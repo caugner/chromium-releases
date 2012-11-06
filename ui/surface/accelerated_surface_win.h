@@ -25,15 +25,17 @@ class Rect;
 class SURFACE_EXPORT AcceleratedPresenter
     : public base::RefCountedThreadSafe<AcceleratedPresenter> {
  public:
-  typedef base::Callback<void(bool)> CompletionTaskl;
+  typedef base::Callback<void(bool,
+                              base::TimeTicks,
+                              base::TimeDelta)> CompletionTask;
 
-  explicit AcceleratedPresenter(gfx::NativeWindow window);
+  explicit AcceleratedPresenter(gfx::PluginWindowHandle window);
 
   // Returns a thread safe reference to the presenter for the given window or
   // null is no such presenter exists. The thread safe refptr ensures the
   // presenter will not be destroyed. This can be called on any thread.
   static scoped_refptr<AcceleratedPresenter> GetForWindow(
-      gfx::NativeWindow window);
+      gfx::PluginWindowHandle window);
 
   // Schedule a frame to be presented. The completion callback will be invoked
   // when it is safe to write to the surface on another thread. The lock for
@@ -42,7 +44,7 @@ class SURFACE_EXPORT AcceleratedPresenter
   void AsyncPresentAndAcknowledge(
       const gfx::Size& size,
       int64 surface_handle,
-      const base::Callback<void(bool)>& completion_task);
+      const CompletionTask& completion_task);
 
   // Schedule the presenter to free all its resources. This can be called on any
   // thread.
@@ -71,7 +73,7 @@ class SURFACE_EXPORT AcceleratedPresenter
   void DoPresentAndAcknowledge(
       const gfx::Size& size,
       int64 surface_handle,
-      const base::Callback<void(bool)>& completion_task);
+      const CompletionTask& completion_task);
   void DoSuspend();
   void DoPresent(HDC dc, bool* presented);
   bool DoRealPresent(HDC dc);
@@ -81,7 +83,7 @@ class SURFACE_EXPORT AcceleratedPresenter
   PresentThread* const present_thread_;
 
   // The window that is presented to.
-  gfx::NativeWindow window_;
+  gfx::PluginWindowHandle window_;
 
   // The lock is taken while any thread is calling the object, except those that
   // simply post from the main thread to the present thread via the immutable
@@ -108,6 +110,8 @@ class SURFACE_EXPORT AcceleratedPresenter
   // are used so it is possible to represent it to quickly validate the window.
   base::win::ScopedComPtr<IDirect3DSwapChain9> swap_chain_;
 
+  // Whether the window is hidden or has not been presented to since it was
+  // last hidden.
   bool hidden_;
 
   DISALLOW_COPY_AND_ASSIGN(AcceleratedPresenter);
@@ -115,7 +119,7 @@ class SURFACE_EXPORT AcceleratedPresenter
 
 class SURFACE_EXPORT AcceleratedSurface {
  public:
-  AcceleratedSurface(gfx::NativeWindow window);
+  AcceleratedSurface(gfx::PluginWindowHandle window);
   ~AcceleratedSurface();
 
   // Synchronously present a frame with no acknowledgement.

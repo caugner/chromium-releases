@@ -198,8 +198,9 @@ bool WebAppShortcutCreator::UpdateIcon(const FilePath& app_path) const {
 
   scoped_nsobject<IconFamily> icon_family([[IconFamily alloc] init]);
   bool image_added = false;
+  info_.favicon.ToImageSkia()->EnsureRepsForSupportedScaleFactors();
   std::vector<gfx::ImageSkiaRep> image_reps =
-      info_.favicon.ToImageSkia()->GetRepresentations();
+      info_.favicon.ToImageSkia()->image_reps();
   for (size_t i = 0; i < image_reps.size(); ++i) {
     NSBitmapImageRep* image_rep = SkBitmapToImageRep(
         image_reps[i].sk_bitmap());
@@ -251,9 +252,8 @@ void WebAppShortcutCreator::RevealGeneratedBundleInFinder(
 namespace web_app {
 namespace internals {
 
-bool CreatePlatformShortcut(
+bool CreatePlatformShortcuts(
     const FilePath& web_app_path,
-    const FilePath& profile_path,
     const ShellIntegration::ShortcutInfo& shortcut_info) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
   string16 bundle_id = UTF8ToUTF16(base::mac::BaseBundleID());
@@ -262,8 +262,9 @@ bool CreatePlatformShortcut(
   return shortcut_creator.CreateShortcut();
 }
 
-void DeletePlatformShortcuts(const FilePath& profile_path,
-                             const std::string& extension_id) {
+void DeletePlatformShortcuts(
+    const FilePath& web_app_path,
+    const ShellIntegration::ShortcutInfo& shortcut_info) {
   // TODO(benwells): Implement this when shortcuts / weblings are enabled on
   // mac.
 }

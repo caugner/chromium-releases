@@ -7,6 +7,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "webkit/blob/local_file_stream_reader.h"
+#include "webkit/blob/shareable_file_reference.h"
 #include "webkit/chromeos/fileapi/remote_file_system_proxy.h"
 #include "webkit/fileapi/local_file_stream_writer.h"
 
@@ -101,6 +102,12 @@ int RemoteFileStreamWriter::Cancel(const net::CompletionCallback& callback) {
 
   // Write() is not called yet.
   return net::ERR_UNEXPECTED;
+}
+
+int RemoteFileStreamWriter::Flush(const net::CompletionCallback& callback) {
+  // For remote file writer, Flush() is a no-op. Synchronization to the remote
+  // server is not done until the file is closed.
+  return net::OK;
 }
 
 void RemoteFileStreamWriter::InvokePendingCancelCallback(int result) {

@@ -80,13 +80,13 @@ class ResourceRequestInfo {
   // Returns the associated referrer policy.
   virtual WebKit::WebReferrerPolicy GetReferrerPolicy() const = 0;
 
-  // When there is upload data, this is the byte count of that data. When there
-  // is no upload, this will be 0.
-  virtual uint64 GetUploadSize() const = 0;
-
   // True if the request was initiated by a user action (like a tap to follow
   // a link).
   virtual bool HasUserGesture() const = 0;
+
+  // True if ResourceController::CancelAndIgnore() was called.  For example,
+  // the requested URL may be being loaded by an external program.
+  virtual bool WasIgnoredByHandler() const = 0;
 
   // Returns false if there is NOT an associated render view.
   virtual bool GetAssociatedRenderView(int* render_process_id,

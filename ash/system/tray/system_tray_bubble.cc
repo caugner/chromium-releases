@@ -123,12 +123,12 @@ class TrayPopupItemContainer : public views::View {
     PreferredSizeChanged();
   }
 
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE {
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE {
     hover_ = true;
     SchedulePaint();
   }
 
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE {
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE {
     hover_ = false;
     SchedulePaint();
   }
@@ -303,7 +303,6 @@ void SystemTrayBubble::InitView(views::View* anchor,
   }
   bubble_view_ = TrayBubbleView::Create(anchor, this, init_params);
 
-
   CreateItemViews(login_status);
 
   DCHECK(bubble_widget_ == NULL);
@@ -329,6 +328,10 @@ void SystemTrayBubble::OnMouseExitedView() {
 void SystemTrayBubble::OnClickedOutsideView() {
   if (bubble_type_ != BUBBLE_TYPE_NOTIFICATION)
     bubble_widget_->Close();
+}
+
+string16 SystemTrayBubble::GetAccessibleName() {
+  return tray_->GetAccessibleName();
 }
 
 void SystemTrayBubble::DestroyItemViews() {

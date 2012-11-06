@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/chromeos/language_preferences.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/notification_observer.h"
 
 class PrefService;
@@ -107,15 +107,17 @@ class Preferences : public content::NotificationObserver {
   IntegerPrefMember touchpad_sensitivity_;
   BooleanPrefMember primary_mouse_button_right_;
   BooleanPrefMember use_24hour_clock_;
-  BooleanPrefMember disable_gdata_;
-  BooleanPrefMember disable_gdata_over_cellular_;
-  BooleanPrefMember disable_gdata_hosted_files_;
+  BooleanPrefMember disable_drive_;
+  BooleanPrefMember disable_drive_over_cellular_;
+  BooleanPrefMember disable_drive_hosted_files_;
+  FilePathPrefMember download_default_directory_;
 
   // Input method preferences.
   StringPrefMember preferred_languages_;
   StringPrefMember preload_engines_;
   StringPrefMember current_input_method_;
   StringPrefMember previous_input_method_;
+  StringPrefMember filtered_extension_imes_;
 
   BooleanPrefMember chewing_boolean_prefs_[
       language_prefs::kNumChewingBooleanPrefs];
@@ -143,8 +145,6 @@ class Preferences : public content::NotificationObserver {
   IntegerPrefMember xkb_auto_repeat_interval_pref_;
 
   BooleanPrefMember enable_screen_lock_;
-
-  IntegerPrefMember secondary_display_layout_;
 
   BooleanPrefMember enable_drm_;
 

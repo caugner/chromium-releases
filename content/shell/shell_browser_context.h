@@ -16,7 +16,6 @@ namespace content {
 
 class DownloadManagerDelegate;
 class ResourceContext;
-class ShellBrowserMainParts;
 class ShellDownloadManagerDelegate;
 
 class ShellBrowserContext : public BrowserContext {
@@ -31,7 +30,14 @@ class ShellBrowserContext : public BrowserContext {
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+      int renderer_child_id) OVERRIDE;
+  virtual net::URLRequestContextGetter*
+      GetMediaRequestContextForStoragePartition(
+          const std::string& partition_id) OVERRIDE;
+  virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
+      const std::string& partition_id) OVERRIDE;
   virtual ResourceContext* GetResourceContext() OVERRIDE;
   virtual GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
@@ -46,6 +52,7 @@ class ShellBrowserContext : public BrowserContext {
   void InitWhileIOAllowed();
 
   bool off_the_record_;
+  bool ignore_certificate_errors_;
   ScopedTempDir testing_path_;
   FilePath path_;
   scoped_ptr<ResourceContext> resource_context_;

@@ -398,6 +398,7 @@
               ],
               'include_dirs': [
                 'src',
+                'src/third_party',
               ],
               'link_settings': {
                 'libraries': [
@@ -440,6 +441,8 @@
                 'src/common/linux/elfutils.h',
                 'src/common/linux/file_id.cc',
                 'src/common/linux/file_id.h',
+                'src/common/linux/linux_libc_support.cc',
+                'src/common/linux/linux_libc_support.h',
                 'src/common/linux/memory_mapped_file.cc',
                 'src/common/linux/memory_mapped_file.h',
                 'src/common/linux/guid_creator.h',
@@ -476,6 +479,9 @@
             'src/client/linux/crash_generation/crash_generation_client.cc',
             'src/client/linux/crash_generation/crash_generation_client.h',
             'src/client/linux/handler/exception_handler.cc',
+            'src/client/linux/handler/exception_handler.h',
+            'src/client/linux/handler/minidump_descriptor.cc',
+            'src/client/linux/handler/minidump_descriptor.h',
             'src/client/linux/log/log.cc',
             'src/client/linux/log/log.h',
             'src/client/linux/minidump_writer/directory_reader.h',
@@ -505,6 +511,7 @@
             'src/common/linux/guid_creator.h',
             'src/common/linux/libcurl_wrapper.cc',
             'src/common/linux/libcurl_wrapper.h',
+            'src/common/linux/linux_libc_support.cc',
             'src/common/linux/linux_libc_support.h',
             'src/common/linux/memory_mapped_file.cc',
             'src/common/linux/memory_mapped_file.h',
@@ -516,14 +523,19 @@
           ],
 
           'conditions': [
-            ['target_arch=="arm"', {
+            # Android NDK toolchain doesn't support -mimplicit-it=always
+            ['target_arch=="arm" and OS!="android"', {
               'cflags': ['-Wa,-mimplicit-it=always'],
             }],
             ['OS=="android"', {
-              'sources!':[
-                'src/common/linux/elf_core_dump.cc',
-                'src/common/linux/elf_core_dump.h',
+              'include_dirs': [
+                'src/common/android/include',
               ],
+              'direct_dependent_settings': {
+                'include_dirs': [
+                  'src/common/android/include',
+                ],
+              },
             }],
           ],
 
@@ -586,7 +598,6 @@
             'src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc',
             'src/client/linux/minidump_writer/minidump_writer_unittest.cc',
             'src/client/linux/minidump_writer/minidump_writer_unittest_utils.cc',
-            'src/client/linux/minidump_writer/minidump_writer_unittest_utils.h',
             'src/common/linux/elf_core_dump_unittest.cc',
             'src/common/linux/file_id_unittest.cc',
             'src/common/linux/linux_libc_support_unittest.cc',
@@ -607,6 +618,22 @@
             'src',
             '..',
             '.',
+          ],
+          'conditions': [
+            [ 'clang == 1', {
+              'cflags': [
+                # See http://crbug.com/138571#c18
+                '-Wno-unused-value',
+              ],
+            }],
+            ['OS=="android"', {
+              'libraries': [
+                '-llog',
+              ],
+              'include_dirs': [
+                'src/common/android/include',
+              ],
+            }],
           ],
         },
         {
@@ -680,6 +707,73 @@
     [ 'OS=="ios"', {
       'targets': [
         {
+          'target_name': 'breakpad_utilities',
+          'type': 'none',
+          'variables': {
+            'ninja_output_dir': 'ninja-breakpad',
+            # Gyp to rerun
+            're_run_targets': [
+              'breakpad/breakpad.gyp',
+            ],
+          },
+          'includes': ['../build/ios/mac_build.gypi'],
+          'actions': [
+            {
+              'action_name': 'compile breakpad utilities',
+              'inputs': [],
+              'outputs': [],
+              'action': [
+                '<@(ninja_cmd)',
+                'dump_syms',
+                'symupload',
+              ],
+              'message': 'Generating the breakpad executables',
+            },
+            {
+              'action_name': 'copy dump_syms',
+              'inputs': [
+                '<(ninja_product_dir)/dump_syms',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/dump_syms',
+              ],
+              'action': [
+                'cp',
+                '<(ninja_product_dir)/dump_syms',
+                '<(PRODUCT_DIR)/dump_syms',
+              ],
+            },
+            {
+              'action_name': 'copy symupload',
+              'inputs': [
+                '<(ninja_product_dir)/symupload',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/symupload',
+              ],
+              'action': [
+                'cp',
+                '<(ninja_product_dir)/symupload',
+                '<(PRODUCT_DIR)/symupload',
+              ],
+            },
+          ],
+        },
+        {
+          'target_name': 'dump_syms',
+          'type': 'none',
+          'dependencies': [
+            'breakpad_utilities',
+          ],
+        },
+        {
+          'target_name': 'symupload',
+          'type': 'none',
+          'dependencies': [
+            'breakpad_utilities',
+          ],
+        },
+        {
           'target_name': 'breakpad_client',
           'type': '<(library)',
           'sources': [
@@ -710,7 +804,6 @@
             'src/common/convert_UTF.h',
             'src/common/mac/file_id.cc',
             'src/common/mac/file_id.h',
-            'src/common/mac/GTMLogger.m',
             'src/common/mac/HTTPMultipartUpload.m',
             'src/common/mac/macho_id.cc',
             'src/common/mac/macho_id.h',
@@ -728,28 +821,28 @@
             'src/common/string_conversion.h',
             'src/google_breakpad/common/minidump_format.h',
           ],
-          'xcode_settings': {
-            # With the Xcode 4.2 toolchain (iOS 5.0 SDK), there is a change to
-            # exception handling when building for arm (but not simulator).
-            # __EXCEPTIONS is still defined if objc exceptions are enabled but
-            # c++ exceptions are not.  With Xcode 3.2.6 (iOS 4.3 SDK) for both
-            # device and simulator turning off c++ exceptions caused gcc to
-            # still honor try/catch in .mm files as if they were @try/@catch
-            # due to the new runtime support for exceptions.  The clang arm
-            # compiler in Xcode 4.2 does not do this and exception_defines.h
-            # does not kick in because __EXCEPTIONS is still defined.  So
-            # the compile fails for trying to use try without compiler support
-            # for c++ exceptions.  The simulator build in that setup still
-            # works.  Turning off objc exceptions is just enough to get
-            # __EXCEPTIONS to not be defined and exception_defines.h kicks in
-            # to let the code compile.
-            'GCC_ENABLE_OBJC_EXCEPTIONS': 'NO',
-          },
           'include_dirs': [
             'src',
             'src/client/mac/Framework',
             'src/common/mac',
+            # For GTMLogger.
+            '<(DEPTH)/third_party/GTM',
+            '<(DEPTH)/third_party/GTM/Foundation',
           ],
+          'link_settings': {
+            # Build the version of GTMLogger.m in third_party rather than the
+            # one in src/common/mac because the former catches all exceptions
+            # whereas the latter lets them propagate, which can cause odd
+            # crashes.
+            'sources': [
+              '<(DEPTH)/third_party/GTM/Foundation/GTMLogger.h',
+              '<(DEPTH)/third_party/GTM/Foundation/GTMLogger.m',
+            ],
+            'include_dirs': [
+              '<(DEPTH)/third_party/GTM',
+              '<(DEPTH)/third_party/GTM/Foundation',
+            ],
+          },
         },
       ],
     }],

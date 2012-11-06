@@ -4,7 +4,7 @@
 
 #include "ash/wm/frame_painter.h"
 #include "ash/wm/panel_frame_view.h"
-#include "grit/ui_resources.h"
+#include "grit/ash_resources.h"
 #include "grit/ui_strings.h"  // Accessibility names
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/animation/throb_animation.h"
@@ -87,7 +87,7 @@ gfx::Rect PanelFrameView::GetWindowBoundsForClientBounds(
 }
 
 void PanelFrameView::ButtonPressed(views::Button* sender,
-                                   const views::Event& event) {
+                                   const ui::Event& event) {
   if (sender == close_button_)
     GetWidget()->Close();
 }

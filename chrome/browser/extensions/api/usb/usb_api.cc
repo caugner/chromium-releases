@@ -25,6 +25,12 @@ namespace IsochronousTransfer =
 using extensions::api::experimental_usb::Device;
 using std::vector;
 
+namespace {
+
+static UsbDevice* device_for_test_ = NULL;
+
+}  // namespace
+
 namespace extensions {
 
 UsbAsyncApiFunction::UsbAsyncApiFunction()
@@ -39,9 +45,22 @@ bool UsbAsyncApiFunction::PrePrepare() {
   return manager_ != NULL;
 }
 
+UsbDeviceResource* UsbAsyncApiFunction::GetUsbDeviceResource(
+    int api_resource_id) {
+  return manager_->Get(extension_->id(), api_resource_id);
+}
+
+void UsbAsyncApiFunction::RemoveUsbDeviceResource(int api_resource_id) {
+  manager_->Remove(extension_->id(), api_resource_id);
+}
+
 UsbFindDeviceFunction::UsbFindDeviceFunction() : event_notifier_(NULL) {}
 
 UsbFindDeviceFunction::~UsbFindDeviceFunction() {}
+
+void UsbFindDeviceFunction::SetDeviceForTest(UsbDevice* device) {
+  device_for_test_ = device;
+}
 
 bool UsbFindDeviceFunction::Prepare() {
   parameters_ = FindDevice::Params::Create(*args_);
@@ -51,18 +70,23 @@ bool UsbFindDeviceFunction::Prepare() {
 }
 
 void UsbFindDeviceFunction::Work() {
-  UsbService* const service =
-      UsbServiceFactory::GetInstance()->GetForProfile(profile());
-  DCHECK(service) << "No UsbService associated with profile.";
+  UsbDevice* device = NULL;
+  if (device_for_test_) {
+    device = device_for_test_;
+  } else {
+    UsbService* const service = UsbServiceFactory::GetInstance()->GetForProfile(
+        profile());
+    device = service->FindDevice(parameters_->vendor_id,
+                                 parameters_->product_id);
+  }
 
-  UsbDevice* const device = service->FindDevice(parameters_->vendor_id,
-                                                parameters_->product_id);
   if (!device) {
     SetResult(base::Value::CreateNullValue());
     return;
   }
 
-  UsbDeviceResource* const resource = new UsbDeviceResource(event_notifier_,
+  UsbDeviceResource* const resource = new UsbDeviceResource(extension_->id(),
+                                                            event_notifier_,
                                                             device);
 
   Device result;
@@ -87,7 +111,13 @@ bool UsbCloseDeviceFunction::Prepare() {
 }
 
 void UsbCloseDeviceFunction::Work() {
-  manager_->Remove(parameters_->device.handle);
+  UsbDeviceResource* const device = GetUsbDeviceResource(
+      parameters_->device.handle);
+
+  if (device)
+    device->Close();
+
+  RemoveUsbDeviceResource(parameters_->device.handle);
 }
 
 bool UsbCloseDeviceFunction::Respond() {
@@ -105,7 +135,9 @@ bool UsbControlTransferFunction::Prepare() {
 }
 
 void UsbControlTransferFunction::Work() {
-  UsbDeviceResource* const device = manager_->Get(parameters_->device.handle);
+  UsbDeviceResource* const device = GetUsbDeviceResource(
+      parameters_->device.handle);
+
   if (device) {
     device->ControlTransfer(parameters_->transfer_info);
   }
@@ -126,7 +158,9 @@ UsbBulkTransferFunction::UsbBulkTransferFunction() {}
 UsbBulkTransferFunction::~UsbBulkTransferFunction() {}
 
 void UsbBulkTransferFunction::Work() {
-  UsbDeviceResource* const device = manager_->Get(parameters_->device.handle);
+  UsbDeviceResource* const device = GetUsbDeviceResource(
+      parameters_->device.handle);
+
   if (device) {
     device->BulkTransfer(parameters_->transfer_info);
   }
@@ -147,7 +181,9 @@ bool UsbInterruptTransferFunction::Prepare() {
 }
 
 void UsbInterruptTransferFunction::Work() {
-  UsbDeviceResource* const device = manager_->Get(parameters_->device.handle);
+  UsbDeviceResource* const device = GetUsbDeviceResource(
+      parameters_->device.handle);
+
   if (device) {
     device->InterruptTransfer(parameters_->transfer_info);
   }
@@ -168,7 +204,9 @@ bool UsbIsochronousTransferFunction::Prepare() {
 }
 
 void UsbIsochronousTransferFunction::Work() {
-  UsbDeviceResource* const device = manager_->Get(parameters_->device.handle);
+  UsbDeviceResource* const device = GetUsbDeviceResource(
+      parameters_->device.handle);
+
   if (device) {
     device->IsochronousTransfer(parameters_->transfer_info);
   }

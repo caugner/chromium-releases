@@ -310,7 +310,7 @@ GLRenderingVDAClient::~GLRenderingVDAClient() {
   SetState(CS_DESTROYED);
 }
 
-#if !defined(OS_MACOSX) && defined(ARCH_CPU_X86_FAMILY)
+#if !defined(OS_MACOSX)
 static bool DoNothingReturnTrue() { return true; }
 #endif
 
@@ -328,7 +328,8 @@ void GLRenderingVDAClient::CreateDecoder() {
       new OmxVideoDecodeAccelerator(
           static_cast<EGLDisplay>(rendering_helper_->GetGLDisplay()),
           static_cast<EGLContext>(rendering_helper_->GetGLContext()),
-          this));
+          this,
+          base::Bind(&DoNothingReturnTrue)));
 #elif defined(ARCH_CPU_X86_FAMILY)
   decoder_.reset(new VaapiVideoDecodeAccelerator(
       static_cast<Display*>(rendering_helper_->GetGLDisplay()),
@@ -534,7 +535,7 @@ std::string GLRenderingVDAClient::GetBytesForNextFrames(
   for (int i = 0; i < num_fragments_per_decode_; ++i) {
     uint32 frame_size = *reinterpret_cast<uint32*>(&encoded_data_[*end_pos]);
     *end_pos += 12;  // Skip frame header.
-    bytes.append(encoded_data_.substr(*end_pos, *end_pos + frame_size));
+    bytes.append(encoded_data_.substr(*end_pos, frame_size));
     *end_pos += frame_size;
     if (*end_pos + 12 >= encoded_data_.size())
       return bytes;

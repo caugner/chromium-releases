@@ -126,11 +126,12 @@ class MockEventExecutor : public EventExecutor {
                void(const protocol::ClipboardEvent& event));
   MOCK_METHOD1(InjectKeyEvent, void(const protocol::KeyEvent& event));
   MOCK_METHOD1(InjectMouseEvent, void(const protocol::MouseEvent& event));
-  MOCK_METHOD1(OnSessionStartedPtr,
+  MOCK_METHOD1(StartPtr,
                void(protocol::ClipboardStub* client_clipboard));
-  MOCK_METHOD0(OnSessionFinished, void());
+  MOCK_METHOD0(StopAndDeleteMock, void());
 
-  void OnSessionStarted(scoped_ptr<protocol::ClipboardStub> client_clipboard);
+  void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard);
+  void StopAndDelete();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockEventExecutor);
@@ -149,6 +150,7 @@ class MockHostStatusObserver : public HostStatusObserver {
                void(const std::string& jid,
                     const std::string& channel_name,
                     const protocol::TransportRoute& route));
+  MOCK_METHOD1(OnStart, void(const std::string& xmpp_login));
   MOCK_METHOD0(OnShutdown, void());
 };
 

@@ -16,12 +16,13 @@ namespace win {
 
 // Identifies the type of the metro launch.
 enum MetroLaunchType {
-  LAUNCH,
-  SEARCH,
-  SHARE,
-  FILE,
-  PROTOCOL,
-  LASTLAUNCHTYPE,
+  METRO_LAUNCH,
+  METRO_SEARCH,
+  METRO_SHARE,
+  METRO_FILE,
+  METRO_PROTOCOL,
+  METRO_LAUNCH_ERROR,
+  METRO_LASTLAUNCHTYPE,
 };
 
 // In metro mode, this enum identifies the last execution state, i.e. whether
@@ -41,12 +42,6 @@ struct CurrentTabInfo {
   wchar_t* url;
 };
 
-// The types of exports in metro_driver.dll.
-typedef HRESULT (*ActivateApplicationFn)(const wchar_t*);
-
-// The names of the exports in metro_driver.dll.
-BASE_EXPORT extern const char kActivateApplication[];
-
 // Returns the handle to the metro dll loaded in the process. A NULL return
 // indicates that the metro dll was not loaded in the process.
 BASE_EXPORT HMODULE GetMetroModule();
@@ -54,6 +49,21 @@ BASE_EXPORT HMODULE GetMetroModule();
 // Returns true if this process is running as an immersive program
 // in Windows Metro mode.
 BASE_EXPORT bool IsMetroProcess();
+
+// Returns true if the process identified by the handle passed in is an
+// immersive (Metro) process.
+BASE_EXPORT bool IsProcessImmersive(HANDLE process);
+
+// Returns true if this process is running under Text Services Framework (TSF)
+// and browser must be TSF-aware.
+BASE_EXPORT bool IsTsfAwareRequired();
+
+// Sets browser to use Text Service Framework (TSF) regardless of process
+// status. On Windows 8, this function also disables CUAS (Cicero Unaware
+// Application Support) to emulate Windows Metro mode in terms of IME
+// functionality. This should be beneficial in QA process because on can test
+// IME functionality in Windows 8 desktop mode.
+BASE_EXPORT void SetForceToUseTsf();
 
 // Allocates and returns the destination string via the LocalAlloc API after
 // copying the src to it.
@@ -66,6 +76,10 @@ BASE_EXPORT bool IsTouchEnabled();
 // feature is available on Windows Vista and beyond.
 // This function should ideally be called on the UI thread.
 BASE_EXPORT bool IsParentalControlActivityLoggingOn();
+
+// Returns the type of launch and the activation params. For example if the
+// the launch is for METRO_PROTOCOL then the params is a url.
+BASE_EXPORT MetroLaunchType GetMetroLaunchParams(string16* params);
 
 // Handler function for the buttons on a metro dialog box
 typedef void (*MetroDialogButtonPressedHandler)();

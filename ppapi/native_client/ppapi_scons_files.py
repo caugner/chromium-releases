@@ -27,6 +27,7 @@ untrusted_irt_scons_files = [
 
 
 nonvariant_test_scons_files = [
+    'tests/breakpad_crash_test/nacl.scons',
     'tests/ppapi/nacl.scons',
     'tests/ppapi_browser/bad/nacl.scons',
     'tests/ppapi_browser/crash/nacl.scons',
@@ -41,11 +42,8 @@ nonvariant_test_scons_files = [
     'tests/ppapi_browser/ppb_image_data/nacl.scons',
     'tests/ppapi_browser/ppb_instance/nacl.scons',
     'tests/ppapi_browser/ppb_memory/nacl.scons',
-    'tests/ppapi_browser/ppb_pdf/nacl.scons',
-    'tests/ppapi_browser/ppb_scrollbar/nacl.scons',
     'tests/ppapi_browser/ppb_url_loader/nacl.scons',
     'tests/ppapi_browser/ppb_var/nacl.scons',
-    'tests/ppapi_browser/ppb_widget/nacl.scons',
     'tests/ppapi_browser/ppp_input_event/nacl.scons',
     'tests/ppapi_browser/ppp_instance/nacl.scons',
     'tests/ppapi_browser/progress_events/nacl.scons',

@@ -104,7 +104,10 @@ runTests([
                  'schemes': ["http"]
              },
              'resourceType': ["main_frame"],
-             'contentType': ["text/html"]})],
+             'contentType': ["text/plain"],
+             'excludeContentType': ["image/png"],
+             'responseHeaders': [{ nameContains: ["content", "type"] } ],
+             'excludeResponseHeaders': [{ valueContains: "nonsense" }] })],
          'actions': [new CancelRequest()]}
       ],
       function() {navigateAndWait(getURLHttpWithHeaders());}
@@ -244,6 +247,34 @@ runTests([
       [ {conditions: [new RequestMatcher({url: {pathSuffix: ".html"}})],
          actions: [
              new RedirectByRegEx({from: "^(.*)/a.html$", to: "$1/b.html"})]}
+      ],
+      function() {navigateAndWait(getURLHttpSimple());}
+    );
+  },
+
+  function testRegexFilter() {
+    ignoreUnexpected = true;
+    expect(
+      [
+        { label: "onErrorOccurred",
+          event: "onErrorOccurred",
+          details: {
+            url: getURLHttpSimple(),
+            fromCache: false,
+            error: "net::ERR_BLOCKED_BY_CLIENT"
+          }
+        },
+      ],
+      [ ["onErrorOccurred"] ]);
+    onRequest.addRules(
+      [ {'conditions': [
+           new RequestMatcher({
+             'url': {
+                 'urlMatches': 'simple[A-Z].*a\.html$',
+                 'schemes': ["http"]
+             },
+           })],
+         'actions': [new CancelRequest()]}
       ],
       function() {navigateAndWait(getURLHttpSimple());}
     );

@@ -17,19 +17,6 @@ class Profile;
 class NewTabPageHandler : public content::WebUIMessageHandler {
  public:
   NewTabPageHandler();
-  virtual ~NewTabPageHandler();
-
-  // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
-
-  // Callback for "closeNotificationPromo".
-  void HandleCloseNotificationPromo(const ListValue* args);
-
-  // Callback for "notificationPromoViewed".
-  void HandleNotificationPromoViewed(const ListValue* args);
-
-  // Callback for "pageSelected".
-  void HandlePageSelected(const ListValue* args);
 
   // Register NTP per-profile preferences.
   static void RegisterUserPrefs(PrefService* prefs);
@@ -41,6 +28,29 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
   static void GetLocalizedValues(Profile* profile, DictionaryValue* values);
 
  private:
+  virtual ~NewTabPageHandler();
+
+  // WebUIMessageHandler implementation.
+  virtual void RegisterMessages() OVERRIDE;
+
+  // Callback for "notificationPromoClosed". No arguments.
+  void HandleNotificationPromoClosed(const ListValue* args);
+
+  // Callback for "notificationPromoViewed". No arguments.
+  void HandleNotificationPromoViewed(const ListValue* args);
+
+  // Callback for "bubblePromoClosed". No arguments.
+  void HandleBubblePromoClosed(const ListValue* args);
+
+  // Callback for "bubblePromoViewed". No arguments.
+  void HandleBubblePromoViewed(const ListValue* args);
+
+  // Callback for "pageSelected".
+  void HandlePageSelected(const ListValue* args);
+
+  // Callback for "logTimeToClick".
+  void HandleLogTimeToClick(const base::ListValue* args);
+
   // Tracks the number of times the user has switches pages (for UMA).
   size_t page_switch_count_;
 
@@ -55,7 +65,8 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
     APPS_PAGE_ID = 2 << kPageIdOffset,
     BOOKMARKS_PAGE_ID = 3 << kPageIdOffset,
     SUGGESTIONS_PAGE_ID = 4 << kPageIdOffset,
-    LAST_PAGE_ID = SUGGESTIONS_PAGE_ID
+    RECENTLY_CLOSED_PAGE_ID = 5 << kPageIdOffset,
+    LAST_PAGE_ID = RECENTLY_CLOSED_PAGE_ID
   };
   static const int kHistogramEnumerationMax =
       (LAST_PAGE_ID >> kPageIdOffset) + 1;

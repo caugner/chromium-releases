@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/search/search_ui.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
+#include "chrome/browser/ui/webui/instant_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -40,6 +41,8 @@ const int kEditFontAdjust = 0;
 const int kEditFontAdjust = -1;
 #endif
 
+const int kRetractDurationMs = 120;
+
 }  // namespace
 
 InlineOmniboxPopupView::InlineOmniboxPopupView(
@@ -61,6 +64,9 @@ InlineOmniboxPopupView::InlineOmniboxPopupView(
   SetVisible(false);
   set_background(views::Background::CreateSolidBackground(
                      chrome::search::kSuggestBackgroundColor));
+  size_animation_.SetSlideDuration(kRetractDurationMs *
+                                   InstantUI::GetSlowAnimationScaleFactor());
+  size_animation_.SetTweenType(ui::Tween::EASE_IN_OUT);
 }
 
 InlineOmniboxPopupView::~InlineOmniboxPopupView() {
@@ -98,7 +104,7 @@ void InlineOmniboxPopupView::LayoutChildren() {
   // Make the children line up with the LocationBar.
   gfx::Point content_origin;
   // TODO(sky): this won't work correctly with LocationBarContainer.
-  views::View::ConvertPointToView(location_bar_, this, &content_origin);
+  views::View::ConvertPointToTarget(location_bar_, this, &content_origin);
   int x = content_origin.x();
   int width = location_bar_->width();
   gfx::Rect contents_rect = GetContentsBounds();
@@ -116,7 +122,7 @@ void InlineOmniboxPopupView::LayoutChildren() {
 // InlineOmniboxPopupView, AutocompletePopupView overrides:
 
 bool InlineOmniboxPopupView::IsOpen() const {
-  return visible();
+  return model_->result().empty() ? false : visible();
 }
 
 void InlineOmniboxPopupView::InvalidateLine(size_t line) {
@@ -131,25 +137,22 @@ void InlineOmniboxPopupView::InvalidateLine(size_t line) {
 }
 
 void InlineOmniboxPopupView::UpdatePopupAppearance() {
-  if (model_->result().empty()) {
-    SetVisible(false);
-    PreferredSizeChanged();
-    return;
-  }
+  gfx::Rect new_target_bounds;
+  if (!model_->result().empty()) {
+    // Update the match cached by each row, in the process of doing so make sure
+    // we have enough row views.
+    size_t child_rv_count = child_count();
+    const size_t result_size = model_->result().size();
+    for (size_t i = 0; i < result_size; ++i) {
+      OmniboxResultView* view = static_cast<OmniboxResultView*>(child_at(i));
+      view->SetMatch(GetMatchAtIndex(i));
+      view->SetVisible(true);
+    }
+    for (size_t i = result_size; i < child_rv_count; ++i)
+      child_at(i)->SetVisible(false);
 
-  // Update the match cached by each row, in the process of doing so make sure
-  // we have enough row views.
-  size_t child_rv_count = child_count();
-  const size_t result_size = model_->result().size();
-  for (size_t i = 0; i < result_size; ++i) {
-    OmniboxResultView* view = static_cast<OmniboxResultView*>(child_at(i));
-    view->SetMatch(GetMatchAtIndex(i));
-    view->SetVisible(true);
+    new_target_bounds = CalculateTargetBounds(CalculatePopupHeight());
   }
-  for (size_t i = result_size; i < child_rv_count; ++i)
-    child_at(i)->SetVisible(false);
-
-  gfx::Rect new_target_bounds = CalculateTargetBounds(CalculatePopupHeight());
 
   // If we're animating and our target height changes, reset the animation.
   // NOTE: If we just reset blindly on _every_ update, then when the user types
@@ -203,10 +206,10 @@ bool InlineOmniboxPopupView::IsHoveredIndex(size_t index) const {
   return index == model_->hovered_line();
 }
 
-const SkBitmap* InlineOmniboxPopupView::GetIconIfExtensionMatch(
+gfx::Image InlineOmniboxPopupView::GetIconIfExtensionMatch(
     size_t index) const {
   if (!HasMatchAt(index))
-    return NULL;
+    return gfx::Image();
   return model_->GetIconIfExtensionMatch(GetMatchAtIndex(index));
 }
 
@@ -218,6 +221,14 @@ void InlineOmniboxPopupView::AnimationProgressed(
   // We should only be running the animation when the popup is already visible.
   DCHECK(visible());
   PreferredSizeChanged();
+}
+
+void InlineOmniboxPopupView::AnimationEnded(
+    const ui::Animation* animation) {
+  if (model_->result().empty()) {
+    SetVisible(false);
+    PreferredSizeChanged();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -238,7 +249,7 @@ views::View* InlineOmniboxPopupView::GetEventHandlerForPoint(
 }
 
 bool InlineOmniboxPopupView::OnMousePressed(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   ignore_mouse_drag_ = false;  // See comment on |ignore_mouse_drag_| in header.
   if (event.IsLeftMouseButton() || event.IsMiddleMouseButton())
     UpdateLineEvent(event, event.IsLeftMouseButton());
@@ -246,14 +257,14 @@ bool InlineOmniboxPopupView::OnMousePressed(
 }
 
 bool InlineOmniboxPopupView::OnMouseDragged(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   if (event.IsLeftMouseButton() || event.IsMiddleMouseButton())
     UpdateLineEvent(event, !ignore_mouse_drag_ && event.IsLeftMouseButton());
   return true;
 }
 
 void InlineOmniboxPopupView::OnMouseReleased(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   if (ignore_mouse_drag_) {
     OnMouseCaptureLost();
     return;
@@ -270,22 +281,22 @@ void InlineOmniboxPopupView::OnMouseCaptureLost() {
 }
 
 void InlineOmniboxPopupView::OnMouseMoved(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   model_->SetHoveredLine(GetIndexForPoint(event.location()));
 }
 
 void InlineOmniboxPopupView::OnMouseEntered(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   model_->SetHoveredLine(GetIndexForPoint(event.location()));
 }
 
 void InlineOmniboxPopupView::OnMouseExited(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   model_->SetHoveredLine(OmniboxPopupModel::kNoMatch);
 }
 
-ui::GestureStatus InlineOmniboxPopupView::OnGestureEvent(
-    const views::GestureEvent& event) {
+ui::EventResult InlineOmniboxPopupView::OnGestureEvent(
+    const ui::GestureEvent& event) {
   switch (event.type()) {
     case ui::ET_GESTURE_TAP_DOWN:
     case ui::ET_GESTURE_SCROLL_BEGIN:
@@ -297,9 +308,9 @@ ui::GestureStatus InlineOmniboxPopupView::OnGestureEvent(
       OpenSelectedLine(event, CURRENT_TAB);
       break;
     default:
-      return ui::GESTURE_STATUS_UNKNOWN;
+      return ui::ER_UNHANDLED;
   }
-  return ui::GESTURE_STATUS_CONSUMED;
+  return ui::ER_CONSUMED;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -359,7 +370,7 @@ void InlineOmniboxPopupView::OpenIndex(size_t index,
 }
 
 size_t InlineOmniboxPopupView::GetIndexForPoint(const gfx::Point& point) {
-  if (!HitTest(point))
+  if (!HitTestPoint(point))
     return OmniboxPopupModel::kNoMatch;
 
   int nb_match = model_->result().size();
@@ -367,8 +378,8 @@ size_t InlineOmniboxPopupView::GetIndexForPoint(const gfx::Point& point) {
   for (int i = 0; i < nb_match; ++i) {
     views::View* child = child_at(i);
     gfx::Point point_in_child_coords(point);
-    View::ConvertPointToView(this, child, &point_in_child_coords);
-    if (child->HitTest(point_in_child_coords))
+    View::ConvertPointToTarget(this, child, &point_in_child_coords);
+    if (child->HitTestPoint(point_in_child_coords))
       return i;
   }
   return OmniboxPopupModel::kNoMatch;
@@ -379,7 +390,7 @@ gfx::Rect InlineOmniboxPopupView::CalculateTargetBounds(int h) {
 }
 
 void InlineOmniboxPopupView::UpdateLineEvent(
-    const views::LocatedEvent& event,
+    const ui::LocatedEvent& event,
     bool should_set_selected_line) {
   size_t index = GetIndexForPoint(event.location());
   model_->SetHoveredLine(index);
@@ -388,7 +399,7 @@ void InlineOmniboxPopupView::UpdateLineEvent(
 }
 
 void InlineOmniboxPopupView::OpenSelectedLine(
-    const views::LocatedEvent& event,
+    const ui::LocatedEvent& event,
     WindowOpenDisposition disposition) {
   size_t index = GetIndexForPoint(event.location());
   OpenIndex(index, disposition);

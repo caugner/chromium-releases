@@ -14,13 +14,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-class ExtensionNavigationObserver;
 class NetPrefObserver;
 class PrefService;
 class PromoResourceService;
@@ -58,7 +57,14 @@ class ProfileImpl : public Profile,
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
+      const std::string& partition_id) OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+      int renderer_child_id) OVERRIDE;
+  virtual net::URLRequestContextGetter*
+      GetMediaRequestContextForStoragePartition(
+          const std::string& partition_id) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
@@ -83,20 +89,15 @@ class ProfileImpl : public Profile,
   virtual extensions::EventRouter* GetExtensionEventRouter() OVERRIDE;
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
-  virtual FaviconService* GetFaviconService(ServiceAccessType sat) OVERRIDE;
   virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
-  virtual HistoryService* GetHistoryService(ServiceAccessType sat) OVERRIDE;
-  virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
+  virtual policy::UserCloudPolicyManager* GetUserCloudPolicyManager() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetRequestContextForExtensions() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForIsolatedApp(
-      const std::string& app_id) OVERRIDE;
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
-  virtual BookmarkModel* GetBookmarkModel() OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
   virtual bool IsSameProfile(Profile* profile) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
@@ -186,9 +187,12 @@ class ProfileImpl : public Profile,
   //  that the declaration occurs AFTER things it depends on as destruction
   //  happens in reverse order of declaration.
 
-  // |prefs_| depends on |policy_service_|.
-  // TODO(bauerb): Once |prefs_| is a ProfileKeyedService, |policy_service_|
-  // should become one as well.
+  // |prefs_| depends on |policy_service_|, which depends on
+  // |user_cloud_policy_manager_|.
+  // TODO(bauerb, mnissler): Once |prefs_| is a ProfileKeyedService,
+  // |policy_service_| and |user_cloud_policy_manager_| should become
+  // ProfiledKeyedServices as well.
+  scoped_ptr<policy::UserCloudPolicyManager> cloud_policy_manager_;
   scoped_ptr<policy::PolicyService> policy_service_;
 
   // Keep |prefs_| on top for destruction order because |extension_prefs_|,
@@ -208,9 +212,7 @@ class ProfileImpl : public Profile,
   scoped_refptr<content::GeolocationPermissionContext>
       geolocation_permission_context_;
   scoped_ptr<GAIAInfoUpdateService> gaia_info_update_service_;
-  scoped_ptr<FaviconService> favicon_service_;
   scoped_refptr<history::ShortcutsBackend> shortcuts_backend_;
-  bool favicon_service_created_;
 
   // Whether or not the last session exited cleanly. This is set only once.
   bool last_session_exited_cleanly_;
@@ -254,8 +256,6 @@ class ProfileImpl : public Profile,
   Profile::Delegate* delegate_;
 
   chrome_browser_net::Predictor* predictor_;
-
-  bool session_restore_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileImpl);
 };

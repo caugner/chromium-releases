@@ -20,11 +20,11 @@
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/windows_version.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
@@ -47,173 +47,472 @@ const int kMinLaunchDelaySeconds = 1;
 const FilePath::CharType kMe2meHostBinaryName[] =
     FILE_PATH_LITERAL("remoting_me2me_host.exe");
 
-// Match the pipe name prefix used by Chrome IPC channels.
-const char kChromePipeNamePrefix[] = "\\\\.\\pipe\\chrome.";
+const FilePath::CharType kMe2meServiceBinaryName[] =
+    FILE_PATH_LITERAL("remoting_service.exe");
 
-// The IPC channel name is passed to the host in the command line.
-const char kChromotingIpcSwitchName[] = "chromoting-ipc";
+// The command line switch specifying the name of the daemon IPC endpoint.
+const char kDaemonIpcSwitchName[] = "daemon-pipe";
+
+const char kElevateSwitchName[] = "elevate";
 
 // The command line parameters that should be copied from the service's command
 // line to the host process.
 const char* kCopiedSwitchNames[] = {
-    "auth-config", "host-config", switches::kV, switches::kVModule };
+    "host-config", switches::kV, switches::kVModule };
 
-// The security descriptor of the Chromoting IPC channel. It gives full access
+// The security descriptor of the daemon IPC endpoint. It gives full access
 // to LocalSystem and denies access by anyone else.
-const wchar_t kChromotingChannelSecurityDescriptor[] =
-    L"O:SYG:SYD:(A;;GA;;;SY)";
-
-// Takes the process token and makes a copy of it. The returned handle will have
-// |desired_access| rights.
-bool CopyProcessToken(DWORD desired_access,
-                      ScopedHandle* token_out) {
-
-  HANDLE handle;
-  if (!OpenProcessToken(GetCurrentProcess(),
-                        TOKEN_DUPLICATE | desired_access,
-                        &handle)) {
-    LOG_GETLASTERROR(ERROR) << "Failed to open process token";
-    return false;
-  }
-
-  ScopedHandle process_token(handle);
-
-  if (!DuplicateTokenEx(process_token,
-                        desired_access,
-                        NULL,
-                        SecurityImpersonation,
-                        TokenPrimary,
-                        &handle)) {
-    LOG_GETLASTERROR(ERROR) << "Failed to duplicate the process token";
-    return false;
-  }
-
-  token_out->Set(handle);
-  return true;
-}
-
-// Creates a copy of the current process with SE_TCB_NAME privilege enabled.
-bool CreatePrivilegedToken(ScopedHandle* token_out) {
-  ScopedHandle privileged_token;
-  DWORD desired_access = TOKEN_ADJUST_PRIVILEGES | TOKEN_IMPERSONATE |
-                         TOKEN_DUPLICATE | TOKEN_QUERY;
-  if (!CopyProcessToken(desired_access, &privileged_token)) {
-    return false;
-  }
-
-  // Get the LUID for the SE_TCB_NAME privilege.
-  TOKEN_PRIVILEGES state;
-  state.PrivilegeCount = 1;
-  state.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-  if (!LookupPrivilegeValue(NULL, SE_TCB_NAME, &state.Privileges[0].Luid)) {
-    LOG_GETLASTERROR(ERROR) <<
-        "Failed to lookup the LUID for the SE_TCB_NAME privilege";
-    return false;
-  }
-
-  // Enable the SE_TCB_NAME privilege.
-  if (!AdjustTokenPrivileges(privileged_token, FALSE, &state, 0, NULL, 0)) {
-    LOG_GETLASTERROR(ERROR) <<
-        "Failed to enable SE_TCB_NAME privilege in a token";
-    return false;
-  }
-
-  token_out->Set(privileged_token.Take());
-  return true;
-}
-
-// Creates a copy of the current process token for the given |session_id| so
-// it can be used to launch a process in that session.
-bool CreateSessionToken(uint32 session_id,
-                        ScopedHandle* token_out) {
-
-  ScopedHandle session_token;
-  DWORD desired_access = TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID |
-                         TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_QUERY;
-  if (!CopyProcessToken(desired_access, &session_token)) {
-    return false;
-  }
-
-  // Change the session ID of the token.
-  DWORD new_session_id = session_id;
-  if (!SetTokenInformation(session_token,
-                           TokenSessionId,
-                           &new_session_id,
-                           sizeof(new_session_id))) {
-    LOG_GETLASTERROR(ERROR) <<
-        "Failed to change session ID of a token";
-    return false;
-  }
-
-  token_out->Set(session_token.Take());
-  return true;
-}
-
-// Generates random channel ID.
-// N.B. Stolen from src/content/common/child_process_host_impl.cc
-std::string GenerateRandomChannelId(void* instance) {
-  return base::StringPrintf("%d.%p.%d",
-                            base::GetCurrentProcId(), instance,
-                            base::RandInt(0, std::numeric_limits<int>::max()));
-}
-
-// Creates the server end of the Chromoting IPC channel.
-// N.B. This code is based on IPC::Channel's implementation.
-bool CreatePipeForIpcChannel(void* instance,
-                             std::string* channel_name_out,
-                             ScopedHandle* pipe_out) {
-  // Create security descriptor for the channel.
-  SECURITY_ATTRIBUTES security_attributes;
-  security_attributes.nLength = sizeof(security_attributes);
-  security_attributes.bInheritHandle = FALSE;
-
-  ULONG security_descriptor_length = 0;
-  if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-           kChromotingChannelSecurityDescriptor,
-           SDDL_REVISION_1,
-           reinterpret_cast<PSECURITY_DESCRIPTOR*>(
-               &security_attributes.lpSecurityDescriptor),
-           &security_descriptor_length)) {
-    LOG_GETLASTERROR(ERROR) <<
-        "Failed to create a security descriptor for the Chromoting IPC channel";
-    return false;
-  }
-
-  // Generate a random channel name.
-  std::string channel_name(GenerateRandomChannelId(instance));
-
-  // Convert it to the pipe name.
-  std::string pipe_name(kChromePipeNamePrefix);
-  pipe_name.append(channel_name);
-
-  // Create the server end of the pipe. This code should match the code in
-  // IPC::Channel with exception of passing a non-default security descriptor.
-  HANDLE pipe = CreateNamedPipeW(UTF8ToUTF16(pipe_name).c_str(),
-                                 PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
-                                     FILE_FLAG_FIRST_PIPE_INSTANCE,
-                                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE,
-                                 1,
-                                 IPC::Channel::kReadBufferSize,
-                                 IPC::Channel::kReadBufferSize,
-                                 5000,
-                                 &security_attributes);
-  if (pipe == INVALID_HANDLE_VALUE) {
-    LOG_GETLASTERROR(ERROR) <<
-        "Failed to create the server end of the Chromoting IPC channel";
-    LocalFree(security_attributes.lpSecurityDescriptor);
-    return false;
-  }
-
-  LocalFree(security_attributes.lpSecurityDescriptor);
-
-  *channel_name_out = channel_name;
-  pipe_out->Set(pipe);
-  return true;
-}
+const char kDaemonIpcSecurityDescriptor[] = "O:SYG:SYD:(A;;GA;;;SY)";
 
 } // namespace
 
 namespace remoting {
+
+class WtsSessionProcessLauncherImpl
+    : public base::RefCountedThreadSafe<WtsSessionProcessLauncherImpl>,
+      public WorkerProcessLauncher::Delegate {
+ public:
+  // Returns the exit code of the worker process.
+  virtual DWORD GetExitCode() = 0;
+
+  // Stops the object asynchronously.
+  virtual void Stop() = 0;
+
+ protected:
+  friend class base::RefCountedThreadSafe<WtsSessionProcessLauncherImpl>;
+  virtual ~WtsSessionProcessLauncherImpl();
+};
+
+namespace {
+
+// Implements |WorkerProcessLauncher::Delegate| that starts the specified
+// process in a different session via CreateProcessAsUser() and uses
+// the returned handle to monitor and terminate the process.
+class SingleProcessLauncher : public WtsSessionProcessLauncherImpl {
+ public:
+  SingleProcessLauncher(
+      uint32 session_id,
+      const FilePath& binary_path,
+      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
+
+  // WorkerProcessLauncher::Delegate implementation.
+  virtual bool DoLaunchProcess(
+      const std::string& channel_name,
+      ScopedHandle* process_exit_event_out) OVERRIDE;
+  virtual void DoKillProcess(DWORD exit_code) OVERRIDE;
+
+  // WtsSessionProcessLauncherImpl implementation.
+  virtual DWORD GetExitCode() OVERRIDE;
+  virtual void Stop() OVERRIDE;
+
+ private:
+  FilePath binary_path_;
+
+  // The task runner all public methods of this class should be called on.
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
+
+  // A handle that becomes signalled once the process associated has been
+  // terminated.
+  ScopedHandle process_exit_event_;
+
+  // The token to be used to launch a process in a different session.
+  ScopedHandle user_token_;
+
+  // The handle of the worker process, if launched.
+  ScopedHandle worker_process_;
+
+  DISALLOW_COPY_AND_ASSIGN(SingleProcessLauncher);
+};
+
+// Implements |WorkerProcessLauncher::Delegate| that starts the specified
+// process (UAC) elevated in a different session. |ElevatedProcessLauncher|
+// utilizes a helper process to bypass limitations of ShellExecute() which
+// cannot spawn processes across the session boundary.
+class ElevatedProcessLauncher : public WtsSessionProcessLauncherImpl,
+                                public base::MessagePumpForIO::IOHandler {
+ public:
+  ElevatedProcessLauncher(
+      uint32 session_id,
+      const FilePath& binary_path,
+      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
+
+  // base::MessagePumpForIO::IOHandler implementation.
+  virtual void OnIOCompleted(base::MessagePumpForIO::IOContext* context,
+                             DWORD bytes_transferred,
+                             DWORD error) OVERRIDE;
+
+  // WorkerProcessLauncher::Delegate implementation.
+  virtual bool DoLaunchProcess(
+      const std::string& channel_name,
+      ScopedHandle* process_exit_event_out) OVERRIDE;
+  virtual void DoKillProcess(DWORD exit_code) OVERRIDE;
+
+  // WtsSessionProcessLauncherImpl implementation.
+  virtual DWORD GetExitCode() OVERRIDE;
+  virtual void Stop() OVERRIDE;
+
+ private:
+  // Drains the completion port queue to make sure that all job object
+  // notifications have been received.
+  void DrainJobNotifications();
+
+  // Notified that the completion port queue has been drained.
+  void DrainJobNotificationsCompleted();
+
+  // Creates and initializes the job object that will sandbox the launched child
+  // processes.
+  void InitializeJob();
+
+  // Notified that the job object initialization is complete.
+  void InitializeJobCompleted(scoped_ptr<ScopedHandle> job);
+
+  // Called to process incoming job object notifications.
+  void OnJobNotification(DWORD message, DWORD pid);
+
+  FilePath binary_path_;
+
+  // The task runner all public methods of this class should be called on.
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
+
+  // The task runner serving job object notifications.
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+
+  // The job object used to control the lifetime of child processes.
+  ScopedHandle job_;
+
+  // A waiting handle that becomes signalled once all process associated with
+  // the job have been terminated.
+  ScopedHandle process_exit_event_;
+
+  // The token to be used to launch a process in a different session.
+  ScopedHandle user_token_;
+
+  // The handle of the worker process, if launched.
+  ScopedHandle worker_process_;
+
+  DISALLOW_COPY_AND_ASSIGN(ElevatedProcessLauncher);
+};
+
+SingleProcessLauncher::SingleProcessLauncher(
+    uint32 session_id,
+    const FilePath& binary_path,
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner)
+    : binary_path_(binary_path),
+      main_task_runner_(main_task_runner) {
+  CHECK(CreateSessionToken(session_id, &user_token_));
+}
+
+bool SingleProcessLauncher::DoLaunchProcess(
+    const std::string& channel_name,
+    ScopedHandle* process_exit_event_out) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  // Create the command line passing the name of the IPC channel to use and
+  // copying known switches from the caller's command line.
+  CommandLine command_line(binary_path_);
+  command_line.AppendSwitchNative(kDaemonIpcSwitchName,
+                                  UTF8ToWide(channel_name));
+  command_line.CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
+                                kCopiedSwitchNames,
+                                _countof(kCopiedSwitchNames));
+
+  // Try to launch the process and attach an object watcher to the returned
+  // handle so that we get notified when the process terminates.
+  ScopedHandle worker_thread;
+  worker_process_.Close();
+  if (!LaunchProcessWithToken(binary_path_,
+                              command_line.GetCommandLineString(),
+                              user_token_,
+                              0,
+                              &worker_process_,
+                              &worker_thread)) {
+    return false;
+  }
+
+  ScopedHandle process_exit_event;
+  if (!DuplicateHandle(GetCurrentProcess(),
+                       worker_process_,
+                       GetCurrentProcess(),
+                       process_exit_event.Receive(),
+                       SYNCHRONIZE,
+                       FALSE,
+                       0)) {
+    LOG_GETLASTERROR(ERROR) << "Failed to duplicate a handle";
+    DoKillProcess(CONTROL_C_EXIT);
+    return false;
+  }
+
+  *process_exit_event_out = process_exit_event.Pass();
+  return true;
+}
+
+void SingleProcessLauncher::DoKillProcess(DWORD exit_code) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  if (worker_process_.IsValid()) {
+    TerminateProcess(worker_process_, exit_code);
+  }
+}
+
+DWORD SingleProcessLauncher::GetExitCode() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  DWORD exit_code = CONTROL_C_EXIT;
+  if (worker_process_.IsValid()) {
+    if (!::GetExitCodeProcess(worker_process_, &exit_code)) {
+      LOG_GETLASTERROR(INFO)
+          << "Failed to query the exit code of the worker process";
+      exit_code = CONTROL_C_EXIT;
+    }
+
+    worker_process_.Close();
+  }
+
+  return exit_code;
+}
+
+void SingleProcessLauncher::Stop() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+}
+
+ElevatedProcessLauncher::ElevatedProcessLauncher(
+    uint32 session_id,
+    const FilePath& binary_path,
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
+    : binary_path_(binary_path),
+      main_task_runner_(main_task_runner),
+      io_task_runner_(io_task_runner) {
+  process_exit_event_.Set(CreateEvent(NULL, TRUE, FALSE, NULL));
+  CHECK(process_exit_event_.IsValid());
+
+  CHECK(CreateSessionToken(session_id, &user_token_));
+
+  // To receive job object notifications the job object is registered with
+  // the completion port represented by |io_task_runner|. The registration has
+  // to be done on the I/O thread because MessageLoopForIO::RegisterJobObject()
+  // can only be called via MessageLoopForIO::current().
+  io_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&ElevatedProcessLauncher::InitializeJob, this));
+}
+
+void ElevatedProcessLauncher::OnIOCompleted(
+    base::MessagePumpForIO::IOContext* context,
+    DWORD bytes_transferred,
+    DWORD error) {
+  DCHECK(io_task_runner_->BelongsToCurrentThread());
+
+  // |bytes_transferred| is used in job object notifications to supply
+  // the message ID; |context| carries process ID.
+  main_task_runner_->PostTask(FROM_HERE, base::Bind(
+      &ElevatedProcessLauncher::OnJobNotification, this, bytes_transferred,
+      reinterpret_cast<DWORD>(context)));
+}
+
+bool ElevatedProcessLauncher::DoLaunchProcess(
+    const std::string& channel_name,
+    ScopedHandle* process_exit_event_out) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  // The job object is not ready. Retry starting the host process later.
+  if (!job_.IsValid()) {
+    return false;
+  }
+
+  // Construct the helper binary name.
+  FilePath dir_path;
+  if (!PathService::Get(base::DIR_EXE, &dir_path)) {
+    LOG(ERROR) << "Failed to get the executable file name.";
+    return false;
+  }
+  FilePath service_binary = dir_path.Append(kMe2meServiceBinaryName);
+
+  // Create the command line passing the name of the IPC channel to use and
+  // copying known switches from the caller's command line.
+  CommandLine command_line(service_binary);
+  command_line.AppendSwitchPath(kElevateSwitchName, binary_path_);
+  command_line.AppendSwitchNative(kDaemonIpcSwitchName,
+                                  UTF8ToWide(channel_name));
+  command_line.CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
+                                kCopiedSwitchNames,
+                                _countof(kCopiedSwitchNames));
+
+  CHECK(ResetEvent(process_exit_event_));
+
+  // Try to launch the process and attach an object watcher to the returned
+  // handle so that we get notified when the process terminates.
+  ScopedHandle worker_process;
+  ScopedHandle worker_thread;
+  if (!LaunchProcessWithToken(service_binary,
+                              command_line.GetCommandLineString(),
+                              user_token_,
+                              CREATE_SUSPENDED,
+                              &worker_process,
+                              &worker_thread)) {
+    return false;
+  }
+
+  if (!AssignProcessToJobObject(job_, worker_process)) {
+    LOG_GETLASTERROR(ERROR) << "Failed to assign the worker to the job object";
+    TerminateProcess(worker_process, CONTROL_C_EXIT);
+    return false;
+  }
+
+  if (!ResumeThread(worker_thread)) {
+    LOG_GETLASTERROR(ERROR) << "Failed to resume the worker thread";
+    DoKillProcess(CONTROL_C_EXIT);
+    return false;
+  }
+
+  ScopedHandle process_exit_event;
+  if (!DuplicateHandle(GetCurrentProcess(),
+                       process_exit_event_,
+                       GetCurrentProcess(),
+                       process_exit_event.Receive(),
+                       SYNCHRONIZE,
+                       FALSE,
+                       0)) {
+    LOG_GETLASTERROR(ERROR) << "Failed to duplicate a handle";
+    DoKillProcess(CONTROL_C_EXIT);
+    return false;
+  }
+
+  *process_exit_event_out = process_exit_event.Pass();
+  return true;
+}
+
+void ElevatedProcessLauncher::DoKillProcess(DWORD exit_code) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  if (job_.IsValid()) {
+    TerminateJobObject(job_, exit_code);
+  }
+}
+
+DWORD ElevatedProcessLauncher::GetExitCode() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  DWORD exit_code = CONTROL_C_EXIT;
+  if (worker_process_.IsValid()) {
+    if (!::GetExitCodeProcess(worker_process_, &exit_code)) {
+      LOG_GETLASTERROR(INFO)
+          << "Failed to query the exit code of the worker process";
+      exit_code = CONTROL_C_EXIT;
+    }
+
+    worker_process_.Close();
+  }
+
+  return exit_code;
+}
+
+void ElevatedProcessLauncher::Stop() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  // Drain the completion queue to make sure all job object notification have
+  // been received.
+  DrainJobNotificationsCompleted();
+}
+
+void ElevatedProcessLauncher::DrainJobNotifications() {
+  DCHECK(io_task_runner_->BelongsToCurrentThread());
+
+  // DrainJobNotifications() is posted after the job object is destroyed, so
+  // by this time all notifications from the job object have been processed
+  // already. Let the main thread know that the queue has been drained.
+  main_task_runner_->PostTask(FROM_HERE, base::Bind(
+      &ElevatedProcessLauncher::DrainJobNotificationsCompleted, this));
+}
+
+void ElevatedProcessLauncher::DrainJobNotificationsCompleted() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  if (job_.IsValid()) {
+    job_.Close();
+
+    // Drain the completion queue to make sure all job object notification have
+    // been received.
+    io_task_runner_->PostTask(FROM_HERE, base::Bind(
+        &ElevatedProcessLauncher::DrainJobNotifications, this));
+  }
+}
+
+void ElevatedProcessLauncher::InitializeJob() {
+  DCHECK(io_task_runner_->BelongsToCurrentThread());
+
+  ScopedHandle job;
+  job.Set(CreateJobObject(NULL, NULL));
+  if (!job.IsValid()) {
+    LOG_GETLASTERROR(ERROR) << "Failed to create a job object";
+    return;
+  }
+
+  // Limit the number of active processes in the job to two (the process
+  // performing elevation and the host) and make sure that all processes will be
+  // killed once the job object is destroyed.
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
+  memset(&info, 0, sizeof(info));
+  info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_ACTIVE_PROCESS |
+      JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  info.BasicLimitInformation.ActiveProcessLimit = 2;
+  if (!SetInformationJobObject(job,
+                               JobObjectExtendedLimitInformation,
+                               &info,
+                               sizeof(info))) {
+    LOG_GETLASTERROR(ERROR) << "Failed to set limits on the job object";
+    return;
+  }
+
+  // Register the job object with the completion port in the I/O thread to
+  // receive job notifications.
+  if (!MessageLoopForIO::current()->RegisterJobObject(job, this)) {
+    LOG_GETLASTERROR(ERROR)
+        << "Failed to associate the job object with a completion port";
+    return;
+  }
+
+  // ScopedHandle is not compatible with base::Passed, so we wrap it to a scoped
+  // pointer.
+  scoped_ptr<ScopedHandle> job_wrapper(new ScopedHandle());
+  *job_wrapper = job.Pass();
+
+  // Let the main thread know that initialization is complete.
+  main_task_runner_->PostTask(FROM_HERE, base::Bind(
+      &ElevatedProcessLauncher::InitializeJobCompleted, this,
+      base::Passed(&job_wrapper)));
+}
+
+void ElevatedProcessLauncher::InitializeJobCompleted(
+    scoped_ptr<ScopedHandle> job) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+  DCHECK(!job_.IsValid());
+
+  job_ = job->Pass();
+}
+
+void ElevatedProcessLauncher::OnJobNotification(DWORD message, DWORD pid) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  switch (message) {
+    case JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO:
+      CHECK(SetEvent(process_exit_event_));
+      break;
+
+    case JOB_OBJECT_MSG_NEW_PROCESS:
+      // We report the exit code of the worker process to be |CONTROL_C_EXIT|
+      // if we cannot get the actual exit code. So here we can safely ignore
+      // the error returned by OpenProcess().
+      worker_process_.Set(OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid));
+      break;
+  }
+}
+
+}  // namespace
+
+WtsSessionProcessLauncherImpl::~WtsSessionProcessLauncherImpl() {
+}
 
 WtsSessionProcessLauncher::WtsSessionProcessLauncher(
     const base::Closure& stopped_callback,
@@ -221,35 +520,11 @@ WtsSessionProcessLauncher::WtsSessionProcessLauncher(
     scoped_refptr<base::SingleThreadTaskRunner> main_message_loop,
     scoped_refptr<base::SingleThreadTaskRunner> ipc_message_loop)
     : Stoppable(main_message_loop, stopped_callback),
+      attached_(false),
       main_message_loop_(main_message_loop),
       ipc_message_loop_(ipc_message_loop),
-      monitor_(monitor),
-      state_(StateDetached) {
+      monitor_(monitor) {
   monitor_->AddWtsConsoleObserver(this);
-}
-
-WtsSessionProcessLauncher::~WtsSessionProcessLauncher() {
-  monitor_->RemoveWtsConsoleObserver(this);
-  if (state_ != StateDetached) {
-    OnSessionDetached();
-  }
-
-  DCHECK(state_ == StateDetached);
-  DCHECK(!timer_.IsRunning());
-  DCHECK(process_.handle() == NULL);
-  DCHECK(process_watcher_.GetWatchedObject() == NULL);
-  DCHECK(chromoting_channel_.get() == NULL);
-}
-
-void WtsSessionProcessLauncher::LaunchProcess() {
-  DCHECK(main_message_loop_->BelongsToCurrentThread());
-  DCHECK(state_ == StateStarting);
-  DCHECK(!timer_.IsRunning());
-  DCHECK(process_.handle() == NULL);
-  DCHECK(process_watcher_.GetWatchedObject() == NULL);
-  DCHECK(chromoting_channel_.get() == NULL);
-
-  launch_time_ = base::Time::Now();
 
   // Construct the host binary name.
   FilePath dir_path;
@@ -258,140 +533,35 @@ void WtsSessionProcessLauncher::LaunchProcess() {
     Stop();
     return;
   }
-  FilePath host_binary = dir_path.Append(kMe2meHostBinaryName);
-
-  std::string channel_name;
-  ScopedHandle pipe;
-  if (CreatePipeForIpcChannel(this, &channel_name, &pipe)) {
-    // Wrap the pipe into an IPC channel.
-    chromoting_channel_.reset(new IPC::ChannelProxy(
-        IPC::ChannelHandle(pipe.Get()),
-        IPC::Channel::MODE_SERVER,
-        this,
-        ipc_message_loop_));
-
-    // Create the host process command line passing the name of the IPC channel
-    // to use and copying known switches from the service's command line.
-    CommandLine command_line(host_binary);
-    command_line.AppendSwitchASCII(kChromotingIpcSwitchName, channel_name);
-    command_line.CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
-                                  kCopiedSwitchNames,
-                                  _countof(kCopiedSwitchNames));
-
-    // Try to launch the process and attach an object watcher to the returned
-    // handle so that we get notified when the process terminates.
-    if (LaunchProcessWithToken(host_binary,
-                               command_line.GetCommandLineString(),
-                               session_token_,
-                               &process_)) {
-      if (process_watcher_.StartWatching(process_.handle(), this)) {
-        state_ = StateAttached;
-        return;
-      } else {
-        LOG(ERROR) << "Failed to arm the process watcher.";
-        process_.Terminate(0);
-        process_.Close();
-      }
-    }
-
-    chromoting_channel_.reset();
-  }
-
-  // Something went wrong. Try to launch the host again later. The attempts rate
-  // is limited by exponential backoff.
-  launch_backoff_ = std::max(launch_backoff_ * 2,
-                             TimeDelta::FromSeconds(kMinLaunchDelaySeconds));
-  launch_backoff_ = std::min(launch_backoff_,
-                             TimeDelta::FromSeconds(kMaxLaunchDelaySeconds));
-  timer_.Start(FROM_HERE, launch_backoff_,
-               this, &WtsSessionProcessLauncher::LaunchProcess);
+  host_binary_ = dir_path.Append(kMe2meHostBinaryName);
 }
 
-void WtsSessionProcessLauncher::OnObjectSignaled(HANDLE object) {
-  if (!main_message_loop_->BelongsToCurrentThread()) {
-    main_message_loop_->PostTask(
-        FROM_HERE, base::Bind(&WtsSessionProcessLauncher::OnObjectSignaled,
-                              base::Unretained(this), object));
-    return;
-  }
+WtsSessionProcessLauncher::~WtsSessionProcessLauncher() {
+  // Make sure that the object is completely stopped. The same check exists
+  // in Stoppable::~Stoppable() but this one helps us to fail early and
+  // predictably.
+  CHECK_EQ(stoppable_state(), Stoppable::kStopped);
 
-  // It is possible that OnObjectSignaled() task will be queued by another
-  // thread right before |process_watcher_| was stopped. It such a case it is
-  // safe to ignore this notification.
-  if (state_ != StateAttached) {
-    return;
-  }
+  monitor_->RemoveWtsConsoleObserver(this);
 
-  DCHECK(!timer_.IsRunning());
-  DCHECK(process_.handle() != NULL);
-  DCHECK(process_watcher_.GetWatchedObject() == NULL);
-  DCHECK(chromoting_channel_.get() != NULL);
+  CHECK(!attached_);
+  CHECK(!timer_.IsRunning());
+}
 
-  // Stop trying to restart the host if its process exited due to
-  // misconfiguration.
-  int exit_code;
-  bool stop_trying =
-      base::WaitForExitCodeWithTimeout(
-          process_.handle(), &exit_code, base::TimeDelta()) &&
-      kMinPermanentErrorExitCode <= exit_code &&
-      exit_code <= kMaxPermanentErrorExitCode;
-
-  // The host process has been terminated for some reason. The handle can now be
-  // closed.
-  process_.Close();
-  chromoting_channel_.reset();
-  state_ = StateStarting;
-
-  if (stop_trying) {
-    Stop();
-    return;
-  }
-
-  // Expand the backoff interval if the process has died quickly or reset it if
-  // it was up longer than the maximum backoff delay.
-  base::TimeDelta delta = base::Time::Now() - launch_time_;
-  if (delta < base::TimeDelta() ||
-      delta >= base::TimeDelta::FromSeconds(kMaxLaunchDelaySeconds)) {
-    launch_backoff_ = base::TimeDelta();
-  } else {
-    launch_backoff_ = std::max(launch_backoff_ * 2,
-                               TimeDelta::FromSeconds(kMinLaunchDelaySeconds));
-    launch_backoff_ = std::min(launch_backoff_,
-                               TimeDelta::FromSeconds(kMaxLaunchDelaySeconds));
-  }
-
-  // Try to restart the host.
-  timer_.Start(FROM_HERE, launch_backoff_,
-               this, &WtsSessionProcessLauncher::LaunchProcess);
+void WtsSessionProcessLauncher::OnChannelConnected() {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
 }
 
 bool WtsSessionProcessLauncher::OnMessageReceived(const IPC::Message& message) {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(WtsSessionProcessLauncher, message)
-      IPC_MESSAGE_HANDLER(ChromotingHostMsg_SendSasToConsole,
-                          OnSendSasToConsole)
-      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_MESSAGE_HANDLER(ChromotingNetworkDaemonMsg_SendSasToConsole,
+                        OnSendSasToConsole)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void WtsSessionProcessLauncher::OnSendSasToConsole() {
-  if (!main_message_loop_->BelongsToCurrentThread()) {
-    main_message_loop_->PostTask(
-        FROM_HERE, base::Bind(&WtsSessionProcessLauncher::OnSendSasToConsole,
-                              base::Unretained(this)));
-    return;
-  }
-
-  if (state_ == StateAttached) {
-    if (sas_injector_.get() == NULL) {
-      sas_injector_ = SasInjector::Create();
-    }
-
-    if (sas_injector_.get() != NULL) {
-      sas_injector_->InjectSas();
-    }
-  }
 }
 
 void WtsSessionProcessLauncher::OnSessionAttached(uint32 session_id) {
@@ -401,89 +571,161 @@ void WtsSessionProcessLauncher::OnSessionAttached(uint32 session_id) {
     return;
   }
 
-  DCHECK(state_ == StateDetached);
+  DCHECK(!attached_);
   DCHECK(!timer_.IsRunning());
-  DCHECK(process_.handle() == NULL);
-  DCHECK(process_watcher_.GetWatchedObject() == NULL);
-  DCHECK(chromoting_channel_.get() == NULL);
 
-  // Temporarily enable the SE_TCB_NAME privilege. The privileged token is
-  // created as needed and kept for later reuse.
-  if (privileged_token_.Get() == NULL) {
-    if (!CreatePrivilegedToken(&privileged_token_)) {
-      return;
-    }
+  attached_ = true;
+
+  // Reset the backoff timeout every time the session is switched.
+  launch_backoff_ = base::TimeDelta();
+
+  // The workaround we use to launch a process in a not yet logged in session
+  // (see CreateRemoteSessionProcess()) on Windows XP/2K3 does not let us to
+  // assign the started process to a job. However on Vista+ we have to start
+  // the host via a helper process. The helper process calls ShellExecute() that
+  // does not work across the session boundary but it required to launch
+  // a binary specifying uiAccess='true' in its manifest.
+  //
+  // Below we choose which implementation of |WorkerProcessLauncher::Delegate|
+  // to use. A single process is launched on XP (since uiAccess='true' does not
+  // have effect any way). Vista+ utilizes a helper process and assign it to
+  // a job object to control it.
+  if (new_impl_.get()) {
+    new_impl_->Stop();
+    new_impl_ = NULL;
+  }
+  if (base::win::GetVersion() == base::win::VERSION_XP) {
+    new_impl_ = new SingleProcessLauncher(session_id, host_binary_,
+                                          main_message_loop_);
+  } else {
+    new_impl_ = new ElevatedProcessLauncher(session_id, host_binary_,
+                                            main_message_loop_,
+                                            ipc_message_loop_);
   }
 
-  if (!ImpersonateLoggedOnUser(privileged_token_)) {
-    LOG_GETLASTERROR(ERROR) <<
-        "Failed to impersonate the privileged token";
-    return;
+  if (launcher_.get() == NULL) {
+    LaunchProcess();
   }
-
-  // While the SE_TCB_NAME privilege is enabled, create a session token for
-  // the launched process.
-  bool result = CreateSessionToken(session_id, &session_token_);
-
-  // Revert to the default token. The default token is sufficient to call
-  // CreateProcessAsUser() successfully.
-  CHECK(RevertToSelf());
-
-  if (!result)
-    return;
-
-  // Now try to launch the host.
-  state_ = StateStarting;
-  LaunchProcess();
 }
 
 void WtsSessionProcessLauncher::OnSessionDetached() {
   DCHECK(main_message_loop_->BelongsToCurrentThread());
-  DCHECK(state_ == StateDetached ||
-         state_ == StateStarting ||
-         state_ == StateAttached);
+  DCHECK(attached_);
 
-  switch (state_) {
-    case StateDetached:
-      DCHECK(!timer_.IsRunning());
-      DCHECK(process_.handle() == NULL);
-      DCHECK(process_watcher_.GetWatchedObject() == NULL);
-      DCHECK(chromoting_channel_.get() == NULL);
-      break;
+  attached_ = false;
+  launch_backoff_ = base::TimeDelta();
+  timer_.Stop();
 
-    case StateStarting:
-      DCHECK(process_.handle() == NULL);
-      DCHECK(process_watcher_.GetWatchedObject() == NULL);
-      DCHECK(chromoting_channel_.get() == NULL);
-
-      timer_.Stop();
-      launch_backoff_ = base::TimeDelta();
-      state_ = StateDetached;
-      break;
-
-    case StateAttached:
-      DCHECK(!timer_.IsRunning());
-      DCHECK(process_.handle() != NULL);
-      DCHECK(process_watcher_.GetWatchedObject() != NULL);
-      DCHECK(chromoting_channel_.get() != NULL);
-
-      process_watcher_.StopWatching();
-      process_.Terminate(0);
-      process_.Close();
-      chromoting_channel_.reset();
-      state_ = StateDetached;
-      break;
+  if (launcher_.get() != NULL) {
+    launcher_->Stop();
   }
-
-  session_token_.Close();
 }
 
 void WtsSessionProcessLauncher::DoStop() {
-  if (state_ != StateDetached) {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
+
+  if (attached_) {
     OnSessionDetached();
   }
 
+  // Don't complete shutdown if |launcher_| is not completely stopped.
+  if (launcher_.get() != NULL) {
+    return;
+  }
+
+  // Tear down implementation objects asynchromously.
+  if (new_impl_.get()) {
+    new_impl_->Stop();
+    new_impl_ = NULL;
+  }
+  if (impl_.get()) {
+    impl_->Stop();
+    impl_ = NULL;
+  }
+
   CompleteStopping();
+}
+
+void WtsSessionProcessLauncher::OnSendSasToConsole() {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
+
+  if (attached_) {
+    if (sas_injector_.get() == NULL)
+      sas_injector_ = SasInjector::Create();
+    if (!sas_injector_->InjectSas())
+      LOG(ERROR) << "Failed to inject Secure Attention Sequence.";
+  }
+}
+
+void WtsSessionProcessLauncher::LaunchProcess() {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
+  DCHECK(attached_);
+  DCHECK(launcher_.get() == NULL);
+  DCHECK(!timer_.IsRunning());
+
+  // Switch to a new implementation object if needed.
+  if (new_impl_.get() != NULL) {
+    if (impl_.get() != NULL) {
+      impl_->Stop();
+      impl_ = NULL;
+    }
+
+    impl_.swap(new_impl_);
+  }
+
+  DCHECK(impl_.get() != NULL);
+
+  launch_time_ = base::Time::Now();
+  launcher_.reset(new WorkerProcessLauncher(
+      impl_.get(), this,
+      base::Bind(&WtsSessionProcessLauncher::OnLauncherStopped,
+                 base::Unretained(this)),
+      main_message_loop_,
+      ipc_message_loop_));
+  launcher_->Start(kDaemonIpcSecurityDescriptor);
+}
+
+void WtsSessionProcessLauncher::OnLauncherStopped() {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
+
+  // Retrieve the exit code of the worker process.
+  DWORD exit_code = impl_->GetExitCode();
+
+  launcher_.reset(NULL);
+
+  // Do not relaunch the worker process if the caller has asked us to stop.
+  if (stoppable_state() != Stoppable::kRunning) {
+    Stop();
+    return;
+  }
+
+  // Stop trying to restart the worker process if its process exited due to
+  // misconfiguration.
+  if (kMinPermanentErrorExitCode <= exit_code &&
+      exit_code <= kMaxPermanentErrorExitCode) {
+    Stop();
+    return;
+  }
+
+  // Try to restart the worker process if we are still attached to a session.
+  if (attached_) {
+    // Expand the backoff interval if the process has died quickly or reset it
+    // if it was up longer than the maximum backoff delay.
+    base::TimeDelta delta = base::Time::Now() - launch_time_;
+    if (delta < base::TimeDelta() ||
+        delta >= base::TimeDelta::FromSeconds(kMaxLaunchDelaySeconds)) {
+      launch_backoff_ = base::TimeDelta();
+    } else {
+      launch_backoff_ = std::max(
+          launch_backoff_ * 2, TimeDelta::FromSeconds(kMinLaunchDelaySeconds));
+      launch_backoff_ = std::min(
+          launch_backoff_, TimeDelta::FromSeconds(kMaxLaunchDelaySeconds));
+    }
+
+    // Try to launch the worker process.
+    timer_.Start(FROM_HERE, launch_backoff_,
+                 this, &WtsSessionProcessLauncher::LaunchProcess);
+  }
 }
 
 } // namespace remoting

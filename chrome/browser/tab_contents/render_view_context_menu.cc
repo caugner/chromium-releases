@@ -16,6 +16,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_preview_context_menu_observer.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
@@ -81,6 +81,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginAction.h"
+#include "ui/base/clipboard/clipboard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/favicon_size.h"
@@ -191,7 +192,7 @@ void AddCustomItemsToMenu(const std::vector<WebMenuItem>& items,
         NOTREACHED();
         break;
       case WebMenuItem::SEPARATOR:
-        menu_model->AddSeparator();
+        menu_model->AddSeparator(ui::NORMAL_SEPARATOR);
         break;
       case WebMenuItem::SUBMENU: {
         ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(delegate);
@@ -390,38 +391,44 @@ void RenderViewContextMenu::AppendExtensionItems(
   // If this is the first extension-provided menu item, and there are other
   // items in the menu, add a separator.
   if (*index == 0 && menu_model_.GetItemCount())
-    menu_model_.AddSeparator();
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 
-  int menu_id = IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + (*index)++;
-
-  // Extensions are only allowed one top-level slot (and it can't be a radio or
-  // checkbox item because we are going to put the extension icon next to it).
+  // Extensions (other than platform apps) are only allowed one top-level slot
+  // (and it can't be a radio or checkbox item because we are going to put the
+  // extension icon next to it).
   // If they have more than that, we automatically push them into a submenu.
-  string16 title;
-  MenuItem::List submenu_items;
-  if (items.size() > 1 || items[0]->type() != MenuItem::NORMAL) {
-    title = UTF8ToUTF16(extension->name());
-    submenu_items = items;
-  } else {
-    MenuItem* item = items[0];
-    extension_item_map_[menu_id] = item->id();
-    title = item->TitleWithReplacement(PrintableSelectionText(),
-                                       kMaxExtensionItemTitleLength);
-    submenu_items = GetRelevantExtensionItems(item->children(), params_,
-                                              profile_, can_cross_incognito);
-  }
-
-  // Now add our item(s) to the menu_model_.
-  if (submenu_items.empty()) {
-    menu_model_.AddItem(menu_id, title);
-  } else {
-    ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(this);
-    extension_menu_models_.push_back(submenu);
-    menu_model_.AddSubMenu(menu_id, title, submenu);
-    RecursivelyAppendExtensionItems(submenu_items, can_cross_incognito, submenu,
+  if (extension->is_platform_app()) {
+    RecursivelyAppendExtensionItems(items, can_cross_incognito, &menu_model_,
                                     index);
+  } else {
+    int menu_id = IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + (*index)++;
+    string16 title;
+    MenuItem::List submenu_items;
+
+    if (items.size() > 1 || items[0]->type() != MenuItem::NORMAL) {
+      title = UTF8ToUTF16(extension->name());
+      submenu_items = items;
+    } else {
+      MenuItem* item = items[0];
+      extension_item_map_[menu_id] = item->id();
+      title = item->TitleWithReplacement(PrintableSelectionText(),
+                                       kMaxExtensionItemTitleLength);
+      submenu_items = GetRelevantExtensionItems(item->children(), params_,
+                                              profile_, can_cross_incognito);
+    }
+
+    // Now add our item(s) to the menu_model_.
+    if (submenu_items.empty()) {
+      menu_model_.AddItem(menu_id, title);
+    } else {
+      ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(this);
+      extension_menu_models_.push_back(submenu);
+      menu_model_.AddSubMenu(menu_id, title, submenu);
+      RecursivelyAppendExtensionItems(submenu_items, can_cross_incognito,
+                                      submenu, index);
+    }
+    SetExtensionIcon(extension_id);
   }
-  SetExtensionIcon(extension_id);
 }
 
 void RenderViewContextMenu::RecursivelyAppendExtensionItems(
@@ -441,7 +448,7 @@ void RenderViewContextMenu::RecursivelyAppendExtensionItems(
     // a separator.  The converse case is handled below.
     if (last_type == MenuItem::RADIO &&
         item->type() != MenuItem::RADIO) {
-      menu_model->AddSeparator();
+      menu_model->AddSeparator(ui::NORMAL_SEPARATOR);
       last_type = MenuItem::SEPARATOR;
     }
 
@@ -473,13 +480,13 @@ void RenderViewContextMenu::RecursivelyAppendExtensionItems(
 
         // Auto-append a separator if needed.
         if (last_type != MenuItem::SEPARATOR)
-          menu_model->AddSeparator();
+          menu_model->AddSeparator(ui::NORMAL_SEPARATOR);
       }
 
       menu_model->AddRadioItem(menu_id, title, radio_group_id);
     } else if (item->type() == MenuItem::SEPARATOR) {
       if (i != items.begin() && last_type != MenuItem::SEPARATOR) {
-        menu_model->AddSeparator();
+        menu_model->AddSeparator(ui::NORMAL_SEPARATOR);
       }
     }
     last_type = item->type();
@@ -497,7 +504,7 @@ void RenderViewContextMenu::SetExtensionIcon(const std::string& extension_id) {
   DCHECK(icon.width() == gfx::kFaviconSize);
   DCHECK(icon.height() == gfx::kFaviconSize);
 
-  menu_model_.SetIcon(index, icon);
+  menu_model_.SetIcon(index, gfx::Image(icon));
 }
 
 void RenderViewContextMenu::AppendAllExtensionItems() {
@@ -554,7 +561,7 @@ void RenderViewContextMenu::InitMenu() {
     // If there's a selection, don't early return when there are custom items,
     // but fall through to adding the normal ones after the custom ones.
     if (has_selection) {
-      menu_model_.AddSeparator();
+      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     } else {
       // Don't add items for Pepper menu.
       if (!params_.custom_context.is_pepper_menu)
@@ -577,7 +584,7 @@ void RenderViewContextMenu::InitMenu() {
         if (!params_.frame_url.is_empty()) {
           is_devtools = IsDevToolsURL(params_.frame_url);
           if (!is_devtools && !IsInternalResourcesURL(params_.frame_url)) {
-            menu_model_.AddSeparator();
+            menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
             AppendFrameItems();
           }
         }
@@ -590,7 +597,7 @@ void RenderViewContextMenu::InitMenu() {
   if (has_link) {
     AppendLinkItems();
     if (params_.media_type != WebContextMenuData::MediaTypeNone)
-      menu_model_.AddSeparator();
+      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
 
   switch (params_.media_type) {
@@ -652,6 +659,14 @@ void RenderViewContextMenu::AppendPlatformAppItems() {
   DCHECK(platform_app);
   DCHECK(platform_app->is_platform_app());
 
+  bool has_selection = !params_.selection_text.empty();
+
+  // Add undo/redo, cut/copy/paste etc for text fields
+  if (params_.is_editable)
+    AppendEditableItems();
+  else if (has_selection)
+    AppendCopyItem();
+
   int index = 0;
   AppendExtensionItems(platform_app->id(), &index);
 
@@ -688,7 +703,7 @@ void RenderViewContextMenu::AddCheckItem(int command_id,
 }
 
 void RenderViewContextMenu::AddSeparator() {
-  menu_model_.AddSeparator();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 }
 
 void RenderViewContextMenu::AddSubMenu(int command_id,
@@ -743,7 +758,7 @@ void RenderViewContextMenu::AppendDeveloperItems() {
   // In the DevTools popup menu, "developer items" is normally the only
   // section, so omit the separator there.
   if (menu_model_.GetItemCount() > 0)
-    menu_model_.AddSeparator();
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_INSPECTELEMENT,
                                   IDS_CONTENT_CONTEXT_INSPECTELEMENT);
 }
@@ -786,7 +801,7 @@ void RenderViewContextMenu::AppendImageItems() {
 
 void RenderViewContextMenu::AppendAudioItems() {
   AppendMediaItems();
-  menu_model_.AddSeparator();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
                                   IDS_CONTENT_CONTEXT_SAVEAUDIOAS);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYAVLOCATION,
@@ -797,7 +812,7 @@ void RenderViewContextMenu::AppendAudioItems() {
 
 void RenderViewContextMenu::AppendVideoItems() {
   AppendMediaItems();
-  menu_model_.AddSeparator();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
                                   IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYAVLOCATION,
@@ -840,7 +855,7 @@ void RenderViewContextMenu::AppendPluginItems() {
 
   if (params_.media_flags & WebContextMenuData::MediaCanRotate) {
     if (menu_model_.GetItemCount() > 0)
-      menu_model_.AddSeparator();
+      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECW,
                                     IDS_CONTENT_CONTEXT_ROTATECW);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECCW,
@@ -852,7 +867,7 @@ void RenderViewContextMenu::AppendPageItems() {
   menu_model_.AddItemWithStringId(IDC_BACK, IDS_CONTENT_CONTEXT_BACK);
   menu_model_.AddItemWithStringId(IDC_FORWARD, IDS_CONTENT_CONTEXT_FORWARD);
   menu_model_.AddItemWithStringId(IDC_RELOAD, IDS_CONTENT_CONTEXT_RELOAD);
-  menu_model_.AddSeparator();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_SAVE_PAGE,
                                   IDS_CONTENT_CONTEXT_SAVEPAGEAS);
   menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
@@ -924,16 +939,7 @@ void RenderViewContextMenu::AppendSearchProvider() {
        i = printable_selection_text.find('&', i + 2))
     printable_selection_text.insert(i, 1, '&');
 
-  if (match.transition == content::PAGE_TRANSITION_TYPED) {
-    if ((selection_navigation_url_ != params_.link_url) &&
-        ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
-            selection_navigation_url_.scheme())) {
-      menu_model_.AddItem(
-          IDC_CONTENT_CONTEXT_GOTOURL,
-          l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_GOTOURL,
-                                     printable_selection_text));
-    }
-  } else {
+  if (AutocompleteMatch::IsSearchType(match.type)) {
     const TemplateURL* const default_provider =
         TemplateURLServiceFactory::GetForProfile(profile_)->
         GetDefaultSearchProvider();
@@ -944,6 +950,15 @@ void RenderViewContextMenu::AppendSearchProvider() {
         l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHWEBFOR,
                                    default_provider->short_name(),
                                    printable_selection_text));
+  } else {
+    if ((selection_navigation_url_ != params_.link_url) &&
+        ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
+            selection_navigation_url_.scheme())) {
+      menu_model_.AddItem(
+          IDC_CONTENT_CONTEXT_GOTOURL,
+          l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_GOTOURL,
+                                     printable_selection_text));
+    }
   }
 }
 
@@ -954,7 +969,7 @@ void RenderViewContextMenu::AppendEditableItems() {
                                   IDS_CONTENT_CONTEXT_UNDO);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_REDO,
                                   IDS_CONTENT_CONTEXT_REDO);
-  menu_model_.AddSeparator();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_CUT,
                                   IDS_CONTENT_CONTEXT_CUT);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPY,
@@ -965,12 +980,12 @@ void RenderViewContextMenu::AppendEditableItems() {
                                   IDS_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_DELETE,
                                   IDS_CONTENT_CONTEXT_DELETE);
-  menu_model_.AddSeparator();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 
   if (!params_.keyword_url.is_empty()) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ADDSEARCHENGINE,
                                     IDS_CONTENT_CONTEXT_ADDSEARCHENGINE);
-    menu_model_.AddSeparator();
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
 
   AppendSpellcheckOptionsSubMenu();
@@ -983,7 +998,7 @@ void RenderViewContextMenu::AppendEditableItems() {
   AppendBidiSubMenu();
 #endif  // OS_MACOSX
 
-  menu_model_.AddSeparator();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SELECTALL,
                                   IDS_CONTENT_CONTEXT_SELECTALL);
 }
@@ -1050,7 +1065,7 @@ void RenderViewContextMenu::AppendProtocolHandlerSubMenu() {
         IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST + i,
         handlers[i].title());
   }
-  protocol_handler_submenu_model_.AddSeparator();
+  protocol_handler_submenu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   protocol_handler_submenu_model_.AddItem(
       IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS,
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKWITH_CONFIGURE));
@@ -1695,14 +1710,14 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_PRINT:
       if (params_.media_type == WebContextMenuData::MediaTypeNone) {
-        TabContents* tab_contents =
-            TabContents::FromWebContents(source_web_contents_);
-        if (!tab_contents)
+        printing::PrintViewManager* print_view_manager =
+            printing::PrintViewManager::FromWebContents(source_web_contents_);
+        if (!print_view_manager)
           break;
         if (profile_->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled)) {
-          tab_contents->print_view_manager()->PrintNow();
+          print_view_manager->PrintNow();
         } else {
-          tab_contents->print_view_manager()->PrintPreviewNow();
+          print_view_manager->PrintPreviewNow();
         }
       } else {
         rvh->Send(new PrintMsg_PrintNodeUnderContextMenu(rvh->GetRoutingID()));
@@ -2000,7 +2015,7 @@ void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
   chrome_common_net::WriteURLToClipboard(
       url,
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
-      g_browser_process->clipboard());
+      ui::Clipboard::GetForCurrentThread());
 }
 
 void RenderViewContextMenu::MediaPlayerActionAt(

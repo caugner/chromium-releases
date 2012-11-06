@@ -7,12 +7,13 @@
 #include <algorithm>
 #include <cstring>
 
+#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/rand_util.h"
+#include "sync/engine/backoff_delay_provider.h"
 #include "sync/engine/syncer.h"
 #include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/protocol/proto_enum_conversions.h"
@@ -31,11 +32,6 @@ using sessions::SyncSourceInfo;
 using sync_pb::GetUpdatesCallerInfo;
 
 namespace {
-
-// For integration tests only.  Override initial backoff value.
-// TODO(tim): Remove this egregiousness, use command line flag and plumb
-// through. Done this way to reduce diffs in hotfix.
-static bool g_force_short_retry = false;
 
 bool ShouldRequestEarlyExit(const SyncProtocolError& error) {
   switch (error.error_type) {
@@ -74,7 +70,7 @@ ConfigurationParams::ConfigurationParams()
     : source(GetUpdatesCallerInfo::UNKNOWN) {}
 ConfigurationParams::ConfigurationParams(
     const sync_pb::GetUpdatesCallerInfo::GetUpdatesSource& source,
-    const ModelTypeSet& types_to_download,
+    ModelTypeSet types_to_download,
     const ModelSafeRoutingInfo& routing_info,
     const base::Closure& ready_task)
     : source(source),
@@ -84,9 +80,6 @@ ConfigurationParams::ConfigurationParams(
   DCHECK(!ready_task.is_null());
 }
 ConfigurationParams::~ConfigurationParams() {}
-
-SyncSchedulerImpl::DelayProvider::DelayProvider() {}
-SyncSchedulerImpl::DelayProvider::~DelayProvider() {}
 
 SyncSchedulerImpl::WaitInterval::WaitInterval()
     : mode(UNKNOWN),
@@ -138,11 +131,6 @@ const char* SyncSchedulerImpl::SyncSessionJob::GetPurposeString(
   }
   NOTREACHED();
   return "";
-}
-
-TimeDelta SyncSchedulerImpl::DelayProvider::GetDelay(
-    const base::TimeDelta& last_delay) {
-  return SyncSchedulerImpl::GetRecommendedDelay(last_delay);
 }
 
 GetUpdatesCallerInfo::GetUpdatesSource GetUpdatesFromNudgeSource(
@@ -197,6 +185,7 @@ bool IsConfigRelatedUpdateSourceValue(
 }  // namespace
 
 SyncSchedulerImpl::SyncSchedulerImpl(const std::string& name,
+                                     BackoffDelayProvider* delay_provider,
                                      sessions::SyncSessionContext* context,
                                      Syncer* syncer)
     : weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
@@ -216,9 +205,10 @@ SyncSchedulerImpl::SyncSchedulerImpl(const std::string& name,
       // Start with assuming everything is fine with the connection.
       // At the end of the sync cycle we would have the correct status.
       connection_code_(HttpResponse::SERVER_CONNECTION_OK),
-      delay_provider_(new DelayProvider()),
+      delay_provider_(delay_provider),
       syncer_(syncer),
-      session_context_(context) {
+      session_context_(context),
+      no_scheduling_allowed_(false) {
   DCHECK(sync_loop_);
 }
 
@@ -287,6 +277,13 @@ void SyncSchedulerImpl::Start(Mode mode) {
   if (old_mode != mode_) {
     // We just changed our mode. See if there are any pending jobs that we could
     // execute in the new mode.
+    if (mode_ == NORMAL_MODE) {
+      // It is illegal to switch to NORMAL_MODE if a previous CONFIGURATION job
+      // has not yet completed.
+      DCHECK(!wait_interval_.get() ||
+             !wait_interval_->pending_configure_job.get());
+    }
+
     DoPendingJobIfPossible(false);
   }
 }
@@ -306,7 +303,7 @@ namespace {
 // Helper to extract the routing info and workers corresponding to types in
 // |types| from |current_routes| and |current_workers|.
 void BuildModelSafeParams(
-    const ModelTypeSet& types_to_download,
+    ModelTypeSet types_to_download,
     const ModelSafeRoutingInfo& current_routes,
     const std::vector<ModelSafeWorker*>& current_workers,
     ModelSafeRoutingInfo* result_routes,
@@ -363,7 +360,7 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
         session_context_,
         this,
         SyncSourceInfo(params.source,
-                       ModelSafeRoutingInfoToPayloadMap(
+                       ModelSafeRoutingInfoToStateMap(
                            restricted_routes,
                            std::string())),
         restricted_routes,
@@ -435,7 +432,7 @@ SyncSchedulerImpl::JobProcessDecision SyncSchedulerImpl::DecideOnJob(
   if (job.purpose == SyncSessionJob::NUDGE &&
       job.session->source().updates_source == GetUpdatesCallerInfo::LOCAL) {
     ModelTypeSet requested_types;
-    for (ModelTypePayloadMap::const_iterator i =
+    for (ModelTypeStateMap::const_iterator i =
          job.session->source().types.begin();
          i != job.session->source().types.end();
          ++i) {
@@ -462,12 +459,43 @@ SyncSchedulerImpl::JobProcessDecision SyncSchedulerImpl::DecideOnJob(
   DCHECK_EQ(mode_, NORMAL_MODE);
   DCHECK_NE(job.purpose, SyncSessionJob::CONFIGURATION);
 
-  // Freshness condition
-  if (job.scheduled_start < last_sync_session_end_time_) {
-    SDVLOG(2) << "Dropping job because of freshness";
-    return DROP;
-  }
+  // Note about some subtle scheduling semantics.
+  //
+  // It's possible at this point that |job| is known to be unnecessary, and
+  // dropping it would be perfectly safe and correct. Consider
+  //
+  // 1) |job| is a POLL with a |scheduled_start| time that is less than
+  //    the time that the last successful all-datatype NUDGE completed.
+  //
+  // 2) |job| is a NUDGE (for any combination of types) with a
+  //    |scheduled_start| time that is less than the time that the last
+  //    successful all-datatype NUDGE completed, and it has a NOTIFICATION
+  //    GetUpdatesCallerInfo value yet offers no new notification hint.
+  //
+  // 3) |job| is a NUDGE with a |scheduled_start| time that is less than
+  //    the time that the last successful matching-datatype NUDGE completed,
+  //    and payloads (hints) are identical to that last successful NUDGE.
+  //
+  //  Case 1 can occur if the POLL timer fires *after* a call to
+  //  ScheduleSyncSessionJob for a NUDGE, but *before* the thread actually
+  //  picks the resulting posted task off of the MessageLoop. The NUDGE will
+  //  run first and complete at a time greater than the POLL scheduled_start.
+  //  However, this case (and POLLs in general) is so rare that we ignore it (
+  //  and avoid the required bookeeping to simplify code).
+  //
+  //  We avoid cases 2 and 3 by externally synchronizing NUDGE requests --
+  //  scheduling a NUDGE requires command of the sync thread, which is
+  //  impossible* from outside of SyncScheduler if a NUDGE is taking place.
+  //  And if you have command of the sync thread when scheduling a NUDGE and a
+  //  previous NUDGE exists, they will be coalesced and the stale job will be
+  //  cancelled via the session-equality check in DoSyncSessionJob.
+  //
+  //  * It's not strictly "impossible", but it would be reentrant and hence
+  //  illegal. e.g. scheduling a job and re-entering the SyncScheduler is NOT a
+  //  legal side effect of any of the work being done as part of a sync cycle.
+  //  See |no_scheduling_allowed_| for details.
 
+  // Decision now rests on state of auth tokens.
   if (!session_context_->connection_manager()->HasInvalidAuthToken())
     return CONTINUE;
 
@@ -481,6 +509,9 @@ void SyncSchedulerImpl::InitOrCoalescePendingJob(const SyncSessionJob& job) {
   if (pending_nudge_.get() == NULL) {
     SDVLOG(2) << "Creating a pending nudge job";
     SyncSession* s = job.session.get();
+
+    // Get a fresh session with similar configuration as before (resets
+    // StatusController).
     scoped_ptr<SyncSession> session(new SyncSession(s->context(),
         s->delegate(), s->source(), s->routing_info(), s->workers()));
 
@@ -488,7 +519,6 @@ void SyncSchedulerImpl::InitOrCoalescePendingJob(const SyncSessionJob& job) {
         make_linked_ptr(session.release()), false,
         ConfigurationParams(), job.from_here);
     pending_nudge_.reset(new SyncSessionJob(new_job));
-
     return;
   }
 
@@ -566,29 +596,29 @@ void SyncSchedulerImpl::ScheduleNudgeAsync(
       << "source " << GetNudgeSourceString(source) << ", "
       << "types " << ModelTypeSetToString(types);
 
-  ModelTypePayloadMap types_with_payloads =
-      ModelTypePayloadMapFromEnumSet(types, std::string());
+  ModelTypeStateMap type_state_map =
+      ModelTypeSetToStateMap(types, std::string());
   SyncSchedulerImpl::ScheduleNudgeImpl(delay,
                                        GetUpdatesFromNudgeSource(source),
-                                       types_with_payloads,
+                                       type_state_map,
                                        false,
                                        nudge_location);
 }
 
-void SyncSchedulerImpl::ScheduleNudgeWithPayloadsAsync(
+void SyncSchedulerImpl::ScheduleNudgeWithStatesAsync(
     const TimeDelta& delay,
-    NudgeSource source, const ModelTypePayloadMap& types_with_payloads,
+    NudgeSource source, const ModelTypeStateMap& type_state_map,
     const tracked_objects::Location& nudge_location) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   SDVLOG_LOC(nudge_location, 2)
       << "Nudge scheduled with delay " << delay.InMilliseconds() << " ms, "
       << "source " << GetNudgeSourceString(source) << ", "
       << "payloads "
-      << ModelTypePayloadMapToString(types_with_payloads);
+      << ModelTypeStateMapToString(type_state_map);
 
   SyncSchedulerImpl::ScheduleNudgeImpl(delay,
                                        GetUpdatesFromNudgeSource(source),
-                                       types_with_payloads,
+                                       type_state_map,
                                        false,
                                        nudge_location);
 }
@@ -596,19 +626,21 @@ void SyncSchedulerImpl::ScheduleNudgeWithPayloadsAsync(
 void SyncSchedulerImpl::ScheduleNudgeImpl(
     const TimeDelta& delay,
     GetUpdatesCallerInfo::GetUpdatesSource source,
-    const ModelTypePayloadMap& types_with_payloads,
+    const ModelTypeStateMap& type_state_map,
     bool is_canary_job, const tracked_objects::Location& nudge_location) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  DCHECK(!type_state_map.empty()) << "Nudge scheduled for no types!";
 
   SDVLOG_LOC(nudge_location, 2)
       << "In ScheduleNudgeImpl with delay "
       << delay.InMilliseconds() << " ms, "
       << "source " << GetUpdatesSourceString(source) << ", "
       << "payloads "
-      << ModelTypePayloadMapToString(types_with_payloads)
+      << ModelTypeStateMapToString(type_state_map)
       << (is_canary_job ? " (canary)" : "");
 
-  SyncSourceInfo info(source, types_with_payloads);
+  SyncSourceInfo info(source, type_state_map);
+  UpdateNudgeTimeRecords(info);
 
   SyncSession* session(CreateSyncSession(info));
   SyncSessionJob job(SyncSessionJob::NUDGE, TimeTicks::Now() + delay,
@@ -712,6 +744,11 @@ void SyncSchedulerImpl::PostDelayedTask(
 
 void SyncSchedulerImpl::ScheduleSyncSessionJob(const SyncSessionJob& job) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  if (no_scheduling_allowed_) {
+    NOTREACHED() << "Illegal to schedule job while session in progress.";
+    return;
+  }
+
   TimeDelta delay = job.scheduled_start - TimeTicks::Now();
   if (delay < TimeDelta::FromMilliseconds(0))
     delay = TimeDelta::FromMilliseconds(0);
@@ -737,6 +774,8 @@ void SyncSchedulerImpl::ScheduleSyncSessionJob(const SyncSessionJob& job) {
 
 void SyncSchedulerImpl::DoSyncSessionJob(const SyncSessionJob& job) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
+
+  AutoReset<bool> protector(&no_scheduling_allowed_, true);
   if (!ShouldRunJob(job)) {
     SLOG(WARNING)
         << "Not executing "
@@ -781,24 +820,33 @@ void SyncSchedulerImpl::DoSyncSessionJob(const SyncSessionJob& job) {
   FinishSyncSessionJob(job);
 }
 
-void SyncSchedulerImpl::FinishSyncSessionJob(const SyncSessionJob& job) {
+void SyncSchedulerImpl::UpdateNudgeTimeRecords(const SyncSourceInfo& info) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  // Update timing information for how often datatypes are triggering nudges.
+
+  // We are interested in recording time between local nudges for datatypes.
+  // TODO(tim): Consider tracking LOCAL_NOTIFICATION as well.
+  if (info.updates_source != GetUpdatesCallerInfo::LOCAL)
+    return;
+
   base::TimeTicks now = TimeTicks::Now();
-  if (!last_sync_session_end_time_.is_null()) {
-    ModelTypePayloadMap::const_iterator iter;
-    for (iter = job.session->source().types.begin();
-         iter != job.session->source().types.end();
-         ++iter) {
+  // Update timing information for how often datatypes are triggering nudges.
+  for (ModelTypeStateMap::const_iterator iter = info.types.begin();
+       iter != info.types.end();
+       ++iter) {
+    base::TimeTicks previous = last_local_nudges_by_model_type_[iter->first];
+    last_local_nudges_by_model_type_[iter->first] = now;
+    if (previous.is_null())
+      continue;
+
 #define PER_DATA_TYPE_MACRO(type_str) \
-    SYNC_FREQ_HISTOGRAM("Sync.Freq" type_str, \
-                        now - last_sync_session_end_time_);
+    SYNC_FREQ_HISTOGRAM("Sync.Freq" type_str, now - previous);
       SYNC_DATA_TYPE_HISTOGRAM(iter->first);
 #undef PER_DATA_TYPE_MACRO
-    }
   }
-  last_sync_session_end_time_ = now;
+}
 
+void SyncSchedulerImpl::FinishSyncSessionJob(const SyncSessionJob& job) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
   // Now update the status of the connection from SCM. We need this to decide
   // whether we need to save/run future jobs. The notifications from SCM are not
   // reliable.
@@ -820,6 +868,7 @@ void SyncSchedulerImpl::FinishSyncSessionJob(const SyncSessionJob& job) {
              !job.config_params.ready_task.is_null()) {
     // If this was a configuration job with a ready task, invoke it now that
     // we finished successfully.
+    AutoReset<bool> protector(&no_scheduling_allowed_, true);
     job.config_params.ready_task.Run();
   }
 
@@ -903,43 +952,6 @@ void SyncSchedulerImpl::RestartWaiting() {
                               this, &SyncSchedulerImpl::DoCanaryJob);
 }
 
-namespace {
-// TODO(tim): Move this function to syncer_error.h.
-// Return true if the command in question was attempted and did not complete
-// successfully.
-bool IsError(SyncerError error) {
-  return error != UNSET && error != SYNCER_OK;
-}
-}  // namespace
-
-// static
-void SyncSchedulerImpl::ForceShortInitialBackoffRetry() {
-  g_force_short_retry = true;
-}
-
-TimeDelta SyncSchedulerImpl::GetInitialBackoffDelay(
-    const sessions::ModelNeutralState& state) const {
-  // TODO(tim): Remove this, provide integration-test-only mechanism
-  // for override.
-  if (g_force_short_retry) {
-    return TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds);
-  }
-
-  if (IsError(state.last_get_key_result))
-    return TimeDelta::FromSeconds(kInitialBackoffRetrySeconds);
-  // Note: If we received a MIGRATION_DONE on download updates, then commit
-  // should not have taken place.  Moreover, if we receive a MIGRATION_DONE
-  // on commit, it means that download updates succeeded.  Therefore, we only
-  // need to check if either code is equal to SERVER_RETURN_MIGRATION_DONE,
-  // and not if there were any more serious errors requiring the long retry.
-  if (state.last_download_updates_result == SERVER_RETURN_MIGRATION_DONE ||
-      state.commit_result == SERVER_RETURN_MIGRATION_DONE) {
-    return TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds);
-  }
-
-  return TimeDelta::FromSeconds(kInitialBackoffRetrySeconds);
-}
-
 void SyncSchedulerImpl::HandleContinuationError(
     const SyncSessionJob& old_job) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
@@ -951,7 +963,7 @@ void SyncSchedulerImpl::HandleContinuationError(
 
   TimeDelta length = delay_provider_->GetDelay(
       IsBackingOff() ? wait_interval_->length :
-          GetInitialBackoffDelay(
+          delay_provider_->GetInitialDelay(
               old_job.session->status_controller().model_neutral_state()));
 
   SDVLOG(2) << "In handle continuation error with "
@@ -982,30 +994,6 @@ void SyncSchedulerImpl::HandleContinuationError(
     InitOrCoalescePendingJob(old_job);
   }
   RestartWaiting();
-}
-
-// static
-TimeDelta SyncSchedulerImpl::GetRecommendedDelay(const TimeDelta& last_delay) {
-  if (last_delay.InSeconds() >= kMaxBackoffSeconds)
-    return TimeDelta::FromSeconds(kMaxBackoffSeconds);
-
-  // This calculates approx. base_delay_seconds * 2 +/- base_delay_seconds / 2
-  int64 backoff_s =
-      std::max(static_cast<int64>(1),
-               last_delay.InSeconds() * kBackoffRandomizationFactor);
-
-  // Flip a coin to randomize backoff interval by +/- 50%.
-  int rand_sign = base::RandInt(0, 1) * 2 - 1;
-
-  // Truncation is adequate for rounding here.
-  backoff_s = backoff_s +
-      (rand_sign * (last_delay.InSeconds() / kBackoffRandomizationFactor));
-
-  // Cap the backoff interval.
-  backoff_s = std::max(static_cast<int64>(1),
-                       std::min(backoff_s, kMaxBackoffSeconds));
-
-  return TimeDelta::FromSeconds(backoff_s);
 }
 
 void SyncSchedulerImpl::RequestStop(const base::Closure& callback) {
@@ -1047,10 +1035,6 @@ void SyncSchedulerImpl::DoPendingJobIfPossible(bool is_canary_job) {
     job_to_execute = wait_interval_->pending_configure_job.get();
   } else if (mode_ == NORMAL_MODE && pending_nudge_.get()) {
     SDVLOG(2) << "Found pending nudge job";
-    // Pending jobs mostly have time from the past. Reset it so this job
-    // will get executed.
-    if (pending_nudge_->scheduled_start < TimeTicks::Now())
-      pending_nudge_->scheduled_start = TimeTicks::Now();
 
     scoped_ptr<SyncSession> session(CreateSyncSession(
         pending_nudge_->session->source()));
@@ -1086,9 +1070,9 @@ SyncSession* SyncSchedulerImpl::CreateSyncSession(
 void SyncSchedulerImpl::PollTimerCallback() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   ModelSafeRoutingInfo r;
-  ModelTypePayloadMap types_with_payloads =
-      ModelSafeRoutingInfoToPayloadMap(r, std::string());
-  SyncSourceInfo info(GetUpdatesCallerInfo::PERIODIC, types_with_payloads);
+  ModelTypeStateMap type_state_map =
+      ModelSafeRoutingInfoToStateMap(r, std::string());
+  SyncSourceInfo info(GetUpdatesCallerInfo::PERIODIC, type_state_map);
   SyncSession* s = CreateSyncSession(info);
 
   SyncSessionJob job(SyncSessionJob::POLL, TimeTicks::Now(),

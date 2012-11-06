@@ -109,7 +109,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, InstallThenCancel) {
   EXPECT_TRUE(IsExtensionAtVersion(extension, "1.0"));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, InstallRequiresConfirm) {
+#if defined(OS_WIN)
+// http://crbug.com/141913
+#define MAYBE_InstallRequiresConfirm FLAKY_InstallRequiresConfirm
+#else
+#define MAYBE_InstallRequiresConfirm InstallRequiresConfirm
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, MAYBE_InstallRequiresConfirm) {
   // Installing the extension without an auto confirming UI should result in
   // it being disabled, since good.crx has permissions that require approval.
   ExtensionService* service = browser()->profile()->GetExtensionService();
@@ -238,7 +244,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, MAYBE_AutoUpdate) {
   NotificationListener notification_listener;
   FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
   // Note: This interceptor gets requests on the IO thread.
-  scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
+  scoped_refptr<extensions::AutoUpdateInterceptor> interceptor(
+      new extensions::AutoUpdateInterceptor());
   net::URLFetcher::SetEnableInterceptionForTests(true);
 
   interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",
@@ -317,7 +324,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest,
   NotificationListener notification_listener;
   FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
   // Note: This interceptor gets requests on the IO thread.
-  scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
+  scoped_refptr<extensions::AutoUpdateInterceptor> interceptor(
+      new extensions::AutoUpdateInterceptor());
   net::URLFetcher::SetEnableInterceptionForTests(true);
 
   interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",
@@ -378,7 +386,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalUrlUpdate) {
   FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
 
   // Note: This interceptor gets requests on the IO thread.
-  scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
+  scoped_refptr<extensions::AutoUpdateInterceptor> interceptor(
+      new extensions::AutoUpdateInterceptor());
   net::URLFetcher::SetEnableInterceptionForTests(true);
 
   interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",
@@ -461,7 +470,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalPolicyRefresh) {
   FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
 
   // Note: This interceptor gets requests on the IO thread.
-  scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
+  scoped_refptr<extensions::AutoUpdateInterceptor> interceptor(
+      new extensions::AutoUpdateInterceptor());
   net::URLFetcher::SetEnableInterceptionForTests(true);
 
   interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",
@@ -536,7 +546,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest,
   ASSERT_TRUE(service->disabled_extensions()->is_empty());
 
   // Note: This interceptor gets requests on the IO thread.
-  scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
+  scoped_refptr<extensions::AutoUpdateInterceptor> interceptor(
+      new extensions::AutoUpdateInterceptor());
   net::URLFetcher::SetEnableInterceptionForTests(true);
 
   interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",

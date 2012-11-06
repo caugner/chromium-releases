@@ -17,6 +17,7 @@
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -48,6 +49,7 @@ class SearchProviderTest : public testing::Test,
         term1_(UTF8ToUTF16("term1")),
         keyword_t_url_(NULL),
         keyword_term_(UTF8ToUTF16("keyword")),
+        ui_thread_(BrowserThread::UI, &message_loop_),
         io_thread_(BrowserThread::IO),
         quit_when_done_(false) {
     io_thread_.Start();
@@ -104,6 +106,7 @@ class SearchProviderTest : public testing::Test,
   GURL keyword_url_;
 
   MessageLoopForUI message_loop_;
+  content::TestBrowserThread ui_thread_;
   content::TestBrowserThread io_thread_;
 
   // URLFetcherFactory implementation registered.
@@ -208,8 +211,7 @@ void SearchProviderTest::QueryForInputAndSetWYTMatch(
   QueryForInput(text, string16(), false);
   profile_.BlockUntilHistoryProcessesPendingRequests();
   ASSERT_NO_FATAL_FAILURE(FinishDefaultSuggestQuery());
-  EXPECT_NE(profile_.GetPrefs()->GetBoolean(prefs::kInstantEnabled),
-            provider_->done());
+  EXPECT_NE(InstantController::IsSuggestEnabled(&profile_), provider_->done());
   if (!wyt_match)
     return;
   ASSERT_GE(provider_->matches().size(), 1u);
@@ -642,18 +644,30 @@ TEST_F(SearchProviderTest, DontCrowdOutSingleWords) {
   EXPECT_GT(term_match.relevance, wyt_match.relevance);
 }
 
+// Inline autocomplete matches regardless of case differences from the input.
+TEST_F(SearchProviderTest, InlineMixedCaseMatches) {
+  GURL term_url(AddSearchToHistory(default_t_url_, ASCIIToUTF16("FOO"), 1));
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+
+  AutocompleteMatch wyt_match;
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("f"),
+                                                      &wyt_match));
+  ASSERT_EQ(2u, provider_->matches().size());
+  AutocompleteMatch term_match;
+  EXPECT_TRUE(FindMatchWithDestination(term_url, &term_match));
+  EXPECT_GT(term_match.relevance, wyt_match.relevance);
+  EXPECT_EQ(1u, term_match.inline_autocomplete_offset);
+  EXPECT_EQ(ASCIIToUTF16("FOO"), term_match.fill_into_edit);
+}
+
 // Verifies AutocompleteControllers sets descriptions for results correctly.
 TEST_F(SearchProviderTest, UpdateKeywordDescriptions) {
   // Add an entry that corresponds to a keyword search with 'term2'.
   AddSearchToHistory(keyword_t_url_, ASCIIToUTF16("term2"), 1);
   profile_.BlockUntilHistoryProcessesPendingRequests();
 
-  ACProviders providers;
-  SearchProvider* provider = provider_.release();
-  providers.push_back(provider);
-  AutocompleteController controller(providers, &profile_);
-  controller.set_search_provider(provider);
-  provider->set_listener(&controller);
+  AutocompleteController controller(&profile_, NULL,
+      AutocompleteProvider::TYPE_SEARCH);
   controller.Start(ASCIIToUTF16("k t"), string16(), false, false, true,
                    AutocompleteInput::ALL_MATCHES);
   const AutocompleteResult& result = controller.result();

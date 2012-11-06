@@ -20,11 +20,11 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
-#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
+#include "google_apis/gaia/gaia_auth_fetcher.h"
+#include "google_apis/gaia/gaia_constants.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "net/cookies/cookie_monster.h"
 #include "unicode/regex.h"
 
@@ -428,6 +428,16 @@ void SigninManager::OnGetUserInfoSuccess(const UserInfoMap& data) {
     return;
   } else {
     DCHECK(email_iter->first == kGetInfoEmailKey);
+
+    // When signing in with credentials, the possibly invalid name is already
+    // a Gaia normalized name.  If the name returned by GetUserInfo does not
+    // match what is expected, return an error.
+    if (type_ == SIGNIN_TYPE_WITH_CREDENTIALS &&
+        email_iter->second != possibly_invalid_username_) {
+      OnGetUserInfoKeyNotFound(kGetInfoEmailKey);
+      return;
+    }
+
     SetAuthenticatedUsername(email_iter->second);
     possibly_invalid_username_.clear();
     profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername,

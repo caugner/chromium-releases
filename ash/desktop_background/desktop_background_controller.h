@@ -11,18 +11,27 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/image/image_skia.h"
+
+typedef unsigned int SkColor;
 
 namespace aura {
 class RootWindow;
 }
 
 namespace ash {
+
+// The width and height of small/large resolution wallpaper. When screen size is
+// smaller than |kSmallWallpaperMaxWidth| and |kSmallWallpaperMaxHeight|, the
+// small resolution wallpaper should be used. Otherwise, uses the large
+// resolution wallpaper.
+ASH_EXPORT extern const int kSmallWallpaperMaxWidth;
+ASH_EXPORT extern const int kSmallWallpaperMaxHeight;
+ASH_EXPORT extern const int kLargeWallpaperMaxWidth;
+ASH_EXPORT extern const int kLargeWallpaperMaxHeight;
 
 class UserWallpaperDelegate {
  public:
@@ -69,9 +78,9 @@ class ASH_EXPORT DesktopBackgroundController : public aura::WindowObserver {
 
   WallpaperLayout GetWallpaperLayout() const;
 
-  // Provides current image on the background, or empty SkBitmap if there is
-  // no image, e.g. background is solid color.
-  SkBitmap GetCurrentWallpaperImage();
+  // Provides current image on the background, or empty gfx::ImageSkia if there
+  // is no image, e.g. background is solid color.
+  gfx::ImageSkia GetCurrentWallpaperImage();
 
   // Initialize root window's background.
   void OnRootWindowAdded(aura::RootWindow* root_window);
@@ -107,15 +116,14 @@ class ASH_EXPORT DesktopBackgroundController : public aura::WindowObserver {
   // is SystemGestureEventFilterTest.ThreeFingerSwipe.
   void CreateEmptyWallpaper();
 
+  // Returns the appropriate wallpaper resolution for all root windows.
+  WallpaperResolution GetAppropriateResolution();
+
   // Move all desktop widgets to locked container.
   void MoveDesktopToLockedContainer();
 
   // Move all desktop widgets to unlocked container.
   void MoveDesktopToUnlockedContainer();
-
-  // Drop references to background view for |root_window|, because the view
-  // was deleted.
-  void CleanupView(aura::RootWindow* root_window);
 
   // WindowObserver implementation.
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
@@ -153,9 +161,6 @@ class ASH_EXPORT DesktopBackgroundController : public aura::WindowObserver {
 
   // Returns id for background container for unlocked and locked states.
   int GetBackgroundContainerId(bool locked);
-
-  // Returns the appropriate wallpaper resolution for all root windows.
-  WallpaperResolution GetAppropriateResolution();
 
   // Send notification that background animation finished.
   void NotifyAnimationFinished();

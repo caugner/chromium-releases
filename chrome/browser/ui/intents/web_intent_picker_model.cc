@@ -22,16 +22,19 @@ const size_t kMaxSuggestionCount = 5;  // Maximum number of visible suggestions.
 }  // namespace
 
 WebIntentPickerModel::WebIntentPickerModel()
-    : observer_(NULL) {
+    : observer_(NULL),
+      waiting_for_suggestions_(true),
+      default_service_hash_(0) {
 }
 
 WebIntentPickerModel::~WebIntentPickerModel() {
   DestroyAll();
 }
 
-void WebIntentPickerModel::AddInstalledService(const string16& title,
-                                               const GURL& url,
-                                               Disposition disposition) {
+void WebIntentPickerModel::AddInstalledService(
+    const string16& title,
+    const GURL& url,
+    webkit_glue::WebIntentServiceData::Disposition disposition) {
   // TODO(groby): Revisit to remove O(n^2) complexity.
   for (size_t i = 0; i < installed_services_.size(); ++i) {
     InstalledService* service = installed_services_[i];
@@ -56,8 +59,9 @@ void WebIntentPickerModel::RemoveInstalledServiceAt(size_t index) {
 void WebIntentPickerModel::Clear() {
   DestroyAll();
   action_.clear();
-  mimetype_.clear();
+  type_.clear();
   inline_disposition_url_ = GURL::EmptyGURL();
+  waiting_for_suggestions_ = true;
   if (observer_)
     observer_->OnModelChanged(this);
 }
@@ -90,20 +94,11 @@ void WebIntentPickerModel::UpdateFaviconAt(size_t index,
     observer_->OnFaviconChanged(this, index);
 }
 
-void WebIntentPickerModel::AddSuggestedExtension(const string16& title,
-                                                 const string16& id,
-                                                 double average_rating) {
-  suggested_extensions_.push_back(
-      new SuggestedExtension(title, id, average_rating));
-  if (observer_)
-    observer_->OnModelChanged(this);
-}
-
-void WebIntentPickerModel::RemoveSuggestedExtensionAt(size_t index) {
-  DCHECK_LT(index, suggested_extensions_.size());
-  SuggestedExtension* extension = suggested_extensions_[index];
-  suggested_extensions_.erase(suggested_extensions_.begin() + index);
-  delete extension;
+void WebIntentPickerModel::AddSuggestedExtensions(
+    const std::vector<SuggestedExtension>& suggestions) {
+  suggested_extensions_.insert(suggested_extensions_.end(),
+                               suggestions.begin(),
+                               suggestions.end());
   if (observer_)
     observer_->OnModelChanged(this);
 }
@@ -111,7 +106,7 @@ void WebIntentPickerModel::RemoveSuggestedExtensionAt(size_t index) {
 const WebIntentPickerModel::SuggestedExtension&
     WebIntentPickerModel::GetSuggestedExtensionAt(size_t index) const {
   DCHECK_LT(index, suggested_extensions_.size());
-  return *suggested_extensions_[index];
+  return suggested_extensions_[index];
 }
 
 size_t WebIntentPickerModel::GetSuggestedExtensionCount() const {
@@ -131,12 +126,12 @@ void WebIntentPickerModel::SetSuggestedExtensionIconWithId(
     const string16& id,
     const gfx::Image& image) {
   for (size_t i = 0; i < suggested_extensions_.size(); ++i) {
-    SuggestedExtension* extension = suggested_extensions_[i];
-    if (extension->id == id) {
-      extension->icon = image;
+    SuggestedExtension& extension = suggested_extensions_[i];
+    if (extension.id == id) {
+      extension.icon = image;
 
       if (observer_)
-        observer_->OnExtensionIconChanged(this, extension->id);
+        observer_->OnExtensionIconChanged(this, extension.id);
       break;
     }
   }
@@ -155,15 +150,24 @@ bool WebIntentPickerModel::IsInlineDisposition() const {
   return !inline_disposition_url_.is_empty();
 }
 
+bool WebIntentPickerModel::IsWaitingForSuggestions() const {
+  return waiting_for_suggestions_;
+}
+
+void WebIntentPickerModel::SetWaitingForSuggestions(bool waiting) {
+  waiting_for_suggestions_ = waiting;
+  if (observer_)
+    observer_->OnModelChanged(this);
+}
+
 void WebIntentPickerModel::DestroyAll() {
   STLDeleteElements(&installed_services_);
-  STLDeleteElements(&suggested_extensions_);
 }
 
 WebIntentPickerModel::InstalledService::InstalledService(
     const string16& title,
     const GURL& url,
-    Disposition disposition)
+    webkit_glue::WebIntentServiceData::Disposition disposition)
     : title(title),
       url(url),
       favicon(ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(

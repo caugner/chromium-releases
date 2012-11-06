@@ -79,6 +79,9 @@ MockPluginDelegate::PlatformImage2D* MockPluginDelegate::CreateImage2D(
 MockPluginDelegate::PlatformContext3D* MockPluginDelegate::CreateContext3D() {
   return NULL;
 }
+void MockPluginDelegate::ReparentContext(
+    MockPluginDelegate::PlatformContext3D* context) {
+}
 
 MockPluginDelegate::PlatformVideoDecoder*
 MockPluginDelegate::CreateVideoDecoder(
@@ -298,6 +301,13 @@ uint32 MockPluginDelegate::UDPSocketCreate() {
   return 0;
 }
 
+void MockPluginDelegate::UDPSocketSetBoolSocketFeature(
+    PPB_UDPSocket_Private_Impl* socket,
+    uint32 socket_id,
+    int32_t name,
+    bool value) {
+}
+
 void MockPluginDelegate::UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
                                        uint32 socket_id,
                                        const PP_NetAddress_Private& addr) {
@@ -398,10 +408,6 @@ void MockPluginDelegate::SetContentRestriction(int restrictions) {
 void MockPluginDelegate::SaveURLAs(const GURL& url) {
 }
 
-webkit_glue::P2PTransport* MockPluginDelegate::CreateP2PTransport() {
-  return NULL;
-}
-
 double MockPluginDelegate::GetLocalTimeZoneOffset(base::Time t) {
   return 0.0;
 }
@@ -449,6 +455,9 @@ int MockPluginDelegate::EnumerateDevices(
     PP_DeviceType_Dev type,
     const EnumerateDevicesCallback& callback) {
   return -1;
+}
+
+void MockPluginDelegate::StopEnumerateDevices(int request_id) {
 }
 
 webkit_glue::ClipboardClient*

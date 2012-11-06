@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
 
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -14,14 +15,18 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
 #include "chrome/common/pref_names.h"
-#include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/views_switches.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/app_icon_win.h"
+#endif
+
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_native_widget_aura.h"
 #endif
 
 #if defined(USE_AURA)
@@ -55,10 +60,6 @@ PrefService* GetPrefsForWindow(const views::Widget* window) {
 
 ///////////////////////////////////////////////////////////////////////////////
 // ChromeViewsDelegate, views::ViewsDelegate implementation:
-
-ui::Clipboard* ChromeViewsDelegate::GetClipboard() const {
-  return g_browser_process->clipboard();
-}
 
 void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
                                               const std::string& window_name,
@@ -180,5 +181,16 @@ views::NativeWidgetHelperAura* ChromeViewsDelegate::CreateNativeWidgetHelper(
 content::WebContents* ChromeViewsDelegate::CreateWebContents(
     content::BrowserContext* browser_context,
     content::SiteInstance* site_instance) {
+  return NULL;
+}
+
+views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(
+    views::internal::NativeWidgetDelegate* delegate,
+    gfx::NativeView parent) {
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+        views::switches::kDesktopAura))
+    return new views::DesktopNativeWidgetAura(delegate);
+#endif
   return NULL;
 }

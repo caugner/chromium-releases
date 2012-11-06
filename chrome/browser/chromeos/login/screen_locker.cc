@@ -36,7 +36,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -104,6 +103,9 @@ class ScreenLockObserver : public chromeos::SessionManagerClient::Observer,
 
   virtual void UnlockScreen() OVERRIDE {
     chromeos::ScreenLocker::Hide();
+    chromeos::SessionManagerClient* session_manager =
+        chromeos::DBusThreadManager::Get()->GetSessionManagerClient();
+    session_manager->NotifyLockScreenDismissed();
   }
 
  private:
@@ -218,8 +220,9 @@ void ScreenLocker::Authenticate(const string16& password) {
   // initial online login phase is still active.
   if (LoginPerformer::default_performer()) {
     DVLOG(1) << "Delegating authentication to LoginPerformer.";
-    LoginPerformer::default_performer()->Login(user_.email(),
-                                               UTF16ToUTF8(password));
+    LoginPerformer::default_performer()->PerformLogin(
+        user_.email(), UTF16ToUTF8(password),
+        LoginPerformer::AUTH_MODE_INTERNAL);
   } else {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -289,8 +292,8 @@ void ScreenLocker::Show() {
     locker->Init();
   } else {
     DVLOG(1) << "Show: locker already exists. Just sending completion event.";
-    DBusThreadManager::Get()->GetPowerManagerClient()->
-        NotifyScreenLockCompleted();
+    DBusThreadManager::Get()->GetSessionManagerClient()->
+        NotifyLockScreenShown();
   }
 }
 
@@ -319,6 +322,9 @@ void ScreenLocker::InitClass() {
 
 ScreenLocker::~ScreenLocker() {
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
+
+  if (authenticator_)
+    authenticator_->SetConsumer(NULL);
   ClearErrors();
   ash::Shell::GetInstance()->
       desktop_background_controller()->MoveDesktopToUnlockedContainer();
@@ -329,8 +335,8 @@ ScreenLocker::~ScreenLocker() {
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       content::Source<ScreenLocker>(this),
       content::Details<bool>(&state));
-  DBusThreadManager::Get()->GetPowerManagerClient()->
-      NotifyScreenUnlockCompleted();
+  DBusThreadManager::Get()->GetSessionManagerClient()->
+      NotifyLockScreenDismissed();
 }
 
 void ScreenLocker::SetAuthenticator(Authenticator* authenticator) {
@@ -338,7 +344,7 @@ void ScreenLocker::SetAuthenticator(Authenticator* authenticator) {
 }
 
 void ScreenLocker::ScreenLockReady() {
-  VLOG(1) << "ScreenLockReady: sending completed signal to power manager.";
+  VLOG(1) << "ScreenLockReady: sending completed signal to session manager.";
   locked_ = true;
   base::TimeDelta delta = base::Time::Now() - start_time_;
   VLOG(1) << "Screen lock time: " << delta.InSecondsF();
@@ -352,8 +358,7 @@ void ScreenLocker::ScreenLockReady() {
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       content::Source<ScreenLocker>(this),
       content::Details<bool>(&state));
-  DBusThreadManager::Get()->GetPowerManagerClient()->
-      NotifyScreenLockCompleted();
+  DBusThreadManager::Get()->GetSessionManagerClient()->NotifyLockScreenShown();
 }
 
 }  // namespace chromeos

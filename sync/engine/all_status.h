@@ -48,11 +48,14 @@ class AllStatus : public SyncEngineEventListener {
 
   void IncrementNotificationsReceived();
 
-  void SetThrottledTypes(const ModelTypeSet &types);
+  void SetThrottledTypes(ModelTypeSet types);
 
   void SetEncryptedTypes(ModelTypeSet types);
   void SetCryptographerReady(bool ready);
   void SetCryptoHasPendingKeys(bool has_pending_keys);
+  void SetPassphraseType(PassphraseType type);
+  void SetHasKeystoreKey(bool has_keystore_key);
+  void SetKeystoreMigrationTime(const base::Time& migration_time);
 
   void SetUniqueId(const std::string& guid);
 

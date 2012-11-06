@@ -16,9 +16,10 @@
 #include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/internal_components_factory.h"
 #include "sync/internal_api/public/util/weak_handle.h"
-#include "sync/notifier/notifications_disabled_reason.h"
-#include "sync/notifier/object_id_payload_map.h"
-#include "sync/notifier/sync_notifier.h"
+#include "sync/notifier/invalidator.h"
+#include "sync/notifier/invalidator_state.h"
+#include "sync/notifier/object_id_state_map.h"
+#include "sync/test/fake_sync_encryption_handler.h"
 
 namespace syncer {
 
@@ -27,7 +28,9 @@ FakeSyncManager::FakeSyncManager(ModelTypeSet initial_sync_ended_types,
                                  ModelTypeSet configure_fail_types) :
     initial_sync_ended_types_(initial_sync_ended_types),
     progress_marker_types_(progress_marker_types),
-    configure_fail_types_(configure_fail_types) {}
+    configure_fail_types_(configure_fail_types) {
+  fake_encryption_handler_.reset(new FakeSyncEncryptionHandler());
+}
 
 FakeSyncManager::~FakeSyncManager() {}
 
@@ -49,31 +52,21 @@ ModelTypeSet FakeSyncManager::GetAndResetEnabledTypes() {
   return enabled_types;
 }
 
-void FakeSyncManager::Invalidate(const ObjectIdPayloadMap& id_payloads,
-                                 IncomingNotificationSource source) {
+void FakeSyncManager::Invalidate(const ObjectIdStateMap& id_state_map,
+                                 IncomingInvalidationSource source) {
   if (!sync_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&FakeSyncManager::InvalidateOnSyncThread,
-                 base::Unretained(this), id_payloads, source))) {
+                 base::Unretained(this), id_state_map, source))) {
     NOTREACHED();
   }
 }
 
-void FakeSyncManager::EnableNotifications() {
+void FakeSyncManager::UpdateInvalidatorState(InvalidatorState state) {
   if (!sync_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&FakeSyncManager::EnableNotificationsOnSyncThread,
-                 base::Unretained(this)))) {
-    NOTREACHED();
-  }
-}
-
-void FakeSyncManager::DisableNotifications(
-    NotificationsDisabledReason reason) {
-  if (!sync_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&FakeSyncManager::DisableNotificationsOnSyncThread,
-                 base::Unretained(this), reason))) {
+      base::Bind(&FakeSyncManager::UpdateInvalidatorStateOnSyncThread,
+                 base::Unretained(this), state))) {
     NOTREACHED();
   }
 }
@@ -96,7 +89,7 @@ void FakeSyncManager::WaitForSyncThread() {
   run_loop.Run();
 }
 
-bool FakeSyncManager::Init(
+void FakeSyncManager::Init(
     const FilePath& database_location,
     const WeakHandle<JsEventHandler>& event_handler,
     const std::string& sync_server_and_path,
@@ -108,10 +101,9 @@ bool FakeSyncManager::Init(
     ExtensionsActivityMonitor* extensions_activity_monitor,
     ChangeDelegate* change_delegate,
     const SyncCredentials& credentials,
-    scoped_ptr<SyncNotifier> sync_notifier,
+    scoped_ptr<Invalidator> invalidator,
     const std::string& restored_key_for_bootstrapping,
     const std::string& restored_keystore_key_for_bootstrapping,
-    bool keystore_encryption_enabled,
     scoped_ptr<InternalComponentsFactory> internal_components_factory,
     Encryptor* encryptor,
     UnrecoverableErrorHandler* unrecoverable_error_handler,
@@ -123,7 +115,6 @@ bool FakeSyncManager::Init(
                     OnInitializationComplete(
                         syncer::WeakHandle<syncer::JsBackend>(),
                         true, initial_sync_ended_types_));
-  return true;
 }
 
 void FakeSyncManager::ThrowUnrecoverableError() {
@@ -157,23 +148,23 @@ void FakeSyncManager::UpdateCredentials(const SyncCredentials& credentials) {
   NOTIMPLEMENTED();
 }
 
-void FakeSyncManager::UpdateEnabledTypes(const ModelTypeSet& types) {
+void FakeSyncManager::UpdateEnabledTypes(ModelTypeSet types) {
   enabled_types_ = types;
 }
 
 void FakeSyncManager::RegisterInvalidationHandler(
-    SyncNotifierObserver* handler) {
+    InvalidationHandler* handler) {
   registrar_.RegisterHandler(handler);
 }
 
 void FakeSyncManager::UpdateRegisteredInvalidationIds(
-    SyncNotifierObserver* handler,
+    InvalidationHandler* handler,
     const ObjectIdSet& ids) {
   registrar_.UpdateRegisteredIds(handler, ids);
 }
 
 void FakeSyncManager::UnregisterInvalidationHandler(
-    SyncNotifierObserver* handler) {
+    InvalidationHandler* handler) {
   registrar_.UnregisterHandler(handler);
 }
 
@@ -182,18 +173,9 @@ void FakeSyncManager::StartSyncingNormally(
   // Do nothing.
 }
 
-void FakeSyncManager::SetEncryptionPassphrase(const std::string& passphrase,
-                                              bool is_explicit) {
-  NOTIMPLEMENTED();
-}
-
-void FakeSyncManager::SetDecryptionPassphrase(const std::string& passphrase) {
-  NOTIMPLEMENTED();
-}
-
 void FakeSyncManager::ConfigureSyncer(
     ConfigureReason reason,
-    const ModelTypeSet& types_to_config,
+    ModelTypeSet types_to_config,
     const ModelSafeRoutingInfo& new_routing_info,
     const base::Closure& ready_task,
     const base::Closure& retry_task) {
@@ -237,15 +219,6 @@ SyncStatus FakeSyncManager::GetDetailedStatus() const {
   return SyncStatus();
 }
 
-bool FakeSyncManager::IsUsingExplicitPassphrase() {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-bool FakeSyncManager::GetKeystoreKeyBootstrapToken(std::string* token) {
-  return false;
-}
-
 void FakeSyncManager::SaveChanges() {
   // Do nothing.
 }
@@ -261,17 +234,7 @@ void FakeSyncManager::ShutdownOnSyncThread() {
 }
 
 UserShare* FakeSyncManager::GetUserShare() {
-  NOTIMPLEMENTED();
   return NULL;
-}
-
-void FakeSyncManager::RefreshNigori(const std::string& chrome_version,
-                                    const base::Closure& done_callback) {
-  done_callback.Run();
-}
-
-void FakeSyncManager::EnableEncryptEverything() {
-  NOTIMPLEMENTED();
 }
 
 bool FakeSyncManager::ReceivedExperiment(Experiments* experiments) {
@@ -283,22 +246,21 @@ bool FakeSyncManager::HasUnsyncedItems() {
   return false;
 }
 
+SyncEncryptionHandler* FakeSyncManager::GetEncryptionHandler() {
+  return fake_encryption_handler_.get();
+}
+
 void FakeSyncManager::InvalidateOnSyncThread(
-    const ObjectIdPayloadMap& id_payloads,
-    IncomingNotificationSource source) {
+    const ObjectIdStateMap& id_state_map,
+    IncomingInvalidationSource source) {
   DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
-  registrar_.DispatchInvalidationsToHandlers(id_payloads, source);
+  registrar_.DispatchInvalidationsToHandlers(id_state_map, source);
 }
 
-void FakeSyncManager::EnableNotificationsOnSyncThread() {
+void FakeSyncManager::UpdateInvalidatorStateOnSyncThread(
+    InvalidatorState state) {
   DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
-  registrar_.EmitOnNotificationsEnabled();
-}
-
-void FakeSyncManager::DisableNotificationsOnSyncThread(
-    NotificationsDisabledReason reason) {
-  DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
-  registrar_.EmitOnNotificationsDisabled(reason);
+  registrar_.UpdateInvalidatorState(state);
 }
 
 }  // namespace syncer

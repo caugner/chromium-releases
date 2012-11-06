@@ -16,15 +16,16 @@
 #include "content/public/browser/web_contents_view_delegate.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/drag_drop_delegate.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_aura.h"
+#include "ui/base/events/event.h"
 #include "ui/base/hit_test.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/screen.h"
@@ -73,7 +74,7 @@ class WebDragSourceAura : public MessageLoopForUI::Observer {
               screen_loc_in_pixel);
           gfx::Point client_loc = screen_loc;
           aura::Window* window = rvh->GetView()->GetNativeView();
-          aura::Window::ConvertPointToWindow(window->GetRootWindow(),
+          aura::Window::ConvertPointToTarget(window->GetRootWindow(),
               window, &client_loc);
           rvh->DragSourceMovedTo(client_loc.x(), client_loc.y(),
               screen_loc.x(), screen_loc.y());
@@ -241,7 +242,7 @@ void WebContentsViewAura::EndDrag(WebKit::WebDragOperationsMask ops) {
   gfx::Point client_loc = screen_loc;
   content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
   aura::Window* window = rvh->GetView()->GetNativeView();
-  aura::Window::ConvertPointToWindow(root_window, window, &client_loc);
+  aura::Window::ConvertPointToTarget(root_window, window, &client_loc);
   rvh->DragSourceEndedAt(client_loc.x(), client_loc.y(), screen_loc.x(),
       screen_loc.y(), ops);
 }
@@ -405,9 +406,10 @@ gfx::Rect WebContentsViewAura::GetViewBounds() const {
 // WebContentsViewAura, RenderViewHostDelegateView implementation:
 
 void WebContentsViewAura::ShowContextMenu(
-    const content::ContextMenuParams& params) {
+    const content::ContextMenuParams& params,
+    content::ContextMenuSourceType type) {
   if (delegate_.get())
-    delegate_->ShowContextMenu(params);
+    delegate_->ShowContextMenu(params, type);
 }
 
 void WebContentsViewAura::ShowPopupMenu(const gfx::Rect& bounds,
@@ -452,7 +454,7 @@ void WebContentsViewAura::StartDragging(
     gfx::Point location(gfx::Screen::GetCursorScreenPoint());
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
     result_op = aura::client::GetDragDropClient(root_window)->StartDragAndDrop(
-        data, location, ConvertFromWeb(operations));
+        data, root_window, location, ConvertFromWeb(operations));
   }
 
   EndDrag(ConvertToWeb(result_op));
@@ -470,7 +472,7 @@ void WebContentsViewAura::GotFocus() {
 
 void WebContentsViewAura::TakeFocus(bool reverse) {
   if (web_contents_->GetDelegate() &&
-      !web_contents_->GetDelegate()->TakeFocus(reverse) &&
+      !web_contents_->GetDelegate()->TakeFocus(web_contents_, reverse) &&
       delegate_.get()) {
     delegate_->TakeFocus(reverse);
   }
@@ -488,16 +490,24 @@ void WebContentsViewAura::OnBoundsChanged(const gfx::Rect& old_bounds,
   SizeChangedCommon(new_bounds.size());
   if (delegate_.get())
     delegate_->SizeChanged(new_bounds.size());
+
+  // Constrained web dialogs, need to be kept centered over our content area.
+  for (size_t i = 0; i < window_->children().size(); i++) {
+    if (window_->children()[i]->GetProperty(
+            aura::client::kConstrainedWindowKey)) {
+      gfx::Rect bounds = window_->children()[i]->bounds();
+      bounds.set_origin(
+          gfx::Point((new_bounds.width() - bounds.width()) / 2,
+                     (new_bounds.height() - bounds.height()) / 2));
+      window_->children()[i]->SetBounds(bounds);
+    }
+  }
 }
 
 void WebContentsViewAura::OnFocus(aura::Window* old_focused_window) {
 }
 
 void WebContentsViewAura::OnBlur() {
-}
-
-bool WebContentsViewAura::OnKeyEvent(aura::KeyEvent* event) {
-  return false;
 }
 
 gfx::NativeCursor WebContentsViewAura::GetCursor(const gfx::Point& point) {
@@ -512,33 +522,6 @@ bool WebContentsViewAura::ShouldDescendIntoChildForEventHandling(
     aura::Window* child,
     const gfx::Point& location) {
   return true;
-}
-
-bool WebContentsViewAura::OnMouseEvent(aura::MouseEvent* event) {
-  if (!web_contents_->GetDelegate())
-    return false;
-
-  switch (event->type()) {
-    case ui::ET_MOUSE_PRESSED:
-      web_contents_->GetDelegate()->ActivateContents(web_contents_);
-      break;
-    case ui::ET_MOUSE_MOVED:
-      web_contents_->GetDelegate()->ContentsMouseEvent(
-          web_contents_, gfx::Screen::GetCursorScreenPoint(), true);
-      break;
-    default:
-      break;
-  }
-  return false;
-}
-
-ui::TouchStatus WebContentsViewAura::OnTouchEvent(aura::TouchEvent* event) {
-  return ui::TOUCH_STATUS_UNKNOWN;
-}
-
-ui::GestureStatus WebContentsViewAura::OnGestureEvent(
-    aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;
 }
 
 bool WebContentsViewAura::CanFocus() {
@@ -577,10 +560,51 @@ bool WebContentsViewAura::HasHitTestMask() const {
 void WebContentsViewAura::GetHitTestMask(gfx::Path* mask) const {
 }
 
+scoped_refptr<ui::Texture> WebContentsViewAura::CopyTexture() {
+  // The layer we create doesn't have an external texture, so this should never
+  // get invoked.
+  NOTREACHED();
+  return scoped_refptr<ui::Texture>();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// WebContentsViewAura, ui::EventHandler implementation:
+
+ui::EventResult WebContentsViewAura::OnKeyEvent(ui::KeyEvent* event) {
+  return ui::ER_UNHANDLED;
+}
+
+ui::EventResult WebContentsViewAura::OnMouseEvent(ui::MouseEvent* event) {
+  if (!web_contents_->GetDelegate())
+    return ui::ER_UNHANDLED;
+
+  switch (event->type()) {
+    case ui::ET_MOUSE_PRESSED:
+      web_contents_->GetDelegate()->ActivateContents(web_contents_);
+      break;
+    case ui::ET_MOUSE_MOVED:
+      web_contents_->GetDelegate()->ContentsMouseEvent(
+          web_contents_, gfx::Screen::GetCursorScreenPoint(), true);
+      break;
+    default:
+      break;
+  }
+  return ui::ER_UNHANDLED;
+}
+
+ui::TouchStatus WebContentsViewAura::OnTouchEvent(ui::TouchEvent* event) {
+  return ui::TOUCH_STATUS_UNKNOWN;
+}
+
+ui::EventResult WebContentsViewAura::OnGestureEvent(
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentsViewAura, aura::client::DragDropDelegate implementation:
 
-void WebContentsViewAura::OnDragEntered(const aura::DropTargetEvent& event) {
+void WebContentsViewAura::OnDragEntered(const ui::DropTargetEvent& event) {
   if (drag_dest_delegate_)
     drag_dest_delegate_->DragInitialize(web_contents_);
 
@@ -600,7 +624,7 @@ void WebContentsViewAura::OnDragEntered(const aura::DropTargetEvent& event) {
   }
 }
 
-int WebContentsViewAura::OnDragUpdated(const aura::DropTargetEvent& event) {
+int WebContentsViewAura::OnDragUpdated(const ui::DropTargetEvent& event) {
   DCHECK(current_rvh_for_drag_);
   if (current_rvh_for_drag_ != web_contents_->GetRenderViewHost())
     OnDragEntered(event);
@@ -627,7 +651,7 @@ void WebContentsViewAura::OnDragExited() {
     drag_dest_delegate_->OnDragLeave();
 }
 
-int WebContentsViewAura::OnPerformDrop(const aura::DropTargetEvent& event) {
+int WebContentsViewAura::OnPerformDrop(const ui::DropTargetEvent& event) {
   DCHECK(current_rvh_for_drag_);
   if (current_rvh_for_drag_ != web_contents_->GetRenderViewHost())
     OnDragEntered(event);

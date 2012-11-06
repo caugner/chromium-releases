@@ -31,6 +31,15 @@
 //     SetMyToken(notification.token())
 //   }
 // }
+//
+// There is currently no easy way to create a fake TokenService. Tests that want
+// to use TokenService to issue tokens without the use of fake GaiaAuthFetchers
+// or persisting the tokens to disk via WebDataService can do this by
+// creating a TokenService (skipping the Initialize() step to avoid interacting
+// with WebDataService) and calling IssueAuthTokenForTest() to issue new tokens.
+// This will result in the TokenService sending out the appropriate
+// TOKEN_AVAILABLE notification and returning the correct response to future
+// calls to Has/GetTokenForService().
 
 #ifndef CHROME_BROWSER_SIGNIN_TOKEN_SERVICE_H_
 #define CHROME_BROWSER_SIGNIN_TOKEN_SERVICE_H_
@@ -43,11 +52,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/common/net/gaia/gaia_auth_consumer.h"
-#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "google_apis/gaia/gaia_auth_consumer.h"
+#include "google_apis/gaia/gaia_auth_fetcher.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 
 class Profile;
 class TokenServiceTest;
@@ -167,6 +176,10 @@ class TokenService : public GaiaAuthConsumer,
   // For tests only. Doesn't save to the WebDB.
   void IssueAuthTokenForTest(const std::string& service,
                              const std::string& auth_token);
+
+  const GaiaAuthConsumer::ClientLoginResult& credentials() const {
+    return credentials_;
+  }
 
   // GaiaAuthConsumer implementation.
   virtual void OnIssueAuthTokenSuccess(const std::string& service,

@@ -416,6 +416,10 @@ void RenderText::SetFontList(const FontList& font_list) {
   ResetLayout();
 }
 
+void RenderText::SetFont(const Font& font) {
+  SetFontList(FontList(font));
+}
+
 void RenderText::SetFontSize(int size) {
   font_list_ = font_list_.DeriveFontListWithSize(size);
   cached_bounds_and_offset_valid_ = false;
@@ -445,8 +449,6 @@ void RenderText::SetObscured(bool obscured) {
 }
 
 void RenderText::SetDisplayRect(const Rect& r) {
-  if (r.width() != display_rect_.width())
-    ResetLayout();
   display_rect_ = r;
   cached_bounds_and_offset_valid_ = false;
 }

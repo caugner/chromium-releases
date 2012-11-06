@@ -115,10 +115,10 @@ void ShowBalloon(const Extension* extension, Profile* profile) {
       extension->is_app() ?  IDS_BACKGROUND_CRASHED_APP_BALLOON_MESSAGE :
       IDS_BACKGROUND_CRASHED_EXTENSION_BALLOON_MESSAGE,
       UTF8ToUTF16(extension->name()));
-  GURL icon_url(extension->GetIconURL(ExtensionIconSet::EXTENSION_ICON_SMALLISH,
+  GURL icon_url(extension->GetIconURL(extension_misc::EXTENSION_ICON_SMALLISH,
                                       ExtensionIconSet::MATCH_BIGGER));
   DesktopNotificationService::AddNotification(
-      extension->url(), title, message, icon_url,
+      extension->url(), title, message, icon_url, string16(),
       new CrashNotificationDelegate(profile, extension), profile);
 #endif
 }
@@ -612,11 +612,12 @@ void BackgroundContentsService::AddWebContents(
     WebContents* new_contents,
     WindowOpenDisposition disposition,
     const gfx::Rect& initial_pos,
-    bool user_gesture) {
+    bool user_gesture,
+    bool* was_blocked) {
   Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
   if (browser) {
     chrome::AddWebContents(browser, NULL, new_contents, disposition,
-                           initial_pos, user_gesture);
+                           initial_pos, user_gesture, was_blocked);
   }
 }

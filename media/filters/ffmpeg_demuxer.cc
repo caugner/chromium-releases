@@ -65,7 +65,7 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(
 }
 
 bool FFmpegDemuxerStream::HasPendingReads() {
-  DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
+  DCHECK(demuxer_->message_loop()->BelongsToCurrentThread());
   base::AutoLock auto_lock(lock_);
   DCHECK(!stopped_ || read_queue_.empty())
       << "Read queue should have been emptied if demuxing stream is stopped";
@@ -74,7 +74,7 @@ bool FFmpegDemuxerStream::HasPendingReads() {
 
 void FFmpegDemuxerStream::EnqueuePacket(
     scoped_ptr_malloc<AVPacket, ScopedPtrAVFreePacket> packet) {
-  DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
+  DCHECK(demuxer_->message_loop()->BelongsToCurrentThread());
 
   base::AutoLock auto_lock(lock_);
   if (stopped_) {
@@ -116,7 +116,7 @@ void FFmpegDemuxerStream::EnqueuePacket(
 }
 
 void FFmpegDemuxerStream::FlushBuffers() {
-  DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
+  DCHECK(demuxer_->message_loop()->BelongsToCurrentThread());
   base::AutoLock auto_lock(lock_);
   DCHECK(read_queue_.empty()) << "Read requests should be empty";
   buffer_queue_.clear();
@@ -124,7 +124,7 @@ void FFmpegDemuxerStream::FlushBuffers() {
 }
 
 void FFmpegDemuxerStream::Stop() {
-  DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
+  DCHECK(demuxer_->message_loop()->BelongsToCurrentThread());
   base::AutoLock auto_lock(lock_);
   buffer_queue_.clear();
   for (ReadQueue::iterator it = read_queue_.begin();
@@ -174,7 +174,7 @@ void FFmpegDemuxerStream::Read(const ReadCB& read_cb) {
 }
 
 void FFmpegDemuxerStream::ReadTask(const ReadCB& read_cb) {
-  DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
+  DCHECK(demuxer_->message_loop()->BelongsToCurrentThread());
 
   base::AutoLock auto_lock(lock_);
   // Don't accept any additional reads if we've been told to stop.
@@ -197,7 +197,7 @@ void FFmpegDemuxerStream::ReadTask(const ReadCB& read_cb) {
 }
 
 void FFmpegDemuxerStream::FulfillPendingRead() {
-  DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
+  DCHECK(demuxer_->message_loop()->BelongsToCurrentThread());
   lock_.AssertAcquired();
   if (buffer_queue_.empty() || read_queue_.empty()) {
     return;
@@ -258,7 +258,7 @@ base::TimeDelta FFmpegDemuxerStream::ConvertStreamTimestamp(
 // FFmpegDemuxer
 //
 FFmpegDemuxer::FFmpegDemuxer(
-    MessageLoop* message_loop,
+    const scoped_refptr<base::MessageLoopProxy>& message_loop,
     const scoped_refptr<DataSource>& data_source)
     : host_(NULL),
       message_loop_(message_loop),
@@ -411,7 +411,7 @@ bool FFmpegDemuxer::IsStreaming() {
   return data_source_->IsStreaming();
 }
 
-MessageLoop* FFmpegDemuxer::message_loop() {
+scoped_refptr<base::MessageLoopProxy> FFmpegDemuxer::message_loop() {
   return message_loop_;
 }
 
@@ -453,7 +453,7 @@ static int CalculateBitrate(
 
 void FFmpegDemuxer::InitializeTask(DemuxerHost* host,
                                    const PipelineStatusCB& status_cb) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   host_ = host;
 
   // TODO(scherkus): DataSource should have a host by this point,
@@ -572,7 +572,7 @@ void FFmpegDemuxer::InitializeTask(DemuxerHost* host,
 }
 
 void FFmpegDemuxer::SeekTask(base::TimeDelta time, const PipelineStatusCB& cb) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // Tell streams to flush buffers due to seeking.
   StreamVector::iterator iter;
@@ -599,7 +599,7 @@ void FFmpegDemuxer::SeekTask(base::TimeDelta time, const PipelineStatusCB& cb) {
 }
 
 void FFmpegDemuxer::DemuxTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // Make sure we have work to do before demuxing.
   if (!StreamsHavePendingReads()) {
@@ -658,7 +658,7 @@ void FFmpegDemuxer::DemuxTask() {
 }
 
 void FFmpegDemuxer::StopTask(const base::Closure& callback) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
     if (*iter)
@@ -672,7 +672,7 @@ void FFmpegDemuxer::StopTask(const base::Closure& callback) {
 }
 
 void FFmpegDemuxer::DisableAudioStreamTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   audio_disabled_ = true;
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
@@ -683,7 +683,7 @@ void FFmpegDemuxer::DisableAudioStreamTask() {
 }
 
 bool FFmpegDemuxer::StreamsHavePendingReads() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
     if (*iter && (*iter)->HasPendingReads()) {
@@ -694,7 +694,7 @@ bool FFmpegDemuxer::StreamsHavePendingReads() {
 }
 
 void FFmpegDemuxer::StreamHasEnded() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
     if (!*iter ||
@@ -717,7 +717,7 @@ void FFmpegDemuxer::SignalReadCompleted(int size) {
 }
 
 void FFmpegDemuxer::NotifyBufferingChanged() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   Ranges<base::TimeDelta> buffered;
   scoped_refptr<FFmpegDemuxerStream> audio =
       audio_disabled_ ? NULL : GetFFmpegStream(DemuxerStream::AUDIO);

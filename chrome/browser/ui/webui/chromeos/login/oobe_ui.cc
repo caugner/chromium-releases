@@ -26,11 +26,12 @@
 #include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_dropdown_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/reset_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/update_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/user_image_screen_handler.h"
-#include "chrome/browser/ui/webui/options2/chromeos/user_image_source.h"
-#include "chrome/browser/ui/webui/options2/chromeos/wallpaper_source.h"
+#include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
+#include "chrome/browser/ui/webui/options/chromeos/wallpaper_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -124,6 +125,7 @@ OobeUI::OobeUI(content::WebUI* web_ui)
       update_screen_actor_(NULL),
       network_screen_actor_(NULL),
       eula_screen_actor_(NULL),
+      reset_screen_actor_(NULL),
       signin_screen_handler_(NULL),
       user_image_screen_actor_(NULL) {
   core_handler_ = new CoreOobeHandler(this);
@@ -138,6 +140,10 @@ OobeUI::OobeUI(content::WebUI* web_ui)
   EulaScreenHandler* eula_screen_handler = new EulaScreenHandler();
   eula_screen_actor_ = eula_screen_handler;
   AddScreenHandler(eula_screen_handler);
+
+  ResetScreenHandler* reset_screen_handler = new ResetScreenHandler();
+  reset_screen_actor_ = reset_screen_handler;
+  AddScreenHandler(reset_screen_handler);
 
   UpdateScreenHandler* update_screen_handler = new UpdateScreenHandler();
   update_screen_actor_ = update_screen_handler;
@@ -176,14 +182,14 @@ OobeUI::OobeUI(content::WebUI* web_ui)
   ChromeURLDataManager::AddDataSource(profile, html_source);
 
   // Set up the chrome://userimage/ source.
-  options2::UserImageSource* user_image_source =
-      new options2::UserImageSource();
+  options::UserImageSource* user_image_source =
+      new options::UserImageSource();
   ChromeURLDataManager::AddDataSource(profile, user_image_source);
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableNewOobe)) {
     // Set up the chrome://wallpaper/ source.
-    chromeos::options2::WallpaperImageSource* wallpaper_image_source =
-        new chromeos::options2::WallpaperImageSource();
+    chromeos::options::WallpaperImageSource* wallpaper_image_source =
+        new chromeos::options::WallpaperImageSource();
     ChromeURLDataManager::AddDataSource(profile, wallpaper_image_source);
   }
 }
@@ -214,6 +220,10 @@ EulaScreenActor* OobeUI::GetEulaScreenActor() {
 EnterpriseEnrollmentScreenActor* OobeUI::
     GetEnterpriseEnrollmentScreenActor() {
   return enterprise_enrollment_screen_actor_;
+}
+
+ResetScreenActor* OobeUI::GetResetScreenActor() {
+  return reset_screen_actor_;
 }
 
 UserImageScreenActor* OobeUI::GetUserImageScreenActor() {
@@ -273,6 +283,10 @@ void OobeUI::ShowOobeUI(bool show) {
   core_handler_->ShowOobeUI(show);
 }
 
+void OobeUI::ShowRetailModeLoginSpinner() {
+  signin_screen_handler_->ShowRetailModeLoginSpinner();
+}
+
 void OobeUI::ShowSigninScreen(SigninScreenHandlerDelegate* delegate) {
   signin_screen_handler_->SetDelegate(delegate);
   signin_screen_handler_->Show(core_handler_->show_oobe_ui());
@@ -280,10 +294,6 @@ void OobeUI::ShowSigninScreen(SigninScreenHandlerDelegate* delegate) {
 
 void OobeUI::ResetSigninScreenHandlerDelegate() {
   signin_screen_handler_->SetDelegate(NULL);
-}
-
-void OobeUI::OnLoginPromptVisible() {
-  user_image_screen_actor_->CheckCameraPresence();
 }
 
 }  // namespace chromeos

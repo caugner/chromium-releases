@@ -23,27 +23,11 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_session.h"
 
 namespace net {
-
-namespace {
-
-Value* NetLogSpdySendRequestCallback(const SpdyHeaderBlock* headers,
-                                     NetLog::LogLevel /* log_level */) {
-  DictionaryValue* dict = new DictionaryValue();
-  ListValue* headers_list = new ListValue();
-  for (SpdyHeaderBlock::const_iterator it = headers->begin();
-       it != headers->end(); ++it) {
-    headers_list->Append(new StringValue(base::StringPrintf(
-        "%s: %s", it->first.c_str(), it->second.c_str())));
-  }
-  dict->Set("headers", headers_list);
-  return dict;
-}
-
-}  // namespace
 
 SpdyHttpStream::SpdyHttpStream(SpdySession* spdy_session,
                                bool direct)
@@ -99,11 +83,12 @@ const HttpResponseInfo* SpdyHttpStream::GetResponseInfo() const {
   return response_info_;
 }
 
-uint64 SpdyHttpStream::GetUploadProgress() const {
+UploadProgress SpdyHttpStream::GetUploadProgress() const {
   if (!request_body_stream_.get())
-    return 0;
+    return UploadProgress();
 
-  return request_body_stream_->position();
+  return UploadProgress(request_body_stream_->position(),
+                        request_body_stream_->size());
 }
 
 int SpdyHttpStream::ReadResponseHeaders(const CompletionCallback& callback) {
@@ -220,7 +205,7 @@ int SpdyHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
                                    direct_);
   stream_->net_log().AddEvent(
       NetLog::TYPE_HTTP_TRANSACTION_SPDY_SEND_REQUEST_HEADERS,
-      base::Bind(&NetLogSpdySendRequestCallback, headers.get()));
+      base::Bind(&SpdyHeaderBlockNetLogCallback, headers.get()));
   stream_->set_spdy_headers(headers.Pass());
 
   stream_->SetRequestTime(request_time);
@@ -409,6 +394,11 @@ int SpdyHttpStream::OnResponseReceived(const SpdyHeaderBlock& response,
     DoCallback(status);
 
   return status;
+}
+
+void SpdyHttpStream::OnHeadersSent() {
+  // For HTTP streams, no HEADERS frame is sent from the client.
+  NOTREACHED();
 }
 
 int SpdyHttpStream::OnDataReceived(const char* data, int length) {

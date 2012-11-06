@@ -11,6 +11,7 @@
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -19,6 +20,14 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
+#endif
+
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
 
 namespace captive_portal {
 
@@ -92,10 +101,22 @@ void RecordRepeatHistograms(Result result,
   result_duration_histogram->AddTime(result_duration);
 }
 
+bool HasNativeCaptivePortalDetection() {
+  // Lion and Windows 8 have their own captive portal detection that will open
+  // a browser window as needed.
+#if defined(OS_MACOSX)
+  return base::mac::IsOSLionOrLater();
+#elif defined(OS_WIN)
+  return base::win::GetVersion() >= base::win::VERSION_WIN8;
+#else
+  return false;
+#endif
+}
+
 }  // namespace
 
-// Disabled for M22.
-bool CaptivePortalService::is_disabled_for_testing_ = true;
+CaptivePortalService::TestingState CaptivePortalService::testing_state_ =
+    NOT_TESTING;
 
 class CaptivePortalService::RecheckBackoffEntry : public net::BackoffEntry {
  public:
@@ -261,13 +282,17 @@ void CaptivePortalService::OnURLFetchComplete(const net::URLFetcher* source) {
     ResetBackoffEntry(new_result);
 
     backoff_entry_->SetCustomReleaseTime(now + retry_after_delta);
-    backoff_entry_->InformOfRequest(true);
+    // The BackoffEntry is not informed of this request, so there's no delay
+    // before the next request.  This allows for faster login when a captive
+    // portal is first detected.  It can also help when moving between captive
+    // portals.
   } else {
     DCHECK_LE(1, num_checks_with_same_result_);
     ++num_checks_with_same_result_;
 
     // Requests that have the same Result as the last one are considered
     // "failures", to trigger backoff.
+    backoff_entry_->SetCustomReleaseTime(now + retry_after_delta);
     backoff_entry_->InformOfRequest(false);
   }
 
@@ -328,8 +353,14 @@ void CaptivePortalService::ResetBackoffEntry(Result result) {
 
 void CaptivePortalService::UpdateEnabledState() {
   bool enabled_before = enabled_;
-  enabled_ = !is_disabled_for_testing_ &&
+  enabled_ = testing_state_ != DISABLED_FOR_TESTING &&
              resolve_errors_with_web_service_.GetValue();
+
+  if (testing_state_ != SKIP_OS_CHECK_FOR_TESTING &&
+      HasNativeCaptivePortalDetection()) {
+    enabled_ = false;
+  }
+
   if (enabled_before == enabled_)
     return;
 
@@ -393,7 +424,13 @@ Result CaptivePortalService::GetCaptivePortalResultFromResponse(
     return RESULT_NO_RESPONSE;
   }
 
-  // Non-2xx/3xx HTTP responses may also indicate server errors.
+  // A 511 response (Network Authentication Required) means that the user needs
+  // to login to whatever server issued the response.
+  // See:  http://tools.ietf.org/html/rfc6585
+  if (response_code == 511)
+    return RESULT_BEHIND_CAPTIVE_PORTAL;
+
+  // Other non-2xx/3xx HTTP responses may indicate server errors.
   if (response_code >= 400 || response_code < 200)
     return RESULT_NO_RESPONSE;
 

@@ -23,6 +23,7 @@
 #include "chrome/browser/sync/glue/bookmark_data_type_controller.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
 #include "chrome/browser/sync/glue/data_type_manager_impl.h"
+#include "chrome/browser/sync/glue/data_type_manager_observer.h"
 #include "chrome/browser/sync/glue/extension_data_type_controller.h"
 #include "chrome/browser/sync/glue/extension_setting_data_type_controller.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
@@ -62,6 +63,7 @@ using browser_sync::BookmarkModelAssociator;
 using browser_sync::DataTypeController;
 using browser_sync::DataTypeManager;
 using browser_sync::DataTypeManagerImpl;
+using browser_sync::DataTypeManagerObserver;
 using browser_sync::ExtensionDataTypeController;
 using browser_sync::ExtensionSettingDataTypeController;
 using browser_sync::GenericChangeProcessor;
@@ -99,6 +101,38 @@ ProfileSyncComponentsFactoryImpl::~ProfileSyncComponentsFactoryImpl() {
 
 void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
     ProfileSyncService* pss) {
+  RegisterCommonDataTypes(pss);
+#if !defined(OS_ANDROID)
+  RegisterDesktopDataTypes(pss);
+#endif
+}
+
+void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
+    ProfileSyncService* pss) {
+  // Bookmark sync is enabled by default.  Register unless explicitly
+  // disabled.
+  if (!command_line_->HasSwitch(switches::kDisableSyncBookmarks)) {
+    pss->RegisterDataTypeController(
+        new BookmarkDataTypeController(this, profile_, pss));
+  }
+
+  // TypedUrl sync is enabled by default.  Register unless explicitly disabled,
+  // or if saving history is disabled.
+  if (!profile_->GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled) &&
+      !command_line_->HasSwitch(switches::kDisableSyncTypedUrls)) {
+    pss->RegisterDataTypeController(
+        new TypedUrlDataTypeController(this, profile_, pss));
+  }
+
+  // Session sync is enabled by default.  Register unless explicitly disabled.
+  if (!command_line_->HasSwitch(switches::kDisableSyncTabs)) {
+    pss->RegisterDataTypeController(
+        new SessionDataTypeController(this, profile_, pss));
+  }
+}
+
+void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
+    ProfileSyncService* pss) {
   // App sync is enabled by default.  Register unless explicitly
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncApps)) {
@@ -111,13 +145,6 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   if (!command_line_->HasSwitch(switches::kDisableSyncAutofill)) {
     pss->RegisterDataTypeController(
         new AutofillDataTypeController(this, profile_, pss));
-  }
-
-  // Bookmark sync is enabled by default.  Register unless explicitly
-  // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncBookmarks)) {
-    pss->RegisterDataTypeController(
-        new BookmarkDataTypeController(this, profile_, pss));
   }
 
   // Extension sync is enabled by default.  Register unless explicitly
@@ -150,25 +177,11 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   }
 #endif
 
-  // TypedUrl sync is enabled by default.  Register unless explicitly disabled,
-  // or if saving history is disabled.
-  if (!profile_->GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled) &&
-      !command_line_->HasSwitch(switches::kDisableSyncTypedUrls)) {
-    pss->RegisterDataTypeController(
-        new TypedUrlDataTypeController(this, profile_, pss));
-  }
-
   // Search Engine sync is enabled by default.  Register only if explicitly
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncSearchEngines)) {
     pss->RegisterDataTypeController(
         new SearchEngineDataTypeController(this, profile_, pss));
-  }
-
-  // Session sync is enabled by default.  Register unless explicitly disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncTabs)) {
-    pss->RegisterDataTypeController(
-        new SessionDataTypeController(this, profile_, pss));
   }
 
   // Extension setting sync is enabled by default.  Register unless explicitly
@@ -202,8 +215,9 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
 
 DataTypeManager* ProfileSyncComponentsFactoryImpl::CreateDataTypeManager(
     SyncBackendHost* backend,
-    const DataTypeController::TypeMap* controllers) {
-  return new DataTypeManagerImpl(backend, controllers);
+    const DataTypeController::TypeMap* controllers,
+    DataTypeManagerObserver* observer) {
+  return new DataTypeManagerImpl(backend, controllers, observer);
 }
 
 browser_sync::GenericChangeProcessor*

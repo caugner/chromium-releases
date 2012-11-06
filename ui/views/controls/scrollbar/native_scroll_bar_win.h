@@ -34,8 +34,8 @@ class NativeScrollBarWin : public NativeControlWin,
   virtual gfx::Size GetPreferredSize();
 
   // Overridden from View for keyboard UI purpose.
-  virtual bool OnKeyPressed(const KeyEvent& event);
-  virtual bool OnMouseWheel(const MouseWheelEvent& e);
+  virtual bool OnKeyPressed(const ui::KeyEvent& event);
+  virtual bool OnMouseWheel(const ui::MouseWheelEvent& e);
 
   // Overridden from NativeControlWin.
   virtual void CreateNativeControl();

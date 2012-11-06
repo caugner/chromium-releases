@@ -16,28 +16,14 @@
 
 namespace ash {
 namespace test {
-class ScreenAshTest : public test::AshTestBase {
- public:
-  ScreenAshTest() {}
-  virtual ~ScreenAshTest() {}
 
-  virtual void SetUp() OVERRIDE {
-    internal::DisplayController::SetExtendedDesktopEnabled(true);
-    AshTestBase::SetUp();
-  }
-
-  virtual void TearDown() OVERRIDE {
-    AshTestBase::TearDown();
-    internal::DisplayController::SetExtendedDesktopEnabled(false);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScreenAshTest);
-};
+typedef test::AshTestBase ScreenAshTest;
 
 #if !defined(OS_WIN)
 TEST_F(ScreenAshTest, Bounds) {
   UpdateDisplay("600x600,500x500");
+  Shell::GetInstance()->SetShelfAutoHideBehavior(
+      ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
 
   views::Widget* primary =
       views::Widget::CreateWindowWithBounds(NULL, gfx::Rect(10, 10, 100, 100));
@@ -47,7 +33,7 @@ TEST_F(ScreenAshTest, Bounds) {
   secondary->Show();
 
   // Maximized bounds
-  EXPECT_EQ("0,0 600x598",
+  EXPECT_EQ("0,0 600x597",
             ScreenAsh::GetMaximizedWindowBoundsInParent(
                 primary->GetNativeView()).ToString());
   EXPECT_EQ("0,0 500x500",
@@ -55,7 +41,7 @@ TEST_F(ScreenAshTest, Bounds) {
                 secondary->GetNativeView()).ToString());
 
   // Unmaximized work area bounds
-  EXPECT_EQ("0,0 600x552",
+  EXPECT_EQ("0,0 600x597",
             ScreenAsh::GetUnmaximizedWorkAreaBoundsInParent(
                 primary->GetNativeView()).ToString());
   EXPECT_EQ("0,0 500x500",
@@ -71,7 +57,7 @@ TEST_F(ScreenAshTest, Bounds) {
                 secondary->GetNativeView()).ToString());
 
   // Work area bounds
-  EXPECT_EQ("0,0 600x552",
+  EXPECT_EQ("0,0 600x597",
             ScreenAsh::GetDisplayWorkAreaBoundsInParent(
                 primary->GetNativeView()).ToString());
   EXPECT_EQ("0,0 500x500",

@@ -4,13 +4,14 @@
 
 #include "sync/notifier/invalidation_notifier.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
+#include "google/cacheinvalidation/include/invalidation-client-factory.h"
 #include "jingle/notifier/listener/push_client.h"
 #include "net/url_request/url_request_context.h"
-#include "sync/internal_api/public/base/model_type_payload_map.h"
-#include "sync/notifier/sync_notifier_observer.h"
+#include "sync/notifier/invalidation_handler.h"
 #include "talk/xmpp/jid.h"
 #include "talk/xmpp/xmppclientsettings.h"
 
@@ -27,35 +28,40 @@ InvalidationNotifier::InvalidationNotifier(
       invalidation_state_tracker_(invalidation_state_tracker),
       client_info_(client_info),
       invalidation_state_(initial_invalidation_state),
-      invalidation_client_(push_client.Pass()) {
+      invalidation_listener_(push_client.Pass()) {
 }
 
 InvalidationNotifier::~InvalidationNotifier() {
   DCHECK(CalledOnValidThread());
 }
 
-void InvalidationNotifier::RegisterHandler(SyncNotifierObserver* handler) {
+void InvalidationNotifier::RegisterHandler(InvalidationHandler* handler) {
   DCHECK(CalledOnValidThread());
   registrar_.RegisterHandler(handler);
 }
 
-void InvalidationNotifier::UpdateRegisteredIds(SyncNotifierObserver* handler,
+void InvalidationNotifier::UpdateRegisteredIds(InvalidationHandler* handler,
                                                const ObjectIdSet& ids) {
   DCHECK(CalledOnValidThread());
   registrar_.UpdateRegisteredIds(handler, ids);
-  invalidation_client_.RegisterIds(registrar_.GetAllRegisteredIds());
+  invalidation_listener_.UpdateRegisteredIds(registrar_.GetAllRegisteredIds());
 }
 
-void InvalidationNotifier::UnregisterHandler(SyncNotifierObserver* handler) {
+void InvalidationNotifier::UnregisterHandler(InvalidationHandler* handler) {
   DCHECK(CalledOnValidThread());
   registrar_.UnregisterHandler(handler);
 }
 
+InvalidatorState InvalidationNotifier::GetInvalidatorState() const {
+  DCHECK(CalledOnValidThread());
+  return registrar_.GetInvalidatorState();
+}
+
 void InvalidationNotifier::SetUniqueId(const std::string& unique_id) {
   DCHECK(CalledOnValidThread());
-  invalidation_client_id_ = unique_id;
+  client_id_ = unique_id;
   DVLOG(1) << "Setting unique ID to " << unique_id;
-  CHECK(!invalidation_client_id_.empty());
+  CHECK(!client_id_.empty());
 }
 
 void InvalidationNotifier::SetStateDeprecated(const std::string& state) {
@@ -81,36 +87,32 @@ void InvalidationNotifier::SetStateDeprecated(const std::string& state) {
 void InvalidationNotifier::UpdateCredentials(
     const std::string& email, const std::string& token) {
   if (state_ == STOPPED) {
-    invalidation_client_.Start(
-        invalidation_client_id_, client_info_, invalidation_state_,
+    invalidation_listener_.Start(
+        base::Bind(&invalidation::CreateInvalidationClient),
+        client_id_, client_info_, invalidation_state_,
         initial_max_invalidation_versions_,
         invalidation_state_tracker_,
         this);
     invalidation_state_.clear();
     state_ = STARTED;
   }
-  invalidation_client_.UpdateCredentials(email, token);
+  invalidation_listener_.UpdateCredentials(email, token);
 }
 
-void InvalidationNotifier::SendNotification(ModelTypeSet changed_types) {
+void InvalidationNotifier::SendInvalidation(
+    const ObjectIdStateMap& id_state_map) {
   DCHECK(CalledOnValidThread());
   // Do nothing.
 }
 
-void InvalidationNotifier::OnInvalidate(const ObjectIdPayloadMap& id_payloads) {
+void InvalidationNotifier::OnInvalidate(const ObjectIdStateMap& id_state_map) {
   DCHECK(CalledOnValidThread());
-  registrar_.DispatchInvalidationsToHandlers(id_payloads, REMOTE_NOTIFICATION);
+  registrar_.DispatchInvalidationsToHandlers(id_state_map, REMOTE_INVALIDATION);
 }
 
-void InvalidationNotifier::OnNotificationsEnabled() {
+void InvalidationNotifier::OnInvalidatorStateChange(InvalidatorState state) {
   DCHECK(CalledOnValidThread());
-  registrar_.EmitOnNotificationsEnabled();
-}
-
-void InvalidationNotifier::OnNotificationsDisabled(
-    NotificationsDisabledReason reason) {
-  DCHECK(CalledOnValidThread());
-  registrar_.EmitOnNotificationsDisabled(reason);
+  registrar_.UpdateInvalidatorState(state);
 }
 
 }  // namespace syncer

@@ -48,7 +48,7 @@ RootWindow* SingleDisplayManager::CreateRootWindowForDisplay(
     const gfx::Display& display) {
   DCHECK(!root_window_);
   DCHECK_EQ(display_.id(), display.id());
-  root_window_ = new RootWindow(display.bounds());
+  root_window_ = new RootWindow(RootWindow::CreateParams(display.bounds()));
   root_window_->AddObserver(this);
   root_window_->Init();
   return root_window_;
@@ -75,6 +75,10 @@ const gfx::Display& SingleDisplayManager::GetDisplayNearestPoint(
 const gfx::Display& SingleDisplayManager::GetDisplayMatching(
     const gfx::Rect& match_rect) const {
   return display_;
+}
+
+std::string SingleDisplayManager::GetDisplayNameAt(size_t index) {
+  return "Display";
 }
 
 void SingleDisplayManager::OnWindowBoundsChanged(

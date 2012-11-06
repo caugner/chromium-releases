@@ -24,6 +24,10 @@
 
 struct WebMenuItem;
 
+namespace ui {
+class WindowAndroid;
+}
+
 namespace content {
 class ContentViewClient;
 class RenderWidgetHostViewAndroid;
@@ -34,7 +38,10 @@ class ContentViewCoreImpl : public ContentViewCore,
  public:
   ContentViewCoreImpl(JNIEnv* env,
                       jobject obj,
-                      WebContents* web_contents);
+                      bool hardware_accelerated,
+                      bool take_ownership_of_web_contents,
+                      WebContents* web_contents,
+                      ui::WindowAndroid* window_android);
 
   // ContentViewCore overrides
   virtual void Destroy(JNIEnv* env, jobject obj) OVERRIDE;
@@ -47,16 +54,16 @@ class ContentViewCoreImpl : public ContentViewCore,
   // showing select popup.
   void SelectPopupMenuItems(JNIEnv* env, jobject obj, jintArray indices);
 
-  void LoadUrlWithoutUrlSanitization(JNIEnv* env,
-                                     jobject,
-                                     jstring jurl,
-                                     int page_transition);
-  void LoadUrlWithoutUrlSanitizationWithUserAgentOverride(
-      JNIEnv* env,
-      jobject,
-      jstring jurl,
-      int page_transition,
-      jstring user_agent_override);
+  void LoadUrl(
+      JNIEnv* env, jobject obj,
+      jstring url,
+      jint load_url_type,
+      jint transition_type,
+      jint ua_override_option,
+      jstring extra_headers,
+      jbyteArray post_data,
+      jstring base_url_for_data_url,
+      jstring virtual_url_for_data_url);
   base::android::ScopedJavaLocalRef<jstring> GetURL(JNIEnv* env, jobject) const;
   base::android::ScopedJavaLocalRef<jstring> GetTitle(
       JNIEnv* env, jobject obj) const;
@@ -69,7 +76,8 @@ class ContentViewCoreImpl : public ContentViewCore,
                       jobjectArray pts);
   void ScrollBegin(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y);
   void ScrollEnd(JNIEnv* env, jobject obj, jlong time_ms);
-  void ScrollBy(JNIEnv* env, jobject obj, jlong time_ms, jint dx, jint dy);
+  void ScrollBy(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y,
+                jint dx, jint dy);
   void FlingStart(JNIEnv* env,
                   jobject obj,
                   jlong time_ms,
@@ -83,7 +91,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                  jlong time_ms,
                  jint x,
                  jint y,
-                 jboolean link_preview_tap);
+                 jboolean disambiguation_popup_tap);
   void ShowPressState(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y);
   void DoubleTap(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y) ;
   void LongPress(JNIEnv* env,
@@ -91,7 +99,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                  jlong time_ms,
                  jint x,
                  jint y,
-                 jboolean link_preview_tap);
+                 jboolean disambiguation_popup_tap);
   void PinchBegin(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y);
   void PinchEnd(JNIEnv* env, jobject obj, jlong time_ms);
   void PinchBy(JNIEnv* env,
@@ -100,25 +108,30 @@ class ContentViewCoreImpl : public ContentViewCore,
                jint x,
                jint y,
                jfloat delta);
+  virtual void SelectBetweenCoordinates(JNIEnv* env, jobject obj,
+                                        jint x1, jint y1,
+                                        jint x2, jint y2) OVERRIDE;
   jboolean CanGoBack(JNIEnv* env, jobject obj);
   jboolean CanGoForward(JNIEnv* env, jobject obj);
   jboolean CanGoToOffset(JNIEnv* env, jobject obj, jint offset);
   void GoBack(JNIEnv* env, jobject obj);
   void GoForward(JNIEnv* env, jobject obj);
   void GoToOffset(JNIEnv* env, jobject obj, jint offset);
-  jdouble GetLoadProgress(JNIEnv* env, jobject obj) const;
   void StopLoading(JNIEnv* env, jobject obj);
   void Reload(JNIEnv* env, jobject obj);
   jboolean NeedsReload(JNIEnv* env, jobject obj);
   void ClearHistory(JNIEnv* env, jobject obj);
   void SetClient(JNIEnv* env, jobject obj, jobject jclient);
   jint EvaluateJavaScript(JNIEnv* env, jobject obj, jstring script);
+  virtual int GetNativeImeAdapter(JNIEnv* env, jobject obj) OVERRIDE;
+  virtual base::android::ScopedJavaLocalRef<jobject> GetJavaObject() OVERRIDE;
   void AddJavascriptInterface(JNIEnv* env,
                               jobject obj,
                               jobject object,
                               jstring name,
-                              jboolean allow_inherited_methods);
+                              jboolean require_annotation);
   void RemoveJavascriptInterface(JNIEnv* env, jobject obj, jstring name);
+  int GetNavigationHistory(JNIEnv* env, jobject obj, jobject context);
 
   // --------------------------------------------------------------------------
   // Public methods that call to Java via JNI
@@ -133,6 +146,11 @@ class ContentViewCoreImpl : public ContentViewCore,
                            bool multiple);
 
   void OnTabCrashed(const base::ProcessHandle handle);
+  void ImeUpdateAdapter(int native_ime_adapter, int text_input_type,
+                        const std::string& text,
+                        int selection_start, int selection_end,
+                        int composition_start, int composition_end,
+                        bool show_ime_if_needed);
   void SetTitle(const string16& title);
 
   bool HasFocus();
@@ -148,10 +166,6 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   // Called when page loading begins.
   void DidStartLoading();
-
-  void OnAcceleratedCompositingStateChange(RenderWidgetHostViewAndroid* rwhva,
-                                           bool activated,
-                                           bool force);
   void StartContentIntent(const GURL& content_url);
 
   // --------------------------------------------------------------------------
@@ -161,11 +175,9 @@ class ContentViewCoreImpl : public ContentViewCore,
   gfx::Rect GetBounds() const;
 
   WebContents* web_contents() const { return web_contents_; }
-  void LoadUrl(const GURL& url, int page_transition);
-  void LoadUrlWithUserAgentOverride(
-      const GURL& url,
-      int page_transition,
-      const std::string& user_agent_override);
+
+  virtual void LoadUrl(NavigationController::LoadURLParams& params) OVERRIDE;
+  virtual ui::WindowAndroid* GetWindowAndroid() OVERRIDE;
 
  private:
   // NotificationObserver implementation.
@@ -184,13 +196,14 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   void InitJNI(JNIEnv* env, jobject obj);
 
+  void InitWebContents(content::WebContents* web_contents);
+
   RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
 
-  void SendGestureEvent(WebKit::WebInputEvent::Type type, long time_ms,
-                        int x, int y,
-                        float dx, float dy, bool link_preview_tap);
+  int GetTouchPadding();
 
-  void PostLoadUrl(const GURL& url);
+  void SendGestureEvent(WebKit::WebInputEvent::Type type, long time_ms,
+                        int x, int y);
 
   struct JavaObject;
   JavaObject* java_object_;
@@ -203,12 +216,16 @@ class ContentViewCoreImpl : public ContentViewCore,
   // Reference to the current WebContents used to determine how and what to
   // display in the ContentViewCore.
   WebContentsImpl* web_contents_;
+  bool owns_web_contents_;
 
   // We only set this to be the delegate of the web_contents if we own it.
   scoped_ptr<ContentViewClient> content_view_client_;
 
   // Whether the renderer backing this ContentViewCore has crashed.
   bool tab_crashed_;
+
+  // The owning window that has a hold of main application activity.
+  ui::WindowAndroid* window_android_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentViewCoreImpl);
 };

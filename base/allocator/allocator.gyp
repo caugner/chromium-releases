@@ -6,6 +6,7 @@
   'variables': {
     'jemalloc_dir': '../../third_party/jemalloc/chromium',
     'tcmalloc_dir': '../../third_party/tcmalloc/chromium',
+    'use_vtable_verify%': 0,
   },
   'targets': [
     {
@@ -315,6 +316,7 @@
             'libcmt',
           ],
           'include_dirs': [
+            '<(jemalloc_dir)',
             '<(tcmalloc_dir)/src/windows',
           ],
           'sources!': [
@@ -394,6 +396,11 @@
               '-Wl,-u_ZN15HeapLeakChecker12IgnoreObjectEPKv,-u_ZN15HeapLeakChecker14UnIgnoreObjectEPKv',
           ]},
         }],
+        [ 'use_vtable_verify==1', {
+          'cflags': [
+            '-fvtable-verify=preinit',
+          ],
+        }],
         [ 'linux_use_debugallocation==1', {
           'sources!': [
             # debugallocation.cc #includes tcmalloc.cc,
@@ -430,6 +437,18 @@
           # Disable the heap checker in tcmalloc.
           'defines': [
             'NO_HEAP_CHECK',
+           ],
+        }],
+        [ 'clang==1', {
+          'cflags': [
+            '-Wno-non-literal-null-conversion',
+          ],
+        }],
+        ['order_profiling != 0', {
+          'target_conditions' : [
+            ['_toolset=="target"', {
+              'cflags!': [ '-finstrument-functions' ],
+            }],
           ],
         }],
       ],

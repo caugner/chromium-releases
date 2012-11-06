@@ -14,14 +14,15 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
+#include "remoting/host/win/desktop.h"
+#include "remoting/host/win/scoped_thread_desktop.h"
 
 namespace remoting {
 
 namespace {
 
 // Names of the API and library implementing software SAS generation.
-const FilePath::CharType kSasDllFileName[] =
-    FILE_PATH_LITERAL("sas.dll");
+const FilePath::CharType kSasDllFileName[] = FILE_PATH_LITERAL("sas.dll");
 const char kSendSasName[] = "SendSAS";
 
 // The prototype of SendSAS().
@@ -104,9 +105,9 @@ bool ScopedSoftwareSasPolicy::Apply() {
 
 } // namespace
 
-// Sends the Secure Attention Sequence using the SendSAS() function from
-// sas.dll. This library is shipped starting from Win7/W2K8 R2 only. However
-// Win7 SDK includes a redistributable verion of the same library that works on
+// Sends Secure Attention Sequence using the SendSAS() function from sas.dll.
+// This library is shipped starting from Win7/W2K8 R2 only. However Win7 SDK
+// includes a redistributable verion of the same library that works on
 // Vista/W2K8. We install the latter along with our binaries.
 class SasInjectorWin : public SasInjector {
  public:
@@ -119,6 +120,18 @@ class SasInjectorWin : public SasInjector {
  private:
   base::ScopedNativeLibrary sas_dll_;
   SendSasFunc send_sas_;
+};
+
+// Emulates Secure Attention Sequence (Ctrl+Alt+Del) by switching to
+// the Winlogon desktop and injecting Ctrl+Alt+Del as a hot key.
+// N.B. Windows XP/W2K3 only.
+class SasInjectorXp : public SasInjector {
+ public:
+  SasInjectorXp();
+  virtual ~SasInjectorXp();
+
+  // SasInjector implementation.
+  virtual bool InjectSas() OVERRIDE;
 };
 
 SasInjectorWin::SasInjectorWin() : send_sas_(NULL) {
@@ -166,12 +179,43 @@ bool SasInjectorWin::InjectSas() {
   return true;
 }
 
+SasInjectorXp::SasInjectorXp() {
+}
+
+SasInjectorXp::~SasInjectorXp() {
+}
+
+bool SasInjectorXp::InjectSas() {
+  const wchar_t kWinlogonDesktopName[] = L"Winlogon";
+  const wchar_t kSasWindowClassName[] = L"SAS window class";
+  const wchar_t kSasWindowTitle[] = L"SAS window";
+
+  scoped_ptr<remoting::Desktop> winlogon_desktop(
+      remoting::Desktop::GetDesktop(kWinlogonDesktopName));
+  if (!winlogon_desktop.get())
+    return false;
+
+  remoting::ScopedThreadDesktop desktop;
+  if (!desktop.SetThreadDesktop(winlogon_desktop.Pass()))
+    return false;
+
+  HWND window = FindWindow(kSasWindowClassName, kSasWindowTitle);
+  if (!window)
+    return false;
+
+  PostMessage(window,
+              WM_HOTKEY,
+              0,
+              MAKELONG(MOD_ALT | MOD_CONTROL, VK_DELETE));
+  return true;
+}
+
 scoped_ptr<SasInjector> SasInjector::Create() {
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+    return scoped_ptr<SasInjector>(new SasInjectorXp());
+  } else {
     return scoped_ptr<SasInjector>(new SasInjectorWin());
   }
-
-  return scoped_ptr<SasInjector>();
 }
 
 } // namespace remoting

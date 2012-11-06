@@ -10,6 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
@@ -17,7 +18,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/base_window.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -277,12 +278,13 @@ void SelectFileDialogExtension::SelectFileImpl(
         g_browser_process->profile_manager()->GetLoadedProfiles();
     for (std::vector<Profile*>::const_iterator i(profiles.begin());
          i < profiles.end(); ++i) {
-      ShellWindowRegistry* registry = ShellWindowRegistry::Get(*i);
+      extensions::ShellWindowRegistry* registry =
+          extensions::ShellWindowRegistry::Get(*i);
       DCHECK(registry);
       ShellWindow* shell_window = registry->GetShellWindowForNativeWindow(
           owner_window);
       if (shell_window) {
-        base_window = shell_window;
+        base_window = shell_window->GetBaseWindow();
         tab = shell_window->tab_contents();
         profile_ = *i;
         break;
@@ -300,18 +302,31 @@ void SelectFileDialogExtension::SelectFileImpl(
   // possible. If there is no tab contents use a tab_id of 0. A dialog without
   // an associated tab contents will be shown fully screen; only one at a time
   // is allowed in this state.
-  int32 tab_id = tab ? tab->restore_tab_helper()->session_id().id() : 0;
+  int32 tab_id = tab ? SessionTabHelper::FromWebContents(tab->web_contents())->
+                           session_id().id()
+                     : 0;
   if (PendingExists(tab_id)) {
     DLOG(WARNING) << "Pending dialog exists with id " << tab_id;
     return;
   }
 
+  FilePath default_dialog_path;
+
+  const PrefService* pref_service = profile_->GetPrefs();
+
+  if (default_path.empty() && pref_service) {
+    default_dialog_path =
+        pref_service->GetFilePath(prefs::kDownloadDefaultDirectory);
+  } else {
+    default_dialog_path = default_path;
+  }
+
   FilePath virtual_path;
   if (file_manager_util::ConvertFileToRelativeFileSystemPath(
-          profile_, default_path, &virtual_path)) {
+          profile_, default_dialog_path, &virtual_path)) {
     virtual_path = FilePath("/").Append(virtual_path);
   } else {
-    virtual_path = default_path.BaseName();
+    virtual_path = default_dialog_path.BaseName();
   }
 
   has_multiple_file_type_choices_ =
@@ -321,7 +336,7 @@ void SelectFileDialogExtension::SelectFileImpl(
       type, title, virtual_path, file_types, file_type_index,
       default_extension);
 
-ExtensionDialog* dialog = ExtensionDialog::Show(file_browser_url,
+  ExtensionDialog* dialog = ExtensionDialog::Show(file_browser_url,
       base_window, profile_, tab->web_contents(),
       kFileManagerWidth, kFileManagerHeight,
 #if defined(USE_AURA)

@@ -35,10 +35,9 @@ scoped_ptr<Permissions> PackPermissionSet(const PermissionSet* set) {
   Permissions* permissions(new Permissions());
 
   permissions->permissions.reset(new std::vector<std::string>());
-  PermissionsInfo* info = PermissionsInfo::GetInstance();
   for (APIPermissionSet::const_iterator i = set->apis().begin();
        i != set->apis().end(); ++i) {
-    permissions->permissions->push_back(info->GetByID(*i)->name());
+    permissions->permissions->push_back(i->name());
   }
 
   permissions->origins.reset(new std::vector<std::string>());
@@ -57,13 +56,13 @@ scoped_refptr<PermissionSet> UnpackPermissionSet(
     PermissionsInfo* info = PermissionsInfo::GetInstance();
     for (std::vector<std::string>::iterator it = permissions_list->begin();
         it != permissions_list->end(); ++it) {
-      APIPermission* permission = info->GetByName(*it);
-      if (!permission) {
+      const APIPermissionInfo* permission_info = info->GetByName(*it);
+      if (!permission_info) {
         *error = ExtensionErrorUtils::FormatErrorMessage(
             kUnknownPermissionError, *it);
         return NULL;
       }
-      apis.insert(permission->id());
+      apis.insert(permission_info->id());
     }
   }
 

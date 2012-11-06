@@ -27,6 +27,7 @@
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray_accessibility.h"
 #include "ash/system/tray_caps_lock.h"
+#include "ash/system/tray_display.h"
 #include "ash/system/tray_update.h"
 #include "ash/system/user/login_status.h"
 #include "ash/system/user/tray_user.h"
@@ -36,8 +37,7 @@
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "ui/aura/root_window.h"
-#include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
@@ -51,39 +51,9 @@
 
 namespace ash {
 
-namespace internal {
-
-// Observe the tray layer animation and update the anchor when it changes.
-// TODO(stevenjb): Observe or mirror the actual animation, not just the start
-// and end points.
-class SystemTrayLayerAnimationObserver : public ui::LayerAnimationObserver {
- public:
-  explicit SystemTrayLayerAnimationObserver(SystemTray* host) : host_(host) {}
-
-  virtual void OnLayerAnimationEnded(ui::LayerAnimationSequence* sequence) {
-    host_->UpdateNotificationAnchor();
-  }
-
-  virtual void OnLayerAnimationAborted(ui::LayerAnimationSequence* sequence) {
-    host_->UpdateNotificationAnchor();
-  }
-
-  virtual void OnLayerAnimationScheduled(ui::LayerAnimationSequence* sequence) {
-    host_->UpdateNotificationAnchor();
-  }
-
- private:
-  SystemTray* host_;
-
-  DISALLOW_COPY_AND_ASSIGN(SystemTrayLayerAnimationObserver);
-};
-
-}  // namespace internal
-
 // SystemTray
 
 using internal::SystemTrayBubble;
-using internal::SystemTrayLayerAnimationObserver;
 using internal::TrayBubbleView;
 
 SystemTray::SystemTray(internal::StatusAreaWidget* status_area_widget)
@@ -101,9 +71,9 @@ SystemTray::SystemTray(internal::StatusAreaWidget* status_area_widget)
       network_observer_(NULL),
       update_observer_(NULL),
       user_observer_(NULL),
-      should_show_launcher_(false),
       default_bubble_height_(0),
       hide_notifications_(false) {
+  SetContentsBackground();
 }
 
 SystemTray::~SystemTray() {
@@ -113,12 +83,6 @@ SystemTray::~SystemTray() {
        ++it) {
     (*it)->DestroyTrayView();
   }
-}
-
-void SystemTray::Initialize() {
-  layer_animation_observer_.reset(new SystemTrayLayerAnimationObserver(this));
-  GetWidget()->GetNativeView()->layer()->GetAnimator()->AddObserver(
-      layer_animation_observer_.get());
 }
 
 void SystemTray::CreateItems() {
@@ -138,6 +102,7 @@ void SystemTray::CreateItems() {
   internal::TrayLocale* tray_locale = new internal::TrayLocale;
   internal::TrayUpdate* tray_update = new internal::TrayUpdate;
   internal::TraySettings* tray_settings = new internal::TraySettings();
+  internal::TrayDisplay* tray_display = new internal::TrayDisplay;
 
   accessibility_observer_ = tray_accessibility;
   audio_observer_ = tray_volume;
@@ -163,6 +128,7 @@ void SystemTray::CreateItems() {
   AddTrayItem(tray_drive);
   AddTrayItem(tray_ime);
   AddTrayItem(tray_locale);
+  AddTrayItem(tray_display);
   AddTrayItem(tray_volume);
   AddTrayItem(tray_brightness);
   AddTrayItem(tray_update);
@@ -179,8 +145,7 @@ void SystemTray::AddTrayItem(SystemTrayItem* item) {
 
   SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
   views::View* tray_item = item->CreateTrayView(delegate->GetUserLoginStatus());
-  item->UpdateAfterShelfAlignmentChange(
-      ash::Shell::GetInstance()->system_tray()->shelf_alignment());
+  item->UpdateAfterShelfAlignmentChange(shelf_alignment());
 
   if (tray_item) {
     tray_container()->AddChildViewAt(tray_item, 0);
@@ -267,12 +232,23 @@ void SystemTray::SetHideNotifications(bool hide_notifications) {
   hide_notifications_ = hide_notifications;
 }
 
+bool SystemTray::HasSystemBubble() const {
+  return bubble_.get() != NULL;
+}
+
 bool SystemTray::IsAnyBubbleVisible() const {
   if (bubble_.get() && bubble_->IsVisible())
     return true;
   if (notification_bubble_.get() && notification_bubble_->IsVisible())
     return true;
   return false;
+}
+
+bool SystemTray::IsMouseInNotificationBubble() const {
+  if (!notification_bubble_.get())
+    return false;
+  return notification_bubble_->bubble_view()->GetBoundsInScreen().Contains(
+      gfx::Screen::GetCursorScreenPoint());
 }
 
 bool SystemTray::CloseBubbleForTest() const {
@@ -289,20 +265,18 @@ void SystemTray::DestroyBubble() {
   detailed_item_ = NULL;
 }
 
+void SystemTray::DestroyNotificationBubble() {
+  notification_bubble_.reset();
+  status_area_widget()->SetHideWebNotifications(false);
+}
+
 void SystemTray::RemoveBubble(SystemTrayBubble* bubble) {
   if (bubble == bubble_.get()) {
     DestroyBubble();
     UpdateNotificationBubble();  // State changed, re-create notifications.
-    if (should_show_launcher_) {
-      // No need to show the launcher if the mouse isn't over the status area
-      // anymore.
-      should_show_launcher_ = GetWidget()->GetWindowBoundsInScreen().Contains(
-          gfx::Screen::GetCursorScreenPoint());
-      if (!should_show_launcher_)
-        Shell::GetInstance()->shelf()->UpdateAutoHideState();
-    }
+    Shell::GetInstance()->shelf()->UpdateAutoHideState();
   } else if (bubble == notification_bubble_) {
-    notification_bubble_.reset();
+    DestroyNotificationBubble();
   } else {
     NOTREACHED();
   }
@@ -377,13 +351,9 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
   else
     detailed_item_ = NULL;
 
-  // If we have focus the shelf should be visible and we need to continue
-  // showing the shelf when the popup is shown.
-  if (GetWidget()->IsActive())
-    should_show_launcher_ = true;
-
   UpdateNotificationBubble();  // State changed, re-create notifications.
-  status_area_widget()->HideNonSystemNotifications();
+  status_area_widget()->SetHideWebNotifications(true);
+  Shell::GetInstance()->shelf()->UpdateAutoHideState();
 }
 
 void SystemTray::UpdateNotificationBubble() {
@@ -392,7 +362,7 @@ void SystemTray::UpdateNotificationBubble() {
   if (notification_items_.empty() ||
       (bubble_.get() &&
        bubble_->bubble_type() == SystemTrayBubble::BUBBLE_TYPE_DEFAULT)) {
-    notification_bubble_.reset();
+    DestroyNotificationBubble();
     return;
   }
   if (bubble_.get() &&
@@ -404,6 +374,10 @@ void SystemTray::UpdateNotificationBubble() {
          iter != notification_items_.end(); ++ iter) {
       if (*iter != detailed_item_)
         items.push_back(*iter);
+    }
+    if (items.empty()) {
+      DestroyNotificationBubble();
+      return;
     }
     notification_bubble_.reset(new SystemTrayBubble(
         this, items, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION));
@@ -427,18 +401,20 @@ void SystemTray::UpdateNotificationBubble() {
   user::LoginStatus login_status =
       Shell::GetInstance()->tray_delegate()->GetUserLoginStatus();
   notification_bubble_->InitView(anchor, init_params, login_status);
+  if (notification_bubble_->bubble_view()->child_count() == 0) {
+    // It is possible that none of the items generated actual notifications.
+    DestroyNotificationBubble();
+    return;
+  }
   if (hide_notifications_)
     notification_bubble_->SetVisible(false);
   else
-    status_area_widget()->HideNonSystemNotifications();
+    status_area_widget()->SetHideWebNotifications(true);
 }
 
-void SystemTray::UpdateNotificationAnchor() {
-  if (!notification_bubble_.get())
-    return;
-  notification_bubble_->bubble_view()->UpdateBubble();
-  // Ensure that the notification buble is above the launcher/status area.
-  notification_bubble_->bubble_view()->GetWidget()->StackAtTop();
+void SystemTray::Initialize() {
+  internal::TrayBackgroundView::Initialize();
+  CreateItems();
 }
 
 void SystemTray::SetShelfAlignment(ShelfAlignment alignment) {
@@ -455,7 +431,21 @@ void SystemTray::SetShelfAlignment(ShelfAlignment alignment) {
   }
 }
 
-bool SystemTray::PerformAction(const views::Event& event) {
+void SystemTray::AnchorUpdated() {
+  if (notification_bubble_.get()) {
+    notification_bubble_->bubble_view()->UpdateBubble();
+    // Ensure that the notification buble is above the launcher/status area.
+    notification_bubble_->bubble_view()->GetWidget()->StackAtTop();
+  }
+  if (bubble_.get())
+    bubble_->bubble_view()->UpdateBubble();
+}
+
+string16 SystemTray::GetAccessibleName() {
+  return l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_ACCESSIBLE_NAME);
+}
+
+bool SystemTray::PerformAction(const ui::Event& event) {
   // If we're already showing the default view, hide it; otherwise, show it
   // (and hide any popup that's currently shown).
   if (bubble_.get() &&
@@ -464,8 +454,8 @@ bool SystemTray::PerformAction(const views::Event& event) {
   } else {
     int arrow_offset = TrayBubbleView::InitParams::kArrowDefaultOffset;
     if (event.IsMouseEvent() || event.type() == ui::ET_GESTURE_TAP) {
-      const views::LocatedEvent& located_event =
-          static_cast<const views::LocatedEvent&>(event);
+      const ui::LocatedEvent& located_event =
+          static_cast<const ui::LocatedEvent&>(event);
       if (shelf_alignment() == SHELF_ALIGNMENT_BOTTOM) {
         gfx::Point point(located_event.x(), 0);
         ConvertPointToWidget(this, &point);
@@ -475,38 +465,6 @@ bool SystemTray::PerformAction(const views::Event& event) {
     ShowDefaultViewWithOffset(BUBBLE_CREATE_NEW, arrow_offset);
   }
   return true;
-}
-
-void SystemTray::OnMouseEntered(const views::MouseEvent& event) {
-  TrayBackgroundView::OnMouseEntered(event);
-  should_show_launcher_ = true;
-}
-
-void SystemTray::OnMouseExited(const views::MouseEvent& event) {
-  TrayBackgroundView::OnMouseExited(event);
-  // When the popup closes we'll update |should_show_launcher_|.
-  if (!bubble_.get())
-    should_show_launcher_ = false;
-}
-
-void SystemTray::AboutToRequestFocusFromTabTraversal(bool reverse) {
-  views::View* v = GetNextFocusableView();
-  if (v)
-    v->AboutToRequestFocusFromTabTraversal(reverse);
-}
-
-void SystemTray::GetAccessibleState(ui::AccessibleViewState* state) {
-  state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
-  state->name = l10n_util::GetStringUTF16(
-      IDS_ASH_STATUS_TRAY_ACCESSIBLE_NAME);
-}
-
-void SystemTray::OnPaintFocusBorder(gfx::Canvas* canvas) {
-  // The tray itself expands to the right and bottom edge of the screen to make
-  // sure clicking on the edges brings up the popup. However, the focus border
-  // should be only around the container.
-  if (GetWidget() && GetWidget()->IsActive())
-    DrawBorder(canvas, GetContentsBounds());
 }
 
 }  // namespace ash

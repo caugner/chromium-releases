@@ -6,6 +6,16 @@
 
 namespace content {
 
+bool IsAudioMediaType(MediaStreamDeviceType type) {
+  return (type == content::MEDIA_DEVICE_AUDIO_CAPTURE ||
+          type == content::MEDIA_TAB_AUDIO_CAPTURE);
+}
+
+bool IsVideoMediaType(MediaStreamDeviceType type) {
+  return (type == content::MEDIA_DEVICE_VIDEO_CAPTURE ||
+          type == content::MEDIA_TAB_VIDEO_CAPTURE);
+}
+
 MediaStreamDevice::MediaStreamDevice(
     MediaStreamDeviceType type,
     const std::string& device_id,
@@ -14,6 +24,8 @@ MediaStreamDevice::MediaStreamDevice(
       device_id(device_id),
       name(name) {
 }
+
+MediaStreamDevice::~MediaStreamDevice() {}
 
 MediaStreamRequest::MediaStreamRequest(
     int render_process_id,
@@ -25,6 +37,12 @@ MediaStreamRequest::MediaStreamRequest(
 }
 
 MediaStreamRequest::~MediaStreamRequest() {
+  for (MediaStreamDeviceMap::iterator iter = devices.begin();
+       iter != devices.end();
+       ++iter) {
+    iter->second.clear();
+  }
+  devices.clear();
 }
 
 }  // namespace content

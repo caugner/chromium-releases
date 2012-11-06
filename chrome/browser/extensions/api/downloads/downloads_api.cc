@@ -139,7 +139,6 @@ const char* kStateStrings[] = {
   kStateInProgress,
   kStateComplete,
   kStateInterrupted,
-  NULL,
   kStateInterrupted,
 };
 COMPILE_ASSERT(arraysize(kStateStrings) == DownloadItem::MAX_DOWNLOAD_STATE,
@@ -149,6 +148,9 @@ const char* DangerString(content::DownloadDangerType danger) {
   DCHECK(danger >= 0);
   DCHECK(danger < static_cast<content::DownloadDangerType>(
       arraysize(kDangerStrings)));
+  if (danger < 0 || danger >= static_cast<content::DownloadDangerType>(
+      arraysize(kDangerStrings)))
+    return "";
   return kDangerStrings[danger];
 }
 
@@ -164,7 +166,9 @@ const char* StateString(DownloadItem::DownloadState state) {
   DCHECK(state >= 0);
   DCHECK(state < static_cast<DownloadItem::DownloadState>(
       arraysize(kStateStrings)));
-  DCHECK(state != DownloadItem::REMOVING);
+  if (state < 0 || state >= static_cast<DownloadItem::DownloadState>(
+      arraysize(kStateStrings)))
+    return "";
   return kStateStrings[state];
 }
 
@@ -186,32 +190,39 @@ bool ValidateFilename(const string16& filename) {
   return true;
 }
 
-scoped_ptr<base::DictionaryValue> DownloadItemToJSON(DownloadItem* item) {
+scoped_ptr<base::DictionaryValue> DownloadItemToJSON(
+    DownloadItem* download_item,
+    bool incognito) {
   base::DictionaryValue* json = new base::DictionaryValue();
-  json->SetInteger(kIdKey, item->GetId());
-  json->SetString(kUrlKey, item->GetOriginalUrl().spec());
-  json->SetString(kFilenameKey, item->GetFullPath().LossyDisplayName());
-  json->SetString(kDangerKey, DangerString(item->GetDangerType()));
-  if (item->GetDangerType() != content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS)
+  json->SetInteger(kIdKey, download_item->GetId());
+  json->SetString(kUrlKey, download_item->GetOriginalUrl().spec());
+  json->SetString(
+      kFilenameKey, download_item->GetFullPath().LossyDisplayName());
+  json->SetString(kDangerKey, DangerString(download_item->GetDangerType()));
+  if (download_item->GetDangerType() !=
+      content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS)
     json->SetBoolean(kDangerAcceptedKey,
-        item->GetSafetyState() == DownloadItem::DANGEROUS_BUT_VALIDATED);
-  json->SetString(kStateKey, StateString(item->GetState()));
-  json->SetBoolean(kPausedKey, item->IsPaused());
-  json->SetString(kMimeKey, item->GetMimeType());
+        download_item->GetSafetyState() ==
+        DownloadItem::DANGEROUS_BUT_VALIDATED);
+  json->SetString(kStateKey, StateString(download_item->GetState()));
+  json->SetBoolean(kPausedKey, download_item->IsPaused());
+  json->SetString(kMimeKey, download_item->GetMimeType());
   json->SetInteger(kStartTimeKey,
-      (item->GetStartTime() - base::Time::UnixEpoch()).InMilliseconds());
-  json->SetInteger(kBytesReceivedKey, item->GetReceivedBytes());
-  json->SetInteger(kTotalBytesKey, item->GetTotalBytes());
-  json->SetBoolean(kIncognito, item->IsOtr());
-  if (item->GetState() == DownloadItem::INTERRUPTED) {
-    json->SetInteger(kErrorKey, static_cast<int>(item->GetLastReason()));
-  } else if (item->GetState() == DownloadItem::CANCELLED) {
+      (download_item->GetStartTime() -
+       base::Time::UnixEpoch()).InMilliseconds());
+  json->SetInteger(kBytesReceivedKey, download_item->GetReceivedBytes());
+  json->SetInteger(kTotalBytesKey, download_item->GetTotalBytes());
+  json->SetBoolean(kIncognito, incognito);
+  if (download_item->GetState() == DownloadItem::INTERRUPTED) {
+    json->SetInteger(kErrorKey, static_cast<int>(
+        download_item->GetLastReason()));
+  } else if (download_item->GetState() == DownloadItem::CANCELLED) {
     json->SetInteger(kErrorKey, static_cast<int>(
         content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED));
   }
   // TODO(benjhayden): Implement endTime and fileSize.
   // json->SetInteger(kEndTimeKey, -1);
-  json->SetInteger(kFileSizeKey, item->GetTotalBytes());
+  json->SetInteger(kFileSizeKey, download_item->GetTotalBytes());
   return scoped_ptr<base::DictionaryValue>(json);
 }
 
@@ -310,19 +321,27 @@ void InitSortTypeMap(SortTypeMap& sorter_types) {
   sorter_types[kUrlKey] = DownloadQuery::SORT_URL;
 }
 
-bool IsNotTemporaryDownloadFilter(const DownloadItem& item) {
-  return !item.IsTemporary();
+bool IsNotTemporaryDownloadFilter(const DownloadItem& download_item) {
+  return !download_item.IsTemporary();
 }
 
+// Set |manager| to the on-record DownloadManager, and |incognito_manager| to
+// the off-record DownloadManager if one exists and is requested via
+// |include_incognito|. This should work regardless of whether |profile| is
+// original or incognito.
 void GetManagers(
     Profile* profile,
     bool include_incognito,
-    DownloadManager** manager, DownloadManager** incognito_manager) {
-  *manager = BrowserContext::GetDownloadManager(profile);
-  *incognito_manager = NULL;
-  if (include_incognito && profile->HasOffTheRecordProfile()) {
+    DownloadManager** manager,
+    DownloadManager** incognito_manager) {
+  *manager = BrowserContext::GetDownloadManager(profile->GetOriginalProfile());
+  if (profile->HasOffTheRecordProfile() &&
+      (include_incognito ||
+       profile->IsOffTheRecord())) {
     *incognito_manager = BrowserContext::GetDownloadManager(
         profile->GetOffTheRecordProfile());
+  } else {
+    *incognito_manager = NULL;
   }
 }
 
@@ -392,8 +411,8 @@ void CompileDownloadQueryOrderBy(
 
 void RunDownloadQuery(
     const extensions::api::downloads::DownloadQuery& query_in,
-    Profile* profile,
-    bool include_incognito,
+    DownloadManager* manager,
+    DownloadManager* incognito_manager,
     std::string* error,
     DownloadQuery::DownloadVector* results) {
   // TODO(benjhayden): Consider switching from LazyInstance to explicit string
@@ -449,24 +468,93 @@ void RunDownloadQuery(
     }
   }
 
-  DownloadManager* manager = NULL;
-  DownloadManager* incognito_manager = NULL;
-  GetManagers(profile, include_incognito, &manager, &incognito_manager);
   DownloadQuery::DownloadVector all_items;
   if (query_in.id.get()) {
-    DownloadItem* item = manager->GetDownload(*query_in.id.get());
-    if (!item && incognito_manager)
-      item = incognito_manager->GetDownload(*query_in.id.get());
-    if (item)
-      all_items.push_back(item);
+    DownloadItem* download_item = manager->GetDownload(*query_in.id.get());
+    if (!download_item && incognito_manager)
+      download_item = incognito_manager->GetDownload(*query_in.id.get());
+    if (download_item)
+      all_items.push_back(download_item);
   } else {
-    manager->GetAllDownloads(FilePath(FILE_PATH_LITERAL("")), &all_items);
+    manager->GetAllDownloads(&all_items);
     if (incognito_manager)
-      incognito_manager->GetAllDownloads(
-          FilePath(FILE_PATH_LITERAL("")), &all_items);
+      incognito_manager->GetAllDownloads(&all_items);
   }
+  query_out.AddFilter(base::Bind(&IsNotTemporaryDownloadFilter));
   query_out.Search(all_items.begin(), all_items.end(), results);
 }
+
+void DispatchEventInternal(
+    Profile* target_profile,
+    const char* event_name,
+    const std::string& json_args,
+    scoped_ptr<base::ListValue> event_args) {
+  if (!target_profile->GetExtensionEventRouter())
+    return;
+  target_profile->GetExtensionEventRouter()->DispatchEventToRenderers(
+      event_name,
+      event_args.Pass(),
+      target_profile,
+      GURL(),
+      extensions::EventFilteringInfo());
+
+  ExtensionDownloadsEventRouter::DownloadsNotificationSource
+    notification_source;
+  notification_source.event_name = event_name;
+  notification_source.profile = target_profile;
+  content::Source<ExtensionDownloadsEventRouter::DownloadsNotificationSource>
+    content_source(&notification_source);
+  std::string args_copy(json_args);
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT,
+      content_source,
+      content::Details<std::string>(&args_copy));
+}
+
+class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
+ public:
+  static ExtensionDownloadsEventRouterData* Get(DownloadItem* download_item) {
+    base::SupportsUserData::Data* data = download_item->GetUserData(kKey);
+    return (data == NULL) ? NULL :
+        static_cast<ExtensionDownloadsEventRouterData*>(data);
+  }
+
+  explicit ExtensionDownloadsEventRouterData(
+      DownloadItem* download_item,
+      scoped_ptr<base::DictionaryValue> json_item)
+      : updated_(0),
+        changed_fired_(0),
+        json_(json_item.Pass()) {
+    download_item->SetUserData(kKey, this);
+  }
+
+  virtual ~ExtensionDownloadsEventRouterData() {
+    if (updated_ > 0) {
+      UMA_HISTOGRAM_PERCENTAGE("Download.OnChanged",
+                               (changed_fired_ * 100 / updated_));
+    }
+  }
+
+  const base::DictionaryValue& json() const { return *json_.get(); }
+  void set_json(scoped_ptr<base::DictionaryValue> json_item) {
+    json_ = json_item.Pass();
+  }
+
+  void OnItemUpdated() { ++updated_; }
+  void OnChangedFired() { ++changed_fired_; }
+
+ private:
+  static const char kKey[];
+
+  int updated_;
+  int changed_fired_;
+  scoped_ptr<base::DictionaryValue> json_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionDownloadsEventRouterData);
+};
+
+const char ExtensionDownloadsEventRouterData::kKey[] =
+  "DownloadItem ExtensionDownloadsEventRouterData";
 
 }  // namespace
 
@@ -570,16 +658,28 @@ bool DownloadsSearchFunction::RunImpl() {
   scoped_ptr<extensions::api::downloads::Search::Params> params(
       extensions::api::downloads::Search::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
+  DownloadManager* manager = NULL;
+  DownloadManager* incognito_manager = NULL;
+  GetManagers(profile(), include_incognito(), &manager, &incognito_manager);
   DownloadQuery::DownloadVector results;
-  RunDownloadQuery(params->query, profile(), include_incognito(),
-                   &error_, &results);
+  RunDownloadQuery(params->query,
+                   manager,
+                   incognito_manager,
+                   &error_,
+                   &results);
   if (!error_.empty())
     return false;
+
   base::ListValue* json_results = new base::ListValue();
   for (DownloadManager::DownloadVector::const_iterator it = results.begin();
        it != results.end(); ++it) {
-    scoped_ptr<base::DictionaryValue> item(DownloadItemToJSON(*it));
-    json_results->Append(item.release());
+    DownloadItem* download_item = *it;
+    int32 download_id = download_item->GetId();
+    bool off_record = ((incognito_manager != NULL) &&
+                       (incognito_manager->GetDownload(download_id) != NULL));
+    scoped_ptr<base::DictionaryValue> json_item(DownloadItemToJSON(
+        *it, off_record));
+    json_results->Append(json_item.release());
   }
   SetResult(json_results);
   RecordApiFunctions(DOWNLOADS_FUNCTION_SEARCH);
@@ -728,8 +828,8 @@ bool DownloadsDragFunction::RunImpl() {
 }
 
 DownloadsGetFileIconFunction::DownloadsGetFileIconFunction()
-  : icon_size_(kDefaultIconSize),
-    icon_extractor_(new DownloadFileIconExtractorImpl()) {
+    : icon_size_(kDefaultIconSize),
+      icon_extractor_(new DownloadFileIconExtractorImpl()) {
 }
 
 DownloadsGetFileIconFunction::~DownloadsGetFileIconFunction() {}
@@ -789,74 +889,61 @@ void DownloadsGetFileIconFunction::OnIconURLExtracted(const std::string& url) {
 ExtensionDownloadsEventRouter::ExtensionDownloadsEventRouter(
     Profile* profile,
     DownloadManager* manager)
-  : profile_(profile),
-    manager_(manager) {
+    : profile_(profile),
+      ALLOW_THIS_IN_INITIALIZER_LIST(notifier_(manager, this)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(profile_);
-  DCHECK(manager_);
-  manager_->AddObserver(this);
 }
 
 ExtensionDownloadsEventRouter::~ExtensionDownloadsEventRouter() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (manager_ != NULL)
-    manager_->RemoveObserver(this);
-  for (ItemMap::const_iterator iter = downloads_.begin();
-       iter != downloads_.end(); ++iter) {
-    if (iter->second != NULL)
-      iter->second->RemoveObserver(this);
-  }
-  STLDeleteValues(&item_jsons_);
-  STLDeleteValues(&on_changed_stats_);
 }
 
-ExtensionDownloadsEventRouter::OnChangedStat::OnChangedStat()
-  : fires(0),
-    total(0) {
-}
-
-ExtensionDownloadsEventRouter::OnChangedStat::~OnChangedStat() {
-  if (total > 0)
-    UMA_HISTOGRAM_PERCENTAGE("Download.OnChanged", (fires * 100 / total));
-}
-
-void ExtensionDownloadsEventRouter::OnDownloadUpdated(DownloadItem* item) {
+void ExtensionDownloadsEventRouter::OnDownloadCreated(
+    DownloadManager* manager, DownloadItem* download_item) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  int download_id = item->GetId();
-  if (item->GetState() == DownloadItem::REMOVING) {
-    // The REMOVING state indicates that this item is being erased.
-    // Let's unregister as an observer so that we don't see any more updates
-    // from it, dispatch the onErased event, and remove its json and is
-    // OnChangedStat from our maps.
-    downloads_.erase(download_id);
-    item->RemoveObserver(this);
-    DispatchEvent(extensions::event_names::kOnDownloadErased,
-                  base::Value::CreateIntegerValue(download_id));
-    delete item_jsons_[download_id];
-    item_jsons_.erase(download_id);
-    delete on_changed_stats_[download_id];
-    on_changed_stats_.erase(download_id);
+  if (download_item->IsTemporary())
+    return;
+
+  scoped_ptr<base::DictionaryValue> json_item(
+      DownloadItemToJSON(download_item, profile_->IsOffTheRecord()));
+  DispatchEvent(extensions::event_names::kOnDownloadCreated,
+                json_item->DeepCopy());
+  if (!ExtensionDownloadsEventRouterData::Get(download_item))
+    new ExtensionDownloadsEventRouterData(download_item, json_item.Pass());
+}
+
+void ExtensionDownloadsEventRouter::OnDownloadUpdated(
+    DownloadManager* manager, DownloadItem* download_item) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (download_item->IsTemporary())
+    return;
+
+  ExtensionDownloadsEventRouterData* data =
+    ExtensionDownloadsEventRouterData::Get(download_item);
+  if (!data) {
+    // The download_item probably transitioned from temporary to not temporary.
+    OnDownloadCreated(manager, download_item);
     return;
   }
-
-  base::DictionaryValue* old_json = item_jsons_[download_id];
-  scoped_ptr<base::DictionaryValue> new_json(DownloadItemToJSON(item));
+  scoped_ptr<base::DictionaryValue> new_json(DownloadItemToJSON(
+        download_item, profile_->IsOffTheRecord()));
   scoped_ptr<base::DictionaryValue> delta(new base::DictionaryValue());
-  delta->SetInteger(kIdKey, download_id);
+  delta->SetInteger(kIdKey, download_item->GetId());
   std::set<std::string> new_fields;
   bool changed = false;
 
-  // For each field in the new json representation of the item except the
-  // bytesReceived field, if the field has changed from the previous old json,
-  // set the differences in the |delta| object and remember that something
+  // For each field in the new json representation of the download_item except
+  // the bytesReceived field, if the field has changed from the previous old
+  // json, set the differences in the |delta| object and remember that something
   // significant changed.
   for (base::DictionaryValue::Iterator iter(*new_json.get());
        iter.HasNext(); iter.Advance()) {
     new_fields.insert(iter.key());
     if (iter.key() != kBytesReceivedKey) {
-      base::Value* old_value = NULL;
-      if (!old_json->HasKey(iter.key()) ||
-          (old_json->Get(iter.key(), &old_value) &&
+      const base::Value* old_value = NULL;
+      if (!data->json().HasKey(iter.key()) ||
+          (data->json().Get(iter.key(), &old_value) &&
            !iter.value().Equals(old_value))) {
         delta->Set(iter.key() + ".current", iter.value().DeepCopy());
         if (old_value)
@@ -868,7 +955,7 @@ void ExtensionDownloadsEventRouter::OnDownloadUpdated(DownloadItem* item) {
 
   // If a field was in the previous json but is not in the new json, set the
   // difference in |delta|.
-  for (base::DictionaryValue::Iterator iter(*old_json);
+  for (base::DictionaryValue::Iterator iter(data->json());
        iter.HasNext(); iter.Advance()) {
     if (new_fields.find(iter.key()) == new_fields.end()) {
       delta->Set(iter.key() + ".previous", iter.value().DeepCopy());
@@ -878,62 +965,47 @@ void ExtensionDownloadsEventRouter::OnDownloadUpdated(DownloadItem* item) {
 
   // Update the OnChangedStat and dispatch the event if something significant
   // changed. Replace the stored json with the new json.
-  ++(on_changed_stats_[download_id]->total);
+  data->OnItemUpdated();
   if (changed) {
     DispatchEvent(extensions::event_names::kOnDownloadChanged, delta.release());
-    ++(on_changed_stats_[download_id]->fires);
+    data->OnChangedFired();
   }
-  item_jsons_[download_id]->Swap(new_json.get());
+  data->set_json(new_json.Pass());
 }
 
-void ExtensionDownloadsEventRouter::OnDownloadOpened(DownloadItem* item) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-}
-
-void ExtensionDownloadsEventRouter::OnDownloadCreated(
+void ExtensionDownloadsEventRouter::OnDownloadRemoved(
     DownloadManager* manager, DownloadItem* download_item) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(manager_ == manager);
-  if (download_item->IsTemporary()) return;
-
-  download_item->AddObserver(this);
-  scoped_ptr<base::DictionaryValue> json_item(
-      DownloadItemToJSON(download_item));
-  DispatchEvent(extensions::event_names::kOnDownloadCreated,
-                json_item->DeepCopy());
-  int32 download_id = download_item->GetId();
-  DCHECK(item_jsons_.find(download_id) == item_jsons_.end());
-  on_changed_stats_[download_id] = new OnChangedStat();
-  item_jsons_[download_id] = json_item.release();
-  downloads_[download_id] = download_item;
-}
-
-void ExtensionDownloadsEventRouter::ManagerGoingDown(
-    DownloadManager* manager) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  manager_->RemoveObserver(this);
-  manager_ = NULL;
+  if (download_item->IsTemporary())
+    return;
+  DispatchEvent(extensions::event_names::kOnDownloadErased,
+                base::Value::CreateIntegerValue(download_item->GetId()));
 }
 
 void ExtensionDownloadsEventRouter::DispatchEvent(
     const char* event_name, base::Value* arg) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  base::ListValue args;
-  args.Append(arg);
+  scoped_ptr<base::ListValue> args(new base::ListValue());
+  args->Append(arg);
   std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-  profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
-      event_name,
-      json_args,
-      profile_,
-      GURL(),
-      extensions::EventFilteringInfo());
-
-  DownloadsNotificationSource notification_source;
-  notification_source.event_name = event_name;
-  notification_source.profile = profile_;
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT,
-      content::Source<DownloadsNotificationSource>(&notification_source),
-      content::Details<std::string>(&json_args));
+  base::JSONWriter::Write(args.get(), &json_args);
+  // There is a one EDER for each on-record Profile, and a separate EDER for
+  // each off-record Profile, so there is exactly one EDER for each
+  // DownloadManager.  EDER only watches its own DM, so all the items that an
+  // EDER sees are either all on-record or all off-record. However, we want
+  // extensions in off-record contexts to see on-record items. So, if this EDER
+  // is watching an on-record DM, and there is a corresponding off-record
+  // Profile, then dispatch this event to both the on-record Profile and the
+  // off-record Profile.  There may or may not be an off-record Profile, so send
+  // a *copy* of |args| to the off-record Profile, and Pass() |args|
+  // to the Profile that we know is there.
+  if (profile_->HasOffTheRecordProfile() &&
+      !profile_->IsOffTheRecord()) {
+    DispatchEventInternal(
+        profile_->GetOffTheRecordProfile(),
+        event_name,
+        json_args,
+        scoped_ptr<base::ListValue>(args->DeepCopy()));
+  }
+  DispatchEventInternal(profile_, event_name, json_args, args.Pass());
 }

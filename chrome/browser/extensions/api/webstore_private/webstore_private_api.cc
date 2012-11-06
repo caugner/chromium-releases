@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 
+#include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string_util.h"
@@ -27,12 +29,12 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -111,33 +113,6 @@ ProfileSyncService* GetSyncService(Profile* profile) {
     return ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
 }
 
-// Whitelists extension IDs for use by webstorePrivate.silentlyInstall.
-bool trust_test_ids = false;
-
-bool IsTrustedForSilentInstall(const std::string& id) {
-  // Trust the extensions in api_test/webstore_private/bundle when the flag
-  // is set.
-  if (trust_test_ids &&
-      (id == "begfmnajjkbjdgmffnjaojchoncnmngg" ||
-       id == "bmfoocgfinpmkmlbjhcbofejhkhlbchk" ||
-       id == "mpneghmdnmaolkljkipbhaienajcflfe"))
-    return true;
-
-  return
-      id == "jgoepmocgafhnchmokaimcmlojpnlkhp" ||  // +1 Extension
-      id == "cpembckmhnjipbgbnfiocbgnkpjdokdd" ||  // +1 Extension - dev
-      id == "boemmnepglcoinjcdlfcpcbmhiecichi" ||  // Notifications
-      id == "flibmgiapaohcbondaoopaalfejliklp" ||  // Notifications - dev
-      id == "nckgahadagoaajjgafhacjanaoiihapd" ||  // Talk
-      id == "eggnbpckecmjlblplehfpjjdhhidfdoj" ||  // Talk Beta
-      id == "dlppkpafhbajpcmmoheippocdidnckmm" ||  // Remaining are placeholders
-      id == "hmglfmpefabcafaimbpldpambdfomanl" ||
-      id == "idfijlieiecpfcjckpkliefekpokhhnd" ||
-      id == "jaokjbijaokooelpahnlmbciccldmfla" ||
-      id == "kdjeommiakphmeionoojjljlecmpaldd" ||
-      id == "lpdeojkfhenboeibhkjhiancceeboknd";
-}
-
 // Helper to create a dictionary with login and token properties set from
 // the appropriate values in the passed-in |profile|.
 DictionaryValue* CreateLoginResult(Profile* profile) {
@@ -172,11 +147,6 @@ void WebstorePrivateApi::SetTestingProfileSyncService(
 void WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(
     WebstoreInstaller::Delegate* delegate) {
   test_webstore_installer_delegate = delegate;
-}
-
-// static
-void WebstorePrivateApi::SetTrustTestIDsForTesting(bool allow) {
-  trust_test_ids = allow;
 }
 
 // static
@@ -479,83 +449,6 @@ bool CompleteInstallFunction::RunImpl() {
   return true;
 }
 
-SilentlyInstallFunction::SilentlyInstallFunction() {}
-SilentlyInstallFunction::~SilentlyInstallFunction() {}
-
-bool SilentlyInstallFunction::RunImpl() {
-  DictionaryValue* details = NULL;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &details));
-  CHECK(details);
-
-  EXTENSION_FUNCTION_VALIDATE(details->GetString(kIdKey, &id_));
-  if (!IsTrustedForSilentInstall(id_)) {
-    error_ = kInvalidIdError;
-    return false;
-  }
-
-  EXTENSION_FUNCTION_VALIDATE(details->GetString(kManifestKey, &manifest_));
-
-  // Matched in OnWebstoreParseFailure, OnExtensionInstall{Success,Failure}.
-  AddRef();
-
-  scoped_refptr<WebstoreInstallHelper> helper = new WebstoreInstallHelper(
-      this, id_, manifest_, std::string(), GURL(), NULL);
-  helper->Start();
-
-  return true;
-}
-
-void SilentlyInstallFunction::OnWebstoreParseSuccess(
-    const std::string& id,
-    const SkBitmap& icon,
-    base::DictionaryValue* parsed_manifest) {
-  CHECK_EQ(id_, id);
-
-  // This lets CrxInstaller bypass the permission confirmation UI for the
-  // extension. The whitelist entry gets cleared in
-  // CrxInstaller::ConfirmInstall.
-  scoped_ptr<WebstoreInstaller::Approval> approval(
-      WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
-          profile(), id_, scoped_ptr<base::DictionaryValue>(parsed_manifest)));
-  approval->skip_post_install_ui = true;
-
-  scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
-      profile(), this,
-      &(dispatcher()->delegate()->GetAssociatedWebContents()->GetController()),
-      id_, approval.Pass(), WebstoreInstaller::FLAG_NONE);
-  installer->Start();
-}
-
-void SilentlyInstallFunction::OnWebstoreParseFailure(
-    const std::string& id,
-    InstallHelperResultCode result_code,
-    const std::string& error_message) {
-  CHECK_EQ(id_, id);
-
-  error_ = error_message;
-  SendResponse(false);
-
-  Release();  // Matches the AddRef() in RunImpl().
-}
-
-void SilentlyInstallFunction::OnExtensionInstallSuccess(const std::string& id) {
-  CHECK_EQ(id_, id);
-
-  SendResponse(true);
-
-  Release();  // Matches the AddRef() in RunImpl().
-}
-
-void SilentlyInstallFunction::OnExtensionInstallFailure(
-    const std::string& id, const std::string& error) {
-  CHECK_EQ(id_, id);
-
-  error_ = error;
-  SendResponse(false);
-
-  Release();  // Matches the AddRef() in RunImpl().
-}
-
 bool GetBrowserLoginFunction::RunImpl() {
   SetResult(CreateLoginResult(profile_->GetOriginalProfile()));
   return true;
@@ -585,7 +478,8 @@ bool SetStoreLoginFunction::RunImpl() {
 GetWebGLStatusFunction::GetWebGLStatusFunction() {
   feature_checker_ = new GPUFeatureChecker(
       content::GPU_FEATURE_TYPE_WEBGL,
-      base::Bind(&GetWebGLStatusFunction::OnFeatureCheck, this));
+      base::Bind(&GetWebGLStatusFunction::OnFeatureCheck,
+          base::Unretained(this)));
 }
 
 GetWebGLStatusFunction::~GetWebGLStatusFunction() {}

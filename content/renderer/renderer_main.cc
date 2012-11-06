@@ -57,16 +57,23 @@ void InstallFrameworkHacks() {
   // See http://crbug.com/31225
   // TODO: Don't do this on newer OS X revisions that have a fix for
   // http://openradar.appspot.com/radar?id=1156410
-  if (base::mac::IsOSSnowLeopardOrLater()) {
-    // Chinese Handwriting was introduced in 10.6. Since doing this override
-    // regresses page cycler memory usage on 10.5, don't do the unnecessary
-    // override there.
-    mach_error_t err = mach_override_ptr(
-        (void*)&TISCreateInputSourceList,
-        (void*)&ChromeTISCreateInputSourceList,
-        NULL);
-    CHECK_EQ(err_none, err);
-  }
+  // To check if this is broken:
+  // 1. Enable Multi language input (simplified chinese)
+  // 2. Ensure "Show/Hide Trackpad Handwriting" shortcut works.
+  //    (ctrl+shift+space).
+  // 3. Now open a new tab in Google Chrome or start Google Chrome
+  // 4. Try ctrl+shift+space shortcut again. Shortcut will not work, IME will
+  //    either not appear or (worse) not disappear on ctrl-shift-space.
+  //    (Run `ps aux | grep Chinese` (10.6/10.7) or `ps aux | grep Trackpad`
+  //    and then kill that pid to make it go away.)
+
+  // Chinese Handwriting was introduced in 10.6 and is confirmed broken on
+  // 10.6, 10.7, and 10.8.
+  mach_error_t err = mach_override_ptr(
+      (void*)&TISCreateInputSourceList,
+      (void*)&ChromeTISCreateInputSourceList,
+      NULL);
+  CHECK_EQ(err_none, err);
 }
 
 #endif  // OS_MACOSX
@@ -178,10 +185,10 @@ int RendererMain(const content::MainFunctionParams& parameters) {
   // Initialize histogram statistics gathering system.
   base::StatisticsRecorder::Initialize();
 
-  // Initialize statistical testing infrastructure.  We set client_id to the
-  // empty string to disallow the renderer process from creating its own
-  // one-time randomized trials; they should be created in the browser process.
-  base::FieldTrialList field_trial(EmptyString());
+  // Initialize statistical testing infrastructure.  We set the entropy provider
+  // to NULL to disallow the renderer process from creating its own one-time
+  // randomized trials; they should be created in the browser process.
+  base::FieldTrialList field_trial_list(NULL);
   // Ensure any field trials in browser are reflected into renderer.
   if (parsed_command_line.HasSwitch(switches::kForceFieldTrials)) {
     std::string persistent = parsed_command_line.GetSwitchValueASCII(
@@ -205,6 +212,12 @@ int RendererMain(const content::MainFunctionParams& parameters) {
       run_loop = platform.EnableSandbox();
     } else {
       LOG(ERROR) << "Running without renderer sandbox";
+#ifndef NDEBUG
+      // For convenience, we print the stack trace for crashes. We can't get
+      // symbols when the sandbox is enabled, so only try when the sandbox is
+      // disabled.
+      base::EnableInProcessStackDumping();
+#endif
     }
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     RenderProcessImpl render_process;

@@ -102,23 +102,40 @@ class UI_EXPORT Cursor {
 
   int native_type() const { return native_type_; }
   PlatformCursor platform() const { return platform_cursor_; }
+  float device_scale_factor() const {
+    return device_scale_factor_;
+  }
+  void set_device_scale_factor(float device_scale_factor) {
+    device_scale_factor_ = device_scale_factor;
+  }
 
   bool operator==(int type) const { return native_type_ == type; }
   bool operator==(const Cursor& cursor) const {
     return native_type_ == cursor.native_type_ &&
-           platform_cursor_ == cursor.platform_cursor_;
+           platform_cursor_ == cursor.platform_cursor_ &&
+           device_scale_factor_ == cursor.device_scale_factor_;
   }
   bool operator!=(int type) const { return native_type_ != type; }
   bool operator!=(const Cursor& cursor) const {
     return native_type_ != cursor.native_type_ ||
-           platform_cursor_ != cursor.platform_cursor_;
+           platform_cursor_ != cursor.platform_cursor_ ||
+           device_scale_factor_ != cursor.device_scale_factor_;
+  }
+
+  void operator=(const Cursor& cursor) {
+    Assign(cursor);
   }
 
  private:
+  void Assign(const Cursor& cursor);
+
   // See definitions above.
   int native_type_;
 
   PlatformCursor platform_cursor_;
+
+  // The device scale factor for the cursor.
+  float device_scale_factor_;
 };
 
 }  // namespace ui

@@ -43,7 +43,7 @@ const char* GetPageTransitionString(
     ENUM_CASE(sync_pb::SyncEnums, AUTO_SUBFRAME);
     ENUM_CASE(sync_pb::SyncEnums, MANUAL_SUBFRAME);
     ENUM_CASE(sync_pb::SyncEnums, GENERATED);
-    ENUM_CASE(sync_pb::SyncEnums, START_PAGE);
+    ENUM_CASE(sync_pb::SyncEnums, AUTO_TOPLEVEL);
     ENUM_CASE(sync_pb::SyncEnums, FORM_SUBMIT);
     ENUM_CASE(sync_pb::SyncEnums, RELOAD);
     ENUM_CASE(sync_pb::SyncEnums, KEYWORD);
@@ -162,6 +162,20 @@ const char* GetFaviconTypeString(
                      TYPE_WEB_FAVICON);
   switch (favicon_type) {
     ENUM_CASE(sync_pb::SessionTab, TYPE_WEB_FAVICON);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* PassphraseTypeString(
+    sync_pb::NigoriSpecifics::PassphraseType type) {
+  ASSERT_ENUM_BOUNDS(sync_pb::NigoriSpecifics, PassphraseType,
+                     IMPLICIT_PASSPHRASE, CUSTOM_PASSPHRASE);
+  switch (type) {
+    ENUM_CASE(sync_pb::NigoriSpecifics, IMPLICIT_PASSPHRASE);
+    ENUM_CASE(sync_pb::NigoriSpecifics, KEYSTORE_PASSPHRASE);
+    ENUM_CASE(sync_pb::NigoriSpecifics, FROZEN_IMPLICIT_PASSPHRASE);
+    ENUM_CASE(sync_pb::NigoriSpecifics, CUSTOM_PASSPHRASE);
   }
   NOTREACHED();
   return "";

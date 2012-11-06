@@ -6,11 +6,12 @@
 
 #include <algorithm>
 
+#include "ash/caps_lock_delegate_stub.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/test_launcher_delegate.h"
+#include "ash/wm/window_util.h"
 #include "content/public/test/test_browser_context.h"
-#include "grit/ui_resources.h"
 #include "ui/aura/window.h"
 
 namespace ash {
@@ -30,6 +31,10 @@ bool TestShellDelegate::IsUserLoggedIn() {
 
 bool TestShellDelegate::IsSessionStarted() {
   return true;
+}
+
+bool TestShellDelegate::IsFirstRunAfterBoot() {
+  return false;
 }
 
 void TestShellDelegate::LockScreen() {
@@ -56,6 +61,12 @@ void TestShellDelegate::NewTab() {
 void TestShellDelegate::NewWindow(bool incognito) {
 }
 
+void TestShellDelegate::ToggleMaximized() {
+  aura::Window* window = ash::wm::GetActiveWindow();
+  if (window)
+    ash::wm::ToggleMaximizedWindow(window);
+}
+
 void TestShellDelegate::OpenFileManager(bool as_dialog) {
 }
 
@@ -79,7 +90,8 @@ void TestShellDelegate::ShowTaskManager() {
 }
 
 content::BrowserContext* TestShellDelegate::GetCurrentBrowserContext() {
-  return new content::TestBrowserContext();
+  current_browser_context_.reset(new content::TestBrowserContext());
+  return current_browser_context_.get();
 }
 
 void TestShellDelegate::ToggleSpokenFeedback() {
@@ -108,6 +120,10 @@ UserWallpaperDelegate* TestShellDelegate::CreateUserWallpaperDelegate() {
   return NULL;
 }
 
+CapsLockDelegate* TestShellDelegate::CreateCapsLockDelegate() {
+  return new CapsLockDelegateStub;
+}
+
 aura::client::UserActionClient* TestShellDelegate::CreateUserActionClient() {
   return NULL;
 }
@@ -116,6 +132,19 @@ void TestShellDelegate::OpenFeedbackPage() {
 }
 
 void TestShellDelegate::RecordUserMetricsAction(UserMetricsAction action) {
+}
+
+void TestShellDelegate::HandleMediaNextTrack() {
+}
+
+void TestShellDelegate::HandleMediaPlayPause() {
+}
+
+void TestShellDelegate::HandleMediaPrevTrack() {
+}
+
+string16 TestShellDelegate::GetTimeRemainingString(base::TimeDelta delta) {
+  return string16();
 }
 
 }  // namespace test

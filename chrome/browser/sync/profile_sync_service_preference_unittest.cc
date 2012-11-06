@@ -24,10 +24,10 @@
 #include "chrome/browser/sync/glue/ui_data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "sync/api/sync_data.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/change_record.h"
@@ -133,7 +133,7 @@ class ProfileSyncServicePreferenceTest
     EXPECT_CALL(*factory, GetSyncableServiceForType(syncer::PREFERENCES)).
         WillOnce(Return(pref_sync_service_->AsWeakPtr()));
 
-    EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _)).
         WillOnce(ReturnNewDataTypeManager());
     dtc_ = new UIDataTypeController(syncer::PREFERENCES,
                                     factory,

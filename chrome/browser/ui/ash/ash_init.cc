@@ -14,10 +14,9 @@
 #include "base/command_line.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/ui/ash/caps_lock_handler.h"
+#include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 #include "chrome/browser/ui/ash/event_rewriter.h"
 #include "chrome/browser/ui/ash/screenshot_taker.h"
-#include "chrome/browser/ui/views/ash/chrome_shell_delegate.h"
 #include "chrome/common/chrome_switches.h"
 #include "ui/aura/aura_switches.h"
 #include "ui/aura/display_manager.h"
@@ -27,12 +26,12 @@
 
 #if defined(OS_CHROMEOS)
 #include "base/chromeos/chromeos_version.h"
-#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/ui/ash/volume_controller_chromeos.h"
 #include "chrome/browser/ui/ash/brightness_controller_chromeos.h"
 #include "chrome/browser/ui/ash/ime_controller_chromeos.h"
 #include "chrome/browser/ui/ash/keyboard_brightness_controller_chromeos.h"
+#include "chrome/browser/ui/ash/volume_controller_chromeos.h"
+#include "ui/base/x/x11_util.h"
 #endif
 
 
@@ -50,14 +49,18 @@ void OpenAsh() {
       switches::kAuraHostWindowUseFullscreen);
 
 #if defined(OS_CHROMEOS)
-  if (base::chromeos::IsRunningOnChromeOS())
+  if (base::chromeos::IsRunningOnChromeOS()) {
     use_fullscreen = true;
+    // Hides the cursor outside of the Aura root window. The cursor will be
+    // drawn within the Aura root window, and it'll remain hidden after the
+    // Aura window is closed.
+    ui::HideHostCursor();
+  }
 #endif
 
   if (use_fullscreen) {
     aura::DisplayManager::set_use_fullscreen_host_window(true);
 #if defined(OS_CHROMEOS)
-    aura::RootWindow::set_hide_host_cursor(true);
     // Hide the mouse cursor completely at boot.
     if (!chromeos::UserManager::Get()->IsUserLoggedIn())
       ash::Shell::set_initially_hide_cursor(true);
@@ -78,18 +81,11 @@ void OpenAsh() {
   shell->accelerator_controller()->SetBrightnessControlDelegate(
       scoped_ptr<ash::BrightnessControlDelegate>(
           new BrightnessController).Pass());
-  chromeos::input_method::XKeyboard* xkeyboard =
-      chromeos::input_method::InputMethodManager::GetInstance()->GetXKeyboard();
-  shell->accelerator_controller()->SetCapsLockDelegate(
-      scoped_ptr<ash::CapsLockDelegate>(new CapsLockHandler(xkeyboard)).Pass());
   shell->accelerator_controller()->SetImeControlDelegate(
       scoped_ptr<ash::ImeControlDelegate>(new ImeController).Pass());
   shell->accelerator_controller()->SetKeyboardBrightnessControlDelegate(
       scoped_ptr<ash::KeyboardBrightnessControlDelegate>(
           new KeyboardBrightnessController).Pass());
-  shell->accelerator_controller()->SetVolumeControlDelegate(
-      scoped_ptr<ash::VolumeControlDelegate>(new VolumeController).Pass());
-
   ash::Shell::GetInstance()->high_contrast_controller()->SetEnabled(
       chromeos::accessibility::IsHighContrastEnabled());
 

@@ -149,6 +149,7 @@
 <translation id="5564962323737505851">Nastavi upravitelja gesel. Če je omogočen, lahko izberete, ali želite omogočiti ali onemogočiti, ali lahko uporabnik prikaže gesla z vidnim besedilom.</translation>
 <translation id="4668325077104657568">Nastavitev privzetih slik</translation>
 <translation id="7161193985878519056">Način brez beleženja zgodovine je onemogočen.</translation>
+<translation id="2524379983318108884">Omogočanje snemanja zvoka</translation>
 <translation id="4492287494009043413">Onemogoči ustvarjanje posnetkov zaslona</translation>
 <translation id="6368403635025849609">Dovoli JavaScript na teh mestih</translation>
 <translation id="6074963268421707432">Nobenemu spletnemu mestu ne dovoli, da pokaže namizna obvestila</translation>
@@ -251,19 +252,13 @@
       Nekatere spletne aplikacije zavzamejo veliko povezav, ki se prenehajo odzivati, zato lahko znižanje vrednosti pod 32 povzroči neodzivnost povezav brskalnika z omrežjem, če je odprtih preveč takšnih aplikacij. Vrednost znižate pod privzeto na svojo odgovornost.
 
       Če ta pravilnik ni nastavljen, bo uporabljena privzeta vrednost, ki je 32.</translation>
+<translation id="5395271912574071439">Omogoča zakrivanja gostiteljev za oddaljeni dostop, ko je vzpostavljena povezava.
+
+          Če je ta nastavitev omogočena, so vhodne in izhodne naprave gostitelja onemogočene, ko je vzpostavljena povezava na daljavo.
+
+          Če je ta nastavitev onemogočena ali ni nastavljena, lahko lokalni in oddaljeni uporabniki komunicirajo z gostiteljem, ko je v skupni rabi.</translation>
 <translation id="2312509925391670075">Vprašaj vsakič, ko želi spletno mesto dostop do moje kamere in/ali mikrofona</translation>
 <translation id="1426410128494586442">Da</translation>
-<translation id="1692788808502061374">Omogoča določitev razširitev, ki se namestijo v ozadju, brez poseganja uporabnika.
-
-          Vsak element na seznamu je niz z ID-jem razširitve in URL-jem za posodobitev, ki sta ločena s podpičjem (<ph name="SEMICOLON"/>). ID razširitve je 32-mestni niz, ki ga lahko na primer najdete na <ph name="CHROME_EXTENSIONS_LINK"/> v načinu za razvijalce. URL za posodobitev mora vsebovati povezavo na dokument XML za posodobitev manifesta, kot je opisano na <ph name="LINK_TO_EXTENSION_DOC1"/>.
-
-          Za vsak element <ph name="PRODUCT_NAME"/> iz storitve za posodobitev na določenem URL-ju prenese razširitev, določeno v ID-ju razširitve, in jo namesti v ozadju.
-
-          Na primer, <ph name="EXTENSION_POLICY_EXAMPLE"/> z običajnega URL-ja za posodobitev Spletne trgovine Chrome namesti razširitev <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/>. Če želite več informacij o gostovanju razširitev, glejte: <ph name="LINK_TO_EXTENSION_DOC2"/>.
-
-          Uporabniki lahko odstranijo razširitve, določene s tem pravilnikom. Če razširitev odstranite s tega seznama, jo <ph name="PRODUCT_NAME"/> samodejno odstrani.
-
-          Če ta pravilnik ni nastavljen, lahko uporabnik razširitve odstrani v brskalniku <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="4962195944157514011">Določi URL iskalnika, ki se uporablja pri privzetem iskanju. URL mora vsebovati niz »<ph name="SEARCH_TERM_MARKER"/>«, ki ga bodo ob času poizvedbe nadomestili izrazi, ki jih išče uporabnik.
 
           Ta možnost mora biti nastavljena, ko je omogočen pravilnik »DefaultSearchProviderEnabled«, in bo veljala samo v tem primeru.</translation>
@@ -333,6 +328,13 @@
 
           Če to nastavitev onemogočite ali je ne nastavite, ustvarjeni SPN za Kerberos v nobenem primeru ne bo vključeval vrat.</translation>
 <translation id="3236046242843493070">Vzorci URL-jev, ki omogočajo namestitev razširitev, aplikacij in uporabniških skriptov iz</translation>
+<translation id="3442095178490656861">Določi časovni pas za napravo. Uporabniki lahko določeni časovni pas za trenutno sejo preglasijo. Pri odjavi je spet nastavljen določeni časovni pas. Če je vnesena neveljavna vrednost, je pravilnik kljub temu aktiviran s časovnim pasom »GMT«.
+
+      Če ta pravilnik ni uporabljen, se uporablja trenutno aktivni časovni pas. Če uporabniki spremenijo časovni pas, je sprememba vidna povsod. Sprememba časovnega pasu zato vpliva na zaslon za prijavo in na vse druge uporabnike.
+
+      Nove naprave imajo na začetku nastavljen časovni pas »ameriški/tihomorski«.
+
+      Oblika vrednosti je v skladu z imeni časovnih pasov v zbirki podatkov o časovnih pasovih IANA (glejte »http://en.wikipedia.org/wiki/List_of_tz_database_time«). Veliko časovnih pasov je mogoče navesti kot »celina/vele_mesto« ali »ocean/vele_mesto«.</translation>
 <translation id="8992176907758534924">Nobenemu spletnemu mestu ne dovoli prikaza slik</translation>
 <translation id="262740370354162807">Omogoča pošiljanje dokumentov v storitev <ph name="CLOUD_PRINT_NAME"/></translation>
 <translation id="8704831857353097849">Seznam onemogočenih vtičnikov</translation>
@@ -412,6 +414,7 @@
 
       Če pravilnik ni nastavljen, lahko uporabnik spremeni seznam pripetih aplikacij v zaganjalniku.</translation>
 <translation id="7625444193696794922">Določa kanal za izdajo, na katerega naj bo zaklenjena ta naprava.</translation>
+<translation id="2552966063069741410">Časovni pas</translation>
 <translation id="3088288048720661397">Če je pravilnik nastavljen na »True«, je sinhronizacija z Google Dokumenti onemogočena, ko je vzpostavljena mobilna povezava. V tem primeru se podatki sinhronizirajo z Google Dokumenti samo v omrežju Wi-Fi ali prek ethernetne povezave.
 
           Če pravilnik ni nastavljen ali je nastavljen na »False«, lahko uporabniki prenesejo datoteke v Google Dokumente prek mobilnih povezav.</translation>
@@ -510,6 +513,7 @@
       Če to nastavitev omogočite ali ne nastavite vrednosti zanjo, ostane samodejno izpolnjevanje pod nadzorom uporabnikov. Nastavili bodo lahko profile za samodejno izpolnjevanje in ga poljubno vklapljali ali izklapljali.</translation>
 <translation id="6157537876488211233">Seznam pravil za obvod proxyja, ločenih z vejico</translation>
 <translation id="3965339130942650562">Časovna omejitev za odjavo nedejavnega uporabnika</translation>
+<translation id="5293547923319914979">Omogočanje zakrivanja gostiteljev za oddaljeni dostop.</translation>
 <translation id="7091198954851103976">Vedno izvedi vtičnike, ki zahtevajo dovoljenje</translation>
 <translation id="2021307518684405078">Ne dovoli nobenemu spletnemu mestu dostopa do moje kamere in mikrofona</translation>
 <translation id="8870318296973696995">Domača stran</translation>
@@ -568,6 +572,13 @@
           Če ta pravilnik ni nastavljen, je omogočen privzeti ponudnik iskanja in bo lahko uporabnik nastavil seznam ponudnikov iskanja.</translation>
 <translation id="8731693562790917685">Z nastavitvami vsebine lahko določite, kako se obravnava vsebina različnih vrst (npr. piškotki, slike ali JavaScript).</translation>
 <translation id="2411919772666155530">Blokiraj obvestila na teh mestih</translation>
+<translation id="5281259077246025371">Omogočanje snemanja zvoka.
+
+      Če je ta pravilnik nastavljen na »False«, snemanje zvoka v napravi ni na voljo, ko je uporabnik prijavljen.
+
+      Ta pravilnik vpliva na vse vrste zvočnega snemanja, ne samo na snemanje z vgrajenim mikrofonom.
+
+      Če je ta nastavitev nastavljena na »True« ali ni določena, lahko uporabniki uporabljajo vse podprte funkcije zvočnega snemanja v napravi.</translation>
 <translation id="6923366716660828830">Določa ime privzetega ponudnika iskanja. Če pravilnik ostane prazen ali če ni nastavljen, bo uporabljeno ime gostitelja, določeno z URL-jem iskanja.
 
           Ta pravilnik velja le, če je omogočen pravilnik »DefaultSearchProviderEnabled«.</translation>
@@ -617,6 +628,13 @@
           Če omogočite to možnost, je uporabniki ne morejo spremeniti ali preglasiti v storitvi <ph name="PRODUCT_NAME"/>.
 
           Če to nastavitev onemogočite, je enako, kot če je ne nastavite. Uporabnik jo lahko spremeni v storitvi <ph name="PRODUCT_NAME"/>.</translation>
+<translation id="8161570238552664224">Omogočanje predvajanje zvoka.
+
+      Če je ta pravilnik nastavljen na »False«, zvok v napravi ni na voljo, ko je uporabnik prijavljen.
+
+      Ta pravilnik vpliva na vse vrste zvočnega predvajanja, ne samo na predvajanje iz vgrajenih zvočnikov. Onemogočene so tudi zvočne funkcije za ljudi s posebnimi potrebami. Če uporabnik potrebuje bralnik zaslona, tega pravilnika ne omogočite.
+
+      Če je ta nastavitev nastavljena na »True« ali ni določena, lahko uporabniki uporabljajo vse podprte izhodne zvočne funkcije v napravi.</translation>
 <translation id="5761030451068906335">Določi nastavitve proxyja za <ph name="PRODUCT_NAME"/>.
 
       Ta pravilnik še ni primeren za uporabo, zato ga ne uporabljajte.</translation>
@@ -785,6 +803,7 @@
       Če to nastavitev omogočite ali onemogočite, je uporabniki v brskalniku <ph name="PRODUCT_NAME"/> ne morejo spremeniti ali preglasiti.
 
       Če tega pravilnika ne nastavite, lahko uporabnik izbere, ali bo gumb za domačo stran prikazan.</translation>
+<translation id="2518231489509538392">Omogočanje predvajanje zvoka</translation>
 <translation id="7547044444554936129">Omogoča funkcijo dinamičnega iskanja v brskalniku <ph name="PRODUCT_NAME"/> in preprečuje uporabnikom spreminjanje te nastavitve.
 
       Če to nastavitev omogočite, je dinamično iskanje v <ph name="PRODUCT_NAME"/> omogočeno.
@@ -867,6 +886,7 @@
           Če tega pravilnika ne nastavite, bo za integrirano preverjanje pristnosti sprejet kateri koli strežnik.</translation>
 <translation id="2299220924812062390">Določi seznam omogočenih vtičnikov</translation>
 <translation id="924557436754151212">Uvoz shranjenih gesel privzetega brskalnika pri prvem zagonu</translation>
+<translation id="1465619815762735808">Kliknite za predvajanje</translation>
 <translation id="7227967227357489766">Določa seznam uporabnikov, ki se lahko prijavijo v napravo. Vnosi so v obliki <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, na primer <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Če želite omogočiti poljubne uporabnike v domeni, naj bodo vnosi v obliki <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
       Če pravilnik ni nastavljen, se lahko prijavijo vsi uporabniki. Če ustvarite nove uporabnike, morate ustrezno nastaviti pravilnik <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/>.</translation>
@@ -934,6 +954,11 @@
 <translation id="8631434304112909927">do različice <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Omogoči predloge za iskanje</translation>
 <translation id="4906194810004762807">Osveži oceno za pravilnik za naprave</translation>
+<translation id="1398889361882383850">Omogoča nastavitev, ali je spletnim mestom dovoljeno samodejno izvajati vtičnike. Samodejno izvajanje vtičnikov je mogoče dovoliti za vsa spletna mesta ali zavrniti za vsa spletna mesta.
+
+          Klik za predvajanje omogoča izvajanje vtičnikov, vendar jih mora uporabnik klikniti, da se začnejo izvajati.
+
+          Če ta pravilnik ni nastavljen, se uporabi »AllowPlugins«, vendar lahko uporabnik to spremeni.</translation>
 <translation id="7974114691960514888">Ta pravilnik ni več podprt.
           Omogoča uporabo strežnikov STUN in posredovalnih strežnikov pri povezovanju z oddaljenim odjemalcem.
 
@@ -967,9 +992,6 @@
       Če to nastavitev omogočite, <ph name="PRODUCT_NAME"/> uporabi nastavljene območne nastavitve. Če nastavljene območne nastavitve niso podprte, bo uporabljena nastavitev »en-US«.
 
      Če to nastavitev onemogočite ali je ne nastavite, <ph name="PRODUCT_NAME"/> uporabi prednostne območne nastavitve, ki jih izbere uporabnik (če so nastavljene), sistemske območne nastavitve ali rezervne območne nastavitve (»en-US«).</translation>
-<translation id="7271483295221961083">Omogoča nastavitev, ali lahko spletna mesta samodejno izvajajo vtičnike. Samodejno izvajanje vtičnikov je lahko dovoljeno ali zavrnjeno za vsa spletna mesta.
-
-          Če ta pravilnik ni nastavljen, bo uporabljen pravilnik »AllowPlugins«, uporabnik pa tega ne bo mogel spremeniti.</translation>
 <translation id="718956142899066210">Dovoljene vrste povezav za posodobitve</translation>
 <translation id="6985168562472482191">Ime spletne trgovine podjetja, ki bo prikazano pod ikono programa na strani novega zavihka. Ta nastavitev nima učinka, če ni nastavljen pravilnik »EnterpriseWebStoreURL«.
 
@@ -1057,6 +1079,17 @@
 <translation id="6658245400435704251">Določa število sekund, do katerega lahko naprava naključno odloži prenos posodobitve od trenutka, ko je bila posodobitev prvič na voljo v strežniku. Naprava lahko del tega časa čaka v smislu dejansko pretečenega časa, preostali del pa v smislu števila preverjanj za posodobitve. Razpršitev je v vsakem primeru omejena navzgor na nespremenljiv čas, tako da se ne more zgoditi, da bi naprava neomejen čas čakala na prenos posodobitve.</translation>
 <translation id="1948757837129151165">Pravilniki za preverjanje pristnosti HTTP</translation>
 <translation id="5946082169633555022">Preskusna različica</translation>
+<translation id="145467868108778033">Omogoča določitev seznama razširitev, ki se namestijo v ozadju brez poseganja uporabnika.
+
+          Vsak element na seznamu je niz, ki vsebuje ID razširitve in URL za posodobitev, ločen s podpičjem (<ph name="SEMICOLON"/>). ID razširitve je 32-mestni niz, ki ga je mogoče v načinu za razvijalce najti na primer na <ph name="CHROME_EXTENSIONS_LINK"/>. URL za posodobitev mora kazati na dokument XML manifesta za posodobitev, kot je opisano na <ph name="LINK_TO_EXTENSION_DOC1"/>. URL za posodobitev, nastavljen v tem pravilniku, se uporabi samo pri začetni namestitvi; pri vseh nadaljnjih posodobitvah razširitve je uporabljen URL za posodobitev, naveden v manifestu razširitve.
+
+          <ph name="PRODUCT_NAME"/> iz storitve za posodobitev na navedenem URL-ju za posodobitev prenese razširitev za vsak element in jo namesti v ozadju.
+
+          <ph name="EXTENSION_POLICY_EXAMPLE"/> namesti na primer razširitev <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> s standardnega URL-ja za posodobitev spletne trgovine Chrome. Več informacij o gostovanju razširitev najdete na <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Uporabniki ne morejo odstraniti razširitev, določenih s tem pravilnikom. Če razširitev odstranite s seznama, jo <ph name="PRODUCT_NAME"/> samodejno odstrani.
+
+          Če ta pravilnik ni nastavljen, lahko uporabniki odstranijo katero koli razširitev v storitvi <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="8303314579975657113">Določa, katera knjižnica GSSAPI bo uporabljena za preverjanje pristnosti HTTP. Nastavite lahko samo ime knjižnice ali celotno pot.
 
           Če ni določena nobena nastavitev, <ph name="PRODUCT_NAME"/> uporabi privzeto ime knjižnice.</translation>

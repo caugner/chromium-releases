@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
@@ -14,6 +15,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/favicon_size.h"
 
 FaviconSource::FaviconSource(Profile* profile, IconType type)
     : DataSource(type == FAVICON ? chrome::kChromeUIFaviconHost :
@@ -43,7 +45,7 @@ void FaviconSource::StartDataRequest(const std::string& path,
                                      bool is_incognito,
                                      int request_id) {
   FaviconService* favicon_service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
   if (!favicon_service || path.empty()) {
     SendDefaultResponse(request_id);
     return;
@@ -52,9 +54,11 @@ void FaviconSource::StartDataRequest(const std::string& path,
   FaviconService::Handle handle;
   if (path.size() > 8 && path.substr(0, 8) == "iconurl/") {
     // TODO : Change GetFavicon to support combination of IconType.
-    handle = favicon_service->GetFavicon(
+    handle = favicon_service->GetRawFavicon(
         GURL(path.substr(8)),
         history::FAVICON,
+        gfx::kFaviconSize,
+        ui::SCALE_FACTOR_100P,
         &cancelable_consumer_,
         base::Bind(&FaviconSource::OnFaviconDataAvailable,
                    base::Unretained(this)));
@@ -104,10 +108,14 @@ void FaviconSource::StartDataRequest(const std::string& path,
     }
 
     // TODO(estade): fetch the requested size.
-    handle = favicon_service->GetFaviconForURL(
-        url,
-        icon_types_,
-        &cancelable_consumer_,
+    handle = favicon_service->GetRawFaviconForURL(
+        FaviconService::FaviconForURLParams(
+            profile_,
+            url,
+            icon_types_,
+            gfx::kFaviconSize,
+            &cancelable_consumer_),
+        ui::SCALE_FACTOR_100P,
         base::Bind(&FaviconSource::OnFaviconDataAvailable,
                    base::Unretained(this)));
   }
@@ -130,15 +138,15 @@ bool FaviconSource::ShouldReplaceExistingSource() const {
 
 void FaviconSource::OnFaviconDataAvailable(
     FaviconService::Handle request_handle,
-    history::FaviconData favicon) {
+    const history::FaviconBitmapResult& bitmap_result) {
   FaviconService* favicon_service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
   int request_id = cancelable_consumer_.GetClientData(favicon_service,
                                                       request_handle);
 
-  if (favicon.is_valid()) {
+  if (bitmap_result.is_valid()) {
     // Forward the data along to the networking system.
-    SendResponse(request_id, favicon.image_data);
+    SendResponse(request_id, bitmap_result.bitmap_data);
   } else {
     SendDefaultResponse(request_id);
   }

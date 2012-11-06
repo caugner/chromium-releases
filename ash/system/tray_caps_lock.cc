@@ -4,12 +4,12 @@
 
 #include "ash/system/tray_caps_lock.h"
 
+#include "ash/caps_lock_delegate.h"
 #include "ash/shell.h"
-#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -55,9 +55,16 @@ class CapsLockDefaultView : public ActionableView {
         IDS_ASH_STATUS_TRAY_CAPS_LOCK_DISABLED;
     text_label_->SetText(bundle.GetLocalizedString(text_string_id));
 
-    const int shortcut_string_id = search_mapped_to_caps_lock ?
-        IDS_ASH_STATUS_TRAY_CAPS_LOCK_SHORTCUT_SEARCH :
-        IDS_ASH_STATUS_TRAY_CAPS_LOCK_SHORTCUT_SHIFT_SEARCH;
+    int shortcut_string_id = 0;
+    if (caps_lock_enabled) {
+      shortcut_string_id = search_mapped_to_caps_lock ?
+          IDS_ASH_STATUS_TRAY_CAPS_LOCK_SHORTCUT_SEARCH_OR_SHIFT :
+          IDS_ASH_STATUS_TRAY_CAPS_LOCK_SHORTCUT_ALT_SEARCH_OR_SHIFT;
+    } else {
+      shortcut_string_id = search_mapped_to_caps_lock ?
+          IDS_ASH_STATUS_TRAY_CAPS_LOCK_SHORTCUT_SEARCH :
+          IDS_ASH_STATUS_TRAY_CAPS_LOCK_SHORTCUT_ALT_SEARCH;
+    }
     shortcut_label_->SetText(bundle.GetLocalizedString(shortcut_string_id));
 
     Layout();
@@ -84,9 +91,8 @@ class CapsLockDefaultView : public ActionableView {
   }
 
   // Overridden from ActionableView:
-  virtual bool PerformAction(const views::Event& event) OVERRIDE {
-    Shell::GetInstance()->tray_delegate()->SetCapsLockEnabled(
-        !Shell::GetInstance()->tray_delegate()->IsCapsLockOn());
+  virtual bool PerformAction(const ui::Event& event) OVERRIDE {
+    Shell::GetInstance()->caps_lock_delegate()->ToggleCapsLock();
     return true;
   }
 
@@ -102,14 +108,14 @@ TrayCapsLock::TrayCapsLock()
       detailed_(NULL),
       search_mapped_to_caps_lock_(false),
       caps_lock_enabled_(
-          Shell::GetInstance()->tray_delegate()->IsCapsLockOn()),
+          Shell::GetInstance()->caps_lock_delegate()->IsCapsLockEnabled()),
       message_shown_(false) {
 }
 
 TrayCapsLock::~TrayCapsLock() {}
 
 bool TrayCapsLock::GetInitialVisibility() {
-  return Shell::GetInstance()->tray_delegate()->IsCapsLockOn();
+  return Shell::GetInstance()->caps_lock_delegate()->IsCapsLockEnabled();
 }
 
 views::View* TrayCapsLock::CreateDefaultView(user::LoginStatus status) {
@@ -137,8 +143,8 @@ views::View* TrayCapsLock::CreateDetailedView(user::LoginStatus status) {
   detailed_->AddChildView(image);
 
   const int string_id = search_mapped_to_caps_lock_ ?
-      IDS_ASH_STATUS_TRAY_CAPS_LOCK_ENABLED_PRESS_SEARCH :
-      IDS_ASH_STATUS_TRAY_CAPS_LOCK_ENABLED_PRESS_SHIFT_AND_SEARCH_KEYS;
+      IDS_ASH_STATUS_TRAY_CAPS_LOCK_CANCEL_BY_SEARCH :
+      IDS_ASH_STATUS_TRAY_CAPS_LOCK_CANCEL_BY_ALT_SEARCH;
   views::Label* label = new views::Label(bundle.GetLocalizedString(string_id));
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);

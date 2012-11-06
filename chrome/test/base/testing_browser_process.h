@@ -38,10 +38,6 @@ namespace prerender {
 class PrerenderTracker;
 }
 
-namespace ui {
-class Clipboard;
-}
-
 class TestingBrowserProcess : public BrowserProcess {
  public:
   TestingBrowserProcess();
@@ -70,13 +66,12 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual chromeos::OomPriorityManager* oom_priority_manager() OVERRIDE;
 #endif  // defined(OS_CHROMEOS)
 
-  virtual ui::Clipboard* clipboard() OVERRIDE;
   virtual extensions::EventRouterForwarder*
       extension_event_router_forwarder() OVERRIDE;
   virtual NotificationUIManager* notification_ui_manager() OVERRIDE;
   virtual IntranetRedirectDetector* intranet_redirect_detector() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
-  virtual void InitDevToolsHttpProtocolHandler(
+  virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
       const std::string& ip,
       int port,
@@ -115,7 +110,6 @@ class TestingBrowserProcess : public BrowserProcess {
  private:
   scoped_ptr<content::NotificationService> notification_service_;
   unsigned int module_ref_count_;
-  scoped_ptr<ui::Clipboard> clipboard_;
   std::string app_locale_;
 
   // Weak pointer.

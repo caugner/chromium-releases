@@ -152,8 +152,10 @@ void QueueProfileDirectoryForDeletion(const FilePath& path) {
 // Called upon completion of profile creation. This function takes care of
 // launching a new browser window and signing the user in to their Google
 // account.
-void OnOpenWindowForNewProfile(Profile* profile,
-                               Profile::CreateStatus status) {
+void OnOpenWindowForNewProfile(
+    const ProfileManager::CreateCallback& callback,
+    Profile* profile,
+    Profile::CreateStatus status) {
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
     ProfileManager::FindOrCreateNewWindowForProfile(
         profile,
@@ -161,6 +163,8 @@ void OnOpenWindowForNewProfile(Profile* profile,
         chrome::startup::IS_FIRST_RUN,
         false);
   }
+  if (!callback.is_null())
+    callback.Run(profile, status);
 }
 
 #if defined(OS_CHROMEOS)
@@ -239,6 +243,7 @@ ProfileManager::ProfileManager(const FilePath& user_data_dir)
     : user_data_dir_(user_data_dir),
       logged_in_(false),
       will_import_(false),
+      profile_shortcut_manager_(NULL),
 #if !defined(OS_ANDROID)
       ALLOW_THIS_IN_INITIALIZER_LIST(
           browser_list_observer_(this)),
@@ -266,13 +271,13 @@ ProfileManager::ProfileManager(const FilePath& user_data_dir)
       this,
       chrome::NOTIFICATION_BROWSER_CLOSE_CANCELLED,
       content::NotificationService::AllSources());
+
+  if (ProfileShortcutManager::IsFeatureEnabled() && !user_data_dir.empty())
+    profile_shortcut_manager_.reset(ProfileShortcutManager::Create(
+                                   this));
 }
 
 ProfileManager::~ProfileManager() {
-#if defined(OS_WIN)
-  if (profile_shortcut_manager_.get())
-    profile_info_cache_->RemoveObserver(profile_shortcut_manager_.get());
-#endif
 }
 
 FilePath ProfileManager::GetDefaultProfileDir(
@@ -418,10 +423,11 @@ Profile* ProfileManager::GetProfile(const FilePath& profile_dir) {
   return profile;
 }
 
-void ProfileManager::CreateProfileAsync(const FilePath& profile_path,
-                                        const CreateCallback& callback,
-                                        const string16& name,
-                                        const string16& icon_url) {
+void ProfileManager::CreateProfileAsync(
+    const FilePath& profile_path,
+    const CreateCallback& callback,
+    const string16& name,
+    const string16& icon_url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Make sure that this profile is not pending deletion.
@@ -467,8 +473,8 @@ void ProfileManager::CreateDefaultProfileAsync(const CreateCallback& callback) {
   default_profile_dir = default_profile_dir.Append(
       profile_manager->GetInitialProfileDir());
 
-  profile_manager->CreateProfileAsync(default_profile_dir, callback,
-                                      string16(), string16());
+  profile_manager->CreateProfileAsync(
+      default_profile_dir, callback, string16(), string16());
 }
 
 bool ProfileManager::AddProfile(Profile* profile) {
@@ -488,8 +494,9 @@ bool ProfileManager::AddProfile(Profile* profile) {
   return true;
 }
 
-ProfileManager::ProfileInfo* ProfileManager::RegisterProfile(Profile* profile,
-                                                             bool created) {
+ProfileManager::ProfileInfo* ProfileManager::RegisterProfile(
+    Profile* profile,
+    bool created) {
   ProfileInfo* info = new ProfileInfo(profile, created);
   profiles_info_.insert(std::make_pair(profile->GetPath(), info));
   return info;
@@ -656,6 +663,13 @@ void ProfileManager::BrowserListObserver::OnBrowserRemoved(
 
 void ProfileManager::BrowserListObserver::OnBrowserSetLastActive(
     Browser* browser) {
+  // If all browsers are being closed (e.g. the user is in the process of
+  // shutting down), this event will be fired after each browser is
+  // closed. This does not represent a user intention to change the active
+  // browser so is not handled here.
+  if (profile_manager_->closing_all_browsers_)
+    return;
+
   Profile* last_active = browser->profile();
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
@@ -673,9 +687,6 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
   InitProfileUserPrefs(profile);
   AddProfileToCache(profile);
   DoFinalInitLogging(profile);
-#if defined(OS_WIN)
-  CreateDesktopShortcut(profile);
-#endif
 
   ProfileMetrics::LogNumberOfProfiles(this, ProfileMetrics::ADD_PROFILE_EVENT);
   content::NotificationService::current()->Notify(
@@ -688,6 +699,7 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
 void ProfileManager::DoFinalInitForServices(Profile* profile,
                                             bool go_off_the_record) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+#if defined(ENABLE_EXTENSIONS)
   extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
       !go_off_the_record);
   // During tests, when |profile| is an instance of TestingProfile,
@@ -696,6 +708,7 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
     profile->GetHostContentSettingsMap()->RegisterExtensionService(
         extensions::ExtensionSystem::Get(profile)->extension_service());
   }
+#endif
   if (!command_line.HasSwitch(switches::kDisableWebResources))
     profile->InitPromoResources();
 }
@@ -703,9 +716,11 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
 void ProfileManager::DoFinalInitLogging(Profile* profile) {
   // Count number of extensions in this profile.
   int extension_count = -1;
+#if defined(ENABLE_EXTENSIONS)
   ExtensionService* extension_service = profile->GetExtensionService();
   if (extension_service)
     extension_count = extension_service->GetAppIds().size();
+#endif
 
   // Log the profile size after a reasonable startup delay.
   BrowserThread::PostDelayedTask(
@@ -724,12 +739,6 @@ Profile* ProfileManager::CreateProfileAsyncHelper(const FilePath& path,
                                 delegate,
                                 Profile::CREATE_MODE_ASYNCHRONOUS);
 }
-
-#if defined(OS_WIN)
-ProfileShortcutManagerWin* ProfileManager::CreateShortcutManager() {
-  return new ProfileShortcutManagerWin();
-}
-#endif
 
 void ProfileManager::OnProfileCreated(Profile* profile,
                                       bool success,
@@ -790,8 +799,10 @@ FilePath ProfileManager::GenerateNextProfileDirectoryPath() {
 }
 
 // static
-void ProfileManager::CreateMultiProfileAsync(const string16& name,
-                                             const string16& icon_url) {
+void ProfileManager::CreateMultiProfileAsync(
+    const string16& name,
+    const string16& icon_url,
+    const CreateCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -799,7 +810,8 @@ void ProfileManager::CreateMultiProfileAsync(const string16& name,
   FilePath new_path = profile_manager->GenerateNextProfileDirectoryPath();
 
   profile_manager->CreateProfileAsync(new_path,
-                                      base::Bind(&OnOpenWindowForNewProfile),
+                                      base::Bind(&OnOpenWindowForNewProfile,
+                                          callback),
                                       name, icon_url);
 }
 
@@ -831,18 +843,12 @@ ProfileInfoCache& ProfileManager::GetProfileInfoCache() {
   if (!profile_info_cache_.get()) {
     profile_info_cache_.reset(new ProfileInfoCache(
         g_browser_process->local_state(), user_data_dir_));
-#if defined(OS_WIN)
-    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    ProfileShortcutManagerWin* shortcut_manager = CreateShortcutManager();
-    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-    if (dist && dist->CanCreateDesktopShortcuts() && shortcut_manager &&
-        !command_line.HasSwitch(switches::kDisableDesktopShortcuts)) {
-      profile_shortcut_manager_.reset(shortcut_manager);
-      profile_info_cache_->AddObserver(profile_shortcut_manager_.get());
-    }
-#endif
   }
   return *profile_info_cache_.get();
+}
+
+ProfileShortcutManager* ProfileManager::profile_shortcut_manager() {
+  return profile_shortcut_manager_.get();
 }
 
 void ProfileManager::AddProfileToCache(Profile* profile) {
@@ -870,28 +876,6 @@ void ProfileManager::AddProfileToCache(Profile* profile) {
                           icon_index);
 }
 
-#if defined(OS_WIN)
-void ProfileManager::CreateDesktopShortcut(Profile* profile) {
-  // TODO(sail): Disable creating new shortcuts for now.
-  return;
-
-  // Some distributions and tests cannot create desktop shortcuts, in which case
-  // profile_shortcut_manager_ will not be set.
-  if (!profile_shortcut_manager_.get())
-    return;
-
-  bool shortcut_created =
-      profile->GetPrefs()->GetBoolean(prefs::kProfileShortcutCreated);
-  if (!shortcut_created && GetNumberOfProfiles() > 1) {
-    profile_shortcut_manager_->AddProfileShortcut(profile->GetPath());
-
-    // We only ever create the shortcut for a profile once, so set a pref
-    // reminding us to skip this in the future.
-    profile->GetPrefs()->SetBoolean(prefs::kProfileShortcutCreated, true);
-  }
-}
-#endif
-
 void ProfileManager::InitProfileUserPrefs(Profile* profile) {
   ProfileInfoCache& cache = GetProfileInfoCache();
 
@@ -899,7 +883,7 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
     return;
 
   // Initialize the user preferences (name and avatar) only if the profile
-  // doesn't have default preferenc values for them.
+  // doesn't have default preference values for them.
   if (HasAnyDefaultUserPrefs(profile)) {
     size_t profile_cache_index =
         cache.GetIndexOfProfileWithPath(profile->GetPath());
@@ -946,8 +930,8 @@ void ProfileManager::ScheduleProfileForDeletion(const FilePath& profile_dir) {
   if (cache.GetNumberOfProfiles() == 1) {
     FilePath new_path = GenerateNextProfileDirectoryPath();
 
-    CreateProfileAsync(new_path, base::Bind(&OnOpenWindowForNewProfile),
-                       string16(), string16());
+    CreateProfileAsync(new_path, base::Bind(&OnOpenWindowForNewProfile,
+                       CreateCallback()), string16(), string16());
   }
 
   // Update the last used profile pref before closing browser windows. This way
@@ -988,12 +972,11 @@ void ProfileManager::ScheduleProfileForDeletion(const FilePath& profile_dir) {
 
 // static
 bool ProfileManager::IsMultipleProfilesEnabled() {
+#if defined(OS_ANDROID)
+  return false;
+#endif
 #if defined(OS_CHROMEOS)
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles))
-    return false;
-#endif
-#if defined(OS_WIN)
-  if (base::win::IsMetroProcess())
     return false;
 #endif
   return !ManagedMode::IsInManagedMode();
@@ -1032,6 +1015,13 @@ void ProfileManager::RunCallbacks(const std::vector<CreateCallback>& callbacks,
                                   Profile::CreateStatus status) {
   for (size_t i = 0; i < callbacks.size(); ++i)
     callbacks[i].Run(profile, status);
+}
+
+ProfileManager::ProfileInfo::ProfileInfo(
+    Profile* profile,
+    bool created)
+    : profile(profile),
+      created(created) {
 }
 
 ProfileManager::ProfileInfo::~ProfileInfo() {

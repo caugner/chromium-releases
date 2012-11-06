@@ -78,7 +78,8 @@ class RenderMessageFilter : public BrowserMessageFilter {
                       BrowserContext* browser_context,
                       net::URLRequestContextGetter* request_context,
                       RenderWidgetHelper* render_widget_helper,
-                      MediaObserver* media_observer);
+                      MediaObserver* media_observer,
+                      DOMStorageContextImpl* dom_storage_context);
 
   // IPC::ChannelProxy::MessageFilter methods:
   virtual void OnChannelClosing() OVERRIDE;
@@ -166,6 +167,11 @@ class RenderMessageFilter : public BrowserMessageFilter {
                              IPC::Message* reply_msg);
   void OnOpenChannelToPepperPlugin(const FilePath& path,
                                    IPC::Message* reply_msg);
+  void OnDidCreateOutOfProcessPepperInstance(int plugin_child_id,
+                                             int32 pp_instance,
+                                             int render_view_id);
+  void OnDidDeleteOutOfProcessPepperInstance(int plugin_child_id,
+                                             int32 pp_instance);
   void OnOpenChannelToPpapiBroker(int routing_id,
                                   int request_id,
                                   const FilePath& path);

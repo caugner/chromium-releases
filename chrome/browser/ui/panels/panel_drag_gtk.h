@@ -43,7 +43,7 @@ class PanelDragGtk {
                                  GtkWidget* titlebar_widget);
 
  private:
-  friend class NativePanelTestingGtk;
+  friend class GtkNativePanelTesting;
 
   enum DragState {
     NOT_DRAGGING,

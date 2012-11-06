@@ -5,8 +5,11 @@
 /**
  * @fileoverview New tab page
  * This is the main code for the new tab page used by touch-enabled Chrome
- * browsers.  For now this is still a prototype.
- */
+ * browsers. NewTabView manages page list and dot list and handles apps pages
+ * callbacks from backend.
+ *
+ * Note that you need to have AppLauncherHandler in your WebUI to use this code.
+*/
 
 // Use an anonymous function to enable strict mode just for this file (which
 // will be concatenated with other files when embedded in Chrome
@@ -47,10 +50,18 @@ cr.define('ntp', function() {
   var shouldShowLoginBubble = false;
 
   /**
-   * The 'other-sessions-menu-button' element.
-   * @type {!Element|undefined}
+   * The total number of thumbnails that were hovered over.
+   * @type {number}
+   * @private
    */
-  var otherSessionsButton;
+  var hoveredThumbnailCount = 0;
+
+  /**
+   * The time when all sections are ready.
+   * @type {number|undefined}
+   * @private
+   */
+  var startTime;
 
   /**
    * The time in milliseconds for most transitions.  This should match what's
@@ -72,46 +83,591 @@ cr.define('ntp', function() {
   };
 
   /**
-   * Creates a NewTabView object. NewTabView extends PageListView with
-   * new tab UI specific logics.
+   * Creates a NewTabView object.
    * @constructor
-   * @extends {PageListView}
    */
   function NewTabView() {
-    var pageSwitcherStart = null;
-    var pageSwitcherEnd = null;
-    if (loadTimeData.getValue('showApps')) {
-      pageSwitcherStart = getRequiredElement('page-switcher-start');
-      pageSwitcherEnd = getRequiredElement('page-switcher-end');
-    }
     this.initialize(getRequiredElement('page-list'),
                     getRequiredElement('dot-list'),
-                    getRequiredElement('card-slider-frame'),
-                    getRequiredElement('trash'),
-                    pageSwitcherStart, pageSwitcherEnd);
+                    getRequiredElement('card-slider-frame'));
   }
 
   NewTabView.prototype = {
-    __proto__: ntp.PageListView.prototype,
+    /**
+     * The CardSlider object to use for changing app pages.
+     * @type {CardSlider|undefined}
+     */
+    cardSlider: undefined,
 
-    /** @inheritDoc */
-    appendTilePage: function(page, title, titleIsEditable, opt_refNode) {
-      ntp.PageListView.prototype.appendTilePage.apply(this, arguments);
+    /**
+     * The frame div for this.cardSlider.
+     * @type {!Element|undefined}
+     */
+    sliderFrame: undefined,
+
+    /**
+     * The 'page-list' element.
+     * @type {!Element|undefined}
+     */
+    pageList: undefined,
+
+    /**
+     * A list of all 'tile-page' elements.
+     * @type {!NodeList|undefined}
+     */
+    tilePages: undefined,
+
+    /**
+     * A list of all 'apps-page' elements.
+     * @type {!NodeList|undefined}
+     */
+    appsPages: undefined,
+
+    /**
+     * The Most Visited page.
+     * @type {!Element|undefined}
+     */
+    mostVisitedPage: undefined,
+
+    /**
+     * The Recently Closed page.
+     * @type {!Element|undefined}
+     */
+    recentlyClosedPage: undefined,
+
+    /**
+     * The 'dots-list' element.
+     * @type {!Element|undefined}
+     */
+    dotList: undefined,
+
+    /**
+     * The type of page that is currently shown. The value is a numerical ID.
+     * @type {number}
+     */
+    shownPage: 0,
+
+    /**
+     * The index of the page that is currently shown, within the page type.
+     * For example if the third Apps page is showing, this will be 2.
+     * @type {number}
+     */
+    shownPageIndex: 0,
+
+    /**
+     * EventTracker for managing event listeners for page events.
+     * @type {!EventTracker}
+     */
+    eventTracker: new EventTracker,
+
+    /**
+     * If non-null, this is the ID of the app to highlight to the user the next
+     * time getAppsCallback runs. "Highlight" in this case means to switch to
+     * the page and run the new tile animation.
+     * @type {?string}
+     */
+    highlightAppId: null,
+
+    /**
+     * Initializes new tab view.
+     * @param {!Element} pageList A DIV element to host all pages.
+     * @param {!Element} dotList An UL element to host nav dots. Each dot
+     *     represents a page.
+     * @param {!Element} cardSliderFrame The card slider frame that hosts
+     *     pageList.
+     */
+    initialize: function(pageList, dotList, cardSliderFrame) {
+      this.pageList = pageList;
+
+      this.dotList = dotList;
+      cr.ui.decorate(this.dotList, ntp.DotList);
+
+      this.shownPage = loadTimeData.getInteger('shown_page_type');
+      this.shownPageIndex = loadTimeData.getInteger('shown_page_index');
+
+      if (loadTimeData.getBoolean('showApps')) {
+        // Request data on the apps so we can fill them in.
+        // Note that this is kicked off asynchronously.  'getAppsCallback' will
+        // be invoked at some point after this function returns.
+        chrome.send('getApps');
+      } else if (this.shownPage == loadTimeData.getInteger('apps_page_id')) {
+        // No apps page.
+        this.setShownPage_(
+            loadTimeData.getInteger('most_visited_page_id'), 0);
+      }
+
+      document.addEventListener('keydown', this.onDocKeyDown_.bind(this));
+      // Prevent touch events from triggering any sort of native scrolling.
+      document.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+      }, true);
+
+      this.tilePages = this.pageList.getElementsByClassName('tile-page');
+      this.appsPages = this.pageList.getElementsByClassName('apps-page');
+
+      // Initialize the cardSlider without any cards at the moment.
+      this.sliderFrame = cardSliderFrame;
+      this.cardSlider = new cr.ui.CardSlider(this.sliderFrame, this.pageList,
+          this.sliderFrame.offsetWidth);
+
+      var cardSlider = this.cardSlider;
+      this.cardSlider.initialize(
+          loadTimeData.getBoolean('isSwipeTrackingFromScrollEventsEnabled'));
+
+      // Handle events from the card slider.
+      this.pageList.addEventListener('cardSlider:card_changed',
+                                     this.onCardChanged_.bind(this));
+      this.pageList.addEventListener('cardSlider:card_added',
+                                     this.onCardAdded_.bind(this));
+      this.pageList.addEventListener('cardSlider:card_removed',
+                                     this.onCardRemoved_.bind(this));
+
+      // Ensure the slider is resized appropriately with the window.
+      window.addEventListener('resize', this.onWindowResize_.bind(this));
+
+      // Update apps when online state changes.
+      window.addEventListener('online',
+          this.updateOfflineEnabledApps_.bind(this));
+      window.addEventListener('offline',
+          this.updateOfflineEnabledApps_.bind(this));
+    },
+
+    /**
+     * Appends a tile page.
+     *
+     * @param {TilePage} page The page element.
+     * @param {string} title The title of the tile page.
+     * @param {TilePage} opt_refNode Optional reference node to insert in front
+     *     of.
+     * When opt_refNode is falsey, |page| will just be appended to the end of
+     * the page list.
+     */
+    appendTilePage: function(page, title, opt_refNode) {
+      if (opt_refNode) {
+        var refIndex = this.getTilePageIndex(opt_refNode);
+        this.cardSlider.addCardAtIndex(page, refIndex);
+      } else {
+        this.cardSlider.appendCard(page);
+      }
+
+      // Remember special MostVisitedPage.
+      if (typeof ntp.MostVisitedPage != 'undefined' &&
+          page instanceof ntp.MostVisitedPage) {
+        assert(this.tilePages.length == 1,
+               'MostVisitedPage should be added as first tile page');
+        this.mostVisitedPage = page;
+      }
+
+      if (typeof ntp.RecentlyClosedPage != 'undefined' &&
+          page instanceof ntp.RecentlyClosedPage) {
+        this.recentlyClosedPage = page;
+      }
+
+      // Make a deep copy of the dot template to add a new one.
+      var newDot = new ntp.NavDot(page, title);
+      page.navigationDot = newDot;
+      this.dotList.insertBefore(newDot,
+                                opt_refNode ? opt_refNode.navigationDot : null);
+      // Set a tab index on the first dot.
+      if (this.dotList.dots.length == 1)
+        newDot.tabIndex = 3;
 
       if (infoBubble)
         window.setTimeout(infoBubble.reposition.bind(infoBubble), 0);
-    }
+    },
+
+    /**
+     * Called by chrome when an app has changed positions.
+     * @param {Object} appData The data for the app. This contains page and
+     *     position indices.
+     */
+    appMoved: function(appData) {
+      assert(loadTimeData.getBoolean('showApps'));
+
+      var app = $(appData.id);
+      assert(app, 'trying to move an app that doesn\'t exist');
+      app.remove(false);
+
+      this.appsPages[appData.page_index].insertApp(appData, false);
+    },
+
+    /**
+     * Called by chrome when an existing app has been disabled or
+     * removed/uninstalled from chrome.
+     * @param {Object} appData A data structure full of relevant information for
+     *     the app.
+     * @param {boolean} isUninstall True if the app is being uninstalled;
+     *     false if the app is being disabled.
+     * @param {boolean} fromPage True if the removal was from the current page.
+     */
+    appRemoved: function(appData, isUninstall, fromPage) {
+      assert(loadTimeData.getBoolean('showApps'));
+
+      var app = $(appData.id);
+      assert(app, 'trying to remove an app that doesn\'t exist');
+
+      if (!isUninstall)
+        app.replaceAppData(appData);
+      else
+        app.remove(!!fromPage);
+    },
+
+    /**
+     * @return {boolean} If the page is still starting up.
+     * @private
+     */
+    isStartingUp_: function() {
+      return document.documentElement.classList.contains('starting-up');
+    },
+
+    /**
+     * Tracks whether apps have been loaded at least once.
+     * @type {boolean}
+     * @private
+     */
+    appsLoaded_: false,
+
+    /**
+     * Callback invoked by chrome with the apps available.
+     *
+     * Note that calls to this function can occur at any time, not just in
+     * response to a getApps request. For example, when a user
+     * installs/uninstalls an app on another synchronized devices.
+     * @param {Object} data An object with all the data on available
+     *        applications.
+     */
+    getAppsCallback: function(data) {
+      assert(loadTimeData.getBoolean('showApps'));
+
+      var startTime = Date.now();
+
+      // Remember this to select the correct card when done rebuilding.
+      var prevCurrentCard = this.cardSlider.currentCard;
+
+      // Make removal of pages and dots as quick as possible with less DOM
+      // operations, reflows, or repaints. We set currentCard = 0 and remove
+      // from the end to not encounter any auto-magic card selections in the
+      // process and we hide the card slider throughout.
+      this.cardSlider.currentCard = 0;
+
+      // Clear any existing apps pages and dots.
+      // TODO(rbyers): It might be nice to preserve animation of dots after an
+      // uninstall. Could we re-use the existing page and dot elements?  It
+      // seems unfortunate to have Chrome send us the entire apps list after an
+      // uninstall.
+      while (this.appsPages.length > 0)
+        this.removeTilePageAndDot_(this.appsPages[this.appsPages.length - 1]);
+
+      // Get the array of apps and add any special synthesized entries
+      var apps = data.apps;
+
+      // Get a list of page names
+      var pageNames = data.appPageNames;
+
+      function stringListIsEmpty(list) {
+        for (var i = 0; i < list.length; i++) {
+          if (list[i])
+            return false;
+        }
+        return true;
+      }
+
+      // Sort by launch ordinal
+      apps.sort(function(a, b) {
+        return a.app_launch_ordinal > b.app_launch_ordinal ? 1 :
+          a.app_launch_ordinal < b.app_launch_ordinal ? -1 : 0;
+      });
+
+      // An app to animate (in case it was just installed).
+      var highlightApp;
+
+      // If there are any pages after the apps, add new pages before them.
+      var lastAppsPage = (this.appsPages.length > 0) ?
+          this.appsPages[this.appsPages.length - 1] : null;
+      var lastAppsPageIndex = (lastAppsPage != null) ?
+          Array.prototype.indexOf.call(this.tilePages, lastAppsPage) : -1;
+      var nextPageAfterApps = lastAppsPageIndex != -1 ?
+          this.tilePages[lastAppsPageIndex + 1] : null;
+
+      // Add the apps, creating pages as necessary
+      for (var i = 0; i < apps.length; i++) {
+        var app = apps[i];
+        var pageIndex = app.page_index || 0;
+        while (pageIndex >= this.appsPages.length) {
+          var pageName = loadTimeData.getString('appDefaultPageName');
+          if (this.appsPages.length < pageNames.length)
+            pageName = pageNames[this.appsPages.length];
+
+          var origPageCount = this.appsPages.length;
+          this.appendTilePage(new ntp.AppsPage(), pageName, nextPageAfterApps);
+          // Confirm that appsPages is a live object, updated when a new page is
+          // added (otherwise we'd have an infinite loop)
+          assert(this.appsPages.length == origPageCount + 1,
+                 'expected new page');
+        }
+
+        if (app.id == this.highlightAppId)
+          highlightApp = app;
+        else
+          this.appsPages[pageIndex].insertApp(app, false);
+      }
+
+      this.cardSlider.currentCard = prevCurrentCard;
+
+      if (highlightApp)
+        this.appAdded(highlightApp, true);
+
+      logEvent('apps.layout: ' + (Date.now() - startTime));
+
+      // Tell the slider about the pages and mark the current page.
+      this.updateSliderCards();
+      this.cardSlider.currentCardValue.navigationDot.classList.add('selected');
+
+      if (!this.appsLoaded_) {
+        this.appsLoaded_ = true;
+        cr.dispatchSimpleEvent(document, 'sectionready', true, true);
+      }
+    },
+
+    /**
+     * Called by chrome when a new app has been added to chrome or has been
+     * enabled if previously disabled.
+     * @param {Object} appData A data structure full of relevant information for
+     *     the app.
+     * @param {boolean=} opt_highlight Whether the app about to be added should
+     *     be highlighted.
+     */
+    appAdded: function(appData, opt_highlight) {
+      assert(loadTimeData.getBoolean('showApps'));
+
+      if (appData.id == this.highlightAppId) {
+        opt_highlight = true;
+        this.highlightAppId = null;
+      }
+
+      var pageIndex = appData.page_index || 0;
+
+      if (pageIndex >= this.appsPages.length) {
+        while (pageIndex >= this.appsPages.length) {
+          this.appendTilePage(new ntp.AppsPage(),
+                              loadTimeData.getString('appDefaultPageName'));
+        }
+        this.updateSliderCards();
+      }
+
+      var page = this.appsPages[pageIndex];
+      var app = $(appData.id);
+      if (app) {
+        app.replaceAppData(appData);
+      } else if (opt_highlight) {
+        page.insertAndHighlightApp(appData);
+        this.setShownPage_(loadTimeData.getInteger('apps_page_id'),
+                           appData.page_index);
+      } else {
+        page.insertApp(appData, false);
+      }
+    },
+
+    /**
+     * Callback invoked by chrome whenever an app preference changes.
+     * @param {Object} data An object with all the data on available
+     *     applications.
+     */
+    appsPrefChangedCallback: function(data) {
+      assert(loadTimeData.getBoolean('showApps'));
+
+      for (var i = 0; i < data.apps.length; ++i) {
+        $(data.apps[i].id).appData = data.apps[i];
+      }
+    },
+
+    /**
+     * Invoked whenever the pages in apps-page-list have changed so that
+     * the Slider knows about the new elements.
+     */
+    updateSliderCards: function() {
+      var pageNo = Math.max(0, Math.min(this.cardSlider.currentCard,
+                                        this.tilePages.length - 1));
+      this.cardSlider.setCards(Array.prototype.slice.call(this.tilePages),
+                               pageNo);
+      switch (this.shownPage) {
+        case loadTimeData.getInteger('apps_page_id'):
+          this.cardSlider.selectCardByValue(
+              this.appsPages[Math.min(this.shownPageIndex,
+                                      this.appsPages.length - 1)]);
+          break;
+        case loadTimeData.getInteger('most_visited_page_id'):
+          if (this.mostVisitedPage)
+            this.cardSlider.selectCardByValue(this.mostVisitedPage);
+          break;
+        case loadTimeData.getInteger('recently_closed_page_id'):
+          if (this.recentlyClosedPage)
+            this.cardSlider.selectCardByValue(this.recentlyClosedPage);
+          break;
+      }
+    },
+
+    /**
+     * Returns the index of the given apps page.
+     * @param {AppsPage} page The AppsPage we wish to find.
+     * @return {number} The index of |page| or -1 if it is not in the
+     *    collection.
+     */
+    getAppsPageIndex: function(page) {
+      return Array.prototype.indexOf.call(this.appsPages, page);
+    },
+
+    /**
+     * Handler for cardSlider:card_changed events from this.cardSlider.
+     * @param {Event} e The cardSlider:card_changed event.
+     * @private
+     */
+    onCardChanged_: function(e) {
+      var page = e.cardSlider.currentCardValue;
+
+      // Don't change shownPage until startup is done (and page changes actually
+      // reflect user actions).
+      if (!this.isStartingUp_()) {
+        if (page.classList.contains('apps-page')) {
+          this.setShownPage_(loadTimeData.getInteger('apps_page_id'),
+                             this.getAppsPageIndex(page));
+        } else if (page.classList.contains('most-visited-page')) {
+          this.setShownPage_(
+              loadTimeData.getInteger('most_visited_page_id'), 0);
+        } else if (page.classList.contains('recently-closed-page')) {
+          this.setShownPage_(
+              loadTimeData.getInteger('recently_closed_page_id'), 0);
+        } else {
+          console.error('unknown page selected');
+        }
+      }
+
+      // Update the active dot
+      var curDot = this.dotList.getElementsByClassName('selected')[0];
+      if (curDot)
+        curDot.classList.remove('selected');
+      page.navigationDot.classList.add('selected');
+    },
+
+    /**
+     * Saves/updates the newly selected page to open when first loading the NTP.
+     * @type {number} shownPage The new shown page type.
+     * @type {number} shownPageIndex The new shown page index.
+     * @private
+     */
+    setShownPage_: function(shownPage, shownPageIndex) {
+      assert(shownPageIndex >= 0);
+      this.shownPage = shownPage;
+      this.shownPageIndex = shownPageIndex;
+      chrome.send('pageSelected', [this.shownPage, this.shownPageIndex]);
+    },
+
+    /**
+     * Listen for card additions to update the current card accordingly.
+     * @param {Event} e A card removed or added event.
+     */
+    onCardAdded_: function(e) {
+      // When the second arg passed to insertBefore is falsey, it acts just like
+      // appendChild.
+      this.pageList.insertBefore(e.addedCard, this.tilePages[e.addedIndex]);
+      this.onCardAddedOrRemoved_();
+    },
+
+    /**
+     * Listen for card removals to update the current card accordingly.
+     * @param {Event} e A card removed or added event.
+     */
+    onCardRemoved_: function(e) {
+      e.removedCard.parentNode.removeChild(e.removedCard);
+      this.onCardAddedOrRemoved_();
+    },
+
+    /**
+     * Called when a card is removed or added.
+     * @private
+     */
+    onCardAddedOrRemoved_: function() {
+      if (this.isStartingUp_())
+        return;
+
+      // Without repositioning there were issues - http://crbug.com/133457.
+      this.cardSlider.repositionFrame();
+    },
+
+    /**
+     * Window resize handler.
+     * @private
+     */
+    onWindowResize_: function(e) {
+      this.cardSlider.resize(this.sliderFrame.offsetWidth);
+    },
+
+    /**
+     * Listener for offline status change events. Updates apps that are
+     * not offline-enabled to be grayscale if the browser is offline.
+     * @private
+     */
+    updateOfflineEnabledApps_: function() {
+      var apps = document.querySelectorAll('.app');
+      for (var i = 0; i < apps.length; ++i) {
+        if (apps[i].appData.enabled && !apps[i].appData.offline_enabled) {
+          apps[i].setIcon();
+          apps[i].loadIcon();
+        }
+      }
+    },
+
+    /**
+     * Handler for key events on the page. Ctrl-Arrow will switch the visible
+     * page.
+     * @param {Event} e The KeyboardEvent.
+     * @private
+     */
+    onDocKeyDown_: function(e) {
+      if (!e.ctrlKey || e.altKey || e.metaKey || e.shiftKey)
+        return;
+
+      var direction = 0;
+      if (e.keyIdentifier == 'Left')
+        direction = -1;
+      else if (e.keyIdentifier == 'Right')
+        direction = 1;
+      else
+        return;
+
+      var cardIndex =
+          (this.cardSlider.currentCard + direction +
+           this.cardSlider.cardCount) % this.cardSlider.cardCount;
+      this.cardSlider.selectCard(cardIndex, true);
+
+      e.stopPropagation();
+    },
+
+    /**
+     * Returns the index of a given tile page.
+     * @param {TilePage} page The TilePage we wish to find.
+     * @return {number} The index of |page| or -1 if it is not in the
+     *    collection.
+     */
+    getTilePageIndex: function(page) {
+      return Array.prototype.indexOf.call(this.tilePages, page);
+    },
+
+    /**
+     * Removes a page and navigation dot (if the navdot exists).
+     * @param {TilePage} page The page to be removed.
+     */
+    removeTilePageAndDot_: function(page) {
+      if (page.navigationDot)
+        page.navigationDot.remove();
+      this.cardSlider.removeCard(page);
+    },
   };
 
   /**
    * Invoked at startup once the DOM is available to initialize the app.
    */
   function onLoad() {
-    sectionsToWaitFor = loadTimeData.getBoolean('showApps') ? 2 : 1;
-    if (loadTimeData.getBoolean('isSuggestionsPageEnabled'))
-      sectionsToWaitFor++;
-    measureNavDots();
-
     // Load the current theme colors.
     themeChanged();
 
@@ -121,54 +677,24 @@ cr.define('ntp', function() {
     notificationContainer.addEventListener(
         'webkitTransitionEnd', onNotificationTransitionEnd);
 
-    cr.ui.decorate($('recently-closed-menu-button'), ntp.RecentMenuButton);
-    chrome.send('getRecentlyClosedTabs');
-
-    if (loadTimeData.getBoolean('showOtherSessionsMenu')) {
-      otherSessionsButton = getRequiredElement('other-sessions-menu-button');
-      cr.ui.decorate(otherSessionsButton, ntp.OtherSessionsMenuButton);
-      otherSessionsButton.initialize(loadTimeData.getBoolean('isUserSignedIn'));
-    }
-
     var mostVisited = new ntp.MostVisitedPage();
-    // Move the footer into the most visited page if we are in "bare minimum"
-    // mode.
-    if (document.body.classList.contains('bare-minimum'))
-      mostVisited.appendFooter(getRequiredElement('footer'));
     newTabView.appendTilePage(mostVisited,
-                              loadTimeData.getString('mostvisited'),
-                              false);
+                              loadTimeData.getString('mostvisited'));
     chrome.send('getMostVisited');
 
-    if (loadTimeData.getBoolean('isSuggestionsPageEnabled')) {
-      var suggestions_script = document.createElement('script');
-      suggestions_script.src = 'suggestions_page.js';
-      suggestions_script.onload = function() {
-         newTabView.appendTilePage(new ntp.SuggestionsPage(),
-                                   loadTimeData.getString('suggestions'),
-                                   false,
-                                   (newTabView.appsPages.length > 0) ?
-                                       newTabView.appsPages[0] : null);
-         chrome.send('getSuggestions');
-         cr.dispatchSimpleEvent(document, 'sectionready', true, true);
-      };
-      document.querySelector('head').appendChild(suggestions_script);
-    }
-
-    var webStoreLink = loadTimeData.getString('webStoreLink');
-    var url = appendParam(webStoreLink, 'utm_source', 'chrome-ntp-launcher');
-    $('chrome-web-store-link').href = url;
-    $('chrome-web-store-link').addEventListener('click',
-        onChromeWebStoreButtonClick);
+    var recentlyClosed = new ntp.RecentlyClosedPage();
+    newTabView.appendTilePage(recentlyClosed,
+                              loadTimeData.getString('recentlyclosed'));
+    chrome.send('getRecentlyClosedTabs');
 
     if (loadTimeData.getString('login_status_message')) {
       loginBubble = new cr.ui.Bubble;
       loginBubble.anchorNode = $('login-container');
-      loginBubble.setArrowLocation(cr.ui.ArrowLocation.TOP_END);
+      loginBubble.arrowLocation = cr.ui.ArrowLocation.TOP_END;
       loginBubble.bubbleAlignment =
           cr.ui.BubbleAlignment.BUBBLE_EDGE_TO_ANCHOR_EDGE;
       loginBubble.deactivateToDismissDelay = 2000;
-      loginBubble.setCloseButtonVisible(false);
+      loginBubble.closeButtonVisible = false;
 
       $('login-status-advanced').onclick = function() {
         chrome.send('showAdvancedLoginUI');
@@ -211,18 +737,9 @@ cr.define('ntp', function() {
 
       cr.dispatchSimpleEvent(document, 'ntpLoaded', true, true);
       document.documentElement.classList.remove('starting-up');
-    });
-  }
 
-  /**
-   * Launches the chrome web store app with the chrome-ntp-launcher
-   * source.
-   * @param {Event} e The click event.
-   */
-  function onChromeWebStoreButtonClick(e) {
-    chrome.send('recordAppLaunchByURL',
-                [encodeURIComponent(this.href),
-                 ntp.APP_LAUNCH.NTP_WEBSTORE_FOOTER]);
+      startTime = Date.now();
+    });
   }
 
   /*
@@ -262,24 +779,6 @@ cr.define('ntp', function() {
       readyCallbacks.push(callback);
     else
       window.setTimeout(callback, 0);  // Do soon after, but asynchronously.
-  }
-
-  /**
-   * Fills in an invisible div with the 'Most Visited' string so that
-   * its length may be measured and the nav dots sized accordingly.
-   */
-  function measureNavDots() {
-    var measuringDiv = $('fontMeasuringDiv');
-    measuringDiv.textContent = loadTimeData.getString('mostvisited');
-    // The 4 is for border and padding.
-    var pxWidth = Math.max(measuringDiv.clientWidth * 1.15 + 4, 80);
-
-    var styleElement = document.createElement('style');
-    styleElement.type = 'text/css';
-    // max-width is used because if we run out of space, the nav dots will be
-    // shrunk.
-    styleElement.textContent = '.dot { max-width: ' + pxWidth + 'px; }';
-    document.querySelector('head').appendChild(styleElement);
   }
 
   function themeChanged(opt_hasAttribution) {
@@ -365,10 +864,9 @@ cr.define('ntp', function() {
     document.addEventListener('dragstart', closeFunc);
 
     notificationContainer.hidden = false;
-    showNotificationOnCurrentPage();
-
-    newTabView.cardSlider.frame.addEventListener(
-        'cardSlider:card_change_ended', onCardChangeEnded);
+    window.setTimeout(function() {
+      notificationContainer.classList.remove('inactive');
+    }, 0);
 
     var timeout = opt_timeout || 10000;
     notificationTimeout = window.setTimeout(hideNotification, timeout);
@@ -379,47 +877,6 @@ cr.define('ntp', function() {
    */
   function hideNotification() {
     notificationContainer.classList.add('inactive');
-
-    newTabView.cardSlider.frame.removeEventListener(
-        'cardSlider:card_change_ended', onCardChangeEnded);
-  }
-
-  /**
-   * Happens when 1 or more consecutive card changes end.
-   * @param {Event} e The cardSlider:card_change_ended event.
-   */
-  function onCardChangeEnded(e) {
-    // If we ended on the same page as we started, ignore.
-    if (newTabView.cardSlider.currentCardValue.notification)
-      return;
-
-    // Hide the notification the old page.
-    notificationContainer.classList.add('card-changed');
-
-    showNotificationOnCurrentPage();
-  }
-
-  /**
-   * Move and show the notification on the current page.
-   */
-  function showNotificationOnCurrentPage() {
-    var page = newTabView.cardSlider.currentCardValue;
-    doWhenAllSectionsReady(function() {
-      if (page != newTabView.cardSlider.currentCardValue)
-        return;
-
-      // NOTE: This moves the notification to inside of the current page.
-      page.notification = notificationContainer;
-
-      // Reveal the notification and instruct it to hide itself if ignored.
-      notificationContainer.classList.remove('inactive');
-
-      // Gives the browser time to apply this rule before we remove it (causing
-      // a transition).
-      window.setTimeout(function() {
-        notificationContainer.classList.remove('card-changed');
-      }, 0);
-    });
   }
 
   /**
@@ -432,30 +889,17 @@ cr.define('ntp', function() {
       notificationContainer.hidden = true;
   }
 
-  function setRecentlyClosedTabs(dataItems) {
-    $('recently-closed-menu-button').dataItems = dataItems;
+  function setRecentlyClosedTabs(data) {
+    newTabView.recentlyClosedPage.setData(data);
   }
 
   function setMostVisitedPages(data, hasBlacklistedUrls) {
-    newTabView.mostVisitedPage.data = data;
+    newTabView.mostVisitedPage.setData(data);
     cr.dispatchSimpleEvent(document, 'sectionready', true, true);
   }
 
-  function setSuggestionsPages(data, hasBlacklistedUrls) {
-    newTabView.suggestionsPage.data = data;
-  }
-
-  /**
-   * Set the dominant color for a node. This will be called in response to
-   * getFaviconDominantColor. The node represented by |id| better have a setter
-   * for stripeColor.
-   * @param {string} id The ID of a node.
-   * @param {string} color The color represented as a CSS string.
-   */
-  function setStripeColor(id, color) {
-    var node = $(id);
-    if (node)
-      node.stripeColor = color;
+  function getThumbnailUrl(url) {
+    return 'chrome://thumb/' + url;
   }
 
   /**
@@ -493,8 +937,6 @@ cr.define('ntp', function() {
     } else if (loginBubble) {
       loginBubble.reposition();
     }
-    if (otherSessionsButton)
-      otherSessionsButton.updateSignInState(isUserSignedIn);
   }
 
   /**
@@ -508,7 +950,29 @@ cr.define('ntp', function() {
   }
 
   /**
-   * Wrappers to forward the callback to corresponding PageListView member.
+   * Increments the parameter used to log the total number of thumbnail hovered
+   * over.
+   */
+  function incrementHoveredThumbnailCount() {
+    hoveredThumbnailCount++;
+  }
+
+  /**
+   * Logs the time to click for the specified item and the total number of
+   * thumbnails hovered over.
+   * @param {string} item The item to log the time-to-click.
+   */
+  function logTimeToClickAndHoverCount(item) {
+    var timeToClick = Date.now() - startTime;
+    chrome.send('logTimeToClick',
+        ['ExtendedNewTabPage.TimeToClick' + item, timeToClick]);
+    chrome.send('metricsHandler:recordInHistogram',
+        ['ExtendedNewTabPage.hoveredThumbnailCount',
+         hoveredThumbnailCount, 40]);
+  }
+
+  /**
+   * Wrappers to forward the callback to corresponding NewTabView member.
    */
   function appAdded() {
     return newTabView.appAdded.apply(newTabView, arguments);
@@ -530,13 +994,9 @@ cr.define('ntp', function() {
     return newTabView.appsReordered.apply(newTabView, arguments);
   }
 
-  function enterRearrangeMode() {
-    return newTabView.enterRearrangeMode.apply(newTabView, arguments);
-  }
-
   function setForeignSessions(sessionList, isTabSyncEnabled) {
-    if (otherSessionsButton)
-      otherSessionsButton.setForeignSessions(sessionList, isTabSyncEnabled);
+    // TODO(jeremycho): Support this once the Devices page is implemented.
+    console.warn('setForeignSessions not implemented.');
   }
 
   function getAppsCallback() {
@@ -551,14 +1011,6 @@ cr.define('ntp', function() {
     return newTabView.cardSlider;
   }
 
-  function leaveRearrangeMode() {
-    return newTabView.leaveRearrangeMode.apply(newTabView, arguments);
-  }
-
-  function saveAppPageName() {
-    return newTabView.saveAppPageName.apply(newTabView, arguments);
-  }
-
   function setAppToBeHighlighted(appId) {
     newTabView.highlightAppId = appId;
   }
@@ -569,21 +1021,19 @@ cr.define('ntp', function() {
     appMoved: appMoved,
     appRemoved: appRemoved,
     appsPrefChangeCallback: appsPrefChangeCallback,
-    enterRearrangeMode: enterRearrangeMode,
     getAppsCallback: getAppsCallback,
     getAppsPageIndex: getAppsPageIndex,
     getCardSlider: getCardSlider,
+    getThumbnailUrl: getThumbnailUrl,
+    incrementHoveredThumbnailCount: incrementHoveredThumbnailCount,
+    logTimeToClickAndHoverCount: logTimeToClickAndHoverCount,
     onLoad: onLoad,
-    leaveRearrangeMode: leaveRearrangeMode,
     NtpFollowAction: NtpFollowAction,
-    saveAppPageName: saveAppPageName,
     setAppToBeHighlighted: setAppToBeHighlighted,
     setBookmarkBarAttached: setBookmarkBarAttached,
     setForeignSessions: setForeignSessions,
     setMostVisitedPages: setMostVisitedPages,
-    setSuggestionsPages: setSuggestionsPages,
     setRecentlyClosedTabs: setRecentlyClosedTabs,
-    setStripeColor: setStripeColor,
     showNotification: showNotification,
     themeChanged: themeChanged,
     updateLogin: updateLogin

@@ -73,6 +73,28 @@ using WebKit::WebInputEvent;
 using WebKit::WebString;
 using WebKit::WebView;
 
+namespace {
+
+class ScopedLogLevel {
+ public:
+  ScopedLogLevel(int level);
+  ~ScopedLogLevel();
+
+ private:
+  int old_level_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedLogLevel);
+};
+
+ScopedLogLevel::ScopedLogLevel(int level)
+    : old_level_(logging::GetMinLogLevel()) {
+  logging::SetMinLogLevel(level);
+}
+
+ScopedLogLevel::~ScopedLogLevel() {
+  logging::SetMinLogLevel(old_level_);
+}
+
 // Proxy for WebPluginResourceClient.  The object owns itself after creation,
 // deleting itself after its callback has been called.
 class ResourceClientProxy : public webkit::npapi::WebPluginResourceClient {
@@ -168,6 +190,8 @@ class ResourceClientProxy : public webkit::npapi::WebPluginResourceClient {
   // For e.g. response for a HTTP byte range request.
   bool multibyte_response_expected_;
 };
+
+}  // namespace
 
 WebPluginDelegateProxy::WebPluginDelegateProxy(
     const std::string& mime_type,
@@ -329,11 +353,15 @@ bool WebPluginDelegateProxy::Initialize(
     track_nested_removes.reset();
 #endif
 
-    result = channel_host->Send(new PluginMsg_CreateInstance(
-        mime_type_, &instance_id));
-    if (!result) {
-      LOG(ERROR) << "Couldn't send PluginMsg_CreateInstance";
-      continue;
+    {
+      // TODO(bauerb): Debugging for http://crbug.com/141055.
+      ScopedLogLevel log_level(-2);  // Equivalent to --v=2
+      result = channel_host->Send(new PluginMsg_CreateInstance(
+          mime_type_, &instance_id));
+      if (!result) {
+        LOG(ERROR) << "Couldn't send PluginMsg_CreateInstance";
+        continue;
+      }
     }
   }
 
@@ -1135,13 +1163,17 @@ void WebPluginDelegateProxy::OnNotifyIMEStatus(int input_type,
   if (!render_view_)
     return;
 
+  ViewHostMsg_TextInputState_Params params;
+  params.type = static_cast<ui::TextInputType>(input_type);
+  params.can_compose_inline = true;
   render_view_->Send(new ViewHostMsg_TextInputStateChanged(
       render_view_->routing_id(),
-      static_cast<ui::TextInputType>(input_type),
-      true));
+      params));
 
   render_view_->Send(new ViewHostMsg_SelectionBoundsChanged(
-      render_view_->routing_id(), caret_rect, caret_rect));
+      render_view_->routing_id(),
+      caret_rect, WebKit::WebTextDirectionLeftToRight,
+      caret_rect, WebKit::WebTextDirectionLeftToRight));
 }
 #endif
 
@@ -1150,8 +1182,7 @@ void WebPluginDelegateProxy::OnCancelResource(int id) {
     plugin_->CancelResource(id);
 }
 
-void WebPluginDelegateProxy::OnInvalidateRect(const gfx::Rect& rect,
-                                              bool allow_buffer_flipping) {
+void WebPluginDelegateProxy::OnInvalidateRect(const gfx::Rect& rect) {
   if (!plugin_)
     return;
 
@@ -1163,7 +1194,7 @@ void WebPluginDelegateProxy::OnInvalidateRect(const gfx::Rect& rect,
   // The plugin is blocked on the renderer because the invalidate message it has
   // sent us is synchronous, so we can use buffer flipping here if the caller
   // allows it.
-  UpdateFrontBuffer(clipped_rect, allow_buffer_flipping);
+  UpdateFrontBuffer(clipped_rect, true);
   plugin_->InvalidateRect(clipped_rect);
 }
 

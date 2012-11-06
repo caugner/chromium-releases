@@ -32,26 +32,27 @@ int ExtensionTabUtil::GetWindowIdOfTab(const WebContents* web_contents) {
   return -1;
 }
 
-DictionaryValue* ExtensionTabUtil::CreateTabValue(const WebContents* contents) {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
-ListValue* ExtensionTabUtil::CreateTabList(const Browser* browser) {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
-DictionaryValue* ExtensionTabUtil::CreateTabValue(const WebContents* contents,
-                                                  TabStripModel* tab_strip,
-                                                  int tab_index) {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
-DictionaryValue* ExtensionTabUtil::CreateTabValueActive(
+DictionaryValue* ExtensionTabUtil::CreateTabValue(
     const WebContents* contents,
-    bool active) {
+    TabStripModel* tab_strip,
+    int tab_index,
+    const extensions::Extension* extension) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+ListValue* ExtensionTabUtil::CreateTabList(
+    const Browser* browser,
+    const extensions::Extension* extension) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+DictionaryValue* ExtensionTabUtil::CreateTabValue(
+    const WebContents* contents,
+    TabStripModel* tab_strip,
+    int tab_index,
+    IncludePrivacySensitiveFields include_privacy_sensitive_fields) {
   NOTIMPLEMENTED();
   return NULL;
 }

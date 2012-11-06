@@ -4,14 +4,14 @@
 
 var callbackPass = chrome.test.callbackPass;
 
-chrome.experimental.app.onLaunched.addListener(function() {
+chrome.app.runtime.onLaunched.addListener(function() {
   chrome.test.runTests([
    function testCreateWindow() {
      chrome.app.window.create('test.html', {}, callbackPass(function (win) {
-       chrome.test.assertTrue(typeof win.window === 'object');
-       chrome.test.assertEq('about:blank', win.location.href);
+       chrome.test.assertTrue(typeof win.contentWindow.window === 'object');
+       chrome.test.assertEq('about:blank', win.contentWindow.location.href);
        chrome.test.assertEq('<html><head></head><body></body></html>',
-           win.document.documentElement.outerHTML);
+           win.contentWindow.document.documentElement.outerHTML);
      }))
    },
 
@@ -19,12 +19,13 @@ chrome.experimental.app.onLaunched.addListener(function() {
      chrome.app.window.create('test.html',
          {width:512, height:384, frame:'custom'},
          callbackPass(function(win) {
-           chrome.test.assertEq(512, win.innerWidth);
-           chrome.test.assertEq(384, win.innerHeight);
-           var oldWidth = win.outerWidth, oldHeight = win.outerHeight;
-           win.resizeBy(-256, 0);
-           chrome.test.assertEq(oldWidth - 256, win.outerWidth);
-           chrome.test.assertEq(oldHeight, win.outerHeight);
+           chrome.test.assertEq(512, win.contentWindow.innerWidth);
+           chrome.test.assertEq(384, win.contentWindow.innerHeight);
+           var oldWidth = win.contentWindow.outerWidth;
+           var oldHeight = win.contentWindow.outerHeight;
+           win.contentWindow.resizeBy(-256, 0);
+           chrome.test.assertEq(oldWidth - 256, win.contentWindow.outerWidth);
+           chrome.test.assertEq(oldHeight, win.contentWindow.outerHeight);
          }));
    },
 

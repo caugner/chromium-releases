@@ -15,6 +15,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -24,6 +25,7 @@
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/syncable/entry.h"  // TODO(tim): Investigating bug 121587.
+#include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image_util.h"
 
 using content::BrowserThread;
@@ -232,7 +234,7 @@ void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
       LOG(ERROR) << "Deleted entry.";
     } else {
       syncer::Cryptographer* crypto = trans.GetCryptographer();
-      syncer::ModelTypeSet encrypted_types(crypto->GetEncryptedTypes());
+      syncer::ModelTypeSet encrypted_types(trans.GetEncryptedTypes());
       const sync_pb::EntitySpecifics& specifics =
           sync_node.GetEntry()->Get(syncer::syncable::SPECIFICS);
       CHECK(specifics.has_encrypted());
@@ -637,14 +639,22 @@ void BookmarkChangeProcessor::ApplyBookmarkFavicon(
   HistoryService* history =
       HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
   FaviconService* favicon_service =
-      profile->GetFaviconService(Profile::EXPLICIT_ACCESS);
+      FaviconServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
 
   history->AddPageNoVisitForBookmark(bookmark_node->url(),
                                      bookmark_node->GetTitle());
-  favicon_service->SetFavicon(bookmark_node->url(),
-                              fake_icon_url,
-                              icon_bytes_vector,
-                              history::FAVICON);
+  // The client may have cached the favicon at 2x. Use MergeFavicon() as not to
+  // overwrite the cached 2x favicon bitmap. Sync favicons are always
+  // gfx::kFaviconSize in width and height. Store the favicon into history
+  // as such.
+  scoped_refptr<base::RefCountedMemory> bitmap_data(
+      new base::RefCountedBytes(icon_bytes_vector));
+  gfx::Size pixel_size(gfx::kFaviconSize, gfx::kFaviconSize);
+  favicon_service->MergeFavicon(bookmark_node->url(),
+                                fake_icon_url,
+                                history::FAVICON,
+                                bitmap_data,
+                                pixel_size);
 }
 
 // static

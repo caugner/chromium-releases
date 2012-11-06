@@ -9,6 +9,7 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/opensslv.h>
 
 #include "base/bind.h"
 #include "base/memory/singleton.h"
@@ -46,8 +47,10 @@ const size_t kSessionCacheMaxEntires = 1024;
 // the server supports NPN, choosing "http/1.1" is the best answer.
 const char kDefaultSupportedNPNProtocol[] = "http/1.1";
 
-// This method doesn't seemed to have made it into the OpenSSL headers.
+#if OPENSSL_VERSION_NUMBER < 0x1000103fL
+// This method doesn't seem to have made it into the OpenSSL headers.
 unsigned long SSL_CIPHER_get_id(const SSL_CIPHER* cipher) { return cipher->id; }
+#endif
 
 // Used for encoding the |connection_status| field of an SSLInfo object.
 int EncodeSSLConnectionStatus(int cipher_suite,
@@ -918,11 +921,11 @@ int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
 
   int flags = 0;
   if (ssl_config_.rev_checking_enabled)
-    flags |= X509Certificate::VERIFY_REV_CHECKING_ENABLED;
+    flags |= CertVerifier::VERIFY_REV_CHECKING_ENABLED;
   if (ssl_config_.verify_ev_cert)
-    flags |= X509Certificate::VERIFY_EV_CERT;
+    flags |= CertVerifier::VERIFY_EV_CERT;
   if (ssl_config_.cert_io_enabled)
-    flags |= X509Certificate::VERIFY_CERT_IO_ENABLED;
+    flags |= CertVerifier::VERIFY_CERT_IO_ENABLED;
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
   return verifier_->Verify(
       server_cert_, host_and_port_.host(), flags,

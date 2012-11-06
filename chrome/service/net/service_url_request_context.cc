@@ -123,6 +123,7 @@ ServiceURLRequestContext::ServiceURLRequestContext(
   storage_.set_http_auth_handler_factory(
       net::HttpAuthHandlerFactory::CreateDefault(host_resolver()));
   storage_.set_http_server_properties(new net::HttpServerPropertiesImpl);
+  storage_.set_transport_security_state(new net::TransportSecurityState);
   storage_.set_throttler_manager(new net::URLRequestThrottlerManager);
 
   net::HttpNetworkSession::Params session_params;

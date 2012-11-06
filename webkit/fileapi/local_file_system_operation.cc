@@ -11,11 +11,11 @@
 #include "net/base/escape.h"
 #include "net/url_request/url_request_context.h"
 #include "webkit/blob/shareable_file_reference.h"
+#include "webkit/fileapi/file_observers.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util_proxy.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_url.h"
@@ -45,46 +45,32 @@ bool IsCrossOperationAllowed(FileSystemType src_type,
 
 }  // namespace
 
-class LocalFileSystemOperation::ScopedQuotaNotifier {
+class LocalFileSystemOperation::ScopedUpdateNotifier {
  public:
-  ScopedQuotaNotifier(FileSystemContext* context,
-                      const GURL& origin_url,
-                      FileSystemType type);
-  ~ScopedQuotaNotifier();
+  ScopedUpdateNotifier(FileSystemOperationContext* operation_context,
+                       const FileSystemURL& url);
+  ~ScopedUpdateNotifier();
 
  private:
   // Not owned; owned by the owner of this instance
   // (i.e. LocalFileSystemOperation).
-  FileSystemQuotaUtil* quota_util_;
-  const GURL origin_url_;
-  FileSystemType type_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedQuotaNotifier);
+  FileSystemOperationContext* operation_context_;
+  FileSystemURL url_;
+  DISALLOW_COPY_AND_ASSIGN(ScopedUpdateNotifier);
 };
 
-LocalFileSystemOperation::ScopedQuotaNotifier::ScopedQuotaNotifier(
-    FileSystemContext* context, const GURL& origin_url, FileSystemType type)
-    : origin_url_(origin_url), type_(type) {
-  DCHECK(context);
-  DCHECK(type_ != kFileSystemTypeUnknown);
-  quota_util_ = context->GetQuotaUtil(type_);
-  if (quota_util_) {
-    DCHECK(quota_util_->proxy());
-    quota_util_->proxy()->StartUpdateOrigin(origin_url_, type_);
-  }
+LocalFileSystemOperation::ScopedUpdateNotifier::ScopedUpdateNotifier(
+    FileSystemOperationContext* operation_context,
+    const FileSystemURL& url)
+    : operation_context_(operation_context), url_(url) {
+  operation_context_->update_observers()->Notify(
+      &FileUpdateObserver::OnStartUpdate, MakeTuple(url_));
 }
 
-LocalFileSystemOperation::ScopedQuotaNotifier::~ScopedQuotaNotifier() {
-  if (quota_util_) {
-    DCHECK(quota_util_->proxy());
-    quota_util_->proxy()->EndUpdateOrigin(origin_url_, type_);
-  }
+LocalFileSystemOperation::ScopedUpdateNotifier::~ScopedUpdateNotifier() {
+  operation_context_->update_observers()->Notify(
+      &FileUpdateObserver::OnEndUpdate, MakeTuple(url_));
 }
-
-LocalFileSystemOperation::TaskParamsForDidGetQuota::TaskParamsForDidGetQuota() {
-}
-
-LocalFileSystemOperation::TaskParamsForDidGetQuota::~TaskParamsForDidGetQuota(
-    ) {}
 
 LocalFileSystemOperation::~LocalFileSystemOperation() {
 }
@@ -149,6 +135,28 @@ void LocalFileSystemOperation::Copy(const FileSystemURL& src_url,
       dest_url,
       base::Bind(&LocalFileSystemOperation::DoCopy,
                  base::Unretained(this), src_url, dest_url, callback),
+      base::Bind(callback, base::PLATFORM_FILE_ERROR_FAILED));
+}
+
+void LocalFileSystemOperation::CopyInForeignFile(
+    const FilePath& src_local_disk_file_path,
+    const FileSystemURL& dest_url,
+    const StatusCallback& callback) {
+  DCHECK(SetPendingOperationType(kOperationCopyInForeignFile));
+
+  base::PlatformFileError result = SetUp(
+      dest_url, &dest_util_, SETUP_FOR_CREATE);
+  if (result != base::PLATFORM_FILE_OK) {
+    callback.Run(result);
+    delete this;
+    return;
+  }
+
+  GetUsageAndQuotaThenRunTask(
+      dest_url,
+      base::Bind(&LocalFileSystemOperation::DoCopyInForeignFile,
+                 base::Unretained(this), src_local_disk_file_path, dest_url,
+                 callback),
       base::Bind(callback, base::PLATFORM_FILE_ERROR_FAILED));
 }
 
@@ -269,9 +277,6 @@ void LocalFileSystemOperation::Remove(const FileSystemURL& url,
     return;
   }
 
-  scoped_quota_notifier_.reset(new ScopedQuotaNotifier(
-      file_system_context(), url.origin(), url.type()));
-
   FileSystemFileUtilProxy::Delete(
       operation_context_.get(), src_util_, url, recursive,
       base::Bind(&LocalFileSystemOperation::DidFinishFileOperation,
@@ -309,14 +314,12 @@ void LocalFileSystemOperation::Write(
   DCHECK(blob_url.is_valid());
   file_writer_delegate_.reset(new FileWriterDelegate(
       base::Bind(&LocalFileSystemOperation::DidWrite,
-                 weak_factory_.GetWeakPtr()),
+                 weak_factory_.GetWeakPtr(), url),
       writer.Pass()));
 
   set_write_callback(callback);
-  scoped_ptr<net::URLRequest> blob_request(
-      new net::URLRequest(blob_url,
-                          file_writer_delegate_.get(),
-                          url_request_context));
+  scoped_ptr<net::URLRequest> blob_request(url_request_context->CreateRequest(
+      blob_url, file_writer_delegate_.get()));
 
   file_writer_delegate_->Start(blob_request.Pass());
 }
@@ -506,35 +509,28 @@ void LocalFileSystemOperation::GetUsageAndQuotaThenRunTask(
     return;
   }
 
-  TaskParamsForDidGetQuota params;
-  params.url = url;
-  params.task = task;
-  params.error_callback = error_callback;
-
   DCHECK(quota_manager_proxy);
   DCHECK(quota_manager_proxy->quota_manager());
   quota_manager_proxy->quota_manager()->GetUsageAndQuota(
       url.origin(),
       FileSystemTypeToQuotaStorageType(url.type()),
       base::Bind(&LocalFileSystemOperation::DidGetUsageAndQuotaAndRunTask,
-                 weak_factory_.GetWeakPtr(), params));
+                 weak_factory_.GetWeakPtr(), task, error_callback));
 }
 
 void LocalFileSystemOperation::DidGetUsageAndQuotaAndRunTask(
-    const TaskParamsForDidGetQuota& params,
+    const base::Closure& task,
+    const base::Closure& error_callback,
     quota::QuotaStatusCode status,
     int64 usage, int64 quota) {
   if (status != quota::kQuotaStatusOk) {
     LOG(WARNING) << "Got unexpected quota error : " << status;
-    params.error_callback.Run();
+    error_callback.Run();
     return;
   }
 
   operation_context_->set_allowed_bytes_growth(quota - usage);
-  scoped_quota_notifier_.reset(new ScopedQuotaNotifier(
-      file_system_context(), params.url.origin(), params.url.type()));
-
-  params.task.Run();
+  task.Run();
 }
 
 void LocalFileSystemOperation::DoCreateFile(
@@ -569,6 +565,18 @@ void LocalFileSystemOperation::DoCopy(const FileSystemURL& src_url,
       operation_context_.get(),
       src_util_, dest_util_,
       src_url, dest_url,
+      base::Bind(&LocalFileSystemOperation::DidFinishFileOperation,
+                 base::Owned(this), callback));
+}
+
+void LocalFileSystemOperation::DoCopyInForeignFile(
+    const FilePath& src_local_disk_file_path,
+    const FileSystemURL& dest_url,
+    const StatusCallback& callback) {
+  FileSystemFileUtilProxy::CopyInForeignFile(
+      operation_context_.get(),
+      dest_util_,
+      src_local_disk_file_path, dest_url,
       base::Bind(&LocalFileSystemOperation::DidFinishFileOperation,
                  base::Owned(this), callback));
 }
@@ -669,15 +677,24 @@ void LocalFileSystemOperation::DidReadDirectory(
 }
 
 void LocalFileSystemOperation::DidWrite(
+    const FileSystemURL& url,
     base::PlatformFileError rv,
     int64 bytes,
-    bool complete) {
+    FileWriterDelegate::WriteProgressStatus write_status) {
   if (write_callback_.is_null()) {
     // If cancelled, callback is already invoked and set to null in Cancel().
     // We must not call it twice. Just shut down this operation object.
     delete this;
     return;
   }
+
+  const bool complete = (
+      write_status != FileWriterDelegate::SUCCESS_IO_PENDING);
+  if (complete && write_status != FileWriterDelegate::ERROR_WRITE_NOT_STARTED) {
+    operation_context_->change_observers()->Notify(
+        &FileChangeObserver::OnModifyFile, MakeTuple(url));
+  }
+
   write_callback_.Run(rv, bytes, complete);
   if (complete || rv != base::PLATFORM_FILE_OK)
     delete this;
@@ -721,8 +738,13 @@ base::PlatformFileError LocalFileSystemOperation::SetUp(
   if (!url.is_valid())
     return base::PLATFORM_FILE_ERROR_INVALID_URL;
 
+  // Restricted file system is read-only.
+  if (url.type() == fileapi::kFileSystemTypeRestrictedNativeLocal &&
+      mode != SETUP_FOR_READ)
+    return base::PLATFORM_FILE_ERROR_SECURITY;
+
   if (!file_system_context()->GetMountPointProvider(
-          url.type())->IsAccessAllowed(url.origin(), url.type(), url.path()))
+          url.type())->IsAccessAllowed(url))
     return base::PLATFORM_FILE_ERROR_SECURITY;
 
   DCHECK(file_util);
@@ -732,21 +754,15 @@ base::PlatformFileError LocalFileSystemOperation::SetUp(
     return base::PLATFORM_FILE_ERROR_SECURITY;
 
   if (mode == SETUP_FOR_READ) {
-    // We notify this read access whether the read access succeeds or not.
-    // This must be ok since this is used to let the QM's eviction logic know
-    // someone is interested in reading the origin data and therefore to
-    // indicate that evicting this origin may not be a good idea.
-    FileSystemQuotaUtil* quota_util = file_system_context()->GetQuotaUtil(
-        url.type());
-    if (quota_util) {
-      quota_util->NotifyOriginWasAccessedOnIOThread(
-          file_system_context()->quota_manager_proxy(),
-          url.origin(), url.type());
-    }
+    operation_context_->access_observers()->Notify(
+        &FileAccessObserver::OnAccess, MakeTuple(url));
     return base::PLATFORM_FILE_OK;
   }
 
   DCHECK(mode == SETUP_FOR_WRITE || mode == SETUP_FOR_CREATE);
+
+  scoped_update_notifiers_.push_back(new ScopedUpdateNotifier(
+      operation_context_.get(), url));
 
   // Any write access is disallowed on the root path.
   if (url.path().value().length() == 0 ||

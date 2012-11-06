@@ -11,7 +11,6 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "content/public/browser/notification_source.h"
@@ -52,9 +51,9 @@ class ContentSettingBubbleContents::Favicon : public views::ImageView {
 
  private:
   // views::View overrides:
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
-  virtual gfx::NativeCursor GetCursor(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
 
   ContentSettingBubbleContents* parent_;
   views::Link* link_;
@@ -73,20 +72,20 @@ ContentSettingBubbleContents::Favicon::~Favicon() {
 }
 
 bool ContentSettingBubbleContents::Favicon::OnMousePressed(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   return event.IsLeftMouseButton() || event.IsMiddleMouseButton();
 }
 
 void ContentSettingBubbleContents::Favicon::OnMouseReleased(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
   if ((event.IsLeftMouseButton() || event.IsMiddleMouseButton()) &&
-     HitTest(event.location())) {
+     HitTestPoint(event.location())) {
     parent_->LinkClicked(link_, event.flags());
   }
 }
 
 gfx::NativeCursor ContentSettingBubbleContents::Favicon::GetCursor(
-    const views::MouseEvent& event) {
+    const ui::MouseEvent& event) {
 #if defined(USE_AURA)
   return ui::kCursorHand;
 #elif defined(OS_WIN)
@@ -97,17 +96,18 @@ gfx::NativeCursor ContentSettingBubbleContents::Favicon::GetCursor(
 
 ContentSettingBubbleContents::ContentSettingBubbleContents(
     ContentSettingBubbleModel* content_setting_bubble_model,
-    Profile* profile,
     WebContents* web_contents,
     views::View* anchor_view,
     views::BubbleBorder::ArrowLocation arrow_location)
     : BubbleDelegateView(anchor_view, arrow_location),
       content_setting_bubble_model_(content_setting_bubble_model),
-      profile_(profile),
       web_contents_(web_contents),
       custom_link_(NULL),
       manage_link_(NULL),
       close_button_(NULL) {
+  // Compensate for built-in vertical padding in the anchor view's image.
+  set_anchor_insets(gfx::Insets(5, 0, 5, 0));
+
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::Source<WebContents>(web_contents));
 }
@@ -123,12 +123,6 @@ gfx::Size ContentSettingBubbleContents::GetPreferredSize() {
       kMinMultiLineContentsWidth : preferred_size.width();
   preferred_size.set_width(std::min(preferred_width, kMaxContentsWidth));
   return preferred_size;
-}
-
-gfx::Rect ContentSettingBubbleContents::GetAnchorRect() {
-  gfx::Rect rect(BubbleDelegateView::GetAnchorRect());
-  rect.Inset(0, anchor_view() ? 5 : 0);
-  return rect;
 }
 
 void ContentSettingBubbleContents::Init() {
@@ -286,7 +280,7 @@ void ContentSettingBubbleContents::Init() {
 }
 
 void ContentSettingBubbleContents::ButtonPressed(views::Button* sender,
-                                                 const views::Event& event) {
+                                                 const ui::Event& event) {
   if (sender == close_button_) {
     content_setting_bubble_model_->OnDoneClicked();
     StartFade(false);

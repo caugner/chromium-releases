@@ -51,7 +51,7 @@ class Feature {
 
   // Whether a feature is available in a given situation or not, and if not,
   // why not.
-  enum Availability {
+  enum AvailabilityResult {
     IS_AVAILABLE,
     NOT_FOUND_IN_WHITELIST,
     INVALID_TYPE,
@@ -64,26 +64,56 @@ class Feature {
     UNSUPPORTED_CHANNEL,
   };
 
+  // Container for AvailabiltyResult that also exposes a user-visible error
+  // message in cases where the feature is not available.
+  class Availability {
+   public:
+    AvailabilityResult result() const { return result_; }
+    bool is_available() const { return result_ == IS_AVAILABLE; }
+    const std::string& message() const { return message_; }
+
+   private:
+    friend class Feature;
+
+    // Instances should be created via Feature::CreateAvailability.
+    Availability(AvailabilityResult result, const std::string& message)
+        : result_(result), message_(message) { }
+
+    const AvailabilityResult result_;
+    const std::string message_;
+  };
+
   Feature();
   Feature(const Feature& other);
   virtual ~Feature();
 
-  // (Re)Sets whether checking against "channel" should be done. This must only
-  // be called on the browser process, since the check involves accessing the
-  // filesystem.
-  // See http://crbug.com/126535.
-  static void SetChannelCheckingEnabled(bool enabled);
-  static void ResetChannelCheckingEnabled();
-
-  // (Re)Sets the Channel to for all Features to compare against. This is
-  // usually chrome::VersionInfo::GetChannel(), but for tests allow this to be
-  // overridden.
-  static void SetChannelForTesting(chrome::VersionInfo::Channel channel);
-  static void ResetChannelForTesting();
-
-  // Returns the current channel as seen by the Feature system (i.e. the
-  // ChannelForTesting if one is set, otherwise the actual channel).
+  // Gets the current channel as seen by the Feature system.
   static chrome::VersionInfo::Channel GetCurrentChannel();
+
+  // Sets the current channel as seen by the Feature system. In the browser
+  // process this should be chrome::VersionInfo::GetChannel(), and in the
+  // renderer this will need to come from an IPC.
+  static void SetCurrentChannel(chrome::VersionInfo::Channel channel);
+
+  // Gets the default channel as seen by the Feature system.
+  static chrome::VersionInfo::Channel GetDefaultChannel();
+
+  // Scoped channel setter. Use for tests.
+  class ScopedCurrentChannel {
+   public:
+    explicit ScopedCurrentChannel(chrome::VersionInfo::Channel channel)
+        : original_channel_(chrome::VersionInfo::CHANNEL_UNKNOWN) {
+      original_channel_ = GetCurrentChannel();
+      SetCurrentChannel(channel);
+    }
+
+    ~ScopedCurrentChannel() {
+      SetCurrentChannel(original_channel_);
+    }
+
+   private:
+    chrome::VersionInfo::Channel original_channel_;
+  };
 
   const std::string& name() const { return name_; }
   void set_name(const std::string& name) { name_ = name; }
@@ -147,10 +177,15 @@ class Feature {
                                             Context context,
                                             Platform platform) const;
 
-  // Returns an error message for an Availability code.
-  std::string GetErrorMessage(Availability result);
+ protected:
+  Availability CreateAvailability(AvailabilityResult result) const;
+  Availability CreateAvailability(AvailabilityResult result,
+                                  Extension::Type type) const;
 
  private:
+  std::string GetAvailabilityMessage(
+      AvailabilityResult result, Extension::Type type) const;
+
   std::string name_;
 
   // For clarify and consistency, we handle the default value of each of these

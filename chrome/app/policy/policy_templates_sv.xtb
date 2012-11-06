@@ -149,6 +149,7 @@
 <translation id="5564962323737505851">Konfigurerar lösenordshanteraren. Om lösenordshanteraren är aktiverad kan du välja att aktivera eller inaktivera huruvida användare får visa sparade lösenord med vanlig text.</translation>
 <translation id="4668325077104657568">Standardinställning för bilder</translation>
 <translation id="7161193985878519056">Inkognitoläget är inaktiverat.</translation>
+<translation id="2524379983318108884">Tillåta ljudinspelning</translation>
 <translation id="4492287494009043413">Inaktivera tagning av skärmdumpar</translation>
 <translation id="6368403635025849609">Tillåt JavaScript på dessa webbplatser</translation>
 <translation id="6074963268421707432">Tillåt inte att någon webbplats visar aviseringar på skrivbordet</translation>
@@ -251,19 +252,13 @@
       Vissa webbappar kräver många anslutningar med hängande GET-kommandon, så om du sänker under 32 kanske webbläsaren hänger sig om för många sådana webbappar körs samtidigt. Använd värden under standardvärdet på egen risk.
 
       Om policyn inte anges används standardvärdet 32.</translation>
+<translation id="5395271912574071439">Aktiverar avskärmning av fjärråtkomstvärdar när en anslutning har upprättats.
+
+          Om den här inställningen är aktiverad inaktiveras värdens fysiska indata- och utadataenheter när en fjärranslutning har upprättats.
+
+          Om inställningen inaktiveras eller inte har konfigurerats kan både lokala användare och fjärranvändare kommunicera med värden när den delas.</translation>
 <translation id="2312509925391670075">Fråga varje gång en webbplats vill komma åt min kamera och/eller mikrofon</translation>
 <translation id="1426410128494586442">Ja</translation>
-<translation id="1692788808502061374">Innebär att du kan ange en lista med tillägg som ska installeras utan att användaren märker något.
-
-          Varje objekt i listan är en sträng som innehåller ett tilläggs-ID eller en uppdateringsadress och avgränsas med semikolon (<ph name="SEMICOLON"/>). Tilläggs-ID är en sträng med 32 bokstäver som till exempel finns på <ph name="CHROME_EXTENSIONS_LINK"/> i utvecklarläge. Uppdateringsadressen ska hänvisa till uppdateringens XML-manifest enligt beskrivningen på <ph name="LINK_TO_EXTENSION_DOC1"/>.
-
-          För varje objekt hämtar <ph name="PRODUCT_NAME"/> det tillägg som anges av tilläggs-ID:t från uppdateringstjänsten på den angivna uppdateringsadressen och installerar det utan att användaren märker något.
-
-          <ph name="EXTENSION_POLICY_EXAMPLE"/> installerar till exempel tillägget <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> från standarduppdateringsadressen i Chrome Web Store. Mer information om värdenheter för tillägg finns på: <ph name="LINK_TO_EXTENSION_DOC2"/>.
-
-          Användarna kan inte avinstallera tillägg som anges av den här policyn. Om du tar bort ett tillägg från listan avinstalleras det automatiskt av <ph name="PRODUCT_NAME"/>.
-
-          Om den här policyn inte anges kan användaren avinstallera alla tillägg i <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="4962195944157514011">Policyn anger webbadressen till sökmotorn som används för standardsökning. Webbadressen ska innehålla strängen <ph name="SEARCH_TERM_MARKER"/>, som ersätts av användarens sökord när sökningen utförs.
 
           Alternativet måste anges om policyn DefaultSearchProviderEnabled är aktiverad och används bara om så är fallet.</translation>
@@ -331,6 +326,13 @@
 
           Om du inaktiverar inställningen eller inte anger den tas ingen port med när Kerberos SPN genereras.</translation>
 <translation id="3236046242843493070">Webbadressmönster för att tillåta installationer av tillägg, appar och användarskript från</translation>
+<translation id="3442095178490656861">Anger vilken tidszon som används på enheten. Användare kan åsidosätta den angivna tidszonen för den aktuella sessionen. När användaren loggar ut återgår dock inställningen till den angivna tidszonen. Om en ogiltig tidszon anges är policyn fortfarande aktiverad och använder GMT istället.
+
+      Om denna policy inte används är det den tidszon som för närvarande är aktiv som används. Användare kan dock ändra tidszonen och ändringen är permanent. Därför påverkas inloggningsskärmen och alla användare av de ändringar som en enskild användare gör.
+
+      På nya enheter har tidszonen US/Pacific angetts.
+
+      Formatvärdet följer namnen på tidszonerna i databasen IANA Time Zone Database (besök http://en.wikipedia.org/wiki/List_of_tz_database_time). Det går att hänvisa till de flesta tidszoner som &quot;continent/large_city&quot; eller &quot;ocean/large_city&quot;.</translation>
 <translation id="8992176907758534924">Tillåt inte att bilder visas på någon webbplats</translation>
 <translation id="262740370354162807">Aktivera sändning av dokument till <ph name="CLOUD_PRINT_NAME"/></translation>
 <translation id="8704831857353097849">Lista med inaktiverade plugin-program</translation>
@@ -406,6 +408,7 @@
 
       Om den här policyn inte ställs in kan användaren ändra listan med fasta appar i startfältet.</translation>
 <translation id="7625444193696794922">Policyn anger vilken versionskanal som enheten ska låsas till.</translation>
+<translation id="2552966063069741410">Tidszon</translation>
 <translation id="3088288048720661397">Inaktiverar synkronisering av Google Dokument när en mobildataanslutning används och värdet är sant.
 
           Data synkroniseras bara med Google Dokument om det finns en Wi-Fi- eller Ethernet-anslutning
@@ -510,6 +513,7 @@
       Om du aktiverar inställningen eller inte anger något värde kan användarna styra autofyll. De kan konfigurera autofyllprofiler och aktivera och inaktivera autofyllfunktionen när de vill.</translation>
 <translation id="6157537876488211233">Kommaavgränsad lista med regler för proxybypass</translation>
 <translation id="3965339130942650562">Tidsgräns för utloggning av inaktiv användare</translation>
+<translation id="5293547923319914979">Aktivera avskärmning av fjärråtkomstvärdar.</translation>
 <translation id="7091198954851103976">Kör alltid pluginprogram som kräver auktorisering</translation>
 <translation id="2021307518684405078">Tillåt inte att webbplatser kommer åt min kamera och mikrofon</translation>
 <translation id="8870318296973696995">Startsida</translation>
@@ -570,6 +574,13 @@
           Om policyn inte ställs in aktiveras standardsökleverantören och användaren kan ställa in listan med sökleverantörer.</translation>
 <translation id="8731693562790917685">Med innehållsinställningarna kan du ange hur innehåll av en viss typ (till exempel cookies, bilder eller JavaScript) ska hanteras.</translation>
 <translation id="2411919772666155530">Blockera meddelanden på dessa webbplatser</translation>
+<translation id="5281259077246025371">Tillåta inspelning av ljud.
+
+      När policyn anges som falsk inaktiveras ljudinspelning när användaren är inloggad.
+
+      Policyn påverkar alla typer av ljudingångar och inte bara den inbyggda mikrofonen.
+
+      Om inställningen anges som sann eller inte konfigureras kan användare använda alla ljudingångar som stöds på enheten.</translation>
 <translation id="6923366716660828830">Policyn anger namnet på standardsökleverantören. Om värdet lämnas tomt eller inte anges används det värdnamn som angavs av sökadressen.
 
           Policyn används bara om policyn DefaultSearchProviderEnabled är aktiverad.</translation>
@@ -619,6 +630,13 @@
           Om du aktiverar den här inställningen kan den inte ändras eller åsidosättas av användaren i <ph name="PRODUCT_NAME"/>.
 
           Om du inaktiverar inställningen är det samma sak som att inte konfigurera den. Användaren kan fortfarande ändra den i <ph name="PRODUCT_NAME"/>.</translation>
+<translation id="8161570238552664224">Tillåta uppspelning av ljud.
+
+      När policyn anges som falsk inaktiveras ljudutgångar när användaren är inloggad.
+
+      Policyn påverkar alla typer av ljudutgångar och inte bara de inbyggda högtalarna. Åtkomst till ljudfunktioner nekas också av den här policyn. Aktivera inte den här policyn om en skärmläsare krävs för användaren.
+
+      Om inställningen anges som sann eller inte konfigureras kan användare använda alla ljudutgångar som stöds på enheten.</translation>
 <translation id="5761030451068906335">Konfigurerar proxyinställningarna för <ph name="PRODUCT_NAME"/>. Använd inte policyn. Den är inte redo ännu.</translation>
 <translation id="8344454543174932833">Importera bokmärken från standardwebbläsaren första gången den körs</translation>
 <translation id="1019101089073227242">Ange katalog för användardata</translation>
@@ -785,6 +803,7 @@
       Om du aktiverar eller inaktiverar inställningen kan den inte ändras eller åsidosättas av användare i <ph name="PRODUCT_NAME"/>.
 
       Om du inte anger policyn kan användaren välja om knappen Startsida ska visas.</translation>
+<translation id="2518231489509538392">Tillåta uppspelning av ljud</translation>
 <translation id="7547044444554936129">Policyn aktiverar funktionen Instant i <ph name="PRODUCT_NAME"/> och förhindrar att användarna ändrar inställningen.
 
       Om du aktiverar inställningen aktiveras <ph name="PRODUCT_NAME"/> Instant.
@@ -867,6 +886,7 @@
           Om du inte anger policyn kan valfri server användas för integrerad autentisering.</translation>
 <translation id="2299220924812062390">Ange en lista med aktiverade plugin-program</translation>
 <translation id="924557436754151212">Importera sparade lösenord från standardwebbläsaren första gången den körs</translation>
+<translation id="1465619815762735808">Klicka för att spela</translation>
 <translation id="7227967227357489766">Definierar listan med användare som får logga in på enheten. Poster har formatet <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, till exempel <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Om du vill att användare ska kunna logga in på en domän helt godtyckligt använder du poster i formatet <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
       Om policyn inte är konfigurerad finns inga begränsningar för vilka användare som får logga in. Observera att policyn <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/> fortfarande måste vara korrekt konfigurerad för att det ska gå att skapa nya användare.</translation>
@@ -934,6 +954,11 @@
 <translation id="8631434304112909927">till och med version <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Aktivera sökförslag</translation>
 <translation id="4906194810004762807">Uppdateringsfrekvens för enhetspolicy</translation>
+<translation id="1398889361882383850">Gör det möjligt att ange om webbplatser får köra plugin-program automatiskt. Det går att tillåta eller neka att plugin-program körs automatiskt för alla webbplatser.
+
+          Spela genom att klicka tillåter plugin-program att köras, men användaren måste klicka på dem för att de ska starta.
+
+          Om den här policyn inte anges används &quot;AllowPlugins&quot; och användaren kan ändra den.</translation>
 <translation id="7974114691960514888">Policyn stöds inte längre.
           Gör att STUN och reläservrar kan användas för att ansluta till en fjärrklient.
 
@@ -969,9 +994,6 @@
       Om du aktiverar den här inställningen används den angivna språkversionen av <ph name="PRODUCT_NAME"/>. Om den språkversion som anges inte stöds används en-US istället.
 
       Om inställningen inaktiveras eller inte är konfigurerad använder <ph name="PRODUCT_NAME"/> antingen den språkversion som användaren anger (om den är konfigurerad), samma språk som datorn eller standardversionen en-US.</translation>
-<translation id="7271483295221961083">Policyn gör att du kan ange om webbplatser får köra plugin-program automatiskt. Att köra plugin-program automatiskt kan vara tillåtet för alla webbplatser eller otillåtet för alla webbplatser.
-
-          Om den här policyn inte anges används AllowPlugins och inställningen kan ändras av användaren.</translation>
 <translation id="718956142899066210">Anslutningstyper som tillåts för uppdateringar</translation>
 <translation id="6985168562472482191">Namnet på företagets webbutik, som visas under appikonen på sidan Ny flik. Den här inställningen har ingen effekt om inte EnterpriseWebStoreURL har ställts in.
 
@@ -1056,6 +1078,17 @@
 <translation id="6658245400435704251">Anger hur många sekunder en hämtning av en uppdatering via en enhet får försenas slumpmässigt från den tidpunkt då uppdateringen först skickades till servern. Enheten kan hållas i vänteläge dels under en vanlig tidsperiod, dels beroende på antalet uppdateringskontroller. Spridningen är alltid bunden till en övre tidsgräns så att en enhet aldrig fastnar för gott medan en uppdatering håller på att hämtas.</translation>
 <translation id="1948757837129151165">Policy för HTTP-autentisering</translation>
 <translation id="5946082169633555022">Betakanal</translation>
+<translation id="145467868108778033">Gör det möjligt att ange en lista över tillägg som installeras utan någon åtgärd från användare.
+
+          Varje post i listan är en sträng som innehåller ett tilläggs-ID och en uppdateringsadress som avgränsas av ett semikolon (<ph name="SEMICOLON"/>). Tilläggs-ID:t är strängen med 32 tecken i till exempel <ph name="CHROME_EXTENSIONS_LINK"/> i utvecklarläget. Uppdateringsadressen ska leda till ett XML-dokument för uppdatering av manifest enligt vad som beskrivs på <ph name="LINK_TO_EXTENSION_DOC1"/>. Observera att uppdateringsadressen som anges i policyn endast används för den initiala installationen. För senare uppdateringar av tillägget används uppdateringsadressen i tilläggsmanifestet.
+
+          För varje post får <ph name="PRODUCT_NAME"/> det tillägg som anges i tilläggs-ID:t från uppdateringstjänsten på den angivna uppdateringsadressen och installerar det automatiskt.
+
+          Till exempel installerar <ph name="EXTENSION_POLICY_EXAMPLE"/> tillägget <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> från standarduppdateringsadressen från Chrome Web Store. Mer information om värdtillägg hittar du på: <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Användare kommer inte att kunna avinstallera tillägg som anges av den här policyn. Om du tar bort ett tillägg från listan avinstalleras det automatiskt av <ph name="PRODUCT_NAME"/>.
+
+          Om den här policyn inte anges kan användaren avinstallera tillägg i <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="8303314579975657113">Policyn anger vilket GSSAPI-bibliotek som ska användas för HTTP-autentisering. Du kan ange bara ett biblioteksnamn eller en fullständig sökväg.
 
       Om du inte anger något använder <ph name="PRODUCT_NAME"/> ett standardbiblioteksnamn.</translation>

@@ -15,14 +15,18 @@
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_param_traits.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebExceptionCode.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBMetadata.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBObjectStore.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
 
 #define IPC_MESSAGE_START IndexedDBMsgStart
 
 // Argument structures used in messages
 
 IPC_ENUM_TRAITS(WebKit::WebIDBObjectStore::PutMode)
+IPC_ENUM_TRAITS(WebKit::WebIDBCursor::Direction)
+IPC_ENUM_TRAITS(WebKit::WebIDBTransaction::TaskType)
 
 // Used to enumerate indexed databases.
 IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryGetDatabaseNames_Params)
@@ -37,7 +41,10 @@ IPC_STRUCT_END()
 IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryOpen_Params)
   // The response should have these ids.
   IPC_STRUCT_MEMBER(int32, thread_id)
+  // Identifier of the request
   IPC_STRUCT_MEMBER(int32, response_id)
+  // Identifier for database callbacks
+  IPC_STRUCT_MEMBER(int32, database_response_id)
   // The origin doing the initiating.
   IPC_STRUCT_MEMBER(string16, origin)
   // The name of the database.
@@ -146,7 +153,9 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_ObjectStoreOpenCursor_Params)
   // The serialized key range.
   IPC_STRUCT_MEMBER(content::IndexedDBKeyRange, key_range)
   // The direction of this cursor.
-  IPC_STRUCT_MEMBER(int32, direction)
+  IPC_STRUCT_MEMBER(WebKit::WebIDBCursor::Direction, direction)
+  // The priority of this cursor.
+  IPC_STRUCT_MEMBER(WebKit::WebIDBTransaction::TaskType, task_type)
   // The object store the cursor belongs to.
   IPC_STRUCT_MEMBER(int32, idb_object_store_id)
   // The transaction this request belongs to.
@@ -266,6 +275,10 @@ IPC_MESSAGE_CONTROL2(IndexedDBMsg_TransactionCallbacksComplete,
                      int32 /* thread_id */,
                      int32 /* transaction_id */)
 
+// IDBDatabaseCallback message handlers
+IPC_MESSAGE_CONTROL2(IndexedDBMsg_DatabaseCallbacksForcedClose,
+                     int32, /* thread_id */
+                     int32) /* database_id */
 IPC_MESSAGE_CONTROL3(IndexedDBMsg_DatabaseCallbacksVersionChange,
                      int32, /* thread_id */
                      int32, /* database_id */
@@ -389,12 +402,6 @@ IPC_SYNC_MESSAGE_CONTROL4_2(IndexedDBHostMsg_DatabaseTransaction,
                             int32, /* idb_transaction_id */
                             WebKit::WebExceptionCode /* ec */)
 
-// WebIDBDatabase::open() message.
-IPC_MESSAGE_CONTROL3(IndexedDBHostMsg_DatabaseOpen,
-                     int32, /* idb_database_id */
-                     int32 /* thread_id */,
-                     int32 /* response_id */)
-
 // WebIDBDatabase::close() message.
 IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_DatabaseClose,
                      int32 /* idb_database_id */)
@@ -453,6 +460,21 @@ IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_ObjectStoreGet,
 IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStorePut,
                             IndexedDBHostMsg_ObjectStorePut_Params,
                             WebKit::WebExceptionCode /* ec */)
+
+// WebIDBObjectStore::setIndexKeys() message.
+IPC_MESSAGE_CONTROL5(IndexedDBHostMsg_ObjectStoreSetIndexKeys,
+                     int32, /* idb_object_store_id */
+                     content::IndexedDBKey, /* primary_key */
+                     std::vector<string16>, /* index_names */
+                     std::vector<std::vector<content::IndexedDBKey> >,
+                     /* index_keys */
+                     int32 /* transaction_id */)
+
+// WebIDBObjectStore::setIndexesReady() message.
+IPC_MESSAGE_CONTROL3(IndexedDBHostMsg_ObjectStoreSetIndexesReady,
+                     int32, /* idb_object_store_id */
+                     std::vector<string16>, /* index_names */
+                     int32 /* transaction_id */)
 
 // WebIDBObjectStore::delete() message.
 IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_ObjectStoreDelete,

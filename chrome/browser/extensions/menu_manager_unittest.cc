@@ -29,6 +29,7 @@
 using content::BrowserThread;
 using testing::_;
 using testing::AtLeast;
+using testing::DeleteArg;
 using testing::InSequence;
 using testing::Return;
 using testing::SaveArg;
@@ -187,6 +188,70 @@ TEST_F(MenuManagerTest, ChildFunctions) {
   ASSERT_EQ(1u, manager_.MenuItems(item2->extension_id())->size());
   ASSERT_EQ(item2, manager_.MenuItems(item2->extension_id())->at(0));
   ASSERT_EQ(0, item2->child_count());
+}
+
+TEST_F(MenuManagerTest, PopulateFromValue) {
+  Extension* extension = AddExtension("test");
+
+  bool incognito = true;
+  int type = MenuItem::CHECKBOX;
+  std::string title("TITLE");
+  bool checked = true;
+  bool enabled = true;
+  MenuItem::ContextList contexts;
+  contexts.Add(MenuItem::PAGE);
+  contexts.Add(MenuItem::SELECTION);
+  int contexts_value = 0;
+  ASSERT_TRUE(contexts.ToValue()->GetAsInteger(&contexts_value));
+
+  ListValue* document_url_patterns(new ListValue());
+  document_url_patterns->Append(
+      Value::CreateStringValue("http://www.google.com/*"));
+  document_url_patterns->Append(
+      Value::CreateStringValue("http://www.reddit.com/*"));
+
+  ListValue* target_url_patterns(new ListValue());
+  target_url_patterns->Append(
+      Value::CreateStringValue("http://www.yahoo.com/*"));
+  target_url_patterns->Append(
+      Value::CreateStringValue("http://www.facebook.com/*"));
+
+  base::DictionaryValue value;
+  value.SetBoolean("incognito", incognito);
+  value.SetString("string_uid", std::string());
+  value.SetInteger("type", type);
+  value.SetString("title", title);
+  value.SetBoolean("checked", checked);
+  value.SetBoolean("enabled", enabled);
+  value.SetInteger("contexts", contexts_value);
+  value.Set("document_url_patterns", document_url_patterns);
+  value.Set("target_url_patterns", target_url_patterns);
+
+  std::string error;
+  scoped_ptr<MenuItem> item(MenuItem::Populate(extension->id(), value, &error));
+  ASSERT_TRUE(item.get());
+
+  EXPECT_EQ(extension->id(), item->extension_id());
+  EXPECT_EQ(incognito, item->incognito());
+  EXPECT_EQ(title, item->title());
+  EXPECT_EQ(checked, item->checked());
+  EXPECT_EQ(item->checked(), item->checked());
+  EXPECT_EQ(enabled, item->enabled());
+  EXPECT_EQ(contexts, item->contexts());
+
+  URLPatternSet document_url_pattern_set;
+  document_url_pattern_set.Populate(*document_url_patterns,
+                                    URLPattern::SCHEME_ALL,
+                                    true,
+                                    &error);
+  EXPECT_EQ(document_url_pattern_set, item->document_url_patterns());
+
+  URLPatternSet target_url_pattern_set;
+  target_url_pattern_set.Populate(*target_url_patterns,
+                                   URLPattern::SCHEME_ALL,
+                                   true,
+                                   &error);
+  EXPECT_EQ(target_url_pattern_set, item->target_url_patterns());
 }
 
 // Tests that deleting a parent properly removes descendants.
@@ -375,14 +440,23 @@ class MockEventRouter : public EventRouter {
   explicit MockEventRouter(Profile* profile) :
       EventRouter(profile) {}
 
-  MOCK_METHOD6(DispatchEventToExtension,
+  MOCK_METHOD6(DispatchEventToExtensionMock,
                void(const std::string& extension_id,
                     const std::string& event_name,
-                    const std::string& event_args,
+                    base::ListValue* event_args,
                     Profile* source_profile,
                     const GURL& event_url,
                     EventRouter::UserGestureState state));
 
+  virtual void DispatchEventToExtension(const std::string& extension_id,
+                                        const std::string& event_name,
+                                        scoped_ptr<base::ListValue> event_args,
+                                        Profile* source_profile,
+                                        const GURL& event_url,
+                                        EventRouter::UserGestureState state) {
+    DispatchEventToExtensionMock(extension_id, event_name, event_args.release(),
+                                 source_profile, event_url, state);
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockEventRouter);
@@ -474,40 +548,32 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
 
   // Use the magic of googlemock to save a parameter to our mock's
   // DispatchEventToExtension method into event_args.
-  std::string event_args;
+  base::ListValue* list = NULL;
   {
     InSequence s;
     EXPECT_CALL(*mock_event_router.get(),
-                DispatchEventToExtension(
+                DispatchEventToExtensionMock(
                     item->extension_id(),
-                  extensions::event_names::kOnContextMenus,
-                  _,
-                  &profile,
-                  GURL(),
-                  EventRouter::USER_GESTURE_ENABLED))
+                    extensions::event_names::kOnContextMenus,
+                    _,
+                    &profile,
+                    GURL(),
+                    EventRouter::USER_GESTURE_ENABLED))
       .Times(1)
-      .WillOnce(SaveArg<2>(&event_args));
+      .WillOnce(SaveArg<2>(&list));
   EXPECT_CALL(*mock_event_router.get(),
-              DispatchEventToExtension(
+              DispatchEventToExtensionMock(
                   item->extension_id(),
                   extensions::event_names::kOnContextMenuClicked,
                   _,
                   &profile,
                   GURL(),
                   EventRouter::USER_GESTURE_ENABLED))
-      .Times(1);
+      .Times(1)
+      .WillOnce(DeleteArg<2>());
   }
   manager_.ExecuteCommand(&profile, NULL /* tab_contents */, params, id);
 
-  // Parse the json event_args, which should turn into a 2-element list where
-  // the first element is a dictionary we want to inspect for the correct
-  // values.
-  scoped_ptr<Value> result(
-      base::JSONReader::Read(event_args, base::JSON_ALLOW_TRAILING_COMMAS));
-  Value* value = result.get();
-  ASSERT_TRUE(result.get() != NULL);
-  ASSERT_EQ(Value::TYPE_LIST, value->GetType());
-  ListValue* list = static_cast<ListValue*>(value);
   ASSERT_EQ(2u, list->GetSize());
 
   DictionaryValue* info;
@@ -532,6 +598,8 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
   bool bool_tmp = true;
   ASSERT_TRUE(info->GetBoolean("editable", &bool_tmp));
   ASSERT_EQ(params.is_editable, bool_tmp);
+
+  delete list;
 }
 
 // Test that there is always only one radio item selected.

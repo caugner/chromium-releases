@@ -83,38 +83,38 @@ DebugDaemonClient* MockDBusThreadManagerWithoutGMock::GetDebugDaemonClient() {
   return NULL;
 }
 
-FlimflamDeviceClient*
-    MockDBusThreadManagerWithoutGMock::GetFlimflamDeviceClient() {
+ShillDeviceClient*
+    MockDBusThreadManagerWithoutGMock::GetShillDeviceClient() {
   NOTIMPLEMENTED();
   return NULL;
 }
 
-FlimflamIPConfigClient*
-    MockDBusThreadManagerWithoutGMock::GetFlimflamIPConfigClient() {
+ShillIPConfigClient*
+    MockDBusThreadManagerWithoutGMock::GetShillIPConfigClient() {
   NOTIMPLEMENTED();
   return NULL;
 }
 
-FlimflamManagerClient*
-    MockDBusThreadManagerWithoutGMock::GetFlimflamManagerClient() {
+ShillManagerClient*
+    MockDBusThreadManagerWithoutGMock::GetShillManagerClient() {
   NOTIMPLEMENTED();
   return NULL;
 }
 
-FlimflamNetworkClient*
-    MockDBusThreadManagerWithoutGMock::GetFlimflamNetworkClient() {
+ShillNetworkClient*
+    MockDBusThreadManagerWithoutGMock::GetShillNetworkClient() {
   NOTIMPLEMENTED();
   return NULL;
 }
 
-FlimflamProfileClient*
-    MockDBusThreadManagerWithoutGMock::GetFlimflamProfileClient() {
+ShillProfileClient*
+    MockDBusThreadManagerWithoutGMock::GetShillProfileClient() {
   NOTIMPLEMENTED();
   return NULL;
 }
 
-FlimflamServiceClient*
-    MockDBusThreadManagerWithoutGMock::GetFlimflamServiceClient() {
+ShillServiceClient*
+    MockDBusThreadManagerWithoutGMock::GetShillServiceClient() {
   NOTIMPLEMENTED();
   return NULL;
 }
@@ -135,8 +135,20 @@ IntrospectableClient*
   return NULL;
 }
 
+MediaTransferProtocolDaemonClient*
+    MockDBusThreadManagerWithoutGMock::GetMediaTransferProtocolDaemonClient() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 ModemMessagingClient*
     MockDBusThreadManagerWithoutGMock::GetModemMessagingClient() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+PermissionBrokerClient*
+    MockDBusThreadManagerWithoutGMock::GetPermissionBrokerClient() {
   NOTIMPLEMENTED();
   return NULL;
 }

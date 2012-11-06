@@ -4,26 +4,47 @@
 
 #include "chrome/browser/process_singleton.h"
 
+#include <shellapi.h>
+#include <shobjidl.h>
+
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/metro.h"
+#include "base/win/registry.h"
+#include "base/win/scoped_com_initializer.h"
+#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/win_util.h"
+#include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/wmi.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/win/hwnd_util.h"
 
 namespace {
 
 const char kLockfile[] = "lockfile";
+
+const char kSearchUrl[] =
+  "http://www.google.com/search?q=%s&sourceid=chrome&ie=UTF-8";
+
+const int kImmersiveChromeInitTimeout = 500;
 
 // Checks the visibility of the enumerated window and signals once a visible
 // window has been found.
@@ -112,6 +133,100 @@ bool ParseCommandLine(const COPYDATASTRUCT* cds,
   return false;
 }
 
+bool ActivateMetroChrome() {
+  FilePath chrome_exe;
+  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
+    NOTREACHED() << "Failed to get chrome exe path";
+    return false;
+  }
+  string16 app_id = ShellUtil::GetBrowserModelId(
+      BrowserDistribution::GetDistribution(), chrome_exe.value());
+  if (app_id.empty()) {
+    NOTREACHED() << "Failed to get chrome app user model id.";
+    return false;
+  }
+
+  base::win::ScopedComPtr<IApplicationActivationManager> activation_manager;
+  HRESULT hr = activation_manager.CreateInstance(
+      CLSID_ApplicationActivationManager);
+  if (!activation_manager) {
+    NOTREACHED() << "Failed to cocreate activation manager. Error: " << hr;
+    return false;
+  }
+
+  unsigned long pid = 0;
+  hr = activation_manager->ActivateApplication(app_id.c_str(),
+                                               L"open",
+                                               AO_NONE,
+                                               &pid);
+  if (FAILED(hr)) {
+    NOTREACHED() << "Failed to activate metro chrome. Error: " << hr;
+    return false;
+  }
+  return true;
+}
+
+// Returns true if Chrome needs to be relaunched into Windows 8 immersive mode.
+// Following conditions apply:-
+// 1. Windows 8 or greater.
+// 2. Not in Windows 8 immersive mode.
+// 3. Process integrity level is not high.
+// 4. The profile data directory is the default directory .
+// 5. Last used mode was immersive/machine is a tablet.
+// TODO(ananta)
+// Move this function to a common place as the Windows 8 delegate_execute
+// handler can possibly use this.
+bool ShouldLaunchInWindows8ImmersiveMode(const FilePath& user_data_dir) {
+#if defined(USE_AURA)
+  return false;
+#endif
+
+  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+    return false;
+
+  if (base::win::IsProcessImmersive(base::GetCurrentProcessHandle()))
+    return false;
+
+  base::IntegrityLevel integrity_level = base::INTEGRITY_UNKNOWN;
+  base::GetProcessIntegrityLevel(base::GetCurrentProcessHandle(),
+                                 &integrity_level);
+  if (integrity_level == base::HIGH_INTEGRITY)
+    return false;
+
+  FilePath default_user_data_dir;
+  if (!chrome::GetDefaultUserDataDirectory(&default_user_data_dir))
+    return false;
+
+  if (default_user_data_dir != user_data_dir)
+    return false;
+
+  // TODO(gab): This is a temporary solution to avoid activating Metro Chrome
+  // when chrome.exe is invoked with one of the short-lived commands below. The
+  // long-term and correct solution is to only check/activate Chrome later;
+  // after handling of these short-lived commands has occured
+  // (http://crbug.com/155585).
+  // This is a 1:1 mapping of the switches that force an early exit of Chrome in
+  // ChromeBrowserMainParts::PreMainMessageLoopRunImpl().
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUninstall) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kHideIcons) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kShowIcons) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kMakeDefaultBrowser) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kPackExtension)) {
+    return false;
+  }
+
+  base::win::RegKey reg_key;
+  DWORD reg_value = 0;
+  if (reg_key.Create(HKEY_CURRENT_USER, chrome::kMetroRegistryPath,
+                     KEY_READ) == ERROR_SUCCESS &&
+      reg_key.ReadValueDW(chrome::kLaunchModeValue,
+                          &reg_value) == ERROR_SUCCESS) {
+    return reg_value == 1;
+  }
+  return base::win::IsMachineATablet();
+}
+
 }  // namespace
 
 // Microsoft's Softricity virtualization breaks the sandbox processes.
@@ -151,6 +266,19 @@ bool ProcessSingleton::EscapeVirtualization(const FilePath& user_data_dir) {
 ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
     : window_(NULL), locked_(false), foreground_window_(NULL),
     is_virtualized_(false), lock_file_(INVALID_HANDLE_VALUE) {
+  FilePath default_user_data_dir;
+  // For Windows 8 and above check if we need to relaunch into Windows 8
+  // immersive mode.
+  if (ShouldLaunchInWindows8ImmersiveMode(user_data_dir)) {
+    bool immersive_chrome_launched = ActivateMetroChrome();
+    if (!immersive_chrome_launched) {
+      LOG(WARNING) << "Failed to launch immersive chrome";
+    } else {
+      // Sleep to allow the immersive chrome process to create its initial
+      // message window.
+      SleepEx(kImmersiveChromeInitTimeout, FALSE);
+    }
+  }
   remote_window_ = FindWindowEx(HWND_MESSAGE, NULL,
                                 chrome::kMessageWindowClass,
                                 user_data_dir.value().c_str());
@@ -239,7 +367,38 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
   else if (!remote_window_)
     return PROCESS_NONE;
 
-  // Found another window, send our command line to it
+  DWORD process_id = 0;
+  DWORD thread_id = GetWindowThreadProcessId(remote_window_, &process_id);
+  // It is possible that the process owning this window may have died by now.
+  if (!thread_id || !process_id) {
+    remote_window_ = NULL;
+    return PROCESS_NONE;
+  }
+
+  if (base::win::IsMetroProcess()) {
+    // Interesting corner case. We are launched as a metro process but we
+    // found another chrome running. Since metro enforces single instance then
+    // the other chrome must be desktop chrome and this must be a search charm
+    // activation. This scenario is unique; other cases should be properly
+    // handled by the delegate_execute which will not activate a second chrome.
+    string16 terms;
+    base::win::MetroLaunchType launch = base::win::GetMetroLaunchParams(&terms);
+    if (launch != base::win::METRO_SEARCH) {
+      LOG(WARNING) << "In metro mode, but and launch is " << launch;
+    } else {
+      std::string query = net::EscapeQueryParamValue(UTF16ToUTF8(terms), true);
+      std::string url = base::StringPrintf(kSearchUrl, query.c_str());
+      SHELLEXECUTEINFOA sei = { sizeof(sei) };
+      sei.fMask = SEE_MASK_FLAG_LOG_USAGE;
+      sei.nShow = SW_SHOWNORMAL;
+      sei.lpFile = url.c_str();
+      OutputDebugStringA(sei.lpFile);
+      sei.lpDirectory = "";
+      ::ShellExecuteExA(&sei);
+    }
+    return PROCESS_NOTIFIED;
+  }
+  // Non-metro mode, send our command line to the other chrome message window.
   // format is "START\0<<<current directory>>>\0<<<commandline>>>".
   std::wstring to_send(L"START\0", 6);  // want the NULL in the string.
   FilePath cur_dir;
@@ -252,14 +411,6 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
 
   // Allow the current running browser window making itself the foreground
   // window (otherwise it will just flash in the taskbar).
-  DWORD process_id = 0;
-  DWORD thread_id = GetWindowThreadProcessId(remote_window_, &process_id);
-  // It is possible that the process owning this window may have died by now.
-  if (!thread_id || !process_id) {
-    remote_window_ = NULL;
-    return PROCESS_NONE;
-  }
-
   AllowSetForegroundWindow(process_id);
 
   COPYDATASTRUCT cds;
@@ -278,6 +429,15 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
     if (!result) {
       remote_window_ = NULL;
       return PROCESS_NONE;
+    }
+
+    base::win::ScopedHandle process_handle;
+    if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
+        base::OpenProcessHandleWithAccess(
+            process_id, PROCESS_QUERY_INFORMATION,
+            process_handle.Receive())) {
+      if (base::win::IsProcessImmersive(process_handle.Get()))
+        ActivateMetroChrome();
     }
     return PROCESS_NOTIFIED;
   }

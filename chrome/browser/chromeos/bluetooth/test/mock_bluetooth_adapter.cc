@@ -6,7 +6,15 @@
 
 namespace chromeos {
 
-MockBluetoothAdapter::MockBluetoothAdapter() {}
+MockBluetoothAdapter::Observer::Observer() {}
+MockBluetoothAdapter::Observer::~Observer() {}
+
+MockBluetoothAdapter::MockBluetoothAdapter(const std::string& address,
+                                           const std::string& name) {
+  address_ = address;
+  name_ = name;
+}
+
 MockBluetoothAdapter::~MockBluetoothAdapter() {}
 
 }  // namespace chromeos

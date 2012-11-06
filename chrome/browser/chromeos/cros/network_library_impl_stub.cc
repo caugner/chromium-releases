@@ -40,9 +40,18 @@ void NetworkLibraryImplStub::Init() {
   enabled_devices_ = devices;
   connected_devices_ = devices;
 
+  base::ListValue supported_carriers;
+  supported_carriers.Append(new StringValue("Generic CDMA Carrier 1"));
+  supported_carriers.Append(new StringValue("Generic UMTS"));
+  supported_carriers.Append(new StringValue("Generic CDMA Carrier 2"));
+  supported_carriers.Append(new StringValue("Generic CDMA Carrier 3"));
+
   NetworkDevice* cellular = new NetworkDevice("cellular");
   cellular->type_ = TYPE_CELLULAR;
+  cellular->set_technology_family(TECHNOLOGY_FAMILY_CDMA);
+  cellular->set_carrier("Generic CDMA Carrier 2");
   cellular->imsi_ = "123456789012345";
+  cellular->set_supported_carriers(supported_carriers);
   device_map_["cellular"] = cellular;
 
   CellularApn apn;
@@ -63,6 +72,7 @@ void NetworkLibraryImplStub::Init() {
   cellular_gsm->imsi_ = "123456789012345";
   cellular_gsm->set_sim_pin_required(SIM_PIN_REQUIRED);
   cellular_gsm->set_provider_apn_list(apn_list);
+  cellular_gsm->set_supported_carriers(supported_carriers);
   device_map_["cellular_gsm"] = cellular_gsm;
 
   // Profiles
@@ -159,6 +169,7 @@ void NetworkLibraryImplStub::Init() {
 
   CellularNetwork* cellular1 = new CellularNetwork("cellular1");
   cellular1->set_name("Fake Cellular 1");
+  cellular1->set_device_path(cellular->device_path());
   cellular1->set_strength(100);
   cellular1->set_connected();
   cellular1->set_activation_state(ACTIVATION_STATE_ACTIVATED);
@@ -169,6 +180,7 @@ void NetworkLibraryImplStub::Init() {
 
   CellularNetwork* cellular2 = new CellularNetwork("/cellular2");
   cellular2->set_name("Fake Cellular 2");
+  cellular2->set_device_path(cellular->device_path());
   cellular2->set_strength(50);
   cellular2->set_activation_state(ACTIVATION_STATE_NOT_ACTIVATED);
   cellular2->set_network_technology(NETWORK_TECHNOLOGY_UMTS);
@@ -199,6 +211,7 @@ void NetworkLibraryImplStub::Init() {
 
   CellularNetwork* cellular5 = new CellularNetwork("cellular5");
   cellular5->set_name("Fake Cellular Low Data");
+  cellular5->set_device_path(cellular->device_path());
   cellular5->set_strength(100);
   cellular5->set_activation_state(ACTIVATION_STATE_ACTIVATED);
   cellular5->set_payment_url(std::string("http://www.google.com"));
@@ -482,7 +495,7 @@ void NetworkLibraryImplStub::CallConfigureService(
     const DictionaryValue* info) {}
 
 void NetworkLibraryImplStub::CallConnectToNetwork(Network* network) {
-  // Immediately set the network to active to mimic flimflam's behavior.
+  // Immediately set the network to active to mimic shill's behavior.
   SetActiveNetwork(network->type(), network->service_path());
   // If a delay has been set (i.e. we are interactive), delay the call to
   // ConnectToNetwork (but signal observers since we changed connecting state).
@@ -624,6 +637,17 @@ void NetworkLibraryImplStub::RequestCellularRegister(
 
 void NetworkLibraryImplStub::SetCellularDataRoamingAllowed(bool new_value) {}
 
+void NetworkLibraryImplStub::SetCarrier(
+    const std::string& carrier,
+    const NetworkOperationCallback& completed) {
+  // Call the completed callback with a 10s delay.
+  BrowserThread::PostDelayedTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(completed, "", NETWORK_METHOD_ERROR_NONE,""),
+      base::TimeDelta::FromMilliseconds(10000));
+}
+
 bool NetworkLibraryImplStub::IsCellularAlwaysInRoaming() {
   return false;
 }
@@ -639,6 +663,9 @@ bool NetworkLibraryImplStub::GetWifiAccessPoints(
     WifiAccessPointVector* result) {
   *result = WifiAccessPointVector();
   return true;
+}
+
+void NetworkLibraryImplStub::RefreshIPConfig(Network* network) {
 }
 
 void NetworkLibraryImplStub::DisconnectFromNetwork(const Network* network) {
@@ -672,8 +699,34 @@ NetworkIPConfigVector NetworkLibraryImplStub::GetIPConfigs(
   return ip_configs_;
 }
 
-void NetworkLibraryImplStub::SetIPConfig(const NetworkIPConfig& ipconfig) {
-    ip_configs_.push_back(ipconfig);
+void NetworkLibraryImplStub::SetIPParameters(const std::string& service_path,
+                                             const std::string& address,
+                                             const std::string& netmask,
+                                             const std::string& gateway,
+                                             const std::string& name_servers,
+                                             int dhcp_usage_mask) {
+  VLOG(1) << "Setting IP parameters:"
+      << "\n  address: " << address
+      << (dhcp_usage_mask & USE_DHCP_ADDRESS ?
+          " (ignored)" : " (in use)")
+      << "\n  netmask: " << netmask
+      << (dhcp_usage_mask & USE_DHCP_NETMASK ?
+          " (ignored)" : " (in use)")
+      << "\n  gateway: " << gateway
+      << (dhcp_usage_mask & USE_DHCP_GATEWAY ?
+          " (ignored)" : " (in use)")
+      << "\n  name_servers: " << name_servers
+      << (dhcp_usage_mask & USE_DHCP_NAME_SERVERS ?
+          " (ignored)" : " (in use)");
+
+    Network* network = FindNetworkByPath(service_path);
+    if (network)
+      ip_configs_.push_back(NetworkIPConfig(network->device_path(),
+                                            IPCONFIG_TYPE_IPV4,
+                                            address,
+                                            netmask,
+                                            gateway,
+                                            name_servers));
 }
 
 }  // namespace chromeos

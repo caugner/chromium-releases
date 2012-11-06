@@ -8,7 +8,7 @@
 
 cr.define('login', function() {
   // Network state constants.
-  const NET_STATE = {
+  /** @const */ var NET_STATE = {
     OFFLINE: 0,
     ONLINE: 1,
     PORTAL: 2
@@ -24,6 +24,9 @@ cr.define('login', function() {
   HeaderBar.prototype = {
     __proto__: HTMLDivElement.prototype,
 
+    // Whether guest button should be shown when header bar is in normal mode.
+    showGuest_: false,
+
     /** @inheritDoc */
     decorate: function() {
       $('shutdown-header-bar-item').addEventListener('click',
@@ -35,16 +38,14 @@ cr.define('login', function() {
                     ['login.HeaderBar.handleAddUser',
                      'check']);
       });
-      $('cancel-add-user-button').addEventListener('click', function(e) {
-        this.hidden = true;
-        $('add-user-button').hidden = false;
-        Oobe.showScreen({id: SCREEN_ACCOUNT_PICKER});
-        Oobe.resetSigninUI(true);
-      });
-      $('sign-out-user-button').addEventListener('click', function(e) {
-        this.disabled = true;
-        chrome.send('signOutUser');
-      });
+      $('cancel-add-user-button').addEventListener('click',
+          this.handleCancelAddUserClick_);
+      $('guest-user-header-bar-item').addEventListener('click',
+          this.handleGuestClick_);
+      $('guest-user-button').addEventListener('click',
+          this.handleGuestClick_);
+      $('sign-out-user-button').addEventListener('click',
+          this.handleSignoutClick_);
     },
 
     /**
@@ -70,29 +71,80 @@ cr.define('login', function() {
     },
 
     /**
+     * Cancel add user button click handler.
+     * @private
+     */
+    handleCancelAddUserClick_: function(e) {
+      $('login-header-bar').signinUIActive = false;
+      Oobe.showScreen({id: SCREEN_ACCOUNT_PICKER});
+      Oobe.resetSigninUI(true);
+    },
+
+    /**
+     * Guest button click handler.
+     * @private
+     */
+    handleGuestClick_: function(e) {
+      Oobe.disableSigninUI();
+      chrome.send('launchIncognito');
+      e.stopPropagation();
+    },
+
+    /**
+     * Sign out button click handler.
+     * @private
+     */
+    handleSignoutClick_: function(e) {
+      this.disabled = true;
+      chrome.send('signOutUser');
+      e.stopPropagation();
+    },
+
+    /**
      * Shutdown button click handler.
      * @private
      */
     handleShutdownClick_: function(e) {
       chrome.send('shutdownSystem');
       e.stopPropagation();
-    }
+    },
+
+    /**
+     * If true then "Browse as Guest" button is shown.
+     * @type {boolean}
+     */
+    set showGuestButton(value) {
+      this.showGuest_ = value;
+      $('guest-user-header-bar-item').hidden = !value;
+    },
+
+    /**
+     * If true then sign in UI is active and header controls
+     * should change accordingly.
+     * @type {boolean}
+     */
+    set signinUIActive(value) {
+      $('add-user-header-bar-item').hidden = false;
+      $('add-user-button').hidden = value;
+      $('cancel-add-user-button').hidden = !value;
+      $('guest-user-header-bar-item').hidden = value || !this.showGuest_;
+    },
   };
 
   /**
    * Continues add user button click handling after network state has
    * been recieved.
-   * @param {Integer} state Current state of the network (see NET_STATE).
+   * @param {number} state Current state of the network (see NET_STATE).
    * @param {string} network Name of the network.
    * @param {string} reason Reason the callback was called.
-   * @param {int} last Last active network type.
+   * @param {number} last Last active network type.
    */
   HeaderBar.handleAddUser = function(state, network, reason, last) {
     if (state != NET_STATE.OFFLINE) {
       Oobe.showSigninUI();
     } else {
-      const BUBBLE_OFFSET = 8;
-      const BUBBLE_PADDING = 5;
+      /** @const */ var BUBBLE_OFFSET = 8;
+      /** @const */ var BUBBLE_PADDING = 5;
       $('bubble').showTextForElement(
           $('add-user-button'),
           localStrings.getString('addUserErrorMessage'),
@@ -104,10 +156,10 @@ cr.define('login', function() {
 
   /**
    * Observes network state, and close the bubble when network becomes online.
-   * @param {Integer} state Current state of the network (see NET_STATE).
+   * @param {number} state Current state of the network (see NET_STATE).
    * @param {string} network Name of the network.
    * @param {string} reason Reason the callback was called.
-   * @param {int} last Last active network type.
+   * @param {number} last Last active network type.
    */
   HeaderBar.bubbleWatchdog = function(state, network, reason, last) {
     if (state != NET_STATE.OFFLINE) {

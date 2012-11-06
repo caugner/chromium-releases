@@ -7,15 +7,24 @@
 #ifndef SYNC_NOTIFIER_INVALIDATION_UTIL_H_
 #define SYNC_NOTIFIER_INVALIDATION_UTIL_H_
 
+#include <iosfwd>
 #include <set>
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
 #include "sync/internal_api/public/base/model_type.h"
+
+namespace base {
+class DictionaryValue;
+}  // namespace
 
 namespace invalidation {
 
 class Invalidation;
 class ObjectId;
+
+// Gmock print helper
+void PrintTo(const invalidation::ObjectId& id, std::ostream* os);
 
 }  // namespace invalidation
 
@@ -34,10 +43,17 @@ bool RealModelTypeToObjectId(ModelType model_type,
 bool ObjectIdToRealModelType(const invalidation::ObjectId& object_id,
                              ModelType* model_type);
 
-ObjectIdSet ModelTypeSetToObjectIdSet(const ModelTypeSet& models);
-ModelTypeSet ObjectIdSetToModelTypeSet(const ObjectIdSet& ids);
+// Caller owns the returned DictionaryValue.
+scoped_ptr<base::DictionaryValue> ObjectIdToValue(
+    const invalidation::ObjectId& object_id);
+
+bool ObjectIdFromValue(const base::DictionaryValue& value,
+                       invalidation::ObjectId* out);
 
 std::string ObjectIdToString(const invalidation::ObjectId& object_id);
+
+ObjectIdSet ModelTypeSetToObjectIdSet(ModelTypeSet models);
+ModelTypeSet ObjectIdSetToModelTypeSet(const ObjectIdSet& ids);
 
 std::string InvalidationToString(
     const invalidation::Invalidation& invalidation);

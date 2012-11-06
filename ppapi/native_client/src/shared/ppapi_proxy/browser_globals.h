@@ -8,9 +8,7 @@
 #include "ppapi/c/dev/ppb_find_dev.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
-#include "ppapi/c/dev/ppb_scrollbar_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
-#include "ppapi/c/dev/ppb_widget_dev.h"
 #include "ppapi/c/dev/ppb_zoom_dev.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
@@ -38,7 +36,8 @@
 #include "ppapi/c/ppb_websocket.h"
 #include "ppapi/c/private/ppb_host_resolver_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
-#include "ppapi/c/private/ppb_pdf.h"
+#include "ppapi/c/private/ppb_network_list_private.h"
+#include "ppapi/c/private/ppb_network_monitor_private.h"
 #include "ppapi/c/private/ppb_tcp_server_socket_private.h"
 #include "ppapi/c/private/ppb_tcp_socket_private.h"
 #include "ppapi/c/private/ppb_udp_socket_private.h"
@@ -124,8 +123,8 @@ const PPB_MouseInputEvent* PPBMouseInputEventInterface();
 const PPB_Messaging* PPBMessagingInterface();
 const PPB_MouseLock* PPBMouseLockInterface();
 const PPB_NetAddress_Private* PPBNetAddressPrivateInterface();
-const PPB_PDF* PPBPDFInterface();
-const PPB_Scrollbar_Dev* PPBScrollbarInterface();
+const PPB_NetworkList_Private* PPBNetworkListPrivateInterface();
+const PPB_NetworkMonitor_Private* PPBNetworkMonitorPrivateInterface();
 const PPB_TCPServerSocket_Private* PPBTCPServerSocketPrivateInterface();
 const PPB_TCPSocket_Private* PPBTCPSocketPrivateInterface();
 const PPB_Testing_Dev* PPBTestingInterface();
@@ -138,7 +137,6 @@ const PPB_VarArrayBuffer* PPBVarArrayBufferInterface();  // shared
 const PPB_View* PPBViewInterface();
 const PPB_WheelInputEvent* PPBWheelInputEventInterface();
 const PPB_WebSocket* PPBWebSocketInterface();
-const PPB_Widget_Dev* PPBWidgetInterface();
 const PPB_Zoom_Dev* PPBZoomInterface();
 
 // PPAPI constants used in the proxy.

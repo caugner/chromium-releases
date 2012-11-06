@@ -8,6 +8,7 @@ import re
 import sys
 
 import cmd_helper
+import constants
 import logging
 import shutil
 import tempfile
@@ -47,8 +48,8 @@ class TestPackageApk(TestPackage):
     command_line_file.write(self.test_suite_basename + ' ' + options)
     command_line_file.flush()
     self.adb.PushIfNeeded(command_line_file.name,
-                          '/data/local/tmp/' +
-                          'chrome-native-tests-command-line')
+                          constants.TEST_EXECUTABLE_DIR +
+                          '/chrome-native-tests-command-line')
 
   def _GetGTestReturnCode(self):
     return None
@@ -97,13 +98,8 @@ class TestPackageApk(TestPackage):
   def StripAndCopyExecutable(self):
     # Always uninstall the previous one (by activity name); we don't
     # know what was embedded in it.
-    logging.info('Uninstalling any activity with the test name')
-    self.adb.Adb().SendCommand('uninstall org.chromium.native_test',
-                               timeout_time=60*5)
-    logging.info('Installing new apk')
-    self.adb.Adb().SendCommand('install -r ' + self.test_suite_full,
-                               timeout_time=60*5)
-    logging.info('Install has completed.')
+    self.adb.ManagedInstall(self.test_suite_full, False,
+                            package_name='org.chromium.native_test')
 
   def _GetTestSuiteBaseName(self):
     """Returns the  base name of the test suite."""

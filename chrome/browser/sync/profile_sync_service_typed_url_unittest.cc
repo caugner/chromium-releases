@@ -36,10 +36,10 @@
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/test/base/profile_mock.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "googleurl/src/gurl.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
@@ -221,7 +221,7 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
                                               data_type_controller,
                                               &error_handler_,
                                               &model_associator));
-      EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
+      EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _)).
           WillOnce(ReturnNewDataTypeManager());
 
       token_service_->IssueAuthTokenForTest(
@@ -946,4 +946,55 @@ TEST_F(ProfileSyncServiceTypedUrlTest, FailToGetTypedURLs) {
       1u, service_->failed_datatypes_handler().GetFailedTypes().Size());
   // Can't check GetErrorPercentage(), because generating an unrecoverable
   // error will free the model associator.
+}
+TEST_F(ProfileSyncServiceTypedUrlTest, IgnoreLocalFileURL) {
+  history::VisitVector original_visits;
+  // Create http and file url.
+  history::URLRow url_entry(MakeTypedUrlEntry("http://yey.com",
+                                              "yey", 12, 15, false,
+                                              &original_visits));
+  history::URLRow file_entry(MakeTypedUrlEntry("file:///kitty.jpg",
+                                               "kitteh", 12, 15, false,
+                                               &original_visits));
+
+  history::URLRows original_entries;
+  original_entries.push_back(url_entry);
+  original_entries.push_back(file_entry);
+
+  EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
+      WillRepeatedly(DoAll(SetArgumentPointee<0>(original_entries),
+                     Return(true)));
+  EXPECT_CALL((*history_backend_.get()), GetMostRecentVisitsForURL(_, _, _)).
+      WillRepeatedly(DoAll(SetArgumentPointee<2>(original_visits),
+                     Return(true)));
+  CreateRootHelper create_root(this, syncer::TYPED_URLS);
+  StartSyncService(create_root.callback());
+
+  history::VisitVector updated_visits;
+  // Create updates for the previous urls + a new file one.
+  history::URLRow updated_url_entry(MakeTypedUrlEntry("http://yey.com",
+                                                      "yey", 20, 15, false,
+                                                      &updated_visits));
+  history::URLRow updated_file_entry(MakeTypedUrlEntry("file:///cat.jpg",
+                                                       "cat", 20, 15, false,
+                                                       &updated_visits));
+  history::URLRow new_file_entry(MakeTypedUrlEntry("file:///dog.jpg",
+                                                   "dog", 20, 15, false,
+                                                   &updated_visits));
+  history::URLsModifiedDetails details;
+  details.changed_urls.push_back(updated_url_entry);
+  details.changed_urls.push_back(updated_file_entry);
+  details.changed_urls.push_back(new_file_entry);
+  scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&history_thread_));
+  notifier->Notify(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
+                   content::Source<Profile>(&profile_),
+                   content::Details<history::URLsModifiedDetails>(&details));
+
+  history::URLRows new_sync_entries;
+  GetTypedUrlsFromSyncDB(&new_sync_entries);
+
+  // We should ignore the local file urls (existing and updated),
+  // and only be left with the updated http url.
+  ASSERT_EQ(1U, new_sync_entries.size());
+  EXPECT_TRUE(URLsEqual(updated_url_entry, new_sync_entries[0]));
 }

@@ -35,11 +35,12 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
 #endif
 
 using content::BrowserContext;
@@ -100,7 +101,7 @@ void GetDownloadFilePath(
 
 #if defined (OS_CHROMEOS)
   // Do not use drive for extension downloads.
-  if (gdata::util::IsUnderGDataMountPoint(directory))
+  if (gdata::util::IsUnderDriveMountPoint(directory))
     directory = download_util::GetDefaultDownloadDirectory();
 #endif
 
@@ -167,7 +168,7 @@ WebstoreInstaller::Approval::~Approval() {}
 
 const WebstoreInstaller::Approval* WebstoreInstaller::GetAssociatedApproval(
     const DownloadItem& download) {
-  return static_cast<const Approval*>(download.GetExternalData(kApprovalKey));
+  return static_cast<const Approval*>(download.GetUserData(kApprovalKey));
 }
 
 WebstoreInstaller::WebstoreInstaller(Profile* profile,
@@ -181,14 +182,12 @@ WebstoreInstaller::WebstoreInstaller(Profile* profile,
       controller_(controller),
       id_(id),
       download_item_(NULL),
-      flags_(flags),
       approval_(approval.release()) {
-  // TODO(benjhayden): Change this CHECK to DCHECK after http://crbug.com/126013
-  CHECK(controller_);
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(controller_);
   download_url_ = GetWebstoreInstallURL(id, flags & FLAG_INLINE_INSTALL ?
       kInlineInstallSource : kDefaultInstallSource);
 
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   registrar_.Add(this, chrome::NOTIFICATION_CRX_INSTALLER_DONE,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
@@ -259,6 +258,10 @@ void WebstoreInstaller::Observe(int type,
   }
 }
 
+void WebstoreInstaller::InvalidateDelegate() {
+  delegate_ = NULL;
+}
+
 void WebstoreInstaller::SetDownloadDirectoryForTests(FilePath* directory) {
   g_download_directory_for_tests = directory;
 }
@@ -280,10 +283,14 @@ void WebstoreInstaller::OnDownloadStarted(DownloadId id, net::Error error) {
 
   DownloadManager* download_manager =
       BrowserContext::GetDownloadManager(profile_);
-  download_item_ = download_manager->GetActiveDownloadItem(id.local());
-  download_item_->AddObserver(this);
-  if (approval_.get())
-    download_item_->SetExternalData(kApprovalKey, approval_.release());
+  if (!download_manager)
+    return;
+  download_item_ = download_manager->GetDownload(id.local());
+  if (download_item_) {
+    download_item_->AddObserver(this);
+    if (approval_.get())
+      download_item_->SetUserData(kApprovalKey, approval_.release());
+  }
 }
 
 void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
@@ -296,10 +303,6 @@ void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
     case DownloadItem::INTERRUPTED:
       ReportFailure(kDownloadInterruptedError);
       break;
-    case DownloadItem::REMOVING:
-      download_item_->RemoveObserver(this);
-      download_item_ = NULL;
-      break;
     case DownloadItem::COMPLETE:
       // Wait for other notifications if the download is really an extension.
       if (!download_crx_util::IsExtensionDownload(*download))
@@ -311,14 +314,25 @@ void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
   }
 }
 
-void WebstoreInstaller::OnDownloadOpened(DownloadItem* download) {
+void WebstoreInstaller::OnDownloadDestroyed(DownloadItem* download) {
   CHECK_EQ(download_item_, download);
+  download_item_->RemoveObserver(this);
+  download_item_ = NULL;
 }
 
 void WebstoreInstaller::StartDownload(const FilePath& file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (file.empty() || !controller_->GetWebContents()) {
+  DownloadManager* download_manager =
+    BrowserContext::GetDownloadManager(profile_);
+  if (file.empty() ||
+      !download_manager ||
+      !controller_->GetWebContents() ||
+      !controller_->GetWebContents()->GetRenderProcessHost() ||
+      !controller_->GetWebContents()->GetRenderViewHost() ||
+      !controller_->GetWebContents()->GetBrowserContext() ||
+      !controller_->GetWebContents()->GetBrowserContext()
+        ->GetResourceContext()) {
     ReportFailure(kDownloadDirectoryError);
     return;
   }
@@ -339,7 +353,7 @@ void WebstoreInstaller::StartDownload(const FilePath& file) {
         content::Referrer(controller_->GetActiveEntry()->GetURL(),
                           WebKit::WebReferrerPolicyDefault));
   params->set_callback(base::Bind(&WebstoreInstaller::OnDownloadStarted, this));
-  BrowserContext::GetDownloadManager(profile_)->DownloadUrl(params.Pass());
+  download_manager->DownloadUrl(params.Pass());
 }
 
 void WebstoreInstaller::ReportFailure(const std::string& error) {

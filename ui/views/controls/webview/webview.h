@@ -5,20 +5,22 @@
 #ifndef UI_VIEWS_CONTROLS_WEBVIEW_WEBVIEW_H_
 #define UI_VIEWS_CONTROLS_WEBVIEW_WEBVIEW_H_
 
+#include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "ui/views/controls/webview/webview_export.h"
 #include "ui/views/view.h"
 
 namespace views {
 
 class NativeViewHost;
 
-class VIEWS_EXPORT WebView : public View,
-                             public content::NotificationObserver,
-                             public content::WebContentsDelegate {
+class WEBVIEW_EXPORT WebView : public View,
+                               public content::NotificationObserver,
+                               public content::WebContentsDelegate {
  public:
   static const char kViewClassName[];
 
@@ -44,7 +46,7 @@ class VIEWS_EXPORT WebView : public View,
   // Loads the initial URL to display in the attached WebContents. Creates the
   // WebContents if none is attached yet. Note that this is intended as a
   // convenience for loading the initial URL, and so URLs are navigated with
-  // PAGE_TRANSITION_START_PAGE, so this is not intended as a general purpose
+  // PAGE_TRANSITION_AUTO_TOPLEVEL, so this is not intended as a general purpose
   // navigation method - use WebContents' API directly.
   void LoadInitialURL(const GURL& url);
 
@@ -83,7 +85,7 @@ class VIEWS_EXPORT WebView : public View,
                                     View* parent,
                                     View* child) OVERRIDE;
   virtual bool SkipDefaultKeyEventProcessing(
-      const views::KeyEvent& event) OVERRIDE;
+      const ui::KeyEvent& event) OVERRIDE;
   virtual bool IsFocusable() const OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void AboutToRequestFocusFromTabTraversal(bool reverse) OVERRIDE;
@@ -111,7 +113,6 @@ class VIEWS_EXPORT WebView : public View,
   content::WebContents* CreateWebContents(
       content::BrowserContext* browser_context,
       content::SiteInstance* site_instance);
-
 
   NativeViewHost* wcv_holder_;
   scoped_ptr<content::WebContents> wc_owner_;

@@ -4,9 +4,14 @@
 
 #include "ui/views/test/test_views_delegate.h"
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "content/public/test/web_contents_tester.h"
-#include "ui/base/clipboard/clipboard.h"
+#include "ui/views/views_switches.h"
+
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_native_widget_aura.h"
+#endif
 
 namespace views {
 
@@ -22,14 +27,6 @@ TestViewsDelegate::~TestViewsDelegate() {
 
 void TestViewsDelegate::SetUseTransparentWindows(bool transparent) {
   use_transparent_windows_ = transparent;
-}
-
-ui::Clipboard* TestViewsDelegate::GetClipboard() const {
-  if (!clipboard_.get()) {
-    // Note that we need a MessageLoop for the next call to work.
-    clipboard_.reset(new ui::Clipboard);
-  }
-  return clipboard_.get();
 }
 
 void TestViewsDelegate::SaveWindowPlacement(const Widget* window,
@@ -68,6 +65,16 @@ views::NativeWidgetHelperAura* TestViewsDelegate::CreateNativeWidgetHelper(
 content::WebContents* TestViewsDelegate::CreateWebContents(
     content::BrowserContext* browser_context,
     content::SiteInstance* site_instance) {
+  return NULL;
+}
+
+NativeWidget* TestViewsDelegate::CreateNativeWidget(
+    internal::NativeWidgetDelegate* delegate,
+    gfx::NativeView parent) {
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDesktopAura))
+    return new DesktopNativeWidgetAura(delegate);
+#endif
   return NULL;
 }
 

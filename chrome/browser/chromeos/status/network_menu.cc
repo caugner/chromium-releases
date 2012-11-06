@@ -146,6 +146,7 @@ class NetworkMenuModel : public ui::MenuModel {
   virtual bool HasIcons() const OVERRIDE;
   virtual int GetItemCount() const OVERRIDE;
   virtual ui::MenuModel::ItemType GetTypeAt(int index) const OVERRIDE;
+  virtual ui::MenuSeparatorType GetSeparatorTypeAt(int index) const OVERRIDE;
   virtual string16 GetLabelAt(int index) const OVERRIDE;
   virtual bool IsItemDynamicAt(int index) const OVERRIDE;
   virtual const gfx::Font* GetLabelFontAt(int index) const OVERRIDE;
@@ -153,7 +154,7 @@ class NetworkMenuModel : public ui::MenuModel {
                                 ui::Accelerator* accelerator) const OVERRIDE;
   virtual bool IsItemCheckedAt(int index) const OVERRIDE;
   virtual int GetGroupIdAt(int index) const OVERRIDE;
-  virtual bool GetIconAt(int index, gfx::ImageSkia* icon) OVERRIDE;
+  virtual bool GetIconAt(int index, gfx::Image* icon) OVERRIDE;
   virtual ui::ButtonMenuItemModel* GetButtonMenuItemAt(
       int index) const OVERRIDE;
   virtual bool IsEnabledAt(int index) const OVERRIDE;
@@ -343,6 +344,10 @@ ui::MenuModel::ItemType NetworkMenuModel::GetTypeAt(int index) const {
   return menu_items_[index].type;
 }
 
+ui::MenuSeparatorType NetworkMenuModel::GetSeparatorTypeAt(int index) const {
+  return ui::NORMAL_SEPARATOR;
+}
+
 string16 NetworkMenuModel::GetLabelAt(int index) const {
   return menu_items_[index].label;
 }
@@ -376,9 +381,9 @@ int NetworkMenuModel::GetGroupIdAt(int index) const {
   return 0;
 }
 
-bool NetworkMenuModel::GetIconAt(int index, gfx::ImageSkia* icon) {
-  if (!menu_items_[index].icon.empty()) {
-    *icon = menu_items_[index].icon;
+bool NetworkMenuModel::GetIconAt(int index, gfx::Image* icon) {
+  if (!menu_items_[index].icon.isNull()) {
+    *icon = gfx::Image(menu_items_[index].icon);
     return true;
   }
   return false;
@@ -537,44 +542,6 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
                                    label, icon, std::string(), flag));
   }
 
-  // Wifi Networks
-  bool wifi_available = cros->wifi_available();
-  bool wifi_enabled = cros->wifi_enabled();
-  if (wifi_available && wifi_enabled) {
-    const WifiNetworkVector& wifi_networks = cros->wifi_networks();
-
-    bool separator_added = false;
-    // List Wifi networks.
-    for (size_t i = 0; i < wifi_networks.size(); ++i) {
-      const WifiNetwork* wifi_network = wifi_networks[i];
-      AddWirelessNetworkMenuItem(wifi_network, FLAG_WIFI, &separator_added);
-    }
-    if (!separator_added && !menu_items_.empty())
-      menu_items_.push_back(MenuItem());
-    menu_items_.push_back(MenuItem(
-        ui::MenuModel::TYPE_COMMAND,
-        l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_WIFI_NETWORKS),
-        NetworkMenuIcon::GetConnectedImage(NetworkMenuIcon::ARCS,
-                                           NetworkMenuIcon::COLOR_DARK),
-        std::string(), FLAG_ADD_WIFI));
-  }
-
-  // Wimax Networks
-  bool wimax_available = cros->wimax_available();
-  bool wimax_enabled = cros->wimax_enabled();
-  if (wimax_available && wimax_enabled) {
-    const WimaxNetworkVector& wimax_networks = cros->wimax_networks();
-    bool separator_added = false;
-    // List Wifi networks.
-    for (size_t i = 0; i < wimax_networks.size(); ++i) {
-      AddWirelessNetworkMenuItem(wimax_networks[i],
-                                 FLAG_WIMAX,
-                                 &separator_added);
-    }
-    if (!separator_added && !menu_items_.empty())
-      menu_items_.push_back(MenuItem());
-  }
-
   // Cellular Networks
   bool cellular_available = cros->cellular_available();
   bool cellular_enabled = cros->cellular_enabled();
@@ -672,6 +639,44 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
             std::string(), FLAG_ADD_CELLULAR));
       }
     }
+  }
+
+  // Wimax Networks
+  bool wimax_available = cros->wimax_available();
+  bool wimax_enabled = cros->wimax_enabled();
+  if (wimax_available && wimax_enabled) {
+    const WimaxNetworkVector& wimax_networks = cros->wimax_networks();
+    bool separator_added = false;
+    // List Wifi networks.
+    for (size_t i = 0; i < wimax_networks.size(); ++i) {
+      AddWirelessNetworkMenuItem(wimax_networks[i],
+                                 FLAG_WIMAX,
+                                 &separator_added);
+    }
+    if (!separator_added && !menu_items_.empty())
+      menu_items_.push_back(MenuItem());
+  }
+
+  // Wifi Networks
+  bool wifi_available = cros->wifi_available();
+  bool wifi_enabled = cros->wifi_enabled();
+  if (wifi_available && wifi_enabled) {
+    const WifiNetworkVector& wifi_networks = cros->wifi_networks();
+
+    bool separator_added = false;
+    // List Wifi networks.
+    for (size_t i = 0; i < wifi_networks.size(); ++i) {
+      const WifiNetwork* wifi_network = wifi_networks[i];
+      AddWirelessNetworkMenuItem(wifi_network, FLAG_WIFI, &separator_added);
+    }
+    if (!separator_added && !menu_items_.empty())
+      menu_items_.push_back(MenuItem());
+    menu_items_.push_back(MenuItem(
+        ui::MenuModel::TYPE_COMMAND,
+        l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_WIFI_NETWORKS),
+        NetworkMenuIcon::GetConnectedImage(NetworkMenuIcon::ARCS,
+                                           NetworkMenuIcon::COLOR_DARK),
+        std::string(), FLAG_ADD_WIFI));
   }
 
   // No networks available message.

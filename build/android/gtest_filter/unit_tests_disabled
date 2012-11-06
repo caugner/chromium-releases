@@ -19,10 +19,6 @@ HistoryProfileTest.TypicalProfileVersion
 SQLitePersistentCookieStoreTest.TestDontLoadOldSessionCookies
 SQLitePersistentCookieStoreTest.PersistIsPersistent
 
-# We don't use the GPU blacklist and we don't fetch the deps project for the
-# blacklist data so this test is not relevant for us.
-GpuBlacklistTest.CurrentBlacklistValidation
-
 # http://crbug.com/117940
 TemplateURLTest.*
 TemplateURLPrepopulateDataTest.*
@@ -42,9 +38,6 @@ CreditCardTest.SetInfoExpirationMonth
 
 # crbug.com/139398
 DownloadItemModelTest.InterruptTooltip
-
-# crbug.com/139434
-LeveldbValueStore/ValueStoreTest.DotsInKeyNamesWithDicts/0
 
 # Tests crashing in the APK
 # DEATH test, forking and doing bad stuff, not supported yet.
@@ -66,9 +59,6 @@ ValueStoreFrontendTest.GetExistingData
 
 # crbug.com/139421
 ChromeSelectFilePolicyTest.ExpectAsynchronousListenerCall
-
-# crbug.com/139412
-UserStyleSheetWatcherTest.StyleLoad
 
 # http://crbug.com/139033
 ChromeDownloadManagerDelegateTest.StartDownload_PromptAlways
@@ -105,10 +95,10 @@ ExtensionSettingsSyncTest.*
 ExtensionUpdaterTest.*
 UserScriptListenerTest.*
 WebApplicationTest.GetShortcutInfoForTab
+ExtensionActionIconFactoryTest.*
 
 # crbug.com/139411
 AutocompleteProviderTest.*
-HistoryQuickProviderTest.*
 HistoryContentsProviderBodyOnlyTest.*
 HistoryContentsProviderTest.*
 HQPOrderingTest.*
@@ -133,10 +123,29 @@ ImageOperations.ResizeShouldAverageColors
 PrerenderTest.*
 RenderWidgetTest.OnMsgPaintAtSize
 
-# crbug.com/139642
-PromoResourceServiceTest.NotificationPromoTest
+# crbug.com/146857
+TopSitesTest.Blacklisting
 
 # crbug.com/139643
-ExperimentsHelperTest.DisableAfterInitialization
-ExperimentsHelperTest.AssociateGoogleVariationID
-ExperimentsHelperTest.NoAssociation
+VariationsHelperTest.DisableAfterInitialization
+VariationsHelperTest.AssociateGoogleVariationID
+VariationsHelperTest.NoAssociation
+
+# crbug.com/141473
+AutofillManagerTest.UpdatePasswordSyncState
+AutofillManagerTest.UpdatePasswordGenerationState
+
+# crbug.com/144227
+ExtensionIconImageTest.*
+
+# crbug.com/145843
+EntropyProviderTest.UseOneTimeRandomizationSHA1
+EntropyProviderTest.UseOneTimeRandomizationPermuted
+
+# crbug.com/147500
+ManifestTest.RestrictedKeys
+
+# crbug.com/147504
+VariationsUtilTest.DisableAfterInitialization
+VariationsUtilTest.AssociateGoogleVariationID
+VariationsUtilTest.NoAssociation

@@ -19,6 +19,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/json/json_file_value_serializer.h"
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -46,8 +47,8 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/base/chrome_process_util.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/test_switches.h"
-#include "content/common/debug_flags.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "ui/gl/gl_implementation.h"
@@ -174,6 +175,9 @@ void UITestBase::SetLaunchSwitches() {
   // All flags added here should also be added in ExtraChromeFlags() in
   // chrome/test/pyautolib/pyauto.py as well to take effect for all tests
   // on chromeos.
+
+  // Propagate commandline settings from test_launcher_utils.
+  test_launcher_utils::PrepareBrowserCommandLineForTests(&launch_arguments_);
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWaitForDebugger))
     launch_arguments_.AppendSwitch(switches::kWaitForDebugger);
@@ -309,27 +313,6 @@ void UITestBase::NavigateToURLBlockUntilNavigationsComplete(
                 url, number_of_navigations)) << url.spec();
 }
 
-bool UITestBase::WaitForBookmarkBarVisibilityChange(BrowserProxy* browser,
-                                                    bool wait_for_open) {
-  const int kCycles = 10;
-  const TimeDelta kDelay = TestTimeouts::action_timeout() / kCycles;
-  for (int i = 0; i < kCycles; i++) {
-    bool visible = false;
-    bool animating = true;
-    bool detached;
-    if (!browser->GetBookmarkBarVisibility(&visible, &animating, &detached))
-      return false;  // Some error.
-    if (visible == wait_for_open && !animating)
-      return true;  // Bookmark bar visibility change complete.
-
-    // Give it a chance to catch up.
-    base::PlatformThread::Sleep(kDelay);
-  }
-
-  ADD_FAILURE() << "Timeout reached in WaitForBookmarkBarVisibilityChange";
-  return false;
-}
-
 GURL UITestBase::GetActiveTabURL(int window_index) {
   scoped_refptr<TabProxy> tab_proxy(GetActiveTab(window_index));
   EXPECT_TRUE(tab_proxy.get());
@@ -437,24 +420,17 @@ FilePath UITestBase::ComputeTypicalUserDataSource(
   source_history_file = source_history_file.AppendASCII("profiles");
   switch (profile_type) {
     case UITestBase::DEFAULT_THEME:
-      source_history_file = source_history_file.AppendASCII("typical_history");
+      source_history_file = source_history_file.AppendASCII(
+          "profile_with_default_theme");
       break;
     case UITestBase::COMPLEX_THEME:
-      source_history_file = source_history_file.AppendASCII("complex_theme");
-      break;
-    case UITestBase::NATIVE_THEME:
-      source_history_file = source_history_file.AppendASCII("gtk_theme");
-      break;
-    case UITestBase::CUSTOM_FRAME:
-      source_history_file = source_history_file.AppendASCII("custom_frame");
-      break;
-    case UITestBase::CUSTOM_FRAME_NATIVE_THEME:
-      source_history_file =
-          source_history_file.AppendASCII("custom_frame_gtk_theme");
+      source_history_file = source_history_file.AppendASCII(
+          "profile_with_complex_theme");
       break;
     default:
       NOTREACHED();
   }
+
   return source_history_file;
 }
 

@@ -7,8 +7,12 @@
 
 #include "base/shared_memory.h"
 #include "base/values.h"
+#include "chrome/common/extensions/draggable_region.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/permissions/filesystem_permission.h"
+#include "chrome/common/extensions/permissions/media_galleries_permission.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
+#include "chrome/common/extensions/permissions/socket_permission_data.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "chrome/common/view_type.h"
@@ -96,6 +100,12 @@ IPC_STRUCT_TRAITS_BEGIN(WebApplicationInfo)
   IPC_STRUCT_TRAITS_MEMBER(is_offline_enabled)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(extensions::DraggableRegion)
+  IPC_STRUCT_TRAITS_MEMBER(label)
+  IPC_STRUCT_TRAITS_MEMBER(bounds)
+  IPC_STRUCT_TRAITS_MEMBER(clip)
+IPC_STRUCT_TRAITS_END()
+
 // Singly-included section for custom IPC traits.
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_MESSAGES_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_MESSAGES_H_
@@ -158,6 +168,44 @@ struct ParamTraits<extensions::APIPermission::ID> {
   typedef extensions::APIPermission::ID param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* p);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<extensions::APIPermission*> {
+  typedef extensions::APIPermission* param_type;
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<extensions::APIPermissionSet> {
+  typedef extensions::APIPermissionSet param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<extensions::SocketPermissionData> {
+  typedef extensions::SocketPermissionData param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<extensions::MediaGalleriesPermission::PermissionTypes> {
+  typedef extensions::MediaGalleriesPermission::PermissionTypes param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<extensions::FileSystemPermission::PermissionTypes> {
+  typedef extensions::FileSystemPermission::PermissionTypes param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -505,3 +553,7 @@ IPC_SYNC_MESSAGE_CONTROL0_1(ExtensionHostMsg_GenerateUniqueID,
 
 // Resumes resource requests for a newly created app window.
 IPC_MESSAGE_CONTROL1(ExtensionHostMsg_ResumeRequests, int /* route_id */)
+
+// Sent by the renderer when the draggable regions are updated.
+IPC_MESSAGE_ROUTED1(ExtensionHostMsg_UpdateDraggableRegions,
+                    std::vector<extensions::DraggableRegion> /* regions */)

@@ -7,10 +7,10 @@
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accelerators/accelerator_manager.h"
+#include "ui/base/events/event.h"
 
 namespace ash {
 namespace {
@@ -39,6 +39,9 @@ bool ShouldProcessAcceleratorsNow(const ui::Accelerator& accelerator,
     return false;
   }
 
+  if (Shell::GetInstance()->GetAppListTargetVisibility())
+    return true;
+
   // Unless |target| is in the full screen state, handle reserved accelerators
   // such as Alt+Tab now.
   return Shell::GetInstance()->accelerator_controller()->IsReservedAccelerator(
@@ -62,7 +65,7 @@ AcceleratorFilter::~AcceleratorFilter() {
 // AcceleratorFilter, EventFilter implementation:
 
 bool AcceleratorFilter::PreHandleKeyEvent(aura::Window* target,
-                                          aura::KeyEvent* event) {
+                                          ui::KeyEvent* event) {
   const ui::EventType type = event->type();
   if (type != ui::ET_KEY_PRESSED && type != ui::ET_KEY_RELEASED)
     return false;
@@ -79,20 +82,20 @@ bool AcceleratorFilter::PreHandleKeyEvent(aura::Window* target,
 }
 
 bool AcceleratorFilter::PreHandleMouseEvent(aura::Window* target,
-                                            aura::MouseEvent* event) {
+                                            ui::MouseEvent* event) {
   return false;
 }
 
 ui::TouchStatus AcceleratorFilter::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus AcceleratorFilter::PreHandleGestureEvent(
+ui::EventResult AcceleratorFilter::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;
 }
 
 }  // namespace internal

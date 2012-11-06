@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/views/dropdown_bar_host.h"
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/font.h"
@@ -32,7 +31,6 @@
 #endif
 
 class ActionBoxButtonView;
-class ChromeToMobileView;
 class CommandUpdater;
 class ContentSettingBubbleModelDelegate;
 class ContentSettingImageView;
@@ -42,6 +40,7 @@ class GURL;
 class InstantController;
 class KeywordHintView;
 class LocationIconView;
+class OpenPDFInReaderView;
 class PageActionWithBadgeView;
 class PageActionImageView;
 class Profile;
@@ -50,6 +49,7 @@ class StarView;
 class SuggestedTextView;
 class TabContents;
 class TemplateURLService;
+class WebIntentsButtonView;
 class ZoomView;
 
 namespace chrome {
@@ -89,7 +89,8 @@ class LocationBarView : public LocationBar,
   virtual void SetAnimationOffset(int offset) OVERRIDE;
 
   // chrome::search::SearchModelObserver:
-  virtual void ModeChanged(const chrome::search::Mode& mode) OVERRIDE;
+  virtual void ModeChanged(const chrome::search::Mode& old_mode,
+                           const chrome::search::Mode& new_mode) OVERRIDE;
 
   // Returns the offset used while animating.
   int animation_offset() const { return animation_offset_; }
@@ -150,7 +151,8 @@ class LocationBarView : public LocationBar,
     APP_LAUNCHER
   };
 
-  LocationBarView(Profile* profile,
+  LocationBarView(Browser* browser,
+                  Profile* profile,
                   CommandUpdater* command_updater,
                   ToolbarModel* model,
                   Delegate* delegate,
@@ -183,14 +185,8 @@ class LocationBarView : public LocationBar,
   // Returns the delegate.
   Delegate* delegate() const { return delegate_; }
 
-  // Sets the tooltip for the zoom icon.
-  void SetZoomIconTooltipPercent(int zoom_percent);
-
-  // Sets the zoom icon state.
-  void SetZoomIconState(ZoomController::ZoomIconState zoom_icon_state);
-
-  // Shows the zoom bubble.
-  void ShowZoomBubble(int zoom_percent);
+  // See comment in browser_window.h for more info.
+  void ZoomChangedForActiveTab(bool can_show_bubble);
 
   // Sets |preview_enabled| for the PageAction View associated with this
   // |page_action|. If |preview_enabled| is true, the view will display the
@@ -257,9 +253,9 @@ class LocationBarView : public LocationBar,
 
 #if defined(OS_WIN) && !defined(USE_AURA)
   // Event Handlers
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
 #endif
 
@@ -284,15 +280,15 @@ class LocationBarView : public LocationBar,
   virtual void OnInputInProgress(bool in_progress) OVERRIDE;
   virtual void OnKillFocus() OVERRIDE;
   virtual void OnSetFocus() OVERRIDE;
-  virtual SkBitmap GetFavicon() const OVERRIDE;
+  virtual gfx::Image GetFavicon() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual TabContents* GetTabContents() const OVERRIDE;
 
   // Overridden from views::View:
   virtual std::string GetClassName() const OVERRIDE;
-  virtual bool SkipDefaultKeyEventProcessing(const views::KeyEvent& event)
-      OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(
+      const ui::KeyEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual bool HasFocus() const OVERRIDE;
 
@@ -319,6 +315,8 @@ class LocationBarView : public LocationBar,
   virtual void UpdateContentSettingsIcons() OVERRIDE;
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
+  virtual void UpdateWebIntentsButton() OVERRIDE;
+  virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
   virtual const OmniboxView* GetLocationEntry() const OVERRIDE;
@@ -360,6 +358,8 @@ class LocationBarView : public LocationBar,
   static const int kIconInternalPadding;
   // Space between the edge and a bubble.
   static const int kBubbleHorizontalPadding;
+  // Background color of the location bar.
+  static const SkColor kOmniboxBackgroundColor;
 
  protected:
   virtual void OnFocus() OVERRIDE;
@@ -416,12 +416,15 @@ class LocationBarView : public LocationBar,
   // PageActions.
   void RefreshPageActionViews();
 
+  // Update the view for the zoom icon based on the current tab's zoom.
+  void RefreshZoomView();
+
   // Sets the visibility of view to new_vis.
   void ToggleVisibility(bool new_vis, views::View* view);
 
 #if !defined(USE_AURA)
   // Helper for the Mouse event handlers that does all the real work.
-  void OnMouseEvent(const views::MouseEvent& event, UINT msg);
+  void OnMouseEvent(const ui::MouseEvent& event, UINT msg);
 #endif
 
   // Returns true if the suggest text is valid.
@@ -444,6 +447,11 @@ class LocationBarView : public LocationBar,
   // Cleans up layers used for the animation.
   void CleanupFadeAnimation();
 #endif
+
+  // The Browser this LocationBarView is in.  Note that at least
+  // chromeos::SimpleWebViewDialog uses a LocationBarView outside any browser
+  // window, so this may be NULL.
+  Browser* browser_;
 
   // The Autocomplete Edit field.
   scoped_ptr<OmniboxView> location_entry_;
@@ -511,6 +519,9 @@ class LocationBarView : public LocationBar,
   // The zoom icon.
   ZoomView* zoom_view_;
 
+  // The icon to open a PDF in Reader.
+  OpenPDFInReaderView* open_pdf_in_reader_view_;
+
   // The current page actions.
   std::vector<ExtensionAction*> page_actions_;
 
@@ -520,11 +531,11 @@ class LocationBarView : public LocationBar,
   // The star.
   StarView* star_view_;
 
+  // The web intents choose-another-service button
+  WebIntentsButtonView* web_intents_button_view_;
+
   // The action box button (plus).
   ActionBoxButtonView* action_box_button_view_;
-
-  // The Chrome To Mobile page action icon view.
-  ChromeToMobileView* chrome_to_mobile_view_;
 
   // The mode that dictates how the bar shows.
   Mode mode_;

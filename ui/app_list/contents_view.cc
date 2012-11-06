@@ -11,6 +11,7 @@
 #include "ui/app_list/page_switcher.h"
 #include "ui/app_list/pagination_model.h"
 #include "ui/app_list/search_result_list_view.h"
+#include "ui/base/events/event.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/view_model.h"
 #include "ui/views/view_model_utils.h"
@@ -30,7 +31,10 @@ const int kIndexSearchResults = 2;
 
 const int kMinMouseWheelToSwitchPage = 20;
 const int kMinScrollToSwitchPage = 20;
-const int kMinHorizVelocityToSwitchPage = 1100;
+const int kMinHorizVelocityToSwitchPage = 800;
+
+const double kFinishTransitionThreshold = 0.33;
+const int kTransitionAnimationDurationInMs = 180;
 
 // Helpers to get certain child view from |model|.
 AppsGridView* GetAppsGridView(views::ViewModel* model) {
@@ -55,6 +59,8 @@ ContentsView::ContentsView(AppListView* app_list_view,
       view_model_(new views::ViewModel),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           bounds_animator_(new views::BoundsAnimator(this))) {
+  pagination_model_->SetTransitionDuration(kTransitionAnimationDurationInMs);
+
   AppsGridView* apps_grid_view = new AppsGridView(app_list_view,
                                                   pagination_model);
   apps_grid_view->SetLayout(kPreferredIconDimension,
@@ -185,41 +191,42 @@ void ContentsView::Layout() {
   views::ViewModelUtils::SetViewBoundsToIdealBounds(*view_model_);
 }
 
-ui::GestureStatus ContentsView::OnGestureEvent(
-    const views::GestureEvent& event) {
+ui::EventResult ContentsView::OnGestureEvent(
+    const ui::GestureEvent& event) {
   if (show_state_ != SHOW_APPS)
-    return ui::GESTURE_STATUS_UNKNOWN;
+    return ui::ER_UNHANDLED;
 
   switch (event.type()) {
     case ui::ET_GESTURE_SCROLL_BEGIN:
       pagination_model_->StartScroll();
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     case ui::ET_GESTURE_SCROLL_UPDATE:
       // event.details.scroll_x() > 0 means moving contents to right. That is,
       // transitioning to previous page.
       pagination_model_->UpdateScroll(
           event.details().scroll_x() / GetContentsBounds().width());
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     case ui::ET_GESTURE_SCROLL_END:
-      pagination_model_->EndScroll();
-      return ui::GESTURE_STATUS_CONSUMED;
+      pagination_model_->EndScroll(pagination_model_->
+          transition().progress < kFinishTransitionThreshold);
+      return ui::ER_CONSUMED;
     case ui::ET_SCROLL_FLING_START: {
+      pagination_model_->EndScroll(true);
       if (fabs(event.details().velocity_x()) > kMinHorizVelocityToSwitchPage) {
         pagination_model_->SelectPageRelative(
             event.details().velocity_x() < 0 ? 1 : -1,
             true);
-        return ui::GESTURE_STATUS_CONSUMED;
       }
-      break;
+      return ui::ER_CONSUMED;
     }
     default:
       break;
   }
 
-  return ui::GESTURE_STATUS_UNKNOWN;
+  return ui::ER_UNHANDLED;
 }
 
-bool ContentsView::OnKeyPressed(const views::KeyEvent& event) {
+bool ContentsView::OnKeyPressed(const ui::KeyEvent& event) {
   switch (show_state_) {
     case SHOW_APPS:
       return GetAppsGridView(view_model_.get())->OnKeyPressed(event);
@@ -231,7 +238,7 @@ bool ContentsView::OnKeyPressed(const views::KeyEvent& event) {
   return false;
 }
 
-bool ContentsView::OnMouseWheel(const views::MouseWheelEvent& event) {
+bool ContentsView::OnMouseWheel(const ui::MouseWheelEvent& event) {
   if (show_state_ != SHOW_APPS)
     return false;
 
@@ -244,13 +251,13 @@ bool ContentsView::OnMouseWheel(const views::MouseWheelEvent& event) {
   return false;
 }
 
-bool ContentsView::OnScrollEvent(const views::ScrollEvent & event) {
+bool ContentsView::OnScrollEvent(const ui::ScrollEvent& event) {
   if (show_state_ != SHOW_APPS)
     return false;
 
   if (abs(event.x_offset()) > kMinScrollToSwitchPage) {
     if (!pagination_model_->has_transition()) {
-      pagination_model_->SelectPageRelative(event.x_offset() > 0 ? 1 : -1,
+      pagination_model_->SelectPageRelative(event.x_offset() > 0 ? -1 : 1,
                                             true);
     }
     return true;

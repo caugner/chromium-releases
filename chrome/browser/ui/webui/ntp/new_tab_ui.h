@@ -11,7 +11,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -34,12 +34,12 @@ class NewTabUI : public content::WebUIController,
   // Returns whether or not to show apps pages.
   static bool ShouldShowApps();
 
-  // Returns whether or not the "suggestions links page" is enabled.
-  static bool IsSuggestionsPageEnabled();
+  // Returns whether or not "Discovery" in the NTP is Enabled.
+  static bool IsDiscoveryInNTPEnabled();
 
   // Adds "url", "title", and "direction" keys on incoming dictionary, setting
   // title as the url as a fallback on empty title.
-  static void SetURLTitleAndDirection(base::DictionaryValue* dictionary,
+  static void SetUrlTitleAndDirection(base::DictionaryValue* dictionary,
                                       const string16& title,
                                       const GURL& gurl);
 
@@ -85,7 +85,7 @@ class NewTabUI : public content::WebUIController,
                      int resource_id);
 
    private:
-    virtual ~NewTabHTMLSource() {}
+    virtual ~NewTabHTMLSource();
 
     // Pointer back to the original profile.
     Profile* profile_;

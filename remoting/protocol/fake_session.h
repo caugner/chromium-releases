@@ -14,6 +14,7 @@
 #include "net/base/completion_callback.h"
 #include "net/socket/socket.h"
 #include "net/socket/stream_socket.h"
+#include "remoting/protocol/channel_factory.h"
 #include "remoting/protocol/session.h"
 
 class MessageLoop;
@@ -146,15 +147,16 @@ class FakeUdpSocket : public net::Socket {
 
 // FakeSession is a dummy protocol::Session that uses FakeSocket for all
 // channels.
-class FakeSession : public Session {
+class FakeSession : public Session,
+                    public ChannelFactory {
  public:
   FakeSession();
   virtual ~FakeSession();
 
   EventHandler* event_handler() { return event_handler_; }
 
-  void set_message_loop(MessageLoop* message_loop) {
-    message_loop_ = message_loop;
+  void set_async_creation(bool async_creation) {
+    async_creation_ = async_creation;
   }
 
   void set_error(ErrorCode error) { error_ = error; }
@@ -164,31 +166,40 @@ class FakeSession : public Session {
   FakeSocket* GetStreamChannel(const std::string& name);
   FakeUdpSocket* GetDatagramChannel(const std::string& name);
 
-  // Session implementation.
+  // Session interface.
   virtual void SetEventHandler(EventHandler* event_handler) OVERRIDE;
-
   virtual ErrorCode error() OVERRIDE;
+  virtual const std::string& jid() OVERRIDE;
+  virtual const CandidateSessionConfig* candidate_config() OVERRIDE;
+  virtual const SessionConfig& config() OVERRIDE;
+  virtual void set_config(const SessionConfig& config) OVERRIDE;
+  virtual ChannelFactory* GetTransportChannelFactory() OVERRIDE;
+  virtual ChannelFactory* GetMultiplexedChannelFactory() OVERRIDE;
+  virtual void Close() OVERRIDE;
 
+  // ChannelFactory interface.
   virtual void CreateStreamChannel(
-      const std::string& name, const StreamChannelCallback& callback) OVERRIDE;
+      const std::string& name,
+      const StreamChannelCallback& callback) OVERRIDE;
   virtual void CreateDatagramChannel(
       const std::string& name,
       const DatagramChannelCallback& callback) OVERRIDE;
   virtual void CancelChannelCreation(const std::string& name) OVERRIDE;
 
-  virtual const std::string& jid() OVERRIDE;
-
-  virtual const CandidateSessionConfig* candidate_config() OVERRIDE;
-  virtual const SessionConfig& config() OVERRIDE;
-  virtual void set_config(const SessionConfig& config) OVERRIDE;
-
-  virtual void Close() OVERRIDE;
-
  public:
+  void NotifyStreamChannelCallback(
+      const std::string& name,
+      const StreamChannelCallback& callback);
+  void NotifyDatagramChannelCallback(
+      const std::string& name,
+      const DatagramChannelCallback& callback);
+
   EventHandler* event_handler_;
   scoped_ptr<const CandidateSessionConfig> candidate_config_;
   SessionConfig config_;
   MessageLoop* message_loop_;
+
+  bool async_creation_;
 
   std::map<std::string, FakeSocket*> stream_channels_;
   std::map<std::string, FakeUdpSocket*> datagram_channels_;
@@ -197,6 +208,8 @@ class FakeSession : public Session {
 
   ErrorCode error_;
   bool closed_;
+
+  base::WeakPtrFactory<FakeSession> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSession);
 };

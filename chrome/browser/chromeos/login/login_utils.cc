@@ -24,6 +24,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
@@ -43,13 +44,14 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
-#include "chrome/browser/chromeos/settings/ownership_service.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/preconnect.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/policy/cloud_policy_client.h"
+#include "chrome/browser/policy/cloud_policy_service.h"
+#include "chrome/browser/policy/user_cloud_policy_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -64,8 +66,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/net/gaia/gaia_auth_consumer.h"
-#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
@@ -74,6 +74,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
+#include "google_apis/gaia/gaia_auth_consumer.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "googleurl/src/gurl.h"
 #include "media/base/media_switches.h"
 #include "net/base/network_change_notifier.h"
@@ -406,8 +408,10 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
   if (browser_shutdown::IsTryingToQuit())
     return;
 
-  if (login_host)
+  if (login_host) {
     login_host->SetStatusAreaVisible(true);
+    login_host->BeforeSessionStart();
+  }
 
   BootTimesLoader::Get()->AddLoginTimeMarker("BrowserLaunched", false);
 
@@ -487,6 +491,23 @@ void LoginUtilsImpl::PrepareProfile(
   // initialization code sees the cached policy settings.
   connector->InitializeUserPolicy(username, wait_for_policy_fetch);
 
+  // The default profile will have been changed because the ProfileManager
+  // will process the notification that the UserManager sends out.
+  ProfileManager::CreateDefaultProfileAsync(
+      base::Bind(&LoginUtilsImpl::OnProfileCreated, AsWeakPtr()));
+
+  // The default profile is only partially initialized at this point.
+  // Setup the UserCloudPolicyManager so profile initialization can complete.
+  Profile* user_profile = ProfileManager::GetDefaultProfile();
+
+  // Initialize the new cloud policy framework, if enabled.
+  if (user_profile->GetUserCloudPolicyManager()) {
+    user_profile->GetUserCloudPolicyManager()->Initialize(
+        g_browser_process->local_state(),
+        connector->device_management_service(),
+        connector->GetUserAffiliation(username));
+  }
+
   if (wait_for_policy_fetch) {
     // Profile creation will block until user policy is fetched, which
     // requires the DeviceManagement token. Try to fetch it now.
@@ -495,11 +516,6 @@ void LoginUtilsImpl::PrepareProfile(
         new PolicyOAuthFetcher(authenticator_->authentication_profile()));
     policy_oauth_fetcher_->Start();
   }
-
-  // The default profile will have been changed because the ProfileManager
-  // will process the notification that the UserManager sends out.
-  ProfileManager::CreateDefaultProfileAsync(
-      base::Bind(&LoginUtilsImpl::OnProfileCreated, AsWeakPtr()));
 }
 
 void LoginUtilsImpl::DelegateDeleted(LoginUtils::Delegate* delegate) {
@@ -742,23 +758,26 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kDisableSeccompFilterSandbox,
       ::switches::kDisableSeccompSandbox,
       ::switches::kDisableThreadedAnimation,
-      ::switches::kEnableDevicePolicy,
+      ::switches::kEnableBrowserTextSubpixelPositioning,
+      ::switches::kEnableCompositingForFixedPosition,
       ::switches::kEnableGView,
-      ::switches::kEnableHighDPIPDFPlugin,
       ::switches::kEnableLogging,
       ::switches::kEnablePartialSwap,
       ::switches::kEnableUIReleaseFrontSurface,
       ::switches::kEnablePinch,
+      ::switches::kEnableGestureTapHighlight,
       ::switches::kEnableSmoothScrolling,
       ::switches::kEnableThreadedCompositing,
+      ::switches::kEnableTouchCalibration,
       ::switches::kEnableTouchEvents,
       ::switches::kEnableViewport,
+      ::switches::kEnableWebkitTextSubpixelPositioning,
       ::switches::kDisableThreadedCompositing,
       ::switches::kForceCompositingMode,
       ::switches::kGpuStartupDialog,
-      ::switches::kLoad2xResources,
       ::switches::kLoginProfile,
       ::switches::kScrollPixels,
+      ::switches::kNaturalScrollDefault,
       ::switches::kNoFirstRun,
       ::switches::kNoSandbox,
       ::switches::kPpapiFlashArgs,
@@ -775,7 +794,7 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ash::switches::kAshWindowAnimationsDisabled,
       ash::switches::kAuraLegacyPowerButton,
       ash::switches::kAuraNoShadows,
-      ash::switches::kAshNotify,
+      ash::switches::kAshNotifyDisabled,
       ::switches::kUIEnablePartialSwap,
       ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
@@ -868,11 +887,18 @@ void LoginUtilsImpl::SetFirstLoginPrefs(PrefService* prefs) {
 scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
     LoginStatusConsumer* consumer) {
   // Screen locker needs new Authenticator instance each time.
-  if (ScreenLocker::default_screen_locker())
+  if (ScreenLocker::default_screen_locker()) {
+    if (authenticator_)
+      authenticator_->SetConsumer(NULL);
     authenticator_ = NULL;
+  }
 
-  if (authenticator_ == NULL)
+  if (authenticator_ == NULL) {
     authenticator_ = new ParallelAuthenticator(consumer);
+  } else {
+    // TODO(nkostylev): Fix this hack by improving Authenticator dependencies.
+    authenticator_->SetConsumer(consumer);
+  }
   return authenticator_;
 }
 
@@ -1041,17 +1067,28 @@ void LoginUtilsImpl::StoreOAuth1AccessToken(Profile* user_profile,
                                             const std::string& token,
                                             const std::string& secret) {
   // First store OAuth1 token + service for the current user profile...
+  std::string encrypted_token =
+      CrosLibrary::Get()->GetCertLibrary()->EncryptToken(token);
+  std::string encrypted_secret =
+      CrosLibrary::Get()->GetCertLibrary()->EncryptToken(secret);
   PrefService* pref_service = user_profile->GetPrefs();
-  pref_service->SetString(prefs::kOAuth1Token,
-      CrosLibrary::Get()->GetCertLibrary()->EncryptToken(token));
-  pref_service->SetString(prefs::kOAuth1Secret,
-      CrosLibrary::Get()->GetCertLibrary()->EncryptToken(secret));
+  if (!encrypted_token.empty() && !encrypted_secret.empty()) {
+    pref_service->SetString(prefs::kOAuth1Token, encrypted_token);
+    pref_service->SetString(prefs::kOAuth1Secret, encrypted_secret);
 
-  // ...then record the presence of valid OAuth token for this account in local
-  // state as well.
-  UserManager::Get()->SaveUserOAuthStatus(
-      UserManager::Get()->GetLoggedInUser().email(),
-      User::OAUTH_TOKEN_STATUS_VALID);
+    // ...then record the presence of valid OAuth token for this account in
+    // local state as well.
+    UserManager::Get()->SaveUserOAuthStatus(
+        UserManager::Get()->GetLoggedInUser().email(),
+        User::OAUTH_TOKEN_STATUS_VALID);
+  } else {
+    LOG(WARNING) << "Failed to get OAuth1 token/secret encrypted.";
+    // Set the OAuth status invalid so that the user will go through full
+    // GAIA login next time.
+    UserManager::Get()->SaveUserOAuthStatus(
+        UserManager::Get()->GetLoggedInUser().email(),
+        User::OAUTH_TOKEN_STATUS_INVALID);
+  }
 }
 
 void LoginUtilsImpl::VerifyOAuth1AccessToken(Profile* user_profile,

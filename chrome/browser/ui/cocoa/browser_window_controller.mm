@@ -44,12 +44,12 @@
 #import "chrome/browser/ui/cocoa/dev_tools_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #import "chrome/browser/ui/cocoa/event_utils.h"
+#include "chrome/browser/ui/cocoa/extensions/extension_keybinding_registry_cocoa.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
-#import "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
@@ -62,6 +62,7 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
@@ -244,9 +245,9 @@ enum {
 
     // Set the window to not have rounded corners, which prevents the resize
     // control from being inset slightly and looking ugly. Only bother to do
-    // this on Snow Leopard and earlier; on Lion and later all windows have
-    // rounded bottom corners, and this won't work anyway.
-    if (base::mac::IsOSSnowLeopardOrEarlier() &&
+    // this on Snow Leopard; on Lion and later all windows have rounded bottom
+    // corners, and this won't work anyway.
+    if (base::mac::IsOSSnowLeopard() &&
         [window respondsToSelector:@selector(setBottomCornerRounded:)])
       [window setBottomCornerRounded:NO];
 
@@ -277,7 +278,9 @@ enum {
     if ((browser_->is_type_popup() || browser_->is_type_panel()) &&
          windowRect.x() == 0 && windowRect.y() == 0) {
       gfx::Size size = windowRect.size();
-      windowRect.set_origin(WindowSizer::GetDefaultPopupOrigin(size));
+      windowRect.set_origin(
+          WindowSizer::GetDefaultPopupOrigin(size,
+                                             browser_->host_desktop_type()));
     }
 
     // Size and position the window.  Note that it is not yet onscreen.  Popup
@@ -411,6 +414,11 @@ enum {
     if ([self hasToolbar])  // Do not create the buttons in popups.
       [toolbarController_ createBrowserActionButtons];
 
+    extension_keybinding_registry_.reset(
+        new ExtensionKeybindingRegistryCocoa(browser_->profile(),
+            [self window],
+            extensions::ExtensionKeybindingRegistry::ALL_EXTENSIONS));
+
     // We are done initializing now.
     initializing_ = NO;
   }
@@ -519,18 +527,6 @@ enum {
   [self performSelector:@selector(autorelease)
              withObject:nil
              afterDelay:0];
-}
-
-- (void)attachConstrainedWindow:(ConstrainedWindowMac*)window {
-  [tabStripController_ attachConstrainedWindow:window];
-}
-
-- (void)removeConstrainedWindow:(ConstrainedWindowMac*)window {
-  [tabStripController_ removeConstrainedWindow:window];
-}
-
-- (BOOL)canAttachConstrainedWindow {
-  return ![previewableContentsController_ isShowingPreview];
 }
 
 - (void)updateDevToolsForContents:(WebContents*)contents {
@@ -1045,7 +1041,7 @@ enum {
                     IDS_ENTER_FULLSCREEN_MAC);
             [static_cast<NSMenuItem*>(item) setTitle:menuTitle];
 
-            if (base::mac::IsOSSnowLeopardOrEarlier())
+            if (base::mac::IsOSSnowLeopard())
               [static_cast<NSMenuItem*>(item) setHidden:YES];
           }
           break;
@@ -1164,6 +1160,11 @@ enum {
   chrome::ExecuteCommand(browser_.get(), command);
 }
 
+- (BOOL)handledByExtensionCommand:(NSEvent*)event {
+  return extension_keybinding_registry_->ProcessKeyEvent(
+      content::NativeWebKeyboardEvent(event));
+}
+
 // StatusBubble delegate method: tell the status bubble the frame it should
 // position itself in.
 - (NSRect)statusBubbleBaseFrame {
@@ -1183,6 +1184,10 @@ enum {
 
 - (void)setStarredState:(BOOL)isStarred {
   [toolbarController_ setStarredState:isStarred];
+}
+
+- (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
+  [toolbarController_ zoomChangedForActiveTab:canShowBubble];
 }
 
 // Return the rect, in WebKit coordinates (flipped), of the window's grow box
@@ -1516,6 +1521,17 @@ enum {
   return [self supportsWindowFeature:Browser::FEATURE_TABSTRIP];
 }
 
+- (BOOL)isTabDraggable:(NSView*)tabView {
+  // TODO(avi, thakis): GTMWindowSheetController has no api to move tabsheets
+  // between windows. Until then, we have to prevent having to move a tabsheet
+  // between windows, e.g. no tearing off of tabs.
+  int index = [tabStripController_ modelIndexForTabView:tabView];
+  TabContents* contents = chrome::GetTabContentsAt(browser_.get(), index);
+  if (!contents)
+    return NO;
+  return !contents->constrained_window_tab_helper()->constrained_window_count();
+}
+
 // TabStripControllerDelegate protocol.
 - (void)onActivateTabWithContents:(WebContents*)contents {
   // Update various elements that are interested in knowing the current
@@ -1632,10 +1648,6 @@ enum {
   bookmarkBubbleController_ = nil;
 }
 
-- (NSPoint)chromeToMobileBubblePoint {
-  return [toolbarController_ chromeToMobileBubblePoint];
-}
-
 // Show the Chrome To Mobile bubble (e.g. user just clicked on the icon).
 - (void)showChromeToMobileBubble {
   // Do nothing if the bubble is already showing.
@@ -1647,27 +1659,11 @@ enum {
           initWithParentWindow:[self window]
                        browser:browser_.get()];
   [chromeToMobileBubbleController_ showWindow:self];
-
-  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-  [center addObserver:self
-             selector:@selector(chromeToMobileBubbleWindowWillClose:)
-                 name:NSWindowWillCloseNotification
-               object:[chromeToMobileBubbleController_ window]];
-  // Show the lit Chrome To Mobile icon while the bubble is visible.
-  [self locationBarBridge]->SetChromeToMobileDecorationLit(true);
 }
 
 // Nil out the weak Chrome To Mobile bubble controller reference.
-- (void)chromeToMobileBubbleWindowWillClose:(NSNotification*)notification {
-  DCHECK_EQ([notification object], [chromeToMobileBubbleController_ window]);
-
-  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-  [center removeObserver:self
-                    name:NSWindowWillCloseNotification
-                  object:[chromeToMobileBubbleController_ window]];
+- (void)chromeToMobileBubbleWindowWillClose {
   chromeToMobileBubbleController_ = nil;
-  // Restore the dimmed Chrome To Mobile icon when the bubble closes.
-  [self locationBarBridge]->SetChromeToMobileDecorationLit(false);
 }
 
 // Handle the editBookmarkNode: action sent from bookmark bubble controllers.
@@ -1920,10 +1916,14 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
 - (void)commitInstant {
   InstantController* instant = browser_->instant_controller()->instant();
-  if (instant)
-    instant->CommitIfCurrent();
+  if (instant && instant->IsCurrent())
+    instant->CommitCurrentPreview(INSTANT_COMMIT_FOCUS_LOST);
 }
 
+- (BOOL)isInstantTabShowing {
+  return previewableContentsController_ &&
+      [previewableContentsController_ isShowingPreview];
+}
 
 - (NSRect)instantFrame {
   // The view's bounds are in its own coordinate system.  Convert that to the
@@ -1981,9 +1981,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       [static_cast<FramedBrowserWindow*>([self window]) toggleSystemFullScreen];
   } else {
     if (fullscreen)
-      [self enterFullscreenForSnowLeopardOrEarlier];
+      [self enterFullscreenForSnowLeopard];
     else
-      [self exitFullscreenForSnowLeopardOrEarlier];
+      [self exitFullscreenForSnowLeopard];
   }
 }
 
@@ -2022,9 +2022,8 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   fullscreenUrl_ = url;
   fullscreenBubbleType_ = bubbleType;
 
-  // Presentation mode on Leopard and Snow Leopard maps directly to fullscreen
-  // mode.
-  if (base::mac::IsOSSnowLeopardOrEarlier()) {
+  // Presentation mode on Snow Leopard maps directly to fullscreen mode.
+  if (base::mac::IsOSSnowLeopard()) {
     [self setFullscreen:presentationMode url:url bubbleType:bubbleType];
     return;
   }

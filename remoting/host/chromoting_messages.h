@@ -10,8 +10,14 @@
 #define IPC_MESSAGE_START ChromotingMsgStart
 
 //-----------------------------------------------------------------------------
-// The Chrmomoting session messages
+// Daemon to Network messages
 
-// Asks the service to send the Secure Attention Sequence (SAS) to the current
+// Delivers the host configuration (and updates) to the network process.
+IPC_MESSAGE_CONTROL1(ChromotingDaemonNetworkMsg_Configuration, std::string)
+
+//-----------------------------------------------------------------------------
+// Network to Daemon messages
+
+// Asks the daemon to send Secure Attention Sequence (SAS) to the current
 // console session.
-IPC_MESSAGE_CONTROL0(ChromotingHostMsg_SendSasToConsole)
+IPC_MESSAGE_CONTROL0(ChromotingNetworkDaemonMsg_SendSasToConsole)

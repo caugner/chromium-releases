@@ -300,11 +300,10 @@ int AutomationProvider::GetIndexForNavigationController(
 
 // TODO(phajdan.jr): move to TestingAutomationProvider.
 DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
-    const DownloadItem* download) {
+    const DownloadItem* download, bool incognito) {
   std::map<DownloadItem::DownloadState, std::string> state_to_string;
   state_to_string[DownloadItem::IN_PROGRESS] = std::string("IN_PROGRESS");
   state_to_string[DownloadItem::CANCELLED] = std::string("CANCELLED");
-  state_to_string[DownloadItem::REMOVING] = std::string("REMOVING");
   state_to_string[DownloadItem::INTERRUPTED] = std::string("INTERRUPTED");
   state_to_string[DownloadItem::COMPLETE] = std::string("COMPLETE");
 
@@ -326,7 +325,7 @@ DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
   dl_item_value->SetBoolean("open_when_complete",
                             download->GetOpenWhenComplete());
   dl_item_value->SetBoolean("is_temporary", download->IsTemporary());
-  dl_item_value->SetBoolean("is_otr", download->IsOtr());  // incognito
+  dl_item_value->SetBoolean("is_otr", incognito);
   dl_item_value->SetString("state", state_to_string[download->GetState()]);
   dl_item_value->SetString("safety_state",
                            safety_state_to_string[download->GetSafetyState()]);
@@ -675,9 +674,7 @@ void AutomationProvider::OnSetPageFontSize(int tab_handle,
 
 void AutomationProvider::RemoveBrowsingData(int remove_mask) {
   BrowsingDataRemover* remover;
-  remover = new BrowsingDataRemover(profile(),
-      BrowsingDataRemover::EVERYTHING,  // All time periods.
-      base::Time());
+  remover = BrowsingDataRemover::CreateForUnboundedRange(profile());
   remover->Remove(remove_mask, BrowsingDataHelper::UNPROTECTED_WEB);
   // BrowsingDataRemover deletes itself.
 }

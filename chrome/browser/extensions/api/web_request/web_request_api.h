@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/api/web_request/web_request_permissions.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "ipc/ipc_sender.h"
 #include "net/base/completion_callback.h"
@@ -99,6 +100,7 @@ class ExtensionWebRequestEventRouter
       RESPONSE_HEADERS = 1<<1,
       BLOCKING = 1<<2,
       ASYNC_BLOCKING = 1<<3,
+      REQUEST_BODY = 1<<4,
     };
 
     static bool InitFromValue(const base::ListValue& value,
@@ -371,6 +373,9 @@ class ExtensionWebRequestEventRouter
   // OTR and vice versa).
   void* GetCrossProfile(void* profile) const;
 
+  // Returns true if |request| was already signaled to some event handlers.
+  bool WasSignaled(const net::URLRequest& request) const;
+
   // A map for each profile that maps an event name to a set of extensions that
   // are listening to that event.
   ListenerMap listeners_;
@@ -434,7 +439,7 @@ class WebRequestHandlerBehaviorChanged : public SyncIOThreadExtensionFunction {
       QuotaLimitHeuristics* heuristics) const OVERRIDE;
   // Handle quota exceeded gracefully: Only warn the user but still execute the
   // function.
-  virtual void OnQuotaExceeded() OVERRIDE;
+  virtual void OnQuotaExceeded(const std::string& error) OVERRIDE;
   virtual bool RunImpl() OVERRIDE;
 };
 

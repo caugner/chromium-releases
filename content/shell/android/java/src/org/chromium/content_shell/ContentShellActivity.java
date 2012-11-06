@@ -15,6 +15,7 @@ import org.chromium.content.app.AppResource;
 import org.chromium.content.app.LibraryLoader;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.common.CommandLine;
+import org.chromium.ui.gfx.NativeWindow;
 
 /**
  * Activity for managing the Content Shell.
@@ -42,6 +43,7 @@ public class ContentShellActivity extends Activity {
 
         setContentView(R.layout.content_shell_activity);
         mShellManager = (ShellManager) findViewById(R.id.shell_container);
+        mShellManager.setWindow(new NativeWindow(this));
 
         String startupUrl = getUrlFromIntent(getIntent());
         if (!TextUtils.isEmpty(startupUrl)) {
@@ -146,5 +148,6 @@ public class ContentShellActivity extends Activity {
     private void initializeContentViewResources() {
         AppResource.DIMENSION_LINK_PREVIEW_OVERLAY_RADIUS = R.dimen.link_preview_overlay_radius;
         AppResource.DRAWABLE_LINK_PREVIEW_POPUP_OVERLAY = R.drawable.popup_zoomer_overlay;
+        AppResource.STRING_CONTENT_VIEW_CONTENT_DESCRIPTION = R.string.accessibility_content_view;
     }
 }

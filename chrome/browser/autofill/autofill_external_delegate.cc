@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete_history_manager.h"
+#include "chrome/browser/autofill/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/common/autofill_messages.h"
@@ -18,8 +18,7 @@
 using content::RenderViewHost;
 using WebKit::WebAutofillClient;
 
-AutofillExternalDelegate::~AutofillExternalDelegate() {
-}
+AutofillExternalDelegate::~AutofillExternalDelegate() {}
 
 AutofillExternalDelegate::AutofillExternalDelegate(
     TabContents* tab_contents,
@@ -211,8 +210,12 @@ bool AutofillExternalDelegate::DidAcceptAutofillSuggestions(
 }
 
 void AutofillExternalDelegate::ClearPreviewedForm() {
-  RenderViewHost* host = tab_contents_->web_contents()->GetRenderViewHost();
-  host->Send(new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
+  if (tab_contents_ && tab_contents_->web_contents()) {
+    RenderViewHost* host = tab_contents_->web_contents()->GetRenderViewHost();
+
+    if (host)
+      host->Send(new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
+  }
 }
 
 void AutofillExternalDelegate::HideAutofillPopup() {
@@ -343,11 +346,8 @@ void AutofillExternalDelegate::InsertDataListValues(
                               data_list_unique_ids_.end());
 }
 
-// Add a "!defined(OS_YOUROS) for each platform that implements this
-// in an autofill_external_delegate_YOUROS.cc.  Currently there are
-// none, so all platforms use the default.
 
-#if !defined(OS_ANDROID) && !defined(TOOLKIT_GTK)
+#if defined(OS_MACOSX)
 
 AutofillExternalDelegate* AutofillExternalDelegate::Create(
     TabContents*, AutofillManager*) {

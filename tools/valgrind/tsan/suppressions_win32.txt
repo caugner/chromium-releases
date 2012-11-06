@@ -1,22 +1,4 @@
 ############################
-# Chromium
-
-{
-  Benign race durung InitializeClock
-  ThreadSanitizer:Race
-  ...
-  fun:*InitializeClock*
-}
-
-{
-  bug_62560
-  ThreadSanitizer:Race
-  ...
-  fun:_initterm
-  fun:doexit
-}
-
-############################
 # Reports on the guts of Windows
 {
   UuidCreate
@@ -45,11 +27,45 @@
   ThreadSanitizer:InvalidLock
   fun:unnamedImageEntryPoint
 }
+
 {
   accessing an invalid lock in CoFreeAllLibraries
   ThreadSanitizer:InvalidLock
   fun:CoFreeAllLibraries
 }
+
+{
+  bug_146724_benign_a
+  ThreadSanitizer:Race
+  fun:_lock_file
+  fun:vprintf_helper
+  fun:vprintf
+}
+{
+  bug_146724_benign_b
+  ThreadSanitizer:Race
+  fun:_getstream
+  fun:_wfsopen
+}
+
+############################
+# Chromium
+
+{
+  Benign race durung InitializeClock
+  ThreadSanitizer:Race
+  ...
+  fun:*InitializeClock*
+}
+
+{
+  bug_62560
+  ThreadSanitizer:Race
+  ...
+  fun:_initterm
+  fun:doexit
+}
+
 {
   accessing an invalid lock under exit/doexit
   ThreadSanitizer:InvalidLock
@@ -161,4 +177,51 @@
   ...
   fun:media::FFmpegAudioDecoder::DoDecodeBuffer
 }
+{
+  bug_144928
+  ThreadSanitizer:Race
+  fun:google_breakpad::CrashGenerationServer::HandleConnectionRequest
+  fun:google_breakpad::CrashGenerationServer::OnPipeConnected
+  fun:RtlSetTimer
+  fun:RtlSetTimer
+  fun:TpReleaseTimer
+  fun:TpReleaseTimer
+  fun:RtlMultiByteToUnicodeSize
+  fun:TpCallbackMayRunLong
+  fun:TpCallbackMayRunLong
+  fun:BaseThreadInitThunk
+}
+{
+  bug_144928_b
+  ThreadSanitizer:Race
+  fun:google_breakpad::CrashGenerationServer::HandleConnectingState
+  fun:google_breakpad::CrashGenerationServer::OnPipeConnected
+  fun:RtlSetTimer
+  fun:RtlSetTimer
+  fun:TpReleaseTimer
+  fun:TpReleaseTimer
+  fun:RtlMultiByteToUnicodeSize
+  fun:TpCallbackMayRunLong
+  fun:TpCallbackMayRunLong
+  fun:BaseThreadInitThunk
+}
+{
+  bug_144928_c
+  ThreadSanitizer:Race
+  fun:google_breakpad::CrashGenerationServer::~CrashGenerationServer
+  fun:google_breakpad::CrashGenerationServer::`scalar deleting destructor'
+  fun:scoped_ptr::~scoped_ptr
+  fun:remoting::BreakpadWinDeathTest::~BreakpadWinDeathTest
+  fun:remoting::BreakpadWinDeathTest_TestAccessViolation_Test::`scalar deleting destructor'
+  fun:testing::Test::DeleteSelf_
+  fun:testing::internal::HandleExceptionsInMethodIfSupported
+}
 
+{
+  bug_146119
+  ThreadSanitizer:Race
+  ...
+  fun:GetAdaptersAddresses
+  ...
+  fun:base::internal::RunnableAdapter::Run
+}

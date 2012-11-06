@@ -24,6 +24,7 @@
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/fileapi/file_util_helper.h"
 #include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/quota/mock_special_storage_policy.h"
 
@@ -35,9 +36,10 @@ class SandboxMountPointProviderOriginEnumeratorTest : public testing::Test {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     sandbox_provider_.reset(
         new SandboxMountPointProvider(
-          base::MessageLoopProxy::current(),
-          data_dir_.path(),
-          CreateAllowFileAccessOptions()));
+            NULL,
+            base::MessageLoopProxy::current(),
+            data_dir_.path(),
+            CreateAllowFileAccessOptions()));
   }
 
   SandboxMountPointProvider::OriginEnumerator* CreateEnumerator() const {
@@ -201,6 +203,16 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
     return new FileSystemOperationContext(file_system_context_);
   }
 
+  bool PathExists(const FileSystemURL& url) {
+    scoped_ptr<FileSystemOperationContext> context(NewContext());
+    return FileUtilHelper::PathExists(context.get(), file_util(), url);
+  }
+
+  bool DirectoryExists(const FileSystemURL& url) {
+    scoped_ptr<FileSystemOperationContext> context(NewContext());
+    return FileUtilHelper::DirectoryExists(context.get(), file_util(), url);
+  }
+
   std::string URLAndTypeToSeedString(const GURL& origin_url,
     fileapi::FileSystemType type) {
     return GetOriginIdentifierFromURL(origin_url) +
@@ -216,39 +228,24 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
     FileSystemURL root(origin_url, type, FilePath());
     FileSystemURL seed = root.WithPath(root.path().Append(seed_file_path));
 
-    context.reset(NewContext());
-    EXPECT_TRUE(file_util()->DirectoryExists(
-        context.get(), seed));
-    context.reset(NewContext());
-    EXPECT_TRUE(file_util()->DirectoryExists(
-        context.get(), seed.WithPath(seed.path().Append(seed_file_path))));
-    context.reset(NewContext());
-    EXPECT_TRUE(file_util()->DirectoryExists(
-        context.get(), seed.WithPath(seed.path().AppendASCII("d 0"))));
-    context.reset(NewContext());
-    EXPECT_TRUE(file_util()->DirectoryExists(
-        context.get(), seed.WithPath(seed.path().AppendASCII("d 1"))));
-    context.reset(NewContext());
-    EXPECT_TRUE(file_util()->PathExists(
-        context.get(), root.WithPath(root.path().AppendASCII("file 0"))));
-    context.reset(NewContext());
-    EXPECT_FALSE(file_util()->DirectoryExists(
-        context.get(), seed.WithPath(seed.path().AppendASCII("file 0"))));
-    context.reset(NewContext());
-    EXPECT_TRUE(file_util()->PathExists(
-        context.get(),
+    EXPECT_TRUE(DirectoryExists(seed));
+    EXPECT_TRUE(DirectoryExists(
+        seed.WithPath(seed.path().Append(seed_file_path))));
+    EXPECT_TRUE(DirectoryExists(
+        seed.WithPath(seed.path().AppendASCII("d 0"))));
+    EXPECT_TRUE(DirectoryExists(
+        seed.WithPath(seed.path().AppendASCII("d 1"))));
+    EXPECT_TRUE(PathExists(
+        root.WithPath(root.path().AppendASCII("file 0"))));
+    EXPECT_FALSE(DirectoryExists(
+        seed.WithPath(seed.path().AppendASCII("file 0"))));
+    EXPECT_TRUE(PathExists(
         seed.WithPath(seed.path().AppendASCII("d 0").AppendASCII("file 1"))));
-    context.reset(NewContext());
-    EXPECT_FALSE(file_util()->DirectoryExists(
-        context.get(),
+    EXPECT_FALSE(DirectoryExists(
         seed.WithPath(seed.path().AppendASCII("d 0").AppendASCII("file 1"))));
-    context.reset(NewContext());
-    EXPECT_TRUE(file_util()->PathExists(
-        context.get(),
+    EXPECT_TRUE(PathExists(
         seed.WithPath(seed.path().AppendASCII("d 0").AppendASCII("file 2"))));
-    context.reset(NewContext());
-    EXPECT_FALSE(file_util()->DirectoryExists(
-        context.get(),
+    EXPECT_FALSE(DirectoryExists(
         seed.WithPath(seed.path().AppendASCII("d 0").AppendASCII("file 2"))));
   }
 
@@ -278,7 +275,6 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
     bool create = false;
     std::set<GURL> origins;
     std::string host = "the host with the most";
-    int64 delta = 0;
 
     // We want to make sure that all the public methods of
     // SandboxMountPointProvider which might access the filesystem will cause a
@@ -312,25 +308,6 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
     case 6:
       sandbox_provider()->GetOriginUsageOnFileThread(
           file_system_context_, origin_url, type);
-      break;
-    case 7:
-      // This case has to use an origin that already exists in the
-      // migrated data.
-      sandbox_provider()->UpdateOriginUsageOnFileThread(
-          NULL, kMigrationTestRecords[0].origin,
-          kFileSystemTypeTemporary, delta);
-      break;
-    case 8:
-      // This case has to use a filesystem that already exists in the
-      // migrated data.
-      sandbox_provider()->StartUpdateOriginOnFileThread(
-          kMigrationTestRecords[0].origin, kFileSystemTypeTemporary);
-      break;
-    case 9:
-      // This case has to use a filesystem that already exists in the
-      // migrated data.
-      sandbox_provider()->EndUpdateOriginOnFileThread(
-          kMigrationTestRecords[0].origin, kFileSystemTypeTemporary);
       break;
     default:
       FAIL();
@@ -380,18 +357,6 @@ TEST_F(SandboxMountPointProviderMigrationTest, TestMigrateViaMethod5) {
 
 TEST_F(SandboxMountPointProviderMigrationTest, TestMigrateViaMethod6) {
   RunMigrationTest(6);
-}
-
-TEST_F(SandboxMountPointProviderMigrationTest, TestMigrateViaMethod7) {
-  RunMigrationTest(7);
-}
-
-TEST_F(SandboxMountPointProviderMigrationTest, TestMigrateViaMethod8) {
-  RunMigrationTest(8);
-}
-
-TEST_F(SandboxMountPointProviderMigrationTest, TestMigrateViaMethod9) {
-  RunMigrationTest(9);
 }
 
 }  // namespace fileapi

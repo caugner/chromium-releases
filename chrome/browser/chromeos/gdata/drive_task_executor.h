@@ -5,12 +5,15 @@
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_DRIVE_TASK_EXECUTOR_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_DRIVE_TASK_EXECUTOR_H_
 
+#include <string>
+#include <vector>
+
 #include "chrome/browser/chromeos/extensions/file_handler_util.h"
-#include "chrome/browser/chromeos/gdata/gdata_errorcode.h"
+#include "chrome/browser/google_apis/gdata_errorcode.h"
 
 namespace gdata {
 
-class GDataEntryProto;
+class DriveEntryProto;
 
 // This class implements an "executor" class that will execute tasks for
 // third party Drive apps that store data in Drive itself.  To do that, it
@@ -33,8 +36,8 @@ class DriveTaskExecutor : public file_handler_util::FileTaskExecutor {
                     const std::string& action_id);
   virtual ~DriveTaskExecutor();
 
-  void OnFileEntryFetched(GDataFileError error,
-                          scoped_ptr<GDataEntryProto> entry_proto);
+  void OnFileEntryFetched(DriveFileError error,
+                          scoped_ptr<DriveEntryProto> entry_proto);
   void OnAppAuthorized(const std::string& resource_id,
                        GDataErrorCode error,
                        scoped_ptr<base::Value> feed_data);

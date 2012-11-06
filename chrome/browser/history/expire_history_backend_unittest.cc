@@ -133,7 +133,7 @@ class ExpireHistoryTest : public testing::Test,
 
     FilePath history_name = path().Append(kHistoryFile);
     main_db_.reset(new HistoryDatabase);
-    if (main_db_->Init(history_name, FilePath()) != sql::INIT_OK)
+    if (main_db_->Init(history_name) != sql::INIT_OK)
       main_db_.reset();
 
     FilePath archived_name = path().Append(kArchivedHistoryFile);
@@ -205,9 +205,9 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
   // Two favicons. The first two URLs will share the same one, while the last
   // one will have a unique favicon.
   FaviconID favicon1 = thumb_db_->AddFavicon(GURL("http://favicon/url1"),
-                                             FAVICON);
+      FAVICON, GetDefaultFaviconSizes());
   FaviconID favicon2 = thumb_db_->AddFavicon(GURL("http://favicon/url2"),
-                                             FAVICON);
+      FAVICON, GetDefaultFaviconSizes());
 
   // Three URLs.
   URLRow url_row1(GURL("http://www.google.com/1"));
@@ -319,18 +319,17 @@ void ExpireHistoryTest::AddExampleSourceData(const GURL& url, URLID* id) {
 bool ExpireHistoryTest::HasFavicon(FaviconID favicon_id) {
   if (!thumb_db_.get() || favicon_id == 0)
     return false;
-  Time last_updated;
-  std::vector<unsigned char> icon_data_unused;
-  GURL icon_url;
-  return thumb_db_->GetFavicon(favicon_id, &last_updated, &icon_data_unused,
-                               &icon_url, NULL);
+  return thumb_db_->GetFaviconHeader(favicon_id, NULL, NULL, NULL);
 }
 
 FaviconID ExpireHistoryTest::GetFavicon(const GURL& page_url,
                                         IconType icon_type) {
-  IconMapping icon_mapping;
-  thumb_db_->GetIconMappingForPageURL(page_url, icon_type, &icon_mapping);
-  return icon_mapping.icon_id;
+  std::vector<IconMapping> icon_mappings;
+  if (thumb_db_->GetIconMappingsForPageURL(page_url, icon_type,
+                                           &icon_mappings)) {
+    return icon_mappings[0].icon_id;
+  }
+  return 0;
 }
 
 bool ExpireHistoryTest::HasThumbnail(URLID url_id) {
@@ -404,7 +403,8 @@ void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row) {
 TEST_F(ExpireHistoryTest, DeleteFaviconsIfPossible) {
   // Add a favicon record.
   const GURL favicon_url("http://www.google.com/favicon.ico");
-  FaviconID icon_id = thumb_db_->AddFavicon(favicon_url, FAVICON);
+  FaviconID icon_id = thumb_db_->AddFavicon(favicon_url, FAVICON,
+      GetDefaultFaviconSizes());
   EXPECT_TRUE(icon_id);
   EXPECT_TRUE(HasFavicon(icon_id));
 
@@ -415,7 +415,8 @@ TEST_F(ExpireHistoryTest, DeleteFaviconsIfPossible) {
   EXPECT_FALSE(HasFavicon(icon_id));
 
   // Add back the favicon.
-  icon_id = thumb_db_->AddFavicon(favicon_url, TOUCH_ICON);
+  icon_id = thumb_db_->AddFavicon(favicon_url, TOUCH_ICON,
+      GetDefaultFaviconSizes());
   EXPECT_TRUE(icon_id);
   EXPECT_TRUE(HasFavicon(icon_id));
 

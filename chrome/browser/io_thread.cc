@@ -21,12 +21,13 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
-#include "chrome/browser/net/cache_stats.h"
+#include "chrome/browser/net/async_dns_field_trial.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/http_pipelining_compatibility_client.h"
+#include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
@@ -38,6 +39,7 @@
 #include "net/base/cert_verifier.h"
 #include "net/base/default_server_bound_cert_store.h"
 #include "net/base/host_cache.h"
+#include "net/base/host_mapping_rules.h"
 #include "net/base/host_resolver.h"
 #include "net/base/mapped_host_resolver.h"
 #include "net/base/net_util.h"
@@ -109,10 +111,13 @@ class SystemURLRequestContext : public URLRequestContextWithUserAgent {
 net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
+  bool allow_async_dns_field_trial = true;
+
   size_t parallelism = net::HostResolver::kDefaultParallelism;
 
   // Use the concurrency override from the command-line, if any.
   if (command_line.HasSwitch(switches::kHostResolverParallelism)) {
+    allow_async_dns_field_trial = false;
     std::string s =
         command_line.GetSwitchValueASCII(switches::kHostResolverParallelism);
 
@@ -129,6 +134,7 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
 
   // Use the retry attempts override from the command-line, if any.
   if (command_line.HasSwitch(switches::kHostResolverRetryAttempts)) {
+    allow_async_dns_field_trial = false;
     std::string s =
         command_line.GetSwitchValueASCII(switches::kHostResolverRetryAttempts);
     // Parse the switch (it should be a non-negative integer).
@@ -141,14 +147,24 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
   }
 
   net::HostResolver* global_host_resolver = NULL;
+  bool use_async = false;
   if (command_line.HasSwitch(switches::kEnableAsyncDns)) {
-    global_host_resolver =
-        net::CreateAsyncHostResolver(parallelism, retry_attempts, net_log);
+    allow_async_dns_field_trial = false;
+    use_async = true;
+  } else if (command_line.HasSwitch(switches::kDisableAsyncDns)) {
+    allow_async_dns_field_trial = false;
+    use_async = false;
   }
 
-  if (!global_host_resolver) {
+  if (allow_async_dns_field_trial)
+    use_async = chrome_browser_net::ConfigureAsyncDnsFieldTrial();
+
+  if (use_async) {
     global_host_resolver =
-      net::CreateSystemHostResolver(parallelism, retry_attempts, net_log);
+        net::CreateAsyncHostResolver(parallelism, retry_attempts, net_log);
+  } else {
+    global_host_resolver =
+        net::CreateSystemHostResolver(parallelism, retry_attempts, net_log);
   }
 
   // Determine if we should disable IPv6 support.
@@ -307,7 +323,12 @@ SystemRequestContextLeakChecker::~SystemRequestContextLeakChecker() {
 
 IOThread::Globals::Globals()
     : ALLOW_THIS_IN_INITIALIZER_LIST(
-        system_request_context_leak_checker(this)) {}
+        system_request_context_leak_checker(this)),
+      ignore_certificate_errors(false),
+      http_pipelining_enabled(false),
+      testing_fixed_http_port(0),
+      testing_fixed_https_port(0) {}
+
 IOThread::Globals::~Globals() {}
 
 // |local_state| is passed in explicitly in order to (1) reduce implicit
@@ -335,10 +356,12 @@ IOThread::IOThread(
   gssapi_library_name_ = local_state->GetString(prefs::kGSSAPILibraryName);
   pref_proxy_config_tracker_.reset(
       ProxyServiceFactory::CreatePrefProxyConfigTracker(local_state));
-  ChromeNetworkDelegate::InitializeReferrersEnabled(&system_enable_referrers_,
-                                                    local_state);
+  ChromeNetworkDelegate::InitializePrefsOnUIThread(
+      &system_enable_referrers_,
+      NULL,
+      local_state);
   ssl_config_service_manager_.reset(
-      SSLConfigServiceManager::CreateDefaultManager(local_state));
+      SSLConfigServiceManager::CreateDefaultManager(local_state, NULL));
 
   BrowserThread::SetDelegate(BrowserThread::IO, this);
 }
@@ -386,6 +409,8 @@ void IOThread::Init() {
   net::SetMessageLoopForNSSHttpIO();
 #endif  // defined(USE_NSS)
 
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
   DCHECK(!globals_);
   globals_ = new Globals;
 
@@ -395,6 +420,9 @@ void IOThread::Init() {
   network_change_observer_.reset(
       new LoggingNetworkChangeObserver(net_log_));
 
+  // Setup the HistogramWatcher to run on the IO thread.
+  net::NetworkChangeNotifier::InitHistogramWatcher();
+
   globals_->extension_event_router_forwarder =
       extension_event_router_forwarder_;
   ChromeNetworkDelegate* network_delegate = new ChromeNetworkDelegate(
@@ -403,12 +431,12 @@ void IOThread::Init() {
       NULL,
       NULL,
       NULL,
+      NULL,
       &system_enable_referrers_,
+      NULL,
       NULL);
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableExtensionsHttpThrottling)) {
+  if (command_line.HasSwitch(switches::kDisableExtensionsHttpThrottling))
     network_delegate->NeverThrottleRequests();
-  }
   globals_->system_network_delegate.reset(network_delegate);
   globals_->host_resolver.reset(
       CreateGlobalHostResolver(net_log_));
@@ -428,7 +456,33 @@ void IOThread::Init() {
       new net::ServerBoundCertService(
           new net::DefaultServerBoundCertStore(NULL),
           base::WorkerPool::GetTaskRunner(true)));
-  globals_->cache_stats.reset(new chrome_browser_net::CacheStats());
+  globals_->load_time_stats.reset(new chrome_browser_net::LoadTimeStats());
+  globals_->host_mapping_rules.reset(new net::HostMappingRules());
+  if (command_line.HasSwitch(switches::kHostRules)) {
+    globals_->host_mapping_rules->SetRulesFromString(
+        command_line.GetSwitchValueASCII(switches::kHostRules));
+  }
+  if (command_line.HasSwitch(switches::kIgnoreCertificateErrors))
+    globals_->ignore_certificate_errors = true;
+  if (command_line.HasSwitch(switches::kEnableHttpPipelining))
+    globals_->http_pipelining_enabled = true;
+  if (command_line.HasSwitch(switches::kTestingFixedHttpPort)) {
+    int value;
+    base::StringToInt(
+        command_line.GetSwitchValueASCII(
+            switches::kTestingFixedHttpPort),
+        &value);
+    globals_->testing_fixed_http_port = value;
+  }
+  if (command_line.HasSwitch(switches::kTestingFixedHttpsPort)) {
+    int value;
+    base::StringToInt(
+        command_line.GetSwitchValueASCII(
+            switches::kTestingFixedHttpsPort),
+        &value);
+    globals_->testing_fixed_https_port = value;
+  }
+
   net::HttpNetworkSession::Params session_params;
   session_params.host_resolver = globals_->host_resolver.get();
   session_params.cert_verifier = globals_->cert_verifier.get();
@@ -438,16 +492,23 @@ void IOThread::Init() {
       globals_->transport_security_state.get();
   session_params.proxy_service =
       globals_->proxy_script_fetcher_proxy_service.get();
+  session_params.ssl_config_service = globals_->ssl_config_service.get();
   session_params.http_auth_handler_factory =
       globals_->http_auth_handler_factory.get();
+  session_params.http_server_properties =
+      globals_->http_server_properties.get();
   session_params.network_delegate = globals_->system_network_delegate.get();
   // TODO(rtenneti): We should probably use HttpServerPropertiesManager for the
   // system URLRequestContext too. There's no reason this should be tied to a
   // profile.
-  session_params.http_server_properties =
-      globals_->http_server_properties.get();
   session_params.net_log = net_log_;
-  session_params.ssl_config_service = globals_->ssl_config_service;
+  session_params.host_mapping_rules = globals_->host_mapping_rules.get();
+  session_params.ignore_certificate_errors =
+      globals_->ignore_certificate_errors;
+  session_params.http_pipelining_enabled = globals_->http_pipelining_enabled;
+  session_params.testing_fixed_http_port = globals_->testing_fixed_http_port;
+  session_params.testing_fixed_https_port = globals_->testing_fixed_https_port;
+
   scoped_refptr<net::HttpNetworkSession> network_session(
       new net::HttpNetworkSession(session_params));
   globals_->proxy_script_fetcher_http_transaction_factory.reset(
@@ -609,6 +670,7 @@ void IOThread::InitSystemRequestContextOnIOThread() {
           globals_->proxy_script_fetcher_context.get(),
           system_proxy_config_service_.release(),
           command_line));
+
   net::HttpNetworkSession::Params system_params;
   system_params.host_resolver = globals_->host_resolver.get();
   system_params.cert_verifier = globals_->cert_verifier.get();
@@ -623,6 +685,12 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   system_params.http_server_properties = globals_->http_server_properties.get();
   system_params.network_delegate = globals_->system_network_delegate.get();
   system_params.net_log = net_log_;
+  system_params.host_mapping_rules = globals_->host_mapping_rules.get();
+  system_params.ignore_certificate_errors = globals_->ignore_certificate_errors;
+  system_params.http_pipelining_enabled = globals_->http_pipelining_enabled;
+  system_params.testing_fixed_http_port = globals_->testing_fixed_http_port;
+  system_params.testing_fixed_https_port = globals_->testing_fixed_https_port;
+
   globals_->system_http_transaction_factory.reset(
       new net::HttpNetworkLayer(
           new net::HttpNetworkSession(system_params)));

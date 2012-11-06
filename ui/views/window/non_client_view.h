@@ -67,7 +67,7 @@ class VIEWS_EXPORT NonClientFrameView : public View {
   virtual void UpdateWindowIcon() = 0;
 
   // Overridden from View:
-  virtual bool HitTest(const gfx::Point& l) const OVERRIDE;
+  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
 
@@ -150,9 +150,10 @@ class VIEWS_EXPORT NonClientView : public View {
   // Called by the containing Window when it is closed.
   void WindowClosing();
 
-  // Changes the frame from native to custom depending on the value of
-  // |use_native_frame|.
-  void UpdateFrame();
+  // Replaces the frame view with a new one. Used when switching window theme
+  // or frame style. Pass true for |layout| to refresh the window layout (the
+  // common case) or false if you will trigger layout yourself.
+  void UpdateFrame(bool layout);
 
   // Prevents the window from being rendered as deactivated when |disable| is
   // true, until called with |disable| false. Used when a sub-window is to be

@@ -15,6 +15,7 @@
 #include "ui/compositor/compositor_switches.h"
 
 #if defined(USE_X11)
+#include "base/message_pump_aurax11.h"
 #include "ui/aura/display_change_observer_x11.h"
 #endif
 
@@ -28,12 +29,18 @@ Env* Env::instance_ = NULL;
 
 Env::Env()
     : mouse_button_flags_(0),
+      is_cursor_hidden_(false),
       is_touch_down_(false),
       render_white_bg_(true),
       stacking_client_(NULL) {
 }
 
 Env::~Env() {
+#if defined(USE_X11)
+  base::MessagePumpAuraX11::Current()->RemoveObserver(
+      &device_list_updater_aurax11_);
+#endif
+
   ui::Compositor::Terminate();
 }
 
@@ -69,6 +76,19 @@ void Env::SetLastMouseLocation(const Window& window,
     client->ConvertPointToScreen(&window, &last_mouse_location_);
 }
 
+void Env::SetCursorShown(bool cursor_shown) {
+  if (cursor_shown) {
+    // Protect against restoring a position that hadn't been saved.
+    if (is_cursor_hidden_)
+      last_mouse_location_ = hidden_cursor_location_;
+    is_cursor_hidden_ = false;
+  } else {
+    hidden_cursor_location_ = last_mouse_location_;
+    last_mouse_location_ = gfx::Point(-10000, -10000);
+    is_cursor_hidden_ = true;
+  }
+}
+
 void Env::SetDisplayManager(DisplayManager* display_manager) {
   display_manager_.reset(display_manager);
 #if defined(USE_X11)
@@ -83,7 +103,11 @@ void Env::SetEventFilter(EventFilter* event_filter) {
 
 #if !defined(OS_MACOSX)
 MessageLoop::Dispatcher* Env::GetDispatcher() {
+#if defined(USE_X11)
+  return base::MessagePumpAuraX11::Current();
+#else
   return dispatcher_.get();
+#endif
 }
 #endif
 
@@ -91,11 +115,16 @@ MessageLoop::Dispatcher* Env::GetDispatcher() {
 // Env, private:
 
 void Env::Init() {
-#if !defined(OS_MACOSX)
+#if !defined(USE_X11)
   dispatcher_.reset(CreateDispatcher());
 #endif
 #if defined(USE_X11)
   display_change_observer_.reset(new internal::DisplayChangeObserverX11);
+
+  // We can't do this with a root window listener because XI_HierarchyChanged
+  // messages don't have a target window.
+  base::MessagePumpAuraX11::Current()->AddObserver(
+      &device_list_updater_aurax11_);
 #endif
   ui::Compositor::Initialize(
       CommandLine::ForCurrentProcess()->HasSwitch(

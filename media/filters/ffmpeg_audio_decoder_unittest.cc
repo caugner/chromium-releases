@@ -30,8 +30,9 @@ ACTION_P(InvokeReadPacket, test) {
 class FFmpegAudioDecoderTest : public testing::Test {
  public:
   FFmpegAudioDecoderTest()
-      : decoder_(new FFmpegAudioDecoder(base::Bind(&Identity<MessageLoop*>,
-                                                   &message_loop_))),
+      : decoder_(new FFmpegAudioDecoder(base::Bind(
+            &Identity<scoped_refptr<base::MessageLoopProxy> >,
+            message_loop_.message_loop_proxy()))),
         demuxer_(new StrictMock<MockDemuxerStream>()) {
     CHECK(FFmpegGlue::GetInstance());
 
@@ -145,7 +146,7 @@ TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
       .Times(5)
       .WillRepeatedly(InvokeReadPacket(this));
   EXPECT_CALL(statistics_cb_, OnStatistics(_))
-      .Times(5);
+      .Times(4);
 
   Read();
   Read();

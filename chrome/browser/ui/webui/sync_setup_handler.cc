@@ -28,11 +28,11 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -285,6 +285,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
 
   static OptionsStringResource resources[] = {
     { "syncSetupConfigureTitle", IDS_SYNC_SETUP_CONFIGURE_TITLE },
+    { "syncSetupSpinnerTitle", IDS_SYNC_SETUP_SPINNER_TITLE },
     { "syncSetupTimeoutTitle", IDS_SYNC_SETUP_TIME_OUT_TITLE },
     { "syncSetupTimeoutContent", IDS_SYNC_SETUP_TIME_OUT_CONTENT },
     { "cannotBeBlank", IDS_SYNC_CANNOT_BE_BLANK },
@@ -590,8 +591,6 @@ bool SyncSetupHandler::PrepareSyncSetup() {
   return true;
 }
 
-// TODO(kochi): Handle error conditions (timeout, other failures).
-// http://crbug.com/128692
 void SyncSetupHandler::DisplaySpinner() {
   configuring_sync_ = true;
   StringValue page("spinner");

@@ -6,10 +6,11 @@
 
 #include "ash/wm/frame_painter.h"
 #include "ash/wm/workspace/frame_maximize_button.h"
-#include "grit/ui_resources.h"
+#include "grit/ash_resources.h"
 #include "grit/ui_strings.h"  // Accessibility names
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/compositor/layer_animator.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
@@ -120,6 +121,9 @@ void CustomFrameViewAsh::Layout() {
 }
 
 void CustomFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
+  if (frame_->IsFullscreen())
+    return;
+
   bool paint_as_active = ShouldPaintAsActive();
   int theme_image_id = paint_as_active ? IDR_AURA_WINDOW_HEADER_BASE_ACTIVE :
       IDR_AURA_WINDOW_HEADER_BASE_INACTIVE;
@@ -144,7 +148,9 @@ gfx::Size CustomFrameViewAsh::GetMinimumSize() {
 ////////////////////////////////////////////////////////////////////////////////
 // views::ButtonListener overrides:
 void CustomFrameViewAsh::ButtonPressed(views::Button* sender,
-                                       const views::Event& event) {
+                                       const ui::Event& event) {
+  if (event.IsShiftDown())
+    ui::LayerAnimator::set_slow_animation_mode(true);
   if (sender == maximize_button_) {
     // The maximize button may move out from under the cursor.
     ResetWindowControls();
@@ -156,12 +162,17 @@ void CustomFrameViewAsh::ButtonPressed(views::Button* sender,
   } else if (sender == close_button_) {
     frame_->Close();
   }
+  if (event.IsShiftDown())
+    ui::LayerAnimator::set_slow_animation_mode(false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // CustomFrameViewAsh, private:
 
 int CustomFrameViewAsh::NonClientTopBorderHeight() const {
+  if (frame_->IsFullscreen())
+    return 0;
+
   // Reserve enough space to see the buttons, including any offset from top and
   // reserving space for the separator line.
   return close_button_->bounds().bottom() +

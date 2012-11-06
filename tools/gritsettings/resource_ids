@@ -34,8 +34,9 @@
   "chrome/common/common_resources.grd": {
     "includes": [2500],
   },
-  "chrome/renderer/renderer_resources.grd": {
+  "chrome/renderer/resources/renderer_resources.grd": {
     "includes": [3500],
+    "structures": [3700],
   },
   "net/base/net_resources.grd": {
     "includes": [4000],
@@ -47,11 +48,14 @@
   "webkit/tools/test_shell/test_shell_resources.grd": {
     "includes": [5000],
   },
-  "ui/resources/ui_resources_wallpapers.grd": {
-    "includes": [5500],
-  },
   "ui/resources/ui_resources.grd": {
-    "structures": [6000],
+    "structures": [5500],
+  },
+  "ash/resources/ash_resources.grd": {
+    "structures": [5900],
+  },
+  "ash/resources/ash_wallpaper_resources.grd": {
+    "includes": [6300],
   },
   "chrome/app/theme/theme_resources.grd": {
     "includes": [6500],
@@ -159,7 +163,7 @@
   "chrome/browser/resources/options_resources.grd": {
     "includes": [23000],
   },
-  "chrome/browser/resources/options2_resources.grd": {
+  "chrome/browser/resources/options_resources.grd": {
     "structures": [23200],
   },
   "cloud_print/virtual_driver/win/install/virtual_driver_setup_resources.grd": {

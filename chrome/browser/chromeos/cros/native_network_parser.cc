@@ -132,6 +132,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kStateProperty, PROPERTY_INDEX_STATE },
   { flimflam::kSupportNetworkScanProperty,
     PROPERTY_INDEX_SUPPORT_NETWORK_SCAN },
+  { shill::kSupportedCarriersProperty, PROPERTY_INDEX_SUPPORTED_CARRIERS},
   { flimflam::kTechnologyFamilyProperty, PROPERTY_INDEX_TECHNOLOGY_FAMILY },
   { flimflam::kTypeProperty, PROPERTY_INDEX_TYPE },
   { flimflam::kUIDataProperty, PROPERTY_INDEX_UI_DATA },
@@ -454,6 +455,13 @@ bool NativeNetworkDeviceParser::ParseValue(
       device->set_support_network_scan(support_network_scan);
       return true;
     }
+    case PROPERTY_INDEX_SUPPORTED_CARRIERS: {
+      if (value.IsType(base::Value::TYPE_LIST)) {
+        device->set_supported_carriers(static_cast<const ListValue&>(value));
+        return true;
+      }
+      break;
+    }
     case PROPERTY_INDEX_TECHNOLOGY_FAMILY: {
       std::string technology_family_string;
       if (value.GetAsString(&technology_family_string)) {
@@ -550,7 +558,7 @@ bool NativeNetworkDeviceParser::ParseSimLockStateFromDictionary(
     bool* out_enabled) {
   std::string state_string;
   // Since RetriesLeft is sent as a uint32, which may overflow int32 range, from
-  // Flimflam, it may be stored as an integer or a double in DictionaryValue.
+  // Shill, it may be stored as an integer or a double in DictionaryValue.
   const base::Value* retries_value = NULL;
   if (!info.GetString(flimflam::kSIMLockTypeProperty, &state_string) ||
       !info.GetBoolean(flimflam::kSIMLockEnabledProperty, out_enabled) ||

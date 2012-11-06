@@ -5,8 +5,8 @@
 #include "ui/aura/test/test_window_delegate.h"
 
 #include "base/stringprintf.h"
-#include "ui/aura/event.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event.h"
 #include "ui/base/hit_test.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/path.h"
@@ -18,10 +18,19 @@ namespace test {
 ////////////////////////////////////////////////////////////////////////////////
 // TestWindowDelegate
 
-TestWindowDelegate::TestWindowDelegate() : window_component_(HTCLIENT) {
+TestWindowDelegate::TestWindowDelegate()
+    : window_component_(HTCLIENT),
+      delete_on_destroyed_(false) {
 }
 
 TestWindowDelegate::~TestWindowDelegate() {
+}
+
+// static
+TestWindowDelegate* TestWindowDelegate::CreateSelfDestroyingDelegate() {
+  TestWindowDelegate* delegate = new TestWindowDelegate;
+  delegate->delete_on_destroyed_ = true;
+  return delegate;
 }
 
 gfx::Size TestWindowDelegate::GetMinimumSize() const {
@@ -38,10 +47,6 @@ void TestWindowDelegate::OnFocus(Window* old_focused_window) {
 void TestWindowDelegate::OnBlur() {
 }
 
-bool TestWindowDelegate::OnKeyEvent(KeyEvent* event) {
-  return false;
-}
-
 gfx::NativeCursor TestWindowDelegate::GetCursor(const gfx::Point& point) {
   return gfx::kNullCursor;
 }
@@ -54,18 +59,6 @@ bool TestWindowDelegate::ShouldDescendIntoChildForEventHandling(
       Window* child,
       const gfx::Point& location) {
   return true;
-}
-
-bool TestWindowDelegate::OnMouseEvent(MouseEvent* event) {
-  return false;
-}
-
-ui::TouchStatus TestWindowDelegate::OnTouchEvent(TouchEvent* event) {
-  return ui::TOUCH_STATUS_UNKNOWN;
-}
-
-ui::GestureStatus TestWindowDelegate::OnGestureEvent(GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;
 }
 
 bool TestWindowDelegate::CanFocus() {
@@ -86,6 +79,8 @@ void TestWindowDelegate::OnWindowDestroying() {
 }
 
 void TestWindowDelegate::OnWindowDestroyed() {
+  if (delete_on_destroyed_)
+    delete this;
 }
 
 void TestWindowDelegate::OnWindowTargetVisibilityChanged(bool visible) {
@@ -98,6 +93,27 @@ bool TestWindowDelegate::HasHitTestMask() const {
 void TestWindowDelegate::GetHitTestMask(gfx::Path* mask) const {
 }
 
+scoped_refptr<ui::Texture> TestWindowDelegate::CopyTexture() {
+  return scoped_refptr<ui::Texture>();
+}
+
+ui::EventResult TestWindowDelegate::OnKeyEvent(ui::KeyEvent* event) {
+  return ui::ER_UNHANDLED;
+}
+
+ui::EventResult TestWindowDelegate::OnMouseEvent(ui::MouseEvent* event) {
+  return ui::ER_UNHANDLED;
+}
+
+ui::TouchStatus TestWindowDelegate::OnTouchEvent(ui::TouchEvent* event) {
+  return ui::TOUCH_STATUS_UNKNOWN;
+}
+
+ui::EventResult TestWindowDelegate::OnGestureEvent(
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ColorTestWindowDelegate
 
@@ -108,9 +124,9 @@ ColorTestWindowDelegate::ColorTestWindowDelegate(SkColor color)
 ColorTestWindowDelegate::~ColorTestWindowDelegate() {
 }
 
-bool ColorTestWindowDelegate::OnKeyEvent(KeyEvent* event) {
+ui::EventResult ColorTestWindowDelegate::OnKeyEvent(ui::KeyEvent* event) {
   last_key_code_ = event->key_code();
-  return true;
+  return ui::ER_HANDLED;
 }
 void ColorTestWindowDelegate::OnWindowDestroyed() {
   delete this;
@@ -147,7 +163,20 @@ EventCountDelegate::EventCountDelegate()
     key_release_count_(0) {
 }
 
-bool EventCountDelegate::OnMouseEvent(MouseEvent* event) {
+ui::EventResult EventCountDelegate::OnKeyEvent(ui::KeyEvent* event) {
+  switch (event->type()) {
+    case ui::ET_KEY_PRESSED:
+      key_press_count_++;
+      break;
+    case ui::ET_KEY_RELEASED:
+      key_release_count_++;
+    default:
+      break;
+  }
+  return ui::ER_UNHANDLED;
+}
+
+ui::EventResult EventCountDelegate::OnMouseEvent(ui::MouseEvent* event) {
   switch (event->type()) {
     case ui::ET_MOUSE_MOVED:
       mouse_move_count_++;
@@ -167,20 +196,7 @@ bool EventCountDelegate::OnMouseEvent(MouseEvent* event) {
     default:
       break;
   }
-  return false;
-}
-
-bool EventCountDelegate::OnKeyEvent(KeyEvent* event) {
-  switch (event->type()) {
-    case ui::ET_KEY_PRESSED:
-      key_press_count_++;
-      break;
-    case ui::ET_KEY_RELEASED:
-      key_release_count_++;
-    default:
-      break;
-  }
-  return false;
+  return ui::ER_UNHANDLED;
 }
 
 std::string EventCountDelegate::GetMouseMotionCountsAndReset() {

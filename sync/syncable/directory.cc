@@ -36,41 +36,6 @@ void InitializeIndexEntry(EntryKernel* entry,
   }
 }
 
-// This function checks to see if the given list of Metahandles has any nodes
-// whose PREV_ID, PARENT_ID or NEXT_ID values refer to ID values that do not
-// actually exist.  Returns true on success.
-//
-// This function is "Unsafe" because it does not attempt to acquire any locks
-// that may be protecting this list that gets passed in.  The caller is
-// responsible for ensuring that no one modifies this list while the function is
-// running.
-bool VerifyReferenceIntegrityUnsafe(const syncable::MetahandlesIndex &index) {
-  TRACE_EVENT0("sync", "SyncDatabaseIntegrityCheck");
-  using namespace syncable;
-  typedef base::hash_set<std::string> IdsSet;
-
-  IdsSet ids_set;
-  bool is_ok = true;
-
-  for (MetahandlesIndex::const_iterator it = index.begin();
-       it != index.end(); ++it) {
-    EntryKernel* entry = *it;
-    bool is_duplicate_id = !(ids_set.insert(entry->ref(ID).value()).second);
-    is_ok = is_ok && !is_duplicate_id;
-  }
-
-  IdsSet::iterator end = ids_set.end();
-  for (MetahandlesIndex::const_iterator it = index.begin();
-       it != index.end(); ++it) {
-    EntryKernel* entry = *it;
-    bool prev_exists = (ids_set.find(entry->ref(PREV_ID).value()) != end);
-    bool parent_exists = (ids_set.find(entry->ref(PARENT_ID).value()) != end);
-    bool next_exists = (ids_set.find(entry->ref(NEXT_ID).value()) != end);
-    is_ok = is_ok && prev_exists && parent_exists && next_exists;
-  }
-  return is_ok;
-}
-
 }
 
 // static
@@ -171,17 +136,19 @@ Directory::Kernel::~Kernel() {
 }
 
 Directory::Directory(
-    Encryptor* encryptor,
+    DirectoryBackingStore* store,
     UnrecoverableErrorHandler* unrecoverable_error_handler,
     ReportUnrecoverableErrorFunction report_unrecoverable_error_function,
-    DirectoryBackingStore* store)
-    : cryptographer_(encryptor),
-      kernel_(NULL),
+    NigoriHandler* nigori_handler,
+    Cryptographer* cryptographer)
+    : kernel_(NULL),
       store_(store),
       unrecoverable_error_handler_(unrecoverable_error_handler),
       report_unrecoverable_error_function_(
           report_unrecoverable_error_function),
       unrecoverable_error_set_(false),
+      nigori_handler_(nigori_handler),
+      cryptographer_(cryptographer),
       invariant_check_level_(VERIFY_CHANGES) {
 }
 
@@ -236,12 +203,17 @@ DirOpenResult Directory::OpenImpl(
   if (OPENED != result)
     return result;
 
-  if (!VerifyReferenceIntegrityUnsafe(metas_bucket))
-    return FAILED_LOGICAL_CORRUPTION;
-
   kernel_ = new Kernel(name, info, delegate, transaction_observer);
   kernel_->metahandles_index->swap(metas_bucket);
   InitializeIndices();
+
+  // Write back the share info to reserve some space in 'next_id'.  This will
+  // prevent local ID reuse in the case of an early crash.  See the comments in
+  // TakeSnapshotForSaveChanges() or crbug.com/142987 for more information.
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+  if (!SaveChanges())
+    return FAILED_INITIAL_WRITE;
+
   return OPENED;
 }
 
@@ -738,6 +710,19 @@ void Directory::set_store_birthday(const string& store_birthday) {
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
+string Directory::bag_of_chips() const {
+  ScopedKernelLock lock(this);
+  return kernel_->persisted_info.bag_of_chips;
+}
+
+void Directory::set_bag_of_chips(const string& bag_of_chips) {
+  ScopedKernelLock lock(this);
+  if (kernel_->persisted_info.bag_of_chips == bag_of_chips)
+    return;
+  kernel_->persisted_info.bag_of_chips = bag_of_chips;
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+}
+
 std::string Directory::GetNotificationState() const {
   ScopedKernelLock lock(this);
   std::string notification_state = kernel_->persisted_info.notification_state;
@@ -754,9 +739,13 @@ string Directory::cache_guid() const {
   return kernel_->cache_guid;
 }
 
+NigoriHandler* Directory::GetNigoriHandler() {
+  return nigori_handler_;
+}
+
 Cryptographer* Directory::GetCryptographer(const BaseTransaction* trans) {
   DCHECK_EQ(this, trans->directory());
-  return &cryptographer_;
+  return cryptographer_;
 }
 
 void Directory::GetAllMetaHandles(BaseTransaction* trans,

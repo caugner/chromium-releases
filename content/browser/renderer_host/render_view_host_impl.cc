@@ -9,18 +9,18 @@
 #include <utility>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/cross_site_request_manager.h"
-#include "content/browser/dom_storage/dom_storage_context_impl.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/host_zoom_map_impl.h"
@@ -29,6 +29,7 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/common/accessibility_messages.h"
+#include "content/common/content_constants_internal.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/drag_messages.h"
 #include "content/common/inter_process_time_ticks_converter.h"
@@ -52,6 +53,7 @@
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
+#include "content/public/common/context_menu_source_type.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
@@ -170,16 +172,8 @@ RenderViewHostImpl::RenderViewHostImpl(
       session_storage_namespace_(
           static_cast<SessionStorageNamespaceImpl*>(session_storage)),
       save_accessibility_tree_for_testing_(false),
-      send_accessibility_updated_notifications_(false),
       render_view_termination_status_(base::TERMINATION_STATUS_STILL_RUNNING) {
-  if (!session_storage_namespace_) {
-    DOMStorageContext* dom_storage_context =
-        BrowserContext::GetDOMStorageContext(GetProcess()->GetBrowserContext(),
-                                             instance->GetProcess()->GetID());
-    session_storage_namespace_ = new SessionStorageNamespaceImpl(
-        static_cast<DOMStorageContextImpl*>(dom_storage_context));
-  }
-
+  DCHECK(session_storage_namespace_);
   DCHECK(instance_);
   CHECK(delegate_);  // http://crbug.com/82827
 
@@ -265,20 +259,7 @@ bool RenderViewHostImpl::CreateRenderView(
   params.embedder_channel_name = embedder_channel_name;
   params.embedder_container_id = embedder_container_id;
   params.accessibility_mode =
-      BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser() ?
-          AccessibilityModeComplete :
-          AccessibilityModeOff;
-
-#if defined(OS_WIN)
-  // On Windows 8, always enable accessibility for editable text controls
-  // so we can show the virtual keyboard when one is enabled.
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-      params.accessibility_mode == AccessibilityModeOff &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableRendererAccessibility)) {
-    params.accessibility_mode = AccessibilityModeEditableTextOnly;
-  }
-#endif
+      BrowserAccessibilityStateImpl::GetInstance()->GetAccessibilityMode();
 
   Send(new ViewMsg_New(params));
 
@@ -511,6 +492,18 @@ void RenderViewHostImpl::SetHasPendingCrossSiteRequest(bool has_pending_request,
 int RenderViewHostImpl::GetPendingRequestId() {
   return pending_request_id_;
 }
+
+#if defined(OS_ANDROID)
+void RenderViewHostImpl::ActivateNearestFindResult(int request_id,
+                                                   float x,
+                                                   float y) {
+  Send(new ViewMsg_ActivateNearestFindResult(GetRoutingID(), request_id, x, y));
+}
+
+void RenderViewHostImpl::RequestFindMatchRects(int current_version) {
+  Send(new ViewMsg_FindMatchRects(GetRoutingID(), current_version));
+}
+#endif
 
 void RenderViewHostImpl::DragTargetDragEnter(
     const WebDropData& drop_data,
@@ -951,6 +944,7 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
                         OnDomOperationResponse)
     IPC_MESSAGE_HANDLER(AccessibilityHostMsg_Notifications,
                         OnAccessibilityNotifications)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_FrameTreeUpdated, OnFrameTreeUpdated)
     // Have the super handle all other messages.
     IPC_MESSAGE_UNHANDLED(
         handled = RenderWidgetHostImpl::OnMessageReceived(msg))
@@ -1155,6 +1149,21 @@ void RenderViewHostImpl::OnMsgNavigate(const IPC::Message& msg) {
   FilterURL(policy, renderer_id, true, &validated_params.password_form.action);
 
   delegate_->DidNavigate(this, validated_params);
+
+  // For top level navigations, if there is no frame tree present for this
+  // instance (for example when the window is first created), then create
+  // an unnamed one with the proper frame id from the renderer.
+  // This should be done after we called DidNavigate, since updating the frame
+  // tree expects the render view being updated to be the active one.
+  if (content::PageTransitionIsMainFrame(validated_params.transition)) {
+    if (frame_tree_.empty()) {
+      base::DictionaryValue tree;
+      tree.SetString(content::kFrameTreeNodeNameKey, std::string());
+      tree.SetInteger(content::kFrameTreeNodeIdKey, validated_params.frame_id);
+      base::JSONWriter::Write(&tree, &frame_tree_);
+      delegate_->DidUpdateFrameTree(this);
+    }
+  }
 }
 
 void RenderViewHostImpl::OnMsgUpdateState(int32 page_id,
@@ -1245,7 +1254,15 @@ void RenderViewHostImpl::OnMsgContextMenu(
   FilterURL(policy, renderer_id, false, &validated_params.page_url);
   FilterURL(policy, renderer_id, true, &validated_params.frame_url);
 
-  delegate_->ShowContextMenu(validated_params);
+  content::ContextMenuSourceType type = content::CONTEXT_MENU_SOURCE_MOUSE;
+  if (!in_process_event_types_.empty()) {
+    WebKit::WebInputEvent::Type event_type = in_process_event_types_.front();
+    if (WebKit::WebInputEvent::isGestureEventType(event_type))
+      type = content::CONTEXT_MENU_SOURCE_TOUCH;
+    else if (WebKit::WebInputEvent::isKeyboardEventType(event_type))
+      type = content::CONTEXT_MENU_SOURCE_KEYBOARD;
+  }
+  delegate_->ShowContextMenu(validated_params, type);
 }
 
 void RenderViewHostImpl::OnMsgToggleFullscreen(bool enter_fullscreen) {
@@ -1299,9 +1316,13 @@ void RenderViewHostImpl::OnMsgSelectionChanged(const string16& text,
 
 void RenderViewHostImpl::OnMsgSelectionBoundsChanged(
     const gfx::Rect& start_rect,
-    const gfx::Rect& end_rect) {
-  if (view_)
-    view_->SelectionBoundsChanged(start_rect, end_rect);
+    WebKit::WebTextDirection start_direction,
+    const gfx::Rect& end_rect,
+    WebKit::WebTextDirection end_direction) {
+  if (view_) {
+    view_->SelectionBoundsChanged(start_rect, start_direction,
+                                  end_rect, end_direction);
+  }
 }
 
 void RenderViewHostImpl::OnMsgRouteCloseEvent() {
@@ -1418,8 +1439,10 @@ void RenderViewHostImpl::OnAddMessageToConsole(
   int32 resolved_level =
       (enabled_bindings_ & content::BINDINGS_POLICY_WEB_UI) ? level : 0;
 
-  logging::LogMessage("CONSOLE", line_no, resolved_level).stream() << "\"" <<
-      message << "\", source: " << source_id << " (" << line_no << ")";
+  if (resolved_level >= ::logging::GetMinLogLevel()) {
+    logging::LogMessage("CONSOLE", line_no, resolved_level).stream() << "\"" <<
+        message << "\", source: " << source_id << " (" << line_no << ")";
+  }
 }
 
 void RenderViewHostImpl::AddObserver(
@@ -1560,17 +1583,14 @@ void RenderViewHostImpl::ForwardKeyboardEvent(
   RenderWidgetHostImpl::ForwardKeyboardEvent(key_event);
 }
 
-#if defined(OS_MACOSX)
-void RenderViewHostImpl::DidSelectPopupMenuItem(int selected_index) {
-  Send(new ViewMsg_SelectPopupMenuItem(GetRoutingID(), selected_index));
-}
-
-void RenderViewHostImpl::DidCancelPopupMenu() {
-  Send(new ViewMsg_SelectPopupMenuItem(GetRoutingID(), -1));
-}
-#endif
-
 #if defined(OS_ANDROID)
+void RenderViewHostImpl::AttachLayer(WebKit::WebLayer* layer) {
+  delegate_->AttachLayer(layer);
+}
+
+void RenderViewHostImpl::RemoveLayer(WebKit::WebLayer* layer) {
+  delegate_->RemoveLayer(layer);
+}
 void RenderViewHostImpl::DidSelectPopupMenuItems(
     const std::vector<int>& selected_indices) {
   Send(new ViewMsg_SelectPopupMenuItems(GetRoutingID(), false,
@@ -1580,6 +1600,16 @@ void RenderViewHostImpl::DidSelectPopupMenuItems(
 void RenderViewHostImpl::DidCancelPopupMenu() {
   Send(new ViewMsg_SelectPopupMenuItems(GetRoutingID(), true,
                                         std::vector<int>()));
+}
+#endif
+
+#if defined(OS_MACOSX)
+void RenderViewHostImpl::DidSelectPopupMenuItem(int selected_index) {
+  Send(new ViewMsg_SelectPopupMenuItem(GetRoutingID(), selected_index));
+}
+
+void RenderViewHostImpl::DidCancelPopupMenu() {
+  Send(new ViewMsg_SelectPopupMenuItem(GetRoutingID(), -1));
 }
 #endif
 
@@ -1635,6 +1665,17 @@ void RenderViewHostImpl::ExitFullscreen() {
 
 webkit_glue::WebPreferences RenderViewHostImpl::GetWebkitPreferences() {
   return delegate_->GetWebkitPrefs();
+}
+
+void RenderViewHostImpl::UpdateFrameTree(
+    int process_id,
+    int route_id,
+    const std::string& frame_tree) {
+  frame_tree_ = frame_tree;
+  Send(new ViewMsg_UpdateFrameTree(GetRoutingID(),
+                                   process_id,
+                                   route_id,
+                                   frame_tree_));
 }
 
 void RenderViewHostImpl::UpdateWebkitPreferences(
@@ -1724,40 +1765,32 @@ void RenderViewHostImpl::StopFinding(content::StopFindAction action) {
   Send(new ViewMsg_StopFinding(GetRoutingID(), action));
 }
 
-content::SessionStorageNamespace*
-RenderViewHostImpl::GetSessionStorageNamespace() {
-  return session_storage_namespace_.get();
-}
-
 void RenderViewHostImpl::OnAccessibilityNotifications(
     const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
   if (view_ && !is_swapped_out_)
     view_->OnAccessibilityNotifications(params);
 
-  if (!params.empty()) {
-    for (unsigned i = 0; i < params.size(); i++) {
-      const AccessibilityHostMsg_NotificationParams& param = params[i];
+  for (unsigned i = 0; i < params.size(); i++) {
+    const AccessibilityHostMsg_NotificationParams& param = params[i];
+    AccessibilityNotification src_type = param.notification_type;
 
-      if ((param.notification_type == AccessibilityNotificationLayoutComplete ||
-           param.notification_type == AccessibilityNotificationLoadComplete) &&
-          save_accessibility_tree_for_testing_) {
-        accessibility_tree_ = param.acc_tree;
-
-        // Only notify for non-blank pages.
-        if (accessibility_tree_.children.size() > 0)
-          content::NotificationService::current()->Notify(
-              content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
-              content::Source<RenderViewHost>(this),
-              content::NotificationService::NoDetails());
-      }
+    if ((src_type == AccessibilityNotificationLayoutComplete ||
+         src_type == AccessibilityNotificationLoadComplete) &&
+        save_accessibility_tree_for_testing_) {
+      accessibility_tree_ = param.acc_tree;
     }
-  }
 
-  if (send_accessibility_updated_notifications_) {
+    NotificationType dst_type;
+    if (src_type == AccessibilityNotificationLoadComplete)
+      dst_type = content::NOTIFICATION_ACCESSIBILITY_LOAD_COMPLETE;
+    else if (src_type == AccessibilityNotificationLayoutComplete)
+      dst_type = content::NOTIFICATION_ACCESSIBILITY_LAYOUT_COMPLETE;
+    else
+      dst_type = content::NOTIFICATION_ACCESSIBILITY_OTHER;
     content::NotificationService::current()->Notify(
-        content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
-        content::Source<RenderViewHost>(this),
-        content::NotificationService::NoDetails());
+          dst_type,
+          content::Source<RenderViewHost>(this),
+          content::NotificationService::NoDetails());
   }
 
   Send(new AccessibilityMsg_Notifications_ACK(GetRoutingID()));
@@ -1875,6 +1908,11 @@ void RenderViewHostImpl::OnDomOperationResponse(
       content::NOTIFICATION_DOM_OPERATION_RESPONSE,
       content::Source<RenderViewHost>(this),
       content::Details<DomOperationNotificationDetails>(&details));
+}
+
+void RenderViewHostImpl::OnFrameTreeUpdated(const std::string& frame_tree) {
+  frame_tree_ = frame_tree;
+  delegate_->DidUpdateFrameTree(this);
 }
 
 void RenderViewHostImpl::SetSwappedOut(bool is_swapped_out) {

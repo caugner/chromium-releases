@@ -4,6 +4,8 @@
 
 #include "sync/internal_api/debug_info_event_listener.h"
 
+#include "sync/util/cryptographer.h"
+
 namespace syncer {
 
 using sessions::SyncSessionSnapshot;
@@ -66,8 +68,13 @@ void DebugInfoEventListener::OnPassphraseAccepted() {
 }
 
 void DebugInfoEventListener::OnBootstrapTokenUpdated(
-    const std::string& bootstrap_token) {
-  CreateAndAddEvent(sync_pb::DebugEventInfo::BOOTSTRAP_TOKEN_UPDATED);
+    const std::string& bootstrap_token, BootstrapTokenType type) {
+  if (type == PASSPHRASE_BOOTSTRAP_TOKEN) {
+    CreateAndAddEvent(sync_pb::DebugEventInfo::BOOTSTRAP_TOKEN_UPDATED);
+    return;
+  }
+  DCHECK_EQ(type, KEYSTORE_BOOTSTRAP_TOKEN);
+  CreateAndAddEvent(sync_pb::DebugEventInfo::KEYSTORE_TOKEN_UPDATED);
 }
 
 void DebugInfoEventListener::OnStopSyncingPermanently() {
@@ -88,17 +95,19 @@ void DebugInfoEventListener::OnEncryptionComplete() {
   CreateAndAddEvent(sync_pb::DebugEventInfo::ENCRYPTION_COMPLETE);
 }
 
+void DebugInfoEventListener::OnCryptographerStateChanged(
+    Cryptographer* cryptographer) {
+  cryptographer_has_pending_keys_ = cryptographer->has_pending_keys();
+  cryptographer_ready_ = cryptographer->is_ready();
+}
+
+void DebugInfoEventListener::OnPassphraseTypeChanged(PassphraseType type) {
+  CreateAndAddEvent(sync_pb::DebugEventInfo::PASSPHRASE_TYPE_CHANGED);
+}
+
 void DebugInfoEventListener::OnActionableError(
     const SyncProtocolError& sync_error) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::ACTIONABLE_ERROR);
-}
-
-void DebugInfoEventListener::SetCrytographerHasPendingKeys(bool pending_keys) {
-  cryptographer_has_pending_keys_ = pending_keys;
-}
-
-void DebugInfoEventListener::SetCryptographerReady(bool ready) {
-  cryptographer_ready_ = ready;
 }
 
 void DebugInfoEventListener::OnNudgeFromDatatype(ModelType datatype) {
@@ -109,9 +118,9 @@ void DebugInfoEventListener::OnNudgeFromDatatype(ModelType datatype) {
 }
 
 void DebugInfoEventListener::OnIncomingNotification(
-     const ModelTypePayloadMap& type_payloads) {
+     const ModelTypeStateMap& type_state_map) {
   sync_pb::DebugEventInfo event_info;
-  ModelTypeSet types = ModelTypePayloadMapToEnumSet(type_payloads);
+  ModelTypeSet types = ModelTypeStateMapToSet(type_state_map);
 
   for (ModelTypeSet::Iterator it = types.First(); it.Good(); it.Inc()) {
     event_info.add_datatypes_notified_from_server(

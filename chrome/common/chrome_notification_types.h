@@ -5,6 +5,7 @@
 #ifndef CHROME_COMMON_CHROME_NOTIFICATION_TYPES_H_
 #define CHROME_COMMON_CHROME_NOTIFICATION_TYPES_H_
 
+#include "build/build_config.h"
 #include "content/public/browser/notification_types.h"
 
 namespace chrome {
@@ -166,7 +167,7 @@ enum NotificationType {
   NOTIFICATION_TAB_ADDED,
 
   // This notification is sent after a tab has been appended to the tab_strip.
-  // The source is a Source<TabContents> of the tab being added. There
+  // The source is a Source<WebContents> of the tab being added. There
   // are no details.
   NOTIFICATION_TAB_PARENTED,
 
@@ -175,16 +176,15 @@ enum NotificationType {
   // closed tab.  No details are expected.
   //
   // See also NOTIFICATION_TAB_CONTENTS_DESTROYED, which is sent when the
-  // TabContents is destroyed, and
-  // content::NOTIFICATION_WEB_CONTENTS_DESTROYED, which is sent when the
-  // WebContents containing the NavigationController is destroyed.
+  // TabContents is destroyed, and content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+  // which is sent when the WebContents containing the NavigationController is
+  // destroyed.
   NOTIFICATION_TAB_CLOSING,
 
-  // Sent when a TabContents is being destroyed.  At this point it's safe
-  // to call TabContents member functions, which is not true of the
-  // similar content::NOTIFICATION_WEB_CONTENTS_DESTROYED that fires later
-  // during teardown.  The source is a Source<TabContents>.  There are no
-  // details.
+  // Sent when a TabContents is being destroyed.  At this point it's safe to
+  // call TabContents member functions, which is not true of the similar
+  // content::NOTIFICATION_WEB_CONTENTS_DESTROYED that fires later during
+  // teardown.  The source is a Source<TabContents>.  There are no details.
   NOTIFICATION_TAB_CONTENTS_DESTROYED,
 
   // Stuff inside the tabs ---------------------------------------------------
@@ -198,6 +198,14 @@ enum NotificationType {
   // Details encompass a FindNotificationDetail object that tells whether the
   // match was found or not found.
   NOTIFICATION_FIND_RESULT_AVAILABLE,
+
+#if defined(OS_ANDROID)
+  // This notification is sent when the match rects of a find-in-page search
+  // are available. The source is a Source<WebContents>. Details encompass a
+  // FindMatchRectsDetails object that contains the result version and the
+  // rects information.
+  NOTIFICATION_FIND_MATCH_RECTS_AVAILABLE,
+#endif
 
   // BackgroundContents ------------------------------------------------------
 
@@ -469,7 +477,7 @@ enum NotificationType {
   NOTIFICATION_EXTENSIONS_READY,
 
   // Sent when an extension icon being displayed in the location bar is updated.
-  // The source is the Profile and the details are the TabContents for
+  // The source is the Profile and the details are the WebContents for
   // the tab.
   NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED,
 
@@ -562,7 +570,8 @@ enum NotificationType {
   NOTIFICATION_EXTENSION_POPUP_VIEW_READY,
 
   // Sent when a browser action's state has changed. The source is the
-  // ExtensionAction* that changed.  There are no details.
+  // ExtensionAction* that changed.  The details are the Profile* that the
+  // browser action belongs to.
   NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
 
   // Sent when the count of page actions has changed. Note that some of them
@@ -587,6 +596,21 @@ enum NotificationType {
   // and the details is a std::pair of two std::string objects (an extension ID
   // and the name of the command being added).
   NOTIFICATION_EXTENSION_COMMAND_ADDED,
+
+  // Sent when an extension command shortcut for a browser action is activated
+  // on Mac. The source is the profile and the details is a std::string
+  // containing an extension ID.
+  NOTIFICATION_EXTENSION_COMMAND_BROWSER_ACTION_MAC,
+
+  // Sent when an extension command shortcut for a page action is activated
+  // on Mac. The source is the profile and the details is a std::string
+  // containing an extension ID.
+  NOTIFICATION_EXTENSION_COMMAND_PAGE_ACTION_MAC,
+
+  // Sent when an extension command shortcut for a script badge is activated
+  // on Mac. The source is the profile and the details is a std::string
+  // containing an extension ID.
+  NOTIFICATION_EXTENSION_COMMAND_SCRIPT_BADGE_MAC,
 
   // A new extension RenderViewHost has been registered. The details are
   // the RenderViewHost*.
@@ -810,14 +834,14 @@ enum NotificationType {
 
   // Sync --------------------------------------------------------------------
 
-  // Sent when the syncer is blocked configuring.
-  NOTIFICATION_SYNC_CONFIGURE_BLOCKED,
-
-  // The sync service has started the configuration process.
-  NOTIFICATION_SYNC_CONFIGURE_START,
-
-  // The sync service is finished the configuration process.
+  // The sync service has finished the datatype configuration process. The
+  // source is the ProfileSyncService object of the Profile. There are no
+  // details.
   NOTIFICATION_SYNC_CONFIGURE_DONE,
+
+  // The sync service has started the datatype configuration process. The source
+  // is the ProfileSyncService object of the Profile. There are no details.
+  NOTIFICATION_SYNC_CONFIGURE_START,
 
   // A service is requesting a sync datatype refresh for the current profile.
   // The details value is a const syncer::ModelTypePayloadMap.
@@ -1043,16 +1067,11 @@ enum NotificationType {
   // object.
   NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
 
-  // Sent when an attempt to acquire the public key of the owner of a chromium
-  // os device has succeeded.
-  NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED,
-
-  // Sent when an attempt to acquire the public key of the owner of a chromium
-  // os device has failed.
-  NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_FAILED,
-
-  // Sent after UserManager checked ownership status of logged in user.
-  NOTIFICATION_OWNERSHIP_CHECKED,
+  // Sent by DeviceSettingsService to indicate that the ownership status
+  // changed. If you can, please use DeviceSettingsService::Observer instead.
+  // Other singleton-based services can't use that because Observer
+  // unregistration is impossible due to unpredictable deletion order.
+  NOTIFICATION_OWNERSHIP_STATUS_CHANGED,
 
   // This is sent to a ChromeOS settings observer when a system setting is
   // changed. The source is the CrosSettings and the details a std::string of
@@ -1096,13 +1115,16 @@ enum NotificationType {
   // Sent each time the InstantController shows the InstantLoader.
   NOTIFICATION_INSTANT_CONTROLLER_SHOWN,
 
-  // Sent when an Instant preview is committed.  The Source is the
-  // TabContents containing the committed preview.  There are no details.
+  // Sent each time the InstantController hides the InstantLoader.
+  NOTIFICATION_INSTANT_CONTROLLER_HIDDEN,
+
+  // Sent when an Instant preview is committed. The Source is the TabContents
+  // containing the committed preview. There are no details.
   NOTIFICATION_INSTANT_COMMITTED,
 
-  // Sent when the instant loader determines whether the page supports the
-  // instant API or not. The details is a boolean indicating if the page
-  // supports instant. The source is not used.
+  // Sent when the Instant loader determines whether the page supports the
+  // Instant API or not. The details is a boolean indicating if the page
+  // supports Instant. The source is not used.
   NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
 
   // Sent when the CaptivePortalService checks if we're behind a captive portal.
@@ -1131,12 +1153,12 @@ enum NotificationType {
   // which was installed.
   NOTIFICATION_APP_INSTALLED_TO_NTP,
 
-#if defined(USE_ASH)
   // Similar to NOTIFICATION_APP_INSTALLED_TO_NTP but used to nofity ash AppList
   // about installed app. Source is the profile in which the app is installed
   // and Details is the string ID of the extension.
   NOTIFICATION_APP_INSTALLED_TO_APPLIST,
 
+#if defined(USE_ASH)
   // Sent when wallpaper show animation has finished.
   NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
 #endif
@@ -1224,10 +1246,16 @@ enum NotificationType {
   // Blocked content.
   // Sent when content changes to or from the blocked state in
   // BlockedContentTabHelper.
-  // The source is the TabContents of the blocked content and details
+  // The source is the WebContents of the blocked content and details
   // is a boolean: true if the content is entering the blocked state, false
   // if it is leaving.
   NOTIFICATION_CONTENT_BLOCKED_STATE_CHANGED,
+
+  // SearchViewController.
+  // Sent when animations initiated by search view controller complete.
+  // The source is the SearchViewController whose animation is finished.
+  // No details.
+  NOTIFICATION_SEARCH_VIEW_CONTROLLER_ANIMATION_FINISHED,
 
   // Note:-
   // Currently only Content and Chrome define and use notifications.

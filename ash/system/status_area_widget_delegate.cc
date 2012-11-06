@@ -9,7 +9,6 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "base/utf_string_conversions.h"
-#include "grit/ui_resources.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -62,6 +61,14 @@ const views::Widget* StatusAreaWidgetDelegate::GetWidget() const {
   return View::GetWidget();
 }
 
+ui::EventResult StatusAreaWidgetDelegate::OnGestureEvent(
+    const ui::GestureEvent& event) {
+  if (gesture_handler_.ProcessGestureEvent(event))
+    return ui::ER_CONSUMED;
+
+  return views::AccessiblePaneView::OnGestureEvent(event);
+}
+
 bool StatusAreaWidgetDelegate::CanActivate() const {
   // We don't want mouse clicks to activate us, but we need to allow
   // activation when the user is using the keyboard (FocusCycler).
@@ -96,14 +103,14 @@ void StatusAreaWidgetDelegate::UpdateLayout() {
                          views::GridLayout::USE_PREF, 0, 0);
     }
     layout->StartRow(0, 0);
-    for (int c = 0; c < child_count(); ++c)
+    for (int c = child_count() - 1; c >= 0; --c)
       layout->AddView(child_at(c));
   } else {
     columns->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER,
                        0, /* resize percent */
                        views::GridLayout::USE_PREF, 0, 0);
-    for (int c = 0; c < child_count(); ++c) {
-      if (c != 0)
+    for (int c = child_count() - 1; c >= 0; --c) {
+      if (c != child_count() - 1)
         layout->AddPaddingRow(0, kTraySpacing);
       layout->StartRow(0, 0);
       layout->AddView(child_at(c));

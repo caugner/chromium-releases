@@ -14,7 +14,6 @@
       requireNative('apiDefinitions').GetExtensionAPIDefinition;
   var sendRequest = require('sendRequest').sendRequest;
   var utils = require('utils');
-  var isDevChannel = requireNative('channel').IsDevChannel;
   var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
   var schemaUtils = require('schemaUtils');
 
@@ -312,9 +311,12 @@
             if (this.handleRequest) {
               retval = this.handleRequest.apply(this, args);
             } else {
+              var optArgs = {
+                customCallback: this.customCallback
+              };
               retval = sendRequest(this.name, args,
                                    this.definition.parameters,
-                                   {customCallback: this.customCallback});
+                                   optArgs);
             }
 
             // Validate return value if defined - only in debug.
@@ -343,15 +345,20 @@
 
           var eventName = apiDef.namespace + "." + eventDef.name;
           var customEvent = customEvents[apiDef.namespace];
+          var options = eventDef.options || {};
+
+          if (eventDef.filters && eventDef.filters.length > 0)
+            options.supportsFilters = true;
+
           if (customEvent) {
             mod[eventDef.name] = new customEvent(
                 eventName, eventDef.parameters, eventDef.extraParameters,
-                eventDef.options);
+                options);
           } else if (eventDef.anonymous) {
             mod[eventDef.name] = new chrome.Event();
           } else {
             mod[eventDef.name] = new chrome.Event(
-                eventName, eventDef.parameters, eventDef.options);
+                eventName, eventDef.parameters, options);
           }
         });
       }

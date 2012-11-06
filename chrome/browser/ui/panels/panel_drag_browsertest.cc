@@ -10,10 +10,10 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_drag_controller.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
-#include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
-
-// Refactor has only been done for Win and Mac panels so far.
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#include "chrome/browser/ui/panels/test_panel_strip_squeeze_observer.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/test/test_utils.h"
 
 class PanelDragBrowserTest : public BasePanelBrowserTest {
  public:
@@ -406,10 +406,6 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragThreeDockedPanels) {
 }
 
 IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragMinimizedPanel) {
-  // We'll simulate mouse movements for test.
-  PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
-  PanelManager::GetInstance()->SetMouseWatcherForTesting(mouse_watcher);
-
   Panel* panel = CreatePanel("panel1");
   scoped_ptr<NativePanelTesting> panel_testing(
       CreateNativePanelTesting(panel));
@@ -449,10 +445,6 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragMinimizedPanel) {
 
 IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest,
                        DragMinimizedPanelWhileDrawingAttention) {
-  // We'll simulate mouse movements for test.
-  PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
-  PanelManager::GetInstance()->SetMouseWatcherForTesting(mouse_watcher);
-
   Panel* panel = CreatePanel("panel1");
   scoped_ptr<NativePanelTesting> panel_testing(
       CreateNativePanelTesting(panel));
@@ -482,6 +474,11 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest,
   panel->FlashFrame(false);
   EXPECT_FALSE(panel->IsDrawingAttention());
   EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  // Typical user scenario will detect the mouse in the panel
+  // after attention is cleared, causing titles to pop up, so
+  // we simulate that here.
+  MoveMouse(mouse_location);
 
   // Verify panel returns to fully minimized state after dragging ends once
   // mouse moves away from the panel.
@@ -1228,6 +1225,10 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, AttachWithSqueeze) {
   ASSERT_EQ(3, detached_strip->num_panels());
   ASSERT_EQ(4, docked_strip->num_panels());
 
+  // Wait for active states to settle.
+  PanelStripSqueezeObserver panel7_settled(docked_strip, panel7);
+  panel7_settled.Wait();
+
   gfx::Point detached_position1 = panel1->GetBounds().origin();
   gfx::Point detached_position2 = panel2->GetBounds().origin();
   gfx::Point detached_position3 = panel3->GetBounds().origin();
@@ -1273,7 +1274,8 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, AttachWithSqueeze) {
 #else
   // The last panel is active so these positions do not change.
   // TODO (ABurago) this is wrong behavior, a panel should activate
-  // when it is dragged. Change the test when the behavior is fixed.
+  // when it is dragged (it does in real usage, but not when drag is
+  // simulated in a test). Change this test when the behavior is fixed.
   EXPECT_EQ(true, panel7->IsActive());
   EXPECT_EQ(panel7->GetBounds().width(), panel7->GetRestoredBounds().width());
 
@@ -1344,5 +1346,3 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragDetachedPanelToTop) {
 
   panel_manager->CloseAll();
 }
-
-#endif // OS_WIN || OS_MACOSX

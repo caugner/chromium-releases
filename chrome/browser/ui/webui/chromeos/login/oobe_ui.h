@@ -42,6 +42,7 @@ class OobeUI : public OobeDisplay,
   virtual EulaScreenActor* GetEulaScreenActor() OVERRIDE;
   virtual EnterpriseEnrollmentScreenActor* GetEnterpriseEnrollmentScreenActor()
       OVERRIDE;
+  virtual ResetScreenActor* GetResetScreenActor() OVERRIDE;
   virtual UserImageScreenActor* GetUserImageScreenActor() OVERRIDE;
   virtual ViewScreenDelegate* GetRegistrationScreenActor() OVERRIDE;
   virtual ViewScreenDelegate* GetHTMLPageScreenActor() OVERRIDE;
@@ -55,14 +56,16 @@ class OobeUI : public OobeDisplay,
   // Shows or hides OOBE UI elements.
   void ShowOobeUI(bool show);
 
+  // TODO(rkc): Create a separate retail mode login UI and move this method
+  // there - see crbug.com/157671.
+  // Shows a login spinner for retail mode logins.
+  void ShowRetailModeLoginSpinner();
+
   // Shows the signin screen.
   void ShowSigninScreen(SigninScreenHandlerDelegate* delegate);
 
   // Resets the delegate set in ShowSigninScreen.
   void ResetSigninScreenHandlerDelegate();
-
-  // Called when the login main frame has been rendered.
-  void OnLoginPromptVisible();
 
  private:
   void AddScreenHandler(BaseScreenHandler* handler);
@@ -75,6 +78,7 @@ class OobeUI : public OobeDisplay,
   NetworkScreenActor* network_screen_actor_;
   EulaScreenActor* eula_screen_actor_;
   EnterpriseEnrollmentScreenActor* enterprise_enrollment_screen_actor_;
+  ResetScreenActor* reset_screen_actor_;
 
   // Reference to SigninScreenHandler that handles sign-in screen requrests and
   // forward calls from native code to JS side.

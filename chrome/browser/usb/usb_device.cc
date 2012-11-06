@@ -99,6 +99,8 @@ UsbDevice::UsbDevice(UsbService* service, PlatformUsbDeviceHandle handle)
   DCHECK(handle) << "Cannot create device with NULL handle.";
 }
 
+UsbDevice::UsbDevice() : service_(NULL), handle_(NULL) {}
+
 UsbDevice::~UsbDevice() {}
 
 void UsbDevice::Close() {
@@ -177,6 +179,12 @@ void UsbDevice::IsochronousTransfer(const TransferDirection direction,
     const unsigned int packets, const unsigned int packet_length,
     const unsigned int timeout, const UsbTransferCallback& callback) {
   CheckDevice();
+
+  const uint64 total_length = packets * packet_length;
+  if (total_length > length) {
+    callback.Run(USB_TRANSFER_LENGTH_SHORT);
+    return;
+  }
 
   struct libusb_transfer* const transfer = libusb_alloc_transfer(packets);
   const uint8 new_endpoint = ConvertTransferDirection(direction) | endpoint;

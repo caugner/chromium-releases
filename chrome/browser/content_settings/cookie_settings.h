@@ -11,8 +11,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service_factory.h"
 #include "chrome/common/content_settings.h"
@@ -127,7 +127,7 @@ class CookieSettings
 
     // |ProfileKeyedBaseFactory| methods:
     virtual void RegisterUserPrefs(PrefService* user_prefs) OVERRIDE;
-    virtual bool ServiceRedirectedInIncognito() OVERRIDE;
+    virtual bool ServiceRedirectedInIncognito() const OVERRIDE;
     virtual scoped_refptr<RefcountedProfileKeyedService>
         BuildServiceInstanceFor(Profile* profile) const OVERRIDE;
   };

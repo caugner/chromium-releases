@@ -18,7 +18,7 @@ Stoppable::Stoppable(
 }
 
 Stoppable::~Stoppable() {
-  DCHECK_EQ(state_, kStopped);
+  CHECK_EQ(state_, kStopped);
 }
 
 void Stoppable::Stop() {
@@ -26,8 +26,10 @@ void Stoppable::Stop() {
 
   if (state_ == kRunning) {
     state_ = kStopping;
-    DoStop();
   }
+
+  // DoStop() can be called multiple times.
+  DoStop();
 }
 
 void Stoppable::CompleteStopping() {

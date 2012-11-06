@@ -18,7 +18,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/managed_mode.h"
 #include "chrome/browser/native_window_notification_source.h"
 #include "chrome/browser/ntp_background_util.h"
@@ -31,11 +30,13 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/speech/extension_api/tts_extension_api.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window_state.h"
@@ -43,6 +44,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
@@ -102,7 +104,6 @@
 #include "ui/ui_controls/ui_controls.h"
 #include "ui/views/controls/single_split_view.h"
 #include "ui/views/controls/webview/webview.h"
-#include "ui/views/events/event.h"
 #include "ui/views/focus/external_focus_tracker.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/layout/grid_layout.h"
@@ -116,14 +117,15 @@
 #include "ash/launcher/launcher_model.h"
 #include "ash/shell.h"
 #include "chrome/browser/ui/ash/ash_util.h"
-#include "chrome/browser/ui/views/ash/chrome_shell_delegate.h"
-#include "chrome/browser/ui/views/ash/launcher/browser_launcher_item_controller.h"
-#include "chrome/browser/ui/views/ash/window_positioner.h"
+#include "chrome/browser/ui/ash/chrome_shell_delegate.h"
+#include "chrome/browser/ui/ash/launcher/browser_launcher_item_controller.h"
+#include "chrome/browser/ui/ash/window_positioner.h"
 #elif defined(OS_WIN) && !defined(USE_AURA)
 #include "base/win/metro.h"
 #include "chrome/browser/jumplist_win.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
 #include "ui/views/widget/native_widget_win.h"
+#include "ui/views/win/scoped_fullscreen_visibility.h"
 #endif
 
 #if defined(USE_AURA)
@@ -171,6 +173,20 @@ const int kNewtabBarRoundness = 5;
 
 // Returned from BrowserView::GetClassName.
 const char BrowserView::kViewClassName[] = "browser/ui/views/BrowserView";
+
+namespace {
+
+bool ShouldSaveOrRestoreWindowPos() {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // In Windows 8 metro mode the window is always maximized (without the
+  // WS_MAXIMIZE) style.
+  if (base::win::IsMetroProcess())
+    return false;
+#endif
+  return true;
+}
+
+}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // BookmarkExtensionBackground, private:
@@ -331,7 +347,8 @@ BrowserView::BrowserView(Browser* browser)
       ticker_(0),
 #endif
       force_location_bar_focus_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(color_change_listener_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(color_change_listener_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(activate_modal_dialog_factory_(this)) {
   browser_->tab_strip_model()->AddObserver(this);
 }
 
@@ -409,7 +426,7 @@ gfx::Rect BrowserView::GetToolbarBounds() const {
 gfx::Rect BrowserView::GetClientAreaBounds() const {
   gfx::Rect container_bounds = contents_->bounds();
   gfx::Point container_origin = container_bounds.origin();
-  ConvertPointToView(this, parent(), &container_origin);
+  ConvertPointToTarget(this, parent(), &container_origin);
   container_bounds.set_origin(container_origin);
   return container_bounds;
 }
@@ -431,7 +448,8 @@ gfx::Point BrowserView::OffsetPointForToolbarBackgroundImage(
   // vertically at the top edge of the horizontal tab strip (or where it would
   // be).  We expect our parent's origin to be the window origin.
   gfx::Point window_point(point.Add(GetMirroredPosition()));
-  window_point.Offset(0, -frame_->GetTabStripInsets(false).top);
+  window_point.Offset(frame_->GetThemeBackgroundXInset(),
+                      -frame_->GetTabStripInsets(false).top);
   return window_point;
 }
 
@@ -450,7 +468,7 @@ bool BrowserView::IsGuestSession() const {
 bool BrowserView::ShouldShowAvatar() const {
   if (!IsBrowserTypeNormal())
     return false;
-  if (IsOffTheRecord())
+  if (IsOffTheRecord() && !IsGuestSession())
     return true;
   if (ManagedMode::IsInManagedMode())
     return true;
@@ -514,20 +532,6 @@ bool BrowserView::GetAccelerator(int cmd_id, ui::Accelerator* accelerator) {
   return false;
 }
 
-bool BrowserView::ActivateAppModalDialog() const {
-  // If another browser is app modal, flash and activate the modal browser.
-  if (AppModalDialogQueue::GetInstance()->HasActiveDialog()) {
-    Browser* active_browser = BrowserList::GetLastActive();
-    if (active_browser && (browser_ != active_browser)) {
-      active_browser->window()->FlashFrame(true);
-      active_browser->window()->Activate();
-    }
-    AppModalDialogQueue::GetInstance()->ActivateModalDialog();
-    return true;
-  }
-  return false;
-}
-
 WebContents* BrowserView::GetActiveWebContents() const {
   return chrome::GetActiveWebContents(browser_.get());
 }
@@ -546,9 +550,9 @@ gfx::ImageSkia BrowserView::GetOTRAvatarIcon() const {
 bool BrowserView::IsPositionInWindowCaption(const gfx::Point& point) {
   if (window_switcher_button_) {
     gfx::Point window_switcher_point(point);
-    views::View::ConvertPointToView(this, window_switcher_button_,
-                                    &window_switcher_point);
-    if (window_switcher_button_->HitTest(window_switcher_point))
+    views::View::ConvertPointToTarget(this, window_switcher_button_,
+                                      &window_switcher_point);
+    if (window_switcher_button_->HitTestPoint(window_switcher_point))
       return false;
   }
   return GetBrowserViewLayout()->IsPositionInWindowCaption(point);
@@ -590,7 +594,7 @@ void BrowserView::Show() {
 
   browser()->OnWindowDidShow();
 
-  browser::MaybeShowInvertBubbleView(browser_.get(), contents_);
+  chrome::MaybeShowInvertBubbleView(browser_.get(), contents_);
 }
 
 void BrowserView::ShowInactive() {
@@ -705,17 +709,9 @@ void BrowserView::SetStarredState(bool is_starred) {
   GetLocationBarView()->SetStarToggled(is_starred);
 }
 
-void BrowserView::SetZoomIconState(
-    ZoomController::ZoomIconState zoom_icon_state) {
-  GetLocationBarView()->SetZoomIconState(zoom_icon_state);
-}
-
-void BrowserView::SetZoomIconTooltipPercent(int zoom_percent) {
-  GetLocationBarView()->SetZoomIconTooltipPercent(zoom_percent);
-}
-
-void BrowserView::ShowZoomBubble(int zoom_percent) {
-  GetLocationBarView()->ShowZoomBubble(zoom_percent);
+void BrowserView::ZoomChangedForActiveTab(bool can_show_bubble) {
+  GetLocationBarView()->ZoomChangedForActiveTab(
+      can_show_bubble && !toolbar_->IsWrenchMenuShowing());
 }
 
 gfx::Rect BrowserView::GetRestoredBounds() const {
@@ -800,6 +796,7 @@ void BrowserView::FullScreenStateChanged() {
 
 #if defined(OS_WIN)
 void BrowserView::SetMetroSnapMode(bool enable) {
+  HISTOGRAM_COUNTS("Metro.SnapModeToggle", enable);
   ProcessFullscreen(enable, FOR_METRO, GURL(), FEB_TYPE_NONE);
 }
 
@@ -852,9 +849,9 @@ void BrowserView::ToolbarSizeChanged(bool is_animating) {
     // The +1 in the next line creates a 1-px gap between icon and arrow tip.
     gfx::Point icon_bottom(0, location_icon_view->GetImageBounds().bottom() -
         LocationBarView::kIconInternalPadding + 1);
-    ConvertPointToView(location_icon_view, this, &icon_bottom);
+    ConvertPointToTarget(location_icon_view, this, &icon_bottom);
     gfx::Point infobar_top(0, infobar_container_->GetVerticalOverlap(NULL));
-    ConvertPointToView(infobar_container_, this, &infobar_top);
+    ConvertPointToTarget(infobar_container_, this, &infobar_top);
 
     AutoReset<CallState> resetter(&call_state,
         is_animating ? REENTRANT_FORCE_FAST_RESIZE : REENTRANT);
@@ -882,11 +879,13 @@ SkColor BrowserView::GetToolbarBackgroundColor(
     return theme_provider->GetColor(ThemeService::COLOR_TOOLBAR);
 
   switch (mode) {
+    case chrome::search::Mode::MODE_NTP_LOADING:
     case chrome::search::Mode::MODE_NTP:
       return theme_provider->GetColor(
           ThemeService::COLOR_SEARCH_NTP_BACKGROUND);
 
-    case chrome::search::Mode::MODE_SEARCH:
+    case chrome::search::Mode::MODE_SEARCH_SUGGESTIONS:
+    case chrome::search::Mode::MODE_SEARCH_RESULTS:
       return theme_provider->GetColor(
           ThemeService::COLOR_SEARCH_SEARCH_BACKGROUND);
 
@@ -905,10 +904,12 @@ gfx::ImageSkia* BrowserView::GetToolbarBackgroundImage(
     return theme_provider->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
 
   switch (mode) {
+    case chrome::search::Mode::MODE_NTP_LOADING:
     case chrome::search::Mode::MODE_NTP:
       return theme_provider->GetImageSkiaNamed(IDR_THEME_NTP_BACKGROUND);
 
-    case chrome::search::Mode::MODE_SEARCH:
+    case chrome::search::Mode::MODE_SEARCH_SUGGESTIONS:
+    case chrome::search::Mode::MODE_SEARCH_RESULTS:
     case chrome::search::Mode::MODE_DEFAULT:
     default:
       return theme_provider->GetImageSkiaNamed(IDR_THEME_TOOLBAR_SEARCH);
@@ -1223,7 +1224,7 @@ void BrowserView::ShowWebsiteSettings(Profile* profile,
                                       bool show_history) {
   WebsiteSettingsPopupView::ShowPopup(
       GetLocationBarView()->location_icon_view(), profile,
-      tab_contents, url, ssl);
+      tab_contents, url, ssl, browser_.get());
 }
 
 void BrowserView::ShowAppMenu() {
@@ -1379,6 +1380,10 @@ gfx::Rect BrowserView::GetInstantBounds() {
   return contents_->GetPreviewBounds();
 }
 
+bool BrowserView::IsInstantTabShowing() {
+  return preview_container_ != NULL;
+}
+
 WindowOpenDisposition BrowserView::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
 #if defined(OS_WIN)
@@ -1501,7 +1506,18 @@ bool BrowserView::CanMaximize() const {
 }
 
 bool BrowserView::CanActivate() const {
-  return !ActivateAppModalDialog();
+  if (!AppModalDialogQueue::GetInstance()->active_dialog())
+    return true;
+
+  // If another browser is app modal, flash and activate the modal browser. This
+  // has to be done in a post task, otherwise if the user clicked on a window
+  // that doesn't have the modal dialog the windows keep trying to get the focus
+  // from each other on Windows. http://crbug.com/141650.
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&BrowserView::ActivateAppModalDialog,
+                 activate_modal_dialog_factory_.GetWeakPtr()));
+  return false;
 }
 
 string16 BrowserView::GetWindowTitle() const {
@@ -1535,9 +1551,11 @@ bool BrowserView::ShouldShowWindowTitle() const {
 
 gfx::ImageSkia BrowserView::GetWindowAppIcon() {
   if (browser_->is_app()) {
-    TabContents* contents = chrome::GetActiveTabContents(browser_.get());
-    if (contents && contents->extension_tab_helper()->GetExtensionAppIcon())
-      return *contents->extension_tab_helper()->GetExtensionAppIcon();
+    WebContents* contents = chrome::GetActiveWebContents(browser_.get());
+    extensions::TabHelper* extensions_tab_helper =
+        contents ? extensions::TabHelper::FromWebContents(contents) : NULL;
+    if (extensions_tab_helper && extensions_tab_helper->GetExtensionAppIcon())
+      return *extensions_tab_helper->GetExtensionAppIcon();
   }
 
   return GetWindowIcon();
@@ -1545,7 +1563,7 @@ gfx::ImageSkia BrowserView::GetWindowAppIcon() {
 
 gfx::ImageSkia BrowserView::GetWindowIcon() {
   if (browser_->is_app())
-    return browser_->GetCurrentPageIcon();
+    return browser_->GetCurrentPageIcon().AsImageSkia();
   return gfx::ImageSkia();
 }
 
@@ -1594,6 +1612,9 @@ void BrowserView::SaveWindowPlacement(const gfx::Rect& bounds,
   // If IsFullscreen() is true, we've just changed into fullscreen mode, and
   // we're catching the going-into-fullscreen sizing and positioning calls,
   // which we want to ignore.
+  if (!ShouldSaveOrRestoreWindowPos())
+    return;
+
   if (!IsFullscreen() && chrome::ShouldSaveWindowPlacement(browser_.get())) {
     WidgetDelegate::SaveWindowPlacement(bounds, show_state);
     chrome::SaveWindowPlacement(browser_.get(), bounds, show_state);
@@ -1603,6 +1624,8 @@ void BrowserView::SaveWindowPlacement(const gfx::Rect& bounds,
 bool BrowserView::GetSavedWindowPlacement(
     gfx::Rect* bounds,
     ui::WindowShowState* show_state) const {
+  if (!ShouldSaveOrRestoreWindowPos())
+    return false;
   *bounds = chrome::GetSavedWindowBounds(browser_.get());
   *show_state = chrome::GetSavedWindowShowState(browser_.get());
 
@@ -1644,7 +1667,9 @@ bool BrowserView::GetSavedWindowPlacement(
     // assume none were given by the window.open() command.
     if (window_rect.x() == 0 && window_rect.y() == 0) {
       gfx::Size size = window_rect.size();
-      window_rect.set_origin(WindowSizer::GetDefaultPopupOrigin(size));
+      window_rect.set_origin(
+          WindowSizer::GetDefaultPopupOrigin(size,
+                                             browser_->host_desktop_type()));
     }
 
     *bounds = window_rect;
@@ -1707,7 +1732,7 @@ void BrowserView::OnWidgetMove() {
   // Close the omnibox popup, if any.
   LocationBarView* location_bar_view = GetLocationBarView();
   if (location_bar_view)
-    location_bar_view->GetLocationEntry()->ClosePopup();
+    location_bar_view->GetLocationEntry()->CloseOmniboxPopup();
 }
 
 views::Widget* BrowserView::GetWidget() {
@@ -1861,7 +1886,7 @@ bool BrowserView::DrawInfoBarArrows(int* x) const {
     const LocationIconView* location_icon_view =
         toolbar_->location_bar()->location_icon_view();
     gfx::Point icon_center(location_icon_view->GetImageBounds().CenterPoint());
-    ConvertPointToView(location_icon_view, this, &icon_center);
+    ConvertPointToTarget(location_icon_view, this, &icon_center);
     *x = icon_center.x();
   }
   return true;
@@ -1876,7 +1901,7 @@ bool BrowserView::SplitHandleMoved(views::SingleSplitView* sender) {
 }
 
 void BrowserView::OnSysColorChange() {
-  browser::MaybeShowInvertBubbleView(browser_.get(), contents_);
+  chrome::MaybeShowInvertBubbleView(browser_.get(), contents_);
 }
 
 int BrowserView::GetOTRIconResourceID() const {
@@ -1936,20 +1961,22 @@ void BrowserView::Init() {
   contents_container_->set_id(VIEW_ID_TAB_CONTAINER);
   contents_ = new ContentsContainer(contents_container_);
 
-  views::View* omnibox_popup_view_parent = NULL;
+  toolbar_ = new ToolbarView(browser_.get());
+  AddChildView(toolbar_);
+
+  views::View* omnibox_popup_parent = NULL;
   // SearchViewController doesn't work on windows yet.
 #if defined(USE_AURA)
-  if (chrome::search::IsInstantExtendedAPIEnabled(browser_->profile())) {
-    search_view_controller_.reset(
-        new SearchViewController(browser_->profile(), contents_));
-    omnibox_popup_view_parent =
-        search_view_controller_->omnibox_popup_view_parent();
+  Profile* profile = browser_->profile();
+  if (chrome::search::IsInstantExtendedAPIEnabled(profile)) {
+    search_view_controller_.reset(new SearchViewController(profile, contents_,
+        &browser()->search_delegate()->toolbar_search_animator(), toolbar_));
+    omnibox_popup_parent =
+        search_view_controller_->omnibox_popup_parent();
   }
 #endif
 
-  toolbar_ = new ToolbarView(browser_.get());
-  AddChildView(toolbar_);
-  toolbar_->Init(this, omnibox_popup_view_parent);
+  toolbar_->Init(this, omnibox_popup_parent);
 
 #if defined(USE_AURA)
   if (search_view_controller_.get()) {
@@ -2244,8 +2271,7 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
 #endif
   }
 #if defined(OS_WIN) && !defined(USE_AURA)
-  static_cast<views::NativeWidgetWin*>(frame_->native_widget())->
-      PushForceHidden();
+  views::ScopedFullscreenVisibility visibility(frame_->GetNativeView());
 #endif
 
   if (type == FOR_METRO) {
@@ -2282,10 +2308,6 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
   // it's in its final position.
   ignore_layout_ = false;
   Layout();
-#if defined(OS_WIN) && !defined(USE_AURA)
-  static_cast<views::NativeWidgetWin*>(frame_->native_widget())->
-      PopForceHidden();
-#endif
 }
 
 void BrowserView::LoadAccelerators() {
@@ -2400,6 +2422,11 @@ void BrowserView::UpdateAcceleratorMetrics(
   if (command_id == IDC_HELP_PAGE_VIA_KEYBOARD && key_code == ui::VKEY_F1)
     content::RecordAction(UserMetricsAction("ShowHelpTabViaF1"));
 
+  if (command_id == IDC_BOOKMARK_PAGE)
+    UMA_HISTOGRAM_ENUMERATION("Bookmarks.EntryPoint",
+                              bookmark_utils::ENTRY_POINT_ACCELERATOR,
+                              bookmark_utils::ENTRY_POINT_LIMIT);
+
 #if defined(OS_CHROMEOS)
   // Collect information about the relative popularity of various accelerators
   // on Chrome OS.
@@ -2465,6 +2492,8 @@ void BrowserView::ProcessTabSelected(TabContents* new_contents) {
   // When we toggle the NTP floating bookmarks bar and/or the info bar,
   // we don't want any WebContents to be attached, so that we
   // avoid an unnecessary resize and re-layout of a WebContents.
+  // This also applies to the |search_view_controller_| logic, as it can
+  // reparent the |contents_container_|.
   if (change_tab_contents)
     contents_container_->SetWebContents(NULL);
   infobar_container_->ChangeTabContents(new_contents->infobar_tab_helper());
@@ -2474,6 +2503,7 @@ void BrowserView::ProcessTabSelected(TabContents* new_contents) {
         BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
   }
   UpdateUIForContents(new_contents);
+
   if (change_tab_contents)
     contents_container_->SetWebContents(new_contents->web_contents());
 
@@ -2550,8 +2580,8 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton() {
 
 void BrowserView::ShowPasswordGenerationBubble(
     const gfx::Rect& rect,
-    autofill::PasswordGenerator* password_generator,
-    const webkit::forms::PasswordForm& form) {
+    const webkit::forms::PasswordForm& form,
+    autofill::PasswordGenerator* password_generator) {
   // Create a rect in the content bounds that the bubble will point to.
   gfx::Point origin(rect.origin());
   views::View::ConvertPointToScreen(GetTabContentsContainerView(), &origin);
@@ -2564,13 +2594,14 @@ void BrowserView::ShowPasswordGenerationBubble(
 
   PasswordGenerationBubbleView* bubble =
       new PasswordGenerationBubbleView(
-          bounds,
           form,
+          bounds,
           this,
           tab_contents->web_contents()->GetRenderViewHost(),
+          tab_contents->password_manager(),
           password_generator,
           browser_.get(),
-          tab_contents->password_manager());
+          GetWidget()->GetThemeProvider());
 
   views::BubbleDelegateView::CreateBubble(bubble);
   bubble->SetAlignment(views::BubbleBorder::ALIGN_ARROW_TO_MID_ANCHOR);
@@ -2597,4 +2628,21 @@ bool BrowserView::DoCutCopyPaste(void (content::RenderWidgetHost::*method)()) {
   // TODO(yusukes): Support non-Aura Windows.
 #endif
   return false;
+}
+
+void BrowserView::ActivateAppModalDialog() const {
+  // If another browser is app modal, flash and activate the modal browser.
+  AppModalDialog* active_dialog =
+      AppModalDialogQueue::GetInstance()->active_dialog();
+  if (!active_dialog)
+    return;
+
+  Browser* modal_browser =
+      browser::FindBrowserWithWebContents(active_dialog->web_contents());
+  if (modal_browser && (browser_ != modal_browser)) {
+    modal_browser->window()->FlashFrame(true);
+    modal_browser->window()->Activate();
+  }
+
+  AppModalDialogQueue::GetInstance()->ActivateModalDialog();
 }

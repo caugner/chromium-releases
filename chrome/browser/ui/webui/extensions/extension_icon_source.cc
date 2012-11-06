@@ -15,8 +15,10 @@
 #include "base/threading/thread.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -27,6 +29,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/favicon_size.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "webkit/glue/image_decoder.h"
 
@@ -203,7 +206,7 @@ void ExtensionIconSource::LoadExtensionImage(const ExtensionResource& icon,
 
 void ExtensionIconSource::LoadFaviconImage(int request_id) {
   FaviconService* favicon_service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
   // Fall back to the default icons if the service isn't available.
   if (favicon_service == NULL) {
     LoadDefaultImage(request_id);
@@ -211,10 +214,14 @@ void ExtensionIconSource::LoadFaviconImage(int request_id) {
   }
 
   GURL favicon_url = GetData(request_id)->extension->GetFullLaunchURL();
-  FaviconService::Handle handle = favicon_service->GetFaviconForURL(
-      favicon_url,
-      history::FAVICON,
-      &cancelable_consumer_,
+  FaviconService::Handle handle = favicon_service->GetRawFaviconForURL(
+      FaviconService::FaviconForURLParams(
+          profile_,
+          favicon_url,
+          history::FAVICON,
+          gfx::kFaviconSize,
+          &cancelable_consumer_),
+      ui::SCALE_FACTOR_100P,
       base::Bind(&ExtensionIconSource::OnFaviconDataAvailable,
                  base::Unretained(this)));
   cancelable_consumer_.SetClientData(favicon_service, handle, request_id);
@@ -222,13 +229,14 @@ void ExtensionIconSource::LoadFaviconImage(int request_id) {
 
 void ExtensionIconSource::OnFaviconDataAvailable(
     FaviconService::Handle request_handle,
-    history::FaviconData favicon) {
+    const history::FaviconBitmapResult& bitmap_result) {
   int request_id = cancelable_consumer_.GetClientData(
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS), request_handle);
+      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS),
+      request_handle);
   ExtensionIconRequest* request = GetData(request_id);
 
   // Fallback to the default icon if there wasn't a favicon.
-  if (!favicon.is_valid()) {
+  if (!bitmap_result.is_valid()) {
     LoadDefaultImage(request_id);
     return;
   }
@@ -237,10 +245,10 @@ void ExtensionIconSource::OnFaviconDataAvailable(
     // If we don't need a grayscale image, then we can bypass FinalizeImage
     // to avoid unnecessary conversions.
     ClearData(request_id);
-    SendResponse(request_id, favicon.image_data);
+    SendResponse(request_id, bitmap_result.bitmap_data);
   } else {
-    FinalizeImage(ToBitmap(favicon.image_data->front(),
-                           favicon.image_data->size()), request_id);
+    FinalizeImage(ToBitmap(bitmap_result.bitmap_data->front(),
+                           bitmap_result.bitmap_data->size()), request_id);
   }
 }
 
@@ -261,7 +269,7 @@ void ExtensionIconSource::LoadIconFailed(int request_id) {
   ExtensionResource icon =
       request->extension->GetIconResource(request->size, request->match);
 
-  if (request->size == ExtensionIconSet::EXTENSION_ICON_BITTY)
+  if (request->size == extension_misc::EXTENSION_ICON_BITTY)
     LoadFaviconImage(request_id);
   else
     LoadDefaultImage(request_id);

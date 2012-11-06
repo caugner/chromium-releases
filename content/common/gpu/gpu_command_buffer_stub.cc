@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
+#include "base/hash.h"
 #include "base/shared_memory.h"
 #include "base/time.h"
 #include "build/build_config.h"
@@ -15,6 +16,7 @@
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_memory_manager.h"
+#include "content/common/gpu/gpu_memory_tracking.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/gpu/gpu_watchdog.h"
 #include "content/common/gpu/image_transport_surface.h"
@@ -24,7 +26,6 @@
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
-#include "net/disk_cache/hash.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_switches.h"
 
@@ -38,15 +39,22 @@ namespace {
 // ContextGroup's memory type managers and the GpuMemoryManager class.
 class GpuCommandBufferMemoryTracker : public gpu::gles2::MemoryTracker {
  public:
-  GpuCommandBufferMemoryTracker(GpuMemoryManager* gpu_memory_manager)
-    : gpu_memory_manager_(gpu_memory_manager) {}
+  GpuCommandBufferMemoryTracker(GpuChannel* channel) {
+    gpu_memory_manager_tracking_group_ = new GpuMemoryTrackingGroup(
+        channel->renderer_pid(),
+        channel->gpu_channel_manager()->gpu_memory_manager());
+  }
+
   void TrackMemoryAllocatedChange(size_t old_size, size_t new_size) {
-    gpu_memory_manager_->TrackMemoryAllocatedChange(old_size, new_size);
+    gpu_memory_manager_tracking_group_->TrackMemoryAllocatedChange(
+        old_size, new_size);
   }
 
  private:
-  ~GpuCommandBufferMemoryTracker() {}
-  GpuMemoryManager* gpu_memory_manager_;
+  ~GpuCommandBufferMemoryTracker() {
+    delete gpu_memory_manager_tracking_group_;
+  }
+  GpuMemoryTrackingGroup* gpu_memory_manager_tracking_group_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferMemoryTracker);
 };
@@ -115,17 +123,15 @@ GpuCommandBufferStub::GpuCommandBufferStub(
       sync_point_wait_count_(0),
       delayed_work_scheduled_(false),
       active_url_(active_url) {
-  active_url_hash_ =
-      disk_cache::Hash(active_url.possibly_invalid_spec());
+  active_url_hash_ = base::Hash(active_url.possibly_invalid_spec());
   FastSetActiveURL(active_url_, active_url_hash_);
   if (share_group) {
     context_group_ = share_group->context_group_;
   } else {
     context_group_ = new gpu::gles2::ContextGroup(
-      mailbox_manager,
-      new GpuCommandBufferMemoryTracker(
-        channel->gpu_channel_manager()->gpu_memory_manager()),
-      true);
+        mailbox_manager,
+        new GpuCommandBufferMemoryTracker(channel),
+        true);
   }
   if (surface_id != 0)
     surface_state_.reset(new GpuCommandBufferStubBase::SurfaceState(

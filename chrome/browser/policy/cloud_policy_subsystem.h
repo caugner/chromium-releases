@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_POLICY_CLOUD_POLICY_SUBSYSTEM_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "content/public/browser/notification_observer.h"
 #include "net/base/network_change_notifier.h"
 
@@ -71,7 +71,8 @@ class CloudPolicySubsystem
   };
 
   CloudPolicySubsystem(CloudPolicyDataStore* data_store,
-                       CloudPolicyCacheBase* policy_cache);
+                       CloudPolicyCacheBase* policy_cache,
+                       const std::string& device_management_url);
   virtual ~CloudPolicySubsystem();
 
   // Initializes the subsystem. The first network request will only be made

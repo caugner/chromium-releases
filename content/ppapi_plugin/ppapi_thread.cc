@@ -94,6 +94,8 @@ bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnMsgLoadPlugin)
     IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnMsgCreateChannel)
 
+    IPC_MESSAGE_HANDLER(PpapiPluginMsg_ResourceReply, OnMsgResourceReply)
+
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_ListenACK,
                                 OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_AcceptACK,
@@ -166,6 +168,10 @@ bool PpapiThread::SendToBrowser(IPC::Message* msg) {
     return ChildThread::Send(msg);
 
   return sync_message_filter()->Send(msg);
+}
+
+IPC::Sender* PpapiThread::GetBrowserSender() {
+  return this;
 }
 
 std::string PpapiThread::GetUILanguage() {
@@ -300,6 +306,13 @@ void PpapiThread::OnMsgCreateChannel(int renderer_id,
   }
 
   Send(new PpapiHostMsg_ChannelCreated(channel_handle));
+}
+
+void PpapiThread::OnMsgResourceReply(
+    const ppapi::proxy::ResourceMessageReplyParams& reply_params,
+    const IPC::Message& nested_msg) {
+  ppapi::proxy::PluginDispatcher::DispatchResourceReply(reply_params,
+                                                        nested_msg);
 }
 
 void PpapiThread::OnMsgSetNetworkState(bool online) {

@@ -29,7 +29,7 @@ class RunAnimation : public LinearAnimation {
       : LinearAnimation(frame_rate, delegate) {
   }
 
-  virtual void AnimateToState(double state) {
+  virtual void AnimateToState(double state) OVERRIDE {
     EXPECT_LE(0.0, state);
     EXPECT_GE(1.0, state);
   }
@@ -44,7 +44,7 @@ class CancelAnimation : public LinearAnimation {
       : LinearAnimation(duration, frame_rate, delegate) {
   }
 
-  virtual void AnimateToState(double state) {
+  virtual void AnimateToState(double state) OVERRIDE {
     if (state >= 0.5)
       Stop();
   }
@@ -59,7 +59,7 @@ class EndAnimation : public LinearAnimation {
       : LinearAnimation(duration, frame_rate, delegate) {
   }
 
-  virtual void AnimateToState(double state) {
+  virtual void AnimateToState(double state) OVERRIDE {
     if (state >= 0.5)
       End();
   }
@@ -71,7 +71,7 @@ class EndAnimation : public LinearAnimation {
 // AnimationDelegate implementation that deletes the animation in ended.
 class DeletingAnimationDelegate : public AnimationDelegate {
  public:
-  virtual void AnimationEnded(const Animation* animation) {
+  virtual void AnimationEnded(const Animation* animation) OVERRIDE {
     delete animation;
     MessageLoop::current()->Quit();
   }
@@ -141,6 +141,18 @@ TEST_F(AnimationTest, ShouldRenderRichAnimation) {
 #else
   EXPECT_TRUE(Animation::ShouldRenderRichAnimation());
 #endif
+}
+
+// Test that current value is always 0 after Start() is called.
+TEST_F(AnimationTest, StartState) {
+  LinearAnimation animation(100, 60, NULL);
+  EXPECT_EQ(0.0, animation.GetCurrentValue());
+  animation.Start();
+  EXPECT_EQ(0.0, animation.GetCurrentValue());
+  animation.End();
+  EXPECT_EQ(1.0, animation.GetCurrentValue());
+  animation.Start();
+  EXPECT_EQ(0.0, animation.GetCurrentValue());
 }
 
 }  // namespace ui

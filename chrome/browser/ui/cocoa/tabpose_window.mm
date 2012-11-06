@@ -237,10 +237,12 @@ void ThumbnailLoader::LoadThumbnail() {
         [infoBarContainer overlappingTipHeight];
   }
 
+  BookmarkTabHelper* bookmark_tab_helper =
+      BookmarkTabHelper::FromWebContents(contents_->web_contents());
   bool always_show_bookmark_bar =
       contents_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
   bool has_detached_bookmark_bar =
-      contents_->bookmark_tab_helper()->ShouldShowBookmarkBar() &&
+      bookmark_tab_helper->ShouldShowBookmarkBar() &&
       !always_show_bookmark_bar;
   if (has_detached_bookmark_bar)
     topOffset += bookmarks::kNTPBookmarkBarHeight;
@@ -330,7 +332,7 @@ void ThumbnailLoader::LoadThumbnail() {
     rwh->CopyFromBackingStoreToCGContext(destRect, context);
   } else if (thumbnail_) {
     // No cache hit, but the renderer returned a thumbnail to us.
-    gfx::ScopedCGContextSaveGState CGContextSaveGState(context);
+    gfx::ScopedCGContextSaveGState save_gstate(context);
     CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
     CGContextDrawImage(context, destRect, thumbnail_.get());
   }
@@ -457,8 +459,10 @@ NSRect Tile::GetFaviconStartRectRelativeTo(const Tile& tile) const {
 }
 
 NSImage* Tile::favicon() const {
-  if (contents_->extension_tab_helper()->is_app()) {
-    SkBitmap* bitmap = contents_->extension_tab_helper()->GetExtensionAppIcon();
+  extensions::TabHelper* extensions_tab_helper =
+      extensions::TabHelper::FromWebContents(contents_->web_contents());
+  if (extensions_tab_helper->is_app()) {
+    SkBitmap* bitmap = extensions_tab_helper->GetExtensionAppIcon();
     if (bitmap)
       return gfx::SkBitmapToNSImage(*bitmap);
   }
@@ -948,7 +952,7 @@ void AnimateCALayerOpacityFromTo(
         new TabStripModelObserverBridge(tabStripModel_, self));
     NSImage* nsCloseIcon =
         ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-            IDR_TABPOSE_CLOSE);
+            IDR_TABPOSE_CLOSE).ToNSImage();
     closeIcon_.reset(base::mac::CopyNSImageToCGImage(nsCloseIcon));
     [self setReleasedWhenClosed:YES];
     [self setOpaque:NO];

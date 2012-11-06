@@ -21,7 +21,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
-#include "ui/views/examples/examples_window.h"
+#include "ui/views/examples/examples_window_with_content.h"
 
 namespace ash {
 namespace shell {
@@ -117,7 +117,7 @@ class WindowTypeLauncherItem : public app_list::AppListItemModel {
       }
       case EXAMPLES_WINDOW: {
 #if !defined(OS_MACOSX)
-        views::examples::ShowExamplesWindow(
+        views::examples::ShowExamplesWindowWithContent(
             views::examples::DO_NOTHING_ON_CLOSE,
             ash::Shell::GetInstance()->browser_context());
 #endif
@@ -240,6 +240,12 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
     WindowTypeLauncherItem::Activate(example_result->type(), event_flags);
   }
 
+  virtual void InvokeSearchResultAction(const app_list::SearchResult& result,
+                                        int action_index,
+                                        int event_flags) OVERRIDE {
+    NOTIMPLEMENTED();
+  }
+
   virtual void StartSearch() OVERRIDE {
     string16 query;
     TrimWhitespace(model_->search_box()->text(), TRIM_ALL, &query);
@@ -256,8 +262,10 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
           static_cast<WindowTypeLauncherItem::Type>(i);
 
       string16 title = UTF8ToUTF16(WindowTypeLauncherItem::GetTitle(type));
-      if (base::i18n::StringSearchIgnoringCaseAndAccents(query, title))
+      if (base::i18n::StringSearchIgnoringCaseAndAccents(
+              query, title, NULL, NULL)) {
         model_->results()->Add(new ExampleSearchResult(type, query));
+      }
     }
   }
 
@@ -269,6 +277,10 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
     DCHECK(ash::Shell::HasInstance());
     if (Shell::GetInstance()->GetAppListTargetVisibility())
       Shell::GetInstance()->ToggleAppList();
+  }
+
+  virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE {
+    return gfx::ImageSkia();
   }
 
   app_list::AppListModel* model_;

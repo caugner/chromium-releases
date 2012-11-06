@@ -21,10 +21,10 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/sessions/session_backend.h"
 #include "chrome/browser/sessions/session_command.h"
 #include "chrome/browser/sessions/session_restore.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -47,6 +47,7 @@
 
 using base::Time;
 using content::NavigationEntry;
+using content::WebContents;
 
 // Identifier for commands written to file.
 static const SessionCommand::id_type kCommandSetTabWindow = 0;
@@ -429,9 +430,8 @@ void SessionService::TabNavigationPathPrunedFromFront(
 void SessionService::UpdateTabNavigation(
     const SessionID& window_id,
     const SessionID& tab_id,
-    int index,
-    const NavigationEntry& entry) {
-  if (!ShouldTrackEntry(entry.GetVirtualURL()) ||
+    const TabNavigation& navigation) {
+  if (!ShouldTrackEntry(navigation.virtual_url()) ||
       !ShouldTrackChangesToWindow(window_id)) {
     return;
   }
@@ -439,18 +439,20 @@ void SessionService::UpdateTabNavigation(
   if (tab_to_available_range_.find(tab_id.id()) !=
       tab_to_available_range_.end()) {
     std::pair<int, int>& range = tab_to_available_range_[tab_id.id()];
-    range.first = std::min(index, range.first);
-    range.second = std::max(index, range.second);
+    range.first = std::min(navigation.index(), range.first);
+    range.second = std::max(navigation.index(), range.second);
   }
   ScheduleCommand(CreateUpdateTabNavigationCommand(kCommandUpdateTabNavigation,
-                                                   tab_id.id(), index, entry));
+                                                   tab_id.id(), navigation));
 }
 
 void SessionService::TabRestored(TabContents* tab, bool pinned) {
-  if (!ShouldTrackChangesToWindow(tab->restore_tab_helper()->window_id()))
+  SessionTabHelper* session_tab_helper =
+      SessionTabHelper::FromWebContents(tab->web_contents());
+  if (!ShouldTrackChangesToWindow(session_tab_helper->window_id()))
     return;
 
-  BuildCommandsForTab(tab->restore_tab_helper()->window_id(), tab, -1,
+  BuildCommandsForTab(session_tab_helper->window_id(), tab, -1,
                       pinned, &pending_commands(), NULL);
   StartSaveTimer();
 }
@@ -482,6 +484,17 @@ void SessionService::SetSelectedTabInWindow(const SessionID& window_id,
   ScheduleCommand(CreateSetSelectedTabInWindow(window_id, index));
 }
 
+void SessionService::SetTabUserAgentOverride(
+    const SessionID& window_id,
+    const SessionID& tab_id,
+    const std::string& user_agent_override) {
+  if (!ShouldTrackChangesToWindow(window_id))
+    return;
+
+  ScheduleCommand(CreateSetTabUserAgentOverrideCommand(
+      kCommandSetTabUserAgentOverride, tab_id.id(), user_agent_override));
+}
+
 SessionService::Handle SessionService::GetLastSession(
     CancelableRequestConsumerBase* consumer,
     const SessionCallback& callback) {
@@ -497,9 +510,8 @@ void SessionService::Save() {
   bool had_commands = !pending_commands().empty();
   BaseSessionService::Save();
   if (had_commands) {
-    RecordSessionUpdateHistogramData(
-        chrome::NOTIFICATION_SESSION_SERVICE_SAVED,
-        &last_updated_save_time_);
+    RecordSessionUpdateHistogramData(chrome::NOTIFICATION_SESSION_SERVICE_SAVED,
+                                     &last_updated_save_time_);
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_SESSION_SERVICE_SAVED,
         content::Source<Profile>(profile()),
@@ -591,24 +603,33 @@ void SessionService::Observe(int type,
     }
 
     case chrome::NOTIFICATION_TAB_PARENTED: {
-      TabContents* tab = content::Source<TabContents>(source).ptr();
-      if (tab->profile() != profile())
+      WebContents* web_contents = content::Source<WebContents>(source).ptr();
+      if (web_contents->GetBrowserContext() != profile())
         return;
-      SetTabWindow(tab->restore_tab_helper()->window_id(),
-                   tab->restore_tab_helper()->session_id());
-      if (tab->extension_tab_helper()->extension_app()) {
+      SessionTabHelper* session_tab_helper =
+          SessionTabHelper::FromWebContents(web_contents);
+      SetTabWindow(session_tab_helper->window_id(),
+                   session_tab_helper->session_id());
+      extensions::TabHelper* extensions_tab_helper =
+          extensions::TabHelper::FromWebContents(web_contents);
+      if (extensions_tab_helper &&
+          extensions_tab_helper->extension_app()) {
         SetTabExtensionAppID(
-            tab->restore_tab_helper()->window_id(),
-            tab->restore_tab_helper()->session_id(),
-            tab->extension_tab_helper()->extension_app()->id());
+            session_tab_helper->window_id(),
+            session_tab_helper->session_id(),
+            extensions_tab_helper->extension_app()->id());
       }
 
       // Record the association between the SessionStorageNamespace and the
       // tab.
+      //
+      // TODO(ajwong): This should be processing the whole map rather than
+      // just the default. This in particular will not work for tabs with only
+      // isolated apps which won't have a default partition.
       content::SessionStorageNamespace* session_storage_namespace =
-          tab->web_contents()->GetController().GetSessionStorageNamespace();
+          web_contents->GetController().GetDefaultSessionStorageNamespace();
       ScheduleCommand(CreateSessionStorageAssociatedCommand(
-          tab->restore_tab_helper()->session_id(),
+          session_tab_helper->session_id(),
           session_storage_namespace->persistent_id()));
       session_storage_namespace->SetShouldPersist(true);
       break;
@@ -621,75 +642,91 @@ void SessionService::Observe(int type,
       // Allow the associated sessionStorage to get deleted; it won't be needed
       // in the session restore.
       content::SessionStorageNamespace* session_storage_namespace =
-          tab->web_contents()->GetController().GetSessionStorageNamespace();
+          tab->web_contents()->GetController().
+              GetDefaultSessionStorageNamespace();
       session_storage_namespace->SetShouldPersist(false);
-      TabClosed(tab->restore_tab_helper()->window_id(),
-                tab->restore_tab_helper()->session_id(),
+      SessionTabHelper* session_tab_helper =
+          SessionTabHelper::FromWebContents(tab->web_contents());
+      TabClosed(session_tab_helper->window_id(),
+                session_tab_helper->session_id(),
                 tab->web_contents()->GetClosedByUserGesture());
       RecordSessionUpdateHistogramData(type, &last_updated_tab_closed_time_);
       break;
     }
 
     case content::NOTIFICATION_NAV_LIST_PRUNED: {
-      TabContents* tab = TabContents::FromWebContents(
+      WebContents* web_contents =
           content::Source<content::NavigationController>(source).ptr()->
-              GetWebContents());
-      if (!tab || tab->profile() != profile())
+              GetWebContents();
+      SessionTabHelper* session_tab_helper =
+          SessionTabHelper::FromWebContents(web_contents);
+      if (!session_tab_helper || web_contents->GetBrowserContext() != profile())
         return;
       content::Details<content::PrunedDetails> pruned_details(details);
       if (pruned_details->from_front) {
         TabNavigationPathPrunedFromFront(
-            tab->restore_tab_helper()->window_id(),
-            tab->restore_tab_helper()->session_id(),
+            session_tab_helper->window_id(),
+            session_tab_helper->session_id(),
             pruned_details->count);
       } else {
         TabNavigationPathPrunedFromBack(
-            tab->restore_tab_helper()->window_id(),
-            tab->restore_tab_helper()->session_id(),
-            tab->web_contents()->GetController().GetEntryCount());
+            session_tab_helper->window_id(),
+            session_tab_helper->session_id(),
+            web_contents->GetController().GetEntryCount());
       }
-      RecordSessionUpdateHistogramData(content::NOTIFICATION_NAV_LIST_PRUNED,
-          &last_updated_nav_list_pruned_time_);
+      RecordSessionUpdateHistogramData(type,
+                                       &last_updated_nav_list_pruned_time_);
       break;
     }
 
     case content::NOTIFICATION_NAV_ENTRY_CHANGED: {
-      TabContents* tab = TabContents::FromWebContents(
+      WebContents* web_contents =
           content::Source<content::NavigationController>(source).ptr()->
-              GetWebContents());
-      if (!tab || tab->profile() != profile())
+              GetWebContents();
+      SessionTabHelper* session_tab_helper =
+          SessionTabHelper::FromWebContents(web_contents);
+      if (!session_tab_helper || web_contents->GetBrowserContext() != profile())
         return;
       content::Details<content::EntryChangedDetails> changed(details);
-      UpdateTabNavigation(
-          tab->restore_tab_helper()->window_id(),
-          tab->restore_tab_helper()->session_id(),
-          changed->index, *changed->changed_entry);
+      const TabNavigation navigation =
+          TabNavigation::FromNavigationEntry(
+              changed->index, *changed->changed_entry,
+              base::Time::Now());
+      UpdateTabNavigation(session_tab_helper->window_id(),
+                          session_tab_helper->session_id(),
+                          navigation);
       break;
     }
 
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED: {
-      TabContents* tab = TabContents::FromWebContents(
+      WebContents* web_contents =
           content::Source<content::NavigationController>(source).ptr()->
-              GetWebContents());
-      if (!tab || tab->profile() != profile())
+              GetWebContents();
+      SessionTabHelper* session_tab_helper =
+          SessionTabHelper::FromWebContents(web_contents);
+      if (!session_tab_helper || web_contents->GetBrowserContext() != profile())
         return;
       int current_entry_index =
-          tab->web_contents()->GetController().GetCurrentEntryIndex();
-      SetSelectedNavigationIndex(tab->restore_tab_helper()->window_id(),
-                                 tab->restore_tab_helper()->session_id(),
-                                 current_entry_index);
+          web_contents->GetController().GetCurrentEntryIndex();
+      SetSelectedNavigationIndex(
+          session_tab_helper->window_id(),
+          session_tab_helper->session_id(),
+          current_entry_index);
+      const TabNavigation navigation =
+          TabNavigation::FromNavigationEntry(
+              current_entry_index,
+              *web_contents->GetController().GetEntryAtIndex(
+                  current_entry_index),
+              base::Time::Now());
       UpdateTabNavigation(
-          tab->restore_tab_helper()->window_id(),
-          tab->restore_tab_helper()->session_id(),
-          current_entry_index,
-          *tab->web_contents()->GetController().GetEntryAtIndex(
-              current_entry_index));
+          session_tab_helper->window_id(),
+          session_tab_helper->session_id(),
+          navigation);
       content::Details<content::LoadCommittedDetails> changed(details);
       if (changed->type == content::NAVIGATION_TYPE_NEW_PAGE ||
         changed->type == content::NAVIGATION_TYPE_EXISTING_PAGE) {
-        RecordSessionUpdateHistogramData(
-            content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-            &last_updated_nav_entry_commit_time_);
+        RecordSessionUpdateHistogramData(type,
+                                         &last_updated_nav_entry_commit_time_);
       }
       break;
     }
@@ -697,13 +734,16 @@ void SessionService::Observe(int type,
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
       extensions::TabHelper* extension_tab_helper =
           content::Source<extensions::TabHelper>(source).ptr();
-      if (extension_tab_helper->tab_contents()->profile() != profile())
+      if (extension_tab_helper->web_contents()->GetBrowserContext() !=
+              profile()) {
         return;
+      }
       if (extension_tab_helper->extension_app()) {
-        RestoreTabHelper* helper =
-            extension_tab_helper->tab_contents()->restore_tab_helper();
-        SetTabExtensionAppID(helper->window_id(),
-                             helper->session_id(),
+        SessionTabHelper* session_tab_helper =
+            SessionTabHelper::FromWebContents(
+                extension_tab_helper->web_contents());
+        SetTabExtensionAppID(session_tab_helper->window_id(),
+                             session_tab_helper->session_id(),
                              extension_tab_helper->extension_app()->id());
       }
       break;
@@ -721,23 +761,8 @@ void SessionService::SetTabExtensionAppID(
   if (!ShouldTrackChangesToWindow(window_id))
     return;
 
-  ScheduleCommand(CreateSetTabExtensionAppIDCommand(
-                      kCommandSetExtensionAppID,
-                      tab_id.id(),
-                      extension_app_id));
-}
-
-void SessionService::SetTabUserAgentOverride(
-    const SessionID& window_id,
-    const SessionID& tab_id,
-    const std::string& user_agent_override) {
-  if (!ShouldTrackChangesToWindow(window_id))
-    return;
-
-  ScheduleCommand(CreateSetTabUserAgentOverrideCommand(
-                      kCommandSetTabUserAgentOverride,
-                      tab_id.id(),
-                      user_agent_override));
+  ScheduleCommand(CreateSetTabExtensionAppIDCommand(kCommandSetExtensionAppID,
+      tab_id.id(), extension_app_id));
 }
 
 SessionCommand* SessionService::CreateSetSelectedTabInWindow(
@@ -1290,7 +1315,9 @@ void SessionService::BuildCommandsForTab(
     std::vector<SessionCommand*>* commands,
     IdToRange* tab_to_available_range) {
   DCHECK(tab && commands && window_id.id());
-  const SessionID& session_id(tab->restore_tab_helper()->session_id());
+  SessionTabHelper* session_tab_helper =
+      SessionTabHelper::FromWebContents(tab->web_contents());
+  const SessionID& session_id(session_tab_helper->session_id());
   commands->push_back(CreateSetTabWindowCommand(window_id, session_id));
 
   const int current_index =
@@ -1311,11 +1338,13 @@ void SessionService::BuildCommandsForTab(
     commands->push_back(CreatePinnedStateCommand(session_id, true));
   }
 
-  if (tab->extension_tab_helper()->extension_app()) {
+  extensions::TabHelper* extensions_tab_helper =
+      extensions::TabHelper::FromWebContents(tab->web_contents());
+  if (extensions_tab_helper->extension_app()) {
     commands->push_back(
         CreateSetTabExtensionAppIDCommand(
             kCommandSetExtensionAppID, session_id.id(),
-            tab->extension_tab_helper()->extension_app()->id()));
+            extensions_tab_helper->extension_app()->id()));
   }
 
   const std::string& ua_override = tab->web_contents()->GetUserAgentOverride();
@@ -1331,9 +1360,11 @@ void SessionService::BuildCommandsForTab(
         tab->web_contents()->GetController().GetEntryAtIndex(i);
     DCHECK(entry);
     if (ShouldTrackEntry(entry->GetVirtualURL())) {
+      const TabNavigation navigation =
+          TabNavigation::FromNavigationEntry(i, *entry, base::Time::Now());
       commands->push_back(
           CreateUpdateTabNavigationCommand(
-              kCommandUpdateTabNavigation, session_id.id(), i, *entry));
+              kCommandUpdateTabNavigation, session_id.id(), navigation));
     }
   }
   commands->push_back(
@@ -1346,9 +1377,9 @@ void SessionService::BuildCommandsForTab(
 
   // Record the association between the sessionStorage namespace and the tab.
   content::SessionStorageNamespace* session_storage_namespace =
-      tab->web_contents()->GetController().GetSessionStorageNamespace();
+      tab->web_contents()->GetController().GetDefaultSessionStorageNamespace();
   ScheduleCommand(CreateSessionStorageAssociatedCommand(
-      tab->restore_tab_helper()->session_id(),
+      session_tab_helper->session_id(),
       session_storage_namespace->persistent_id()));
 }
 

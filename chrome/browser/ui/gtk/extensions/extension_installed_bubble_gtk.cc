@@ -11,6 +11,8 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/commands/command_service.h"
+#include "chrome/browser/extensions/api/commands/command_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/gtk/browser_actions_toolbar_gtk.h"
@@ -19,9 +21,11 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
+#include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
@@ -76,16 +80,14 @@ ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(
       animation_wait_retries_(kAnimationWaitRetries) {
   AddRef();  // Balanced in Close().
 
-  if (!extension_->omnibox_keyword().empty()) {
+  if (!extension_->omnibox_keyword().empty())
     type_ = OMNIBOX_KEYWORD;
-  } else if (extension_->browser_action()) {
+  else if (extension_->browser_action())
     type_ = BROWSER_ACTION;
-  } else if (extension->page_action() &&
-             !extension->page_action()->default_icon_path().empty()) {
+  else if (extension->page_action() && extension->is_verbose_install_message())
     type_ = PAGE_ACTION;
-  } else {
+  else
     type_ = GENERIC;
-  }
 
   // |extension| has been initialized but not loaded at this point. We need
   // to wait on showing the Bubble until not only the EXTENSION_LOADED gets
@@ -236,16 +238,22 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
 
   // Browser action label.
   if (type_ == BROWSER_ACTION) {
-    const extensions::Command* browser_action_command =
-        extension_->browser_action_command();
+    extensions::CommandService* command_service =
+        extensions::CommandServiceFactory::GetForProfile(
+            browser_->profile());
+    extensions::Command browser_action_command;
     GtkWidget* info_label;
-    if (!browser_action_command) {
+    if (!command_service->GetBrowserActionCommand(
+            extension_->id(),
+            extensions::CommandService::ACTIVE_ONLY,
+            &browser_action_command,
+            NULL)) {
       info_label = gtk_label_new(l10n_util::GetStringUTF8(
           IDS_EXTENSION_INSTALLED_BROWSER_ACTION_INFO).c_str());
     } else {
       info_label = gtk_label_new(l10n_util::GetStringFUTF8(
           IDS_EXTENSION_INSTALLED_BROWSER_ACTION_INFO_WITH_SHORTCUT,
-          browser_action_command->accelerator().GetShortcutText()).c_str());
+          browser_action_command.accelerator().GetShortcutText()).c_str());
       has_keybinding = true;
     }
     gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
@@ -254,16 +262,22 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
 
   // Page action label.
   if (type_ == PAGE_ACTION) {
-    const extensions::Command* page_action_command =
-        extension_->page_action_command();
+    extensions::CommandService* command_service =
+        extensions::CommandServiceFactory::GetForProfile(
+            browser_->profile());
+    extensions::Command page_action_command;
     GtkWidget* info_label;
-    if (!page_action_command) {
+    if (!command_service->GetPageActionCommand(
+            extension_->id(),
+            extensions::CommandService::ACTIVE_ONLY,
+            &page_action_command,
+            NULL)) {
       info_label = gtk_label_new(l10n_util::GetStringUTF8(
           IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO).c_str());
     } else {
       info_label = gtk_label_new(l10n_util::GetStringFUTF8(
           IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO_WITH_SHORTCUT,
-          page_action_command->accelerator().GetShortcutText()).c_str());
+          page_action_command.accelerator().GetShortcutText()).c_str());
       has_keybinding = true;
     }
     gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
@@ -280,7 +294,14 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   }
 
   if (has_keybinding) {
-    // TODO(finnur): Show the shortcut link.
+    GtkWidget* manage_link = theme_provider->BuildChromeLinkButton(
+        l10n_util::GetStringUTF8(IDS_EXTENSION_INSTALLED_MANAGE_SHORTCUTS));
+    GtkWidget* link_hbox = gtk_hbox_new(FALSE, 0);
+    // Stick it in an hbox so it doesn't expand to the whole width.
+    gtk_box_pack_end(GTK_BOX(link_hbox), manage_link, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(text_column), link_hbox, FALSE, FALSE, 0);
+    g_signal_connect(manage_link, "clicked",
+                     G_CALLBACK(OnLinkClickedThunk), this);
   } else {
     // Manage label.
     GtkWidget* manage_label = gtk_label_new(
@@ -337,6 +358,18 @@ void ExtensionInstalledBubbleGtk::OnButtonClick(GtkWidget* button,
     NOTREACHED();
   }
 }
+
+void ExtensionInstalledBubbleGtk::OnLinkClicked(GtkWidget* widget) {
+  bubble_->Close();
+
+  std::string configure_url = chrome::kChromeUIExtensionsURL;
+  configure_url += chrome::kExtensionConfigureCommandsSubPage;
+  chrome::NavigateParams params(
+      chrome::GetSingletonTabNavigateParams(
+      browser_, GURL(configure_url.c_str())));
+  chrome::Navigate(&params);
+}
+
 void ExtensionInstalledBubbleGtk::BubbleClosing(BubbleGtk* bubble,
                                                 bool closed_by_escape) {
   if (extension_ && type_ == PAGE_ACTION) {

@@ -307,7 +307,7 @@ std::string TestGraphics2D::TestInitToZero() {
 
 std::string TestGraphics2D::TestDescribe() {
   const int w = 15, h = 17;
-  const bool always_opaque = ::rand() % 2 ? true : false;
+  const bool always_opaque = (::rand() % 2 == 1);
   pp::Graphics2D dc(instance_, pp::Size(w, h), always_opaque);
   if (dc.is_null())
     return "Failure creating a boring device";
@@ -650,13 +650,13 @@ std::string TestGraphics2D::TestFlush() {
 }
 
 std::string TestGraphics2D::TestDev() {
-  // Tests GetScale/SetScale via the Graphics2DDev C++ wrapper
-  const int w=20, h=16;
-  const float scale=1.0f/2.0f;
+  // Tests GetScale/SetScale via the Graphics2D_Dev C++ wrapper
+  const int w = 20, h = 16;
+  const float scale = 1.0f/2.0f;
   pp::Graphics2D dc(instance_, pp::Size(w, h), false);
   if (dc.is_null())
     return "Failure creating a boring device";
-  pp::Graphics2DDev dc_dev(dc);
+  pp::Graphics2D_Dev dc_dev(dc);
   if (dc_dev.GetScale() != 1.0f)
     return "GetScale returned unexpected value before SetScale";
   if (!dc_dev.SetScale(scale))

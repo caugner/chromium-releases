@@ -35,7 +35,7 @@ class InputMethodBridge : public InputMethodBase,
   virtual void Init(Widget* widget) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
-  virtual void DispatchKeyEvent(const KeyEvent& key) OVERRIDE;
+  virtual void DispatchKeyEvent(const ui::KeyEvent& key) OVERRIDE;
   virtual void OnTextInputTypeChanged(View* view) OVERRIDE;
   virtual void OnCaretBoundsChanged(View* view) OVERRIDE;
   virtual void CancelComposition(View* view) OVERRIDE;
@@ -66,6 +66,7 @@ class InputMethodBridge : public InputMethodBase,
   virtual void OnInputMethodChanged() OVERRIDE;
   virtual bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) OVERRIDE;
+  virtual void ExtendSelectionAndDelete(size_t before, size_t after) OVERRIDE;
 
   // Overridden from FocusChangeListener.
   virtual void OnWillChangeFocus(View* focused_before, View* focused) OVERRIDE;

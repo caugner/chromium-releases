@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -43,13 +44,14 @@ void WaitForTabsAndPopups(Browser* browser,
                    num_tabs, num_popups, num_panels));
   // We start with one tab and one browser already open.
   ++num_tabs;
-  size_t num_browsers = static_cast<size_t>(num_popups + num_panels) + 1;
+  size_t num_browsers = static_cast<size_t>(num_popups) + 1;
 
   const base::TimeDelta kWaitTime = base::TimeDelta::FromSeconds(15);
   base::TimeTicks end_time = base::TimeTicks::Now() + kWaitTime;
   while (base::TimeTicks::Now() < end_time) {
     if (browser::GetBrowserCount(browser->profile()) == num_browsers &&
-        browser->tab_count() == num_tabs)
+        browser->tab_count() == num_tabs &&
+        PanelManager::GetInstance()->num_panels() == num_panels)
       break;
 
     content::RunAllPendingInMessageLoop();
@@ -57,23 +59,25 @@ void WaitForTabsAndPopups(Browser* browser,
 
   EXPECT_EQ(num_browsers, browser::GetBrowserCount(browser->profile()));
   EXPECT_EQ(num_tabs, browser->tab_count());
+  EXPECT_EQ(num_panels, PanelManager::GetInstance()->num_panels());
 
   int num_popups_seen = 0;
-  int num_panels_seen = 0;
   for (BrowserList::const_iterator iter = BrowserList::begin();
        iter != BrowserList::end(); ++iter) {
     if (*iter == browser)
       continue;
 
-    // Check for TYPE_POPUP or TYPE_PANEL.
+    // Check for TYPE_POPUP.
+#if defined(USE_ASH)
+    // On Ash, panel windows open as popup windows.
     EXPECT_TRUE((*iter)->is_type_popup() || (*iter)->is_type_panel());
-    if ((*iter)->is_type_popup())
-      ++num_popups_seen;
-    else
-      ++num_panels_seen;
+#else
+    EXPECT_TRUE((*iter)->is_type_popup());
+#endif
+    ++num_popups_seen;
+
   }
   EXPECT_EQ(num_popups, num_popups_seen);
-  EXPECT_EQ(num_panels, num_panels_seen);
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, BrowserIsApp) {
@@ -207,6 +211,17 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenPanel) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel")) << message_;
 }
 
+#if defined(USE_ASH)
+// On Ash, this currently fails because we're currently opening new panel
+// windows as popup windows instead.
+#define MAYBE_WindowOpenPanelDetached FAILS_WindowOpenPanelDetached
+#else
+#define MAYBE_WindowOpenPanelDetached WindowOpenPanelDetached
+#endif
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenPanelDetached) {
+  ASSERT_TRUE(RunExtensionTest("window_open/panel_detached")) << message_;
+}
+
 #if defined(OS_MACOSX) || defined(OS_WIN)
 // Focus test fails if there is no window manager on Linux.
 IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenFocus) {
@@ -216,8 +231,14 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenFocus) {
 
 IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
                        CloseNonExtensionPanelsOnUninstall) {
+#if defined(USE_ASH)
+  // On Ash, new panel windows open as popup windows instead.
+  int num_popups = 4;
+  int num_panels = 0;
+#else
   int num_popups = 2;
   int num_panels = 2;
+#endif
   ASSERT_TRUE(StartTestServer());
 
   // Setup listeners to wait on strings we expect the extension pages to send.
@@ -249,10 +270,36 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
 
   UninstallExtension(extension->id());
 
-  // Wait for one tab and one popup in non-extension domain to stay open.
+  // Wait for the tabs and popups in non-extension domain to stay open.
   // Expect everything else, including panels, to close.
-  num_popups = 1;
+#if defined(USE_ASH)
+  // On Ash, new panel windows open as popup windows instead, so there are 2
+  // extension domain popups that will close (instead of 1 popup on non-Ash).
+  num_popups -= 2;
+#else
+  num_popups -= 1;
+#endif
   WaitForTabsAndPopups(browser(), 1, num_popups, 0);
+}
+
+#if defined(USE_ASH)
+// This test is not applicable on Ash. Ash opens panel windows as popup
+// windows. The modified window.open behavior only applies to panel windows.
+#define MAYBE_WindowOpenFromPanel DISABLED_WindowOpenFromPanel
+#else
+#define MAYBE_WindowOpenFromPanel WindowOpenFromPanel
+#endif
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenFromPanel) {
+  ASSERT_TRUE(StartTestServer());
+
+  // Load the extension that will open a panel which then calls window.open.
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("window_open").
+                            AppendASCII("panel_window_open")));
+
+  // Expect one panel (opened by extension) and one tab (from the panel calling
+  // window.open). Panels modify the WindowOpenDisposition in window.open
+  // to always open in a tab.
+  WaitForTabsAndPopups(browser(), 1, 0, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_WindowOpener) {

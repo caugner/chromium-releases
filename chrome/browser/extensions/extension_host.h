@@ -20,7 +20,7 @@
 #include "content/public/browser/web_contents_observer.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/views/extensions/extension_view.h"
+#include "chrome/browser/ui/views/extensions/extension_view_views.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #elif defined(TOOLKIT_GTK)
@@ -36,6 +36,7 @@ namespace content {
 class RenderProcessHost;
 class RenderWidgetHostView;
 class SiteInstance;
+class WebIntentsDispatcher;
 }
 
 namespace extensions {
@@ -54,7 +55,7 @@ class ExtensionHost : public content::WebContentsDelegate,
   class ProcessCreationQueue;
 
 #if defined(TOOLKIT_VIEWS)
-  typedef ExtensionView PlatformExtensionView;
+  typedef ExtensionViewViews PlatformExtensionView;
 #elif defined(OS_MACOSX)
   typedef ExtensionViewMac PlatformExtensionView;
 #elif defined(TOOLKIT_GTK)
@@ -145,9 +146,11 @@ class ExtensionHost : public content::WebContentsDelegate,
       content::WebContents* source,
       const content::OpenURLParams& params) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
+      content::WebContents* source,
       const content::NativeWebKeyboardEvent& event,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
+      content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual void ResizeDueToAutoResize(content::WebContents* source,
                                      const gfx::Size& new_size) OVERRIDE;
@@ -160,10 +163,17 @@ class ExtensionHost : public content::WebContentsDelegate,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) OVERRIDE;
+                              bool user_gesture,
+                              bool* was_blocked) OVERRIDE;
   virtual void CloseContents(content::WebContents* contents) OVERRIDE;
+#if defined(OS_CHROMEOS)
+  virtual bool ShouldSuppressDialogs() OVERRIDE;
+#endif
   virtual void OnStartDownload(content::WebContents* source,
                                content::DownloadItem* download) OVERRIDE;
+  virtual void WebIntentDispatch(
+      content::WebContents* web_contents,
+      content::WebIntentsDispatcher* intents_dispatcher) OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -196,6 +206,7 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Platform specific implementation may override this method to handle the
   // event in platform specific way.
   virtual void UnhandledKeyboardEvent(
+      content::WebContents* source,
       const content::NativeWebKeyboardEvent& event);
 
   // Returns true if we're hosting a background page.

@@ -11,8 +11,8 @@
 #include "base/string_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_code_conversion.h"
 
 #if defined(OS_CHROMEOS)
@@ -41,6 +41,8 @@ namespace {
 const int kBadDeviceId = -1;
 
 #if defined(OS_CHROMEOS)
+const char kNeo2LayoutId[] = "xkb:de:neo:ger";
+
 // A key code and a flag we should use when a key is remapped to |remap_to|.
 const struct ModifierRemapping {
   int remap_to;
@@ -173,19 +175,19 @@ EventRewriter::DeviceType EventRewriter::GetDeviceType(
   return kDeviceUnknown;
 }
 
-void EventRewriter::RewriteForTesting(aura::KeyEvent* event) {
+void EventRewriter::RewriteForTesting(ui::KeyEvent* event) {
   Rewrite(event);
 }
 
 ash::EventRewriterDelegate::Action EventRewriter::RewriteOrFilterKeyEvent(
-    aura::KeyEvent* event) {
+    ui::KeyEvent* event) {
   if (event->HasNativeEvent())
     Rewrite(event);
   return ash::EventRewriterDelegate::ACTION_REWRITE_EVENT;
 }
 
 ash::EventRewriterDelegate::Action EventRewriter::RewriteOrFilterLocatedEvent(
-    aura::LocatedEvent* event) {
+    ui::LocatedEvent* event) {
   if (event->HasNativeEvent())
     RewriteLocatedEvent(event);
   return ash::EventRewriterDelegate::ACTION_REWRITE_EVENT;
@@ -332,7 +334,7 @@ KeyCode EventRewriter::NativeKeySymToNativeKeycode(KeySym keysym) {
 }
 #endif
 
-void EventRewriter::Rewrite(aura::KeyEvent* event) {
+void EventRewriter::Rewrite(ui::KeyEvent* event) {
 #if defined(OS_CHROMEOS)
   // Do not rewrite an event sent by ui_controls::SendKeyPress(). See
   // crbug.com/136465.
@@ -340,6 +342,9 @@ void EventRewriter::Rewrite(aura::KeyEvent* event) {
     return;
 #endif
   RewriteModifiers(event);
+  // This should be called after RewriteModifiers(). Otherwise, remapped
+  // Mod3Mask might be re-remapped.
+  RewriteFnKey(event);
   RewriteNumPadKeys(event);
   RewriteBackspaceAndArrowKeys(event);
   // TODO(yusukes): Implement crosbug.com/27167 (allow sending function keys).
@@ -409,7 +414,7 @@ void EventRewriter::GetRemappedModifierMasks(
 #endif
 }
 
-bool EventRewriter::RewriteModifiers(aura::KeyEvent* event) {
+bool EventRewriter::RewriteModifiers(ui::KeyEvent* event) {
   // Do nothing if we have just logged in as guest but have not restarted chrome
   // process yet (so we are still on the login screen). In this situations we
   // have no user profile so can not do anything useful.
@@ -500,7 +505,42 @@ bool EventRewriter::RewriteModifiers(aura::KeyEvent* event) {
 #endif
 }
 
-bool EventRewriter::RewriteNumPadKeys(aura::KeyEvent* event) {
+bool EventRewriter::RewriteFnKey(ui::KeyEvent* event) {
+#if defined(OS_CHROMEOS)
+  // Since both German Neo2 XKB layout and F15 depend on Mod3Mask, it's not
+  // possible to make both features work. For now, we don't remap Mod3Mask to
+  // ControlMask when Neo2 is in use.
+  // TODO(yusukes): Remove the restriction.
+  if (InputMethodManager::GetInstance()->GetCurrentInputMethod().id() ==
+      kNeo2LayoutId) {
+    return false;
+  }
+
+  XEvent* xev = event->native_event();
+  XKeyEvent* xkey = &(xev->xkey);
+
+  int remapped_flags = event->flags();
+  unsigned int remapped_native_modifiers = xkey->state;
+
+  // TODO(yusukes): Add a pref entry for specifying how to remap Fn key, and
+  // check it here if not in guest mode.
+  if (xkey->state & Mod3Mask) {
+    remapped_flags |= ui::EF_CONTROL_DOWN;
+    remapped_native_modifiers =
+        (remapped_native_modifiers & ~Mod3Mask) | ControlMask;
+  }
+
+  OverwriteEvent(event,
+                 xkey->keycode, remapped_native_modifiers,
+                 event->key_code(), remapped_flags);
+  return true;
+#else
+  // TODO(yusukes): Support Ash on other platforms if needed.
+  return false;
+#endif
+}
+
+bool EventRewriter::RewriteNumPadKeys(ui::KeyEvent* event) {
   bool rewritten = false;
 #if defined(OS_CHROMEOS)
   XEvent* xev = event->native_event();
@@ -582,7 +622,7 @@ bool EventRewriter::RewriteNumPadKeys(aura::KeyEvent* event) {
   return rewritten;
 }
 
-bool EventRewriter::RewriteBackspaceAndArrowKeys(aura::KeyEvent* event) {
+bool EventRewriter::RewriteBackspaceAndArrowKeys(ui::KeyEvent* event) {
   bool rewritten = false;
 #if defined(OS_CHROMEOS)
   XEvent* xev = event->native_event();
@@ -629,7 +669,7 @@ bool EventRewriter::RewriteBackspaceAndArrowKeys(aura::KeyEvent* event) {
   return rewritten;
 }
 
-void EventRewriter::RewriteLocatedEvent(aura::LocatedEvent* event) {
+void EventRewriter::RewriteLocatedEvent(ui::LocatedEvent* event) {
 #if defined(OS_CHROMEOS)
   if (event->flags() & ui::EF_IS_SYNTHESIZED)
     return;
@@ -671,7 +711,7 @@ void EventRewriter::RewriteLocatedEvent(aura::LocatedEvent* event) {
 #endif
 }
 
-void EventRewriter::OverwriteEvent(aura::KeyEvent* event,
+void EventRewriter::OverwriteEvent(ui::KeyEvent* event,
                                    unsigned int new_native_keycode,
                                    unsigned int new_native_state,
                                    ui::KeyboardCode new_keycode,
@@ -685,6 +725,7 @@ void EventRewriter::OverwriteEvent(aura::KeyEvent* event,
   event->set_character(ui::GetCharacterFromKeyCode(event->key_code(),
                                                    new_flags));
   event->set_flags(new_flags);
+  event->NormalizeFlags();
 #else
   // TODO(yusukes): Support Ash on other platforms if needed.
 #endif

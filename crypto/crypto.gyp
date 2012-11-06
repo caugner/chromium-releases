@@ -35,7 +35,7 @@
         4018,
       ],
       'conditions': [
-        [ 'os_posix == 1 and OS != "mac" and OS != "android"', {
+        [ 'os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {
           'dependencies': [
             '../build/linux/system.gyp:ssl',
           ],
@@ -48,7 +48,7 @@
               },
             ],
           ],
-        }, {  # os_posix != 1 or OS == "mac" or OS == "android"
+        }, {  # os_posix != 1 or OS == "mac" or OS == "ios" or OS == "android"
             'sources/': [
               ['exclude', '_nss\.cc$'],
               ['include', 'ec_private_key_nss\.cc$'],
@@ -64,6 +64,13 @@
               'openpgp_symmetric_encryption.h',
               'symmetric_key_win.cc',
             ],
+        }],
+        [ 'OS != "mac" and OS != "ios"', {
+          'sources!': [
+            'apple_keychain.h',
+            'mock_apple_keychain.cc',
+            'mock_apple_keychain.h',
+          ],
         }],
         [ 'OS == "android"', {
             'dependencies': [
@@ -86,6 +93,12 @@
             },
           },
         ],
+        [ 'OS == "ios"', {
+          'sources!': [
+            # This class is stubbed out on iOS.
+            'rsa_private_key.cc',
+          ],
+        }],
         [ 'OS == "mac"', {
           'link_settings': {
             'libraries': [
@@ -100,7 +113,7 @@
             'mac_security_services_lock.h',
           ],
         }],
-        [ 'OS == "mac" or OS == "win"', {
+        [ 'OS == "mac" or OS == "ios" or OS == "win"', {
           'dependencies': [
             '../third_party/nss/nss.gyp:nspr',
             '../third_party/nss/nss.gyp:nss',
@@ -160,6 +173,9 @@
         # NOTE: all transitive dependencies of HMAC on windows need
         #     to be placed in the source list above.
         '<@(hmac_win64_related_sources)',
+        'apple_keychain.h',
+        'apple_keychain_ios.mm',
+        'apple_keychain_mac.mm',
         'capi_util.cc',
         'capi_util.h',
         'crypto_export.h',
@@ -180,12 +196,12 @@
         'encryptor_openssl.cc',
         'hmac_nss.cc',
         'hmac_openssl.cc',
-        'keychain_mac.cc',
-        'keychain_mac.h',
         'mac_security_services_lock.cc',
         'mac_security_services_lock.h',
-        'mock_keychain_mac.cc',
-        'mock_keychain_mac.h',
+        'mock_apple_keychain.cc',
+        'mock_apple_keychain.h',
+        'mock_apple_keychain_ios.cc',
+        'mock_apple_keychain_mac.cc',
         'p224_spake.cc',
         'p224_spake.h',
         'nss_util.cc',
@@ -201,6 +217,7 @@
         'random.cc',
         'rsa_private_key.cc',
         'rsa_private_key.h',
+        'rsa_private_key_ios.cc',
         'rsa_private_key_mac.cc',
         'rsa_private_key_nss.cc',
         'rsa_private_key_openssl.cc',
@@ -262,7 +279,7 @@
         '../testing/gtest.gyp:gtest',
       ],
       'conditions': [
-        [ 'os_posix == 1 and OS != "mac" and OS != "android"', {
+        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
           'conditions': [
             [ 'linux_use_tcmalloc==1', {
                 'dependencies': [
@@ -274,15 +291,24 @@
           'dependencies': [
             '../build/linux/system.gyp:ssl',
           ],
-        }, {  # os_posix != 1 or OS == "mac" or OS == "android"
+        }, {  # os_posix != 1 or OS == "mac" or OS == "android" or OS == "ios"
           'sources!': [
             'rsa_private_key_nss_unittest.cc',
             'openpgp_symmetric_encryption_unittest.cc',
           ]
         }],
-        [ 'OS == "mac" or OS == "win"', {
+        [ 'OS == "mac" or OS == "ios" or OS == "win"', {
           'dependencies': [
             '../third_party/nss/nss.gyp:nss',
+          ],
+        }],
+        ['OS == "ios"', {
+          'sources!': [
+            # These tests are excluded because they test classes that are not
+            # implemented on iOS.
+            'rsa_private_key_unittest.cc',
+            'signature_creator_unittest.cc',
+            'signature_verifier_unittest.cc',
           ],
         }],
         [ 'OS == "mac"', {

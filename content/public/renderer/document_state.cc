@@ -20,6 +20,7 @@ DocumentState::DocumentState()
       was_fetched_via_proxy_(false),
       use_error_page_(false),
       is_overriding_user_agent_(false),
+      must_reset_scroll_and_scale_state_(false),
       was_prefetcher_(false),
       was_referred_by_prefetcher_(false),
       load_type_(UNDEFINED_LOAD),
@@ -31,8 +32,9 @@ DocumentState::DocumentState()
 
 DocumentState::~DocumentState() {}
 
-void DocumentState::set_password_form_data(webkit::forms::PasswordForm* data) {
-  password_form_data_.reset(data);
+void DocumentState::set_password_form_data(
+    scoped_ptr<webkit::forms::PasswordForm> data) {
+  password_form_data_.reset(data.release());
 }
 
 void DocumentState::set_alt_error_page_fetcher(

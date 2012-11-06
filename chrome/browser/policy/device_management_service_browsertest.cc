@@ -42,7 +42,8 @@ class CannedResponseInterceptor : public net::URLRequest::Interceptor {
 
   // net::URLRequest::Interceptor overrides.
   virtual net::URLRequestJob* MaybeIntercept(
-      net::URLRequest* request) OVERRIDE {
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) OVERRIDE {
     em::DeviceManagementRequest dm_request;
     net::UploadData* upload = request->get_upload_mutable();
     if (request->url().GetOrigin() == service_url_.GetOrigin() &&
@@ -50,8 +51,11 @@ class CannedResponseInterceptor : public net::URLRequest::Interceptor {
         upload != NULL &&
         upload->elements()->size() == 1) {
       std::string response_data;
-      ConstructResponse(upload->elements()->at(0).bytes(), &response_data);
+      ConstructResponse(upload->elements()->at(0).bytes(),
+                        upload->elements()->at(0).bytes_length(),
+                        &response_data);
       return new net::URLRequestTestJob(request,
+                                        network_delegate,
                                         net::URLRequestTestJob::test_headers(),
                                         response_data,
                                         true);
@@ -61,11 +65,11 @@ class CannedResponseInterceptor : public net::URLRequest::Interceptor {
   }
 
  private:
-  void ConstructResponse(const std::vector<char>& request_data,
+  void ConstructResponse(const char* request_data,
+                         uint64 request_data_length,
                          std::string* response_data) {
     em::DeviceManagementRequest request;
-    ASSERT_TRUE(request.ParseFromArray(vector_as_array(&request_data),
-                                       request_data.size()));
+    ASSERT_TRUE(request.ParseFromArray(request_data, request_data_length));
     em::DeviceManagementResponse response;
     if (request.has_register_request()) {
       response.mutable_register_response()->set_device_management_token(

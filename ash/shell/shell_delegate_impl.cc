@@ -4,10 +4,12 @@
 
 #include "ash/shell/shell_delegate_impl.h"
 
+#include "ash/caps_lock_delegate_stub.h"
 #include "ash/shell/example_factory.h"
 #include "ash/shell/launcher_delegate_impl.h"
 #include "ash/shell/toplevel_window.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/window_util.h"
 #include "base/message_loop.h"
 #include "ui/aura/window.h"
 
@@ -36,6 +38,10 @@ bool ShellDelegateImpl::IsUserLoggedIn() {
 
 bool ShellDelegateImpl::IsSessionStarted() {
   return true;
+}
+
+bool ShellDelegateImpl::IsFirstRunAfterBoot() {
+  return false;
 }
 
 void ShellDelegateImpl::LockScreen() {
@@ -68,6 +74,12 @@ void ShellDelegateImpl::NewWindow(bool incognito) {
   create_params.can_resize = true;
   create_params.can_maximize = true;
   ash::shell::ToplevelWindow::CreateToplevelWindow(create_params);
+}
+
+void ShellDelegateImpl::ToggleMaximized() {
+  aura::Window* window = ash::wm::GetActiveWindow();
+  if (window)
+    ash::wm::ToggleMaximizedWindow(window);
 }
 
 void ShellDelegateImpl::OpenFileManager(bool as_dialog) {
@@ -123,6 +135,10 @@ ash::UserWallpaperDelegate* ShellDelegateImpl::CreateUserWallpaperDelegate() {
   return NULL;
 }
 
+ash::CapsLockDelegate* ShellDelegateImpl::CreateCapsLockDelegate() {
+  return new CapsLockDelegateStub;
+}
+
 aura::client::UserActionClient* ShellDelegateImpl::CreateUserActionClient() {
   return NULL;
 }
@@ -131,6 +147,19 @@ void ShellDelegateImpl::OpenFeedbackPage() {
 }
 
 void ShellDelegateImpl::RecordUserMetricsAction(UserMetricsAction action) {
+}
+
+void ShellDelegateImpl::HandleMediaNextTrack() {
+}
+
+void ShellDelegateImpl::HandleMediaPlayPause() {
+}
+
+void ShellDelegateImpl::HandleMediaPrevTrack() {
+}
+
+string16 ShellDelegateImpl::GetTimeRemainingString(base::TimeDelta delta) {
+  return string16();
 }
 
 }  // namespace shell

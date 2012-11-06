@@ -31,6 +31,10 @@ template <> const char* interface_name<PPB_WheelInputEvent_1_0>() {
   return PPB_WHEEL_INPUT_EVENT_INTERFACE_1_0;
 }
 
+template <> const char* interface_name<PPB_TouchInputEvent_1_0>() {
+  return PPB_TOUCH_INPUT_EVENT_INTERFACE_1_0;
+}
+
 }  // namespace
 
 // InputEvent ------------------------------------------------------------------
@@ -232,6 +236,17 @@ TouchInputEvent::TouchInputEvent(const InputEvent& event) : InputEvent() {
     Module::Get()->core()->AddRefResource(event.pp_resource());
     PassRefFromConstructor(event.pp_resource());
   }
+}
+
+TouchInputEvent::TouchInputEvent(const InstanceHandle& instance,
+                                 PP_InputEvent_Type type,
+                                 PP_TimeTicks time_stamp,
+                                 uint32_t modifiers) {
+  // Type check the input event before setting it.
+  if (!has_interface<PPB_TouchInputEvent_1_0>())
+    return;
+  PassRefFromConstructor(get_interface<PPB_TouchInputEvent_1_0>()->Create(
+      instance.pp_instance(), type, time_stamp, modifiers));
 }
 
 void TouchInputEvent::AddTouchPoint(PP_TouchListType list,

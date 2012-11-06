@@ -5,29 +5,26 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_impl.h"
 #include "content/renderer/media/mock_media_stream_dependency_factory.h"
 #include "content/renderer/media/mock_media_stream_dispatcher.h"
-#include "content/renderer/media/mock_web_peer_connection_00_handler_client.h"
-#include "content/renderer/media/mock_web_peer_connection_handler_client.h"
-#include "content/renderer/media/peer_connection_handler_jsep.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
-#include "content/renderer/p2p/socket_dispatcher.h"
+#include "media/base/video_decoder.h"
 #include "media/base/message_loop_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamComponent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamDescriptor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPeerConnection00Handler.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPeerConnectionHandler.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
 class MediaStreamImplUnderTest : public MediaStreamImpl {
  public:
   MediaStreamImplUnderTest(MediaStreamDispatcher* media_stream_dispatcher,
-                           content::P2PSocketDispatcher* p2p_socket_dispatcher,
                            VideoCaptureImplManager* vc_manager,
                            MediaStreamDependencyFactory* dependency_factory)
-      : MediaStreamImpl(NULL, media_stream_dispatcher, p2p_socket_dispatcher,
-                        vc_manager, dependency_factory) {
+      : MediaStreamImpl(NULL, media_stream_dispatcher, vc_manager,
+                        dependency_factory) {
   }
 
   virtual void CompleteGetUserMediaRequest(
@@ -53,22 +50,12 @@ class MediaStreamImplTest : public ::testing::Test {
   void SetUp() {
     // Create our test object.
     ms_dispatcher_.reset(new MockMediaStreamDispatcher());
-    p2p_socket_dispatcher_.reset(new content::P2PSocketDispatcher(NULL));
     scoped_refptr<VideoCaptureImplManager> vc_manager(
         new VideoCaptureImplManager());
-    MockMediaStreamDependencyFactory* dependency_factory =
-        new MockMediaStreamDependencyFactory(vc_manager);
+    dependency_factory_.reset(new MockMediaStreamDependencyFactory());
     ms_impl_.reset(new MediaStreamImplUnderTest(ms_dispatcher_.get(),
-                                                p2p_socket_dispatcher_.get(),
                                                 vc_manager.get(),
-                                                dependency_factory));
-  }
-
-  void TearDown() {
-    // Make sure the message created by
-    // P2PSocketDispatcher::AsyncMessageSender::Send is handled before
-    // tear down to avoid a memory leak.
-    loop_.RunAllPending();
+                                                dependency_factory_.get()));
   }
 
   WebKit::WebMediaStreamDescriptor RequestLocalMediaStream(bool audio,
@@ -106,19 +93,10 @@ class MediaStreamImplTest : public ::testing::Test {
   }
 
  protected:
-  MessageLoop loop_;
   scoped_ptr<MockMediaStreamDispatcher> ms_dispatcher_;
-  scoped_ptr<content::P2PSocketDispatcher> p2p_socket_dispatcher_;
   scoped_ptr<MediaStreamImplUnderTest> ms_impl_;
+  scoped_ptr<MockMediaStreamDependencyFactory> dependency_factory_;
 };
-
-TEST_F(MediaStreamImplTest, CreatePeerConnection) {
-  // Create JSEP PeerConnection.
-  WebKit::MockWebPeerConnection00HandlerClient client_jsep;
-  scoped_ptr<WebKit::WebPeerConnection00Handler> pc_handler_jsep(
-      ms_impl_->CreatePeerConnectionHandlerJsep(&client_jsep));
-  pc_handler_jsep.reset();
-}
 
 TEST_F(MediaStreamImplTest, LocalMediaStream) {
   // Test a stream with both audio and video.

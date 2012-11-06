@@ -2,76 +2,40 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "remoting/host/audio_capturer_win.h"
+
 #include <windows.h>
-#include <audioclient.h>
 #include <avrt.h>
-#include <mmdeviceapi.h>
 #include <mmreg.h>
 #include <mmsystem.h>
 
+#include <algorithm>
 #include <stdlib.h>
 
-#include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/timer.h"
-#include "base/win/scoped_co_mem.h"
-#include "base/win/scoped_com_initializer.h"
-#include "base/win/scoped_comptr.h"
-#include "remoting/host/audio_capturer.h"
-#include "remoting/proto/audio.pb.h"
 
 namespace {
 const int kChannels = 2;
 const int kBitsPerSample = 16;
 const int kBitsPerByte = 8;
 // Conversion factor from 100ns to 1ms.
-const int kHnsToMs = 10000;
+const int k100nsPerMillisecond = 10000;
 
 // Tolerance for catching packets of silence. If all samples have absolute
 // value less than this threshold, the packet will be counted as a packet of
 // silence. A value of 2 was chosen, because Windows can give samples of 1 and
 // -1, even when no audio is playing.
 const int kSilenceThreshold = 2;
+
+// Lower bound for timer intervals, in milliseconds.
+const int kMinTimerInterval = 30;
+
+// Upper bound for the timer precision error, in milliseconds.
+// Timers are supposed to be accurate to 20ms, so we use 30ms to be safe.
+const int kMaxExpectedTimerLag = 30;
 }  // namespace
 
 namespace remoting {
-
-class AudioCapturerWin : public AudioCapturer {
- public:
-  AudioCapturerWin();
-  virtual ~AudioCapturerWin();
-
-  // AudioCapturer interface.
-  virtual bool Start(const PacketCapturedCallback& callback) OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual bool IsRunning() OVERRIDE;
-
- private:
-  // Receives all packets from the audio capture endpoint buffer and pushes them
-  // to the network.
-  void DoCapture();
-
-  static bool IsPacketOfSilence(const AudioPacket* packet);
-
-  PacketCapturedCallback callback_;
-
-  AudioPacket::SamplingRate sampling_rate_;
-
-  scoped_ptr<base::RepeatingTimer<AudioCapturerWin> > capture_timer_;
-  base::TimeDelta audio_device_period_;
-
-  base::win::ScopedCoMem<WAVEFORMATEX> wave_format_ex_;
-  base::win::ScopedComPtr<IAudioCaptureClient> audio_capture_client_;
-  base::win::ScopedComPtr<IAudioClient> audio_client_;
-  base::win::ScopedComPtr<IMMDevice> mm_device_;
-  scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_;
-
-  base::ThreadChecker thread_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioCapturerWin);
-};
 
 AudioCapturerWin::AudioCapturerWin()
     : sampling_rate_(AudioPacket::SAMPLING_RATE_INVALID) {
@@ -128,8 +92,12 @@ bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
     LOG(ERROR) << "IAudioClient::GetDevicePeriod failed. Error " << hr;
     return false;
   }
+  // We round up, if |device_period| / |k100nsPerMillisecond|
+  // is not a whole number.
+  int device_period_in_milliseconds =
+      1 + ((device_period - 1) / k100nsPerMillisecond);
   audio_device_period_ = base::TimeDelta::FromMilliseconds(
-      device_period / kChannels / kHnsToMs);
+      std::max(device_period_in_milliseconds, kMinTimerInterval));
 
   // Get the wave format.
   hr = audio_client_->GetMixFormat(&wave_format_ex_);
@@ -193,12 +161,14 @@ bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
   }
 
   // Initialize the IAudioClient.
-  hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                 AUDCLNT_STREAMFLAGS_LOOPBACK,
-                                 0,
-                                 0,
-                                 wave_format_ex_,
-                                 NULL);
+  hr = audio_client_->Initialize(
+      AUDCLNT_SHAREMODE_SHARED,
+      AUDCLNT_STREAMFLAGS_LOOPBACK,
+      (kMaxExpectedTimerLag + audio_device_period_.InMilliseconds()) *
+      k100nsPerMillisecond,
+      0,
+      wave_format_ex_,
+      NULL);
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to initialize IAudioClient. Error " << hr;
     return false;
@@ -229,7 +199,7 @@ bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
 
 void AudioCapturerWin::Stop() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(IsRunning());
+  DCHECK(IsStarted());
 
   capture_timer_.reset();
   mm_device_.Release();
@@ -241,7 +211,7 @@ void AudioCapturerWin::Stop() {
   thread_checker_.DetachFromThread();
 }
 
-bool AudioCapturerWin::IsRunning() {
+bool AudioCapturerWin::IsStarted() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return capture_timer_.get() != NULL;
 }
@@ -249,7 +219,7 @@ bool AudioCapturerWin::IsRunning() {
 void AudioCapturerWin::DoCapture() {
   DCHECK(AudioCapturer::IsValidSampleRate(sampling_rate_));
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(IsRunning());
+  DCHECK(IsStarted());
 
   // Fetch all packets from the audio capture endpoint buffer.
   while (true) {
@@ -274,15 +244,19 @@ void AudioCapturerWin::DoCapture() {
       return;
     }
 
-    scoped_ptr<AudioPacket> packet = scoped_ptr<AudioPacket>(new AudioPacket());
-    packet->set_data(data, frames * wave_format_ex_->nBlockAlign);
-    packet->set_sampling_rate(sampling_rate_);
-    packet->set_bytes_per_sample(
-        static_cast<AudioPacket::BytesPerSample>(sizeof(int16)));
-    packet->set_encoding(AudioPacket::ENCODING_RAW);
+    if (!IsPacketOfSilence(
+            reinterpret_cast<const int16*>(data),
+            frames * kChannels)) {
+      scoped_ptr<AudioPacket> packet =
+          scoped_ptr<AudioPacket>(new AudioPacket());
+      packet->add_data(data, frames * wave_format_ex_->nBlockAlign);
+      packet->set_encoding(AudioPacket::ENCODING_RAW);
+      packet->set_sampling_rate(sampling_rate_);
+      packet->set_bytes_per_sample(AudioPacket::BYTES_PER_SAMPLE_2);
+      packet->set_channels(AudioPacket::CHANNELS_STEREO);
 
-    if (!IsPacketOfSilence(packet.get()))
       callback_.Run(packet.Pass());
+    }
 
     hr = audio_capture_client_->ReleaseBuffer(frames);
     if (FAILED(hr)) {
@@ -295,16 +269,17 @@ void AudioCapturerWin::DoCapture() {
 // Detects whether there is audio playing in a packet of samples.
 // Windows can give nonzero samples, even when there is no audio playing, so
 // extremely low amplitude samples are counted as silence.
-bool AudioCapturerWin::IsPacketOfSilence(const AudioPacket* packet) {
-  DCHECK_EQ(static_cast<AudioPacket::BytesPerSample>(sizeof(int16)),
-            packet->bytes_per_sample());
-  const int16* data = reinterpret_cast<const int16*>(packet->data().data());
-  int number_of_samples = packet->data().size() * kBitsPerByte / kBitsPerSample;
-
+// static
+bool AudioCapturerWin::IsPacketOfSilence(
+    const int16* samples, int number_of_samples) {
   for (int i = 0; i < number_of_samples; i++) {
-    if (abs(data[i]) > kSilenceThreshold)
+    if (abs(samples[i]) > kSilenceThreshold)
       return false;
   }
+  return true;
+}
+
+bool AudioCapturer::IsSupported() {
   return true;
 }
 

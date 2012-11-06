@@ -4,6 +4,7 @@
 
 #include "ui/app_list/app_list_item_model.h"
 
+#include "base/logging.h"
 #include "ui/app_list/app_list_item_model_observer.h"
 
 namespace app_list {

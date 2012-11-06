@@ -6,8 +6,8 @@
 
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/system/tray/tray_constants.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/button/image_button.h"
@@ -92,6 +92,10 @@ void TrayNotificationView::SetIconImage(const gfx::ImageSkia& image) {
   SchedulePaint();
 }
 
+const gfx::ImageSkia& TrayNotificationView::GetIconImage() const {
+  return icon_->GetImage();
+}
+
 void TrayNotificationView::UpdateView(views::View* new_contents) {
   RemoveAllChildViews(true);
   InitView(new_contents);
@@ -111,21 +115,21 @@ void TrayNotificationView::UpdateViewAndImage(views::View* new_contents,
 }
 
 void TrayNotificationView::ButtonPressed(views::Button* sender,
-                                         const views::Event& event) {
+                                         const ui::Event& event) {
   HandleClose();
 }
 
-bool TrayNotificationView::OnMousePressed(const views::MouseEvent& event) {
+bool TrayNotificationView::OnMousePressed(const ui::MouseEvent& event) {
   HandleClickAction();
   return true;
 }
 
-ui::GestureStatus TrayNotificationView::OnGestureEvent(
-    const views::GestureEvent& event) {
+ui::EventResult TrayNotificationView::OnGestureEvent(
+    const ui::GestureEvent& event) {
   if (event.type() != ui::ET_GESTURE_TAP)
-    return ui::GESTURE_STATUS_UNKNOWN;
+    return ui::ER_UNHANDLED;
   HandleClickAction();
-  return ui::GESTURE_STATUS_CONSUMED;
+  return ui::ER_CONSUMED;
 }
 
 void TrayNotificationView::OnClose() {

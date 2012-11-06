@@ -12,9 +12,9 @@
 #include <X11/extensions/Xrandr.h>
 
 #include "base/message_pump_aurax11.h"
-#include "ui/aura/dispatcher_linux.h"
 #include "ui/aura/env.h"
 #include "ui/aura/display_manager.h"
+#include "ui/base/x/x11_util.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/gfx/display.h"
 
@@ -84,13 +84,11 @@ DisplayChangeObserverX11::DisplayChangeObserverX11()
       xrandr_event_base_(0) {
   int error_base_ignored;
   XRRQueryExtension(xdisplay_, &xrandr_event_base_, &error_base_ignored);
-  static_cast<DispatcherLinux*>(Env::GetInstance()->GetDispatcher())->
-      AddDispatcherForRootWindow(this);
+  base::MessagePumpAuraX11::Current()->AddDispatcherForRootWindow(this);
 }
 
 DisplayChangeObserverX11::~DisplayChangeObserverX11() {
-  static_cast<DispatcherLinux*>(Env::GetInstance()->GetDispatcher())->
-      RemoveDispatcherForRootWindow(this);
+  base::MessagePumpAuraX11::Current()->RemoveDispatcherForRootWindow(this);
 }
 
 bool DisplayChangeObserverX11::Dispatch(const base::NativeEvent& event) {
@@ -117,6 +115,7 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
 
   std::vector<gfx::Display> displays;
   std::set<int> y_coords;
+  std::set<int64> ids;
   for (int o = 0; o < screen_resources->noutput; o++) {
     XRROutputInfo *output_info =
         XRRGetOutputInfo(xdisplay_,
@@ -131,6 +130,12 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
       LOG(WARNING) << "Crtc not found for output: output=" << o;
       continue;
     }
+    // TODO(oshima): Temporarily ignore all displays other than
+    // primary, which has y = 0 to disable extended desktop.
+    // crbug.com/152003.
+    if (crtc_info->y != 0)
+      continue;
+
     XRRModeInfo* mode = FindMode(screen_resources, crtc_info->mode);
     if (!mode) {
       LOG(WARNING) << "Could not find a mode for the output: output=" << o;
@@ -150,9 +155,27 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
         kHighDensityDIPThreshold) {
       device_scale_factor = 2.0f;
     }
+
+    uint16 manufacturer_id = 0;
+    uint32 serial_number = 0;
+    if (ui::GetOutputDeviceData(screen_resources->outputs[o], &manufacturer_id,
+                                &serial_number, NULL) && manufacturer_id != 0) {
+      // An ID based on display's index will be assigned later if this call
+      // fails.
+      int64 new_id = gfx::Display::GetID(manufacturer_id, serial_number);
+      if (ids.find(new_id) == ids.end()) {
+        displays.back().set_id(new_id);
+        ids.insert(new_id);
+      }
+    }
+
     displays.back().set_device_scale_factor(device_scale_factor);
     y_coords.insert(crtc_info->y);
     XRRFreeOutputInfo(output_info);
+
+    // TODO(oshima): There is only one display in m23.
+    // Set the id to 0. crbug.com/152003.
+    displays.back().set_id(0);
   }
 
   // Free all allocated resources.
@@ -165,11 +188,14 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
   // PowerManager lays out the outputs vertically. Sort them by Y
   // coordinates.
   std::sort(displays.begin(), displays.end(), CompareDisplayY);
-  // TODO(oshima): Assisgn index as ID for now. Use unique ID.
-  int id = 0;
+  int64 id = 0;
   for (std::vector<gfx::Display>::iterator iter = displays.begin();
-       iter != displays.end(); ++iter, ++id)
-    (*iter).set_id(id);
+       iter != displays.end(); ++iter) {
+    if (iter->id() == gfx::Display::kInvalidDisplayID) {
+      iter->set_id(id);
+      ++id;
+    }
+  }
 
   Env::GetInstance()->display_manager()->OnNativeDisplaysChanged(displays);
 }

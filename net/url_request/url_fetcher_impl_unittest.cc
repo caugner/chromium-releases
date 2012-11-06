@@ -552,6 +552,7 @@ void URLFetcherStopOnRedirectTest::OnURLFetchComplete(
   callback_called_ = true;
   EXPECT_EQ(GURL(kRedirectTarget), source->GetURL());
   EXPECT_EQ(URLRequestStatus::CANCELED, source->GetStatus().status());
+  EXPECT_EQ(ERR_ABORTED, source->GetStatus().error());
   EXPECT_EQ(301, source->GetResponseCode());
   CleanupAfterFetchComplete();
 }
@@ -990,9 +991,11 @@ TEST_F(URLFetcherBadHTTPSTest, DISABLED_BadHTTPSTest) {
 #else
 TEST_F(URLFetcherBadHTTPSTest, BadHTTPSTest) {
 #endif
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_EXPIRED);
-  TestServer test_server(https_options, FilePath(kDocRoot));
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_EXPIRED);
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   CreateFetcher(test_server.GetURL("defaultresponse"));

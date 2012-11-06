@@ -130,10 +130,8 @@ void ChangePosixFilePermissions(const FilePath& path,
 
 const wchar_t bogus_content[] = L"I'm cannon fodder.";
 
-const file_util::FileEnumerator::FileType FILES_AND_DIRECTORIES =
-    static_cast<file_util::FileEnumerator::FileType>(
-        file_util::FileEnumerator::FILES |
-        file_util::FileEnumerator::DIRECTORIES);
+const int FILES_AND_DIRECTORIES =
+    file_util::FileEnumerator::FILES | file_util::FileEnumerator::DIRECTORIES;
 
 // file_util winds up using autoreleased objects on the Mac, so this needs
 // to be a PlatformTest
@@ -1594,71 +1592,6 @@ TEST_F(ReadOnlyFileUtilTest, TextContentsEqual) {
 
 // We don't need equivalent functionality outside of Windows.
 #if defined(OS_WIN)
-TEST_F(FileUtilTest, ResolveShortcutTest) {
-  FilePath target_file = temp_dir_.path().Append(L"Target.txt");
-  CreateTextFile(target_file, L"This is the target.");
-
-  FilePath link_file = temp_dir_.path().Append(L"Link.lnk");
-
-  HRESULT result;
-  IShellLink* shell = NULL;
-  IPersistFile* persist = NULL;
-
-  CoInitialize(NULL);
-  // Temporarily create a shortcut for test
-  result = CoCreateInstance(CLSID_ShellLink, NULL,
-                          CLSCTX_INPROC_SERVER, IID_IShellLink,
-                          reinterpret_cast<LPVOID*>(&shell));
-  EXPECT_TRUE(SUCCEEDED(result));
-  result = shell->QueryInterface(IID_IPersistFile,
-                             reinterpret_cast<LPVOID*>(&persist));
-  EXPECT_TRUE(SUCCEEDED(result));
-  result = shell->SetPath(target_file.value().c_str());
-  EXPECT_TRUE(SUCCEEDED(result));
-  result = shell->SetDescription(L"ResolveShortcutTest");
-  EXPECT_TRUE(SUCCEEDED(result));
-  result = persist->Save(link_file.value().c_str(), TRUE);
-  EXPECT_TRUE(SUCCEEDED(result));
-  if (persist)
-    persist->Release();
-  if (shell)
-    shell->Release();
-
-  bool is_solved;
-  is_solved = file_util::ResolveShortcut(&link_file);
-  EXPECT_TRUE(is_solved);
-  std::wstring contents;
-  contents = ReadTextFile(link_file);
-  EXPECT_EQ(L"This is the target.", contents);
-
-  // Cleaning
-  DeleteFile(target_file.value().c_str());
-  DeleteFile(link_file.value().c_str());
-  CoUninitialize();
-}
-
-TEST_F(FileUtilTest, CreateShortcutTest) {
-  const wchar_t* file_contents = L"This is another target.";
-  FilePath target_file = temp_dir_.path().Append(L"Target1.txt");
-  CreateTextFile(target_file, file_contents);
-
-  FilePath link_file = temp_dir_.path().Append(L"Link1.lnk");
-
-  CoInitialize(NULL);
-  EXPECT_TRUE(file_util::CreateOrUpdateShortcutLink(
-                  target_file.value().c_str(), link_file.value().c_str(), NULL,
-                  NULL, NULL, NULL, 0, NULL,
-                  file_util::SHORTCUT_CREATE_ALWAYS));
-  FilePath resolved_name = link_file;
-  EXPECT_TRUE(file_util::ResolveShortcut(&resolved_name));
-  std::wstring read_contents = ReadTextFile(resolved_name);
-  EXPECT_EQ(file_contents, read_contents);
-
-  DeleteFile(target_file.value().c_str());
-  DeleteFile(link_file.value().c_str());
-  CoUninitialize();
-}
-
 TEST_F(FileUtilTest, CopyAndDeleteDirectoryTest) {
   // Create a directory
   FilePath dir_name_from =
@@ -1863,8 +1796,7 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
 
   // Test an empty directory, non-recursively, including "..".
   file_util::FileEnumerator f0_dotdot(temp_dir_.path(), false,
-      static_cast<file_util::FileEnumerator::FileType>(
-          FILES_AND_DIRECTORIES | file_util::FileEnumerator::INCLUDE_DOT_DOT));
+      FILES_AND_DIRECTORIES | file_util::FileEnumerator::INCLUDE_DOT_DOT);
   EXPECT_EQ(temp_dir_.path().Append(FILE_PATH_LITERAL("..")).value(),
             f0_dotdot.Next().value());
   EXPECT_EQ(FILE_PATH_LITERAL(""),
@@ -1919,11 +1851,9 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
   EXPECT_EQ(c2_non_recursive.size(), 2);
 
   // Only enumerate directories, non-recursively, including "..".
-  file_util::FileEnumerator f2_dotdot(
-      temp_dir_.path(), false,
-      static_cast<file_util::FileEnumerator::FileType>(
-          file_util::FileEnumerator::DIRECTORIES |
-          file_util::FileEnumerator::INCLUDE_DOT_DOT));
+  file_util::FileEnumerator f2_dotdot(temp_dir_.path(), false,
+      file_util::FileEnumerator::DIRECTORIES |
+      file_util::FileEnumerator::INCLUDE_DOT_DOT);
   FindResultCollector c2_dotdot(f2_dotdot);
   EXPECT_TRUE(c2_dotdot.HasFile(dir1));
   EXPECT_TRUE(c2_dotdot.HasFile(dir2));

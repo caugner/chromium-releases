@@ -319,8 +319,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Starts a nested message loop that moves the window. This can be used to
   // start a window move operation from a mouse moved event. This returns when
-  // the move completes.
-  MoveLoopResult RunMoveLoop();
+  // the move completes. |drag_offset| is the offset from the top left corner
+  // of the window to the point where the cursor is dragging, and is used to
+  // offset the bounds of the window from the cursor.
+  MoveLoopResult RunMoveLoop(const gfx::Point& drag_offset);
 
   // Stops a previously started move loop. This is not immediate.
   void EndMoveLoop();
@@ -491,9 +493,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Sets the focus to |native_view|.
   void FocusNativeView(gfx::NativeView native_view);
 
-  // Updates the frame after an event caused it to be changed.
-  virtual void UpdateFrameAfterFrameChange();
-
   void set_frame_type(FrameType frame_type) { frame_type_ = frame_type; }
   FrameType frame_type() const { return frame_type_; }
 
@@ -579,7 +578,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // being processed at the same time (e.g. one event triggers another event),
   // then the most recent event is returned. Returns NULL if no event is being
   // processed.
-  const Event* GetCurrentEvent();
+  const ui::Event* GetCurrentEvent();
 
   // Invoked when the tooltip text changes for the specified views.
   void TooltipTextChanged(View* view);
@@ -638,11 +637,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
       const gfx::Rect& dirty_region) OVERRIDE;
   virtual void OnNativeWidgetPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) OVERRIDE;
-  virtual bool OnKeyEvent(const KeyEvent& event) OVERRIDE;
-  virtual bool OnMouseEvent(const MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyEvent(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool OnMouseEvent(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
-  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(const ui::TouchEvent& event) OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(
+      const ui::GestureEvent& event) OVERRIDE;
   virtual bool ExecuteCommand(int command_id) OVERRIDE;
   virtual InputMethod* GetInputMethodDirect() OVERRIDE;
   virtual const std::vector<ui::Layer*>& GetRootLayers() OVERRIDE;

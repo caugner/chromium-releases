@@ -15,6 +15,7 @@ namespace internal {
 
 class StatusAreaWidget;
 class TrayBackground;
+class TrayLayerAnimationObserver;
 
 // Base class for children of StatusAreaWidget: SystemTray, WebNotificationTray.
 // This class handles setting and animating the background when the Launcher
@@ -58,13 +59,19 @@ class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
   explicit TrayBackgroundView(internal::StatusAreaWidget* status_area_widget);
   virtual ~TrayBackgroundView();
 
+  // Called after the tray has been added to the widget containing it.
+  virtual void Initialize();
+
   // Overridden from views::View.
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
   virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
+  virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void AboutToRequestFocusFromTabTraversal(bool reverse) OVERRIDE;
 
   // Overridden from internal::ActionableView.
-  virtual bool PerformAction(const views::Event& event) OVERRIDE;
+  virtual bool PerformAction(const ui::Event& event) OVERRIDE;
 
   // Overridden from internal::BackgroundAnimatorDelegate.
   virtual void UpdateBackground(int alpha) OVERRIDE;
@@ -72,18 +79,22 @@ class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
   // Called whenever the shelf alignment changes.
   virtual void SetShelfAlignment(ShelfAlignment alignment);
 
-  // Sets |contents| as a child and sets its background to |background_|.
+  // Called when the anchor (tray or bubble) may have moved or changed.
+  virtual void AnchorUpdated() {}
+
+  virtual string16 GetAccessibleName() = 0;
+
+  // Sets |contents| as a child.
   void SetContents(views::View* contents);
+
+  // Creates and sets contents background to |background_|.
+  void SetContentsBackground();
 
   // Sets whether the tray paints a background. Default is true, but is set to
   // false if a window overlaps the shelf.
   void SetPaintsBackground(
       bool value,
       internal::BackgroundAnimator::ChangeType change_type);
-
-  // Called after all status area trays have been created. Sets the border
-  // based on the position of the view.
-  void SetBorder();
 
   StatusAreaWidget* status_area_widget() {
     return status_area_widget_;
@@ -92,6 +103,12 @@ class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
   ShelfAlignment shelf_alignment() const { return shelf_alignment_; }
 
  private:
+  friend class TrayLayerAnimationObserver;
+
+  // Called from Initialize after all status area trays have been created.
+  // Sets the border based on the position of the view.
+  void SetBorder();
+
   // Unowned pointer to parent widget.
   StatusAreaWidget* status_area_widget_;
 
@@ -106,6 +123,8 @@ class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
 
   internal::BackgroundAnimator hide_background_animator_;
   internal::BackgroundAnimator hover_background_animator_;
+  scoped_ptr<internal::TrayLayerAnimationObserver>
+      layer_animation_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayBackgroundView);
 };

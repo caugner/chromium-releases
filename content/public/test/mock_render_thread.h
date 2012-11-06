@@ -62,8 +62,6 @@ class MockRenderThread : public RenderThread {
   virtual base::SharedMemoryHandle HostAllocateSharedMemoryBuffer(
       uint32 buffer_size) OVERRIDE;
   virtual void RegisterExtension(v8::Extension* extension) OVERRIDE;
-  virtual bool IsRegisteredExtension(
-      const std::string& v8_extension_name) const OVERRIDE;
   virtual void ScheduleIdleHandler(int64 initial_delay_ms) OVERRIDE;
   virtual void IdleHandler() OVERRIDE;
   virtual int64 GetIdleNotificationDelayInMs() const OVERRIDE;
@@ -150,6 +148,9 @@ class MockRenderThread : public RenderThread {
 
   // The last known good deserializer for sync messages.
   scoped_ptr<IPC::MessageReplyDeserializer> reply_deserializer_;
+
+  // A list of message filters added to this thread.
+  std::vector<scoped_refptr<IPC::ChannelProxy::MessageFilter> > filters_;
 };
 
 }  // namespace content

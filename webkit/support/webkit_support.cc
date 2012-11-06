@@ -50,7 +50,6 @@
 #include "ui/gl/gl_surface.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/fileapi/isolated_context.h"
-#include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
@@ -74,6 +73,8 @@
 #include "webkit/tools/test_shell/simple_dom_storage_system.h"
 #include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
+#include "webkit/user_agent/user_agent.h"
+#include "webkit/user_agent/user_agent_util.h"
 
 #if defined(OS_ANDROID)
 #include "base/test/test_support_android.h"
@@ -383,6 +384,7 @@ WebPlugin* CreateWebPlugin(WebFrame* frame,
 
 WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebFrame* frame,
+    const WebURL& url,
     WebMediaPlayerClient* client,
     webkit_media::MediaStreamClient* media_stream_client) {
 #if defined(OS_ANDROID)
@@ -414,8 +416,9 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
 
 WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebFrame* frame,
+    const WebURL& url,
     WebMediaPlayerClient* client) {
-  return CreateMediaPlayer(frame, client, NULL);
+  return CreateMediaPlayer(frame, url, client, NULL);
 }
 
 #if defined(OS_ANDROID)
@@ -802,6 +805,13 @@ void OpenFileSystem(WebFrame* frame, WebFileSystem::Type type,
   SimpleFileSystem* fileSystem = static_cast<SimpleFileSystem*>(
       test_environment->webkit_platform_support()->fileSystem());
   fileSystem->OpenFileSystem(frame, type, size, create, callbacks);
+}
+
+void DeleteFileSystem(WebFrame* frame, WebFileSystem::Type type,
+                      WebFileSystemCallbacks* callbacks) {
+  SimpleFileSystem* fileSystem = static_cast<SimpleFileSystem*>(
+      test_environment->webkit_platform_support()->fileSystem());
+  fileSystem->DeleteFileSystem(frame, type, callbacks);
 }
 
 WebKit::WebString RegisterIsolatedFileSystem(

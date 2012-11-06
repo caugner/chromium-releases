@@ -12,6 +12,10 @@
 #include "ui/aura/client/stacking_client.h"
 #include "ui/gfx/point.h"
 
+#if defined(USE_X11)
+#include "ui/aura/device_list_updater_aurax11.h"
+#endif
+
 namespace aura {
 class EnvObserver;
 class EventFilter;
@@ -22,7 +26,7 @@ namespace internal {
 class DisplayChangeObserverX11;
 }
 
-#if !defined(OS_MACOSX)
+#if !defined(USE_X11)
 // Creates a platform-specific native event dispatcher.
 MessageLoop::Dispatcher* CreateDispatcher();
 #endif
@@ -50,6 +54,10 @@ class AURA_EXPORT Env {
   const gfx::Point& last_mouse_location() const { return last_mouse_location_; }
   void SetLastMouseLocation(const Window& window,
                             const gfx::Point& location_in_root);
+
+  // If |cursor_shown| is false, sets the last_mouse_position to an invalid
+  // location. If |cursor_shown| is true, restores the last_mouse_position.
+  void SetCursorShown(bool cursor_shown);
 
   // Whether any touch device is currently down.
   bool is_touch_down() const { return is_touch_down_; }
@@ -92,7 +100,7 @@ class AURA_EXPORT Env {
   void NotifyWindowInitialized(Window* window);
 
   ObserverList<EnvObserver> observers_;
-#if !defined(OS_MACOSX)
+#if !defined(USE_X11)
   scoped_ptr<MessageLoop::Dispatcher> dispatcher_;
 #endif
 
@@ -100,6 +108,9 @@ class AURA_EXPORT Env {
   int mouse_button_flags_;
   // Location of last mouse event, in screen coordinates.
   gfx::Point last_mouse_location_;
+  // If the cursor is hidden, saves the previous last_mouse_position.
+  gfx::Point hidden_cursor_location_;
+  bool is_cursor_hidden_;
   bool is_touch_down_;
   bool render_white_bg_;
   client::StackingClient* stacking_client_;
@@ -108,6 +119,7 @@ class AURA_EXPORT Env {
 
 #if defined(USE_X11)
   scoped_ptr<internal::DisplayChangeObserverX11> display_change_observer_;
+  DeviceListUpdaterAuraX11 device_list_updater_aurax11_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(Env);

@@ -11,17 +11,16 @@
 #include <string>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/property_bag.h"
 #include "base/string16.h"
 #include "base/time.h"
 #include "base/tuple.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/app_shortcut_manager.h"
 #include "chrome/browser/extensions/app_sync_bundle.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
@@ -35,17 +34,18 @@
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/extensions/process_map.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "sync/api/string_ordinal.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/syncable_service.h"
 
 class BookmarkExtensionEventRouter;
+class CommandLine;
 class ExtensionErrorUI;
 class ExtensionFontSettingsEventRouter;
 class ExtensionManagementEventRouter;
@@ -70,20 +70,22 @@ class ComponentLoader;
 class ContentSettingsStore;
 class CrxInstaller;
 class Extension;
+class ExtensionActionStorageManager;
 class ExtensionCookiesEventRouter;
 class ExtensionManagedModeEventRouter;
-class PushMessagingEventRouter;
 class ExtensionSyncData;
 class ExtensionSystem;
 class ExtensionUpdater;
+class FontSettingsEventRouter;
+class MediaGalleriesPrivateEventRouter;
 class PendingExtensionManager;
+class PushMessagingEventRouter;
 class SettingsFrontend;
 class WebNavigationEventRouter;
 class WindowEventRouter;
 }
 
 namespace syncer {
-class SyncData;
 class SyncErrorFactory;
 }
 
@@ -119,7 +121,7 @@ class ExtensionServiceInterface : public syncer::SyncableService {
 
   virtual void UpdateExtensionBlacklist(
     const std::vector<std::string>& blacklist) = 0;
-  virtual void CheckAdminBlacklist() = 0;
+  virtual void CheckManagementPolicy() = 0;
 
   // Safe to call multiple times in a row.
   //
@@ -147,36 +149,36 @@ class ExtensionService
  public:
   // The name of the directory inside the profile where extensions are
   // installed to.
-  static const char* kInstallDirectoryName;
+  static const char kInstallDirectoryName[];
 
   // If auto-updates are turned on, default to running every 5 hours.
   static const int kDefaultUpdateFrequencySeconds = 60 * 60 * 5;
 
   // The name of the directory inside the profile where per-app local settings
   // are stored.
-  static const char* kLocalAppSettingsDirectoryName;
+  static const char kLocalAppSettingsDirectoryName[];
 
   // The name of the directory inside the profile where per-extension local
   // settings are stored.
-  static const char* kLocalExtensionSettingsDirectoryName;
+  static const char kLocalExtensionSettingsDirectoryName[];
 
   // The name of the directory inside the profile where per-app synced settings
   // are stored.
-  static const char* kSyncAppSettingsDirectoryName;
+  static const char kSyncAppSettingsDirectoryName[];
 
   // The name of the directory inside the profile where per-extension synced
   // settings are stored.
-  static const char* kSyncExtensionSettingsDirectoryName;
+  static const char kSyncExtensionSettingsDirectoryName[];
 
   // The name of the database inside the profile where chrome-internal
   // extension state resides.
-  static const char* kStateStoreName;
+  static const char kStateStoreName[];
 
   // Returns the Extension of hosted or packaged apps, NULL otherwise.
-  const extensions::Extension* GetInstalledApp(const GURL& url);
+  const extensions::Extension* GetInstalledApp(const GURL& url) const;
 
   // Returns whether the URL is from either a hosted or packaged app.
-  bool IsInstalledApp(const GURL& url);
+  bool IsInstalledApp(const GURL& url) const;
 
   // Associates a renderer process with the given installed app.
   void SetInstalledAppForRenderer(int renderer_child_id,
@@ -185,7 +187,7 @@ class ExtensionService
   // If the renderer is hosting an installed app, returns it, otherwise returns
   // NULL.
   const extensions::Extension* GetInstalledAppForRenderer(
-      int renderer_child_id);
+      int renderer_child_id) const;
 
   // Attempts to uninstall an extension from a given ExtensionService. Returns
   // true iff the target extension exists.
@@ -244,13 +246,13 @@ class ExtensionService
 
   // Returns true if the given extension can see events and data from another
   // sub-profile (incognito to original profile, or vice versa).
-  bool CanCrossIncognito(const extensions::Extension* extension);
+  bool CanCrossIncognito(const extensions::Extension* extension) const;
 
   // Returns true if the given extension can be loaded in incognito.
   bool CanLoadInIncognito(const extensions::Extension* extension) const;
 
   // Whether this extension can inject scripts into pages with file URLs.
-  bool AllowFileAccess(const extensions::Extension* extension);
+  bool AllowFileAccess(const extensions::Extension* extension) const;
   // Will reload the extension since this permission is applied at loading time
   // only.
   void SetAllowFileAccess(const extensions::Extension* extension, bool allow);
@@ -258,22 +260,19 @@ class ExtensionService
   // Whether the persistent background page, if any, is ready. We don't load
   // other components until then. If there is no background page, or if it is
   // non-persistent (lazy), we consider it to be ready.
-  bool IsBackgroundPageReady(const extensions::Extension* extension);
+  bool IsBackgroundPageReady(const extensions::Extension* extension) const;
   void SetBackgroundPageReady(const extensions::Extension* extension);
 
   // Getter and setter for the flag that specifies whether the extension is
   // being upgraded.
-  bool IsBeingUpgraded(const extensions::Extension* extension);
+  bool IsBeingUpgraded(const extensions::Extension* extension) const;
   void SetBeingUpgraded(const extensions::Extension* extension, bool value);
 
   // Getter and setter for the flag that specifies if the extension has used
   // the webrequest API.
   // TODO(mpcomplete): remove. http://crbug.com/100411
-  bool HasUsedWebRequest(const extensions::Extension* extension);
+  bool HasUsedWebRequest(const extensions::Extension* extension) const;
   void SetHasUsedWebRequest(const extensions::Extension* extension, bool value);
-
-  // Getter for the extension's runtime data PropertyBag.
-  base::PropertyBag* GetPropertyBag(const extensions::Extension* extension);
 
   // Initialize and start all installed extensions.
   void Init();
@@ -289,6 +288,9 @@ class ExtensionService
 
   // Start up the extension event routers.
   void InitEventRouters();
+
+  // Called when the associated Profile is going to be destroyed.
+  void Shutdown();
 
   // Look up an extension by ID.  Does not include terminated
   // extensions.
@@ -353,6 +355,12 @@ class ExtensionService
       const extensions::Extension* extension,
       bool record_oauth2_grant);
 
+  // Updates the |extension|'s granted permissions lists to include all
+  // permissions in the |extensions|'s manifest.
+  void GrantPermissions(
+      const extensions::Extension* extension,
+      bool record_oauth2_grant);
+
   // Check for updates (or potentially new extensions from external providers)
   void CheckForExternalUpdates();
 
@@ -382,11 +390,11 @@ class ExtensionService
   bool ExtensionBindingsAllowed(const GURL& url);
 
   // Returns the icon to display in the omnibox for the given extension.
-  const SkBitmap& GetOmniboxIcon(const std::string& extension_id);
+  gfx::Image GetOmniboxIcon(const std::string& extension_id);
 
   // Returns the icon to display in the omnibox popup window for the given
   // extension.
-  const SkBitmap& GetOmniboxPopupIcon(const std::string& extension_id);
+  gfx::Image GetOmniboxPopupIcon(const std::string& extension_id);
 
   // Called when the initial extensions load has completed.
   virtual void OnLoadedInstalledExtensions();
@@ -400,7 +408,8 @@ class ExtensionService
   void OnExtensionInstalled(
       const extensions::Extension* extension,
       bool from_webstore,
-      const StringOrdinal& page_ordinal);
+      const syncer::StringOrdinal& page_ordinal,
+      bool has_requirement_errors);
 
   // Initializes the |extension|'s active permission set and disables the
   // extension if the privilege level has increased (e.g., due to an upgrade).
@@ -411,10 +420,10 @@ class ExtensionService
   virtual void UpdateExtensionBlacklist(
       const std::vector<std::string>& blacklist) OVERRIDE;
 
-  // Go through each extension and unload those that the network admin has
-  // put on the blacklist (not to be confused with the Google-managed blacklist)
-  // set of extensions.
-  virtual void CheckAdminBlacklist() OVERRIDE;
+  // Go through each extension and unload those that are not allowed to run by
+  // management policy providers (ie. network admin and Google-managed
+  // blacklist).
+  virtual void CheckManagementPolicy() OVERRIDE;
 
   virtual void CheckForUpdatesSoon() OVERRIDE;
 
@@ -619,10 +628,22 @@ class ExtensionService
     return &extension_warnings_;
   }
 
-  AppShortcutManager* app_shortcut_manager() { return &app_shortcut_manager_; }
+  extensions::AppShortcutManager* app_shortcut_manager() {
+    return &app_shortcut_manager_;
+  }
 
   // Specialization of syncer::SyncableService::AsWeakPtr.
   base::WeakPtr<ExtensionService> AsWeakPtr() { return base::AsWeakPtr(this); }
+
+#if defined(OS_CHROMEOS)
+  // TODO(jamescook): Remove ifdef after M23 backport, crbug.com/155994
+  bool browser_terminating() const { return browser_terminating_; }
+
+  // For testing.
+  void set_browser_terminating_for_test(bool value) {
+    browser_terminating_ = value;
+  }
+#endif  // OS_CHROMEOS
 
  private:
   // Contains Extension data that can change during the life of the process,
@@ -636,9 +657,6 @@ class ExtensionService
 
     // True if the extension has used the webRequest API.
     bool has_used_webrequest;
-
-    // Generic bag of runtime data that users can associate with extensions.
-    base::PropertyBag property_bag;
 
     ExtensionRuntimeData();
     ~ExtensionRuntimeData();
@@ -667,13 +685,18 @@ class ExtensionService
       const extensions::ExtensionSyncData& extension_sync_data,
       syncer::ModelType type);
 
+  enum IncludeFlag {
+    INCLUDE_NONE = 0,
+    INCLUDE_ENABLED = 1 << 0,
+    INCLUDE_DISABLED = 1 << 1,
+    INCLUDE_TERMINATED = 1 << 2
+  };
+
   // Look up an extension by ID, optionally including either or both of enabled
   // and disabled extensions.
   const extensions::Extension* GetExtensionByIdInternal(
       const std::string& id,
-      bool include_enabled,
-      bool include_disabled,
-      bool include_terminated) const;
+      int include_mask) const;
 
   // Adds the given extension to the list of terminated extensions if
   // it is not already there and unloads it.
@@ -707,6 +730,11 @@ class ExtensionService
   void UpdatePluginListWithNaClModules();
 
   NaClModuleInfoList::iterator FindNaClModule(const GURL& url);
+
+  // Enqueues a launch task in the lazy background page queue.
+  void QueueRestoreAppWindow(const extensions::Extension* extension);
+  // Launches the platform app associated with |extension_host|.
+  static void LaunchApplication(extensions::ExtensionHost* extension_host);
 
   // The normal profile associated with this ExtensionService.
   Profile* profile_;
@@ -780,6 +808,10 @@ class ExtensionService
   typedef std::map<std::string, int> OrphanedDevTools;
   OrphanedDevTools orphaned_dev_tools_;
 
+  // A set of apps that had an open window the last time they were reloaded.
+  // A new window will be launched when the app is succesfully reloaded.
+  std::set<std::string> relaunch_app_ids_;
+
   content::NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
 
@@ -813,12 +845,15 @@ class ExtensionService
 
   scoped_ptr<ExtensionManagementEventRouter> management_event_router_;
 
+  scoped_ptr<extensions::MediaGalleriesPrivateEventRouter>
+      media_galleries_private_event_router_;
+
   scoped_ptr<extensions::PushMessagingEventRouter>
       push_messaging_event_router_;
 
   scoped_ptr<extensions::WebNavigationEventRouter> web_navigation_event_router_;
 
-  scoped_ptr<ExtensionFontSettingsEventRouter> font_settings_event_router_;
+  scoped_ptr<extensions::FontSettingsEventRouter> font_settings_event_router_;
 
   scoped_ptr<extensions::ExtensionManagedModeEventRouter>
       managed_mode_event_router_;
@@ -841,6 +876,14 @@ class ExtensionService
   // install pending extensions.
   bool update_once_all_providers_are_ready_;
 
+#if defined(OS_CHROMEOS)
+  // TODO(jamescook): Remove ifdef after M23 backport, crbug.com/155994
+  // Set when the browser is terminating. Prevents us from installing or
+  // updating additional extensions and allows in-progress installations to
+  // decide to abort.
+  bool browser_terminating_;
+#endif
+
   NaClModuleInfoList nacl_module_list_;
 
   extensions::AppSyncBundle app_sync_bundle_;
@@ -851,9 +894,14 @@ class ExtensionService
 
   extensions::ProcessMap process_map_;
 
-  AppShortcutManager app_shortcut_manager_;
+  extensions::AppShortcutManager app_shortcut_manager_;
 
   scoped_ptr<ExtensionErrorUI> extension_error_ui_;
+
+#if defined(ENABLE_EXTENSIONS)
+  scoped_ptr<extensions::ExtensionActionStorageManager>
+      extension_action_storage_manager_;
+#endif
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            InstallAppsWithUnlimtedStorage);

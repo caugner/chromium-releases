@@ -82,8 +82,7 @@ class SiteInstanceTestClient : public TestContentClient {
   }
 };
 
-class SiteInstanceTestBrowserClient :
-    public content::TestContentBrowserClient {
+class SiteInstanceTestBrowserClient : public content::TestContentBrowserClient {
  public:
   SiteInstanceTestBrowserClient()
       : privileged_process_id_(-1) {
@@ -135,12 +134,29 @@ class SiteInstanceTest : public testing::Test {
 
     content::GetContentClient()->set_browser_for_testing(old_browser_client_);
     content::SetContentClient(old_client_);
-    MessageLoop::current()->RunAllPending();
-    message_loop_.RunAllPending();
+
+    // http://crbug.com/143565 found SiteInstanceTest leaking an
+    // AppCacheDatabase. This happens because some part of the test indirectly
+    // calls StoragePartitionImplMap::PostCreateInitialization(), which posts
+    // a task to the IO thread to create the AppCacheDatabase. Since the
+    // message loop is not running, the AppCacheDatabase ends up getting
+    // created when DrainMessageLoops() gets called at the end of a test case.
+    // Immediately after, the test case ends and the AppCacheDatabase gets
+    // scheduled for deletion. Here, call DrainMessageLoops() again so the
+    // AppCacheDatabase actually gets deleted.
+    DrainMessageLoops();
   }
 
   void set_privileged_process_id(int process_id) {
     browser_client_.set_privileged_process_id(process_id);
+  }
+
+  void DrainMessageLoops() {
+    // We don't just do this in TearDown() because we create TestBrowserContext
+    // objects in each test, which will be destructed before
+    // TearDown() is called.
+    MessageLoop::current()->RunAllPending();
+    message_loop_.RunAllPending();
   }
 
  private:
@@ -249,15 +265,16 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
                                                &site_delete_counter,
                                                &browsing_delete_counter);
   {
-    WebContentsImpl web_contents(browser_context.get(), instance,
-                                 MSG_ROUTING_NONE, NULL, NULL, NULL);
+    scoped_ptr<WebContentsImpl> web_contents(
+        WebContentsImpl::Create(browser_context.get(), instance,
+                                MSG_ROUTING_NONE, NULL));
     EXPECT_EQ(1, site_delete_counter);
     EXPECT_EQ(1, browsing_delete_counter);
   }
 
   // Make sure that we flush any messages related to the above WebContentsImpl
   // destruction.
-  MessageLoop::current()->RunAllPending();
+  DrainMessageLoops();
 
   EXPECT_EQ(2, site_delete_counter);
   EXPECT_EQ(2, browsing_delete_counter);
@@ -302,6 +319,8 @@ TEST_F(SiteInstanceTest, CloneNavigationEntry) {
 
   // Both BrowsingInstances are also now deleted
   EXPECT_EQ(2, browsing_delete_counter);
+
+  DrainMessageLoops();
 }
 
 // Test to ensure GetProcess returns and creates processes correctly.
@@ -321,6 +340,8 @@ TEST_F(SiteInstanceTest, GetProcess) {
   scoped_ptr<content::RenderProcessHost> host2(instance2->GetProcess());
   EXPECT_TRUE(host2.get() != NULL);
   EXPECT_NE(host1.get(), host2.get());
+
+  DrainMessageLoops();
 }
 
 // Test to ensure SetSite and site() work properly.
@@ -334,6 +355,8 @@ TEST_F(SiteInstanceTest, SetSite) {
   EXPECT_EQ(GURL("http://google.com"), instance->GetSite());
 
   EXPECT_TRUE(instance->HasSite());
+
+  DrainMessageLoops();
 }
 
 // Test to ensure GetSiteForURL properly returns sites for URLs.
@@ -367,6 +390,8 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   // "file://home/" as the site, which seems broken.
   // test_url = GURL("file://home/");
   // EXPECT_EQ(GURL(), SiteInstanceImpl::GetSiteForURL(NULL, test_url));
+
+  DrainMessageLoops();
 }
 
 // Test of distinguishing URLs from different sites.  Most of this logic is
@@ -393,6 +418,8 @@ TEST_F(SiteInstanceTest, IsSameWebSite) {
   EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_javascript, url_foo));
   EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_javascript, url_foo_https));
   EXPECT_TRUE(SiteInstance::IsSameWebSite(NULL, url_javascript, url_foo_port));
+
+  DrainMessageLoops();
 }
 
 // Test to ensure that there is only one SiteInstance per site in a given
@@ -467,6 +494,8 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSite) {
 
   // browsing_instances will be deleted when their SiteInstances are deleted.
   // The processes will be unregistered when the RPH scoped_ptrs go away.
+
+  DrainMessageLoops();
 }
 
 // Test to ensure that there is only one RenderProcessHost per site for an
@@ -552,6 +581,8 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
 
   // browsing_instances will be deleted when their SiteInstances are deleted.
   // The processes will be unregistered when the RPH scoped_ptrs go away.
+
+  DrainMessageLoops();
 }
 
 static SiteInstanceImpl* CreateSiteInstance(
@@ -617,6 +648,8 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   }
 
   STLDeleteContainerPointers(hosts.begin(), hosts.end());
+
+  DrainMessageLoops();
 }
 
 // Test to ensure that HasWrongProcessForURL behaves properly for different
@@ -649,4 +682,33 @@ TEST_F(SiteInstanceTest, HasWrongProcessForURL) {
       GURL("javascript:alert(document.location.href);")));
 
   EXPECT_TRUE(instance->HasWrongProcessForURL(GURL("chrome://settings")));
+
+  // Test that WebUI SiteInstances reject normal web URLs.
+  const GURL webui_url("chrome://settings");
+  scoped_refptr<SiteInstanceImpl> webui_instance(static_cast<SiteInstanceImpl*>(
+      SiteInstance::Create(browser_context.get())));
+  webui_instance->SetSite(webui_url);
+  scoped_ptr<content::RenderProcessHost> webui_host(
+      webui_instance->GetProcess());
+
+  // Simulate granting WebUI bindings for the process.
+  ChildProcessSecurityPolicyImpl::GetInstance()->GrantWebUIBindings(
+      webui_host->GetID());
+
+  EXPECT_TRUE(webui_instance->HasProcess());
+  EXPECT_FALSE(webui_instance->HasWrongProcessForURL(webui_url));
+  EXPECT_TRUE(webui_instance->HasWrongProcessForURL(GURL("http://google.com")));
+
+  // WebUI uses process-per-site, so another instance will use the same process
+  // even if we haven't called GetProcess yet.  Make sure HasWrongProcessForURL
+  // doesn't crash (http://crbug.com/137070).
+  scoped_refptr<SiteInstanceImpl> webui_instance2(
+      static_cast<SiteInstanceImpl*>(
+          SiteInstance::Create(browser_context.get())));
+  webui_instance2->SetSite(webui_url);
+  EXPECT_FALSE(webui_instance2->HasWrongProcessForURL(webui_url));
+  EXPECT_TRUE(
+      webui_instance2->HasWrongProcessForURL(GURL("http://google.com")));
+
+  DrainMessageLoops();
 }

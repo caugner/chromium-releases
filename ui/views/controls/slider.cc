@@ -14,6 +14,7 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/slide_animation.h"
+#include "ui/base/events/event.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/point.h"
@@ -218,28 +219,28 @@ void Slider::OnPaint(gfx::Canvas* canvas) {
     paint.setAntiAlias(true);
     paint.setColor(kButtonColor);
     canvas->sk_canvas()->drawCircle(button_cx, button_cy, kButtonRadius, paint);
-    View::OnPaint(canvas);
   }
+  View::OnPaint(canvas);
 }
 
-bool Slider::OnMousePressed(const views::MouseEvent& event) {
+bool Slider::OnMousePressed(const ui::MouseEvent& event) {
   if (listener_)
     listener_->SliderDragStarted(this);
   MoveButtonTo(event.location());
   return true;
 }
 
-bool Slider::OnMouseDragged(const views::MouseEvent& event) {
+bool Slider::OnMouseDragged(const ui::MouseEvent& event) {
   MoveButtonTo(event.location());
   return true;
 }
 
-void Slider::OnMouseReleased(const views::MouseEvent& event) {
+void Slider::OnMouseReleased(const ui::MouseEvent& event) {
   if (listener_)
     listener_->SliderDragEnded(this);
 }
 
-bool Slider::OnKeyPressed(const views::KeyEvent& event) {
+bool Slider::OnKeyPressed(const ui::KeyEvent& event) {
   if (orientation_ == HORIZONTAL) {
     if (event.key_code() == ui::VKEY_LEFT) {
       SetValueInternal(value_ - keyboard_increment_, VALUE_CHANGED_BY_USER);
@@ -260,15 +261,15 @@ bool Slider::OnKeyPressed(const views::KeyEvent& event) {
   return false;
 }
 
-ui::GestureStatus Slider::OnGestureEvent(const views::GestureEvent& event) {
+ui::EventResult Slider::OnGestureEvent(const ui::GestureEvent& event) {
   if (event.type() == ui::ET_GESTURE_SCROLL_UPDATE ||
       event.type() == ui::ET_GESTURE_SCROLL_BEGIN ||
       event.type() == ui::ET_GESTURE_SCROLL_END ||
       event.type() == ui::ET_GESTURE_TAP_DOWN) {
     MoveButtonTo(event.location());
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
-  return ui::GESTURE_STATUS_UNKNOWN;
+  return ui::ER_UNHANDLED;
 }
 
 void Slider::AnimationProgressed(const ui::Animation* animation) {

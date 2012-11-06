@@ -137,21 +137,157 @@ gChildPIDs = []
      StartupBrowserCreatorTest.OpenAppShortcutPanel: Fails on coverage bot.
      FilePathWatcherTest.Callback: Fails with error 'Unable to terminate
      process group' in process_util_posix.cc.
+     SUIDSandboxUITest.testSUIDSandboxEnabled: crbug.com/143250
+     PPAPINaClNewlibTest.Fullscreen: crbug.com/143251
+     PPAPINaClGLibcTest.Fullscreen: ditto.
+     UnloadTest.BrowserCloseInfiniteBeforeUnload: crbug.com/143253
+     PrerenderBrowserTest.PrerenderDelayLoadPlugin: crbug.com/143257
+     PrerenderBrowserTest.PrerenderIframeDelayLoadPlugin: ditto.
+     WindowOpenPanelTest.WindowOpenPanel: crbug.com/143258
+     WindowOpenPanelTest.CloseNonExtensionPanelsOnUninstall: ditto
+     ExtensionManagementApiTest.LaunchPanelApp: crbug.com/143416
+     ClickToPlayPluginTest.Basic: crbug.com/143417
+     ClickToPlayPluginTest.LoadAllBlockedPlugins: ditto.
+     ClickToPlayPluginTest.NoCallbackAtLoad: ditto.
+     WebGLConformanceTests.conformance_attribs_gl_enable_vertex_attrib: Fails
+     with timeout (45000 ms) exceeded error. crbug.com/143248
+     WebGLConformanceTests.conformance_attribs_gl_disabled_vertex_attrib:
+     ditto.
+     WebGLConformanceTests.conformance_attribs_gl_vertex_attrib_zero_issues:
+     ditto.
+     WebGLConformanceTests.conformance_attribs_gl_vertex_attrib: ditto.
+     WebGLConformanceTests.conformance_attribs_gl_vertexattribpointer_offsets:
+     ditto.
+     WebGLConformanceTests.conformance_attribs_gl_vertexattribpointer: ditto.
+     WebGLConformanceTests.conformance_buffers_buffer_bind_test: After
+     disabling WebGLConformanceTests specified above, this test fails when run
+     on local machine.
+     WebGLConformanceTests.conformance_buffers_buffer_data_array_buffer: ditto.
+     WebGLConformanceTests.conformance_buffers_index_validation_copies_indices:
+     ditto.
+     WebGLConformanceTests.
+     conformance_buffers_index_validation_crash_with_buffer_sub_data: ditto.
+     WebGLConformanceTests.
+     conformance_buffers_index_validation_verifies_too_many_indices: ditto.
+     WebGLConformanceTests.
+     conformance_buffers_index_validation_with_resized_buffer: ditto.
+     WebGLConformanceTests.conformance_canvas_buffer_offscreen_test: ditto.
+     WebGLConformanceTests.conformance_canvas_buffer_preserve_test: ditto.
+     WebGLConformanceTests.conformance_canvas_canvas_test: ditto.
+     WebGLConformanceTests.conformance_canvas_canvas_zero_size: ditto.
+     WebGLConformanceTests.
+     conformance_canvas_drawingbuffer_static_canvas_test: ditto.
+     WebGLConformanceTests.conformance_canvas_drawingbuffer_test: ditto.
+     PageCycler*.*: Fails on coverage bot with "Missing test directory
+     /....../slave/coverage-dbg-linux/build/src/data/page_cycler/moz" error.
+     *FrameRateCompositingTest.*: Fails with
+     "FATAL:chrome_content_browser_client.cc(893)] Check failed:
+     command_line->HasSwitch(switches::kEnableStatsTable)."
+     *FrameRateNoVsyncCanvasInternalTest.*: ditto.
+     *FrameRateGpuCanvasInternalTest.*: ditto.
+     IndexedDBTest.Perf: Fails with 'Timeout reached in WaitUntilCookieValue'
+     error.
+     TwoClientPasswordsSyncTest.DeleteAll: Fails on coverage bot.
+     MigrationTwoClientTest.MigrationHellWithoutNigori: Fails with timeout
+     (45000 ms) exceeded error.
+     TwoClientSessionsSyncTest.DeleteActiveSession: ditto.
+     MultipleClientSessionsSyncTest.EncryptedAndChanged: ditto.
+     MigrationSingleClientTest.AllTypesIndividuallyTriggerNotification: ditto.
+     *OldPanelResizeBrowserTest.*: crbug.com/143247
+     *OldPanelDragBrowserTest.*: ditto.
+     *OldPanelBrowserTest.*: ditto.
+     *OldPanelAndDesktopNotificationTest.*: ditto.
+     *OldDockedPanelBrowserTest.*: ditto.
+     *OldDetachedPanelBrowserTest.*: ditto.
+     PanelDragBrowserTest.AttachWithSqueeze: ditto.
+     *PanelBrowserTest.*: ditto.
+     *DockedPanelBrowserTest.*: ditto.
+     *DetachedPanelBrowserTest.*: ditto.
+     AutomatedUITest.TheOneAndOnlyTest: crbug.com/143419
+     AutomatedUITestBase.DragOut: ditto
 
 """
 gTestExclusions = {
   'darwin2': { 'base_unittests': ('ProcessUtilTest.SpawnChild',),
                'ipc_tests': ('IPCFuzzingTest.MsgBadPayloadArgs',), },
-  'linux2': { 'browser_tests':
-                  ('*FullscreenControllerTest.*',
-                   '*PageCyclerCachedBrowserTest.*',
-                   '*FullscreenControllerBrowserTest.*',
-                   'PPAPITest.Fullscreen',
-                   'OutOfProcessPPAPITest.Fullscreen',
-                   'IndexedDBLayoutTest.RegressionTests',
-                   'PanelBrowserNavigatorTest.NavigateFromCrashedPanel',
-                   'StartupBrowserCreatorTest.OpenAppShortcutPanel',
-                   'FilePathWatcherTest.Callback',), },
+  'linux2': {
+    'browser_tests':
+        ('*FullscreenControllerTest.*',
+         '*PageCyclerCachedBrowserTest.*',
+         '*FullscreenControllerBrowserTest.*',
+         'PPAPITest.Fullscreen',
+         'OutOfProcessPPAPITest.Fullscreen',
+         'IndexedDBLayoutTest.RegressionTests',
+         'PanelBrowserNavigatorTest.NavigateFromCrashedPanel',
+         'StartupBrowserCreatorTest.OpenAppShortcutPanel',
+         'FilePathWatcherTest.Callback',
+         'SUIDSandboxUITest.testSUIDSandboxEnabled',
+         'PPAPINaClNewlibTest.Fullscreen',
+         'PPAPINaClGLibcTest.Fullscreen',
+         'UnloadTest.BrowserCloseInfiniteBeforeUnload',
+         'PrerenderBrowserTest.PrerenderDelayLoadPlugin',
+         'PrerenderBrowserTest.PrerenderIframeDelayLoadPlugin',
+         'WindowOpenPanelTest.WindowOpenPanel',
+         'WindowOpenPanelTest.CloseNonExtensionPanelsOnUninstall',
+         'ExtensionManagementApiTest.LaunchPanelApp',
+         'ClickToPlayPluginTest.Basic',
+         'ClickToPlayPluginTest.LoadAllBlockedPlugins',
+         'ClickToPlayPluginTest.NoCallbackAtLoad',),
+    'gpu_tests':
+        ('WebGLConformanceTests.conformance_attribs_gl_enable_vertex_attrib',
+         'WebGLConformanceTests.'
+             'conformance_attribs_gl_disabled_vertex_attrib',
+         'WebGLConformanceTests.'
+             'conformance_attribs_gl_vertex_attrib_zero_issues',
+         'WebGLConformanceTests.conformance_attribs_gl_vertex_attrib',
+         'WebGLConformanceTests.'
+             'conformance_attribs_gl_vertexattribpointer_offsets',
+         'WebGLConformanceTests.conformance_attribs_gl_vertexattribpointer',
+         'WebGLConformanceTests.conformance_buffers_buffer_bind_test',
+         'WebGLConformanceTests.'
+             'conformance_buffers_buffer_data_array_buffer',
+         'WebGLConformanceTests.'
+             'conformance_buffers_index_validation_copies_indices',
+         'WebGLConformanceTests.'
+             'conformance_buffers_index_validation_crash_with_buffer_sub_data',
+         'WebGLConformanceTests.'
+             'conformance_buffers_index_validation_verifies_too_many_indices',
+         'WebGLConformanceTests.'
+             'conformance_buffers_index_validation_with_resized_buffer',
+         'WebGLConformanceTests.conformance_canvas_buffer_offscreen_test',
+         'WebGLConformanceTests.conformance_canvas_buffer_preserve_test',
+         'WebGLConformanceTests.conformance_canvas_canvas_test',
+         'WebGLConformanceTests.conformance_canvas_canvas_zero_size',
+         'WebGLConformanceTests.'
+             'conformance_canvas_drawingbuffer_static_canvas_test',
+         'WebGLConformanceTests.conformance_canvas_drawingbuffer_test',),
+    'performance_ui_tests':
+        ('*PageCycler*.*',
+         '*FrameRateCompositingTest.*',
+         '*FrameRateNoVsyncCanvasInternalTest.*',
+         '*FrameRateGpuCanvasInternalTest.*',
+         'IndexedDBTest.Perf',),
+    'sync_integration_tests':
+        ('TwoClientPasswordsSyncTest.DeleteAll',
+         'MigrationTwoClientTest.MigrationHellWithoutNigori',
+         'TwoClientSessionsSyncTest.DeleteActiveSession',
+         'MultipleClientSessionsSyncTest.EncryptedAndChanged',
+         'MigrationSingleClientTest.'
+         'AllTypesIndividuallyTriggerNotification',),
+    'interactive_ui_tests':
+        ('*OldPanelResizeBrowserTest.*',
+         '*OldPanelDragBrowserTest.*',
+         '*OldPanelBrowserTest.*',
+         '*OldPanelAndDesktopNotificationTest.*',
+         '*OldDockedPanelBrowserTest.*',
+         '*OldDetachedPanelBrowserTest.*',
+         'PanelDragBrowserTest.AttachWithSqueeze',
+         '*PanelBrowserTest.*',
+         '*DockedPanelBrowserTest.*',
+         '*DetachedPanelBrowserTest.*',),
+    'automated_ui_tests':
+        ('AutomatedUITest.TheOneAndOnlyTest',
+         'AutomatedUITestBase.DragOut',), },
 }
 
 
@@ -518,9 +654,10 @@ class Coverage(object):
 
     # Add 'src/test/functional/pyauto_functional.py' to self.tests.
     # This file with '-v --suite=CODE_COVERAGE' arguments runs all pyauto tests.
-    self.tests += [['src/chrome/test/functional/pyauto_functional.py',
-                    '-v',
-                    '--suite=CODE_COVERAGE']]
+    # Pyauto tests are failing randomly on coverage bots. So excluding them.
+    # self.tests += [['src/chrome/test/functional/pyauto_functional.py',
+    #                '-v',
+    #                '--suite=CODE_COVERAGE']]
 
     # Medium tests?
     # Not sure all of these work yet (e.g. page_cycler_tests)
@@ -662,8 +799,8 @@ class Coverage(object):
     positive_gfilter_list = []
     negative_gfilter_list = []
 
-    # Exclude all flaky and failing tests; they don't count for code coverage.
-    negative_gfilter_list += ('*.FLAKY_*', '*.FAILS_*')
+    # Run all tests including flaky tests to get the overall coverage.
+    negative_gfilter_list += ['*.FAILS_*']
 
     if not self.options.no_exclusions:
       exclusions = excl or gTestExclusions

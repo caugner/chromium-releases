@@ -21,7 +21,6 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/background/background_mode_manager.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
@@ -40,13 +39,9 @@
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/user_script_master.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
-#include "chrome/browser/history/history.h"
-#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/shortcuts_backend.h"
 #include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/net_pref_observer.h"
@@ -56,6 +51,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/policy/policy_service.h"
+#include "chrome/browser/policy/user_cloud_policy_manager.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -84,10 +80,13 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
+#include "content/public/common/content_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -211,9 +210,6 @@ void ProfileImpl::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kSavingBrowserHistoryDisabled,
                              false,
                              PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kProfileShortcutCreated,
-                             false,
-                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kProfileAvatarIndex,
                              -1,
                              PrefService::SYNCABLE_PREF);
@@ -261,11 +257,9 @@ ProfileImpl::ProfileImpl(const FilePath& path,
           new VisitedLinkEventListener(this))),
       ALLOW_THIS_IN_INITIALIZER_LIST(io_data_(this)),
       host_content_settings_map_(NULL),
-      favicon_service_created_(false),
       start_time_(Time::Now()),
       delegate_(delegate),
-      predictor_(NULL),
-      session_restore_enabled_(false) {
+      predictor_(NULL) {
   DCHECK(!path.empty()) << "Using an empty path will attempt to write " <<
                             "profile files to the root directory!";
 
@@ -282,13 +276,18 @@ ProfileImpl::ProfileImpl(const FilePath& path,
       !command_line->HasSwitch(switches::kDisablePreconnect),
       g_browser_process->profile_manager() == NULL);
 
-  session_restore_enabled_ =
-      !command_line->HasSwitch(switches::kDisableRestoreSessionState);
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  policy_service_.reset(
-      g_browser_process->browser_policy_connector()->CreatePolicyService(this));
+  // TODO(atwilson): Change these to ProfileKeyedServices once PrefService is
+  // a ProfileKeyedService (policy must be initialized before PrefService
+  // because PrefService depends on policy loading to get overridden pref
+  // values).
+  cloud_policy_manager_ =
+      g_browser_process->browser_policy_connector()->CreateCloudPolicyManager(
+          this);
+  policy_service_ =
+      g_browser_process->browser_policy_connector()->CreatePolicyService(this);
 #else
-    policy_service_.reset(new policy::PolicyServiceStub());
+  policy_service_.reset(new policy::PolicyServiceStub());
 #endif
   if (create_mode == CREATE_MODE_ASYNCHRONOUS) {
     prefs_.reset(PrefService::CreatePrefService(
@@ -347,7 +346,7 @@ void ProfileImpl::DoFinalInit(bool is_new_profile) {
 
   PrefService* local_state = g_browser_process->local_state();
   ssl_config_service_manager_.reset(
-      SSLConfigServiceManager::CreateDefaultManager(local_state));
+      SSLConfigServiceManager::CreateDefaultManager(local_state, prefs));
 
   // Initialize the BackgroundModeManager - this has to be done here before
   // InitExtensions() is called because it relies on receiving notifications
@@ -363,8 +362,6 @@ void ProfileImpl::DoFinalInit(bool is_new_profile) {
     if (g_browser_process->background_mode_manager())
       g_browser_process->background_mode_manager()->RegisterProfile(this);
   }
-
-  InstantController::RecordMetrics(this);
 
   FilePath cookie_path = GetPath();
   cookie_path = cookie_path.Append(chrome::kCookieFilename);
@@ -385,7 +382,9 @@ void ProfileImpl::DoFinalInit(bool is_new_profile) {
   extensions_cookie_path =
       extensions_cookie_path.Append(chrome::kExtensionsCookieFilename);
 
-  FilePath app_path = GetPath().Append(chrome::kIsolatedAppStateDirname);
+  FilePath infinite_cache_path = GetPath();
+  infinite_cache_path =
+      infinite_cache_path.Append(FILE_PATH_LITERAL("Infinite Cache"));
 
 #if defined(OS_ANDROID)
   SessionStartupPref::Type startup_pref_type =
@@ -396,7 +395,6 @@ void ProfileImpl::DoFinalInit(bool is_new_profile) {
           *CommandLine::ForCurrentProcess(), this).type;
 #endif
   bool restore_old_session_cookies =
-      session_restore_enabled_ &&
       (!DidLastSessionExitCleanly() ||
        startup_pref_type == SessionStartupPref::LAST);
 
@@ -407,7 +405,8 @@ void ProfileImpl::DoFinalInit(bool is_new_profile) {
 
   io_data_.Init(cookie_path, server_bound_cert_path, cache_path,
                 cache_max_size, media_cache_path, media_cache_max_size,
-                extensions_cookie_path, app_path, predictor_,
+                extensions_cookie_path, GetPath(), infinite_cache_path,
+                predictor_,
                 g_browser_process->local_state(),
                 g_browser_process->io_thread(),
                 restore_old_session_cookies,
@@ -422,6 +421,12 @@ void ProfileImpl::DoFinalInit(bool is_new_profile) {
         BrowserThread::FILE, FROM_HERE,
         base::Bind(&EnsureReadmeFile, GetPath()),
         base::TimeDelta::FromMilliseconds(create_readme_delay_ms));
+
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableRestoreSessionState)) {
+    content::BrowserContext::GetDefaultStoragePartition(this)->
+        GetDOMStorageContext()->SetSaveSessionStorageOnDisk();
+  }
 
   // Creation has been finished.
   if (delegate_)
@@ -500,19 +505,8 @@ ProfileImpl::~ProfileImpl() {
 
   ProfileDependencyManager::GetInstance()->DestroyProfileServices(this);
 
-  // The HistoryService maintains threads for background processing. Its
-  // possible each thread still has tasks on it that have increased the ref
-  // count of the service. In such a situation, when we decrement the refcount,
-  // it won't be 0, and the threads/databases aren't properly shut down. By
-  // explicitly calling Cleanup/Shutdown we ensure the databases are properly
-  // closed.
-
   if (top_sites_.get())
     top_sites_->Shutdown();
-
-  // FaviconService depends on HistoryServce so make sure we delete
-  // HistoryService first.
-  favicon_service_.reset();
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
@@ -643,6 +637,10 @@ bool ProfileImpl::WasCreatedByVersionOrLater(const std::string& version) {
   return (profile_version.CompareTo(arg_version) >= 0);
 }
 
+policy::UserCloudPolicyManager* ProfileImpl::GetUserCloudPolicyManager() {
+  return cloud_policy_manager_.get();
+}
+
 policy::PolicyService* ProfileImpl::GetPolicyService() {
   DCHECK(policy_service_.get());  // Should explicitly be initialized.
   return policy_service_.get();
@@ -681,9 +679,8 @@ net::URLRequestContextGetter* ProfileImpl::GetRequestContextForRenderProcess(
   if (extension_service) {
     const extensions::Extension* installed_app = extension_service->
         GetInstalledAppForRenderer(renderer_child_id);
-    if (installed_app != NULL && installed_app->is_storage_isolated()) {
-      return GetRequestContextForIsolatedApp(installed_app->id());
-    }
+    if (installed_app && installed_app->is_storage_isolated())
+      return GetRequestContextForStoragePartition(installed_app->id());
   }
 
   content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
@@ -695,35 +692,61 @@ net::URLRequestContextGetter* ProfileImpl::GetRequestContextForRenderProcess(
     // non-persistent context using the RPH's id.
     std::string id("guest-");
     id.append(base::IntToString(renderer_child_id));
-    return GetRequestContextForIsolatedApp(id);
+    return GetRequestContextForStoragePartition(id);
   }
 
   return GetRequestContext();
 }
 
-net::URLRequestContextGetter* ProfileImpl::GetRequestContextForMedia() {
+net::URLRequestContextGetter* ProfileImpl::GetMediaRequestContext() {
+  // Return the default media context.
   return io_data_.GetMediaRequestContextGetter();
+}
+
+net::URLRequestContextGetter*
+ProfileImpl::GetMediaRequestContextForRenderProcess(
+    int renderer_child_id) {
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(this)->extension_service();
+  if (extension_service) {
+    const extensions::Extension* installed_app = extension_service->
+        GetInstalledAppForRenderer(renderer_child_id);
+    if (installed_app && installed_app->is_storage_isolated())
+      return io_data_.GetIsolatedMediaRequestContextGetter(installed_app->id());
+  }
+
+  content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
+      renderer_child_id);
+  if (rph && rph->IsGuest()) {
+    // For guest processes (used by the browser tag), we need to isolate the
+    // storage.
+    // TODO(nasko): Until we have proper storage partitions, create a
+    // non-persistent context using the RPH's id.
+    std::string id("guest-");
+    id.append(base::IntToString(renderer_child_id));
+    return io_data_.GetIsolatedMediaRequestContextGetter(id);
+  }
+
+  return io_data_.GetMediaRequestContextGetter();
+}
+
+net::URLRequestContextGetter*
+ProfileImpl::GetMediaRequestContextForStoragePartition(
+    const std::string& partition_id) {
+  return io_data_.GetIsolatedMediaRequestContextGetter(partition_id);
 }
 
 content::ResourceContext* ProfileImpl::GetResourceContext() {
   return io_data_.GetResourceContext();
 }
 
-FaviconService* ProfileImpl::GetFaviconService(ServiceAccessType sat) {
-  if (!favicon_service_created_) {
-    favicon_service_created_ = true;
-    favicon_service_.reset(new FaviconService(this));
-  }
-  return favicon_service_.get();
-}
-
 net::URLRequestContextGetter* ProfileImpl::GetRequestContextForExtensions() {
   return io_data_.GetExtensionsRequestContextGetter();
 }
 
-net::URLRequestContextGetter* ProfileImpl::GetRequestContextForIsolatedApp(
-    const std::string& app_id) {
-  return io_data_.GetIsolatedAppRequestContextGetter(app_id);
+net::URLRequestContextGetter* ProfileImpl::GetRequestContextForStoragePartition(
+    const std::string& partition_id) {
+  return io_data_.GetIsolatedAppRequestContextGetter(partition_id);
 }
 
 net::SSLConfigService* ProfileImpl::GetSSLConfigService() {
@@ -763,14 +786,6 @@ GAIAInfoUpdateService* ProfileImpl::GetGAIAInfoUpdateService() {
   return gaia_info_update_service_.get();
 }
 
-HistoryService* ProfileImpl::GetHistoryService(ServiceAccessType sat) {
-  return HistoryServiceFactory::GetForProfile(this, sat).get();
-}
-
-HistoryService* ProfileImpl::GetHistoryServiceWithoutCreating() {
-  return HistoryServiceFactory::GetForProfileWithoutCreating(this).get();
-}
-
 DownloadManagerDelegate* ProfileImpl::GetDownloadManagerDelegate() {
   return DownloadServiceFactory::GetForProfile(this)->
       GetDownloadManagerDelegate();
@@ -785,10 +800,6 @@ bool ProfileImpl::DidLastSessionExitCleanly() {
 
 quota::SpecialStoragePolicy* ProfileImpl::GetSpecialStoragePolicy() {
   return GetExtensionSpecialStoragePolicy();
-}
-
-BookmarkModel* ProfileImpl::GetBookmarkModel() {
-  return BookmarkModelFactory::GetForProfile(this);
 }
 
 ProtocolHandlerRegistry* ProfileImpl::GetProtocolHandlerRegistry() {

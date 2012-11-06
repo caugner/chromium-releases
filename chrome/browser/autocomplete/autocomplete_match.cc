@@ -16,7 +16,18 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "content/public/common/url_constants.h"
 #include "grit/theme_resources.h"
+
+namespace {
+
+bool IsTrivialClassification(const ACMatchClassifications& classifications) {
+  return classifications.empty() ||
+      ((classifications.size() == 1) &&
+       (classifications.back().style == ACMatchClassification::NONE));
+}
+
+}  // namespace
 
 // AutocompleteMatch ----------------------------------------------------------
 
@@ -132,6 +143,7 @@ std::string AutocompleteMatch::TypeToString(Type type) {
     "search-suggest",
     "search-other-engine",
     "extension-app",
+    "contact",
   };
   COMPILE_ASSERT(arraysize(strings) == NUM_TYPES,
                  strings_array_must_match_type_enum);
@@ -152,10 +164,21 @@ int AutocompleteMatch::TypeToIcon(Type type) {
     IDR_OMNIBOX_SEARCH,
     IDR_OMNIBOX_SEARCH,
     IDR_OMNIBOX_EXTENSION_APP,
+    // ContactProvider isn't used by the omnibox, so this icon is never
+    // displayed.
+    IDR_OMNIBOX_SEARCH,
   };
   COMPILE_ASSERT(arraysize(icons) == NUM_TYPES,
                  icons_array_must_match_type_enum);
   return icons[type];
+}
+
+// static
+int AutocompleteMatch::TypeToLocationBarIcon(Type type) {
+  int id = TypeToIcon(type);
+  if (id == IDR_OMNIBOX_HTTP)
+    return IDR_LOCATION_BAR_HTTP;
+  return id;
 }
 
 // static
@@ -174,13 +197,19 @@ bool AutocompleteMatch::DestinationSortFunc(const AutocompleteMatch& elem1,
   // Sort identical destination_urls together.  Place the most relevant matches
   // first, so that when we call std::unique(), these are the ones that get
   // preserved.
-  return DestinationsEqual(elem1, elem2) ? MoreRelevant(elem1, elem2) :
-      (elem1.stripped_destination_url < elem2.stripped_destination_url);
+  if (DestinationsEqual(elem1, elem2) ||
+      (elem1.stripped_destination_url.is_empty() &&
+       elem2.stripped_destination_url.is_empty()))
+    return MoreRelevant(elem1, elem2);
+  return elem1.stripped_destination_url < elem2.stripped_destination_url;
 }
 
 // static
 bool AutocompleteMatch::DestinationsEqual(const AutocompleteMatch& elem1,
                                           const AutocompleteMatch& elem2) {
+  if (elem1.stripped_destination_url.is_empty() &&
+      elem2.stripped_destination_url.is_empty())
+    return false;
   return elem1.stripped_destination_url == elem2.stripped_destination_url;
 }
 
@@ -229,6 +258,37 @@ void AutocompleteMatch::ClassifyLocationInString(
   if (after_match < overall_length) {
     classification->push_back(ACMatchClassification(after_match, style));
   }
+}
+
+// static
+AutocompleteMatch::ACMatchClassifications
+    AutocompleteMatch::MergeClassifications(
+    const ACMatchClassifications& classifications1,
+    const ACMatchClassifications& classifications2) {
+  // We must return the empty vector only if both inputs are truly empty.
+  // The result of merging an empty vector with a single (0, NONE)
+  // classification is the latter one-entry vector.
+  if (IsTrivialClassification(classifications1))
+    return classifications2.empty() ? classifications1 : classifications2;
+  if (IsTrivialClassification(classifications2))
+    return classifications1;
+
+  ACMatchClassifications output;
+  for (ACMatchClassifications::const_iterator i = classifications1.begin(),
+       j = classifications2.begin(); i != classifications1.end();) {
+    AutocompleteMatch::AddLastClassificationIfNecessary(&output,
+        std::max(i->offset, j->offset), i->style | j->style);
+    const size_t next_i_offset = (i + 1) == classifications1.end() ?
+        static_cast<size_t>(-1) : (i + 1)->offset;
+    const size_t next_j_offset = (j + 1) == classifications2.end() ?
+        static_cast<size_t>(-1) : (j + 1)->offset;
+    if (next_i_offset >= next_j_offset)
+      ++j;
+    if (next_j_offset >= next_i_offset)
+      ++i;
+  }
+
+  return output;
 }
 
 // static
@@ -288,19 +348,46 @@ string16 AutocompleteMatch::SanitizeString(const string16& text) {
   return result;
 }
 
+// static
+bool AutocompleteMatch::IsSearchType(Type type) {
+  return type == SEARCH_WHAT_YOU_TYPED ||
+         type == SEARCH_HISTORY ||
+         type == SEARCH_SUGGEST ||
+         type == SEARCH_OTHER_ENGINE;
+}
+
 void AutocompleteMatch::ComputeStrippedDestinationURL() {
+  stripped_destination_url = destination_url;
+  if (!stripped_destination_url.is_valid())
+    return;
+
+  // |replacements| keeps all the substitions we're going to make to
+  // from {destination_url} to {stripped_destination_url}.  |need_replacement|
+  // is a helper variable that helps us keep track of whether we need
+  // to apply the replacement.
+  bool needs_replacement = false;
+  GURL::Replacements replacements;
+
+  // Remove the www. prefix from the host.
   static const char prefix[] = "www.";
   static const size_t prefix_len = arraysize(prefix) - 1;
-
   std::string host = destination_url.host();
-  if (destination_url.is_valid() && host.compare(0, prefix_len, prefix) == 0) {
+  if (host.compare(0, prefix_len, prefix) == 0) {
     host = host.substr(prefix_len);
-    GURL::Replacements replace_host;
-    replace_host.SetHostStr(host);
-    stripped_destination_url = destination_url.ReplaceComponents(replace_host);
-  } else {
-    stripped_destination_url = destination_url;
+    replacements.SetHostStr(host);
+    needs_replacement = true;
   }
+
+  // Replace https protocol with http protocol.
+  if (stripped_destination_url.SchemeIs(chrome::kHttpsScheme)) {
+    replacements.SetScheme(
+        chrome::kHttpScheme,
+        url_parse::Component(0, strlen(chrome::kHttpScheme)));
+    needs_replacement = true;
+  }
+
+  if (needs_replacement)
+    stripped_destination_url = destination_url.ReplaceComponents(replacements);
 }
 
 void AutocompleteMatch::GetKeywordUIState(Profile* profile,
@@ -369,14 +456,15 @@ void AutocompleteMatch::ValidateClassifications(
   size_t last_offset = classifications[0].offset;
   for (ACMatchClassifications::const_iterator i(classifications.begin() + 1);
        i != classifications.end(); ++i) {
+    const char* provider_name = provider ? provider->GetName() : "None";
     DCHECK_GT(i->offset, last_offset)
         << " Classification for \"" << text << "\" with offset of " << i->offset
         << " is unsorted in relation to last offset of " << last_offset
-        << ". Provider: " << (provider ? provider->name() : "None") << ".";
+        << ". Provider: " << provider_name << ".";
     DCHECK_LT(i->offset, text.length())
         << " Classification of [" << i->offset << "," << text.length()
         << "] is out of bounds for \"" << text << "\". Provider: "
-        << (provider ? provider->name() : "None") << ".";
+        << provider_name << ".";
     last_offset = i->offset;
   }
 }

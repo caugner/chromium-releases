@@ -31,9 +31,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/glue/user_agent.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/plugin_constants.h"
+#include "webkit/user_agent/user_agent_util.h"
 
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
@@ -292,10 +292,6 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin,
   FilePath flash_path;
   if (!PathService::Get(chrome::FILE_PEPPER_FLASH_PLUGIN, &flash_path))
     return false;
-  // It is an error to have FLAPPER_AVAILABLE defined but then not having the
-  // plugin file in place, but this happens in Chrome OS builds.
-  // Use --disable-bundled-ppapi-flash to skip this.
-  DCHECK(file_util::PathExists(flash_path));
 
   bool force_enable = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableBundledPpapiFlash);
@@ -430,15 +426,19 @@ bool ChromeContentClient::CanHandleWhileSwappedOut(
   return false;
 }
 
-std::string ChromeContentClient::GetUserAgent() const {
+std::string ChromeContentClient::GetProduct() const {
   chrome::VersionInfo version_info;
   std::string product("Chrome/");
   product += version_info.is_valid() ? version_info.Version() : "0.0.0.0";
+  return product;
+}
+
+std::string ChromeContentClient::GetUserAgent() const {
+  std::string product = GetProduct();
 #if defined(OS_ANDROID)
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kUseMobileUserAgent)) {
+  if (command_line->HasSwitch(switches::kUseMobileUserAgent))
     product += " Mobile";
-  }
 #endif
   return webkit_glue::BuildUserAgentFromProduct(product);
 }
@@ -522,7 +522,7 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
 }
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 bool ChromeContentClient::GetSandboxProfileForSandboxType(
     int sandbox_type,
     int* sandbox_profile_resource_id) const {

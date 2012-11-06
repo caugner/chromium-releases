@@ -16,6 +16,7 @@
 #include "base/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/point.h"
@@ -112,6 +113,7 @@ class UI_EXPORT RenderText {
 
   const FontList& font_list() const { return font_list_; }
   void SetFontList(const FontList& font_list);
+  void SetFont(const Font& font);
 
   // Set the font size to |size| in pixels.
   void SetFontSize(int size);

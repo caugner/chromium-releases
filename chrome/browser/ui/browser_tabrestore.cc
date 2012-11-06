@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ipc/ipc_message.h"
@@ -39,19 +40,29 @@ content::WebContents* AddRestoredTab(
     bool select,
     bool pin,
     bool from_last_session,
-    content::SessionStorageNamespace* storage_namespace) {
+    content::SessionStorageNamespace* session_storage_namespace,
+    const std::string& user_agent_override) {
   GURL restore_url = navigations.at(selected_navigation).virtual_url();
-  TabContents* tab_contents = chrome::TabContentsFactory(
+  // TODO(ajwong): Remove the temporary session_storage_namespace_map when
+  // we teach session restore to understand that one tab can have multiple
+  // SessionStorageNamespace objects. Also remove the
+  // session_storage_namespace.h include since we only need that to assign
+  // into the map.
+  content::SessionStorageNamespaceMap session_storage_namespace_map;
+  session_storage_namespace_map[""] = session_storage_namespace;
+  TabContents* tab_contents = chrome::TabContentsWithSessionStorageFactory(
       browser->profile(),
       tab_util::GetSiteInstanceForNewTab(browser->profile(), restore_url),
       MSG_ROUTING_NONE,
       chrome::GetActiveWebContents(browser),
-      storage_namespace);
+      session_storage_namespace_map);
   WebContents* new_tab = tab_contents->web_contents();
-  tab_contents->extension_tab_helper()->SetExtensionAppById(extension_app_id);
-  std::vector<NavigationEntry*> entries;
-  TabNavigation::CreateNavigationEntriesFromTabNavigations(
-      browser->profile(), navigations, &entries);
+  extensions::TabHelper::FromWebContents(new_tab)->
+      SetExtensionAppById(extension_app_id);
+  std::vector<NavigationEntry*> entries =
+      TabNavigation::CreateNavigationEntriesFromTabNavigations(
+          navigations, browser->profile());
+  new_tab->SetUserAgentOverride(user_agent_override);
   new_tab->GetController().Restore(
       selected_navigation, from_last_session, &entries);
   DCHECK_EQ(0u, entries.size());
@@ -92,19 +103,29 @@ void ReplaceRestoredTab(
     int selected_navigation,
     bool from_last_session,
     const std::string& extension_app_id,
-    content::SessionStorageNamespace* session_storage_namespace) {
+    content::SessionStorageNamespace* session_storage_namespace,
+    const std::string& user_agent_override) {
   GURL restore_url = navigations.at(selected_navigation).virtual_url();
-  TabContents* tab_contents = chrome::TabContentsFactory(
+  // TODO(ajwong): Remove the temporary session_storage_namespace_map when
+  // we teach session restore to understand that one tab can have multiple
+  // SessionStorageNamespace objects. Also remove the
+  // session_storage_namespace.h include since we only need that to assign
+  // into the map.
+  content::SessionStorageNamespaceMap session_storage_namespace_map;
+  session_storage_namespace_map[""] = session_storage_namespace;
+  TabContents* tab_contents = chrome::TabContentsWithSessionStorageFactory(
       browser->profile(),
       tab_util::GetSiteInstanceForNewTab(browser->profile(), restore_url),
       MSG_ROUTING_NONE,
       GetActiveWebContents(browser),
-      session_storage_namespace);
-  tab_contents->extension_tab_helper()->SetExtensionAppById(extension_app_id);
+      session_storage_namespace_map);
   WebContents* replacement = tab_contents->web_contents();
-  std::vector<NavigationEntry*> entries;
-  TabNavigation::CreateNavigationEntriesFromTabNavigations(
-      browser->profile(), navigations, &entries);
+  extensions::TabHelper::FromWebContents(replacement)->
+      SetExtensionAppById(extension_app_id);
+  replacement->SetUserAgentOverride(user_agent_override);
+  std::vector<NavigationEntry*> entries =
+      TabNavigation::CreateNavigationEntriesFromTabNavigations(
+          navigations, browser->profile());
   replacement->GetController().Restore(
       selected_navigation, from_last_session, &entries);
   DCHECK_EQ(0u, entries.size());

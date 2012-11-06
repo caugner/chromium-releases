@@ -44,14 +44,16 @@ class BrowserFrameWin : public views::NativeWidgetWin,
 
  protected:
   // Overridden from views::NativeWidgetWin:
-  virtual int GetShowState() const OVERRIDE;
-  virtual gfx::Insets GetClientAreaInsets() const OVERRIDE;
-  virtual void UpdateFrameAfterFrameChange() OVERRIDE;
-  virtual void OnEndSession(BOOL ending, UINT logoff) OVERRIDE;
-  virtual void OnInitMenuPopup(HMENU menu,
-                               UINT position,
-                               BOOL is_system_menu) OVERRIDE;
-  virtual void OnWindowPosChanged(WINDOWPOS* window_pos) OVERRIDE;
+  virtual int GetInitialShowState() const OVERRIDE;
+  virtual bool GetClientAreaInsets(gfx::Insets* insets) const OVERRIDE;
+  virtual void HandleFrameChanged() OVERRIDE;
+  virtual bool PreHandleMSG(UINT message,
+                            WPARAM w_param,
+                            LPARAM l_param,
+                            LRESULT* result) OVERRIDE;
+  virtual void PostHandleMSG(UINT message,
+                             WPARAM w_param,
+                             LPARAM l_param) OVERRIDE;
   virtual void OnScreenReaderDetected() OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -59,9 +61,9 @@ class BrowserFrameWin : public views::NativeWidgetWin,
       const gfx::Rect& restored_bounds) OVERRIDE;
   virtual void ShowWithWindowState(ui::WindowShowState show_state) OVERRIDE;
   virtual void Close() OVERRIDE;
-  virtual void OnActivate(UINT action, BOOL minimized, HWND window) OVERRIDE;
   virtual void FrameTypeChanged() OVERRIDE;
   virtual void SetFullscreen(bool fullscreen) OVERRIDE;
+  virtual void Activate() OVERRIDE;
 
   // Overridden from NativeBrowserFrame:
   virtual views::NativeWidget* AsNativeWidget() OVERRIDE;
@@ -72,12 +74,7 @@ class BrowserFrameWin : public views::NativeWidgetWin,
 
   // Overriden from views::ImageButton override:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
-
-  // Overridden from WindowImpl:
-  virtual LRESULT OnWndProc(UINT message,
-                            WPARAM w_param,
-                            LPARAM l_param) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
  private:
   // Updates the DWM with the frame bounds.

@@ -8,14 +8,7 @@
     # duplicated from chrome.gyp
     'chromium_code': 1,
 
-    'remoting_audio': 0,
     'remoting_multi_process%': 0,
-
-    # Use consistent strings across all platforms. Note that the plugin name
-    # is brand-dependent and is defined further down.
-    # Must match host/plugin/constants.h
-    'host_plugin_mime_type': 'application/vnd.chromium.remoting-host',
-    'host_plugin_description': 'Allow another user to access your computer securely over the Internet.',
 
     # The version is composed from major & minor versions specific to remoting
     # and build & patch versions inherited from Chrome.
@@ -29,19 +22,19 @@
       '<!(python <(version_py_path) -f <(version_path) -t "@MAJOR@.@MINOR@").'
       '<!(python <(version_py_path) -f <(chrome_version_path) -t "@BUILD@")',
 
+    'branding_path': '../remoting/branding_<(branding)',
+    'copyright_info': '<!(python <(version_py_path) -f <(branding_path) -t "@COPYRIGHT@")',
+
+    # Use consistent strings across all platforms.
+    # These values must match host/plugin/constants.h
+    'host_plugin_mime_type': 'application/vnd.chromium.remoting-host',
+    'host_plugin_description': '<!(python <(version_py_path) -f <(branding_path) -t "@HOST_PLUGIN_DESCRIPTION@")',
+    'host_plugin_name': '<!(python <(version_py_path) -f <(branding_path) -t "@HOST_PLUGIN_FILE_NAME@")',
+
     'conditions': [
       ['OS=="mac"', {
-        'conditions': [
-          ['branding=="Chrome"', {
-            'mac_bundle_id': 'com.google.Chrome',
-            'mac_creator': 'rimZ',
-            'copyright_by': 'Google Inc.',
-          }, {  # else: branding!="Chrome"
-            'mac_bundle_id': 'org.chromium.Chromium',
-            'mac_creator': 'Cr24',
-            'copyright_by': 'The Chromium Authors.',
-          }],  # branding
-        ],  # conditions
+        'mac_bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_BUNDLE_ID@")',
+        'mac_creator': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_CREATOR@")',
         'host_plugin_extension': 'plugin',
         'host_plugin_prefix': '',
       }],
@@ -64,9 +57,8 @@
         'host_plugin_extension': 'dll',
         'host_plugin_prefix': '',
       }],
+
       ['branding=="Chrome"', {
-        # Must match host/plugin/constants.h
-        'host_plugin_name': 'Chrome Remote Desktop Host',
         'remoting_webapp_locale_files': [
           'webapp/_locales.official/ar/messages.json',
           'webapp/_locales.official/bg/messages.json',
@@ -112,8 +104,6 @@
           'webapp/_locales.official/zh_TW/messages.json',
         ],
       }, {  # else: branding!="Chrome"
-        # Must match host/plugin/constants.h
-        'host_plugin_name': 'Chromoting Host',
         'remoting_webapp_locale_files': [
           'webapp/_locales/en/messages.json',
         ],
@@ -188,9 +178,6 @@
     'remoting_host_installer_mac_files': [
       'host/installer/mac/do_signing.sh',
       'host/installer/mac/do_signing.props',
-      'host/installer/mac/ChromotingHost.packproj',
-      'host/installer/mac/ChromotingHostService.packproj',
-      'host/installer/mac/ChromotingHostUninstaller.packproj',
       'host/installer/mac/ChromotingHost.pkgproj',
       'host/installer/mac/ChromotingHostService.pkgproj',
       'host/installer/mac/ChromotingHostUninstaller.pkgproj',
@@ -211,12 +198,7 @@
       '..',  # Root of Chrome checkout
     ],
     'conditions': [
-      ['remoting_audio == 1', {
-        'defines': [
-          'ENABLE_REMOTING_AUDIO',
-        ],
-      }],
-      ['remoting_multi_process == 1', {
+      ['remoting_multi_process != 0', {
         'defines': [
           'REMOTING_MULTI_PROCESS',
         ],
@@ -272,19 +254,10 @@
           'target_name': 'remoting_host_uninstaller',
           'type': 'executable',
           'mac_bundle': 1,
-          'conditions': [
-            ['branding == "Chrome"', {
-              'variables': {
-                'bundle_id': 'com.google.chromeremotedesktop.host_uninstaller',
-                'bundle_name': 'Chrome Remote Desktop Host Uninstaller',
-              },
-            }, { # else branding!="Chrome"
-              'variables': {
-                'bundle_id': 'org.chromium.remoting.host_uninstaller',
-                'bundle_name': 'Chromoting Host Uninstaller',
-              },
-            }],
-          ],
+          'variables': {
+            'bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_UNINSTALLER_BUNDLE_ID@")',
+            'bundle_name': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_UNINSTALLER_BUNDLE_NAME@")',
+          },
           'dependencies': [
             '<(DEPTH)/base/base.gyp:base',
           ],
@@ -299,7 +272,7 @@
           'xcode_settings': {
             'INFOPLIST_FILE': 'host/installer/mac/uninstaller/remoting_uninstaller-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
-            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_NAME="<(bundle_name)" BUNDLE_ID="<(bundle_id)" COPYRIGHT_BY="<(copyright_by)"',
+            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_NAME="<(bundle_name)" BUNDLE_ID="<(bundle_id)" COPYRIGHT_INFO="<(copyright_info)"',
           },
           'mac_bundle_resources': [
             'host/installer/mac/uninstaller/remoting_uninstaller.icns',
@@ -326,23 +299,12 @@
             'host/installer/build-installer-archive.py',
             '<@(remoting_host_installer_mac_files)',
           ],
-          'conditions': [
-            ['branding == "Chrome"', {
-              'variables': {
-                'host_name': 'Chrome Remote Desktop Host',
-                'host_service_name': 'Chrome Remote Desktop Host Service',
-                'host_uninstaller_name': 'Chrome Remote Desktop Host Uninstaller',
-                'bundle_prefix': 'com.google.pkg',
-              },
-            }, { # else branding!="Chrome"
-              'variables': {
-                'host_name': 'Chromoting Host',
-                'host_service_name': 'Chromoting Host Service',
-                'host_uninstaller_name': 'Chromoting Host Uninstaller',
-                'bundle_prefix': 'org.chromium.pkg',
-              },
-            }],
-          ],  # conditions
+          'variables': {
+            'host_name': '<!(python <(version_py_path) -f <(branding_path) -t "@HOST_PLUGIN_FILE_NAME@")',
+            'host_service_name': '<!(python <(version_py_path) -f <(branding_path) -t "@DAEMON_FILE_NAME@")',
+            'host_uninstaller_name': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_UNINSTALLER_NAME@")',
+            'bundle_prefix': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_UNINSTALLER_BUNDLE_PREFIX@")',
+          },
           'actions': [
             {
               'action_name': 'Zip installer files for signing',
@@ -371,7 +333,7 @@
                 'VERSION_SHORT=<(version_short)',
                 'VERSION_MAJOR=<!(python <(version_py_path) -f <(version_path) -t "@MAJOR@")',
                 'VERSION_MINOR=<!(python <(version_py_path) -f <(version_path) -t "@MINOR@")',
-                'COPYRIGHT_BY=<(copyright_by)',
+                'COPYRIGHT_INFO=<(copyright_info)',
                 'HOST_NAME=<(host_name)',
                 'HOST_SERVICE_NAME=<(host_service_name)',
                 'HOST_UNINSTALLER_NAME=<(host_uninstaller_name)',
@@ -423,22 +385,22 @@
             '../third_party/jsoncpp/overrides/include/',
             '../third_party/jsoncpp/source/include/',
             '../third_party/jsoncpp/source/src/lib_json/',
-	  ],
+          ],
 
           # These source files are included directly, instead of adding target
-	  # dependencies, because the targets are not yet built for 64-bit on
-	  # Mac OS X - http://crbug.com/125116.
-	  #
-	  # TODO(lambroslambrou): Fix this when Chrome supports building for
-	  # Mac OS X 64-bit - http://crbug.com/128122.
+          # dependencies, because the targets are not yet built for 64-bit on
+          # Mac OS X - http://crbug.com/125116.
+          #
+          # TODO(lambroslambrou): Fix this when Chrome supports building for
+          # Mac OS X 64-bit - http://crbug.com/128122.
           'sources': [
-	    '../third_party/jsoncpp/source/src/lib_json/json_reader.cpp',
-	    '../third_party/jsoncpp/overrides/src/lib_json/json_value.cpp',
-	    '../third_party/jsoncpp/source/src/lib_json/json_writer.cpp',
-	    '../third_party/modp_b64/modp_b64.cc',
+            '../third_party/jsoncpp/source/src/lib_json/json_reader.cpp',
+            '../third_party/jsoncpp/overrides/src/lib_json/json_value.cpp',
+            '../third_party/jsoncpp/source/src/lib_json/json_writer.cpp',
+            '../third_party/modp_b64/modp_b64.cc',
             'host/constants_mac.cc',
             'host/constants_mac.h',
-	    'host/host_config.cc',
+            'host/host_config.cc',
             'host/me2me_preference_pane.h',
             'host/me2me_preference_pane.mm',
             'host/me2me_preference_pane_confirm_pin.h',
@@ -454,12 +416,22 @@
               '$(SDKROOT)/System/Library/Frameworks/Security.framework',
             ],
           },
+          'variables': {
+            'bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_PREFPANE_BUNDLE_ID@")',
+            'bundle_name': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_PREFPANE_BUNDLE_NAME@")',
+            # The XML new-line entity splits the label into two lines, which
+            # is the maximum number of lines allowed by the System Preferences
+            # applet.
+            # TODO(lambroslambrou): When these strings are localized, use "\n"
+            # instead of "&#x0a;" for linebreaks.
+            'pref_pane_icon_label': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_PREFPANE_ICON_LABEL@")',
+          },
           'xcode_settings': {
             'ARCHS': ['i386', 'x86_64'],
             'GCC_ENABLE_OBJC_GC': 'supported',
             'INFOPLIST_FILE': 'host/me2me_preference_pane-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
-            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_NAME="<(bundle_name)" BUNDLE_ID="<(bundle_id)" COPYRIGHT_BY="<(copyright_by)" PREF_PANE_ICON_LABEL="<(pref_pane_icon_label)"',
+            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_NAME="<(bundle_name)" BUNDLE_ID="<(bundle_id)" COPYRIGHT_INFO="<(copyright_info)" PREF_PANE_ICON_LABEL="<(pref_pane_icon_label)"',
           },
           'mac_bundle_resources': [
             'host/me2me_preference_pane.xib',
@@ -476,25 +448,6 @@
               'variables': {
                 # A real .dSYM is needed for dump_syms to operate on.
                 'mac_real_dsym': 1,
-              },
-            }],
-            ['branding == "Chrome"', {
-              'variables': {
-                'bundle_id': 'com.google.chromeremotedesktop.preferences',
-                'bundle_name': 'Chrome Remote Desktop Host Preferences',
-
-                # The XML new-line entity splits the label into two lines,
-                # which is the maximum number of lines allowed by the System
-                # Preferences applet.
-                # TODO(lambroslambrou): When these strings are localized, use
-                # "\n" instead.
-                'pref_pane_icon_label': 'Chrome Remote&#x0a;Desktop Host',
-              },
-            }, { # else branding!="Chrome"
-              'variables': {
-                'bundle_id': 'org.chromium.remoting.preferences',
-                'bundle_name': 'Chromoting Host Preferences',
-                'pref_pane_icon_label': 'Chromoting&#x0a;Host',
               },
             }],
           ],  # conditions
@@ -515,16 +468,13 @@
             'tools/breakpad_tester_win.cc',
           ],
         },  # end of target 'remoting_breakpad_tester'
-
         {
           'target_name': 'remoting_elevated_controller',
           'type': 'static_library',
-          'defines' : [
-            'DAEMON_CONTROLLER_CLSID=<(daemon_controller_clsid)',
-          ],
           'sources': [
-            'host/win/elevated_controller.idl',
+            'host/win/elevated_controller_idl.templ',
             '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller.h',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller.idl',
             '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller_i.c',
           ],
           # This target exports a hard dependency because dependent targets may
@@ -540,6 +490,24 @@
               '<(SHARED_INTERMEDIATE_DIR)',
             ],
           },
+          'rules': [
+            {
+              'rule_name': 'generate_idl',
+              'extension': 'templ',
+              'outputs': [
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/host/elevated_controller.idl',
+              ],
+              'action': [
+                'python',
+                '<(version_py_path)',
+                '-e', 'DAEMON_CONTROLLER_CLSID="<(daemon_controller_clsid)"',
+                '<(RULE_INPUT_PATH)',
+                '<@(_outputs)',
+              ],
+              'process_outputs_as_sources': 1,
+              'message': 'Generating <@(_outputs)'
+            },
+          ],
         },  # end of target 'remoting_elevated_controller'
         {
           'target_name': 'remoting_host_controller',
@@ -563,7 +531,7 @@
             'remoting_version_resources',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/elevated_controller_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_controller_version.rc',
             'host/branding.cc',
             'host/branding.h',
             'host/pin_hash.cc',
@@ -610,12 +578,14 @@
             'remoting_version_resources',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/host_service_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_daemon_version.rc',
             'base/scoped_sc_handle_win.h',
             'host/branding.cc',
             'host/branding.h',
             'host/chromoting_messages.cc',
             'host/chromoting_messages.h',
+            'host/config_file_watcher.cc',
+            'host/config_file_watcher.h',
             'host/constants.h',
             'host/constants_win.cc',
             'host/daemon_process.cc',
@@ -625,22 +595,31 @@
             'host/sas_injector_win.cc',
             'host/usage_stats_consent.h',
             'host/usage_stats_consent_win.cc',
+            'host/win/desktop.cc',
+            'host/win/desktop.h',
             'host/win/host_service.cc',
             'host/win/host_service.h',
             'host/win/host_service.rc',
             'host/win/host_service_resource.h',
             'host/win/launch_process_with_token.cc',
             'host/win/launch_process_with_token.h',
+            'host/win/scoped_thread_desktop.cc',
+            'host/win/scoped_thread_desktop.h',
+            'host/win/worker_process_launcher.cc',
+            'host/win/worker_process_launcher.h',
             'host/win/wts_console_monitor.h',
             'host/win/wts_console_observer.h',
             'host/win/wts_session_process_launcher.cc',
             'host/win/wts_session_process_launcher.h',
+            'host/worker_process_ipc_delegate.h',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
               'AdditionalDependencies': [
                 'wtsapi32.lib',
               ],
+              # 2 == /SUBSYSTEM:WINDOWS
+              'SubSystem': '2',
             },
           },
         },  # end of target 'remoting_service'
@@ -652,15 +631,14 @@
         #   - build/util/LASTCHANGE - the last source code revision.
         #   - chrome/VERSION - the build & patch versions.
         #   - remoting/VERSION - the major & minor versions.
-        #   - xxx_branding - UI/localizable strings.
+        #   - (branding_path) - UI/localizable strings.
         #   - xxx.ver - per-binary non-localizable strings such as the binary
         #     name.
         {
           'target_name': 'remoting_version_resources',
           'type': 'none',
           'inputs': [
-            'chromium_branding',
-            'google_chrome_branding',
+            '<(branding_path)',
             'version.rc.version',
             '<(DEPTH)/build/util/LASTCHANGE',
             '<(version_path)',
@@ -672,10 +650,11 @@
             ],
           },
           'sources': [
-            'host/plugin/host_plugin.ver',
-            'host/remoting_me2me_host.ver',
-            'host/win/elevated_controller.ver',
-            'host/win/host_service.ver',
+            'host/plugin/remoting_host_plugin.ver',
+            'host/remoting_desktop.ver',
+            'host/remoting_host_me2me.ver',
+            'host/win/remoting_controller.ver',
+            'host/win/remoting_daemon.ver',
           ],
           'rules': [
             {
@@ -685,17 +664,6 @@
                 'lastchange_path': '<(DEPTH)/build/util/LASTCHANGE',
                 'template_input_path': 'version.rc.version',
               },
-              'conditions': [
-                ['branding == "Chrome"', {
-                  'variables': {
-                     'branding_path': 'google_chrome_branding',
-                  },
-                }, { # else branding!="Chrome"
-                  'variables': {
-                     'branding_path': 'chromium_branding',
-                  },
-                }],
-              ],
               'inputs': [
                 '<(template_input_path)',
                 '<(version_path)',
@@ -747,8 +715,24 @@
           ],
           'wix_defines' : [
             '-dBranding=<(branding)',
+            '-dRemotingMultiProcess=<(remoting_multi_process)',
+          ],
+          'wix_inputs' : [
+            '<(PRODUCT_DIR)/remoting_host_controller.exe',
+            '<(PRODUCT_DIR)/remoting_me2me_host.exe',
+            '<(PRODUCT_DIR)/remoting_service.exe',
+            '<(sas_dll_path)/sas.dll',
+            'resources/chromoting.ico',
           ],
           'conditions': [
+            ['remoting_multi_process != 0', {
+              'dependencies': [
+                'remoting_desktop',
+              ],
+              'wix_inputs' : [
+                '<(PRODUCT_DIR)/remoting_desktop.exe',
+              ],
+            }],
             ['buildtype == "Official"', {
               'wix_defines': [
                 '-dOfficialBuild=1',
@@ -760,11 +744,7 @@
               'rule_name': 'candle_and_light',
               'extension': 'wxs',
               'inputs': [
-                '<(PRODUCT_DIR)/remoting_host_controller.exe',
-                '<(PRODUCT_DIR)/remoting_me2me_host.exe',
-                '<(PRODUCT_DIR)/remoting_service.exe',
-                '<(sas_dll_path)/sas.dll',
-                'resources/chromoting.ico',
+                '<@(_wix_inputs)',
                 'tools/candle_and_light.py',
               ],
               'outputs': [
@@ -834,6 +814,60 @@
         },  # end of target 'remoting_host_installation_unittest'
       ],  # end of 'targets'
     }],  # '<(wix_path) != ""'
+
+    ['remoting_multi_process != 0', {
+      'targets': [
+        {
+          'target_name': 'remoting_desktop',
+          'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'dependencies': [
+            'remoting_base',
+            'remoting_breakpad',
+            'remoting_host',
+            'remoting_version_resources',
+            '../base/base.gyp:base',
+            '../ipc/ipc.gyp:ipc',
+          ],
+          'sources': [
+            'host/branding.cc',
+            'host/branding.h',
+            'host/desktop_process.cc',
+            'host/desktop_process.h',
+            'host/host_ui.rc',
+            'host/usage_stats_consent.h',
+            'host/usage_stats_consent_win.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_desktop_version.rc',
+          ],
+          'link_settings': {
+            'libraries': [
+              '-lcomctl32.lib',
+            ],
+          },
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'AdditionalOptions': [
+                "\"/manifestdependency:type='win32' "
+                    "name='Microsoft.Windows.Common-Controls' "
+                    "version='6.0.0.0' "
+                    "processorArchitecture='*' "
+                    "publicKeyToken='6595b64144ccf1df' language='*'\"",
+              ],
+              'conditions': [
+                ['buildtype == "Official" and remoting_multi_process != 0', {
+                  'AdditionalOptions': [
+                    "\"/MANIFESTUAC:level='requireAdministrator' "
+                        "uiAccess='true'\"",
+                  ],
+                }],
+              ],
+              # 2 == /SUBSYSTEM:WINDOWS
+              'SubSystem': '2',
+            },
+          },
+        },  # end of target 'remoting_desktop'
+      ],
+    }],  # 'remoting_multi_process != 0'
 
   ],  # end of 'conditions'
 
@@ -1027,7 +1061,6 @@
         [ 'OS=="win"', {
           'dependencies': [
             '../google_update/google_update.gyp:google_update',
-            '../ipc/ipc.gyp:ipc',
             'remoting_elevated_controller',
             'remoting_version_resources',
           ],
@@ -1035,7 +1068,7 @@
             '<(INTERMEDIATE_DIR)',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/host_plugin_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_host_plugin_version.rc',
             'host/host_ui.rc',
             'host/plugin/host_plugin.def',
           ],
@@ -1141,6 +1174,7 @@
         '../skia/skia.gyp:skia',
         '../third_party/libvpx/libvpx.gyp:libvpx',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+        '../third_party/speex/speex.gyp:libspeex',
         '../third_party/zlib/zlib.gyp:zlib',
         '../media/media.gyp:yuv_convert',
         'remoting_jingle_glue',
@@ -1157,6 +1191,8 @@
       # depend on chromotocol_proto_lib for headers.
       'hard_dependency': 1,
       'sources': [
+        'base/auto_thread_task_runner.cc',
+        'base/auto_thread_task_runner.h',
         'base/auth_token_util.cc',
         'base/auth_token_util.h',
         'base/capture_data.cc',
@@ -1170,21 +1206,11 @@
         'base/compressor_zlib.h',
         'base/constants.cc',
         'base/constants.h',
-        'base/decoder.h',
-        'base/decoder_vp8.cc',
-        'base/decoder_vp8.h',
-        'base/decoder_row_based.cc',
-        'base/decoder_row_based.h',
         'base/decompressor.h',
         'base/decompressor_verbatim.cc',
         'base/decompressor_verbatim.h',
         'base/decompressor_zlib.cc',
         'base/decompressor_zlib.h',
-        'base/encoder.h',
-        'base/encoder_vp8.cc',
-        'base/encoder_vp8.h',
-        'base/encoder_row_based.cc',
-        'base/encoder_row_based.h',
         'base/plugin_thread_task_runner.cc',
         'base/plugin_thread_task_runner.h',
         'base/rate_counter.cc',
@@ -1195,15 +1221,27 @@
         'base/stoppable.h',
         'base/util.cc',
         'base/util.h',
-        # TODO(kxing): Seperate the audio and video codec files into a separate
-        # target.
         'codec/audio_decoder.cc',
         'codec/audio_decoder.h',
+        'codec/audio_decoder_speex.cc',
+        'codec/audio_decoder_speex.h',
         'codec/audio_decoder_verbatim.cc',
         'codec/audio_decoder_verbatim.h',
         'codec/audio_encoder.h',
+        'codec/audio_encoder_speex.cc',
+        'codec/audio_encoder_speex.h',
         'codec/audio_encoder_verbatim.cc',
         'codec/audio_encoder_verbatim.h',
+        'codec/video_decoder.h',
+        'codec/video_decoder_vp8.cc',
+        'codec/video_decoder_vp8.h',
+        'codec/video_decoder_row_based.cc',
+        'codec/video_decoder_row_based.h',
+        'codec/video_encoder.h',
+        'codec/video_encoder_vp8.cc',
+        'codec/video_encoder_vp8.h',
+        'codec/video_encoder_row_based.cc',
+        'codec/video_encoder_row_based.h',
       ],
     },  # end of target 'remoting_base'
 
@@ -1222,8 +1260,10 @@
         'host/audio_capturer.cc',
         'host/audio_capturer.h',
         'host/audio_capturer_linux.cc',
+        'host/audio_capturer_linux.h',
         'host/audio_capturer_mac.cc',
         'host/audio_capturer_win.cc',
+        'host/audio_capturer_win.h',
         'host/audio_scheduler.cc',
         'host/audio_scheduler.h',
         'host/capture_scheduler.cc',
@@ -1238,9 +1278,6 @@
         'host/clipboard_linux.cc',
         'host/clipboard_mac.mm',
         'host/clipboard_win.cc',
-        'host/composite_host_config.cc',
-        'host/composite_host_config.h',
-        'host/constants.cc',
         'host/constants.h',
         'host/constants_mac.cc',
         'host/constants_mac.h',
@@ -1251,6 +1288,8 @@
         'host/continue_window_win.cc',
         'host/desktop_environment.cc',
         'host/desktop_environment.h',
+        'host/desktop_environment_factory.cc',
+        'host/desktop_environment_factory.h',
         'host/differ.cc',
         'host/differ.h',
         'host/disconnect_window.h',
@@ -1258,6 +1297,8 @@
         'host/disconnect_window_mac.h',
         'host/disconnect_window_mac.mm',
         'host/disconnect_window_win.cc',
+        'host/dns_blackhole_checker.cc',
+        'host/dns_blackhole_checker.h',
         'host/event_executor.h',
         'host/event_executor_linux.cc',
         'host/event_executor_mac.cc',
@@ -1293,6 +1334,10 @@
         'host/local_input_monitor_win.cc',
         'host/log_to_server.cc',
         'host/log_to_server.h',
+        'host/mac/scoped_pixel_buffer_object.cc',
+        'host/mac/scoped_pixel_buffer_object.h',
+        'host/mouse_clamping_filter.cc',
+        'host/mouse_clamping_filter.h',
         'host/mouse_move_observer.h',
         'host/network_settings.h',
         'host/pin_hash.cc',
@@ -1306,12 +1351,12 @@
         'host/register_support_host_request.h',
         'host/remote_input_filter.cc',
         'host/remote_input_filter.h',
+        'host/sas_injector.h',
+        'host/sas_injector_win.cc',
         'host/screen_recorder.cc',
         'host/screen_recorder.h',
         'host/server_log_entry.cc',
         'host/server_log_entry.h',
-        'host/session_event_executor_win.cc',
-        'host/session_event_executor_win.h',
         'host/session_manager_factory.cc',
         'host/session_manager_factory.h',
         'host/signaling_connector.cc',
@@ -1338,6 +1383,10 @@
         'host/win/desktop.h',
         'host/win/scoped_thread_desktop.cc',
         'host/win/scoped_thread_desktop.h',
+        'host/win/session_desktop_environment_factory.cc',
+        'host/win/session_desktop_environment_factory.h',
+        'host/win/session_event_executor.cc',
+        'host/win/session_event_executor.h',
         'host/x_server_pixel_buffer.cc',
         'host/x_server_pixel_buffer.h',
       ],
@@ -1349,8 +1398,8 @@
               '-lXdamage',
               '-lXfixes',
               '-lXtst',
-              '-lpam',
-              '-lXext'
+              '-lXext',
+              '-lXi'
             ],
           },
         }],
@@ -1448,13 +1497,6 @@
       'sources': [
         'host/simple_host_process.cc',
       ],
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': [
-            '../ipc/ipc.gyp:ipc'
-          ],
-        }],
-      ],
     },  # end of target 'remoting_simple_host'
 
     {
@@ -1469,36 +1511,42 @@
         'remoting_jingle_glue',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
+        '../google_apis/google_apis.gyp:google_apis',
+        '../ipc/ipc.gyp:ipc',
         '../media/media.gyp:media',
         '../net/net.gyp:net',
+      ],
+      'defines': [
+        'VERSION=<(version_full)',
       ],
       'sources': [
         'host/branding.cc',
         'host/branding.h',
-        'host/sighup_listener_mac.cc',
-        'host/sighup_listener_mac.h',
+        'host/config_file_watcher.cc',
+        'host/config_file_watcher.h',
+        'host/curtain_mode_mac.h',
+        'host/curtain_mode_mac.cc',
+        'host/posix/signal_handler.cc',
+        'host/posix/signal_handler.h',
         'host/remoting_me2me_host.cc',
         'host/usage_stats_consent.h',
         'host/usage_stats_consent_win.cc',
       ],
       'conditions': [
+        ['os_posix != 1', {
+          'sources/': [
+            ['exclude', '^host/posix/'],
+          ],
+        }],
         ['OS=="mac"', {
           'mac_bundle': 1,
-          'conditions': [
-            ['branding == "Chrome"', {
-              'variables': {
-                 'host_bundle_id': 'com.google.chrome_remote_desktop.remoting_me2me_host',
-              },
-            }, { # else branding!="Chrome"
-              'variables': {
-                'host_bundle_id': 'org.chromium.chromoting.remoting_me2me_host',
-              },
-            }],
-          ],
+          'variables': {
+             'host_bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_HOST_BUNDLE_ID@")',
+          },
           'xcode_settings': {
             'INFOPLIST_FILE': 'host/remoting_me2me_host-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
-            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(host_bundle_id)" COPYRIGHT_BY="<(copyright_by)"',
+            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(host_bundle_id)" COPYRIGHT_INFO="<(copyright_info)"',
           },
           'mac_bundle_resources': [
             'host/disconnect_window.xib',
@@ -1511,12 +1559,11 @@
         }],
         ['OS=="win"', {
           'dependencies': [
-            '../ipc/ipc.gyp:ipc',
             'remoting_version_resources',
           ],
           'sources': [
             '<(SHARED_INTERMEDIATE_DIR)/remoting/host/remoting_host_messages.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_me2me_host_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_host_me2me_version.rc',
             'host/host_ui.rc',
           ],
           'link_settings': {
@@ -1532,6 +1579,14 @@
                     "version='6.0.0.0' "
                     "processorArchitecture='*' "
                     "publicKeyToken='6595b64144ccf1df' language='*'\"",
+              ],
+              'conditions': [
+                ['buildtype == "Official" and remoting_multi_process == 0', {
+                  'AdditionalOptions': [
+                    "\"/MANIFESTUAC:level='requireAdministrator' "
+                        "uiAccess='true'\"",
+                  ],
+                }],
               ],
               # 2 == /SUBSYSTEM:WINDOWS
               'SubSystem': '2',
@@ -1617,6 +1672,8 @@
         'protocol/channel_authenticator.h',
         'protocol/channel_dispatcher_base.cc',
         'protocol/channel_dispatcher_base.h',
+        'protocol/channel_multiplexer.cc',
+        'protocol/channel_multiplexer.h',
         'protocol/client_control_dispatcher.cc',
         'protocol/client_control_dispatcher.h',
         'protocol/client_event_dispatcher.cc',
@@ -1624,11 +1681,11 @@
         'protocol/client_stub.h',
         'protocol/clipboard_echo_filter.cc',
         'protocol/clipboard_echo_filter.h',
-        'protocol/clipboard_filter.h',
         'protocol/clipboard_filter.cc',
+        'protocol/clipboard_filter.h',
+        'protocol/clipboard_stub.h',
         'protocol/clipboard_thread_proxy.cc',
         'protocol/clipboard_thread_proxy.h',
-        'protocol/clipboard_stub.h',
         'protocol/connection_to_client.cc',
         'protocol/connection_to_client.h',
         'protocol/connection_to_host.cc',
@@ -1640,7 +1697,6 @@
         'protocol/host_control_dispatcher.h',
         'protocol/host_event_dispatcher.cc',
         'protocol/host_event_dispatcher.h',
-        'protocol/host_event_stub.h',
         'protocol/host_stub.h',
         'protocol/input_event_tracker.cc',
         'protocol/input_event_tracker.h',
@@ -1665,6 +1721,7 @@
         'protocol/message_reader.h',
         'protocol/mouse_input_filter.cc',
         'protocol/mouse_input_filter.h',
+        'protocol/name_value_map.h',
         'protocol/negotiating_authenticator.cc',
         'protocol/negotiating_authenticator.h',
         'protocol/protobuf_video_reader.cc',
@@ -1754,26 +1811,28 @@
       ],
       'sources': [
         'base/auth_token_util_unittest.cc',
-        'base/base_mock_objects.cc',
-        'base/base_mock_objects.h',
+        'base/auto_thread_task_runner_unittest.cc',
         'base/breakpad_win_unittest.cc',
-        'base/codec_test.cc',
-        'base/codec_test.h',
         'base/compound_buffer_unittest.cc',
         'base/compressor_zlib_unittest.cc',
-        'base/decoder_vp8_unittest.cc',
         'base/decompressor_zlib_unittest.cc',
-        'base/encode_decode_unittest.cc',
-        'base/encoder_vp8_unittest.cc',
-        'base/encoder_row_based_unittest.cc',
         'base/util_unittest.cc',
         'client/key_event_mapper_unittest.cc',
         'client/plugin/mac_key_event_processor_unittest.cc',
+        'codec/codec_test.cc',
+        'codec/codec_test.h',
+        'codec/video_decoder_vp8_unittest.cc',
+        'codec/video_encode_decode_unittest.cc',
+        'codec/video_encoder_row_based_unittest.cc',
+        'codec/video_encoder_vp8_unittest.cc',
+        'host/audio_capturer_win_unittest.cc',
         'host/chromoting_host_context_unittest.cc',
         'host/chromoting_host_unittest.cc',
         'host/client_session_unittest.cc',
         'host/differ_block_unittest.cc',
         'host/differ_unittest.cc',
+        'host/event_executor_fake.cc',
+        'host/event_executor_fake.h',
         'host/heartbeat_sender_unittest.cc',
         'host/host_key_pair_unittest.cc',
         'host/host_mock_objects.cc',
@@ -1803,7 +1862,9 @@
         'protocol/authenticator_test_base.cc',
         'protocol/authenticator_test_base.h',
         'protocol/buffered_socket_writer_unittest.cc',
+        'protocol/channel_multiplexer_unittest.cc',
         'protocol/clipboard_echo_filter_unittest.cc',
+        'protocol/clipboard_filter_unittest.cc',
         'protocol/connection_tester.cc',
         'protocol/connection_tester.h',
         'protocol/connection_to_client_unittest.cc',
@@ -1812,9 +1873,10 @@
         'protocol/fake_authenticator.h',
         'protocol/fake_session.cc',
         'protocol/fake_session.h',
+        'protocol/input_event_tracker_unittest.cc',
+        'protocol/input_filter_unittest.cc',
         'protocol/jingle_messages_unittest.cc',
         'protocol/jingle_session_unittest.cc',
-        'protocol/input_event_tracker_unittest.cc',
         'protocol/message_decoder_unittest.cc',
         'protocol/message_reader_unittest.cc',
         'protocol/mouse_input_filter_unittest.cc',
@@ -1830,9 +1892,6 @@
         [ 'OS=="win"', {
           'include_dirs': [
             '../breakpad/src',
-          ],
-          'dependencies': [
-            '../ipc/ipc.gyp:ipc'
           ],
           'link_settings': {
             'libraries': [

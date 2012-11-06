@@ -16,8 +16,8 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -38,7 +38,7 @@
 
 namespace {
 
-const int kPaddingVertical = 10;
+const int kPaddingVertical = 19;
 
 class DateDefaultView : public views::View,
                         public views::ButtonListener {
@@ -53,9 +53,8 @@ class DateDefaultView : public views::View,
         new ash::internal::tray::DateView();
     date_view->set_border(views::Border::CreateEmptyBorder(kPaddingVertical,
         ash::kTrayPopupPaddingHorizontal,
-        kPaddingVertical,
-        ash::kTrayPopupPaddingHorizontal));
-
+        0,
+        0));
     ash::internal::SpecialPopupRow* view = new ash::internal::SpecialPopupRow();
     view->SetContent(date_view);
     AddChildView(view);
@@ -64,7 +63,7 @@ class DateDefaultView : public views::View,
         login == ash::user::LOGGED_IN_NONE)
       return;
 
-    date_view->SetActionable(true);
+    date_view->SetActionable(false);
 
     help_ = new ash::internal::TrayPopupHeaderButton(this,
         IDR_AURA_UBER_TRAY_HELP,
@@ -101,7 +100,7 @@ class DateDefaultView : public views::View,
  private:
   // Overridden from views::ButtonListener.
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE {
+                             const ui::Event& event) OVERRIDE {
     ash::SystemTrayDelegate* tray = ash::Shell::GetInstance()->tray_delegate();
     if (sender == help_)
       tray->ShowHelp();

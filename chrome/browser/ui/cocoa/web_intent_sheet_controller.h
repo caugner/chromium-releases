@@ -13,7 +13,9 @@
 
 class WebIntentPickerCocoa;
 class WebIntentPickerModel;
-@class SuggestionView;
+
+@class IntentView;
+@class WaitingView;
 
 // Controller for intent picker constrained dialog. This dialog pops up
 // whenever a web page invokes ActivateIntent and lets the user choose which
@@ -29,13 +31,10 @@ class WebIntentPickerModel;
   // The intent picker data to be rendered. Weak reference.
   WebIntentPickerModel* model_;
 
-  // Indicator that we have neither suggested nor installed services.
-  BOOL isEmpty_;
-
+  scoped_nsobject<WaitingView> waitingView_;
   scoped_nsobject<NSTextField> actionTextField_;
-  scoped_nsobject<SuggestionView> suggestionView_;
+  scoped_nsobject<IntentView> intentView_;
   scoped_nsobject<NSButton> closeButton_;
-  scoped_nsobject<NSMutableArray> intentButtons_;
   scoped_nsobject<NSView> flipView_;
   scoped_nsobject<NSTextField> inlineDispositionTitleField_;
 }
@@ -64,9 +63,6 @@ class WebIntentPickerModel;
 
 // Close the current sheet (and by extension, the constrained dialog).
 - (void)closeSheet;
-
-// List of extensions/suggestions has been retrieved.
-- (void)pendingAsyncCompleted;
 
 // Notification handler - called when sheet has been closed.
 - (void)sheetDidEnd:(NSWindow*)sheet

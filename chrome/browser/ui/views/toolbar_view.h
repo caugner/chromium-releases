@@ -10,8 +10,8 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/command_observer.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -125,14 +125,15 @@ class ToolbarView : public views::AccessiblePaneView,
   virtual void OnInputInProgress(bool in_progress) OVERRIDE;
 
   // Overridden from chrome::search::SearchModelObserver:
-  virtual void ModeChanged(const chrome::search::Mode& mode) OVERRIDE;
+  virtual void ModeChanged(const chrome::search::Mode& old_mode,
+                           const chrome::search::Mode& new_mode) OVERRIDE;
 
   // Overridden from CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -146,17 +147,20 @@ class ToolbarView : public views::AccessiblePaneView,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual bool HitTest(const gfx::Point& l) const OVERRIDE;
+  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual bool GetDropFormats(
       int* formats,
       std::set<OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
   virtual bool CanDrop(const ui::OSExchangeData& data) OVERRIDE;
-  virtual int OnDragUpdated(const views::DropTargetEvent& event) OVERRIDE;
-  virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& acc) OVERRIDE;
+
+  // Whether the wrench/hotdogs menu is currently showing.
+  bool IsWrenchMenuShowing() const;
 
   // The apparent horizontal space between most items, and the vertical padding
   // above and below them.
@@ -169,6 +173,8 @@ class ToolbarView : public views::AccessiblePaneView,
   // Overridden from AccessiblePaneView
   virtual bool SetPaneFocusAndFocusDefault() OVERRIDE;
   virtual void RemovePaneFocus() OVERRIDE;
+  virtual View* GetParentForFocusSearch(View* v) OVERRIDE;
+  virtual bool ContainsForFocusSearch(View* root, const View* v) OVERRIDE;
 
  private:
   // Types of display mode this toolbar can have.
@@ -207,15 +213,9 @@ class ToolbarView : public views::AccessiblePaneView,
   // unacknowledged background pages in the system.
   gfx::ImageSkia GetBackgroundPageBadge();
 
-  // Layout the location bar for the Extended Instant NTP.
-  void LayoutLocationBarNTP();
-
   // Sets the bounds of the LocationBarContainer. |bounds| is in the coordinates
   // of |this|.
   void SetLocationBarContainerBounds(const gfx::Rect& bounds);
-
-  scoped_ptr<BackForwardMenuModel> back_menu_model_;
-  scoped_ptr<BackForwardMenuModel> forward_menu_model_;
 
   // The model that contains the security level, text, icon to display...
   ToolbarModel* model_;

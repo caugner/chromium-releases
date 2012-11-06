@@ -55,25 +55,20 @@ scoped_refptr<const Extension> CreateTestExtension(
 class ActiveTabTest : public TabContentsTestHarness {
  public:
   ActiveTabTest()
-      : extension(CreateTestExtension("deadbeef", true)),
+      : current_channel_(chrome::VersionInfo::CHANNEL_DEV),
+        extension(CreateTestExtension("deadbeef", true)),
         another_extension(CreateTestExtension("feedbeef", true)),
         extension_without_active_tab(CreateTestExtension("badbeef", false)),
-        ui_thread_(BrowserThread::UI, MessageLoop::current()) {
-  }
-
-  virtual void SetUp() {
-    TabContentsTestHarness::SetUp();
-    Feature::SetChannelForTesting(chrome::VersionInfo::CHANNEL_UNKNOWN);
-  }
+        ui_thread_(BrowserThread::UI, MessageLoop::current()) {}
 
  protected:
   int tab_id() {
-    return SessionID::IdForTab(tab_contents());
+    return SessionID::IdForTab(tab_contents()->web_contents());
   }
 
   ActiveTabPermissionManager* active_tab_permission_manager() {
-    return tab_contents()->extension_tab_helper()->
-                           active_tab_permission_manager();
+    return extensions::TabHelper::FromWebContents(web_contents())->
+        active_tab_permission_manager();
   }
 
   bool IsAllowed(const scoped_refptr<const Extension>& extension,
@@ -84,7 +79,7 @@ class ActiveTabTest : public TabContentsTestHarness {
   bool IsAllowed(const scoped_refptr<const Extension>& extension,
                  const GURL& url,
                  int tab_id) {
-    return extension->CanExecuteScriptOnPage(url, tab_id, NULL, NULL) &&
+    return extension->CanExecuteScriptOnPage(url, url, tab_id, NULL, NULL) &&
            extension->CanCaptureVisiblePage(url, tab_id, NULL) &&
            HasTabsPermission(extension, tab_id);
   }
@@ -98,7 +93,7 @@ class ActiveTabTest : public TabContentsTestHarness {
                  const GURL& url,
                  int tab_id) {
     // Note: can't check HasTabsPermission because it isn't URL specific.
-    return !extension->CanExecuteScriptOnPage(url, tab_id, NULL, NULL) &&
+    return !extension->CanExecuteScriptOnPage(url, url, tab_id, NULL, NULL) &&
            !extension->CanCaptureVisiblePage(url, tab_id, NULL);
   }
 
@@ -110,6 +105,11 @@ class ActiveTabTest : public TabContentsTestHarness {
                          int tab_id) {
     return extension->HasAPIPermissionForTab(tab_id, APIPermission::kTab);
   }
+
+  // Force the test to run in dev channel because the permission is only
+  // available in dev channel. Without declaring this first, the extensions
+  // below won't load due to manifest errors.
+  Feature::ScopedCurrentChannel current_channel_;
 
   // An extension with the activeTab permission.
   scoped_refptr<const Extension> extension;

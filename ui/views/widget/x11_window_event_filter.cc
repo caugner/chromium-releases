@@ -4,15 +4,16 @@
 
 #include "ui/views/widget/x11_window_event_filter.h"
 
-#include <X11/Xatom.h>
-#include <X11/Xlib.h>
 #include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
 
 #include "base/message_pump_aurax11.h"
 #include "ui/aura/desktop/desktop_activation_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/events/event.h"
 #include "ui/base/hit_test.h"
 #include "ui/views/widget/native_widget_aura.h"
 
@@ -58,10 +59,8 @@ namespace views {
 
 X11WindowEventFilter::X11WindowEventFilter(
     aura::RootWindow* root_window,
-    aura::DesktopActivationClient* activation_client,
-    NativeWidgetAura* widget)
-    : widget_(widget),
-      activation_client_(activation_client),
+    aura::DesktopActivationClient* activation_client)
+    : activation_client_(activation_client),
       xdisplay_(base::MessagePumpAuraX11::GetDefaultXDisplay()),
       xwindow_(root_window->GetAcceleratedWidget()),
       x_root_window_(DefaultRootWindow(xdisplay_)),
@@ -90,12 +89,12 @@ void X11WindowEventFilter::SetUseHostWindowBorders(bool use_os_border) {
 }
 
 bool X11WindowEventFilter::PreHandleKeyEvent(aura::Window* target,
-                                             aura::KeyEvent* event) {
+                                             ui::KeyEvent* event) {
   return false;
 }
 
 bool X11WindowEventFilter::PreHandleMouseEvent(aura::Window* target,
-                                               aura::MouseEvent* event) {
+                                               ui::MouseEvent* event) {
   if (event->type() != ui::ET_MOUSE_PRESSED)
     return false;
 
@@ -105,39 +104,20 @@ bool X11WindowEventFilter::PreHandleMouseEvent(aura::Window* target,
     return false;
 
   // Get the |x_root_window_| location out of the native event.
-  gfx::Point root_location;
-  const base::NativeEvent& native_event = event->native_event();
-  switch (native_event->type) {
-    case ButtonPress: {
-      root_location.SetPoint(native_event->xbutton.x_root,
-                             native_event->xbutton.y_root);
-      break;
-    }
-    case GenericEvent: {
-      XIDeviceEvent* xievent =
-          static_cast<XIDeviceEvent*>(native_event->xcookie.data);
-      root_location.SetPoint(xievent->root_x, xievent->root_y);
-      break;
-    }
-    default: {
-      NOTREACHED();
-      return false;
-    }
-  }
-
+  gfx::Point root_location = event->system_location();
   return DispatchHostWindowDragMovement(component, root_location);
 }
 
 ui::TouchStatus X11WindowEventFilter::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus X11WindowEventFilter::PreHandleGestureEvent(
+ui::EventResult X11WindowEventFilter::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;
 }
 
 bool X11WindowEventFilter::DispatchHostWindowDragMovement(

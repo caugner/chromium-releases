@@ -5,6 +5,8 @@
 #ifndef PPAPI_PROXY_PPB_INSTANCE_PROXY_H_
 #define PPAPI_PROXY_PPB_INSTANCE_PROXY_H_
 
+#include <string>
+
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_time.h"
@@ -20,6 +22,8 @@
 #ifdef PostMessage
 #undef PostMessage
 #endif
+
+struct PP_DecryptedBlockInfo;
 
 namespace ppapi {
 namespace proxy {
@@ -65,8 +69,7 @@ class PPB_Instance_Proxy : public InterfaceProxy,
   virtual PP_Bool GetScreenSize(PP_Instance instance,
                                 PP_Size* size) OVERRIDE;
   virtual thunk::PPB_Flash_API* GetFlashAPI() OVERRIDE;
-  virtual void SampleGamepads(PP_Instance instance,
-                              PP_GamepadsSampleData* data) OVERRIDE;
+  virtual thunk::PPB_Gamepad_API* GetGamepadAPI(PP_Instance instance) OVERRIDE;
   virtual int32_t RequestInputEvents(PP_Instance instance,
                                      uint32_t event_classes) OVERRIDE;
   virtual int32_t RequestFilteringInputEvents(PP_Instance instance,
@@ -87,9 +90,6 @@ class PPB_Instance_Proxy : public InterfaceProxy,
   virtual int32_t LockMouse(PP_Instance instance,
                             scoped_refptr<TrackedCallback> callback) OVERRIDE;
   virtual void UnlockMouse(PP_Instance instance) OVERRIDE;
-  virtual PP_Bool GetDefaultPrintSettings(
-      PP_Instance instance,
-      PP_PrintSettings_Dev* print_settings) OVERRIDE;
   virtual void SetTextInputType(PP_Instance instance,
                                 PP_TextInput_Type type) OVERRIDE;
   virtual void UpdateCaretPosition(PP_Instance instance,
@@ -115,6 +115,32 @@ class PPB_Instance_Proxy : public InterfaceProxy,
   virtual PP_Var GetPluginInstanceURL(
       PP_Instance instance,
       PP_URLComponents_Dev* components) OVERRIDE;
+  virtual void NeedKey(PP_Instance instance,
+                       PP_Var key_system,
+                       PP_Var session_id,
+                       PP_Var init_data) OVERRIDE;
+  virtual void KeyAdded(PP_Instance instance,
+                        PP_Var key_system,
+                        PP_Var session_id) OVERRIDE;
+  virtual void KeyMessage(PP_Instance instance,
+                          PP_Var key_system,
+                          PP_Var session_id,
+                          PP_Resource message,
+                          PP_Var default_url) OVERRIDE;
+  virtual void KeyError(PP_Instance instance,
+                        PP_Var key_system,
+                        PP_Var session_id,
+                        int32_t media_error,
+                        int32_t system_code) OVERRIDE;
+  virtual void DeliverBlock(PP_Instance instance,
+                            PP_Resource decrypted_block,
+                            const PP_DecryptedBlockInfo* block_info) OVERRIDE;
+  virtual void DeliverFrame(PP_Instance instance,
+                            PP_Resource decrypted_frame,
+                            const PP_DecryptedBlockInfo* block_info) OVERRIDE;
+  virtual void DeliverSamples(PP_Instance instance,
+                              PP_Resource decrypted_samples,
+                              const PP_DecryptedBlockInfo* block_info) OVERRIDE;
 #endif  // !defined(OS_NACL)
 
   static const ApiID kApiID = API_ID_PPB_INSTANCE;
@@ -156,9 +182,6 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                             SerializedVarReceiveInput message);
   void OnHostMsgLockMouse(PP_Instance instance);
   void OnHostMsgUnlockMouse(PP_Instance instance);
-  void OnHostMsgGetDefaultPrintSettings(PP_Instance instance,
-                                        PP_PrintSettings_Dev* settings,
-                                        bool* result);
   void OnHostMsgSetCursor(PP_Instance instance,
                           int32_t type,
                           const ppapi::HostResource& custom_image,
@@ -173,6 +196,7 @@ class PPB_Instance_Proxy : public InterfaceProxy,
       const std::string& text,
       uint32_t caret,
       uint32_t anchor);
+
 #if !defined(OS_NACL)
   void OnHostMsgResolveRelativeToDocument(PP_Instance instance,
                                           SerializedVarReceiveInput relative,
@@ -187,12 +211,42 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                                SerializedVarReturnValue result);
   void OnHostMsgGetPluginInstanceURL(PP_Instance instance,
                                      SerializedVarReturnValue result);
+  virtual void OnHostMsgNeedKey(PP_Instance instance,
+                                SerializedVarReceiveInput key_system,
+                                SerializedVarReceiveInput session_id,
+                                SerializedVarReceiveInput init_data);
+  virtual void OnHostMsgKeyAdded(PP_Instance instance,
+                                 SerializedVarReceiveInput key_system,
+                                 SerializedVarReceiveInput session_id);
+  virtual void OnHostMsgKeyMessage(PP_Instance instance,
+                                   SerializedVarReceiveInput key_system,
+                                   SerializedVarReceiveInput session_id,
+                                   PP_Resource message,
+                                   SerializedVarReceiveInput default_url);
+  virtual void OnHostMsgKeyError(PP_Instance instance,
+                                 SerializedVarReceiveInput key_system,
+                                 SerializedVarReceiveInput session_id,
+                                 int32_t media_error,
+                                 int32_t system_code);
+  virtual void OnHostMsgDeliverBlock(PP_Instance instance,
+                                     PP_Resource decrypted_block,
+                                     const std::string& serialized_block_info);
+  virtual void OnHostMsgDeliverFrame(PP_Instance instance,
+                                     PP_Resource decrypted_frame,
+                                     const std::string& serialized_block_info);
+  virtual void OnHostMsgDeliverSamples(
+      PP_Instance instance,
+      PP_Resource decrypted_samples,
+      const std::string& serialized_block_info);
 #endif  // !defined(OS_NACL)
 
   // Host -> Plugin message handlers.
   void OnPluginMsgMouseLockComplete(PP_Instance instance, int32_t result);
 
   void MouseLockCompleteInHost(int32_t result, PP_Instance instance);
+
+  // Other helpers.
+  void CancelAnyPendingRequestSurroundingText(PP_Instance instance);
 
   ProxyCompletionCallbackFactory<PPB_Instance_Proxy> callback_factory_;
 };

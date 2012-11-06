@@ -40,7 +40,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -50,6 +49,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/generated_resources.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_network_session.h"
@@ -73,6 +73,9 @@ const long int kReleaseNotesTargetRelease = 19;
 // user who logs on the device.
 const char kGetStartedURLPattern[] =
     "http://gweb-gettingstartedguide.appspot.com/";
+
+// Getting started guide application window size.
+const char kGSGAppWindowSize[] = "820,550";
 
 // Parameter to be added to GetStarted URL that contains board.
 const char kGetStartedBoardParam[] = "board";
@@ -229,10 +232,11 @@ void ExistingUserController::Observe(
   }
   if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED ||
       type == chrome::NOTIFICATION_POLICY_USER_LIST_CHANGED) {
-    // Signed settings or user list changed. Notify views and update them.
-    const chromeos::UserList& users = chromeos::UserManager::Get()->GetUsers();
-    UpdateLoginDisplay(users);
-    return;
+    if (host_ != NULL) {
+      // Signed settings or user list changed. Notify views and update them.
+      UpdateLoginDisplay(chromeos::UserManager::Get()->GetUsers());
+      return;
+    }
   }
   if (type == chrome::NOTIFICATION_AUTH_SUPPLIED) {
     // Possibly the user has authenticated against a proxy server and we might
@@ -305,12 +309,18 @@ void ExistingUserController::SetDisplayEmail(const std::string& email) {
 
 void ExistingUserController::CompleteLogin(const std::string& username,
                                            const std::string& password) {
+  if (!host_) {
+    // Complete login event was generated already from UI. Ignore notification.
+    return;
+  }
   if (!time_init_.is_null()) {
     base::TimeDelta delta = base::Time::Now() - time_init_;
     UMA_HISTOGRAM_MEDIUM_TIMES("Login.PromptToCompleteLoginTime", delta);
     time_init_ = base::Time();  // Reset to null.
   }
+
   host_->OnCompleteLogin();
+
   // Auto-enrollment must have made a decision by now. It's too late to enroll
   // if the protocol isn't done at this point.
   if (do_auto_enrollment_) {
@@ -333,24 +343,15 @@ void ExistingUserController::CompleteLogin(const std::string& username,
 
 void ExistingUserController::CompleteLoginInternal(std::string username,
                                                    std::string password) {
+  // Disable UI while loading user profile.
+  login_display_->SetUIEnabled(false);
+
   resume_login_callback_.Reset();
 
-  if (!login_performer_.get()) {
-    LoginPerformer::Delegate* delegate = this;
-    if (login_performer_delegate_.get())
-      delegate = login_performer_delegate_.get();
-    // Only one instance of LoginPerformer should exist at a time.
-    login_performer_.reset(new LoginPerformer(delegate));
-  }
-
-  // If the device is not owned yet, successfully logged in user will be owner.
-  is_owner_login_ = OwnershipService::GetSharedInstance()->GetStatus(true) ==
-      OwnershipService::OWNERSHIP_NONE;
-
-  is_login_in_progress_ = true;
-  login_performer_->CompleteLogin(username, password);
-  accessibility::MaybeSpeak(
-      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN));
+  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
+      base::Bind(&ExistingUserController::PerformLogin,
+                 weak_factory_.GetWeakPtr(), username, password,
+                 LoginPerformer::AUTH_MODE_EXTENSION));
 }
 
 void ExistingUserController::Login(const std::string& username,
@@ -359,10 +360,6 @@ void ExistingUserController::Login(const std::string& username,
     return;
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
-
-  // If the device is not owned yet, successfully logged in user will be owner.
-  is_owner_login_ = OwnershipService::GetSharedInstance()->GetStatus(true) ==
-      OwnershipService::OWNERSHIP_NONE;
 
   BootTimesLoader::Get()->RecordLoginAttempted();
 
@@ -375,6 +372,21 @@ void ExistingUserController::Login(const std::string& username,
   }
   num_login_attempts_++;
 
+  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
+      base::Bind(&ExistingUserController::PerformLogin,
+                 weak_factory_.GetWeakPtr(), username, password,
+                 LoginPerformer::AUTH_MODE_INTERNAL));
+}
+
+void ExistingUserController::PerformLogin(
+    const std::string& username,
+    const std::string& password,
+    LoginPerformer::AuthorizationMode auth_mode,
+    DeviceSettingsService::OwnershipStatus ownership_status,
+    bool is_owner) {
+  // If the device is not owned yet, successfully logged in user will be owner.
+  is_owner_login_ = ownership_status == DeviceSettingsService::OWNERSHIP_NONE;
+
   // Use the same LoginPerformer for subsequent login as it has state
   // such as Authenticator instance.
   if (!login_performer_.get() || num_login_attempts_ <= 1) {
@@ -385,8 +397,9 @@ void ExistingUserController::Login(const std::string& username,
     login_performer_.reset(NULL);
     login_performer_.reset(new LoginPerformer(delegate));
   }
+
   is_login_in_progress_ = true;
-  login_performer_->Login(username, password);
+  login_performer_->PerformLogin(username, password, auth_mode);
   accessibility::MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN));
 }
@@ -461,20 +474,21 @@ void ExistingUserController::OnUserSelected(const std::string& username) {
 }
 
 void ExistingUserController::OnStartEnterpriseEnrollment() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableDevicePolicy)) {
-    OwnershipService::GetSharedInstance()->GetStatusAsync(
-        base::Bind(&ExistingUserController::OnEnrollmentOwnershipCheckCompleted,
-                   weak_factory_.GetWeakPtr()));
-  }
+  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
+      base::Bind(&ExistingUserController::OnEnrollmentOwnershipCheckCompleted,
+                 weak_factory_.GetWeakPtr()));
+}
+
+void ExistingUserController::OnStartDeviceReset() {
+  ShowResetScreen();
 }
 
 void ExistingUserController::OnEnrollmentOwnershipCheckCompleted(
-    OwnershipService::Status status,
+    DeviceSettingsService::OwnershipStatus status,
     bool current_user_is_owner) {
-  if (status == OwnershipService::OWNERSHIP_NONE) {
+  if (status == DeviceSettingsService::OWNERSHIP_NONE) {
     ShowEnrollmentScreen(false, std::string());
-  } else if (status == OwnershipService::OWNERSHIP_TAKEN) {
+  } else if (status == DeviceSettingsService::OWNERSHIP_TAKEN) {
     // On a device that is already owned we might want to allow users to
     // re-enroll if the policy information is invalid.
     CrosSettingsProvider::TrustedStatus trusted_status =
@@ -500,6 +514,11 @@ void ExistingUserController::ShowEnrollmentScreen(bool is_auto_enrollment,
     params->SetString("user", user);
   }
   host_->StartWizard(WizardController::kEnterpriseEnrollmentScreenName, params);
+  login_display_->OnFadeOut();
+}
+
+void ExistingUserController::ShowResetScreen() {
+  host_->StartWizard(WizardController::kResetScreenName, NULL);
   login_display_->OnFadeOut();
 }
 
@@ -609,6 +628,10 @@ void ExistingUserController::OnLoginSuccess(
 
 void ExistingUserController::OnProfilePrepared(Profile* profile) {
   OptionallyShowReleaseNotes(profile);
+
+  // Reenable clicking on other windows and status area.
+  login_display_->SetUIEnabled(true);
+
   if (!ready_for_browser_launch_) {
     // Don't specify start URLs if the administrator has configured the start
     // URLs via policy.
@@ -799,9 +822,8 @@ void ExistingUserController::InitializeStartUrls() const {
   if (!guide_url.empty()) {
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(switches::kApp,
                                                         guide_url);
-    // NTP would open in the background, app window with GSG would be focused
-    // so that user won't have an empty desktop after GSG is closed.
-    CommandLine::ForCurrentProcess()->AppendArg(chrome::kChromeUINewTabURL);
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kAppWindowSize, kGSGAppWindowSize);
   } else {
     // We should not be adding any start URLs if guide
     // is defined as it launches as a standalone app window.

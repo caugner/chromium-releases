@@ -9,7 +9,7 @@
 namespace ash {
 
 const int kPaddingFromRightEdgeOfScreenBottomAlignment = 15;
-const int kPaddingFromBottomOfScreenBottomAlignment = 9;
+const int kPaddingFromBottomOfScreenBottomAlignment = 7;
 const int kPaddingFromOuterEdgeOfLauncherVerticalAlignment = 8;
 const int kPaddingFromInnerEdgeOfLauncherVerticalAlignment = 9;
 const int kPaddingFromBottomOfScreenVerticalAlignment = 10;
@@ -28,7 +28,7 @@ const int kTrayPopupPaddingBetweenItems = 10;
 const int kTrayPopupTextSpacingVertical = 4;
 
 const int kTrayPopupItemHeight = 48;
-const int kTrayPopupDetailsIconWidth = 27;
+const int kTrayPopupDetailsIconWidth = 25;
 const int kTrayRoundedBorderRadius = 2;
 const int kTrayBarButtonWidth = 39;
 

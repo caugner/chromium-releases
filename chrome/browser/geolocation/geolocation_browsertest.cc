@@ -8,13 +8,13 @@
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -568,10 +568,10 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
 
   InfoBarTabHelper* infobar_helper =
       chrome::GetActiveTabContents(current_browser_)->infobar_tab_helper();
-  size_t num_infobars_before_cancel = infobar_helper->infobar_count();
+  size_t num_infobars_before_cancel = infobar_helper->GetInfoBarCount();
   // Change the iframe, and ensure the infobar is gone.
   IFrameLoader change_iframe_1(current_browser_, 1, current_url_);
-  size_t num_infobars_after_cancel = infobar_helper->infobar_count();
+  size_t num_infobars_after_cancel = infobar_helper->GetInfoBarCount();
   EXPECT_EQ(num_infobars_before_cancel, num_infobars_after_cancel + 1);
 }
 

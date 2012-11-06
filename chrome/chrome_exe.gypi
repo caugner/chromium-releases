@@ -247,16 +247,6 @@
             'CHROMIUM_CREATOR': '<(mac_creator)',
             'CHROMIUM_SHORT_NAME': '<(branding)',
           },
-          # Turn off -dead_strip in Release mode for the main app. There's
-          # little here to strip, and doing so preserves symbols from
-          # crt1.10.6.o, which get removed incorrectly. http://crbug.com/139902
-          'configurations': {
-            'Release': {
-              'xcode_settings': {
-                'DEAD_CODE_STRIPPING': 'NO',
-              },
-            },
-          },
           'dependencies': [
             'helper_app',
             'infoplist_strings_tool',
@@ -339,15 +329,15 @@
               # Keystone information is included if Keystone is enabled.  The
               # application reads Keystone keys from this plist and not the
               # framework's, and the ticket will reference this Info.plist to
-              # determine the tag of the installed product.  Use --svn=1 to
-              # include Subversion information.  The --pdf flag controls whether
+              # determine the tag of the installed product.  Use --scm=1 to
+              # include SCM information.  The --pdf flag controls whether
               # to insert PDF as a supported type identifier that can be
               # opened.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
                          '--breakpad=0',
                          '--keystone=<(mac_keystone)',
-                         '--svn=1',
+                         '--scm=1',
                          '--pdf=<(internal_pdf)',
                          '--bundle_id=<(mac_bundle_id)'],
             },
@@ -518,7 +508,13 @@
         }],
         ['OS=="win" and component=="shared_library"', {
           'defines': ['COMPILE_CONTENT_STATICALLY'],
-        }]
+        }],
+        ['OS=="win" and (MSVS_VERSION=="2010" or MSVS_VERSION=="2010e")', {
+          'dependencies': [
+            '../win8/metro_driver/metro_driver.gyp:*',
+            '../win8/delegate_execute/delegate_execute.gyp:*',
+          ],
+        }],
       ],
     },
   ],

@@ -6,13 +6,15 @@
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_LOCATION_BAR_CONTAINER_H_
 
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/views/view.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/animation/bounds_animator_observer.h"
+#include "ui/views/view.h"
 
 class LocationBarView;
 
 namespace views {
+class AccessiblePaneView;
+class FocusTraversable;
 class NativeViewHost;
 }
 
@@ -25,8 +27,11 @@ class NativeViewHost;
 class LocationBarContainer : public views::View,
                              public views::BoundsAnimatorObserver {
  public:
-  // Creates a new LocationBarContainer as a child of |parent|.
-  LocationBarContainer(views::View* parent, bool instant_extended_api_enabled);
+  // Creates a new LocationBarContainer as a child of |parent|,
+  // with |accessible_pane_view| as the owning view for focus searching.
+  LocationBarContainer(views::View* parent,
+                       views::AccessiblePaneView* accessible_pane_view,
+                       bool instant_extended_api_enabled);
   virtual ~LocationBarContainer();
 
   // Sets whether the LocationBarContainer is in the toolbar.
@@ -52,9 +57,11 @@ class LocationBarContainer : public views::View,
   // views::View overrides:
   virtual std::string GetClassName() const OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void Layout() OVERRIDE;
   virtual bool SkipDefaultKeyEventProcessing(
-      const views::KeyEvent& event) OVERRIDE;
+      const ui::KeyEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual views::FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
 
   // views::BoundsAnimatorObserver overrides:
   virtual void OnBoundsAnimatorProgressed(
@@ -69,7 +76,7 @@ class LocationBarContainer : public views::View,
   void PlatformInit();
 
   // Returns the background color.
-  static SkColor GetBackgroundColor();
+  SkColor GetBackgroundColor();
 
   // Returns animation duration in milliseconds.
   static int GetAnimationDuration();
@@ -85,6 +92,10 @@ class LocationBarContainer : public views::View,
   views::NativeViewHost* native_view_host_;
 
   bool in_toolbar_;
+
+  views::AccessiblePaneView* accessible_pane_view_;
+
+  bool instant_extended_api_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarContainer);
 };

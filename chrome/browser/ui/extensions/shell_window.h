@@ -7,6 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/base_window.h"
 #include "content/public/browser/notification_observer.h"
@@ -14,11 +15,13 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/console_message_level.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 
 class GURL;
 class Profile;
 class TabContents;
+class NativeShellWindow;
 
 namespace content {
 class WebContents;
@@ -26,7 +29,10 @@ class WebContents;
 
 namespace extensions {
 class Extension;
+class PlatformAppBrowserTest;
 class WindowController;
+
+struct DraggableRegion;
 }
 
 // ShellWindow is the type of window used by platform apps. Shell windows
@@ -35,7 +41,7 @@ class ShellWindow : public content::NotificationObserver,
                     public content::WebContentsDelegate,
                     public content::WebContentsObserver,
                     public ExtensionFunctionDispatcher::Delegate,
-                    public BaseWindow {
+                    public ImageLoadingTracker::Observer  {
  public:
   struct CreateParams {
     enum Frame {
@@ -44,13 +50,20 @@ class ShellWindow : public content::NotificationObserver,
     };
 
     CreateParams();
+    ~CreateParams();
 
     Frame frame;
     // Specify the initial bounds of the window. If empty, the window will be a
     // default size.
     gfx::Rect bounds;
+    // Specify if bounds should be restored from a previous time.
+    bool restore_position;
+    bool restore_size;
+
     gfx::Size minimum_size;
     gfx::Size maximum_size;
+
+    std::string window_key;
   };
 
   static ShellWindow* Create(Profile* profile,
@@ -60,38 +73,39 @@ class ShellWindow : public content::NotificationObserver,
 
   const SessionID& session_id() const { return session_id_; }
   const extensions::Extension* extension() const { return extension_; }
-  const TabContents* tab_contents() const { return contents_.get(); }
+  TabContents* tab_contents() const { return contents_.get(); }
   content::WebContents* web_contents() const { return web_contents_; }
+  Profile* profile() const { return profile_; }
+  const gfx::Image& app_icon() const { return app_icon_; }
 
- protected:
-  ShellWindow(Profile* profile,
-              const extensions::Extension* extension,
-              const GURL& url);
-  virtual ~ShellWindow();
+  BaseWindow* GetBaseWindow();
+  gfx::NativeWindow GetNativeWindow() {
+    return GetBaseWindow()->GetNativeWindow();
+  }
 
-  // Called when the title of the window changes.
-  virtual void UpdateWindowTitle() {}
-  // Sub-classes should call this to determine what the window's title is on
-  // startup and from within UpdateWindowTitle().
+  // NativeShellWindows should call this to determine what the window's title
+  // is on startup and from within UpdateWindowTitle().
   virtual string16 GetTitle() const;
-
-  virtual void SetFullscreen(bool fullscreen) {}
-  virtual bool IsFullscreenOrPending() const;
 
   // Call to notify ShellRegistry and delete the window. Subclasses should
   // invoke this method instead of using "delete this".
   void OnNativeClose();
 
+  // Save the window position in the prefs.
+  virtual void SaveWindowPosition();
+
+ protected:
+  ShellWindow(Profile* profile,
+              const extensions::Extension* extension);
+  virtual ~ShellWindow();
+
  private:
   // PlatformAppBrowserTest needs access to web_contents()
-  friend class PlatformAppBrowserTest;
+  friend class extensions::PlatformAppBrowserTest;
 
   // Instantiates a platform-specific ShellWindow subclass (one implementation
   // per platform). Public users of ShellWindow should use ShellWindow::Create.
-  static ShellWindow* CreateImpl(Profile* profile,
-                                 const extensions::Extension* extension,
-                                 const GURL& url,
-                                 const CreateParams& params);
+  void Init(const GURL& url, const CreateParams& params);
 
   // content::WebContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -126,7 +140,11 @@ class ShellWindow : public content::NotificationObserver,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) OVERRIDE;
+                              bool user_gesture,
+                              bool* was_blocked) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      content::WebContents* source,
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -144,9 +162,24 @@ class ShellWindow : public content::NotificationObserver,
   void AddMessageToDevToolsConsole(content::ConsoleMessageLevel level,
                                    const std::string& message);
 
+  virtual void UpdateDraggableRegions(
+    const std::vector<extensions::DraggableRegion>& regions);
+
+  // Load the app's image, firing a load state change when loaded.
+  void UpdateExtensionAppIcon();
+
+  // ImageLoadingTracker::Observer implementation.
+  virtual void OnImageLoaded(const gfx::Image& image,
+                             const std::string& extension_id,
+                             int index) OVERRIDE;
+
   Profile* profile_;  // weak pointer - owned by ProfileManager.
   // weak pointer - owned by ExtensionService.
   const extensions::Extension* extension_;
+
+  // Identifier that is used when saving and restoring geometry for this
+  // window.
+  std::string window_key_;
 
   const SessionID session_id_;
   scoped_ptr<TabContents> contents_;
@@ -154,6 +187,14 @@ class ShellWindow : public content::NotificationObserver,
   content::WebContents* web_contents_;
   content::NotificationRegistrar registrar_;
   ExtensionFunctionDispatcher extension_function_dispatcher_;
+
+  // Icon showed in the task bar.
+  gfx::Image app_icon_;
+
+  // Used for loading app_icon_.
+  scoped_ptr<ImageLoadingTracker> app_icon_loader_;
+
+  scoped_ptr<NativeShellWindow> native_window_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellWindow);
 };

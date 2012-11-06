@@ -15,12 +15,13 @@
 #include "ash/system/network/network_observer.h"
 #include "ash/system/power/power_status_observer.h"
 #include "ash/system/status_area_widget.h"
+#include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray_accessibility.h"
 #include "ash/system/tray_caps_lock.h"
-#include "ash/system/tray/system_tray_delegate.h"
-#include "ash/system/tray/system_tray.h"
 #include "ash/system/user/update_observer.h"
 #include "ash/system/user/user_observer.h"
+#include "ash/volume_control_delegate.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/chromeos/chromeos_version.h"
@@ -34,10 +35,8 @@
 #include "chrome/browser/chromeos/bluetooth/bluetooth_device.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive_service_interface.h"
+#include "chrome/browser/chromeos/gdata/drive_system_service.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
@@ -51,13 +50,15 @@
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
 #include "chrome/browser/chromeos/status/network_menu.h"
 #include "chrome/browser/chromeos/status/network_menu_icon.h"
-#include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
+#include "chrome/browser/chromeos/system_key_event_listener.h"
+#include "chrome/browser/google_apis/gdata_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/ash/volume_controller_chromeos.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/upgrade_detector.h"
@@ -74,9 +75,8 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using gdata::GDataOperationRegistry;
-using gdata::GDataSystemService;
-using gdata::GDataSystemServiceFactory;
+using gdata::DriveSystemService;
+using gdata::DriveSystemServiceFactory;
 
 namespace chromeos {
 
@@ -106,10 +106,9 @@ void ExtractIMEInfo(const input_method::InputMethodDescriptor& ime,
 }
 
 ash::DriveOperationStatusList GetDriveStatusList(
-    const std::vector<GDataOperationRegistry::ProgressStatus>& list) {
+    const gdata::OperationProgressStatusList& list) {
   ash::DriveOperationStatusList results;
-  for (GDataOperationRegistry::ProgressStatusList::const_iterator it =
-          list.begin();
+  for (gdata::OperationProgressStatusList::const_iterator it = list.begin();
        it != list.end(); ++it) {
     ash::DriveOperationStatus status;
     status.file_path = it->file_path;
@@ -150,13 +149,13 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
                            public NetworkLibrary::NetworkManagerObserver,
                            public NetworkLibrary::NetworkObserver,
                            public NetworkLibrary::CellularDataPlanObserver,
-                           public gdata::GDataOperationRegistry::Observer,
+                           public gdata::DriveServiceObserver,
                            public content::NotificationObserver,
                            public input_method::InputMethodManager::Observer,
                            public system::TimezoneSettings::Observer,
                            public BluetoothAdapter::Observer,
                            public SystemKeyEventListener::CapsLockObserver,
-                           public MessageBubbleLinkListener {
+                           public ash::NetworkTrayDelegate {
  public:
   explicit SystemTrayDelegate(ash::SystemTray* tray)
       : tray_(tray),
@@ -171,7 +170,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         search_key_mapped_to_(input_method::kSearchKey),
         screen_locked_(false),
         connected_network_state_(STATE_UNKNOWN),
-        data_promo_notification_(new DataPromoNotification()) {
+        data_promo_notification_(new DataPromoNotification()),
+        volume_control_delegate_(ALLOW_THIS_IN_INITIALIZER_LIST(
+            new VolumeController)) {
     AudioHandler::GetInstance()->AddVolumeObserver(this);
     DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
     DBusThreadManager::Get()->GetPowerManagerClient()->RequestStatusUpdate(
@@ -204,6 +205,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     registrar_.Add(this,
                    chrome::NOTIFICATION_PROFILE_CREATED,
                    content::NotificationService::AllSources());
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
+                   content::NotificationService::AllSources());
 
     accessibility_enabled_.Init(prefs::kSpokenFeedbackEnabled,
                                 g_browser_process->local_state(), this);
@@ -233,14 +237,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     bluetooth_adapter_->RemoveObserver(this);
 
     // Stop observing gdata operations.
-    Profile* profile = ProfileManager::GetDefaultProfile();
-    if (gdata::util::IsGDataAvailable(profile)) {
-      GDataSystemService* system_service =
-          GDataSystemServiceFactory::FindForProfile(profile);
-      if (system_service) {
-        system_service->docs_service()->operation_registry()->
-            RemoveObserver(this);
-      }
+    DriveSystemService* system_service = FindDriveSystemService();
+    if (system_service) {
+      system_service->drive_service()->RemoveObserver(this);
     }
   }
 
@@ -318,6 +317,11 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     // TODO(sad): Make this work.
   }
 
+  virtual void ShowDisplaySettings() OVERRIDE {
+    content::RecordAction(content::UserMetricsAction("ShowDisplayOptions"));
+    chrome::ShowSettingsSubPage(GetAppropriateBrowser(), "display");
+  }
+
   virtual void ShowDriveSettings() OVERRIDE {
     // TODO(hshi): Open the drive-specific settings page once we put it in.
     // For now just show search result for downoads settings.
@@ -337,36 +341,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     chrome::ShowHelp(GetAppropriateBrowser(), chrome::HELP_SOURCE_MENU);
   }
 
-  virtual bool IsAudioMuted() const OVERRIDE {
-    return AudioHandler::GetInstance()->IsMuted();
-  }
-
-  virtual void SetAudioMuted(bool muted) OVERRIDE {
-    return AudioHandler::GetInstance()->SetMuted(muted);
-  }
-
-  virtual float GetVolumeLevel() const OVERRIDE {
-    return AudioHandler::GetInstance()->GetVolumePercent() / 100.f;
-  }
-
-  virtual void SetVolumeLevel(float level) OVERRIDE {
-    AudioHandler::GetInstance()->SetVolumePercent(level * 100.f);
-  }
-
-  virtual bool IsCapsLockOn() const OVERRIDE {
-    input_method::InputMethodManager* ime_manager =
-        input_method::InputMethodManager::GetInstance();
-    return ime_manager->GetXKeyboard()->CapsLockIsEnabled();
-  }
-
-  virtual void SetCapsLockEnabled(bool enabled) OVERRIDE {
-    input_method::InputMethodManager* ime_manager =
-        input_method::InputMethodManager::GetInstance();
-    return ime_manager->GetXKeyboard()->SetCapsLockEnabled(enabled);
-  }
-
   virtual void ShutDown() OVERRIDE {
     DBusThreadManager::Get()->GetPowerManagerClient()->RequestShutdown();
+    if (!base::chromeos::IsRunningOnChromeOS())
+      browser::AttemptUserExit();
   }
 
   virtual void SignOut() OVERRIDE {
@@ -463,33 +441,21 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual void CancelDriveOperation(const FilePath& file_path) OVERRIDE {
-    Profile* profile = ProfileManager::GetDefaultProfile();
-    if (!gdata::util::IsGDataAvailable(profile))
-      return;
-
-    GDataSystemService* system_service =
-          GDataSystemServiceFactory::FindForProfile(profile);
+    DriveSystemService* system_service = FindDriveSystemService();
     if (!system_service)
       return;
 
-    system_service->docs_service()->operation_registry()->CancelForFilePath(
-        file_path);
+    system_service->drive_service()->CancelForFilePath(file_path);
   }
 
   virtual void GetDriveOperationStatusList(
       ash::DriveOperationStatusList* list) OVERRIDE {
-    Profile* profile = ProfileManager::GetDefaultProfile();
-    if (!gdata::util::IsGDataAvailable(profile))
-      return;
-
-    GDataSystemService* system_service =
-          GDataSystemServiceFactory::FindForProfile(profile);
+    DriveSystemService* system_service = FindDriveSystemService();
     if (!system_service)
       return;
 
     *list = GetDriveStatusList(
-        system_service->docs_service()->operation_registry()->
-            GetProgressStatusList());
+        system_service->drive_service()->GetProgressStatusList());
   }
 
 
@@ -721,6 +687,15 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     BaseLoginDisplayHost::default_host()->OpenProxySettings();
   }
 
+  virtual ash::VolumeControlDelegate* GetVolumeControlDelegate() const OVERRIDE
+  {
+    return volume_control_delegate_.get();
+  }
+
+  virtual void SetVolumeControlDelegate(
+      scoped_ptr<ash::VolumeControlDelegate> delegate) OVERRIDE {
+    volume_control_delegate_.swap(delegate);
+  }
  private:
   // Returns the last active browser. If there is no such browser, creates a new
   // browser window with an empty tab and returns it.
@@ -737,15 +712,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     UpdateClockType(profile->GetPrefs());
     search_key_mapped_to_ =
         profile->GetPrefs()->GetInteger(prefs::kLanguageXkbRemapSearchKeyTo);
+  }
 
-    if (gdata::util::IsGDataAvailable(profile)) {
-      GDataSystemService* system_service =
-          GDataSystemServiceFactory::FindForProfile(profile);
-      if (!system_service)
-        return;
+  void ObserveGDataUpdates() {
+    DriveSystemService* system_service = FindDriveSystemService();
+    if (!system_service)
+      return;
 
-      system_service->docs_service()->operation_registry()->AddObserver(this);
-    }
+    system_service->drive_service()->AddObserver(this);
   }
 
   void UpdateClockType(PrefService* service) {
@@ -870,7 +844,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
       connection_string = l10n_util::GetStringUTF8(
           IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP);
     }
-    accessibility::Speak(connection_string.c_str());
+    if (connection_string != last_connection_string_) {
+      last_connection_string_ = connection_string;
+      accessibility::Speak(connection_string);
+    }
   }
 
   void AddNetworkToList(std::vector<ash::NetworkIconInfo>* list,
@@ -1025,9 +1002,31 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
                        const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_UPGRADE_RECOMMENDED: {
+        UpgradeDetector* detector =
+            content::Source<UpgradeDetector>(source).ptr();
+        ash::UpdateObserver::UpdateSeverity severity =
+            ash::UpdateObserver::UPDATE_NORMAL;
+        switch (detector->upgrade_notification_stage()) {
+          case UpgradeDetector::UPGRADE_ANNOYANCE_SEVERE:
+            severity = ash::UpdateObserver::UPDATE_SEVERE_RED;
+            break;
+
+          case UpgradeDetector::UPGRADE_ANNOYANCE_HIGH:
+            severity = ash::UpdateObserver::UPDATE_HIGH_ORANGE;
+            break;
+
+          case UpgradeDetector::UPGRADE_ANNOYANCE_ELEVATED:
+            severity = ash::UpdateObserver::UPDATE_LOW_GREEN;
+            break;
+
+          case UpgradeDetector::UPGRADE_ANNOYANCE_LOW:
+          default:
+            severity = ash::UpdateObserver::UPDATE_NORMAL;
+            break;
+        }
         ash::UpdateObserver* observer = tray_->update_observer();
         if (observer)
-          observer->OnUpdateRecommended();
+          observer->OnUpdateRecommended(severity);
         break;
       }
       case chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED: {
@@ -1038,6 +1037,11 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
           if (observer)
             observer->OnUserUpdate();
         }
+        break;
+      }
+      case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED: {
+        // GData system service exists by the time if enabled.
+        ObserveGDataUpdates();
         break;
       }
       case chrome::NOTIFICATION_PREF_CHANGED: {
@@ -1089,9 +1093,9 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     NotifyRefreshIME(false);
   }
 
-  // gdata::GDataOperationRegistry::Observer overrides.
+  // gdata::DriveServiceObserver overrides.
   virtual void OnProgressUpdate(
-      const GDataOperationRegistry::ProgressStatusList& list) {
+      const gdata::OperationProgressStatusList& list) OVERRIDE {
     std::vector<ash::DriveOperationStatus> ui_list = GetDriveStatusList(list);
     NotifyRefreshDrive(ui_list);
 
@@ -1100,15 +1104,11 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     // raise events that will let us properly clear the uber tray state.
     if (list.size() > 0) {
       bool has_in_progress_items = false;
-      for (GDataOperationRegistry::ProgressStatusList::const_iterator it =
-               list.begin();
+      for (gdata::OperationProgressStatusList::const_iterator it = list.begin();
           it != list.end(); ++it) {
-        if (it->transfer_state ==
-                GDataOperationRegistry::OPERATION_STARTED ||
-            it->transfer_state ==
-                GDataOperationRegistry::OPERATION_IN_PROGRESS ||
-            it->transfer_state ==
-                GDataOperationRegistry::OPERATION_SUSPENDED) {
+        if (it->transfer_state == gdata::OPERATION_STARTED ||
+            it->transfer_state == gdata::OPERATION_IN_PROGRESS ||
+            it->transfer_state == gdata::OPERATION_SUSPENDED) {
           has_in_progress_items = true;
           break;
         }
@@ -1131,17 +1131,18 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   // status in UI in cases when there are no new changes coming (i.e. when the
   // last set of transfer operations completed).
   void RecheckGDataOperations() {
-    Profile* profile = ProfileManager::GetDefaultProfile();
-    if (!gdata::util::IsGDataAvailable(profile))
-      return;
-
-    GDataSystemService* system_service =
-          GDataSystemServiceFactory::FindForProfile(profile);
+    DriveSystemService* system_service = FindDriveSystemService();
     if (!system_service)
       return;
 
-    OnProgressUpdate(system_service->docs_service()->operation_registry()->
-        GetProgressStatusList());
+    OnProgressUpdate(system_service->drive_service()->GetProgressStatusList());
+  }
+
+  DriveSystemService* FindDriveSystemService() {
+    Profile* profile = ProfileManager::GetDefaultProfile();
+    if (!gdata::util::IsGDataAvailable(profile))
+      return NULL;
+    return DriveSystemServiceFactory::FindForProfile(profile);
   }
 
   // Overridden from system::TimezoneSettings::Observer.
@@ -1193,8 +1194,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
       observer->OnCapsLockChanged(enabled, search_mapped_to_caps_lock);
   }
 
-  // Overridden from MessageBubbleLinkListener
-  virtual void OnLinkActivated(size_t index) OVERRIDE {
+  // Overridden from ash::NetworkTrayDelegate
+  virtual void NotificationLinkClicked(size_t index) OVERRIDE {
     // If we have deal info URL defined that means that there're
     // 2 links in bubble. Let the user close it manually then thus giving
     // ability to navigate to second link.
@@ -1244,11 +1245,15 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   ConnectionState connected_network_state_;
   std::string connected_network_path_;
 
+  std::string last_connection_string_;
+
   scoped_refptr<BluetoothAdapter> bluetooth_adapter_;
 
   BooleanPrefMember accessibility_enabled_;
 
   scoped_ptr<DataPromoNotification> data_promo_notification_;
+
+  scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemTrayDelegate);
 };

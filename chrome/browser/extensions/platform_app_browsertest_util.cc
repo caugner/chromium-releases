@@ -17,12 +17,12 @@
 #include "content/public/test/test_utils.h"
 
 using content::WebContents;
-using extensions::Extension;
 
 namespace utils = extension_function_test_utils;
 
-void PlatformAppBrowserTest::SetUpCommandLine(
-    CommandLine* command_line) {
+namespace extensions {
+
+void PlatformAppBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
   command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
 }
@@ -47,13 +47,21 @@ const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
 }
 
 WebContents* PlatformAppBrowserTest::GetFirstShellWindowWebContents() {
+  ShellWindow* window = GetFirstShellWindow();
+  if (window)
+    return window->web_contents();
+
+  return NULL;
+}
+
+ShellWindow* PlatformAppBrowserTest::GetFirstShellWindow() {
   ShellWindowRegistry* app_registry =
       ShellWindowRegistry::Get(browser()->profile());
   ShellWindowRegistry::const_iterator iter;
   ShellWindowRegistry::ShellWindowSet shell_windows =
       app_registry->shell_windows();
   for (iter = shell_windows.begin(); iter != shell_windows.end(); ++iter) {
-    return (*iter)->web_contents();
+    return *iter;
   }
 
   return NULL;
@@ -116,6 +124,8 @@ void PlatformAppBrowserTest::CloseShellWindow(ShellWindow* window) {
   content::WindowedNotificationObserver destroyed_observer(
       content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
-  window->Close();
+  window->GetBaseWindow()->Close();
   destroyed_observer.Wait();
 }
+
+}  // namespace extensions

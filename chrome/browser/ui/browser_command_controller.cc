@@ -15,6 +15,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
@@ -42,10 +42,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
-#endif
-
-#if defined(USE_ASH)
-#include "ash/wm/window_util.h"
 #endif
 
 using content::WebContents;
@@ -72,6 +68,74 @@ bool HasInternalURL(const NavigationEntry* entry) {
 
   return false;
 }
+
+#if defined(OS_WIN)
+// Windows 8 specific helper class to manage DefaultBrowserWorker. It does the
+// following asynchronous actions in order:
+// 1- Check that chrome is the default browser
+// 2- If we are the default, restart chrome in metro and exit
+// 3- If not the default browser show the 'select default browser' system dialog
+// 4- When dialog dismisses check again who got made the default
+// 5- If we are the default then restart chrome in metro and exit
+// 6- If we are not the default exit.
+//
+// Note: this class deletes itself.
+class SwichToMetroUIHandler
+    : public ShellIntegration::DefaultWebClientObserver {
+ public:
+  SwichToMetroUIHandler()
+      : ALLOW_THIS_IN_INITIALIZER_LIST(default_browser_worker_(
+            new ShellIntegration::DefaultBrowserWorker(this))),
+        first_check_(true) {
+    default_browser_worker_->StartCheckIsDefault();
+  }
+
+  virtual ~SwichToMetroUIHandler() {
+    default_browser_worker_->ObserverDestroyed();
+  }
+
+ private:
+  virtual void SetDefaultWebClientUIState(
+      ShellIntegration::DefaultWebClientUIState state) OVERRIDE {
+    switch (state) {
+      case ShellIntegration::STATE_PROCESSING:
+        return;
+      case ShellIntegration::STATE_UNKNOWN :
+        break;
+      case ShellIntegration::STATE_IS_DEFAULT:
+        browser::AttemptRestartWithModeSwitch();
+        break;
+      case ShellIntegration::STATE_NOT_DEFAULT:
+        if (first_check_) {
+          default_browser_worker_->StartSetAsDefault();
+          return;
+        }
+        break;
+      default:
+        NOTREACHED();
+    }
+    delete this;
+  }
+
+  virtual void OnSetAsDefaultConcluded(bool success)  OVERRIDE {
+    if (!success) {
+      delete this;
+      return;
+    }
+    first_check_ = false;
+    default_browser_worker_->StartCheckIsDefault();
+  }
+
+  virtual bool IsInteractiveSetDefaultPermitted() OVERRIDE {
+    return true;
+  }
+
+  scoped_refptr<ShellIntegration::DefaultBrowserWorker> default_browser_worker_;
+  bool first_check_;
+
+  DISALLOW_COPY_AND_ASSIGN(SwichToMetroUIHandler);
+};
+#endif  // defined(OS_WIN)
 
 }  // namespace
 
@@ -287,31 +351,13 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       NewIncognitoWindow(browser_);
       break;
     case IDC_CLOSE_WINDOW:
-      // Destroying a tab / browser window while it has opened a full screen
-      // window will destroy it's content class - which will destroy the
-      // delegate - which is also used by the opened full screen window's
-      // event handler. That will cause then a crash. To avoid that we supress
-      // closing of windows via key stroke while a full screen window is open.
-      // http://crbug.com/134465,  http://crbug.com/131436
-#if defined(OS_CHROMEOS)
-      if (!IsFullScreenWindowOpen())
-#endif
-        CloseWindow(browser_);
+      CloseWindow(browser_);
       break;
     case IDC_NEW_TAB:
       NewTab(browser_);
       break;
     case IDC_CLOSE_TAB:
-      // Destroying a tab / browser window while it has opened a full screen
-      // window will destroy it's content class - which will destroy the
-      // delegate - which is also used by the opened full screen window's
-      // event handler. That will cause then a crash. To avoid that we supress
-      // closing of windows via key stroke while a full screen window is open.
-      // http://crbug.com/134465,  http://crbug.com/131436
-#if defined(OS_CHROMEOS)
-      if (!IsFullScreenWindowOpen())
-#endif
-        CloseTab(browser_);
+      CloseTab(browser_);
       break;
     case IDC_SELECT_NEXT_TAB:
       SelectNextTab(browser_);
@@ -353,14 +399,23 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_FULLSCREEN:
       chrome::ToggleFullscreenMode(browser_);
       break;
+
 #if defined(OS_WIN)
+    // Windows 8 specific commands.
     case IDC_METRO_SNAP_ENABLE:
       browser_->SetMetroSnapMode(true);
       break;
     case IDC_METRO_SNAP_DISABLE:
       browser_->SetMetroSnapMode(false);
       break;
+    case IDC_WIN8_DESKTOP_RESTART:
+      browser::AttemptRestartWithModeSwitch();
+      break;
+    case IDC_WIN8_METRO_RESTART:
+      new SwichToMetroUIHandler;
+      break;
 #endif
+
 #if defined(OS_MACOSX)
     case IDC_PRESENTATION_MODE:
       browser_->TogglePresentationMode();
@@ -376,6 +431,9 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_BOOKMARK_PAGE:
       BookmarkCurrentPage(browser_);
+      break;
+    case IDC_SHARE_PAGE:
+      ShareCurrentPage(browser_);
       break;
     case IDC_PIN_TO_START_SCREEN:
       TogglePagePinnedToStartScreen(browser_);
@@ -508,13 +566,16 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       CreateApplicationShortcuts(browser_);
       break;
     case IDC_DEV_TOOLS:
-      ToggleDevToolsWindow(browser_, DEVTOOLS_TOGGLE_ACTION_NONE);
+      ToggleDevToolsWindow(browser_, DEVTOOLS_TOGGLE_ACTION_SHOW);
       break;
     case IDC_DEV_TOOLS_CONSOLE:
       ToggleDevToolsWindow(browser_, DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
       break;
     case IDC_DEV_TOOLS_INSPECT:
       ToggleDevToolsWindow(browser_, DEVTOOLS_TOGGLE_ACTION_INSPECT);
+      break;
+    case IDC_DEV_TOOLS_TOGGLE:
+      ToggleDevToolsWindow(browser_, DEVTOOLS_TOGGLE_ACTION_TOGGLE);
       break;
     case IDC_TASK_MANAGER:
       OpenTaskManager(browser_, false);
@@ -565,6 +626,9 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_IMPORT_SETTINGS:
       ShowImportDialog(browser_);
+      break;
+    case IDC_TOGGLE_REQUEST_TABLET_SITE:
+      ToggleRequestTabletSite(browser_);
       break;
     case IDC_ABOUT:
       ShowAboutChrome(browser_);
@@ -757,6 +821,7 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_ISO88598I, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_WINDOWS1255, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_WINDOWS1258, true);
+  command_updater_.UpdateCommandEnabled(IDC_SHARE_PAGE, true);
 
   // Zoom
   command_updater_.UpdateCommandEnabled(IDC_ZOOM_MENU, true);
@@ -806,6 +871,9 @@ void BrowserCommandController::InitCommandState() {
   const bool metro_mode = base::win::IsMetroProcess();
   command_updater_.UpdateCommandEnabled(IDC_METRO_SNAP_ENABLE, metro_mode);
   command_updater_.UpdateCommandEnabled(IDC_METRO_SNAP_DISABLE, metro_mode);
+  int restart_mode = metro_mode ?
+      IDC_WIN8_DESKTOP_RESTART : IDC_WIN8_METRO_RESTART;
+  command_updater_.UpdateCommandEnabled(restart_mode, normal_window);
 #endif
 #if defined(OS_MACOSX)
   command_updater_.UpdateCommandEnabled(IDC_TABPOSE, normal_window);
@@ -878,10 +946,9 @@ void BrowserCommandController::UpdateCommandsForIncognitoAvailability() {
 }
 
 void BrowserCommandController::UpdateCommandsForTabState() {
-  TabContents* current_tab_contents = chrome::GetActiveTabContents(browser_);
-  if (!current_tab_contents)  // May be NULL during tab restore.
+  WebContents* current_web_contents = chrome::GetActiveWebContents(browser_);
+  if (!current_web_contents)  // May be NULL during tab restore.
     return;
-  WebContents* current_web_contents = current_tab_contents->web_contents();
 
   // Navigation commands
   command_updater_.UpdateCommandEnabled(IDC_BACK, CanGoBack(browser_));
@@ -898,11 +965,8 @@ void BrowserCommandController::UpdateCommandsForTabState() {
 
   // Page-related commands
   window()->SetStarredState(
-      current_tab_contents->bookmark_tab_helper()->is_starred());
-  window()->SetZoomIconState(
-      current_tab_contents->zoom_controller()->zoom_icon_state());
-  window()->SetZoomIconTooltipPercent(
-      current_tab_contents->zoom_controller()->zoom_percent());
+      BookmarkTabHelper::FromWebContents(current_web_contents)->is_starred());
+  window()->ZoomChangedForActiveTab(false);
   command_updater_.UpdateCommandEnabled(IDC_VIEW_SOURCE,
                                         CanViewSource(browser_));
   command_updater_.UpdateCommandEnabled(IDC_EMAIL_PAGE_LOCATION,
@@ -925,6 +989,10 @@ void BrowserCommandController::UpdateCommandsForTabState() {
       IDC_CREATE_SHORTCUTS,
       CanCreateApplicationShortcuts(browser_));
 #endif
+
+  command_updater_.UpdateCommandEnabled(
+      IDC_TOGGLE_REQUEST_TABLET_SITE,
+      CanRequestTabletSite(current_web_contents));
 
   UpdateCommandsForContentRestrictionState();
   UpdateCommandsForBookmarkEditing();
@@ -951,6 +1019,8 @@ void BrowserCommandController::UpdateCommandsForDevTools() {
   command_updater_.UpdateCommandEnabled(IDC_DEV_TOOLS_CONSOLE,
                                         dev_tools_enabled);
   command_updater_.UpdateCommandEnabled(IDC_DEV_TOOLS_INSPECT,
+                                        dev_tools_enabled);
+  command_updater_.UpdateCommandEnabled(IDC_DEV_TOOLS_TOGGLE,
                                         dev_tools_enabled);
 }
 
@@ -1099,17 +1169,6 @@ BrowserWindow* BrowserCommandController::window() {
 
 Profile* BrowserCommandController::profile() {
   return browser_->profile();
-}
-
-bool BrowserCommandController::IsFullScreenWindowOpen() {
-#if defined(USE_ASH)
-  // Returns true when a Pepper Flash window is maximized.
-  aura::Window* aura_window = ash::wm::GetActiveWindow();
-  return aura_window && ash::wm::IsWindowFullscreen(aura_window) &&
-      !window()->IsFullscreen();
-#else
-  return false;
-#endif
 }
 
 }  // namespace chrome

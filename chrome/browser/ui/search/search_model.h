@@ -8,8 +8,6 @@
 #include "base/basictypes.h"
 #include "base/observer_list.h"
 #include "chrome/browser/ui/search/search_types.h"
-#include "third_party/skia/include/core/SkColor.h"
-#include "ui/gfx/rect.h"
 
 class TabContents;
 
@@ -35,9 +33,6 @@ class SearchModel {
 
   // Get the active mode.
   const Mode& mode() const { return mode_; }
-
-  // Change the mode to |to_mode| only if |from_mode| is the active mode.
-  void MaybeChangeMode(Mode::Type from_mode, Mode::Type to_mode);
 
   // Add and remove observers.
   void AddObserver(SearchModelObserver* observer);

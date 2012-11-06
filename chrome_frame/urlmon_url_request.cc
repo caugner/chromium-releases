@@ -691,13 +691,14 @@ STDMETHODIMP UrlmonUrlRequest::OnResponse(DWORD dwResponseCode,
   headers_received_ = true;
   DCHECK_NE(id(), -1);
   delegate_->OnResponseStarted(id(),
-                    "",                   // mime_type
-                    raw_headers.c_str(),  // headers
-                    0,                    // size
-                    base::Time(),         // last_modified
-                    status_.get_redirection().utf8_url,
-                    status_.get_redirection().http_code,
-                    socket_address_);
+                               "",                   // mime_type
+                               raw_headers.c_str(),  // headers
+                               0,                    // size
+                               base::Time(),         // last_modified
+                               status_.get_redirection().utf8_url,
+                               status_.get_redirection().http_code,
+                               socket_address_,
+                               post_data_len());
   return S_OK;
 }
 
@@ -1074,6 +1075,31 @@ void UrlmonUrlRequestManager::StartRequestHelper(
     new_request = created_request;
   }
 
+  // Format upload data if it's chunked.
+  if (request_info.upload_data && request_info.upload_data->is_chunked()) {
+    std::vector<net::UploadElement>* elements =
+        request_info.upload_data->elements_mutable();
+    for (size_t i = 0; i < elements->size(); ++i) {
+      net::UploadElement* element = &(*elements)[i];
+      DCHECK(element->type() == net::UploadElement::TYPE_BYTES);
+      std::string chunk_length = StringPrintf(
+          "%X\r\n", static_cast<unsigned int>(element->bytes_length()));
+      std::vector<char> bytes;
+      bytes.insert(bytes.end(), chunk_length.data(),
+                   chunk_length.data() + chunk_length.length());
+      const char* data = element->bytes();
+      bytes.insert(bytes.end(), data, data + element->bytes_length());
+      const char* crlf = "\r\n";
+      bytes.insert(bytes.end(), crlf, crlf + strlen(crlf));
+      if (i == elements->size() - 1) {
+        const char* end_of_data = "0\r\n\r\n";
+        bytes.insert(bytes.end(), end_of_data,
+                     end_of_data + strlen(end_of_data));
+      }
+      element->SetToBytes(&bytes[0], static_cast<int>(bytes.size()));
+    }
+  }
+
   new_request->Initialize(static_cast<PluginUrlRequestDelegate*>(this),
       request_id,
       request_info.url,
@@ -1298,10 +1324,11 @@ void UrlmonUrlRequestManager::StopAllRequestsHelper(
     request_map_lock->Release();
 }
 
-void UrlmonUrlRequestManager::OnResponseStarted(int request_id,
-    const char* mime_type, const char* headers, int size,
+void UrlmonUrlRequestManager::OnResponseStarted(
+    int request_id, const char* mime_type, const char* headers, int size,
     base::Time last_modified, const std::string& redirect_url,
-    int redirect_status, const net::HostPortPair& socket_address) {
+    int redirect_status, const net::HostPortPair& socket_address,
+    uint64 upload_size) {
   DCHECK_NE(request_id, -1);
   DVLOG(1) << __FUNCTION__;
 
@@ -1314,8 +1341,9 @@ void UrlmonUrlRequestManager::OnResponseStarted(int request_id,
   }
   DCHECK(request != NULL);
 #endif  // NDEBUG
-  delegate_->OnResponseStarted(request_id, mime_type, headers, size,
-      last_modified, redirect_url, redirect_status, socket_address);
+  delegate_->OnResponseStarted(
+      request_id, mime_type, headers, size, last_modified, redirect_url,
+      redirect_status, socket_address, upload_size);
 }
 
 void UrlmonUrlRequestManager::OnReadComplete(int request_id,

@@ -8,8 +8,8 @@
 #include "ash/shell_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/image_view.h"
@@ -45,7 +45,7 @@ class DefaultAccessibilityView : public ActionableView {
 
  protected:
   // Overridden from ActionableView.
-  virtual bool PerformAction(const views::Event& event) OVERRIDE {
+  virtual bool PerformAction(const ui::Event& event) OVERRIDE {
     if (Shell::GetInstance()->delegate()->IsSpokenFeedbackEnabled())
       Shell::GetInstance()->delegate()->ToggleSpokenFeedback();
     GetWidget()->Close();

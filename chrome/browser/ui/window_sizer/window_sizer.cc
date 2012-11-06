@@ -128,7 +128,12 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
 
 // The number of pixels which are kept free top, left and right when a window
 // gets positioned to its default location.
+// static
 const int WindowSizer::kDesktopBorderSize = 16;
+
+// Maximum width of a window even if there is more room on the desktop.
+// static
+const int WindowSizer::kMaximumWindowWidth = 1100;
 
 WindowSizer::WindowSizer(StateProvider* state_provider, const Browser* browser)
     : state_provider_(state_provider),
@@ -163,7 +168,7 @@ void WindowSizer::DetermineWindowBounds(const gfx::Rect& specified_bounds,
                                         gfx::Rect* bounds) const {
   *bounds = specified_bounds;
   if (bounds->IsEmpty()) {
-    if (GetBoundsIgnoringPreviousState(specified_bounds, bounds))
+    if (GetBoundsOverride(specified_bounds, bounds))
       return;
     // See if there's saved placement information.
     if (!GetLastWindowBounds(bounds)) {
@@ -325,13 +330,13 @@ void WindowSizer::AdjustBoundsToBeVisibleOnMonitorContaining(
 #endif  // defined(OS_MACOSX)
 }
 
-bool WindowSizer::GetBoundsIgnoringPreviousState(
+bool WindowSizer::GetBoundsOverride(
     const gfx::Rect& specified_bounds,
     gfx::Rect* bounds) const {
 #if defined(USE_ASH)
   // TODO(beng): insufficient but currently necessary. http://crbug.com/133312
   if (chrome::ShouldOpenAshOnStartup())
-    return GetBoundsIgnoringPreviousStateAsh(specified_bounds, bounds);
+    return GetBoundsOverrideAsh(specified_bounds, bounds);
 #endif
   return false;
 }

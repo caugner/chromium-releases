@@ -13,8 +13,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/property_bag.h"
-#include "content/browser/browser_plugin/old/browser_plugin_host.h"
+#include "content/browser/browser_plugin/old/old_browser_plugin_host.h"
 #include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
@@ -26,6 +25,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
 #include "net/base/load_states.h"
+#include "ui/gfx/rect_f.h"
 #include "ui/gfx/size.h"
 #include "webkit/glue/resource_type.h"
 
@@ -76,18 +76,31 @@ class CONTENT_EXPORT WebContentsImpl
       public RenderViewHostManager::Delegate,
       public content::NotificationObserver {
  public:
-  // See WebContents::Create for a description of these parameters.
-  WebContentsImpl(content::BrowserContext* browser_context,
-                  content::SiteInstance* site_instance,
-                  int routing_id,
-                  const WebContentsImpl* base_web_contents,
-                  WebContentsImpl* opener,
-                  SessionStorageNamespaceImpl* session_storage_namespace);
   virtual ~WebContentsImpl();
+
+  static WebContentsImpl* Create(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* site_instance,
+      int routing_id,
+      const WebContentsImpl* base_web_contents);
+
+  static WebContentsImpl* CreateWithOpener(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* site_instance,
+      int routing_id,
+      const WebContentsImpl* base_web_contents,
+      WebContentsImpl* opener);
 
   // Returns the content specific prefs for the given RVH.
   static webkit_glue::WebPreferences GetWebkitPrefs(
       content::RenderViewHost* rvh, const GURL& url);
+
+  // Complex initialization here. Specifically needed to avoid having
+  // members call back into our virtual functions in the constructor.
+  virtual void Init(content::BrowserContext* browser_context,
+                    content::SiteInstance* site_instance,
+                    int routing_id,
+                    const content::WebContents* base_web_contents);
 
   // Returns the SavePackage which manages the page saving job. May be NULL.
   SavePackage* save_package() const { return save_package_.get(); }
@@ -144,26 +157,22 @@ class CONTENT_EXPORT WebContentsImpl
     return java_bridge_dispatcher_host_manager_.get();
   }
 
-  content::BrowserPluginHost* browser_plugin_host() const {
-    return browser_plugin_host_.get();
+  content::old::BrowserPluginHost* old_browser_plugin_host() const {
+    return old_browser_plugin_host_.get();
   }
-
-  // Like GetController from WebContents, but returns the concrete object.
-  NavigationControllerImpl& GetControllerImpl();
 
   // Expose the render manager for testing.
   RenderViewHostManager* GetRenderManagerForTesting();
 
   // content::WebContents ------------------------------------------------------
-  virtual const base::PropertyBag* GetPropertyBag() const OVERRIDE;
-  virtual base::PropertyBag* GetPropertyBag() OVERRIDE;
   virtual content::WebContentsDelegate* GetDelegate() OVERRIDE;
   virtual void SetDelegate(content::WebContentsDelegate* delegate) OVERRIDE;
-  virtual content::NavigationController& GetController() OVERRIDE;
-  virtual const content::NavigationController& GetController() const OVERRIDE;
+  virtual NavigationControllerImpl& GetController() OVERRIDE;
+  virtual const NavigationControllerImpl& GetController() const OVERRIDE;
   virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual content::RenderProcessHost* GetRenderProcessHost() const OVERRIDE;
   virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE;
+  virtual int GetRoutingID() const OVERRIDE;
   virtual content::RenderWidgetHostView*
       GetRenderWidgetHostView() const OVERRIDE;
   virtual content::WebContentsView* GetView() const OVERRIDE;
@@ -199,10 +208,6 @@ class CONTENT_EXPORT WebContentsImpl
   virtual bool NeedToFireBeforeUnload() OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual content::WebContents* Clone() OVERRIDE;
-  virtual void AddNewContents(content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture) OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
@@ -256,6 +261,9 @@ class CONTENT_EXPORT WebContentsImpl
   virtual content::WebContents* OpenURL(
       const content::OpenURLParams& params) OVERRIDE;
 
+  // Implementation of IPC::Sender.
+  virtual bool Send(IPC::Message* message) OVERRIDE;
+
   // RenderViewHostDelegate ----------------------------------------------------
 
   virtual content::RenderViewHostDelegateView* GetDelegateView() OVERRIDE;
@@ -264,7 +272,7 @@ class CONTENT_EXPORT WebContentsImpl
   virtual bool OnMessageReceived(content::RenderViewHost* render_view_host,
                                  const IPC::Message& message) OVERRIDE;
   virtual const GURL& GetURL() const OVERRIDE;
-  virtual WebContents* GetAsWebContents() OVERRIDE;
+  virtual content::WebContents* GetAsWebContents() OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
   virtual void RenderViewCreated(
       content::RenderViewHost* render_view_host) OVERRIDE;
@@ -313,6 +321,7 @@ class CONTENT_EXPORT WebContentsImpl
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidCancelLoading() OVERRIDE;
   virtual void DidChangeLoadProgress(double progress) OVERRIDE;
+  virtual void DidUpdateFrameTree(content::RenderViewHost* rvh) OVERRIDE;
   virtual void DocumentAvailableInMainFrame(
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DocumentOnLoadCompletedInMainFrame(
@@ -395,10 +404,16 @@ class CONTENT_EXPORT WebContentsImpl
                                  const gfx::Rect& initial_pos) OVERRIDE;
   virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
   virtual void ShowContextMenu(
-      const content::ContextMenuParams& params) OVERRIDE;
+      const content::ContextMenuParams& params,
+      content::ContextMenuSourceType type) OVERRIDE;
   virtual void RequestMediaAccessPermission(
       const content::MediaStreamRequest* request,
       const content::MediaResponseCallback& callback) OVERRIDE;
+
+#if defined(OS_ANDROID)
+  virtual void AttachLayer(WebKit::WebLayer* layer) OVERRIDE;
+  virtual void RemoveLayer(WebKit::WebLayer* layer) OVERRIDE;
+#endif
 
   // RenderWidgetHostDelegate --------------------------------------------------
 
@@ -438,18 +453,11 @@ class CONTENT_EXPORT WebContentsImpl
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
- protected:
-  friend class content::WebContentsObserver;
-
-  // Add and remove observers for page navigation notifications. Adding or
-  // removing multiple times has no effect. The order in which notifications
-  // are sent to observers is undefined. Clients must be sure to remove the
-  // observer before they go away.
-  void AddObserver(content::WebContentsObserver* observer);
-  void RemoveObserver(content::WebContentsObserver* observer);
 
  private:
   friend class NavigationControllerImpl;
+  friend class content::WebContentsObserver;
+  friend class content::WebContents;  // To implement factory methods.
 
   FRIEND_TEST_ALL_PREFIXES(WebContentsImplTest, NoJSMessageOnInterstitials);
   FRIEND_TEST_ALL_PREFIXES(WebContentsImplTest, UpdateTitle);
@@ -465,6 +473,17 @@ class CONTENT_EXPORT WebContentsImpl
   // TODO(brettw) TestWebContents shouldn't exist!
   friend class content::TestWebContents;
 
+  // See WebContents::Create for a description of these parameters.
+  WebContentsImpl(content::BrowserContext* browser_context,
+                  WebContentsImpl* opener);
+
+  // Add and remove observers for page navigation notifications. Adding or
+  // removing multiple times has no effect. The order in which notifications
+  // are sent to observers is undefined. Clients must be sure to remove the
+  // observer before they go away.
+  void AddObserver(content::WebContentsObserver* observer);
+  void RemoveObserver(content::WebContentsObserver* observer);
+
   // Clears this tab's opener if it has been closed.
   void OnWebContentsDestroyed(content::WebContents* web_contents);
 
@@ -473,6 +492,10 @@ class CONTENT_EXPORT WebContentsImpl
                       IPC::Message* reply_msg,
                       bool success,
                       const string16& user_input);
+
+  // Callback function when requesting permission to access the PPAPI broker.
+  // |result| is true if permission was granted.
+  void OnPpapiBrokerPermissionResult(int request_id, bool result);
 
   // IPC message handlers.
   void OnRegisterIntentService(const webkit_glue::WebIntentServiceData& data,
@@ -509,9 +532,16 @@ class CONTENT_EXPORT WebContentsImpl
                                  const GURL& url,
                                  const string16& title,
                                  bool user_gesture);
-  void OnFindReply(int request_id, int number_of_matches,
-                   const gfx::Rect& selection_rect, int active_match_ordinal,
+  void OnFindReply(int request_id,
+                   int number_of_matches,
+                   const gfx::Rect& selection_rect,
+                   int active_match_ordinal,
                    bool final_update);
+#if defined(OS_ANDROID)
+  void OnFindMatchRectsReply(int version,
+                             const std::vector<gfx::RectF>& rects,
+                             const gfx::RectF& active_rect);
+#endif
   void OnCrashedPlugin(const FilePath& plugin_path);
   void OnAppCacheAccessed(const GURL& manifest_url, bool blocked_by_policy);
   void OnOpenColorChooser(int color_chooser_id, SkColor color);
@@ -523,6 +553,9 @@ class CONTENT_EXPORT WebContentsImpl
   void OnWebUISend(const GURL& source_url,
                    const std::string& name,
                    const base::ListValue& args);
+  void OnRequestPpapiBrokerPermission(int request_id,
+                                      const GURL& url,
+                                      const FilePath& plugin_path);
 
   // Changes the IsLoading state and notifies delegate as needed
   // |details| is used to provide details on the load that just finished
@@ -628,10 +661,6 @@ class CONTENT_EXPORT WebContentsImpl
                                     std::string* embedder_channel_name,
                                     int* embedder_container_id);
 
-  // Stores random bits of data for others to associate with this object.
-  // WARNING: this needs to be deleted after NavigationController.
-  base::PropertyBag property_bag_;
-
   // Data for core operation ---------------------------------------------------
 
   // Delegate for notifying our owner about stuff. Not owned by us.
@@ -678,8 +707,10 @@ class CONTENT_EXPORT WebContentsImpl
   scoped_ptr<JavaBridgeDispatcherHostManager>
       java_bridge_dispatcher_host_manager_;
 
+  // TODO(fsamuel): Remove this once upstreaming of the new browser plugin
+  // implmentation is complete.
   // Manages the browser plugin instances hosted by this WebContents.
-  scoped_ptr<content::BrowserPluginHost> browser_plugin_host_;
+  scoped_ptr<content::old::BrowserPluginHost> old_browser_plugin_host_;
 
   // SavePackage, lazily created.
   scoped_refptr<SavePackage> save_package_;

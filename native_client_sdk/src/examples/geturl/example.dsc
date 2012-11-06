@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win'],
+  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win', 'linux'],
   'TARGETS': [
     {
       'NAME' : 'geturl',
@@ -8,7 +8,7 @@
       'LIBS': ['ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
-  'DATA': ['geturl_success.html'],
+  'DATA': ['geturl_success.html', 'example.js'],
   'DEST': 'examples',
   'NAME': 'geturl',
   'TITLE': 'Get URL',

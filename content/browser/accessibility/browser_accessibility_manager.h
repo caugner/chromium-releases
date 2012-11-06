@@ -35,6 +35,7 @@ class CONTENT_EXPORT BrowserAccessibilityDelegate {
       int acc_obj_id, int start_offset, int end_offset) = 0;
   virtual bool HasFocus() const = 0;
   virtual gfx::Rect GetViewBounds() const = 0;
+  virtual gfx::Point GetLastTouchEventLocation() const = 0;
 };
 
 class CONTENT_EXPORT BrowserAccessibilityFactory {
@@ -92,8 +93,19 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
   BrowserAccessibility* GetFromRendererID(int32 renderer_id);
 
   // Called to notify the accessibility manager that its associated native
-  // view got focused.
-  void GotFocus();
+  // view got focused. This implies that it is shown (opposite of WasHidden,
+  // below).
+  // The touch_event_context parameter indicates that we were called in the
+  // context of a touch event.
+  void GotFocus(bool touch_event_context);
+
+  // Called to notify the accessibility manager that its associated native
+  // view was hidden. When it's no longer hidden, GotFocus will be called.
+  void WasHidden();
+
+  // Called to notify the accessibility manager that a mouse down event
+  // occurred in the tab.
+  void GotMouseDown();
 
   // Update the focused node to |node|, which may be null.
   // If |notify| is true, send a message to the renderer to set focus
@@ -137,6 +149,10 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
   // given root (inclusive). Does not make a new reference.
   BrowserAccessibility* GetFocus(BrowserAccessibility* root);
 
+  // Is the on-screen keyboard allowed to be shown, in response to a
+  // focus event on a text box?
+  bool IsOSKAllowed(const gfx::Rect& bounds);
+
  protected:
   BrowserAccessibilityManager(
       gfx::NativeView parent_view,
@@ -145,6 +161,28 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
       BrowserAccessibilityFactory* factory);
 
  private:
+  // The following states keep track of whether or not the
+  // on-screen keyboard is allowed to be shown.
+  enum OnScreenKeyboardState {
+    // Never show the on-screen keyboard because this tab is hidden.
+    OSK_DISALLOWED_BECAUSE_TAB_HIDDEN,
+
+    // This tab was just shown, so don't pop-up the on-screen keyboard if a
+    // text field gets focus that wasn't the result of an explicit touch.
+    OSK_DISALLOWED_BECAUSE_TAB_JUST_APPEARED,
+
+    // A touch event has occurred within the window, but focus has not
+    // explicitly changed. Allow the on-screen keyboard to be shown if the
+    // touch event was within the bounds of the currently focused object.
+    // Otherwise we'll just wait to see if focus changes.
+    OSK_ALLOWED_WITHIN_FOCUSED_OBJECT,
+
+    // Focus has changed within a tab that's already visible. Allow the
+    // on-screen keyboard to show anytime that a touch event leads to an
+    // editable text control getting focus.
+    OSK_ALLOWED
+  };
+
   // Update an accessibility node with an updated AccessibilityNodeData node
   // received from the renderer process. When |include_children| is true
   // the node's children will also be updated, otherwise only the node
@@ -177,6 +215,9 @@ class CONTENT_EXPORT BrowserAccessibilityManager {
   // currently has focus, if any.
   BrowserAccessibility* root_;
   BrowserAccessibility* focus_;
+
+  // The on-screen keyboard state.
+  OnScreenKeyboardState osk_state_;
 
   // A mapping from the IDs of objects in the renderer, to the child IDs
   // we use internally here.

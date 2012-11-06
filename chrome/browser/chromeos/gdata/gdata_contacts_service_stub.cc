@@ -4,9 +4,11 @@
 
 #include "chrome/browser/chromeos/gdata/gdata_contacts_service_stub.h"
 
+#include <vector>
+
 #include "chrome/browser/chromeos/contacts/contact.pb.h"
 #include "chrome/browser/chromeos/contacts/contact_test_util.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/google_apis/gdata_util.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -14,7 +16,8 @@ using content::BrowserThread;
 namespace gdata {
 
 GDataContactsServiceStub::GDataContactsServiceStub()
-    : download_should_succeed_(true) {
+    : num_download_requests_(0),
+      download_should_succeed_(true) {
 }
 
 GDataContactsServiceStub::~GDataContactsServiceStub() {
@@ -35,6 +38,7 @@ void GDataContactsServiceStub::DownloadContacts(
     FailureCallback failure_callback,
     const base::Time& min_update_time) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  num_download_requests_++;
 
   if (!download_should_succeed_) {
     failure_callback.Run();

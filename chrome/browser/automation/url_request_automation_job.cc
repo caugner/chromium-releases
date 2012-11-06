@@ -52,11 +52,12 @@ net::URLRequest::ProtocolFactory* URLRequestAutomationJob::old_https_factory_
 
 URLRequestAutomationJob::URLRequestAutomationJob(
     net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
     int tab,
     int request_id,
     AutomationResourceMessageFilter* filter,
     bool is_pending)
-    : net::URLRequestJob(request, request->context()->network_delegate()),
+    : net::URLRequestJob(request, network_delegate),
       id_(0),
       tab_(tab),
       message_filter_(filter),
@@ -64,6 +65,7 @@ URLRequestAutomationJob::URLRequestAutomationJob(
       redirect_status_(0),
       request_id_(request_id),
       is_pending_(is_pending),
+      upload_size_(0),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DVLOG(1) << "URLRequestAutomationJob create. Count: " << ++instance_count_;
   DCHECK(message_filter_ != NULL);
@@ -95,6 +97,7 @@ void URLRequestAutomationJob::EnsureProtocolFactoryRegistered() {
 
 net::URLRequestJob* URLRequestAutomationJob::Factory(
     net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
     const std::string& scheme) {
   bool scheme_is_http = request->url().SchemeIs("http");
   bool scheme_is_https = request->url().SchemeIs("https");
@@ -108,7 +111,8 @@ net::URLRequestJob* URLRequestAutomationJob::Factory(
       AutomationResourceMessageFilter::AutomationDetails details;
       if (AutomationResourceMessageFilter::LookupRegisteredRenderView(
               child_id, route_id, &details)) {
-        URLRequestAutomationJob* job = new URLRequestAutomationJob(request,
+        URLRequestAutomationJob* job = new URLRequestAutomationJob(
+            request, network_delegate,
             details.tab_handle, info->GetRequestID(), details.filter,
             details.is_pending_render_view);
         return job;
@@ -116,9 +120,9 @@ net::URLRequestJob* URLRequestAutomationJob::Factory(
     }
 
     if (scheme_is_http && old_http_factory_)
-      return old_http_factory_(request, scheme);
+      return old_http_factory_(request, network_delegate, scheme);
     else if (scheme_is_https && old_https_factory_)
-      return old_https_factory_(request, scheme);
+      return old_https_factory_(request, network_delegate, scheme);
   }
   return NULL;
 }
@@ -229,17 +233,15 @@ bool URLRequestAutomationJob::IsRedirectResponse(
   return true;
 }
 
-uint64 URLRequestAutomationJob::GetUploadProgress() const {
+net::UploadProgress URLRequestAutomationJob::GetUploadProgress() const {
+  uint64 progress = 0;
   if (request_ && request_->status().is_success()) {
     // We don't support incremental progress notifications in ChromeFrame. When
     // we receive a response for the POST request from Chromeframe, it means
     // that the upload is fully complete.
-    const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request_);
-    if (info) {
-      return info->GetUploadSize();
-    }
+    progress = upload_size_;
   }
-  return 0;
+  return net::UploadProgress(progress, upload_size_);
 }
 
 net::HostPortPair URLRequestAutomationJob::GetSocketAddress() const {
@@ -302,6 +304,7 @@ void URLRequestAutomationJob::OnRequestStarted(
                                           response.headers.size()));
   }
   socket_address_ = response.socket_address;
+  upload_size_ = response.upload_size;
   NotifyHeadersComplete();
 }
 
@@ -416,21 +419,19 @@ void URLRequestAutomationJob::StartAsync() {
   for (size_t i = 0; i < arraysize(kFilteredHeaderStrings); ++i)
     new_request_headers.RemoveHeader(kFilteredHeaderStrings[i]);
 
-  if (request_->context()) {
-    // Only add default Accept-Language and Accept-Charset if the request
-    // didn't have them specified.
-    if (!new_request_headers.HasHeader(
-        net::HttpRequestHeaders::kAcceptLanguage) &&
-        !request_->context()->accept_language().empty()) {
-      new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptLanguage,
-                                    request_->context()->accept_language());
-    }
-    if (!new_request_headers.HasHeader(
-        net::HttpRequestHeaders::kAcceptCharset) &&
-        !request_->context()->accept_charset().empty()) {
-      new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptCharset,
-                                    request_->context()->accept_charset());
-    }
+  // Only add default Accept-Language and Accept-Charset if the request
+  // didn't have them specified.
+  if (!new_request_headers.HasHeader(
+      net::HttpRequestHeaders::kAcceptLanguage) &&
+      !request_->context()->accept_language().empty()) {
+    new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptLanguage,
+                                  request_->context()->accept_language());
+  }
+  if (!new_request_headers.HasHeader(
+      net::HttpRequestHeaders::kAcceptCharset) &&
+      !request_->context()->accept_charset().empty()) {
+    new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptCharset,
+                                  request_->context()->accept_charset());
   }
 
   // Ensure that we do not send username and password fields in the referrer.

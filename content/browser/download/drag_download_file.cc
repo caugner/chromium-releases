@@ -183,11 +183,14 @@ void DragDownloadFile::ModelChanged(DownloadManager* manager) {
     return;
 
   std::vector<DownloadItem*> downloads;
-  download_manager_->GetTemporaryDownloads(file_path_.DirName(), &downloads);
+  download_manager_->GetAllDownloads(&downloads);
   for (std::vector<DownloadItem*>::const_iterator i = downloads.begin();
        i != downloads.end(); ++i) {
-    if ((*i)->GetOriginalUrl() == url_) {
-      download_item_ = *i;
+    DownloadItem* item = *i;
+    if (item->IsTemporary() &&
+        item->GetOriginalUrl() == url_ &&
+        file_path_.DirName() == item->GetTargetFilePath().DirName()) {
+      download_item_ = item;
       download_item_->AddObserver(this);
       break;
     }
@@ -196,8 +199,7 @@ void DragDownloadFile::ModelChanged(DownloadManager* manager) {
 
 void DragDownloadFile::OnDownloadUpdated(content::DownloadItem* download) {
   AssertCurrentlyOnUIThread();
-  if (download->IsCancelled() ||
-      (download->GetState() == DownloadItem::REMOVING)) {
+  if (download->IsCancelled()) {
     RemoveObservers();
     DownloadCompleted(false);
   } else if (download->IsComplete()) {
@@ -205,6 +207,17 @@ void DragDownloadFile::OnDownloadUpdated(content::DownloadItem* download) {
     DownloadCompleted(true);
   }
   // Ignore other states.
+}
+
+// If the download completes or is cancelled, then OnDownloadUpdated() will
+// handle it and RemoveObserver() so that OnDownloadDestroyed is never called.
+// OnDownloadDestroyed is only called if OnDownloadUpdated() does not detect
+// completion or cancellation (in which cases it removes this observer).
+// TODO(benjhayden): Try to change this to NOTREACHED()?
+void DragDownloadFile::OnDownloadDestroyed(content::DownloadItem* download) {
+  AssertCurrentlyOnUIThread();
+  RemoveObservers();
+  DownloadCompleted(false);
 }
 
 void DragDownloadFile::AssertCurrentlyOnDragThread() {

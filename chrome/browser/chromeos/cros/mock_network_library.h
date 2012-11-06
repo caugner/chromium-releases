@@ -113,12 +113,15 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_METHOD0(RequestCellularScan, void());
   MOCK_METHOD1(RequestCellularRegister, void(const std::string&));
   MOCK_METHOD1(SetCellularDataRoamingAllowed, void(bool));
+  MOCK_METHOD2(SetCarrier, void(const std::string&,
+                                const NetworkOperationCallback&));
   MOCK_METHOD0(IsCellularAlwaysInRoaming, bool());
 
   MOCK_METHOD0(RequestNetworkScan, void(void));
   MOCK_CONST_METHOD1(HasProfileType, bool(NetworkProfileType));
   MOCK_METHOD1(GetWifiAccessPoints, bool(WifiAccessPointVector*));
   MOCK_CONST_METHOD1(CanConnectToNetwork, bool(const Network*));
+  MOCK_METHOD1(RefreshIPConfig, void(Network*));
   MOCK_METHOD1(ConnectToWifiNetwork, void(WifiNetwork*));
   MOCK_METHOD2(ConnectToWifiNetwork, void(WifiNetwork*, bool));
   MOCK_METHOD1(ConnectToWimaxNetwork, void(WimaxNetwork*));
@@ -181,11 +184,17 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_METHOD3(GetIPConfigs, NetworkIPConfigVector(const std::string&,
                                                    std::string*,
                                                    HardwareAddressFormat));
-  MOCK_METHOD1(SetIPConfig, void(const NetworkIPConfig&));
+  MOCK_METHOD6(SetIPParameters, void(const std::string&,
+                                     const std::string&,
+                                     const std::string&,
+                                     const std::string&,
+                                     const std::string&,
+                                     int));
   MOCK_METHOD0(SwitchToPreferredNetwork, void(void));
-  MOCK_METHOD4(LoadOncNetworks, bool(const std::string&,
+  MOCK_METHOD5(LoadOncNetworks, bool(const std::string&,
                                      const std::string&,
                                      NetworkUIData::ONCSource,
+                                     bool,
                                      std::string*));
   MOCK_METHOD2(SetActiveNetwork, bool(ConnectionType, const std::string&));
 };

@@ -17,21 +17,21 @@
 #include "sync/syncable/entry_kernel.h"
 #include "sync/syncable/metahandle_set.h"
 #include "sync/syncable/scoped_kernel_lock.h"
-#include "sync/util/cryptographer.h"
 
 namespace syncer {
 
-class Encryptor;
+class Cryptographer;
 class UnrecoverableErrorHandler;
 
 namespace syncable {
 
-class DirectoryChangeDelegate;
-class TransactionObserver;
 class BaseTransaction;
-class WriteTransaction;
-class ScopedKernelLock;
+class DirectoryChangeDelegate;
 class DirectoryBackingStore;
+class NigoriHandler;
+class ScopedKernelLock;
+class TransactionObserver;
+class WriteTransaction;
 
 // How syncable indices & Indexers work.
 //
@@ -170,6 +170,10 @@ class Directory {
     int64 next_id;
     // The persisted notification state.
     std::string notification_state;
+    // The serialized bag of chips we were given by the server. Contents are
+    // opaque to the client. This is the serialization of a message of type
+    // ChipBag defined in sync.proto. It can contains NULL characters.
+    std::string bag_of_chips;
   };
 
   // What the Directory needs on initialization to create itself and its Kernel.
@@ -207,11 +211,12 @@ class Directory {
   // |report_unrecoverable_error_function| may be NULL.
   // Takes ownership of |store|.
   Directory(
-      Encryptor* encryptor,
+      DirectoryBackingStore* store,
       UnrecoverableErrorHandler* unrecoverable_error_handler,
       ReportUnrecoverableErrorFunction
           report_unrecoverable_error_function,
-      DirectoryBackingStore* store);
+      NigoriHandler* nigori_handler,
+      Cryptographer* cryptographer);
   virtual ~Directory();
 
   // Does not take ownership of |delegate|, which must not be NULL.
@@ -259,15 +264,22 @@ class Directory {
   std::string store_birthday() const;
   void set_store_birthday(const std::string& store_birthday);
 
+  // (Account) Bag of chip is an opaque state used by the server to track the
+  // client.
+  std::string bag_of_chips() const;
+  void set_bag_of_chips(const std::string& bag_of_chips);
+
   std::string GetNotificationState() const;
   void SetNotificationState(const std::string& notification_state);
 
   // Unique to each account / client pair.
   std::string cache_guid() const;
 
-  // Returns a pointer to our cryptographer.  Does not transfer ownership.  The
-  // cryptographer is not thread safe; it should not be accessed after the
-  // transaction has been released.
+  // Returns a pointer to our Nigori node handler.
+  NigoriHandler* GetNigoriHandler();
+
+  // Returns a pointer to our cryptographer. Does not transfer ownership.
+  // Not thread safe, so should only be accessed while holding a transaction.
   Cryptographer* GetCryptographer(const BaseTransaction* trans);
 
   // Returns true if the directory had encountered an unrecoverable error.
@@ -592,8 +604,6 @@ class Directory {
   EntryKernel* GetPossibleFirstChild(
       const ScopedKernelLock& lock, const Id& parent_id);
 
-  Cryptographer cryptographer_;
-
   Kernel* kernel_;
 
   scoped_ptr<DirectoryBackingStore> store_;
@@ -601,6 +611,10 @@ class Directory {
   UnrecoverableErrorHandler* const unrecoverable_error_handler_;
   const ReportUnrecoverableErrorFunction report_unrecoverable_error_function_;
   bool unrecoverable_error_set_;
+
+  // Not owned.
+  NigoriHandler* const nigori_handler_;
+  Cryptographer* const cryptographer_;
 
   InvariantCheckLevel invariant_check_level_;
 };

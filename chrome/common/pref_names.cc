@@ -468,6 +468,14 @@ const char kInstantConfirmDialogShown[] = "instant.confirm_dialog_shown";
 // Boolean pref indicating if instant is enabled.
 const char kInstantEnabled[] = "instant.enabled";
 
+// Prefix URL for the (experimental) ZeroSuggest provider.
+const char kExperimentalZeroSuggestUrlPrefix[] =
+    "instant.experimental_zero_suggest_url_prefix";
+
+// Boolean pref indicating if instant search provider logo should be shown.
+const char kInstantShowSearchProviderLogo[] =
+    "instant.show_search_provider_logo";
+
 // Used to migrate preferences from local state to user preferences to
 // enable multiple profiles.
 // BITMASK with possible values (see browser_prefs.cc for enum):
@@ -494,7 +502,9 @@ const char kNetworkPredictionEnabled[] = "dns_prefetching.enabled";
 const char kDefaultAppsInstallState[] = "default_apps_install_state";
 
 #if defined(OS_CHROMEOS)
-// An integer pref to initially mute volume if 1.
+// An integer pref to initially mute volume if 1. This pref is ignored if
+// |kAudioOutputAllowed| is set to false, but its value is preserved, therefore
+// when the policy is lifted the original mute state is restored.
 const char kAudioMute[] = "settings.audio.mute";
 
 // TODO(derat): This is deprecated in favor of |kAudioVolumePercent|; remove it
@@ -561,6 +571,10 @@ const char kLanguagePreferredLanguages[] =
 // A string pref (comma-separated list) set to the preloaded (active) input
 // method IDs (ex. "pinyin,mozc").
 const char kLanguagePreloadEngines[] = "settings.language.preload_engines";
+
+// A List pref (comma-separated list) set to the extension IMEs to filter out.
+const char kLanguageFilteredExtensionImes[] =
+    "settings.language.filtered_extension_imes";
 
 // Boolean prefs for ibus-chewing Chinese input method.
 const char kLanguageChewingAutoShiftCur[] =
@@ -737,6 +751,15 @@ const char kEnableCrosDRM[] = "settings.privacy.drm_enabled";
 //  3 - The secondary display is at the left of the primary display.
 // TODO(mukai,oshima): update the format of the multi-display settings.
 const char kSecondaryDisplayLayout[] = "settings.display.secondary_layout";
+
+// An integer pref that specifies how far the secondary display is positioned
+// from the edge of the primary display.
+const char kSecondaryDisplayOffset[] = "settings.display.secondary_offset";
+
+// A dictionary pref that specifies per-display layout/offset information.
+// Its key is the ID of the display and its value is a dictionary for the
+// layout/offset information.
+const char kSecondaryDisplays[] = "settings.display.secondary_displays";
 #endif  // defined(OS_CHROMEOS)
 
 // The disabled messages in IPC logging.
@@ -942,10 +965,6 @@ const char kDefaultZoomLevel[] = "profile.default_zoom_level";
 // be displayed at the default zoom level.
 const char kPerHostZoomLevels[] = "profile.per_host_zoom_levels";
 
-// Boolean that specifies whether or not a shortcut has been created for this
-// profile in multi-profiles mode.
-const char kProfileShortcutCreated[] = "profile.shortcut_created";
-
 // Boolean that is true if Autofill is enabled and allowed to save profile data.
 const char kAutofillEnabled[] = "autofill.enabled";
 
@@ -993,6 +1012,9 @@ const char kEnableHyperlinkAuditing[] = "enable_a_ping";
 
 // Whether to enable sending referrers.
 const char kEnableReferrers[] = "enable_referrers";
+
+// Whether to send the DNT header.
+const char kEnableDoNotTrack[] = "enable_do_not_track";
 
 // Boolean to enable reporting memory info to page.
 const char kEnableMemoryInfo[] = "enable_memory_info";
@@ -1287,9 +1309,13 @@ const char kSelectFileLastDirectory[] = "selectfile.last_directory";
 // Boolean that specifies if file selection dialogs are shown.
 const char kAllowFileSelectionDialogs[] = "select_file_dialogs.allowed";
 
-// Map of timestamps of the last used file browser tasks.
-const char kLastUsedFileBrowserHandlers[] =
-    "filebrowser.handler.lastused";
+// Map of default tasks, associated by MIME type.
+const char kDefaultTasksByMimeType[] =
+    "filebrowser.tasks.default_by_mime_type";
+
+// Map of default tasks, associated by file suffix.
+const char kDefaultTasksBySuffix[] =
+    "filebrowser.tasks.default_by_suffix";
 
 // Extensions which should be opened upon completion.
 const char kDownloadExtensionsToOpen[] = "download.extensions_to_open";
@@ -1379,6 +1405,11 @@ const char kRestartLastSessionOnShutdown[] = "restart.last.session.on.shutdown";
 
 // Set before autorestarting Chrome, cleared on clean exit.
 const char kWasRestarted[] = "was.restarted";
+
+#if defined(OS_WIN)
+// On Windows 8 chrome can restart in desktop or in metro mode.
+const char kRestartSwitchMode[] = "restart.switch_mode";
+#endif
 
 // Number of bookmarks/folders on the bookmark bar/other bookmark folder.
 const char kNumBookmarksOnBookmarkBar[] =
@@ -1480,60 +1511,8 @@ const char kNtpPromoVersion[] = "ntp.promo_version";
 // The last locale the promo was fetched for.
 const char kNtpPromoLocale[] = "ntp.promo_locale";
 
-// Whether promo should be shown to Dev builds, Beta and Dev, or all builds.
-const char kNtpPromoBuild[] = "ntp.promo_build";
-
-// True if user has explicitly closed the promo line.
-const char kNtpPromoClosed[] = "ntp.promo_closed";
-
-// Users are randomly divided into 100 groups in order to slowly roll out
-// special promos.
-const char kNtpPromoGroup[] = "ntp.promo_group";
-
-// Number of promo groups (buckets).
-const char kNtpPromoNumGroups[] = "ntp.promo_num_groups";
-
-// Initial segment of the groups to show the promo to.
-const char kNtpPromoInitialSegment[] = "ntp.promo_initial_segment";
-
-// Number of additional segments to show this promo to every time slice.
-const char kNtpPromoIncrement[] = "ntp.promo_increment";
-
-// Amount of time each promo group should be shown a promo that is being slowly
-// rolled out, in seconds.
-const char kNtpPromoGroupTimeSlice[] = "ntp.promo_group_timeslice";
-
-// Number of groups to roll out this promo to.
-const char kNtpPromoGroupMax[] = "ntp.promo_group_max";
-
-// Number of views of this promo.
-const char kNtpPromoViews[] = "ntp.promo_views";
-
-// Max number of views of this promo.
-const char kNtpPromoViewsMax[] = "ntp.promo_views_max";
-
-// Target platform for this promo.
-const char kNtpPromoPlatform[] = "ntp.promo_platform";
-
-// Promo line from server.
-const char kNtpPromoLine[] = "ntp.promo_line";
-
-#if defined(OS_ANDROID)
-// Promo line from server (long).
-const char kNtpPromoLineLong[] = "ntp.promo_line_long";
-// Promo action that needs to be triggered
-const char kNtpPromoActionType[] = "ntp.promo_action_type";
-// Promo action arguments
-const char kNtpPromoActionArgs[] = "ntp.promo_action_args";
-#endif  // defined(OS_ANDROID)
-
-// Dates between which the NTP should show a promotional line downloaded
-// from the promo server.
-const char kNtpPromoStart[] = "ntp.promo_start";
-const char kNtpPromoEnd[] = "ntp.promo_end";
-
-// True if this promo should only be shown to G+ users.
-const char kNtpPromoGplusRequired[] = "ntp.gplus_required";
+// True if a desktop sync session was found for this user.
+const char kNtpPromoDesktopSessionFound[] = "ntp.promo_desktop_session_found";
 
 // Boolean indicating whether the web store is active for the current locale.
 const char kNtpWebStoreEnabled[] = "ntp.webstore_enabled";
@@ -1724,6 +1703,10 @@ const char kRemoteAccessHostDomain[] = "remote_access.host_domain";
 const char kRemoteAccessHostTalkGadgetPrefix[] =
     "remote_access.host_talkgadget_prefix";
 
+// Boolean controlling whether curtaining is required when connecting to a host.
+const char kRemoteAccessHostRequireCurtain[] =
+    "remote_access.host_require_curtain";
+
 // The last used printer and its settings.
 const char kPrintPreviewStickySettings[] =
     "printing.print_preview_sticky_settings";
@@ -1742,9 +1725,8 @@ const char kCloudPrintSigninDialogHeight[] =
     "cloud_print.signin_dialog_size.height";
 
 #if !defined(OS_ANDROID)
-// The Chrome To Mobile service prefs; the device list and last update time.
+// The Chrome To Mobile service mobile device list pref.
 const char kChromeToMobileDeviceList[] = "chrome_to_mobile.device_list";
-const char kChromeToMobileTimestamp[] = "chrome_to_mobile.timestamp";
 #endif
 
 // The list of BackgroundContents that should be loaded when the browser
@@ -1781,9 +1763,9 @@ const char kGSSAPILibraryName[] = "auth.gssapi_library_name";
 const char kAllowCrossOriginAuthPrompt[] = "auth.allow_cross_origin_prompt";
 
 #if defined(OS_CHROMEOS)
-// Dictionary for transient storage of settings that should go into signed
+// Dictionary for transient storage of settings that should go into device
 // settings storage before owner has been assigned.
-const char kSignedSettingsCache[] = "signed_settings_cache";
+const char kDeviceSettingsCache[] = "signed_settings_cache";
 
 // The hardware keyboard layout of the device. This should look like
 // "xkb:us::eng".
@@ -1821,8 +1803,23 @@ const char kSyncSpareBootstrapToken[] = "sync.spare_bootstrap_token";
 // storage for the user.
 const char kExternalStorageDisabled[] = "hardware.external_storage_disabled";
 
+// A pref holding the value of the policy used to disable playing audio on
+// ChromeOS devices. This pref overrides |kAudioMute| but does not overwrite
+// it, therefore when the policy is lifted the original mute state is restored.
+const char kAudioOutputAllowed[] = "hardware.audio_output_enabled";
+
+// A pref holding the value of the policy used to disable capturing audio on
+// ChromeOS devices.
+const char kAudioCaptureAllowed[] = "hardware.audio_capture_enabled";
+
 // A dictionary that maps usernames to wallpaper properties.
 const char kUsersWallpaperInfo[] = "user_wallpaper_info";
+
+// Copy of owner swap mouse buttons option to use on login screen.
+const char kOwnerPrimaryMouseButtonRight[] = "owner.mouse.primary_right";
+
+// Copy of owner tap-to-click option to use on login screen.
+const char kOwnerTapToClickEnabled[] = "owner.touchpad.enable_tap_to_click";
 #endif
 
 // Whether there is a Flash version installed that supports clearing LSO data.
@@ -1849,6 +1846,12 @@ const char kChromeOsReleaseChannel[] = "cros.system.releaseChannel";
 
 // Value of the enums in TabStrip::LayoutType as an int.
 const char kTabStripLayoutType[] = "tab_strip_layout_type";
+
+// If true, cloud policy for the user is loaded once the user signs in.
+const char kLoadCloudPolicyOnSignin[] = "policy.load_cloud_policy_on_signin";
+
+// Indicates that factory reset was requested from options page.
+const char kFactoryResetRequested[] = "FactoryResetRequested";
 
 // *************** SERVICE PREFS ***************
 // These are attached to the service process.
@@ -1936,6 +1939,10 @@ const char kManagedAutoSelectCertificateForUrls[] =
 // uninstalling background apps.
 const char kUserCreatedLoginItem[] = "background_mode.user_created_login_item";
 
+// Set to true if the user removed our login item so we should not create a new
+// one when uninstalling background apps.
+const char kUserRemovedLoginItem[] = "background_mode.user_removed_login_item";
+
 // Set to true if background mode is enabled on this browser.
 const char kBackgroundModeEnabled[] = "background_mode.enabled";
 
@@ -1987,8 +1994,17 @@ const char kUseDefaultPinnedApps[] = "use_default_pinned_apps";
 const char kPinnedLauncherApps[] =
     "pinned_launcher_apps";
 
+// Boolean value indicating whether launcher should run sync animation.
+// Note this is an unsyncable pref value used as a flag per profile because sync
+// animation should only run once for new ChromeOS login (i.e. once per created
+// profile on ChromeOS device).
+const char kLauncherShouldRunSyncAnimation[] =
+    "launcher_should_run_sync_animation";
+
 const char kLongPressTimeInSeconds[] =
     "gesture.long_press_time_in_seconds";
+const char kMaxDistanceBetweenTapsForDoubleTap[] =
+    "gesture.max_distance_between_taps_for_double_tap";
 const char kMaxDistanceForTwoFingerTapInPixels[] =
     "gesture.max_distance_for_two_finger_tap_in_pixels";
 const char kMaxSecondsBetweenDoubleClick[] =
@@ -2023,6 +2039,8 @@ const char kRailStartProportion[] =
     "gesture.rail_start_proportion";
 const char kSemiLongPressTimeInSeconds[] =
     "gesture.semi_long_press_time_in_seconds";
+const char kTouchScreenFlingAccelerationAdjustment[] =
+    "gesture.touchscreen_fling_acceleration_adjustment";
 #endif
 
 // Indicates whether the browser is in managed mode.
@@ -2035,11 +2053,5 @@ const char kNetworkProfileWarningsLeft[] = "network_profile.warnings_left";
 // |network_profile.warnings_left| after a silence period.
 const char kNetworkProfileLastWarningTime[] =
     "network_profile.last_warning_time";
-
-#if defined(OS_MACOSX)
-// A timestamp of when the obsolete OS infobar was last shown to a user on 10.5.
-const char kMacLeopardObsoleteInfobarLastShown[] =
-    "mac_105_obsolete_infobar_last_shown";
-#endif  // defined(OS_MACOSX)
 
 }  // namespace prefs

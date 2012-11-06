@@ -5,28 +5,39 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_SHELL_WINDOW_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_SHELL_WINDOW_VIEWS_H_
 
+#include "chrome/browser/ui/base_window.h"
+#include "chrome/browser/ui/extensions/native_shell_window.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
+#include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
+#include "third_party/skia/include/core/SkRegion.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/rect.h"
-#include "ui/gfx/scoped_sk_region.h"
 #include "ui/views/widget/widget_delegate.h"
 
+class ExtensionKeybindingRegistryViews;
 class Profile;
+
+namespace content {
+class WebContents;
+}
 
 namespace extensions {
 class Extension;
+struct DraggableRegion;
 }
 
 namespace views {
 class WebView;
 }
 
-class ShellWindowViews : public ShellWindow,
+class ShellWindowViews : public NativeShellWindow,
                          public views::WidgetDelegateView {
  public:
-  ShellWindowViews(Profile* profile,
-                   const extensions::Extension* extension,
-                   const GURL& url,
-                   const CreateParams& params);
+  ShellWindowViews(ShellWindow* shell_window,
+                   const ShellWindow::CreateParams& params);
+
+  bool frameless() const { return frameless_; }
+  SkRegion* draggable_region() { return draggable_region_.get(); }
 
   // BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
@@ -45,7 +56,6 @@ class ShellWindowViews : public ShellWindow,
   virtual void Minimize() OVERRIDE;
   virtual void Restore() OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SetDraggableRegion(SkRegion* region) OVERRIDE;
   virtual void FlashFrame(bool flash) OVERRIDE;
   virtual bool IsAlwaysOnTop() const OVERRIDE;
 
@@ -60,6 +70,12 @@ class ShellWindowViews : public ShellWindow,
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
+  virtual bool ShouldDescendIntoChildForEventHandling(
+      gfx::NativeView child,
+      const gfx::Point& location) OVERRIDE;
+  virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
+  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
+  virtual bool ShouldShowWindowTitle() const OVERRIDE;
 
  protected:
   // views::View implementation.
@@ -70,27 +86,51 @@ class ShellWindowViews : public ShellWindow,
   virtual gfx::Size GetMaximumSize() OVERRIDE;
   virtual void OnFocus() OVERRIDE;
 
-  // ShellWindow implementation.
-  virtual void UpdateWindowTitle() OVERRIDE;
-  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
-  virtual bool IsFullscreenOrPending() const OVERRIDE;
+  Profile* profile() { return shell_window_->profile(); }
+  content::WebContents* web_contents() {
+    return shell_window_->web_contents();
+  }
+  const extensions::Extension* extension() {
+    return shell_window_->extension();
+  }
+
+  // views::WidgetDelegate implementation.
+  virtual void SaveWindowPlacement(const gfx::Rect& bounds,
+                                   ui::WindowShowState show_state) OVERRIDE;
 
  private:
   friend class ShellWindowFrameView;
 
   virtual ~ShellWindowViews();
 
+  // NativeShellWindow implementation.
+  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
+  virtual bool IsFullscreenOrPending() const OVERRIDE;
+  virtual void UpdateWindowIcon() OVERRIDE;
+  virtual void UpdateWindowTitle() OVERRIDE;
+  virtual void UpdateDraggableRegions(
+      const std::vector<extensions::DraggableRegion>& regions) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
+
   void OnViewWasResized();
+
+  ShellWindow* shell_window_; // weak - ShellWindow owns NativeShellWindow.
 
   views::WebView* web_view_;
   views::Widget* window_;
   bool is_fullscreen_;
 
-  gfx::ScopedSkRegion caption_region_;
+  scoped_ptr<SkRegion> draggable_region_;
 
-  bool use_custom_frame_;
+  bool frameless_;
   gfx::Size minimum_size_;
   gfx::Size maximum_size_;
+
+  // The class that registers for keyboard shortcuts for extension commands.
+  scoped_ptr<ExtensionKeybindingRegistryViews> extension_keybinding_registry_;
+
+  UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellWindowViews);
 };

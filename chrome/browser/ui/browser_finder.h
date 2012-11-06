@@ -36,10 +36,12 @@ Browser* FindOrCreateTabbedBrowser(Profile* profile);
 // additional information.
 Browser* FindAnyBrowser(Profile* profile, bool match_original_profiles);
 
-// Find an existing browser window with the provided profile. Searches in the
-// order of last activation. Only browsers that have been active can be
-// returned. Returns NULL if no such browser currently exists.
-Browser* FindBrowserWithProfile(Profile* profile);
+// Find an existing browser window with the provided profile and hosted in the
+// given desktop. Searches in the order of last activation. Only browsers that
+// have been active can be returned. Returns NULL if no such browser currently
+// exists.
+Browser* FindBrowserWithProfile(Profile* profile,
+                                chrome::HostDesktopType type);
 
 // Find an existing browser with the provided ID. Returns NULL if no such
 // browser currently exists.
@@ -56,6 +58,12 @@ Browser* FindBrowserWithWebContents(const content::WebContents* web_contents);
 // recently open browser owned by |profile| is returned. If none exist, returns
 // NULL.  WARNING: see warnings in BrowserList::GetLastActive().
 Browser* FindLastActiveWithProfile(Profile* profile);
+
+// Identical in behavior to BrowserList::GetLastActive(), except that the most
+// recently open browser owned on the desktop described by |type| is returned.
+// If none exist, returns NULL.  WARNING: see warnings in
+// BrowserList::GetLastActive().
+Browser* FindLastActiveWithHostDesktopType(chrome::HostDesktopType type);
 
 // Returns the number of browsers with the Profile |profile|.
 size_t GetBrowserCount(Profile* profile);

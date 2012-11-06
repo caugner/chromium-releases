@@ -8,6 +8,7 @@
 #include "base/sha1.h"
 #include "build/build_config.h"
 #include "net/base/cert_status_flags.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/crl_set.h"
 #include "net/base/net_errors.h"
@@ -84,9 +85,9 @@ int CertVerifyProc::Verify(X509Certificate* cert,
   //
   // TODO(rsleevi): http://crbug.com/142974 - Allow preferences to fully
   // disable revocation checking.
-  if ((flags & X509Certificate::VERIFY_EV_CERT) &&
+  if ((flags & CertVerifier::VERIFY_EV_CERT) &&
       (!crl_set || crl_set->IsExpired())) {
-    flags |= X509Certificate::VERIFY_REV_CHECKING_ENABLED_EV_ONLY;
+    flags |= CertVerifier::VERIFY_REV_CHECKING_ENABLED_EV_ONLY;
   }
 
   int rv = VerifyInternal(cert, hostname, flags, crl_set, verify_result);
@@ -216,8 +217,9 @@ bool CertVerifyProc::IsBlacklisted(X509Certificate* cert) {
 }
 
 // static
+// NOTE: This implementation assumes and enforces that the hashes are SHA1.
 bool CertVerifyProc::IsPublicKeyBlacklisted(
-    const std::vector<SHA1Fingerprint>& public_key_hashes) {
+    const HashValueVector& public_key_hashes) {
   static const unsigned kNumHashes = 9;
   static const uint8 kHashes[kNumHashes][base::kSHA1Length] = {
     // Subject: CN=DigiNotar Root CA
@@ -263,10 +265,12 @@ bool CertVerifyProc::IsPublicKeyBlacklisted(
   };
 
   for (unsigned i = 0; i < kNumHashes; i++) {
-    for (std::vector<SHA1Fingerprint>::const_iterator
-         j = public_key_hashes.begin(); j != public_key_hashes.end(); ++j) {
-      if (memcmp(j->data, kHashes[i], base::kSHA1Length) == 0)
+    for (HashValueVector::const_iterator j = public_key_hashes.begin();
+         j != public_key_hashes.end(); ++j) {
+      if (j->tag == HASH_VALUE_SHA1 &&
+          memcmp(j->data(), kHashes[i], base::kSHA1Length) == 0) {
         return true;
+      }
     }
   }
 

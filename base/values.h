@@ -256,6 +256,15 @@ class BASE_EXPORT DictionaryValue : public Value {
   // be used as paths.
   void SetWithoutPathExpansion(const std::string& key, Value* in_value);
 
+  // Convenience forms of SetWithoutPathExpansion().
+  void SetBooleanWithoutPathExpansion(const std::string& path, bool in_value);
+  void SetIntegerWithoutPathExpansion(const std::string& path, int in_value);
+  void SetDoubleWithoutPathExpansion(const std::string& path, double in_value);
+  void SetStringWithoutPathExpansion(const std::string& path,
+                                     const std::string& in_value);
+  void SetStringWithoutPathExpansion(const std::string& path,
+                                     const string16& in_value);
+
   // Gets the Value associated with the given path starting from this object.
   // A path has the form "<key>" or "<key>.<key>.[...]", where "." indexes
   // into the next DictionaryValue down.  If the path can be resolved
@@ -339,10 +348,12 @@ class BASE_EXPORT DictionaryValue : public Value {
   // YOU SHOULD ALWAYS USE THE XXXWithoutPathExpansion() APIs WITH THESE, NOT
   // THE NORMAL XXX() APIs.  This makes sure things will work correctly if any
   // keys have '.'s in them.
-  class key_iterator
+  class BASE_EXPORT key_iterator
       : private std::iterator<std::input_iterator_tag, const std::string> {
    public:
-    explicit key_iterator(ValueMap::const_iterator itr) { itr_ = itr; }
+    explicit key_iterator(ValueMap::const_iterator itr);
+    // Not explicit, because this is a copy constructor.
+    key_iterator(const key_iterator& rhs);
     key_iterator operator++() {
       ++itr_;
       return *this;
@@ -360,10 +371,9 @@ class BASE_EXPORT DictionaryValue : public Value {
 
   // This class provides an iterator over both keys and values in the
   // dictionary.  It can't be used to modify the dictionary.
-  class Iterator {
+  class BASE_EXPORT Iterator {
    public:
-    explicit Iterator(const DictionaryValue& target)
-        : target_(target), it_(target.dictionary_.begin()) {}
+    explicit Iterator(const DictionaryValue& target);
 
     bool HasNext() const { return it_ != target_.dictionary_.end(); }
     void Advance() { ++it_; }
@@ -451,6 +461,15 @@ class BASE_EXPORT ListValue : public Value {
   // Appends a Value to the end of the list.
   void Append(Value* in_value);
 
+  // Convenience forms of Append.
+  void AppendBoolean(bool in_value);
+  void AppendInteger(int in_value);
+  void AppendDouble(double in_value);
+  void AppendString(const std::string& in_value);
+  void AppendString(const string16& in_value);
+  void AppendStrings(const std::vector<std::string>& in_values);
+  void AppendStrings(const std::vector<string16>& in_values);
+
   // Appends a Value if it's not already present. Takes ownership of the
   // |in_value|. Returns true if successful, or false if the value was already
   // present. If the value was already present the |in_value| is deleted.
@@ -503,6 +522,9 @@ class BASE_EXPORT ValueSerializer {
   // error message including the location of the error if appropriate.
   virtual Value* Deserialize(int* error_code, std::string* error_str) = 0;
 };
+
+// Stream operator so Values can be used in assertion statements.
+BASE_EXPORT std::ostream& operator<<(std::ostream& out, const Value& value);
 
 }  // namespace base
 

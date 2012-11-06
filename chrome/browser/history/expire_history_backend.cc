@@ -11,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -103,7 +103,7 @@ bool ShouldArchiveVisit(const VisitRow& visit) {
   // to see them.
   if (no_qualifier == content::PAGE_TRANSITION_TYPED ||
       no_qualifier == content::PAGE_TRANSITION_AUTO_BOOKMARK ||
-      no_qualifier == content::PAGE_TRANSITION_START_PAGE)
+      no_qualifier == content::PAGE_TRANSITION_AUTO_TOPLEVEL)
     return true;
 
   // Only archive these "less important" transitions when they were the final

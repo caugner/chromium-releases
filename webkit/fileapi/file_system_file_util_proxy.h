@@ -14,7 +14,7 @@
 #include "base/platform_file.h"
 #include "base/tracked_objects.h"
 #include "webkit/fileapi/file_system_file_util.h"
-#include "webkit/fileapi/file_system_operation_interface.h"
+#include "webkit/fileapi/file_system_operation.h"
 
 namespace fileapi {
 
@@ -39,9 +39,8 @@ class FileSystemFileUtilProxy {
   typedef base::Callback<void(PlatformFileError status)> StatusCallback;
   typedef base::Callback<void(PlatformFileError status,
                               bool created)> EnsureFileExistsCallback;
-  typedef FileSystemOperationInterface::GetMetadataCallback GetFileInfoCallback;
-  typedef FileSystemOperationInterface::ReadDirectoryCallback
-      ReadDirectoryCallback;
+  typedef FileSystemOperation::GetMetadataCallback GetFileInfoCallback;
+  typedef FileSystemOperation::ReadDirectoryCallback ReadDirectoryCallback;
 
   typedef base::Callback<
       void(base::PlatformFileError result,
@@ -86,6 +85,15 @@ class FileSystemFileUtilProxy {
       FileSystemFileUtil* src_util,
       FileSystemFileUtil* dest_util,
       const FileSystemURL& src_url,
+      const FileSystemURL& dest_url,
+      const StatusCallback& callback);
+
+  // Copies a file from local disk to the given filesystem destination.
+  // Primarily used for the Syncable filesystem type (e.g. GDrive).
+  static bool CopyInForeignFile(
+      FileSystemOperationContext* context,
+      FileSystemFileUtil* dest_util,
+      const FilePath& src_local_disk_file_path,
       const FileSystemURL& dest_url,
       const StatusCallback& callback);
 

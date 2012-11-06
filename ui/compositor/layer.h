@@ -13,7 +13,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebContentLayerClient.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayerClient.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebLayer.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebContentLayer.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSolidColorLayer.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayer.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/compositor/compositor.h"
@@ -43,7 +47,8 @@ class Texture;
 // NULL, but the children are not deleted.
 class COMPOSITOR_EXPORT Layer
     : public LayerAnimationDelegate,
-      NON_EXPORTED_BASE(public WebKit::WebContentLayerClient) {
+      NON_EXPORTED_BASE(public WebKit::WebContentLayerClient),
+      NON_EXPORTED_BASE(public WebKit::WebExternalTextureLayerClient) {
  public:
   Layer();
   explicit Layer(LayerType type);
@@ -128,6 +133,10 @@ class COMPOSITOR_EXPORT Layer
   float opacity() const { return opacity_; }
   void SetOpacity(float opacity);
 
+  // Returns the actual opacity, which the opacity of this layer multipled by
+  // the combined opacity of the parent.
+  float GetCombinedOpacity() const;
+
   // Blur pixels by this amount in anything below the layer and visible through
   // the layer.
   int background_blur() const { return background_blur_radius_; }
@@ -211,6 +220,7 @@ class COMPOSITOR_EXPORT Layer
   // Assigns a new external texture.  |texture| can be NULL to disable external
   // updates.
   void SetExternalTexture(ui::Texture* texture);
+  ui::Texture* external_texture() { return texture_.get(); }
 
   // Sets the layer's fill color.  May only be called for LAYER_SOLID_COLOR.
   void SetColor(SkColor color);
@@ -237,9 +247,10 @@ class COMPOSITOR_EXPORT Layer
 
   // Sets whether the layer should scale its content. If true, the canvas will
   // be scaled in software rendering mode before it is passed to
-  // |LayerDelegate::OnPaint| and the texture will be scaled in accelerated
-  // mode. Set to false if the delegate handles scaling and the texture is
-  // the correct pixel size.
+  // |LayerDelegate::OnPaint|.
+  // Set to false if the delegate handles scaling.
+  // NOTE: if this is called during |LayerDelegate::OnPaint|, the new value will
+  // not apply to the canvas passed to the pending draw.
   void set_scale_content(bool scale_content) { scale_content_ = scale_content; }
 
   // Returns true if the layer scales its content.
@@ -252,13 +263,14 @@ class COMPOSITOR_EXPORT Layer
   // WebContentLayerClient
   virtual void paintContents(WebKit::WebCanvas*,
                              const WebKit::WebRect& clip,
-#if defined(WEBCONTENTLAYERCLIENT_FLOAT_OPAQUE_RECT)
                              WebKit::WebFloatRect& opaque);
-#else
-                             WebKit::WebRect& opaque);
-#endif
 
-  WebKit::WebLayer web_layer() { return web_layer_; }
+  WebKit::WebLayer* web_layer() { return web_layer_; }
+
+  // WebExternalTextureLayerClient
+  virtual unsigned prepareTexture(
+      WebKit::WebTextureUpdater& /* updater */) OVERRIDE;
+  virtual WebKit::WebGraphicsContext3D* context() OVERRIDE;
 
   float device_scale_factor() const { return device_scale_factor_; }
 
@@ -268,12 +280,6 @@ class COMPOSITOR_EXPORT Layer
   bool force_render_surface() const { return force_render_surface_; }
 
  private:
-  // TODO(vollick): Eventually, if a non-leaf node has an opacity of less than
-  // 1.0, we'll render to a separate texture, and then apply the alpha.
-  // Currently, we multiply our opacity by all our ancestor's opacities and
-  // use the combined result, but this is only temporary.
-  float GetCombinedOpacity() const;
-
   // Stacks |child| above or below |other|.  Helper method for StackAbove() and
   // StackBelow().
   void StackRelativeTo(Layer* child, Layer* other, bool above);
@@ -371,9 +377,14 @@ class COMPOSITOR_EXPORT Layer
 
   LayerDelegate* delegate_;
 
-  scoped_ptr<LayerAnimator> animator_;
+  scoped_refptr<LayerAnimator> animator_;
 
-  WebKit::WebLayer web_layer_;
+  // Ownership of the layer is held through one of the strongly typed layer
+  // pointers, depending on which sort of layer this is.
+  scoped_ptr<WebKit::WebContentLayer> content_layer_;
+  scoped_ptr<WebKit::WebExternalTextureLayer> texture_layer_;
+  scoped_ptr<WebKit::WebSolidColorLayer> solid_color_layer_;
+  WebKit::WebLayer* web_layer_;
   bool web_layer_is_accelerated_;
   bool show_debug_borders_;
 

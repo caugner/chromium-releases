@@ -143,6 +143,7 @@
 <translation id="5564962323737505851">Định cấu hình trình quản lý mật khẩu. Nếu bật trình quản lý mật khẩu, bạn có thể chọn bật hoặc tắt chế độ người dùng có thể hiển thị mật khẩu được lưu trữ bằng văn bản rõ ràng hay không.</translation>
 <translation id="4668325077104657568">Cài đặt hình ảnh mặc định</translation>
 <translation id="7161193985878519056">Đã tắt chế độ ẩn danh.</translation>
+<translation id="2524379983318108884">Cho phép thu âm thanh</translation>
 <translation id="4492287494009043413">Tắt tính năng chụp ảnh chụp màn hình</translation>
 <translation id="6368403635025849609">Cho phép JavaScript trên các trang web này</translation>
 <translation id="6074963268421707432">Không cho phép bất kỳ trang web nào hiển thị thông báo trên màn hình</translation>
@@ -245,19 +246,13 @@
       Một số ứng dụng web tiêu hao nhiều kết nối với các GET treo, vì vậy, việc hạ giá trị xuống dưới 32 có thể khiến mạng của trình duyệt bị treo nếu mở quá nhiều ứng dụng web như vậy. Bạn tự chịu rủi ro khi đặt giá trị thấp hơn giá trị mặc định.
 
       Nếu không đặt chính sách này, giá trị mặc định được sử dụng sẽ là 32.</translation>
+<translation id="5395271912574071439">Bật tính năng ẩn của máy máy chủ truy cập từ xa trong khi đang thực hiện kết nối.
+
+          Nếu bạn bật cài đặt này thì các thiết bị đầu vào và đầu ra vật lý của máy chủ sẽ bị tắt khi đang thực hiện kết nối từ xa.
+
+          Nếu bạn tắt hoặc chưa đặt cài đặt này thì cả người dùng cục bộ và người dùng từ xa đều có thể tương tác với máy chủ khi máy chủ đang được chia sẻ.</translation>
 <translation id="2312509925391670075">Hỏi mỗi lần trang web muốn truy cập vào máy ảnh và/hoặc micrô của tôi</translation>
 <translation id="1426410128494586442">Có</translation>
-<translation id="1692788808502061374">Cho phép bạn chỉ định danh sách các tiện ích mở rộng sẽ được cài đặt tự động mà không có sự tương tác của người dùng.
-
-          Mỗi mục trong danh sách là một chuỗi chứa ID tiện ích mở rộng và URL cập nhật được phân tách bằng dấu chấm phẩy (<ph name="SEMICOLON"/>). ID tiện ích mở rộng là chuỗi 32 chữ cái được tìm thấy, chẳng hạn như trên <ph name="CHROME_EXTENSIONS_LINK"/> khi ở chế độ nhà phát triển. URL cập nhật sẽ trỏ tới tài liệu XML của tệp kê khai cập nhật như được mô tả tại <ph name="LINK_TO_EXTENSION_DOC1"/>.
-
-          Đối với từng mục, <ph name="PRODUCT_NAME"/> sẽ truy xuất tiện ích mở rộng được chỉ định bởi ID tiện ích mở rộng từ dịch vụ cập nhật tại URL cập nhật đã chỉ định và tự động cài đặt tiện ích này.
-
-          Ví dụ: <ph name="EXTENSION_POLICY_EXAMPLE"/> cài đặt tiện ích mở rộng <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> từ URL cập nhật của Cửa hàng Chrome trực tuyến tiêu chuẩn. Để biết thêm thông tin về việc lưu trữ tiện ích mở rộng, hãy xem: <ph name="LINK_TO_EXTENSION_DOC2"/>.
-
-          Người dùng sẽ không thể gỡ cài đặt tiện ích mở rộng được chính sách này chỉ định. Nếu bạn xóa một tiện ích mở rộng khỏi danh sách này, khi ấy, tiện ích mở rộng đó sẽ tự động được <ph name="PRODUCT_NAME"/> gỡ cài đặt.
-
-          Nếu chính sách này không được đặt, người dùng có thể gỡ cài đặt bất kỳ tiện ích mở rộng nào trong <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="4962195944157514011">Chỉ định URL của công cụ tìm kiếm được sử dụng khi thực hiện tìm kiếm mặc định. URL phải chứa chuỗi '<ph name="SEARCH_TERM_MARKER"/>'. Chuỗi này sẽ được thay thế vào thời điểm truy vấn bằng các cụm từ mà người dùng đang tìm kiếm.
 
           Tùy chọn này phải được đặt khi chính sách 'DefaultSearchProviderEnabled' được bật và sẽ chỉ được áp dụng nếu thỏa mãn điều kiện này.</translation>
@@ -327,6 +322,13 @@
 
           Nếu bạn tắt cài đặt này, Kerberos SPN được tạo sẽ không bao gồm cổng trong bất kỳ trường hợp nào.</translation>
 <translation id="3236046242843493070">Mẫu URL để cho phép cài đặt tiện ích mở rộng, ứng dụng và tập lệnh người dùng từ</translation>
+<translation id="3442095178490656861">Chỉ định múi giờ sẽ được sử dụng cho thiết bị. Người dùng có thể ghi đè múi giờ đã chỉ định cho phiên hiện tại. Tuy nhiên, khi đăng xuất, múi giờ này sẽ được đặt lại về múi giờ đã chỉ định. Nếu giá trị không hợp lệ được cung cấp, chính sách này vẫn được kích hoạt bằng cách sử dụng &quot;GMT&quot; thay vào đó.
+
+      Nếu chính sách này không được sử dụng, múi giờ hiện đang hoạt động sẽ vẫn được sử dụng. Tuy nhiên người dùng có thể thay đổi múi giờ này và thay đổi vẫn có hiệu lực. Do đó, thay đổi của một người dùng sẽ ảnh hưởng đến màn hình đăng nhập và tất cả người dùng khác.
+
+      Các thiết bị mới sẽ bắt đầu với múi giờ được đặt thành &quot;Hoa Kỳ/Thái Bình Dương&quot;.
+
+      Định dạng của giá trị sẽ theo tên của múi giờ trong &quot;Cơ sở dữ liệu múi giờ IANA&quot; (xem &quot;http://en.wikipedia.org/wiki/List_of_tz_database_time&quot;). Cụ thể, có thể tham chiếu hầu hết các múi giờ bằng định dạng &quot;lục địa/thành_phố_lớn&quot; hoặc &quot;đại dương/thành_phố_lớn&quot;.</translation>
 <translation id="8992176907758534924">Không cho phép bất kỳ trang web nào hiển thị hình ảnh</translation>
 <translation id="262740370354162807">Cho phép gửi tài liệu tới <ph name="CLOUD_PRINT_NAME"/></translation>
 <translation id="8704831857353097849">Danh sách trình cắm bị tắt</translation>
@@ -392,6 +394,7 @@
 
       Nếu chính sách này không được đặt, người dùng có thể thay đổi danh sách các ứng dụng được ghim trong trình khởi chạy.</translation>
 <translation id="7625444193696794922">Chỉ định kênh phát hành mà thiết bị này phải bị khóa.</translation>
+<translation id="2552966063069741410">Múi giờ</translation>
 <translation id="3088288048720661397">Tắt tính năng đồng bộ hóa với Google Documents khi sử dụng kết nối di động nếu được đặt thành Đúng. Trong trường hợp đó, dữ liệu chỉ được đồng bộ hóa với Google Documents khi được kết nối qua WiFi hoặc Ethernet.
 
           Nếu không được đặt hoặc được đặt thành Sai thì người dùng sẽ có thể chuyển tệp tới Google Documents thông qua kết nối di động.</translation>
@@ -483,6 +486,7 @@
 <translation id="6392973646875039351">Bật tính năng Tự động điền của <ph name="PRODUCT_NAME"/> và cho phép người dùng tự động hoàn thành các biểu mẫu web bằng cách sử dụng thông tin được lưu trữ trước đây, chẳng hạn như địa chỉ hoặc thông tin thẻ tín dụng. Nếu bạn tắt cài đặt này, người dùng sẽ không sử dụng được tính năng Tự động điền. Nếu bạn bật cài đặt này hoặc không đặt giá trị, Tự động điền sẽ vẫn thuộc quyền kiểm soát của người dùng. Điều này sẽ cho phép họ thiết lập cấu hình Tự động điền và bật hoặc tắt Tự động điền tùy theo ý họ.</translation>
 <translation id="6157537876488211233">Danh sách quy tắc bỏ qua proxy được phân cách bằng dấu phẩy</translation>
 <translation id="3965339130942650562">Thời gian chờ cho tới khi đăng xuất của người dùng không hoạt động được thực thi</translation>
+<translation id="5293547923319914979">Bật tính năng ẩn của máy chủ truy cập từ xa.</translation>
 <translation id="7091198954851103976">Luôn chạy plugin yêu cầu ủy quyền</translation>
 <translation id="2021307518684405078">Không cho phép bất kỳ trang web nào truy cập vào máy ảnh và micrô của tôi</translation>
 <translation id="8870318296973696995">Trang chủ</translation>
@@ -533,6 +537,13 @@
 <translation id="8469342921412620373">Cho phép sử dụng nhà cung cấp dịch vụ tìm kiếm mặc định. Nếu bạn bật cài đặt này, tìm kiếm mặc định được thực hiện khi người dùng nhập văn bản không phải là URL vào thanh địa chỉ. Bạn có thể chỉ định nhà cung cấp dịch vụ tìm kiếm mặc định được sử dụng bằng cách thiết lập phần còn lại của các chính sách tìm kiếm mặc định. Nếu để trống các chính sách này, người dùng có thể chọn nhà cung cấp mặc định. Nếu bạn tắt cài đặt này, sẽ không có tìm kiếm nào được thực hiện khi người dùng nhập văn bản không phải là URL vào thanh địa chỉ. Nếu bạn bật hoặc tắt cài đặt này, người dùng không thể thay đổi hoặc ghi đè cài đặt này trong <ph name="PRODUCT_NAME"/>. Nếu không thiết lập chính sách này, nhà cung cấp dịch vụ tìm kiếm mặc định sẽ được bật và người dùng có thể thiết lập danh sách nhà cung cấp dịch vụ tìm kiếm.</translation>
 <translation id="8731693562790917685">Cài đặt nội dung cho phép bạn chỉ định cách xử lý những loại nội dung cụ thể (ví dụ: Cookie, Hình ảnh hoặc JavaScript).</translation>
 <translation id="2411919772666155530">Chặn thông báo trên các trang web này</translation>
+<translation id="5281259077246025371">Cho phép thu âm thanh.
+
+      Khi chính sách này được đặt thành sai, tính năng thu âm thanh không khả dụng trên thiết bị khi người dùng đã đăng nhập.
+
+      Chính sách này ảnh hưởng đến tất cả các loại đầu vào âm thanh chứ không chỉ đến micrrô tích hợp sẵn.
+
+      Nếu cài đặt này được đặt thành đúng hoặc không được định cấu hình thì người dùng có thể sử dụng tất cả các loại đầu vào âm thanh được hỗ trợ trên thiết bị của họ.</translation>
 <translation id="6923366716660828830">Chỉ định tên của nhà cung cấp dịch vụ tìm kiếm mặc định. Nếu để trống hoặc không đặt, tên máy chủ lưu trữ do URL tìm kiếm chỉ định sẽ được sử dụng.
 
           Chính sách này chỉ được xem xét nếu chính sách 'DefaultSearchProviderEnabled' được bật.</translation>
@@ -580,6 +591,13 @@
           Nếu bạn bật cài đặt này, người dùng không thể thay đổi hoặc ghi đè cài đặt này trong <ph name="PRODUCT_NAME"/>.
 
           Tắt cài đặt này tương ứng với không định cấu hình. Người dùng vẫn có thể thay đổi cài đặt này trong <ph name="PRODUCT_NAME"/>.</translation>
+<translation id="8161570238552664224">Cho phép phát âm thanh.
+
+      Khi chính sách này được đặt thành sai, đầu ra âm thanh sẽ không có trên thiết bị khi người dùng đã đăng nhập.
+
+      Chính sách này ảnh hưởng đến tất cả các loại đầu ra âm thanh chứ không chỉ đến loa tích hợp sẵn. Các tính năng hỗ trợ truy cập âm thanh cũng bị chính sách này cấm. Không bật chính sách này nếu trình đọc màn hình là cần thiết cho người dùng.
+
+      Nếu cài đặt này được đặt thành đúng hoặc không được định cấu hình thì người dùng có thể sử dụng tất cả các đầu ra âm thanh được hỗ trợ trên thiết bị của họ.</translation>
 <translation id="5761030451068906335">Định cấu hình cài đặt proxy cho <ph name="PRODUCT_NAME"/>.
 
       Chính sách chưa sẵn sàng để sử dụng, vui lòng không sử dụng chính sách này.</translation>
@@ -738,6 +756,7 @@
       Nếu bạn bật hoặc tắt cài đặt này, người dùng không thể thay đổi hoặc ghi đè cài đặt này trong  <ph name="PRODUCT_NAME"/>.
 
       Không thiết lập chính sách này sẽ cho phép người dùng chọn có hiển thị nút trang chủ hay không.</translation>
+<translation id="2518231489509538392">Cho phép phát âm thanh</translation>
 <translation id="7547044444554936129">Bật tính năng Instant của  <ph name="PRODUCT_NAME"/> và ngăn người dùng thay đổi cài đặt này. 
 
       Nếu bạn bật cài đặt này, <ph name="PRODUCT_NAME"/> Instant sẽ được bật.
@@ -816,6 +835,7 @@
           Nếu không thiết lập chính sách này, mọi máy chủ sẽ được chấp nhận để xác thực tích hợp.</translation>
 <translation id="2299220924812062390">Chỉ định danh sách plugin được phép</translation>
 <translation id="924557436754151212">Nhập mật khẩu đã lưu từ trình duyệt mặc định trong lần chạy đầu tiên</translation>
+<translation id="1465619815762735808">Nhấp để phát</translation>
 <translation id="7227967227357489766">Xác định danh sách những người dùng được phép đăng nhập vào thiết bị. Các mục nhập sẽ có dạng <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, chẳng hạn như <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Để cho phép bất kỳ người dùng nào trên miền, hãy sử dụng các mục nhập có dạng <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
       Nếu chính sách này không được định cấu hình, sẽ không có hạn chế về người dùng được phép đăng nhập. Lưu ý rằng việc tạo người dùng mới sẽ vẫn yêu cầu chính sách <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/> phải được định cấu hình chính xác.</translation>
@@ -877,6 +897,11 @@
 <translation id="8631434304112909927">cho đến phiên bản <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Bật đề xuất tìm kiếm</translation>
 <translation id="4906194810004762807">Chính sách tốc độ làm mới cho thiết bị</translation>
+<translation id="1398889361882383850">Cho phép bạn đặt có cho phép các trang web tự động chạy plugin không. Bạn có thể cho phép hoặc không cho phép tất cả các trang web tự động chạy plugin.
+
+          Tính năng Nhấp để phát cho phép plugin chạy, tuy nhiên người dùng phải nhấp vào plugin để bắt đầu quá trình thực thi.
+
+          Nếu chính sách này không được đặt, 'AllowPlugins' sẽ được sử dụng và người dùng có thể thay đổi tùy chọn này.</translation>
 <translation id="7974114691960514888">Chính sách này không còn được hỗ trợ.
           Cho phép sử dụng STUN và máy chủ chuyển tiếp khi kết nối với máy khách từ xa.
 
@@ -906,9 +931,6 @@
 <translation id="4121350739760194865">Chặn các quảng cáo ứng dụng xuất hiện trên trang tab mới</translation>
 <translation id="2127599828444728326">Cho phép thông báo trên các trang web này</translation>
 <translation id="7635471475589566552">Định cấu hình ngôn ngữ ứng dụng trong <ph name="PRODUCT_NAME"/> và ngăn người dùng thay đổi ngôn ngữ này. Nếu bạn bật cài đặt này, <ph name="PRODUCT_NAME"/> sẽ sử dụng ngôn ngữ được chỉ định. Nếu ngôn ngữ được định cấu hình không được hỗ trợ, 'en-US' sẽ được sử dụng thay thế. Nếu bạn tắt hoặc không thiết lập cài đặt này, <ph name="PRODUCT_NAME"/> sẽ sử dụng ngôn ngữ ưa thích do người dùng chỉ định (nếu được định cấu hình), ngôn ngữ hệ thống hoặc ngôn ngữ dự phòng 'en-US'.</translation>
-<translation id="7271483295221961083">Cho phép bạn đặt liệu các trang web có được phép tự động chạy trình cắm hay không. Có thể cho phép hoặc từ chối tự động chạy trình cắm cho tất cả các trang web.
-
-          Nếu không thiết lập chính sách này, 'AllowPlugins' sẽ được sử dụng và người dùng có thể thay đổi cài đặt này.</translation>
 <translation id="718956142899066210">Các loại kết nối được cho phép để cập nhật</translation>
 <translation id="6985168562472482191">Tên của cửa hàng trực tuyến dành cho doanh nghiệp sẽ xuất hiện bên dưới biểu tượng ứng dụng trên trang tab mới. Cài đặt này không có hiệu lực nếu không đặt EnterpriseWebStoreURL.
 
@@ -990,6 +1012,17 @@
 <translation id="6658245400435704251">Chỉ định số giây tối đa mà thiết bị có thể ngẫu nhiên trì hoãn việc tải xuống bản cập nhật từ thời điểm bản cập nhật được đưa lên máy chủ lần đầu tiên. Thiết bị có thể đợi một phần số thời gian này là thời gian thực và phần thời gian còn lại là thời gian kiểm tra bản cập nhật. Trong bất kỳ trường hợp nào, việc phân tán bị chặn trên ở lượng thời gian cố định để thiết bị không bao giờ phải chờ mãi để tải xuống bản cập nhật.</translation>
 <translation id="1948757837129151165">Chính sách xác thực HTTP</translation>
 <translation id="5946082169633555022">Kênh beta</translation>
+<translation id="145467868108778033">Cho phép bạn chỉ định danh sách các tiện ích mở rộng sẽ được cài đặt tự động mà không cần tương tác của người dùng.
+
+          Mỗi mục trong danh sách là một chuỗi chứa ID tiện ích mở rộng và URL bản cập nhật được phân tách bằng dấu chấm phẩy (<ph name="SEMICOLON"/>). ID tiện ích mở rộng là chuỗi gồm 32 chữ cái được tìm thấy, ví dụ: trên <ph name="CHROME_EXTENSIONS_LINK"/> khi ở chế độ nhà phát triển. URL bản cập nhật phải trỏ tới tài liệu XML bản kê khai cập nhật như được mô tả tại <ph name="LINK_TO_EXTENSION_DOC1"/>. Xin lưu ý rằng URL bản cập nhật được đặt trong chính sách này chỉ dùng cho cài đặt ban đầu; các lần cập nhật tiện ích mở rộng tiếp theo sẽ sử dụng URL bản cập nhật được chỉ ra trong tệp kê khai của tiện ích mở rộng.
+
+          Đối với mỗi mục, <ph name="PRODUCT_NAME"/> sẽ truy xuất tiện ích mở rộng được chỉ định theo ID tiện ích mở rộng từ dịch vụ cập nhật tại URL bản cập nhật được chỉ định và tự động cài đặt tiện ích mở rộng đó.
+
+          Ví dụ: <ph name="EXTENSION_POLICY_EXAMPLE"/> cài đặt tiện ích mở rộng <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> từ URL bản cập nhật chuẩn trên Cửa hàng Chrome trực tuyến. Để biết thêm thông tin về cách lưu trữ tiện ích mở rộng, xem: <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Người dùng sẽ không thể gỡ cài đặt các tiện ích mở rộng do chính sách này chỉ định. Nếu bạn xóa một tiện ích mở rộng khỏi danh sách này thì tiện ích mở rộng đó sẽ được <ph name="PRODUCT_NAME"/> gỡ cài đặt tự động.
+
+          Nếu chính sách này không được đặt, người dùng có thể gỡ cài đặt mọi tiện ích mở rộng trong <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="8303314579975657113">Chỉ định thư viện GSSAPI nào được sử dụng để Xác thực HTTP. Bạn có thể chỉ đặt tên thư viện hoặc đường dẫn đầy đủ. Nếu không có cài đặt nào được cung cấp, <ph name="PRODUCT_NAME"/> sẽ quay trở lại sử dụng tên thư viện mặc định.</translation>
 <translation id="7749402620209366169">Bật xác thực hai bước cho máy chủ truy cập từ xa thay vì mã PIN do người dùng chỉ định.
 

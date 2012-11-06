@@ -23,7 +23,8 @@ class ApiResourceEventNotifier;
 
 class TCPSocket : public Socket {
  public:
-  explicit TCPSocket(ApiResourceEventNotifier* event_notifier);
+  TCPSocket(const std::string& owner_extension_id,
+            ApiResourceEventNotifier* event_notifier);
   virtual ~TCPSocket();
 
   virtual void Connect(const std::string& address,
@@ -42,12 +43,13 @@ class TCPSocket : public Socket {
                       const CompletionCallback& callback) OVERRIDE;
   virtual bool SetKeepAlive(bool enable, int delay) OVERRIDE;
   virtual bool SetNoDelay(bool no_delay) OVERRIDE;
-  virtual bool IsTCPSocket() OVERRIDE;
   virtual bool GetPeerAddress(net::IPEndPoint* address) OVERRIDE;
   virtual bool GetLocalAddress(net::IPEndPoint* address) OVERRIDE;
+  virtual Socket::SocketType GetSocketType() const OVERRIDE;
 
   static TCPSocket* CreateSocketForTesting(
       net::TCPClientSocket* tcp_client_socket,
+      const std::string& owner_extension_id,
       ApiResourceEventNotifier* event_notifier);
 
  protected:
@@ -61,6 +63,7 @@ class TCPSocket : public Socket {
                       int result);
 
   TCPSocket(net::TCPClientSocket* tcp_client_socket,
+            const std::string& owner_extension_id,
             ApiResourceEventNotifier* event_notifier);
 
   scoped_ptr<net::TCPClientSocket> socket_;

@@ -9,6 +9,8 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 
+namespace extensions {
+
 ShellWindowRegistry::ShellWindowRegistry() {}
 
 ShellWindowRegistry::~ShellWindowRegistry() {}
@@ -69,6 +71,20 @@ ShellWindow* ShellWindowRegistry::GetShellWindowForNativeWindow(
   return NULL;
 }
 
+ShellWindow* ShellWindowRegistry::GetCurrentShellWindowForApp(
+    const std::string& app_id) const {
+  ShellWindow* result = NULL;
+  for (ShellWindowSet::const_iterator i = shell_windows_.begin();
+       i != shell_windows_.end(); ++i) {
+    if ((*i)->extension()->id() == app_id)
+      result = *i;
+    if (result->GetBaseWindow()->IsActive())
+      return result;
+  }
+
+  return result;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Factory boilerplate
 
@@ -96,10 +112,16 @@ ProfileKeyedService* ShellWindowRegistry::Factory::BuildServiceInstanceFor(
   return new ShellWindowRegistry();
 }
 
-bool ShellWindowRegistry::Factory::ServiceIsCreatedWithProfile() {
+bool ShellWindowRegistry::Factory::ServiceHasOwnInstanceInIncognito() const {
   return true;
 }
 
-bool ShellWindowRegistry::Factory::ServiceIsNULLWhileTesting() {
+bool ShellWindowRegistry::Factory::ServiceIsCreatedWithProfile() const {
+  return true;
+}
+
+bool ShellWindowRegistry::Factory::ServiceIsNULLWhileTesting() const {
   return false;
 }
+
+}  // namespace extensions

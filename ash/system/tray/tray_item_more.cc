@@ -7,7 +7,7 @@
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
-#include "grit/ui_resources.h"
+#include "grit/ash_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -60,7 +60,7 @@ void TrayItemMore::ReplaceIcon(views::View* view) {
   AddChildViewAt(view, 0);
 }
 
-bool TrayItemMore::PerformAction(const views::Event& event) {
+bool TrayItemMore::PerformAction(const ui::Event& event) {
   owner_->TransitionDetailedView();
   return true;
 }

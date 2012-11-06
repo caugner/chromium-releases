@@ -18,6 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/common/edit_command.h"
@@ -52,6 +53,11 @@
 #include "webkit/glue/webpreferences.h"
 #include "webkit/media/webmediaplayer_delegate.h"
 #include "webkit/plugins/npapi/webplugin_page_delegate.h"
+
+#if defined(OS_ANDROID)
+#include "content/renderer/android/content_detector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebContentDetectionResult.h"
+#endif
 
 #if defined(COMPILER_MSVC)
 // RenderViewImpl is a diamond-shaped hierarchy, with WebWidgetClient at the
@@ -91,14 +97,18 @@ class WebUIBindings;
 
 namespace content {
 class DocumentState;
-class GuestToEmbedderChannel;
 class NavigationState;
-class P2PSocketDispatcher;
 class RenderViewObserver;
 class RenderViewTest;
 class RendererAccessibility;
+class RendererPpapiHost;
 struct CustomContextMenuContext;
 struct FileChooserParams;
+
+namespace old {
+class GuestToEmbedderChannel;
+}
+
 }  // namespace content
 
 namespace gfx {
@@ -133,10 +143,14 @@ class WebMediaPlayerManagerAndroid;
 namespace WebKit {
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
+class WebCompositorOutputSurface;
 class WebDOMMessageEvent;
 class WebDataSource;
 class WebDragData;
 class WebGeolocationClient;
+#if defined(OS_ANDROID)
+class WebHitTestResult;
+#endif
 class WebIconURL;
 class WebImage;
 class WebPeerConnection00Handler;
@@ -211,7 +225,7 @@ class RenderViewImpl : public RenderWidget,
       bool swapped_out,
       int32 next_page_id,
       const WebKit::WebScreenInfo& screen_info,
-      content::GuestToEmbedderChannel* guest_to_embedder_channel,
+      content::old::GuestToEmbedderChannel* guest_to_embedder_channel,
       AccessibilityMode accessibility_mode);
 
   // Returns the RenderViewImpl containing the given WebView.
@@ -234,17 +248,16 @@ class RenderViewImpl : public RenderWidget,
     return webkit_preferences_;
   }
 
+  bool enable_do_not_track() const {
+    return renderer_preferences_.enable_do_not_track;
+  }
+
   void set_send_content_state_immediately(bool value) {
     send_content_state_immediately_ = value;
   }
 
   MediaStreamDispatcher* media_stream_dispatcher() {
     return media_stream_dispatcher_;
-  }
-
-  // Current P2PSocketDispatcher. Set to NULL if P2P API is disabled.
-  content::P2PSocketDispatcher* p2p_socket_dispatcher() {
-    return p2p_socket_dispatcher_;
   }
 
   MouseLockDispatcher* mouse_lock_dispatcher() {
@@ -256,9 +269,6 @@ class RenderViewImpl : public RenderWidget,
     return media_player_manager_.get();
   }
 #endif
-
-  WebKit::WebPeerConnection00Handler* CreatePeerConnectionHandlerJsep(
-      WebKit::WebPeerConnection00HandlerClient* client);
 
   // Functions to add and remove observers for this object.
   void AddObserver(content::RenderViewObserver* observer);
@@ -276,8 +286,8 @@ class RenderViewImpl : public RenderWidget,
   // Sets whether  the renderer should report load progress to the browser.
   void SetReportLoadProgressEnabled(bool enabled);
 
-  content::GuestToEmbedderChannel* GetGuestToEmbedderChannel() const;
-  void SetGuestToEmbedderChannel(content::GuestToEmbedderChannel* channel);
+  content::old::GuestToEmbedderChannel* GetGuestToEmbedderChannel() const;
+  void SetGuestToEmbedderChannel(content::old::GuestToEmbedderChannel* channel);
   PP_Instance guest_pp_instance() const { return guest_pp_instance_; }
   void set_guest_pp_instance(PP_Instance instance) {
     guest_pp_instance_ = instance;
@@ -330,7 +340,7 @@ class RenderViewImpl : public RenderWidget,
   void PpapiPluginSelectionChanged();
 
   // Notification that a PPAPI plugin has been created.
-  void PpapiPluginCreated(ppapi::host::PpapiHost* host);
+  void PpapiPluginCreated(content::RendererPpapiHost* host);
 
   // Retrieves the current caret position if a PPAPI plugin has focus.
   bool GetPpapiPluginCaretBounds(gfx::Rect* rect);
@@ -426,8 +436,7 @@ class RenderViewImpl : public RenderWidget,
       WebKit::WebExternalPopupMenuClient* popup_menu_client);
   virtual WebKit::WebStorageNamespace* createSessionStorageNamespace(
       unsigned quota);
-  virtual WebKit::WebGraphicsContext3D* createGraphicsContext3D(
-      const WebKit::WebGraphicsContext3D::Attributes& attributes);
+  virtual WebKit::WebCompositorOutputSurface* createOutputSurface() OVERRIDE;
   virtual void didAddMessageToConsole(
       const WebKit::WebConsoleMessage& message,
       const WebKit::WebString& source_name,
@@ -498,6 +507,14 @@ class RenderViewImpl : public RenderWidget,
                                        const WebKit::WebString& title);
   virtual WebKit::WebPageVisibilityState visibilityState() const;
   virtual WebKit::WebUserMediaClient* userMediaClient();
+  virtual void draggableRegionsChanged();
+
+#if defined(OS_ANDROID)
+  virtual void scheduleContentIntent(const WebKit::WebURL& intent);
+  virtual void cancelScheduledContentIntents();
+  virtual WebKit::WebContentDetectionResult detectContentAround(
+      const WebKit::WebHitTestResult& touch_hit);
+#endif
 
   // WebKit::WebFrameClient implementation -------------------------------------
 
@@ -512,11 +529,14 @@ class RenderViewImpl : public RenderWidget,
       const WebKit::WebString& name, unsigned long long documentId);
   virtual WebKit::WebMediaPlayer* createMediaPlayer(
       WebKit::WebFrame* frame,
+      const WebKit::WebURL& url,
       WebKit::WebMediaPlayerClient* client);
   virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
       WebKit::WebFrame* frame,
       WebKit::WebApplicationCacheHostClient* client);
   virtual WebKit::WebCookieJar* cookieJar(WebKit::WebFrame* frame);
+  virtual void didCreateFrame(WebKit::WebFrame* parent,
+                              WebKit::WebFrame* child);
   virtual void frameDetached(WebKit::WebFrame* frame);
   virtual void willClose(WebKit::WebFrame* frame);
   virtual void loadURLExternally(WebKit::WebFrame* frame,
@@ -655,7 +675,8 @@ class RenderViewImpl : public RenderWidget,
   virtual void willOpenSocketStream(
       WebKit::WebSocketStreamHandle* handle);
   virtual bool willCheckAndDispatchMessageEvent(
-      WebKit::WebFrame* source,
+      WebKit::WebFrame* sourceFrame,
+      WebKit::WebFrame* targetFrame,
       WebKit::WebSecurityOrigin targetOrigin,
       WebKit::WebDOMMessageEvent event) OVERRIDE;
   virtual WebKit::WebString userAgentOverride(
@@ -701,6 +722,7 @@ class RenderViewImpl : public RenderWidget,
       WebKit::WebFrame* frame,
       const WebKit::WebURLRequest& request,
       WebKit::WebNavigationPolicy policy) OVERRIDE;
+  virtual void Repaint(const gfx::Size& size) OVERRIDE;
 
   // webkit_glue::WebPluginPageDelegate implementation -------------------------
 
@@ -745,7 +767,8 @@ class RenderViewImpl : public RenderWidget,
       const gfx::Rect& paint_bounds,
       TransportDIB** dib,
       gfx::Rect* location,
-      gfx::Rect* clip) OVERRIDE;
+      gfx::Rect* clip,
+      float* scale_factor) OVERRIDE;
   virtual gfx::Point GetScrollOffset() OVERRIDE;
   virtual void DidHandleKeyEvent() OVERRIDE;
   virtual bool WillHandleMouseEvent(
@@ -788,12 +811,16 @@ class RenderViewImpl : public RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, InsertCharacters);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, JSBlockSentAfterPageLoad);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, LastCommittedUpdateState);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnExtendSelectionAndDelete);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnHandleKeyboardEvent);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnImeStateChanged);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnNavStateChanged);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnReplaceAll);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnSetTextDirection);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnUpdateWebPreferences);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, SendSwapOutACK);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
+                           SetEditableSelectionAndComposition);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, StaleNavigationsIgnored);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, UpdateTargetURLWithInvalidURL);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
@@ -826,7 +853,8 @@ class RenderViewImpl : public RenderWidget,
                  bool swapped_out,
                  int32 next_page_id,
                  const WebKit::WebScreenInfo& screen_info,
-                 content::GuestToEmbedderChannel* guest_to_embedder_channel,
+                 content::old::GuestToEmbedderChannel*
+                    guest_to_embedder_channel,
                  AccessibilityMode accessibility_mode);
 
   // Do not delete directly.  This class is reference counted.
@@ -876,6 +904,9 @@ class RenderViewImpl : public RenderWidget,
   // The documentation for these functions should be in
   // render_messages_internal.h for the message that the function is handling.
 
+#if defined(OS_ANDROID)
+  void OnActivateNearestFindResult(int request_id, float x, float y);
+#endif
   CONTENT_EXPORT void OnAllowBindings(int enabled_bindings_flags);
   void OnAllowScriptToClose(bool script_can_close);
   void OnAsyncFileOpened(base::PlatformFileError error_code,
@@ -883,6 +914,7 @@ class RenderViewImpl : public RenderWidget,
                          int message_id);
   void OnPpapiBrokerChannelCreated(int request_id,
                                    const IPC::ChannelHandle& handle);
+  void OnPpapiBrokerPermissionResult(int request_id, bool result);
   void OnCancelDownload(int32 download_id);
   void OnClearFocusedNode();
   void OnClosePage();
@@ -927,11 +959,14 @@ class RenderViewImpl : public RenderWidget,
   void OnDisableAutoResize(const gfx::Size& new_size);
   void OnEnumerateDirectoryResponse(int id, const std::vector<FilePath>& paths);
   void OnExecuteEditCommand(const std::string& name, const std::string& value);
+  CONTENT_EXPORT void OnExtendSelectionAndDelete(int before, int after);
   void OnFileChooserResponse(
       const std::vector<ui::SelectedFileInfo>& files);
   void OnFind(int request_id, const string16&, const WebKit::WebFindOptions&);
-  void OnFindReplyAck();
   void OnGetAllSavableResourceLinksForCurrentPage(const GURL& page_url);
+#if defined(OS_ANDROID)
+  void OnFindMatchRects(int current_version);
+#endif
   void OnGetSerializedHtmlDataForCurrentPageWithLocalLinks(
       const std::vector<GURL>& links,
       const std::vector<FilePath>& local_paths,
@@ -955,6 +990,7 @@ class RenderViewImpl : public RenderWidget,
   void OnRedo();
   void OnReloadFrame();
   void OnReplace(const string16& text);
+  CONTENT_EXPORT void OnReplaceAll(const string16& text);
   void OnResetPageEncodingToDefault();
   void OnScriptEvalRequest(const string16& frame_xpath,
                            const string16& jscript,
@@ -966,6 +1002,10 @@ class RenderViewImpl : public RenderWidget,
   void OnSetActive(bool active);
   void OnSetAltErrorPageURL(const GURL& gurl);
   void OnSetBackground(const SkBitmap& background);
+  CONTENT_EXPORT void OnSetCompositionFromExistingText(
+      int start, int end,
+      const std::vector<WebKit::WebCompositionUnderline>& underlines);
+  CONTENT_EXPORT void OnSetEditableSelectionOffsets(int start, int end);
   void OnSetNavigationStartTime(
       const base::TimeTicks& browser_navigation_start);
   void OnSetWebUIProperty(const std::string& name, const std::string& value);
@@ -996,6 +1036,7 @@ class RenderViewImpl : public RenderWidget,
   void OnUpdateTargetURLAck();
   CONTENT_EXPORT void OnUpdateWebPreferences(
       const webkit_glue::WebPreferences& prefs);
+  CONTENT_EXPORT void OnUnselect();
 
 #if defined(OS_MACOSX)
   void OnWindowFrameChanged(const gfx::Rect& window_frame,
@@ -1016,6 +1057,10 @@ class RenderViewImpl : public RenderWidget,
 
   void OnJavaBridgeInit();
 
+  void OnUpdatedFrameTree(int process_id,
+                          int route_id,
+                          const std::string& frame_tree);
+
   // Adding a new message handler? Please add it in alphabetical order above
   // and put it in the same position in the .cc file.
 
@@ -1029,6 +1074,30 @@ class RenderViewImpl : public RenderWidget,
 
   // Check whether the preferred size has changed.
   void CheckPreferredSize();
+
+  WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
+      const WebKit::WebGraphicsContext3D::Attributes& attributes);
+
+  // This method walks the entire frame tree for this RenderView and sends an
+  // update to the browser process as described in the
+  // ViewHostMsg_FrameTreeUpdated comments. If |exclude_frame_subtree|
+  // frame is non-NULL, the subtree starting at that frame not included in the
+  // serialized form.
+  // This is used when a frame is going to be removed from the tree.
+  void SendUpdatedFrameTree(WebKit::WebFrame* exclude_frame_subtree);
+
+  // Recursively creates a DOM frame tree starting with |frame|, based on
+  // |frame_tree|. For each node, the frame is navigated to the swapped out URL,
+  // the name (if present) is set on it, and all the subframes are created
+  // and added to the DOM.
+  void CreateFrameTree(WebKit::WebFrame* frame, DictionaryValue* frame_tree);
+
+  // If this is a swapped out RenderView, which maintains a copy of the frame
+  // tree of an active RenderView, we keep a map from frame ids in this view to
+  // the frame ids of the active view for each corresponding frame.
+  // This method uses the map to find the frame in this RenderView that
+  // corresponds to the frame in the active RenderView specified by |frame_id|.
+  WebKit::WebFrame* GetFrameByMappedID(int frame_id);
 
   void EnsureMediaStreamImpl();
 
@@ -1068,12 +1137,17 @@ class RenderViewImpl : public RenderWidget,
   bool IsBackForwardToStaleEntry(const ViewMsg_Navigate_Params& params,
                                  bool is_reload);
 
+#if defined(OS_ANDROID)
+  // Launch an Android content intent with the given URL.
+  void LaunchAndroidContentIntent(const GURL& intent_url, size_t request_id);
+#endif
+
   bool MaybeLoadAlternateErrorPage(WebKit::WebFrame* frame,
                                    const WebKit::WebURLError& error,
                                    bool replace);
 
   // Make this RenderView show an empty, unscriptable page.
-  void NavigateToSwappedOutURL();
+  void NavigateToSwappedOutURL(WebKit::WebFrame* frame);
 
   // If we initiated a navigation, this function will populate |document_state|
   // with the navigation information saved in OnNavigate().
@@ -1311,9 +1385,6 @@ class RenderViewImpl : public RenderWidget,
   // MediaStreamImpl attached to this view; lazily initialized.
   MediaStreamImpl* media_stream_impl_;
 
-  // Dispatches all P2P socket used by the renderer.
-  content::P2PSocketDispatcher* p2p_socket_dispatcher_;
-
   DevToolsAgent* devtools_agent_;
 
   // The current accessibility mode.
@@ -1328,6 +1399,19 @@ class RenderViewImpl : public RenderWidget,
 
   // Mouse Lock dispatcher attached to this view.
   MouseLockDispatcher* mouse_lock_dispatcher_;
+
+#if defined(OS_ANDROID)
+  // Android Specific ---------------------------------------------------------
+
+  // Expected id of the next content intent launched. Used to prevent scheduled
+  // intents to be launched if aborted.
+  size_t expected_content_intent_id_;
+
+  // List of click-based content detectors.
+  typedef std::vector< linked_ptr<content::ContentDetector> >
+      ContentDetectorList;
+  ContentDetectorList content_detectors_;
+#endif
 
   // Misc ----------------------------------------------------------------------
 
@@ -1356,11 +1440,6 @@ class RenderViewImpl : public RenderWidget,
   // Whether this is a top level window (instead of a popup). Top level windows
   // shouldn't count against their own |shared_popup_counter_|.
   bool decrement_shared_popup_at_destruction_;
-
-  // If the browser hasn't sent us an ACK for the last FindReply we sent
-  // to it, then we need to queue up the message (keeping only the most
-  // recent message if new ones come in).
-  scoped_ptr<IPC::Message> queued_find_reply_message_;
 
   // Stores edit commands associated to the next key event.
   // Shall be cleared as soon as the next key event is processed.
@@ -1412,7 +1491,8 @@ class RenderViewImpl : public RenderWidget,
   scoped_ptr<DomAutomationController> dom_automation_controller_;
 
   // Channel for communication with embedding renderer, if it exists.
-  scoped_refptr<content::GuestToEmbedderChannel> guest_to_embedder_channel_;
+  scoped_refptr<content::old::GuestToEmbedderChannel>
+      guest_to_embedder_channel_;
 
   // The pepper instance identifer for this guest RenderView.
   PP_Instance guest_pp_instance_;
@@ -1424,9 +1504,37 @@ class RenderViewImpl : public RenderWidget,
   // This graphics context is initialized once GuestReady() is called.
   WebGraphicsContext3DCommandBufferImpl* guest_uninitialized_context_;
 
-  // These are the attributes originally passed into createGraphicsContext3D
+  // These are the attributes originally passed into createOutputSurface
   // before the guest_to_embedder_channel was ready.
   WebKit::WebGraphicsContext3D::Attributes guest_attributes_;
+
+  // Boolean indicating whether we are in the process of creating the frame
+  // tree for this renderer in response to ViewMsg_UpdateFrameTree.  If true,
+  // we won't be sending ViewHostMsg_FrameTreeUpdated messages back to the
+  // browser, as those will be redundant.
+  bool updating_frame_tree_;
+
+  // Boolean indicating that the frame tree has changed, but a message has not
+  // been sent to the browser because a page has been loading. This helps
+  // avoid extra messages being sent to the browser when navigating away from a
+  // page with subframes, which will be destroyed. Instead, a single message
+  // is sent when the load is stopped with the final state of the frame tree.
+  //
+  // TODO(nasko): Relying on the is_loading_ means that frame tree updates will
+  // not be sent until *all* subframes have completed loading. This can cause
+  // JavaScript calls to fail, if they occur prior to the first update message
+  // being sent. This will be fixed by bug http://crbug.com/145014.
+  bool pending_frame_tree_update_;
+
+  // If this render view is a swapped out "mirror" of an active render view in a
+  // different process, we record the process id and route id for the active RV.
+  // For further details, see the comments on ViewHostMsg_FrameTreeUpdated.
+  int target_process_id_;
+  int target_routing_id_;
+
+  // A map of the current process's frame ids to ids in the remote active render
+  // view, if this is a swapped out render view.
+  std::map<int, int> active_frame_id_map_;
 
   // NOTE: pepper_delegate_ should be last member because its constructor calls
   // AddObservers method of RenderViewImpl from c-tor.

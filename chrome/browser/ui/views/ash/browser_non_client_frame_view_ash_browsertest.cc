@@ -23,14 +23,14 @@ IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewAshTest, UseShortHeader) {
   // Restored window uses tall header.
   widget->SetBounds(gfx::Rect(10, 10, 300, 300));
   EXPECT_FALSE(frame_view->UseShortHeader());
-  // Window at top of screen uses short header.
+  // Window at top of screen uses normal header.
   widget->SetBounds(gfx::Rect(10, 0, 300, 300));
-  EXPECT_TRUE(frame_view->UseShortHeader());
+  EXPECT_FALSE(frame_view->UseShortHeader());
   // Maximized window uses short header.
   widget->Maximize();
   EXPECT_TRUE(frame_view->UseShortHeader());
 
-  // Popups use short header.
+  // Popups tall header.
   Browser* popup = CreateBrowserForPopup(browser()->profile());
   Widget* popup_widget =
       static_cast<BrowserView*>(popup->window())->GetWidget();
@@ -38,7 +38,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewAshTest, UseShortHeader) {
       static_cast<BrowserNonClientFrameViewAsh*>(
           popup_widget->non_client_view()->frame_view());
   popup_widget->SetBounds(gfx::Rect(5, 5, 200, 200));
-  EXPECT_TRUE(popup_frame_view->UseShortHeader());
+  EXPECT_FALSE(popup_frame_view->UseShortHeader());
 
   // Apps use tall header.
   Browser* app = CreateBrowserForApp("name", browser()->profile());

@@ -6,9 +6,14 @@
 #define UI_AURA_CLIENT_DRAG_DROP_CLIENT_H_
 
 #include "ui/aura/aura_export.h"
-#include "ui/aura/event.h"
+#include "ui/gfx/native_widget_types.h"
+
+namespace gfx {
+class Point;
+}
 
 namespace ui {
+class LocatedEvent;
 class OSExchangeData;
 }
 
@@ -26,25 +31,23 @@ class AURA_EXPORT DragDropClient {
   // applied at the end of the drag drop session. |root_location| is in the
   // RootWindow's coordinate system.
   virtual int StartDragAndDrop(const ui::OSExchangeData& data,
+                               aura::RootWindow* root_window,
                                const gfx::Point& root_location,
                                int operation) = 0;
 
   // Called when mouse is dragged during a drag and drop.
-  virtual void DragUpdate(aura::Window* target, const LocatedEvent& event) = 0;
+  virtual void DragUpdate(aura::Window* target,
+                          const ui::LocatedEvent& event) = 0;
 
   // Called when mouse is released during a drag and drop.
-  virtual void Drop(aura::Window* target, const LocatedEvent& event) = 0;
+  virtual void Drop(aura::Window* target,
+                    const ui::LocatedEvent& event) = 0;
 
   // Called when a drag and drop session is cancelled.
   virtual void DragCancel() = 0;
 
   // Returns true if a drag and drop session is in progress.
   virtual bool IsDragDropInProgress() = 0;
-
-  // Returns the current cursor according to the appropriate drag effect. This
-  // should only be called if IsDragDropInProgress() returns true. If it is
-  // called otherwise, the returned cursor is arbitrary.
-  virtual gfx::NativeCursor GetDragCursor() = 0;
 };
 
 AURA_EXPORT void SetDragDropClient(RootWindow* root_window,

@@ -12,22 +12,22 @@
 #include "base/scoped_temp_dir.h"
 #include "base/threading/worker_pool.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/gdata/gdata_errorcode.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
-#include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
-#include "chrome/browser/chromeos/gdata/gdata_wapi_parser.h"
-#include "chrome/browser/chromeos/gdata/mock_gdata_documents_service.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system.h"
+#include "chrome/browser/chromeos/gdata/drive_system_service.h"
+#include "chrome/browser/chromeos/gdata/mock_drive_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
+#include "chrome/browser/google_apis/gdata_util.h"
+#include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/fileapi/file_system_context.h"
@@ -41,8 +41,8 @@ namespace {
 
 // These should match the counterparts in remote.js.
 // Also, the size of the file in |kTestRootFeed| has to be set to
-// |size(kTestFileContents)|.
-const char kTestFileContents[] = "hello, world";
+// length of kTestFileContent string.
+const char kTestFileContent[] = "hello, world!";
 
 // Contains a folder entry for the folder 'Folder' that will be 'created'.
 const char kTestDirectory[] = "new_folder_entry.json";
@@ -89,7 +89,7 @@ class BackgroundObserver {
 };
 
 // TODO(tbarzic): We should probably share GetTestFilePath and LoadJSONFile
-// with gdata_file_system_unittest.
+// with drive_file_system_unittest.
 // Generates file path in gdata test directory for a file with name |filename|.
 FilePath GetTestFilePath(const FilePath::StringType& filename) {
   FilePath path;
@@ -134,10 +134,10 @@ ACTION_P2(MockGetDocumentEntryCallback, status, value) {
 }
 
 // Creates a cache representation of the test file with predetermined content.
-void CreateDownloadFile(const FilePath& path) {
-  int file_content_size = static_cast<int>(sizeof(kTestFileContents));
-  ASSERT_EQ(file_content_size,
-            file_util::WriteFile(path, kTestFileContents, file_content_size));
+void CreateFileWithContent(const FilePath& path, const std::string& content) {
+  int content_size = static_cast<int>(content.length());
+  ASSERT_EQ(content_size,
+            file_util::WriteFile(path, content.c_str(), content_size));
 }
 
 // Action used to set mock expectations for DownloadFile().
@@ -145,7 +145,7 @@ ACTION_P(MockDownloadFileCallback, status) {
   ASSERT_TRUE(content::BrowserThread::PostTaskAndReply(
       content::BrowserThread::FILE,
       FROM_HERE,
-      base::Bind(&CreateDownloadFile, arg1),
+      base::Bind(&CreateFileWithContent, arg1, kTestFileContent),
       base::Bind(arg3, status, arg2, arg1)));
 }
 
@@ -166,8 +166,8 @@ class FileSystemExtensionApiTest : public ExtensionApiTest {
   // Adds a local mount point at at mount point /tmp.
   void AddTmpMountPoint() {
     fileapi::ExternalFileSystemMountPointProvider* provider =
-        BrowserContext::GetFileSystemContext(browser()->profile())->
-            external_provider();
+        BrowserContext::GetDefaultStoragePartition(
+            browser()->profile())->GetFileSystemContext()->external_provider();
     provider->AddLocalMountPoint(test_mount_point_);
   }
 
@@ -187,6 +187,56 @@ class FileSystemExtensionApiTest : public ExtensionApiTest {
   FilePath test_mount_point_;
 };
 
+class RestrictedFileSystemExtensionApiTest : public ExtensionApiTest {
+ public:
+  RestrictedFileSystemExtensionApiTest() {}
+
+  virtual ~RestrictedFileSystemExtensionApiTest() {}
+
+  virtual void SetUp() OVERRIDE {
+    FilePath tmp_path;
+    PathService::Get(base::DIR_TEMP, &tmp_path);
+    ASSERT_TRUE(tmp_dir_.CreateUniqueTempDirUnderPath(tmp_path));
+    mount_point_dir_ = tmp_dir_.path().Append("mount");
+    // Create the mount point.
+    file_util::CreateDirectory(mount_point_dir_);
+
+    FilePath test_dir = mount_point_dir_.Append("test_dir");
+    file_util::CreateDirectory(test_dir);
+
+    FilePath test_file = test_dir.AppendASCII("test_file.foo");
+    CreateFileWithContent(test_file, kTestFileContent);
+
+    test_file = test_dir.AppendASCII("mutable_test_file.foo");
+    CreateFileWithContent(test_file, kTestFileContent);
+
+    test_file = test_dir.AppendASCII("test_file_to_delete.foo");
+    CreateFileWithContent(test_file, kTestFileContent);
+
+    test_file = test_dir.AppendASCII("test_file_to_move.foo");
+    CreateFileWithContent(test_file, kTestFileContent);
+
+    // Create test files.
+    ExtensionApiTest::SetUp();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    ExtensionApiTest::TearDown();
+  }
+
+  void AddRestrictedMountPoint() {
+    fileapi::ExternalFileSystemMountPointProvider* provider =
+        BrowserContext::GetDefaultStoragePartition(
+            browser()->profile())->GetFileSystemContext()->external_provider();
+    provider->AddRestrictedLocalMountPoint(mount_point_dir_);
+  }
+
+ protected:
+  ScopedTempDir tmp_dir_;
+  FilePath mount_point_dir_;
+};
+
+
 class RemoteFileSystemExtensionApiTest : public ExtensionApiTest {
  public:
   RemoteFileSystemExtensionApiTest() {}
@@ -201,35 +251,28 @@ class RemoteFileSystemExtensionApiTest : public ExtensionApiTest {
     FilePath tmp_dir_path;
     PathService::Get(base::DIR_TEMP, &tmp_dir_path);
     ASSERT_TRUE(test_cache_root_.CreateUniqueTempDirUnderPath(tmp_dir_path));
-    gdata::GDataSystemServiceFactory::set_cache_root_for_test(
+    gdata::DriveSystemServiceFactory::set_cache_root_for_test(
         test_cache_root_.path().value());
 
-    mock_documents_service_ = new gdata::MockDocumentsService();
+    mock_drive_service_ = new gdata::MockDriveService();
 
-    operation_registry_.reset(new gdata::GDataOperationRegistry());
-    // FileBrowserEventRouter will add and remove itself from operation registry
-    // observer list.
-    EXPECT_CALL(*mock_documents_service_, operation_registry()).
-        WillRepeatedly(Return(operation_registry_.get()));
-
-    // |mock_documents_service_| will eventually get owned by a system service.
-    gdata::GDataSystemServiceFactory::set_documents_service_for_test(
-        mock_documents_service_);
+    // |mock_drive_service_| will eventually get owned by a system service.
+    gdata::DriveSystemServiceFactory::set_drive_service_for_test(
+        mock_drive_service_);
 
     ExtensionApiTest::SetUp();
   }
 
   virtual void TearDown() OVERRIDE {
     // Let's make sure we don't leak documents service.
-    gdata::GDataSystemServiceFactory::set_documents_service_for_test(NULL);
-    gdata::GDataSystemServiceFactory::set_cache_root_for_test(std::string());
+    gdata::DriveSystemServiceFactory::set_drive_service_for_test(NULL);
+    gdata::DriveSystemServiceFactory::set_cache_root_for_test(std::string());
     ExtensionApiTest::TearDown();
   }
 
  protected:
   ScopedTempDir test_cache_root_;
-  gdata::MockDocumentsService* mock_documents_service_;
-  scoped_ptr<gdata::GDataOperationRegistry> operation_registry_;
+  gdata::MockDriveService* mock_drive_service_;
 };
 
 IN_PROC_BROWSER_TEST_F(FileSystemExtensionApiTest, LocalFileSystem) {
@@ -276,20 +319,26 @@ IN_PROC_BROWSER_TEST_F(FileSystemExtensionApiTest,
       "filebrowser_component", "write.html", kComponentFlags)) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(RestrictedFileSystemExtensionApiTest, Basic) {
+  AddRestrictedMountPoint();
+  ASSERT_TRUE(RunExtensionSubtest(
+      "filebrowser_component", "restricted.html", kComponentFlags)) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
                        RemoteMountPoint) {
-  EXPECT_CALL(*mock_documents_service_, GetAccountMetadata(_)).Times(1);
+  EXPECT_CALL(*mock_drive_service_, GetAccountMetadata(_)).Times(1);
 
   // First, file browser will try to create new directory.
   scoped_ptr<base::Value> dir_value(LoadJSONFile(kTestDirectory));
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               CreateDirectory(_, _, _))
       .WillOnce(MockCreateDirectoryCallback(gdata::HTTP_SUCCESS, &dir_value));
 
   // Then the test will try to read an existing file file.
   // Remote filesystem should first request root feed from gdata server.
   scoped_ptr<base::Value> documents_value(LoadJSONFile(kTestRootFeed));
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               GetDocuments(_, _, _, _, _))
       .WillOnce(MockGetDocumentsCallback(gdata::HTTP_SUCCESS,
                                          &documents_value));
@@ -303,20 +352,20 @@ IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
   // copy is already present in the cache.
   scoped_ptr<base::Value> document_to_download_value(
       LoadJSONFile(kTestDocumentToDownloadEntry));
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               GetDocumentEntry("file:1_file_resource_id", _))
       .WillOnce(MockGetDocumentEntryCallback(gdata::HTTP_SUCCESS,
                                              &document_to_download_value));
 
   // We expect to download url defined in document entry returned by
   // GetDocumentEntry mock implementation.
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               DownloadFile(_, _, GURL("https://file_content_url_changed"),
                            _, _))
       .WillOnce(MockDownloadFileCallback(gdata::HTTP_SUCCESS));
 
   // On exit, all operations in progress should be cancelled.
-  EXPECT_CALL(*mock_documents_service_, CancelAll());
+  EXPECT_CALL(*mock_drive_service_, CancelAll());
 
   // All is set... RUN THE TEST.
   EXPECT_TRUE(RunExtensionTest("filesystem_handler")) << message_;
@@ -324,26 +373,19 @@ IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
       kComponentFlags)) << message_;
 }
 
-// This test fails under AddressSanitizer, see http://crbug.com/136169.
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_ContentSearch DISABLED_ContentSearch
-#else
-#define MAYBE_ContentSearch ContentSearch
-#endif
-IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
-                       MAYBE_ContentSearch) {
-  EXPECT_CALL(*mock_documents_service_, GetAccountMetadata(_)).Times(1);
+IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest, ContentSearch) {
+  EXPECT_CALL(*mock_drive_service_, GetAccountMetadata(_)).Times(1);
 
   // First, test will get drive root directory, to init file system.
   scoped_ptr<base::Value> documents_value(LoadJSONFile(kTestRootFeed));
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               GetDocuments(_, _, "", _, _))
       .WillOnce(MockGetDocumentsCallback(gdata::HTTP_SUCCESS,
                                          &documents_value));
 
   // We return the whole test file system in serch results.
   scoped_ptr<base::Value> search_value(LoadJSONFile(kTestRootFeed));
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               GetDocuments(_, _, "foo", _, _))
       .WillOnce(MockGetDocumentsCallback(gdata::HTTP_SUCCESS,
                                          &search_value));
@@ -351,20 +393,20 @@ IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
   // Test will try to create a snapshot of the returned file.
   scoped_ptr<base::Value> document_to_download_value(
       LoadJSONFile(kTestDocumentToDownloadEntry));
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               GetDocumentEntry("file:1_file_resource_id", _))
       .WillOnce(MockGetDocumentEntryCallback(gdata::HTTP_SUCCESS,
                                              &document_to_download_value));
 
   // We expect to download url defined in document entry returned by
   // GetDocumentEntry mock implementation.
-  EXPECT_CALL(*mock_documents_service_,
+  EXPECT_CALL(*mock_drive_service_,
               DownloadFile(_, _, GURL("https://file_content_url_changed"),
                            _, _))
       .WillOnce(MockDownloadFileCallback(gdata::HTTP_SUCCESS));
 
   // On exit, all operations in progress should be cancelled.
-  EXPECT_CALL(*mock_documents_service_, CancelAll());
+  EXPECT_CALL(*mock_drive_service_, CancelAll());
 
   // All is set... RUN THE TEST.
   EXPECT_TRUE(RunExtensionSubtest("filebrowser_component", "remote_search.html",

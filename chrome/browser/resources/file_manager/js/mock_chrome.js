@@ -50,18 +50,21 @@ function cloneShallow(object) {
  * Mock out the chrome.fileBrowserPrivate API for use in the harness.
  */
 chrome.fileBrowserPrivate = {
+  /**
+   * Change to window.TEMPORARY if you do not insist on persistence.
+   */
+  FS_TYPE: window.PERSISTENT,
 
   /**
    * Return a normal HTML5 filesystem api, rather than the real local
    * filesystem.
    *
-   * You must start chrome with --allow-file-access-from-files and
-   * --unlimited-quota-for-files in order for this to work.
+   * If the test harness is on file: schema you must start chrome with
+   * --allow-file-access-from-files in order for this to work.
    */
   requestLocalFileSystem: function(callback) {
-    window.webkitRequestFileSystem(window.PERSISTENT, 16 * 1024 * 1024,
-                                   callback,
-                                   util.ferr('Error requesting filesystem'));
+    window.webkitRequestFileSystem(this.FS_TYPE,
+        16 * 1024 * 1024, callback, util.ferr('Error requesting filesystem'));
   },
 
   /**
@@ -123,12 +126,11 @@ chrome.fileBrowserPrivate = {
    * Returns common tasks for a given list of files.
    * @return {Array.<Object>} Array of task descriptors.
    */
-  getFileTasks: function(urlList, callback) {
+  getFileTasks: function(urlList, mimeTypes, callback) {
     if (urlList.length == 0)
       return callback([]);
 
-    // This is how File Manager gets the extension id.
-    var extensionId = chrome.extension.getURL('').split('/')[2];
+    var internalTaskPrefix = util.getExtensionId() + '|file';
 
     if (!callback)
       throw new Error('Missing callback');
@@ -137,18 +139,18 @@ chrome.fileBrowserPrivate = {
         'R0lGODlhAQABAPABAP///wAAACH5BAEKAAAALAAAAAABAAEAAAICRAEAOw%3D%3D';
 
     var tasks = [
-      { taskId: extensionId + '|play',
+      { taskId: internalTaskPrefix + '|play',
         title: 'Listen',
         regexp: /\.(flac|m4a|mp3|oga|ogg|wav)$/i,
         iconUrl: emptyIcon
       },
-      { taskId: extensionId + '|mount-archive',
+      { taskId: internalTaskPrefix + '|mount-archive',
         title: 'Mount',
         regexp: /\.(rar|tar|tar.bz2|tar.gz|tbz|tbz2|tgz|zip)$/i,
         iconUrl: emptyIcon
       },
       {
-        taskId: extensionId + '|gallery',
+        taskId: internalTaskPrefix + '|gallery',
         title: 'View',
         regexp: /\.(bmp|gif|jpe?g|png|webp|3gp|avi|m4v|mov|mp4|mpeg4?|mpg4?|ogm|ogv|ogx|webm)$/i,
         iconUrl: emptyIcon
@@ -157,16 +159,22 @@ chrome.fileBrowserPrivate = {
         taskId: 'fake-extension-id|fake-item',
         title: 'External action',
         regexp: /\.(bmp|gif|jpe?g|png|webp|3gp|avi|m4v|mov|mp4|mpeg4?|mpg4?|ogm|ogv|ogx|webm)$/i,
-        iconUrl: 'images/icon16.png'
+        iconUrl: 'chrome://theme/IDR_FILE_MANAGER_IMG_FILETYPE_GENERIC'
       },
       {
-        taskId: extensionId + '|view-in-browser',
+        taskId: 'fake-extension-id|file|upload',
+        title: 'Upload video',
+        regexp: /\.(3gp|avi|m4v|mov|mp4|mpeg4?|mpg4?|ogm|ogv|ogx|webm)$/i,
+        iconUrl: 'chrome://theme/IDR_FILE_MANAGER_IMG_FILETYPE_VIDEO'
+      },
+      {
+        taskId: internalTaskPrefix + '|view-in-browser',
         title: 'View',
         regexp: /\.(html?|log|mht|mhtml|txt)$/i,
         iconUrl: emptyIcon
       },
       {
-        taskId: extensionId + '|view-pdf',
+        taskId: internalTaskPrefix + '|view-pdf',
         title: 'View',
         regexp: /\.pdf$/i,
         iconUrl: emptyIcon
@@ -464,6 +472,13 @@ chrome.fileBrowserPrivate = {
       DATE_COLUMN_LABEL: 'Date modified',
       PREVIEW_COLUMN_LABEL: 'Preview',
 
+      SHORTCUT_CTRL: 'Ctrl',
+      SHORTCUT_ALT: 'Alt',
+      SHORTCUT_SHIFT: 'Shift',
+      SHORTCUT_META: 'Meta',
+      SHORTCUT_SPACE: 'Space',
+      SHORTCUT_ENTER: 'Enter',
+
       ERROR_CREATING_FOLDER: 'Unable to create folder "$1". $2',
       ERROR_INVALID_CHARACTER: 'Invalid character: $1',
       ERROR_RESERVED_NAME: 'This name may not be used as a file of folder name',
@@ -485,12 +500,14 @@ chrome.fileBrowserPrivate = {
 
       MOUNT_ARCHIVE: 'Open',
       FORMAT_DEVICE: 'Format device',
+      IMPORT_PHOTOS_BUTTON_LABEL: 'Import photos',
 
       ACTION_VIEW: 'View',
       ACTION_OPEN: 'Open',
       ACTION_WATCH: 'Watch',
       ACTION_LISTEN: 'Listen',
       INSTALL_CRX: 'Open',
+      SEND_TO_DRIVE: 'Send to Google Drive',
 
       CHANGE_DEFAULT_MENU_ITEM: 'Change default...',
       CHANGE_DEFAULT_CAPTION: 'Choose the default app for $1 files:',
@@ -519,6 +536,21 @@ chrome.fileBrowserPrivate = {
       GALLERY_READONLY_WARNING: '$1 is read only. Edited images will be saved in the Downloads folder.',
       GALLERY_IMAGE_ERROR: 'This file could not be displayed',
       GALLERY_VIDEO_ERROR: 'This file could not be played',
+
+      GALLERY_ITEMS_SELECTED: '$1 items selected',
+      GALLERY_NO_IMAGES: 'No images in this directory.',
+      GALLERY_MOSAIC: 'Mosaic view',
+      GALLERY_SLIDE: 'Slide view',
+      GALLERY_SLIDESHOW: 'Slideshow',
+      GALLERY_SLIDESHOW_PAUSED:
+          'Paused. Press "Esc" to exit, any other key to resume.',
+      GALLERY_DELETE: 'Delete',
+
+      GALLERY_OK_LABEL: 'OK',
+      GALLERY_CANCEL_LABEL: 'Cancel',
+      GALLERY_CONFIRM_DELETE_ONE: 'Are you sure you want to delete "$1"?',
+      GALLERY_CONFIRM_DELETE_SOME: 'Are you sure you want to delete $1 items?',
+
       AUDIO_ERROR: 'This file could not be played',
 
       CONFIRM_OVERWRITE_FILE: 'A file named "$1" already exists. Do you want to replace it?',
@@ -536,6 +568,8 @@ chrome.fileBrowserPrivate = {
       COPY_BUTTON_LABEL: 'Copy',
       CUT_BUTTON_LABEL: 'Cut',
 
+      OPEN_WITH_BUTTON_LABEL: 'Open with...',
+
       UNMOUNT_FAILED: 'Unable to eject: $1',
       UNMOUNT_DEVICE_BUTTON_LABEL: 'Unmount',
       FORMAT_DEVICE_BUTTON_LABEL: 'Format',
@@ -547,6 +581,7 @@ chrome.fileBrowserPrivate = {
       GDATA_WAITING_FOR_SPACE_INFO: 'Waiting for space info...',
       GDATA_FAILED_SPACE_INFO: 'Failed to retrieve space info',
       GDATA_BUY_MORE_SPACE: 'Buy more storage...',
+      GDATA_VISIT_DRIVE_GOOGLE_COM: 'Go to drive.google.com...',
       GDATA_SPACE_AVAILABLE: '$1 left',
 
       GDATA_BUY_MORE_SPACE_LINK: 'Buy more storage',
@@ -629,8 +664,9 @@ chrome.fileBrowserPrivate = {
       MANY_DIRECTORIES_SELECTED: '$1 folders selected',
       MANY_ENTRIES_SELECTED: '$1 items selected, $2',
 
-      CONFIRM_DELETE_ONE: 'Are you sure you want to delete "$1"?',
-      CONFIRM_DELETE_SOME: 'Are you sure you want to delete $1 items?',
+      DELETED_MESSAGE: 'Deleted $1',
+      DELETED_MESSAGE_PLURAL: 'Deleted $1 items',
+      UNDO_DELETE: 'Undo',
 
       UNKNOWN_FILESYSTEM_WARNING: 'This device cannot be opened because its' +
           ' filesystem was not recognized.',
@@ -768,6 +804,18 @@ chrome.tabs = {
 };
 
 /**
+ * Mock object for |chrome.windows|.
+ */
+chrome.windows = {
+  getCurrent: function(callback) {
+    var maximized = document.body.clientWidth == screen.availableWidth;
+    callback({
+      state: maximized ? 'maximized' : 'normal'
+    });
+  }
+};
+
+/**
  * Mock object for |chrome.metricsPrivate|.
  */
 chrome.metricsPrivate = {
@@ -784,6 +832,12 @@ chrome.metricsPrivate = {
 chrome.mediaPlayerPrivate = {
 
   onPlaylistChanged: new MockEventSource(),
+
+  onTogglePlayState: new MockEventSource(),
+
+  onNextTrack: new MockEventSource(),
+
+  onPrevTrack: new MockEventSource(),
 
   play: function(urls, position) {
     this.playlist_ = { items: urls, position: position };

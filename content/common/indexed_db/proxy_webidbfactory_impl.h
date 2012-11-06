@@ -6,6 +6,7 @@
 #define CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBFACTORY_IMPL_H_
 
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
@@ -26,11 +27,11 @@ class RendererWebIDBFactoryImpl : public WebKit::WebIDBFactory {
       const WebKit::WebSecurityOrigin& origin,
       WebKit::WebFrame* web_frame,
       const WebKit::WebString& data_dir);
-
   virtual void open(
       const WebKit::WebString& name,
       long long version,
       WebKit::WebIDBCallbacks* callbacks,
+      WebKit::WebIDBDatabaseCallbacks* databaseCallbacks,
       const WebKit::WebSecurityOrigin& origin,
       WebKit::WebFrame* web_frame,
       const WebKit::WebString& data_dir);

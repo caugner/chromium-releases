@@ -18,6 +18,7 @@
 #include "net/base/net_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "unicode/regex.h"
@@ -83,11 +84,11 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   void TestRequestHelper(const GURL& url, bool run_to_completion) {
     delegate_.reset(new TestDelegate());
     delegate_->set_quit_on_redirect(true);
-    request_.reset(new net::URLRequest(url,
-                                       delegate_.get(),
-                                       &empty_context_));
-    job_ = new FileSystemDirURLRequestJob(request_.get(),
-                                          file_system_context_.get());
+    request_.reset(empty_context_.CreateRequest(url, delegate_.get()));
+    job_ = new FileSystemDirURLRequestJob(
+        request_.get(),
+        empty_context_.network_delegate(),
+        file_system_context_.get());
 
     request_->Start();
     ASSERT_TRUE(request_->is_pending());  // verify that we're starting async
@@ -186,6 +187,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
 
   static net::URLRequestJob* FileSystemDirURLRequestJobFactory(
       net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
       const std::string& scheme) {
     DCHECK(job_);
     net::URLRequestJob* temp = job_;

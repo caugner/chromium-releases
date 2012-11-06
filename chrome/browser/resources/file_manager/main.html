@@ -67,6 +67,7 @@
       <script src="../shared/js/cr/ui/context_menu_handler.js"></script>
 
       <script src="js/combobutton.js"></script>
+      <script src="js/commandbutton.js"></script>
 
       <script src="js/path_util.js"></script>
       <script src="js/util.js"></script>
@@ -74,6 +75,7 @@
       <script src="js/butter_bar.js"></script>
       <script src="js/directory_contents.js"></script>
       <script src="js/directory_model.js"></script>
+      <script src="js/drive_banners.js"></script>
       <script src="js/file_copy_manager_wrapper.js"></script>
       <script src="js/file_manager.js"></script>
       <script src="js/file_manager_pyauto.js"></script>
@@ -84,6 +86,7 @@
       <script src="js/media/media_util.js"></script>
       <script src="js/metadata/metadata_cache.js"></script>
       <script src="js/default_action_dialog.js"></script>
+      <script src="js/file_manager_commands.js"></script>
       <!-- For accurate load performance tracking main.js should be
            the last script to include. -->
       <script src="js/main.js"></script>
@@ -93,20 +96,27 @@
   <body i18n-values=".style.fontFamily:WEB_FONT_FAMILY;
                      .style.fontSize:WEB_FONT_SIZE">
     <commands>
-      <command id="cut" i18n-values="label:CUT_BUTTON_LABEL"></command>
-      <command id="copy" i18n-values="label:COPY_BUTTON_LABEL"></command>
-      <command id="paste" i18n-values="label:PASTE_BUTTON_LABEL"></command>
-      <command id="rename" i18n-values="label:RENAME_BUTTON_LABEL"></command>
-      <command id="delete" i18n-values="label:DELETE_BUTTON_LABEL"></command>
+      <!-- We have to use U+XXXX notation here according to event.keyIdentifier
+      property -->
+      <command id="cut" i18n-values="label:CUT_BUTTON_LABEL"
+              shortcut="U+0058-Ctrl"></command>
+      <command id="copy" i18n-values="label:COPY_BUTTON_LABEL"
+              shortcut="U+0043-Ctrl"></command>
+      <command id="paste" i18n-values="label:PASTE_BUTTON_LABEL"
+              shortcut="U+0056-Ctrl"></command>
+      <command id="rename" i18n-values="label:RENAME_BUTTON_LABEL"
+              shortcut="Enter-Ctrl"></command>
+      <command id="delete" i18n-values="label:DELETE_BUTTON_LABEL"
+               shortcut="U+007F"></command>
       <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
-          ></command>
+               shortcut="U+0045-Ctrl"></command>
 
       <command id="unmount" i18n-values="label:UNMOUNT_DEVICE_BUTTON_LABEL"
           ></command>
       <command id="format" i18n-values="label:FORMAT_DEVICE_BUTTON_LABEL"
           ></command>
       <command id="import-photos" i18n-values="label:IMPORT_PHOTOS_BUTTON_LABEL"
-          ></command>
+          hidden></command>
 
       <command id="gdata-buy-more-space"
           i18n-values="label:GDATA_BUY_MORE_SPACE"
@@ -115,10 +125,16 @@
           ></command>
       <command id="gdata-clear-local-cache"
           i18n-values="label:GDATA_CLEAR_LOCAL_CACHE"></command>
+      <command id="gdata-go-to-drive"
+          i18n-values="label:GDATA_VISIT_DRIVE_GOOGLE_COM"></command>
+      <command id="open-with"
+          i18n-values="label:OPEN_WITH_BUTTON_LABEL"></command>
     </commands>
 
-    <menu class="file-context-menu chrome-menu">
+    <menu id="file-context-menu" class="chrome-menu" showShortcuts>
       <menuitem id="default-action"
+          visibleif="full-page" hidden></menuitem>
+      <menuitem command="#open-with"
           visibleif="full-page" hidden></menuitem>
       <hr id="default-action-separator" visibleif="full-page" hidden>
       <menuitem command="#cut" visibleif="full-page"></menuitem>
@@ -131,8 +147,7 @@
       <menuitem command="#newfolder"
           visibleif="saveas-file full-page"></menuitem>
     </menu>
-
-    <menu class="roots-context-menu chrome-menu" >
+    <menu id="roots-context-menu" class="chrome-menu" >
       <menuitem command="#import-photos"></menuitem>
       <menuitem command="#unmount"></menuitem>
       <menuitem command="#format"></menuitem>
@@ -143,8 +158,8 @@
           i18n-content=GDATA_MOBILE_CONNECTION_OPTION></menuitem>
       <menuitem id="gdata-hosted-settings"
           i18n-content=GDATA_SHOW_HOSTED_FILES_OPTION></menuitem>
-      <hr visibleif="ctrl">
-      <menuitem id="gdata-clear-local-cache" visibleif="ctrl"
+      <hr required_attr="ctrl-pressing">
+      <menuitem id="gdata-clear-local-cache" required_attr="ctrl-pressing"
           command="#gdata-clear-local-cache"></menuitem>
       <hr>
       <div id="gdata-space-info" disabled>
@@ -155,10 +170,18 @@
             ></div>
       </div>
       <menuitem command="#gdata-buy-more-space"></menuitem>
+      <menuitem command="#gdata-go-to-drive"></menuitem>
       <menuitem command="#gdata-help"></menuitem>
     </menu>
 
     <menu id="tasks-menu" class="chrome-menu">
+    </menu>
+
+    <menu id="text-context-menu" class="chrome-menu" showShortcuts>
+        <menuitem command="#cut"></menuitem>
+        <menuitem command="#copy"></menuitem>
+        <menuitem command="#paste"></menuitem>
+        <menuitem command="#delete"></menuitem>
     </menu>
 
     <div class=dialog-title invisibleif="full-page">[TITLE]</div>
@@ -221,18 +244,20 @@
             <div class="right buttonbar" visibleif="full-page">
               <button id="tasks" class="combobutton" menu="#tasks-menu">
               </button>
-              <button id="delete-button" command="#delete"
-                  i18n-content="DELETE_BUTTON_LABEL">
-              </button>
+              <button id="delete-button" command="#delete"></button>
             </div>
           </div>
           <div id="unmounted-panel"></div>
+          <div id="format-panel">
+              <div class="error"></div>
+              <button id="format-button" command="#format"></button>
+          </div>
         </div>
       </div>
     </div>
     <div class=dialog-footer invisibleif="full-page">
       <button id="new-folder" i18n-content=NEW_FOLDER_BUTTON_LABEL
-              visibleif="saveas-file">[NEW FOLDER]</button>
+              visibleif="saveas-file folder" command="#newfolder">[NEW FOLDER]</button>
       <div id="filename-input-box">
         <div class=filename-label i18n-content=FILENAME_LABEL>[FILENAME]</div>
         <input type=text spellcheck=false>

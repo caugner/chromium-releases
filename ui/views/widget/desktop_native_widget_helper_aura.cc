@@ -21,11 +21,11 @@
 #include "ui/base/win/hwnd_subclass.h"
 #include "ui/views/widget/widget_message_filter.h"
 #elif defined(USE_X11)
+#include "ui/base/x/x11_util.h"
 #include "ui/views/widget/x11_desktop_handler.h"
+#include "ui/views/widget/x11_desktop_window_move_client.h"
 #include "ui/views/widget/x11_window_event_filter.h"
 #endif
-
-DECLARE_WINDOW_PROPERTY_TYPE(aura::Window*);
 
 namespace views {
 
@@ -46,7 +46,7 @@ class DesktopScreenPositionClient
   virtual void ConvertPointToScreen(const aura::Window* window,
                                     gfx::Point* point) OVERRIDE {
     const aura::RootWindow* root_window = window->GetRootWindow();
-    aura::Window::ConvertPointToWindow(window, root_window, point);
+    aura::Window::ConvertPointToTarget(window, root_window, point);
     gfx::Point origin = root_window->GetHostOrigin();
     point->Offset(origin.x(), origin.y());
   }
@@ -56,14 +56,16 @@ class DesktopScreenPositionClient
     const aura::RootWindow* root_window = window->GetRootWindow();
     gfx::Point origin = root_window->GetHostOrigin();
     point->Offset(-origin.x(), -origin.y());
-    aura::Window::ConvertPointToWindow(root_window, window, point);
+    aura::Window::ConvertPointToTarget(root_window, window, point);
   }
 
   virtual void SetBounds(aura::Window* window,
-                         const gfx::Rect& bounds) OVERRIDE {
+                         const gfx::Rect& bounds,
+                         const gfx::Display& display) OVERRIDE {
+    // TODO: Use the 3rd parameter, |display|.
     gfx::Point origin = bounds.origin();
     aura::RootWindow* root = window->GetRootWindow();
-    aura::Window::ConvertPointToWindow(window->parent(), root, &origin);
+    aura::Window::ConvertPointToTarget(window->parent(), root, &origin);
 
 #if !defined(OS_WIN)
     if  (window->type() == aura::client::WINDOW_TYPE_CONTROL) {
@@ -89,13 +91,18 @@ class DesktopScreenPositionClient
 DesktopNativeWidgetHelperAura::DesktopNativeWidgetHelperAura(
     NativeWidgetAura* widget)
     : widget_(widget),
+      window_(NULL),
       root_window_event_filter_(NULL),
       is_embedded_window_(false) {
 }
 
 DesktopNativeWidgetHelperAura::~DesktopNativeWidgetHelperAura() {
+  if (window_)
+    window_->RemoveObserver(this);
+
   if (root_window_event_filter_) {
 #if defined(USE_X11)
+    root_window_event_filter_->RemoveFilter(x11_window_move_client_.get());
     root_window_event_filter_->RemoveFilter(x11_window_event_filter_.get());
 #endif
 
@@ -147,7 +154,8 @@ void DesktopNativeWidgetHelperAura::PreInitialize(
   activation_client = new aura::DesktopActivationClient(focus_manager);
 #endif
 
-  root_window_.reset(new aura::RootWindow(bounds));
+  root_window_.reset(
+      new aura::RootWindow(aura::RootWindow::CreateParams(bounds)));
   root_window_->SetProperty(kViewsWindowForRootWindow, window);
   root_window_->Init();
   root_window_->set_focus_manager(focus_manager);
@@ -169,16 +177,35 @@ void DesktopNativeWidgetHelperAura::PreInitialize(
 
 #if defined(USE_X11)
   x11_window_event_filter_.reset(
-      new X11WindowEventFilter(root_window_.get(), activation_client, widget_));
+      new X11WindowEventFilter(root_window_.get(), activation_client));
   x11_window_event_filter_->SetUseHostWindowBorders(false);
   root_window_event_filter_->AddFilter(x11_window_event_filter_.get());
+
+  if (params.type == Widget::InitParams::TYPE_MENU) {
+    ::Window window = root_window_->GetAcceleratedWidget();
+    XSetWindowAttributes attributes;
+    memset(&attributes, 0, sizeof(attributes));
+    attributes.override_redirect = True;
+    XChangeWindowAttributes(ui::GetXDisplay(), window, CWOverrideRedirect,
+        &attributes);
+  }
 #endif
 
   root_window_->AddRootWindowObserver(this);
 
+  window_ = window;
+  window_->AddObserver(this);
+
   aura::client::SetActivationClient(root_window_.get(), activation_client);
   aura::client::SetDispatcherClient(root_window_.get(),
                                     new aura::DesktopDispatcherClient);
+#if defined(USE_X11)
+  // TODO(ben): A window implementation of this will need to be written.
+  x11_window_move_client_.reset(new X11DesktopWindowMoveClient);
+  root_window_event_filter_->AddFilter(x11_window_move_client_.get());
+  aura::client::SetWindowMoveClient(root_window_.get(),
+                                    x11_window_move_client_.get());
+#endif
 
   position_client_.reset(new DesktopScreenPositionClient());
   aura::client::SetScreenPositionClient(root_window_.get(),
@@ -193,11 +220,6 @@ void DesktopNativeWidgetHelperAura::PostInitialize() {
   ui::HWNDSubclass::AddFilterToTarget(root_window_->GetAcceleratedWidget(),
                                       hwnd_message_filter_.get());
 #endif
-}
-
-void DesktopNativeWidgetHelperAura::ShowRootWindow() {
-  if (root_window_.get())
-    root_window_->ShowRootWindow();
 }
 
 aura::RootWindow* DesktopNativeWidgetHelperAura::GetRootWindow() {
@@ -230,6 +252,20 @@ gfx::Rect DesktopNativeWidgetHelperAura::ModifyAndSetBounds(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// DesktopNativeWidgetHelperAura, aura::WindowObserver implementation:
+void DesktopNativeWidgetHelperAura::OnWindowVisibilityChanged(
+    aura::Window* window,
+    bool visible) {
+  DCHECK_EQ(window, window_);
+
+  // Since we're trying to hide the main window, hide the OS level root as well.
+  if (visible)
+    root_window_->ShowRootWindow();
+  else
+    root_window_->HideRootWindow();
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // DesktopNativeWidgetHelperAura, aura::RootWindowObserver implementation:
 
 void DesktopNativeWidgetHelperAura::OnRootWindowResized(
@@ -240,10 +276,16 @@ void DesktopNativeWidgetHelperAura::OnRootWindowResized(
                                root->GetHostSize()));
 }
 
-void DesktopNativeWidgetHelperAura::OnRootWindowHostClosed(
+void DesktopNativeWidgetHelperAura::OnRootWindowHostCloseRequested(
     const aura::RootWindow* root) {
   DCHECK_EQ(root, root_window_.get());
   widget_->GetWidget()->Close();
+}
+
+void DesktopNativeWidgetHelperAura::OnRootWindowMoved(
+    const aura::RootWindow* root,
+    const gfx::Point& new_origin) {
+  widget_->GetWidget()->OnNativeWidgetMove();
 }
 
 }  // namespace views

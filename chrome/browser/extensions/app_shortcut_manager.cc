@@ -17,7 +17,7 @@
 #include "skia/ext/image_operations.h"
 #include "ui/base/resource/resource_bundle.h"
 
-using extensions::Extension;
+namespace extensions {
 
 namespace {
 // Allow tests to disable shortcut creation, to prevent developers' desktops
@@ -29,6 +29,22 @@ const int kDesiredSizes[] = {16, 32, 128, 256, 512};
 #else
 const int kDesiredSizes[] = {32};
 #endif
+
+ShellIntegration::ShortcutInfo ShortcutInfoForExtensionAndProfile(
+    const Extension* extension, Profile* profile) {
+  ShellIntegration::ShortcutInfo shortcut_info;
+  shortcut_info.extension_id = extension->id();
+  shortcut_info.url = GURL(extension->launch_web_url());
+  shortcut_info.title = UTF8ToUTF16(extension->name());
+  shortcut_info.description = UTF8ToUTF16(extension->description());
+  shortcut_info.extension_path = extension->path();
+  shortcut_info.create_in_applications_menu = true;
+  shortcut_info.create_in_quick_launch_bar = true;
+  shortcut_info.create_on_desktop = true;
+  shortcut_info.profile_path = profile->GetPath();
+  return shortcut_info;
+}
+
 }  // namespace
 
 AppShortcutManager::AppShortcutManager(Profile* profile)
@@ -57,7 +73,7 @@ void AppShortcutManager::OnImageLoaded(const gfx::Image& image,
     shortcut_info_.favicon = image;
   }
 
-  web_app::CreateShortcut(profile_->GetPath(), shortcut_info_);
+  web_app::CreateShortcuts(shortcut_info_);
 }
 
 void AppShortcutManager::Observe(int type,
@@ -76,10 +92,10 @@ void AppShortcutManager::Observe(int type,
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED: {
-      std::string extension_id =
-          content::Details<const Extension>(details).ptr()->id();
+      const Extension* extension = content::Details<const Extension>(
+          details).ptr();
       if (!disable_shortcut_creation_for_tests)
-        web_app::DeleteAllShortcuts(profile_->GetPath(), extension_id);
+        DeleteApplicationShortcuts(extension);
       break;
     }
     default:
@@ -95,25 +111,19 @@ void AppShortcutManager::SetShortcutCreationDisabledForTesting(bool disabled) {
 
 void AppShortcutManager::InstallApplicationShortcuts(
     const Extension* extension) {
-  shortcut_info_.extension_id = extension->id();
-  shortcut_info_.url = GURL(extension->launch_web_url());
-  shortcut_info_.title = UTF8ToUTF16(extension->name());
-  shortcut_info_.description = UTF8ToUTF16(extension->description());
-  shortcut_info_.extension_path = extension->path();
-  shortcut_info_.is_platform_app = extension->is_platform_app();
-  shortcut_info_.create_in_applications_menu = true;
-  shortcut_info_.create_in_quick_launch_bar = true;
-  shortcut_info_.create_on_desktop = true;
-  shortcut_info_.profile_path = profile_->GetPath();
+  shortcut_info_ = ShortcutInfoForExtensionAndProfile(extension, profile_);
 
-  std::vector<ImageLoadingTracker::ImageInfo> info_list;
+  std::vector<ImageLoadingTracker::ImageRepresentation> info_list;
   for (size_t i = 0; i < arraysize(kDesiredSizes); ++i) {
     int size = kDesiredSizes[i];
     ExtensionResource resource = extension->GetIconResource(
         size, ExtensionIconSet::MATCH_EXACTLY);
     if (!resource.empty()) {
-      info_list.push_back(
-          ImageLoadingTracker::ImageInfo(resource, gfx::Size(size, size)));
+      info_list.push_back(ImageLoadingTracker::ImageRepresentation(
+          resource,
+          ImageLoadingTracker::ImageRepresentation::RESIZE_WHEN_LARGER,
+          gfx::Size(size, size),
+          ui::SCALE_FACTOR_100P));
     }
   }
 
@@ -130,8 +140,11 @@ void AppShortcutManager::InstallApplicationShortcuts(
       resource = extension->GetIconResource(
           size, ExtensionIconSet::MATCH_SMALLER);
     }
-    info_list.push_back(
-        ImageLoadingTracker::ImageInfo(resource, gfx::Size(size, size)));
+    info_list.push_back(ImageLoadingTracker::ImageRepresentation(
+        resource,
+        ImageLoadingTracker::ImageRepresentation::RESIZE_WHEN_LARGER,
+        gfx::Size(size, size),
+        ui::SCALE_FACTOR_100P));
   }
 
   // |icon_resources| may still be empty at this point, in which case LoadImage
@@ -139,3 +152,12 @@ void AppShortcutManager::InstallApplicationShortcuts(
   // immediately.
   tracker_.LoadImages(extension, info_list, ImageLoadingTracker::DONT_CACHE);
 }
+
+void AppShortcutManager::DeleteApplicationShortcuts(
+    const Extension* extension) {
+  ShellIntegration::ShortcutInfo delete_info =
+      ShortcutInfoForExtensionAndProfile(extension, profile_);
+  web_app::DeleteAllShortcuts(delete_info);
+}
+
+}  // namespace extensions

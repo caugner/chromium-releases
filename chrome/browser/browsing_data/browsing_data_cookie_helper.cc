@@ -15,11 +15,16 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_util.h"
 #include "net/cookies/parsed_cookie.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
+
+namespace {
+const char kGlobalCookieListURL[] = "chrome://cookielist";
+}
 
 BrowsingDataCookieHelper::BrowsingDataCookieHelper(
     net::URLRequestContextGetter* request_context_getter)
@@ -133,17 +138,36 @@ void CannedBrowsingDataCookieHelper::AddChangedCookie(
     const GURL& url,
     const std::string& cookie_line,
     const net::CookieOptions& options) {
-  net::ParsedCookie parsed_cookie(cookie_line);
-  if (options.exclude_httponly() && parsed_cookie.IsHttpOnly()) {
-    // Return if a Javascript cookie illegally specified the HTTP only flag.
-    return;
-  }
+  base::Time creation_time = base::Time::Now();
 
-  // This fails to create a canonical cookie, if the normalized cookie domain
-  // form cookie line and the url don't have the same domain+registry, or url
-  // host isn't cookie domain or one of its subdomains.
+  net::ParsedCookie pc(cookie_line);
+  if (!pc.IsValid())
+    return;
+
+  if (options.exclude_httponly() && pc.IsHttpOnly())
+    return;
+
+  std::string domain_string;
+  if (pc.HasDomain())
+    domain_string = pc.Domain();
+  std::string cookie_domain;
+  if (!net::cookie_util::GetCookieDomainWithString(url, domain_string,
+                                                   &cookie_domain))
+    return;
+
+  std::string cookie_path = net::CanonicalCookie::CanonPath(url, pc);
+  std::string mac_key = pc.HasMACKey() ? pc.MACKey() : std::string();
+  std::string mac_algorithm = pc.HasMACAlgorithm() ?
+      pc.MACAlgorithm() : std::string();
+
+  base::Time cookie_expires =
+      net::CanonicalCookie::CanonExpiration(pc, creation_time);
+
   scoped_ptr<net::CanonicalCookie> cookie(
-      net::CanonicalCookie::Create(url, parsed_cookie));
+      new net::CanonicalCookie(url, pc.Name(), pc.Value(), cookie_domain,
+                               cookie_path, mac_key, mac_algorithm,
+                               creation_time, cookie_expires,
+                               creation_time, pc.IsSecure(), pc.IsHttpOnly()));
   if (cookie.get())
     AddCookie(frame_url, *cookie);
 }
@@ -223,8 +247,23 @@ net::CookieList* CannedBrowsingDataCookieHelper::GetCookiesFor(
 void CannedBrowsingDataCookieHelper::AddCookie(
     const GURL& frame_url,
     const net::CanonicalCookie& cookie) {
+  // Storing cookies in separate cookie lists per frame origin makes the
+  // GetCookieCount method count a cookie multiple times if it is stored in
+  // multiple lists.
+  // E.g. let "example.com" be redirected to "www.example.com". A cookie set
+  // with the cookie string "A=B; Domain=.example.com" would be sent to both
+  // hosts. This means it would be stored in the separate cookie lists for both
+  // hosts ("example.com", "www.example.com"). The method GetCookieCount would
+  // count this cookie twice. To prevent this, we us a single global cookie
+  // list as a work-around to store all added cookies. Per frame URL cookie
+  // lists are currently not used. In the future they will be used for
+  // collecting cookies per origin in redirect chains.
+  // TODO(markusheintz): A) Change the GetCookiesCount method to prevent
+  // counting cookies multiple times if they are stored in multiple cookie
+  // lists.  B) Replace the GetCookieFor method call below with:
+  // "GetCookiesFor(frame_url.GetOrigin());"
   net::CookieList* cookie_list =
-      GetCookiesFor(frame_url.GetOrigin());
+      GetCookiesFor(GURL(kGlobalCookieListURL));
   DeleteMatchingCookie(cookie, cookie_list);
   cookie_list->push_back(cookie);
 }

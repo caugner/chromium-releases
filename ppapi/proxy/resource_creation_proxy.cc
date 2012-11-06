@@ -7,8 +7,12 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/trusted/ppb_image_data_trusted.h"
+#include "ppapi/proxy/connection.h"
 #include "ppapi/proxy/file_chooser_resource.h"
+#include "ppapi/proxy/flash_device_id_resource.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
+#include "ppapi/proxy/plugin_globals.h"
+#include "ppapi/proxy/plugin_proxy_delegate.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_audio_input_proxy.h"
@@ -18,7 +22,6 @@
 #include "ppapi/proxy/ppb_file_io_proxy.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
-#include "ppapi/proxy/ppb_flash_device_id_proxy.h"
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
 #include "ppapi/proxy/ppb_flash_message_loop_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
@@ -34,6 +37,7 @@
 #include "ppapi/proxy/ppb_video_capture_proxy.h"
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
 #include "ppapi/proxy/ppb_x509_certificate_private_proxy.h"
+#include "ppapi/proxy/printing_resource.h"
 #include "ppapi/shared_impl/api_id.h"
 #include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/ppb_audio_config_shared.h"
@@ -207,6 +211,56 @@ PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
                                                    is_always_opaque);
 }
 
+PP_Resource ResourceCreationProxy::CreateGraphics3D(
+    PP_Instance instance,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  return PPB_Graphics3D_Proxy::CreateProxyResource(
+      instance, share_context, attrib_list);
+}
+
+PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
+    PP_Instance instance,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  // Not proxied. The raw creation function is used only in the implementation
+  // of the proxy on the host side.
+  return 0;
+}
+
+PP_Resource ResourceCreationProxy::CreateHostResolverPrivate(
+    PP_Instance instance) {
+  return PPB_HostResolver_Private_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateNetworkMonitor(
+    PP_Instance instance,
+    PPB_NetworkMonitor_Callback callback,
+    void* user_data) {
+  return PPB_NetworkMonitor_Private_Proxy::CreateProxyResource(
+      instance, callback, user_data);
+}
+
+PP_Resource ResourceCreationProxy::CreateTCPServerSocketPrivate(
+    PP_Instance instance) {
+  return PPB_TCPServerSocket_Private_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateTCPSocketPrivate(
+    PP_Instance instance) {
+  return PPB_TCPSocket_Private_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateUDPSocketPrivate(
+    PP_Instance instance) {
+  return PPB_UDPSocket_Private_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateX509CertificatePrivate(
+    PP_Instance instance) {
+  return PPB_X509Certificate_Private_Proxy::CreateProxyResource(instance);
+}
+
 #if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateAudioInput0_1(
     PP_Instance instance,
@@ -252,12 +306,12 @@ PP_Resource ResourceCreationProxy::CreateFileChooser(
     PP_Instance instance,
     PP_FileChooserMode_Dev mode,
     const char* accept_types) {
-  return (new FileChooserResource(dispatcher(), instance, mode,
+  return (new FileChooserResource(GetConnection(), instance, mode,
                                   accept_types))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateFlashDeviceID(PP_Instance instance) {
-  return PPB_Flash_DeviceID_Proxy::CreateProxyResource(instance);
+  return (new FlashDeviceIDResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateFlashMenu(
@@ -271,34 +325,8 @@ PP_Resource ResourceCreationProxy::CreateFlashMessageLoop(
   return PPB_Flash_MessageLoop_Proxy::CreateProxyResource(instance);
 }
 
-PP_Resource ResourceCreationProxy::CreateHostResolverPrivate(
-    PP_Instance instance) {
-  return PPB_HostResolver_Private_Proxy::CreateProxyResource(instance);
-}
-
-PP_Resource ResourceCreationProxy::CreateNetworkMonitor(
-      PP_Instance instance,
-      PPB_NetworkMonitor_Callback callback,
-      void* user_data) {
-  return PPB_NetworkMonitor_Private_Proxy::CreateProxyResource(
-      instance, callback, user_data);
-}
-
-PP_Resource ResourceCreationProxy::CreateGraphics3D(
-    PP_Instance instance,
-    PP_Resource share_context,
-    const int32_t* attrib_list) {
-  return PPB_Graphics3D_Proxy::CreateProxyResource(
-      instance, share_context, attrib_list);
-}
-
-PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
-    PP_Instance instance,
-    PP_Resource share_context,
-    const int32_t* attrib_list) {
-  // Not proxied. The raw creation function is used only in the implementation
-  // of the proxy on the host side.
-  return 0;
+PP_Resource ResourceCreationProxy::CreatePrinting(PP_Instance instance) {
+  return (new PrintingResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateScrollbar(PP_Instance instance,
@@ -309,21 +337,6 @@ PP_Resource ResourceCreationProxy::CreateScrollbar(PP_Instance instance,
 
 PP_Resource ResourceCreationProxy::CreateTalk(PP_Instance instance) {
   return PPB_Talk_Private_Proxy::CreateProxyResource(instance);
-}
-
-PP_Resource ResourceCreationProxy::CreateTCPServerSocketPrivate(
-    PP_Instance instance) {
-  return PPB_TCPServerSocket_Private_Proxy::CreateProxyResource(instance);
-}
-
-PP_Resource ResourceCreationProxy::CreateTCPSocketPrivate(
-    PP_Instance instance) {
-  return PPB_TCPSocket_Private_Proxy::CreateProxyResource(instance);
-}
-
-PP_Resource ResourceCreationProxy::CreateUDPSocketPrivate(
-    PP_Instance instance) {
-  return PPB_UDPSocket_Private_Proxy::CreateProxyResource(instance);
 }
 
 PP_Resource ResourceCreationProxy::CreateVideoCapture(PP_Instance instance) {
@@ -350,12 +363,7 @@ PP_Resource ResourceCreationProxy::CreateWebSocket(PP_Instance instance) {
   return 0;
 }
 
-PP_Resource ResourceCreationProxy::CreateX509CertificatePrivate(
-    PP_Instance instance) {
-  return PPB_X509Certificate_Private_Proxy::CreateProxyResource(instance);
-}
 #endif  // !defined(OS_NACL)
-
 
 bool ResourceCreationProxy::Send(IPC::Message* msg) {
   return dispatcher()->Send(msg);
@@ -363,6 +371,12 @@ bool ResourceCreationProxy::Send(IPC::Message* msg) {
 
 bool ResourceCreationProxy::OnMessageReceived(const IPC::Message& msg) {
   return false;
+}
+
+Connection ResourceCreationProxy::GetConnection() {
+  return Connection(
+      PluginGlobals::Get()->plugin_proxy_delegate()->GetBrowserSender(),
+      dispatcher());
 }
 
 }  // namespace proxy

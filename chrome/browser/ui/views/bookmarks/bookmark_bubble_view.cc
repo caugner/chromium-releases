@@ -28,7 +28,6 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/events/event.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
@@ -120,13 +119,6 @@ BookmarkBubbleView::~BookmarkBubbleView() {
 
 views::View* BookmarkBubbleView::GetInitiallyFocusedView() {
   return title_tf_;
-}
-
-gfx::Rect BookmarkBubbleView::GetAnchorRect() {
-  // Compensate for some built-in padding in the star image.
-  gfx::Rect rect(BubbleDelegateView::GetAnchorRect());
-  rect.Inset(0, anchor_view() ? 5 : 0);
-  return rect;
 }
 
 void BookmarkBubbleView::WindowClosing() {
@@ -263,6 +255,8 @@ BookmarkBubbleView::BookmarkBubbleView(views::View* anchor_view,
       parent_combobox_(NULL),
       remove_bookmark_(false),
       apply_edits_(true) {
+  // Compensate for built-in vertical padding in the anchor view's image.
+  set_anchor_insets(gfx::Insets(5, 0, 5, 0));
 }
 
 string16 BookmarkBubbleView::GetTitle() {
@@ -278,7 +272,7 @@ string16 BookmarkBubbleView::GetTitle() {
 }
 
 void BookmarkBubbleView::ButtonPressed(
-    views::Button* sender, const views::Event& event) {
+    views::Button* sender, const ui::Event& event) {
   HandleButtonPressed(sender);
 }
 

@@ -11,10 +11,13 @@
 #include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/android/draw_delegate_impl.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
+#include "content/browser/renderer_host/compositor_impl_android.h"
+#include "content/browser/renderer_host/image_transport_factory_android.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/android/device_info.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/view_messages.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 
 namespace content {
 
@@ -26,15 +29,23 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
       // ContentViewCore.  It being NULL means that it is not attached to the
       // View system yet, so we treat it as hidden.
       is_hidden_(!content_view_core),
-      content_view_core_(content_view_core) {
+      content_view_core_(content_view_core),
+      ime_adapter_android_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      texture_layer_(WebKit::WebExternalTextureLayer::create()) {
   host_->SetView(this);
   // RenderWidgetHost is initialized as visible. If is_hidden_ is true, tell
   // RenderWidgetHost to hide.
   if (is_hidden_)
     host_->WasHidden();
+  texture_layer_->layer()->setDrawsContent(!is_hidden_);
+  host_->AttachLayer(texture_layer_->layer());
 }
 
 RenderWidgetHostViewAndroid::~RenderWidgetHostViewAndroid() {
+  if (!shared_surface_.is_null()) {
+    ImageTransportFactoryAndroid::GetInstance()->DestroySharedSurfaceHandle(
+        shared_surface_);
+  }
 }
 
 void RenderWidgetHostViewAndroid::InitAsChild(gfx::NativeView parent_view) {
@@ -85,6 +96,7 @@ void RenderWidgetHostViewAndroid::SetSize(const gfx::Size& size) {
     requested_size_ = gfx::Size(size.width(), size.height());
     host_->WasResized();
   }
+  texture_layer_->layer()->setBounds(size);
 }
 
 void RenderWidgetHostViewAndroid::SetBounds(const gfx::Rect& rect) {
@@ -110,6 +122,7 @@ RenderWidgetHostViewAndroid::GetNativeViewAccessible() {
 }
 
 void RenderWidgetHostViewAndroid::MovePluginWindows(
+    const gfx::Point& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   // We don't have plugin windows on Android. Do nothing. Note: this is called
   // from RenderWidgetHost::OnMsgUpdateRect which is itself invoked while
@@ -141,11 +154,11 @@ bool RenderWidgetHostViewAndroid::IsSurfaceAvailableForCopy() const {
 }
 
 void RenderWidgetHostViewAndroid::Show() {
-  // nothing to do
+  texture_layer_->layer()->setDrawsContent(true);
 }
 
 void RenderWidgetHostViewAndroid::Hide() {
-  // nothing to do
+  texture_layer_->layer()->setDrawsContent(false);
 }
 
 bool RenderWidgetHostViewAndroid::IsShowing() {
@@ -176,17 +189,25 @@ void RenderWidgetHostViewAndroid::SetIsLoading(bool is_loading) {
   // is TabContentsDelegate.
 }
 
-void RenderWidgetHostViewAndroid::ImeUpdateTextInputState(
+void RenderWidgetHostViewAndroid::TextInputStateChanged(
     const ViewHostMsg_TextInputState_Params& params) {
-  NOTIMPLEMENTED();
+  if (is_hidden_)
+    return;
+
+  content_view_core_->ImeUpdateAdapter(
+      GetNativeImeAdapter(),
+      static_cast<int>(params.type),
+      params.value, params.selection_start, params.selection_end,
+      params.composition_start, params.composition_end,
+      false /* show_ime_if_needed */);
 }
 
-void RenderWidgetHostViewAndroid::TextInputStateChanged(
-    ui::TextInputType type, bool can_compose_inline) {
-  NOTIMPLEMENTED();
+int RenderWidgetHostViewAndroid::GetNativeImeAdapter() {
+  return reinterpret_cast<int>(&ime_adapter_android_);
 }
 
 void RenderWidgetHostViewAndroid::ImeCancelComposition() {
+  ime_adapter_android_.CancelComposition();
 }
 
 void RenderWidgetHostViewAndroid::DidUpdateBackingStore(
@@ -201,6 +222,8 @@ void RenderWidgetHostViewAndroid::RenderViewGone(
 }
 
 void RenderWidgetHostViewAndroid::Destroy() {
+  host_->RemoveLayer(texture_layer_->layer());
+
   content_view_core_ = NULL;
 
   // The RenderWidgetHost's destruction led here, so don't call it.
@@ -256,15 +279,17 @@ void RenderWidgetHostViewAndroid::CopyFromCompositingSurface(
 }
 
 void RenderWidgetHostViewAndroid::OnAcceleratedCompositingStateChange() {
-  const bool activated = host_->is_accelerated_compositing_active();
-  if (content_view_core_)
-    content_view_core_->OnAcceleratedCompositingStateChange(
-        this, activated, false);
 }
 
 void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
+  texture_layer_->setTextureId(params.surface_handle);
+  texture_layer_->layer()->invalidate();
+  // TODO(sievers): The view and layer should get sized proactively.
+  if (((gfx::Size)texture_layer_->layer()->bounds()).IsEmpty())
+    texture_layer_->layer()->setBounds(
+        DrawDelegateImpl::GetInstance()->GetBounds());
   DrawDelegateImpl::GetInstance()->OnSurfaceUpdated(
       params.surface_handle,
       this,
@@ -295,10 +320,14 @@ void RenderWidgetHostViewAndroid::StartContentIntent(
 }
 
 gfx::GLSurfaceHandle RenderWidgetHostViewAndroid::GetCompositingSurface() {
-  gfx::GLSurfaceHandle handle =
-      DrawDelegateImpl::GetInstance()->GetDrawSurface();
-  if (!handle.is_null())
-    return handle;
+  if (CompositorImpl::IsInitialized()) {
+    // The app uses the browser-side compositor.
+    if (shared_surface_.is_null())
+      shared_surface_ =
+          ImageTransportFactoryAndroid::GetInstance()->
+              CreateSharedSurfaceHandle();
+    return shared_surface_;
+  }
 
   // On Android, we cannot generate a window handle that can be passed to the
   // GPU process through the native side. Instead, we send the surface handle
@@ -346,6 +375,14 @@ void RenderWidgetHostViewAndroid::UnlockMouse() {
   NOTIMPLEMENTED();
 }
 
+// Methods called from the host to the render
+
+void RenderWidgetHostViewAndroid::SendKeyEvent(
+    const NativeWebKeyboardEvent& event) {
+  if (host_)
+    host_->ForwardKeyboardEvent(event);
+}
+
 void RenderWidgetHostViewAndroid::TouchEvent(
     const WebKit::WebTouchEvent& event) {
   if (host_)
@@ -356,6 +393,12 @@ void RenderWidgetHostViewAndroid::GestureEvent(
     const WebKit::WebGestureEvent& event) {
   if (host_)
     host_->ForwardGestureEvent(event);
+}
+
+void RenderWidgetHostViewAndroid::SelectRange(const gfx::Point& start,
+                                              const gfx::Point& end) {
+  if (host_)
+    host_->SelectRange(start, end);
 }
 
 void RenderWidgetHostViewAndroid::SetContentViewCore(

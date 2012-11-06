@@ -43,7 +43,7 @@ class SearchBoxView : public views::View,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual bool OnMouseWheel(const views::MouseWheelEvent& event) OVERRIDE;
+  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
 
  private:
   // Updates model text and selection model with current Textfield info.
@@ -56,7 +56,7 @@ class SearchBoxView : public views::View,
   virtual void ContentsChanged(views::Textfield* sender,
                                const string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const views::KeyEvent& key_event) OVERRIDE;
+                              const ui::KeyEvent& key_event) OVERRIDE;
 
   // Overridden from SearchBoxModelObserver:
   virtual void IconChanged() OVERRIDE;

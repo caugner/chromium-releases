@@ -61,7 +61,7 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
 
   // Helper function to send the given message to the GPU process on the IO
   // thread.  Calls Get and if a host is returned, sends it.  Can be called from
-  // any thread.
+  // any thread.  Deletes the message if it cannot be sent.
   CONTENT_EXPORT static void SendOnIO(GpuProcessKind kind,
                                       content::CauseForGpuLaunch cause,
                                       IPC::Message* message);
@@ -116,6 +116,7 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   virtual void OnProcessCrashed(int exit_code) OVERRIDE;
 
   // Message handlers.
+  void OnInitialized(bool result);
   void OnChannelEstablished(const IPC::ChannelHandle& channel_handle);
   void OnCommandBufferCreated(const int32 route_id);
   void OnDestroyCommandBuffer(int32 surface_id);
@@ -124,7 +125,8 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
 #endif
-#if defined(OS_WIN) && !defined(USE_AURA)
+  // Note: Different implementations depending on USE_AURA.
+#if defined(OS_WIN)
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
   void OnAcceleratedSurfacePostSubBuffer(

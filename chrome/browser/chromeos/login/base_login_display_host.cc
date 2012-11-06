@@ -4,8 +4,10 @@
 
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 
+#include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/workspace_controller.h"  // temporary until w2 is the default.
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -28,6 +30,7 @@
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/mobile_config.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -132,7 +135,8 @@ BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
     : background_bounds_(background_bounds),
       ALLOW_THIS_IN_INITIALIZER_LIST(pointer_factory_(this)),
       shutting_down_(false),
-      oobe_progress_bar_visible_(false) {
+      oobe_progress_bar_visible_(false),
+      session_starting_(false) {
   // We need to listen to CLOSE_ALL_BROWSERS_REQUEST but not APP_TERMINATIN
   // because/ APP_TERMINATING will never be fired as long as this keeps
   // ref-count. CLOSE_ALL_BROWSERS_REQUEST is safe here because there will be no
@@ -147,6 +151,12 @@ BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_OPENED,
                  content::NotificationService::AllSources());
+
+  // Login screen is moved to lock screen container when user logs in.
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_LOGIN_USER_CHANGED,
+                 content::NotificationService::AllSources());
+
   DCHECK(default_host_ == NULL);
   default_host_ = this;
 
@@ -168,8 +178,16 @@ BaseLoginDisplayHost::~BaseLoginDisplayHost() {
 ////////////////////////////////////////////////////////////////////////////////
 // BaseLoginDisplayHost, LoginDisplayHost implementation:
 
+void BaseLoginDisplayHost::BeforeSessionStart() {
+  session_starting_ = true;
+}
+
 void BaseLoginDisplayHost::OnSessionStart() {
   DVLOG(1) << "Session starting";
+  if (chromeos::UserManager::Get()->IsCurrentUserNew()) {
+    ash::Shell::GetInstance()->
+        desktop_background_controller()->MoveDesktopToUnlockedContainer();
+  }
   if (wizard_controller_.get())
     wizard_controller_->OnSessionStart();
   // Display host is deleted once animation is completed
@@ -262,7 +280,7 @@ void BaseLoginDisplayHost::CheckForAutoEnrollment() {
 
   // Start by checking if the device has already been owned.
   pointer_factory_.InvalidateWeakPtrs();
-  OwnershipService::GetSharedInstance()->GetStatusAsync(
+  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
       base::Bind(&BaseLoginDisplayHost::OnOwnershipStatusCheckDone,
                  pointer_factory_.GetWeakPtr()));
 }
@@ -276,13 +294,24 @@ void BaseLoginDisplayHost::Observe(
     const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST) {
     ShutdownDisplayHost(true);
-  } else if (type == chrome::NOTIFICATION_BROWSER_OPENED) {
+  } else if (type == chrome::NOTIFICATION_BROWSER_OPENED && session_starting_) {
+    // Browsers created before session start (windows opened by extensions, for
+    // example) are ignored.
     OnBrowserCreated();
     registrar_.Remove(this,
                       chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
                       content::NotificationService::AllSources());
     registrar_.Remove(this,
                       chrome::NOTIFICATION_BROWSER_OPENED,
+                      content::NotificationService::AllSources());
+  } else if (type == chrome::NOTIFICATION_LOGIN_USER_CHANGED &&
+             chromeos::UserManager::Get()->IsCurrentUserNew()) {
+    // For new user, move desktop to locker container so that windows created
+    // during the user image picker step are below it.
+    ash::Shell::GetInstance()->
+        desktop_background_controller()->MoveDesktopToLockedContainer();
+    registrar_.Remove(this,
+                      chrome::NOTIFICATION_LOGIN_USER_CHANGED,
                       content::NotificationService::AllSources());
   }
 }
@@ -316,6 +345,7 @@ void BaseLoginDisplayHost::StartAnimation() {
       switches::kDisableLoginAnimations);
 
   const bool do_background_animation =
+      !ash::internal::WorkspaceController::IsWorkspace2Enabled() &&
       kEnableBackgroundAnimation && !disable_animations;
 
   const bool do_browser_transform_animation =
@@ -357,7 +387,9 @@ void BaseLoginDisplayHost::StartAnimation() {
   }
 
   // Browser windows layer opacity and transform animation.
-  if (do_browser_transform_animation || do_browser_opacity_animation) {
+  if (ash::internal::WorkspaceController::IsWorkspace2Enabled()) {
+    ash::Shell::GetInstance()->DoInitialWorkspaceAnimation();
+  } else if (do_browser_transform_animation || do_browser_opacity_animation) {
     ui::Layer* default_container_layer =
         ash::Shell::GetContainer(
             ash::Shell::GetPrimaryRootWindow(),
@@ -407,9 +439,9 @@ void BaseLoginDisplayHost::StartAnimation() {
 }
 
 void BaseLoginDisplayHost::OnOwnershipStatusCheckDone(
-    OwnershipService::Status status,
+    DeviceSettingsService::OwnershipStatus status,
     bool current_user_is_owner) {
-  if (status != OwnershipService::OWNERSHIP_NONE) {
+  if (status != DeviceSettingsService::OWNERSHIP_NONE) {
     // The device is already owned. No need for auto-enrollment checks.
     VLOG(1) << "CheckForAutoEnrollment: device already owned";
     return;
@@ -468,15 +500,22 @@ void ShowLoginWizard(const std::string& first_screen_name,
   if (g_browser_process && g_browser_process->local_state()) {
     const std::string locale = g_browser_process->GetApplicationLocale();
     // If the preferred keyboard for the login screen has been saved, use it.
+    PrefService* prefs = g_browser_process->local_state();
     std::string initial_input_method_id =
-        g_browser_process->local_state()->GetString(
-            chromeos::language_prefs::kPreferredKeyboardLayout);
+        prefs->GetString(chromeos::language_prefs::kPreferredKeyboardLayout);
     if (initial_input_method_id.empty()) {
       // If kPreferredKeyboardLayout is not specified, use the hardware layout.
       initial_input_method_id =
           manager->GetInputMethodUtil()->GetHardwareInputMethodId();
     }
     manager->EnableLayouts(locale, initial_input_method_id);
+
+    // Apply owner preferences for tap-to-click and mouse buttons swap for
+    // login screen.
+    system::mouse_settings::SetPrimaryButtonRight(
+        prefs->GetBoolean(prefs::kOwnerPrimaryMouseButtonRight));
+    system::touchpad_settings::SetTapToClick(
+        prefs->GetBoolean(prefs::kOwnerTapToClickEnabled));
   }
 
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(size));

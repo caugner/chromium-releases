@@ -78,6 +78,7 @@ enum IPCMessageStart {
   ClipboardMsgStart,
   BlobMsgStart,
   AppCacheMsgStart,
+  DeviceMotionMsgStart,
   DeviceOrientationMsgStart,
   DesktopNotificationMsgStart,
   GeolocationMsgStart,
@@ -102,6 +103,10 @@ enum IPCMessageStart {
   PrerenderMsgStart,
   ChromotingMsgStart,
   OldBrowserPluginMsgStart,
+  BrowserPluginMsgStart,
+  HyphenatorMsgStart,
+  AndroidWebViewMsgStart,
+  ViewerMsgStart,
   LastIPCMsgStart      // Must come last.
 };
 

@@ -33,7 +33,14 @@ class TestBrowserContext : public BrowserContext {
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
+    const std::string& partition_id) OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+      int renderer_child_id) OVERRIDE;
+  virtual net::URLRequestContextGetter*
+      GetMediaRequestContextForStoragePartition(
+          const std::string& partition_id) OVERRIDE;
   virtual ResourceContext* GetResourceContext() OVERRIDE;
   virtual GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
@@ -46,6 +53,7 @@ class TestBrowserContext : public BrowserContext {
   FRIEND_TEST_ALL_PREFIXES(DOMStorageTest, SessionOnly);
   FRIEND_TEST_ALL_PREFIXES(DOMStorageTest, SaveSessionState);
 
+  scoped_refptr<net::URLRequestContextGetter> request_context_;
   scoped_ptr<MockResourceContext> resource_context_;
   ScopedTempDir browser_context_dir_;
   scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;

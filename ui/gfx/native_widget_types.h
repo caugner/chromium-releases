@@ -46,8 +46,10 @@
 
 class SkRegion;
 namespace aura {
-class Event;
 class Window;
+}
+namespace ui {
+class Event;
 }
 #endif  // defined(USE_AURA)
 
@@ -55,6 +57,23 @@ class Window;
 #include <windows.h>  // NOLINT
 typedef struct HFONT__* HFONT;
 struct IAccessible;
+#elif defined(OS_IOS)
+struct CGContext;
+#ifdef __OBJC__
+@class UIEvent;
+@class UIFont;
+@class UIImage;
+@class UIView;
+@class UIWindow;
+@class UITextField;
+#else
+class UIEvent;
+class UIFont;
+class UIImage;
+class UIView;
+class UIWindow;
+class UITextField;
+#endif  // __OBJC__
 #elif defined(OS_MACOSX)
 struct CGContext;
 #ifdef __OBJC__
@@ -91,6 +110,9 @@ struct ANativeWindow;
 namespace content {
 class ContentViewCore;
 }
+namespace ui {
+class WindowAndroid;
+}
 #endif
 class SkBitmap;
 
@@ -101,13 +123,18 @@ typedef ui::Cursor NativeCursor;
 typedef aura::Window* NativeView;
 typedef aura::Window* NativeWindow;
 typedef SkRegion* NativeRegion;
-typedef aura::Event* NativeEvent;
+typedef ui::Event* NativeEvent;
 #elif defined(OS_WIN)
 typedef HCURSOR NativeCursor;
 typedef HWND NativeView;
 typedef HWND NativeWindow;
 typedef HRGN NativeRegion;
 typedef MSG NativeEvent;
+#elif defined(OS_IOS)
+typedef void* NativeCursor;
+typedef UIView* NativeView;
+typedef UIWindow* NativeWindow;
+typedef UIEvent* NativeEvent;
 #elif defined(OS_MACOSX)
 typedef NSCursor* NativeCursor;
 typedef NSView* NativeView;
@@ -122,7 +149,7 @@ typedef GdkEvent* NativeEvent;
 #elif defined(OS_ANDROID)
 typedef void* NativeCursor;
 typedef content::ContentViewCore* NativeView;
-typedef content::ContentViewCore* NativeWindow;
+typedef ui::WindowAndroid* NativeWindow;
 typedef void* NativeRegion;
 typedef jobject NativeEvent;
 #endif
@@ -133,6 +160,11 @@ typedef HWND NativeEditView;
 typedef HDC NativeDrawingContext;
 typedef HMENU NativeMenu;
 typedef IAccessible* NativeViewAccessible;
+#elif defined(OS_IOS)
+typedef UIFont* NativeFont;
+typedef UITextField* NativeEditView;
+typedef CGContext* NativeDrawingContext;
+typedef void* NativeMenu;
 #elif defined(OS_MACOSX)
 typedef NSFont* NativeFont;
 typedef NSTextField* NativeEditView;
@@ -166,7 +198,9 @@ const int kNullCursor = 0;
 const gfx::NativeCursor kNullCursor = static_cast<gfx::NativeCursor>(NULL);
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_IOS)
+typedef UIImage NativeImageType;
+#elif defined(OS_MACOSX)
 typedef NSImage NativeImageType;
 #elif defined(TOOLKIT_GTK)
 typedef GdkPixbuf NativeImageType;
@@ -276,6 +310,9 @@ typedef HWND AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = NULL;
 #elif defined(USE_X11)
 typedef unsigned long AcceleratedWidget;
+const AcceleratedWidget kNullAcceleratedWidget = 0;
+#elif defined(OS_IOS)
+typedef UIView* AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = 0;
 #elif defined(OS_MACOSX)
 typedef NSView* AcceleratedWidget;

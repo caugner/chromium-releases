@@ -6,9 +6,11 @@ package org.chromium.content.browser;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.ResultReceiver;
 import android.util.Log;
 import android.view.ActionMode;
 import android.view.KeyEvent;
@@ -17,21 +19,26 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.DownloadListener;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.WeakContext;
+import org.chromium.content.app.AppResource;
+import org.chromium.content.browser.accessibility.AccessibilityInjector;
 import org.chromium.content.browser.ContentViewGestureHandler;
+import org.chromium.content.browser.ContentViewGestureHandler.MotionEventDelegate;
 import org.chromium.content.browser.TouchPoint;
 import org.chromium.content.browser.ZoomManager;
 import org.chromium.content.common.CleanupReference;
 import org.chromium.content.common.TraceEvent;
-
-import org.chromium.content.browser.accessibility.AccessibilityInjector;
-import org.chromium.content.browser.ContentViewGestureHandler.MotionEventDelegate;
+import org.chromium.ui.gfx.NativeWindow;
 
 /**
+ * Provides a Java-side 'wrapper' around a WebContent (native) instance.
  * Contains all the major functionality necessary to manage the lifecycle of a ContentView without
  * being tied to the view system.
  */
@@ -46,15 +53,6 @@ public class ContentViewCore implements MotionEventDelegate {
     public static final int PAGE_TRANSITION_AUTO_BOOKMARK = 2;
     public static final int PAGE_TRANSITION_START_PAGE = 6;
 
-    /** Translate the find selection into a normal selection. */
-    public static final int FIND_SELECTION_ACTION_KEEP_SELECTION = 0;
-    /** Clear the find selection. */
-    public static final int FIND_SELECTION_ACTION_CLEAR_SELECTION = 1;
-    /** Focus and click the selected node (for links). */
-    public static final int FIND_SELECTION_ACTION_ACTIVATE_SELECTION = 2;
-
-    // Personality of the ContentView.
-    private int mPersonality;
     // Used when ContentView implements a standalone View.
     public static final int PERSONALITY_VIEW = 0;
     // Used for Chrome.
@@ -62,11 +60,14 @@ public class ContentViewCore implements MotionEventDelegate {
 
     // Used to avoid enabling zooming in / out if resulting zooming will
     // produce little visible difference.
-    private static float ZOOM_CONTROLS_EPSILON = 0.007f;
+    private static final float ZOOM_CONTROLS_EPSILON = 0.007f;
 
     // To avoid checkerboard, we clamp the fling velocity based on the maximum number of tiles
     // should be allowed to upload per 100ms.
-    private static int MAX_NUM_UPLOAD_TILES = 12;
+    private final int mMaxNumUploadTiles = 12;
+
+    // Personality of the ContentView.
+    private final int mPersonality;
 
     /**
      * Interface that consumers of {@link ContentViewCore} must implement to allow the proper
@@ -125,7 +126,7 @@ public class ContentViewCore implements MotionEventDelegate {
     }
 
     private static final class DestroyRunnable implements Runnable {
-        private int mNativeContentViewCore;
+        private final int mNativeContentViewCore;
         private DestroyRunnable(int nativeContentViewCore) {
             mNativeContentViewCore = nativeContentViewCore;
         }
@@ -137,7 +138,7 @@ public class ContentViewCore implements MotionEventDelegate {
 
     private CleanupReference mCleanupReference;
 
-    private Context mContext;
+    private final Context mContext;
     private ViewGroup mContainerView;
     private InternalAccessDelegate mContainerViewInternals;
 
@@ -160,6 +161,8 @@ public class ContentViewCore implements MotionEventDelegate {
     private float mNativeMinimumScale = 1.0f;
     private float mNativeMaximumScale = 1.0f;
 
+    private PopupZoomer mPopupZoomer;
+
     // TODO(klobag): this is to avoid a bug in GestureDetector. With multi-touch,
     // mAlwaysInTapRegion is not reset. So when the last finger is up, onSingleTapUp()
     // will be mistakenly fired.
@@ -167,6 +170,10 @@ public class ContentViewCore implements MotionEventDelegate {
 
     // Only valid when focused on a text / password field.
     private ImeAdapter mImeAdapter;
+    private ImeAdapter.AdapterInputConnection mInputConnection;
+
+    private SelectionHandleController mSelectionHandleController;
+    private InsertionHandleController mInsertionHandleController;
 
     // Tracks whether a selection is currently active.  When applied to selected text, indicates
     // whether the last selected text is still highlighted.
@@ -182,8 +189,16 @@ public class ContentViewCore implements MotionEventDelegate {
     // over DownloadListener.
     private ContentViewDownloadDelegate mDownloadDelegate;
 
+    // Whether a physical keyboard is connected.
+    private boolean mKeyboardConnected;
+
     // The AccessibilityInjector that handles loading Accessibility scripts into the web page.
     private final AccessibilityInjector mAccessibilityInjector;
+
+    private boolean mNeedUpdateOrientationChanged;
+
+    // Whether we use hardware-accelerated drawing.
+    private boolean mHardwareAccelerated = false;
 
     /**
      * Enable multi-process ContentView. This should be called by the application before
@@ -218,22 +233,14 @@ public class ContentViewCore implements MotionEventDelegate {
     }
 
     /**
-     * Constructs a new ContentViewCore.
+     * Constructs a new ContentViewCore. Embedders must call initialize() after constructing
+     * a ContentViewCore and before using it.
      *
      * @param context The context used to create this.
-     * @param containerView The view that will act as a container for all views created by this.
-     * @param internalDispatcher Handles dispatching all hidden or super methods to the
-     *                           containerView.
-     * @param nativeWebContents A pointer to the native web contents.
      * @param personality The type of ContentViewCore being created.
      */
-    public ContentViewCore(
-            Context context, ViewGroup containerView,
-            InternalAccessDelegate internalDispatcher,
-            int nativeWebContents, int personality) {
+    public ContentViewCore(Context context, int personality) {
         mContext = context;
-        mContainerView = containerView;
-        mContainerViewInternals = internalDispatcher;
 
         WeakContext.initializeWeakContext(context);
         // By default, ContentView will initialize single process mode. The call to
@@ -245,7 +252,8 @@ public class ContentViewCore implements MotionEventDelegate {
         mAccessibilityInjector = AccessibilityInjector.newInstance(this);
         mAccessibilityInjector.addOrRemoveAccessibilityApisIfNecessary();
 
-        initialize(context, nativeWebContents, personality);
+        mPersonality = personality;
+        HeapStatsLogger.init(mContext.getApplicationContext());
     }
 
     /**
@@ -262,26 +270,143 @@ public class ContentViewCore implements MotionEventDelegate {
         return mContainerView;
     }
 
-    // TODO(jrg): incomplete; upstream the rest of this method.
-    private void initialize(Context context, int nativeWebContents, int personality) {
-        mNativeContentViewCore = nativeInit(nativeWebContents);
-        mCleanupReference = new CleanupReference(this, new DestroyRunnable(mNativeContentViewCore));
+   private ImeAdapter createImeAdapter(Context context) {
+        return new ImeAdapter(context, getSelectionHandleController(),
+                getInsertionHandleController(),
+                new ImeAdapter.ViewEmbedder() {
+                    @Override
+                    public void onImeEvent(boolean isFinish) {
+                        getContentViewClient().onImeEvent();
+                        // TODO(olilan): Add undoScrollFocusedEditableNodeIntoViewIfNeeded
+                        // call when available.
+                    }
 
-        mPersonality = personality;
-        mContentSettings = new ContentSettings(this, mNativeContentViewCore);
+                    @Override
+                    public void onSetFieldValue() {
+                    }
+
+                    @Override
+                    public void onDismissInput() {
+                    }
+
+                    @Override
+                    public View getAttachedView() {
+                        return mContainerView;
+                    }
+
+                    @Override
+                    public ResultReceiver getNewShowKeyboardReceiver() {
+                        // TODO(olilan): Add receiver when scrollFocusedEditableNodeIntoView
+                        // is upstreamed.
+                        return null;
+                    }
+                }
+        );
+    }
+
+    /**
+     *
+     * @param containerView The view that will act as a container for all views created by this.
+     * @param internalDispatcher Handles dispatching all hidden or super methods to the
+     *                           containerView.
+     * @param takeOwnershipOfWebContents Whether this object will take ownership of
+     *                                   nativeWebContents over on its native side.
+     * @param nativeWebContents A pointer to the native web contents.
+     * @param nativeWindow An instance of the NativeWindow.
+     * @param isAccessFromFileURLsGrantedByDefault Default WebSettings configuration.
+     */
+    // Perform important post-construction set up of the ContentViewCore.
+    // We do not require the containing view in the constructor to allow embedders to create a
+    // ContentViewCore without having fully created it's containing view. The containing view
+    // is a vital component of the ContentViewCore, so embedders must exercise caution in what
+    // they do with the ContentViewCore before calling initialize().
+    // We supply the nativeWebContents pointer here rather than in the constructor to allow us
+    // to set the private browsing mode at a later point for the WebView implementation.
+    public void initialize(ViewGroup containerView, InternalAccessDelegate internalDispatcher,
+            boolean takeOwnershipOfWebContents, int nativeWebContents, NativeWindow nativeWindow,
+            boolean isAccessFromFileURLsGrantedByDefault) {
+        mContainerView = containerView;
+        mNativeContentViewCore = nativeInit(mHardwareAccelerated, takeOwnershipOfWebContents,
+                nativeWebContents, nativeWindow.getNativePointer());
+        mCleanupReference = new CleanupReference(
+                this, new DestroyRunnable(mNativeContentViewCore));
+        mContentSettings = new ContentSettings(
+                this, mNativeContentViewCore, isAccessFromFileURLsGrantedByDefault);
+        initializeContainerView(internalDispatcher);
+        if (mPersonality == PERSONALITY_VIEW) {
+            setAllUserAgentOverridesInHistory();
+        }
+
+        String contentDescription = "Web View";
+        if (AppResource.STRING_CONTENT_VIEW_CONTENT_DESCRIPTION == 0) {
+            Log.w(TAG, "Setting contentDescription to 'Web View' as no value was specified.");
+        } else {
+            contentDescription = mContext.getResources().getString(
+                    AppResource.STRING_CONTENT_VIEW_CONTENT_DESCRIPTION);
+        }
+        mContainerView.setContentDescription(contentDescription);
+    }
+
+    /**
+     * Initializes the View that will contain all Views created by the ContentViewCore.
+     *
+     * @param internalDispatcher Handles dispatching all hidden or super methods to the
+     *                           containerView.
+     */
+    private void initializeContainerView(InternalAccessDelegate internalDispatcher) {
+        TraceEvent.begin();
+        mContainerViewInternals = internalDispatcher;
+
+        mContainerView.setWillNotDraw(false);
         mContainerView.setFocusable(true);
         mContainerView.setFocusableInTouchMode(true);
-        if (mContainerView.getScrollBarStyle() == View.SCROLLBARS_INSIDE_OVERLAY) {
-            mContainerView.setHorizontalScrollBarEnabled(false);
-            mContainerView.setVerticalScrollBarEnabled(false);
-        }
         mContainerView.setClickable(true);
 
-        mZoomManager = new ZoomManager(context, this);
-        mZoomManager.updateMultiTouchSupport();
-        mContentViewGestureHandler = new ContentViewGestureHandler(context, this, mZoomManager);
+        if (mPersonality == PERSONALITY_CHROME) {
+            // Doing this in PERSONALITY_VIEW mode causes rendering problems in our
+            // current WebView test case (the HTMLViewer application).
+            // TODO(benm): Figure out why this is the case.
+            if (mContainerView.getScrollBarStyle() == View.SCROLLBARS_INSIDE_OVERLAY) {
+                mContainerView.setHorizontalScrollBarEnabled(false);
+                mContainerView.setVerticalScrollBarEnabled(false);
+            }
+        }
 
-        Log.i(TAG, "mNativeContentView=0x"+ Integer.toHexString(mNativeContentViewCore));
+        mZoomManager = new ZoomManager(mContext, this);
+        mZoomManager.updateMultiTouchSupport();
+        mContentViewGestureHandler = new ContentViewGestureHandler(mContext, this, mZoomManager);
+
+        initPopupZoomer(mContext);
+        mImeAdapter = createImeAdapter(mContext);
+        mKeyboardConnected = mContainerView.getResources().getConfiguration().keyboard
+                != Configuration.KEYBOARD_NOKEYS;
+        TraceEvent.end();
+    }
+
+    private void initPopupZoomer(Context context){
+        mPopupZoomer = new PopupZoomer(context);
+        mContainerView.addView(mPopupZoomer);
+        PopupZoomer.OnTapListener listener = new PopupZoomer.OnTapListener() {
+            @Override
+            public boolean onSingleTap(View v, MotionEvent e) {
+                mContainerView.requestFocus();
+                if (mNativeContentViewCore != 0) {
+                    nativeSingleTap(mNativeContentViewCore, e.getEventTime(), (int) e.getX(),
+                            (int) e.getY(), true);
+                }
+                return true;
+            }
+
+            @Override
+            public boolean onLongPress(View v, MotionEvent e) {
+                if (mNativeContentViewCore != 0) {
+                    nativeLongPress(mNativeContentViewCore, e.getEventTime(), (int) e.getX(),
+                            (int) e.getY(), true);
+                }
+                return true;
+            }
+        };
+        mPopupZoomer.setOnTapListener(listener);
     }
 
     /**
@@ -323,6 +448,14 @@ public class ContentViewCore implements MotionEventDelegate {
     }
 
     /**
+     * This is only useful for passing over JNI to native code that requires ContentViewCore*.
+     * @return native ContentViewCore pointer.
+     */
+    public int getNativeContentViewCore() {
+        return mNativeContentViewCore;
+    }
+
+    /**
      * For internal use. Throws IllegalStateException if mNativeContentView is 0.
      * Use this to ensure we get a useful Java stack trace, rather than a native
      * crash dump, from use-after-destroy bugs in Java code.
@@ -361,40 +494,19 @@ public class ContentViewCore implements MotionEventDelegate {
      * ensuring the URL passed in is properly formatted (i.e. the scheme has been added if left
      * off during user input).
      *
-     * @param url The url to load.
+     * @param pararms Parameters for this load.
      */
-    public void loadUrlWithoutUrlSanitization(String url) {
-        loadUrlWithoutUrlSanitization(url, PAGE_TRANSITION_TYPED);
-    }
-
-    /**
-     * Load url without fixing up the url string. Consumers of ContentView are responsible for
-     * ensuring the URL passed in is properly formatted (i.e. the scheme has been added if left
-     * off during user input).
-     *
-     * @param url The url to load.
-     * @param pageTransition Page transition id that describes the action that led to this
-     *                       navigation. It is important for ranking URLs in the history so the
-     *                       omnibox can report suggestions correctly.
-     */
-    public void loadUrlWithoutUrlSanitization(String url, int pageTransition) {
-        mAccessibilityInjector.addOrRemoveAccessibilityApisIfNecessary();
-        if (mNativeContentViewCore != 0) {
-            if (isPersonalityView()) {
-                nativeLoadUrlWithoutUrlSanitizationWithUserAgentOverride(
-                        mNativeContentViewCore,
-                        url,
-                        pageTransition,
-                        mContentSettings.getUserAgentString());
-            } else {
-                // Chrome stores overridden UA strings in navigation history
-                // items, so they stay the same on going back / forward.
-                nativeLoadUrlWithoutUrlSanitization(
-                        mNativeContentViewCore,
-                        url,
-                        pageTransition);
-            }
-        }
+    public void loadUrl(LoadUrlParams params) {
+        if (mNativeContentViewCore == 0) return;
+        nativeLoadUrl(mNativeContentViewCore,
+                params.mUrl,
+                params.mLoadUrlType,
+                params.mTransitionType,
+                params.mUaOverrideOption,
+                params.mExtraHeaders,
+                params.mPostData,
+                params.mBaseUrlForDataUrl,
+                params.mVirtualUrlForDataUrl);
     }
 
     void setAllUserAgentOverridesInHistory() {
@@ -426,16 +538,6 @@ public class ContentViewCore implements MotionEventDelegate {
     public String getTitle() {
         if (mNativeContentViewCore != 0) return nativeGetTitle(mNativeContentViewCore);
         return null;
-    }
-
-    /**
-     * @return The load progress of current web contents (range is 0 - 100).
-     */
-    public int getProgress() {
-        if (mNativeContentViewCore != 0) {
-            return (int) (100.0 * nativeGetLoadProgress(mNativeContentViewCore));
-        }
-        return 100;
     }
 
     public int getWidth() {
@@ -572,9 +674,12 @@ public class ContentViewCore implements MotionEventDelegate {
             case ContentViewGestureHandler.GESTURE_SCROLL_START:
                 nativeScrollBegin(mNativeContentViewCore, timeMs, x, y);
                 return true;
-            case ContentViewGestureHandler.GESTURE_SCROLL_BY:
-                nativeScrollBy(mNativeContentViewCore, timeMs, x, y);
+            case ContentViewGestureHandler.GESTURE_SCROLL_BY: {
+                int dx = b.getInt(ContentViewGestureHandler.DISTANCE_X);
+                int dy = b.getInt(ContentViewGestureHandler.DISTANCE_Y);
+                nativeScrollBy(mNativeContentViewCore, timeMs, x, y, dx, dy);
                 return true;
+            }
             case ContentViewGestureHandler.GESTURE_SCROLL_END:
                 nativeScrollEnd(mNativeContentViewCore, timeMs);
                 return true;
@@ -689,6 +794,49 @@ public class ContentViewCore implements MotionEventDelegate {
         setAccessibilityState(false);
     }
 
+    /**
+     * @see View#onCreateInputConnection(EditorInfo)
+     */
+    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+        if (!mImeAdapter.hasTextInputType()) {
+            // Although onCheckIsTextEditor will return false in this case, the EditorInfo
+            // is still used by the InputMethodService. Need to make sure the IME doesn't
+            // enter fullscreen mode.
+            outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
+        }
+        mInputConnection = ImeAdapter.AdapterInputConnection.getInstance(
+                mContainerView, mImeAdapter, outAttrs);
+        return mInputConnection;
+    }
+
+    /**
+     * @see View#onCheckIsTextEditor()
+     */
+    public boolean onCheckIsTextEditor() {
+        return mImeAdapter.hasTextInputType();
+    }
+
+    /**
+     * @see View#onConfigurationChanged(Configuration)
+     */
+    @SuppressWarnings("javadoc")
+    public void onConfigurationChanged(Configuration newConfig) {
+        TraceEvent.begin();
+
+        mKeyboardConnected = newConfig.keyboard != Configuration.KEYBOARD_NOKEYS;
+
+        if (mKeyboardConnected) {
+            mImeAdapter.attach(nativeGetNativeImeAdapter(mNativeContentViewCore),
+                    ImeAdapter.sTextInputTypeNone);
+            InputMethodManager manager = (InputMethodManager)
+                    getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            manager.restartInput(mContainerView);
+        }
+        mContainerViewInternals.super_onConfigurationChanged(newConfig);
+        mNeedUpdateOrientationChanged = true;
+        TraceEvent.end();
+    }
+
     // End FrameLayout overrides.
 
     /**
@@ -710,6 +858,8 @@ public class ContentViewCore implements MotionEventDelegate {
             long timeMs, int x, int y, boolean isLongPress, boolean showPress) {
         //TODO(yusufo):Upstream the rest of the bits about handlerControllers.
         if (!mContainerView.isFocused()) mContainerView.requestFocus();
+
+        if (!mPopupZoomer.isShowing()) mPopupZoomer.setLastTouch(x, y);
 
         if (isLongPress) {
             if (mNativeContentViewCore != 0) {
@@ -746,7 +896,7 @@ public class ContentViewCore implements MotionEventDelegate {
      * logic in Scroller.java. As it is almost linear for the first 100ms, we use a simple math.
      */
     private int clampFlingVelocityX(int velocity) {
-        int cols = MAX_NUM_UPLOAD_TILES / (int) (Math.ceil((float) getHeight() / 256) + 1);
+        int cols = mMaxNumUploadTiles / (int) (Math.ceil((float) getHeight() / 256) + 1);
         int maxVelocity = cols > 0 ? cols * 2560 : 1000;
         if (Math.abs(velocity) > maxVelocity) {
             return velocity > 0 ? maxVelocity : -maxVelocity;
@@ -756,7 +906,7 @@ public class ContentViewCore implements MotionEventDelegate {
     }
 
     private int clampFlingVelocityY(int velocity) {
-        int rows = MAX_NUM_UPLOAD_TILES / (int) (Math.ceil((float) getWidth() / 256) + 1);
+        int rows = mMaxNumUploadTiles / (int) (Math.ceil((float) getWidth() / 256) + 1);
         int maxVelocity = rows > 0 ? rows * 2560 : 1000;
         if (Math.abs(velocity) > maxVelocity) {
             return velocity > 0 ? maxVelocity : -maxVelocity;
@@ -798,6 +948,28 @@ public class ContentViewCore implements MotionEventDelegate {
     // Called by DownloadController.
     ContentViewDownloadDelegate getDownloadDelegate() {
         return mDownloadDelegate;
+    }
+
+    private SelectionHandleController getSelectionHandleController() {
+        if (mSelectionHandleController == null) {
+            mSelectionHandleController = new SelectionHandleController(getContainerView());
+            // TODO(olilan): add specific method implementations.
+
+            mSelectionHandleController.hideAndDisallowAutomaticShowing();
+        }
+
+        return mSelectionHandleController;
+    }
+
+    private InsertionHandleController getInsertionHandleController() {
+        if (mInsertionHandleController == null) {
+            mInsertionHandleController = new InsertionHandleController(getContainerView());
+            // TODO(olilan): add specific method implementations.
+
+            mInsertionHandleController.hideAndDisallowAutomaticShowing();
+        }
+
+        return mInsertionHandleController;
     }
 
     private void showSelectActionBar() {
@@ -866,6 +1038,34 @@ public class ContentViewCore implements MotionEventDelegate {
     }
 
     // The following methods are called by native through jni
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private void imeUpdateAdapter(int nativeImeAdapterAndroid, int textInputType,
+            String text, int selectionStart, int selectionEnd,
+            int compositionStart, int compositionEnd, boolean showImeIfNeeded) {
+        TraceEvent.begin();
+
+        // Non-breaking spaces can cause the IME to get confused. Replace with normal spaces.
+        text = text.replace('\u00A0', ' ');
+
+        mSelectionEditable = (textInputType != ImeAdapter.sTextInputTypeNone);
+        if (!mKeyboardConnected || InputDialogContainer.isDialogInputType(textInputType)) {
+            mImeAdapter.attachAndShowIfNeeded(nativeImeAdapterAndroid, textInputType,
+                    text, showImeIfNeeded);
+        }
+        if (mInputConnection != null) {
+            // In WebKit if there's a composition then the selection will usually be the
+            // same as the composition, whereas Android IMEs expect the selection to be
+            // just a caret at the end of the composition.
+            if (selectionStart == compositionStart && selectionEnd == compositionEnd) {
+                selectionStart = selectionEnd;
+            }
+            mInputConnection.setEditableText(text, selectionStart, selectionEnd,
+                    compositionStart, compositionEnd);
+        }
+        TraceEvent.end();
+    }
 
     /**
      * Called (from native) when the <select> popup needs to be shown.
@@ -1030,13 +1230,12 @@ public class ContentViewCore implements MotionEventDelegate {
      * @param object The Java object to inject into the ContentViewCore's
      *               JavaScript context. Null values are ignored.
      * @param name The name used to expose the instance in JavaScript.
-     * @param allowInheritedMethods Whether or not inherited methods may be
-     *                              called from JavaScript.
+     * @param requireAnnotation Restrict exposed methods to ones with the
+     *                          {@link JavascriptInterface} annotation.
      */
-    public void addJavascriptInterface(Object object, String name, boolean allowInheritedMethods) {
+    public void addJavascriptInterface(Object object, String name, boolean requireAnnotation) {
         if (mNativeContentViewCore != 0 && object != null) {
-            nativeAddJavascriptInterface(mNativeContentViewCore, object, name,
-                    allowInheritedMethods);
+            nativeAddJavascriptInterface(mNativeContentViewCore, object, name, requireAnnotation);
         }
     }
 
@@ -1107,32 +1306,47 @@ public class ContentViewCore implements MotionEventDelegate {
         mAccessibilityInjector.setScriptEnabled(state);
     }
 
-    // The following methods are implemented at native side.
+    /**
+     * Callback factory method for nativeGetNavigationHistory().
+     */
+    @CalledByNative
+    private void addToNavigationHistory(Object history, String url, String virtualUrl,
+            String originalUrl, String title, Bitmap favicon) {
+        NavigationEntry entry = new NavigationEntry(url, virtualUrl, originalUrl, title, favicon);
+        ((NavigationHistory) history).addEntry(entry);
+    }
 
     /**
-     * Initialize the ContentView native side.
-     * Should be called with a valid native WebContents.
-     * If nativeInitProcess is never called, the first time this method is called,
-     * nativeInitProcess will be called implicitly with the default settings.
-     * @param webContentsPtr the ContentView does not create a new native WebContents and uses
-     *                       the provided one.
-     * @return a native pointer to the native ContentView object.
+     * Get a copy of the navigation history of the view.
      */
-    private native int nativeInit(int webContentsPtr);
+    public NavigationHistory getNavigationHistory() {
+        NavigationHistory history = new NavigationHistory();
+        int currentIndex = nativeGetNavigationHistory(mNativeContentViewCore, history);
+        history.setCurrentEntryIndex(currentIndex);
+        return history;
+    }
 
-    private static native void nativeDestroy(int nativeContentViewCoreImpl);
+    // The following methods are implemented at native side.
 
-    private native void nativeLoadUrlWithoutUrlSanitization(int nativeContentViewCoreImpl,
-            String url, int pageTransition);
-    private native void nativeLoadUrlWithoutUrlSanitizationWithUserAgentOverride(
-            int nativeContentViewCoreImpl, String url, int pageTransition,
-            String userAgentOverride);
+    private native int nativeInit(boolean hardwareAccelerated, boolean takeOwnershipOfWebContents,
+            int webContentsPtr, int windowAndroidPtr);
+
+    private static native void nativeDestroy(int nativeContentViewCore);
+
+    private native void nativeLoadUrl(
+            int nativeContentViewCoreImpl,
+            String url,
+            int loadUrlType,
+            int transitionType,
+            int uaOverrideOption,
+            String extraHeaders,
+            byte[] postData,
+            String baseUrlForDataUrl,
+            String virtualUrlForDataUrl);
 
     private native String nativeGetURL(int nativeContentViewCoreImpl);
 
     private native String nativeGetTitle(int nativeContentViewCoreImpl);
-
-    private native double nativeGetLoadProgress(int nativeContentViewCoreImpl);
 
     private native boolean nativeIsIncognito(int nativeContentViewCoreImpl);
 
@@ -1148,7 +1362,7 @@ public class ContentViewCore implements MotionEventDelegate {
     private native void nativeScrollEnd(int nativeContentViewCoreImpl, long timeMs);
 
     private native void nativeScrollBy(
-            int nativeContentViewCoreImpl, long timeMs, int deltaX, int deltaY);
+            int nativeContentViewCoreImpl, long timeMs, int x, int y, int deltaX, int deltaY);
 
     private native void nativeFlingStart(
             int nativeContentViewCoreImpl, long timeMs, int x, int y, int vx, int vy);
@@ -1172,6 +1386,9 @@ public class ContentViewCore implements MotionEventDelegate {
 
     private native void nativePinchBy(int nativeContentViewCoreImpl, long timeMs,
             int anchorX, int anchorY, float deltaScale);
+
+    private native void nativeSelectBetweenCoordinates(
+            int nativeContentViewCore, int x1, int y1, int x2, int y2);
 
     private native boolean nativeCanGoBack(int nativeContentViewCoreImpl);
 
@@ -1199,8 +1416,12 @@ public class ContentViewCore implements MotionEventDelegate {
 
     private native int nativeEvaluateJavaScript(String script);
 
+    private native int nativeGetNativeImeAdapter(int nativeContentViewCore);
+
     private native void nativeAddJavascriptInterface(int nativeContentViewCoreImpl, Object object,
-                                                     String name, boolean allowInheritedMethods);
+                                                     String name, boolean requireAnnotation);
 
     private native void nativeRemoveJavascriptInterface(int nativeContentViewCoreImpl, String name);
+
+    private native int nativeGetNavigationHistory(int nativeContentViewCoreImpl, Object context);
 }

@@ -9,7 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkXfermode.h"
-#include "ui/aura/event.h"
+#include "ui/base/events/event.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/rect.h"
@@ -183,18 +183,18 @@ void TouchObserverHUD::UpdateTouchPointLabel(int index) {
 }
 
 bool TouchObserverHUD::PreHandleKeyEvent(aura::Window* target,
-                                         aura::KeyEvent* event) {
+                                         ui::KeyEvent* event) {
   return false;
 }
 
 bool TouchObserverHUD::PreHandleMouseEvent(aura::Window* target,
-                                           aura::MouseEvent* event) {
+                                           ui::MouseEvent* event) {
   return false;
 }
 
 ui::TouchStatus TouchObserverHUD::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   if (event->touch_id() >= kMaxTouchPoints)
     return ui::TOUCH_STATUS_UNKNOWN;
 
@@ -213,10 +213,10 @@ ui::TouchStatus TouchObserverHUD::PreHandleTouchEvent(
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus TouchObserverHUD::PreHandleGestureEvent(
+ui::EventResult TouchObserverHUD::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;
 }
 
 void TouchObserverHUD::OnWidgetClosing(views::Widget* widget) {

@@ -8,9 +8,7 @@
 #include "ppapi/c/dev/ppb_memory_dev.h"
 #include "ppapi/c/dev/ppp_find_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
-#include "ppapi/c/dev/ppp_scrollbar_dev.h"
 #include "ppapi/c/dev/ppp_selection_dev.h"
-#include "ppapi/c/dev/ppp_widget_dev.h"
 #include "ppapi/c/dev/ppp_zoom_dev.h"
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/ppb.h"
@@ -70,9 +68,7 @@ PPP_Instance_Combined* PPPInstanceInterface();
 const PPP_Messaging* PPPMessagingInterface();
 const PPP_MouseLock* PPPMouseLockInterface();
 const PPP_Printing_Dev* PPPPrintingInterface();
-const PPP_Scrollbar_Dev* PPPScrollbarInterface();
 const PPP_Selection_Dev* PPPSelectionInterface();
-const PPP_Widget_Dev* PPPWidgetInterface();
 const PPP_Zoom_Dev* PPPZoomInterface();
 
 // Get thread creation/join functions.
@@ -80,14 +76,6 @@ const struct PP_ThreadFunctions* GetThreadCreator();
 
 // PPAPI constants used in the proxy.
 extern const PP_Resource kInvalidResourceId;
-
-// The following function TotalSharedMemorySizeInBytes, is copied & similar
-// to the one in audio_util.cc.  This function includes optional fields
-// stored at the end of the audio buffer.
-inline size_t TotalAudioSharedMemorySizeInBytes(size_t audio_buffer_size) {
-  // Include optional field that communicates the number of bytes written.
-  return audio_buffer_size + sizeof(uint32_t);
-}
 
 }  // namespace ppapi_proxy
 

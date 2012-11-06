@@ -55,6 +55,7 @@
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/histogram_message_filter.h"
+#include "content/browser/hyphenator/hyphenator_message_filter.h"
 #include "content/browser/in_process_webkit/indexed_db_context_impl.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/browser/mime_registry_message_filter.h"
@@ -81,9 +82,11 @@
 #include "content/browser/renderer_host/socket_stream_dispatcher_host.h"
 #include "content/browser/renderer_host/text_input_client_message_filter.h"
 #include "content/browser/resolve_proxy_msg_helper.h"
+#include "content/browser/storage_partition_impl.h"
 #include "content/browser/speech/input_tag_speech_dispatcher_host.h"
 #include "content/browser/speech/speech_recognition_dispatcher_host.h"
 #include "content/browser/trace_message_filter.h"
+#include "content/browser/worker_host/worker_storage_partition.h"
 #include "content/browser/worker_host/worker_message_filter.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
@@ -187,7 +190,9 @@ class RendererURLRequestContextSelector
                                     int render_child_id)
       : request_context_(browser_context->GetRequestContextForRenderProcess(
                              render_child_id)),
-        media_request_context_(browser_context->GetRequestContextForMedia()) {
+        media_request_context_(
+            browser_context->GetMediaRequestContextForRenderProcess(
+                render_child_id)) {
   }
 
   virtual net::URLRequestContext* GetRequestContext(
@@ -321,7 +326,9 @@ void RenderProcessHost::SetMaxRendererProcessCount(size_t count) {
 }
 
 RenderProcessHostImpl::RenderProcessHostImpl(
-    BrowserContext* browser_context, bool is_guest)
+    BrowserContext* browser_context,
+    StoragePartitionImpl* storage_partition_impl,
+    bool is_guest)
         : fast_shutdown_started_(false),
           deleting_soon_(false),
           pending_views_(0),
@@ -333,6 +340,7 @@ RenderProcessHostImpl::RenderProcessHostImpl(
           is_initialized_(false),
           id_(ChildProcessHostImpl::GenerateChildProcessUniqueId()),
           browser_context_(browser_context),
+          storage_partition_impl_(storage_partition_impl),
           sudden_termination_allowed_(true),
           ignore_input_events_(false),
           is_guest_(is_guest) {
@@ -346,7 +354,7 @@ RenderProcessHostImpl::RenderProcessHostImpl(
   // requests them.
   // This is for the filesystem sandbox.
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
-      GetID(), browser_context->GetPath().Append(
+      GetID(), storage_partition_impl->GetPath().Append(
           fileapi::SandboxMountPointProvider::kNewFileSystemDirectory),
       base::PLATFORM_FILE_OPEN |
       base::PLATFORM_FILE_CREATE |
@@ -363,14 +371,14 @@ RenderProcessHostImpl::RenderProcessHostImpl(
   // This is so that we can read and move stuff out of the old filesystem
   // sandbox.
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
-      GetID(), browser_context->GetPath().Append(
+      GetID(), storage_partition_impl_->GetPath().Append(
           fileapi::SandboxMountPointProvider::kOldFileSystemDirectory),
       base::PLATFORM_FILE_READ | base::PLATFORM_FILE_WRITE |
       base::PLATFORM_FILE_WRITE_ATTRIBUTES | base::PLATFORM_FILE_ENUMERATE);
   // This is so that we can rename the old sandbox out of the way so that we
   // know we've taken care of it.
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
-      GetID(), browser_context->GetPath().Append(
+      GetID(), storage_partition_impl_->GetPath().Append(
           fileapi::SandboxMountPointProvider::kRenamedOldFileSystemDirectory),
       base::PLATFORM_FILE_CREATE | base::PLATFORM_FILE_CREATE_ALWAYS |
       base::PLATFORM_FILE_WRITE);
@@ -503,6 +511,7 @@ bool RenderProcessHostImpl::Init() {
 }
 
 void RenderProcessHostImpl::CreateMessageFilters() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   MediaObserver* media_observer =
       GetContentClient()->browser()->GetMediaObserver();
   scoped_refptr<RenderMessageFilter> render_message_filter(
@@ -512,13 +521,16 @@ void RenderProcessHostImpl::CreateMessageFilters() {
           GetBrowserContext(),
           GetBrowserContext()->GetRequestContextForRenderProcess(GetID()),
           widget_helper_,
-          media_observer));
+          media_observer,
+          storage_partition_impl_->GetDOMStorageContext()));
   channel_->AddFilter(render_message_filter);
   BrowserContext* browser_context = GetBrowserContext();
   ResourceContext* resource_context = browser_context->GetResourceContext();
 
   ResourceMessageFilter* resource_message_filter = new ResourceMessageFilter(
       GetID(), PROCESS_TYPE_RENDERER, resource_context,
+      storage_partition_impl_->GetAppCacheService(),
+      ChromeBlobStorageContext::GetFor(browser_context),
       new RendererURLRequestContextSelector(browser_context, GetID()));
 
   channel_->AddFilter(resource_message_filter);
@@ -530,16 +542,17 @@ void RenderProcessHostImpl::CreateMessageFilters() {
   channel_->AddFilter(new AudioRendererHost(audio_manager, media_observer));
   channel_->AddFilter(new VideoCaptureHost());
   channel_->AddFilter(new AppCacheDispatcherHost(
-      static_cast<ChromeAppCacheService*>(
-          BrowserContext::GetAppCacheService(browser_context)),
+      storage_partition_impl_->GetAppCacheService(),
       GetID()));
   channel_->AddFilter(new ClipboardMessageFilter());
-  channel_->AddFilter(new DOMStorageMessageFilter(GetID(),
-      static_cast<DOMStorageContextImpl*>(
-          BrowserContext::GetDOMStorageContext(browser_context, GetID()))));
-  channel_->AddFilter(new IndexedDBDispatcherHost(GetID(),
-      static_cast<IndexedDBContextImpl*>(
-          BrowserContext::GetIndexedDBContext(browser_context))));
+  channel_->AddFilter(
+      new DOMStorageMessageFilter(
+          GetID(),
+          storage_partition_impl_->GetDOMStorageContext()));
+  channel_->AddFilter(
+      new IndexedDBDispatcherHost(
+          GetID(),
+          storage_partition_impl_->GetIndexedDBContext()));
   channel_->AddFilter(GeolocationDispatcherHost::New(
       GetID(), browser_context->GetGeolocationPermissionContext()));
   gpu_message_filter_ = new GpuMessageFilter(GetID(), widget_helper_.get());
@@ -549,28 +562,30 @@ void RenderProcessHostImpl::CreateMessageFilters() {
 #endif
   channel_->AddFilter(
       GetContentClient()->browser()->AllowPepperPrivateFileAPI() ?
-      new PepperUnsafeFileMessageFilter(GetID(), browser_context->GetPath()) :
-      new PepperFileMessageFilter(GetID()));
+          new PepperUnsafeFileMessageFilter(
+              GetID(),
+              storage_partition_impl_->GetPath()) :
+          new PepperFileMessageFilter(GetID()));
   channel_->AddFilter(new PepperMessageFilter(PepperMessageFilter::RENDERER,
                                               GetID(), browser_context));
 #if defined(ENABLE_INPUT_SPEECH)
   channel_->AddFilter(new speech::InputTagSpeechDispatcherHost(
-      GetID(), browser_context->GetRequestContext(),
+      GetID(), storage_partition_impl_->GetURLRequestContext(),
       browser_context->GetSpeechRecognitionPreferences()));
   channel_->AddFilter(new speech::SpeechRecognitionDispatcherHost(
-      GetID(), browser_context->GetRequestContext(),
+      GetID(), storage_partition_impl_->GetURLRequestContext(),
       browser_context->GetSpeechRecognitionPreferences()));
 #endif
   channel_->AddFilter(new FileAPIMessageFilter(
       GetID(),
-      browser_context->GetRequestContext(),
-      BrowserContext::GetFileSystemContext(browser_context),
+      storage_partition_impl_->GetURLRequestContext(),
+      storage_partition_impl_->GetFileSystemContext(),
       ChromeBlobStorageContext::GetFor(browser_context)));
-  channel_->AddFilter(new device_orientation::OrientationMessageFilter());
+  channel_->AddFilter(new OrientationMessageFilter());
   channel_->AddFilter(new FileUtilitiesMessageFilter(GetID()));
   channel_->AddFilter(new MimeRegistryMessageFilter());
   channel_->AddFilter(new DatabaseMessageFilter(
-      BrowserContext::GetDatabaseTracker(browser_context)));
+      storage_partition_impl_->GetDatabaseTracker()));
 #if defined(OS_MACOSX)
   channel_->AddFilter(new TextInputClientMessageFilter(GetID()));
 #elif defined(OS_WIN)
@@ -583,9 +598,19 @@ void RenderProcessHostImpl::CreateMessageFilters() {
           resource_context);
   channel_->AddFilter(socket_stream_dispatcher_host);
 
-  channel_->AddFilter(new WorkerMessageFilter(GetID(), resource_context,
-      base::Bind(&RenderWidgetHelper::GetNextRoutingID,
-                 base::Unretained(widget_helper_.get()))));
+  channel_->AddFilter(
+      new WorkerMessageFilter(
+          GetID(),
+          resource_context,
+          WorkerStoragePartition(
+              storage_partition_impl_->GetURLRequestContext(),
+              storage_partition_impl_->GetMediaURLRequestContext(),
+              storage_partition_impl_->GetAppCacheService(),
+              storage_partition_impl_->GetFileSystemContext(),
+              storage_partition_impl_->GetDatabaseTracker(),
+              storage_partition_impl_->GetIndexedDBContext()),
+          base::Bind(&RenderWidgetHelper::GetNextRoutingID,
+                     base::Unretained(widget_helper_.get()))));
 
 #if defined(ENABLE_WEBRTC)
   channel_->AddFilter(new P2PSocketDispatcherHost(resource_context));
@@ -596,11 +621,12 @@ void RenderProcessHostImpl::CreateMessageFilters() {
       browser_context->GetRequestContextForRenderProcess(GetID())));
   channel_->AddFilter(new QuotaDispatcherHost(
       GetID(),
-      BrowserContext::GetQuotaManager(browser_context),
+      storage_partition_impl_->GetQuotaManager(),
       GetContentClient()->browser()->CreateQuotaPermissionContext()));
-  channel_->AddFilter(new GamepadBrowserMessageFilter(this));
+  channel_->AddFilter(new GamepadBrowserMessageFilter());
   channel_->AddFilter(new ProfilerMessageFilter(PROCESS_TYPE_RENDERER));
-  channel_->AddFilter(new content::HistogramMessageFilter());
+  channel_->AddFilter(new HistogramMessageFilter());
+  channel_->AddFilter(new HyphenatorMessageFilter(this));
 }
 
 int RenderProcessHostImpl::GetNextRoutingID() {
@@ -721,6 +747,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kDisableAcceleratedVideoDecode,
     switches::kDisableApplicationCache,
     switches::kDisableAudio,
+    switches::kDisableAudioOutputResampler,
     switches::kDisableBreakpad,
 #if defined(OS_MACOSX)
     switches::kDisableCompositedCoreAnimationPlugins,
@@ -736,7 +763,6 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kDisableJavaScriptI18NAPI,
     switches::kDisableLocalStorage,
     switches::kDisableLogging,
-    switches::kDisablePointerLock,
     switches::kDisableSeccompFilterSandbox,
     switches::kDisableSeccompSandbox,
     switches::kDisableSessionStorage,
@@ -749,27 +775,26 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
 #else
     switches::kDisableWebAudio,
 #endif
+    switches::kEnableWebAudioInput,
     switches::kDisableWebSockets,
     switches::kDomAutomationController,
     switches::kEnableAccessibilityLogging,
+    switches::kEnableDeprecatedPeerConnection,
     switches::kEnableDCHECK,
     switches::kEnableEncryptedMedia,
+    switches::kEnableExperimentalWebKitFeatures,
     switches::kEnableFixedLayout,
     switches::kEnableGPUServiceLogging,
     switches::kEnableGPUClientLogging,
     switches::kEnableGpuBenchmarking,
     switches::kEnableLogging,
-    switches::kEnableMediaSource,
+    switches::kDisableMediaSource,
     switches::kEnablePartialSwap,
-    switches::kEnablePeerConnection,
     switches::kEnablePerTilePainting,
     switches::kEnableRendererSideMixing,
-    switches::kEnableShadowDOM,
     switches::kEnableStrictSiteIsolation,
-    switches::kEnableStyleScoped,
     switches::kDisableFullScreen,
     switches::kEnablePepperTesting,
-    switches::kEnablePointerLock,
     switches::kEnablePreparsedJsCaching,
     switches::kEnablePruneGpuCommandBuffers,
     switches::kEnablePinch,
@@ -782,7 +807,6 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableThreadedCompositing,
     switches::kDisableThreadedCompositing,
     switches::kEnableTouchEvents,
-    switches::kEnableVideoTrack,
     switches::kEnableViewport,
     switches::kForceDeviceScaleFactor,
     switches::kFullMemoryCrashReport,
@@ -793,9 +817,11 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
 #endif  // GOOGLE_CHROME_BUILD
     switches::kInProcessWebGL,
     switches::kJavaScriptFlags,
-    switches::kLoad2xResources,
     switches::kLoggingLevel,
     switches::kOldCheckboxStyle,
+#if defined(OS_ANDROID)
+    switches::kNetworkCountryIso,
+#endif
     switches::kNoReferrers,
     switches::kNoSandbox,
     switches::kPpapiOutOfProcess,
@@ -1034,6 +1060,11 @@ BrowserContext* RenderProcessHostImpl::GetBrowserContext() const {
   return browser_context_;
 }
 
+bool RenderProcessHostImpl::InSameStoragePartition(
+    StoragePartition* partition) const {
+  return storage_partition_impl_ == partition;
+}
+
 int RenderProcessHostImpl::GetID() const {
   return id_;
 }
@@ -1189,6 +1220,15 @@ bool RenderProcessHostImpl::IsSuitableHost(
     return true;
 
   if (host->GetBrowserContext() != browser_context)
+    return false;
+
+  // Check whether the given host and the intended site_url will be using the
+  // same StoragePartition, since a RenderProcessHost can only support a single
+  // StoragePartition.  This is relevant for packaged apps, browser tags, and
+  // isolated sites.
+  StoragePartition* dest_partition =
+      BrowserContext::GetStoragePartitionForSite(browser_context, site_url);
+  if (!host->InSameStoragePartition(dest_partition))
     return false;
 
   // All URLs are suitable if this is associated with a guest renderer process.
@@ -1505,6 +1545,7 @@ void RenderProcessHostImpl::OnCompositorSurfaceBuffersSwappedNoHost(
       int32 surface_id,
       uint64 surface_handle,
       int32 route_id,
+      const gfx::Size& size,
       int32 gpu_process_host_id) {
   TRACE_EVENT0("renderer_host",
                "RenderWidgetHostImpl::OnCompositorSurfaceBuffersSwappedNoHost");

@@ -291,7 +291,7 @@ void WebContentsViewGtk::GotFocus() {
 void WebContentsViewGtk::TakeFocus(bool reverse) {
   if (!web_contents_->GetDelegate())
     return;
-  if (!web_contents_->GetDelegate()->TakeFocus(reverse)) {
+  if (!web_contents_->GetDelegate()->TakeFocus(web_contents_, reverse)) {
     gtk_widget_child_focus(GTK_WIDGET(GetTopLevelNativeWindow()),
         reverse ? GTK_DIR_TAB_BACKWARD : GTK_DIR_TAB_FORWARD);
   }
@@ -328,9 +328,10 @@ gboolean WebContentsViewGtk::OnFocus(GtkWidget* widget,
 }
 
 void WebContentsViewGtk::ShowContextMenu(
-    const content::ContextMenuParams& params) {
+    const content::ContextMenuParams& params,
+    content::ContextMenuSourceType type) {
   if (delegate_.get())
-    delegate_->ShowContextMenu(params);
+    delegate_->ShowContextMenu(params, type);
   else
     DLOG(ERROR) << "Cannot show context menus without a delegate.";
 }

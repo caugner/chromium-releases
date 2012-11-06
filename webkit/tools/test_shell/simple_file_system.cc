@@ -45,7 +45,7 @@ using WebKit::WebVector;
 using webkit_blob::BlobData;
 using webkit_blob::BlobStorageController;
 using fileapi::FileSystemContext;
-using fileapi::FileSystemOperationInterface;
+using fileapi::FileSystemOperation;
 using fileapi::FileSystemTaskRunners;
 using fileapi::FileSystemURL;
 
@@ -65,7 +65,7 @@ void RegisterBlob(const GURL& blob_url, const FilePath& file_path) {
   net::GetWellKnownMimeTypeFromExtension(extension, &mime_type);
 
   BlobData::Item item;
-  item.SetToFile(file_path, 0, -1, base::Time());
+  item.SetToFilePathRange(file_path, 0, -1, base::Time());
   g_blob_storage_controller->StartBuildingBlob(blob_url);
   g_blob_storage_controller->AppendBlobDataItem(blob_url, item);
   g_blob_storage_controller->FinishBuildingBlob(blob_url, mime_type);
@@ -91,7 +91,7 @@ SimpleFileSystem::~SimpleFileSystem() {
 }
 
 void SimpleFileSystem::OpenFileSystem(
-    WebFrame* frame, WebFileSystem::Type web_filesystem_type,
+    WebFrame* frame, WebFileSystem::Type type,
     long long, bool create,
     WebFileSystemCallbacks* callbacks) {
   if (!frame || !file_system_context_.get()) {
@@ -100,22 +100,24 @@ void SimpleFileSystem::OpenFileSystem(
     return;
   }
 
-  fileapi::FileSystemType type;
-  if (web_filesystem_type == WebFileSystem::TypeTemporary)
-    type = fileapi::kFileSystemTypeTemporary;
-  else if (web_filesystem_type == WebFileSystem::TypePersistent)
-    type = fileapi::kFileSystemTypePersistent;
-  else if (web_filesystem_type == WebFileSystem::TypeExternal)
-    type = fileapi::kFileSystemTypeExternal;
-  else {
-    // Unknown type filesystem is requested.
+  GURL origin_url(frame->document().securityOrigin().toString());
+  file_system_context_->OpenFileSystem(
+      origin_url, static_cast<fileapi::FileSystemType>(type), create,
+      OpenFileSystemHandler(callbacks));
+}
+
+void SimpleFileSystem::DeleteFileSystem(
+    WebFrame* frame, WebFileSystem::Type type,
+    WebFileSystemCallbacks* callbacks) {
+  if (!frame || !file_system_context_.get()) {
     callbacks->didFail(WebKit::WebFileErrorSecurity);
     return;
   }
 
   GURL origin_url(frame->document().securityOrigin().toString());
-  file_system_context_->OpenFileSystem(
-      origin_url, type, create, OpenFileSystemHandler(callbacks));
+  file_system_context_->DeleteFileSystem(
+      origin_url, static_cast<fileapi::FileSystemType>(type),
+      DeleteFileSystemHandler(callbacks));
 }
 
 void SimpleFileSystem::move(
@@ -262,29 +264,29 @@ void SimpleFileSystem::CleanupOnIOThread() {
 
 bool SimpleFileSystem::HasFilePermission(
     const fileapi::FileSystemURL& url, FilePermission permission) {
-  // Disallow writing on isolated file system, otherwise return ok.
-  return (url.type() != fileapi::kFileSystemTypeIsolated ||
+  // Disallow writing on dragged file system, otherwise return ok.
+  return (url.type() != fileapi::kFileSystemTypeDragged ||
           permission == FILE_PERMISSION_READ);
 }
 
-FileSystemOperationInterface* SimpleFileSystem::GetNewOperation(
+FileSystemOperation* SimpleFileSystem::GetNewOperation(
     const fileapi::FileSystemURL& url) {
-  return file_system_context_->CreateFileSystemOperation(url);
+  return file_system_context_->CreateFileSystemOperation(url, NULL);
 }
 
-FileSystemOperationInterface::StatusCallback
+FileSystemOperation::StatusCallback
 SimpleFileSystem::FinishHandler(WebFileSystemCallbacks* callbacks) {
   return base::Bind(&SimpleFileSystem::DidFinish,
                     AsWeakPtr(), base::Unretained(callbacks));
 }
 
-FileSystemOperationInterface::ReadDirectoryCallback
+FileSystemOperation::ReadDirectoryCallback
 SimpleFileSystem::ReadDirectoryHandler(WebFileSystemCallbacks* callbacks) {
   return base::Bind(&SimpleFileSystem::DidReadDirectory,
                     AsWeakPtr(), base::Unretained(callbacks));
 }
 
-FileSystemOperationInterface::GetMetadataCallback
+FileSystemOperation::GetMetadataCallback
 SimpleFileSystem::GetMetadataHandler(WebFileSystemCallbacks* callbacks) {
   return base::Bind(&SimpleFileSystem::DidGetMetadata,
                     AsWeakPtr(), base::Unretained(callbacks));
@@ -296,7 +298,13 @@ SimpleFileSystem::OpenFileSystemHandler(WebFileSystemCallbacks* callbacks) {
                     AsWeakPtr(), base::Unretained(callbacks));
 }
 
-FileSystemOperationInterface::SnapshotFileCallback
+FileSystemContext::DeleteFileSystemCallback
+SimpleFileSystem::DeleteFileSystemHandler(WebFileSystemCallbacks* callbacks) {
+  return base::Bind(&SimpleFileSystem::DidDeleteFileSystem,
+                    AsWeakPtr(), callbacks);
+}
+
+FileSystemOperation::SnapshotFileCallback
 SimpleFileSystem::SnapshotFileHandler(const GURL& blob_url,
                                       WebFileSystemCallbacks* callbacks) {
   return base::Bind(&SimpleFileSystem::DidCreateSnapshotFile,
@@ -362,6 +370,15 @@ void SimpleFileSystem::DidOpenFileSystem(
   } else {
     callbacks->didFail(fileapi::PlatformFileErrorToWebFileError(result));
   }
+}
+
+void SimpleFileSystem::DidDeleteFileSystem(
+    WebFileSystemCallbacks* callbacks,
+    base::PlatformFileError result) {
+  if (result == base::PLATFORM_FILE_OK)
+    callbacks->didSucceed();
+  else
+    callbacks->didFail(fileapi::PlatformFileErrorToWebFileError(result));
 }
 
 void SimpleFileSystem::DidCreateSnapshotFile(

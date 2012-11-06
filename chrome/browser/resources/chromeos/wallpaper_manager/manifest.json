@@ -13,10 +13,14 @@
     "tabs",
     "webRequest",
     "http://lh5.ggpht.com/",
-    "http://*.googleapis.com/"
+    "https://commondatastorage.googleapis.com/",
+    "https://storage.googleapis.com/"
   ],
   "app": {
     "launch": {
+      "container": "panel",
+      "width": 550,
+      "height": 440,
       "local_path": "main.html"
     }
   },

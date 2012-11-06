@@ -24,11 +24,8 @@ namespace {
 // that matches the window's bound will be used. Otherwise, it'll
 // return the active root window.
 aura::RootWindow* FindContainerRoot(const gfx::Rect& bounds) {
-  if (!DisplayController::IsExtendedDesktopEnabled() ||
-      (bounds.origin().x() == 0 && bounds.origin().y() == 0 &&
-       bounds.IsEmpty())) {
+  if (bounds.x() == 0 && bounds.y() == 0 && bounds.IsEmpty())
     return Shell::GetActiveRootWindow();
-  }
   return wm::GetRootWindowMatching(bounds);
 }
 
@@ -141,8 +138,7 @@ aura::Window* StackingController::GetSystemModalContainer(
 
 // TODO(oshima): Remove this once extended desktop is on by default.
 internal::AlwaysOnTopController*
-StackingController::GetAlwaysOnTopController(
-    aura::RootWindow* root_window) {
+StackingController::GetAlwaysOnTopController(aura::RootWindow* root_window) {
   internal::AlwaysOnTopController* controller =
       root_window->GetProperty(internal::kAlwaysOnTopControllerKey);
   if (!controller) {

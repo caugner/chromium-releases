@@ -12,8 +12,10 @@
 #include "content/common/content_export.h"
 #include "content/common/gpu/gpu_memory_allocation.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
+#include "content/common/gpu/gpu_rendering_stats.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/gpu_info.h"
+#include "content/public/common/gpu_memory_stats.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/ipc/gpu_command_buffer_traits.h"
@@ -57,9 +59,8 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
   IPC_STRUCT_MEMBER(int32, surface_id)
   IPC_STRUCT_MEMBER(uint64, surface_handle)
   IPC_STRUCT_MEMBER(int32, route_id)
-#if defined(OS_WIN)
   IPC_STRUCT_MEMBER(gfx::Size, size)
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
 #endif
   IPC_STRUCT_MEMBER(uint32, protection_state_id)
@@ -157,9 +158,19 @@ IPC_STRUCT_TRAITS_BEGIN(content::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(gpu_accessible)
   IPC_STRUCT_TRAITS_MEMBER(performance_stats)
   IPC_STRUCT_TRAITS_MEMBER(software_rendering)
+  IPC_STRUCT_TRAITS_MEMBER(sandboxed)
 #if defined(OS_WIN)
   IPC_STRUCT_TRAITS_MEMBER(dx_diagnostics)
 #endif
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::GPUVideoMemoryUsageStats::ProcessStats)
+  IPC_STRUCT_TRAITS_MEMBER(video_memory)
+  IPC_STRUCT_TRAITS_MEMBER(has_duplicates)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::GPUVideoMemoryUsageStats)
+  IPC_STRUCT_TRAITS_MEMBER(process_map)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(GpuMemoryAllocationForRenderer)
@@ -183,6 +194,15 @@ IPC_ENUM_TRAITS(gfx::GpuPreference)
 IPC_ENUM_TRAITS(gpu::error::ContextLostReason)
 
 IPC_ENUM_TRAITS(media::VideoCodecProfile)
+
+IPC_STRUCT_TRAITS_BEGIN(content::GpuRenderingStats)
+  IPC_STRUCT_TRAITS_MEMBER(global_texture_upload_count)
+  IPC_STRUCT_TRAITS_MEMBER(global_total_texture_upload_time)
+  IPC_STRUCT_TRAITS_MEMBER(texture_upload_count)
+  IPC_STRUCT_TRAITS_MEMBER(total_texture_upload_time)
+  IPC_STRUCT_TRAITS_MEMBER(global_total_processing_commands_time)
+  IPC_STRUCT_TRAITS_MEMBER(total_processing_commands_time)
+IPC_STRUCT_TRAITS_END()
 
 //------------------------------------------------------------------------------
 // GPU Messages
@@ -220,6 +240,14 @@ IPC_MESSAGE_CONTROL4(GpuMsg_CreateViewCommandBuffer,
 // Tells the GPU process to create a context for collecting graphics card
 // information.
 IPC_MESSAGE_CONTROL0(GpuMsg_CollectGraphicsInfo)
+
+// Tells the GPU process to report video_memory information for the task manager
+IPC_MESSAGE_CONTROL0(GpuMsg_GetVideoMemoryUsageStats)
+
+// Tells the GPU process' memory manager how many visible windows there are, so
+// it can partition memory amongst them.
+IPC_MESSAGE_CONTROL1(GpuMsg_SetVideoMemoryWindowCount,
+                     uint32 /* window_count */)
 
 // Tells the GPU process that the browser process has finished resizing the
 // view.
@@ -265,6 +293,10 @@ IPC_SYNC_MESSAGE_CONTROL2_1(GpuHostMsg_CreateViewCommandBuffer,
                             GPUCreateCommandBufferConfig, /* init_params */
                             int32 /* route_id */)
 
+// Response from GPU to a GputMsg_Initialize message.
+IPC_MESSAGE_CONTROL1(GpuHostMsg_Initialized,
+                     bool /* result */)
+
 // Response from GPU to a GpuHostMsg_EstablishChannel message.
 IPC_MESSAGE_CONTROL1(GpuHostMsg_ChannelEstablished,
                      IPC::ChannelHandle /* channel_handle */)
@@ -281,6 +313,10 @@ IPC_MESSAGE_CONTROL1(GpuHostMsg_DestroyCommandBuffer,
 // Response from GPU to a GpuMsg_CollectGraphicsInfo.
 IPC_MESSAGE_CONTROL1(GpuHostMsg_GraphicsInfoCollected,
                      content::GPUInfo /* GPU logging stats */)
+
+// Response from GPU to a GpuMsg_GetVideoMemory.
+IPC_MESSAGE_CONTROL1(GpuHostMsg_VideoMemoryUsageStats,
+                     content::GPUVideoMemoryUsageStats /* GPU memory stats */)
 
 // Message from GPU to add a GPU log message to the about:gpu page.
 IPC_MESSAGE_CONTROL3(GpuHostMsg_OnLogMessage,
@@ -357,7 +393,14 @@ IPC_MESSAGE_CONTROL4(GpuChannelMsg_EstablishStreamTexture,
                      /* type */
                      int32, /* primary_id */
                      int32 /* secondary_id */)
+#endif
 
+// Tells the GPU process to collect rendering stats.
+IPC_SYNC_MESSAGE_CONTROL1_1(GpuChannelMsg_CollectRenderingStatsForSurface,
+                            int32 /* surface_id */,
+                            content::GpuRenderingStats /* stats */)
+
+#if defined(OS_ANDROID)
 //------------------------------------------------------------------------------
 // Stream Texture Messages
 // Inform the renderer that a new frame is available.

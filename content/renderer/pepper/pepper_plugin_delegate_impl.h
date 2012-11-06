@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/id_map.h"
@@ -80,6 +81,8 @@ class PepperPluginDelegateImpl
   explicit PepperPluginDelegateImpl(RenderViewImpl* render_view);
   virtual ~PepperPluginDelegateImpl();
 
+  RenderViewImpl* render_view() { return render_view_; }
+
   // Attempts to create a PPAPI plugin for the given filepath. On success, it
   // will return the newly-created module.
   //
@@ -114,7 +117,8 @@ class PepperPluginDelegateImpl
       const gfx::Rect& paint_bounds,
       TransportDIB** dib,
       gfx::Rect* location,
-      gfx::Rect* clip);
+      gfx::Rect* clip,
+      float* scale_factor);
 
   // Called by RenderView when ViewMsg_AsyncOpenFile_ACK.
   void OnAsyncFileOpened(base::PlatformFileError error_code,
@@ -127,6 +131,10 @@ class PepperPluginDelegateImpl
 
   // Removes broker from pending_connect_broker_ if present. Returns true if so.
   bool StopWaitingForBrokerConnection(PepperBrokerImpl* broker);
+
+  // Called when we know whether permission to access the PPAPI broker was
+  // granted.
+  void OnPpapiBrokerPermissionResult(int request_id, bool result);
 
   // Notification that the render view has been focused or defocused. This
   // notifies all of the plugins.
@@ -195,6 +203,7 @@ class PepperPluginDelegateImpl
       PlatformAudioInputClient* client) OVERRIDE;
   virtual PlatformImage2D* CreateImage2D(int width, int height) OVERRIDE;
   virtual PlatformContext3D* CreateContext3D() OVERRIDE;
+  virtual void ReparentContext(PlatformContext3D*) OVERRIDE;
   virtual PlatformVideoCapture* CreateVideoCapture(
       const std::string& device_id,
       PlatformVideoCaptureEventHandler* handler) OVERRIDE;
@@ -298,6 +307,11 @@ class PepperPluginDelegateImpl
       uint32 socket_id) OVERRIDE;
 
   virtual uint32 UDPSocketCreate() OVERRIDE;
+  virtual void UDPSocketSetBoolSocketFeature(
+      webkit::ppapi::PPB_UDPSocket_Private_Impl* socket,
+      uint32 socket_id,
+      int32_t name,
+      bool value) OVERRIDE;
   virtual void UDPSocketBind(
       webkit::ppapi::PPB_UDPSocket_Private_Impl* socket,
       uint32 socket_id,
@@ -359,7 +373,6 @@ class PepperPluginDelegateImpl
   virtual void DidStopLoading() OVERRIDE;
   virtual void SetContentRestriction(int restrictions) OVERRIDE;
   virtual void SaveURLAs(const GURL& url) OVERRIDE;
-  virtual webkit_glue::P2PTransport* CreateP2PTransport() OVERRIDE;
   virtual double GetLocalTimeZoneOffset(base::Time t) OVERRIDE;
   virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size)
       OVERRIDE;
@@ -377,6 +390,7 @@ class PepperPluginDelegateImpl
   virtual int EnumerateDevices(
       PP_DeviceType_Dev type,
       const EnumerateDevicesCallback& callback) OVERRIDE;
+  virtual void StopEnumerateDevices(int request_id) OVERRIDE;
   virtual webkit_glue::ClipboardClient* CreateClipboardClient() const OVERRIDE;
   virtual std::string GetDeviceID() OVERRIDE;
   virtual PP_FlashLSORestrictions GetLocalDataRestrictions(
@@ -427,11 +441,12 @@ class PepperPluginDelegateImpl
                                   uint32 accepted_socket_id,
                                   const PP_NetAddress_Private& local_addr,
                                   const PP_NetAddress_Private& remote_addr);
-  void OnHostResolverResolveACK(uint32 plugin_dispatcher_id,
-                                uint32 host_resolver_id,
-                                bool succeeded,
-                                const std::string& canonical_name,
-                                const ppapi::NetAddressList& net_address_list);
+  void OnHostResolverResolveACK(
+      uint32 plugin_dispatcher_id,
+      uint32 host_resolver_id,
+      bool succeeded,
+      const std::string& canonical_name,
+      const std::vector<PP_NetAddress_Private>& net_address_list);
 
   CONTENT_EXPORT int GetRoutingID() const;
 
@@ -494,6 +509,10 @@ class PepperPluginDelegateImpl
 
   typedef IDMap<scoped_refptr<PepperBrokerImpl>, IDMapOwnPointer> BrokerMap;
   BrokerMap pending_connect_broker_;
+
+  typedef IDMap<base::WeakPtr<webkit::ppapi::PPB_Broker_Impl> >
+      PermissionRequestMap;
+  PermissionRequestMap pending_permission_requests_;
 
   // Whether or not the focus is on a PPAPI plugin
   webkit::ppapi::PluginInstance* focused_plugin_;

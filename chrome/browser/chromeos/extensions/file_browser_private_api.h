@@ -14,9 +14,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "chrome/browser/chromeos/extensions/file_browser_event_router.h"
-#include "chrome/browser/chromeos/gdata/gdata_cache.h"
-#include "chrome/browser/chromeos/gdata/gdata_errorcode.h"
+#include "chrome/browser/chromeos/gdata/drive_cache.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "googleurl/src/url_util.h"
 
@@ -28,6 +28,8 @@ class FileSystemContext;
 
 namespace gdata {
 struct SearchResultInfo;
+struct DriveWebAppInfo;
+class DriveWebAppsRegistry;
 }
 
 namespace ui {
@@ -72,7 +74,6 @@ class FileWatchBrowserFunctionBase : public AsyncExtensionFunction {
 
  private:
   bool GetLocalFilePath(
-      scoped_refptr<fileapi::FileSystemContext> file_system_context,
       const GURL& file_url, FilePath* local_path, FilePath* virtual_path);
   void RespondOnUIThread(bool success);
   void RunFileWatchOperationOnFileThread(
@@ -123,8 +124,52 @@ class GetFileTasksFileBrowserFunction : public AsyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  bool FindDriveAppTasks(const std::vector<GURL>& file_urls,
-                         ListValue* result_list);
+  struct FileInfo {
+    GURL file_url;
+    FilePath file_path;
+    std::string mime_type;
+  };
+  typedef std::vector<FileInfo> FileInfoList;
+
+  // Typedef for holding a map from app_id to DriveWebAppInfo so
+  // we can look up information on the apps.
+  typedef std::map<std::string, gdata::DriveWebAppInfo*> WebAppInfoMap;
+
+  // Look up apps in the registry, and collect applications that match the file
+  // paths given. Returns the intersection of all available application ids in
+  // |available_apps| and a map of application ID to the Drive web application
+  // info collected in |app_info| so details can be collected later. The caller
+  // takes ownership of the pointers in |app_info|.
+  static void IntersectAvailableDriveTasks(
+      gdata::DriveWebAppsRegistry* registry,
+      const FileInfoList& file_info_list,
+      WebAppInfoMap* app_info,
+      std::set<std::string>* available_apps);
+
+  // Takes a map of app_id to application information in |app_info|, and the set
+  // of |available_apps| and adds Drive tasks to the |result_list| for each of
+  // the |available_apps|.  If a default task is set in the result list,
+  // then |default_already_set| is set to true.
+  static void CreateDriveTasks(gdata::DriveWebAppsRegistry* registry,
+                               const WebAppInfoMap& app_info,
+                               const std::set<std::string>& available_apps,
+                               const std::set<std::string>& default_apps,
+                               ListValue* result_list,
+                               bool* default_already_set);
+
+  // Looks in the preferences and finds any of the available apps that are
+  // also listed as default apps for any of the files in the info list.
+  void FindDefaultDriveTasks(const FileInfoList& file_info_list,
+                             const std::set<std::string>& available_apps,
+                             std::set<std::string>* default_apps);
+
+  // Find the list of drive apps that can be used with the given file types. If
+  // a default task is set in the result list, then |default_already_set| is set
+  // to true.
+  bool FindDriveAppTasks(const FileInfoList& file_info_list,
+                         ListValue* result_list,
+                         bool* default_already_set);
+
 };
 
 // Implements the chrome.fileBrowserPrivate.executeTask method.
@@ -283,7 +328,7 @@ class AddMountFunction : public FileBrowserFunction {
   // A callback method to handle the result of SetMountedState.
   void OnMountedStateSet(const std::string& mount_type,
                          const FilePath::StringType& file_name,
-                         gdata::GDataFileError error,
+                         gdata::DriveFileError error,
                          const FilePath& file_path);
 };
 
@@ -355,9 +400,9 @@ class GetSizeStatsFunction : public FileBrowserFunction {
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
 
-  void GetGDataAvailableSpaceCallback(gdata::GDataFileError error,
-                                int64 bytes_total,
-                                int64 bytes_used);
+  void GetDriveAvailableSpaceCallback(gdata::DriveFileError error,
+                                      int64 bytes_total,
+                                      int64 bytes_used);
 
   void GetSizeStatsCallbackOnUIThread(size_t total_size_kb,
                                       size_t remaining_size_kb);
@@ -424,15 +469,15 @@ class FileDialogStringsFunction : public SyncExtensionFunction {
 // Retrieve property information for multiple files, returning a list of the
 // same length as the input list of file URLs.  If a particular file has an
 // error, then return a dictionary with the key "error" set to the error number
-// (gdata::GDataFileError) for that entry in the returned list.
-class GetGDataFilePropertiesFunction : public FileBrowserFunction {
+// (gdata::DriveFileError) for that entry in the returned list.
+class GetDriveFilePropertiesFunction : public FileBrowserFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataFileProperties");
 
-  GetGDataFilePropertiesFunction();
+  GetDriveFilePropertiesFunction();
 
  protected:
-  virtual ~GetGDataFilePropertiesFunction();
+  virtual ~GetDriveFilePropertiesFunction();
 
   void GetNextFileProperties();
   void CompleteGetFileProperties();
@@ -441,12 +486,12 @@ class GetGDataFilePropertiesFunction : public FileBrowserFunction {
   // file path and update its the properties.
   virtual void DoOperation(const FilePath& file_path,
                            base::DictionaryValue* properties,
-                           scoped_ptr<gdata::GDataEntryProto> entry_proto);
+                           scoped_ptr<gdata::DriveEntryProto> entry_proto);
 
   void OnOperationComplete(const FilePath& file_path,
                            base::DictionaryValue* properties,
-                           gdata::GDataFileError error,
-                           scoped_ptr<gdata::GDataEntryProto> entry_proto);
+                           gdata::DriveFileError error,
+                           scoped_ptr<gdata::DriveEntryProto> entry_proto);
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
@@ -457,12 +502,12 @@ class GetGDataFilePropertiesFunction : public FileBrowserFunction {
  private:
   void OnGetFileInfo(const FilePath& file_path,
                      base::DictionaryValue* property_dict,
-                     gdata::GDataFileError error,
-                     scoped_ptr<gdata::GDataEntryProto> entry_proto);
+                     gdata::DriveFileError error,
+                     scoped_ptr<gdata::DriveEntryProto> entry_proto);
 
   void CacheStateReceived(base::DictionaryValue* property_dict,
                           bool success,
-                          const gdata::GDataCacheEntry& cache_entry);
+                          const gdata::DriveCacheEntry& cache_entry);
 
   size_t current_index_;
   base::ListValue* path_list_;
@@ -473,16 +518,16 @@ class GetGDataFilePropertiesFunction : public FileBrowserFunction {
 // properties with the updated cache state.  The returned array is the
 // same length as the input list of file URLs.  If a particular file
 // has an error, then return a dictionary with the key "error" set to
-// the error number (gdata::GDataFileError) for that entry in the
+// the error number (gdata::DriveFileError) for that entry in the
 // returned list.
-class PinGDataFileFunction : public GetGDataFilePropertiesFunction {
+class PinDriveFileFunction : public GetDriveFilePropertiesFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.pinGDataFile");
 
-  PinGDataFileFunction();
+  PinDriveFileFunction();
 
  protected:
-  virtual ~PinGDataFileFunction();
+  virtual ~PinDriveFileFunction();
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
@@ -492,13 +537,13 @@ class PinGDataFileFunction : public GetGDataFilePropertiesFunction {
   virtual void DoOperation(
       const FilePath& file_path,
       base::DictionaryValue* properties,
-      scoped_ptr<gdata::GDataEntryProto> entry_proto) OVERRIDE;
+      scoped_ptr<gdata::DriveEntryProto> entry_proto) OVERRIDE;
 
   // Callback for SetPinState. Updates properties with error.
   void OnPinStateSet(const FilePath& path,
                      base::DictionaryValue* properties,
-                     scoped_ptr<gdata::GDataEntryProto> entry_proto,
-                     gdata::GDataFileError error,
+                     scoped_ptr<gdata::DriveEntryProto> entry_proto,
+                     gdata::DriveFileError error,
                      const std::string& resource_id,
                      const std::string& md5);
 
@@ -532,17 +577,17 @@ class GetFileLocationsFunction : public FileBrowserFunction {
 // This function puts empty strings instead of local paths for files could
 // not be obtained. For instance, this can happen if the user specifies a new
 // file name to save a file on gdata. There may be other reasons to fail. The
-// file manager should check if the local paths returned from getGDataFiles()
+// file manager should check if the local paths returned from getDriveFiles()
 // contain empty paths.
 // TODO(satorux): Should we propagate error types to the JavasScript layer?
-class GetGDataFilesFunction : public FileBrowserFunction {
+class GetDriveFilesFunction : public FileBrowserFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataFiles");
 
-  GetGDataFilesFunction();
+  GetDriveFilesFunction();
 
  protected:
-  virtual ~GetGDataFilesFunction();
+  virtual ~GetDriveFilesFunction();
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
@@ -552,18 +597,18 @@ class GetGDataFilesFunction : public FileBrowserFunction {
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
 
-  // Gets the file on the top of the |remaining_gdata_paths_| or sends the
+  // Gets the file on the top of the |remaining_drive_paths_| or sends the
   // response if the queue is empty.
   void GetFileOrSendResponse();
 
-  // Called by GDataFileSystem::GetFile(). Pops the file from
-  // |remaining_gdata_paths_|, and calls GetFileOrSendResponse().
-  void OnFileReady(gdata::GDataFileError error,
+  // Called by DriveFileSystem::GetFile(). Pops the file from
+  // |remaining_drive_paths_|, and calls GetFileOrSendResponse().
+  void OnFileReady(gdata::DriveFileError error,
                    const FilePath& local_path,
                    const std::string& unused_mime_type,
-                   gdata::GDataFileType file_type);
+                   gdata::DriveFileType file_type);
 
-  std::queue<FilePath> remaining_gdata_paths_;
+  std::queue<FilePath> remaining_drive_paths_;
   ListValue* local_paths_;
 };
 
@@ -618,28 +663,28 @@ class TransferFileFunction : public FileBrowserFunction {
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread()
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
 
-  // Helper callback for handling response from GDataFileSystem::TransferFile().
-  void OnTransferCompleted(gdata::GDataFileError error);
+  // Helper callback for handling response from DriveFileSystem::TransferFile().
+  void OnTransferCompleted(gdata::DriveFileError error);
 };
 
 // Read setting value.
-class GetGDataPreferencesFunction : public SyncExtensionFunction {
+class GetDrivePreferencesFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataPreferences");
 
  protected:
-  virtual ~GetGDataPreferencesFunction() {}
+  virtual ~GetDrivePreferencesFunction() {}
 
   virtual bool RunImpl() OVERRIDE;
 };
 
 // Write setting value.
-class SetGDataPreferencesFunction : public SyncExtensionFunction {
+class SetDrivePreferencesFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.setGDataPreferences");
 
  protected:
-  virtual ~SetGDataPreferencesFunction() {}
+  virtual ~SetDrivePreferencesFunction() {}
 
   virtual bool RunImpl() OVERRIDE;
 };
@@ -661,7 +706,7 @@ class SearchDriveFunction : public AsyncExtensionFunction {
                           const std::string& file_system_name,
                           const GURL& file_system_url);
   // Callback for gdata::SearchAsync called after file system is opened.
-  void OnSearch(gdata::GDataFileError error,
+  void OnSearch(gdata::DriveFileError error,
                 const GURL& next_feed,
                 scoped_ptr<std::vector<gdata::SearchResultInfo> > result_paths);
 

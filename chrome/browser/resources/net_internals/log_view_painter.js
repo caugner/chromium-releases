@@ -24,7 +24,7 @@ function canCollapseBeginWithEnd(beginEntry) {
  * Adds a child pre element to the end of |parent|, and writes the
  * formatted contents of |logEntries| to it.
  */
-printLogEntriesAsText = function(logEntries, parent, enableSecurityStripping,
+printLogEntriesAsText = function(logEntries, parent, privacyStripping,
                                  logCreationTime) {
   var entries = LogGroupEntry.createArrayFrom(logEntries);
   var tablePrinter = new TablePrinter();
@@ -68,7 +68,7 @@ printLogEntriesAsText = function(logEntries, parent, enableSecurityStripping,
     if (typeof entry.orig.params == 'object') {
       // Those 5 skipped cells are: two for "t=", and three for "st=".
       tablePrinter.setNewRowCellIndent(5 + entry.getDepth());
-      writeParameters(entry.orig, enableSecurityStripping, parameterOutputter);
+      writeParameters(entry.orig, privacyStripping, parameterOutputter);
 
       tablePrinter.setNewRowCellIndent(0);
     }
@@ -233,10 +233,14 @@ var ParameterOutputter = (function() {
  * Certain event types will have custom pretty printers. Everything else will
  * default to a JSON-like format.
  */
-function writeParameters(entry, enableSecurityStripping, out) {
-  // If security stripping is enabled, remove data as needed.
-  if (enableSecurityStripping)
+function writeParameters(entry, privacyStripping, out) {
+  if (privacyStripping) {
+    // If privacy stripping is enabled, remove data as needed.
     entry = stripCookiesAndLoginInfo(entry);
+  } else {
+    // If headers are in an object, convert them to an array for better display.
+    entry = reformatHeaders(entry);
+  }
 
   // Use any parameter writer available for this event type.
   var paramsWriter = getParamaterWriterForEventType(entry.type);
@@ -388,6 +392,34 @@ function indentLines(start, lines) {
 }
 
 /**
+ * If entry.param.headers exists and is an object other than an array, converts
+ * it into an array and returns a new entry.  Otherwise, just returns the
+ * original entry.
+ */
+function reformatHeaders(entry) {
+  // If there are no headers, or it is not an object other than an array,
+  // return |entry| without modification.
+  if (!entry.params || entry.params.headers === undefined ||
+      typeof entry.params.headers != 'object' ||
+      entry.params.headers instanceof Array) {
+    return entry;
+  }
+
+  // Duplicate the top level object, and |entry.params|, so the original object
+  // will not be modified.
+  entry = shallowCloneObject(entry);
+  entry.params = shallowCloneObject(entry.params);
+
+  // Convert headers to an array.
+  var headers = [];
+  for (var key in entry.params.headers)
+    headers.push(key + ': ' + entry.params.headers[key]);
+  entry.params.headers = headers;
+
+  return entry;
+}
+
+/**
  * Removes a cookie or unencrypted login information from a single HTTP header
  * line, if present, and returns the modified line.  Otherwise, just returns
  * the original line.
@@ -442,13 +474,16 @@ function stripCookieOrLoginInfo(line) {
  * If |entry| has headers, returns a copy of |entry| with all cookie and
  * unencrypted login text removed.  Otherwise, returns original |entry| object.
  * This is needed so that JSON log dumps can be made without affecting the
- * source data.
+ * source data.  Converts headers stored in objects to arrays.
  */
 stripCookiesAndLoginInfo = function(entry) {
-  if (!entry.params || !entry.params.headers ||
-      !(entry.params.headers instanceof Array)) {
+  if (!entry.params || entry.params.headers === undefined ||
+      !(entry.params.headers instanceof Object)) {
     return entry;
   }
+
+  // Make sure entry's headers are in an array.
+  entry = reformatHeaders(entry);
 
   // Duplicate the top level object, and |entry.params|.  All other fields are
   // just pointers to the original values, as they won't be modified, other than

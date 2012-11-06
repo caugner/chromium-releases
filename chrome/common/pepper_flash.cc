@@ -69,6 +69,8 @@ bool IsInFieldTrialGroup() {
 bool ConductingPepperFlashFieldTrial() {
 #if defined(OS_WIN)
   return true;
+#elif defined(OS_MACOSX)
+  return true;
 #else
   return false;
 #endif
@@ -82,6 +84,8 @@ bool IsPepperFlashEnabledByDefault() {
   return true;
 #elif defined(OS_LINUX)
   // For Linux, always try to use it (availability is checked elsewhere).
+  return true;
+#elif defined(OS_MACOSX)
   return true;
 #else
   return false;

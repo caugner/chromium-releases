@@ -77,9 +77,13 @@ public class ContentSettings {
     private int mDefaultFixedFontSize = 13;
     private boolean mLoadsImagesAutomatically = true;
     private boolean mJavaScriptEnabled = false;
+    private boolean mAllowUniversalAccessFromFileURLs = false;
+    private boolean mAllowFileAccessFromFileURLs = false;
     private boolean mJavaScriptCanOpenWindowsAutomatically = false;
     private PluginState mPluginState = PluginState.OFF;
     private boolean mDomStorageEnabled = false;
+    private boolean mAllowFileUrlAccess = true;
+    private boolean mAllowContentUrlAccess = true;
 
     // Not accessed by the native side.
     private String mDefaultUserAgent = "";
@@ -155,7 +159,8 @@ public class ContentSettings {
      * Package constructor to prevent clients from creating a new settings
      * instance. Must be called on the UI thread.
      */
-    ContentSettings(ContentViewCore contentViewCore, int nativeContentView) {
+    ContentSettings(ContentViewCore contentViewCore, int nativeContentView,
+            boolean isAccessFromFileURLsGrantedByDefault) {
         ThreadUtils.assertOnUiThread();
         mContentViewCore = contentViewCore;
         mCanModifySettings = mContentViewCore.isPersonalityView();
@@ -163,6 +168,11 @@ public class ContentSettings {
         assert mNativeContentSettings != 0;
         mCleanupReference = new CleanupReference(this,
                 new DestroyRunnable(mNativeContentSettings));
+
+        if (isAccessFromFileURLsGrantedByDefault) {
+            mAllowUniversalAccessFromFileURLs = true;
+            mAllowFileAccessFromFileURLs = true;
+        }
 
         mEventHandler = new EventHandler();
         if (mCanModifySettings) {
@@ -291,6 +301,51 @@ public class ContentSettings {
      */
     public boolean getDisplayZoomControls() {
         return mDisplayZoomControls;
+    }
+
+    /**
+     * Enables or disables file access within ContentView. File access is enabled by
+     * default.  Note that this enables or disables file system access only.
+     * Assets and resources are still accessible using file:///android_asset and
+     * file:///android_res.
+     */
+    public synchronized void setAllowFileAccess(boolean allow) {
+        assert mCanModifySettings;
+        if (mAllowFileUrlAccess != allow) {
+            mAllowFileUrlAccess = allow;
+            sendSyncMessage();
+        }
+    }
+
+    /**
+     * Gets whether this ContentView supports file access.
+     *
+     * @see #setAllowFileAccess
+     */
+    public synchronized boolean getAllowFileAccess() {
+        return mAllowFileUrlAccess;
+    }
+
+    /**
+     * Enables or disables content URL access within ContentView.  Content URL
+     * access allows ContentView to load content from a content provider installed
+     * in the system. The default is enabled.
+     */
+    public synchronized void setAllowContentAccess(boolean allow) {
+        assert mCanModifySettings;
+        if (mAllowContentUrlAccess != allow) {
+            mAllowContentUrlAccess = allow;
+            sendSyncMessage();
+        }
+    }
+
+    /**
+     * Gets whether this ContentView supports content URL access.
+     *
+     * @see #setAllowContentAccess
+     */
+    public synchronized boolean getAllowContentAccess() {
+        return mAllowContentUrlAccess;
     }
 
     boolean supportsMultiTouchZoom() {
@@ -523,6 +578,53 @@ public class ContentSettings {
     }
 
     /**
+     * Sets whether JavaScript running in the context of a file scheme URL
+     * should be allowed to access content from any origin. This includes
+     * access to content from other file scheme URLs. See
+     * {@link #setAllowFileAccessFromFileURLs}. To enable the most restrictive,
+     * and therefore secure policy, this setting should be disabled.
+     * <p>
+     * The default value is true for API level
+     * {@link android.os.Build.VERSION_CODES#ICE_CREAM_SANDWICH_MR1} and below,
+     * and false for API level {@link android.os.Build.VERSION_CODES#JELLY_BEAN}
+     * and above.
+     *
+     * @param flag whether JavaScript running in the context of a file scheme
+     *             URL should be allowed to access content from any origin
+     */
+    public synchronized void setAllowUniversalAccessFromFileURLs(boolean flag) {
+        assert mCanModifySettings;
+        if (mAllowUniversalAccessFromFileURLs != flag) {
+            mAllowUniversalAccessFromFileURLs = flag;
+            sendSyncMessage();
+        }
+    }
+
+    /**
+     * Sets whether JavaScript running in the context of a file scheme URL
+     * should be allowed to access content from other file scheme URLs. To
+     * enable the most restrictive, and therefore secure policy, this setting
+     * should be disabled. Note that the value of this setting is ignored if
+     * the value of {@link #getAllowUniversalAccessFromFileURLs} is true.
+     * <p>
+     * The default value is true for API level
+     * {@link android.os.Build.VERSION_CODES#ICE_CREAM_SANDWICH_MR1} and below,
+     * and false for API level {@link android.os.Build.VERSION_CODES#JELLY_BEAN}
+     * and above.
+     *
+     * @param flag whether JavaScript running in the context of a file scheme
+     *             URL should be allowed to access content from other file
+     *             scheme URLs
+     */
+    public synchronized void setAllowFileAccessFromFileURLs(boolean flag) {
+        assert mCanModifySettings;
+        if (mAllowFileAccessFromFileURLs != flag) {
+            mAllowFileAccessFromFileURLs = flag;
+            sendSyncMessage();
+        }
+    }
+
+    /**
      * Tell the WebView to load image resources automatically.
      * @param flag True if the WebView should load images automatically.
      */
@@ -550,6 +652,31 @@ public class ContentSettings {
      */
     public synchronized boolean getJavaScriptEnabled() {
         return mJavaScriptEnabled;
+    }
+
+    /**
+     * Gets whether JavaScript running in the context of a file scheme URL can
+     * access content from any origin. This includes access to content from
+     * other file scheme URLs.
+     *
+     * @return whether JavaScript running in the context of a file scheme URL
+     *         can access content from any origin
+     * @see #setAllowUniversalAccessFromFileURLs
+     */
+    public synchronized boolean getAllowUniversalAccessFromFileURLs() {
+        return mAllowUniversalAccessFromFileURLs;
+    }
+
+    /**
+     * Gets whether JavaScript running in the context of a file scheme URL can
+     * access content from other file scheme URLs.
+     *
+     * @return whether JavaScript running in the context of a file scheme URL
+     *         can access content from other file scheme URLs
+     * @see #setAllowFileAccessFromFileURLs
+     */
+    public synchronized boolean getAllowFileAccessFromFileURLs() {
+        return mAllowFileAccessFromFileURLs;
     }
 
     /**

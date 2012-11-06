@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/mac/mac_logging.h"
+#include "base/observer_list_threadsafe.h"
 #include "base/synchronization/lock.h"
 #include "crypto/mac_security_services_lock.h"
 #include "net/base/net_errors.h"
@@ -15,8 +16,11 @@
 
 namespace net {
 
-CertDatabase::CertDatabase() {
+CertDatabase::CertDatabase()
+    : observer_list_(new ObserverListThreadSafe<Observer>) {
 }
+
+CertDatabase::~CertDatabase() {}
 
 int CertDatabase::CheckUserCert(X509Certificate* cert) {
   if (!cert)
@@ -48,7 +52,7 @@ int CertDatabase::AddUserCert(X509Certificate* cert) {
   }
   switch (err) {
     case noErr:
-      CertDatabase::NotifyObserversOfUserCertAdded(cert);
+      CertDatabase::NotifyObserversOfCertAdded(cert);
       // Fall through.
     case errSecDuplicateItem:
       return OK;

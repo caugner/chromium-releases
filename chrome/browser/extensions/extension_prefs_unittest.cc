@@ -11,17 +11,18 @@
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_prefs.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
-#include "chrome/common/string_ordinal.h"
+#include "chrome/common/extensions/permissions/permissions_info.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/mock_notification_observer.h"
+#include "sync/api/string_ordinal.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -104,9 +105,9 @@ TEST_F(ExtensionPrefsLastPingDay, LastPingDay) {}
 
 namespace {
 
-void AddGalleryPermission(MediaGalleryPrefId gallery, bool has_access,
-                          std::vector<MediaGalleryPermission>* vector) {
-  MediaGalleryPermission permission;
+void AddGalleryPermission(chrome::MediaGalleryPrefId gallery, bool has_access,
+                          std::vector<chrome::MediaGalleryPermission>* vector) {
+  chrome::MediaGalleryPermission permission;
   permission.pref_id = gallery;
   permission.has_permission = has_access;
   vector->push_back(permission);
@@ -153,12 +154,16 @@ class MediaGalleriesPermissions : public ExtensionPrefsTest {
     extension2_expectation_.erase(extension2_expectation_.begin() + 1);
     extension3_expectation_.erase(extension3_expectation_.begin());
     Verify();
+
+    prefs()->UnsetMediaGalleryPermission(extension1_id_, 1);
+    extension1_expectation_.erase(extension1_expectation_.begin());
+    Verify();
   }
 
   virtual void Verify() {
     struct TestData {
       std::string* id;
-      std::vector<MediaGalleryPermission>* expectation;
+      std::vector<chrome::MediaGalleryPermission>* expectation;
     };
 
     const TestData test_data[] = {{&extension1_id_, &extension1_expectation_},
@@ -166,7 +171,7 @@ class MediaGalleriesPermissions : public ExtensionPrefsTest {
                                   {&extension3_id_, &extension3_expectation_},
                                   {&extension4_id_, &extension4_expectation_}};
     for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); i++) {
-      std::vector<MediaGalleryPermission> actual =
+      std::vector<chrome::MediaGalleryPermission> actual =
           prefs()->GetMediaGalleryPermissions(*test_data[i].id);
       EXPECT_EQ(test_data[i].expectation->size(), actual.size());
       for (size_t permission_entry = 0;
@@ -187,10 +192,10 @@ class MediaGalleriesPermissions : public ExtensionPrefsTest {
   std::string extension3_id_;
   std::string extension4_id_;
 
-  std::vector<MediaGalleryPermission> extension1_expectation_;
-  std::vector<MediaGalleryPermission> extension2_expectation_;
-  std::vector<MediaGalleryPermission> extension3_expectation_;
-  std::vector<MediaGalleryPermission> extension4_expectation_;
+  std::vector<chrome::MediaGalleryPermission> extension1_expectation_;
+  std::vector<chrome::MediaGalleryPermission> extension2_expectation_;
+  std::vector<chrome::MediaGalleryPermission> extension3_expectation_;
+  std::vector<chrome::MediaGalleryPermission> extension4_expectation_;
 };
 TEST_F(MediaGalleriesPermissions, MediaGalleries) {}
 
@@ -258,10 +263,24 @@ TEST_F(ExtensionPrefsEscalatePermissions, EscalatePermissions) {}
 class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
  public:
   virtual void Initialize() {
+    const APIPermissionInfo* permission_info =
+      PermissionsInfo::GetInstance()->GetByID(APIPermission::kSocket);
+
     extension_id_ = prefs_.AddExtensionAndReturnId("test");
 
     api_perm_set1_.insert(APIPermission::kTab);
     api_perm_set1_.insert(APIPermission::kBookmark);
+    scoped_ptr<APIPermission> permission(
+        permission_info->CreateAPIPermission());
+    {
+      scoped_ptr<ListValue> value(new ListValue());
+      value->Append(Value::CreateStringValue("tcp-connect:*.example.com:80"));
+      value->Append(Value::CreateStringValue("udp-bind::8080"));
+      value->Append(Value::CreateStringValue("udp-send-to::8888"));
+      if (!permission->FromValue(value.get()))
+        NOTREACHED();
+    }
+    api_perm_set1_.insert(permission.release());
 
     api_perm_set2_.insert(APIPermission::kHistory);
 
@@ -346,9 +365,7 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     permissions = new PermissionSet(
         api_perm_set2_, ehost_perm_set2_, shost_perm_set2_);
 
-    std::set_union(expected_apis.begin(), expected_apis.end(),
-                   api_perm_set2_.begin(), api_perm_set2_.end(),
-                   std::inserter(api_permissions_, api_permissions_.begin()));
+    APIPermissionSet::Union(expected_apis, api_perm_set2_, &api_permissions_);
 
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
     granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
@@ -475,7 +492,7 @@ class ExtensionPrefsBlacklist : public ExtensionPrefsTest {
 
     ExtensionList::const_iterator iter;
     for (iter = extensions_.begin(); iter != extensions_.end(); ++iter) {
-      EXPECT_FALSE(prefs()->IsExtensionBlacklisted((*iter)->id()));
+      EXPECT_TRUE(prefs()->UserMayLoad(*iter, NULL));
     }
     // Blacklist one installed and one not-installed extension id.
     std::set<std::string> blacklisted_ids;
@@ -485,15 +502,13 @@ class ExtensionPrefsBlacklist : public ExtensionPrefsTest {
   }
 
   virtual void Verify() {
-    // Make sure the two id's we expect to be blacklisted are.
-    EXPECT_TRUE(prefs()->IsExtensionBlacklisted(extensions_[0]->id()));
-    EXPECT_TRUE(prefs()->IsExtensionBlacklisted(not_installed_id_));
+    // Make sure the id we expect to be blacklisted is.
+    EXPECT_FALSE(prefs()->UserMayLoad(extensions_[0], NULL));
 
     // Make sure the other id's are not blacklisted.
     ExtensionList::const_iterator iter;
-    for (iter = extensions_.begin() + 1; iter != extensions_.end(); ++iter) {
-      EXPECT_FALSE(prefs()->IsExtensionBlacklisted((*iter)->id()));
-    }
+    for (iter = extensions_.begin() + 1; iter != extensions_.end(); ++iter)
+      EXPECT_TRUE(prefs()->UserMayLoad(*iter, NULL));
 
     // Make sure GetInstalledExtensionsInfo returns only the non-blacklisted
     // extensions data.
@@ -726,7 +741,7 @@ class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
     EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
     prefs()->OnExtensionInstalled(
         extension_.get(), Extension::DISABLED, false,
-        StringOrdinal());
+        syncer::StringOrdinal());
   }
 
   virtual void Verify() {
@@ -745,7 +760,7 @@ class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->WasAppDraggedByUser(extension_->id()));
     prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
-                                  false, StringOrdinal());
+                                  false, syncer::StringOrdinal());
   }
 
   virtual void Verify() {
@@ -781,6 +796,17 @@ class ExtensionPrefsFlags : public ExtensionPrefsTest {
       bookmark_extension_ = prefs_.AddExtensionWithManifestAndFlags(
           dictionary, Extension::INTERNAL, Extension::FROM_BOOKMARK);
     }
+
+    {
+      base::DictionaryValue dictionary;
+      dictionary.SetString(extension_manifest_keys::kName,
+                           "was_installed_by_default");
+      dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
+      default_extension_ = prefs_.AddExtensionWithManifestAndFlags(
+          dictionary,
+          Extension::INTERNAL,
+          Extension::WAS_INSTALLED_BY_DEFAULT);
+    }
   }
 
   virtual void Verify() {
@@ -789,11 +815,14 @@ class ExtensionPrefsFlags : public ExtensionPrefsTest {
 
     EXPECT_TRUE(prefs()->IsFromBookmark(bookmark_extension_->id()));
     EXPECT_FALSE(prefs()->IsFromWebStore(bookmark_extension_->id()));
+
+    EXPECT_TRUE(prefs()->WasInstalledByDefault(default_extension_->id()));
   }
 
  private:
   scoped_refptr<Extension> webstore_extension_;
   scoped_refptr<Extension> bookmark_extension_;
+  scoped_refptr<Extension> default_extension_;
 };
 TEST_F(ExtensionPrefsFlags, ExtensionPrefsFlags) {}
 
@@ -893,7 +922,7 @@ void ExtensionPrefsPrepopulatedTest::EnsureExtensionInstalled(Extension *ext) {
   for (size_t i = 0; i < arraysize(extensions); ++i) {
     if (ext == extensions[i] && !installed[i]) {
       prefs()->OnExtensionInstalled(ext, Extension::ENABLED,
-                                    false, StringOrdinal());
+                                    false, syncer::StringOrdinal());
       installed[i] = true;
       break;
     }

@@ -6,12 +6,18 @@
 
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/maximize_bubble_controller.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace/frame_maximize_button.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "base/command_line.h"
 #include "ui/aura/aura_switches.h"
+#include "ui/aura/client/aura_constants.h"
+#include "ui/aura/focus_manager.h"
 #include "ui/aura/test/event_generator.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/base/gestures/gesture_configuration.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/test/test_views_delegate.h"
 #include "ui/views/widget/widget.h"
@@ -151,7 +157,6 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
   CustomFrameViewAsh::TestApi test(frame);
   views::View* view = test.maximize_button();
   gfx::Point center = view->GetBoundsInScreen().CenterPoint();
-  const int kGridSize = ash::Shell::GetInstance()->GetGridSize();
 
   aura::test::EventGenerator generator(window->GetRootWindow(), center);
 
@@ -167,7 +172,7 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
     internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::RIGHT_EDGE, kGridSize);
+        internal::SnapSizer::RIGHT_EDGE);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
   }
 
@@ -183,7 +188,7 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
     internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::LEFT_EDGE, kGridSize);
+        internal::SnapSizer::LEFT_EDGE);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
   }
 
@@ -216,7 +221,7 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
     internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::RIGHT_EDGE, kGridSize);
+        internal::SnapSizer::RIGHT_EDGE);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
   }
 
@@ -233,7 +238,7 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
     EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
     EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
     internal::SnapSizer sizer(window, center,
-        internal::SnapSizer::LEFT_EDGE, kGridSize);
+        internal::SnapSizer::LEFT_EDGE);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
   }
 
@@ -253,6 +258,381 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
   // Test with gesture events.
 
   widget->Close();
+}
+
+// Test that closing the (browser) window with an opened balloon does not
+// crash the system. In other words: Make sure that shutting down the frame
+// destroys the opened balloon in an orderly fashion.
+TEST_F(CustomFrameViewAshTest, MaximizeButtonExternalShutDown) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_TRUE(ash::wm::IsWindowNormal(window));
+
+  // Move the mouse cursor over the button to bring up the maximizer bubble.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+
+  // Even though the widget is closing the bubble menu should not crash upon
+  // its delayed destruction.
+  widget->CloseNow();
+}
+
+// Test that hovering over a button in the balloon dialog will show the phantom
+// window. Moving then away from the button will hide it again. Then check that
+// pressing and dragging the button itself off the button will also release the
+// phantom window.
+TEST_F(CustomFrameViewAshTest, MaximizeLeftButtonDragOut) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_TRUE(ash::wm::IsWindowNormal(window));
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+
+  // Move the mouse cursor over the button to bring up the maximizer bubble.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+
+  // Move the mouse over the left maximize button.
+  gfx::Point left_max_pos = maximize_button->maximizer()->
+      GetButtonForUnitTest(SNAP_LEFT)->GetBoundsInScreen().CenterPoint();
+
+  generator.MoveMouseTo(left_max_pos);
+  // Expect the phantom window to be open.
+  EXPECT_TRUE(maximize_button->phantom_window_open());
+
+  // Move away to see the window being destroyed.
+  generator.MoveMouseTo(off_pos);
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+
+  // Move back over the button.
+  generator.MoveMouseTo(button_pos);
+  generator.MoveMouseTo(left_max_pos);
+  EXPECT_TRUE(maximize_button->phantom_window_open());
+
+  // Press button and drag out of dialog.
+  generator.PressLeftButton();
+  generator.MoveMouseTo(off_pos);
+  generator.ReleaseLeftButton();
+
+  // Check that the phantom window is also gone.
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+}
+
+// Test that clicking a button in the maximizer bubble (in this case the
+// maximize left button) will do the requested action.
+TEST_F(CustomFrameViewAshTest, MaximizeLeftByButton) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_TRUE(ash::wm::IsWindowNormal(window));
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+
+  // Move the mouse cursor over the button to bring up the maximizer bubble.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+
+  // Move the mouse over the left maximize button.
+  gfx::Point left_max_pos = maximize_button->maximizer()->
+      GetButtonForUnitTest(SNAP_LEFT)->GetBoundsInScreen().CenterPoint();
+  generator.MoveMouseTo(left_max_pos);
+  EXPECT_TRUE(maximize_button->phantom_window_open());
+  generator.ClickLeftButton();
+
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+  EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
+  internal::SnapSizer sizer(window, button_pos,
+                            internal::SnapSizer::LEFT_EDGE);
+  sizer.SelectDefaultSizeAndDisableResize();
+  EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
+}
+
+// Test that the activation focus does not change when the bubble gets shown.
+TEST_F(CustomFrameViewAshTest, MaximizeKeepFocus) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_TRUE(ash::wm::IsWindowNormal(window));
+
+  aura::Window* active = window->GetFocusManager()->GetFocusedWindow();
+
+  // Move the mouse cursor over the button to bring up the maximizer bubble.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+
+  // Check that the focused window is still the same.
+  EXPECT_EQ(active, window->GetFocusManager()->GetFocusedWindow());
+}
+
+TEST_F(CustomFrameViewAshTest, MaximizeTap) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  aura::RootWindow* root_window = window->GetRootWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+
+  const int touch_default_radius =
+      ui::GestureConfiguration::default_radius();
+  ui::GestureConfiguration::set_default_radius(0);
+
+  const int kTouchId = 2;
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, button_pos, kTouchId,
+      base::Time::NowFromSystemTime() - base::Time());
+  root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
+
+  button_pos.Offset(9, 8);
+  ui::TouchEvent release(
+      ui::ET_TOUCH_RELEASED, button_pos, kTouchId,
+      press.time_stamp() + base::TimeDelta::FromMilliseconds(50));
+  root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
+
+  ui::GestureConfiguration::set_default_radius(touch_default_radius);
+}
+
+// Test that only the left button will activate the maximize button.
+TEST_F(CustomFrameViewAshTest, OnlyLeftButtonMaximizes) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_TRUE(ash::wm::IsWindowNormal(window));
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+
+  // Move the mouse cursor over the button.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+
+  // After pressing the left button the button should get triggered.
+  generator.PressLeftButton();
+  RunAllPendingInMessageLoop();
+  EXPECT_TRUE(maximize_button->is_snap_enabled());
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+
+  // Pressing the right button then should cancel the operation.
+  generator.PressRightButton();
+  RunAllPendingInMessageLoop();
+  EXPECT_FALSE(maximize_button->maximizer());
+
+  // After releasing the second button the window shouldn't be maximized.
+  generator.ReleaseRightButton();
+  generator.ReleaseLeftButton();
+  RunAllPendingInMessageLoop();
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+
+  // Second experiment: Starting with right should also not trigger.
+  generator.MoveMouseTo(off_pos);
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+
+  // Pressing first the right button should not activate.
+  generator.PressRightButton();
+  RunAllPendingInMessageLoop();
+  EXPECT_FALSE(maximize_button->is_snap_enabled());
+
+  // Pressing then additionally the left button shouldn't activate either.
+  generator.PressLeftButton();
+  RunAllPendingInMessageLoop();
+  EXPECT_FALSE(maximize_button->is_snap_enabled());
+  generator.ReleaseRightButton();
+  generator.ReleaseLeftButton();
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+}
+
+// Click a button of window maximize functionality.
+// If |snap_type| is SNAP_NONE the FrameMaximizeButton gets clicked, otherwise
+// the associated snap button.
+// |Window| is the window which owns the maximize button.
+// |maximize_button| is the FrameMaximizeButton which controls the window.
+void ClickMaxButton(
+    ash::FrameMaximizeButton* maximize_button,
+    aura::Window* window,
+    SnapType snap_type) {
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  generator.MoveMouseTo(off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+
+  // Move the mouse cursor over the button.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+
+  if (snap_type != SNAP_NONE) {
+    gfx::Point left_max_pos = maximize_button->maximizer()->
+        GetButtonForUnitTest(snap_type)->GetBoundsInScreen().CenterPoint();
+    generator.MoveMouseTo(left_max_pos);
+    EXPECT_TRUE(maximize_button->phantom_window_open());
+  }
+  // After pressing the left button the button should get triggered.
+  generator.ClickLeftButton();
+  EXPECT_FALSE(maximize_button->maximizer());
+}
+
+// Test that the restore from left/right maximize is properly done.
+TEST_F(CustomFrameViewAshTest, MaximizeLeftRestore) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  widget->SetBounds(gfx::Rect(10, 10, 100, 100));
+  gfx::Rect initial_bounds = widget->GetWindowBoundsInScreen();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+
+  ClickMaxButton(maximize_button, window, SNAP_LEFT);
+  // The window should not be maximized.
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+  // But the bounds should be different.
+  gfx::Rect new_bounds = widget->GetWindowBoundsInScreen();
+  EXPECT_EQ(0, new_bounds.x());
+  EXPECT_EQ(0, new_bounds.y());
+
+  // Now click the same button again to see that it restores.
+  ClickMaxButton(maximize_button, window, SNAP_LEFT);
+  // But the bounds should be restored.
+  new_bounds = widget->GetWindowBoundsInScreen();
+  EXPECT_EQ(new_bounds.x(), initial_bounds.x());
+  EXPECT_EQ(new_bounds.y(), initial_bounds.x());
+  EXPECT_EQ(new_bounds.width(), initial_bounds.width());
+  EXPECT_EQ(new_bounds.height(), initial_bounds.height());
+  // Make sure that there is no restore rectangle left.
+  EXPECT_EQ(NULL, window->GetProperty(aura::client::kRestoreBoundsKey));
+}
+
+// Maximize, left/right maximize and then restore should works.
+TEST_F(CustomFrameViewAshTest, MaximizeMaximizeLeftRestore) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  widget->SetBounds(gfx::Rect(10, 10, 100, 100));
+  gfx::Rect initial_bounds = widget->GetWindowBoundsInScreen();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+
+  ClickMaxButton(maximize_button, window, SNAP_NONE);
+  EXPECT_TRUE(ash::wm::IsWindowMaximized(window));
+
+  ClickMaxButton(maximize_button, window, SNAP_LEFT);
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+  gfx::Rect new_bounds = widget->GetWindowBoundsInScreen();
+  EXPECT_EQ(0, new_bounds.x());
+  EXPECT_EQ(0, new_bounds.y());
+
+  // Now click the same button again to see that it restores.
+  ClickMaxButton(maximize_button, window, SNAP_LEFT);
+  RunAllPendingInMessageLoop();
+  // But the bounds should be restored.
+  new_bounds = widget->GetWindowBoundsInScreen();
+  EXPECT_EQ(new_bounds.x(), initial_bounds.x());
+  EXPECT_EQ(new_bounds.y(), initial_bounds.x());
+  EXPECT_EQ(new_bounds.width(), initial_bounds.width());
+  EXPECT_EQ(new_bounds.height(), initial_bounds.height());
+  // Make sure that there is no restore rectangle left.
+  EXPECT_EQ(NULL, window->GetProperty(aura::client::kRestoreBoundsKey));
+}
+
+// Left/right maximize, maximize and then restore should work.
+TEST_F(CustomFrameViewAshTest, MaximizeLeftMaximizeRestore) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  widget->SetBounds(gfx::Rect(10, 10, 100, 100));
+  gfx::Rect initial_bounds = widget->GetWindowBoundsInScreen();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+
+  ClickMaxButton(maximize_button, window, SNAP_LEFT);
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+
+  ClickMaxButton(maximize_button, window, SNAP_NONE);
+  EXPECT_TRUE(ash::wm::IsWindowMaximized(window));
+
+  ClickMaxButton(maximize_button, window, SNAP_NONE);
+  EXPECT_FALSE(ash::wm::IsWindowMaximized(window));
+  gfx::Rect new_bounds = widget->GetWindowBoundsInScreen();
+  EXPECT_EQ(new_bounds.x(), initial_bounds.x());
+  EXPECT_EQ(new_bounds.y(), initial_bounds.x());
+  EXPECT_EQ(new_bounds.width(), initial_bounds.width());
+  EXPECT_EQ(new_bounds.height(), initial_bounds.height());
+  // Make sure that there is no restore rectangle left.
+  EXPECT_EQ(NULL, window->GetProperty(aura::client::kRestoreBoundsKey));
+}
+
+// Test that minimizing the window per keyboard closes the maximize bubble.
+TEST_F(CustomFrameViewAshTest, MinimizePerKeyClosesBubble) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  widget->SetBounds(gfx::Rect(10, 10, 100, 100));
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  generator.MoveMouseTo(off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+
+  // Move the mouse cursor over the maximize button.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+
+  // We simulate the keystroke by calling minimizeWindow directly.
+  wm::MinimizeWindow(window);
+
+  EXPECT_TRUE(ash::wm::IsWindowMinimized(window));
+  EXPECT_FALSE(maximize_button->maximizer());
 }
 
 }  // namespace internal

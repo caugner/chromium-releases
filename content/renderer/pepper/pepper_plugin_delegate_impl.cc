@@ -24,8 +24,8 @@
 #include "content/common/fileapi/file_system_dispatcher.h"
 #include "content/common/fileapi/file_system_messages.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
-#include "content/common/pepper_plugin_registry.h"
 #include "content/common/pepper_messages.h"
+#include "content/common/pepper_plugin_registry.h"
 #include "content/common/quota_dispatcher.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
@@ -40,20 +40,19 @@
 #include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
 #include "content/renderer/media/pepper_platform_video_decoder_impl.h"
-#include "content/renderer/p2p/p2p_transport_impl.h"
 #include "content/renderer/p2p/socket_dispatcher.h"
 #include "content/renderer/pepper/content_renderer_pepper_host_factory.h"
 #include "content/renderer/pepper/pepper_broker_impl.h"
 #include "content/renderer/pepper/pepper_device_enumeration_event_handler.h"
 #include "content/renderer/pepper/pepper_hung_plugin_filter.h"
 #include "content/renderer/pepper/pepper_in_process_resource_creation.h"
-#include "content/renderer/pepper/pepper_instance_state_accessor.h"
 #include "content/renderer/pepper/pepper_platform_audio_input_impl.h"
 #include "content/renderer/pepper/pepper_platform_audio_output_impl.h"
 #include "content/renderer/pepper/pepper_platform_context_3d_impl.h"
 #include "content/renderer/pepper/pepper_platform_image_2d_impl.h"
 #include "content/renderer/pepper/pepper_platform_video_capture_impl.h"
 #include "content/renderer/pepper/pepper_proxy_channel_delegate_impl.h"
+#include "content/renderer/pepper/renderer_ppapi_host_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/render_widget_fullscreen_pepper.h"
@@ -86,9 +85,9 @@
 #include "ui/gfx/size.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/plugins/npapi/webplugin.h"
-#include "webkit/plugins/ppapi/ppb_file_io_impl.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
+#include "webkit/plugins/ppapi/ppb_file_io_impl.h"
 #include "webkit/plugins/ppapi/ppb_flash_impl.h"
 #include "webkit/plugins/ppapi/ppb_tcp_server_socket_private_impl.h"
 #include "webkit/plugins/ppapi/ppb_tcp_socket_private_impl.h"
@@ -103,16 +102,18 @@ namespace content {
 
 namespace {
 
+// This class wraps a dispatcher and has the same lifetime. A dispatcher has
+// the same lifetime as a plugin module, which is longer than any particular
+// RenderView or plugin instance.
 class HostDispatcherWrapper
     : public webkit::ppapi::PluginDelegate::OutOfProcessProxy {
  public:
-  HostDispatcherWrapper(RenderViewImpl* rv,
-                        webkit::ppapi::PluginModule* module,
+  HostDispatcherWrapper(webkit::ppapi::PluginModule* module,
+                        int plugin_child_id,
                         const ppapi::PpapiPermissions& perms)
       : module_(module),
-        instance_state_(module),
-        host_factory_(rv, perms, &instance_state_),
-        render_view_(rv) {
+        plugin_child_id_(plugin_child_id),
+        permissions_(perms) {
   }
   virtual ~HostDispatcherWrapper() {}
 
@@ -134,10 +135,6 @@ class HostDispatcherWrapper
     dispatcher_.reset(new ppapi::proxy::HostDispatcher(
         module_->pp_module(), local_get_interface, filter));
 
-    host_.reset(new ppapi::host::PpapiHost(dispatcher_.get(), &host_factory_,
-                                           permissions));
-    dispatcher_->AddFilter(host_.get());
-
     if (!dispatcher_->InitHostWithChannel(dispatcher_delegate_.get(),
                                           channel_handle,
                                           true,  // Client.
@@ -148,7 +145,6 @@ class HostDispatcherWrapper
     }
     dispatcher_->channel()->SetRestrictDispatchChannelGroup(
         content::kRendererRestrictDispatchGroup_Pepper);
-    render_view_->PpapiPluginCreated(host_.get());
     return true;
   }
 
@@ -158,18 +154,46 @@ class HostDispatcherWrapper
   }
   virtual void AddInstance(PP_Instance instance) {
     ppapi::proxy::HostDispatcher::SetForInstance(instance, dispatcher_.get());
+
+    RendererPpapiHostImpl* host =
+        RendererPpapiHostImpl::GetForPPInstance(instance);
+    // TODO(brettw) remove this null check when the old-style pepper-based
+    // browser tag is removed from this file. Getting this notification should
+    // always give us an instance we can find in the map otherwise, but that
+    // isn't true for browser tag support.
+    if (host) {
+      RenderView* render_view = host->GetRenderViewForInstance(instance);
+      render_view->Send(new ViewHostMsg_DidCreateOutOfProcessPepperInstance(
+          plugin_child_id_,
+          instance,
+          render_view->GetRoutingID()));
+    }
   }
   virtual void RemoveInstance(PP_Instance instance) {
     ppapi::proxy::HostDispatcher::RemoveForInstance(instance);
+
+    RendererPpapiHostImpl* host =
+        RendererPpapiHostImpl::GetForPPInstance(instance);
+    // TODO(brettw) remove null check as described in AddInstance.
+    if (host) {
+      RenderView* render_view = host->GetRenderViewForInstance(instance);
+      render_view->Send(new ViewHostMsg_DidDeleteOutOfProcessPepperInstance(
+          plugin_child_id_,
+          instance));
+    }
   }
+
+  ppapi::proxy::HostDispatcher* dispatcher() { return dispatcher_.get(); }
 
  private:
   webkit::ppapi::PluginModule* module_;
-  PepperInstanceStateAccessorImpl instance_state_;
-  ContentRendererPepperHostFactory host_factory_;
 
-  RenderViewImpl* render_view_;
-  scoped_ptr<ppapi::host::PpapiHost> host_;
+  // ID that the browser process uses to idetify the child process for the
+  // plugin. This isn't directly useful from our process (the renderer) except
+  // in messages to the browser to disambiguate plugins.
+  int plugin_child_id_;
+
+  ppapi::PpapiPermissions permissions_;
 
   scoped_ptr<ppapi::proxy::HostDispatcher> dispatcher_;
   scoped_ptr<ppapi::proxy::ProxyChannel::Delegate> dispatcher_delegate_;
@@ -279,6 +303,23 @@ void DoNotifyCloseFile(const GURL& path, base::PlatformFileError /* unused */) {
   ChildThread::current()->file_system_dispatcher()->NotifyCloseFile(path);
 }
 
+void CreateHostForInProcessModule(RenderViewImpl* render_view,
+                                  webkit::ppapi::PluginModule* module,
+                                  const webkit::WebPluginInfo& webplugin_info) {
+  // First time an in-process plugin was used, make a host for it.
+  const PepperPluginInfo* info =
+      PepperPluginRegistry::GetInstance()->GetInfoForPlugin(webplugin_info);
+  DCHECK(!info->is_out_of_process);
+
+  ppapi::PpapiPermissions perms(
+      PepperPluginRegistry::GetInstance()->GetInfoForPlugin(
+          webplugin_info)->permissions);
+  RendererPpapiHostImpl* host_impl =
+      content::RendererPpapiHostImpl::CreateOnModuleForInProcess(
+          module, perms);
+  render_view->PpapiPluginCreated(host_impl);
+}
+
 }  // namespace
 
 PepperPluginDelegateImpl::PepperPluginDelegateImpl(RenderViewImpl* render_view)
@@ -306,8 +347,15 @@ PepperPluginDelegateImpl::CreatePepperPluginModule(
   FilePath path(webplugin_info.path);
   scoped_refptr<webkit::ppapi::PluginModule> module =
       PepperPluginRegistry::GetInstance()->GetLiveModule(path);
-  if (module)
+  if (module) {
+    if (!module->GetEmbedderState()) {
+      // If the module exists and no embedder state was associated with it,
+      // then the module was one of the ones preloaded and is an in-process
+      // plugin. We need to associate our host state with it.
+      CreateHostForInProcessModule(render_view_, module, webplugin_info);
+    }
     return module;
+  }
 
   // In-process plugins will have always been created up-front to avoid the
   // sandbox restrictions. So getting here implies it doesn't exist or should
@@ -346,7 +394,7 @@ PepperPluginDelegateImpl::CreatePepperPluginModule(
       permissions);
   PepperPluginRegistry::GetInstance()->AddLiveModule(path, module);
   scoped_ptr<HostDispatcherWrapper> dispatcher(
-      new HostDispatcherWrapper(render_view_, module, permissions));
+      new HostDispatcherWrapper(module, plugin_child_id, permissions));
   if (!dispatcher->Init(
           channel_handle,
           webkit::ppapi::PluginModule::GetLocalGetInterfaceFunc(),
@@ -354,6 +402,12 @@ PepperPluginDelegateImpl::CreatePepperPluginModule(
           permissions,
           hung_filter.get()))
     return scoped_refptr<webkit::ppapi::PluginModule>();
+
+  RendererPpapiHostImpl* host_impl =
+      content::RendererPpapiHostImpl::CreateOnModuleForOutOfProcess(
+          module, dispatcher->dispatcher(), permissions);
+  render_view_->PpapiPluginCreated(host_impl);
+
   module->InitAsProxied(dispatcher.release());
   return module;
 }
@@ -362,7 +416,7 @@ scoped_refptr<webkit::ppapi::PluginModule>
     PepperPluginDelegateImpl::CreateBrowserPluginModule(
         const IPC::ChannelHandle& channel_handle,
         int guest_process_id) {
-  BrowserPluginRegistry* registry =
+  content::old::BrowserPluginRegistry* registry =
       RenderThreadImpl::current()->browser_plugin_registry();
   scoped_refptr<webkit::ppapi::PluginModule> module =
       registry->GetModule(guest_process_id);
@@ -385,7 +439,7 @@ scoped_refptr<webkit::ppapi::PluginModule>
   RenderThreadImpl::current()->browser_plugin_registry()->AddModule(
       guest_process_id, module);
   scoped_ptr<HostDispatcherWrapper> dispatcher(
-      new HostDispatcherWrapper(render_view_, module, permissions));
+      new HostDispatcherWrapper(module, 0, permissions));
   if (!dispatcher->Init(
           channel_handle,
           webkit::ppapi::PluginModule::GetLocalGetInterfaceFunc(),
@@ -455,6 +509,7 @@ bool PepperPluginDelegateImpl::StopWaitingForBrokerConnection(
       return true;
     }
   }
+
   return false;
 }
 
@@ -514,13 +569,17 @@ PepperPluginDelegateImpl::GetBitmapForOptimizedPluginPaint(
     const gfx::Rect& paint_bounds,
     TransportDIB** dib,
     gfx::Rect* location,
-    gfx::Rect* clip) {
+    gfx::Rect* clip,
+    float* scale_factor) {
   for (std::set<webkit::ppapi::PluginInstance*>::iterator i =
            active_instances_.begin();
        i != active_instances_.end(); ++i) {
     webkit::ppapi::PluginInstance* instance = *i;
-    if (instance->GetBitmapForOptimizedPluginPaint(
-            paint_bounds, dib, location, clip))
+    // In Flash fullscreen , the plugin contents should be painted onto the
+    // fullscreen widget instead of the web page.
+    if (!instance->FlashIsFullscreenOrPending() &&
+        instance->GetBitmapForOptimizedPluginPaint(paint_bounds, dib, location,
+                                                   clip, scale_factor))
       return *i;
   }
   return NULL;
@@ -694,9 +753,9 @@ void PepperPluginDelegateImpl::InstanceDeleted(
 scoped_ptr< ::ppapi::thunk::ResourceCreationAPI>
 PepperPluginDelegateImpl::CreateResourceCreationAPI(
     webkit::ppapi::PluginInstance* instance) {
-  return scoped_ptr< ::ppapi::thunk::ResourceCreationAPI>(
-      new PepperInProcessResourceCreation(render_view_, instance,
-                                          instance->module()->permissions()));
+  RendererPpapiHostImpl* host_impl = static_cast<RendererPpapiHostImpl*>(
+      instance->module()->GetEmbedderState());
+  return host_impl->CreateInProcessResourceCreationAPI(instance);
 }
 
 SkBitmap* PepperPluginDelegateImpl::GetSadPluginBitmap() {
@@ -726,6 +785,11 @@ webkit::ppapi::PluginDelegate::PlatformContext3D*
 #else
   return NULL;
 #endif
+}
+
+void PepperPluginDelegateImpl::ReparentContext(
+    webkit::ppapi::PluginDelegate::PlatformContext3D* context) {
+  static_cast<PlatformContext3DImpl*>(context)->SetParentContext(this);
 }
 
 webkit::ppapi::PluginDelegate::PlatformVideoCapture*
@@ -788,26 +852,56 @@ PepperPluginDelegateImpl::ConnectToBroker(
     webkit::ppapi::PPB_Broker_Impl* client) {
   DCHECK(client);
 
-  // If a broker needs to be created, this will ensure it does not get deleted
-  // before Connect() adds a reference.
-  scoped_refptr<PepperBrokerImpl> broker_impl;
-
   webkit::ppapi::PluginModule* plugin_module =
       webkit::ppapi::ResourceHelper::GetPluginModule(client);
   if (!plugin_module)
     return NULL;
 
-  webkit::ppapi::PluginDelegate::Broker* broker = plugin_module->GetBroker();
-  if (!broker) {
-    broker_impl = CreateBroker(plugin_module);
-    if (!broker_impl.get())
+  scoped_refptr<PepperBrokerImpl> broker =
+      static_cast<PepperBrokerImpl*>(plugin_module->GetBroker());
+  if (!broker.get()) {
+    broker = CreateBroker(plugin_module);
+    if (!broker.get())
       return NULL;
-    broker = broker_impl;
   }
 
-  // Adds a reference, ensuring not deleted when broker_impl goes out of scope.
-  broker->Connect(client);
+  int request_id = pending_permission_requests_.Add(
+      new base::WeakPtr<webkit::ppapi::PPB_Broker_Impl>(client->AsWeakPtr()));
+  if (!render_view_->Send(
+          new ViewHostMsg_RequestPpapiBrokerPermission(
+              render_view_->routing_id(),
+              request_id,
+              client->GetDocumentUrl(),
+              plugin_module->path()))) {
+    return NULL;
+  }
+
+  // Adds a reference, ensuring that the broker is not deleted when
+  // |broker| goes out of scope.
+  broker->AddPendingConnect(client);
+
   return broker;
+}
+
+void PepperPluginDelegateImpl::OnPpapiBrokerPermissionResult(
+    int request_id,
+    bool result) {
+  scoped_ptr<base::WeakPtr<webkit::ppapi::PPB_Broker_Impl> > client_ptr(
+      pending_permission_requests_.Lookup(request_id));
+  DCHECK(client_ptr.get());
+  pending_permission_requests_.Remove(request_id);
+  base::WeakPtr<webkit::ppapi::PPB_Broker_Impl> client = *client_ptr;
+  if (!client)
+    return;
+
+  webkit::ppapi::PluginModule* plugin_module =
+      webkit::ppapi::ResourceHelper::GetPluginModule(client);
+  if (!plugin_module)
+    return;
+
+  PepperBrokerImpl* broker =
+      static_cast<PepperBrokerImpl*>(plugin_module->GetBroker());
+  broker->OnBrokerPermissionResult(client, result);
 }
 
 bool PepperPluginDelegateImpl::AsyncOpenFile(
@@ -1125,11 +1219,22 @@ uint32 PepperPluginDelegateImpl::UDPSocketCreate() {
   return socket_id;
 }
 
+void PepperPluginDelegateImpl::UDPSocketSetBoolSocketFeature(
+    webkit::ppapi::PPB_UDPSocket_Private_Impl* socket,
+    uint32 socket_id,
+    int32_t name,
+    bool value) {
+  render_view_->Send(
+      new PpapiHostMsg_PPBUDPSocket_SetBoolSocketFeature(
+          render_view_->routing_id(), socket_id, name, value));
+}
+
 void PepperPluginDelegateImpl::UDPSocketBind(
     webkit::ppapi::PPB_UDPSocket_Private_Impl* socket,
     uint32 socket_id,
     const PP_NetAddress_Private& addr) {
-  udp_sockets_.AddWithID(socket, socket_id);
+  if (!udp_sockets_.Lookup(socket_id))
+    udp_sockets_.AddWithID(socket, socket_id);
   render_view_->Send(new PpapiHostMsg_PPBUDPSocket_Bind(
       render_view_->routing_id(), socket_id, addr));
 }
@@ -1223,7 +1328,7 @@ bool PepperPluginDelegateImpl::AddNetworkListObserver(
     webkit_glue::NetworkListObserver* observer) {
 #if defined(ENABLE_WEBRTC)
   P2PSocketDispatcher* socket_dispatcher =
-      render_view_->p2p_socket_dispatcher();
+      RenderThreadImpl::current()->p2p_socket_dispatcher();
   if (!socket_dispatcher) {
     return false;
   }
@@ -1238,7 +1343,7 @@ void PepperPluginDelegateImpl::RemoveNetworkListObserver(
     webkit_glue::NetworkListObserver* observer) {
 #if defined(ENABLE_WEBRTC)
   P2PSocketDispatcher* socket_dispatcher =
-      render_view_->p2p_socket_dispatcher();
+      RenderThreadImpl::current()->p2p_socket_dispatcher();
   if (socket_dispatcher)
     socket_dispatcher->RemoveNetworkListObserver(observer);
 #endif
@@ -1380,14 +1485,6 @@ void PepperPluginDelegateImpl::SaveURLAs(const GURL& url) {
       render_view_->routing_id(), url, referrer));
 }
 
-webkit_glue::P2PTransport* PepperPluginDelegateImpl::CreateP2PTransport() {
-#if defined(ENABLE_P2P_APIS)
-  return new P2PTransportImpl(render_view_->p2p_socket_dispatcher());
-#else
-  return NULL;
-#endif
-}
-
 double PepperPluginDelegateImpl::GetLocalTimeZoneOffset(base::Time t) {
   double result = 0.0;
   render_view_->Send(new PepperMsg_GetLocalTimeZoneOffset(
@@ -1502,6 +1599,19 @@ int PepperPluginDelegateImpl::EnumerateDevices(
 #endif
 
   return request_id;
+}
+
+void PepperPluginDelegateImpl::StopEnumerateDevices(int request_id) {
+#if defined(ENABLE_WEBRTC)
+  // Need to post task since this function might be called inside the callback
+  // of EnumerateDevices.
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(
+          &MediaStreamDispatcher::StopEnumerateDevices,
+          render_view_->media_stream_dispatcher()->AsWeakPtr(),
+          request_id, device_enumeration_event_handler_.get()->AsWeakPtr()));
+#endif
 }
 
 bool PepperPluginDelegateImpl::OnMessageReceived(const IPC::Message& message) {
@@ -1658,7 +1768,7 @@ void PepperPluginDelegateImpl::OnHostResolverResolveACK(
     uint32 host_resolver_id,
     bool succeeded,
     const std::string& canonical_name,
-    const ppapi::NetAddressList& net_address_list) {
+    const std::vector<PP_NetAddress_Private>& net_address_list) {
   ppapi::PPB_HostResolver_Shared* host_resolver =
       host_resolvers_.Lookup(host_resolver_id);
   if (host_resolver) {

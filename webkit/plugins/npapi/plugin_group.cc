@@ -20,10 +20,10 @@ namespace webkit {
 namespace npapi {
 
 // static
-const char PluginGroup::kAdobeReaderGroupName[] = "Adobe Acrobat";
-const char PluginGroup::kJavaGroupName[] = "Java";
-const char PluginGroup::kQuickTimeGroupName[] = "QuickTime";
-const char PluginGroup::kShockwaveGroupName[] = "Shockwave";
+const char PluginGroup::kAdobeReaderGroupName[] = "Adobe Reader";
+const char PluginGroup::kJavaGroupName[] = "Java(TM)";
+const char PluginGroup::kQuickTimeGroupName[] = "QuickTime Player";
+const char PluginGroup::kShockwaveGroupName[] = "Adobe Shockwave Player";
 const char PluginGroup::kRealPlayerGroupName[] = "RealPlayer";
 const char PluginGroup::kSilverlightGroupName[] = "Silverlight";
 const char PluginGroup::kWindowsMediaPlayerGroupName[] = "Windows Media Player";
@@ -98,46 +98,6 @@ bool PluginGroup::Match(const WebPluginInfo& plugin) const {
   }
 
   return true;
-}
-
-/* static */
-std::string PluginGroup::RemoveLeadingZerosFromVersionComponents(
-    const std::string& version) {
-  std::string no_leading_zeros_version;
-  std::vector<std::string> numbers;
-  base::SplitString(version, '.', &numbers);
-  for (size_t i = 0; i < numbers.size(); ++i) {
-    size_t n = numbers[i].size();
-    size_t j = 0;
-    while (j < n && numbers[i][j] == '0') {
-      ++j;
-    }
-    no_leading_zeros_version += (j < n) ? numbers[i].substr(j) : "0";
-    if (i != numbers.size() - 1) {
-      no_leading_zeros_version += ".";
-    }
-  }
-
-  return no_leading_zeros_version;
-}
-
-/* static */
-void PluginGroup::CreateVersionFromString(const string16& version_string,
-                                          Version* parsed_version) {
-  // Remove spaces and ')' from the version string,
-  // Replace any instances of 'r', ',' or '(' with a dot.
-  std::string version = UTF16ToASCII(version_string);
-  RemoveChars(version, ") ", &version);
-  std::replace(version.begin(), version.end(), 'd', '.');
-  std::replace(version.begin(), version.end(), 'r', '.');
-  std::replace(version.begin(), version.end(), ',', '.');
-  std::replace(version.begin(), version.end(), '(', '.');
-  std::replace(version.begin(), version.end(), '_', '.');
-
-  // Remove leading zeros from each of the version components.
-  version = RemoveLeadingZerosFromVersionComponents(version);
-
-  *parsed_version = Version(version);
 }
 
 void PluginGroup::AddPlugin(const WebPluginInfo& plugin) {

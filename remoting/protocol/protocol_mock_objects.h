@@ -14,7 +14,6 @@
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_client.h"
-#include "remoting/protocol/host_event_stub.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/session.h"
@@ -29,8 +28,7 @@ namespace protocol {
 class MockConnectionToClient : public ConnectionToClient {
  public:
   MockConnectionToClient(Session* session,
-                         HostStub* host_stub,
-                         InputStub* input_stub);
+                         HostStub* host_stub);
   virtual ~MockConnectionToClient();
 
   MOCK_METHOD1(Init, void(Session* session));
@@ -99,19 +97,6 @@ class MockInputStub : public InputStub {
   DISALLOW_COPY_AND_ASSIGN(MockInputStub);
 };
 
-class MockHostEventStub : public HostEventStub {
- public:
-  MockHostEventStub();
-  virtual ~MockHostEventStub();
-
-  MOCK_METHOD1(InjectClipboardEvent, void(const ClipboardEvent& event));
-  MOCK_METHOD1(InjectKeyEvent, void(const KeyEvent& event));
-  MOCK_METHOD1(InjectMouseEvent, void(const MouseEvent& event));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockHostEventStub);
-};
-
 class MockHostStub : public HostStub {
  public:
   MockHostStub();
@@ -153,8 +138,6 @@ class MockVideoStub : public VideoStub {
     ProcessVideoPacketPtr(video_packet.get(), done);
   }
 
-  MOCK_METHOD0(GetPendingVideoPackets, int());
-
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoStub);
 };
@@ -166,11 +149,8 @@ class MockSession : public Session {
 
   MOCK_METHOD1(SetEventHandler, void(Session::EventHandler* event_handler));
   MOCK_METHOD0(error, ErrorCode());
-  MOCK_METHOD2(CreateStreamChannel, void(
-      const std::string& name, const StreamChannelCallback& callback));
-  MOCK_METHOD2(CreateDatagramChannel, void(
-      const std::string& name, const DatagramChannelCallback& callback));
-  MOCK_METHOD1(CancelChannelCreation, void(const std::string& name));
+  MOCK_METHOD0(GetTransportChannelFactory, ChannelFactory*());
+  MOCK_METHOD0(GetMultiplexedChannelFactory, ChannelFactory*());
   MOCK_METHOD0(jid, const std::string&());
   MOCK_METHOD0(candidate_config, const CandidateSessionConfig*());
   MOCK_METHOD0(config, const SessionConfig&());

@@ -80,14 +80,29 @@ void ConnectionToClient::set_clipboard_stub(
   clipboard_stub_ = clipboard_stub;
 }
 
+ClipboardStub* ConnectionToClient::clipboard_stub() {
+  DCHECK(CalledOnValidThread());
+  return clipboard_stub_;
+}
+
 void ConnectionToClient::set_host_stub(protocol::HostStub* host_stub) {
   DCHECK(CalledOnValidThread());
   host_stub_ = host_stub;
 }
 
+HostStub* ConnectionToClient::host_stub() {
+  DCHECK(CalledOnValidThread());
+  return host_stub_;
+}
+
 void ConnectionToClient::set_input_stub(protocol::InputStub* input_stub) {
   DCHECK(CalledOnValidThread());
   input_stub_ = input_stub;
+}
+
+InputStub* ConnectionToClient::input_stub() {
+  DCHECK(CalledOnValidThread());
+  return input_stub_;
 }
 
 void ConnectionToClient::OnSessionStateChange(Session::State state) {
@@ -104,14 +119,18 @@ void ConnectionToClient::OnSessionStateChange(Session::State state) {
     case Session::AUTHENTICATED:
       // Initialize channels.
       control_dispatcher_.reset(new HostControlDispatcher());
-      control_dispatcher_->Init(session_.get(), base::Bind(
-          &ConnectionToClient::OnChannelInitialized, base::Unretained(this)));
+      control_dispatcher_->Init(
+          session_.get(), session_->config().control_config(),
+          base::Bind(&ConnectionToClient::OnChannelInitialized,
+                     base::Unretained(this)));
       control_dispatcher_->set_clipboard_stub(clipboard_stub_);
       control_dispatcher_->set_host_stub(host_stub_);
 
       event_dispatcher_.reset(new HostEventDispatcher());
-      event_dispatcher_->Init(session_.get(), base::Bind(
-          &ConnectionToClient::OnChannelInitialized, base::Unretained(this)));
+      event_dispatcher_->Init(
+          session_.get(), session_->config().event_config(),
+          base::Bind(&ConnectionToClient::OnChannelInitialized,
+                     base::Unretained(this)));
       event_dispatcher_->set_input_stub(input_stub_);
       event_dispatcher_->set_sequence_number_callback(base::Bind(
           &ConnectionToClient::UpdateSequenceNumber, base::Unretained(this)));
@@ -122,8 +141,10 @@ void ConnectionToClient::OnSessionStateChange(Session::State state) {
 
       audio_writer_ = AudioWriter::Create(session_->config());
       if (audio_writer_.get()) {
-        audio_writer_->Init(session_.get(), base::Bind(
-            &ConnectionToClient::OnChannelInitialized, base::Unretained(this)));
+        audio_writer_->Init(
+            session_.get(), session_->config().audio_config(),
+            base::Bind(&ConnectionToClient::OnChannelInitialized,
+                       base::Unretained(this)));
       }
 
       // Notify the handler after initializing the channels, so that

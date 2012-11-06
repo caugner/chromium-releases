@@ -18,6 +18,7 @@
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/build/temp_gyp/googleurl.gyp:googleurl',
         '<(DEPTH)/net/net.gyp:net',
+        '<(DEPTH)/printing/printing.gyp:printing',
       ],
       'sources': [
         'service_state.cc',
@@ -26,6 +27,8 @@
         'service_switches.h',
         'win/chrome_launcher.cc',
         'win/chrome_launcher.h',
+        'win/local_security_policy.cc',
+        'win/local_security_policy.h',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -62,6 +65,9 @@
         'VCLinkerTool': {
           'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
           'UACExecutionLevel': '2', # /level='requireAdministrator'
+          'AdditionalDependencies': [
+              'secur32.lib',
+          ],
         },
       },
     },

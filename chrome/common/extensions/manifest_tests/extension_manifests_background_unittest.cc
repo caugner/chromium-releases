@@ -22,11 +22,6 @@ namespace extensions {
 TEST_F(ExtensionManifestTest, BackgroundPermission) {
   LoadAndExpectError("background_permission.json",
                      errors::kBackgroundPermissionNeeded);
-
-  scoped_refptr<Extension> extension;
-  extension = LoadAndExpectSuccess("background_permission_alias.json");
-  EXPECT_TRUE(extension->HasAPIPermission(
-        extensions::APIPermission::kBackground));
 }
 
 TEST_F(ExtensionManifestTest, BackgroundScripts) {
@@ -68,11 +63,9 @@ TEST_F(ExtensionManifestTest, BackgroundPage) {
   EXPECT_EQ("/foo.html", extension->GetBackgroundURL().path());
 
   manifest->SetInteger(keys::kManifestVersion, 2);
-  Feature* feature = SimpleFeatureProvider::GetManifestFeatures()->
-      GetFeature("background_page");
   LoadAndExpectWarning(
       Manifest(manifest.get(), ""),
-      feature->GetErrorMessage(Feature::INVALID_MAX_MANIFEST_VERSION));
+      "'background_page' requires manifest version of 1 or lower.");
 }
 
 TEST_F(ExtensionManifestTest, BackgroundAllowNoJsAccess) {
@@ -89,7 +82,8 @@ TEST_F(ExtensionManifestTest, BackgroundAllowNoJsAccess) {
 TEST_F(ExtensionManifestTest, BackgroundPageWebRequest) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
-  Feature::SetChannelForTesting(chrome::VersionInfo::CHANNEL_UNKNOWN);
+  Feature::ScopedCurrentChannel current_channel(
+      chrome::VersionInfo::CHANNEL_DEV);
 
   std::string error;
   scoped_ptr<DictionaryValue> manifest(

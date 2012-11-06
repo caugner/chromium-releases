@@ -97,8 +97,9 @@ TEST_F(ManifestTest, Extension) {
     Feature feature;
     feature.set_name("background_page");
     feature.set_max_manifest_version(1);
-    EXPECT_EQ(feature.GetErrorMessage(Feature::INVALID_MAX_MANIFEST_VERSION),
-              warnings[0].message);
+    EXPECT_EQ(
+        "'background_page' requires manifest version of 1 or lower.",
+        warnings[0].message);
   }
 
   // Test DeepCopy and Equals.
@@ -190,15 +191,21 @@ TEST_F(ManifestTest, RestrictedKeys) {
       &manifest, keys::kPlatformAppBackground, NULL);
 
   // "commands" is restricted to manifest_version >= 2.
-  MutateManifest(
-      &manifest, keys::kCommands, new DictionaryValue());
-  EXPECT_FALSE(manifest->HasKey(keys::kCommands));
-  EXPECT_FALSE(manifest->Get(keys::kCommands, &output));
+  {
+    // ... and dev channel, for now.
+    Feature::ScopedCurrentChannel dev_channel_scope(
+        chrome::VersionInfo::CHANNEL_DEV);
 
-  MutateManifest(
-      &manifest, keys::kManifestVersion, Value::CreateIntegerValue(2));
-  EXPECT_TRUE(manifest->HasKey(keys::kCommands));
-  EXPECT_TRUE(manifest->Get(keys::kCommands, &output));
+    MutateManifest(
+        &manifest, keys::kCommands, new DictionaryValue());
+    EXPECT_FALSE(manifest->HasKey(keys::kCommands));
+    EXPECT_FALSE(manifest->Get(keys::kCommands, &output));
+
+    MutateManifest(
+        &manifest, keys::kManifestVersion, Value::CreateIntegerValue(2));
+    EXPECT_TRUE(manifest->HasKey(keys::kCommands));
+    EXPECT_TRUE(manifest->Get(keys::kCommands, &output));
+  }
 };
 
 }  // namespace extensions

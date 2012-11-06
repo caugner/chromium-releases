@@ -28,7 +28,7 @@ namespace tracked_objects {
 struct ProcessDataSnapshot;
 }
 
-namespace experiments_helper {
+namespace chrome_variations {
 struct SelectedGroupId;
 }
 
@@ -126,13 +126,16 @@ class MetricsLog : public MetricsLogBase {
   // Returns the screen size for the primary monitor.
   virtual gfx::Size GetScreenSize() const;
 
+  // Returns the device scale factor for the primary monitor.
+  virtual float GetScreenDeviceScaleFactor() const;
+
   // Returns the number of monitors the user is using.
   virtual int GetScreenCount() const;
 
   // Fills |field_trial_ids| with the list of initialized field trials name and
   // group ids.
   virtual void GetFieldTrialIds(
-    std::vector<experiments_helper::SelectedGroupId>* field_trial_ids) const;
+    std::vector<chrome_variations::SelectedGroupId>* field_trial_ids) const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(MetricsLogTest, ChromeOSStabilityData);

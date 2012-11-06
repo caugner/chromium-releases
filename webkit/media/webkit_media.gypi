@@ -10,6 +10,7 @@
       'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/media/media.gyp:shared_memory_support',
         '<(DEPTH)/media/media.gyp:yuv_convert',
         '<(DEPTH)/skia/skia.gyp:skia',
       ],
@@ -65,8 +66,13 @@
         ['OS == "android"', {
           'sources!': [
             'audio_decoder.cc',
+            'audio_decoder.h',
+            'filter_helpers.cc',
+            'filter_helpers.h',
             'webmediaplayer_impl.cc',
             'webmediaplayer_impl.h',
+            'webmediaplayer_proxy.cc',
+            'webmediaplayer_proxy.h',
           ],
           'dependencies': [
             '<(DEPTH)/media/media.gyp:player_android',
@@ -78,5 +84,55 @@
         }],
       ],
     },
+    {
+      'target_name': 'clearkeycdm',
+      'type': 'shared_library',
+      'defines': ['CDM_IMPLEMENTATION'],
+      'dependencies': [
+        '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/media/media.gyp:media'
+      ],
+      'sources': [
+        'crypto/ppapi/clear_key_cdm.cc',
+        'crypto/ppapi/clear_key_cdm.h',
+      ],
+    },
+    {
+      'target_name': 'clearkeycdmplugin',
+      'type': 'none',
+      'dependencies': [
+        '<(DEPTH)/ppapi/ppapi.gyp:ppapi_cpp',
+        'clearkeycdm',
+      ],
+      'sources': [
+        'crypto/ppapi/cdm_wrapper.cc',
+        'crypto/ppapi/content_decryption_module.h',
+        'crypto/ppapi/linked_ptr.h',
+      ],
+      'conditions': [
+        ['os_posix==1 and OS!="mac"', {
+          'cflags': ['-fvisibility=hidden'],
+          'type': 'shared_library',
+          # -gstabs, used in the official builds, causes an ICE. Simply remove
+          # it.
+          'cflags!': ['-gstabs'],
+        }],
+        ['OS=="win"', {
+          'type': 'shared_library',
+        }],
+        ['OS=="mac"', {
+          'type': 'loadable_module',
+          'mac_bundle': 1,
+          'product_extension': 'plugin',
+          'xcode_settings': {
+            'OTHER_LDFLAGS': [
+              # Not to strip important symbols by -Wl,-dead_strip.
+              '-Wl,-exported_symbol,_PPP_GetInterface',
+              '-Wl,-exported_symbol,_PPP_InitializeModule',
+              '-Wl,-exported_symbol,_PPP_ShutdownModule'
+            ]},
+        }],
+      ],
+    }
   ],
 }

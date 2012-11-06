@@ -4,8 +4,6 @@
 
 #include "content/shell/shell_devtools_delegate.h"
 
-#include <algorithm>
-
 #include "content/public/browser/devtools_http_handler.h"
 #include "grit/shell_resources.h"
 #include "net/base/tcp_listen_socket.h"

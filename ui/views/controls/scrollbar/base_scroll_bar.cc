@@ -13,6 +13,7 @@
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "grit/ui_strings.h"
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
@@ -111,13 +112,13 @@ void BaseScrollBar::ScrollByContentsOffset(int contents_offset) {
 ///////////////////////////////////////////////////////////////////////////////
 // BaseScrollBar, View implementation:
 
-bool BaseScrollBar::OnMousePressed(const MouseEvent& event) {
+bool BaseScrollBar::OnMousePressed(const ui::MouseEvent& event) {
   if (event.IsOnlyLeftMouseButton())
     ProcessPressEvent(event);
   return true;
 }
 
-void BaseScrollBar::OnMouseReleased(const MouseEvent& event) {
+void BaseScrollBar::OnMouseReleased(const ui::MouseEvent& event) {
   OnMouseCaptureLost();
 }
 
@@ -125,7 +126,7 @@ void BaseScrollBar::OnMouseCaptureLost() {
   ResetState();
 }
 
-bool BaseScrollBar::OnKeyPressed(const KeyEvent& event) {
+bool BaseScrollBar::OnKeyPressed(const ui::KeyEvent& event) {
   ScrollAmount amount = SCROLL_NONE;
   switch (event.key_code()) {
     case ui::VKEY_UP:
@@ -166,16 +167,25 @@ bool BaseScrollBar::OnKeyPressed(const KeyEvent& event) {
   return false;
 }
 
-ui::GestureStatus BaseScrollBar::OnGestureEvent(const GestureEvent& event) {
+ui::EventResult BaseScrollBar::OnGestureEvent(const ui::GestureEvent& event) {
+  // If a fling is in progress, then stop the fling for any incoming gesture
+  // event (except for the GESTURE_END event that is generated at the end of the
+  // fling).
+  if (scroll_animator_.get() && scroll_animator_->is_scrolling() &&
+      (event.type() != ui::ET_GESTURE_END ||
+       event.details().touch_points() > 1)) {
+    scroll_animator_->Stop();
+  }
+
   if (event.type() == ui::ET_GESTURE_TAP_DOWN) {
     ProcessPressEvent(event);
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
   if (event.type() == ui::ET_GESTURE_LONG_PRESS) {
     // For a long-press, the repeater started in tap-down should continue. So
     // return early.
-    return ui::GESTURE_STATUS_UNKNOWN;
+    return ui::ER_UNHANDLED;
   }
 
   ResetState();
@@ -183,25 +193,43 @@ ui::GestureStatus BaseScrollBar::OnGestureEvent(const GestureEvent& event) {
   if (event.type() == ui::ET_GESTURE_TAP) {
     // TAP_DOWN would have already scrolled some amount. So scrolling again on
     // TAP is not necessary.
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
   if (event.type() == ui::ET_GESTURE_SCROLL_BEGIN ||
       event.type() == ui::ET_GESTURE_SCROLL_END)
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
 
   if (event.type() == ui::ET_GESTURE_SCROLL_UPDATE) {
     ScrollByContentsOffset(IsHorizontal() ? event.details().scroll_x() :
                                             event.details().scroll_y());
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
-  return ui::GESTURE_STATUS_UNKNOWN;
+  if (event.type() == ui::ET_SCROLL_FLING_START) {
+    if (!scroll_animator_.get())
+      scroll_animator_.reset(new ScrollAnimator(this));
+    scroll_animator_->Start(IsHorizontal() ? event.details().velocity_x() : 0.f,
+        IsHorizontal() ? 0.f : event.details().velocity_y());
+    return ui::ER_CONSUMED;
+  }
+
+  return ui::ER_UNHANDLED;
 }
 
-bool BaseScrollBar::OnMouseWheel(const MouseWheelEvent& event) {
+bool BaseScrollBar::OnMouseWheel(const ui::MouseWheelEvent& event) {
   ScrollByContentsOffset(event.offset());
   return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// BaseScrollBar, ScrollDelegate implementation:
+
+void BaseScrollBar::OnScroll(float dx, float dy) {
+  if (IsHorizontal())
+    ScrollByContentsOffset(dx);
+  else
+    ScrollByContentsOffset(dy);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -238,7 +266,8 @@ void BaseScrollBar::ShowContextMenuForView(View* source, const gfx::Point& p) {
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollPrev);
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollNext);
   if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(p, gfx::Size()),
-          MenuItemView::TOPLEFT, MenuRunner::HAS_MNEMONICS) ==
+          MenuItemView::TOPLEFT, MenuRunner::HAS_MNEMONICS |
+          views::MenuRunner::CONTEXT_MENU) ==
       MenuRunner::MENU_DELETED)
     return;
 }
@@ -372,7 +401,7 @@ int BaseScrollBar::GetScrollIncrement(bool is_page, bool is_positive) {
 ///////////////////////////////////////////////////////////////////////////////
 // BaseScrollBar, private:
 
-void BaseScrollBar::ProcessPressEvent(const LocatedEvent& event) {
+void BaseScrollBar::ProcessPressEvent(const ui::LocatedEvent& event) {
   SetThumbTrackState(CustomButton::BS_PUSHED);
   gfx::Rect thumb_bounds = thumb_->bounds();
   if (IsHorizontal()) {

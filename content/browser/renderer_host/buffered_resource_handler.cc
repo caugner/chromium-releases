@@ -132,6 +132,12 @@ bool BufferedResourceHandler::OnResponseStarted(
       // treat the response as "text/plain".  This is the most secure option.
       response_->head.mime_type.assign("text/plain");
     }
+
+    // Treat feed types as text/plain.
+    if (response_->head.mime_type == "application/rss+xml" ||
+        response_->head.mime_type == "application/atom+xml") {
+      response_->head.mime_type.assign("text/plain");
+    }
   }
 
   state_ = STATE_PROCESSING;
@@ -209,6 +215,10 @@ void BufferedResourceHandler::Resume() {
 
 void BufferedResourceHandler::Cancel() {
   controller()->Cancel();
+}
+
+void BufferedResourceHandler::CancelAndIgnore() {
+  controller()->CancelAndIgnore();
 }
 
 bool BufferedResourceHandler::ProcessResponse(bool* defer) {
@@ -351,7 +361,8 @@ bool BufferedResourceHandler::UseAlternateNextHandler(
   bool defer_ignored = false;
   next_handler_->OnResponseStarted(request_id, response_, &defer_ignored);
   DCHECK(!defer_ignored);
-  net::URLRequestStatus status(net::URLRequestStatus::HANDLED_EXTERNALLY, 0);
+  net::URLRequestStatus status(net::URLRequestStatus::CANCELED,
+                               net::ERR_ABORTED);
   next_handler_->OnResponseCompleted(request_id, status, std::string());
 
   // This is handled entirely within the new ResourceHandler, so just reset the

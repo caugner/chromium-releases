@@ -12,8 +12,8 @@
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/test/base/testing_profile.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/protocol/sync_protocol_error.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -88,6 +88,13 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_CONST_METHOD0(waiting_for_auth, bool());
   MOCK_METHOD1(OnActionableError, void(
       const syncer::SyncProtocolError&));
+
+  // DataTypeManagerObserver mocks.
+  MOCK_METHOD0(OnConfigureBlocked, void());
+  MOCK_METHOD1(OnConfigureDone,
+               void(const browser_sync::DataTypeManager::ConfigureResult&));
+  MOCK_METHOD0(OnConfigureRetry, void());
+  MOCK_METHOD0(OnConfigureStart, void());
 
   MOCK_METHOD0(IsSyncEnabledAndLoggedIn, bool());
   MOCK_METHOD0(IsSyncTokenAvailable, bool());

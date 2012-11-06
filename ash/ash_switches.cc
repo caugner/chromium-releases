@@ -7,17 +7,41 @@
 namespace ash {
 namespace switches {
 
+// Variation of boot animation that uses Tween::EASE_OUT_2.
+const char kAshBootAnimationFunction2[] = "ash-boot-animation-function2";
+
+// Variation of boot animation that uses Tween::EASE_OUT_3.
+const char kAshBootAnimationFunction3[] = "ash-boot-animation-function3";
+
+// Constrains the pointer movement within a root window on desktop.
+const char kAshConstrainPointerToRoot[] = "ash-constrain-pointer-to-root";
+
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
+
+// Disables Workspace2.
+const char kAshDisableWorkspace2[] = "ash-disable-workspace2";
+
+// Disables boot animation v2, go back to v1.
+const char kAshDisableBootAnimation2[] = "ash-disable-boot-animation2";
+
+// Enable advanced gestures (e.g. for window management).
+const char kAshEnableAdvancedGestures[] = "ash-enable-advanced-gestures";
 
 // Enables the Oak tree viewer.
 const char kAshEnableOak[] = "ash-enable-oak";
 
-// Enable extended desktop.
-const char kAshExtendedDesktop[] = "ash-extended-desktop";
+// Enables showing the tray bubble by dragging on the shelf.
+const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
 
-// Use Ash notifications.
-const char kAshNotify[] = "ash-notify";
+// Disable using Ash notifications.
+const char kAshNotifyDisabled[] = "ash-notify-disabled";
+
+// Specifies the layout mode and offsets for the secondary display for
+// testing. The format is "<t|r|b|l>,<offset>" where t=TOP, r=RIGHT,
+// b=BOTTOM and L=LEFT. For example, 'r,-100' means the secondary display
+// is positioned on the right with -100 offset. (above than primary)
+const char kAshSecondaryDisplayLayout[] = "ash-secondary-display-layout";
 
 // Enables the heads-up display for tracking touch points.
 const char kAshTouchHud[] = "ash-touch-hud";

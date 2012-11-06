@@ -16,6 +16,7 @@
 #include "base/timer.h"
 #include "chromeos/dbus/power_state_control.pb.h"
 #include "chromeos/dbus/power_supply_properties.pb.h"
+#include "chromeos/dbus/video_activity_update.pb.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_path.h"
@@ -141,7 +142,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
     SimpleMethodCallToPowerManager(power_manager::kIncreaseKeyboardBrightness);
   }
 
-  virtual void SetScreenBrightnessPercent(double percent, bool gradual) {
+  virtual void SetScreenBrightnessPercent(double percent,
+                                          bool gradual) OVERRIDE {
     dbus::MethodCall method_call(
         power_manager::kPowerManagerInterface,
         power_manager::kSetScreenBrightnessPercent);
@@ -224,12 +226,22 @@ class PowerManagerClientImpl : public PowerManagerClient {
   }
 
   virtual void NotifyVideoActivity(
-      const base::TimeTicks& last_activity_time) OVERRIDE {
+      const base::TimeTicks& last_activity_time,
+      bool is_fullscreen) OVERRIDE {
     dbus::MethodCall method_call(
         power_manager::kPowerManagerInterface,
         power_manager::kHandleVideoActivityMethod);
     dbus::MessageWriter writer(&method_call);
-    writer.AppendInt64(last_activity_time.ToInternalValue());
+
+    VideoActivityUpdate protobuf;
+    protobuf.set_last_activity_time(last_activity_time.ToInternalValue());
+    protobuf.set_is_fullscreen(is_fullscreen);
+
+    if (!writer.AppendProtoAsArrayOfBytes(protobuf)) {
+      LOG(ERROR) << "Error calling "
+                 << power_manager::kHandleVideoActivityMethod;
+      return;
+    }
     power_manager_proxy_->CallMethod(
         &method_call,
         dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
@@ -253,7 +265,11 @@ class PowerManagerClientImpl : public PowerManagerClient {
     protobuf.set_disable_idle_suspend(overrides & DISABLE_IDLE_SUSPEND);
     protobuf.set_disable_lid_suspend(overrides & DISABLE_IDLE_LID_SUSPEND);
 
-    writer.AppendProtoAsArrayOfBytes(protobuf);
+    if (!writer.AppendProtoAsArrayOfBytes(protobuf)) {
+      LOG(ERROR) << "Error calling "
+                 << power_manager::kStateOverrideRequest;
+      return;
+    }
     power_manager_proxy_->CallMethod(
         &method_call,
         dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
@@ -261,12 +277,27 @@ class PowerManagerClientImpl : public PowerManagerClient {
                    weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
-  virtual void NotifyScreenLockCompleted() OVERRIDE {
-    SimpleMethodCallToPowerManager(power_manager::kScreenIsLockedMethod);
+  virtual void CancelPowerStateOverrides(uint32 request_id) OVERRIDE {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kStateOverrideCancel);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendInt32(request_id);
+    power_manager_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        dbus::ObjectProxy::EmptyResponseCallback());
   }
 
-  virtual void NotifyScreenUnlockCompleted() OVERRIDE {
-    SimpleMethodCallToPowerManager(power_manager::kScreenIsUnlockedMethod);
+  virtual void SetIsProjecting(bool is_projecting) OVERRIDE {
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kSetIsProjectingMethod);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendBool(is_projecting);
+    power_manager_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        dbus::ObjectProxy::EmptyResponseCallback());
   }
 
  private:
@@ -371,7 +402,12 @@ class PowerManagerClientImpl : public PowerManagerClient {
 
     dbus::MessageReader reader(response);
     PowerSupplyProperties protobuf;
-    reader.PopArrayOfBytesAsProto(&protobuf);
+    if (!reader.PopArrayOfBytesAsProto(&protobuf)) {
+      LOG(ERROR) << "Error calling "
+                 << power_manager::kGetPowerSupplyPropertiesMethod
+                 << response->ToString();
+      return;
+    }
 
     PowerSupplyStatus status;
     status.line_power_on = protobuf.line_power_on();
@@ -420,8 +456,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
     }
 
     dbus::MessageReader reader(response);
-    uint32 request_id = 0;
-    if (!reader.PopUint32(&request_id)) {
+    int32 request_id = 0;
+    if (!reader.PopInt32(&request_id)) {
       LOG(ERROR) << "Error reading response from powerd: "
                  << response->ToString();
       callback.Run(0);
@@ -487,6 +523,9 @@ class PowerManagerClientImpl : public PowerManagerClient {
   dbus::ObjectProxy* power_manager_proxy_;
   dbus::ObjectProxy* session_manager_proxy_;
   ObserverList<Observer> observers_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<PowerManagerClientImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PowerManagerClientImpl);
@@ -500,7 +539,8 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
       : discharging_(true),
         battery_percentage_(40),
         brightness_(50.0),
-        pause_count_(2) {
+        pause_count_(2),
+        next_request_id_(1) {
   }
 
   virtual ~PowerManagerClientStubImpl() {}
@@ -577,15 +617,22 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
   virtual void NotifyUserActivity(
       const base::TimeTicks& last_activity_time) OVERRIDE {}
   virtual void NotifyVideoActivity(
-      const base::TimeTicks& last_activity_time) OVERRIDE {}
+      const base::TimeTicks& last_activity_time,
+      bool is_fullscreen) OVERRIDE {}
   virtual void RequestPowerStateOverrides(
       uint32 request_id,
       uint32 duration,
       int overrides,
-      const PowerStateRequestIdCallback& callback) OVERRIDE {}
-
-  virtual void NotifyScreenLockCompleted() OVERRIDE {}
-  virtual void NotifyScreenUnlockCompleted() OVERRIDE {}
+      const PowerStateRequestIdCallback& callback) OVERRIDE {
+    // Mimic the behavior of power manager w.r.t. the request_id.
+    if (request_id == 0) {
+      callback.Run(next_request_id_++);
+    } else {
+      callback.Run(request_id);
+    }
+  }
+  virtual void CancelPowerStateOverrides(uint32 request_id) OVERRIDE {}
+  virtual void SetIsProjecting(bool is_projecting) OVERRIDE {}
 
  private:
   void Update() {
@@ -633,6 +680,7 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
   ObserverList<Observer> observers_;
   base::RepeatingTimer<PowerManagerClientStubImpl> timer_;
   PowerSupplyStatus status_;
+  uint32 next_request_id_;
 };
 
 PowerManagerClient::PowerManagerClient() {

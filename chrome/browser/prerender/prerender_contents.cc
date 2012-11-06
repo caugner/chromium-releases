@@ -211,8 +211,12 @@ bool PrerenderContents::IsPendingEntry(
 
 void PrerenderContents::StartPendingPrerenders() {
   SessionStorageNamespace* session_storage_namespace = NULL;
-  if (RenderViewHost* render_view_host = GetRenderViewHostMutable())
-    session_storage_namespace = render_view_host->GetSessionStorageNamespace();
+  if (prerender_contents_.get()) {
+    // TODO(ajwong): This does not correctly handle storage for isolated apps.
+    session_storage_namespace =
+        prerender_contents_->web_contents()->GetController()
+            .GetDefaultSessionStorageNamespace();
+  }
   DCHECK(child_id_ == -1 || session_storage_namespace);
 
   std::vector<PendingPrerenderInfo> pending_prerender_list;
@@ -320,7 +324,8 @@ void PrerenderContents::StartPrerendering(
   prerendering_has_started_ = true;
 
   WebContents* new_contents = CreateWebContents(session_storage_namespace);
-  prerender_contents_.reset(new TabContents(new_contents));
+  prerender_contents_.reset(
+      TabContents::Factory::CreateTabContents(new_contents));
   content::WebContentsObserver::Observe(new_contents);
 
   tab_contents_delegate_.reset(new TabContentsDelegateImpl(this));
@@ -370,14 +375,16 @@ void PrerenderContents::StartPrerendering(
   new_contents->SetUserAgentOverride(
       prerender_manager_->config().user_agent_override);
 
-  new_contents->GetController().LoadURLWithUserAgentOverride(
-      prerender_url_,
-      referrer_,
-      (origin_ == ORIGIN_OMNIBOX ? content::PAGE_TRANSITION_TYPED :
-                                   content::PAGE_TRANSITION_LINK),
-      false,
-      std::string(),
-      prerender_manager_->config().is_overriding_user_agent);
+  content::NavigationController::LoadURLParams load_url_params(
+      prerender_url_);
+  load_url_params.referrer = referrer_;
+  load_url_params.transition_type = (origin_ == ORIGIN_OMNIBOX ?
+      content::PAGE_TRANSITION_TYPED : content::PAGE_TRANSITION_LINK);
+  load_url_params.override_user_agent =
+      prerender_manager_->config().is_overriding_user_agent ?
+      content::NavigationController::UA_OVERRIDE_TRUE :
+      content::NavigationController::UA_OVERRIDE_FALSE;
+  new_contents->GetController().LoadURLWithParams(load_url_params);
 }
 
 bool PrerenderContents::GetChildId(int* child_id) const {
@@ -500,8 +507,12 @@ void PrerenderContents::OnRenderViewHostCreated(
 
 WebContents* PrerenderContents::CreateWebContents(
     SessionStorageNamespace* session_storage_namespace) {
-  return  WebContents::Create(profile_, NULL, MSG_ROUTING_NONE, NULL,
-                              session_storage_namespace);
+  // TODO(ajwong): Remove the temporary map once prerendering is aware of
+  // multiple session storage namespaces per tab.
+  content::SessionStorageNamespaceMap session_storage_namespace_map;
+  session_storage_namespace_map[""] = session_storage_namespace;
+  return  WebContents::CreateWithSessionStorage(
+      profile_, NULL, MSG_ROUTING_NONE, NULL, session_storage_namespace_map);
 }
 
 void PrerenderContents::OnUpdateFaviconURL(

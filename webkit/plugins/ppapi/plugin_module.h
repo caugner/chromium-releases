@@ -61,6 +61,14 @@ class WEBKIT_PLUGINS_EXPORT PluginModule :
     PPP_ShutdownModuleFunc shutdown_module;  // Optional, may be NULL.
   };
 
+  // Allows the embedder to associate a class with this module. This is opaque
+  // from the PluginModule's perspective (see Set/GetEmbedderState below) but
+  // the module is in charge of deleting the class.
+  class EmbedderState {
+   public:
+    virtual ~EmbedderState() {}
+  };
+
   typedef std::set<PluginInstance*> PluginInstanceSet;
 
   // You must call one of the Init functions after the constructor to create a
@@ -76,6 +84,14 @@ class WEBKIT_PLUGINS_EXPORT PluginModule :
 
   ~PluginModule();
 
+  // Sets the given class as being associated with this module. It will be
+  // deleted when the module is destroyed. You can only set it once, subsequent
+  // sets will assert.
+  //
+  // See EmbedderState above for more.
+  void SetEmbedderState(scoped_ptr<EmbedderState> state);
+  EmbedderState* GetEmbedderState();
+
   // Initializes this module as an internal plugin with the given entrypoints.
   // This is used for "plugins" compiled into Chrome. Returns true on success.
   // False means that the plugin can not be used.
@@ -89,7 +105,12 @@ class WEBKIT_PLUGINS_EXPORT PluginModule :
   // ownership of the given pointer, even in the failure case.
   void InitAsProxied(PluginDelegate::OutOfProcessProxy* out_of_process_proxy);
 
-  // Initializes this module for the given NaCl proxy. This takes
+  // Creates a new module for a NaCl instance that will be using the IPC proxy.
+  // We can't use the existing module, or new instances of the plugin can't
+  // be created.
+  scoped_refptr<PluginModule> CreateModuleForNaClInstance();
+
+  // Initializes the NaCl module for the given out of process proxy. This takes
   // ownership of the given pointer, even in the failure case.
   void InitAsProxiedNaCl(
       scoped_ptr<PluginDelegate::OutOfProcessProxy> out_of_process_proxy,
@@ -170,6 +191,9 @@ class WEBKIT_PLUGINS_EXPORT PluginModule :
   // Note: This may be null.
   PluginDelegate::ModuleLifetime* lifetime_delegate_;
 
+  // See EmbedderState above.
+  scoped_ptr<EmbedderState> embedder_state_;
+
   // Tracker for completion callbacks, used mainly to ensure that all callbacks
   // are properly aborted on module shutdown.
   scoped_refptr< ::ppapi::CallbackTracker> callback_tracker_;
@@ -214,8 +238,6 @@ class WEBKIT_PLUGINS_EXPORT PluginModule :
   PluginInstanceSet instances_;
 
   PP_Bool (*reserve_instance_id_)(PP_Module, PP_Instance);
-
-  bool nacl_ipc_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginModule);
 };

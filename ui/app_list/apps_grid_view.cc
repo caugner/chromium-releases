@@ -8,6 +8,7 @@
 
 #include "ui/app_list/app_list_item_view.h"
 #include "ui/app_list/pagination_model.h"
+#include "ui/base/events/event.h"
 #include "ui/views/border.h"
 #include "ui/views/widget/widget.h"
 
@@ -23,9 +24,6 @@ const int kPagePadding = 40;
 // Preferred tile size when showing in fixed layout.
 const int kPreferredTileWidth = 88;
 const int kPreferredTileHeight = 98;
-
-// Max extra column padding space in pixels for invalid page transition.
-const int kMaxExtraColPaddingForInvalidTransition = 80;
 
 }  // namespace
 
@@ -94,6 +92,10 @@ void AppsGridView::EnsureItemVisible(const AppListItemView* item) {
   }
 }
 
+bool AppsGridView::HasPageTransition() const {
+  return pagination_model_->has_transition();
+}
+
 gfx::Size AppsGridView::GetPreferredSize() {
   gfx::Insets insets(GetInsets());
   gfx::Size tile_size = gfx::Size(kPreferredTileWidth, kPreferredTileHeight);
@@ -127,8 +129,7 @@ void AppsGridView::Layout() {
   // Transition to right means negative offset.
   const int dir = transition.target_page > current_page ? -1 : 1;
   const int transition_offset = is_valid ?
-      transition.progress * page_width * dir :
-      transition.progress * kMaxExtraColPaddingForInvalidTransition * dir;
+      transition.progress * page_width * dir : 0;
 
   const int first_visible_index = current_page * tiles_per_page();
   const int last_visible_index = (current_page + 1) * tiles_per_page() - 1;
@@ -150,9 +151,9 @@ void AppsGridView::Layout() {
     } else {
       const int col = i % cols_;
       if (transition_offset > 0)
-        x_offset += transition_offset * (col + 1);
+        x_offset += transition_offset * col;
       else
-        x_offset += transition_offset * (cols_ - col);
+        x_offset += transition_offset * (cols_ - col - 1);
     }
 
     gfx::Rect adjusted_slot(tile_slot);
@@ -169,7 +170,7 @@ void AppsGridView::Layout() {
   }
 }
 
-bool AppsGridView::OnKeyPressed(const views::KeyEvent& event) {
+bool AppsGridView::OnKeyPressed(const ui::KeyEvent& event) {
   bool handled = false;
   if (selected_item_index_ >= 0)
     handled = GetItemViewAtIndex(selected_item_index_)->OnKeyPressed(event);
@@ -218,7 +219,7 @@ bool AppsGridView::OnKeyPressed(const views::KeyEvent& event) {
   return handled;
 }
 
-bool AppsGridView::OnKeyReleased(const views::KeyEvent& event) {
+bool AppsGridView::OnKeyReleased(const ui::KeyEvent& event) {
   bool handled = false;
   if (selected_item_index_ >= 0)
     handled = GetItemViewAtIndex(selected_item_index_)->OnKeyReleased(event);
@@ -268,6 +269,10 @@ AppListItemView* AppsGridView::CreateViewForItemAtIndex(size_t index) {
                                               model_->GetItemAt(index),
                                               listener_);
   item->SetIconSize(icon_size_);
+#if !defined(OS_WIN)
+  item->SetPaintToLayer(true);
+  item->SetFillsBoundsOpaquely(false);
+#endif
   return item;
 }
 
@@ -330,7 +335,12 @@ void AppsGridView::SelectedPageChanged(int old_selected, int new_selected) {
 }
 
 void AppsGridView::TransitionChanged() {
-  Layout();
+  // Update layout for valid page transition only since over-scroll no longer
+  // animates app icons.
+  const PaginationModel::Transition& transition =
+      pagination_model_->transition();
+  if (pagination_model_->is_valid_page(transition.target_page))
+    Layout();
 }
 
 }  // namespace app_list

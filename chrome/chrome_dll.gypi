@@ -214,6 +214,9 @@
               'include_dirs': [
                 '<(grit_out_dir)',
               ],
+              'includes': [
+                'chrome_nibs.gypi',
+              ],
               # TODO(mark): Come up with a fancier way to do this.  It should
               # only be necessary to list framework-Info.plist once, not the
               # three times it is listed here.
@@ -228,57 +231,7 @@
                 'app/theme/default_100_percent/<(theme_dir_name)/product_logo_32.png',
 
                 'app/framework-Info.plist',
-                'app/nibs/AboutIPC.xib',
-                'app/nibs/AvatarMenuItem.xib',
-                'app/nibs/BookmarkAllTabs.xib',
-                'app/nibs/BookmarkBar.xib',
-                'app/nibs/BookmarkBarFolderWindow.xib',
-                'app/nibs/BookmarkBubble.xib',
-                'app/nibs/BookmarkEditor.xib',
-                'app/nibs/BookmarkNameFolder.xib',
-                'app/nibs/BrowserWindow.xib',
-                'app/nibs/ChromeToMobileBubble.xib',
-                'app/nibs/CollectedCookies.xib',
-                'app/nibs/CookieDetailsView.xib',
-                'app/nibs/ContentBlockedCookies.xib',
-                'app/nibs/ContentBlockedImages.xib',
-                'app/nibs/ContentBlockedJavaScript.xib',
-                'app/nibs/ContentBlockedMixedScript.xib',
-                'app/nibs/ContentBlockedPlugins.xib',
-                'app/nibs/ContentBlockedPopups.xib',
-                'app/nibs/ContentBlockedGeolocation.xib',
-                'app/nibs/ContentProtocolHandlers.xib',
-                'app/nibs/DownloadItem.xib',
-                'app/nibs/DownloadShelf.xib',
-                'app/nibs/EditSearchEngine.xib',
-                'app/nibs/ExtensionInstallPrompt.xib',
-                'app/nibs/ExtensionInstallPromptBundle.xib',
-                'app/nibs/ExtensionInstallPromptInline.xib',
-                'app/nibs/ExtensionInstallPromptNoWarnings.xib',
-                'app/nibs/ExtensionInstalledBubble.xib',
-                'app/nibs/ExtensionInstalledBubbleBundle.xib',
-                'app/nibs/FindBar.xib',
-                'app/nibs/FirstRunBubble.xib',
-                'app/nibs/FirstRunDialog.xib',
-                'app/nibs/FullscreenExitBubble.xib',
-                'app/nibs/GlobalErrorBubble.xib',
-                'app/nibs/HungRendererDialog.xib',
-                'app/nibs/HttpAuthLoginSheet.xib',
-                'app/nibs/ImportProgressDialog.xib',
-                'app/nibs/InfoBar.xib',
-                'app/nibs/InfoBarContainer.xib',
-                'app/nibs/MainMenu.xib',
-                'app/nibs/Notification.xib',
-                'app/nibs/OneClickSigninBubble.xib',
-                'app/nibs/Panel.xib',
-                'app/nibs/PreviewableContents.xib',
-                'app/nibs/SaveAccessoryView.xib',
-                'app/nibs/SadTab.xib',
-                'app/nibs/SpeechRecognitionBubble.xib',
-                'app/nibs/TabView.xib',
-                'app/nibs/TaskManager.xib',
-                'app/nibs/Toolbar.xib',
-                'app/nibs/WrenchMenu.xib',
+                '<@(mac_all_xibs)',
                 'app/theme/balloon_wrench.pdf',
                 'app/theme/chevron.pdf',
                 'app/theme/find_next_Template.pdf',
@@ -286,12 +239,10 @@
                 'app/theme/menu_hierarchy_arrow.pdf',
                 'app/theme/menu_overflow_down.pdf',
                 'app/theme/menu_overflow_up.pdf',
-                'app/theme/otr_icon.pdf',
                 'browser/mac/install.sh',
                 '<(SHARED_INTERMEDIATE_DIR)/repack/chrome.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/repack/chrome_100_percent.pak',
                 '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak',
-                '<(grit_out_dir)/theme_resources_100_percent.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
                 '<!@pymod_do_main(repack_locales -o -p <(OS) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(locales))',
                 # Note: pseudo_locales are generated via the packed_resources
                 # dependency but not copied to the final target.  See
@@ -361,14 +312,14 @@
                   # The framework needs the Breakpad keys if this feature is
                   # enabled.  It does not need the Keystone keys; these always
                   # come from the outer application bundle.  The framework
-                  # doesn't currently use the Subversion keys for anything,
+                  # doesn't currently use the SCM keys for anything,
                   # but this seems like a really good place to store them.
                   'postbuild_name': 'Tweak Info.plist',
                   'action': ['<(tweak_info_plist_path)',
                              '--breakpad=<(mac_breakpad_compiled_in)',
                              '--breakpad_uploads=<(mac_breakpad_uploads)',
                              '--keystone=0',
-                             '--svn=1',
+                             '--scm=1',
                              '--branding=<(branding)'],
                 },
                 {
@@ -396,7 +347,6 @@
                     ['branding == "Chrome"', {
                       'files': [
                         '<(PRODUCT_DIR)/Flash Player Plugin for Chrome.plugin',
-                        '<(PRODUCT_DIR)/plugin.vch',
                       ],
                     }],
                     ['internal_pdf', {
@@ -410,6 +360,17 @@
                         # We leave out nacl_irt_x86_64.nexe because we only
                         # support x86-32 NaCl on Mac OS X.
                         '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
+                      ],
+                    }],
+                  ],
+                },
+                {
+                  'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Internet Plug-Ins/PepperFlash',
+                  'files': [],
+                  'conditions': [
+                    ['branding == "Chrome"', {
+                      'files': [
+                        '<(PRODUCT_DIR)/PepperFlash/PepperFlashPlayer.plugin',
                       ],
                     }],
                   ],
@@ -521,9 +482,7 @@
                 }],
                 ['enable_hidpi==1', {
                   'mac_bundle_resources': [
-                    '<(grit_out_dir)/theme_resources_200_percent.pak',
-                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_200_percent.pak',
-                    '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources_200_percent.pak',
+                    '<(SHARED_INTERMEDIATE_DIR)/repack/chrome_200_percent.pak',
                   ],
                 }],
               ],  # conditions

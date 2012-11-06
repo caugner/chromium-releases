@@ -43,7 +43,7 @@ class ProxyDecryptor : public media::Decryptor {
   }
 
   // media::Decryptor implementation.
-  virtual void GenerateKeyRequest(const std::string& key_system,
+  virtual bool GenerateKeyRequest(const std::string& key_system,
                                   const uint8* init_data,
                                   int init_data_length) OVERRIDE;
   virtual void AddKey(const std::string& key_system,
@@ -75,7 +75,7 @@ class ProxyDecryptor : public media::Decryptor {
       const scoped_refptr<base::MessageLoopProxy>& message_loop_proxy,
       const scoped_refptr<media::DecoderBuffer>& encrypted,
       const media::Decryptor::DecryptCB& decrypt_cb,
-      media::Decryptor::DecryptStatus status,
+      media::Decryptor::Status status,
       const scoped_refptr<media::DecoderBuffer>& decrypted);
 
   media::DecryptorClient* client_;

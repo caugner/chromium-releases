@@ -21,39 +21,43 @@ const int kHeartbeatTimeInSecs = 300;
 namespace chromeos {
 
 PowerStateOverride::PowerStateOverride()
-    : weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
-  // Call with request id = 0 to create a new override request.
-  CallRequestPowerStateOverrides(0);
+    : request_id_(0),
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+  // request id_ = 0 will create a new override request.
+  CallRequestPowerStateOverrides();
+
+  heartbeat_.Start(FROM_HERE,
+                   base::TimeDelta::FromSeconds(kHeartbeatTimeInSecs),
+                   weak_ptr_factory_.GetWeakPtr(),
+                   &PowerStateOverride::CallRequestPowerStateOverrides);
 }
 
 PowerStateOverride::~PowerStateOverride() {
+  heartbeat_.Stop();
+
+  PowerManagerClient* power_manager =
+      DBusThreadManager::Get()->GetPowerManagerClient();
+  if (power_manager)
+    power_manager->CancelPowerStateOverrides(request_id_);
 }
 
-void PowerStateOverride::Heartbeat(uint32 request_id) {
-  // We've been called back from an override request, schedule another for after
-  // kHeartbeatTime seconds.
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&PowerStateOverride::CallRequestPowerStateOverrides,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 request_id),
-      base::TimeDelta::FromSeconds(kHeartbeatTimeInSecs));
+void PowerStateOverride::SetRequestId(uint32 request_id) {
+  request_id_ = request_id;
 }
 
-void PowerStateOverride::CallRequestPowerStateOverrides(
-    uint32 request_id) {
+void PowerStateOverride::CallRequestPowerStateOverrides() {
   PowerManagerClient* power_manager =
       DBusThreadManager::Get()->GetPowerManagerClient();
   if (power_manager) {
     // Request the duration of twice our heartbeat.
     power_manager->RequestPowerStateOverrides(
-        request_id,
+        request_id_,
         kHeartbeatTimeInSecs * 2,
         PowerManagerClient::DISABLE_IDLE_DIM |
         PowerManagerClient::DISABLE_IDLE_BLANK |
         PowerManagerClient::DISABLE_IDLE_SUSPEND |
         PowerManagerClient::DISABLE_IDLE_LID_SUSPEND,
-        base::Bind(&PowerStateOverride::Heartbeat,
+        base::Bind(&PowerStateOverride::SetRequestId,
                    weak_ptr_factory_.GetWeakPtr()));
   }
 }

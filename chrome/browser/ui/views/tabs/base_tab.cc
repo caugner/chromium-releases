@@ -31,6 +31,10 @@
 #include "ui/gfx/font.h"
 #include "ui/views/controls/button/image_button.h"
 
+#if defined(USE_ASH)
+#include "ui/aura/env.h"
+#endif
+
 // How long the pulse throb takes.
 static const int kPulseDurationMs = 200;
 
@@ -47,7 +51,25 @@ class BaseTab::TabCloseButton : public views::ImageButton {
   explicit TabCloseButton(BaseTab* tab) : views::ImageButton(tab), tab_(tab) {}
   virtual ~TabCloseButton() {}
 
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
+  // Overridden from views::View.
+  virtual View* GetEventHandlerForPoint(const gfx::Point& point) OVERRIDE {
+    // Ignore the padding set on the button.
+    gfx::Rect rect = GetContentsBounds();
+    rect.set_x(GetMirroredXForRect(rect));
+
+#if defined(USE_ASH)
+    // Include the padding in hit-test for touch events.
+    if (aura::Env::GetInstance()->is_touch_down())
+      rect = GetLocalBounds();
+#elif defined(OS_WIN)
+    // TODO(sky): Use local-bounds if a touch-point is active.
+    // http://crbug.com/145258
+#endif
+
+    return rect.Contains(point) ? this : parent();
+  }
+
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE {
     if (tab_->controller())
       tab_->controller()->OnMouseEventInTab(this, event);
 
@@ -57,37 +79,24 @@ class BaseTab::TabCloseButton : public views::ImageButton {
     return event.IsOnlyMiddleMouseButton() ? false : handled;
   }
 
-  // We need to let the parent know about mouse state so that it
-  // can highlight itself appropriately. Note that Exit events
-  // fire before Enter events, so this works.
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE {
-    CustomButton::OnMouseEntered(event);
-    parent()->OnMouseEntered(event);
-  }
-
-  virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE {
+  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE {
     if (tab_->controller())
       tab_->controller()->OnMouseEventInTab(this, event);
     CustomButton::OnMouseMoved(event);
   }
 
-  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE {
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE {
     if (tab_->controller())
       tab_->controller()->OnMouseEventInTab(this, event);
     CustomButton::OnMouseReleased(event);
   }
 
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE {
-    CustomButton::OnMouseExited(event);
-    parent()->OnMouseExited(event);
-  }
-
-  virtual ui::GestureStatus OnGestureEvent(
-      const views::GestureEvent& event) OVERRIDE {
+  virtual ui::EventResult OnGestureEvent(
+      const ui::GestureEvent& event) OVERRIDE {
     // Consume all gesture events here so that the parent (BaseTab) does not
     // start consuming gestures.
     ImageButton::OnGestureEvent(event);
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
  private:
@@ -176,6 +185,10 @@ BaseTab::BaseTab(TabController* controller)
       theme_provider_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(hover_controller_(this)) {
   BaseTab::InitResources();
+
+  // So we get don't get enter/exit on children and don't prematurely stop the
+  // hover.
+  set_notify_enter_exit_on_child(true);
 
   set_id(VIEW_ID_TAB);
 
@@ -302,7 +315,7 @@ ui::ThemeProvider* BaseTab::GetThemeProvider() const {
   return tp ? tp : theme_provider_;
 }
 
-bool BaseTab::OnMousePressed(const views::MouseEvent& event) {
+bool BaseTab::OnMousePressed(const ui::MouseEvent& event) {
   if (!controller())
     return false;
 
@@ -337,13 +350,13 @@ bool BaseTab::OnMousePressed(const views::MouseEvent& event) {
   return true;
 }
 
-bool BaseTab::OnMouseDragged(const views::MouseEvent& event) {
+bool BaseTab::OnMouseDragged(const ui::MouseEvent& event) {
   if (controller())
     controller()->ContinueDrag(this, event.location());
   return true;
 }
 
-void BaseTab::OnMouseReleased(const views::MouseEvent& event) {
+void BaseTab::OnMouseReleased(const ui::MouseEvent& event) {
   if (!controller())
     return;
 
@@ -354,15 +367,15 @@ void BaseTab::OnMouseReleased(const views::MouseEvent& event) {
   // In some cases, ending the drag will schedule the tab for destruction; if
   // so, bail immediately, since our members are already dead and we shouldn't
   // do anything else except drop the tab where it is.
-  if (controller()->EndDrag(false))
+  if (controller()->EndDrag(END_DRAG_COMPLETE))
     return;
 
   // Close tab on middle click, but only if the button is released over the tab
   // (normal windows behavior is to discard presses of a UI element where the
   // releases happen off the element).
   if (event.IsMiddleMouseButton()) {
-    if (HitTest(event.location())) {
-      controller()->CloseTab(this);
+    if (HitTestPoint(event.location())) {
+      controller()->CloseTab(this, CLOSE_TAB_FROM_MOUSE);
     } else if (closing_) {
       // We're animating closed and a middle mouse button was pushed on us but
       // we don't contain the mouse anymore. We assume the user is clicking
@@ -370,7 +383,7 @@ void BaseTab::OnMouseReleased(const views::MouseEvent& event) {
       // the mouse.
       BaseTab* closest_tab = controller()->GetTabAt(this, event.location());
       if (closest_tab)
-        controller()->CloseTab(closest_tab);
+        controller()->CloseTab(closest_tab, CLOSE_TAB_FROM_MOUSE);
     }
   } else if (event.IsOnlyLeftMouseButton() && !event.IsShiftDown() &&
              !event.IsControlDown()) {
@@ -383,30 +396,30 @@ void BaseTab::OnMouseReleased(const views::MouseEvent& event) {
 
 void BaseTab::OnMouseCaptureLost() {
   if (controller())
-    controller()->EndDrag(true);
+    controller()->EndDrag(END_DRAG_CAPTURE_LOST);
 }
 
-void BaseTab::OnMouseEntered(const views::MouseEvent& event) {
+void BaseTab::OnMouseEntered(const ui::MouseEvent& event) {
   hover_controller_.Show();
 }
 
-void BaseTab::OnMouseMoved(const views::MouseEvent& event) {
+void BaseTab::OnMouseMoved(const ui::MouseEvent& event) {
   if (controller())
     controller()->OnMouseEventInTab(this, event);
 }
 
-void BaseTab::OnMouseExited(const views::MouseEvent& event) {
+void BaseTab::OnMouseExited(const ui::MouseEvent& event) {
   hover_controller_.Hide();
 }
 
-ui::GestureStatus BaseTab::OnGestureEvent(const views::GestureEvent& event) {
+ui::EventResult BaseTab::OnGestureEvent(const ui::GestureEvent& event) {
   if (!controller())
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
 
   switch (event.type()) {
     case ui::ET_GESTURE_BEGIN: {
       if (event.details().touch_points() != 1)
-        return ui::GESTURE_STATUS_UNKNOWN;
+        return ui::ER_UNHANDLED;
 
       TabStripSelectionModel original_selection;
       original_selection.Copy(controller()->GetSelectionModel());
@@ -419,7 +432,7 @@ ui::GestureStatus BaseTab::OnGestureEvent(const views::GestureEvent& event) {
     }
 
     case ui::ET_GESTURE_END:
-      controller()->EndDrag(false);
+      controller()->EndDrag(END_DRAG_COMPLETE);
       break;
 
     case ui::ET_GESTURE_SCROLL_UPDATE:
@@ -429,7 +442,7 @@ ui::GestureStatus BaseTab::OnGestureEvent(const views::GestureEvent& event) {
     default:
       break;
   }
-  return ui::GESTURE_STATUS_CONSUMED;
+  return ui::ER_CONSUMED;
 }
 
 bool BaseTab::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
@@ -570,9 +583,13 @@ void BaseTab::AnimationEnded(const ui::Animation* animation) {
   SchedulePaint();
 }
 
-void BaseTab::ButtonPressed(views::Button* sender, const views::Event& event) {
+void BaseTab::ButtonPressed(views::Button* sender, const ui::Event& event) {
+  const CloseTabSource source =
+      (event.type() == ui::ET_MOUSE_RELEASED &&
+       (event.flags() & ui::EF_FROM_TOUCH) == 0) ? CLOSE_TAB_FROM_MOUSE :
+      CLOSE_TAB_FROM_TOUCH;
   DCHECK(sender == close_button_);
-  controller()->CloseTab(this);
+  controller()->CloseTab(this, source);
 }
 
 void BaseTab::ShowContextMenuForView(views::View* source,

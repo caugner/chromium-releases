@@ -7,7 +7,6 @@
 #include <ctype.h>
 
 #include <string>
-#include <vector>
 
 #include "base/base64.h"
 #include "base/bind.h"
@@ -62,7 +61,7 @@
 #ifdef OS_CHROMEOS
 // TODO(kinaba): provide more non-intrusive way for handling local/remote
 // distinction and remove these ugly #ifdef's. http://crbug.com/140425
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
 #endif
 
 #if !defined(OS_MACOSX)
@@ -104,6 +103,11 @@ enum PrintSettingsBuckets {
   PRINT_SETTINGS_BUCKET_BOUNDARY
 };
 
+enum UiBucketGroups {
+  DESTINATION_SEARCH,
+  UI_BUCKET_GROUP_BOUNDARY
+};
+
 enum PrintDestinationBuckets {
   DESTINATION_SHOWN,
   DESTINATION_CLOSED_CHANGED,
@@ -129,7 +133,7 @@ void ReportPrintDestinationHistogram(enum PrintDestinationBuckets event) {
 }
 
 // Name of a dictionary field holding cloud print related data;
-const char kCloudPrintData[] = "cloudPrintData";
+const char kAppState[] = "appState";
 // Name of a dictionary field holding the initiator tab title.
 const char kInitiatorTabTitle[] = "initiatorTabTitle";
 // Name of a dictionary field holding the measurement system according to the
@@ -221,9 +225,9 @@ void PrintToPdfCallback(Metafile* metafile, const FilePath& path) {
 
 #ifdef OS_CHROMEOS
 void PrintToPdfCallbackWithCheck(Metafile* metafile,
-                                 gdata::GDataFileError error,
+                                 gdata::DriveFileError error,
                                  const FilePath& path) {
-  if (error != gdata::GDATA_FILE_OK) {
+  if (error != gdata::DRIVE_FILE_OK) {
     LOG(ERROR) << "Save to pdf failed to write: " << error;
   } else {
     metafile->SaveTo(path);
@@ -237,7 +241,6 @@ void PrintToPdfCallbackWithCheck(Metafile* metafile,
 
 static base::LazyInstance<printing::StickySettings> sticky_settings =
     LAZY_INSTANCE_INITIALIZER;
-
 }  // namespace
 
 // static
@@ -294,14 +297,14 @@ void PrintPreviewHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("cancelPendingPrintRequest",
       base::Bind(&PrintPreviewHandler::HandleCancelPendingPrintRequest,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback("saveLastPrinter",
-      base::Bind(&PrintPreviewHandler::HandleSaveLastPrinter,
+  web_ui()->RegisterMessageCallback("saveAppState",
+      base::Bind(&PrintPreviewHandler::HandleSaveAppState,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("getInitialSettings",
       base::Bind(&PrintPreviewHandler::HandleGetInitialSettings,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback("reportDestinationEvent",
-      base::Bind(&PrintPreviewHandler::HandleReportDestinationEvent,
+  web_ui()->RegisterMessageCallback("reportUiEvent",
+      base::Bind(&PrintPreviewHandler::HandleReportUiEvent,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("printWithCloudPrint",
       base::Bind(&PrintPreviewHandler::HandlePrintWithCloudPrint,
@@ -418,11 +421,6 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
   if (!settings.get())
     return;
 
-  // Storing last used settings.
-  printing::StickySettings* sticky_settings = GetStickySettings();
-  sticky_settings->Store(*settings);
-  sticky_settings->SaveInPrefs(Profile::FromBrowserContext(
-      preview_web_contents()->GetBrowserContext())->GetPrefs());
   // Never try to add headers/footers here. It's already in the generated PDF.
   settings->SetBoolean(printing::kSettingHeaderFooterEnabled, false);
 
@@ -476,8 +474,12 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
     // finished. Then the tab closes and PrintPreviewDone() gets called. Here,
     // since we are hiding the tab, and not closing it, we need to make this
     // call.
-    if (initiator_tab)
-      initiator_tab->print_view_manager()->PrintPreviewDone();
+    if (initiator_tab) {
+      printing::PrintViewManager* print_view_manager =
+          printing::PrintViewManager::FromWebContents(
+              initiator_tab->web_contents());
+      print_view_manager->PrintPreviewDone();
+    }
   }
 }
 
@@ -532,13 +534,13 @@ void PrintPreviewHandler::HandleCancelPendingPrintRequest(
   chrome::ShowPrintErrorDialog(parent);
 }
 
-void PrintPreviewHandler::HandleSaveLastPrinter(const ListValue* args) {
+void PrintPreviewHandler::HandleSaveAppState(const ListValue* args) {
   std::string data_to_save;
+  printing::StickySettings* sticky_settings = GetStickySettings();
   if (args->GetString(0, &data_to_save) && !data_to_save.empty())
-    GetStickySettings()->StorePrinterName(data_to_save);
-
-  if (args->GetString(1, &data_to_save) && !data_to_save.empty())
-    GetStickySettings()->StoreCloudPrintData(data_to_save);
+    sticky_settings->StoreAppState(data_to_save);
+  sticky_settings->SaveInPrefs(Profile::FromBrowserContext(
+      preview_web_contents()->GetBrowserContext())->GetPrefs());
 }
 
 void PrintPreviewHandler::HandleGetPrinterCapabilities(const ListValue* args) {
@@ -632,9 +634,11 @@ void PrintPreviewHandler::HandleShowSystemDialog(const ListValue* /*args*/) {
   if (!initiator_tab)
     return;
 
-  printing::PrintViewManager* manager = initiator_tab->print_view_manager();
-  manager->set_observer(this);
-  manager->PrintForSystemDialogNow();
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          initiator_tab->web_contents());
+  print_view_manager->set_observer(this);
+  print_view_manager->PrintForSystemDialogNow();
 
   // Cancel the pending preview request if exists.
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
@@ -681,36 +685,38 @@ void PrintPreviewHandler::GetNumberFormatAndMeasurementSystem(
 }
 
 void PrintPreviewHandler::HandleGetInitialSettings(const ListValue* /*args*/) {
-  printing::StickySettings* sticky_settings = GetStickySettings();
-  sticky_settings->RestoreFromPrefs(Profile::FromBrowserContext(
-      preview_web_contents()->GetBrowserContext())->GetPrefs());
-  if (sticky_settings->printer_name()) {
-    std::string cloud_print_data;
-    if (sticky_settings->printer_cloud_print_data())
-      cloud_print_data = *sticky_settings->printer_cloud_print_data();
-    SendInitialSettings(*sticky_settings->printer_name(), cloud_print_data);
-  } else {
-    scoped_refptr<PrintSystemTaskProxy> task =
-        new PrintSystemTaskProxy(AsWeakPtr(),
-                                 print_backend_.get(),
-                                 has_logged_printers_count_);
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(&PrintSystemTaskProxy::GetDefaultPrinter, task.get()));
-  }
+  scoped_refptr<PrintSystemTaskProxy> task =
+      new PrintSystemTaskProxy(AsWeakPtr(),
+                                print_backend_.get(),
+                                has_logged_printers_count_);
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&PrintSystemTaskProxy::GetDefaultPrinter, task.get()));
   SendCloudPrintEnabled();
 }
 
-void PrintPreviewHandler::HandleReportDestinationEvent(const ListValue* args) {
-  int event_number;
-  bool ret = args->GetInteger(0, &event_number);
-  if (!ret)
+void PrintPreviewHandler::HandleReportUiEvent(const ListValue* args) {
+  int event_group, event_number;
+  if (!args->GetInteger(0, &event_group) || !args->GetInteger(1, &event_number))
     return;
-  enum PrintDestinationBuckets event =
-      static_cast<enum PrintDestinationBuckets>(event_number);
-  if (event >= PRINT_DESTINATION_BUCKET_BOUNDARY)
+
+  enum UiBucketGroups ui_bucket_group =
+      static_cast<enum UiBucketGroups>(event_group);
+  if (ui_bucket_group >= UI_BUCKET_GROUP_BOUNDARY)
     return;
-  ReportPrintDestinationHistogram(event);
+
+  switch (ui_bucket_group) {
+    case DESTINATION_SEARCH: {
+      enum PrintDestinationBuckets event =
+            static_cast<enum PrintDestinationBuckets>(event_number);
+      if (event >= PRINT_DESTINATION_BUCKET_BOUNDARY)
+        return;
+      ReportPrintDestinationHistogram(event);
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 void PrintPreviewHandler::SendInitialSettings(
@@ -726,12 +732,12 @@ void PrintPreviewHandler::SendInitialSettings(
                               print_preview_ui->source_is_modifiable());
   initial_settings.SetString(printing::kSettingPrinterName,
                              default_printer);
-  initial_settings.SetString(kCloudPrintData, cloud_print_data);
-  initial_settings.SetBoolean(printing::kSettingHeaderFooterEnabled,
-                              GetStickySettings()->headers_footers());
-  initial_settings.SetInteger(printing::kSettingDuplexMode,
-                              GetStickySettings()->duplex_mode());
-
+  printing::StickySettings* sticky_settings = GetStickySettings();
+  sticky_settings->RestoreFromPrefs(Profile::FromBrowserContext(
+      preview_web_contents()->GetBrowserContext())->GetPrefs());
+  if (sticky_settings->printer_app_state())
+    initial_settings.SetString(kAppState,
+                               *sticky_settings->printer_app_state());
 
 #if defined(OS_MACOSX)
   bool kiosk_mode = false;  // No kiosk mode on Mac yet.
@@ -743,7 +749,6 @@ void PrintPreviewHandler::SendInitialSettings(
   initial_settings.SetBoolean(kPrintAutomaticallyInKioskMode, kiosk_mode);
 
   if (print_preview_ui->source_is_modifiable()) {
-    GetStickySettings()->GetLastUsedMarginSettings(&initial_settings);
     GetNumberFormatAndMeasurementSystem(&initial_settings);
   }
   web_ui()->CallJavascriptFunction("setInitialSettings", initial_settings);
@@ -763,16 +768,8 @@ void PrintPreviewHandler::ActivateInitiatorTabAndClosePreviewTab() {
 void PrintPreviewHandler::SendPrinterCapabilities(
     const DictionaryValue& settings_info) {
   VLOG(1) << "Get printer capabilities finished";
-  // Copy so we can override with sticky values.
-  scoped_ptr<DictionaryValue> settings(settings_info.DeepCopy());
-  if (GetStickySettings()->color_model() != printing::UNKNOWN_COLOR_MODEL) {
-    settings->SetBoolean(
-        printing::kSettingSetColorAsDefault,
-        printing::isColorModelSelected(
-            GetStickySettings()->color_model()));
-  }
   web_ui()->CallJavascriptFunction("updateWithPrinterCapabilities",
-                                   *settings);
+                                   settings_info);
 }
 
 void PrintPreviewHandler::SendFailedToGetPrinterCapabilities(
@@ -807,8 +804,10 @@ void PrintPreviewHandler::SendCloudPrintJob(const DictionaryValue& settings,
   print_preview_ui->GetPrintPreviewDataForIndex(
       printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
   if (data.get() && data->size() > 0U && data->front()) {
-    string16 print_job_title_utf16 =
-        preview_tab_contents()->print_view_manager()->RenderSourceName();
+    printing::PrintViewManager* print_view_manager =
+        printing::PrintViewManager::FromWebContents(
+            preview_tab_contents()->web_contents());
+    string16 print_job_title_utf16 = print_view_manager->RenderSourceName();
     std::string print_job_title = UTF16ToUTF8(print_job_title_utf16);
     std::string printer_id;
     settings.GetString(printing::kSettingCloudPrintId, &printer_id);
@@ -876,14 +875,17 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("pdf"));
 
   // Initializing save_path_ if it is not already initialized.
-  if (!GetStickySettings()->save_path()) {
+  printing::StickySettings* sticky_settings = GetStickySettings();
+  if (!sticky_settings->save_path()) {
     // Allowing IO operation temporarily. It is ok to do so here because
     // the select file dialog performs IO anyway in order to display the
     // folders and also it is modal.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
     FilePath file_path;
     PathService::Get(chrome::DIR_USER_DOCUMENTS, &file_path);
-    GetStickySettings()->StoreSavePath(file_path);
+    sticky_settings->StoreSavePath(file_path);
+    sticky_settings->SaveInPrefs(Profile::FromBrowserContext(
+        preview_web_contents()->GetBrowserContext())->GetPrefs());
   }
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
@@ -891,7 +893,7 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_SAVEAS_FILE,
       string16(),
-      GetStickySettings()->save_path()->Append(default_filename),
+      sticky_settings->save_path()->Append(default_filename),
       &file_type_info,
       0,
       FILE_PATH_LITERAL(""),
@@ -904,7 +906,10 @@ void PrintPreviewHandler::OnTabDestroyed() {
   if (!initiator_tab)
     return;
 
-  initiator_tab->print_view_manager()->set_observer(NULL);
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          initiator_tab->web_contents());
+  print_view_manager->set_observer(NULL);
 }
 
 void PrintPreviewHandler::OnPrintPreviewFailed() {
@@ -921,7 +926,10 @@ void PrintPreviewHandler::ShowSystemDialog() {
 void PrintPreviewHandler::FileSelected(const FilePath& path,
                                        int index, void* params) {
   // Updating |save_path_| to the newly selected folder.
-  GetStickySettings()->StoreSavePath(path.DirName());
+  printing::StickySettings* sticky_settings = GetStickySettings();
+  sticky_settings->StoreSavePath(path.DirName());
+  sticky_settings->SaveInPrefs(Profile::FromBrowserContext(
+      preview_web_contents()->GetBrowserContext())->GetPrefs());
 
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       web_ui()->GetController());

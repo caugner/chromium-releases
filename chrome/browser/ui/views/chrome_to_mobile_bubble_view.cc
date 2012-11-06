@@ -25,10 +25,8 @@
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/radio_button.h"
 #include "ui/views/controls/button/text_button.h"
-#include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
-#include "ui/views/events/event.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
@@ -70,10 +68,10 @@ void CheckboxNativeThemeBorder::GetInsets(gfx::Insets* insets) const {
   insets->Set(insets->top(), 0, insets->bottom(), insets->right());
 }
 
-// Downcast the View to an ImageView and set the image with the resource |id|.
-void SetImageViewToId(views::View* image_view, int id) {
-  static_cast<views::ImageView*>(image_view)->
-      SetImage(ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(id));
+// Downcast TextButton |view| and set the icon image with the resource |id|.
+void SetTextButtonIconToId(views::View* view, int id) {
+  static_cast<views::TextButton*>(view)->
+      SetIcon(*ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(id));
 }
 
 }  // namespace
@@ -109,7 +107,7 @@ void ChromeToMobileBubbleView::ShowBubble(views::View* anchor_view,
     return;
 
   // Show the lit mobile device icon during the bubble's lifetime.
-  SetImageViewToId(anchor_view, IDR_MOBILE_LIT);
+  SetTextButtonIconToId(anchor_view, IDR_MOBILE_LIT);
   bubble_ = new ChromeToMobileBubbleView(anchor_view, browser);
   views::BubbleDelegateView::CreateBubble(bubble_);
   bubble_->Show();
@@ -129,13 +127,6 @@ views::View* ChromeToMobileBubbleView::GetInitiallyFocusedView() {
   return send_;
 }
 
-gfx::Rect ChromeToMobileBubbleView::GetAnchorRect() {
-  // Compensate for some built-in padding in the page action icon image.
-  gfx::Rect rect(BubbleDelegateView::GetAnchorRect());
-  rect.Inset(0, anchor_view() ? 5 : 0);
-  return rect;
-}
-
 void ChromeToMobileBubbleView::WindowClosing() {
   // We have to reset |bubble_| here, not in our destructor, because we'll be
   // destroyed asynchronously and the shown state will be checked before then.
@@ -145,8 +136,8 @@ void ChromeToMobileBubbleView::WindowClosing() {
   // Instruct the service to delete the snapshot file.
   service_->DeleteSnapshot(snapshot_path_);
 
-  // Restore the resting state mobile device icon.
-  SetImageViewToId(anchor_view(), IDR_MOBILE);
+  // Restore the resting state action box icon.
+  SetTextButtonIconToId(anchor_view(), IDR_ACTION_BOX_BUTTON);
 }
 
 bool ChromeToMobileBubbleView::AcceleratorPressed(
@@ -180,7 +171,7 @@ void ChromeToMobileBubbleView::AnimationProgressed(
 }
 
 void ChromeToMobileBubbleView::ButtonPressed(views::Button* sender,
-                                             const views::Event& event) {
+                                             const ui::Event& event) {
   HandleButtonPressed(sender);
 }
 
@@ -332,11 +323,11 @@ ChromeToMobileBubbleView::ChromeToMobileBubbleView(views::View* anchor_view,
       send_copy_(NULL),
       send_(NULL),
       cancel_(NULL) {
+  // Compensate for built-in vertical padding in the anchor view's image.
+  set_anchor_insets(gfx::Insets(5, 0, 5, 0));
+
   // Generate the MHTML snapshot now to report its size in the bubble.
   service_->GenerateSnapshot(browser_, weak_ptr_factory_.GetWeakPtr());
-
-  // Request a mobile device list update.
-  service_->RequestMobileListUpdate();
 }
 
 void ChromeToMobileBubbleView::LinkClicked(views::Link* source,
@@ -369,7 +360,7 @@ void ChromeToMobileBubbleView::Send() {
   const DictionaryValue* mobile = NULL;
   if (mobiles->GetDictionary(selected_index, &mobile)) {
     FilePath snapshot = send_copy_->checked() ? snapshot_path_ : FilePath();
-    service_->SendToMobile(*mobile, snapshot, browser_,
+    service_->SendToMobile(mobile, snapshot, browser_,
                            weak_ptr_factory_.GetWeakPtr());
   } else {
     NOTREACHED();

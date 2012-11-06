@@ -28,6 +28,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/api/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
@@ -62,6 +63,7 @@
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/intents/device_attached_intent_source.h"
 #include "chrome/browser/intents/register_intent_handler_infobar_delegate.h"
+#include "chrome/browser/intents/web_intents_reporting.h"
 #include "chrome/browser/intents/web_intents_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/media/media_stream_devices_controller.h"
@@ -77,9 +79,9 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/repost_form_warning_controller.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
@@ -88,12 +90,10 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
-#include "chrome/browser/tab_contents/simple_alert_infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
-#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -111,7 +111,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -124,12 +123,9 @@
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/media_stream_infobar_delegate.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/panels/panel.h"
-#include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
-#include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/sync/browser_synced_window_delegate.h"
@@ -207,7 +203,7 @@
 #endif  // OS_WIN
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
 #endif
 
 #if defined(USE_ASH)
@@ -236,24 +232,20 @@ const char kBrokenPageUrl[] =
     "https://www.google.com/support/chrome/bin/request.py?contact_type="
     "broken_website&format=inproduct&p.page_title=$1&p.page_url=$2";
 
-// The URL for the privacy dashboard.
-const char kPrivacyDashboardUrl[] = "https://www.google.com/dashboard";
-
 // How long we wait before updating the browser chrome while loading a page.
 const int kUIUpdateCoalescingTimeMS = 200;
 
-bool AllowPanels(const std::string& app_name) {
-  return PanelManager::ShouldUsePanels(
-      web_app::GetExtensionIdFromApplicationName(app_name));
-}
-
 BrowserWindow* CreateBrowserWindow(Browser* browser) {
-#if !defined(USE_ASH)
-  if (browser->is_type_panel())
-    return PanelManager::GetInstance()->CreatePanel(browser)->browser_window();
-#endif
   return BrowserWindow::CreateBrowserWindow(browser);
 }
+
+#if defined(OS_CHROMEOS)
+chrome::HostDesktopType kDefaultHostDesktopType = chrome::HOST_DESKTOP_TYPE_ASH;
+#else
+chrome::HostDesktopType kDefaultHostDesktopType =
+    chrome::HOST_DESKTOP_TYPE_NATIVE;
+#endif
+
 
 }  // namespace
 
@@ -263,6 +255,7 @@ BrowserWindow* CreateBrowserWindow(Browser* browser) {
 Browser::CreateParams::CreateParams()
     : type(TYPE_TABBED),
       profile(NULL),
+      host_desktop_type(kDefaultHostDesktopType),
       app_type(APP_TYPE_HOST),
       initial_show_state(ui::SHOW_STATE_DEFAULT),
       is_session_restore(false),
@@ -270,17 +263,31 @@ Browser::CreateParams::CreateParams()
 }
 
 Browser::CreateParams::CreateParams(Profile* profile)
-  : type(TYPE_TABBED),
-    profile(profile),
-    app_type(APP_TYPE_HOST),
-    initial_show_state(ui::SHOW_STATE_DEFAULT),
-    is_session_restore(false),
-    window(NULL) {
+    : type(TYPE_TABBED),
+      profile(profile),
+      host_desktop_type(kDefaultHostDesktopType),
+      app_type(APP_TYPE_HOST),
+      initial_show_state(ui::SHOW_STATE_DEFAULT),
+      is_session_restore(false),
+      window(NULL) {
 }
 
 Browser::CreateParams::CreateParams(Type type, Profile* profile)
     : type(type),
       profile(profile),
+      host_desktop_type(kDefaultHostDesktopType),
+      app_type(APP_TYPE_HOST),
+      initial_show_state(ui::SHOW_STATE_DEFAULT),
+      is_session_restore(false),
+      window(NULL) {
+}
+
+Browser::CreateParams::CreateParams(Type type,
+                                    Profile* profile,
+                                    chrome::HostDesktopType host_desktop_type)
+    : type(type),
+      profile(profile),
+      host_desktop_type(host_desktop_type),
       app_type(APP_TYPE_HOST),
       initial_show_state(ui::SHOW_STATE_DEFAULT),
       is_session_restore(false),
@@ -295,9 +302,6 @@ Browser::CreateParams Browser::CreateParams::CreateForApp(
     Profile* profile) {
   DCHECK(type != TYPE_TABBED);
   DCHECK(!app_name.empty());
-
-  if (type == TYPE_PANEL && !AllowPanels(app_name))
-    type = TYPE_POPUP;
 
   CreateParams params(type, profile);
   params.app_name = app_name;
@@ -335,6 +339,7 @@ Browser::Browser(const CreateParams& params)
       override_bounds_(params.initial_bounds),
       initial_show_state_(params.initial_show_state),
       is_session_restore_(params.is_session_restore),
+      host_desktop_type_(params.host_desktop_type),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           unload_controller_(new chrome::UnloadController(this))),
       weak_factory_(this),
@@ -361,7 +366,8 @@ Browser::Browser(const CreateParams& params)
   toolbar_model_.reset(new ToolbarModel(toolbar_model_delegate_.get()));
   search_model_.reset(new chrome::search::SearchModel(NULL));
   search_delegate_.reset(
-      new chrome::search::SearchDelegate(search_model_.get()));
+      new chrome::search::SearchDelegate(search_model_.get(),
+                                         toolbar_model_.get()));
 
   registrar_.Add(this, content::NOTIFICATION_SSL_VISIBLE_STATE_CHANGED,
                  content::NotificationService::AllSources());
@@ -534,13 +540,12 @@ bool Browser::is_devtools() const {
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, State Storage and Retrieval for UI:
 
-SkBitmap Browser::GetCurrentPageIcon() const {
+gfx::Image Browser::GetCurrentPageIcon() const {
   TabContents* contents = chrome::GetActiveTabContents(this);
   // |contents| can be NULL since GetCurrentPageIcon() is called by the window
   // during the window's creation (before tabs have been added).
-  // TODO: Let this return a gfx::Image.
   return contents ?
-      contents->favicon_tab_helper()->GetFavicon().AsBitmap() : SkBitmap();
+      contents->favicon_tab_helper()->GetFavicon() : gfx::Image();
 }
 
 string16 Browser::GetWindowTitleForCurrentTab() const {
@@ -806,9 +811,11 @@ void Browser::OpenFile() {
 
   // TODO(beng): figure out how to juggle this.
   gfx::NativeWindow parent_window = window_->GetNativeWindow();
+  ui::SelectFileDialog::FileTypeInfo file_types;
+  file_types.support_gdata = true;
   select_file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE,
                                   string16(), directory,
-                                  NULL, 0, FILE_PATH_LITERAL(""),
+                                  &file_types, 0, FILE_PATH_LITERAL(""),
                                   parent_window, NULL);
 }
 
@@ -896,7 +903,7 @@ void Browser::RegisterProtocolHandlerHelper(WebContents* web_contents,
                                                  registry,
                                                  handler);
 
-  for (size_t i = 0; i < infobar_helper->infobar_count(); i++) {
+  for (size_t i = 0; i < infobar_helper->GetInfoBarCount(); i++) {
     InfoBarDelegate* delegate = infobar_helper->GetInfoBarDelegateAt(i);
     RegisterProtocolHandlerInfoBarDelegate* cast_delegate =
         delegate->AsRegisterProtocolHandlerInfoBarDelegate();
@@ -943,7 +950,7 @@ void Browser::RequestMediaAccessPermissionHelper(
   if (!controller->DismissInfoBarAndTakeActionOnSettings()) {
     InfoBarTabHelper* infobar_helper = tab->infobar_tab_helper();
     InfoBarDelegate* old_infobar = NULL;
-    for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
+    for (size_t i = 0; i < infobar_helper->GetInfoBarCount(); ++i) {
       old_infobar = infobar_helper->GetInfoBarDelegateAt(i)->
           AsMediaStreamInfoBarDelegate();
       if (old_infobar)
@@ -1000,8 +1007,10 @@ WebContents* Browser::OpenURL(const OpenURLParams& params) {
 void Browser::TabInsertedAt(TabContents* contents,
                             int index,
                             bool foreground) {
-  SetAsDelegate(contents, this);
-  contents->restore_tab_helper()->SetWindowID(session_id());
+  SetAsDelegate(contents->web_contents(), this);
+  SessionTabHelper* session_tab_helper =
+      SessionTabHelper::FromWebContents(contents->web_contents());
+  session_tab_helper->SetWindowID(session_id());
 
   SyncHistoryWithTabs(index);
 
@@ -1027,7 +1036,7 @@ void Browser::TabClosingAt(TabStripModel* tab_strip_model,
       content::NotificationService::NoDetails());
 
   // Sever the WebContents' connection back to us.
-  SetAsDelegate(contents, NULL);
+  SetAsDelegate(contents->web_contents(), NULL);
 }
 
 void Browser::TabDetachedAt(TabContents* contents, int index) {
@@ -1157,10 +1166,11 @@ void Browser::TabPinnedStateChanged(TabContents* contents, int index) {
   SessionService* session_service =
       SessionServiceFactory::GetForProfileIfExisting(profile());
   if (session_service) {
+    SessionTabHelper* session_tab_helper =
+        SessionTabHelper::FromWebContents(contents->web_contents());
     session_service->SetPinnedState(
         session_id(),
-        chrome::GetTabContentsAt(this, index)->restore_tab_helper()->
-            session_id(),
+        session_tab_helper->session_id(),
         tab_strip_model_->IsTabPinned(index));
   }
 }
@@ -1176,7 +1186,8 @@ void Browser::TabStripEmpty() {
       FROM_HERE, base::Bind(&Browser::CloseFrame, weak_factory_.GetWeakPtr()));
 }
 
-bool Browser::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+bool Browser::PreHandleKeyboardEvent(content::WebContents* source,
+                                     const NativeWebKeyboardEvent& event,
                                      bool* is_keyboard_shortcut) {
   // Escape exits tabbed fullscreen mode.
   // TODO(koz): Write a test for this http://crbug.com/100441.
@@ -1187,7 +1198,8 @@ bool Browser::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
   return window()->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
 }
 
-void Browser::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
+void Browser::HandleKeyboardEvent(content::WebContents* source,
+                                  const NativeWebKeyboardEvent& event) {
   window()->HandleKeyboardEvent(event);
 }
 
@@ -1282,9 +1294,10 @@ void Browser::AddNewContents(WebContents* source,
                              WebContents* new_contents,
                              WindowOpenDisposition disposition,
                              const gfx::Rect& initial_pos,
-                             bool user_gesture) {
+                             bool user_gesture,
+                             bool* was_blocked) {
   chrome::AddWebContents(this, source, new_contents, disposition, initial_pos,
-                         user_gesture);
+                         user_gesture, was_blocked);
 }
 
 void Browser::ActivateContents(WebContents* contents) {
@@ -1362,7 +1375,8 @@ void Browser::WebContentsFocused(WebContents* contents) {
   window_->WebContentsFocused(contents);
 }
 
-bool Browser::TakeFocus(bool reverse) {
+bool Browser::TakeFocus(content::WebContents* source,
+                        bool reverse) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
       content::Source<Browser>(this),
@@ -1424,8 +1438,7 @@ void Browser::OnStartDownload(WebContents* source,
   // Don't show the animation for "Save file" downloads.
   // For non-theme extensions, we don't show the download animation.
   // Show animation in same window as the download shelf. Download shelf
-  // may not be in the same window that initiated the download, e.g.
-  // Panels.
+  // may not be in the same window that initiated the download.
   // Don't show the animation if the selected tab is not visible (i.e. the
   // window is minimized, we're in a unit test, etc.).
   WebContents* shelf_tab = chrome::GetActiveWebContents(shelf->browser());
@@ -1488,12 +1501,11 @@ void Browser::WebContentsCreated(WebContents* source_contents,
                                  int64 source_frame_id,
                                  const GURL& target_url,
                                  WebContents* new_contents) {
-  // Create a TabContents now, so all observers are in place, as the network
+  // Adopt the WebContents now, so all observers are in place, as the network
   // requests for its initial navigation will start immediately. The WebContents
   // will later be inserted into this browser using Browser::Navigate via
-  // AddNewContents. The latter will retrieve the newly created TabContents from
-  // WebContents object.
-  new TabContents(new_contents);
+  // AddNewContents.
+  AdoptAsTabContents(new_contents);
 
   // Notify.
   RetargetingDetails details;
@@ -1627,10 +1639,12 @@ void Browser::RegisterIntentHandler(
 void Browser::WebIntentDispatch(
     WebContents* web_contents,
     content::WebIntentsDispatcher* intents_dispatcher) {
-  if (!web_intents::IsWebIntentsEnabledForProfile(profile_))
+  if (!web_intents::IsWebIntentsEnabledForProfile(profile_)) {
+    web_intents::RecordIntentsDispatchDisabled();
     return;
+  }
 
-  UMA_HISTOGRAM_COUNTS("WebIntents.Dispatch", 1);
+  web_intents::RecordIntentDispatchRequested();
 
   if (!web_contents) {
     // Intent is system-caused and the picker will show over the currently
@@ -1735,29 +1749,19 @@ TabContents* Browser::GetConstrainingTabContents(TabContents* source) {
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, BookmarkTabHelperDelegate implementation:
 
-void Browser::URLStarredChanged(TabContents* source, bool starred) {
-  if (source == chrome::GetActiveTabContents(this))
+void Browser::URLStarredChanged(content::WebContents* web_contents,
+                                bool starred) {
+  if (web_contents == chrome::GetActiveWebContents(this))
     window_->SetStarredState(starred);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, ZoomObserver implementation:
 
-void Browser::OnZoomIconChanged(TabContents* source,
-                                ZoomController::ZoomIconState state) {
-  if (source == chrome::GetActiveTabContents(this))
-    window_->SetZoomIconState(state);
-}
-
-void Browser::OnZoomChanged(TabContents* source,
-                            int zoom_percent,
-                            bool can_show_bubble) {
+void Browser::OnZoomChanged(TabContents* source, bool can_show_bubble) {
   if (source == chrome::GetActiveTabContents(this)) {
-    window_->SetZoomIconTooltipPercent(zoom_percent);
-
     // Only show the zoom bubble for zoom changes in the active window.
-    if (can_show_bubble && window_->IsActive())
-      window_->ShowZoomBubble(zoom_percent);
+    window_->ZoomChangedForActiveTab(can_show_bubble && window_->IsActive());
   }
 }
 
@@ -1778,7 +1782,7 @@ void Browser::FileSelectedWithExtraInfo(
   GURL file_url = net::FilePathToFileURL(path);
 
 #if defined(OS_CHROMEOS)
-  gdata::util::ModifyGDataFileResourceUrl(profile_, path, &file_url);
+  gdata::util::ModifyDriveFileResourceUrl(profile_, path, &file_url);
 #endif
 
   if (file_url.is_empty())
@@ -1822,15 +1826,8 @@ void Browser::Observe(int type,
                 details)->extension;
         for (int i = tab_strip_model_->count() - 1; i >= 0; --i) {
           WebContents* tc = chrome::GetTabContentsAt(this, i)->web_contents();
-          bool close_tab_contents =
-              tc->GetURL().SchemeIs(chrome::kExtensionScheme) &&
-              tc->GetURL().host() == extension->id();
-          // We want to close all panels originated by the unloaded extension.
-          close_tab_contents = close_tab_contents ||
-              (type_ == TYPE_PANEL &&
-               (web_app::GetExtensionIdFromApplicationName(app_name_) ==
-                extension->id()));
-          if (close_tab_contents)
+          if (tc->GetURL().SchemeIs(chrome::kExtensionScheme) &&
+              tc->GetURL().host() == extension->id())
             chrome::CloseWebContents(this, tc);
         }
       }
@@ -2061,13 +2058,15 @@ void Browser::SyncHistoryWithTabs(int index) {
       SessionServiceFactory::GetForProfileIfExisting(profile());
   if (session_service) {
     for (int i = index; i < tab_count(); ++i) {
-      TabContents* tab = chrome::GetTabContentsAt(this, i);
-      if (tab) {
+      WebContents* web_contents = chrome::GetWebContentsAt(this, i);
+      if (web_contents) {
+        SessionTabHelper* session_tab_helper =
+            SessionTabHelper::FromWebContents(web_contents);
         session_service->SetTabIndexInWindow(
-            session_id(), tab->restore_tab_helper()->session_id(), i);
+            session_id(), session_tab_helper->session_id(), i);
         session_service->SetPinnedState(
             session_id(),
-            tab->restore_tab_helper()->session_id(),
+            session_tab_helper->session_id(),
             tab_strip_model_->IsTabPinned(i));
       }
     }
@@ -2101,19 +2100,6 @@ bool Browser::CanCloseWithInProgressDownloads() {
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, Assorted utility functions (private):
 
-void Browser::SetAsDelegate(TabContents* tab, Browser* delegate) {
-  // WebContents...
-  tab->web_contents()->SetDelegate(delegate);
-
-  // ...and all the helpers.
-  tab->blocked_content_tab_helper()->set_delegate(delegate);
-  tab->bookmark_tab_helper()->set_delegate(delegate);
-  tab->zoom_controller()->set_observer(delegate);
-  tab->constrained_window_tab_helper()->set_delegate(delegate);
-  tab->core_tab_helper()->set_delegate(delegate);
-  tab->search_engine_tab_helper()->set_delegate(delegate);
-}
-
 void Browser::CloseFrame() {
   window_->Close();
 }
@@ -2135,7 +2121,7 @@ void Browser::TabDetachedAtImpl(TabContents* contents, int index,
       SyncHistoryWithTabs(0);
   }
 
-  SetAsDelegate(contents, NULL);
+  SetAsDelegate(contents->web_contents(), NULL);
   RemoveScheduledUpdatesFor(contents->web_contents());
 
   if (find_bar_controller_.get() && index == active_index()) {
@@ -2190,8 +2176,10 @@ void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
       (!window_ || !window_->IsFullscreen())) {
     state = BookmarkBar::SHOW;
   } else {
-    TabContents* tab = chrome::GetActiveTabContents(this);
-    if (tab && tab->bookmark_tab_helper()->ShouldShowBookmarkBar())
+    WebContents* web_contents = chrome::GetActiveWebContents(this);
+    BookmarkTabHelper* bookmark_tab_helper =
+        web_contents ? BookmarkTabHelper::FromWebContents(web_contents) : NULL;
+    if (bookmark_tab_helper && bookmark_tab_helper->ShouldShowBookmarkBar())
       state = BookmarkBar::DETACHED;
     else
       state = BookmarkBar::HIDDEN;

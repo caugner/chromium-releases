@@ -109,8 +109,6 @@ cr.define('login', function() {
       this.addEventListener('mousedown',
           this.handleMouseDown_.bind(this));
 
-      this.enterButtonElement.addEventListener('click',
-          this.activate.bind(this));
       this.signinButtonElement.addEventListener('click',
           this.activate.bind(this));
 
@@ -134,12 +132,10 @@ cr.define('login', function() {
      * Initializes the pod after its properties set and added to a pod row.
      */
     initialize: function() {
-      if (!this.isGuest) {
-        this.passwordElement.addEventListener('keydown',
-            this.parentNode.handleKeyDown.bind(this.parentNode));
-        this.passwordElement.addEventListener('keypress',
-            this.handlePasswordKeyPress_.bind(this));
-      }
+      this.passwordElement.addEventListener('keydown',
+          this.parentNode.handleKeyDown.bind(this.parentNode));
+      this.passwordElement.addEventListener('keypress',
+          this.handlePasswordKeyPress_.bind(this));
 
       this.imageElement.addEventListener('load',
           this.parentNode.handlePodImageLoad.bind(this.parentNode, this));
@@ -204,14 +200,6 @@ cr.define('login', function() {
      * @type {!HTMLImageElement}
      */
     get capslockHintElement() {
-      return this.enterButtonElement.previousElementSibling;
-    },
-
-    /**
-     * Gets guest enter button.
-     * @type {!HTMLInputElement}
-     */
-    get enterButtonElement() {
       return this.signinButtonElement.previousElementSibling;
     },
 
@@ -241,23 +229,16 @@ cr.define('login', function() {
       this.removeUserButtonElement.hidden = !this.user_.canRemove;
       this.signedInIndicatorElement.hidden = !this.user_.signedIn;
 
-      if (this.isGuest) {
-        this.enterButtonElement.hidden = false;
-        this.passwordElement.hidden = true;
-        this.signinButtonElement.hidden = true;
-      } else {
-        var needSignin = this.needGaiaSignin;
-        this.enterButtonElement.hidden = true;
-        this.passwordElement.hidden = needSignin;
-        this.removeUserButtonElement.setAttribute(
-            'aria-label', localStrings.getStringF('removeButtonAccessibleName',
-                                                  this.user_.emailAddress));
-        this.passwordElement.setAttribute('aria-label',
-                                          localStrings.getStringF(
-                                              'passwordFieldAccessibleName',
-                                              this.user_.emailAddress));
-        this.signinButtonElement.hidden = !needSignin;
-      }
+      var needSignin = this.needGaiaSignin;
+      this.passwordElement.hidden = needSignin;
+      this.removeUserButtonElement.setAttribute(
+          'aria-label', localStrings.getStringF('removeButtonAccessibleName',
+                                                this.user_.emailAddress));
+      this.passwordElement.setAttribute('aria-label',
+                                        localStrings.getStringF(
+                                            'passwordFieldAccessibleName',
+                                            this.user_.emailAddress));
+      this.signinButtonElement.hidden = !needSignin;
     },
 
     /**
@@ -274,22 +255,13 @@ cr.define('login', function() {
     },
 
     /**
-     * Whether we are a guest pod or not.
-     * @type {boolean}
-     */
-    get isGuest() {
-      return !this.user.username;
-    },
-
-    /**
-     * Whether Gaia signin is required for a non-guest user.
+     * Whether Gaia signin is required for this user.
      */
     get needGaiaSignin() {
-      // Gaia signin is performed if we are using gaia extenstion for signin,
-      // the user has an invalid oauth token and device is online and the
-      // user is not currently signed in (i.e. not the lock screen).
+      // Gaia signin is performed if the user has an invalid oauth token and is
+      // not currently signed in (i.e. not the lock screen).
       return this.user.oauthTokenStatus != OAuthTokenStatus.VALID &&
-             window.navigator.onLine && !this.user.signedIn;
+          !this.user.signedIn;
     },
 
     /**
@@ -297,9 +269,7 @@ cr.define('login', function() {
      * @type {(HTMLButtonElement|HTMLInputElement)}
      */
     get mainInput() {
-      if (this.isGuest)
-        return this.enterButtonElement;
-      else if (!this.signinButtonElement.hidden)
+      if (!this.signinButtonElement.hidden)
         return this.signinButtonElement;
       else
         return this.passwordElement;
@@ -333,21 +303,18 @@ cr.define('login', function() {
      * Updates the image element of the user.
      */
     updateUserImage: function() {
-      this.imageElement.src = this.isGuest ?
-          'chrome://theme/IDR_LOGIN_GUEST@' + window.devicePixelRatio + 'x' :
-          'chrome://userimage/' + this.user.username +
-              '?id=' + new Date().getTime();
+      this.imageElement.src = 'chrome://userimage/' + this.user.username +
+          '?id=' + new Date().getTime();
     },
 
     /**
      * Focuses on input element.
      */
     focusInput: function() {
-      if (!this.isGuest) {
-        var needSignin = this.needGaiaSignin;
-        this.signinButtonElement.hidden = !needSignin;
-        this.passwordElement.hidden = needSignin;
-      }
+      var needSignin = this.needGaiaSignin;
+      this.signinButtonElement.hidden = !needSignin;
+      this.passwordElement.hidden = needSignin;
+
       // Move tabIndex from the whole pod to the main input.
       this.tabIndex = -1;
       this.mainInput.tabIndex = UserPodTabOrder.POD_INPUT;
@@ -359,17 +326,8 @@ cr.define('login', function() {
      * @return {boolean} True if activated successfully.
      */
     activate: function() {
-      if (this.isGuest) {
-        Oobe.disableSigninUI();
-        chrome.send('launchIncognito');
-      } else if (!this.signinButtonElement.hidden) {
+      if (!this.signinButtonElement.hidden) {
         // Switch to Gaia signin.
-        if (!this.needGaiaSignin) {
-          // Network may go offline in time period between the pod is focused
-          // and the button is pressed, in which case fallback to offline login.
-          this.focusInput();
-          return false;
-        }
         this.showSigninUI();
       } else if (!this.passwordElement.value) {
         return false;
@@ -458,6 +416,10 @@ cr.define('login', function() {
     // True if inside focusPod().
     insideFocusPod_: false,
 
+    // True if user pod has been activated with keyboard.
+    // In case of activation with keyboard we delay wallpaper change.
+    keyboardActivated_: false,
+
     // Focused pod.
     focusedPod_: undefined,
 
@@ -492,6 +454,14 @@ cr.define('login', function() {
       return this.children;
     },
 
+    /**
+     * Return true if user pod row has only single user pod in it.
+     * @type {boolean}
+     */
+    get isSinglePod() {
+      return this.children.length == 1;
+    },
+
     hideTitles: function() {
       for (var i = 0, pod; pod = this.pods[i]; ++i)
         pod.imageElement.title = '';
@@ -499,10 +469,7 @@ cr.define('login', function() {
 
     updateTitles: function() {
       for (var i = 0, pod; pod = this.pods[i]; ++i) {
-        if (pod.isGuest)
-          pod.imageElement.title = '';
-        else
-          pod.imageElement.title = pod.user.nameTooltip || '';
+        pod.imageElement.title = pod.user.nameTooltip || '';
       }
     },
 
@@ -650,6 +617,10 @@ cr.define('login', function() {
         $('pod-row').classList.remove('images-loading');
       }, POD_ROW_IMAGES_LOAD_TIMEOUT_MS);
 
+      // loadPods is called after user list update (for ex. after deleting user)
+      // so make sure that tooltips are updated.
+      $('pod-row').updateTitles();
+
       this.focusPod(this.preselectedPod);
     },
 
@@ -669,12 +640,16 @@ cr.define('login', function() {
      *                             podToFocus is already focused.
      */
     focusPod: function(podToFocus, opt_force) {
-      if (this.isFocused(podToFocus) && !opt_force)
+      if (this.isFocused(podToFocus) && !opt_force) {
+        this.keyboardActivated_ = false;
         return;
+      }
 
       // Make sure there's only one focusPod operation happening at a time.
-      if (this.insideFocusPod_)
+      if (this.insideFocusPod_) {
+        this.keyboardActivated_ = false;
         return;
+      }
       this.insideFocusPod_ = true;
 
       clearTimeout(this.loadWallpaperTimeout_);
@@ -694,7 +669,7 @@ cr.define('login', function() {
         podToFocus.classList.add('focused');
         podToFocus.reset(true);  // Reset and give focus.
         this.scrollPodIntoView(podToFocus);
-        if (hadFocus) {
+        if (hadFocus && this.keyboardActivated_) {
           // Delay wallpaper loading to let user tab through pods without lag.
           this.loadWallpaperTimeout_ = window.setTimeout(
               this.loadWallpaper_.bind(this), WALLPAPER_LOAD_DELAY_MS);
@@ -702,12 +677,13 @@ cr.define('login', function() {
           // Load wallpaper immediately if there no pod was focused
           // previously, and it is not a boot into user pod list case.
           this.loadWallpaper_();
-          this.firstShown_ = false;
         }
+        this.firstShown_ = false;
       } else {
         chrome.send('userDeselected');
       }
       this.insideFocusPod_ = false;
+      this.keyboardActivated_ = false;
     },
 
     loadWallpaper_: function() {
@@ -803,10 +779,16 @@ cr.define('login', function() {
     handleClick_: function(e) {
       if (this.disabled)
         return;
-      // Clears focus if not clicked on a pod.
+      // Clears focus if not clicked on a pod and if there's more than one pod.
       if (e.target.parentNode != this &&
-          e.target.parentNode.parentNode != this) {
+          e.target.parentNode.parentNode != this &&
+          !this.isSinglePod) {
         this.focusPod();
+      }
+
+      // Return focus back to single pod.
+      if (this.isSinglePod) {
+        this.focusPod(this.focusedPod_, true /* force */);
       }
     },
 
@@ -834,7 +816,11 @@ cr.define('login', function() {
       } else {
         // Clears pod focus when we reach here. It means new focus is neither
         // on a pod nor on a button/input for a pod.
-        this.focusPod();
+        // Do not "defocus" user pod when it is a single pod.
+        // That means that 'focused' class will not be removed and
+        // input field/button will always be visible.
+        if (!this.isSinglePod)
+          this.focusPod();
       }
     },
 
@@ -849,6 +835,7 @@ cr.define('login', function() {
       switch (e.keyIdentifier) {
         case 'Left':
           if (!editing) {
+            this.keyboardActivated_ = true;
             if (this.focusedPod_ && this.focusedPod_.previousElementSibling)
               this.focusPod(this.focusedPod_.previousElementSibling);
             else
@@ -859,6 +846,7 @@ cr.define('login', function() {
           break;
         case 'Right':
           if (!editing) {
+            this.keyboardActivated_ = true;
             if (this.focusedPod_ && this.focusedPod_.nextElementSibling)
               this.focusPod(this.focusedPod_.nextElementSibling);
             else
@@ -874,7 +862,8 @@ cr.define('login', function() {
           }
           break;
         case 'U+001B':  // Esc
-          this.focusPod();
+          if (!this.isSinglePod)
+            this.focusPod();
           break;
       }
     },

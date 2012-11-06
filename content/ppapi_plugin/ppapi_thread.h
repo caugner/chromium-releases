@@ -61,6 +61,7 @@ class PpapiThread : public ChildThread,
   // SendToBrowser() is intended to be safe to use on another thread so
   // long as the main PpapiThread outlives it.
   virtual bool SendToBrowser(IPC::Message* msg) OVERRIDE;
+  virtual IPC::Sender* GetBrowserSender() OVERRIDE;
   virtual std::string GetUILanguage() OVERRIDE;
   virtual void PreCacheFont(const void* logfontw) OVERRIDE;
   virtual void SetActiveURL(const std::string& url) OVERRIDE;
@@ -69,6 +70,9 @@ class PpapiThread : public ChildThread,
   void OnMsgLoadPlugin(const FilePath& path);
   void OnMsgCreateChannel(int renderer_id,
                           bool incognito);
+  void OnMsgResourceReply(
+      const ppapi::proxy::ResourceMessageReplyParams& reply_params,
+      const IPC::Message& nested_msg);
   void OnMsgSetNetworkState(bool online);
   void OnPluginDispatcherMessageReceived(const IPC::Message& msg);
 

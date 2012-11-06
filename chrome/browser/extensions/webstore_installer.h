@@ -11,14 +11,15 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/supports_user_data.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_id.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "net/base/net_errors.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/net_errors.h"
 
 class FilePath;
 class Profile;
@@ -57,7 +58,7 @@ class WebstoreInstaller :public content::NotificationObserver,
   // be skipped or modified. If one of these is present, it means that a CRX
   // download was initiated by WebstoreInstaller. The Approval instance should
   // be checked further for additional details.
-  struct Approval : public content::DownloadItem::ExternalData {
+  struct Approval : public base::SupportsUserData::Data {
     static scoped_ptr<Approval> CreateWithInstallPrompt(Profile* profile);
     static scoped_ptr<Approval> CreateWithNoInstallPrompt(
         Profile* profile,
@@ -122,6 +123,10 @@ class WebstoreInstaller :public content::NotificationObserver,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Removes the reference to the delegate passed in the constructor. Used when
+  // the delegate object must be deleted before this object.
+  void InvalidateDelegate();
+
   // Instead of using the default download directory, use |directory| instead.
   // This does *not* transfer ownership of |directory|.
   static void SetDownloadDirectoryForTests(FilePath* directory);
@@ -137,7 +142,7 @@ class WebstoreInstaller :public content::NotificationObserver,
 
   // DownloadItem::Observer implementation:
   virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
-  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE;
+  virtual void OnDownloadDestroyed(content::DownloadItem* download) OVERRIDE;
 
   // Starts downloading the extension to |file_path|.
   void StartDownload(const FilePath& file_path);
@@ -157,10 +162,8 @@ class WebstoreInstaller :public content::NotificationObserver,
   content::NavigationController* controller_;
   std::string id_;
   // The DownloadItem is owned by the DownloadManager and is valid from when
-  // OnDownloadStarted is called (with no error) until the DownloadItem
-  // transitions to state REMOVING.
+  // OnDownloadStarted is called (with no error) until OnDownloadDestroyed().
   content::DownloadItem* download_item_;
-  int flags_;
   scoped_ptr<Approval> approval_;
   GURL download_url_;
 };

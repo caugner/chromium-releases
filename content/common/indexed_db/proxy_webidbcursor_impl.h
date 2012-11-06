@@ -21,9 +21,6 @@ class RendererWebIDBCursorImpl : public WebKit::WebIDBCursor {
   explicit RendererWebIDBCursorImpl(int32 idb_cursor_id);
   virtual ~RendererWebIDBCursorImpl();
 
-  virtual WebKit::WebIDBKey key() const;
-  virtual WebKit::WebIDBKey primaryKey() const;
-  virtual WebKit::WebSerializedScriptValue value() const;
   virtual void advance(unsigned long count,
                        WebKit::WebIDBCallbacks* callback,
                        WebKit::WebExceptionCode& ec);
@@ -34,9 +31,6 @@ class RendererWebIDBCursorImpl : public WebKit::WebIDBCursor {
                               WebKit::WebExceptionCode& ec);
   virtual void postSuccessHandlerCallback();
 
-  void SetKeyAndValue(const content::IndexedDBKey& key,
-                      const content::IndexedDBKey& primary_key,
-                      const content::SerializedScriptValue& value);
   void SetPrefetchData(
       const std::vector<content::IndexedDBKey>& keys,
       const std::vector<content::IndexedDBKey>& primary_keys,
@@ -47,9 +41,6 @@ class RendererWebIDBCursorImpl : public WebKit::WebIDBCursor {
 
  private:
   int32 idb_cursor_id_;
-  content::IndexedDBKey key_;
-  content::IndexedDBKey primary_key_;
-  content::SerializedScriptValue value_;
 
   // Prefetch cache.
   std::deque<content::IndexedDBKey> prefetch_keys_;

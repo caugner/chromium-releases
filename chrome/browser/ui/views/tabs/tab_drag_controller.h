@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
+#include "chrome/browser/ui/views/tabs/tab_strip_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -68,6 +69,10 @@ class TabDragController : public content::WebContentsDelegate,
     REORDER
   };
 
+  // Amount above or below the tabstrip the user has to drag before detaching.
+  static const int kTouchVerticalDetachMagnetism;
+  static const int kVerticalDetachMagnetism;
+
   TabDragController();
   virtual ~TabDragController();
 
@@ -110,10 +115,8 @@ class TabDragController : public content::WebContentsDelegate,
   // Invoked to drag to the new location, in screen coordinates.
   void Drag(const gfx::Point& point_in_screen);
 
-  // Complete the current drag session. If the drag session was canceled
-  // because the user pressed escape or something interrupted it, |canceled|
-  // is true and the drag is reverted.
-  void EndDrag(bool canceled);
+  // Complete the current drag session.
+  void EndDrag(EndDragReason reason);
 
  private:
   class DockDisplayer;
@@ -211,7 +214,8 @@ class TabDragController : public content::WebContentsDelegate,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) OVERRIDE;
+                              bool user_gesture,
+                              bool* was_blocked) OVERRIDE;
   virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
   virtual content::JavaScriptDialogCreator*
@@ -291,9 +295,9 @@ class TabDragController : public content::WebContentsDelegate,
   // or isn't compatible.
   TabStrip* GetTabStripForWindow(gfx::NativeWindow window);
 
-  // Returns the compatible TabStrip that is under the specified point (screen
+  // Returns the compatible TabStrip to drag to at the specified point (screen
   // coordinates), or NULL if there is none.
-  TabStrip* GetTabStripForPoint(const gfx::Point& point_in_screen);
+  TabStrip* GetTargetTabStripForPoint(const gfx::Point& point_in_screen);
 
   // Returns true if |tabstrip| contains the specified point in screen
   // coordinates.
@@ -316,8 +320,11 @@ class TabDragController : public content::WebContentsDelegate,
   // runs a nested move loop.
   void DetachIntoNewBrowserAndRunMoveLoop(const gfx::Point& point_in_screen);
 
-  // Runs a nested message loop that handles moving the current Browser.
-  void RunMoveLoop();
+  // Runs a nested message loop that handles moving the current
+  // Browser. |drag_offset| is the offset from the window origin and is used in
+  // calculating the location of the window offset from the cursor while
+  // dragging.
+  void RunMoveLoop(const gfx::Point& drag_offset);
 
   // Determines the index to insert tabs at. |dragged_bounds| is the bounds of
   // the tabs being dragged, |start| the index of the tab to start looking from
@@ -424,6 +431,7 @@ class TabDragController : public content::WebContentsDelegate,
   // Creates and returns a new Browser to handle the drag.
   Browser* CreateBrowserForDrag(TabStrip* source,
                                 const gfx::Point& point_in_screen,
+                                gfx::Point* drag_offset,
                                 std::vector<gfx::Rect>* drag_bounds);
 
   // Returns the TabStripModel for the specified tabstrip.
@@ -432,6 +440,10 @@ class TabDragController : public content::WebContentsDelegate,
   // Returns the location of the cursor. This is either the location of the
   // mouse or the location of the current touch point.
   gfx::Point GetCursorScreenPoint();
+
+  // Returns the offset from the top left corner of the window to
+  // |point_in_screen|.
+  gfx::Point GetWindowOffset(const gfx::Point& point_in_screen);
 
   // Returns true if moving the mouse only changes the visible tabs.
   bool move_only() const {

@@ -45,8 +45,7 @@ extern const char kJobFetchReasonQueryMore[];
 extern const char kPrintSystemFailedMessageId[];
 extern const char kGetPrinterCapsFailedMessageId[];
 extern const char kEnumPrintersFailedMessageId[];
-extern const char kDefaultCloudPrintOAuthClientId[];
-extern const char kDefaultCloudPrintOAuthClientSecret[];
+extern const char kZombiePrinterMessageId[];
 
 // Max retry count for job data fetch requests.
 const int kJobDataMaxRetryCount = 5;

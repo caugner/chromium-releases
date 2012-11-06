@@ -78,6 +78,7 @@ WebPreferences::WebPreferences()
       show_composited_layer_borders(false),
       show_composited_layer_tree(false),
       show_fps_counter(false),
+      accelerated_compositing_for_overflow_scroll_enabled(false),
       show_paint_rects(false),
       render_vsync_enabled(true),
       asynchronous_spell_checking_enabled(true),
@@ -92,6 +93,7 @@ WebPreferences::WebPreferences()
       deferred_2d_canvas_enabled(false),
       accelerated_painting_enabled(false),
       accelerated_filters_enabled(false),
+      gesture_tap_highlight_enabled(false),
       accelerated_plugins_enabled(false),
       memory_info_enabled(false),
       fullscreen_enabled(false),
@@ -101,16 +103,12 @@ WebPreferences::WebPreferences()
       should_print_backgrounds(false),
       enable_scroll_animator(false),
       visual_word_movement_enabled(false),
+      css_sticky_position_enabled(false),
       css_regions_enabled(false),
       css_shaders_enabled(false),
       css_variables_enabled(false),
       device_supports_touch(false),
       device_supports_mouse(true),
-#if !defined(WEBCOMPOSITOR_OWNS_SETTINGS)
-      threaded_animation_enabled(false),
-      per_tile_painting_enabled(false),
-      partial_swap_enabled(false),
-#endif
       default_tile_width(256),
       default_tile_height(256),
       max_untiled_layer_width(512),
@@ -313,6 +311,10 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Display an FPS indicator if requested on the command line.
   settings->setShowFPSCounter(show_fps_counter);
 
+  // Enables accelerated compositing for overflow scroll.
+  settings->setAcceleratedCompositingForOverflowScrollEnabled(
+      accelerated_compositing_for_overflow_scroll_enabled);
+
   // Display the current compositor tree as overlay if requested on
   // the command line
   settings->setShowPlatformLayerTree(show_composited_layer_tree);
@@ -346,6 +348,9 @@ void WebPreferences::Apply(WebView* web_view) const {
 
   // Enable gpu-accelerated filters if requested on the command line.
   settings->setAcceleratedFiltersEnabled(accelerated_filters_enabled);
+
+  // Enable gesture tap highlight if requested on the command line.
+  settings->setGestureTapHighlightEnabled(gesture_tap_highlight_enabled);
 
   // Enabling accelerated layers from the command line enabled accelerated
   // 3D CSS, Video, and Animations.
@@ -390,22 +395,13 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setEnableScrollAnimator(enable_scroll_animator);
   settings->setVisualWordMovementEnabled(visual_word_movement_enabled);
 
+  settings->setCSSStickyPositionEnabled(css_sticky_position_enabled);
   settings->setExperimentalCSSRegionsEnabled(css_regions_enabled);
   settings->setExperimentalCSSCustomFilterEnabled(css_shaders_enabled);
   settings->setExperimentalCSSVariablesEnabled(css_variables_enabled);
 
   settings->setDeviceSupportsTouch(device_supports_touch);
   settings->setDeviceSupportsMouse(device_supports_mouse);
-
-#if !defined(WEBCOMPOSITOR_OWNS_SETTINGS)
-  settings->setThreadedAnimationEnabled(threaded_animation_enabled);
-
-  // Enable per-tile painting if requested on the command line.
-  settings->setPerTilePaintingEnabled(per_tile_painting_enabled);
-
-  // Enable partial swaps if specified form the command line.
-  settings->setPartialSwapEnabled(partial_swap_enabled);
-#endif
 
   settings->setDefaultTileSize(
       WebSize(default_tile_width, default_tile_height));

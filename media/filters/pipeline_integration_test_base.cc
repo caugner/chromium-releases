@@ -22,7 +22,8 @@ const char kNullHash[] = "d41d8cd98f00b204e9800998ecf8427e";
 PipelineIntegrationTestBase::PipelineIntegrationTestBase()
     : hashing_enabled_(false),
       message_loop_factory_(new MessageLoopFactory()),
-      pipeline_(new Pipeline(&message_loop_, new MediaLog())),
+      pipeline_(new Pipeline(message_loop_.message_loop_proxy(),
+                             new MediaLog())),
       ended_(false),
       pipeline_status_(PIPELINE_OK) {
   base::MD5Init(&md5_context_);
@@ -87,11 +88,15 @@ void PipelineIntegrationTestBase::OnError(PipelineStatus status) {
 
 bool PipelineIntegrationTestBase::Start(const std::string& url,
                                         PipelineStatus expected_status) {
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kHaveMetadata));
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kPrerollCompleted));
   pipeline_->Start(
       CreateFilterCollection(url),
       base::Bind(&PipelineIntegrationTestBase::OnEnded, base::Unretained(this)),
       base::Bind(&PipelineIntegrationTestBase::OnError, base::Unretained(this)),
-      QuitOnStatusCB(expected_status));
+      QuitOnStatusCB(expected_status),
+      base::Bind(&PipelineIntegrationTestBase::OnBufferingState,
+                 base::Unretained(this)));
   message_loop_.Run();
   return (pipeline_status_ == PIPELINE_OK);
 }
@@ -104,11 +109,15 @@ bool PipelineIntegrationTestBase::Start(const std::string& url,
 }
 
 bool PipelineIntegrationTestBase::Start(const std::string& url) {
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kHaveMetadata));
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kPrerollCompleted));
   pipeline_->Start(
       CreateFilterCollection(url),
       base::Bind(&PipelineIntegrationTestBase::OnEnded, base::Unretained(this)),
       base::Bind(&PipelineIntegrationTestBase::OnError, base::Unretained(this)),
       base::Bind(&PipelineIntegrationTestBase::OnStatusCallback,
+                 base::Unretained(this)),
+      base::Bind(&PipelineIntegrationTestBase::OnBufferingState,
                  base::Unretained(this)));
   message_loop_.Run();
   return (pipeline_status_ == PIPELINE_OK);
@@ -125,6 +134,7 @@ void PipelineIntegrationTestBase::Pause() {
 bool PipelineIntegrationTestBase::Seek(base::TimeDelta seek_time) {
   ended_ = false;
 
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kPrerollCompleted));
   pipeline_->Seek(seek_time, QuitOnStatusCB(PIPELINE_OK));
   message_loop_.Run();
   return (pipeline_status_ == PIPELINE_OK);
@@ -171,29 +181,28 @@ scoped_ptr<FilterCollection>
 PipelineIntegrationTestBase::CreateFilterCollection(const std::string& url) {
   scoped_refptr<FileDataSource> data_source = new FileDataSource();
   CHECK(data_source->Initialize(url));
-  return CreateFilterCollection(new FFmpegDemuxer(&message_loop_, data_source));
+  return CreateFilterCollection(
+      new FFmpegDemuxer(message_loop_.message_loop_proxy(), data_source),
+      NULL);
 }
 
 scoped_ptr<FilterCollection>
 PipelineIntegrationTestBase::CreateFilterCollection(
-    ChunkDemuxerClient* client) {
-  return CreateFilterCollection(new ChunkDemuxer(client));
-}
-
-scoped_ptr<FilterCollection>
-PipelineIntegrationTestBase::CreateFilterCollection(
-    const scoped_refptr<Demuxer>& demuxer) {
+    const scoped_refptr<Demuxer>& demuxer,
+    Decryptor* decryptor) {
   scoped_ptr<FilterCollection> collection(new FilterCollection());
   collection->SetDemuxer(demuxer);
   collection->AddAudioDecoder(new FFmpegAudioDecoder(
       base::Bind(&MessageLoopFactory::GetMessageLoop,
                  base::Unretained(message_loop_factory_.get()),
-                 "AudioDecoderThread")));
-  decoder_ = new FFmpegVideoDecoder(
+                 media::MessageLoopFactory::kDecoder)));
+  scoped_refptr<VideoDecoder> decoder = new FFmpegVideoDecoder(
       base::Bind(&MessageLoopFactory::GetMessageLoop,
                  base::Unretained(message_loop_factory_.get()),
-                 "VideoDecoderThread"));
-  collection->AddVideoDecoder(decoder_);
+                 media::MessageLoopFactory::kDecoder),
+      decryptor);
+  collection->GetVideoDecoders()->push_back(decoder);
+
   // Disable frame dropping if hashing is enabled.
   renderer_ = new VideoRendererBase(
       base::Bind(&PipelineIntegrationTestBase::OnVideoRendererPaint,

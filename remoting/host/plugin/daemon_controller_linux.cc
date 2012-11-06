@@ -31,8 +31,14 @@ namespace remoting {
 
 namespace {
 
-const char kDaemonScript[] = "me2me_virtual_host";
+const char kDaemonScript[] =
+    "/opt/google/chrome-remote-desktop/chrome-remote-desktop";
+
+// Timeout for running daemon script.
 const int64 kDaemonTimeoutMs = 5000;
+
+// Timeout for commands that require password prompt- 1 minute;
+const int64 kSudoTimeoutMs = 60000;
 
 std::string GetMd5(const std::string& value) {
   base::MD5Context ctx;
@@ -43,15 +49,6 @@ std::string GetMd5(const std::string& value) {
   return StringToLowerASCII(base::HexEncode(digest.a, sizeof(digest.a)));
 }
 
-// TODO(sergeyu): This is a very hacky implementation of
-// DaemonController interface for linux. Current version works, but
-// there are sevaral problems with it:
-//   * All calls are executed synchronously, even though this API is
-//     supposed to be asynchronous.
-//   * The host is configured by passing configuration data as CL
-//     argument - this is obviously not secure.
-// Rewrite this code to solve these two problems.
-// http://crbug.com/120950 .
 class DaemonControllerLinux : public remoting::DaemonController {
  public:
   DaemonControllerLinux();
@@ -79,6 +76,7 @@ class DaemonControllerLinux : public remoting::DaemonController {
   void DoUpdateConfig(scoped_ptr<base::DictionaryValue> config,
                       const CompletionCallback& done_callback);
   void DoStop(const CompletionCallback& done_callback);
+  void DoGetVersion(const GetVersionCallback& done_callback);
 
   base::Thread file_io_thread_;
 
@@ -90,29 +88,19 @@ DaemonControllerLinux::DaemonControllerLinux()
   file_io_thread_.Start();
 }
 
-// TODO(jamiewalch): We'll probably be able to do a better job of
-// detecting whether or not the daemon is installed once we have a
-// proper installer. For now, detecting whether or not the binary
-// is on the PATH is good enough.
 static bool GetScriptPath(FilePath* result) {
-  base::Environment* environment = base::Environment::Create();
-  std::string path;
-  if (environment->GetVar("PATH", &path)) {
-    std::vector<std::string> path_directories;
-    base::SplitString(path, ':', &path_directories);
-    for (unsigned int i = 0; i < path_directories.size(); ++i) {
-      FilePath candidate_exe(path_directories[i]);
-      candidate_exe = candidate_exe.Append(kDaemonScript);
-      if (access(candidate_exe.value().c_str(), X_OK) == 0) {
-        *result = candidate_exe;
-        return true;
-      }
-    }
+  FilePath candidate_exe(kDaemonScript);
+  if (access(candidate_exe.value().c_str(), X_OK) == 0) {
+    *result = candidate_exe;
+    return true;
   }
   return false;
 }
 
-static bool RunScript(const std::vector<std::string>& args, int* exit_code) {
+static bool RunHostScriptWithTimeout(
+    const std::vector<std::string>& args,
+    base::TimeDelta timeout,
+    int* exit_code) {
   // As long as we're relying on running an external binary from the
   // PATH, don't do it as root.
   if (getuid() == 0) {
@@ -133,24 +121,31 @@ static bool RunScript(const std::vector<std::string>& args, int* exit_code) {
   if (result) {
     if (exit_code) {
       result = base::WaitForExitCodeWithTimeout(
-          process_handle, exit_code,
-          base::TimeDelta::FromMilliseconds(kDaemonTimeoutMs));
+          process_handle, exit_code, timeout);
     }
     base::CloseProcessHandle(process_handle);
   }
   return result;
 }
 
+static bool RunHostScript(const std::vector<std::string>& args,
+                          int* exit_code) {
+  return RunHostScriptWithTimeout(
+      args, base::TimeDelta::FromMilliseconds(kDaemonTimeoutMs), exit_code);
+}
+
 remoting::DaemonController::State DaemonControllerLinux::GetState() {
   std::vector<std::string> args;
   args.push_back("--check-running");
   int exit_code = 0;
-  if (!RunScript(args, &exit_code)) {
+  if (!RunHostScript(args, &exit_code)) {
     // TODO(jamiewalch): When we have a good story for installing, return
     // NOT_INSTALLED rather than NOT_IMPLEMENTED (the former suppresses
     // the relevant UI in the web-app).
     return remoting::DaemonController::STATE_NOT_IMPLEMENTED;
-  } else if (exit_code == 0) {
+  }
+
+  if (exit_code == 0) {
     return remoting::DaemonController::STATE_STARTED;
   } else {
     return remoting::DaemonController::STATE_STOPPED;
@@ -200,8 +195,9 @@ void DaemonControllerLinux::SetWindow(void* window_handle) {
 
 void DaemonControllerLinux::GetVersion(
     const GetVersionCallback& done_callback) {
-  NOTIMPLEMENTED();
-  done_callback.Run("");
+  file_io_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
+      &DaemonControllerLinux::DoGetVersion, base::Unretained(this),
+      done_callback));
 }
 
 FilePath DaemonControllerLinux::GetConfigPath() {
@@ -234,29 +230,43 @@ void DaemonControllerLinux::DoGetConfig(const GetConfigCallback& callback) {
 void DaemonControllerLinux::DoSetConfigAndStart(
     scoped_ptr<base::DictionaryValue> config,
     const CompletionCallback& done_callback) {
-  JsonHostConfig config_file(GetConfigPath());
-  for (DictionaryValue::key_iterator key(config->begin_keys());
-       key != config->end_keys(); ++key) {
-    std::string value;
-    if (!config->GetString(*key, &value)) {
-      LOG(ERROR) << *key << " is not a string.";
-      done_callback.Run(RESULT_FAILED);
-      return;
-    }
-    config_file.SetString(*key, value);
-  }
 
-  bool success = config_file.Save();
-  if (!success) {
+  // Add the user to chrome-remote-desktop group first.
+  std::vector<std::string> args;
+  args.push_back("--add-user");
+  int exit_code;
+  if (!RunHostScriptWithTimeout(
+          args, base::TimeDelta::FromMilliseconds(kSudoTimeoutMs),
+          &exit_code) ||
+      exit_code != 0) {
+    LOG(ERROR) << "Failed to add user to chrome-remote-desktop group.";
     done_callback.Run(RESULT_FAILED);
     return;
   }
 
-  std::vector<std::string> args;
-  args.push_back("--silent");
+  // Ensure the configuration directory exists.
+  FilePath config_dir = GetConfigPath().DirName();
+  if (!file_util::DirectoryExists(config_dir) &&
+      !file_util::CreateDirectory(config_dir)) {
+    LOG(ERROR) << "Failed to create config directory " << config_dir.value();
+    done_callback.Run(RESULT_FAILED);
+    return;
+  }
+
+  // Write config.
+  JsonHostConfig config_file(GetConfigPath());
+  if (!config_file.CopyFrom(config.get()) ||
+      !config_file.Save()) {
+    LOG(ERROR) << "Failed to update config file.";
+    done_callback.Run(RESULT_FAILED);
+    return;
+  }
+
+  // Finally start the host.
+  args.clear();
+  args.push_back("--start");
   AsyncResult result;
-  int exit_code;
-  if (RunScript(args, &exit_code)) {
+  if (RunHostScript(args, &exit_code)) {
     result = (exit_code == 0) ? RESULT_OK : RESULT_FAILED;
   } else {
     result = RESULT_FAILED;
@@ -268,23 +278,25 @@ void DaemonControllerLinux::DoUpdateConfig(
     scoped_ptr<base::DictionaryValue> config,
     const CompletionCallback& done_callback) {
   JsonHostConfig config_file(GetConfigPath());
-  if (!config_file.Read()) {
+  if (!config_file.Read() ||
+      !config_file.CopyFrom(config.get()) ||
+      !config_file.Save()) {
+    LOG(ERROR) << "Failed to update config file.";
     done_callback.Run(RESULT_FAILED);
+    return;
   }
 
-  for (DictionaryValue::key_iterator key(config->begin_keys());
-       key != config->end_keys(); ++key) {
-    std::string value;
-    if (!config->GetString(*key, &value)) {
-      LOG(ERROR) << *key << " is not a string.";
-      done_callback.Run(RESULT_FAILED);
-      return;
-    }
-    config_file.SetString(*key, value);
+  std::vector<std::string> args;
+  args.push_back("--reload");
+  AsyncResult result;
+  int exit_code;
+  if (RunHostScript(args, &exit_code)) {
+    result = (exit_code == 0) ? RESULT_OK : RESULT_FAILED;
+  } else {
+    result = RESULT_FAILED;
   }
-  bool success = config_file.Save();
-  done_callback.Run(success ? RESULT_OK : RESULT_FAILED);
-  // TODO(sergeyu): Send signal to the daemon to restart the host.
+
+  done_callback.Run(result);
 }
 
 void DaemonControllerLinux::DoStop(const CompletionCallback& done_callback) {
@@ -292,12 +304,43 @@ void DaemonControllerLinux::DoStop(const CompletionCallback& done_callback) {
   args.push_back("--stop");
   int exit_code = 0;
   AsyncResult result;
-  if (RunScript(args, &exit_code)) {
+  if (RunHostScript(args, &exit_code)) {
     result = (exit_code == 0) ? RESULT_OK : RESULT_FAILED;
   } else {
     result = RESULT_FAILED;
   }
   done_callback.Run(result);
+}
+
+void DaemonControllerLinux::DoGetVersion(
+    const GetVersionCallback& done_callback) {
+  FilePath script_path;
+  if (!GetScriptPath(&script_path)) {
+    done_callback.Run("");
+    return;
+  }
+  CommandLine command_line(script_path);
+  command_line.AppendArg("--host-version");
+
+  std::string version;
+  int exit_code = 0;
+  int result =
+      base::GetAppOutputWithExitCode(command_line, &version, &exit_code);
+  if (!result || exit_code != 0) {
+    LOG(ERROR) << "Failed to run \"" << command_line.GetCommandLineString()
+               << "\". Exit code: " << exit_code;
+    done_callback.Run("");
+    return;
+  }
+
+  TrimWhitespaceASCII(version, TRIM_ALL, &version);
+  if (!ContainsOnlyChars(version, "0123456789.")) {
+    LOG(ERROR) << "Received invalid host version number: " << version;
+    done_callback.Run("");
+    return;
+  }
+
+  done_callback.Run(version);
 }
 
 }  // namespace

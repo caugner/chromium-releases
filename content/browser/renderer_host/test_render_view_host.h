@@ -5,6 +5,9 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_TEST_RENDER_VIEW_HOST_H_
 #define CONTENT_BROWSER_RENDERER_HOST_TEST_RENDER_VIEW_HOST_H_
 
+#include <string>
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "build/build_config.h"
@@ -66,6 +69,11 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE {}
   virtual void SetWindowVisibility(bool visible) OVERRIDE {}
   virtual void WindowFrameChanged() OVERRIDE {}
+  virtual void ShowDefinitionForSelection() OVERRIDE {}
+  virtual bool SupportsSpeech() const OVERRIDE;
+  virtual void SpeakSelection() OVERRIDE;
+  virtual bool IsSpeaking() const OVERRIDE;
+  virtual void StopSpeaking() OVERRIDE;
 #endif  // defined(OS_MACOSX)
 #if defined(TOOLKIT_GTK)
   virtual GdkEventButton* GetLastMouseDown() OVERRIDE;
@@ -80,13 +88,14 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void WasShown() OVERRIDE {}
   virtual void WasHidden() OVERRIDE {}
   virtual void MovePluginWindows(
+      const gfx::Point& scroll_offset,
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE {}
   virtual void Focus() OVERRIDE {}
   virtual void Blur() OVERRIDE {}
   virtual void SetIsLoading(bool is_loading) OVERRIDE {}
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE {}
-  virtual void TextInputStateChanged(ui::TextInputType state,
-                                     bool can_compose_inline) OVERRIDE {}
+  virtual void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) OVERRIDE {}
   virtual void ImeCancelComposition() OVERRIDE {}
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,

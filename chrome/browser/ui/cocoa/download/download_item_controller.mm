@@ -181,9 +181,9 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
     confirmButtonTitle =
         base::SysUTF16ToNSString(downloadModel->GetWarningConfirmButtonText());
     if (downloadModel->IsMalicious())
-      alertIcon = rb.GetNativeImageNamed(IDR_SAFEBROWSING_WARNING);
+      alertIcon = rb.GetNativeImageNamed(IDR_SAFEBROWSING_WARNING).ToNSImage();
     else
-      alertIcon = rb.GetNativeImageNamed(IDR_WARNING);
+      alertIcon = rb.GetNativeImageNamed(IDR_WARNING).ToNSImage();
     DCHECK(alertIcon);
     [image_ setImage:alertIcon];
     DCHECK(dangerousWarning);
@@ -283,16 +283,17 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
   // happened yet.
 }
 
-// Called after the current theme has changed.
-- (void)themeDidChangeNotification:(NSNotification*)aNotification {
-  ui::ThemeProvider* themeProvider =
-      static_cast<ThemeService*>([[aNotification object] pointerValue]);
-  [self updateTheme:themeProvider];
+// Called after a theme change took place, possibly for a different profile.
+- (void)themeDidChangeNotification:(NSNotification*)notification {
+  [self updateTheme:[[[self view] window] themeProvider]];
 }
 
 // Adapt appearance to the current theme. Called after theme changes and before
 // this is shown for the first time.
 - (void)updateTheme:(ui::ThemeProvider*)themeProvider {
+  if (!themeProvider)
+    return;
+
   NSColor* color =
       themeProvider->GetNSColor(ThemeService::COLOR_TAB_TEXT, true);
   [dangerousDownloadLabel_ setTextColor:color];

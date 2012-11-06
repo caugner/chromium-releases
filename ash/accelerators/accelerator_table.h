@@ -6,7 +6,7 @@
 #define ASH_ACCELERATORS_ACCELERATOR_TABLE_H_
 
 #include "ash/ash_export.h"
-#include "ui/aura/event.h"
+#include "ui/base/events/event_constants.h"
 
 namespace ash {
 
@@ -19,8 +19,7 @@ enum AcceleratorAction {
   CYCLE_BACKWARD_MRU,
   CYCLE_FORWARD_LINEAR,
   CYCLE_FORWARD_MRU,
-  DISPLAY_ADD_REMOVE,
-  DISPLAY_CYCLE,
+  DISABLE_CAPS_LOCK,
   DISPLAY_TOGGLE_SCALE,
   EXIT,
   FOCUS_LAUNCHER,
@@ -31,6 +30,9 @@ enum AcceleratorAction {
   KEYBOARD_BRIGHTNESS_UP,
   MAGNIFY_SCREEN_ZOOM_IN,
   MAGNIFY_SCREEN_ZOOM_OUT,
+  MEDIA_NEXT_TRACK,
+  MEDIA_PLAY_PAUSE,
+  MEDIA_PREV_TRACK,
   NEW_INCOGNITO_WINDOW,
   NEW_TAB,
   NEW_WINDOW,
@@ -51,23 +53,30 @@ enum AcceleratorAction {
   SELECT_WIN_5,
   SELECT_WIN_6,
   SELECT_WIN_7,
+  // This one is for Control+Alt+/ and Control+Alt+Shift+/, and is not included
+  // in kReservedActions[]. A windowed app should be able to handle these
+  // accelerators.
   SHOW_KEYBOARD_OVERLAY,
+  // This one is for the help key. This is included in kReservedActions[] since
+  // sending VKEY_F14 to a windowed app when the key is pressed does not make
+  // much sense. See crosbug.com/p/14330 for more details.
+  // TODO(yusukes): Reserve F15 as well.
+  SHOW_KEYBOARD_OVERLAY_BY_F14_KEY,
   SHOW_OAK,
   SHOW_TASK_MANAGER,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
   TAKE_PARTIAL_SCREENSHOT,
-  TAKE_SCREENSHOT,  // Control+F5
-  TAKE_SCREENSHOT_BY_PRTSCN_KEY,  // PrtScn
+  TAKE_SCREENSHOT,
   TOGGLE_APP_LIST,
   TOGGLE_CAPS_LOCK,
   TOGGLE_DESKTOP_BACKGROUND_MODE,
+  TOGGLE_MAXIMIZED,
   TOGGLE_ROOT_WINDOW_FULL_SCREEN,
   TOGGLE_SPOKEN_FEEDBACK,
   TOGGLE_WIFI,
   VOLUME_DOWN,
   VOLUME_MUTE,
   VOLUME_UP,
-  WINDOW_MAXIMIZE_RESTORE,
   WINDOW_MINIMIZE,
   WINDOW_POSITION_CENTER,
   WINDOW_SNAP_LEFT,

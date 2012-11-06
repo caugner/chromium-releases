@@ -59,6 +59,17 @@ class BluetoothGetAddressFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
+class BluetoothGetNameFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.getName")
+
+ protected:
+  virtual ~BluetoothGetNameFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
 class BluetoothGetDevicesFunction : public AsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.getDevices")
@@ -75,9 +86,9 @@ class BluetoothGetDevicesFunction : public AsyncExtensionFunction {
 
  private:
 #if defined(OS_CHROMEOS)
-  void AddDeviceIfTrueCallback(ListValue* list,
-                               const chromeos::BluetoothDevice* device,
-                               bool shouldAdd);
+  void DispatchDeviceSearchResult(const chromeos::BluetoothDevice& device);
+  void ProvidesServiceCallback(const chromeos::BluetoothDevice* device,
+                               bool providesService);
 
   int callbacks_pending_;
 #endif

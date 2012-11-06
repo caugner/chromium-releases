@@ -486,8 +486,10 @@ willPositionSheet:(NSWindow*)sheet
 
 - (BOOL)shouldShowDetachedBookmarkBar {
   DCHECK(browser_.get());
-  TabContents* tab = chrome::GetActiveTabContents(browser_.get());
-  return (tab && tab->bookmark_tab_helper()->ShouldShowBookmarkBar() &&
+  WebContents* web_contents = chrome::GetActiveWebContents(browser_.get());
+  BookmarkTabHelper* bookmark_tab_helper =
+      web_contents ? BookmarkTabHelper::FromWebContents(web_contents) : NULL;
+  return (bookmark_tab_helper && bookmark_tab_helper->ShouldShowBookmarkBar() &&
           ![previewableContentsController_ isShowingPreview]);
 }
 
@@ -514,11 +516,11 @@ willPositionSheet:(NSWindow*)sheet
   return base::mac::IsOSLionOrLater() && [self isFullscreen];
 }
 
-- (void)moveViewsForFullscreenForSnowLeopardOrEarlier:(BOOL)fullscreen
+- (void)moveViewsForFullscreenForSnowLeopard:(BOOL)fullscreen
     regularWindow:(NSWindow*)regularWindow
     fullscreenWindow:(NSWindow*)fullscreenWindow {
-  // This method is only for Snow Leopard and earlier.
-  DCHECK(base::mac::IsOSSnowLeopardOrEarlier());
+  // This method is only for Snow Leopard.
+  DCHECK(base::mac::IsOSSnowLeopard());
 
   NSWindow* sourceWindow = fullscreen ? regularWindow : fullscreenWindow;
   NSWindow* destWindow = fullscreen ? fullscreenWindow : regularWindow;
@@ -634,8 +636,8 @@ willPositionSheet:(NSWindow*)sheet
   [self layoutSubviews];
 }
 
-- (void)enterFullscreenForSnowLeopardOrEarlier {
-  DCHECK(base::mac::IsOSSnowLeopardOrEarlier());
+- (void)enterFullscreenForSnowLeopard {
+  DCHECK(base::mac::IsOSSnowLeopard());
 
   // Fade to black.
   const CGDisplayReservationInterval kFadeDurationSeconds = 0.6;
@@ -654,9 +656,9 @@ willPositionSheet:(NSWindow*)sheet
   savedRegularWindow_ = [[self window] retain];
   savedRegularWindowFrame_ = [savedRegularWindow_ frame];
 
-  [self moveViewsForFullscreenForSnowLeopardOrEarlier:YES
-                                        regularWindow:[self window]
-                                     fullscreenWindow:fullscreenWindow_.get()];
+  [self moveViewsForFullscreenForSnowLeopard:YES
+                               regularWindow:[self window]
+                            fullscreenWindow:fullscreenWindow_.get()];
   [self adjustUIForPresentationMode:YES];
   [self setPresentationModeInternal:YES forceDropdown:NO];
   [self layoutSubviews];
@@ -671,8 +673,8 @@ willPositionSheet:(NSWindow*)sheet
   }
 }
 
-- (void)exitFullscreenForSnowLeopardOrEarlier {
-  DCHECK(base::mac::IsOSSnowLeopardOrEarlier());
+- (void)exitFullscreenForSnowLeopard {
+  DCHECK(base::mac::IsOSSnowLeopard());
 
   // Fade to black.
   const CGDisplayReservationInterval kFadeDurationSeconds = 0.6;
@@ -687,7 +689,7 @@ willPositionSheet:(NSWindow*)sheet
 
   [self windowWillExitFullScreen:nil];
 
-  [self moveViewsForFullscreenForSnowLeopardOrEarlier:NO
+  [self moveViewsForFullscreenForSnowLeopard:NO
                                         regularWindow:savedRegularWindow_
                                      fullscreenWindow:fullscreenWindow_.get()];
 

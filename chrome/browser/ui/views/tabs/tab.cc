@@ -29,6 +29,10 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
+#if defined(OS_WIN)
+#include "base/win/metro.h"
+#endif
+
 namespace {
 
 // Padding around the "content" of a tab, occupied by the tab border graphics.
@@ -57,10 +61,10 @@ int top_padding() {
     switch (ui::GetDisplayLayout()) {
       case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
-        value = 8;
+        value = 7;
         break;
       case ui::LAYOUT_TOUCH:
-        value = 12;
+        value = 10;
         break;
       default:
         NOTREACHED();
@@ -144,7 +148,7 @@ int tab_icon_size() {
 }
 
 // Width of touch tabs.
-static const int kTouchWidth = 180;
+static const int kTouchWidth = 120;
 
 static const int kToolbarOverlap = 1;
 static const int kFaviconTitleSpacing = 4;
@@ -166,7 +170,7 @@ static const int kCloseButtonVertFuzz = 1;
 static const int kCloseButtonVertFuzz = 0;
 #endif
 // Additional horizontal offset for close button relative to title text.
-static const int kCloseButtonHorzFuzz = 7;
+static const int kCloseButtonHorzFuzz = 3;
 
 // When a non-mini-tab becomes a mini-tab the width of the tab animates. If
 // the width of a mini-tab is >= kMiniTabRendererAsNormalTabWidth then the tab
@@ -192,6 +196,7 @@ static const int kMiniTitleChangeAnimationDuration2MS = 0;
 static const int kMiniTitleChangeAnimationDuration3MS = 550;
 static const int kMiniTitleChangeAnimationStart3MS = 150;
 static const int kMiniTitleChangeAnimationEnd3MS = 800;
+static const int kMiniTitleChangeAnimationIntervalMS = 40;
 
 // Offset from the right edge for the start of the mini title change animation.
 static const int kMiniTitleChangeInitialXOffset = 6;
@@ -244,7 +249,10 @@ void Tab::StartMiniTabTitleAnimation() {
     parts[0].end_time_ms = kMiniTitleChangeAnimationEnd1MS;
     parts[2].start_time_ms = kMiniTitleChangeAnimationStart3MS;
     parts[2].end_time_ms = kMiniTitleChangeAnimationEnd3MS;
-    mini_title_animation_.reset(new ui::MultiAnimation(parts));
+    mini_title_animation_.reset(new ui::MultiAnimation(
+        parts,
+        base::TimeDelta::FromMilliseconds(
+            kMiniTitleChangeAnimationIntervalMS)));
     mini_title_animation_->SetContainer(animation_container());
     mini_title_animation_->set_delegate(this);
   }
@@ -415,9 +423,23 @@ void Tab::Layout() {
     int close_button_top = top_padding() + kCloseButtonVertFuzz +
         (content_height - close_button_size.height()) / 2;
     // If the ratio of the close button size to tab width exceeds the maximum.
-    close_button()->SetBounds(lb.width() + kCloseButtonHorzFuzz,
-                              close_button_top, close_button_size.width(),
-                              close_button_size.height());
+    // The close button should be as large as possible so that there is a larger
+    // hit-target for touch events. So the close button bounds extends to the
+    // edges of the tab. However, the larger hit-target should be active only
+    // for mouse events, and the close-image should show up in the right place.
+    // So a border is added to the button with necessary padding. The close
+    // button (BaseTab::TabCloseButton) makes sure the padding is a hit-target
+    // only for touch events.
+    int top_border = close_button_top;
+    int bottom_border = height() - (close_button_size.height() + top_border);
+    int left_border = kCloseButtonHorzFuzz;
+    int right_border = width() - (lb.width() + close_button_size.width() +
+        left_border);
+    close_button()->set_border(views::Border::CreateEmptyBorder(top_border,
+        left_border, bottom_border, right_border));
+    close_button()->SetBounds(lb.width(), 0,
+        close_button_size.width() + left_border + right_border,
+        close_button_size.height() + top_border + bottom_border);
     close_button()->SetVisible(true);
   } else {
     close_button()->SetBounds(0, 0, 0, 0);
@@ -439,7 +461,11 @@ void Tab::Layout() {
 
     int title_width;
     if (close_button()->visible()) {
-      title_width = std::max(close_button()->x() -
+      // The close button has an empty border with some padding (see details
+      // above where the close-button's bounds is set). Allow the title to
+      // overlap the empty padding.
+      title_width = std::max(close_button()->x() +
+                             close_button()->GetInsets().left() -
                              kTitleCloseButtonSpacing - title_left, 0);
     } else {
       title_width = std::max(lb.width() - title_left, 0);
@@ -485,7 +511,7 @@ bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) const {
   return true;
 }
 
-void Tab::OnMouseMoved(const views::MouseEvent& event) {
+void Tab::OnMouseMoved(const ui::MouseEvent& event) {
   hover_controller().SetLocation(event.location());
   BaseTab::OnMouseMoved(event);
 }
@@ -505,10 +531,12 @@ gfx::ImageSkia* Tab::GetTabBackgroundImage(
     return tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
 
   switch (mode) {
+    case chrome::search::Mode::MODE_NTP_LOADING:
     case chrome::search::Mode::MODE_NTP:
       return tp->GetImageSkiaNamed(IDR_THEME_NTP_BACKGROUND);
 
-    case chrome::search::Mode::MODE_SEARCH:
+    case chrome::search::Mode::MODE_SEARCH_SUGGESTIONS:
+    case chrome::search::Mode::MODE_SEARCH_RESULTS:
     case chrome::search::Mode::MODE_DEFAULT:
     default:
       return tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR_SEARCH);
@@ -518,29 +546,28 @@ gfx::ImageSkia* Tab::GetTabBackgroundImage(
 void Tab::PaintTabBackground(gfx::Canvas* canvas) {
   if (IsActive()) {
     bool fading_in = false;
-    // If mode is SEARCH, we might be waiting to fade in or fading in new
-    // background, in which case, the previous background needs to be painted.
-    if (data().mode == chrome::search::Mode::MODE_SEARCH &&
-        data().background_state &
-            chrome::search::ToolbarSearchAnimator::BACKGROUND_STATE_NTP) {
-      // Paint background for NTP mode.
+    // If |gradient_background_opacity| < 1f, paint flat background at full
+    // opacity, and only paint gradient background if
+    // |gradient_background_opacity| is not 0f;
+    // if |gradient_opacity| is 1f, paint the background for the current mode
+    // at full opacity.
+    if (data().gradient_background_opacity < 1.0f) {
+      // Paint flat background of NTP mode.
       PaintActiveTabBackground(canvas,
           GetTabBackgroundImage(chrome::search::Mode::MODE_NTP));
-      // We're done if we're not showing background for |MODE_SEARCH|.
-      if (!(data().background_state & chrome::search::ToolbarSearchAnimator::
-            BACKGROUND_STATE_SEARCH)) {
+      // We're done if we're not showing gradient background.
+      if (data().gradient_background_opacity == 0.0f)
         return;
-      }
-      // Otherwise, we're fading in the background for |MODE_SEARCH| at
-      // |data().search_background_opacity|.
+      // Otherwise, we're fading in the gradient background at
+      // |data().gradient_background_opacity|.
       fading_in = true;
       canvas->SaveLayerAlpha(
-          static_cast<uint8>(data().search_background_opacity * 0xFF),
+          static_cast<uint8>(data().gradient_background_opacity * 0xFF),
           gfx::Rect(width(), height()));
     }
     // Paint the background for the current mode.
     PaintActiveTabBackground(canvas, GetTabBackgroundImage(data().mode));
-    // If we're fading in and have saved canvas, restore it now.
+    // If we're fading and have saved canvas, restore it now.
     if (fading_in)
       canvas->Restore();
   } else {
@@ -619,9 +646,14 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   int tab_id;
   if (GetWidget() && GetWidget()->GetTopLevelWidget()->ShouldUseNativeFrame()) {
     tab_id = IDR_THEME_TAB_BACKGROUND_V;
+  } else if (data().incognito) {
+    tab_id = IDR_THEME_TAB_BACKGROUND_INCOGNITO;
+#if defined(OS_WIN)
+  } else if (base::win::IsMetroProcess()) {
+    tab_id = IDR_THEME_TAB_BACKGROUND_V;
+#endif
   } else {
-    tab_id = data().incognito ? IDR_THEME_TAB_BACKGROUND_INCOGNITO :
-                                IDR_THEME_TAB_BACKGROUND;
+    tab_id = IDR_THEME_TAB_BACKGROUND;
   }
 
   gfx::ImageSkia* tab_bg = GetThemeProvider()->GetImageSkiaNamed(tab_id);

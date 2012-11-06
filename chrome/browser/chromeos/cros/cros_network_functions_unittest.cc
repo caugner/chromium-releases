@@ -9,12 +9,12 @@
 #include "chrome/browser/chromeos/cros/sms_watcher.h"
 #include "chromeos/dbus/mock_cashew_client.h"
 #include "chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chromeos/dbus/mock_flimflam_device_client.h"
-#include "chromeos/dbus/mock_flimflam_ipconfig_client.h"
-#include "chromeos/dbus/mock_flimflam_manager_client.h"
-#include "chromeos/dbus/mock_flimflam_network_client.h"
-#include "chromeos/dbus/mock_flimflam_profile_client.h"
-#include "chromeos/dbus/mock_flimflam_service_client.h"
+#include "chromeos/dbus/mock_shill_device_client.h"
+#include "chromeos/dbus/mock_shill_ipconfig_client.h"
+#include "chromeos/dbus/mock_shill_manager_client.h"
+#include "chromeos/dbus/mock_shill_network_client.h"
+#include "chromeos/dbus/mock_shill_profile_client.h"
+#include "chromeos/dbus/mock_shill_service_client.h"
 #include "chromeos/dbus/mock_gsm_sms_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -155,20 +155,22 @@ class CrosNetworkFunctionsTest : public testing::Test {
 
   virtual void SetUp() {
     MockDBusThreadManager* mock_dbus_thread_manager = new MockDBusThreadManager;
+    EXPECT_CALL(*mock_dbus_thread_manager, GetSystemBus())
+        .WillRepeatedly(Return(reinterpret_cast<dbus::Bus*>(NULL)));
     DBusThreadManager::InitializeForTesting(mock_dbus_thread_manager);
     mock_cashew_client_ = mock_dbus_thread_manager->mock_cashew_client();
     mock_device_client_ =
-        mock_dbus_thread_manager->mock_flimflam_device_client();
+        mock_dbus_thread_manager->mock_shill_device_client();
     mock_ipconfig_client_ =
-        mock_dbus_thread_manager->mock_flimflam_ipconfig_client();
+        mock_dbus_thread_manager->mock_shill_ipconfig_client();
     mock_manager_client_ =
-        mock_dbus_thread_manager->mock_flimflam_manager_client();
+        mock_dbus_thread_manager->mock_shill_manager_client();
     mock_network_client_ =
-        mock_dbus_thread_manager->mock_flimflam_network_client();
+        mock_dbus_thread_manager->mock_shill_network_client();
     mock_profile_client_ =
-        mock_dbus_thread_manager->mock_flimflam_profile_client();
+        mock_dbus_thread_manager->mock_shill_profile_client();
     mock_service_client_ =
-        mock_dbus_thread_manager->mock_flimflam_service_client();
+        mock_dbus_thread_manager->mock_shill_service_client();
     mock_gsm_sms_client_ = mock_dbus_thread_manager->mock_gsm_sms_client();
   }
 
@@ -177,16 +179,16 @@ class CrosNetworkFunctionsTest : public testing::Test {
     mock_profile_client_ = NULL;
   }
 
-  // Handles responses for GetProperties method calls for FlimflamManagerClient.
+  // Handles responses for GetProperties method calls for ShillManagerClient.
   void OnGetManagerProperties(
-      const FlimflamClientHelper::DictionaryValueCallback& callback) {
+      const ShillClientHelper::DictionaryValueCallback& callback) {
     callback.Run(DBUS_METHOD_CALL_SUCCESS, *dictionary_value_result_);
   }
 
   // Handles responses for GetProperties method calls.
   void OnGetProperties(
       const dbus::ObjectPath& path,
-      const FlimflamClientHelper::DictionaryValueCallback& callback) {
+      const ShillClientHelper::DictionaryValueCallback& callback) {
     callback.Run(DBUS_METHOD_CALL_SUCCESS, *dictionary_value_result_);
   }
 
@@ -194,7 +196,7 @@ class CrosNetworkFunctionsTest : public testing::Test {
   void OnGetEntry(
       const dbus::ObjectPath& profile_path,
       const std::string& entry_path,
-      const FlimflamClientHelper::DictionaryValueCallback& callback) {
+      const ShillClientHelper::DictionaryValueCallback& callback) {
     callback.Run(DBUS_METHOD_CALL_SUCCESS, *dictionary_value_result_);
   }
 
@@ -210,12 +212,12 @@ class CrosNetworkFunctionsTest : public testing::Test {
 
  protected:
   MockCashewClient* mock_cashew_client_;
-  MockFlimflamDeviceClient* mock_device_client_;
-  MockFlimflamIPConfigClient* mock_ipconfig_client_;
-  MockFlimflamManagerClient* mock_manager_client_;
-  MockFlimflamNetworkClient* mock_network_client_;
-  MockFlimflamProfileClient* mock_profile_client_;
-  MockFlimflamServiceClient* mock_service_client_;
+  MockShillDeviceClient* mock_device_client_;
+  MockShillIPConfigClient* mock_ipconfig_client_;
+  MockShillManagerClient* mock_manager_client_;
+  MockShillNetworkClient* mock_network_client_;
+  MockShillProfileClient* mock_profile_client_;
+  MockShillServiceClient* mock_service_client_;
   MockGsmSMSClient* mock_gsm_sms_client_;
   const base::DictionaryValue* dictionary_value_result_;
 };
@@ -310,7 +312,7 @@ TEST_F(CrosNetworkFunctionsTest, CrosMonitorNetworkManagerProperties) {
   const int kValue = 42;
   const base::FundamentalValue value(kValue);
   // Start monitoring.
-  FlimflamClientHelper::PropertyChangedHandler handler;
+  ShillClientHelper::PropertyChangedHandler handler;
   EXPECT_CALL(*mock_manager_client_, SetPropertyChangedHandler(_))
       .WillOnce(SaveArg<0>(&handler));
   CrosNetworkWatcher* watcher = CrosMonitorNetworkManagerProperties(
@@ -329,7 +331,7 @@ TEST_F(CrosNetworkFunctionsTest, CrosMonitorNetworkServiceProperties) {
   const int kValue = 42;
   const base::FundamentalValue value(kValue);
   // Start monitoring.
-  FlimflamClientHelper::PropertyChangedHandler handler;
+  ShillClientHelper::PropertyChangedHandler handler;
   EXPECT_CALL(*mock_service_client_, SetPropertyChangedHandler(path, _))
       .WillOnce(SaveArg<1>(&handler));
   NetworkPropertiesWatcherCallback callback =
@@ -351,7 +353,7 @@ TEST_F(CrosNetworkFunctionsTest, CrosMonitorNetworkDeviceProperties) {
   const int kValue = 42;
   const base::FundamentalValue value(kValue);
   // Start monitoring.
-  FlimflamClientHelper::PropertyChangedHandler handler;
+  ShillClientHelper::PropertyChangedHandler handler;
   EXPECT_CALL(*mock_device_client_, SetPropertyChangedHandler(path, _))
       .WillOnce(SaveArg<1>(&handler));
   NetworkPropertiesWatcherCallback callback =
@@ -488,7 +490,7 @@ TEST_F(CrosNetworkFunctionsTest, CrosMonitorSMS) {
   const std::string modem_device_path = "/modem/device/path";
 
   // Set expectations.
-  FlimflamDeviceClient::DictionaryValueCallback get_properties_callback;
+  ShillDeviceClient::DictionaryValueCallback get_properties_callback;
   EXPECT_CALL(*mock_device_client_,
               GetProperties(dbus::ObjectPath(modem_device_path), _))
       .WillOnce(SaveArg<1>(&get_properties_callback));
@@ -661,7 +663,7 @@ TEST_F(CrosNetworkFunctionsTest, CrosRequestHiddenWifiNetworkProperties) {
   result.SetWithoutPathExpansion(key1, base::Value::CreateStringValue(value1));
   result.SetWithoutPathExpansion(key2, base::Value::CreateStringValue(value2));
   dictionary_value_result_ = &result;
-  // Create expected argument to FlimflamManagerClient::GetService.
+  // Create expected argument to ShillManagerClient::GetService.
   base::DictionaryValue properties;
   properties.SetWithoutPathExpansion(
       flimflam::kModeProperty,
@@ -706,7 +708,7 @@ TEST_F(CrosNetworkFunctionsTest, CrosRequestVirtualNetworkProperties) {
   result.SetWithoutPathExpansion(key1, base::Value::CreateStringValue(value1));
   result.SetWithoutPathExpansion(key2, base::Value::CreateStringValue(value2));
   dictionary_value_result_ = &result;
-  // Create expected argument to FlimflamManagerClient::GetService.
+  // Create expected argument to ShillManagerClient::GetService.
   base::DictionaryValue properties;
   properties.SetWithoutPathExpansion(
       flimflam::kTypeProperty, base::Value::CreateStringValue("vpn"));
@@ -1060,6 +1062,95 @@ TEST_F(CrosNetworkFunctionsTest, CrosConfigureService) {
   EXPECT_CALL(*mock_manager_client_, ConfigureService(IsEqualTo(&value), _))
       .Times(1);
   CrosConfigureService(value);
+}
+
+TEST_F(CrosNetworkFunctionsTest, NetmaskToPrefixLength) {
+  // Valid netmasks
+  EXPECT_EQ(32, CrosNetmaskToPrefixLength("255.255.255.255"));
+  EXPECT_EQ(31, CrosNetmaskToPrefixLength("255.255.255.254"));
+  EXPECT_EQ(30, CrosNetmaskToPrefixLength("255.255.255.252"));
+  EXPECT_EQ(29, CrosNetmaskToPrefixLength("255.255.255.248"));
+  EXPECT_EQ(28, CrosNetmaskToPrefixLength("255.255.255.240"));
+  EXPECT_EQ(27, CrosNetmaskToPrefixLength("255.255.255.224"));
+  EXPECT_EQ(26, CrosNetmaskToPrefixLength("255.255.255.192"));
+  EXPECT_EQ(25, CrosNetmaskToPrefixLength("255.255.255.128"));
+  EXPECT_EQ(24, CrosNetmaskToPrefixLength("255.255.255.0"));
+  EXPECT_EQ(23, CrosNetmaskToPrefixLength("255.255.254.0"));
+  EXPECT_EQ(22, CrosNetmaskToPrefixLength("255.255.252.0"));
+  EXPECT_EQ(21, CrosNetmaskToPrefixLength("255.255.248.0"));
+  EXPECT_EQ(20, CrosNetmaskToPrefixLength("255.255.240.0"));
+  EXPECT_EQ(19, CrosNetmaskToPrefixLength("255.255.224.0"));
+  EXPECT_EQ(18, CrosNetmaskToPrefixLength("255.255.192.0"));
+  EXPECT_EQ(17, CrosNetmaskToPrefixLength("255.255.128.0"));
+  EXPECT_EQ(16, CrosNetmaskToPrefixLength("255.255.0.0"));
+  EXPECT_EQ(15, CrosNetmaskToPrefixLength("255.254.0.0"));
+  EXPECT_EQ(14, CrosNetmaskToPrefixLength("255.252.0.0"));
+  EXPECT_EQ(13, CrosNetmaskToPrefixLength("255.248.0.0"));
+  EXPECT_EQ(12, CrosNetmaskToPrefixLength("255.240.0.0"));
+  EXPECT_EQ(11, CrosNetmaskToPrefixLength("255.224.0.0"));
+  EXPECT_EQ(10, CrosNetmaskToPrefixLength("255.192.0.0"));
+  EXPECT_EQ(9, CrosNetmaskToPrefixLength("255.128.0.0"));
+  EXPECT_EQ(8, CrosNetmaskToPrefixLength("255.0.0.0"));
+  EXPECT_EQ(7, CrosNetmaskToPrefixLength("254.0.0.0"));
+  EXPECT_EQ(6, CrosNetmaskToPrefixLength("252.0.0.0"));
+  EXPECT_EQ(5, CrosNetmaskToPrefixLength("248.0.0.0"));
+  EXPECT_EQ(4, CrosNetmaskToPrefixLength("240.0.0.0"));
+  EXPECT_EQ(3, CrosNetmaskToPrefixLength("224.0.0.0"));
+  EXPECT_EQ(2, CrosNetmaskToPrefixLength("192.0.0.0"));
+  EXPECT_EQ(1, CrosNetmaskToPrefixLength("128.0.0.0"));
+  EXPECT_EQ(0, CrosNetmaskToPrefixLength("0.0.0.0"));
+  // Invalid netmasks
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.255.255"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.255.255.255.255"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.255.255.255.0"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.255.255.256"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.255.255.1"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.255.240.255"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.0.0.255"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255.255.255.FF"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255,255,255,255"));
+  EXPECT_EQ(-1, CrosNetmaskToPrefixLength("255 255 255 255"));
+}
+
+TEST_F(CrosNetworkFunctionsTest, PrefixLengthToNetmask) {
+  // Valid Prefix Lengths
+  EXPECT_EQ("255.255.255.255", CrosPrefixLengthToNetmask(32));
+  EXPECT_EQ("255.255.255.254", CrosPrefixLengthToNetmask(31));
+  EXPECT_EQ("255.255.255.252", CrosPrefixLengthToNetmask(30));
+  EXPECT_EQ("255.255.255.248", CrosPrefixLengthToNetmask(29));
+  EXPECT_EQ("255.255.255.240", CrosPrefixLengthToNetmask(28));
+  EXPECT_EQ("255.255.255.224", CrosPrefixLengthToNetmask(27));
+  EXPECT_EQ("255.255.255.192", CrosPrefixLengthToNetmask(26));
+  EXPECT_EQ("255.255.255.128", CrosPrefixLengthToNetmask(25));
+  EXPECT_EQ("255.255.255.0", CrosPrefixLengthToNetmask(24));
+  EXPECT_EQ("255.255.254.0", CrosPrefixLengthToNetmask(23));
+  EXPECT_EQ("255.255.252.0", CrosPrefixLengthToNetmask(22));
+  EXPECT_EQ("255.255.248.0", CrosPrefixLengthToNetmask(21));
+  EXPECT_EQ("255.255.240.0", CrosPrefixLengthToNetmask(20));
+  EXPECT_EQ("255.255.224.0", CrosPrefixLengthToNetmask(19));
+  EXPECT_EQ("255.255.192.0", CrosPrefixLengthToNetmask(18));
+  EXPECT_EQ("255.255.128.0", CrosPrefixLengthToNetmask(17));
+  EXPECT_EQ("255.255.0.0", CrosPrefixLengthToNetmask(16));
+  EXPECT_EQ("255.254.0.0", CrosPrefixLengthToNetmask(15));
+  EXPECT_EQ("255.252.0.0", CrosPrefixLengthToNetmask(14));
+  EXPECT_EQ("255.248.0.0", CrosPrefixLengthToNetmask(13));
+  EXPECT_EQ("255.240.0.0", CrosPrefixLengthToNetmask(12));
+  EXPECT_EQ("255.224.0.0", CrosPrefixLengthToNetmask(11));
+  EXPECT_EQ("255.192.0.0", CrosPrefixLengthToNetmask(10));
+  EXPECT_EQ("255.128.0.0", CrosPrefixLengthToNetmask(9));
+  EXPECT_EQ("255.0.0.0", CrosPrefixLengthToNetmask(8));
+  EXPECT_EQ("254.0.0.0", CrosPrefixLengthToNetmask(7));
+  EXPECT_EQ("252.0.0.0", CrosPrefixLengthToNetmask(6));
+  EXPECT_EQ("248.0.0.0", CrosPrefixLengthToNetmask(5));
+  EXPECT_EQ("240.0.0.0", CrosPrefixLengthToNetmask(4));
+  EXPECT_EQ("224.0.0.0", CrosPrefixLengthToNetmask(3));
+  EXPECT_EQ("192.0.0.0", CrosPrefixLengthToNetmask(2));
+  EXPECT_EQ("128.0.0.0", CrosPrefixLengthToNetmask(1));
+  EXPECT_EQ("0.0.0.0", CrosPrefixLengthToNetmask(0));
+  // Invalid Prefix Lengths
+  EXPECT_EQ("", CrosPrefixLengthToNetmask(-1));
+  EXPECT_EQ("", CrosPrefixLengthToNetmask(33));
+  EXPECT_EQ("", CrosPrefixLengthToNetmask(255));
 }
 
 }  // namespace chromeos

@@ -30,9 +30,12 @@ FilePath& BasePath() {
 }  // namespace
 
 // static
-net::URLRequestJob* URLRequestMockHTTPJob::Factory(net::URLRequest* request,
-                                                   const std::string& scheme) {
+net::URLRequestJob* URLRequestMockHTTPJob::Factory(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const std::string& scheme) {
   return new URLRequestMockHTTPJob(request,
+                                   network_delegate,
                                    GetOnDiskPath(BasePath(), request, scheme));
 }
 
@@ -80,9 +83,11 @@ FilePath URLRequestMockHTTPJob::GetOnDiskPath(const FilePath& base_path,
   return file_path;
 }
 
-URLRequestMockHTTPJob::URLRequestMockHTTPJob(net::URLRequest* request,
-                                             const FilePath& file_path)
-    : net::URLRequestFileJob(request, file_path) { }
+URLRequestMockHTTPJob::URLRequestMockHTTPJob(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const FilePath& file_path)
+    : net::URLRequestFileJob(request, network_delegate, file_path) { }
 
 // Public virtual version.
 void URLRequestMockHTTPJob::GetResponseInfo(net::HttpResponseInfo* info) {

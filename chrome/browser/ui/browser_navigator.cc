@@ -74,7 +74,7 @@ bool AdjustNavigateParamsForURL(chrome::NavigateParams* params) {
     return true;
   }
 
-  Profile* profile = params->browser->profile();
+  Profile* profile = params->initiating_profile;
 
   if (profile->IsOffTheRecord() || params->disposition == OFF_THE_RECORD) {
     profile = profile->GetOriginalProfile();
@@ -102,19 +102,23 @@ Browser* GetBrowserForDisposition(chrome::NavigateParams* params) {
   // the target browser. This must happen first, before
   // GetBrowserForDisposition() has a chance to replace |params->browser| with
   // another one.
-  if (!params->source_contents)
+  if (!params->source_contents && params->browser)
     params->source_contents = chrome::GetActiveTabContents(params->browser);
 
-  Profile* profile = params->browser->profile();
+  Profile* profile = params->initiating_profile;
 
   switch (params->disposition) {
     case CURRENT_TAB:
-      return params->browser;
+      if (params->browser)
+        return params->browser;
+      // Find a compatible window and re-execute this command in it. Otherwise
+      // re-run with NEW_WINDOW.
+      return GetOrCreateBrowser(profile);
     case SINGLETON_TAB:
     case NEW_FOREGROUND_TAB:
     case NEW_BACKGROUND_TAB:
       // See if we can open the tab in the window this navigator is bound to.
-      if (WindowCanOpenTabs(params->browser))
+      if (params->browser && WindowCanOpenTabs(params->browser))
         return params->browser;
       // Find a compatible window and re-execute this command in it. Otherwise
       // re-run with NEW_WINDOW.
@@ -128,11 +132,14 @@ Browser* GetBrowserForDisposition(chrome::NavigateParams* params) {
             params->extension_app_id);
       } else if (!params->browser->app_name().empty()) {
         app_name = params->browser->app_name();
-      } else if (params->source_contents &&
-                 params->source_contents->extension_tab_helper()->is_app()) {
-        app_name = web_app::GenerateApplicationNameFromExtensionId(
-            params->source_contents->extension_tab_helper()->
-                extension_app()->id());
+      } else if (params->source_contents) {
+        extensions::TabHelper* extensions_tab_helper =
+            extensions::TabHelper::FromWebContents(
+                params->source_contents->web_contents());
+        if (extensions_tab_helper->is_app()) {
+          app_name = web_app::GenerateApplicationNameFromExtensionId(
+              extensions_tab_helper->extension_app()->id());
+        }
       }
       if (app_name.empty()) {
         Browser::CreateParams browser_params(Browser::TYPE_POPUP, profile);
@@ -204,39 +211,30 @@ void NormalizeDisposition(chrome::NavigateParams* params) {
 }
 
 // Obtain the profile used by the code that originated the Navigate() request.
-// |source_browser| represents the Browser that was supplied in |params| before
-// it was modified.
-Profile* GetSourceProfile(chrome::NavigateParams* params,
-                          Browser* source_browser) {
+Profile* GetSourceProfile(chrome::NavigateParams* params) {
   if (params->source_contents)
     return params->source_contents->profile();
 
-  return source_browser->profile();
+  return params->initiating_profile;
 }
 
 void LoadURLInContents(WebContents* target_contents,
                        const GURL& url,
                        chrome::NavigateParams* params,
                        const std::string& extra_headers) {
-  if (params->transferred_global_request_id != GlobalRequestID()) {
-    target_contents->GetController().TransferURL(
-        url,
-        params->referrer,
-        params->transition, extra_headers,
-        params->transferred_global_request_id,
-        params->is_renderer_initiated);
-  } else if (params->is_renderer_initiated) {
-    target_contents->GetController().LoadURLFromRenderer(
-        url,
-        params->referrer,
-        params->transition,  extra_headers);
-  } else {
-    target_contents->GetController().LoadURL(
-        url,
-        params->referrer,
-        params->transition,  extra_headers);
-  }
+  content::NavigationController::LoadURLParams load_url_params(url);
+  load_url_params.referrer = params->referrer;
+  load_url_params.transition_type = params->transition;
+  load_url_params.extra_headers = extra_headers;
 
+  if (params->transferred_global_request_id != GlobalRequestID()) {
+    load_url_params.is_renderer_initiated = params->is_renderer_initiated;
+    load_url_params.transferred_global_request_id =
+        params->transferred_global_request_id;
+  } else if (params->is_renderer_initiated) {
+    load_url_params.is_renderer_initiated = true;
+  }
+  target_contents->GetController().LoadURLWithParams(load_url_params);
 }
 
 // This class makes sure the Browser object held in |params| is made visible
@@ -350,8 +348,8 @@ NavigateParams::NavigateParams(Browser* a_browser,
       user_gesture(true),
       path_behavior(RESPECT),
       ref_behavior(IGNORE_REF),
-      browser(a_browser) {
-}
+      browser(a_browser),
+      initiating_profile(NULL) {}
 
 NavigateParams::NavigateParams(Browser* a_browser,
                                TabContents* a_target_contents)
@@ -366,32 +364,45 @@ NavigateParams::NavigateParams(Browser* a_browser,
       user_gesture(true),
       path_behavior(RESPECT),
       ref_behavior(IGNORE_REF),
-      browser(a_browser) {
-}
+      browser(a_browser),
+      initiating_profile(NULL) {}
 
-NavigateParams::~NavigateParams() {
-}
+NavigateParams::NavigateParams(Profile* a_profile,
+                               const GURL& a_url,
+                               content::PageTransition a_transition)
+    : url(a_url),
+      target_contents(NULL),
+      source_contents(NULL),
+      disposition(NEW_FOREGROUND_TAB),
+      transition(a_transition),
+      is_renderer_initiated(false),
+      tabstrip_index(-1),
+      tabstrip_add_types(TabStripModel::ADD_ACTIVE),
+      window_action(SHOW_WINDOW),
+      user_gesture(true),
+      path_behavior(RESPECT),
+      ref_behavior(IGNORE_REF),
+      browser(NULL),
+      initiating_profile(a_profile) {}
+
+NavigateParams::~NavigateParams() {}
 
 void Navigate(NavigateParams* params) {
   Browser* source_browser = params->browser;
+  if (source_browser)
+    params->initiating_profile = source_browser->profile();
+  DCHECK(params->initiating_profile);
 
   if (!AdjustNavigateParamsForURL(params))
     return;
 
   // The browser window may want to adjust the disposition.
-  if (params->disposition == NEW_POPUP && source_browser->window()) {
+  if (params->disposition == NEW_POPUP &&
+      source_browser &&
+      source_browser->window()) {
     params->disposition =
         source_browser->window()->GetDispositionForPopupBounds(
             params->window_bounds);
-  }
-
-  // Adjust disposition for the navigation happending in the sad page of the
-  // panel window.
-  if (params->source_contents &&
-      params->source_contents->web_contents()->IsCrashed() &&
-      params->disposition == CURRENT_TAB &&
-      params->browser->is_type_panel()) {
-    params->disposition = NEW_FOREGROUND_TAB;
   }
 
   params->browser = GetBrowserForDisposition(params);
@@ -401,7 +412,7 @@ void Navigate(NavigateParams* params) {
 
   // Navigate() must not return early after this point.
 
-  if (GetSourceProfile(params, source_browser) != params->browser->profile()) {
+  if (GetSourceProfile(params) != params->browser->profile()) {
     // A tab is being opened from a link from a different profile, we must reset
     // source information that may cause state to be shared.
     params->source_contents = NULL;
@@ -441,7 +452,7 @@ void Navigate(NavigateParams* params) {
       base_transition == content::PAGE_TRANSITION_TYPED ||
       base_transition == content::PAGE_TRANSITION_AUTO_BOOKMARK ||
       base_transition == content::PAGE_TRANSITION_GENERATED ||
-      base_transition == content::PAGE_TRANSITION_START_PAGE ||
+      base_transition == content::PAGE_TRANSITION_AUTO_TOPLEVEL ||
       base_transition == content::PAGE_TRANSITION_RELOAD ||
       base_transition == content::PAGE_TRANSITION_KEYWORD;
 
@@ -472,13 +483,13 @@ void Navigate(NavigateParams* params) {
               tab_util::GetSiteInstanceForNewTab(
                   params->browser->profile(), url),
               MSG_ROUTING_NONE,
-              source_contents,
-              NULL);
+              source_contents);
       // This function takes ownership of |params->target_contents| until it
       // is added to a TabStripModel.
       target_contents_owner.TakeOwnership();
-      params->target_contents->extension_tab_helper()->
-          SetExtensionAppById(params->extension_app_id);
+      extensions::TabHelper::FromWebContents(
+          params->target_contents->web_contents())->
+              SetExtensionAppById(params->extension_app_id);
       // TODO(sky): figure out why this is needed. Without it we seem to get
       // failures in startup tests.
       // By default, content believes it is not hidden.  When adding contents

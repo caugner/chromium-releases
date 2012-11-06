@@ -12,6 +12,8 @@
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
+#include "content/browser/dom_storage/dom_storage_context_impl.h"
+#include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
@@ -22,12 +24,15 @@
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/port/browser/render_widget_host_view_port.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
@@ -227,7 +232,7 @@ void InterstitialPageImpl::Show() {
     // Give delegates a chance to set some states on the navigation entry.
     delegate_->OverrideEntry(entry);
 
-    web_contents_->GetControllerImpl().AddTransientEntry(entry);
+    web_contents_->GetController().AddTransientEntry(entry);
   }
 
   DCHECK(!render_view_host_);
@@ -477,9 +482,22 @@ WebContents* InterstitialPageImpl::web_contents() const {
 }
 
 RenderViewHost* InterstitialPageImpl::CreateRenderViewHost() {
+  // Interstitial pages don't want to share the session storage so we mint a
+  // new one.
+  using content::BrowserContext;
+  BrowserContext* browser_context = web_contents()->GetBrowserContext();
+  scoped_refptr<SiteInstance> site_instance =
+      SiteInstance::Create(browser_context);
+  DOMStorageContextImpl* dom_storage_context =
+      static_cast<DOMStorageContextImpl*>(
+          BrowserContext::GetStoragePartition(
+              browser_context, site_instance)->GetDOMStorageContext());
+  SessionStorageNamespaceImpl* session_storage_namespace_impl =
+      new SessionStorageNamespaceImpl(dom_storage_context);
+
   RenderViewHostImpl* render_view_host = new RenderViewHostImpl(
-      SiteInstance::Create(web_contents()->GetBrowserContext()), this, this,
-      MSG_ROUTING_NONE, false, NULL);
+      site_instance, this, this, MSG_ROUTING_NONE, false,
+      session_storage_namespace_impl);
   web_contents_->RenderViewForInterstitialPageCreated(render_view_host);
   return render_view_host;
 }
@@ -657,7 +675,8 @@ void InterstitialPageImpl::ShowCreatedFullscreenWidget(int route_id) {
 }
 
 void InterstitialPageImpl::ShowContextMenu(
-    const content::ContextMenuParams& params) {
+    const content::ContextMenuParams& params,
+    content::ContextMenuSourceType type) {
 }
 
 void InterstitialPageImpl::Disable() {

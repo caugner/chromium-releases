@@ -383,7 +383,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
   void OpenDevToolsWindowForSharedWorker(WorkerData* worker_data) {
     Profile* profile = browser()->profile();
     window_ = DevToolsWindow::CreateDevToolsWindowForWorker(profile);
-    window_->Show(DEVTOOLS_TOGGLE_ACTION_NONE);
+    window_->Show(DEVTOOLS_TOGGLE_ACTION_SHOW);
     DevToolsAgentHost* agent_host =
         DevToolsAgentHostRegistry::GetDevToolsAgentHostForWorker(
             worker_data->worker_process_id,
@@ -420,9 +420,17 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowScriptsTab) {
 // Tests that scripts tab is populated with inspected scripts even if it
 // hadn't been shown by the moment inspected paged refreshed.
 // @see http://crbug.com/26312
+#if defined(OS_WIN)
+// http://crbug.com/141849
+#define MAYBE_TestScriptsTabIsPopulatedOnInspectedPageRefresh \
+        FLAKY_TestScriptsTabIsPopulatedOnInspectedPageRefresh
+#else
+#define MAYBE_TestScriptsTabIsPopulatedOnInspectedPageRefresh \
+        TestScriptsTabIsPopulatedOnInspectedPageRefresh
+#endif
 IN_PROC_BROWSER_TEST_F(
     DevToolsSanityTest,
-    TestScriptsTabIsPopulatedOnInspectedPageRefresh) {
+    MAYBE_TestScriptsTabIsPopulatedOnInspectedPageRefresh) {
   // Clear inspector settings to ensure that Elements will be
   // current panel when DevTools window is open.
   content::GetContentClient()->browser()->ClearInspectorSettings(
@@ -519,10 +527,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleOnNavigateBack) {
   RunTest("testConsoleOnNavigateBack", kNavigateBackTestPage);
 }
 
-#if defined(OS_MACOSX) || defined(OS_LINUX)
-// http://crbug.com/103539
-#define TestReattachAfterCrash DISABLED_TestReattachAfterCrash
-#endif
 // Tests that inspector will reattach to inspected page when it is reloaded
 // after a crash. See http://crbug.com/101952
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestReattachAfterCrash) {

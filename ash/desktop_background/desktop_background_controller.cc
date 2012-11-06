@@ -6,6 +6,7 @@
 
 #include "ash/desktop_background/desktop_background_view.h"
 #include "ash/desktop_background/desktop_background_widget_controller.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_factory.h"
 #include "ash/shell_window_ids.h"
@@ -14,7 +15,6 @@
 #include "base/logging.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "base/threading/worker_pool.h"
-#include "grit/ui_resources.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -23,11 +23,13 @@
 #include "ui/gfx/image/image.h"
 #include "ui/views/widget/widget.h"
 
+using ash::internal::DesktopBackgroundWidgetController;
+using ash::internal::kComponentWrapper;
+using ash::internal::kWindowDesktopComponent;
+
 namespace ash {
 namespace {
 
-const int kSmallWallpaperMaximalWidth = 1366;
-const int kSmallWallpaperMaximalHeight = 800;
 const SkColor kTransparentColor = SkColorSetARGB(0x00, 0x00, 0x00, 0x00);
 
 internal::RootWindowLayoutManager* GetRootWindowLayoutManager(
@@ -36,6 +38,11 @@ internal::RootWindowLayoutManager* GetRootWindowLayoutManager(
       root_window->layout_manager());
 }
 }  // namespace
+
+const int kSmallWallpaperMaxWidth = 1366;
+const int kSmallWallpaperMaxHeight = 800;
+const int kLargeWallpaperMaxWidth = 2560;
+const int kLargeWallpaperMaxHeight = 1700;
 
 // Stores the current wallpaper data.
 struct DesktopBackgroundController::WallpaperData {
@@ -78,6 +85,10 @@ class DesktopBackgroundController::WallpaperOperation
 
   void Cancel() {
     cancel_flag_.Set();
+  }
+
+  int index() const {
+    return index_;
   }
 
   WallpaperData* ReleaseWallpaperData() {
@@ -124,9 +135,9 @@ WallpaperLayout DesktopBackgroundController::GetWallpaperLayout() const {
   return CENTER_CROPPED;
 }
 
-SkBitmap DesktopBackgroundController::GetCurrentWallpaperImage() {
+gfx::ImageSkia DesktopBackgroundController::GetCurrentWallpaperImage() {
   if (desktop_background_mode_ != BACKGROUND_IMAGE)
-    return SkBitmap();
+    return gfx::ImageSkia();
   return GetWallpaper();
 }
 
@@ -174,9 +185,14 @@ void DesktopBackgroundController::SetDefaultWallpaper(int index,
     return;
   }
 
-  if (!force_reload && current_wallpaper_.get() &&
-      current_wallpaper_->wallpaper_index == index)
+  // Prevents loading of the same wallpaper as the currently loading/loaded
+  // one.
+  if (!force_reload &&
+      ((wallpaper_op_.get() && wallpaper_op_->index() == index) ||
+       (current_wallpaper_.get() &&
+        current_wallpaper_->wallpaper_index == index))) {
     return;
+  }
 
   CancelPendingWallpaperOperation();
 
@@ -196,6 +212,11 @@ void DesktopBackgroundController::SetCustomWallpaper(
     const gfx::ImageSkia& wallpaper,
     WallpaperLayout layout) {
   CancelPendingWallpaperOperation();
+  if (current_wallpaper_.get() &&
+      current_wallpaper_->wallpaper_image.BackedBySameObjectAs(wallpaper)) {
+    return;
+  }
+
   current_wallpaper_.reset(new WallpaperData(layout, wallpaper));
   SetDesktopBackgroundImageMode();
 }
@@ -222,21 +243,25 @@ void DesktopBackgroundController::CreateEmptyWallpaper() {
   SetDesktopBackgroundImageMode();
 }
 
+WallpaperResolution DesktopBackgroundController::GetAppropriateResolution() {
+  WallpaperResolution resolution = SMALL;
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  for (Shell::RootWindowList::iterator iter = root_windows.begin();
+       iter != root_windows.end(); ++iter) {
+    gfx::Size root_window_size = (*iter)->GetHostSize();
+    if (root_window_size.width() > kSmallWallpaperMaxWidth ||
+        root_window_size.height() > kSmallWallpaperMaxHeight)
+      resolution = LARGE;
+  }
+  return resolution;
+}
+
 void DesktopBackgroundController::MoveDesktopToLockedContainer() {
   if (locked_)
     return;
   locked_ = true;
   ReparentBackgroundWidgets(GetBackgroundContainerId(false),
                             GetBackgroundContainerId(true));
-}
-
-void DesktopBackgroundController::CleanupView(aura::RootWindow* root_window) {
-  internal::ComponentWrapper* wrapper =
-      root_window->GetProperty(internal::kComponentWrapper);
-  if (NULL == wrapper)
-    return;
-  if (wrapper->component())
-    wrapper->component()->CleanupWidget();
 }
 
 void DesktopBackgroundController::MoveDesktopToUnlockedContainer() {
@@ -248,10 +273,10 @@ void DesktopBackgroundController::MoveDesktopToUnlockedContainer() {
 }
 
 void DesktopBackgroundController::OnWindowDestroying(aura::Window* window) {
-   window->SetProperty(internal::kWindowDesktopComponent,
-       static_cast<internal::DesktopBackgroundWidgetController*>(NULL));
-   window->SetProperty(internal::kComponentWrapper,
-       static_cast<internal::ComponentWrapper*>(NULL));
+  window->SetProperty(internal::kWindowDesktopComponent,
+      static_cast<internal::DesktopBackgroundWidgetController*>(NULL));
+  window->SetProperty(internal::kComponentWrapper,
+      static_cast<internal::ComponentWrapper*>(NULL));
 }
 
 void DesktopBackgroundController::SetDesktopBackgroundImageMode() {
@@ -271,6 +296,7 @@ void DesktopBackgroundController::OnWallpaperLoadCompleted(
 
 void DesktopBackgroundController::NotifyAnimationFinished() {
   Shell* shell = Shell::GetInstance();
+  shell->GetPrimaryRootWindowController()->HandleDesktopBackgroundVisible();
   shell->user_wallpaper_delegate()->OnWallpaperAnimationFinished();
 }
 
@@ -336,13 +362,27 @@ void DesktopBackgroundController::ReparentBackgroundWidgets(int src_container,
   for (Shell::RootWindowList::iterator iter = root_windows.begin();
     iter != root_windows.end(); ++iter) {
     aura::RootWindow* root_window = *iter;
-    if (root_window->GetProperty(internal::kComponentWrapper)) {
-      internal::DesktopBackgroundWidgetController* component = root_window->
-          GetProperty(internal::kComponentWrapper)->component();
-      DCHECK(component);
-      component->Reparent(root_window,
-                          src_container,
-                          dst_container);
+    // In the steady state (no animation playing) the background widget
+    // controller exists in the kWindowDesktopComponent property.
+    DesktopBackgroundWidgetController* desktop_component = root_window->
+        GetProperty(kWindowDesktopComponent);
+    if (desktop_component) {
+      desktop_component->Reparent(root_window,
+                                  src_container,
+                                  dst_container);
+    }
+    // During desktop show animations the controller lives in kComponentWrapper.
+    // NOTE: If a wallpaper load happens during a desktop show animation there
+    // can temporarily be two desktop background widgets.  We must reparent
+    // both of them - one above and one here.
+    DesktopBackgroundWidgetController* wrapped_component =
+        root_window->GetProperty(kComponentWrapper) ?
+        root_window->GetProperty(kComponentWrapper)->GetComponent(false) :
+        NULL;
+    if (wrapped_component) {
+      wrapped_component->Reparent(root_window,
+                                  src_container,
+                                  dst_container);
     }
   }
 }
@@ -350,19 +390,6 @@ void DesktopBackgroundController::ReparentBackgroundWidgets(int src_container,
 int DesktopBackgroundController::GetBackgroundContainerId(bool locked) {
   return locked ? internal::kShellWindowId_LockScreenBackgroundContainer :
                   internal::kShellWindowId_DesktopBackgroundContainer;
-}
-
-WallpaperResolution DesktopBackgroundController::GetAppropriateResolution() {
-  WallpaperResolution resolution = SMALL;
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
-  for (Shell::RootWindowList::iterator iter = root_windows.begin();
-       iter != root_windows.end(); ++iter) {
-    gfx::Size root_window_size = (*iter)->GetHostSize();
-    if (root_window_size.width() > kSmallWallpaperMaximalWidth ||
-        root_window_size.height() > kSmallWallpaperMaximalHeight)
-      resolution = LARGE;
-  }
-  return resolution;
 }
 
 }  // namespace ash

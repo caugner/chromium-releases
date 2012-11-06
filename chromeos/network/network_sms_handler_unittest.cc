@@ -7,8 +7,10 @@
 #include <set>
 #include <string>
 
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -63,8 +65,13 @@ class NetworkSmsHandlerTest : public testing::Test {
 };
 
 TEST_F(NetworkSmsHandlerTest, SmsHandlerDbusStub) {
-  // This relies on the stub dbus implementations for FlimflamManagerClient,
-  // FlimflamDeviceClient, GsmSMSClient, ModemMessagingClient and SMSClient.
+  // Append '--sms-test-messages' to the command line to tell SMSClientStubImpl
+  // to generate a series of test SMS messages.
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  command_line->AppendSwitch(chromeos::switches::kSmsTestMessages);
+
+  // This relies on the stub dbus implementations for ShillManagerClient,
+  // ShillDeviceClient, GsmSMSClient, ModemMessagingClient and SMSClient.
   // Initialize a sms handler. The stub dbus clients will not send the
   // first test message until RequestUpdate has been called.
   scoped_ptr<NetworkSmsHandler> sms_handler(new NetworkSmsHandler());

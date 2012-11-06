@@ -4,7 +4,9 @@
 
 #include "ui/app_list/app_list_view.h"
 
+#include "base/string_util.h"
 #include "ui/app_list/app_list_bubble_border.h"
+#include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_item_view.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_view_delegate.h"
@@ -12,6 +14,7 @@
 #include "ui/app_list/pagination_model.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_box_view.h"
+#include "ui/base/events/event.h"
 #include "ui/gfx/insets.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -49,8 +52,14 @@ void AppListView::InitAsBubble(
     gfx::NativeView parent,
     PaginationModel* pagination_model,
     views::View* anchor,
+    const gfx::Point& anchor_point,
     views::BubbleBorder::ArrowLocation arrow_location) {
+#if defined(OS_WIN)
+  set_background(views::Background::CreateSolidBackground(
+      kContentsBackgroundColor));
+#else
   set_background(NULL);
+#endif
 
   SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical,
                                         kInnerPadding,
@@ -66,6 +75,7 @@ void AppListView::InitAsBubble(
   search_box_view_->set_contents_view(contents_view_);
 
   set_anchor_view(anchor);
+  set_anchor_point(anchor_point);
   set_margins(gfx::Insets());
   set_move_with_anchor(true);
   set_parent_window(parent);
@@ -79,8 +89,14 @@ void AppListView::InitAsBubble(
   GetBubbleFrameView()->SetBubbleBorder(bubble_border_);
   SetBubbleArrowLocation(arrow_location);
 
+#if !defined(OS_WIN)
   // Resets default background since AppListBubbleBorder paints background.
   GetBubbleFrameView()->set_background(NULL);
+
+  contents_view_->SetPaintToLayer(true);
+  contents_view_->SetFillsBoundsOpaquely(false);
+  contents_view_->layer()->SetMasksToBounds(true);
+#endif
 
   CreateModel();
 }
@@ -120,6 +136,13 @@ views::View* AppListView::GetInitiallyFocusedView() {
   return search_box_view_->search_box();
 }
 
+gfx::ImageSkia AppListView::GetWindowAppIcon() {
+  if (delegate_.get())
+    return delegate_->GetWindowAppIcon();
+
+  return gfx::ImageSkia();
+}
+
 bool AppListView::HasHitTestMask() const {
   return true;
 }
@@ -129,7 +152,7 @@ void AppListView::GetHitTestMask(gfx::Path* mask) const {
   bubble_border_->GetMask(GetBubbleFrameView()->bounds(), mask);
 }
 
-bool AppListView::OnKeyPressed(const views::KeyEvent& event) {
+bool AppListView::OnKeyPressed(const ui::KeyEvent& event) {
   if (event.key_code() == ui::VKEY_ESCAPE) {
     Close();
     return true;
@@ -138,8 +161,7 @@ bool AppListView::OnKeyPressed(const views::KeyEvent& event) {
   return false;
 }
 
-void AppListView::ButtonPressed(views::Button* sender,
-                                const views::Event& event) {
+void AppListView::ButtonPressed(views::Button* sender, const ui::Event& event) {
   if (sender->GetClassName() != AppListItemView::kViewClassName)
     return;
 
@@ -174,7 +196,9 @@ gfx::Rect AppListView::GetBubbleBounds() {
 }
 
 void AppListView::QueryChanged(SearchBoxView* sender) {
-  bool should_show_search = !model_->search_box()->text().empty();
+  string16 query;
+  TrimWhitespace(model_->search_box()->text(), TRIM_ALL, &query);
+  bool should_show_search = !query.empty();
   contents_view_->ShowSearchResults(should_show_search);
 
   if (delegate_.get()) {
@@ -188,7 +212,13 @@ void AppListView::QueryChanged(SearchBoxView* sender) {
 void AppListView::OpenResult(const SearchResult& result, int event_flags) {
   if (delegate_.get())
     delegate_->OpenSearchResult(result, event_flags);
-  Close();
+}
+
+void AppListView::InvokeResultAction(const SearchResult& result,
+                                     int action_index,
+                                     int event_flags) {
+  if (delegate_.get())
+    delegate_->InvokeSearchResultAction(result, action_index, event_flags);
 }
 
 }  // namespace app_list

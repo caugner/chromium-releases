@@ -3,11 +3,12 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/browser_event_router.h"
+#include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -17,8 +18,20 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/gfx/image/image_skia.h"
 
 using extensions::Extension;
+
+namespace {
+
+gfx::Image CreateNonEmptyImage() {
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
+  bitmap.allocPixels();
+  return gfx::Image(bitmap);
+}
+
+}  // namespace
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
   ASSERT_TRUE(test_server()->Start());
@@ -34,8 +47,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
   }
 
   // Test that we received the changes.
-  int tab_id = chrome::GetActiveTabContents(browser())->restore_tab_helper()->
-      session_id().id();
+  int tab_id = SessionTabHelper::FromWebContents(
+      chrome::GetActiveWebContents(browser()))->session_id().id();
   ExtensionAction* action = extension->page_action();
   ASSERT_TRUE(action);
   EXPECT_EQ("Modified", action->GetTitle(tab_id));
@@ -59,10 +72,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
     ASSERT_TRUE(catcher.GetNextResult());
   }
 
+  // We should not be creating icons asynchronously, so we don't need an
+  // observer.
+  ExtensionActionIconFactory icon_factory(extension, action, NULL);
+
   // Test that we received the changes.
-  tab_id = chrome::GetActiveTabContents(browser())->restore_tab_helper()->
-      session_id().id();
-  EXPECT_FALSE(action->GetIcon(tab_id).IsEmpty());
+  tab_id = SessionTabHelper::FromWebContents(
+      chrome::GetActiveWebContents(browser()))->session_id().id();
+  EXPECT_FALSE(icon_factory.GetIcon(tab_id).IsEmpty());
 }
 
 // Test that calling chrome.pageAction.setPopup() can enable a popup.
@@ -145,7 +162,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionRemovePopup) {
 // Tests old-style pageActions API that is deprecated but we don't want to
 // break.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OldPageActions) {
-  ASSERT_TRUE(RunExtensionTest("page_action/old_api")) << message_;
+  ASSERT_TRUE(RunExtensionTestAllowOldManifestVersion("page_action/old_api")) <<
+      message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 

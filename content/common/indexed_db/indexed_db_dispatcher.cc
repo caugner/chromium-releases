@@ -107,6 +107,8 @@ void IndexedDBDispatcher::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksUpgradeNeeded, OnUpgradeNeeded)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksAbort, OnAbort)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksComplete, OnComplete)
+    IPC_MESSAGE_HANDLER(IndexedDBMsg_DatabaseCallbacksForcedClose,
+                        OnForcedClose)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_DatabaseCallbacksIntVersionChange,
                         OnIntVersionChange)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_DatabaseCallbacksVersionChange,
@@ -202,10 +204,13 @@ void IndexedDBDispatcher::RequestIDBFactoryOpen(
     const string16& name,
     int64 version,
     WebIDBCallbacks* callbacks_ptr,
+    WebIDBDatabaseCallbacks* database_callbacks_ptr,
     const string16& origin,
     WebFrame* web_frame) {
   ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
+  scoped_ptr<WebIDBDatabaseCallbacks>
+      database_callbacks(database_callbacks_ptr);
 
   if (!CurrentWorkerId() &&
       !ChildThread::current()->IsWebFrameValid(web_frame))
@@ -214,6 +219,8 @@ void IndexedDBDispatcher::RequestIDBFactoryOpen(
   IndexedDBHostMsg_FactoryOpen_Params params;
   params.thread_id = CurrentWorkerId();
   params.response_id = pending_callbacks_.Add(callbacks.release());
+  params.database_response_id = pending_database_callbacks_.Add(
+      database_callbacks.release());
   params.origin = origin;
   params.name = name;
   params.version = version;
@@ -265,18 +272,6 @@ void IndexedDBDispatcher::RequestIDBDatabaseClose(int32 idb_database_id) {
   // the initial upgradeneeded event handler.
   if (pending_database_callbacks_.Lookup(idb_database_id))
     pending_database_callbacks_.Remove(idb_database_id);
-}
-
-void IndexedDBDispatcher::RequestIDBDatabaseOpen(
-      WebIDBDatabaseCallbacks* callbacks_ptr,
-      int32 idb_database_id) {
-  ResetCursorPrefetchCaches();
-  scoped_ptr<WebIDBDatabaseCallbacks> callbacks(callbacks_ptr);
-
-  DCHECK(!pending_database_callbacks_.Lookup(idb_database_id));
-  pending_database_callbacks_.AddWithID(callbacks.release(), idb_database_id);
-  Send(new IndexedDBHostMsg_DatabaseOpen(idb_database_id, CurrentWorkerId(),
-                                         idb_database_id));
 }
 
 void IndexedDBDispatcher::RequestIDBDatabaseSetVersion(
@@ -483,9 +478,10 @@ void IndexedDBDispatcher::RequestIDBObjectStoreClear(
 
 void IndexedDBDispatcher::RequestIDBObjectStoreOpenCursor(
     const WebIDBKeyRange& idb_key_range,
-    unsigned short direction,
+    WebKit::WebIDBCursor::Direction direction,
     WebIDBCallbacks* callbacks_ptr,
     int32 idb_object_store_id,
+    WebKit::WebIDBTransaction::TaskType task_type,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
   ResetCursorPrefetchCaches();
@@ -496,6 +492,7 @@ void IndexedDBDispatcher::RequestIDBObjectStoreOpenCursor(
   params.key_range = IndexedDBKeyRange(idb_key_range);
   params.direction = direction;
   params.idb_object_store_id = idb_object_store_id;
+  params.task_type = task_type;
   params.transaction_id = TransactionId(transaction);
   Send(new IndexedDBHostMsg_ObjectStoreOpenCursor(params, ec));
   if (*ec)
@@ -635,8 +632,7 @@ void IndexedDBDispatcher::OnSuccessOpenCursor(
 
   RendererWebIDBCursorImpl* cursor = new RendererWebIDBCursorImpl(object_id);
   cursors_[object_id] = cursor;
-  cursor->SetKeyAndValue(key, primary_key, value);
-  callbacks->onSuccess(cursor);
+  callbacks->onSuccess(cursor, key, primary_key, value);
 
   pending_callbacks_.Remove(response_id);
 }
@@ -652,12 +648,12 @@ void IndexedDBDispatcher::OnSuccessCursorContinue(
 
   RendererWebIDBCursorImpl* cursor = cursors_[cursor_id];
   DCHECK(cursor);
-  cursor->SetKeyAndValue(key, primary_key, value);
 
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
   if (!callbacks)
     return;
-  callbacks->onSuccessWithContinuation();
+
+  callbacks->onSuccess(key, primary_key, value);
 
   pending_callbacks_.Remove(response_id);
 }
@@ -739,6 +735,16 @@ void IndexedDBDispatcher::OnComplete(int32 thread_id, int32 transaction_id) {
     return;
   callbacks->onComplete();
   pending_transaction_callbacks_.Remove(transaction_id);
+}
+
+void IndexedDBDispatcher::OnForcedClose(int32 thread_id,
+                                        int32 database_id) {
+  DCHECK_EQ(thread_id, CurrentWorkerId());
+  WebIDBDatabaseCallbacks* callbacks =
+      pending_database_callbacks_.Lookup(database_id);
+  if (!callbacks)
+    return;
+  callbacks->onForcedClose();
 }
 
 void IndexedDBDispatcher::OnIntVersionChange(int32 thread_id,

@@ -17,7 +17,6 @@
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/extension_navigation_observer.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
 #include "chrome/browser/extensions/extension_pref_value_map_factory.h"
@@ -26,7 +25,9 @@
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/management_policy.h"
-#include "chrome/browser/extensions/message_service.h"
+#include "chrome/browser/extensions/api/messaging/message_service.h"
+#include "chrome/browser/extensions/navigation_observer.h"
+#include "chrome/browser/extensions/shell_window_geometry_cache.h"
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/user_script_master.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/common/pref_names.h"
@@ -50,10 +52,9 @@ namespace extensions {
 //
 
 ExtensionSystem::ExtensionSystem() {
-  // In lieu of a way for Feature to check whether it's running on the browser
-  // process, tell it.
-  // See http://crbug.com/126535.
-  Feature::SetChannelCheckingEnabled(true);
+  // Only set if it hasn't already been set (e.g. by a test).
+  if (Feature::GetCurrentChannel() == Feature::GetDefaultChannel())
+    Feature::SetCurrentChannel(chrome::VersionInfo::GetChannel());
 }
 
 ExtensionSystem::~ExtensionSystem() {
@@ -88,17 +89,15 @@ void ExtensionSystemImpl::Shared::InitPrefs() {
   state_store_.reset(new StateStore(
       profile_,
       profile_->GetPath().AppendASCII(ExtensionService::kStateStoreName)));
+
+  shell_window_geometry_cache_.reset(new ShellWindowGeometryCache(
+    profile_, state_store_.get()));
+
 }
 
 void ExtensionSystemImpl::Shared::RegisterManagementPolicyProviders() {
   DCHECK(extension_prefs_.get());
   management_policy_->RegisterProvider(extension_prefs_.get());
-}
-
-void ExtensionSystemImpl::Shared::InitInfoMap() {
-  // The ExtensionInfoMap needs to be created before the
-  // ExtensionProcessManager.
-  extension_info_map_ = new ExtensionInfoMap();
 }
 
 void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
@@ -107,8 +106,7 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   lazy_background_task_queue_.reset(new LazyBackgroundTaskQueue(profile_));
   message_service_.reset(new MessageService(lazy_background_task_queue_.get()));
   extension_event_router_.reset(new EventRouter(profile_));
-  extension_navigation_observer_.reset(
-      new ExtensionNavigationObserver(profile_));
+  navigation_observer_.reset(new NavigationObserver(profile_));
 
   ExtensionErrorReporter::Init(true);  // allow noisy errors.
 
@@ -164,10 +162,9 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
       StringTokenizerT<CommandLine::StringType,
           CommandLine::StringType::const_iterator> t(path_list,
                                                      FILE_PATH_LITERAL(","));
-      scoped_refptr<UnpackedInstaller> installer =
-          UnpackedInstaller::Create(extension_service_.get());
       while (t.GetNext()) {
-        installer->LoadFromCommandLine(FilePath(t.token()));
+        UnpackedInstaller::Create(extension_service_.get())->
+            LoadFromCommandLine(FilePath(t.token()));
       }
     }
   }
@@ -198,8 +195,18 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   }
 }
 
+void ExtensionSystemImpl::Shared::Shutdown() {
+  if (extension_service_.get())
+    extension_service_->Shutdown();
+}
+
 StateStore* ExtensionSystemImpl::Shared::state_store() {
   return state_store_.get();
+}
+
+ShellWindowGeometryCache* ExtensionSystemImpl::Shared::
+    shell_window_geometry_cache() {
+  return shell_window_geometry_cache_.get();
 }
 
 ExtensionService* ExtensionSystemImpl::Shared::extension_service() {
@@ -215,6 +222,8 @@ UserScriptMaster* ExtensionSystemImpl::Shared::user_script_master() {
 }
 
 ExtensionInfoMap* ExtensionSystemImpl::Shared::info_map() {
+  if (!extension_info_map_)
+    extension_info_map_ = new ExtensionInfoMap();
   return extension_info_map_.get();
 }
 
@@ -267,7 +276,9 @@ void ExtensionSystemImpl::InitForRegularProfile(bool extensions_enabled) {
     extension_devtools_manager_ = new ExtensionDevToolsManager(profile_);
   }
 
-  shared_->InitInfoMap();
+  // The ExtensionInfoMap needs to be created before the
+  // ExtensionProcessManager.
+  shared_->info_map();
 
   extension_process_manager_.reset(ExtensionProcessManager::Create(profile_));
   alarm_manager_.reset(new AlarmManager(profile_, &base::Time::Now));
@@ -323,6 +334,10 @@ AlarmManager* ExtensionSystemImpl::alarm_manager() {
 
 StateStore* ExtensionSystemImpl::state_store() {
   return shared_->state_store();
+}
+
+ShellWindowGeometryCache* ExtensionSystemImpl::shell_window_geometry_cache() {
+  return shared_->shell_window_geometry_cache();
 }
 
 ExtensionInfoMap* ExtensionSystemImpl::info_map() {

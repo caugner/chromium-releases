@@ -6,6 +6,7 @@
 #define UI_GFX_IMAGE_SKIA_OPERATIONS_H_
 
 #include "base/gtest_prod_util.h"
+#include "skia/ext/image_operations.h"
 #include "ui/base/ui_export.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/shadow_value.h"
@@ -23,6 +24,14 @@ class UI_EXPORT ImageSkiaOperations {
   static ImageSkia CreateBlendedImage(const ImageSkia& first,
                                       const ImageSkia& second,
                                       double alpha);
+
+  // Creates an image that is the original image with opacity set to |alpha|.
+  static ImageSkia CreateTransparentImage(const ImageSkia& image, double alpha);
+
+  // Creates new image by painting first and second image respectively.
+  // The second image is centered in respect to the first image.
+  static ImageSkia CreateSuperimposedImage(const ImageSkia& first,
+                                           const ImageSkia& second);
 
   // Create an image that is the original image masked out by the mask defined
   // in the alpha image. The images must use the kARGB_8888_Config config and
@@ -71,6 +80,7 @@ class UI_EXPORT ImageSkiaOperations {
 
   // Creates an image by resizing |source| to given |target_dip_size|.
   static ImageSkia CreateResizedImage(const ImageSkia& source,
+                                      skia::ImageOperations::ResizeMethod methd,
                                       const Size& target_dip_size);
 
   // Creates an image with drop shadow defined in |shadows| for |source|.

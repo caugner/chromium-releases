@@ -11,9 +11,10 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/ContentSettings_jni.h"
-#include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
+#include "webkit/user_agent/user_agent.h"
+#include "webkit/user_agent/user_agent_util.h"
 
 using base::android::CheckException;
 using base::android::ConvertJavaStringToUTF16;
@@ -66,10 +67,18 @@ struct ContentSettings::FieldIds {
         GetFieldID(env, clazz, "mLoadsImagesAutomatically", "Z");
     java_script_enabled =
         GetFieldID(env, clazz, "mJavaScriptEnabled", "Z");
+    allow_universal_access_from_file_urls =
+        GetFieldID(env, clazz, "mAllowUniversalAccessFromFileURLs", "Z");
+    allow_file_access_from_file_urls =
+        GetFieldID(env, clazz, "mAllowFileAccessFromFileURLs", "Z");
     java_script_can_open_windows_automatically =
         GetFieldID(env, clazz, "mJavaScriptCanOpenWindowsAutomatically", "Z");
     dom_storage_enabled =
         GetFieldID(env, clazz, "mDomStorageEnabled", "Z");
+    allow_file_url_access =
+        GetFieldID(env, clazz, "mAllowFileUrlAccess", "Z");
+    allow_content_url_access =
+        GetFieldID(env, clazz, "mAllowContentUrlAccess", "Z");
   }
 
   // Field ids
@@ -87,8 +96,12 @@ struct ContentSettings::FieldIds {
   jfieldID default_fixed_font_size;
   jfieldID load_images_automatically;
   jfieldID java_script_enabled;
+  jfieldID allow_universal_access_from_file_urls;
+  jfieldID allow_file_access_from_file_urls;
   jfieldID java_script_can_open_windows_automatically;
   jfieldID dom_storage_enabled;
+  jfieldID allow_file_url_access;
+  jfieldID allow_content_url_access;
 };
 
 ContentSettings::ContentSettings(JNIEnv* env,
@@ -189,6 +202,18 @@ void ContentSettings::SyncFromNativeImpl() {
 
   env->SetBooleanField(
       obj,
+      field_ids_->allow_universal_access_from_file_urls,
+      prefs.allow_universal_access_from_file_urls);
+  CheckException(env);
+
+  env->SetBooleanField(
+      obj,
+      field_ids_->allow_file_access_from_file_urls,
+      prefs.allow_file_access_from_file_urls);
+  CheckException(env);
+
+  env->SetBooleanField(
+      obj,
       field_ids_->java_script_can_open_windows_automatically,
       prefs.javascript_can_open_windows_automatically);
   CheckException(env);
@@ -271,6 +296,12 @@ void ContentSettings::SyncToNativeImpl() {
 
   prefs.javascript_enabled =
       env->GetBooleanField(obj, field_ids_->java_script_enabled);
+
+  prefs.allow_universal_access_from_file_urls = env->GetBooleanField(
+      obj, field_ids_->allow_universal_access_from_file_urls);
+
+  prefs.allow_file_access_from_file_urls = env->GetBooleanField(
+      obj, field_ids_->allow_file_access_from_file_urls);
 
   prefs.javascript_can_open_windows_automatically = env->GetBooleanField(
       obj, field_ids_->java_script_can_open_windows_automatically);

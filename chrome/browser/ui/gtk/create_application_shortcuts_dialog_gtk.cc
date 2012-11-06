@@ -324,7 +324,6 @@ CreateChromeApplicationShortcutsDialogGtk::
   // Get shortcut information now, it's needed for our UI.
   shortcut_info_.extension_id = app_->id();
   shortcut_info_.extension_path = app_->path();
-  shortcut_info_.is_platform_app = app_->is_platform_app();
   shortcut_info_.url = GURL(app_->launch_web_url());
   shortcut_info_.title = UTF8ToUTF16(app_->name());
   shortcut_info_.description = UTF8ToUTF16(app_->description());
@@ -370,7 +369,7 @@ void CreateChromeApplicationShortcutsDialogGtk::CreateDesktopShortcut(
     const ShellIntegration::ShortcutInfo& shortcut_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  if (web_app::CreateShortcutOnFileThread(profile_path_, shortcut_info)) {
+  if (web_app::CreateShortcutsOnFileThread(shortcut_info)) {
     Release();
   } else {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,

@@ -9,11 +9,6 @@
 
 namespace remoting {
 
-// This is the default prefix that is prepended to ".talkgadget.google.com"
-// to form the complete talkgadget domain name. Policy settings allow admins
-// to change the prefix that is used.
-extern const char kDefaultTalkGadgetPrefix[];
-
 // Known host exit codes.
 // Please keep this enum in sync with:
 // remoting/host/installer/mac/PrivilegedHelperTools/
@@ -23,17 +18,19 @@ enum HostExitCodes {
   // Error codes that don't indicate a permanent error condition.
   kSuccessExitCode = 0,
   kReservedForX11ExitCode = 1,
+  kHostInitializationFailed = 7,
 
   // Error codes that do indicate a permanent error condition.
   kInvalidHostConfigurationExitCode = 2,
   kInvalidHostIdExitCode = 3,
   kInvalidOauthCredentialsExitCode = 4,
   kInvalidHostDomainExitCode = 5,
+  kLoginScreenNotSupportedExitCode = 6,
 
   // The range of the exit codes that should be interpreted as a permanent error
   // condition.
   kMinPermanentErrorExitCode = kInvalidHostConfigurationExitCode,
-  kMaxPermanentErrorExitCode = kInvalidHostDomainExitCode
+  kMaxPermanentErrorExitCode = kLoginScreenNotSupportedExitCode
 };
 
 #if defined(OS_WIN)

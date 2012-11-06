@@ -19,9 +19,6 @@ namespace internal {
 
 namespace {
 
-// This should be the same color as the darkest launcher bar.
-const SkColor kLauncherColor = SkColorSetARGB(0x80, 0, 0, 0);
-
 // Max bubble size to screen size ratio.
 const float kMaxBubbleSizeToScreenRatio = 0.5f;
 
@@ -78,8 +75,8 @@ class OverflowBubbleView : public views::BubbleDelegateView {
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
-  virtual bool OnMouseWheel(const views::MouseWheelEvent& event) OVERRIDE;
-  virtual bool OnScrollEvent(const views::ScrollEvent & event) OVERRIDE;
+  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
+  virtual bool OnScrollEvent(const ui::ScrollEvent& event) OVERRIDE;
 
   // views::BubbleDelegate overrides:
   virtual gfx::Rect GetBubbleBounds() OVERRIDE;
@@ -121,7 +118,7 @@ void OverflowBubbleView::InitOverflowBubble(LauncherDelegate* delegate,
   set_anchor_view(anchor);
   set_arrow_location(GetBubbleArrowLocation(shelf_alignment));
   set_background(NULL);
-  set_color(kLauncherColor);
+  set_color(SkColorSetARGB(kLauncherBackgroundAlpha, 0, 0, 0));
   set_margins(gfx::Insets(kPadding, kPadding, kPadding, kPadding));
   set_move_with_anchor(true);
   views::BubbleDelegateView::CreateBubble(this);
@@ -181,7 +178,7 @@ void OverflowBubbleView::ChildPreferredSizeChanged(views::View* child) {
   SizeToContents();
 }
 
-bool OverflowBubbleView::OnMouseWheel(const views::MouseWheelEvent& event) {
+bool OverflowBubbleView::OnMouseWheel(const ui::MouseWheelEvent& event) {
   if (is_horizontal_alignment())
     ScrollByXOffset(-event.offset());
   else
@@ -191,7 +188,7 @@ bool OverflowBubbleView::OnMouseWheel(const views::MouseWheelEvent& event) {
   return true;
 }
 
-bool OverflowBubbleView::OnScrollEvent(const views::ScrollEvent & event) {
+bool OverflowBubbleView::OnScrollEvent(const ui::ScrollEvent& event) {
   ScrollByXOffset(-event.x_offset());
   ScrollByYOffset(-event.y_offset());
   Layout();

@@ -148,10 +148,3 @@ void RendererWebIDBDatabaseImpl::close() {
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBDatabaseClose(idb_database_id_);
 }
-
-void RendererWebIDBDatabaseImpl::open(WebIDBDatabaseCallbacks* callbacks) {
-  IndexedDBDispatcher* dispatcher =
-      IndexedDBDispatcher::ThreadSpecificInstance();
-  DCHECK(dispatcher);
-  dispatcher->RequestIDBDatabaseOpen(callbacks, idb_database_id_);
-}

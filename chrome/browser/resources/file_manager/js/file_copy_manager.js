@@ -8,8 +8,11 @@
  */
 function FileCopyManager(root) {
   this.copyTasks_ = [];
+  this.deleteTasks_ = [];
+  this.lastDeleteId_ = 0;
   this.cancelObservers_ = [];
   this.cancelRequested_ = false;
+  this.cancelCallback_ = null;
   this.root_ = root;
   this.unloadTimeout_ = null;
 }
@@ -195,6 +198,17 @@ FileCopyManager.Error.FILESYSTEM_ERROR = 3;
 // FileCopyManager methods.
 
 /**
+ * Called before a new method is run in the manager. Prepares the manager's
+ * state for running a new method.
+ */
+FileCopyManager.prototype.willRunNewMethod = function() {
+  // Cancel any pending close actions so the file copy manager doesn't go away.
+  if (this.unloadTimeout_)
+    clearTimeout(this.unloadTimeout_);
+  this.unloadTimeout_ = null;
+};
+
+/**
  * @return {Object} Status object.
  */
 FileCopyManager.prototype.getStatus = function() {
@@ -271,10 +285,11 @@ FileCopyManager.prototype.sendEvent_ = function(eventName, eventArgs) {
       w.fileCopyManagerWrapper.onEvent(eventName, eventArgs);
   }
 
-  if (this.copyTasks_.length === 0) {
+  if (this.copyTasks_.length === 0 && this.deleteTasks_.length === 0) {
     if (this.unloadTimeout_ === null)
       this.unloadTimeout_ = setTimeout(close, 5000);
-  } else {
+  } else if (this.unloadTimeout_) {
+    this.log_('Unload timeout is set, but all tasks have not finished yet.');
     this.unloadTimeout_ = null;
   }
 };
@@ -338,12 +353,14 @@ FileCopyManager.prototype.resetQueue_ = function() {
  */
 FileCopyManager.prototype.requestCancel = function(opt_callback) {
   this.cancelRequested_ = true;
+  if (this.cancelCallback_)
+    this.cancelCallback_();
   if (opt_callback)
     this.cancelObservers_.push(opt_callback);
 };
 
 /**
- * Perform the bookeeping required to cancel.
+ * Perform the bookkeeping required to cancel.
  * @private
  */
 FileCopyManager.prototype.doCancel_ = function() {
@@ -403,7 +420,7 @@ FileCopyManager.prototype.paste = function(clipboard, targetPath,
 
     function onEntryFound(entry) {
       // When getDirectories/getFiles finish, they call addEntry with null.
-      // We dont want to add null to our entries.
+      // We don't want to add null to our entries.
       if (entry != null) {
         results.entries.push(entry);
         added++;
@@ -609,6 +626,8 @@ FileCopyManager.prototype.serviceNextTask_ = function(
 
 /**
  * Service the next entry in a given task.
+ * TODO(olege): Refactor this method into a separate class.
+ *
  * @private
  * @param {FileManager.Task} task A task.
  * @param {Function} successCallback On success.
@@ -680,7 +699,7 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
   }
 
   function onError(reason, data) {
-    this.log_('serviceNextTaskEntry error: ' + reason + ':', data);
+    self.log_('serviceNextTaskEntry error: ' + reason + ':', data);
     errorCallback(new FileCopyManager.Error(reason, data));
   }
 
@@ -780,9 +799,9 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
     }
 
     if (task.sourceOnGData && task.targetOnGData) {
-      // TODO(benchan): GDataFileSystem has not implemented directory copy,
+      // TODO(benchan): DriveFileSystem has not implemented directory copy,
       // and thus we only call FileEntry.copyTo() for files. Revisit this
-      // code when GDataFileSystem supports directory copy.
+      // code when DriveFileSystem supports directory copy.
       if (!sourceEntry.isDirectory) {
         resolveDirAndBaseName(
             targetDirEntry, targetRelativePath,
@@ -796,13 +815,40 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
       }
     }
 
-    // TODO(benchan): Until GDataFileSystem supports FileWriter, we use the
+    // TODO(benchan): Until DriveFileSystem supports FileWriter, we use the
     // transferFile API to copy files into or out from a gdata file system.
     if (sourceEntry.isFile && (task.sourceOnGData || task.targetOnGData)) {
       var sourceFileUrl = sourceEntry.toURL();
       var targetFileUrl = targetDirEntry.toURL() + '/' +
                           encodeURIComponent(targetRelativePath);
       var transferedBytes = 0;
+
+      function onFileTransferCompleted() {
+        self.cancelCallback_ = null;
+        chrome.fileBrowserPrivate.onFileTransfersUpdated.removeListener(
+            onFileTransfersUpdated);
+        if (chrome.extension.lastError) {
+          this.log_(
+              'Error copying ' + sourceFileUrl + ' to ' + targetFileUrl);
+          onFilesystemError({
+            code: chrome.extension.lastError.message,
+            toGDrive: task.targetOnGData,
+            sourceFileUrl: sourceFileUrl
+          });
+        } else {
+          targetDirEntry.getFile(targetRelativePath, {},
+              function(targetEntry) {
+                targetEntry.getMetadata(function(metadata) {
+                  if (metadata.size > transferedBytes)
+                    onCopyProgress(sourceEntry,
+                                   metadata.size - transferedBytes);
+                  onFilesystemCopyComplete(sourceEntry, targetEntry);
+                });
+              },
+              onFilesystemError);
+        }
+      }
+
       function onFileTransfersUpdated(statusList) {
         for (var i = 0; i < statusList.length; i++) {
           var s = statusList[i];
@@ -813,34 +859,20 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
           }
         }
       }
+
+      self.cancelCallback_ = function() {
+        self.cancelCallback_ = null;
+        chrome.fileBrowserPrivate.onFileTransfersUpdated.removeListener(
+            onFileTransfersUpdated);
+        chrome.fileBrowserPrivate.cancelFileTransfers([sourceFileUrl],
+                                                      function() {});
+        self.doCancel_();
+      };
+
       chrome.fileBrowserPrivate.onFileTransfersUpdated.addListener(
           onFileTransfersUpdated);
       chrome.fileBrowserPrivate.transferFile(
-        sourceFileUrl, targetFileUrl,
-        function() {
-          chrome.fileBrowserPrivate.onFileTransfersUpdated.removeListener(
-              onFileTransfersUpdated);
-          if (chrome.extension.lastError) {
-            this.log_(
-                'Error copying ' + sourceFileUrl + ' to ' + targetFileUrl);
-            onFilesystemError({
-              code: chrome.extension.lastError.message,
-              toGDrive: task.targetOnGData,
-              sourceFileUrl: sourceFileUrl
-            });
-          } else {
-            targetDirEntry.getFile(targetRelativePath, {},
-                function(targetEntry) {
-                  targetEntry.getMetadata(function(metadata) {
-                    if (metadata.size > transferedBytes)
-                      onCopyProgress(sourceEntry,
-                                     metadata.size - transferedBytes);
-                    onFilesystemCopyComplete(sourceEntry, targetEntry);
-                  });
-                },
-                onFilesystemError);
-          }
-        });
+          sourceFileUrl, targetFileUrl, onFileTransferCompleted);
       return;
     }
 
@@ -897,7 +929,7 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
  * @param {function(Entry, number)} successCallback function that will be called
  *     the copy operation finishes. It takes |targetEntry| and size of the last
  *     (not previously reported) copied chunk as parameters.
- * @param {function{string, object}} errorCallback function that will be called
+ * @param {function(string, object)} errorCallback function that will be called
  *     if an error is encountered. Takes error type and additional error data
  *     as parameters.
  */
@@ -919,7 +951,7 @@ FileCopyManager.prototype.copyEntry_ = function(sourceEntry,
 
       writer.onprogress = function(progress) {
         if (self.maybeCancel_()) {
-          // If the copy was canelled, we should abort the operation.
+          // If the copy was cancelled, we should abort the operation.
           writer.abort();
           return;
         }
@@ -943,3 +975,103 @@ FileCopyManager.prototype.copyEntry_ = function(sourceEntry,
   sourceEntry.file(onSourceFileFound, errorCallback);
 };
 
+/**
+ * Timeout before files are really deleted (to allow undo).
+ */
+FileCopyManager.DELETE_TIMEOUT = 15 * 1000;
+
+/**
+ * Schedules the files deletion.
+ * @param {Array.<Entry>} entries The entries.
+ * @param {function(number)} callback Callback gets the scheduled task id.
+ */
+FileCopyManager.prototype.deleteEntries = function(entries, callback) {
+  var id = ++this.lastDeleteId_;
+  var task = {
+    entries: entries,
+    id: id,
+    timeout: setTimeout(this.forceDeleteTask.bind(this, id),
+        FileCopyManager.DELETE_TIMEOUT)
+  };
+  this.deleteTasks_.push(task);
+  callback(id);
+  this.sendDeleteEvent_(task, 'SCHEDULED');
+};
+
+/**
+ * Force deletion before timeout runs out.
+ * @param {number} id The delete task id (as returned by deleteEntries).
+ */
+FileCopyManager.prototype.forceDeleteTask = function(id) {
+  var task = this.findDeleteTaskAndCancelTimeout_(id);
+  if (task) this.serviceDeleteTask_(task);
+};
+
+/**
+ * Cancels the scheduled deletion.
+ * @param {number} id The delete task id (as returned by deleteEntries).
+ */
+FileCopyManager.prototype.cancelDeleteTask = function(id) {
+  var task = this.findDeleteTaskAndCancelTimeout_(id);
+  if (task) this.sendDeleteEvent_(task, 'CANCELLED');
+};
+
+/**
+ * Finds the delete task, removes it from list and cancels the timeout.
+ * @param {number} id The delete task id (as returned by deleteEntries).
+ * @return {object} The delete task.
+ * @private
+ */
+FileCopyManager.prototype.findDeleteTaskAndCancelTimeout_ = function(id) {
+  for (var index = 0; index < this.deleteTasks_.length; index++) {
+    var task = this.deleteTasks_[index];
+    if (task.id == id) {
+      this.deleteTasks_.splice(index, 1);
+      if (task.timeout) {
+        clearTimeout(task.timeout);
+        task.timeout = null;
+      }
+      return task;
+    }
+  }
+  return null;
+};
+
+/**
+ * Performs the deletion.
+ * @param {object} task The delete task (see deleteEntries function).
+ * @private
+ */
+FileCopyManager.prototype.serviceDeleteTask_ = function(task) {
+  var downcount = task.entries.length + 1;
+
+  var onComplete = function() {
+    if (--downcount == 0)
+      this.sendDeleteEvent_(task, 'SUCCESS');
+  }.bind(this);
+
+  for (var i = 0; i < task.entries.length; i++) {
+    var entry = task.entries[i];
+    util.removeFileOrDirectory(
+        entry,
+        onComplete,
+        onComplete); // We ignore error, because we can't do anything here.
+  }
+  onComplete();
+};
+
+/**
+ * Send a 'delete' event to listeners.
+ * @param {Object} task The delete task (see deleteEntries function).
+ * @param {string} reason Event reason.
+ * @private
+ */
+FileCopyManager.prototype.sendDeleteEvent_ = function(task, reason) {
+  this.sendEvent_('delete', {
+    reason: reason,
+    id: task.id,
+    urls: task.entries.map(function(e) {
+      return util.makeFilesystemUrl(e.fullPath);
+    })
+  });
+};

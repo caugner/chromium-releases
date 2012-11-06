@@ -6,8 +6,8 @@
 
 #include <string>
 
+#include "base/command_line.h"
 #include "base/mac/mac_logging.h"
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
 #include "media/audio/mac/audio_input_mac.h"
@@ -15,16 +15,15 @@
 #include "media/audio/mac/audio_low_latency_output_mac.h"
 #include "media/audio/mac/audio_manager_mac.h"
 #include "media/audio/mac/audio_output_mac.h"
+#include "media/audio/mac/audio_synchronized_mac.h"
+#include "media/audio/mac/audio_unified_mac.h"
 #include "media/base/limits.h"
+#include "media/base/media_switches.h"
 
 namespace media {
 
 // Maximum number of output streams that can be open simultaneously.
 static const int kMaxOutputStreams = 50;
-
-// By experiment the maximum number of audio streams allowed in Leopard
-// is 18. But we put a slightly smaller number just to be safe.
-static const int kMaxOutputStreamsLeopard = 15;
 
 static bool HasAudioHardware(AudioObjectPropertySelector selector) {
   AudioDeviceID output_device_id = kAudioObjectUnknown;
@@ -42,6 +41,45 @@ static bool HasAudioHardware(AudioObjectPropertySelector selector) {
                                             &output_device_id);
   return err == kAudioHardwareNoError &&
       output_device_id != kAudioObjectUnknown;
+}
+
+// Returns true if the default input device is the same as
+// the default output device.
+static bool HasUnifiedDefaultIO() {
+  AudioDeviceID input_id, output_id;
+
+  AudioObjectPropertyAddress pa;
+  pa.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+  pa.mScope = kAudioObjectPropertyScopeGlobal;
+  pa.mElement = kAudioObjectPropertyElementMaster;
+  UInt32 size = sizeof(input_id);
+
+  // Get the default input.
+  OSStatus result = AudioObjectGetPropertyData(
+      kAudioObjectSystemObject,
+      &pa,
+      0,
+      0,
+      &size,
+      &input_id);
+
+  if (result != noErr)
+    return false;
+
+  // Get the default output.
+  pa.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+  result = AudioObjectGetPropertyData(
+      kAudioObjectSystemObject,
+      &pa,
+      0,
+      0,
+      &size,
+      &output_id);
+
+  if (result != noErr)
+    return false;
+
+  return input_id == output_id;
 }
 
 static void GetAudioDeviceInfo(bool is_input,
@@ -212,16 +250,7 @@ static AudioDeviceID GetAudioDeviceIdByUId(bool is_input,
 }
 
 AudioManagerMac::AudioManagerMac() {
-  // We are hitting a bug in Leopard where too many audio streams will cause
-  // a deadlock in the AudioQueue API when starting the stream. Unfortunately
-  // there's no way to detect it within the AudioQueue API, so we put a
-  // special hard limit only for Leopard.
-  // See bug: http://crbug.com/30242
-  // In OS other than OSX Leopard, the number of audio streams
-  // allowed is a lot more.
-  int max_output_stream = base::mac::IsOSLeopardOrEarlier() ?
-      kMaxOutputStreamsLeopard : kMaxOutputStreams;
-  SetMaxOutputStreamsAllowed(max_output_stream);
+  SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 }
 
 AudioManagerMac::~AudioManagerMac() {
@@ -255,14 +284,6 @@ void AudioManagerMac::GetAudioInputDeviceNames(
   }
 }
 
-void AudioManagerMac::MuteAll() {
-  // TODO(cpu): implement.
-}
-
-void AudioManagerMac::UnMuteAll() {
-  // TODO(cpu): implement.
-}
-
 AudioOutputStream* AudioManagerMac::MakeLinearOutputStream(
     const AudioParameters& params) {
   DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
@@ -272,6 +293,20 @@ AudioOutputStream* AudioManagerMac::MakeLinearOutputStream(
 AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
     const AudioParameters& params) {
   DCHECK_EQ(AudioParameters::AUDIO_PCM_LOW_LATENCY, params.format());
+
+  // TODO(crogers): remove once we properly handle input device selection.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableWebAudioInput)) {
+    if (HasUnifiedDefaultIO())
+      return new AudioHardwareUnifiedStream(this, params);
+
+    // kAudioDeviceUnknown translates to "use default" here.
+    return new AudioSynchronizedStream(this,
+                                       params,
+                                       kAudioDeviceUnknown,
+                                       kAudioDeviceUnknown);
+  }
+
   return new AUAudioOutputStream(this, params);
 }
 

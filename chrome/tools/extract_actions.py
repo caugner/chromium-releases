@@ -133,7 +133,8 @@ def AddComputedActions(actions):
   # Actions for safe_browsing_blocking_page.cc.
   for interstitial in ('Phishing', 'Malware', 'Multiple'):
     for action in ('Show', 'Proceed', 'DontProceed', 'ForcedDontProceed'):
-      actions.add('SBInterstitial%s%s' % (interstitial, action))
+      for group in ('', '_V1', '_V2'):
+        actions.add('SBInterstitial%s%s%s' % (interstitial, action, group))
 
   # Actions for language_options_handler.cc (Chrome OS specific).
   for input_method_id in INPUT_METHOD_IDS:
@@ -283,10 +284,7 @@ class WebUIActionsParser(HTMLParser):
     is_boolean = ('dataType' in attrs and attrs['dataType'] == 'boolean')
     if 'type' in attrs and attrs['type'] in ('checkbox', 'radio'):
       if attrs['type'] == 'checkbox':
-        # Checkboxes are boolean by default.  However, their 'value-type' can
-        # instead be set to 'integer'.
-        if 'value-type' not in attrs or attrs['value-type'] in ['', 'boolean']:
-          is_boolean = True
+        is_boolean = True
       else:
         # Radio buttons are boolean if and only if their values are 'true' or
         # 'false'.

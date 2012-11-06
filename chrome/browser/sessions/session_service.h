@@ -52,7 +52,6 @@ class NavigationEntry;
 // of the browser.
 class SessionService : public BaseSessionService,
                        public content::NotificationObserver {
-  friend class SessionRestoreTest;
   friend class SessionServiceTestHelper;
  public:
   // Used to distinguish an application window from a normal one.
@@ -150,8 +149,7 @@ class SessionService : public BaseSessionService,
   // Updates the navigation entry for the specified tab.
   void UpdateTabNavigation(const SessionID& window_id,
                            const SessionID& tab_id,
-                           int index,
-                           const content::NavigationEntry& entry);
+                           const TabNavigation& navigation);
 
   // Notification that a tab has restored its entries or a closed tab is being
   // reused.
@@ -165,6 +163,11 @@ class SessionService : public BaseSessionService,
 
   // Sets the index of the selected tab in the specified window.
   void SetSelectedTabInWindow(const SessionID& window_id, int index);
+
+  // Sets the user agent override of the specified tab.
+  void SetTabUserAgentOverride(const SessionID& window_id,
+                               const SessionID& tab_id,
+                               const std::string& user_agent_override);
 
   // Callback from GetSavedSession of GetLastSession.
   //
@@ -219,11 +222,6 @@ class SessionService : public BaseSessionService,
   void SetTabExtensionAppID(const SessionID& window_id,
                             const SessionID& tab_id,
                             const std::string& extension_app_id);
-
-  // Sets the user agent override of the specified tab.
-  void SetTabUserAgentOverride(const SessionID& window_id,
-                               const SessionID& tab_id,
-                               const std::string& user_agent_override);
 
   // Methods to create the various commands. It is up to the caller to delete
   // the returned the SessionCommand* object.

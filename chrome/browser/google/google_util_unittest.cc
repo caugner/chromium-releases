@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using google_util::IsGoogleDomainUrl;
@@ -276,47 +279,150 @@ TEST(GoogleUtilTest, IsInstantExtendedAPIGoogleSearchUrl) {
 TEST(GoogleUtilTest, GoogleDomains) {
   // Test some good Google domains (valid TLDs).
   EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com",
-                                google_util::ALLOW_SUBDOMAIN));
+                                google_util::ALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("http://google.com",
-                                google_util::ALLOW_SUBDOMAIN));
+                                google_util::ALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.ca",
-                                google_util::ALLOW_SUBDOMAIN));
+                                google_util::ALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.biz.tj",
-                                google_util::ALLOW_SUBDOMAIN));
+                                google_util::ALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com/search?q=something",
-                                google_util::ALLOW_SUBDOMAIN));
+                                google_util::ALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com/webhp",
-                                google_util::ALLOW_SUBDOMAIN));
+                                google_util::ALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
 
   // Test some bad Google domains (invalid TLDs).
   EXPECT_FALSE(IsGoogleDomainUrl("http://www.google.notrealtld",
-                                 google_util::ALLOW_SUBDOMAIN));
+                                 google_util::ALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_FALSE(IsGoogleDomainUrl("http://www.google.faketld/search?q=something",
-                                 google_util::ALLOW_SUBDOMAIN));
+                                 google_util::ALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_FALSE(IsGoogleDomainUrl("http://www.yahoo.com",
-                                 google_util::ALLOW_SUBDOMAIN));
+                                 google_util::ALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
 
   // Test subdomain checks.
   EXPECT_TRUE(IsGoogleDomainUrl("http://images.google.com",
-                                google_util::ALLOW_SUBDOMAIN));
+                                google_util::ALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_FALSE(IsGoogleDomainUrl("http://images.google.com",
-                                 google_util::DISALLOW_SUBDOMAIN));
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("http://google.com",
-                                google_util::DISALLOW_SUBDOMAIN));
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com",
-                                google_util::DISALLOW_SUBDOMAIN));
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
 
   // Port and scheme checks.
   EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com:80",
-                                google_util::DISALLOW_SUBDOMAIN));
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_FALSE(IsGoogleDomainUrl("http://www.google.com:123",
-                                 google_util::DISALLOW_SUBDOMAIN));
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_TRUE(IsGoogleDomainUrl("https://www.google.com:443",
-                                google_util::DISALLOW_SUBDOMAIN));
-  EXPECT_FALSE(IsGoogleDomainUrl("https://www.google.com:123",
-                                 google_util::DISALLOW_SUBDOMAIN));
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
+  EXPECT_FALSE(IsGoogleDomainUrl("http://www.google.com:123",
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
+  EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com:123",
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::ALLOW_NON_STANDARD_PORTS));
+  EXPECT_TRUE(IsGoogleDomainUrl("https://www.google.com:123",
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::ALLOW_NON_STANDARD_PORTS));
+  EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com:80",
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::ALLOW_NON_STANDARD_PORTS));
+  EXPECT_TRUE(IsGoogleDomainUrl("https://www.google.com:443",
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::ALLOW_NON_STANDARD_PORTS));
   EXPECT_FALSE(IsGoogleDomainUrl("file://www.google.com",
-                                 google_util::DISALLOW_SUBDOMAIN));
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
   EXPECT_FALSE(IsGoogleDomainUrl("doesnotexist://www.google.com",
-                                 google_util::DISALLOW_SUBDOMAIN));
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
+
+  // Test overriding with --instant-url works.
+  EXPECT_FALSE(IsGoogleDomainUrl("http://test.foo.com",
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
+  EXPECT_FALSE(IsGoogleDomainUrl("http://test.foo.com:1234",
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kInstantURL, "http://test.foo.com:1234/bar");
+  EXPECT_FALSE(IsGoogleDomainUrl("http://test.foo.com",
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
+  EXPECT_TRUE(IsGoogleDomainUrl("http://test.foo.com:1234",
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
+  EXPECT_FALSE(IsGoogleDomainUrl("file://test.foo.com:1234",
+                                 google_util::DISALLOW_SUBDOMAIN,
+                                 google_util::DISALLOW_NON_STANDARD_PORTS));
+  EXPECT_TRUE(IsGoogleDomainUrl("http://www.google.com",
+                                google_util::DISALLOW_SUBDOMAIN,
+                                google_util::DISALLOW_NON_STANDARD_PORTS));
+}
+
+TEST(GoogleUtilTest, SearchTerms) {
+  // Simple searches.
+  EXPECT_EQ(string16(), google_util::GetSearchTermsFromGoogleSearchURL(
+      "http://google.com/search?q=tractor+supply"));
+  EXPECT_EQ(ASCIIToUTF16("tractor supply"),
+            google_util::GetSearchTermsFromGoogleSearchURL(
+                "http://google.com/search?q=tractor+supply&espv=1"));
+  // espv=1 only applies in query.
+  EXPECT_EQ(string16(), google_util::GetSearchTermsFromGoogleSearchURL(
+      "http://google.com/search?q=potato#espv=1"));
+
+  // Instant searches.
+  EXPECT_EQ(string16(), google_util::GetSearchTermsFromGoogleSearchURL(
+      "http://google.com/webhp#q=tractor+supply"));
+  EXPECT_EQ(ASCIIToUTF16("tractor supply"),
+            google_util::GetSearchTermsFromGoogleSearchURL(
+                "http://google.com/webhp?espv=1#q=tractor+supply"));
+  // espv=1 only applies in query.
+  EXPECT_EQ(string16(), google_util::GetSearchTermsFromGoogleSearchURL(
+      "http://google.com/webhp?#espv=1&q=potato"));
+
+  // Both query and ref components have a search term.
+  EXPECT_EQ(ASCIIToUTF16("tractor supply"),
+            google_util::GetSearchTermsFromGoogleSearchURL(
+                "http://google.com/webhp?q=potato&espv=1#q=tractor+supply"));
+
+  // Blank queries.
+  EXPECT_EQ(string16(), google_util::GetSearchTermsFromGoogleSearchURL(
+      "http://google.com/search?q=&q=potato&espv=1"));
+  EXPECT_EQ(string16(), google_util::GetSearchTermsFromGoogleSearchURL(
+      "http://google.com/webhp?espv=1#q=&q=tractor+supply"));
+
+  // Multiple non-empty queries.
+  EXPECT_EQ(ASCIIToUTF16("tractor supply"),
+            google_util::GetSearchTermsFromGoogleSearchURL(
+                "http://google.com/search?q=tractor+supply&q=potato&espv=1"));
+  EXPECT_EQ(ASCIIToUTF16("tractor supply"),
+            google_util::GetSearchTermsFromGoogleSearchURL(
+                "http://google.com/webhp?espv=1#q=tractor+supply&q=potato"));
+
+  // Blank terms in ref override non-blank terms in query.
+  EXPECT_EQ(string16(), google_util::GetSearchTermsFromGoogleSearchURL(
+      "http://google.com/search?q=potato&espv=1#q="));
+
+  // Blank terms in query do not override non-blank terms in ref.
+  EXPECT_EQ(ASCIIToUTF16("tractor supply"),
+            google_util::GetSearchTermsFromGoogleSearchURL(
+                "http://google.com/search?q=&espv=1#q=tractor+supply"));
 }

@@ -112,7 +112,7 @@ void ReloadButton::LoadImages(ui::ThemeProvider* tp) {
 // ReloadButton, views::ButtonListener implementation:
 
 void ReloadButton::ButtonPressed(views::Button* /* button */,
-                                 const views::Event& event) {
+                                 const ui::Event& event) {
   ClearPendingMenu();
 
   if (visible_mode_ == MODE_STOP) {
@@ -150,7 +150,7 @@ void ReloadButton::ButtonPressed(views::Button* /* button */,
 ////////////////////////////////////////////////////////////////////////////////
 // ReloadButton, View overrides:
 
-void ReloadButton::OnMouseExited(const views::MouseEvent& event) {
+void ReloadButton::OnMouseExited(const ui::MouseEvent& event) {
   ButtonDropDown::OnMouseExited(event);
   if (!IsMenuShowing())
     ChangeMode(intended_mode_, true);

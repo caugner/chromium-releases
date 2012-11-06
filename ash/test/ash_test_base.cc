@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "ash/display/display_controller.h"
 #include "ash/shell.h"
 #include "ash/test/test_shell_delegate.h"
 #include "base/run_loop.h"
@@ -58,6 +59,7 @@ void AshTestBase::SetUp() {
   ash::Shell::CreateInstance(delegate);
   Shell::GetPrimaryRootWindow()->Show();
   Shell::GetPrimaryRootWindow()->SetHostSize(gfx::Size(800, 600));
+  Shell::GetInstance()->cursor_manager()->ShowCursor(true);
 
   // Disable animations during tests.
   ui::LayerAnimator::set_disable_animations_for_test(true);
@@ -87,6 +89,18 @@ void AshTestBase::UpdateDisplay(const std::string& display_specs) {
   std::vector<gfx::Display> displays = CreateDisplaysFromString(display_specs);
   aura::Env::GetInstance()->display_manager()->
       OnNativeDisplaysChanged(displays);
+
+  // On non-testing environment, when a secondary display is connected, a new
+  // native (i.e. X) window for the display is always created below the previous
+  // one for GPU performance reasons. Try to emulate the behavior.
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  DCHECK_EQ(displays.size(), root_windows.size());
+  size_t next_y = 0;
+  for (size_t i = 0; i < root_windows.size(); ++i) {
+    const gfx::Size size = root_windows[i]->GetHostSize();
+    root_windows[i]->SetHostBounds(gfx::Rect(gfx::Point(0, next_y), size));
+    next_y += size.height();
+  }
 }
 
 void AshTestBase::RunAllPendingInMessageLoop() {

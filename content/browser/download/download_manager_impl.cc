@@ -15,6 +15,7 @@
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
+#include "base/supports_user_data.h"
 #include "base/synchronization/lock.h"
 #include "base/sys_string_conversions.h"
 #include "build/build_config.h"
@@ -40,6 +41,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "net/base/load_flags.h"
 #include "net/base/upload_data.h"
+#include "net/url_request/url_request_context.h"
 #include "webkit/glue/webkit_glue.h"
 
 using content::BrowserThread;
@@ -52,36 +54,35 @@ using content::WebContents;
 namespace {
 
 // This is just used to remember which DownloadItems come from SavePage.
-class SavePageExternalData : public DownloadItem::ExternalData {
+class SavePageData : public base::SupportsUserData::Data {
  public:
   // A spoonful of syntactic sugar.
   static bool Get(DownloadItem* item) {
-    return item->GetExternalData(kKey) != NULL;
+    return item->GetUserData(kKey) != NULL;
   }
 
-  explicit SavePageExternalData(DownloadItem* item) {
-    item->SetExternalData(kKey, this);
+  explicit SavePageData(DownloadItem* item) {
+    item->SetUserData(kKey, this);
   }
 
-  virtual ~SavePageExternalData() {}
+  virtual ~SavePageData() {}
 
  private:
   static const char kKey[];
 
-  DISALLOW_COPY_AND_ASSIGN(SavePageExternalData);
+  DISALLOW_COPY_AND_ASSIGN(SavePageData);
 };
 
-const char SavePageExternalData::kKey[] = "DownloadItem SavePageExternalData";
+const char SavePageData::kKey[] = "DownloadItem SavePageData";
 
 void BeginDownload(content::DownloadUrlParameters* params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // ResourceDispatcherHost{Base} is-not-a URLRequest::Delegate, and
   // DownloadUrlParameters can-not include resource_dispatcher_host_impl.h, so
   // we must down cast. RDHI is the only subclass of RDH as of 2012 May 4.
-  scoped_ptr<net::URLRequest> request(new net::URLRequest(
-      params->url(),
-      NULL,
-      params->resource_context()->GetRequestContext()));
+  scoped_ptr<net::URLRequest> request(
+      params->resource_context()->GetRequestContext()->CreateRequest(
+          params->url(), NULL));
   request->set_referrer(params->referrer().url.spec());
   webkit_glue::ConfigureURLRequestForReferrerPolicy(
       request.get(), params->referrer().policy);
@@ -177,21 +178,19 @@ class DownloadItemFactoryImpl : public content::DownloadItemFactory {
         DownloadItemImplDelegate* delegate,
         const DownloadCreateInfo& info,
         scoped_ptr<DownloadRequestHandleInterface> request_handle,
-        bool is_otr,
         const net::BoundNetLog& bound_net_log) OVERRIDE {
       return new DownloadItemImpl(delegate, info, request_handle.Pass(),
-                                  is_otr, bound_net_log);
+                                  bound_net_log);
     }
 
     virtual DownloadItemImpl* CreateSavePageItem(
         DownloadItemImplDelegate* delegate,
         const FilePath& path,
         const GURL& url,
-        bool is_otr,
         content::DownloadId download_id,
         const std::string& mime_type,
         const net::BoundNetLog& bound_net_log) OVERRIDE {
-      return new DownloadItemImpl(delegate, path, url, is_otr, download_id,
+      return new DownloadItemImpl(delegate, path, url, download_id,
                                   mime_type, bound_net_log);
     }
 };
@@ -321,13 +320,9 @@ void DownloadManagerImpl::Shutdown() {
   // and all in progress downloads have been cancelled.  We can now delete
   // anything left.
 
-  // Copy downloads_ to separate container so as not to set off checks
-  // in DownloadItem destruction.
-  DownloadMap downloads_to_delete;
-  downloads_to_delete.swap(downloads_);
-
   active_downloads_.clear();
-  STLDeleteValues(&downloads_to_delete);
+  STLDeleteValues(&downloads_);
+  downloads_.clear();
 
   // We'll have nothing more to report to the observers after this point.
   observers_.Clear();
@@ -336,58 +331,6 @@ void DownloadManagerImpl::Shutdown() {
   if (delegate_)
     delegate_->Shutdown();
   delegate_ = NULL;
-}
-
-void DownloadManagerImpl::GetTemporaryDownloads(
-    const FilePath& dir_path, DownloadVector* result) {
-  DCHECK(result);
-
-  for (DownloadMap::iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    DownloadItemImpl* item = it->second;
-    // TODO(benjhayden): Don't check IsPersisted().
-    if (item->IsTemporary() &&
-        item->IsPersisted() &&
-        (dir_path.empty() ||
-         item->GetTargetFilePath().DirName() == dir_path))
-      result->push_back(item);
-  }
-}
-
-void DownloadManagerImpl::GetAllDownloads(
-    const FilePath& dir_path, DownloadVector* result) {
-  DCHECK(result);
-
-  for (DownloadMap::iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    DownloadItemImpl* item = it->second;
-    // TODO(benjhayden): Don't check IsPersisted().
-    if (!item->IsTemporary() &&
-        item->IsPersisted() &&
-        (dir_path.empty() ||
-         item->GetTargetFilePath().DirName() == dir_path))
-      result->push_back(item);
-  }
-}
-
-void DownloadManagerImpl::SearchDownloads(const string16& query,
-                                          DownloadVector* result) {
-  string16 query_lower(base::i18n::ToLower(query));
-
-  for (DownloadMap::iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    DownloadItemImpl* download_item = it->second;
-    // Display Incognito downloads only in Incognito window, and vice versa.
-    // The Incognito Downloads page will get the list of non-Incognito downloads
-    // from its parent profile.
-    // TODO(benjhayden): Don't check IsPersisted().
-    if (!download_item->IsTemporary() &&
-        download_item->IsPersisted() &&
-        (browser_context_->IsOffTheRecord() == download_item->IsOtr()) &&
-        download_item->MatchesQuery(query_lower)) {
-      result->push_back(download_item);
-    }
-  }
 }
 
 bool DownloadManagerImpl::Init(content::BrowserContext* browser_context) {
@@ -414,6 +357,13 @@ content::DownloadId DownloadManagerImpl::StartDownload(
   // assigned in CreateDownloadItem.
   DownloadId download_id = info->download_id;
 
+  if (delegate_) {
+    FilePath website_save_directory;      // Unused
+    bool skip_dir_check = false;          // Unused
+    delegate_->GetSaveDir(GetBrowserContext(), &website_save_directory,
+                          &info->default_download_directory, &skip_dir_check);
+  }
+
   DownloadFileManager::CreateDownloadFileCallback callback(
       base::Bind(&DownloadManagerImpl::OnDownloadFileCreated,
                  this, download_id.local()));
@@ -422,9 +372,8 @@ content::DownloadId DownloadManagerImpl::StartDownload(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&DownloadFileManager::CreateDownloadFile,
                  file_manager_, base::Passed(info.Pass()),
-                 base::Passed(stream.Pass()),
-                 make_scoped_refptr(this),
-                 GenerateFileHash(), bound_net_log,
+                 base::Passed(stream.Pass()), make_scoped_refptr(this),
+                 (delegate_ && delegate_->GenerateFileHash()), bound_net_log,
                  callback));
 
   return download_id;
@@ -534,7 +483,7 @@ net::BoundNetLog DownloadManagerImpl::CreateDownloadItem(
       this, *info,
       scoped_ptr<DownloadRequestHandleInterface>(
           new DownloadRequestHandle(info->request_handle)).Pass(),
-      browser_context_->IsOffTheRecord(), bound_net_log);
+      bound_net_log);
 
   DCHECK(!ContainsKey(downloads_, download->GetId()));
   downloads_[download->GetId()] = download;
@@ -548,7 +497,6 @@ net::BoundNetLog DownloadManagerImpl::CreateDownloadItem(
 DownloadItemImpl* DownloadManagerImpl::CreateSavePackageDownloadItem(
     const FilePath& main_file_path,
     const GURL& page_url,
-    bool is_otr,
     const std::string& mime_type,
     DownloadItem::Observer* observer) {
   net::BoundNetLog bound_net_log =
@@ -557,7 +505,6 @@ DownloadItemImpl* DownloadManagerImpl::CreateSavePackageDownloadItem(
       this,
       main_file_path,
       page_url,
-      is_otr,
       GetNextId(),
       mime_type,
       bound_net_log);
@@ -566,13 +513,11 @@ DownloadItemImpl* DownloadManagerImpl::CreateSavePackageDownloadItem(
 
   DCHECK(!ContainsKey(downloads_, download->GetId()));
   downloads_[download->GetId()] = download;
-  DCHECK(!SavePageExternalData::Get(download));
-  new SavePageExternalData(download);
-  DCHECK(SavePageExternalData::Get(download));
+  DCHECK(!SavePageData::Get(download));
+  new SavePageData(download);
+  DCHECK(SavePageData::Get(download));
 
-  // TODO(benjhayden): Fire OnDownloadCreated for SavePackage downloads when
-  // we're comfortable with the user interacting with them.
-  // FOR_EACH_OBSERVER(Observer, observers_, OnDownloadCreated(this, download));
+  FOR_EACH_OBSERVER(Observer, observers_, OnDownloadCreated(this, download));
 
   // Will notify the observer in the callback.
   if (delegate_)
@@ -617,13 +562,6 @@ void DownloadManagerImpl::OnResponseCompleted(int32 download_id,
 
 void DownloadManagerImpl::AssertStateConsistent(
     DownloadItemImpl* download) const {
-  if (download->GetState() == DownloadItem::REMOVING) {
-    DCHECK(!ContainsKey(downloads_, download->GetId()));
-    DCHECK(!ContainsKey(active_downloads_, download->GetId()));
-    return;
-  }
-
-  // Should be in downloads_ if we're not REMOVING.
   CHECK(ContainsKey(downloads_, download->GetId()));
 
   int64 state = download->GetState();
@@ -771,10 +709,6 @@ void DownloadManagerImpl::RemoveFromActiveList(DownloadItemImpl* download) {
   }
 }
 
-bool DownloadManagerImpl::GenerateFileHash() {
-  return delegate_ && delegate_->GenerateFileHash();
-}
-
 int DownloadManagerImpl::RemoveDownloadItems(
     const DownloadItemImplVector& pending_deletes) {
   if (pending_deletes.empty())
@@ -782,20 +716,16 @@ int DownloadManagerImpl::RemoveDownloadItems(
 
   // Delete from internal maps.
   for (DownloadItemImplVector::const_iterator it = pending_deletes.begin();
-      it != pending_deletes.end();
-      ++it) {
+       it != pending_deletes.end();
+       ++it) {
     DownloadItemImpl* download = *it;
     DCHECK(download);
-    downloads_.erase(download->GetId());
+    int32 download_id = download->GetId();
+    delete download;
+    downloads_.erase(download_id);
   }
-
-  // Tell observers to refresh their views.
   NotifyModelChanged();
-
-  // Delete the download items themselves.
-  const int num_deleted = static_cast<int>(pending_deletes.size());
-  STLDeleteContainerPointers(pending_deletes.begin(), pending_deletes.end());
-  return num_deleted;
+  return static_cast<int>(pending_deletes.size());
 }
 
 void DownloadManagerImpl::DownloadRemoved(DownloadItemImpl* download) {
@@ -822,8 +752,6 @@ int DownloadManagerImpl::RemoveDownloadsBetween(base::Time remove_begin,
   if (delegate_)
     delegate_->RemoveItemsFromPersistentStoreBetween(remove_begin, remove_end);
 
-  // All downloads visible to the user will be in the history,
-  // so scan that map.
   DownloadItemImplVector pending_deletes;
   for (DownloadMap::const_iterator it = downloads_.begin();
       it != downloads_.end();
@@ -834,6 +762,7 @@ int DownloadManagerImpl::RemoveDownloadsBetween(base::Time remove_begin,
         (remove_end.is_null() || download->GetStartTime() < remove_end) &&
         (download->IsComplete() || download->IsCancelled())) {
       AssertStateConsistent(download);
+      download->NotifyRemoved();
       pending_deletes.push_back(download);
     }
   }
@@ -928,7 +857,7 @@ void DownloadManagerImpl::OnItemAddedToPersistentStore(int32 download_id,
 
   DownloadItemImpl* item = downloads_[download_id];
   AddDownloadItemToHistory(item, db_handle);
-  if (SavePageExternalData::Get(item)) {
+  if (SavePageData::Get(item)) {
     OnSavePageItemAddedToPersistentStore(item);
   } else {
     OnDownloadItemAddedToPersistentStore(item);
@@ -1007,6 +936,13 @@ DownloadItem* DownloadManagerImpl::GetDownload(int download_id) {
   return ContainsKey(downloads_, download_id) ? downloads_[download_id] : NULL;
 }
 
+void DownloadManagerImpl::GetAllDownloads(DownloadVector* downloads) {
+  for (DownloadMap::iterator it = downloads_.begin();
+       it != downloads_.end(); ++it) {
+    downloads->push_back(it->second);
+  }
+}
+
 DownloadItem* DownloadManagerImpl::GetActiveDownloadItem(int download_id) {
   if (ContainsKey(active_downloads_, download_id))
     return active_downloads_[download_id];
@@ -1075,11 +1011,6 @@ void DownloadManagerImpl::SavePageDownloadFinished(
   if (download->IsPersisted()) {
     if (delegate_)
       delegate_->UpdateItemInPersistentStore(download);
-    if (download->IsComplete())
-      content::NotificationService::current()->Notify(
-          content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-          content::Source<DownloadManager>(this),
-          content::Details<DownloadItem>(download));
   }
 }
 

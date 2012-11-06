@@ -18,9 +18,9 @@
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/fileapi/file_observers.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/native_file_util.h"
@@ -54,11 +54,6 @@ void InitFileInfo(
   file_info->name = file_name;
 }
 
-bool IsRootDirectory(const FileSystemURL& url) {
-  return (url.path().empty() ||
-          url.path().value() == FILE_PATH_LITERAL("/"));
-}
-
 // Costs computed as per crbug.com/86114, based on the LevelDB implementation of
 // path storage under Linux.  It's not clear if that will differ on Windows, on
 // which FilePath uses wide chars [since they're converted to UTF-8 for storage
@@ -85,15 +80,10 @@ bool AllocateQuota(FileSystemOperationContext* context, int64 growth) {
 
 void UpdateUsage(
     FileSystemOperationContext* context,
-    const GURL& origin,
-    FileSystemType type,
+    const FileSystemURL& url,
     int64 growth) {
-  FileSystemQuotaUtil* quota_util =
-      context->file_system_context()->GetQuotaUtil(type);
-  quota::QuotaManagerProxy* quota_manager_proxy =
-      context->file_system_context()->quota_manager_proxy();
-  quota_util->UpdateOriginUsageOnFileThread(
-      quota_manager_proxy, origin, type, growth);
+  context->update_observers()->Notify(
+      &FileUpdateObserver::OnUpdate, MakeTuple(url, growth));
 }
 
 void TouchDirectory(FileSystemDirectoryDatabase* db, FileId dir_id) {
@@ -106,6 +96,7 @@ const FilePath::CharType kLegacyDataDirectory[] = FILE_PATH_LITERAL("Legacy");
 
 const FilePath::CharType kTemporaryDirectoryName[] = FILE_PATH_LITERAL("t");
 const FilePath::CharType kPersistentDirectoryName[] = FILE_PATH_LITERAL("p");
+const FilePath::CharType kSyncableDirectoryName[] = FILE_PATH_LITERAL("s");
 
 }  // namespace
 
@@ -302,7 +293,9 @@ PlatformFileError ObfuscatedFileUtil::CreateOrOpen(
         file_flags, file_handle);
     if (created && base::PLATFORM_FILE_OK == error) {
       *created = true;
-      UpdateUsage(context, url.origin(), url.type(), growth);
+      UpdateUsage(context, url, growth);
+      context->change_observers()->Notify(
+          &FileChangeObserver::OnCreateFile, MakeTuple(url));
     }
     return error;
   }
@@ -340,8 +333,11 @@ PlatformFileError ObfuscatedFileUtil::CreateOrOpen(
   }
 
   // If truncating we need to update the usage.
-  if (error == base::PLATFORM_FILE_OK && delta)
-    UpdateUsage(context, url.origin(), url.type(), delta);
+  if (error == base::PLATFORM_FILE_OK && delta) {
+    UpdateUsage(context, url, delta);
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnModifyFile, MakeTuple(url));
+  }
   return error;
 }
 
@@ -388,7 +384,9 @@ PlatformFileError ObfuscatedFileUtil::EnsureFileExists(
       context, FilePath(), url.origin(), url.type(), &file_info, 0, NULL);
   if (created && base::PLATFORM_FILE_OK == error) {
     *created = true;
-    UpdateUsage(context, url.origin(), url.type(), growth);
+    UpdateUsage(context, url, growth);
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnCreateFile, MakeTuple(url));
   }
   return error;
 }
@@ -445,7 +443,9 @@ PlatformFileError ObfuscatedFileUtil::CreateDirectory(
       NOTREACHED();
       return base::PLATFORM_FILE_ERROR_FAILED;
     }
-    UpdateUsage(context, url.origin(), url.type(), growth);
+    UpdateUsage(context, url, growth);
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnCreateDirectory, MakeTuple(url));
     if (first) {
       first = false;
       TouchDirectory(db, file_info.parent_id);
@@ -555,48 +555,12 @@ PlatformFileError ObfuscatedFileUtil::Truncate(
   if (!AllocateQuota(context, growth))
     return base::PLATFORM_FILE_ERROR_NO_SPACE;
   error = NativeFileUtil::Truncate(local_path, length);
-  if (error == base::PLATFORM_FILE_OK)
-    UpdateUsage(context, url.origin(), url.type(), growth);
+  if (error == base::PLATFORM_FILE_OK) {
+    UpdateUsage(context, url, growth);
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnModifyFile, MakeTuple(url));
+  }
   return error;
-}
-
-bool ObfuscatedFileUtil::PathExists(
-    FileSystemOperationContext* context,
-    const FileSystemURL& url) {
-  FileSystemDirectoryDatabase* db = GetDirectoryDatabase(
-      url.origin(), url.type(), false);
-  if (!db)
-    return false;
-  FileId file_id;
-  return db->GetFileWithPath(url.path(), &file_id);
-}
-
-bool ObfuscatedFileUtil::DirectoryExists(
-    FileSystemOperationContext* context,
-    const FileSystemURL& url) {
-  if (IsRootDirectory(url)) {
-    // It's questionable whether we should return true or false for the
-    // root directory of nonexistent origin, but here we return true
-    // as the current implementation of ReadDirectory always returns an empty
-    // array (rather than erroring out with NOT_FOUND_ERR even) for
-    // nonexistent origins.
-    // Note: if you're going to change this behavior please also consider
-    // changiing the ReadDirectory's behavior!
-    return true;
-  }
-  FileSystemDirectoryDatabase* db = GetDirectoryDatabase(
-      url.origin(), url.type(), false);
-  if (!db)
-    return false;
-  FileId file_id;
-  if (!db->GetFileWithPath(url.path(), &file_id))
-    return false;
-  FileInfo file_info;
-  if (!db->GetFileInfo(file_id, &file_info)) {
-    NOTREACHED();
-    return false;
-  }
-  return file_info.is_directory();
 }
 
 bool ObfuscatedFileUtil::IsDirectoryEmpty(
@@ -744,11 +708,25 @@ PlatformFileError ObfuscatedFileUtil::CopyOrMoveFile(
   if (error != base::PLATFORM_FILE_OK)
     return error;
 
-  if (!copy)
+  if (overwrite) {
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnModifyFile,
+        MakeTuple(dest_url));
+  } else {
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnCreateFileFrom,
+        MakeTuple(dest_url, src_url));
+  }
+
+  if (!copy) {
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnRemoveFile, MakeTuple(src_url));
     TouchDirectory(db, src_file_info.parent_id);
+  }
+
   TouchDirectory(db, dest_file_info.parent_id);
 
-  UpdateUsage(context, dest_url.origin(), dest_url.type(), growth);
+  UpdateUsage(context, dest_url, growth);
   return error;
 }
 
@@ -818,7 +796,15 @@ PlatformFileError ObfuscatedFileUtil::CopyInForeignFile(
   if (error != base::PLATFORM_FILE_OK)
     return error;
 
-  UpdateUsage(context, dest_url.origin(), dest_url.type(), growth);
+  if (overwrite) {
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnModifyFile, MakeTuple(dest_url));
+  } else {
+    context->change_observers()->Notify(
+        &FileChangeObserver::OnCreateFile, MakeTuple(dest_url));
+  }
+
+  UpdateUsage(context, dest_url, growth);
   TouchDirectory(db, dest_file_info.parent_id);
   return base::PLATFORM_FILE_OK;
 }
@@ -855,8 +841,11 @@ PlatformFileError ObfuscatedFileUtil::DeleteFile(
     NOTREACHED();
     return base::PLATFORM_FILE_ERROR_FAILED;
   }
-  UpdateUsage(context, url.origin(), url.type(), growth);
+  UpdateUsage(context, url, growth);
   TouchDirectory(db, file_info.parent_id);
+
+  context->change_observers()->Notify(
+      &FileChangeObserver::OnRemoveFile, MakeTuple(url));
 
   if (error == base::PLATFORM_FILE_ERROR_NOT_FOUND)
     return base::PLATFORM_FILE_OK;
@@ -887,8 +876,10 @@ PlatformFileError ObfuscatedFileUtil::DeleteSingleDirectory(
     return base::PLATFORM_FILE_ERROR_NOT_EMPTY;
   int64 growth = -UsageForPath(file_info.name.size());
   AllocateQuota(context, growth);
-  UpdateUsage(context, url.origin(), url.type(), growth);
+  UpdateUsage(context, url, growth);
   TouchDirectory(db, file_info.parent_id);
+  context->change_observers()->Notify(
+      &FileChangeObserver::OnRemoveDirectory, MakeTuple(url));
   return base::PLATFORM_FILE_OK;
 }
 
@@ -957,27 +948,33 @@ bool ObfuscatedFileUtil::DeleteDirectoryForOriginAndType(
   DCHECK_EQ(origin_path.value(),
             GetDirectoryForOrigin(origin, false, NULL).value());
 
-  // Delete the origin directory if the deleted one was the last remaining
-  // type for the origin, i.e. if the *other* type doesn't exist.
-  FileSystemType other_type = kFileSystemTypeUnknown;
-  if (type == kFileSystemTypeTemporary)
-    other_type = kFileSystemTypePersistent;
-  else if (type == kFileSystemTypePersistent)
-    other_type = kFileSystemTypeTemporary;
-  else
-    NOTREACHED();
+  // At this point we are sure we had successfully deleted the origin/type
+  // directory (i.e. we're ready to just return true).
 
-  if (!file_util::DirectoryExists(
-          origin_path.Append(GetDirectoryNameForType(other_type)))) {
-    InitOriginDatabase(false);
-    if (origin_database_.get())
-      origin_database_->RemovePathForOrigin(GetOriginIdentifierFromURL(origin));
-    if (!file_util::Delete(origin_path, true /* recursive */))
-      return false;
+  // See if we have other directories in this origin directory.
+  std::vector<FileSystemType> other_types;
+  if (type != kFileSystemTypeTemporary)
+    other_types.push_back(kFileSystemTypeTemporary);
+  if (type != kFileSystemTypePersistent)
+    other_types.push_back(kFileSystemTypePersistent);
+  if (type != kFileSystemTypeSyncable)
+    other_types.push_back(kFileSystemTypeSyncable);
+
+  for (size_t i = 0; i < other_types.size(); ++i) {
+    if (file_util::DirectoryExists(
+            origin_path.Append(GetDirectoryNameForType(other_types[i])))) {
+      // Other type's directory exists; just return true here.
+      return true;
+    }
   }
 
-  // At this point we are sure we had successfully deleted the origin/type
-  // directory, so just returning true here.
+  // No other directories seem exist. Try deleting the entire origin directory.
+  InitOriginDatabase(false);
+  if (origin_database_.get())
+    origin_database_->RemovePathForOrigin(GetOriginIdentifierFromURL(origin));
+  if (!file_util::Delete(origin_path, true /* recursive */))
+    return false;
+
   return true;
 }
 
@@ -996,9 +993,8 @@ bool ObfuscatedFileUtil::MigrateFromOldSandbox(
     return false;
 
   file_util::FileEnumerator file_enum(src_root, true,
-      static_cast<file_util::FileEnumerator::FileType>(
-          file_util::FileEnumerator::FILES |
-          file_util::FileEnumerator::DIRECTORIES));
+      file_util::FileEnumerator::FILES |
+      file_util::FileEnumerator::DIRECTORIES);
   FilePath src_full_path;
   size_t root_path_length = src_root.value().length() + 1;  // +1 for the slash
   while (!(src_full_path = file_enum.Next()).empty()) {
@@ -1062,6 +1058,8 @@ FilePath::StringType ObfuscatedFileUtil::GetDirectoryNameForType(
       return kTemporaryDirectoryName;
     case kFileSystemTypePersistent:
       return kPersistentDirectoryName;
+    case kFileSystemTypeSyncable:
+      return kSyncableDirectoryName;
     case kFileSystemTypeUnknown:
     default:
       return FilePath::StringType();

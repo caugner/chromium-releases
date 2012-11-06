@@ -9,12 +9,13 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/sequenced_task_runner_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
-#include "webkit/fileapi/fileapi_export.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "webkit/fileapi/file_system_types.h"
+#include "webkit/fileapi/fileapi_export.h"
+#include "webkit/fileapi/task_runner_bound_observer_list.h"
 #include "webkit/quota/special_storage_policy.h"
 
 class FilePath;
@@ -32,12 +33,13 @@ namespace fileapi {
 class ExternalFileSystemMountPointProvider;
 class FileSystemFileUtil;
 class FileSystemMountPointProvider;
-class FileSystemOperationInterface;
+class FileSystemOperation;
 class FileSystemOptions;
 class FileSystemQuotaUtil;
 class FileSystemTaskRunners;
 class FileSystemURL;
 class IsolatedMountPointProvider;
+class LocalFileSyncStatus;
 class SandboxMountPointProvider;
 
 struct DefaultContextDeleter;
@@ -49,7 +51,7 @@ class FILEAPI_EXPORT FileSystemContext
                                         DefaultContextDeleter> {
  public:
   // task_runners->file_task_runner() is used as default TaskRunner.
-  // Unless a MountPointProvired is override in CreateFileSystemOperation,
+  // Unless a MountPointProvider is overridden in CreateFileSystemOperation,
   // it is used for all file operations and file related meta operations.
   // The code assumes that
   // task_runners->file_task_runner()->RunsTasksOnCurrentThread()
@@ -84,6 +86,9 @@ class FILEAPI_EXPORT FileSystemContext
   FileSystemMountPointProvider* GetMountPointProvider(
       FileSystemType type) const;
 
+  // Returns update observers for the given filesystem type.
+  const UpdateObserverList* GetUpdateObservers(FileSystemType type) const;
+
   // Returns a FileSystemMountPointProvider instance for sandboxed filesystem
   // types (e.g. TEMPORARY or PERSISTENT).  This is equivalent to calling
   // GetMountPointProvider(kFileSystemType{Temporary, Persistent}).
@@ -104,11 +109,22 @@ class FILEAPI_EXPORT FileSystemContext
       DeleteFileSystemCallback;
 
   // Opens the filesystem for the given |origin_url| and |type|, and dispatches
-  // the DidOpenFileSystem callback of the given |dispatcher|.
+  // |callback| on completion.
   // If |create| is true this may actually set up a filesystem instance
   // (e.g. by creating the root directory or initializing the database
   // entry etc).
   void OpenFileSystem(
+      const GURL& origin_url,
+      FileSystemType type,
+      bool create,
+      const OpenFileSystemCallback& callback);
+
+  // Opens a syncable filesystem for the given |origin_url|.
+  // The file system is internally mounted as an external file system at the
+  // given |mount_name|.
+  // Currently only kFileSystemTypeSyncable type is supported.
+  void OpenSyncableFileSystem(
+      const std::string& mount_name,
       const GURL& origin_url,
       FileSystemType type,
       bool create,
@@ -125,8 +141,9 @@ class FILEAPI_EXPORT FileSystemContext
   // and calling the provider's corresponding CreateFileSystemOperation method.
   // The resolved MountPointProvider could perform further specialization
   // depending on the filesystem type pointed by the |url|.
-  FileSystemOperationInterface* CreateFileSystemOperation(
-      const FileSystemURL& url);
+  FileSystemOperation* CreateFileSystemOperation(
+      const FileSystemURL& url,
+      base::PlatformFileError* error_code);
 
   // Creates new FileStreamReader instance to read a file pointed by the given
   // filesystem URL |url| starting from |offset|.
@@ -144,6 +161,8 @@ class FILEAPI_EXPORT FileSystemContext
                                   FileSystemMountPointProvider* provider);
 
   FileSystemTaskRunners* task_runners() { return task_runners_.get(); }
+
+  LocalFileSyncStatus* sync_status() { return sync_status_.get(); }
 
  private:
   friend struct DefaultContextDeleter;
@@ -165,6 +184,9 @@ class FILEAPI_EXPORT FileSystemContext
 
   // Registered mount point providers.
   std::map<FileSystemType, FileSystemMountPointProvider*> provider_map_;
+
+  // Keeps track of the writing/syncing status.
+  scoped_ptr<LocalFileSyncStatus> sync_status_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FileSystemContext);
 };

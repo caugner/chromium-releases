@@ -23,6 +23,7 @@ class ShellDelegateImpl : public ash::ShellDelegate {
 
   virtual bool IsUserLoggedIn() OVERRIDE;
   virtual bool IsSessionStarted() OVERRIDE;
+  virtual bool IsFirstRunAfterBoot() OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
@@ -30,6 +31,7 @@ class ShellDelegateImpl : public ash::ShellDelegate {
   virtual void Exit() OVERRIDE;
   virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool incognito) OVERRIDE;
+  virtual void ToggleMaximized() OVERRIDE;
   virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
   virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
@@ -46,9 +48,14 @@ class ShellDelegateImpl : public ash::ShellDelegate {
   virtual ash::SystemTrayDelegate* CreateSystemTrayDelegate(
       ash::SystemTray* tray) OVERRIDE;
   virtual ash::UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
+  virtual ash::CapsLockDelegate* CreateCapsLockDelegate() OVERRIDE;
   virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
   virtual void OpenFeedbackPage() OVERRIDE;
   virtual void RecordUserMetricsAction(UserMetricsAction action) OVERRIDE;
+  virtual void HandleMediaNextTrack() OVERRIDE;
+  virtual void HandleMediaPlayPause() OVERRIDE;
+  virtual void HandleMediaPrevTrack() OVERRIDE;
+  virtual string16 GetTimeRemainingString(base::TimeDelta delta) OVERRIDE;
 
  private:
   // Used to update Launcher. Owned by main.

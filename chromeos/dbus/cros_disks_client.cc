@@ -4,6 +4,8 @@
 
 #include "chromeos/dbus/cros_disks_client.h"
 
+#include <map>
+
 #include "base/bind.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
@@ -26,6 +28,7 @@ const char* kDefaultMountOptions[] = {
 
 const char* kDefaultUnmountOptions[] = {
   "force",
+  "lazy",
 };
 
 const char kMountLabelOption[] = "mountlabel";
@@ -246,7 +249,7 @@ class CrosDisksClientImpl : public CrosDisksClient {
         cros_disks::kMountCompleted,
         base::Bind(&CrosDisksClientImpl::OnMountCompleted,
                    weak_ptr_factory_.GetWeakPtr(),
-                   mount_completed_handler ),
+                   mount_completed_handler),
         base::Bind(&CrosDisksClientImpl::OnSignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
   }
@@ -376,6 +379,9 @@ class CrosDisksClientImpl : public CrosDisksClient {
   }
 
   dbus::ObjectProxy* proxy_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<CrosDisksClientImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CrosDisksClientImpl);
@@ -415,7 +421,7 @@ class CrosDisksClientStubImpl : public CrosDisksClient {
   DISALLOW_COPY_AND_ASSIGN(CrosDisksClientStubImpl);
 };
 
-} // namespace
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // DiskInfo
@@ -435,7 +441,7 @@ DiskInfo::DiskInfo(const std::string& device_path, dbus::Response* response)
 DiskInfo::~DiskInfo() {
 }
 
-// Initialize |this| from |response| given by the cros-disks service.
+// Initializes |this| from |response| given by the cros-disks service.
 // Below is an example of |response|'s raw message (long string is ellipsized).
 //
 //
@@ -497,6 +503,22 @@ DiskInfo::~DiskInfo() {
 //     variant       bool false
 //   }
 //   dict entry {
+//     string "VendorId"
+//     variant       string "18d1"
+//   }
+//   dict entry {
+//     string "VendorName"
+//     variant       string "Google Inc."
+//   }
+//   dict entry {
+//     string "ProductId"
+//     variant       string "4e11"
+//   }
+//   dict entry {
+//     string "ProductName"
+//     variant       string "Nexus One"
+//   }
+//   dict entry {
 //     string "DriveModel"
 //     variant       string "TransMemory"
 //   }
@@ -544,6 +566,10 @@ void DiskInfo::InitializeFromResponse(dbus::Response* response) {
                &on_boot_device_);
   MaybePopString(properties[cros_disks::kNativePath], &system_path_);
   MaybePopString(properties[cros_disks::kDeviceFile], &file_path_);
+  MaybePopString(properties[cros_disks::kVendorId], &vendor_id_);
+  MaybePopString(properties[cros_disks::kVendorName], &vendor_name_);
+  MaybePopString(properties[cros_disks::kProductId], &product_id_);
+  MaybePopString(properties[cros_disks::kProductName], &product_name_);
   MaybePopString(properties[cros_disks::kDriveModel], &drive_model_);
   MaybePopString(properties[cros_disks::kIdLabel], &label_);
   MaybePopString(properties[cros_disks::kIdUuid], &uuid_);

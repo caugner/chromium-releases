@@ -75,7 +75,7 @@ const int kPriorityNotSet = 0;
 // The value of priority if network is preferred.
 const int kPriorityPreferred = 1;
 
-// Contains data related to the flimflam.Device interface,
+// Contains data related to the shill.Device interface,
 // e.g. ethernet, wifi, cellular.
 // TODO(dpolukhin): refactor to make base class and device specific derivatives.
 class NetworkDevice {
@@ -130,6 +130,10 @@ class NetworkDevice {
   }
   bool data_roaming_allowed() const { return data_roaming_allowed_; }
   bool support_network_scan() const { return support_network_scan_; }
+  std::string carrier() const { return carrier_; }
+  base::ListValue* supported_carriers() const {
+    return supported_carriers_.get();
+  }
   enum TechnologyFamily technology_family() const { return technology_family_; }
   const CellularApnList& provider_apn_list() const {
     return provider_apn_list_;
@@ -176,6 +180,9 @@ class NetworkDevice {
     technology_family_ = technology_family;
   }
   void set_carrier(const std::string& carrier) { carrier_ = carrier; }
+  void set_supported_carriers(const base::ListValue& supported_carriers) {
+    supported_carriers_.reset(supported_carriers.DeepCopy());
+  }
   void set_home_provider_code(const std::string& home_provider_code) {
     home_provider_code_ = home_provider_code;
   }
@@ -239,6 +246,7 @@ class NetworkDevice {
   // Cellular specific device info.
   TechnologyFamily technology_family_;
   std::string carrier_;
+  scoped_ptr<base::ListValue> supported_carriers_;
   std::string home_provider_code_;
   std::string home_provider_country_;
   std::string home_provider_id_;
@@ -314,7 +322,7 @@ class Network {
 
   // Structure used only for parsing ONC's ProxySettings value.
   struct ProxyOncConfig {
-    ProxyOncConfig() : type(PROXY_ONC_DIRECT) {}
+    ProxyOncConfig();
 
     ProxyOncType type;
     std::string pac_url;  // Only for PROXY_TYPE_PAC.
@@ -568,7 +576,7 @@ class Network {
   int priority_;  // determines order in network list.
   bool auto_connect_;
   bool save_credentials_;  // save passphrase and EAP credentials to disk.
-  std::string proxy_config_;  // ProxyConfig property in flimflam.
+  std::string proxy_config_;  // ProxyConfig property in shill.
   ProxyOncConfig proxy_onc_config_;  // Only used for parsing ONC proxy value.
   scoped_ptr<EnrollmentDelegate> enrollment_delegate_;
 
@@ -581,7 +589,7 @@ class Network {
   // Initialize the IP address field
   void InitIPAddress();
 
-  // Priority value, corresponds to index in list from flimflam (0 = first)
+  // Priority value, corresponds to index in list from shill (0 = first)
   int priority_order_;
 
   // Set to true if the UI requested this as a new network.
@@ -675,6 +683,7 @@ class VirtualNetwork : public Network {
                              const std::string& username,
                              const std::string& user_passphrase,
                              const std::string& otp);
+  void SetServerHostname(const std::string& server_hostname);
 
  private:
   // This allows NetworkParser and its subclasses access to
@@ -859,7 +868,7 @@ class CellularNetwork : public WirelessNetwork {
 
   // Sets the APN to use in establishing data connections. Only
   // the fields of the APN that are needed for making connections
-  // are passed to flimflam. The name, localized_name, and language
+  // are passed to shill. The name, localized_name, and language
   // fields are ignored.
   void SetApn(const CellularApn& apn);
 
@@ -1129,7 +1138,7 @@ class WifiNetwork : public WirelessNetwork {
   std::string eap_passphrase_;
   bool eap_save_credentials_;
 
-  // Internal state (not stored in flimflam).
+  // Internal state (not stored in shill).
   // Passphrase set by user (stored for UI).
   std::string user_passphrase_;
 
@@ -1220,6 +1229,19 @@ class NetworkLibrary {
   enum HardwareAddressFormat {
     FORMAT_RAW_HEX,
     FORMAT_COLON_SEPARATED_HEX
+  };
+
+  // Used to configure which IP parameters will be specified by DHCP and which
+  // will be set by the user.
+  enum UseDHCP {
+    USE_DHCP_ADDRESS      = 0x1,
+    USE_DHCP_NETMASK      = 0x1 << 1,
+    USE_DHCP_GATEWAY      = 0x1 << 2,
+    USE_DHCP_NAME_SERVERS = 0x1 << 3,
+    USE_DHCP_ALL_ROUTING_INFO =
+        (USE_DHCP_ADDRESS |
+         USE_DHCP_NETMASK |
+         USE_DHCP_GATEWAY),
   };
 
   class NetworkManagerObserver {
@@ -1531,6 +1553,11 @@ class NetworkLibrary {
   // Change data roaming restriction for current cellular device.
   virtual void SetCellularDataRoamingAllowed(bool new_value) = 0;
 
+  // Changes the active cellular carrier to the one provided, calls the closure
+  // once the transition is complete.
+  virtual void SetCarrier(const std::string& carrier,
+                          const NetworkOperationCallback& completed) = 0;
+
   // Return true if GSM SIM card can work only with enabled roaming.
   virtual bool IsCellularAlwaysInRoaming() = 0;
 
@@ -1558,6 +1585,10 @@ class NetworkLibrary {
   // user input (e.g. it requires a user profile but none is available).
   virtual bool CanConnectToNetwork(const Network* network) const = 0;
 
+  // Refresh the IP configuration of the given network after changes.  Puts
+  // newly configured properties into effect and renews DHCP lease.
+  virtual void RefreshIPConfig(Network* network) = 0;
+
   // Connect to the specified wireless network.
   virtual void ConnectToWifiNetwork(WifiNetwork* network) = 0;
 
@@ -1582,11 +1613,8 @@ class NetworkLibrary {
   // and optional EAP configuration. If |security| is SECURITY_8021X,
   // |eap_config| must be provided.
   struct EAPConfigData {
-    EAPConfigData()
-        : method(EAP_METHOD_UNKNOWN),
-          auth(EAP_PHASE_2_AUTH_AUTO),
-          use_system_cas(true) {}
-    ~EAPConfigData() {}
+    EAPConfigData();
+    ~EAPConfigData();
     EAPMethod method;
     EAPPhase2Auth auth;
     std::string server_ca_cert_nss_nickname;
@@ -1606,8 +1634,8 @@ class NetworkLibrary {
   // Connect to the specified virtual network with service name.
   // VPNConfigData must be provided.
   struct VPNConfigData {
-    VPNConfigData() {}
-    ~VPNConfigData() {}
+    VPNConfigData();
+    ~VPNConfigData();
     std::string psk;
     std::string server_ca_cert_nss_nickname;
     std::string client_cert_pkcs11_id;
@@ -1655,10 +1683,18 @@ class NetworkLibrary {
       std::string* hardware_address,
       HardwareAddressFormat) = 0;
 
-  // Sets an IP config. This is called when user changes from dhcp to static
-  // or vice versa or when user changes the ip config info.
-  // If nothing is changed, this method does nothing.
-  virtual void SetIPConfig(const NetworkIPConfig& ipconfig) = 0;
+  // Sets the configuration of the IP parameters. This is called when user
+  // changes IP settings from dhcp to static or vice versa or when user changes
+  // the ip config info. If nothing is changed, this method does nothing.
+  // |dhcp_usage_mask| is a bitmask composed of items from the UseDHCP enum, and
+  // indicates which of the supplied values are overridden by values given by
+  // the default IP acquisition technique for the service (DHCP, usually).
+  virtual void SetIPParameters(const std::string& service_path,
+                               const std::string& address,
+                               const std::string& netmask,
+                               const std::string& gateway,
+                               const std::string& name_servers,
+                               int dhcp_usage_mask) = 0;
 
   // This will connect to a preferred network if the currently connected
   // network is not preferred. This should be called when the active profile
@@ -1671,6 +1707,7 @@ class NetworkLibrary {
   virtual bool LoadOncNetworks(const std::string& onc_blob,
                                const std::string& passcode,
                                NetworkUIData::ONCSource source,
+                               bool allow_web_trust_from_policy,
                                std::string* error) = 0;
 
   // This sets the active network for the network type. Note: priority order

@@ -331,14 +331,15 @@ void SwizzleInit() {
 // Termination is cancelled by resetting this flag. The standard
 // |-applicationShouldTerminate:| is not supported, and code paths leading to it
 // must be redirected.
+//
+// When the last browser has been destroyed, the BrowserList calls
+// browser::OnAppExiting(), which is the point of no return. That will cause
+// the NSApplicationWillTerminateNotification to be posted, which ends the
+// NSApplication event loop, so final post- MessageLoop::Run() work is done
+// before exiting.
 - (void)terminate:(id)sender {
   AppController* appController = static_cast<AppController*>([NSApp delegate]);
-  if ([appController tryToTerminateApplication:self]) {
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:NSApplicationWillTerminateNotification
-                      object:self];
-  }
-
+  [appController tryToTerminateApplication:self];
   // Return, don't exit. The application is responsible for exiting on its own.
 }
 
@@ -388,8 +389,11 @@ void SwizzleInit() {
 
   NSString* actionString = NSStringFromSelector(anAction);
   NSString* value =
-        [NSString stringWithFormat:@"%@ tag %d sending %@ to %p",
-                  [sender className], tag, actionString, aTarget];
+        [NSString stringWithFormat:@"%@ tag %ld sending %@ to %p",
+                  [sender className],
+                  static_cast<long>(tag),
+                  actionString,
+                  aTarget];
 
   base::mac::ScopedCrashKey key(kActionKey, value);
 

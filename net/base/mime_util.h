@@ -88,27 +88,9 @@ NET_EXPORT bool IsSupportedStrictMediaMimeType(
     const std::string& mime_type,
     const std::vector<std::string>& codecs);
 
-// Get the extensions for images files.
-// Note that we do not erase the existing elements in the the provided vector.
-// Instead, we append the result to it.
-NET_EXPORT void GetImageExtensions(
-    std::vector<FilePath::StringType>* extensions);
-
-// Get the extensions for audio files.
-// Note that we do not erase the existing elements in the the provided vector.
-// Instead, we append the result to it.
-NET_EXPORT void GetAudioExtensions(
-    std::vector<FilePath::StringType>* extensions);
-
-// Get the extensions for video files.
-// Note that we do not erase the existing elements in the the provided vector.
-// Instead, we append the result to it.
-NET_EXPORT void GetVideoExtensions(
-    std::vector<FilePath::StringType>* extensions);
-
-// Get the extensions associated with the given mime type.
-// There could be multiple extensions for a given mime type, like "html,htm"
-// for "text/html".
+// Get the extensions associated with the given mime type. This should be passed
+// in lower case. There could be multiple extensions for a given mime type, like
+// "html,htm" for "text/html", or "txt,text,html,..." for "text/*".
 // Note that we do not erase the existing elements in the the provided vector.
 // Instead, we append the result to it.
 NET_EXPORT void GetExtensionsForMimeType(
@@ -124,6 +106,11 @@ NET_EXPORT void GetMediaTypesBlacklistedForTests(
 NET_EXPORT void GetMediaCodecsBlacklistedForTests(
     std::vector<std::string>* codecs);
 
+// Returns the IANA media type contained in |mime_type|, or an empty
+// string if |mime_type| does not specifify a known media type.
+// Supported media types are defined at:
+// http://www.iana.org/assignments/media-types/index.html
+NET_EXPORT const std::string GetIANAMediaType(const std::string& mime_type);
 }  // namespace net
 
 #endif  // NET_BASE_MIME_UTIL_H__

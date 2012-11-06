@@ -14,7 +14,8 @@
 #include "base/time.h"
 #include "base/tuple.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete_history_manager.h"
+#include "chrome/browser/api/prefs/pref_service_base.h"
+#include "chrome/browser/autofill/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/autofill/autofill_profile.h"
@@ -22,10 +23,10 @@
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/test_autofill_external_delegate.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents.h"
@@ -442,7 +443,8 @@ class TestAutofillManager : public AutofillManager {
  public:
   TestAutofillManager(TabContents* tab_contents,
                       TestPersonalDataManager* personal_data)
-      : AutofillManager(tab_contents, personal_data),
+      : AutofillManager(&delegate_, tab_contents, personal_data),
+        delegate_(tab_contents),
         personal_data_(personal_data),
         autofill_enabled_(true),
         did_finish_async_form_submit_(false),
@@ -562,6 +564,8 @@ class TestAutofillManager : public AutofillManager {
  private:
   // AutofillManager is ref counted.
   virtual ~TestAutofillManager() {}
+
+  TabAutofillManagerDelegate delegate_;
 
   // Weak reference.
   TestPersonalDataManager* personal_data_;
@@ -2618,24 +2622,19 @@ TEST_F(AutofillManagerTest, FormSubmittedWithDefaultValues) {
 // Checks that resetting the auxiliary profile enabled preference does the right
 // thing on all platforms.
 TEST_F(AutofillManagerTest, AuxiliaryProfilesReset) {
+  PrefServiceBase* prefs = PrefServiceBase::ForContext(profile());
 #if defined(OS_MACOSX)
   // Auxiliary profiles is implemented on Mac only.  It enables Mac Address
   // Book integration.
-  ASSERT_TRUE(profile()->GetPrefs()->GetBoolean(
-      prefs::kAutofillAuxiliaryProfilesEnabled));
-  profile()->GetPrefs()->SetBoolean(
-      prefs::kAutofillAuxiliaryProfilesEnabled, false);
-  profile()->GetPrefs()->ClearPref(prefs::kAutofillAuxiliaryProfilesEnabled);
-  ASSERT_TRUE(profile()->GetPrefs()->GetBoolean(
-      prefs::kAutofillAuxiliaryProfilesEnabled));
+  ASSERT_TRUE(prefs->GetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled));
+  prefs->SetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled, false);
+  prefs->ClearPref(prefs::kAutofillAuxiliaryProfilesEnabled);
+  ASSERT_TRUE(prefs->GetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled));
 #else
-  ASSERT_FALSE(profile()->GetPrefs()->GetBoolean(
-      prefs::kAutofillAuxiliaryProfilesEnabled));
-  profile()->GetPrefs()->SetBoolean(
-      prefs::kAutofillAuxiliaryProfilesEnabled, true);
-  profile()->GetPrefs()->ClearPref(prefs::kAutofillAuxiliaryProfilesEnabled);
-  ASSERT_FALSE(profile()->GetPrefs()->GetBoolean(
-      prefs::kAutofillAuxiliaryProfilesEnabled));
+  ASSERT_FALSE(prefs->GetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled));
+  prefs->SetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled, true);
+  prefs->ClearPref(prefs::kAutofillAuxiliaryProfilesEnabled);
+  ASSERT_FALSE(prefs->GetBoolean(prefs::kAutofillAuxiliaryProfilesEnabled));
 #endif
 }
 
@@ -2919,11 +2918,13 @@ TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUpload) {
 }
 
 TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
+  PrefServiceBase* prefs = PrefServiceBase::ForContext(profile());
+
   // Allow this test to control what should get synced.
-  profile()->GetPrefs()->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
+  prefs->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
   // Always set password generation enabled check box so we can test the
   // behavior of password sync.
-  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, true);
+  prefs->SetBoolean(prefs::kPasswordGenerationEnabled, true);
 
   // Sync some things, but not passwords. Shouldn't send anything since
   // password generation is disabled by default.
@@ -2975,9 +2976,11 @@ TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
 }
 
 TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
+  PrefServiceBase* prefs = PrefServiceBase::ForContext(profile());
+
   // Always set password sync enabled so we can test the behavior of password
   // generation.
-  profile()->GetPrefs()->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
+  prefs->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
   ProfileSyncService* sync_service = ProfileSyncServiceFactory::GetForProfile(
       profile());
   sync_service->SetSyncSetupCompleted();
@@ -2986,24 +2989,24 @@ TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
   sync_service->ChangePreferredDataTypes(preferred_set);
 
   // Enabled state remains false, should not sent.
-  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, false);
+  prefs->SetBoolean(prefs::kPasswordGenerationEnabled, false);
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
 
   // Enabled state from false to true, should sent true.
-  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, true);
+  prefs->SetBoolean(prefs::kPasswordGenerationEnabled, true);
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
   EXPECT_TRUE(autofill_manager_->GetSentStates()[0]);
   autofill_manager_->ClearSentStates();
 
   // Enabled states remains true, should not sent.
-  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, true);
+  prefs->SetBoolean(prefs::kPasswordGenerationEnabled, true);
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
 
   // Enabled states from true to false, should sent false.
-  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, false);
+  prefs->SetBoolean(prefs::kPasswordGenerationEnabled, false);
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
   EXPECT_FALSE(autofill_manager_->GetSentStates()[0]);

@@ -5,6 +5,9 @@
 #include "chrome/browser/net/chrome_network_delegate.h"
 
 #include "base/logging.h"
+#include "base/base_paths.h"
+#include "base/path_service.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -14,8 +17,9 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
-#include "chrome/browser/net/cache_stats.h"
-#include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/net/load_time_stats.h"
+#include "chrome/browser/performance_monitor/performance_monitor.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
@@ -33,8 +37,14 @@
 #include "net/socket_stream/socket_stream.h"
 #include "net/url_request/url_request.h"
 
+#if !defined(OS_ANDROID)
+#include "chrome/browser/managed_mode_url_filter.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include "base/chromeos/chromeos_version.h"
+#include "base/command_line.h"
+#include "chrome/common/chrome_switches.h"
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -45,9 +55,9 @@ using content::BrowserThread;
 using content::RenderViewHost;
 using content::ResourceRequestInfo;
 
-// By default we don't allow access to all file:// urls on ChromeOS but we do on
-// other platforms.
-#if defined(OS_CHROMEOS)
+// By default we don't allow access to all file:// urls on ChromeOS and
+// Android.
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
 bool ChromeNetworkDelegate::g_allow_file_access_ = false;
 #else
 bool ChromeNetworkDelegate::g_allow_file_access_ = true;
@@ -58,6 +68,8 @@ bool ChromeNetworkDelegate::g_allow_file_access_ = true;
 bool ChromeNetworkDelegate::g_never_throttle_requests_ = false;
 
 namespace {
+
+const char kDNTHeader[] = "DNT";
 
 // If the |request| failed due to problems with a proxy, forward the error to
 // the proxy extension API.
@@ -129,17 +141,21 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
     extensions::EventRouterForwarder* event_router,
     ExtensionInfoMap* extension_info_map,
     const policy::URLBlacklistManager* url_blacklist_manager,
+    const ManagedModeURLFilter* managed_mode_url_filter,
     void* profile,
     CookieSettings* cookie_settings,
     BooleanPrefMember* enable_referrers,
-    chrome_browser_net::CacheStats* cache_stats)
+    BooleanPrefMember* enable_do_not_track,
+    chrome_browser_net::LoadTimeStats* load_time_stats)
     : event_router_(event_router),
       profile_(profile),
       cookie_settings_(cookie_settings),
       extension_info_map_(extension_info_map),
       enable_referrers_(enable_referrers),
+      enable_do_not_track_(enable_do_not_track),
       url_blacklist_manager_(url_blacklist_manager),
-      cache_stats_(cache_stats) {
+      managed_mode_url_filter_(managed_mode_url_filter),
+      load_time_stats_(load_time_stats) {
   DCHECK(event_router);
   DCHECK(enable_referrers);
   DCHECK(!profile || cookie_settings);
@@ -153,12 +169,17 @@ void ChromeNetworkDelegate::NeverThrottleRequests() {
 }
 
 // static
-void ChromeNetworkDelegate::InitializeReferrersEnabled(
+void ChromeNetworkDelegate::InitializePrefsOnUIThread(
     BooleanPrefMember* enable_referrers,
+    BooleanPrefMember* enable_do_not_track,
     PrefService* pref_service) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   enable_referrers->Init(prefs::kEnableReferrers, pref_service, NULL);
   enable_referrers->MoveToThread(BrowserThread::IO);
+  if (enable_do_not_track) {
+    enable_do_not_track->Init(prefs::kEnableDoNotTrack, pref_service, NULL);
+    enable_do_not_track->MoveToThread(BrowserThread::IO);
+  }
 }
 
 // static
@@ -185,10 +206,20 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   }
 #endif
 
+#if !defined(OS_ANDROID)
+  if (managed_mode_url_filter_ &&
+      !managed_mode_url_filter_->IsURLWhitelisted(request->url())) {
+    // Block for now.
+    return net::ERR_NETWORK_ACCESS_DENIED;
+  }
+#endif
+
   ForwardRequestStatus(REQUEST_STARTED, request, profile_);
 
   if (!enable_referrers_->GetValue())
     request->set_referrer(std::string());
+  if (enable_do_not_track_ && enable_do_not_track_->GetValue())
+    request->SetExtraRequestHeaderByName(kDNTHeader, "1", true /* override */);
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeRequest(
       profile_, extension_info_map_.get(), request, callback, new_url);
 }
@@ -233,6 +264,9 @@ void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
 
 void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
                                            int bytes_read) {
+  performance_monitor::PerformanceMonitor::GetInstance()->BytesReadOnIOThread(
+      request, bytes_read);
+
 #if defined(ENABLE_TASK_MANAGER)
   TaskManager::GetInstance()->model()->NotifyBytesRead(request, bytes_read);
 #endif  // defined(ENABLE_TASK_MANAGER)
@@ -240,8 +274,7 @@ void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
 
 void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
                                         bool started) {
-  if (request->status().status() == net::URLRequestStatus::SUCCESS ||
-      request->status().status() == net::URLRequestStatus::HANDLED_EXTERNALLY) {
+  if (request->status().status() == net::URLRequestStatus::SUCCESS) {
     bool is_redirect = request->response_headers() &&
         net::HttpResponseHeaders::IsRedirectResponseCode(
             request->response_headers()->response_code());
@@ -264,6 +297,8 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
 void ChromeNetworkDelegate::OnURLRequestDestroyed(net::URLRequest* request) {
   ExtensionWebRequestEventRouter::GetInstance()->OnURLRequestDestroyed(
       profile_, request);
+  if (load_time_stats_)
+    load_time_stats_->OnURLRequestDestroyed(*request);
 }
 
 void ChromeNetworkDelegate::OnPACScriptError(int line_number,
@@ -338,9 +373,19 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
   if (g_allow_file_access_)
     return true;
 
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+  return true;
+#else
 #if defined(OS_CHROMEOS)
-  // ChromeOS uses a whitelist to only allow access to files residing in the
-  // list of directories below.
+  // If we're running Chrome for ChromeOS on Linux, we want to allow file
+  // access.
+  if (!base::chromeos::IsRunningOnChromeOS() ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType)) {
+    return true;
+  }
+
+  // Use a whitelist to only allow access to files residing in the list of
+  // directories below.
   static const char* const kLocalAccessWhiteList[] = {
       "/home/chronos/user/Downloads",
       "/home/chronos/user/log",
@@ -350,11 +395,19 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
       "/tmp",
       "/var/log",
   };
-
-  // If we're running Chrome for ChromeOS on Linux, we want to allow file
-  // access.
-  if (!base::chromeos::IsRunningOnChromeOS())
+#elif defined(OS_ANDROID)
+  // Access to files in external storage is allowed.
+  FilePath external_storage_path;
+  PathService::Get(base::DIR_ANDROID_EXTERNAL_STORAGE, &external_storage_path);
+  if (external_storage_path.IsParent(path))
     return true;
+
+  // Whitelist of other allowed directories.
+  static const char* const kLocalAccessWhiteList[] = {
+      "/sdcard",
+      "/mnt/sdcard",
+  };
+#endif
 
   for (size_t i = 0; i < arraysize(kLocalAccessWhiteList); ++i) {
     const FilePath white_listed_path(kLocalAccessWhiteList[i]);
@@ -364,10 +417,10 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
       return true;
     }
   }
+
+  DVLOG(1) << "File access denied - " << path.value().c_str();
   return false;
-#else
-  return true;
-#endif  // defined(OS_CHROMEOS)
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 }
 
 bool ChromeNetworkDelegate::OnCanThrottleRequest(
@@ -397,9 +450,9 @@ int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
   return net::OK;
 }
 
-void ChromeNetworkDelegate::OnCacheWaitStateChange(
+void ChromeNetworkDelegate::OnRequestWaitStateChange(
     const net::URLRequest& request,
-    CacheWaitState state) {
-  if (cache_stats_)
-    cache_stats_->OnCacheWaitStateChange(request, state);
+    RequestWaitState state) {
+  if (load_time_stats_)
+    load_time_stats_->OnRequestWaitStateChange(request, state);
 }

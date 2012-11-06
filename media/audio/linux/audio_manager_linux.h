@@ -29,8 +29,6 @@ class MEDIA_EXPORT AudioManagerLinux : public AudioManagerBase {
   virtual void ShowAudioInputSettings() OVERRIDE;
   virtual void GetAudioInputDeviceNames(media::AudioDeviceNames* device_names)
       OVERRIDE;
-  virtual void MuteAll() OVERRIDE;
-  virtual void UnMuteAll() OVERRIDE;
 
   // Implementation of AudioManagerBase.
   virtual AudioOutputStream* MakeLinearOutputStream(
@@ -41,6 +39,8 @@ class MEDIA_EXPORT AudioManagerLinux : public AudioManagerBase {
       const AudioParameters& params, const std::string& device_id) OVERRIDE;
   virtual AudioInputStream* MakeLowLatencyInputStream(
       const AudioParameters& params, const std::string& device_id) OVERRIDE;
+  virtual AudioParameters GetPreferredLowLatencyOutputStreamParameters(
+      const AudioParameters& input_params) OVERRIDE;
 
  protected:
   virtual ~AudioManagerLinux();
@@ -50,6 +50,12 @@ class MEDIA_EXPORT AudioManagerLinux : public AudioManagerBase {
     kStreamPlayback = 0,
     kStreamCapture,
   };
+
+  // Returns true if cras should be used for input/output.
+  bool UseCras();
+
+  // Gets a list of available cras input devices.
+  void GetCrasAudioInputDevices(media::AudioDeviceNames* device_names);
 
   // Gets a list of available ALSA input devices.
   void GetAlsaAudioInputDevices(media::AudioDeviceNames* device_names);

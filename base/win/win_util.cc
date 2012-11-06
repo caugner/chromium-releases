@@ -175,13 +175,17 @@ bool SetAppIdForPropertyStore(IPropertyStore* property_store,
                                         app_id);
 }
 
-bool SetDualModeForPropertyStore(IPropertyStore* property_store) {
+bool SetDualModeForPropertyStore(IPropertyStore* property_store,
+                                 bool is_dual_mode) {
   return SetBooleanValueForPropertyStore(property_store,
                                          PKEY_AppUserModel_DualMode,
-                                         true) &&
+                                         is_dual_mode) &&
+         // TODO (gab): This property no longer exists in the final Win8 release
+         // and should be deleted from all shortcuts as it could interfere with
+         // a future (Win9+) property.
          SetUInt32ValueForPropertyStore(property_store,
                                         PKEY_AppUserModel_DualMode_UK,
-                                        1U);
+                                        is_dual_mode ? 1U : 0U);
 }
 
 static const char16 kAutoRunKeyPath[] =
@@ -212,6 +216,21 @@ void SetShouldCrashOnProcessDetach(bool crash) {
 
 bool ShouldCrashOnProcessDetach() {
   return g_crash_on_process_detach;
+}
+
+bool IsMachineATablet() {
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return false;
+  const int kMultiTouch = NID_INTEGRATED_TOUCH | NID_MULTI_INPUT | NID_READY;
+  const int kMaxTabletScreenWidth = 1366;
+  const int kMaxTabletScreenHeight = 768;
+  int sm = GetSystemMetrics(SM_DIGITIZER);
+  if ((sm & kMultiTouch) == kMultiTouch) {
+    int cx = GetSystemMetrics(SM_CXSCREEN);
+    int cy = GetSystemMetrics(SM_CYSCREEN);
+    return cx <= kMaxTabletScreenWidth && cy <= kMaxTabletScreenHeight;
+  }
+  return false;
 }
 
 }  // namespace win

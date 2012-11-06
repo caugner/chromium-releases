@@ -10,6 +10,7 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
+#include "base/platform_file.h"
 #include "base/sequenced_task_runner.h"
 #include "webkit/blob/local_file_stream_reader.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
@@ -40,14 +41,6 @@ IsolatedContext* isolated_context() {
   return IsolatedContext::GetInstance();
 }
 
-#if defined(SUPPORT_MEDIA_FILESYSTEM)
-MediaDeviceInterfaceImpl* GetDeviceForUrl(const FileSystemURL& url,
-                                          FileSystemContext* context) {
-  return MediaDeviceMapService::GetInstance()->CreateOrGetMediaDevice(
-      url.filesystem_id(), context->task_runners()->media_task_runner());
-}
-#endif
-
 }  // namespace
 
 IsolatedMountPointProvider::IsolatedMountPointProvider(
@@ -57,8 +50,9 @@ IsolatedMountPointProvider::IsolatedMountPointProvider(
       isolated_file_util_(new IsolatedFileUtil()),
       dragged_file_util_(new DraggedFileUtil()),
       native_media_file_util_(new NativeMediaFileUtil()) {
-  // TODO(kmadhusu): Initialize device_media_file_util_ in initialization list.
 #if defined(SUPPORT_MEDIA_FILESYSTEM)
+  // TODO(kmadhusu): Initialize |device_media_file_util_| in
+  // initialization list.
   device_media_file_util_.reset(new DeviceMediaFileUtil(profile_path_));
 #endif
 }
@@ -87,8 +81,7 @@ FilePath IsolatedMountPointProvider::GetFileSystemRootPathOnFileThread(
   return FilePath();
 }
 
-bool IsolatedMountPointProvider::IsAccessAllowed(
-    const GURL& origin_url, FileSystemType type, const FilePath& virtual_path) {
+bool IsolatedMountPointProvider::IsAccessAllowed(const FileSystemURL& url) {
   return true;
 }
 
@@ -102,7 +95,7 @@ bool IsolatedMountPointProvider::IsRestrictedFileName(
 FileSystemFileUtil* IsolatedMountPointProvider::GetFileUtil(
     FileSystemType type) {
   switch (type) {
-    case kFileSystemTypeIsolated:
+    case kFileSystemTypeNativeLocal:
       return isolated_file_util_.get();
     case kFileSystemTypeDragged:
       return dragged_file_util_.get();
@@ -113,11 +106,7 @@ FileSystemFileUtil* IsolatedMountPointProvider::GetFileUtil(
       return device_media_file_util_.get();
 #endif
 
-    case kFileSystemTypeTemporary:
-    case kFileSystemTypePersistent:
-    case kFileSystemTypeExternal:
-    case kFileSystemTypeTest:
-    case kFileSystemTypeUnknown:
+    default:
       NOTREACHED();
   }
   return NULL;
@@ -126,18 +115,16 @@ FileSystemFileUtil* IsolatedMountPointProvider::GetFileUtil(
 FilePath IsolatedMountPointProvider::GetPathForPermissionsCheck(
     const FilePath& virtual_path) const {
   // For isolated filesystems we only check per-filesystem permissions.
-  NOTREACHED();
-  return virtual_path;
+  return FilePath();
 }
 
-FileSystemOperationInterface*
-IsolatedMountPointProvider::CreateFileSystemOperation(
+FileSystemOperation* IsolatedMountPointProvider::CreateFileSystemOperation(
     const FileSystemURL& url,
-    FileSystemContext* context) const {
+    FileSystemContext* context,
+    base::PlatformFileError* error_code) const {
   scoped_ptr<FileSystemOperationContext> operation_context(
       new FileSystemOperationContext(context));
-  if (url.type() == kFileSystemTypeNativeMedia ||
-      url.type() == kFileSystemTypeDeviceMedia) {
+  if (url.type() == kFileSystemTypeNativeMedia) {
     operation_context->set_media_path_filter(media_path_filter_.get());
     operation_context->set_task_runner(
         context->task_runners()->media_task_runner());
@@ -145,8 +132,17 @@ IsolatedMountPointProvider::CreateFileSystemOperation(
 
 #if defined(SUPPORT_MEDIA_FILESYSTEM)
   if (url.type() == kFileSystemTypeDeviceMedia) {
-    // GetDeviceForUrl can return NULL. We will handle in DeviceMediaFileUtil.
-    operation_context->set_media_device(GetDeviceForUrl(url, context));
+    MediaDeviceMapService* map_service = MediaDeviceMapService::GetInstance();
+    MediaDeviceDelegate* device_delegate =
+        map_service->GetMediaDeviceDelegate(url.filesystem_id());
+    if (!device_delegate) {
+      if (error_code)
+        *error_code = base::PLATFORM_FILE_ERROR_NOT_FOUND;
+      return NULL;
+    }
+    operation_context->set_media_device_delegate(device_delegate);
+    operation_context->set_task_runner(device_delegate->media_task_runner());
+    operation_context->set_media_path_filter(media_path_filter_.get());
   }
 #endif
 

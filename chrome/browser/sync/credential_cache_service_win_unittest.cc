@@ -8,11 +8,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
+#include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/sync/credential_cache_service_win.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -38,9 +39,6 @@ class CredentialCacheServiceTest : public CredentialCacheService,
   virtual void TearDown() OVERRIDE {
     file_message_loop_.RunAllPending();
   }
-
-  // PrefStore::Observer implementation.
-  virtual void OnInitializationCompleted(bool succeeded) OVERRIDE {}
 
  private:
   ScopedTempDir temp_dir_;
@@ -131,6 +129,15 @@ TEST_F(CredentialCacheServiceTest, TestWriteAndReadCredentialsAfterSignOut) {
   ASSERT_TRUE(HasPref(local_store(), prefs::kSyncKeepEverythingSynced));
   ASSERT_TRUE(false == GetBooleanPref(local_store(),
                                       prefs::kSyncKeepEverythingSynced));
+}
+
+TEST_F(CredentialCacheServiceTest, TestWriteAndReadTimestamps) {
+  // Write a timestamp.
+  WriteLastCacheUpdateTime();
+
+  // Make sure that the correct field was written, and it is not in the future.
+  base::Time time(GetLastCacheUpdateTime(local_store()));
+  ASSERT_LE(time, base::Time::Now());
 }
 
 }  // namespace syncer

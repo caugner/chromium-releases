@@ -1740,13 +1740,41 @@ static void PPB_NetAddress_Private_CreateFromIPv6AddressDispatcher(
   );
 }
 
-static void PPB_PDF_GetLocalizedStringDispatcher(
+static void PPB_NetworkList_Private_IsNetworkListDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbPdfRpcServer::PPB_PDF_GetLocalizedString(
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_IsNetworkList(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_NetworkList_Private_GetCountDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_GetCount(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_NetworkList_Private_GetNameDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_GetName(
       rpc,
       done,
       inputs[0]->u.ival,
@@ -1755,13 +1783,13 @@ static void PPB_PDF_GetLocalizedStringDispatcher(
   );
 }
 
-static void PPB_PDF_GetResourceImageDispatcher(
+static void PPB_NetworkList_Private_GetTypeDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbPdfRpcServer::PPB_PDF_GetResourceImage(
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_GetType(
       rpc,
       done,
       inputs[0]->u.ival,
@@ -1770,30 +1798,28 @@ static void PPB_PDF_GetResourceImageDispatcher(
   );
 }
 
-static void PPB_PDF_GetFontFileWithFallbackDispatcher(
+static void PPB_NetworkList_Private_GetStateDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbPdfRpcServer::PPB_PDF_GetFontFileWithFallback(
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_GetState(
       rpc,
       done,
       inputs[0]->u.ival,
-      inputs[1]->u.count, inputs[1]->arrays.carr,
-      inputs[2]->u.count, inputs[2]->arrays.carr,
-      inputs[3]->u.ival,
+      inputs[1]->u.ival,
       &(outputs[0]->u.ival)
   );
 }
 
-static void PPB_PDF_GetFontTableForPrivateFontFileDispatcher(
+static void PPB_NetworkList_Private_GetIpAddressesDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbPdfRpcServer::PPB_PDF_GetFontTableForPrivateFontFile(
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_GetIpAddresses(
       rpc,
       done,
       inputs[0]->u.ival,
@@ -1803,130 +1829,28 @@ static void PPB_PDF_GetFontTableForPrivateFontFileDispatcher(
   );
 }
 
-static void PPB_PDF_SearchStringDispatcher(
+static void PPB_NetworkList_Private_GetDisplayNameDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbPdfRpcServer::PPB_PDF_SearchString(
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_GetDisplayName(
       rpc,
       done,
       inputs[0]->u.ival,
-      inputs[1]->u.count, inputs[1]->arrays.carr,
-      inputs[2]->u.count, inputs[2]->arrays.carr,
-      inputs[3]->u.ival,
-      &(outputs[0]->u.count), outputs[0]->arrays.carr,
-      &(outputs[1]->u.ival)
+      inputs[1]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
   );
 }
 
-static void PPB_PDF_DidStartLoadingDispatcher(
+static void PPB_NetworkList_Private_GetMTUDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbPdfRpcServer::PPB_PDF_DidStartLoading(
-      rpc,
-      done,
-      inputs[0]->u.ival
-  );
-}
-
-static void PPB_PDF_DidStopLoadingDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbPdfRpcServer::PPB_PDF_DidStopLoading(
-      rpc,
-      done,
-      inputs[0]->u.ival
-  );
-}
-
-static void PPB_PDF_SetContentRestrictionDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbPdfRpcServer::PPB_PDF_SetContentRestriction(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival
-  );
-}
-
-static void PPB_PDF_HistogramPDFPageCountDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbPdfRpcServer::PPB_PDF_HistogramPDFPageCount(
-      rpc,
-      done,
-      inputs[0]->u.ival
-  );
-}
-
-static void PPB_PDF_UserMetricsRecordActionDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbPdfRpcServer::PPB_PDF_UserMetricsRecordAction(
-      rpc,
-      done,
-      inputs[0]->u.count, inputs[0]->arrays.carr
-  );
-}
-
-static void PPB_PDF_HasUnsupportedFeatureDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbPdfRpcServer::PPB_PDF_HasUnsupportedFeature(
-      rpc,
-      done,
-      inputs[0]->u.ival
-  );
-}
-
-static void PPB_PDF_SaveAsDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbPdfRpcServer::PPB_PDF_SaveAs(
-      rpc,
-      done,
-      inputs[0]->u.ival
-  );
-}
-
-static void PPB_Scrollbar_CreateDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  PpbScrollbarRpcServer::PPB_Scrollbar_Create(
+  PpbNetworkListPrivateServer::PPB_NetworkList_Private_GetMTU(
       rpc,
       done,
       inputs[0]->u.ival,
@@ -1935,13 +1859,13 @@ static void PPB_Scrollbar_CreateDispatcher(
   );
 }
 
-static void PPB_Scrollbar_IsScrollbarDispatcher(
+static void PPB_NetworkMonitor_Private_CreateDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbScrollbarRpcServer::PPB_Scrollbar_IsScrollbar(
+  PpbNetworkMonitorPrivateServer::PPB_NetworkMonitor_Private_Create(
       rpc,
       done,
       inputs[0]->u.ival,
@@ -1949,107 +1873,17 @@ static void PPB_Scrollbar_IsScrollbarDispatcher(
   );
 }
 
-static void PPB_Scrollbar_IsOverlayDispatcher(
+static void PPB_NetworkMonitor_Private_IsNetworkMonitorDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbScrollbarRpcServer::PPB_Scrollbar_IsOverlay(
+  PpbNetworkMonitorPrivateServer::PPB_NetworkMonitor_Private_IsNetworkMonitor(
       rpc,
       done,
       inputs[0]->u.ival,
       &(outputs[0]->u.ival)
-  );
-}
-
-static void PPB_Scrollbar_GetThicknessDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  PpbScrollbarRpcServer::PPB_Scrollbar_GetThickness(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      &(outputs[0]->u.ival)
-  );
-}
-
-static void PPB_Scrollbar_GetValueDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  PpbScrollbarRpcServer::PPB_Scrollbar_GetValue(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      &(outputs[0]->u.ival)
-  );
-}
-
-static void PPB_Scrollbar_SetValueDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbScrollbarRpcServer::PPB_Scrollbar_SetValue(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival
-  );
-}
-
-static void PPB_Scrollbar_SetDocumentSizeDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbScrollbarRpcServer::PPB_Scrollbar_SetDocumentSize(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival
-  );
-}
-
-static void PPB_Scrollbar_SetTickMarksDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbScrollbarRpcServer::PPB_Scrollbar_SetTickMarks(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.count, inputs[1]->arrays.carr,
-      inputs[2]->u.ival
-  );
-}
-
-static void PPB_Scrollbar_ScrollByDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbScrollbarRpcServer::PPB_Scrollbar_ScrollBy(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival,
-      inputs[2]->u.ival
   );
 }
 
@@ -2396,6 +2230,22 @@ static void PPB_UDPSocket_Private_IsUDPSocketDispatcher(
       rpc,
       done,
       inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_UDPSocket_Private_SetSocketFeatureDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbUDPSocketPrivateRpcServer::PPB_UDPSocket_Private_SetSocketFeature(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.ival,
+      inputs[2]->u.count, inputs[2]->arrays.carr,
       &(outputs[0]->u.ival)
   );
 }
@@ -2972,81 +2822,6 @@ static void PPB_WebSocket_GetURLDispatcher(
   );
 }
 
-static void PPB_Widget_IsWidgetDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  PpbWidgetRpcServer::PPB_Widget_IsWidget(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      &(outputs[0]->u.ival)
-  );
-}
-
-static void PPB_Widget_PaintDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  PpbWidgetRpcServer::PPB_Widget_Paint(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.count, inputs[1]->arrays.carr,
-      inputs[2]->u.ival,
-      &(outputs[0]->u.ival)
-  );
-}
-
-static void PPB_Widget_HandleEventDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  PpbWidgetRpcServer::PPB_Widget_HandleEvent(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival,
-      &(outputs[0]->u.ival)
-  );
-}
-
-static void PPB_Widget_GetLocationDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  PpbWidgetRpcServer::PPB_Widget_GetLocation(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      &(outputs[0]->u.count), outputs[0]->arrays.carr,
-      &(outputs[1]->u.ival)
-  );
-}
-
-static void PPB_Widget_SetLocationDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PpbWidgetRpcServer::PPB_Widget_SetLocation(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.count, inputs[1]->arrays.carr
-  );
-}
-
 static void PPB_Zoom_ZoomChangedDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
@@ -3193,27 +2968,16 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_NetAddress_Private_GetScopeID:C:i", PPB_NetAddress_Private_GetScopeIDDispatcher },
   { "PPB_NetAddress_Private_CreateFromIPv4Address:Ci:C", PPB_NetAddress_Private_CreateFromIPv4AddressDispatcher },
   { "PPB_NetAddress_Private_CreateFromIPv6Address:Cii:C", PPB_NetAddress_Private_CreateFromIPv6AddressDispatcher },
-  { "PPB_PDF_GetLocalizedString:ii:C", PPB_PDF_GetLocalizedStringDispatcher },
-  { "PPB_PDF_GetResourceImage:ii:i", PPB_PDF_GetResourceImageDispatcher },
-  { "PPB_PDF_GetFontFileWithFallback:iCCi:i", PPB_PDF_GetFontFileWithFallbackDispatcher },
-  { "PPB_PDF_GetFontTableForPrivateFontFile:ii:Ci", PPB_PDF_GetFontTableForPrivateFontFileDispatcher },
-  { "PPB_PDF_SearchString:iCCi:Ci", PPB_PDF_SearchStringDispatcher },
-  { "PPB_PDF_DidStartLoading:i:", PPB_PDF_DidStartLoadingDispatcher },
-  { "PPB_PDF_DidStopLoading:i:", PPB_PDF_DidStopLoadingDispatcher },
-  { "PPB_PDF_SetContentRestriction:ii:", PPB_PDF_SetContentRestrictionDispatcher },
-  { "PPB_PDF_HistogramPDFPageCount:i:", PPB_PDF_HistogramPDFPageCountDispatcher },
-  { "PPB_PDF_UserMetricsRecordAction:C:", PPB_PDF_UserMetricsRecordActionDispatcher },
-  { "PPB_PDF_HasUnsupportedFeature:i:", PPB_PDF_HasUnsupportedFeatureDispatcher },
-  { "PPB_PDF_SaveAs:i:", PPB_PDF_SaveAsDispatcher },
-  { "PPB_Scrollbar_Create:ii:i", PPB_Scrollbar_CreateDispatcher },
-  { "PPB_Scrollbar_IsScrollbar:i:i", PPB_Scrollbar_IsScrollbarDispatcher },
-  { "PPB_Scrollbar_IsOverlay:i:i", PPB_Scrollbar_IsOverlayDispatcher },
-  { "PPB_Scrollbar_GetThickness:i:i", PPB_Scrollbar_GetThicknessDispatcher },
-  { "PPB_Scrollbar_GetValue:i:i", PPB_Scrollbar_GetValueDispatcher },
-  { "PPB_Scrollbar_SetValue:ii:", PPB_Scrollbar_SetValueDispatcher },
-  { "PPB_Scrollbar_SetDocumentSize:ii:", PPB_Scrollbar_SetDocumentSizeDispatcher },
-  { "PPB_Scrollbar_SetTickMarks:iCi:", PPB_Scrollbar_SetTickMarksDispatcher },
-  { "PPB_Scrollbar_ScrollBy:iii:", PPB_Scrollbar_ScrollByDispatcher },
+  { "PPB_NetworkList_Private_IsNetworkList:i:i", PPB_NetworkList_Private_IsNetworkListDispatcher },
+  { "PPB_NetworkList_Private_GetCount:i:i", PPB_NetworkList_Private_GetCountDispatcher },
+  { "PPB_NetworkList_Private_GetName:ii:C", PPB_NetworkList_Private_GetNameDispatcher },
+  { "PPB_NetworkList_Private_GetType:ii:i", PPB_NetworkList_Private_GetTypeDispatcher },
+  { "PPB_NetworkList_Private_GetState:ii:i", PPB_NetworkList_Private_GetStateDispatcher },
+  { "PPB_NetworkList_Private_GetIpAddresses:ii:Ci", PPB_NetworkList_Private_GetIpAddressesDispatcher },
+  { "PPB_NetworkList_Private_GetDisplayName:ii:C", PPB_NetworkList_Private_GetDisplayNameDispatcher },
+  { "PPB_NetworkList_Private_GetMTU:ii:i", PPB_NetworkList_Private_GetMTUDispatcher },
+  { "PPB_NetworkMonitor_Private_Create:i:i", PPB_NetworkMonitor_Private_CreateDispatcher },
+  { "PPB_NetworkMonitor_Private_IsNetworkMonitor:i:i", PPB_NetworkMonitor_Private_IsNetworkMonitorDispatcher },
   { "PPB_TCPServerSocket_Private_Create:i:i", PPB_TCPServerSocket_Private_CreateDispatcher },
   { "PPB_TCPServerSocket_Private_IsTCPServerSocket:i:i", PPB_TCPServerSocket_Private_IsTCPServerSocketDispatcher },
   { "PPB_TCPServerSocket_Private_Listen:iCii:i", PPB_TCPServerSocket_Private_ListenDispatcher },
@@ -3237,6 +3001,7 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_Testing_GetDocumentURL:i:CC", PPB_Testing_GetDocumentURLDispatcher },
   { "PPB_UDPSocket_Private_Create:i:i", PPB_UDPSocket_Private_CreateDispatcher },
   { "PPB_UDPSocket_Private_IsUDPSocket:i:i", PPB_UDPSocket_Private_IsUDPSocketDispatcher },
+  { "PPB_UDPSocket_Private_SetSocketFeature:iiC:i", PPB_UDPSocket_Private_SetSocketFeatureDispatcher },
   { "PPB_UDPSocket_Private_Bind:iCi:i", PPB_UDPSocket_Private_BindDispatcher },
   { "PPB_UDPSocket_Private_GetBoundAddress:i:Ci", PPB_UDPSocket_Private_GetBoundAddressDispatcher },
   { "PPB_UDPSocket_Private_RecvFrom:iii:Ci", PPB_UDPSocket_Private_RecvFromDispatcher },
@@ -3275,11 +3040,6 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_WebSocket_GetProtocol:i:C", PPB_WebSocket_GetProtocolDispatcher },
   { "PPB_WebSocket_GetReadyState:i:i", PPB_WebSocket_GetReadyStateDispatcher },
   { "PPB_WebSocket_GetURL:i:C", PPB_WebSocket_GetURLDispatcher },
-  { "PPB_Widget_IsWidget:i:i", PPB_Widget_IsWidgetDispatcher },
-  { "PPB_Widget_Paint:iCi:i", PPB_Widget_PaintDispatcher },
-  { "PPB_Widget_HandleEvent:ii:i", PPB_Widget_HandleEventDispatcher },
-  { "PPB_Widget_GetLocation:i:Ci", PPB_Widget_GetLocationDispatcher },
-  { "PPB_Widget_SetLocation:iC:", PPB_Widget_SetLocationDispatcher },
   { "PPB_Zoom_ZoomChanged:id:", PPB_Zoom_ZoomChangedDispatcher },
   { "PPB_Zoom_ZoomLimitsChanged:idd:", PPB_Zoom_ZoomLimitsChangedDispatcher },
   { NULL, NULL }

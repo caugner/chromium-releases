@@ -11,9 +11,11 @@
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
+#include "chrome/common/extensions/extension_switch_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/text/bytes_formatting.h"
@@ -87,6 +89,15 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
   // Instruct the service to delete the snapshot file.
   service_->DeleteSnapshot(snapshotPath_);
 
+  BrowserWindowController* controller = [BrowserWindowController
+      browserWindowControllerForWindow:self.parentWindow];
+  [controller chromeToMobileBubbleWindowWillClose];
+
+  // Restore the Action Box icon when the bubble closes.
+  LocationBarViewMac* locationBar = [controller locationBarBridge];
+  if (locationBar)
+    locationBar->SetActionBoxIcon(IDR_ACTION_BOX_BUTTON);
+
   // We caught a close so we don't need to observe further notifications.
   bridge_.reset(NULL);
   [progressAnimation_ stopAnimation];
@@ -140,15 +151,25 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
     [window setFrame:windowFrame display:YES animate:NO];
   }
 
-  // Get the anchor point for the bubble in screen coordinates.
-  BrowserWindowController* controller = [BrowserWindowController
-      browserWindowControllerForWindow:self.parentWindow];
-  if ([controller isKindOfClass:[BrowserWindowController class]]) {
-    LocationBarViewMac* locationBar = [controller locationBarBridge];
-    NSPoint bubblePoint = locationBar->GetChromeToMobileBubblePoint();
-    [self setAnchorPoint:[self.parentWindow convertBaseToScreen:bubblePoint]];
+  LocationBarViewMac* locationBar = [[BrowserWindowController
+      browserWindowControllerForWindow:self.parentWindow] locationBarBridge];
+  if (locationBar) {
+    // Get the anchor point for the bubble in screen coordinates.
+    NSPoint bubblePoint = locationBar->GetActionBoxAnchorPoint();
+    bubblePoint = [self.parentWindow convertBaseToScreen:bubblePoint];
+    // Without an arrow, the anchor point of a bubble is the top left corner,
+    // but GetActionBoxAnchorPoint returns the top right corner.
+    bubblePoint.x -= self.bubble.frame.size.width;
+    [self.bubble setArrowLocation:info_bubble::kNoArrow];
+    [self.bubble setCornerFlags:info_bubble::kRoundedBottomCorners];
+    [self.bubble setAlignment:info_bubble::kAlignEdgeToAnchorEdge];
+    [window setContentSize:self.bubble.frame.size];
+    [window setContentView:self.bubble];
+    [self setAnchorPoint:bubblePoint];
+
+    // Show the lit Chrome To Mobile icon while the bubble is open.
+    locationBar->SetActionBoxIcon(IDR_MOBILE_LIT);
   }
-  [self.bubble setArrowLocation:info_bubble::kTopRight];
 
   // Initialize the checkbox to send an offline copy.
   NSString* sendCopyString =
@@ -164,9 +185,6 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
 
   // Generate the MHTML snapshot now to report its size in the bubble.
   service_->GenerateSnapshot(browser_, bridge_->AsWeakPtr());
-
-  // Request a mobile device list update.
-  service_->RequestMobileListUpdate();
 
   [super showWindow:sender];
 }
@@ -187,7 +205,7 @@ void ChromeToMobileBubbleNotificationBridge::OnSendComplete(bool success) {
 
   const DictionaryValue* mobile = NULL;
   if (mobiles->GetDictionary(selected_index, &mobile)) {
-    service_->SendToMobile(*mobile,
+    service_->SendToMobile(mobile,
         ([sendCopy_ state] == NSOnState) ? snapshotPath_ : FilePath(),
         browser_, bridge_->AsWeakPtr());
   } else {

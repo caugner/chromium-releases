@@ -13,7 +13,6 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/env.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/single_display_manager.h"
 #include "ui/aura/shared/root_window_capture_client.h"
@@ -148,6 +147,10 @@ class WebGLTexture : public ui::Texture {
                          GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   }
 
+  virtual WebGraphicsContext3D* HostContext3D() OVERRIDE {
+    return context_;
+  }
+
  private:
   virtual ~WebGLTexture() {
     context_->deleteTexture(texture_id());
@@ -192,8 +195,7 @@ class WebGLBench : public BenchCompositorObserver {
     webgl_.SetBounds(bounds);
     parent_->Add(&webgl_);
 
-    context_.reset(
-        ui::ContextFactory::GetInstance()->CreateOffscreenContext(compositor));
+    context_.reset(ui::ContextFactory::GetInstance()->CreateOffscreenContext());
     context_->makeContextCurrent();
     texture_ = new WebGLTexture(context_.get(), bounds.size());
     fbo_ = context_->createFramebuffer();

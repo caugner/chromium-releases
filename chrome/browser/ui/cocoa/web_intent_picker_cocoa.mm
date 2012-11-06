@@ -161,8 +161,9 @@ void WebIntentPickerCocoa::OnInlineDisposition(const string16& title,
   content::WebContents* web_contents = content::WebContents::Create(
       tab_contents_->profile(),
       tab_util::GetSiteInstanceForNewTab(tab_contents_->profile(), url),
-      MSG_ROUTING_NONE, NULL, NULL);
-  inline_disposition_tab_contents_.reset(new TabContents(web_contents));
+      MSG_ROUTING_NONE, NULL);
+  inline_disposition_tab_contents_.reset(
+      TabContents::Factory::CreateTabContents(web_contents));
   Browser* browser = browser::FindBrowserWithWebContents(
       tab_contents_->web_contents());
   inline_disposition_delegate_.reset(
@@ -175,7 +176,7 @@ void WebIntentPickerCocoa::OnInlineDisposition(const string16& title,
   inline_disposition_tab_contents_->web_contents()->GetController().LoadURL(
       url,
       content::Referrer(),
-      content::PAGE_TRANSITION_START_PAGE,
+      content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       std::string());
   [sheet_controller_ setInlineDispositionTitle:
       base::SysUTF16ToNSString(title)];
@@ -187,7 +188,7 @@ void WebIntentPickerCocoa::OnInlineDisposition(const string16& title,
 void WebIntentPickerCocoa::OnCancelled() {
   DCHECK(delegate_);
   if (!service_invoked)
-    delegate_->OnPickerClosed();
+    delegate_->OnUserCancelledPickerDialog();
   delegate_->OnClosing();
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
@@ -225,18 +226,19 @@ void WebIntentPickerCocoa::OnInlineDispositionAutoResize(
 }
 
 void WebIntentPickerCocoa::OnPendingAsyncCompleted() {
-  DCHECK(sheet_controller_);
-  [sheet_controller_ pendingAsyncCompleted];
 }
 
-void WebIntentPickerCocoa::OnExtensionLinkClicked(const std::string& id) {
+void WebIntentPickerCocoa::OnExtensionLinkClicked(
+    const std::string& id,
+    WindowOpenDisposition disposition) {
   DCHECK(delegate_);
-  delegate_->OnExtensionLinkClicked(id);
+  delegate_->OnExtensionLinkClicked(id, disposition);
 }
 
-void WebIntentPickerCocoa::OnSuggestionsLinkClicked() {
+void WebIntentPickerCocoa::OnSuggestionsLinkClicked(
+    WindowOpenDisposition disposition) {
   DCHECK(delegate_);
-  delegate_->OnSuggestionsLinkClicked();
+  delegate_->OnSuggestionsLinkClicked(disposition);
 }
 
 void WebIntentPickerCocoa::OnChooseAnotherService() {

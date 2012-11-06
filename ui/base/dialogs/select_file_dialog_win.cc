@@ -23,6 +23,7 @@
 #include "base/win/metro.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/shortcut.h"
 #include "base/win/windows_version.h"
 #include "grit/ui_strings.h"
 #include "ui/base/dialogs/base_shell_dialog_win.h"
@@ -75,6 +76,13 @@ bool CallGetSaveFileName(OPENFILENAME* ofn) {
   }
 }
 
+// Distinguish directories from regular files.
+bool IsDirectory(const FilePath& path) {
+  base::PlatformFileInfo file_info;
+  return file_util::GetFileInfo(path, &file_info) ?
+      file_info.is_directory : file_util::EndsWithSeparator(path);
+}
+
 // Get the file type description from the registry. This will be "Text Document"
 // for .txt files, "JPEG Image" for .jpg files, etc. If the registry doesn't
 // have an entry for the file type, we return false, true if the description was
@@ -117,6 +125,9 @@ std::wstring FormatFilterForExtensions(
       l10n_util::GetStringUTF16(IDS_APP_SAVEAS_ALL_FILES);
 
   DCHECK(file_ext.size() >= ext_desc.size());
+
+  if (file_ext.empty())
+    include_all_files = true;
 
   std::wstring result;
 
@@ -286,8 +297,14 @@ bool SaveFileAsWithFilter(HWND owner,
 
   // Set up the initial directory for the dialog.
   std::wstring directory;
-  if (!suggested_name.empty())
-     directory = suggested_path.DirName().value();
+  if (!suggested_name.empty()) {
+    if (IsDirectory(suggested_path)) {
+      directory = suggested_path.value();
+      file_part.clear();
+    } else {
+      directory = suggested_path.DirName().value();
+    }
+  }
 
   save_as.lpstrInitialDir = directory.c_str();
   save_as.lpstrTitle = NULL;
@@ -427,11 +444,8 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
           ui_proxy(MessageLoopForUI::current()->message_loop_proxy()),
           owner(owner),
           params(params) {
-      if (file_types) {
+      if (file_types)
         this->file_types = *file_types;
-      } else {
-        this->file_types.include_all_files = true;
-      }
     }
     SelectFileDialog::Type type;
     std::wstring title;
@@ -686,7 +700,7 @@ bool SelectFileDialogImpl::RunSelectFolderDialog(const std::wstring& title,
 
       // According to MSDN, win2000 will not resolve shortcuts, so we do it
       // ourself.
-      file_util::ResolveShortcut(path);
+      base::win::ResolveShortcut(*path, path, NULL);
     }
     CoTaskMemFree(list);
   }
@@ -715,13 +729,7 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
   FilePath dir;
   // Use lpstrInitialDir to specify the initial directory
   if (!path->empty()) {
-    bool is_dir;
-    base::PlatformFileInfo file_info;
-    if (file_util::GetFileInfo(*path, &file_info))
-      is_dir = file_info.is_directory;
-    else
-      is_dir = file_util::EndsWithSeparator(*path);
-    if (is_dir) {
+    if (IsDirectory(*path)) {
       ofn.lpstrInitialDir = path->value().c_str();
     } else {
       dir = path->DirName();

@@ -10,7 +10,6 @@
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/threading/thread.h"
 #include "net/base/net_errors.h"
 #include "net/socket/socket.h"
 #include "remoting/protocol/fake_session.h"
@@ -44,20 +43,31 @@ class MockMessageReceivedCallback {
 class MessageReaderTest : public testing::Test {
  public:
   MessageReaderTest()
-      : other_thread_("SecondTestThread"),
-        run_task_finished_(false, false) {
+      : in_callback_(false) {
   }
 
-  void RunDoneTaskOnOtherThread(const base::Closure& done_task) {
-    other_thread_.message_loop()->PostTask(
-        FROM_HERE,
-        base::Bind(&MessageReaderTest::RunClosure,
-                   base::Unretained(this), done_task));
+  // Following two methods are used by the ReadFromCallback test.
+  void AddSecondMessage(const base::Closure& task) {
+    AddMessage(kTestMessage2);
+    in_callback_ = true;
+    task.Run();
+    in_callback_ = false;
+  }
+
+  void OnSecondMessage(const base::Closure& task) {
+    EXPECT_FALSE(in_callback_);
+    task.Run();
+  }
+
+  // Used by the DeleteFromCallback() test.
+  void DeleteReader(const base::Closure& task) {
+    reader_.reset();
+    task.Run();
   }
 
  protected:
   virtual void SetUp() OVERRIDE {
-    reader_ = new MessageReader();
+    reader_.reset(new MessageReader());
   }
 
   virtual void TearDown() OVERRIDE {
@@ -82,11 +92,6 @@ class MessageReaderTest : public testing::Test {
     return result == expected;
   }
 
-  void RunClosure(const base::Closure& task) {
-    task.Run();
-    run_task_finished_.Signal();
-  }
-
   void OnMessage(scoped_ptr<CompoundBuffer> buffer,
                  const base::Closure& done_callback) {
     messages_.push_back(buffer.release());
@@ -94,12 +99,11 @@ class MessageReaderTest : public testing::Test {
   }
 
   MessageLoop message_loop_;
-  base::Thread other_thread_;
-  base::WaitableEvent run_task_finished_;
-  scoped_refptr<MessageReader> reader_;
+  scoped_ptr<MessageReader> reader_;
   FakeSocket socket_;
   MockMessageReceivedCallback callback_;
   std::vector<CompoundBuffer*> messages_;
+  bool in_callback_;
 };
 
 // Receive one message and process it with delay
@@ -113,6 +117,7 @@ TEST_F(MessageReaderTest, OneMessage_Delay) {
       .WillOnce(SaveArg<0>(&done_task));
 
   InitReader();
+  message_loop_.RunAllPending();
 
   Mock::VerifyAndClearExpectations(&callback_);
   Mock::VerifyAndClearExpectations(&socket_);
@@ -137,6 +142,7 @@ TEST_F(MessageReaderTest, OneMessage_Instant) {
       .WillOnce(CallDoneTask());
 
   InitReader();
+  message_loop_.RunAllPending();
 
   EXPECT_TRUE(socket_.read_pending());
   EXPECT_EQ(1U, messages_.size());
@@ -156,6 +162,7 @@ TEST_F(MessageReaderTest, TwoMessages_Together) {
       .WillOnce(SaveArg<0>(&done_task2));
 
   InitReader();
+  message_loop_.RunAllPending();
 
   Mock::VerifyAndClearExpectations(&callback_);
   Mock::VerifyAndClearExpectations(&socket_);
@@ -168,10 +175,12 @@ TEST_F(MessageReaderTest, TwoMessages_Together) {
   EXPECT_FALSE(socket_.read_pending());
 
   done_task1.Run();
+  message_loop_.RunAllPending();
 
   EXPECT_FALSE(socket_.read_pending());
 
   done_task2.Run();
+  message_loop_.RunAllPending();
 
   EXPECT_TRUE(socket_.read_pending());
 }
@@ -190,6 +199,7 @@ TEST_F(MessageReaderTest, TwoMessages_Instant) {
       .WillOnce(SaveArg<0>(&done_task2));
 
   InitReader();
+  message_loop_.RunAllPending();
 
   Mock::VerifyAndClearExpectations(&callback_);
   Mock::VerifyAndClearExpectations(&socket_);
@@ -217,6 +227,7 @@ TEST_F(MessageReaderTest, TwoMessages_Instant2) {
       .WillOnce(CallDoneTask());
 
   InitReader();
+  message_loop_.RunAllPending();
 
   EXPECT_TRUE(socket_.read_pending());
 }
@@ -232,6 +243,7 @@ TEST_F(MessageReaderTest, TwoMessages_Separately) {
       .WillOnce(SaveArg<0>(&done_task));
 
   InitReader();
+  message_loop_.RunAllPending();
 
   Mock::VerifyAndClearExpectations(&callback_);
   Mock::VerifyAndClearExpectations(&socket_);
@@ -243,6 +255,7 @@ TEST_F(MessageReaderTest, TwoMessages_Separately) {
   EXPECT_FALSE(socket_.read_pending());
 
   done_task.Run();
+  message_loop_.RunAllPending();
 
   EXPECT_TRUE(socket_.read_pending());
 
@@ -251,6 +264,7 @@ TEST_F(MessageReaderTest, TwoMessages_Separately) {
       .Times(1)
       .WillOnce(SaveArg<0>(&done_task));
   AddMessage(kTestMessage2);
+  message_loop_.RunAllPending();
 
   EXPECT_TRUE(CompareResult(messages_[1], kTestMessage2));
 
@@ -261,32 +275,6 @@ TEST_F(MessageReaderTest, TwoMessages_Separately) {
   done_task.Run();
 
   EXPECT_TRUE(socket_.read_pending());
-}
-
-// Verify that socket operations occur on same thread, even when the OnMessage()
-// callback triggers |done_task| to run on a different thread.
-TEST_F(MessageReaderTest, UseSocketOnCorrectThread) {
-  AddMessage(kTestMessage1);
-  other_thread_.Start();
-
-  EXPECT_CALL(callback_, OnMessage(_))
-      .WillOnce(Invoke(this, &MessageReaderTest::RunDoneTaskOnOtherThread));
-
-  InitReader();
-
-  run_task_finished_.Wait();
-  message_loop_.RunAllPending();
-
-  Mock::VerifyAndClearExpectations(&callback_);
-
-  // Write another message and verify that we receive it.
-  base::Closure done_task;
-  EXPECT_CALL(callback_, OnMessage(_))
-      .WillOnce(SaveArg<0>(&done_task));
-  AddMessage(kTestMessage2);
-  EXPECT_TRUE(CompareResult(messages_[1], kTestMessage2));
-
-  done_task.Run();
 }
 
 // Read() returns error.
@@ -300,6 +288,38 @@ TEST_F(MessageReaderTest, ReadError) {
       .Times(0);
 
   InitReader();
+}
+
+// Verify that we the OnMessage callback is not reentered.
+TEST_F(MessageReaderTest, ReadFromCallback) {
+  AddMessage(kTestMessage1);
+
+  EXPECT_CALL(callback_, OnMessage(_))
+      .Times(2)
+      .WillOnce(Invoke(this, &MessageReaderTest::AddSecondMessage))
+      .WillOnce(Invoke(this, &MessageReaderTest::OnSecondMessage));
+
+  InitReader();
+  message_loop_.RunAllPending();
+
+  EXPECT_TRUE(socket_.read_pending());
+}
+
+// Verify that we stop getting callbacks after deleting MessageReader.
+TEST_F(MessageReaderTest, DeleteFromCallback) {
+  base::Closure done_task1;
+  base::Closure done_task2;
+
+  AddMessage(kTestMessage1);
+  AddMessage(kTestMessage2);
+
+  // OnMessage() should never be called for the second message.
+  EXPECT_CALL(callback_, OnMessage(_))
+      .Times(1)
+      .WillOnce(Invoke(this, &MessageReaderTest::DeleteReader));
+
+  InitReader();
+  message_loop_.RunAllPending();
 }
 
 }  // namespace protocol

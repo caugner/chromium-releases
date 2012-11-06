@@ -13,8 +13,12 @@
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "min_manifest_version": 2
   },
+  "app.runtime": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
   "app.window": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "appNotifications": {
@@ -75,10 +79,6 @@
     // CloudPrint
     "whitelist": ["mfehgcgbbipciphmccgaenjidiccnmng"]
   },
-  "commands": {
-    "channel": "stable",
-    "extension_types": ["extension", "packaged_app"]
-  },
   "contentSettings": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
@@ -100,12 +100,8 @@
     "extension_types": ["extension", "packaged_app"]
   },
   "declarativeWebRequest": {
-    "channel": "dev",
+    "channel": "beta",
     "extension_types": ["extension", "packaged_app"]
-  },
-  "dns": {
-    "channel": "stable",
-    "extension_types": ["platform_app"]
   },
   "downloads": {
     "channel": "dev",
@@ -129,11 +125,7 @@
     "location": "component"
   },
   "fileSystem": {
-    "channel": "dev",
-    "extension_types": ["platform_app"]
-  },
-  "fileSystemWrite": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "fontSettings": {
@@ -183,13 +175,15 @@
     "channel": "stable",
     "extension_types": [ "platform_app" ]
   },
-  "mediaGalleriesAllGalleries": {
+  // TODO(thestig) Remove this as part of http:://crbug.com/144496
+  "mediaGalleriesPrivate": {
     "channel": "stable",
-    "extension_types": [ "platform_app" ]
-  },
-  "mediaGalleriesRead": {
-    "channel": "stable",
-    "extension_types": [ "platform_app" ]
+    "extension_types": [ "platform_app" ],
+    "whitelist": [
+      "ebpbnabdhheoknfklmpddcdijjkmklkp",
+      "efjnaogkjbogokcnohkmnjdojkikgobo",
+      "ejegoaikibpmikoejfephaneibodccma"
+    ]
   },
   "mediaPlayerPrivate": {
     "channel": "stable",
@@ -228,6 +222,20 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
+  "pushMessaging": {
+    "channel": "dev",
+    "extension_types": ["extension", "platform_app"]
+  },
+  "rtcPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app"],
+    "whitelist": [
+      "nckgahadagoaajjgafhacjanaoiihapd",  // Google Talk prod
+      "eggnbpckecmjlblplehfpjjdhhidfdoj",  // Google Talk beta
+      "ppleadejekpmccmnpjdimmlfljlkdfej",  // Google Talk alpha
+      "ljclpkphhpbpinifbeabbhlfddcpfdde"   // Google Talk debug
+    ]
+  },
   // Note: runtime is not actually a permission, but some systems check these
   // values to verify restrictions.
   "runtime": {
@@ -236,7 +244,7 @@
     "min_manifest_version": 2
   },
   "serial": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "socket": {

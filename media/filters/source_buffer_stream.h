@@ -51,9 +51,6 @@ class MEDIA_EXPORT SourceBufferStream {
   // starting at |media_segment_start_time|.
   void OnNewMediaSegment(base::TimeDelta media_segment_start_time);
 
-  // Sets the start time of the stream.
-  void SetStartTime(base::TimeDelta stream_start_time);
-
   // Add the |buffers| to the SourceBufferStream. Buffers within the queue are
   // expected to be in order, but multiple calls to Append() may add buffers out
   // of order or overlapping. Assumes all buffers within |buffers| are in
@@ -69,6 +66,10 @@ class MEDIA_EXPORT SourceBufferStream {
   // Returns true if the SourceBufferStream has seeked to a time without
   // buffered data and is waiting for more data to be appended.
   bool IsSeekPending() const;
+
+  // Notifies the SourceBufferStream that the media duration has been changed to
+  // |duration| so it should drop any data past that point.
+  void OnSetDuration(base::TimeDelta duration);
 
   // Fills |out_buffer| with a new buffer. Buffers are presented in order from
   // the last call to Seek(), or starting with the first buffer appended if
@@ -110,6 +111,12 @@ class MEDIA_EXPORT SourceBufferStream {
 
   // Frees up space if the SourceBufferStream is taking up too much memory.
   void GarbageCollectIfNeeded();
+
+  // Attempts to delete approximately |total_bytes_to_free| amount of data
+  // |ranges_|, starting at the front of |ranges_| and moving linearly forward
+  // through the buffers. Deletes starting from the back if |reverse_direction|
+  // is true. Returns the number of bytes freed.
+  int FreeBuffers(int total_bytes_to_free, bool reverse_direction);
 
   // Appends |new_buffers| into |range_for_new_buffers_itr|, handling start and
   // end overlaps if necessary.
@@ -154,6 +161,25 @@ class MEDIA_EXPORT SourceBufferStream {
   void MergeWithAdjacentRangeIfNecessary(
       const RangeList::iterator& range_with_new_buffers_itr);
 
+  // Deletes the buffers between |start_timestamp|, |end_timestamp| from
+  // |range|. Deletes between [start,end] if |is_range_exclusive| is true, or
+  // (start,end) if |is_range_exclusive| is false.
+  // Buffers are deleted in GOPs, so this method may delete buffers past
+  // |end_timestamp| if the keyframe a buffer depends on was deleted.
+  // Returns true if the |next_buffer_index_| is reset, and places the buffers
+  // removed from the range starting at |next_buffer_index_| in
+  // |deleted_buffers|.
+  bool DeleteBetween(SourceBufferRange* range,
+                     base::TimeDelta start_timestamp,
+                     base::TimeDelta end_timestamp,
+                     bool is_range_exclusive,
+                     BufferQueue* deleted_buffers);
+
+  // Returns true if |second_timestamp| is the timestamp of the next buffer in
+  // sequence after |first_timestamp|, false otherwise.
+  bool AreAdjacentInSequence(
+      base::TimeDelta first_timestamp, base::TimeDelta second_timestamp) const;
+
   // Helper method that returns the timestamp for the next buffer that
   // |selected_range_| will return from GetNextBuffer() call, or kNoTimestamp()
   // if in between seeking (i.e. |selected_range_| is null).
@@ -179,6 +205,9 @@ class MEDIA_EXPORT SourceBufferStream {
   // Sets the |selected_range_| to |range| and resets the next buffer position
   // for the previous |selected_range_|.
   void SetSelectedRange(SourceBufferRange* range);
+
+  // Resets this stream back to an unseeked state.
+  void ResetSeekState();
 
   // Returns true if |seek_timestamp| refers to the beginning of the first range
   // in |ranges_|, false otherwise or if |ranges_| is empty.
@@ -223,9 +252,6 @@ class MEDIA_EXPORT SourceBufferStream {
   std::vector<AudioDecoderConfig*> audio_configs_;
   std::vector<VideoDecoderConfig*> video_configs_;
 
-  // The starting time of the stream.
-  base::TimeDelta stream_start_time_;
-
   // True if more data needs to be appended before the Seek() can complete,
   // false if no Seek() has been requested or the Seek() is completed.
   bool seek_pending_;
@@ -258,8 +284,14 @@ class MEDIA_EXPORT SourceBufferStream {
   // Stores the largest distance between two adjacent buffers in this stream.
   base::TimeDelta max_interbuffer_distance_;
 
-// The maximum amount of data in bytes the stream will keep in memory.
+  // The maximum amount of data in bytes the stream will keep in memory.
   int memory_limit_;
+
+  // Indicates that a kConfigChanged status has been reported by GetNextBuffer()
+  // and GetCurrentXXXDecoderConfig() must be called to update the current
+  // config. GetNextBuffer() must not be called again until
+  // GetCurrentXXXDecoderConfig() has been called.
+  bool config_change_pending_;
 
   DISALLOW_COPY_AND_ASSIGN(SourceBufferStream);
 };

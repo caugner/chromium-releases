@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/logging.h"
 #include "base/stl_util.h"
 #include "content/browser/renderer_host/media/media_stream_settings_requester.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -114,9 +115,8 @@ struct MediaStreamDeviceSettingsRequest : public MediaStreamRequest {
 namespace {
 
 // Sends the request to the appropriate WebContents.
-void DoDeviceRequest(
-    const MediaStreamDeviceSettingsRequest& request,
-    const content::MediaResponseCallback& callback) {
+void DoDeviceRequest(const MediaStreamDeviceSettingsRequest& request,
+                     const content::MediaResponseCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Send the permission request to the web contents.
@@ -135,11 +135,11 @@ void DoDeviceRequest(
 
 bool IsRequestReadyForView(
     media_stream::MediaStreamDeviceSettingsRequest* request) {
-  if ((request->options.audio && request->devices_full.count(
-           content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE) == 0) ||
-      (request->options.video && request->devices_full.count(
-           content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE) == 0)) {
-     return false;
+  if ((content::IsAudioMediaType(request->options.audio_type) &&
+       request->devices_full.count(request->options.audio_type) == 0) ||
+      (content::IsVideoMediaType(request->options.video_type) &&
+       request->devices_full.count(request->options.video_type) == 0)) {
+    return false;
   }
 
   // We have got all the requested devices, it is ready if it has not
@@ -165,17 +165,21 @@ void MediaStreamDeviceSettings::RequestCaptureDeviceUsage(
     const std::string& label, int render_process_id, int render_view_id,
     const StreamOptions& request_options, const GURL& security_origin) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(requests_.find(label) == requests_.end());
 
   // Create a new request.
-  requests_.insert(std::make_pair(label, new MediaStreamDeviceSettingsRequest(
-      render_process_id, render_view_id, security_origin, request_options)));
+  if (!requests_.insert(std::make_pair(label,
+                                       new MediaStreamDeviceSettingsRequest(
+                                           render_process_id,
+                                           render_view_id,
+                                           security_origin,
+                                           request_options))).second) {
+    NOTREACHED();
+  }
 }
 
 void MediaStreamDeviceSettings::RemovePendingCaptureRequest(
     const std::string& label) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
   SettingsRequests::iterator request_it = requests_.find(label);
   if (request_it != requests_.end()) {
     // Proceed the next pending request for the same page.
@@ -207,12 +211,15 @@ void MediaStreamDeviceSettings::AvailableDevices(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   SettingsRequests::iterator request_it = requests_.find(label);
-  DCHECK(request_it != requests_.end());
+  if (request_it == requests_.end()) {
+    NOTREACHED();
+    return;
+  }
 
   // Add the answer for the request.
   MediaStreamDeviceSettingsRequest* request = request_it->second;
-  DCHECK_EQ(request->devices_full.count(stream_type), static_cast<size_t>(0)) <<
-      "This request already has a list of devices for this stream type.";
+  DCHECK_EQ(request->devices_full.count(stream_type), static_cast<size_t>(0))
+      << "This request already has a list of devices for this stream type.";
   request->devices_full[stream_type] = devices;
 
   if (IsRequestReadyForView(request)) {
@@ -235,14 +242,13 @@ void MediaStreamDeviceSettings::PostResponse(
     const std::string& label,
     const content::MediaStreamDevices& devices) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
   SettingsRequests::iterator req = requests_.find(label);
   // Return if the request has been removed.
   if (req == requests_.end())
     return;
 
   DCHECK(requester_);
-  MediaStreamDeviceSettingsRequest* request = req->second;
+  scoped_ptr<MediaStreamDeviceSettingsRequest> request(req->second);
   requests_.erase(req);
 
   // Look for queued requests for the same view. If there is a pending request,
@@ -265,7 +271,6 @@ void MediaStreamDeviceSettings::PostResponse(
   } else {
     requester_->SettingsError(label);
   }
-  delete request;
 }
 
 void MediaStreamDeviceSettings::UseFakeUI() {
@@ -312,7 +317,12 @@ void MediaStreamDeviceSettings::ProcessNextRequestForView(
 }
 
 void MediaStreamDeviceSettings::PostRequestToUI(const std::string& label) {
-  MediaStreamDeviceSettingsRequest* request = requests_[label];
+  SettingsRequests::iterator request_it = requests_.find(label);
+  if (request_it == requests_.end()) {
+    NOTREACHED();
+    return;
+  }
+  MediaStreamDeviceSettingsRequest* request = request_it->second;
   DCHECK(request != NULL);
 
   request->posted_task = true;

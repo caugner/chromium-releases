@@ -33,8 +33,8 @@ class FakeDownloadItem : public MockDownloadItem {
   explicit FakeDownloadItem()
       : state_(IN_PROGRESS) {
   }
-  ~FakeDownloadItem() {
-    SetState(REMOVING);
+  virtual ~FakeDownloadItem() {
+    FOR_EACH_OBSERVER(Observer, observers_, OnDownloadDestroyed(this));
     EXPECT_EQ(0u, observers_.size());
   }
   virtual void AddObserver(Observer* observer) OVERRIDE {
@@ -60,8 +60,6 @@ class FakeDownloadItem : public MockDownloadItem {
   DownloadState state_;
   ObserverList<Observer> observers_;
 };
-
-}  // namespace
 
 class DownloadPathReservationTrackerTest : public testing::Test {
  public:
@@ -129,7 +127,7 @@ FilePath DownloadPathReservationTrackerTest::GetPathInDownloadsDirectory(
 }
 
 bool DownloadPathReservationTrackerTest::IsPathInUse(const FilePath& path) {
-  return DownloadPathReservationTracker::GetInstance()->IsPathInUse(path);
+  return DownloadPathReservationTracker::IsPathInUseForTesting(path);
 }
 
 void DownloadPathReservationTrackerTest::CallGetReservedPath(
@@ -159,6 +157,8 @@ void DownloadPathReservationTrackerTest::TestReservedPathCallback(
   *return_path = path;
   *return_verified = verified;
 }
+
+}  // namespace
 
 // A basic reservation is acquired and committed.
 TEST_F(DownloadPathReservationTrackerTest, BasicReservation) {
@@ -238,10 +238,10 @@ TEST_F(DownloadPathReservationTrackerTest, ConflictingFiles) {
   EXPECT_TRUE(IsPathInUse(path));
   EXPECT_TRUE(IsPathInUse(reserved_path));
   EXPECT_TRUE(verified);
-  // The path should be uniquified, skipping over foo.txt and
+  // The path should be uniquified, skipping over foo.txt but not over
   // "foo (1).txt.crdownload"
   EXPECT_EQ(
-      GetPathInDownloadsDirectory(FILE_PATH_LITERAL("foo (2).txt")).value(),
+      GetPathInDownloadsDirectory(FILE_PATH_LITERAL("foo (1).txt")).value(),
       reserved_path.value());
 
   item.reset();

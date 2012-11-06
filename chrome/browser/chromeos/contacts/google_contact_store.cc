@@ -13,8 +13,7 @@
 #include "chrome/browser/chromeos/contacts/contact_database.h"
 #include "chrome/browser/chromeos/contacts/contact_store_observer.h"
 #include "chrome/browser/chromeos/gdata/gdata_contacts_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/google_apis/gdata_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -67,31 +66,50 @@ void GoogleContactStore::TestAPI::SetDatabase(ContactDatabaseInterface* db) {
 
 void GoogleContactStore::TestAPI::SetGDataService(
     gdata::GDataContactsServiceInterface* service) {
-  store_->gdata_service_for_testing_.reset(service);
+  store_->gdata_service_.reset(service);
 }
 
 void GoogleContactStore::TestAPI::DoUpdate() {
   store_->UpdateContacts();
 }
 
+void GoogleContactStore::TestAPI::NotifyAboutNetworkStateChange(bool online) {
+  net::NetworkChangeNotifier::ConnectionType type =
+      online ?
+      net::NetworkChangeNotifier::CONNECTION_UNKNOWN :
+      net::NetworkChangeNotifier::CONNECTION_NONE;
+  store_->OnConnectionTypeChanged(type);
+}
+
 GoogleContactStore::GoogleContactStore(Profile* profile)
     : profile_(profile),
-      contacts_deleter_(&contacts_),
       db_(new ContactDatabase),
       update_delay_on_next_failure_(
           base::TimeDelta::FromSeconds(kUpdateFailureInitialRetrySec)),
+      is_online_(true),
+      should_update_when_online_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+  is_online_ = !net::NetworkChangeNotifier::IsOffline();
 }
 
 GoogleContactStore::~GoogleContactStore() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   weak_ptr_factory_.InvalidateWeakPtrs();
+  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
   DestroyDatabase();
 }
 
 void GoogleContactStore::Init() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // Create a GData service if one hasn't already been assigned for testing.
+  if (!gdata_service_.get()) {
+    gdata_service_.reset(new gdata::GDataContactsService(profile_));
+    gdata_service_->Initialize();
+  }
+
   FilePath db_path = profile_->GetPath().Append(kDatabaseDirectoryName);
   VLOG(1) << "Initializing contact database \"" << db_path.value() << "\" for "
           << profile_->GetProfileName();
@@ -110,11 +128,11 @@ void GoogleContactStore::AppendContacts(ContactPointers* contacts_out) {
   }
 }
 
-const Contact* GoogleContactStore::GetContactByProviderId(
-    const std::string& provider_id) {
+const Contact* GoogleContactStore::GetContactById(
+    const std::string& contact_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ContactMap::const_iterator it = contacts_.find(provider_id);
-  return (it != contacts_.end() && !it->second->deleted()) ? it->second : NULL;
+  const Contact* contact = contacts_.Find(contact_id);
+  return (contact && !contact->deleted()) ? contact : NULL;
 }
 
 void GoogleContactStore::AddObserver(ContactStoreObserver* observer) {
@@ -127,6 +145,17 @@ void GoogleContactStore::RemoveObserver(ContactStoreObserver* observer) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(observer);
   observers_.RemoveObserver(observer);
+}
+
+void GoogleContactStore::OnConnectionTypeChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  bool was_online = is_online_;
+  is_online_ = (type != net::NetworkChangeNotifier::CONNECTION_NONE);
+  if (!was_online && is_online_ && should_update_when_online_) {
+    should_update_when_online_ = false;
+    UpdateContacts();
+  }
 }
 
 base::Time GoogleContactStore::GetCurrentTime() const {
@@ -145,6 +174,14 @@ void GoogleContactStore::DestroyDatabase() {
 
 void GoogleContactStore::UpdateContacts() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // If we're offline, defer the update.
+  if (!is_online_) {
+    VLOG(1) << "Deferring contact update due to offline state";
+    should_update_when_online_ = true;
+    return;
+  }
+
   base::Time min_update_time;
   base::TimeDelta time_since_last_update =
       last_successful_update_start_time_.is_null() ?
@@ -170,13 +207,7 @@ void GoogleContactStore::UpdateContacts() {
             << profile_->GetProfileName();
   }
 
-  gdata::GDataContactsServiceInterface* service =
-      gdata_service_for_testing_.get() ?
-      gdata_service_for_testing_.get() :
-      gdata::GDataSystemServiceFactory::GetForProfile(profile_)->
-          contacts_service();
-  DCHECK(service);
-  service->DownloadContacts(
+  gdata_service_->DownloadContacts(
       base::Bind(&GoogleContactStore::OnDownloadSuccess,
                  weak_ptr_factory_.GetWeakPtr(),
                  min_update_time.is_null(),
@@ -209,45 +240,13 @@ void GoogleContactStore::MergeContacts(
     bool is_full_update,
     scoped_ptr<ScopedVector<Contact> > updated_contacts) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (is_full_update) {
-    STLDeleteValues(&contacts_);
-    contacts_.clear();
-  }
-
-  for (ScopedVector<Contact>::iterator it = updated_contacts->begin();
-       it != updated_contacts->end(); ++it) {
-    Contact* contact = *it;
-    VLOG(1) << "Updating " << contact->provider_id();
-    ContactMap::iterator map_it = contacts_.find(contact->provider_id());
-    if (map_it == contacts_.end()) {
-      contacts_[contact->provider_id()] = contact;
-    } else {
-      delete map_it->second;
-      map_it->second = contact;
-    }
-  }
-
-  // Make sure that the Contact objects won't be destroyed when
-  // |updated_contacts| is destroyed.
+  if (is_full_update)
+    contacts_.Clear();
   size_t num_updated_contacts = updated_contacts->size();
-  updated_contacts->weak_clear();
+  contacts_.Merge(updated_contacts.Pass(), ContactMap::KEEP_DELETED_CONTACTS);
 
-  if (is_full_update || num_updated_contacts > 0) {
-    // Find the latest update time.
-    last_contact_update_time_ = base::Time();
-    for (ContactMap::const_iterator it = contacts_.begin();
-         it != contacts_.end(); ++it) {
-      const Contact* contact = it->second;
-      base::Time update_time =
-          base::Time::FromInternalValue(contact->update_time());
-
-      if (!update_time.is_null() &&
-          (last_contact_update_time_.is_null() ||
-           last_contact_update_time_ < update_time)) {
-        last_contact_update_time_ = update_time;
-      }
-    }
-  }
+  if (is_full_update || num_updated_contacts > 0)
+    last_contact_update_time_ = contacts_.GetMaxUpdateTime();
   VLOG(1) << "Last contact update time is "
           << (last_contact_update_time_.is_null() ?
               std::string("null") :
@@ -273,15 +272,18 @@ void GoogleContactStore::OnDownloadSuccess(
   MergeContacts(is_full_update, updated_contacts.Pass());
   last_successful_update_start_time_ = update_start_time;
 
-  if (is_full_update || got_updates > 0) {
+  if (is_full_update || got_updates) {
     FOR_EACH_OBSERVER(ContactStoreObserver,
                       observers_,
                       OnContactsUpdated(this));
   }
 
   if (db_) {
+    // Even if this was an incremental update and we didn't get any updated
+    // contacts, we still want to write updated metadata containing
+    // |update_start_time|.
     VLOG(1) << "Saving " << contacts_to_save_to_db->size() << " contact(s) to "
-            << "database as " << (is_full_update ? "full" : "partial")
+            << "database as " << (is_full_update ? "full" : "incremental")
             << " update";
     scoped_ptr<UpdateMetadata> metadata(new UpdateMetadata);
     metadata->set_last_update_start_time(update_start_time.ToInternalValue());

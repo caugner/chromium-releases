@@ -15,15 +15,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "base/time.h"
-#include "content/browser/renderer_host/pepper/content_browser_pepper_host_factory.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "net/base/network_change_notifier.h"
 #include "net/base/net_util.h"
+#include "net/base/network_change_notifier.h"
 #include "net/base/ssl_config_service.h"
 #include "net/socket/stream_socket.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
 
@@ -73,8 +73,7 @@ class PepperMessageFilter
   // Constructor when used in the context of a PPAPI process (the argument is
   // provided for sanity checking).
   PepperMessageFilter(ProcessType type,
-                      net::HostResolver* host_resolver,
-                      const ppapi::PpapiPermissions& perms);
+                      net::HostResolver* host_resolver);
 
   // content::BrowserMessageFilter methods.
   virtual void OverrideThreadForMessage(
@@ -154,6 +153,10 @@ class PepperMessageFilter
   void OnUDPCreate(int32 routing_id,
                    uint32 plugin_dispatcher_id,
                    uint32* socket_id);
+  void OnUDPSetBoolSocketFeature(int32 routing_id,
+                                 uint32 socket_id,
+                                 int32_t name,
+                                 bool value);
   void OnUDPBind(int32 routing_id,
                  uint32 socket_id,
                  const PP_NetAddress_Private& addr);
@@ -219,7 +222,6 @@ class PepperMessageFilter
                                  ppapi::PPB_X509Certificate_Fields* result);
   void OnUpdateActivity();
   void OnGetDeviceID(std::string* id);
-  void OnGetDeviceIDAsync(int32_t routing_id, PP_Resource resource);
   void OnGetLocalDataRestrictions(const GURL& document_url,
                                   const GURL& plugin_url,
                                   PP_FlashLSORestrictions* restrictions);
@@ -244,11 +246,6 @@ class PepperMessageFilter
 
   // When non-NULL, this should be used instead of the host_resolver_.
   content::ResourceContext* const resource_context_;
-
-  ppapi::PpapiPermissions permissions_;
-
-  content::ContentBrowserPepperHostFactory host_factory_;
-  ppapi::host::PpapiHost ppapi_host_;
 
   // When non-NULL, this should be used instead of the resource_context_. Use
   // GetHostResolver instead of accessing directly.

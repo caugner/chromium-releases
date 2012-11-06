@@ -14,7 +14,6 @@
 #include "media/base/decryptor_client.h"
 #include "media/base/pipeline.h"
 #include "media/filters/chunk_demuxer.h"
-#include "media/filters/chunk_demuxer_client.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "webkit/media/buffered_data_source.h"
 #include "webkit/media/skcanvas_video_renderer.h"
@@ -42,7 +41,6 @@ class WebMediaPlayerImpl;
 // the render thread that WebMediaPlayerImpl is running on.
 class WebMediaPlayerProxy
     : public base::RefCountedThreadSafe<WebMediaPlayerProxy>,
-      public media::ChunkDemuxerClient,
       public media::DecryptorClient {
  public:
   WebMediaPlayerProxy(const scoped_refptr<base::MessageLoopProxy>& render_loop,
@@ -60,14 +58,8 @@ class WebMediaPlayerProxy
     frame_provider_ = frame_provider;
   }
 
-  void set_video_decoder(
-      const scoped_refptr<media::FFmpegVideoDecoder>& video_decoder) {
-    video_decoder_ = video_decoder;
-  }
-
   // Methods for Filter -> WebMediaPlayerImpl communication.
   void Repaint();
-  void SetOpaque(bool opaque);
 
   // Methods for WebMediaPlayerImpl -> Filter communication.
   void Paint(SkCanvas* canvas, const gfx::Rect& dest_rect, uint8_t alpha);
@@ -78,31 +70,6 @@ class WebMediaPlayerProxy
   bool DidPassCORSAccessCheck() const;
 
   void AbortDataSource();
-
-  // Methods for Pipeline -> WebMediaPlayerImpl communication.
-  void PipelineInitializationCallback(media::PipelineStatus status);
-  void PipelineSeekCallback(media::PipelineStatus status);
-  void PipelineEndedCallback(media::PipelineStatus status);
-  void PipelineErrorCallback(media::PipelineStatus error);
-
-  // ChunkDemuxerClient implementation.
-  virtual void DemuxerOpened(media::ChunkDemuxer* demuxer) OVERRIDE;
-  virtual void DemuxerClosed() OVERRIDE;
-  virtual void DemuxerNeedKey(scoped_array<uint8> init_data,
-                              int init_data_size) OVERRIDE;
-
-  // Methods for Demuxer communication.
-  void DemuxerStartWaitingForSeek();
-  media::ChunkDemuxer::Status DemuxerAddId(const std::string& id,
-                                           const std::string& type,
-                                           std::vector<std::string>& codecs);
-  void DemuxerRemoveId(const std::string& id);
-  media::Ranges<base::TimeDelta> DemuxerBufferedRange(const std::string& id);
-  bool DemuxerAppend(const std::string& id, const uint8* data, size_t length);
-  void DemuxerAbort(const std::string& id);
-  void DemuxerEndOfStream(media::PipelineStatus status);
-  void DemuxerShutdown();
-  bool DemuxerSetTimestampOffset(const std::string& id, double offset);
 
   // DecryptorClient implementation.
   virtual void KeyAdded(const std::string& key_system,
@@ -127,25 +94,6 @@ class WebMediaPlayerProxy
 
   // Invoke |webmediaplayer_| to perform a repaint.
   void RepaintTask();
-
-  // Notify |webmediaplayer_| that initialization has finished.
-  void PipelineInitializationTask(media::PipelineStatus status);
-
-  // Notify |webmediaplayer_| that a seek has finished.
-  void PipelineSeekTask(media::PipelineStatus status);
-
-  // Notify |webmediaplayer_| that the media has ended.
-  void PipelineEndedTask(media::PipelineStatus status);
-
-  // Notify |webmediaplayer_| that a pipeline error has occurred during
-  // playback.
-  void PipelineErrorTask(media::PipelineStatus error);
-
-  // Inform |webmediaplayer_| whether the video content is opaque.
-  void SetOpaqueTask(bool opaque);
-
-  void DemuxerOpenedTask(const scoped_refptr<media::ChunkDemuxer>& demuxer);
-  void DemuxerClosedTask();
 
   // Notify |webmediaplayer_| that a key has been added.
   void KeyAddedTask(const std::string& key_system,
@@ -177,12 +125,9 @@ class WebMediaPlayerProxy
   scoped_refptr<BufferedDataSource> data_source_;
   scoped_refptr<media::VideoRendererBase> frame_provider_;
   SkCanvasVideoRenderer video_renderer_;
-  scoped_refptr<media::FFmpegVideoDecoder> video_decoder_;
 
   base::Lock lock_;
   int outstanding_repaints_;
-
-  scoped_refptr<media::ChunkDemuxer> chunk_demuxer_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(WebMediaPlayerProxy);
 };

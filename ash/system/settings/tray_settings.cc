@@ -11,8 +11,8 @@
 #include "ash/system/tray/tray_views.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -32,11 +32,13 @@ class SettingsDefaultView : public ash::internal::ActionableView {
  public:
   explicit SettingsDefaultView(user::LoginStatus status)
       : login_status_(status),
+        label_(NULL),
         power_status_view_(NULL) {
     SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal,
         ash::kTrayPopupPaddingHorizontal, 0,
         ash::kTrayPopupPaddingBetweenItems));
 
+    bool power_view_right_align = false;
     if (login_status_ != user::LOGGED_IN_NONE &&
         login_status_ != user::LOGGED_IN_LOCKED) {
       ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
@@ -50,13 +52,15 @@ class SettingsDefaultView : public ash::internal::ActionableView {
       label_ = new views::Label(text);
       AddChildView(label_);
       SetAccessibleName(text);
+
+      power_view_right_align = true;
     }
 
     PowerSupplyStatus power_status =
         ash::Shell::GetInstance()->tray_delegate()->GetPowerSupplyStatus();
     if (power_status.battery_is_present) {
       power_status_view_ = new ash::internal::PowerStatusView(
-          ash::internal::PowerStatusView::VIEW_DEFAULT);
+          ash::internal::PowerStatusView::VIEW_DEFAULT, power_view_right_align);
       AddChildView(power_status_view_);
       UpdatePowerStatus(power_status);
     }
@@ -70,7 +74,7 @@ class SettingsDefaultView : public ash::internal::ActionableView {
   }
 
   // Overridden from ash::internal::ActionableView.
-  virtual bool PerformAction(const views::Event& event) OVERRIDE {
+  virtual bool PerformAction(const ui::Event& event) OVERRIDE {
     if (login_status_ == user::LOGGED_IN_NONE ||
         login_status_ == user::LOGGED_IN_LOCKED)
       return false;
@@ -81,11 +85,11 @@ class SettingsDefaultView : public ash::internal::ActionableView {
 
   // Overridden from views::View.
   virtual void Layout() OVERRIDE {
-    // Let the box-layout do the layout first. Then move power_status_view_
-    // to right align if it is created.
     views::View::Layout();
 
-    if (power_status_view_) {
+    if (label_ && power_status_view_) {
+      // Let the box-layout do the layout first. Then move power_status_view_
+      // to right align if it is created.
       gfx::Size size = power_status_view_->GetPreferredSize();
       gfx::Rect bounds(size);
       bounds.set_x(width() - size.width() - ash::kTrayPopupPaddingBetweenItems);

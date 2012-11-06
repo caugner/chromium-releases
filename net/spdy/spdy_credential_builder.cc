@@ -8,7 +8,6 @@
 #include "base/string_piece.h"
 #include "crypto/ec_private_key.h"
 #include "crypto/ec_signature_creator.h"
-#include "crypto/signature_creator.h"
 #include "net/base/asn1_util.h"
 #include "net/base/server_bound_cert_service.h"
 #include "net/base/net_errors.h"
@@ -26,7 +25,7 @@ std::vector<uint8> ToVector(base::StringPiece piece) {
 }  // namespace
 
 // static
-int SpdyCredentialBuilder::Build(std::string tls_unique,
+int SpdyCredentialBuilder::Build(const std::string& tls_unique,
                                  SSLClientCertType type,
                                  const std::string& key,
                                  const std::string& cert,
@@ -73,7 +72,8 @@ int SpdyCredentialBuilder::Build(std::string tls_unique,
 }
 
 // static
-std::string SpdyCredentialBuilder::GetCredentialSecret(std::string tls_unique) {
+std::string SpdyCredentialBuilder::GetCredentialSecret(
+    const std::string& tls_unique) {
   const char prefix[] = "SPDY CREDENTIAL ChannelID\0client -> server";
   std::string secret(prefix, arraysize(prefix));
   secret.append(tls_unique);

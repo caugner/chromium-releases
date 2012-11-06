@@ -46,9 +46,22 @@ void PaginationModel::SelectPage(int page, bool animate) {
       // Creates an animation if there is not one.
       StartTranstionAnimation(page);
       return;
-    } else if (transition_.target_page != page) {
-      // If there is a running transition, remembers it if it's new.
-      pending_selected_page_ = page;
+    } else {
+      const bool showing = transition_animation_->IsShowing();
+      const int from_page = showing ? selected_page_ :  transition_.target_page;
+      const int to_page = showing ? transition_.target_page : selected_page_;
+
+      if (from_page == page) {
+        if (showing)
+          transition_animation_->Hide();
+        else
+          transition_animation_->Show();
+        pending_selected_page_ = -1;
+      } else if (to_page != page) {
+        pending_selected_page_ = page;
+      } else {
+        pending_selected_page_ = -1;
+      }
     }
   } else {
     DCHECK(page >= 0 && page < total_pages_);
@@ -56,7 +69,7 @@ void PaginationModel::SelectPage(int page, bool animate) {
     if (page == selected_page_)
       return;
 
-    ResetTranstionAnimation();
+    ResetTransitionAnimation();
 
     int old_selected = selected_page_;
     selected_page_ = page;
@@ -107,16 +120,17 @@ void PaginationModel::UpdateScroll(double delta) {
   if (progress < 0) {
     clear_transition();
   } else if (progress > 1) {
-    if (is_valid_page(transition_.target_page))
+    if (is_valid_page(transition_.target_page)) {
       SelectPage(transition_.target_page, false);
-    clear_transition();
+      clear_transition();
+    }
   } else {
     transition_.progress = progress;
     NotifyTransitionChanged();
   }
 }
 
-void PaginationModel::EndScroll() {
+void PaginationModel::EndScroll(bool cancel) {
   if (!has_transition())
     return;
 
@@ -125,8 +139,13 @@ void PaginationModel::EndScroll() {
 
   // Always call Show to ensure animation will run.
   transition_animation_->Show();
-  if (transition_.progress < 0.5)
+  if (cancel)
     transition_animation_->Hide();
+}
+
+bool PaginationModel::IsRevertingCurrentTransition() const {
+  // Use !IsShowing() so that we return true at the end of hide animation.
+  return transition_animation_.get() && !transition_animation_->IsShowing();
 }
 
 void PaginationModel::AddObserver(PaginationModelObserver* observer) {
@@ -152,7 +171,7 @@ int PaginationModel::CalculateTargetPage(int delta) const {
   DCHECK_GT(total_pages_, 0);
 
   int current_page = selected_page_;
-  if (transition_animation_.get()) {
+  if (transition_animation_.get() && transition_animation_->IsShowing()) {
     current_page = pending_selected_page_ >= 0 ?
         pending_selected_page_ : transition_.target_page;
   }
@@ -181,11 +200,12 @@ void PaginationModel::StartTranstionAnimation(int target_page) {
 
 void PaginationModel::CreateTransitionAnimation() {
   transition_animation_.reset(new ui::SlideAnimation(this));
+  transition_animation_->SetTweenType(ui::Tween::LINEAR);
   if (transition_duration_ms_)
     transition_animation_->SetSlideDuration(transition_duration_ms_);
 }
 
-void PaginationModel::ResetTranstionAnimation() {
+void PaginationModel::ResetTransitionAnimation() {
   transition_animation_.reset();
   transition_.target_page = -1;
   transition_.progress = 0;
@@ -216,7 +236,7 @@ void PaginationModel::AnimationEnded(const ui::Animation* animation) {
     SelectPage(transition_.target_page, false /* animate */);
   } else if (transition_animation_->GetCurrentValue() == 0) {
     // Hiding animation ends. No page change should happen.
-    ResetTranstionAnimation();
+    ResetTransitionAnimation();
   }
 
   if (next_target >= 0)

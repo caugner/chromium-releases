@@ -24,6 +24,10 @@ std::string GetWebstoreLaunchURL() {
   return gallery_prefix;
 }
 
+std::string GetExtensionGalleryURL() {
+  return GetWebstoreLaunchURL() + "/category/extensions";
+}
+
 std::string GetWebstoreItemDetailURLPrefix() {
   return GetWebstoreLaunchURL() + "/detail/";
 }
@@ -109,6 +113,7 @@ namespace extension_info_keys {
   const char kNameKey[] = "name";
   const char kOfflineEnabledKey[] = "offlineEnabled";
   const char kOptionsUrlKey[] = "optionsUrl";
+  const char kDetailsUrlKey[] = "detailsUrl";
   const char kVersionKey[] = "version";
 
 }  // namespace extension_filenames
@@ -130,6 +135,7 @@ const char kAppLaunchHistogram[] = "Extensions.AppLaunch";
 const char kAccessExtensionPath[] =
     "/usr/share/chromeos-assets/accessibility/extensions";
 const char kChromeVoxDirectoryName[] = "access_chromevox";
+const char kWallpaperManagerId[] = "obklkkbkpaoaejdabbfldmcfplpdgolj";
 #endif
 
 const char kAppStateNotInstalled[] = "not_installed";
@@ -144,5 +150,34 @@ const char kMediaFileSystemPathPart[] = "_";
 const char kAppNotificationsIncognitoError[] =
     "This API is not accessible by 'split' mode "
     "extensions in incognito windows.";
+
+const int kExtensionIconSizes[] = {
+  EXTENSION_ICON_GIGANTOR,  // 512
+  EXTENSION_ICON_EXTRA_LARGE,  // 256
+  EXTENSION_ICON_LARGE,  // 128
+  EXTENSION_ICON_MEDIUM,  // 48
+  EXTENSION_ICON_SMALL,  // 32
+  EXTENSION_ICON_SMALLISH,  // 24
+  EXTENSION_ICON_BITTY  // 16
+};
+
+const size_t kNumExtensionIconSizes =
+    arraysize(kExtensionIconSizes);
+
+const int kExtensionActionIconSizes[] = {
+  EXTENSION_ICON_ACTION,  // 19,
+  2 * EXTENSION_ICON_ACTION  // 38
+};
+
+const size_t kNumExtensionActionIconSizes =
+    arraysize(kExtensionActionIconSizes);
+
+const int kScriptBadgeIconSizes[] = {
+  EXTENSION_ICON_BITTY,  // 16
+  2 * EXTENSION_ICON_BITTY  // 32
+};
+
+const size_t kNumScriptBadgeIconSizes =
+    arraysize(kScriptBadgeIconSizes);
 
 }  // namespace extension_misc

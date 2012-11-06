@@ -21,6 +21,8 @@
 #include "ui/gfx/blit.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
+#include "ui/gfx/skia_util.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/gfx_conversion.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
@@ -248,11 +250,8 @@ void PPB_Graphics2D_Impl::PaintImageData(PP_Resource image_data,
   operation.paint_image = image_resource;
   if (!ValidateAndConvertRect(src_rect, image_resource->width(),
                               image_resource->height(),
-                              &operation.paint_src_rect)) {
-    Log(PP_LOGLEVEL_ERROR,
-        "PPB_Graphics2D.PaintImageData: Rectangle is outside bounds.");
+                              &operation.paint_src_rect))
     return;
-  }
 
   // Validate the bitmap position using the previously-validated rect, there
   // should be no painted area outside of the image.
@@ -278,11 +277,8 @@ void PPB_Graphics2D_Impl::Scroll(const PP_Rect* clip_rect,
   if (!ValidateAndConvertRect(clip_rect,
                               image_data_->width(),
                               image_data_->height(),
-                              &operation.scroll_clip_rect)) {
-    Log(PP_LOGLEVEL_ERROR,
-        "PPB_Graphics2D.Scroll: Rectangle is outside bounds.");
+                              &operation.scroll_clip_rect))
     return;
-  }
 
   // If we're being asked to scroll by more than the clip rect size, just
   // ignore this scroll command and say it worked.
@@ -527,7 +523,7 @@ void PPB_Graphics2D_Impl::Paint(WebKit::WebCanvas* canvas,
           data_provider, NULL, false, kCGRenderingIntentDefault));
 
   // Flip the transform
-  CGContextSaveGState(canvas);
+  gfx::ScopedCGContextSaveGState save_gstate(canvas)
   float window_height = static_cast<float>(CGBitmapContextGetHeight(canvas));
   CGContextTranslateCTM(canvas, 0, window_height);
   CGContextScaleCTM(canvas, 1.0, -1.0);
@@ -549,7 +545,7 @@ void PPB_Graphics2D_Impl::Paint(WebKit::WebCanvas* canvas,
       plugin_rect.height();
   bounds.size.width = plugin_rect.width();
   bounds.size.height = plugin_rect.height();
-
+  // TODO(yzshen): We should take |paint_rect| into consideration as well.
   CGContextClipToRect(canvas, bounds);
 
   // TODO(jhorwich) Figure out if this code is even active anymore, and if so
@@ -560,15 +556,13 @@ void PPB_Graphics2D_Impl::Paint(WebKit::WebCanvas* canvas,
   // if the is_always_opaque_ flag is set. Must ensure bitmap is still clipped.
 
   CGContextDrawImage(canvas, bitmap_rect, image);
-  CGContextRestoreGState(canvas);
 #else
-  SkRect sk_plugin_rect = SkRect::MakeXYWH(
-      SkIntToScalar(plugin_rect.origin().x()),
-      SkIntToScalar(plugin_rect.origin().y()),
-      SkIntToScalar(plugin_rect.width()),
-      SkIntToScalar(plugin_rect.height()));
-  canvas->save();
-  canvas->clipRect(sk_plugin_rect);
+  gfx::Rect invalidate_rect = plugin_rect.Intersect(paint_rect);
+  SkRect sk_invalidate_rect = gfx::RectToSkRect(invalidate_rect);
+  SkAutoCanvasRestore auto_restore(canvas, true);
+  canvas->clipRect(sk_invalidate_rect);
+  gfx::Size pixel_image_size(image_data_->width(), image_data_->height());
+  gfx::Size image_size = pixel_image_size.Scale(scale_);
 
   PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
   if (!plugin_instance)
@@ -580,19 +574,15 @@ void PPB_Graphics2D_Impl::Paint(WebKit::WebCanvas* canvas,
     // show white (typically less jarring) rather than black or uninitialized.
     // We don't do this for non-full-frame plugins since we specifically want
     // the page background to show through.
-    canvas->save();
-    SkRect image_data_rect = SkRect::MakeXYWH(
-        SkIntToScalar(plugin_rect.origin().x()),
-        SkIntToScalar(plugin_rect.origin().y()),
-        SkIntToScalar(image_data_->width()),
-        SkIntToScalar(image_data_->height()));
+    SkAutoCanvasRestore auto_restore(canvas, true);
+    SkRect image_data_rect =
+        gfx::RectToSkRect(gfx::Rect(plugin_rect.origin(), image_size));
     canvas->clipRect(image_data_rect, SkRegion::kDifference_Op);
 
     SkPaint paint;
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
     paint.setColor(SK_ColorWHITE);
-    canvas->drawRect(sk_plugin_rect, paint);
-    canvas->restore();
+    canvas->drawRect(sk_invalidate_rect, paint);
   }
 
   SkBitmap image;
@@ -612,13 +602,14 @@ void PPB_Graphics2D_Impl::Paint(WebKit::WebCanvas* canvas,
 
   SkPoint origin;
   origin.set(SkIntToScalar(plugin_rect.x()), SkIntToScalar(plugin_rect.y()));
+
+  SkPoint pixel_origin = origin;
   if (scale_ != 1.0f && scale_ > 0.0f) {
     float inverse_scale = 1.0f / scale_;
-    origin.scale(inverse_scale);
+    pixel_origin.scale(inverse_scale);
     canvas->scale(scale_, scale_);
   }
-  canvas->drawBitmap(image, origin.x(), origin.y(), &paint);
-  canvas->restore();
+  canvas->drawBitmap(image, pixel_origin.x(), pixel_origin.y(), &paint);
 #endif
 }
 

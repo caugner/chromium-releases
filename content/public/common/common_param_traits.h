@@ -23,6 +23,7 @@
 #include "net/url_request/url_request_status.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/surface/transport_dib.h"
+#include "webkit/base/data_element.h"
 
 class SkBitmap;
 
@@ -47,6 +48,10 @@ namespace ui {
 class Range;
 }
 
+namespace webkit_glue {
+class ResourceRequestBody;
+}
+
 namespace IPC {
 
 template <>
@@ -68,6 +73,23 @@ struct CONTENT_EXPORT ParamTraits<net::URLRequestStatus> {
 template <>
 struct CONTENT_EXPORT ParamTraits<scoped_refptr<net::UploadData> > {
   typedef scoped_refptr<net::UploadData> param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct CONTENT_EXPORT ParamTraits<scoped_refptr<
+    webkit_glue::ResourceRequestBody> > {
+  typedef scoped_refptr<webkit_glue::ResourceRequestBody> param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct CONTENT_EXPORT ParamTraits<webkit_base::DataElement> {
+  typedef webkit_base::DataElement param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);

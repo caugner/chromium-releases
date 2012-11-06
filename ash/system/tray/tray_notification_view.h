@@ -41,6 +41,9 @@ class TrayNotificationView : public views::View,
   // Sets/updates the icon image.
   void SetIconImage(const gfx::ImageSkia& image);
 
+  // Gets the icons image.
+  const gfx::ImageSkia& GetIconImage() const;
+
   // Replaces the contents view.
   void UpdateView(views::View* new_contents);
 
@@ -50,12 +53,12 @@ class TrayNotificationView : public views::View,
 
   // Overridden from ButtonListener.
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // Overridden from views::View.
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
-  virtual ui::GestureStatus OnGestureEvent(
-      const views::GestureEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(
+      const ui::GestureEvent& event) OVERRIDE;
 
  protected:
   // Called when the close button is pressed. Does nothing by default.

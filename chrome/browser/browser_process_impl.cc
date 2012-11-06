@@ -37,7 +37,7 @@
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
-#include "chrome/browser/metrics/variations_service.h"
+#include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
@@ -78,7 +78,6 @@
 #include "content/public/common/pepper_plugin_info.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "ui/base/clipboard/clipboard.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(ENABLE_CONFIGURATION_POLICY)
@@ -86,6 +85,7 @@
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
 #if defined(OS_WIN)
+#include "base/win/windows_version.h"
 #include "ui/views/focus/view_storage.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/chrome_browser_main_mac.h"
@@ -141,7 +141,6 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       thumbnail_generator_(new ThumbnailGenerator),
       download_status_updater_(new DownloadStatusUpdater) {
   g_browser_process = this;
-  clipboard_.reset(new ui::Clipboard);
 
 #if defined(ENABLE_PRINTING)
   // Must be created after the NotificationService.
@@ -208,8 +207,10 @@ void BrowserProcessImpl::StartTearDown() {
   // Need to clear profiles (download managers) before the io_thread_.
   profile_manager_.reset();
 
+#if !defined(OS_ANDROID)
   // Debugger must be cleaned up before IO thread and NotificationService.
   remote_debugging_server_.reset();
+#endif
 
   ExtensionTabIdMap::GetInstance()->Shutdown();
 
@@ -385,11 +386,6 @@ PrefService* BrowserProcessImpl::local_state() {
   return local_state_.get();
 }
 
-ui::Clipboard* BrowserProcessImpl::clipboard() {
-  DCHECK(CalledOnValidThread());
-  return clipboard_.get();
-}
-
 net::URLRequestContextGetter* BrowserProcessImpl::system_request_context() {
   DCHECK(CalledOnValidThread());
   return io_thread()->system_url_request_context_getter();
@@ -441,8 +437,7 @@ policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
 policy::PolicyService* BrowserProcessImpl::policy_service() {
   if (!policy_service_.get()) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-    policy_service_.reset(
-        browser_policy_connector()->CreatePolicyService(NULL));
+    policy_service_ = browser_policy_connector()->CreatePolicyService(NULL);
 #else
     policy_service_.reset(new policy::PolicyServiceStub());
 #endif
@@ -472,14 +467,20 @@ AutomationProviderList* BrowserProcessImpl::GetAutomationProviderList() {
 #endif
 }
 
-void BrowserProcessImpl::InitDevToolsHttpProtocolHandler(
+void BrowserProcessImpl::CreateDevToolsHttpProtocolHandler(
     Profile* profile,
     const std::string& ip,
     int port,
     const std::string& frontend_url) {
   DCHECK(CalledOnValidThread());
-  remote_debugging_server_.reset(
-      new RemoteDebuggingServer(profile, ip, port, frontend_url));
+#if !defined(OS_ANDROID)
+  // StartupBrowserCreator::LaunchBrowser can be run multiple times when browser
+  // is started with several profiles or existing browser process is reused.
+  if (!remote_debugging_server_.get()) {
+    remote_debugging_server_.reset(
+        new RemoteDebuggingServer(profile, ip, port, frontend_url));
+  }
+#endif
 }
 
 bool BrowserProcessImpl::IsShuttingDown() {
@@ -554,9 +555,14 @@ DownloadRequestLimiter* BrowserProcessImpl::download_request_limiter() {
 
 BackgroundModeManager* BrowserProcessImpl::background_mode_manager() {
   DCHECK(CalledOnValidThread());
+#if defined(ENABLE_BACKGROUND)
   if (!background_mode_manager_.get())
     CreateBackgroundModeManager();
   return background_mode_manager_.get();
+#else
+  NOTIMPLEMENTED();
+  return NULL;
+#endif
 }
 
 StatusTray* BrowserProcessImpl::status_tray() {
@@ -738,6 +744,11 @@ void BrowserProcessImpl::CreateLocalState() {
   ApplyDisabledSchemesPolicy();
 
   local_state_->RegisterBooleanPref(prefs::kAllowCrossOriginAuthPrompt, false);
+
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8)
+    local_state_->RegisterBooleanPref(prefs::kRestartSwitchMode, false);
+#endif
 }
 
 void BrowserProcessImpl::PreCreateThreads() {

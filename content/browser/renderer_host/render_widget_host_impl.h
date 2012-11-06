@@ -6,6 +6,8 @@
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_IMPL_H_
 
 #include <deque>
+#include <map>
+#include <queue>
 #include <string>
 #include <vector>
 
@@ -14,7 +16,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process_util.h"
-#include "base/property_bag.h"
 #include "base/string16.h"
 #include "base/timer.h"
 #include "build/build_config.h"
@@ -28,6 +29,7 @@ class MockRenderWidgetHost;
 class WebCursor;
 struct EditCommand;
 struct ViewHostMsg_UpdateRect_Params;
+struct ViewHostMsg_TextInputState_Params;
 
 namespace base {
 class TimeTicks;
@@ -44,12 +46,18 @@ struct WebCompositionUnderline;
 struct WebScreenInfo;
 }
 
+#if defined(OS_ANDROID)
+namespace WebKit {
+class WebLayer;
+}
+#endif
+
 namespace content {
 class BackingStore;
+class GestureEventFilter;
 class RenderWidgetHostDelegate;
 class RenderWidgetHostViewPort;
 class SmoothScrollGesture;
-class TapSuppressionController;
 
 // This implements the RenderWidgetHost interface that is exposed to
 // embedders of content, and adds things only visible to content.
@@ -132,12 +140,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   int surface_id() const { return surface_id_; }
 
   bool empty() const { return current_size_.IsEmpty(); }
-
-  // Returns the property bag for this widget, where callers can add extra data
-  // they may wish to associate with it. Returns a pointer rather than a
-  // reference since the PropertyAccessors expect this.
-  const base::PropertyBag* property_bag() const { return &property_bag_; }
-  base::PropertyBag* property_bag() { return &property_bag_; }
 
   // Called when a renderer object already been created for this host, and we
   // just need to be attached to it. Used for window.open, <select> dropdown
@@ -234,6 +236,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void ForwardGestureEvent(const WebKit::WebGestureEvent& gesture_event);
   virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
 
+  // Forwards the given event immediately to the renderer.
+  void ForwardGestureEventImmediately(
+      const WebKit::WebGestureEvent& gesture_event);
+
 #if defined(TOOLKIT_GTK)
   // Give key press listeners a chance to handle this key press. This allow
   // widgets that don't have focus to still handle key presses.
@@ -290,6 +296,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   // Cancels an ongoing composition.
   void ImeCancelComposition();
+
+  // Deletes the current selection plus the specified number of characters
+  // before and after the selection or caret.
+  void ExtendSelectionAndDelete(size_t before, size_t after);
 
   // This is for derived classes to give us access to the resizer rect.
   // And to also expose it to the RenderWidgetHostView.
@@ -360,6 +370,13 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // locked.
   bool GotResponseToLockMouseRequest(bool allowed);
 
+  // Tells the RenderWidget about the latest vsync parameters.
+  // Note: Make sure the timebase was obtained using
+  // base::TimeTicks::HighResNow. Using the non-high res timer will result in
+  // incorrect synchronization across processes.
+  virtual void UpdateVSyncParameters(base::TimeTicks timebase,
+                                     base::TimeDelta interval);
+
   // Called by the view in response to AcceleratedSurfaceBuffersSwapped or
   // AcceleratedSurfacePostSubBuffer.
   static void AcknowledgeBufferPresent(
@@ -391,6 +408,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void set_allow_privileged_mouse_lock(bool allow) {
     allow_privileged_mouse_lock_ = allow;
   }
+
+#if defined(OS_ANDROID)
+  virtual void AttachLayer(WebKit::WebLayer* layer) {}
+  virtual void RemoveLayer(WebKit::WebLayer* layer) {}
+#endif
 
   void DetachDelegate();
 
@@ -476,6 +498,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // This value indicates how long to wait before we consider a renderer hung.
   int hung_renderer_delay_ms_;
 
+  std::queue<WebKit::WebInputEvent::Type> in_process_event_types_;
+
  private:
   friend class ::MockRenderWidgetHost;
 
@@ -502,19 +526,23 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void OnCompositorSurfaceBuffersSwapped(int32 surface_id,
                                          uint64 surface_handle,
                                          int32 route_id,
+                                         const gfx::Size& size,
                                          int32 gpu_process_host_id);
   void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
   void OnMsgUpdateIsDelayed();
   void OnMsgInputEventAck(WebKit::WebInputEvent::Type event_type,
                           bool processed);
-  void OnMsgBeginSmoothScroll(bool scroll_down, bool scroll_far);
+  void OnMsgBeginSmoothScroll(int gesture_id,
+                              bool scroll_down,
+                              bool scroll_far);
+  void OnMsgSelectRangeAck();
   virtual void OnMsgFocus();
   virtual void OnMsgBlur();
   void OnMsgHasTouchEventHandlers(bool has_handlers);
 
   void OnMsgSetCursor(const WebCursor& cursor);
-  void OnMsgTextInputStateChanged(ui::TextInputType type,
-                                  bool can_compose_inline);
+  void OnMsgTextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params);
   void OnMsgImeCompositionRangeChanged(
       const ui::Range& range,
       const std::vector<gfx::Rect>& character_bounds);
@@ -617,9 +645,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // The ID of the corresponding object in the Renderer Instance.
   int routing_id_;
 
-  // Stores random bits of data for others to associate with this object.
-  base::PropertyBag property_bag_;
-
   // The ID of the surface corresponding to this render widget.
   int surface_id_;
 
@@ -634,6 +659,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   // True when a page is rendered directly via the GPU process.
   bool is_accelerated_compositing_active_;
+
+  // True if threaded compositing is enabled on this view.
+  bool is_threaded_compositing_enabled_;
 
   // Set if we are waiting for a repaint ack for the view.
   bool repaint_ack_pending_;
@@ -682,15 +710,14 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // would be queued) results in very slow scrolling.
   WheelEventQueue coalesced_mouse_wheel_events_;
 
-  // (Similar to |mouse_wheel_pending_|.). True if gesture event was sent and
-  // we are waiting for a corresponding ack.
-  bool gesture_event_pending_;
+  // (Similar to |mouse_move_pending_|.) True while waiting for SelectRange_ACK.
+  bool select_range_pending_;
 
-  typedef std::deque<WebKit::WebGestureEvent> GestureEventQueue;
-
-  // (Similar to |coalesced_mouse_wheel_events_|.) GestureScrollUpdate events
-  // are coalesced by merging deltas in a similar fashion as wheel events.
-  GestureEventQueue coalesced_gesture_events_;
+  // (Similar to |next_mouse_move_|.) The next SelectRange to send, if any.
+  struct SelectionRange {
+    gfx::Point start, end;
+  };
+  scoped_ptr<SelectionRange> next_selection_range_;
 
   // The time when an input event was sent to the RenderWidget.
   base::TimeTicks input_event_start_time_;
@@ -781,9 +808,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   base::WeakPtrFactory<RenderWidgetHostImpl> weak_factory_;
 
-  scoped_ptr<TapSuppressionController> tap_suppression_controller_;
+  typedef std::map<int, scoped_refptr<SmoothScrollGesture> >
+      SmoothScrollGestureMap;
+  SmoothScrollGestureMap active_smooth_scroll_gestures_;
 
-  scoped_ptr<SmoothScrollGesture> active_smooth_scroll_gesture_;
+  scoped_ptr<GestureEventFilter> gesture_event_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostImpl);
 };

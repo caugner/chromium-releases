@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win'],
+  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win', 'linux'],
   'TARGETS': [
     {
       'NAME' : 'websocket',
@@ -8,6 +8,7 @@
       'LIBS': ['ppapi_cpp', 'ppapi']
     }
   ],
+  'DATA': ['example.js'],
   'DEST': 'examples',
   'NAME': 'websocket',
   'TITLE': 'Websocket',

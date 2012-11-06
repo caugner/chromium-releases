@@ -6,7 +6,8 @@
 #define WEBKIT_CHROMEOS_FILEAPI_REMOTE_FILE_SYSTEM_OPERATION_H_
 
 #include "webkit/chromeos/fileapi/remote_file_system_proxy.h"
-#include "webkit/fileapi/file_system_operation_interface.h"
+#include "webkit/fileapi/file_system_operation.h"
+#include "webkit/fileapi/file_writer_delegate.h"
 
 namespace base {
 class Value;
@@ -20,11 +21,12 @@ class LocalFileSystemOperation;
 namespace chromeos {
 
 // FileSystemOperation implementation for local file systems.
-class RemoteFileSystemOperation : public fileapi::FileSystemOperationInterface {
+class RemoteFileSystemOperation : public fileapi::FileSystemOperation {
  public:
+  typedef fileapi::FileWriterDelegate FileWriterDelegate;
   virtual ~RemoteFileSystemOperation();
 
-  // FileSystemOperationInterface overrides.
+  // FileSystemOperation overrides.
   virtual void CreateFile(const fileapi::FileSystemURL& url,
                           bool exclusive,
                           const StatusCallback& callback) OVERRIDE;
@@ -100,10 +102,9 @@ class RemoteFileSystemOperation : public fileapi::FileSystemOperationInterface {
       base::PlatformFileError rv,
       const std::vector<base::FileUtilProxy::Entry>& entries,
       bool has_more);
-  void DidWrite(const WriteCallback& callback,
-                base::PlatformFileError result,
+  void DidWrite(base::PlatformFileError result,
                 int64 bytes,
-                bool complete);
+                FileWriterDelegate::WriteProgressStatus write_status);
   void DidFinishFileOperation(const StatusCallback& callback,
                               base::PlatformFileError rv);
   void DidCreateSnapshotFile(
@@ -123,6 +124,9 @@ class RemoteFileSystemOperation : public fileapi::FileSystemOperationInterface {
   // A flag to make sure we call operation only once per instance.
   OperationType pending_operation_;
   scoped_ptr<fileapi::FileWriterDelegate> file_writer_delegate_;
+
+  WriteCallback write_callback_;
+  StatusCallback cancel_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoteFileSystemOperation);
 };

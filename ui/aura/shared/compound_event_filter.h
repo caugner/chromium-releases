@@ -8,8 +8,15 @@
 #include "base/compiler_specific.h"
 #include "base/observer_list.h"
 #include "ui/aura/aura_export.h"
-#include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
+
+namespace ui {
+class GestureEvent;
+class KeyEvent;
+class LocatedEvent;
+class MouseEvent;
+class TouchEvent;
+}
 
 namespace aura {
 class CursorManager;
@@ -25,7 +32,7 @@ namespace shared {
 // consumed by any of those filters. If an event is consumed by a filter, the
 // rest of the filter(s) and CompoundEventFilter will not see the consumed
 // event.
-class AURA_EXPORT CompoundEventFilter : public aura::EventFilter {
+class AURA_EXPORT CompoundEventFilter : public EventFilter {
  public:
   CompoundEventFilter();
   virtual ~CompoundEventFilter();
@@ -33,51 +40,53 @@ class AURA_EXPORT CompoundEventFilter : public aura::EventFilter {
   // Returns the cursor for the specified component.
   static gfx::NativeCursor CursorForWindowComponent(int window_component);
 
-  void set_update_cursor_visibility(bool update) {
-    update_cursor_visibility_ = update;
+  // Used to allow a mouse event to show the cursor even when
+  // the cursor is hidden by |CursorClient::ShowCursor(false)|.
+  void set_cursor_hidden_by_filter(bool cursor_hidden_by_filter) {
+    cursor_hidden_by_filter_ = cursor_hidden_by_filter;
   }
 
   // Adds/removes additional event filters. This does not take ownership of
   // the EventFilter.
-  void AddFilter(aura::EventFilter* filter);
-  void RemoveFilter(aura::EventFilter* filter);
+  void AddFilter(EventFilter* filter);
+  void RemoveFilter(EventFilter* filter);
   size_t GetFilterCount() const;
-
-  // Overridden from EventFilter:
-  virtual bool PreHandleKeyEvent(aura::Window* target,
-                                 aura::KeyEvent* event) OVERRIDE;
-  virtual bool PreHandleMouseEvent(aura::Window* target,
-                                   aura::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus PreHandleTouchEvent(aura::Window* target,
-                                              aura::TouchEvent* event) OVERRIDE;
-  virtual ui::GestureStatus PreHandleGestureEvent(
-      aura::Window* target,
-      aura::GestureEvent* event) OVERRIDE;
 
  private:
   // Updates the cursor if the target provides a custom one, and provides
   // default resize cursors for window edges.
-  void UpdateCursor(aura::Window* target, aura::MouseEvent* event);
+  void UpdateCursor(Window* target, ui::MouseEvent* event);
 
-  // Dispatches event to additional filters. Returns false or
-  // ui::TOUCH_STATUS_UNKNOWN if event is consumed.
-  bool FilterKeyEvent(aura::Window* target, aura::KeyEvent* event);
-  bool FilterMouseEvent(aura::Window* target, aura::MouseEvent* event);
-  ui::TouchStatus FilterTouchEvent(aura::Window* target,
-                                   aura::TouchEvent* event);
+  // Dispatches event to additional filters.
+  ui::EventResult FilterKeyEvent(ui::KeyEvent* event);
+  ui::EventResult FilterMouseEvent(ui::MouseEvent* event);
+  ui::TouchStatus FilterTouchEvent(Window* target, ui::TouchEvent* event);
 
   // Sets the visibility of the cursor if the event is not synthesized and
-  // |update_cursor_visibility_| is true.
+  // 1) it's hiding (show=false) when the cursor is currently shown, or
+  // 2) it's showing (show=true) if the cursor is previously hidden
+  //    by this event filter (see |cursor_hidden_by_filter_|),
+  // so that it doesn't change the cursor visibility if the cursor was
+  // intentionally hidden by other components.
   void SetCursorVisibilityOnEvent(aura::Window* target,
-                                  aura::LocatedEvent* event,
+                                  ui::Event* event,
                                   bool show);
 
-  // Additional event filters that pre-handles events.
-  ObserverList<aura::EventFilter, true> filters_;
+  // Overridden from EventFilter:
+  virtual ui::TouchStatus PreHandleTouchEvent(Window* target,
+                                              ui::TouchEvent* event) OVERRIDE;
 
-  // Should we show the mouse cursor when we see mouse movement and hide it when
-  // we see a touch event?
-  bool update_cursor_visibility_;
+  // Overridden from ui::EventHandler:
+  virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  virtual ui::EventResult OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  // Additional event filters that pre-handles events.
+  ObserverList<EventFilter, true> filters_;
+
+  // True if the cursur was hidden by the filter.
+  bool cursor_hidden_by_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(CompoundEventFilter);
 };

@@ -267,6 +267,11 @@ span.displayModeWarning {
   top: .4em;
 }
 
+#gc-pagecontent h5 {
+  font-size: 100%;
+  margin: 0;
+}
+
 #gc-pagecontent h1.page_title,
 #gc-pagecontent h2.page_title {
   line-height: 130%;
@@ -445,4 +450,20 @@ div.gsc-input-box {
   height: 30px;
   width: 250px;
   float: right;
+}
+
+#known_issues {
+  background: #F5F5F5;
+  padding-top: 1px;
+  padding-bottom: 16px;
+  padding-right: 16px;
+  padding-left: 16px;
+}
+
+#search_results td {
+  border: none;
+}
+
+#search_results {
+  float: left;
 }

@@ -46,6 +46,7 @@
 #include "ipc/ipc_switches.h"
 #include "net/base/mime_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "ui/base/ui_base_switches.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
@@ -70,18 +71,23 @@ class URLRequestContextSelector
     : public ResourceMessageFilter::URLRequestContextSelector {
  public:
   explicit URLRequestContextSelector(
-      net::URLRequestContext* url_request_context)
-      : url_request_context_(url_request_context) {
+      net::URLRequestContextGetter* url_request_context,
+      net::URLRequestContextGetter* media_url_request_context)
+      : url_request_context_(url_request_context),
+        media_url_request_context_(media_url_request_context) {
   }
   virtual ~URLRequestContextSelector() {}
 
   virtual net::URLRequestContext* GetRequestContext(
       ResourceType::Type resource_type) {
-    return url_request_context_;
+    if (resource_type == ResourceType::MEDIA)
+      return media_url_request_context_->GetURLRequestContext();
+    return url_request_context_->GetURLRequestContext();
   }
 
  private:
-  net::URLRequestContext* url_request_context_;
+  net::URLRequestContextGetter* url_request_context_;
+  net::URLRequestContextGetter* media_url_request_context_;
 };
 
 }  // namespace
@@ -94,10 +100,13 @@ void WorkerCrashCallback(int render_process_unique_id, int render_view_id) {
     host->GetDelegate()->WorkerCrashed();
 }
 
-WorkerProcessHost::WorkerProcessHost(ResourceContext* resource_context)
-    : resource_context_(resource_context) {
+WorkerProcessHost::WorkerProcessHost(
+    ResourceContext* resource_context,
+    const WorkerStoragePartition& partition)
+    : resource_context_(resource_context),
+      partition_(partition) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(resource_context);
+  DCHECK(resource_context_);
   process_.reset(
       new BrowserChildProcessHostImpl(content::PROCESS_TYPE_WORKER, this));
 }
@@ -149,7 +158,6 @@ bool WorkerProcessHost::Init(int render_process_id) {
   cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
   static const char* const kSwitchNames[] = {
-    switches::kWebWorkerShareProcesses,
     switches::kDisableApplicationCache,
     switches::kDisableDatabases,
     switches::kEnableLogging,
@@ -200,8 +208,6 @@ bool WorkerProcessHost::Init(int render_process_id) {
 #endif
       cmd_line);
 
-  fileapi::FileSystemContext* file_system_context =
-      GetFileSystemContextForResourceContext(resource_context_);
   ChildProcessSecurityPolicyImpl::GetInstance()->AddWorker(
       process_->GetData().id, render_process_id);
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
@@ -213,7 +219,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
     // This is for the filesystem sandbox.
     ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
         process_->GetData().id,
-        file_system_context->sandbox_provider()->new_base_path(),
+        partition_.filesystem_context()->sandbox_provider()->new_base_path(),
         base::PLATFORM_FILE_OPEN |
         base::PLATFORM_FILE_CREATE |
         base::PLATFORM_FILE_OPEN_ALWAYS |
@@ -230,7 +236,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
     // sandbox.
     ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
         process_->GetData().id,
-        file_system_context->sandbox_provider()->old_base_path(),
+        partition_.filesystem_context()->sandbox_provider()->old_base_path(),
         base::PLATFORM_FILE_READ | base::PLATFORM_FILE_WRITE |
             base::PLATFORM_FILE_WRITE_ATTRIBUTES |
             base::PLATFORM_FILE_ENUMERATE);
@@ -238,7 +244,8 @@ bool WorkerProcessHost::Init(int render_process_id) {
     // we know we've taken care of it.
     ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
         process_->GetData().id,
-        file_system_context->sandbox_provider()->renamed_old_base_path(),
+        partition_.filesystem_context()->sandbox_provider()->
+            renamed_old_base_path(),
         base::PLATFORM_FILE_CREATE | base::PLATFORM_FILE_CREATE_ALWAYS |
             base::PLATFORM_FILE_WRITE);
   }
@@ -249,44 +256,53 @@ bool WorkerProcessHost::Init(int render_process_id) {
 }
 
 void WorkerProcessHost::CreateMessageFilters(int render_process_id) {
-  net::URLRequestContext* request_context =
-      resource_context_->GetRequestContext();
+  ChromeBlobStorageContext* blob_storage_context =
+      content::GetChromeBlobStorageContextForResourceContext(
+          resource_context_);
+
+  net::URLRequestContextGetter* url_request_context =
+      partition_.url_request_context();
+  net::URLRequestContextGetter* media_url_request_context =
+      partition_.url_request_context();
 
   ResourceMessageFilter* resource_message_filter = new ResourceMessageFilter(
       process_->GetData().id, content::PROCESS_TYPE_WORKER, resource_context_,
-      new URLRequestContextSelector(request_context));
+      partition_.appcache_service(),
+      blob_storage_context,
+      new URLRequestContextSelector(url_request_context,
+                                    media_url_request_context));
   process_->GetHost()->AddFilter(resource_message_filter);
 
   worker_message_filter_ = new WorkerMessageFilter(
-      render_process_id, resource_context_,
+      render_process_id, resource_context_, partition_,
       base::Bind(&WorkerServiceImpl::next_worker_route_id,
                  base::Unretained(WorkerServiceImpl::GetInstance())));
   process_->GetHost()->AddFilter(worker_message_filter_);
   process_->GetHost()->AddFilter(new AppCacheDispatcherHost(
-      static_cast<ChromeAppCacheService*>(
-          ResourceContext::GetAppCacheService(resource_context_)),
+      partition_.appcache_service(),
       process_->GetData().id));
   process_->GetHost()->AddFilter(new FileAPIMessageFilter(
       process_->GetData().id,
-      request_context,
-      GetFileSystemContextForResourceContext(resource_context_),
-      content::GetChromeBlobStorageContextForResourceContext(
-          resource_context_)));
+      url_request_context,
+      partition_.filesystem_context(),
+      blob_storage_context));
   process_->GetHost()->AddFilter(new FileUtilitiesMessageFilter(
       process_->GetData().id));
   process_->GetHost()->AddFilter(new MimeRegistryMessageFilter());
-  process_->GetHost()->AddFilter(new DatabaseMessageFilter(
-      content::GetDatabaseTrackerForResourceContext(resource_context_)));
+  process_->GetHost()->AddFilter(
+      new DatabaseMessageFilter(partition_.database_tracker()));
 
   SocketStreamDispatcherHost* socket_stream_dispatcher_host =
-      new SocketStreamDispatcherHost(render_process_id,
-          new URLRequestContextSelector(request_context), resource_context_);
+      new SocketStreamDispatcherHost(
+          render_process_id,
+          new URLRequestContextSelector(url_request_context,
+                                        media_url_request_context),
+          resource_context_);
   process_->GetHost()->AddFilter(socket_stream_dispatcher_host);
   process_->GetHost()->AddFilter(
       new content::WorkerDevToolsMessageFilter(process_->GetData().id));
   process_->GetHost()->AddFilter(new IndexedDBDispatcherHost(
-      process_->GetData().id,
-      content::GetIndexedDBContextForResourceContext(resource_context_)));
+      process_->GetData().id, partition_.indexed_db_context()));
 }
 
 void WorkerProcessHost::CreateWorker(const WorkerInstance& instance) {
@@ -578,7 +594,8 @@ WorkerProcessHost::WorkerInstance::WorkerInstance(
     int worker_route_id,
     int parent_process_id,
     int64 main_resource_appcache_id,
-    content::ResourceContext* resource_context)
+    content::ResourceContext* resource_context,
+    const WorkerStoragePartition& partition)
     : url_(url),
       closed_(false),
       name_(name),
@@ -586,7 +603,8 @@ WorkerProcessHost::WorkerInstance::WorkerInstance(
       parent_process_id_(parent_process_id),
       main_resource_appcache_id_(main_resource_appcache_id),
       worker_document_set_(new WorkerDocumentSet()),
-      resource_context_(resource_context) {
+      resource_context_(resource_context),
+      partition_(partition) {
   DCHECK(resource_context_);
 }
 
@@ -594,7 +612,8 @@ WorkerProcessHost::WorkerInstance::WorkerInstance(
     const GURL& url,
     bool shared,
     const string16& name,
-    content::ResourceContext* resource_context)
+    content::ResourceContext* resource_context,
+    const WorkerStoragePartition& partition)
     : url_(url),
       closed_(false),
       name_(name),
@@ -602,7 +621,8 @@ WorkerProcessHost::WorkerInstance::WorkerInstance(
       parent_process_id_(0),
       main_resource_appcache_id_(0),
       worker_document_set_(new WorkerDocumentSet()),
-      resource_context_(resource_context) {
+      resource_context_(resource_context),
+      partition_(partition) {
   DCHECK(resource_context_);
 }
 
@@ -617,6 +637,7 @@ WorkerProcessHost::WorkerInstance::~WorkerInstance() {
 bool WorkerProcessHost::WorkerInstance::Matches(
     const GURL& match_url,
     const string16& match_name,
+    const WorkerStoragePartition& partition,
     content::ResourceContext* resource_context) const {
   // Only match open shared workers.
   if (closed_)
@@ -625,6 +646,11 @@ bool WorkerProcessHost::WorkerInstance::Matches(
   // ResourceContext equivalence is being used as a proxy to ensure we only
   // matched shared workers within the same BrowserContext.
   if (resource_context_ != resource_context)
+    return false;
+
+  // We must be in the same storage partition otherwise sharing will violate
+  // isolation.
+  if (!partition_.Equals(partition))
     return false;
 
   if (url_.GetOrigin() != match_url.GetOrigin())

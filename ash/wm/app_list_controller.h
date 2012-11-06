@@ -10,10 +10,12 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/timer.h"
+#include "ui/app_list/pagination_model_observer.h"
 #include "ui/aura/event_filter.h"
 #include "ui/aura/focus_change_observer.h"
 #include "ui/aura/root_window_observer.h"
 #include "ui/compositor/layer_animation_observer.h"
+#include "ui/gfx/rect.h"
 #include "ui/views/widget/widget_observer.h"
 
 namespace app_list {
@@ -21,7 +23,7 @@ class AppListView;
 class PaginationModel;
 }
 
-namespace aura {
+namespace ui {
 class LocatedEvent;
 }
 
@@ -38,7 +40,8 @@ class AppListController : public aura::EventFilter,
                           public ui::ImplicitAnimationObserver,
                           public views::WidgetObserver,
                           public ShellObserver,
-                          public LauncherIconObserver {
+                          public LauncherIconObserver,
+                          public app_list::PaginationModelObserver {
  public:
   AppListController();
   virtual ~AppListController();
@@ -68,21 +71,22 @@ class AppListController : public aura::EventFilter,
   void ScheduleAnimation();
 
   void ProcessLocatedEvent(aura::Window* target,
-                           const aura::LocatedEvent& event);
+                           const ui::LocatedEvent& event);
 
   // Makes app list bubble update its bounds.
   void UpdateBounds();
 
   // aura::EventFilter overrides:
   virtual bool PreHandleKeyEvent(aura::Window* target,
-                                 aura::KeyEvent* event) OVERRIDE;
+                                 ui::KeyEvent* event) OVERRIDE;
   virtual bool PreHandleMouseEvent(aura::Window* target,
-                                   aura::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus PreHandleTouchEvent(aura::Window* target,
-                                              aura::TouchEvent* event) OVERRIDE;
-  virtual ui::GestureStatus PreHandleGestureEvent(
+                                   ui::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus PreHandleTouchEvent(
       aura::Window* target,
-      aura::GestureEvent* event) OVERRIDE;
+      ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult PreHandleGestureEvent(
+      aura::Window* target,
+      ui::GestureEvent* event) OVERRIDE;
 
   // aura::FocusChangeObserver overrides:
   virtual void OnWindowFocused(aura::Window* window) OVERRIDE;
@@ -103,6 +107,11 @@ class AppListController : public aura::EventFilter,
   // LauncherIconObserver overrides:
   virtual void OnLauncherIconPositionsChanged() OVERRIDE;
 
+  // app_list::PaginationModelObserver overrides:
+  virtual void TotalPagesChanged() OVERRIDE;
+  virtual void SelectedPageChanged(int old_selected, int new_selected) OVERRIDE;
+  virtual void TransitionChanged() OVERRIDE;
+
   scoped_ptr<app_list::PaginationModel> pagination_model_;
 
   // Whether we should show or hide app list widget.
@@ -110,6 +119,12 @@ class AppListController : public aura::EventFilter,
 
   // The AppListView this class manages, owned by its widget.
   app_list::AppListView* view_;
+
+  // Cached bounds of |view_| for snapping back animation after over-scroll.
+  gfx::Rect view_bounds_;
+
+  // Whether should schedule snap back animation.
+  bool should_snap_back_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListController);
 };

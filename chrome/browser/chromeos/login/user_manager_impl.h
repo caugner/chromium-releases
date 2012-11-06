@@ -20,16 +20,18 @@
 #include "chrome/browser/chromeos/login/user_image_loader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
+#include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/profiles/profile_downloader_delegate.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/gfx/image/image_skia.h"
 
-class SkBitmap;
 class FilePath;
 class PrefService;
 class ProfileDownloader;
 class ProfileSyncService;
+class SkBitmap;
 
 namespace chromeos {
 
@@ -91,10 +93,11 @@ class UserManagerImpl : public UserManager,
   virtual bool IsLoggedInAsGuest() const OVERRIDE;
   virtual bool IsLoggedInAsStub() const OVERRIDE;
   virtual bool IsSessionStarted() const OVERRIDE;
-  virtual void AddObserver(Observer* obs) OVERRIDE;
-  virtual void RemoveObserver(Observer* obs) OVERRIDE;
+  virtual bool IsEphemeralUser(const std::string& email) const OVERRIDE;
+  virtual void AddObserver(UserManager::Observer* obs) OVERRIDE;
+  virtual void RemoveObserver(UserManager::Observer* obs) OVERRIDE;
   virtual void NotifyLocalStateChanged() OVERRIDE;
-  virtual const SkBitmap& DownloadedProfileImage() const OVERRIDE;
+  virtual const gfx::ImageSkia& DownloadedProfileImage() const OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -127,10 +130,6 @@ class UserManagerImpl : public UserManager,
   // Returns true if trusted device policies have successfully been retrieved
   // and ephemeral users are enabled.
   bool AreEphemeralUsersEnabled() const;
-
-  // Returns true if the user with the given email address is to be treated as
-  // ephemeral.
-  bool IsEphemeralUser(const std::string& email) const;
 
   // Returns the user with the given email address if found in the persistent
   // list. Returns |NULL| otherwise.
@@ -215,9 +214,10 @@ class UserManagerImpl : public UserManager,
   void DeleteUserImage(const FilePath& image_path);
 
   // Updates current user ownership on UI thread.
-  void UpdateOwnership(bool is_owner);
+  void UpdateOwnership(DeviceSettingsService::OwnershipStatus status,
+                       bool is_owner);
 
-  // Checks current user's ownership on file thread.
+  // Triggers an asynchronous ownership check.
   void CheckOwnership();
 
   // ProfileDownloaderDelegate implementation.
@@ -283,7 +283,7 @@ class UserManagerImpl : public UserManager,
   // service, so do NOT use it outside |OnStateChanged| method.
   ProfileSyncService* observed_sync_service_;
 
-  ObserverList<Observer> observer_list_;
+  ObserverList<UserManager::Observer> observer_list_;
 
   // Download user profile image on login to update it if it's changed.
   scoped_ptr<ProfileDownloader> profile_image_downloader_;
@@ -300,7 +300,7 @@ class UserManagerImpl : public UserManager,
   bool last_image_set_async_;
 
   // Result of the last successful profile image download, if any.
-  SkBitmap downloaded_profile_image_;
+  gfx::ImageSkia downloaded_profile_image_;
 
   // Data URL for |downloaded_profile_image_|.
   std::string downloaded_profile_image_data_url_;

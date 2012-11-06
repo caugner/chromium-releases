@@ -55,12 +55,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
         const ProxyInfo& used_proxy_info,
         const BoundNetLog& net_log,
         bool was_npn_negotiated,
-        NextProto protocol_negotiated) OVERRIDE {
-      return new HttpPipelinedConnectionImpl(connection, delegate, origin,
-                                             used_ssl_config, used_proxy_info,
-                                             net_log, was_npn_negotiated,
-                                             protocol_negotiated);
-    }
+        NextProto protocol_negotiated) OVERRIDE;
   };
 
   HttpPipelinedConnectionImpl(ClientSocketHandle* connection,
@@ -119,7 +114,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
   void Close(int pipeline_id,
              bool not_reusable);
 
-  uint64 GetUploadProgress(int pipeline_id) const;
+  UploadProgress GetUploadProgress(int pipeline_id) const;
 
   HttpResponseInfo* GetResponseInfo(int pipeline_id);
 

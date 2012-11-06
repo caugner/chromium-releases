@@ -89,6 +89,7 @@
 <translation id="5564962323737505851">Konfigurira upravitelja zaporki. Ako je upravitelj zaporki omogućen, možete omogućiti ili onemogućiti korisničku opciju prikazivanja pohranjenih lozinki čitljivim tekstom.</translation>
 <translation id="4668325077104657568">Zadana postavka slika</translation>
 <translation id="7161193985878519056">Onemogućen je anonimni način rada</translation>
+<translation id="2524379983318108884">Dopusti snimanje zvuka</translation>
 <translation id="4492287494009043413">Onemogući izradu snimki zaslona</translation>
 <translation id="6368403635025849609">Omogući JavaScript na ovim web-lokacijama</translation>
 <translation id="6074963268421707432">Nemoj dopustiti nijednoj web-lokaciji da prikazuje obavijesti radne površine</translation>
@@ -156,19 +157,13 @@
       Poznato je da neke web-aplikacije zauzimaju brojne veze uz GET-ove na čekanju pa snižavanje vrijednosti ispod 32 može dovesti do mrežnog čekanja za preglednik ako je otvoreno previše takvih web-aplikacija. Smanjivanje ispod zadane vrijednosti činite na vlastiti rizik.
 
       Ako to pravilo nije postavljeno, upotrebljavat će se zadana vrijednost, a to je 32.</translation>
+<translation id="5395271912574071439">Omogućuje skrivanje hostova za daljinski pristup dok traje povezivanje.
+
+          Ako je ova postavka omogućena, tada se onemogućuju fizički ulazni i izlazni uređaji hosta dok je daljinsko povezivanje u tijeku.
+
+          Ako je ta postavka onemogućena ili nije postavljena, tada u interakciju s hostom mogu stupati lokalni i udaljeni korisnici kada se on dijeli.</translation>
 <translation id="2312509925391670075">Pitaj svaki put kada web-lokacija želi pristupiti mojoj kameri i/ili mikrofonu</translation>
 <translation id="1426410128494586442">Da</translation>
-<translation id="1692788808502061374">Omogućuje vam da odredite popis proširenja koja će se instalirati neprimjetno, bez interakcije s korisnikom.
-
-          Svaka stavka na popisu niz je koji sadrži ID proširenja i URL za ažuriranje, koji su odvojeni točkom sa zarezom (<ph name="SEMICOLON"/>). ID proširenja niz je od 32 slova koji se, primjerice, nalazi na vezi <ph name="CHROME_EXTENSIONS_LINK"/> kada je u načinu rada razvojnog programera. URL za ažuriranje trebao bi usmjeravati na XML dokument Manifest ažuriranja, kao što je opisano na stranici <ph name="LINK_TO_EXTENSION_DOC1"/>.
-
-          Za svaku stavku usluga <ph name="PRODUCT_NAME"/> dohvatit će proširenje koje odredi ID proširenja iz usluge ažuriranja na navedenom URL-u i neprimjetno ga instalirati.
-
-          Na primjer, pravilo <ph name="EXTENSION_POLICY_EXAMPLE"/> instalira proširenje <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> sa standardnog URL-a za ažuriranje Chrome web-trgovine. Više informacija o hostingu proširenja potražite na stranici <ph name="LINK_TO_EXTENSION_DOC2"/>.
-
-          Korisnici neće moći instalirati proširenja koja to pravilo navede. Ako uklonite neko proširenje s tog popisa, usluga <ph name="PRODUCT_NAME"/> automatski će ga deinstalirati.
-
-          Ako ne postavite to pravilo, korisnik može deinstalirati sva proširenja na usluzi <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="4962195944157514011">Određuje URL tražilice koja se upotrebljava prilikom zadanog pretraživanja. URL treba sadržavati niz &quot;<ph name="SEARCH_TERM_MARKER"/>&quot; koji će u trenutku upita biti zamijenjen pojmovima koje korisnik traži. Ova opcija mora biti postavljena kada je omogućeno pravilo &quot;DefaultSearchProviderEnabled&quot; i poštovat će se samo u tom slučaju.</translation>
 <translation id="6009903244351574348">Dopustite proizvodu <ph name="PRODUCT_FRAME_NAME"/> rukovanje navedenim vrstama sadržaja. Ako ovo pravilo nije postavljeno, upotrebljavat će se zadani prikazivač za sve web-lokacije kao što je navedeno u pravilu &quot;ChromeFrameRendererSettings&quot;.</translation>
 <translation id="3381968327636295719">Upotrijebi preglednik hosta prema zadanim postavkama</translation>
@@ -204,6 +199,13 @@
 <translation id="7003334574344702284">Ako je omogućeno, ovo pravilo prisilno uvozi spremljene zaporke iz prethodno zadanog preglednika. Ako je omogućeno, ovo pravilo također utječe na dijaloški okvir za uvoz. Ako je onemogućeno, spremljene se zaporke ne uvoze. Ako nije postavljeno, korisniku može biti postavljen upit želi li uvesti zaporke ili do uvoza može doći automatski.</translation>
 <translation id="6258193603492867656">Određuje treba li generirani Kerberos SPN uključivati nestandardni priključak. Ako omogućite ovu postavku, a bude unesen nestandardni priključak (tj. priključak koji nije 80 ili 443), on će biti uključen u generirani Kerberos SPN. Ako onemogućite ovu postavku ili ju ne postavite, generirani Kerberos SPN neće uključivati priključak ni u kojem slučaju.</translation>
 <translation id="3236046242843493070">Obrasci URL-ova za dopuštanje instalacija proširenja, aplikacija i korisničkih skripti iz izvora</translation>
+<translation id="3442095178490656861">Određuje vremensku zonu koja će se upotrebljavati za uređaj. Korisnici mogu zaobići navedenu vremensku zonu za trenutačnu sesiju. Međutim, nakon odjave uređaj se ponovo postavlja na navedenu vremensku zonu. Ako se pruži nevažeća vrijednost, pravilo je još uvijek aktivirano i umjesto nje upotrebljava se &quot;GMT&quot;.
+
+      Ako se ovo pravilo ne upotrebljava, trenutačno aktivna vremenska zona ostat će u upotrebi, no korisnici će ju moći promijeniti i ta će promjena biti trajna. Stoga će promjena koju napravi jedan korisnik utjecati na zaslon za prijavu i sve ostale korisnike.
+
+      Na novim uređajima početna vremenska zona postavljena je na &quot;SAD/Pacifik&quot;.
+
+      Format vrijednosti slijedi nazive vremenskih zona u &quot;Bazi podataka vremenskih zona IANA&quot; (pogledajte &quot;http://en.wikipedia.org/wiki/List_of_tz_database_time&quot;). Većina vremenskih zona može biti označena kao &quot;kontinent/veliki_grad&quot; ili &quot;ocean/veliki_grad&quot;.</translation>
 <translation id="8992176907758534924">Ne dopuštaj web-lokacijama prikazivanje slika</translation>
 <translation id="262740370354162807">Omogući slanje dokumenata na uslugu <ph name="CLOUD_PRINT_NAME"/></translation>
 <translation id="8704831857353097849">Popis onemogućenih dodataka</translation>
@@ -259,6 +261,7 @@
 
       Ako se to pravilo ne postavi, korisnik može mijenjati popis prikvačenih aplikacija u pokretaču.</translation>
 <translation id="7625444193696794922">Određuje kanal za izdavanje na koji bi ovaj uređaj trebao biti priključen.</translation>
+<translation id="2552966063069741410">Vremenska zona</translation>
 <translation id="3088288048720661397">Onemogućuje sinkronizaciju Google dokumenata pri upotrebi mobilne veze kada je postavljeno na True. U tom se slučaju podaci sinkroniziraju s Google dokumentima samo kada je uređaj povezan putem Wi-Fija ili Etherneta.
 
           Ako nije postavljeno ili je postavljeno na False, korisnici će moći prenositi datoteke u Google dokumente mobilnim vezama.</translation>
@@ -326,6 +329,7 @@
 <translation id="6392973646875039351">Omogućuje značajku Automatsko popunjavanje proizvoda <ph name="PRODUCT_NAME"/> i omogućuje korisnicima automatsko ispunjavanje web-obrazaca pomoću ranije pohranjenih informacija, kao što su adresa ili podaci o kreditnoj kartici. Ako onemogućite ovu postavku, Automatsko popunjavanje neće biti dostupno korisnicima. Ako omogućite ovu postavku i ne konfigurirate vrijednost, Automatsko popunjavanje ostat će pod nadzorom korisnika. To će im omogućiti konfiguriranje profila Automatskog popunjavanja te uključivanje ili isključivanje Automatskog popunjavanja po vlastitom nahođenju.</translation>
 <translation id="6157537876488211233">Popis pravila zaobilaženja proxyja odvojenih zarezima</translation>
 <translation id="3965339130942650562">Privremeni prekid do izvršavanja odjave korisnika u stanju mirovanja</translation>
+<translation id="5293547923319914979">Omogući skrivanje hosta za daljinski pristup.</translation>
 <translation id="7091198954851103976">Uvijek pokreni dodatke koji zahtijevaju autorizaciju</translation>
 <translation id="2021307518684405078">Ne dopuštaj nijednoj web-lokaciji pristupanje mojoj kameri i mikrofonu</translation>
 <translation id="8870318296973696995">Početna stranica</translation>
@@ -350,6 +354,13 @@
 <translation id="8469342921412620373">Omogućuje upotrebu zadanog davatelja usluga pretraživanja. Ako omogućite ovu postavku, zadano pretraživanje obavlja se kad korisnik u višenamjenski okvir upiše tekst koji nije URL. Zadanog davatelja usluga pretraživanja koji će se upotrebljavati možete odrediti postavljanjem ostalih pravila zadanog pretraživanja. Ako se ova pravila ostave prazna, korisnik može odabrati zadanog davatelja usluga pretraživanja. Ako onemogućite ovu postavku, pretraživanje neće biti provedeno kad korisnik u višenamjenski okvir unese tekst koji nije URL. Ako omogućite ili onemogućite ovu postavku, korisnici neće moći promijeniti ni poništiti ovu postavku u proizvodu <ph name="PRODUCT_NAME"/>. Ako ovo pravilo nije postavljeno, bit će omogućen zadani davatelj usluga pretraživanja, a korisnici će moći postaviti popis davatelja usluga pretraživanja.</translation>
 <translation id="8731693562790917685">Postavke sadržaja omogućuju određivanje načina postupanja s određenim vrstama sadržaja (kao što su Kolačići, Slike i JavaScript).</translation>
 <translation id="2411919772666155530">Blokiranje obavijesti na ovim web-lokacijama</translation>
+<translation id="5281259077246025371">Dopušta se snimanje zvuka.
+
+      Kad je ovo pravilo postavljeno na neistinito, snimanje zvuka neće biti dostupno na uređaju dok je korisnik prijavljen.
+
+      Ovo pravilo utječe na sve vrste zvučnih ulaza, a ne samo na ugrađeni mikrofon.
+
+      Ako je ova postavka postavljena na istinito ili nije konfigurirana, tada korisnici mogu upotrebljavati sve podržane zvučne ulaze na svojem uređaju.</translation>
 <translation id="6923366716660828830">Određuje naziv zadanog davatelja usluga pretraživanja. Ako naziv ostane prazan ili nije postavljen, upotrebljavat će se naziv hosta određen URL-om pretraživanja. Ovo će pravilo biti uzeto u obzir samo ako je omogućeno pravilo &quot;DefaultSearchProviderEnabled&quot;.</translation>
 <translation id="467236746355332046">Podržane značajke:</translation>
 <translation id="7632724434767231364">Naziv GSSAPI biblioteke</translation>
@@ -381,6 +392,13 @@
           Ako omogućite tu postavku, korisnici ju ne mogu promijeniti ili premostiti na usluzi <ph name="PRODUCT_NAME"/>.
 
           Onemogućavanje te postavke ima jednak učinak kao da ju niste konfigurirali. Korisnik će ju i dalje moći promijeniti na usluzi <ph name="PRODUCT_NAME"/>.</translation>
+<translation id="8161570238552664224">Dopušta se reprodukcija zvuka.
+
+      Kad je ovo pravilo postavljeno na neistinito, zvučni izlaz neće biti dostupan na uređaju dok je korisnik prijavljen.
+
+      Ovo pravilo utječe na sve vrste zvučnih izlaza, a ne samo na ugrađene zvučnike. Značajke zvučne pristupačnosti također su zabranjene ovim pravilom. Ne omogućujte ovo pravilo ako je korisniku potreban čitač zaslona.
+
+      Ako je ovo pravilo postavljeno na istinito ili nije konfigurirano, tada korisnici mogu upotrebljavati sve podržane zvučne izlaze na svojem uređaju.</translation>
 <translation id="5761030451068906335">Konfigurira proxy postavke za uslugu <ph name="PRODUCT_NAME"/>. To pravilo nije još spremno za upotrebu, nemojte ga upotrebljavati.</translation>
 <translation id="8344454543174932833">Uvoz oznaka iz zadanog preglednika pri prvom pokretanju</translation>
 <translation id="1019101089073227242">Postavi imenik korisničkih podataka</translation>
@@ -463,6 +481,7 @@
 <translation id="1675002386741412210">Podržano na:</translation>
 <translation id="3547954654003013442">Proxy postavke</translation>
 <translation id="4482640907922304445">Pokazuje gumb Početna na alatnoj traci proizvoda <ph name="PRODUCT_NAME"/>. Ako omogućite ovu postavku, gumb Početna prikazivat će se uvijek. Ako onemogućite ovu postavku, gumb Početna neće se nikad prikazivati. Ako omogućite ili onemogućite ovu postavku, korisnici neće moći promijeniti ni poništiti ovu postavku u proizvodu <ph name="PRODUCT_NAME"/>. Ako ovo pravilo nije postavljeno, korisnik će moći odabrati želi li da se prikazuje gumb Početna.</translation>
+<translation id="2518231489509538392">Dopusti reprodukciju zvuka</translation>
 <translation id="7547044444554936129">Omogućuje značajku Instant preglednika <ph name="PRODUCT_NAME"/> i sprječava korisnike da promijene tu postavku. Ako omogućite ovu postavku, <ph name="PRODUCT_NAME"/> Instant je omogućen. Ako onemogućite ovu postavku, onemogućen je i <ph name="PRODUCT_NAME"/> Instant. Ako omogućite ili onemogućite ovu postavku, korisnici neće moći promijeniti niti poništiti ovu postavku. Ako ova postavka nije postavljena, korisnik može odlučiti hoće li upotrebljavati tu funkciju.</translation>
 <translation id="3264793472749429012">Kodiranja zadanog davatelja usluge pretraživanja</translation>
 <translation id="8101760444435022591">Budući da &quot;soft-fail&quot;, mrežne provjere opoziva ne pružaju učinkovitu zaštitu sigurnosti, onemogućuju se prema zadanim postavkama na usluzi <ph name="PRODUCT_NAME"/> verzije 19 i novijih verzija. Postavljanjem tog pravila na vrijednost &quot;istinito&quot;, prethodno se ponašanje vraća i mrežne provjere OCSP/CRL bit će izvršene.
@@ -511,6 +530,7 @@
 <translation id="8889026535261486875">Poslužitelji koje <ph name="PRODUCT_NAME"/> može imenovati. Više naziva poslužitelja odvojite zarezima. Zamjenski znakovi (*) dopušteni su. Ako ovo pravilo nije postavljeno, bit će prihvaćen bilo koji poslužitelj za integriranu autentifikaciju.</translation>
 <translation id="2299220924812062390">Odredi popis omogućenih dodataka</translation>
 <translation id="924557436754151212">Uvoz spremljenih zaporki iz zadanog preglednika pri prvom pokretanju</translation>
+<translation id="1465619815762735808">Kliknite za reprodukciju</translation>
 <translation id="7227967227357489766">Definira popis korisnika kojima je dopuštena prijava na uređaj. Unosi su u obliku <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, na primjer, <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Da bi slučajnim korisnicima bio dopušten pristup domeni, upotrijebite unose u obliku <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
       Ako se to pravilo ne konfigurira, nema ograničenja za prijavu korisnika. Napominjemo da stvaranje novih korisnika još uvijek zahtijeva odgovarajuću konfiguraciju pravila <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/>.</translation>
@@ -552,6 +572,11 @@
 <translation id="8631434304112909927">do verzije <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Omogući prijedloge pretraživanja</translation>
 <translation id="4906194810004762807">Brzina osvježavanja za pravilo uređaja</translation>
+<translation id="1398889361882383850">Omogućuje vam da postavite hoće li web-lokacijama biti dopušteno automatsko pokretanje dodataka. Automatsko pokretanje dodataka može biti dopušteno za sve web-lokacije ili odbijeno za sve web-lokacije.
+
+          Klik za reprodukciju omogućuje pokretanje dodataka, ali korisnik ih mora kliknuti da bi se pokrenulo njihovo izvršenje.
+
+          Ako ovo pravilo nije postavljeno, bit će upotrijebljeno pravilo &quot;Dopusti dodatke&quot;, a korisnik će ga moći promijeniti.</translation>
 <translation id="7974114691960514888">Ovo pravilo više se ne podržava. Omogućuje upotrebu STUN i relejnih poslužitelja prilikom povezivanja s udaljenim klijentom. Ako je ova postavka omogućena, onda ovo računalo može otkriti udaljena računala hostove i povezati se s njima, čak i ako su odvojena vatrozidom. Ako je ova postavka onemogućena, a izlazne UDP veze filtrirane su vatrozidom, onda se ovo računalo može jedino povezati s računalima hostovima unutar lokalne mreže.</translation>
 <translation id="5511702823008968136">Omogući traku Knjižne oznake</translation>
 <translation id="7882585827992171421">To je pravilo aktivno samo u prodajnom načinu.
@@ -570,7 +595,6 @@
 <translation id="4121350739760194865">Sprječavanje prikaza promocija aplikacija na stranici Nova kartica</translation>
 <translation id="2127599828444728326">Dopuštanje obavijesti na ovim web-lokacijama</translation>
 <translation id="7635471475589566552">Konfigurira oznaku zemlje/jezika aplikacije u proizvodu <ph name="PRODUCT_NAME"/> i sprječava korisnike da promijene oznaku zemlje/jezika. Ako omogućite ovu postavku, <ph name="PRODUCT_NAME"/> upotrebljavat će navedenu oznaku zemlje/jezika. Ako konfigurirana oznaka zemlje/jezika nije podržana, upotrebljavat će se &quot;en-US&quot;. Ako je ova postavka onemogućena ili nije postavljena, <ph name="PRODUCT_NAME"/> upotrebljavat će oznaku zemlje/jezika koju odredi korisnik (ako je konfigurirana), oznaku zemlje/jezika sustava ili standardnu oznaku zemlje/jezika &quot;en-US&quot;.</translation>
-<translation id="7271483295221961083">Omogućuje da postavite smiju li web-lokacije automatski pokretati dodatke. Automatsko pokretanje dodataka može biti dopušteno za sve web-lokacije ili odbijeno za sve web-lokacije. Ako ovo pravilo nije postavljeno, upotrebljavat će se pravilo &quot;AllowPlugins&quot; i korisnik će to moći promijeniti.</translation>
 <translation id="718956142899066210">Dopuštene vrste veza za ažuriranja</translation>
 <translation id="6985168562472482191">Naziv web-trgovine tvrtke koji će se prikazivati ispod ikone aplikacije na stranici Nova kartica. Ova postavka nije na snazi ako nije postavljeno pravilo &quot;EnterpriseWebStoreURL&quot;. Ako je ova postavka onemogućena, aplikacija web-trgovine tvrtke (ako postoji) bit će označena vlastitim URL-om.</translation>
 <translation id="1734716591049455502">Konfiguriraj opcije daljinskog pristupa</translation>
@@ -595,6 +619,17 @@
 <translation id="6658245400435704251">Određuje do koliko sekundi uređaj može nasumično odgađati preuzimanje ažuriranja od trenutka kad je ažuriranje prvi put poslano na poslužitelj. Uređaj može dio tog vremena čekati u smislu stvarnog proteka vremena, a preostalo vrijeme u smislu broja provjera ažuriranja. U bilo kojem slučaju, gornja granica raspršivanja konstantan je iznos vremena tako da uređaj nikad ne može zauvijek zapeti čekajući ažuriranje.</translation>
 <translation id="1948757837129151165">Pravila za HTTP autentifikaciju</translation>
 <translation id="5946082169633555022">Beta kanal</translation>
+<translation id="145467868108778033">Omogućuje vam da odredite popis proširenja koja će biti instalirana u tišini, bez interakcije s korisnikom.
+
+          Svaka je stavka na popisu niz koji sadrži ID proširenja i URL za ažuriranje, razdvojene točkom-zarezom (<ph name="SEMICOLON"/>). ID proširenja niz je od 32 slova koji se, primjerice, može pronaći na <ph name="CHROME_EXTENSIONS_LINK"/> u načinu rada razvojnog programera. URL za ažuriranje treba upućivati na XML dokument manifesta ažuriranja kako je opisano u dokumentu <ph name="LINK_TO_EXTENSION_DOC1"/>. Imajte na umu da se URL za ažuriranje postavljen u ovom pravilu upotrebljava samo za prvu instalaciju, dok će daljnja ažuriranja proširenja upotrebljavati URL za ažuriranje naveden u manifestu proširenja.
+
+          Za svaku stavku proizvod <ph name="PRODUCT_NAME"/> dohvatit će proširenje određeno ID-om proširenja od usluge ažuriranja na navedenom URL-u za ažuriranje i instalirati ga u tišini.
+
+          Na primjer, usluga <ph name="EXTENSION_POLICY_EXAMPLE"/> instalira proširenje <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> sa standardnog URL-a za ažuriranje Chrome web-trgovine. Za više informacija o hostingu proširenja pogledajte: <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Korisnici neće moći deinstalirati proširenja koja su određena ovim pravilom. Ako uklonite proširenje s ovog popisa, proizvod <ph name="PRODUCT_NAME"/> automatski će ga deinstalirati.
+
+          Ako ovo pravilo nije postavljeno, korisnik može deinstalirati bilo koje proširenje u proizvodu <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="8303314579975657113">Određuje koja se GSSAPI knjižnica treba upotrebljavati za HTTP autentifikaciju. Možete postaviti samo naziv knjižnice ili cijelu putanju. Ako nijedna postavka nije navedena, <ph name="PRODUCT_NAME"/> upotrebljavat će zadani naziv knjižnice.</translation>
 <translation id="7749402620209366169">Omogućuje autentifikaciju s dva čimbenika za hostove daljinskog pristupa umjesto PIN-a koji određuje korisnik.
 

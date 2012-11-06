@@ -42,7 +42,7 @@ void WebBlobRegistryImpl::registerBlobURL(
         if (data_item.data.size() == 0)
           break;
         if (data_item.data.size() < kLargeThresholdBytes) {
-          item.SetToData(data_item.data.data(), data_item.data.size());
+          item.SetToBytes(data_item.data.data(), data_item.data.size());
           child_thread_->Send(new BlobHostMsg_AppendBlobDataItem(url, item));
         } else {
           // We handle larger amounts of data via SharedMemory instead of
@@ -67,7 +67,7 @@ void WebBlobRegistryImpl::registerBlobURL(
       }
       case WebBlobData::Item::TypeFile:
         if (data_item.length) {
-          item.SetToFile(
+          item.SetToFilePathRange(
               webkit_glue::WebStringToFilePath(data_item.filePath),
               static_cast<uint64>(data_item.offset),
               static_cast<uint64>(data_item.length),
@@ -77,10 +77,22 @@ void WebBlobRegistryImpl::registerBlobURL(
         break;
       case WebBlobData::Item::TypeBlob:
         if (data_item.length) {
-          item.SetToBlob(
+          item.SetToBlobUrlRange(
               data_item.blobURL,
               static_cast<uint64>(data_item.offset),
               static_cast<uint64>(data_item.length));
+          child_thread_->Send(new BlobHostMsg_AppendBlobDataItem(url, item));
+        }
+        break;
+      case WebBlobData::Item::TypeURL:
+        if (data_item.length) {
+          // We only support filesystem URL as of now.
+          DCHECK(GURL(data_item.url).SchemeIsFileSystem());
+          item.SetToFileSystemUrlRange(
+              data_item.url,
+              static_cast<uint64>(data_item.offset),
+              static_cast<uint64>(data_item.length),
+              base::Time::FromDoubleT(data_item.expectedModificationTime));
           child_thread_->Send(new BlobHostMsg_AppendBlobDataItem(url, item));
         }
         break;

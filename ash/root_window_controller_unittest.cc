@@ -9,9 +9,13 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/env.h"
+#include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
+#include "ui/aura/test/test_window_delegate.h"
+#include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_tracker.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -38,6 +42,27 @@ class TestDelegate : public views::WidgetDelegateView {
   DISALLOW_COPY_AND_ASSIGN(TestDelegate);
 };
 
+class DeleteOnBlurDelegate : public aura::test::TestWindowDelegate {
+ public:
+  DeleteOnBlurDelegate() : window_(NULL) {}
+  virtual ~DeleteOnBlurDelegate() {}
+
+  void set_window(aura::Window* window) { window_ = window; }
+
+  // aura::test::TestWindowDelegate overrides:
+  virtual bool CanFocus() OVERRIDE {
+    return true;
+  }
+  virtual void OnBlur() OVERRIDE {
+    delete window_;
+  }
+
+ private:
+  aura::Window* window_;
+
+  DISALLOW_COPY_AND_ASSIGN(DeleteOnBlurDelegate);
+};
+
 views::Widget* CreateTestWidget(const gfx::Rect& bounds) {
   views::Widget* widget =
       views::Widget::CreateWindowWithBounds(NULL, bounds);
@@ -61,28 +86,14 @@ aura::Window* GetModalContainer(aura::RootWindow* root_window) {
 }  // namespace
 
 namespace test {
-class RootWindowControllerTest : public test::AshTestBase {
- public:
-  RootWindowControllerTest() {}
-  virtual ~RootWindowControllerTest() {}
 
-  virtual void SetUp() OVERRIDE {
-    internal::DisplayController::SetExtendedDesktopEnabled(true);
-    AshTestBase::SetUp();
-  }
-
-  virtual void TearDown() OVERRIDE {
-    AshTestBase::TearDown();
-    internal::DisplayController::SetExtendedDesktopEnabled(false);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RootWindowControllerTest);
-};
+typedef test::AshTestBase RootWindowControllerTest;
 
 TEST_F(RootWindowControllerTest, MoveWindows_Basic) {
   UpdateDisplay("600x600,500x500");
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  ash::Shell::GetInstance()->SetShelfAutoHideBehavior(
+      ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
 
   views::Widget* normal = CreateTestWidget(gfx::Rect(650, 10, 100, 100));
   EXPECT_EQ(root_windows[1], normal->GetNativeView()->GetRootWindow());
@@ -117,19 +128,33 @@ TEST_F(RootWindowControllerTest, MoveWindows_Basic) {
             fullscreen->GetNativeView()->GetBoundsInRootWindow().ToString());
 #endif
 
+  // Make sure a window that will delete itself when losing focus
+  // will not crash.
+  aura::WindowTracker tracker;
+  DeleteOnBlurDelegate delete_on_blur_delegate;
+  aura::Window* d2 = aura::test::CreateTestWindowWithDelegate(
+      &delete_on_blur_delegate, 0, gfx::Rect(50, 50, 100, 100), NULL);
+  delete_on_blur_delegate.set_window(d2);
+  root_windows[0]->GetFocusManager()->SetFocusedWindow(
+      d2, NULL);
+  tracker.Add(d2);
+
   UpdateDisplay("600x600");
+
+  // d2 must have been deleted.
+  EXPECT_FALSE(tracker.Contains(d2));
 
   EXPECT_EQ(root_windows[0], normal->GetNativeView()->GetRootWindow());
   EXPECT_EQ("50,10 100x100", normal->GetWindowBoundsInScreen().ToString());
   EXPECT_EQ("50,10 100x100",
             normal->GetNativeView()->GetBoundsInRootWindow().ToString());
 
-  // Maximized area on primary display has 2px (given as
+  // Maximized area on primary display has 3px (given as
   // kAutoHideSize in shelf_layout_manager.cc) inset at the bottom.
   EXPECT_EQ(root_windows[0], maximized->GetNativeView()->GetRootWindow());
-  EXPECT_EQ("0,0 600x598",
+  EXPECT_EQ("0,0 600x597",
             maximized->GetWindowBoundsInScreen().ToString());
-  EXPECT_EQ("0,0 600x598",
+  EXPECT_EQ("0,0 600x597",
             maximized->GetNativeView()->GetBoundsInRootWindow().ToString());
 
   EXPECT_EQ(root_windows[0], minimized->GetNativeView()->GetRootWindow());

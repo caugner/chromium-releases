@@ -12,8 +12,8 @@
 #define UI_BASE_ACCELERATORS_ACCELERATOR_H_
 
 #include "base/string16.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "ui/base/events.h"
 #include "ui/base/ui_export.h"
 
 namespace ui {
@@ -49,6 +49,7 @@ class UI_EXPORT Accelerator {
   bool IsShiftDown() const;
   bool IsCtrlDown() const;
   bool IsAltDown() const;
+  bool IsCmdDown() const;
 
   // Returns a string with the localized shortcut if any.
   string16 GetShortcutText() const;

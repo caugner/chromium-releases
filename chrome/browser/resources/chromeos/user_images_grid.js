@@ -20,7 +20,7 @@ cr.define('options', function() {
    * Interval between consecutive camera liveness checks in msec.
    * @const
    */
-  var CAMERA_LIVENESS_CHECK_MS = 1000;
+  var CAMERA_LIVENESS_CHECK_MS = 3000;
 
   /**
    * Number of frames recorded by takeVideo().
@@ -44,6 +44,12 @@ cr.define('options', function() {
   };
 
   /**
+   * Internal URL scheme.
+   * @const
+   */
+  var CHROME_SCHEME = 'chrome://';
+
+  /**
    * Creates a new user images grid item.
    * @param {{url: string, title: string=, decorateFn: function=,
    *     clickHandler: function=}} imageInfo User image URL, optional title,
@@ -64,7 +70,10 @@ cr.define('options', function() {
     decorate: function() {
       GridItem.prototype.decorate.call(this);
       var imageEl = cr.doc.createElement('img');
-      imageEl.src = this.dataItem.url;
+      if (this.dataItem.url.slice(0, CHROME_SCHEME.length) == CHROME_SCHEME)
+        imageEl.src = this.dataItem.url + '@' + window.devicePixelRatio + 'x';
+      else
+        imageEl.src = this.dataItem.url;
       imageEl.title = this.dataItem.title || '';
       if (typeof this.dataItem.clickHandler == 'function')
         imageEl.addEventListener('mousedown', this.dataItem.clickHandler);
@@ -142,6 +151,7 @@ cr.define('options', function() {
       this.addEventListener('dblclick', this.handleDblClick_.bind(this));
       this.addEventListener('change', this.handleChange_.bind(this));
       this.setAttribute('role', 'listbox');
+      this.autoExpands = true;
     },
 
     /**
@@ -165,6 +175,8 @@ cr.define('options', function() {
       if (this.selectedItem === null)
         return;
 
+      var oldSelectionType = this.selectionType;
+
       // Update current selection type.
       this.selectionType = this.selectedItem.type;
 
@@ -174,7 +186,9 @@ cr.define('options', function() {
 
       this.updatePreview_();
 
-      cr.dispatchSimpleEvent(this, 'select');
+      var e = new cr.Event('select', false, false);
+      e.oldSelectionType = oldSelectionType;
+      this.dispatchEvent(e);
     },
 
     /**
@@ -183,8 +197,12 @@ cr.define('options', function() {
      */
     updatePreview_: function() {
       var url = this.selectedItemUrl;
-      if (url && this.previewImage_)
-        this.previewImage_.src = url;
+      if (url && this.previewImage_) {
+        if (url.slice(0, CHROME_SCHEME.length) == CHROME_SCHEME)
+          this.previewImage_.src = url + '@' + window.devicePixelRatio + 'x';
+        else
+          this.previewImage_.src = url;
+      }
     },
 
     /**
@@ -236,6 +254,7 @@ cr.define('options', function() {
       }
       if (!this.cameraVideo_)
         return;
+      this.cameraCheckInProgress_ = true;
       navigator.webkitGetUserMedia(
           {video: true},
           this.handleCameraAvailable_.bind(this, onAvailable),
@@ -250,6 +269,8 @@ cr.define('options', function() {
       this.cameraOnline = false;
       if (this.cameraVideo_)
         this.cameraVideo_.src = '';
+      // Cancel any pending getUserMedia() checks.
+      this.cameraCheckInProgress_ = false;
     },
 
     /**
@@ -261,8 +282,9 @@ cr.define('options', function() {
      */
     handleCameraAvailable_: function(onAvailable, stream) {
       this.cameraPresent = true;
-      if (onAvailable())
+      if (this.cameraCheckInProgress_ && onAvailable())
         this.cameraVideo_.src = window.webkitURL.createObjectURL(stream);
+      this.cameraCheckInProgress_ = false;
     },
 
     /**
@@ -284,6 +306,7 @@ cr.define('options', function() {
             this.checkCameraPresence.bind(this, onAvailable, onAbsent),
             CAMERA_CHECK_INTERVAL_MS);
       }
+      this.cameraCheckInProgress_ = false;
     },
 
     /**
@@ -447,6 +470,13 @@ cr.define('options', function() {
       this.cameraVideo_.addEventListener('timeupdate',
                                          this.handleVideoUpdate_.bind(this));
       this.updatePreview_();
+      this.checkCameraPresence(
+          function() {
+            return false;  // Don't start streaming if camera is present.
+          },
+          function() {
+            return false;  // Don't retry if camera is absent.
+          });
     },
 
     /**

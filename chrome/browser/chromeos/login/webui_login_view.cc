@@ -51,6 +51,7 @@ const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
 const char kAccelNameCancel[] = "cancel";
 const char kAccelNameEnrollment[] = "enrollment";
 const char kAccelNameVersion[] = "version";
+const char kAccelNameReset[] = "reset";
 
 // Observes IPC messages from the FrameSniffer and notifies JS if error
 // appears.
@@ -116,9 +117,9 @@ WebUILoginView::WebUILoginView()
       login_window_(NULL),
       host_window_frozen_(false),
       is_hidden_(false),
-      login_visible_notification_fired_(false),
       login_prompt_visible_handled_(false),
-      should_emit_login_prompt_visible_(true) {
+      should_emit_login_prompt_visible_(true),
+      forward_keyboard_event_(true) {
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
                  content::NotificationService::AllSources());
@@ -130,6 +131,9 @@ WebUILoginView::WebUILoginView()
       kAccelNameEnrollment;
   accel_map_[ui::Accelerator(ui::VKEY_V, ui::EF_ALT_DOWN)] =
       kAccelNameVersion;
+  accel_map_[ui::Accelerator(ui::VKEY_R,
+      ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
+      kAccelNameReset;
 
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
     AddAccelerator(i->first);
@@ -153,9 +157,8 @@ void WebUILoginView::Init(views::Widget* login_window) {
       WebContents::Create(ProfileManager::GetDefaultProfile(),
                           NULL,
                           MSG_ROUTING_NONE,
-                          NULL,
                           NULL);
-  tab_contents_.reset(new TabContents(web_contents));
+  tab_contents_.reset(TabContents::Factory::CreateTabContents(web_contents));
   webui_login_->SetWebContents(web_contents);
 
   web_contents->SetDelegate(this);
@@ -236,11 +239,7 @@ void WebUILoginView::OpenProxySettings() {
 
 void WebUILoginView::OnPostponedShow() {
   set_is_hidden(false);
-  // If notification will happen later let it fire login-prompt-visible signal.
-  if (login_visible_notification_fired_) {
-    LOG(INFO) << "Login WebUI >> postponed show, login_visible already fired";
-    OnLoginPromptVisible();
-  }
+  OnLoginPromptVisible();
 }
 
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
@@ -254,6 +253,11 @@ void WebUILoginView::SetStatusAreaVisible(bool visible) {
       tray->GetWidget()->Hide();
     }
   }
+}
+
+void WebUILoginView::SetUIEnabled(bool enabled) {
+  forward_keyboard_event_ = enabled;
+  ash::Shell::GetInstance()->system_tray()->SetEnabled(enabled);
 }
 
 // WebUILoginView protected: ---------------------------------------------------
@@ -282,7 +286,6 @@ void WebUILoginView::Observe(int type,
                              const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE: {
-      login_visible_notification_fired_ = true;
       OnLoginPromptVisible();
       registrar_.RemoveAll();
       break;
@@ -310,9 +313,12 @@ bool WebUILoginView::HandleContextMenu(
 #endif
 }
 
-void WebUILoginView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-  unhandled_keyboard_event_handler_.HandleKeyboardEvent(event,
-                                                        GetFocusManager());
+void WebUILoginView::HandleKeyboardEvent(content::WebContents* source,
+                                         const NativeWebKeyboardEvent& event) {
+  if (forward_keyboard_event_) {
+    unhandled_keyboard_event_handler_.HandleKeyboardEvent(event,
+                                                          GetFocusManager());
+  }
 
   // Make sure error bubble is cleared on keyboard event. This is needed
   // when the focus is inside an iframe. Only clear on KeyDown to prevent hiding
@@ -328,7 +334,7 @@ bool WebUILoginView::IsPopupOrPanel(const WebContents* source) const {
   return true;
 }
 
-bool WebUILoginView::TakeFocus(bool reverse) {
+bool WebUILoginView::TakeFocus(content::WebContents* source, bool reverse) {
   ash::SystemTray* tray = ash::Shell::GetInstance()->system_tray();
   if (tray && tray->GetWidget()->IsVisible()) {
     tray->SetNextFocusableView(this);
@@ -366,11 +372,6 @@ void WebUILoginView::OnLoginPromptVisible() {
         EmitLoginPromptVisible();
   }
   login_prompt_visible_handled_ = true;
-
-  OobeUI* oobe_ui = static_cast<OobeUI*>(GetWebUI()->GetController());
-  // Notify OOBE that the login frame has been rendered. Currently
-  // this is used to start camera presence check.
-  oobe_ui->OnLoginPromptVisible();
 
   // Let RenderWidgetHostViewAura::OnPaint() show white background when
   // loading page and when backing store is not present.

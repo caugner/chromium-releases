@@ -6,6 +6,7 @@
 
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/accessibility/invert_bubble_prefs.h"
+#include "chrome/browser/autocomplete/zero_suggest_provider.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -31,7 +32,7 @@
 #include "chrome/browser/managed_mode.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/metrics/variations_service.h"
+#include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/net/http_server_properties_manager.h"
 #include "chrome/browser/net/net_pref_observer.h"
 #include "chrome/browser/net/predictor.h"
@@ -77,7 +78,6 @@
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/confirm_quit.h"
-#include "chrome/browser/ui/startup/obsolete_os_prompt.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -97,7 +97,7 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
-#include "chrome/browser/chromeos/settings/signed_settings_cache.h"
+#include "chrome/browser/chromeos/settings/device_settings_cache.h"
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
 #include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/device_status_collector.h"
@@ -111,6 +111,10 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/chrome_to_mobile_service.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/ui/webui/ntp/android/promo_handler.h"
 #endif
 
 namespace {
@@ -179,7 +183,7 @@ void RegisterLocalState(PrefService* local_state) {
   chromeos::ProxyConfigServiceImpl::RegisterPrefs(local_state);
   chromeos::UserManager::RegisterPrefs(local_state);
   chromeos::ServicesCustomizationDocument::RegisterPrefs(local_state);
-  chromeos::signed_settings_cache::RegisterPrefs(local_state);
+  chromeos::device_settings_cache::RegisterPrefs(local_state);
   chromeos::WallpaperManager::RegisterPrefs(local_state);
   chromeos::WizardController::RegisterPrefs(local_state);
   policy::AutoEnrollmentClient::RegisterPrefs(local_state);
@@ -187,7 +191,6 @@ void RegisterLocalState(PrefService* local_state) {
 #endif
 
 #if defined(OS_MACOSX)
-  RegisterObsoleteOSInfobarPrefs(local_state);
   confirm_quit::RegisterLocalState(local_state);
 #endif
 }
@@ -202,6 +205,8 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   chrome_browser_net::HttpServerPropertiesManager::RegisterPrefs(user_prefs);
   chrome_browser_net::Predictor::RegisterUserPrefs(user_prefs);
   DownloadPrefs::RegisterUserPrefs(user_prefs);
+  extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
+  extensions::ExtensionPrefs::RegisterUserPrefs(user_prefs);
   ExtensionWebUI::RegisterUserPrefs(user_prefs);
   first_run::RegisterUserPrefs(user_prefs);
   GAIAInfoUpdateService::RegisterUserPrefs(user_prefs);
@@ -216,10 +221,12 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   ProfileImpl::RegisterUserPrefs(user_prefs);
   PromoResourceService::RegisterUserPrefs(user_prefs);
   ProtocolHandlerRegistry::RegisterPrefs(user_prefs);
+  RegisterBrowserUserPrefs(user_prefs);
   SessionStartupPref::RegisterUserPrefs(user_prefs);
   TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
   TranslatePrefs::RegisterUserPrefs(user_prefs);
   web_intents::RegisterUserPrefs(user_prefs);
+  ZeroSuggestProvider::RegisterUserPrefs(user_prefs);
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::URLBlacklistManager::RegisterPrefs(user_prefs);
@@ -235,6 +242,10 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   geolocation::RegisterUserPrefs(user_prefs);
 #endif
 
+#if defined(OS_ANDROID)
+  PromoHandler::RegisterUserPrefs(user_prefs);
+#endif
+
 #if defined(USE_ASH)
   ash::RegisterChromeLauncherUserPrefs(user_prefs);
 #endif
@@ -243,10 +254,7 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   CaptureVisibleTabFunction::RegisterUserPrefs(user_prefs);
   ChromeToMobileService::RegisterUserPrefs(user_prefs);
   extensions::CommandService::RegisterUserPrefs(user_prefs);
-  extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
-  extensions::ExtensionPrefs::RegisterUserPrefs(user_prefs);
   ExtensionSettingsHandler::RegisterUserPrefs(user_prefs);
-  RegisterBrowserUserPrefs(user_prefs);
   RegisterAutolaunchPrefs(user_prefs);
   DevToolsWindow::RegisterUserPrefs(user_prefs);
   PepperFlashSettingsManager::RegisterUserPrefs(user_prefs);

@@ -4,13 +4,11 @@
 
 #include "chrome/browser/chromeos/ui/idle_logout_dialog_view.h"
 
-#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/time.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_metrics.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -55,7 +53,6 @@ KioskModeSettings* IdleLogoutSettingsProvider::GetKioskModeSettings() {
 }
 
 void IdleLogoutSettingsProvider::LogoutCurrentUser(IdleLogoutDialogView*) {
-  KioskModeMetrics::Get()->SessionEnded();
   DBusThreadManager::Get()->GetSessionManagerClient()->StopSession();
 }
 
@@ -154,15 +151,8 @@ void IdleLogoutDialogView::Show() {
 
   UpdateCountdown();
 
-  // If the apps list is displayed, we should show as it's child. Not doing
-  // so will cause the apps list to disappear.
-  gfx::NativeWindow app_list = ash::Shell::GetInstance()->GetAppListWindow();
-  if (app_list) {
-    views::Widget::CreateWindowWithParent(this, app_list);
-  } else {
-    views::Widget::CreateWindow(this);
-    GetWidget()->SetAlwaysOnTop(true);
-  }
+  views::Widget::CreateWindow(this);
+  GetWidget()->SetAlwaysOnTop(true);
   GetWidget()->Show();
 
   // Update countdown every 1 second.

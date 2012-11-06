@@ -7,6 +7,10 @@
 
 #import <Cocoa/Cocoa.h>
 #include <list>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
@@ -56,7 +60,7 @@ class RenderWidgetHostViewMacEditCommandHelper;
 
   // These are part of the magic tooltip code from WebKit's WebHTMLView:
   id trackingRectOwner_;              // (not retained)
-  void *trackingRectUserData_;
+  void* trackingRectUserData_;
   NSTrackingRectTag lastToolTipTag_;
   scoped_nsobject<NSString> toolTip_;
 
@@ -208,6 +212,11 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE;
   virtual void SetWindowVisibility(bool visible) OVERRIDE;
   virtual void WindowFrameChanged() OVERRIDE;
+  virtual void ShowDefinitionForSelection() OVERRIDE;
+  virtual bool SupportsSpeech() const OVERRIDE;
+  virtual void SpeakSelection() OVERRIDE;
+  virtual bool IsSpeaking() const OVERRIDE;
+  virtual void StopSpeaking() OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
 
   // Implementation of RenderWidgetHostViewPort.
@@ -218,15 +227,19 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   virtual void WasShown() OVERRIDE;
   virtual void WasHidden() OVERRIDE;
   virtual void MovePluginWindows(
+      const gfx::Point& scroll_offset,
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void Blur() OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
-  virtual void TextInputStateChanged(ui::TextInputType state,
-                                     bool can_compose_inline) OVERRIDE;
-  virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
-                                      const gfx::Rect& end_rect) OVERRIDE;
+  virtual void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) OVERRIDE;
+  virtual void SelectionBoundsChanged(
+      const gfx::Rect& start_rect,
+      WebKit::WebTextDirection start_direction,
+      const gfx::Rect& end_rect,
+      WebKit::WebTextDirection end_direction) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void ImeCompositionRangeChanged(
       const ui::Range& range,
@@ -332,7 +345,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   // Call setNeedsDisplay on the cocoa_view_. The IOSurface will be drawn during
   // the next drawRect. Return true if the Ack should be sent, false if it
   // should be deferred until drawRect.
-  bool CompositorSwapBuffers(uint64 surface_handle);
+  bool CompositorSwapBuffers(uint64 surface_handle, const gfx::Size& size);
   // Ack pending SwapBuffers requests, if any, to unblock the GPU process. Has
   // no effect if there are no pending requests.
   void AckPendingSwapBuffers();

@@ -4,16 +4,15 @@
 
 #include "sync/internal_api/public/util/sync_string_conversions.h"
 
+#define ENUM_CASE(x) case x: return #x
+
 namespace syncer {
 
 const char* ConnectionStatusToString(ConnectionStatus status) {
   switch (status) {
-    case CONNECTION_OK:
-      return "CONNECTION_OK";
-    case CONNECTION_AUTH_ERROR:
-      return "CONNECTION_AUTH_ERROR";
-    case CONNECTION_SERVER_ERROR:
-      return "CONNECTION_SERVER_ERROR";
+    ENUM_CASE(CONNECTION_OK);
+    ENUM_CASE(CONNECTION_AUTH_ERROR);
+    ENUM_CASE(CONNECTION_SERVER_ERROR);
     default:
       NOTREACHED();
       return "INVALID_CONNECTION_STATUS";
@@ -24,15 +23,34 @@ const char* ConnectionStatusToString(ConnectionStatus status) {
 const char* PassphraseRequiredReasonToString(
     PassphraseRequiredReason reason) {
   switch (reason) {
-    case REASON_PASSPHRASE_NOT_REQUIRED:
-      return "REASON_PASSPHRASE_NOT_REQUIRED";
-    case REASON_ENCRYPTION:
-      return "REASON_ENCRYPTION";
-    case REASON_DECRYPTION:
-      return "REASON_DECRYPTION";
+    ENUM_CASE(REASON_PASSPHRASE_NOT_REQUIRED);
+    ENUM_CASE(REASON_ENCRYPTION);
+    ENUM_CASE(REASON_DECRYPTION);
     default:
       NOTREACHED();
       return "INVALID_REASON";
+  }
+}
+
+const char* PassphraseTypeToString(PassphraseType type) {
+  switch (type) {
+    ENUM_CASE(IMPLICIT_PASSPHRASE);
+    ENUM_CASE(KEYSTORE_PASSPHRASE);
+    ENUM_CASE(FROZEN_IMPLICIT_PASSPHRASE);
+    ENUM_CASE(CUSTOM_PASSPHRASE);
+    default:
+      NOTREACHED();
+      return "INVALID_PASSPHRASE_TYPE";
+  }
+}
+
+const char* BootstrapTokenTypeToString(BootstrapTokenType type) {
+  switch (type) {
+    ENUM_CASE(PASSPHRASE_BOOTSTRAP_TOKEN);
+    ENUM_CASE(KEYSTORE_BOOTSTRAP_TOKEN);
+    default:
+      NOTREACHED();
+      return "INVALID_BOOTSTRAP_TOKEN_TYPE";
   }
 }
 

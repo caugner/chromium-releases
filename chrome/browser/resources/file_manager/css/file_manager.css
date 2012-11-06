@@ -96,7 +96,7 @@ input[type='submit'][disabled]:hover {
 }
 
 #butter-bar {
-  -webkit-box-align: end;
+  -webkit-box-align: center;
   -webkit-box-orient: horizontal;
   -webkit-transition: opacity 300ms;
   background-color: #e3e3e3;
@@ -124,13 +124,20 @@ input[type='submit'][disabled]:hover {
 }
 
 #butter-bar .actions {
+  -webkit-box-align: center;
   -webkit-box-orient: horizontal;
   -webkit-box-pack: end;
+  -webkit-margin-start: 6px;
   display: -webkit-box;
   height: 20px;
 }
 
 #butter-bar .actions a {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+#butter-bar .actions a.x {
   background: center center no-repeat;
   background-image: -webkit-image-set(
     url('../images/files/ui/close_bar.png') 1x,
@@ -334,6 +341,10 @@ div.root-eject:hover {
   margin-top: 5px;
 }
 
+[maximized] .dialog-header {
+  -webkit-padding-end: 70px;
+}
+
 /* Container for the detail and thumbnail list views. */
 .dialog-body {
   -webkit-box-flex: 1;
@@ -391,8 +402,8 @@ div.root-eject:hover {
 }
 
 #search-breadcrumbs {
-  padding-left: 5px;
-  padding-right: 5px;
+  -webkit-margin-end: 5px;
+  -webkit-margin-start: 5px;
 }
 
 .breadcrumbs > [collapsed]:before {
@@ -518,22 +529,41 @@ div.root-eject:hover {
     url('../images/files/ui/2x/search_clear_pressed.png') 2x);
 }
 
-button#detail-view {
+button#detail-view:before {
   background-image: -webkit-image-set(
     url('../images/files/ui/view_list_black.png') 1x,
     url('../images/files/ui/2x/view_list_black.png') 2x);
-  background-position: center;
-  background-repeat: no-repeat;
 }
 
-
-button#thumbnail-view {
+button#thumbnail-view:before {
   background-image: -webkit-image-set(
     url('../images/files/ui/view_thumbs_black.png') 1x,
     url('../images/files/ui/2x/view_thumbs_black.png') 2x);
+}
+
+button#detail-view:before,
+button#thumbnail-view:before {
   background-position: center;
   background-repeat: no-repeat;
+  bottom: 0;
+  content: '';
+  left: 0;
+  opacity: 0.5;
+  position: absolute;
+  right: 0;
+  top: 0;
 }
+
+button#detail-view[disabled]:before,
+button#thumbnail-view[disabled]:before {
+  opacity: 0.75;
+}
+
+button#detail-view:hover:before,
+button#thumbnail-view:hover:before {
+  opacity: 1;
+}
+
 
 /* When detail-view is not disabled (thus thumbnail view is disabled), push
    it up a little, to make it's right glowing border visible while focused.*/
@@ -615,7 +645,7 @@ button#detail-view:not([disabled]) {
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
   -webkit-transition: height 70ms linear;
-  background-image: url('../images/files/ui/clouds.png');
+  background-image: url(chrome://resources/images/clouds.png);
   background-repeat: repeat-x;
   background-size: 150px 44px;
   border-top: 1px solid rgba(0, 0, 0, 0.1);
@@ -673,13 +703,17 @@ button#detail-view:not([disabled]) {
   position: relative;
 }
 
-.thumbnail-frame > .img-container,
-.detail-name .detail-icon,
-.filename-label > * {
+body[type='full-page'] .thumbnail-frame > .img-container,
+body[type='full-page'] .detail-name .detail-icon,
+body[type='full-page'] .filename-label > * {
   cursor: pointer;
 }
 
-.filename-label > :hover,
+body[type='full-page'] grid .filename-label > :hover {
+  text-decoration: underline;
+}
+
+body[type='full-page'] list .filename-label > :hover,
 .breadcrumb-path:not(.breadcrumb-last):hover {
   color: rgb(17, 85, 204);
   text-decoration: underline;
@@ -780,6 +814,7 @@ body[type='full-page'] .thumbnail-grid .thumbnail-bottom {
   background-position: 5px center;
   background-repeat: no-repeat;
   background-size: 16px 16px;
+  line-height: 39px;
   padding-left: 26px;
 }
 
@@ -1042,11 +1077,6 @@ input.rename {
   z-index: 2;
 }
 
-.file-checkbox,
-.pin {
-  opacity: 0.3;
-}
-
 #select-all-checkbox {
   -webkit-margin-end: 11px;
   -webkit-margin-start: 1px;
@@ -1060,16 +1090,13 @@ input.rename {
 #list-container li.table-row:hover .file-checkbox,
 #list-container li.table-row:hover .pin,
 #list-container li.thumbnail-item:hover .file-checkbox {
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
-.file-checkbox:hover,
-.pin:hover,
 #list-container li.table-row[selected] .file-checkbox,
 #list-container li.table-row[selected] .pin,
-#list-container li.table-row .pin:checked,
 #list-container li.thumbnail-item[selected] .file-checkbox {
-  opacity: 0.8 !important;
+  opacity: 1.0 !important;
 }
 
 #list-container li.table-row,
@@ -1301,7 +1328,8 @@ div.shade[fadein] {
 }
 
 /* Message panel for unmounted GData */
-#unmounted-panel {
+#unmounted-panel,
+#format-panel {
   bottom: 0;
   color: #333;
   display: none;
@@ -1314,28 +1342,28 @@ div.shade[fadein] {
 }
 
 .dialog-container[gdata='mounting'] #unmounted-panel,
-.dialog-container[gdata='error'] #unmounted-panel {
+.dialog-container[gdata='error'] #unmounted-panel,
+.dialog-container[unformatted] #format-panel {
   display: block;
 }
 
 .dialog-container[gdata='unmounted'] .filelist-panel,
 .dialog-container[gdata='mounting'] .filelist-panel,
-.dialog-container[gdata='error'] .filelist-panel {
+.dialog-container[gdata='error'] .filelist-panel,
+.dialog-container[unformatted] .filelist-panel {
   /* Hide file list when GData is not mounted.
      Use opacity to avoid manual resizing.*/
   opacity: 0;
 }
 
-#unmounted-panel > * {
-  height: 22px;
-  margin-bottom: 10px;
-}
-
-#unmounted-panel > * {
+#unmounted-panel > *,
+#format-panel > * {
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
   -webkit-box-pack: start;
   display: none;
+  height: 22px;
+  margin-bottom: 10px;
 }
 
 #unmounted-panel > .loading {
@@ -1350,9 +1378,11 @@ div.shade[fadein] {
   width: 40px;
 }
 
+[unformatted] #format-panel > .error,
 [gdata='mounting'] #unmounted-panel > .loading,
 [gdata='mounting'] #unmounted-panel > .progress,
 [gdata='error'] #unmounted-panel > .error,
+#format-panel > #format-button,
 #unmounted-panel.retry-enabled > .retry,
 #unmounted-panel.retry-enabled > .learn-more {
   display: -webkit-box;
@@ -1366,25 +1396,48 @@ div.shade[fadein] {
 .plain-link {
   color: rgb(17, 85, 204);
   cursor: pointer;
+  text-decoration: none;
 }
 
 body[ash] .dialog-title,
-body[type='full-page'] [invisibleif='full-page'],
-body:not([type='full-page']) [visibleif='full-page'],
-body:not([type='saveas-file']) [visibleif='saveas-file'],
-body:not([type='saveas-file']):not([type='full-page'])
-    [visibleif='saveas-file full-page'] {
+
+body[type='folder'] [invisibleif~='folder'],
+body[type='saveas-file'] [invisibleif~='saveas-file'],
+body[type='open-file'] [invisibleif~='open-file'],
+body[type='open-multi-file'] [invisibleif~='open-multi-file'],
+body[type='full-page'] [invisibleif~='full-page'],
+
+body[type='folder'] [visibleif]:not([visibleif~='folder']),
+body[type='saveas-file'] [visibleif]:not([visibleif~='saveas-file']),
+body[type='open-file'] [visibleif]:not([visibleif~='open-file']),
+body[type='open-multi-file'] [visibleif]:not([visibleif~='open-multi-file']),
+body[type='full-page'] [visibleif]:not([visibleif~='full-page']) {
   display: none;
 }
 
-body:not([ctrl-pressing]) [visibleif='ctrl'] {
+body:not([ctrl-pressing]) [required_attr='ctrl-pressing'] {
   display: none;
 }
 
-#gdata-settings {
+#gdata-settings:before {
   background-image: url('../images/files/ui/settings.svg');
   background-position: 20px center;
   background-repeat: no-repeat;
+  bottom: 0;
+  content: '';
+  left: 0;
+  opacity: 0.75;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+#gdata-settings:hover:before {
+  opacity: 1;
+}
+
+
+#gdata-settings {
   overflow: hidden;
   text-align: left;
   width: 54px;
@@ -1540,7 +1593,7 @@ body:not([ctrl-pressing]) [visibleif='ctrl'] {
 }
 
 #list-container .table-header-cell:hover {
-  background-color: #f2f2f2;
+  background-color: #ececec;
 }
 
 button:focus {
@@ -1549,4 +1602,9 @@ button:focus {
 
 #new-folder {
   margin-right: 30px;
+}
+
+#default-action-dialog {
+  min-width: 300px;
+  width: auto;
 }

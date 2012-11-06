@@ -13,13 +13,17 @@ package remoting;
 message AudioPacket {
   optional int32 timestamp = 1 [default = 0];
 
-  // Data is always signed and represented using little endian.
-  optional bytes data = 2;
+  // Packets with raw data must have exactly one data field.
+  // For those packets, samples are signed and represented using little endian.
+  // Some encoders (eg. Speex) may add multiple data fields to separate encoded
+  // frames.
+  repeated bytes data = 2;
 
   enum Encoding {
     ENCODING_INVALID = -1;
     ENCODING_RAW = 0;  // Uncompressed encoding
-    ENCODING_OGG = 1;
+    ENCODING_OPUS = 1;
+    ENCODING_SPEEX = 2;
   }
 
   optional Encoding encoding = 3 [default = ENCODING_INVALID];

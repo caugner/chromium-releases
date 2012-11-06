@@ -19,7 +19,6 @@
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/visibility_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/layout_manager.h"
@@ -67,7 +66,12 @@ Window::Window(WindowDelegate* delegate)
       id_(-1),
       transparent_(false),
       user_data_(NULL),
-      ignore_events_(false) {
+      ignore_events_(false),
+      // Don't notify newly added observers during notification. This causes
+      // problems for code that adds an observer as part of an observer
+      // notification (such as the workspace code).
+      observers_(ObserverList<WindowObserver>::NOTIFY_EXISTING_ONLY) {
+  set_target_handler(delegate_);
 }
 
 Window::~Window() {
@@ -163,6 +167,8 @@ ui::Layer* Window::RecreateLayer() {
     return NULL;
 
   old_layer->set_delegate(NULL);
+  if (delegate_ && old_layer->external_texture())
+    old_layer->SetExternalTexture(delegate_->CopyTexture());
   layer_ = new ui::Layer(old_layer->type());
   layer_owner_.reset(layer_);
   layer_->SetVisible(old_layer->visible());
@@ -243,7 +249,7 @@ gfx::Rect Window::GetBoundsInRootWindow() const {
   if (!GetRootWindow())
     return bounds();
   gfx::Point origin = bounds().origin();
-  Window::ConvertPointToWindow(parent_, GetRootWindow(), &origin);
+  ConvertPointToTarget(parent_, GetRootWindow(), &origin);
   return gfx::Rect(origin, bounds().size());
 }
 
@@ -292,13 +298,14 @@ void Window::SetBounds(const gfx::Rect& new_bounds) {
     SetBoundsInternal(new_bounds);
 }
 
-void Window::SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen) {
+void Window::SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen,
+                               const gfx::Display& dst_display) {
   RootWindow* root = GetRootWindow();
   if (root) {
     gfx::Point origin = new_bounds_in_screen.origin();
     aura::client::ScreenPositionClient* screen_position_client =
         aura::client::GetScreenPositionClient(root);
-    screen_position_client->SetBounds(this, new_bounds_in_screen);
+    screen_position_client->SetBounds(this, new_bounds_in_screen, dst_display);
     return;
   }
   SetBounds(new_bounds_in_screen);
@@ -345,10 +352,12 @@ void Window::StackChildBelow(Window* child, Window* target) {
 }
 
 void Window::AddChild(Window* child) {
+  RootWindow* old_root = child->GetRootWindow();
+
   DCHECK(std::find(children_.begin(), children_.end(), child) ==
       children_.end());
   if (child->parent())
-    child->parent()->RemoveChild(child);
+    child->parent()->RemoveChildImpl(child, this);
   child->parent_ = this;
 
   layer_->Add(child->layer_);
@@ -359,8 +368,8 @@ void Window::AddChild(Window* child) {
   FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowAdded(child));
   child->OnParentChanged();
 
-  RootWindow* root_window = child->GetRootWindow();
-  if (root_window) {
+  RootWindow* root_window = GetRootWindow();
+  if (root_window && old_root != root_window) {
     root_window->OnWindowAddedToRootWindow(child);
     child->NotifyAddedToRootWindow();
   }
@@ -385,26 +394,7 @@ void Window::RemoveTransientChild(Window* child) {
 }
 
 void Window::RemoveChild(Window* child) {
-  Windows::iterator i = std::find(children_.begin(), children_.end(), child);
-  DCHECK(i != children_.end());
-  if (layout_manager_.get())
-    layout_manager_->OnWillRemoveWindowFromLayout(child);
-  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWillRemoveWindow(child));
-  RootWindow* root_window = child->GetRootWindow();
-  if (root_window) {
-    root_window->OnWindowRemovedFromRootWindow(child);
-    child->NotifyRemovingFromRootWindow();
-  }
-  child->parent_ = NULL;
-  // We should only remove the child's layer if the child still owns that layer.
-  // Someone else may have acquired ownership of it via AcquireLayer() and may
-  // expect the hierarchy to go unchanged as the Window is destroyed.
-  if (child->layer_owner_.get())
-    layer_->Remove(child->layer_);
-  children_.erase(i);
-  child->OnParentChanged();
-  if (layout_manager_.get())
-    layout_manager_->OnWindowRemovedFromLayout(child);
+  RemoveChildImpl(child, NULL);
 }
 
 bool Window::Contains(const Window* other) const {
@@ -432,7 +422,7 @@ const Window* Window::GetChildById(int id) const {
 }
 
 // static
-void Window::ConvertPointToWindow(const Window* source,
+void Window::ConvertPointToTarget(const Window* source,
                                   const Window* target,
                                   gfx::Point* point) {
   if (!source)
@@ -459,7 +449,7 @@ void Window::MoveCursorTo(const gfx::Point& point_in_window) {
   RootWindow* root_window = GetRootWindow();
   DCHECK(root_window);
   gfx::Point point_in_root(point_in_window);
-  ConvertPointToWindow(this, root_window, &point_in_root);
+  ConvertPointToTarget(this, root_window, &point_in_root);
   root_window->MoveCursorTo(point_in_root);
 }
 
@@ -468,7 +458,11 @@ gfx::NativeCursor Window::GetCursor(const gfx::Point& point) const {
 }
 
 void Window::SetEventFilter(EventFilter* event_filter) {
+  if (event_filter_.get())
+    RemovePreTargetHandler(event_filter_.get());
   event_filter_.reset(event_filter);
+  if (event_filter)
+    AddPreTargetHandler(event_filter);
 }
 
 void Window::AddObserver(WindowObserver* observer) {
@@ -484,7 +478,7 @@ bool Window::ContainsPointInRoot(const gfx::Point& point_in_root) const {
   if (!root_window)
     return false;
   gfx::Point local_point(point_in_root);
-  ConvertPointToWindow(root_window, this, &local_point);
+  ConvertPointToTarget(root_window, this, &local_point);
   return gfx::Rect(GetTargetBounds().size()).Contains(local_point);
 }
 
@@ -496,7 +490,9 @@ bool Window::HitTest(const gfx::Point& local_point) {
   // Expand my bounds for hit testing (override is usually zero but it's
   // probably cheaper to do the math every time than to branch).
   gfx::Rect local_bounds(gfx::Point(), bounds().size());
-  local_bounds.Inset(hit_test_bounds_override_outer_);
+  local_bounds.Inset(aura::Env::GetInstance()->is_touch_down() ?
+      hit_test_bounds_override_outer_touch_ :
+      hit_test_bounds_override_outer_mouse_);
 
   if (!delegate_ || !delegate_->HasHitTestMask())
     return local_bounds.Contains(local_point);
@@ -544,13 +540,11 @@ bool Window::HasFocus() const {
   return focus_manager ? focus_manager->IsFocusedWindow(this) : false;
 }
 
-// For a given window, we determine its focusability and ability to
-// receive events by inspecting each sibling after it (i.e. drawn in
-// front of it in the z-order) to see if it stops propagation of
-// events that would otherwise be targeted at windows behind it.  We
-// then perform this same check on every window up to the root.
 bool Window::CanFocus() const {
-  if (!IsVisible() || !parent_ || (delegate_ && !delegate_->CanFocus()))
+  // NOTE: as part of focusing the window the ActivationClient may make the
+  // window visible (by way of making a hidden ancestor visible). For this
+  // reason we can't check visibility here and assume the client is doing it.
+  if (!parent_ || (delegate_ && !delegate_->CanFocus()))
     return false;
 
   // The client may forbid certain windows from receiving focus at a given point
@@ -623,6 +617,27 @@ void Window::OnDeviceScaleFactorChanged(float device_scale_factor) {
   if (delegate_)
     delegate_->OnDeviceScaleFactorChanged(device_scale_factor);
 }
+
+#ifndef NDEBUG
+std::string Window::GetDebugInfo() const {
+  return StringPrintf(
+      "%s<%d> bounds(%d, %d, %d, %d) %s %s opacity=%.1f",
+      name().empty() ? "Unknown" : name().c_str(), id(),
+      bounds().x(), bounds().y(), bounds().width(), bounds().height(),
+      visible_ ? "WindowVisible" : "WindowHidden",
+      layer_->GetTargetVisibility() ? "LayerVisible" : "LayerHidden",
+      layer_->opacity());
+}
+
+void Window::PrintWindowHierarchy(int depth) const {
+  printf("%*s%s\n", depth * 2, "", GetDebugInfo().c_str());
+  for (Windows::const_iterator it = children_.begin();
+       it != children_.end(); ++it) {
+    Window* child = *it;
+    child->PrintWindowHierarchy(depth + 1);
+  }
+}
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // Window, private:
@@ -753,7 +768,7 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
       continue;
 
     gfx::Point point_in_child_coords(local_point);
-    Window::ConvertPointToWindow(this, child, &point_in_child_coords);
+    ConvertPointToTarget(this, child, &point_in_child_coords);
     if (for_event_handling && delegate_ &&
         !delegate_->ShouldDescendIntoChildForEventHandling(
             child, local_point)) {
@@ -768,6 +783,30 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
   }
 
   return delegate_ ? this : NULL;
+}
+
+void Window::RemoveChildImpl(Window* child, Window* new_parent) {
+  Windows::iterator i = std::find(children_.begin(), children_.end(), child);
+  DCHECK(i != children_.end());
+  if (layout_manager_.get())
+    layout_manager_->OnWillRemoveWindowFromLayout(child);
+  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWillRemoveWindow(child));
+  RootWindow* root_window = child->GetRootWindow();
+  if (root_window &&
+      (!new_parent || new_parent->GetRootWindow() != root_window)) {
+    root_window->OnWindowRemovedFromRootWindow(child);
+    child->NotifyRemovingFromRootWindow();
+  }
+  child->parent_ = NULL;
+  // We should only remove the child's layer if the child still owns that layer.
+  // Someone else may have acquired ownership of it via AcquireLayer() and may
+  // expect the hierarchy to go unchanged as the Window is destroyed.
+  if (child->layer_owner_.get())
+    layer_->Remove(child->layer_);
+  children_.erase(i);
+  child->OnParentChanged();
+  if (layout_manager_.get())
+    layout_manager_->OnWindowRemovedFromLayout(child);
 }
 
 void Window::OnParentChanged() {
@@ -901,6 +940,14 @@ base::Closure Window::PrepareForLayerBoundsChange() {
                     bounds(), ContainsMouse());
 }
 
+bool Window::CanAcceptEvents() {
+  return CanReceiveEvents();
+}
+
+ui::EventTarget* Window::GetParentTarget() {
+  return parent_;
+}
+
 void Window::UpdateLayerName(const std::string& name) {
 #if !defined(NDEBUG)
   DCHECK(layer());
@@ -927,25 +974,5 @@ bool Window::ContainsMouse() {
   }
   return contains_mouse;
 }
-
-#ifndef NDEBUG
-std::string Window::GetDebugInfo() const {
-  return StringPrintf(
-      "%s<%d> bounds(%d, %d, %d, %d) %s",
-      name().empty() ? "Unknown" : name().c_str(), id(),
-      bounds().x(), bounds().y(), bounds().width(), bounds().height(),
-      IsVisible() ? "Visible" : "Hidden");
-}
-
-void Window::PrintWindowHierarchy(int depth) const {
-  printf("%*s%s\n", depth * 2, "", GetDebugInfo().c_str());
-  for (Windows::const_reverse_iterator it = children_.rbegin(),
-           rend = children_.rend();
-       it != rend; ++it) {
-    Window* child = *it;
-    child->PrintWindowHierarchy(depth + 1);
-  }
-}
-#endif
 
 }  // namespace aura

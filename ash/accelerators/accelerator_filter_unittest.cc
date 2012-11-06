@@ -30,9 +30,8 @@ class DummyScreenshotDelegate : public ScreenshotDelegate {
   virtual ~DummyScreenshotDelegate() {}
 
   // Overridden from ScreenshotDelegate:
-  virtual void HandleTakeScreenshot(aura::Window* window) OVERRIDE {
-    if (window != NULL)
-      ++handle_take_screenshot_count_;
+  virtual void HandleTakeScreenshotForAllRootWindows() OVERRIDE {
+    ++handle_take_screenshot_count_;
   }
 
   virtual void HandleTakePartialScreenshot(
@@ -80,15 +79,12 @@ TEST_F(AcceleratorFilterTest, TestFilterWithoutFocus) {
 
 // Tests if AcceleratorFilter works as expected with a focused window.
 TEST_F(AcceleratorFilterTest, TestFilterWithFocus) {
-  aura::Window* default_container = Shell::GetContainer(
-      Shell::GetPrimaryRootWindow(),
-      internal::kShellWindowId_DefaultContainer);
   aura::test::TestWindowDelegate test_delegate;
   scoped_ptr<aura::Window> window(aura::test::CreateTestWindowWithDelegate(
       &test_delegate,
       -1,
       gfx::Rect(),
-      default_container));
+      NULL));
   wm::ActivateWindow(window.get());
 
   DummyScreenshotDelegate* delegate = new DummyScreenshotDelegate;

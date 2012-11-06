@@ -758,6 +758,7 @@ gfx::NativeViewAccessible RenderWidgetHostViewGtk::GetNativeViewAccessible() {
 }
 
 void RenderWidgetHostViewGtk::MovePluginWindows(
+    const gfx::Point& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   for (size_t i = 0; i < moves.size(); ++i) {
     plugin_container_manager_.MovePluginContainer(moves[i]);
@@ -837,9 +838,8 @@ void RenderWidgetHostViewGtk::SetIsLoading(bool is_loading) {
 }
 
 void RenderWidgetHostViewGtk::TextInputStateChanged(
-    ui::TextInputType type,
-    bool can_compose_inline) {
-  im_context_->UpdateInputMethodState(type, can_compose_inline);
+    const ViewHostMsg_TextInputState_Params& params) {
+  im_context_->UpdateInputMethodState(params.type, params.can_compose_inline);
 }
 
 void RenderWidgetHostViewGtk::ImeCancelComposition() {
@@ -965,7 +965,9 @@ void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
 
 void RenderWidgetHostViewGtk::SelectionBoundsChanged(
     const gfx::Rect& start_rect,
-    const gfx::Rect& end_rect) {
+    WebKit::WebTextDirection start_direction,
+    const gfx::Rect& end_rect,
+    WebKit::WebTextDirection end_direction) {
   im_context_->UpdateCaretBounds(start_rect.Union(end_rect));
 }
 
@@ -1040,19 +1042,17 @@ void RenderWidgetHostViewGtk::CopyFromCompositingSurface(
   base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
 
   const gfx::Rect bounds = GetViewBounds();
-  XImage* image = XGetImage(ui::GetXDisplay(), ui::GetX11RootWindow(),
-                            bounds.x() + src_subrect.x(),
-                            bounds.y() + src_subrect.y(),
-                            src_subrect.width(),
-                            src_subrect.height(),
-                            AllPlanes, ZPixmap);
-  if (!image)
+  ui::XScopedImage image(XGetImage(ui::GetXDisplay(), ui::GetX11RootWindow(),
+                                   bounds.x() + src_subrect.x(),
+                                   bounds.y() + src_subrect.y(),
+                                   src_subrect.width(),
+                                   src_subrect.height(),
+                                   AllPlanes, ZPixmap));
+  if (!image.get())
     return;
 
-  if (!output->initialize(src_subrect.width(), src_subrect.height(), true)) {
-    XFree(image);
+  if (!output->initialize(src_subrect.width(), src_subrect.height(), true))
     return;
-  }
 
   const SkBitmap& bitmap = output->getTopDevice()->accessBitmap(true);
   const size_t bitmap_size = bitmap.getSize();
@@ -1061,7 +1061,6 @@ void RenderWidgetHostViewGtk::CopyFromCompositingSurface(
   unsigned char* pixels = static_cast<unsigned char*>(bitmap.getPixels());
   memcpy(pixels, image->data, bitmap_size);
 
-  XFree(image);
   scoped_callback_runner.Release();
   callback.Run(true);
 }
@@ -1522,6 +1521,11 @@ void RenderWidgetHostViewGtk::AccessibilitySetTextSelection(
     return;
 
   host_->AccessibilitySetTextSelection(acc_obj_id, start_offset, end_offset);
+}
+
+gfx::Point RenderWidgetHostViewGtk::GetLastTouchEventLocation() const {
+  // Not needed on Linux.
+  return gfx::Point();
 }
 
 void RenderWidgetHostViewGtk::OnAccessibilityNotifications(

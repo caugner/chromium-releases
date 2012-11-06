@@ -38,6 +38,7 @@ const char kInvalidRedirect[] = "Did not redirect to the right URL.";
 namespace GetAuthToken = extensions::api::experimental_identity::GetAuthToken;
 namespace LaunchWebAuthFlow =
     extensions::api::experimental_identity::LaunchWebAuthFlow;
+namespace identity = extensions::api::experimental_identity;
 
 IdentityGetAuthTokenFunction::IdentityGetAuthTokenFunction()
     : interactive_(false) {}
@@ -75,7 +76,7 @@ bool IdentityGetAuthTokenFunction::RunImpl() {
     }
   }
 
-  if (StartFlow(GetTokenFlowMode())) {
+  if (StartFlow(OAuth2MintTokenFlow::MODE_MINT_TOKEN_NO_FORCE)) {
     return true;
   } else {
     Release();
@@ -115,7 +116,7 @@ void IdentityGetAuthTokenFunction::OnIssueAdviceSuccess(
 void IdentityGetAuthTokenFunction::OnLoginUIClosed(
     LoginUIService::LoginUI* ui) {
   StopObservingLoginService();
-  if (!StartFlow(GetTokenFlowMode())) {
+  if (!StartFlow(OAuth2MintTokenFlow::MODE_MINT_TOKEN_NO_FORCE)) {
     SendResponse(false);
     Release();
   }
@@ -186,7 +187,7 @@ void IdentityGetAuthTokenFunction::ShowLoginPopup() {
                                                  true));
     chrome::NavigateParams params(browser,
                                   signin_url,
-                                  content::PAGE_TRANSITION_START_PAGE);
+                                  content::PAGE_TRANSITION_AUTO_TOPLEVEL);
     params.disposition = CURRENT_TAB;
     params.window_action = chrome::NavigateParams::SHOW_WINDOW;
     chrome::Navigate(&params);
@@ -218,13 +219,6 @@ bool IdentityGetAuthTokenFunction::HasLoginToken() const {
   return token_service->HasOAuthLoginToken();
 }
 
-OAuth2MintTokenFlow::Mode IdentityGetAuthTokenFunction::GetTokenFlowMode()
-    const {
-  return ExtensionInstallPrompt::ShouldAutomaticallyApproveScopes() ?
-      OAuth2MintTokenFlow::MODE_MINT_TOKEN_FORCE :
-      OAuth2MintTokenFlow::MODE_MINT_TOKEN_NO_FORCE;
-}
-
 IdentityLaunchWebAuthFlowFunction::IdentityLaunchWebAuthFlowFunction() {}
 IdentityLaunchWebAuthFlowFunction::~IdentityLaunchWebAuthFlowFunction() {}
 
@@ -232,15 +226,28 @@ bool IdentityLaunchWebAuthFlowFunction::RunImpl() {
   scoped_ptr<LaunchWebAuthFlow::Params> params(
       LaunchWebAuthFlow::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
+  const identity::WebAuthFlowDetails& details = params->details;
 
-  GURL auth_url(params->details.url);
+  GURL auth_url(details.url);
   WebAuthFlow::Mode mode =
-      params->details.interactive.get() && *params->details.interactive ?
+      details.interactive.get() && *details.interactive ?
       WebAuthFlow::INTERACTIVE : WebAuthFlow::SILENT;
+
+  // The bounds attributes are optional, but using 0 when they're not available
+  // does the right thing.
+  gfx::Rect initial_bounds;
+  if (details.width.get())
+    initial_bounds.set_width(*details.width);
+  if (details.height.get())
+    initial_bounds.set_height(*details.height);
+  if (details.left.get())
+    initial_bounds.set_x(*details.left);
+  if (details.top.get())
+    initial_bounds.set_y(*details.top);
 
   AddRef();  // Balanced in OnAuthFlowSuccess/Failure.
   auth_flow_.reset(new WebAuthFlow(
-      this, profile(), GetExtension()->id(), auth_url, mode));
+      this, profile(), GetExtension()->id(), auth_url, mode, initial_bounds));
   auth_flow_->Start();
   return true;
 }

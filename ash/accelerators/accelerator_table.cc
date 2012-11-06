@@ -5,7 +5,6 @@
 #include "ash/accelerators/accelerator_table.h"
 
 #include "base/basictypes.h"
-#include "ui/base/events.h"
 
 namespace ash {
 
@@ -20,14 +19,11 @@ const AcceleratorData kAcceleratorData[] = {
   { false, ui::VKEY_LSHIFT, ui::EF_ALT_DOWN, NEXT_IME },
   { false, ui::VKEY_SHIFT, ui::EF_ALT_DOWN, NEXT_IME },
   { false, ui::VKEY_RSHIFT, ui::EF_ALT_DOWN, NEXT_IME },
-#if defined(OS_CHROMEOS)
-  // When X11 is in use, a modifier-only accelerator like Shift+Alt could be
-  // sent to the accelerator controller in unnormalized form (e.g. when
-  // NativeWidgetAura is focused). To handle such accelerators, the following 2
-  // entries are necessary. For more details, see crbug.com/127142#c8 and #c14.
-  { false, ui::VKEY_MENU, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, NEXT_IME },
-  { false, ui::VKEY_SHIFT, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, NEXT_IME },
-#endif
+  // Single shift release turns off caps lock.
+  { false, ui::VKEY_LSHIFT, ui::EF_NONE, DISABLE_CAPS_LOCK },
+  { false, ui::VKEY_SHIFT, ui::EF_NONE, DISABLE_CAPS_LOCK },
+  { false, ui::VKEY_RSHIFT, ui::EF_NONE, DISABLE_CAPS_LOCK },
+
   { true, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN, PREVIOUS_IME },
   // Shortcuts for Japanese IME.
   { true, ui::VKEY_CONVERT, ui::EF_NONE, SWITCH_IME },
@@ -49,7 +45,10 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_KBD_BRIGHTNESS_DOWN, ui::EF_NONE, KEYBOARD_BRIGHTNESS_DOWN },
   { true, ui::VKEY_KBD_BRIGHTNESS_UP, ui::EF_NONE, KEYBOARD_BRIGHTNESS_UP },
   { true, ui::VKEY_F4, ui::EF_CONTROL_DOWN, CYCLE_DISPLAY_MODE },
+  { true, ui::VKEY_F4, ui::EF_NONE, TOGGLE_MAXIMIZED },
   { true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, LOCK_SCREEN },
+  // F13 (which is also for locking screen) is handled directly in power
+  // manager.
   { true, ui::VKEY_POWER, ui::EF_NONE, POWER_PRESSED },
   { false, ui::VKEY_POWER, ui::EF_NONE, POWER_RELEASED },
 #if !defined(NDEBUG)
@@ -84,12 +83,12 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_F5, ui::EF_CONTROL_DOWN, TAKE_SCREENSHOT },
   { true, ui::VKEY_F5, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     TAKE_PARTIAL_SCREENSHOT },
-  { true, ui::VKEY_PRINT, ui::EF_NONE, TAKE_SCREENSHOT_BY_PRTSCN_KEY },
+  { true, ui::VKEY_PRINT, ui::EF_NONE, TAKE_SCREENSHOT },
   // On Chrome OS, Search key is mapped to LWIN.
   { true, ui::VKEY_LWIN, ui::EF_NONE, TOGGLE_APP_LIST },
   { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_NONE, TOGGLE_APP_LIST },
   { true, ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, TOGGLE_APP_LIST },
-  { true, ui::VKEY_LWIN, ui::EF_SHIFT_DOWN, TOGGLE_CAPS_LOCK },
+  { true, ui::VKEY_LWIN, ui::EF_ALT_DOWN, TOGGLE_CAPS_LOCK },
   { true, ui::VKEY_F6, ui::EF_NONE, BRIGHTNESS_DOWN },
   { true, ui::VKEY_F6, ui::EF_ALT_DOWN, KEYBOARD_BRIGHTNESS_DOWN },
   { true, ui::VKEY_F7, ui::EF_NONE, BRIGHTNESS_UP },
@@ -109,6 +108,7 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_OEM_2,
     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     SHOW_KEYBOARD_OVERLAY },
+  { true, ui::VKEY_F14, ui::EF_NONE, SHOW_KEYBOARD_OVERLAY_BY_F14_KEY },
   { true, ui::VKEY_F1, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, SHOW_OAK },
   { true, ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN, SHOW_TASK_MANAGER },
   { true, ui::VKEY_1, ui::EF_ALT_DOWN, SELECT_WIN_0 },
@@ -125,13 +125,18 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_OEM_4, ui::EF_ALT_DOWN, WINDOW_SNAP_LEFT },
   { true, ui::VKEY_OEM_6, ui::EF_ALT_DOWN, WINDOW_SNAP_RIGHT },
   { true, ui::VKEY_OEM_MINUS, ui::EF_ALT_DOWN, WINDOW_MINIMIZE },
-  { true, ui::VKEY_OEM_PLUS, ui::EF_ALT_DOWN, WINDOW_MAXIMIZE_RESTORE },
+  { true, ui::VKEY_OEM_PLUS, ui::EF_ALT_DOWN, TOGGLE_MAXIMIZED },
   { true, ui::VKEY_OEM_PLUS, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
     WINDOW_POSITION_CENTER },
   { true, ui::VKEY_F2, ui::EF_CONTROL_DOWN, FOCUS_NEXT_PANE },
   { true, ui::VKEY_F1, ui::EF_CONTROL_DOWN, FOCUS_PREVIOUS_PANE },
 
-  // TODO(yusukes): Handle VKEY_MEDIA_STOP, VKEY_MEDIA_PLAY_PAUSE, and
+  // Media Player shortcuts.
+  { true, ui::VKEY_MEDIA_NEXT_TRACK, ui::EF_NONE, MEDIA_NEXT_TRACK},
+  { true, ui::VKEY_MEDIA_PLAY_PAUSE, ui::EF_NONE, MEDIA_PLAY_PAUSE},
+  { true, ui::VKEY_MEDIA_PREV_TRACK, ui::EF_NONE, MEDIA_PREV_TRACK},
+
+  // TODO(yusukes): Handle VKEY_MEDIA_STOP, and
   // VKEY_MEDIA_LAUNCH_MAIL.
 };
 
@@ -146,8 +151,6 @@ const AcceleratorData kDebugAcceleratorData[] = {
   // For testing on systems where Alt-Tab is already mapped.
   { true, ui::VKEY_W, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU },
   { true, ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, CYCLE_BACKWARD_MRU },
-  { true, ui::VKEY_F4, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, DISPLAY_CYCLE },
-  { true, ui::VKEY_F4, ui::EF_SHIFT_DOWN, DISPLAY_ADD_REMOVE },
   { true, ui::VKEY_HOME, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     DISPLAY_TOGGLE_SCALE },
 #if !defined(NDEBUG)
@@ -168,28 +171,9 @@ const AcceleratorAction kReservedActions[] = {
   CYCLE_FORWARD_MRU,  // Alt+Tab
 
 #if defined(OS_CHROMEOS)
-  // Chrome OS top-row keys.
-  FOCUS_PREVIOUS_PANE,  // Control+F1
-  FOCUS_NEXT_PANE,  // Control+F2
-  CYCLE_DISPLAY_MODE,  // Control+F4
-  DISPLAY_ADD_REMOVE,  // Shift+F4
-  DISPLAY_CYCLE,  // Shift+Control+F4
-  CYCLE_FORWARD_LINEAR,  // F5
-  CYCLE_BACKWARD_LINEAR,  // Shift+F5
-  TAKE_SCREENSHOT,  // Control+F5
-  TAKE_PARTIAL_SCREENSHOT,  // Shift+Control+F5
-  BRIGHTNESS_DOWN,  // F6
-  KEYBOARD_BRIGHTNESS_DOWN,  // Alt+F6
-  MAGNIFY_SCREEN_ZOOM_OUT,  // Control+F6
-  BRIGHTNESS_UP,  // F7
-  KEYBOARD_BRIGHTNESS_UP,  // Alt+F7
-  MAGNIFY_SCREEN_ZOOM_IN,  // Control+F7
-  VOLUME_MUTE,  // F8
-  VOLUME_DOWN,  // F9
-  VOLUME_UP,  // F10
+  SHOW_KEYBOARD_OVERLAY_BY_F14_KEY,  // F14
   POWER_PRESSED,
   POWER_RELEASED,
-  // TODO(yusukes): Handle F1, F2, F3, and F4 without modifiers in BrowserView.
 #endif
 };
 
@@ -201,6 +185,7 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
 #if defined(OS_CHROMEOS)
   CYCLE_DISPLAY_MODE,
 #endif  // defined(OS_CHROMEOS)
+  DISABLE_CAPS_LOCK,
   KEYBOARD_BRIGHTNESS_DOWN,
   KEYBOARD_BRIGHTNESS_UP,
   NEXT_IME,

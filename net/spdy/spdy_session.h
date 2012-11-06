@@ -27,6 +27,7 @@
 #include "net/socket/stream_socket.h"
 #include "net/spdy/buffered_spdy_framer.h"
 #include "net/spdy/spdy_credential_state.h"
+#include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_io_buffer.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session_pool.h"
@@ -263,6 +264,9 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   // Enable sending of PING frame with each request.
   static void set_enable_ping_based_connection_checking(bool enable);
 
+  // Enable the sending of CREDENTIAL frames.
+  static void set_enable_credential_frames(bool enable);
+
   // The initial max concurrent streams per session, can be overridden by the
   // server via SETTINGS.
   static void set_init_max_concurrent_streams(size_t value);
@@ -374,13 +378,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
     PendingCreateStream(const GURL& url, RequestPriority priority,
                         scoped_refptr<SpdyStream>* spdy_stream,
                         const BoundNetLog& stream_net_log,
-                        const CompletionCallback& callback)
-        : url(&url),
-          priority(priority),
-          spdy_stream(spdy_stream),
-          stream_net_log(&stream_net_log),
-          callback(callback) {
-    }
+                        const CompletionCallback& callback);
 
     ~PendingCreateStream();
 
@@ -411,8 +409,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
                               SpdyIOBufferProducerCompare> WriteQueue;
 
   struct CallbackResultPair {
-    CallbackResultPair(const CompletionCallback& callback_in, int result_in)
-        : callback(callback_in), result(result_in) {}
+    CallbackResultPair(const CompletionCallback& callback_in, int result_in);
     ~CallbackResultPair();
 
     CompletionCallback callback;

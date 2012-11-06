@@ -78,7 +78,11 @@ bool ExecuteCodeInTabFunction::RunImpl() {
   // we check again in the renderer.
   CHECK(contents);
   if (!GetExtension()->CanExecuteScriptOnPage(
-          contents->web_contents()->GetURL(), execute_tab_id_, NULL, &error_)) {
+          contents->web_contents()->GetURL(),
+          contents->web_contents()->GetURL(),
+          execute_tab_id_,
+          NULL,
+          &error_)) {
     return false;
   }
 
@@ -261,13 +265,14 @@ bool ExecuteCodeInTabFunction::Execute(const std::string& code_string) {
   }
   CHECK_NE(UserScript::UNDEFINED, run_at);
 
-  contents->extension_tab_helper()->script_executor()->ExecuteScript(
-      extension->id(),
-      script_type,
-      code_string,
-      frame_scope,
-      run_at,
-      ScriptExecutor::ISOLATED_WORLD,
-      base::Bind(&ExecuteCodeInTabFunction::OnExecuteCodeFinished, this));
+  extensions::TabHelper::FromWebContents(contents->web_contents())->
+      script_executor()->ExecuteScript(
+          extension->id(),
+          script_type,
+          code_string,
+          frame_scope,
+          run_at,
+          ScriptExecutor::ISOLATED_WORLD,
+          base::Bind(&ExecuteCodeInTabFunction::OnExecuteCodeFinished, this));
   return true;
 }

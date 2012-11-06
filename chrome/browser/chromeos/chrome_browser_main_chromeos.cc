@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/chromeos/chromeos_version.h"
@@ -18,11 +19,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
+#include "chrome/browser/chromeos/contacts/contact_manager.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cryptohome/async_method_caller.h"
 #include "chrome/browser/chromeos/dbus/cros_dbus_service.h"
-#include "chrome/browser/chromeos/disks/disk_mount_manager.h"
 #include "chrome/browser/chromeos/external_metrics.h"
+#include "chrome/browser/chromeos/extensions/default_app_order.h"
 #include "chrome/browser/chromeos/imageburner/burn_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/low_memory_observer.h"
+#include "chrome/browser/chromeos/mtp/media_transfer_protocol_manager.h"
 #include "chrome/browser/chromeos/net/cros_network_change_notifier_factory.h"
 #include "chrome/browser/chromeos/net/network_change_notifier_chromeos.h"
 #include "chrome/browser/chromeos/oom_priority_manager.h"
@@ -50,31 +52,34 @@
 #include "chrome/browser/chromeos/power/screen_lock_observer.h"
 #include "chrome/browser/chromeos/power/user_activity_notifier.h"
 #include "chrome/browser/chromeos/power/video_activity_notifier.h"
-#include "chrome/browser/chromeos/settings/ownership_service.h"
-#include "chrome/browser/chromeos/settings/session_manager_observer.h"
+#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
 #include "chrome/browser/chromeos/web_socket_proxy_controller.h"
 #include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/media_gallery/media_device_notifications_chromeos.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/network_configuration_updater.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/token_service_factory.h"
+#include "chrome/browser/system_monitor/media_transfer_protocol_device_observer_chromeos.h"
+#include "chrome/browser/system_monitor/removable_device_notifications_chromeos.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "chromeos/disks/disk_mount_manager.h"
+#include "chromeos/display/output_configurator.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/platform_locale_settings.h"
@@ -207,6 +212,7 @@ ChromeBrowserMainPartsChromeos::~ChromeBrowserMainPartsChromeos() {
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
     chromeos::ShutdownKioskModeScreensaver();
   cryptohome::AsyncMethodCaller::Shutdown();
+  chromeos::mtp::MediaTransferProtocolManager::Shutdown();
   chromeos::disks::DiskMountManager::Shutdown();
 
   // CrosLibrary is shut down before DBusThreadManager even though the former
@@ -291,11 +297,14 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
 
   chromeos::CrosDBusService::Initialize();
 
-  // Initialize the session manager observer so that we'll take actions
-  // per signals sent from the session manager.
-  session_manager_observer_.reset(new chromeos::SessionManagerObserver);
+  // Initialize the device settings service so that we'll take actions per
+  // signals sent from the session manager.
+  chromeos::DeviceSettingsService::Get()->Initialize(
+      chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
+      chromeos::OwnerKeyUtil::Create());
 
   chromeos::disks::DiskMountManager::Initialize();
+  chromeos::mtp::MediaTransferProtocolManager::Initialize();
   cryptohome::AsyncMethodCaller::Initialize();
 
   // Initialize the network change notifier for Chrome OS. The network
@@ -345,7 +354,7 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   chromeos::BootTimesLoader::Get()->RecordChromeMainStats();
 
   // Trigger prefetching of ownership status.
-  chromeos::OwnershipService::GetSharedInstance()->Prewarm();
+  chromeos::DeviceSettingsService::Get()->Load();
 
   // -- This used to be in ChromeBrowserMainParts::PreMainMessageLoopRun()
   // -- just before CreateProfile().
@@ -367,6 +376,11 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   if (parsed_command_line().HasSwitch(switches::kAllowFileAccess))
     ChromeNetworkDelegate::AllowAccessToAllFiles();
 
+  if (parsed_command_line().HasSwitch(switches::kEnableContacts)) {
+    contact_manager_.reset(new contacts::ContactManager());
+    contact_manager_->Init();
+  }
+
   // There are two use cases for kLoginUser:
   //   1) if passed in tandem with kLoginPassword, to drive a "StubLogin"
   //   2) if passed alone, to signal that the indicated user has already
@@ -384,9 +398,22 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
     // Initialize user policy before creating the profile so the profile
     // initialization code sees policy settings.
-    g_browser_process->browser_policy_connector()->InitializeUserPolicy(
-        username, false  /* wait_for_policy_fetch */);
+    // Guest accounts are not subject to user policy.
+    if (!chromeos::UserManager::Get()->IsLoggedInAsGuest()) {
+      g_browser_process->browser_policy_connector()->InitializeUserPolicy(
+          username, false  /* wait_for_policy_fetch */);
+    }
+
+    // Load the default app order synchronously for restarting case.
+    app_order_loader_.reset(
+        new chromeos::default_app_order::ExternalLoader(false /* async */));
+
     chromeos::UserManager::Get()->SessionStarted();
+  }
+
+  if (!app_order_loader_.get()) {
+    app_order_loader_.reset(
+        new chromeos::default_app_order::ExternalLoader(true /* async */));
   }
 
   // In Aura builds this will initialize ash::Shell.
@@ -397,12 +424,15 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // -- This used to be in ChromeBrowserMainParts::PreMainMessageLoopRun()
   // -- just after CreateProfile().
 
+  policy::BrowserPolicyConnector* connector =
+      g_browser_process->browser_policy_connector();
+
   if (parsed_command_line().HasSwitch(switches::kLoginUser) &&
       !parsed_command_line().HasSwitch(switches::kLoginPassword)) {
     // Pass the TokenService pointer to the policy connector so user policy can
     // grab a token and register with the policy server.
     // TODO(mnissler): Remove once OAuth is the only authentication mechanism.
-    g_browser_process->browser_policy_connector()->SetUserPolicyTokenService(
+    connector->SetUserPolicyTokenService(
         TokenServiceFactory::GetForProfile(profile()));
 
     // Make sure we flip every profile to not share proxies if the user hasn't
@@ -413,12 +443,9 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
       profile()->GetPrefs()->SetBoolean(prefs::kUseSharedProxies, false);
   }
 
-  if (parsed_command_line().HasSwitch(switches::kEnableONCPolicy)) {
-    network_config_updater_.reset(
-        new policy::NetworkConfigurationUpdater(
-            g_browser_process->policy_service(),
-            chromeos::CrosLibrary::Get()->GetNetworkLibrary()));
-  }
+  // Make sure the NetworkConfigurationUpdater is ready so that it pushes ONC
+  // configuration before login.
+  connector->GetNetworkConfigurationUpdater();
 
   // Make sure that wallpaper boot transition and other delays in OOBE
   // are disabled for tests by default.
@@ -437,13 +464,16 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // Initialize the brightness observer so that we'll display an onscreen
   // indication of brightness changes during login.
   brightness_observer_.reset(new chromeos::BrightnessObserver());
+  media_transfer_protocol_device_observer_.reset(
+      new chromeos::mtp::MediaTransferProtocolDeviceObserverCros());
   output_observer_.reset(new chromeos::OutputObserver());
   resume_observer_.reset(new chromeos::ResumeObserver());
   screen_lock_observer_.reset(new chromeos::ScreenLockObserver());
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
     power_state_override_.reset(new chromeos::PowerStateOverride());
 
-  media_device_notifications_ = new chromeos::MediaDeviceNotifications();
+  removable_device_notifications_ =
+      new chromeos::RemovableDeviceNotificationsCros();
 
   ChromeBrowserMainPartsLinux::PostProfileInit();
 }
@@ -510,13 +540,17 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   if (chromeos::CrosNetworkChangeNotifierFactory::GetInstance())
     chromeos::CrosNetworkChangeNotifierFactory::GetInstance()->Shutdown();
 
+  // Tell DeviceSettingsService to stop talking to session_manager.
+  chromeos::DeviceSettingsService::Get()->Shutdown();
+
   // We should remove observers attached to D-Bus clients before
   // DBusThreadManager is shut down.
-  session_manager_observer_.reset();
   screen_lock_observer_.reset();
   resume_observer_.reset();
   brightness_observer_.reset();
+  media_transfer_protocol_device_observer_.reset();
   output_observer_.reset();
+  power_state_override_.reset();
 
   // The XInput2 event listener needs to be shut down earlier than when
   // Singletons are finally destroyed in AtExitManager.
@@ -539,9 +573,8 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   power_button_observer_.reset();
   screen_dimming_observer_.reset();
 
-  // Delete the NetworkConfigurationUpdater while |g_browser_process| is still
-  // alive.
-  network_config_updater_.reset();
+  // Delete ContactManager while |g_browser_process| is still alive.
+  contact_manager_.reset();
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopRun();
 }

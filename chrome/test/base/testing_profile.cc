@@ -24,6 +24,7 @@
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
@@ -34,6 +35,7 @@
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/policy/user_cloud_policy_manager.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/testing_pref_store.h"
 #include "chrome/browser/prerender/prerender_manager.h"
@@ -48,6 +50,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/bookmark_load_observer.h"
+#include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
@@ -159,30 +162,7 @@ TestingProfile::TestingProfile()
       last_session_exited_cleanly_(true),
       profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
       delegate_(NULL) {
-  if (!temp_dir_.CreateUniqueTempDir()) {
-    LOG(ERROR) << "Failed to create unique temporary directory.";
-
-    // Fallback logic in case we fail to create unique temporary directory.
-    FilePath system_tmp_dir;
-    bool success = PathService::Get(base::DIR_TEMP, &system_tmp_dir);
-
-    // We're severly screwed if we can't get the system temporary
-    // directory. Die now to avoid writing to the filesystem root
-    // or other bad places.
-    CHECK(success);
-
-    FilePath fallback_dir(system_tmp_dir.AppendASCII("TestingProfilePath"));
-    file_util::Delete(fallback_dir, true);
-    file_util::CreateDirectory(fallback_dir);
-    if (!temp_dir_.Set(fallback_dir)) {
-      // That shouldn't happen, but if it does, try to recover.
-      LOG(ERROR) << "Failed to use a fallback temporary directory.";
-
-      // We're screwed if this fails, see CHECK above.
-      CHECK(temp_dir_.Set(system_tmp_dir));
-    }
-  }
-
+  CreateTempProfileDir();
   profile_path_ = temp_dir_.path();
 
   Init();
@@ -217,6 +197,69 @@ TestingProfile::TestingProfile(const FilePath& path,
                                                 base::Unretained(this)));
   } else {
     FinishInit();
+  }
+}
+
+TestingProfile::TestingProfile(
+    const FilePath& path,
+    Delegate* delegate,
+    scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy,
+    scoped_ptr<PrefService> prefs,
+    scoped_ptr<policy::UserCloudPolicyManager> user_cloud_policy_manager)
+    : start_time_(Time::Now()),
+      prefs_(prefs.release()),
+      testing_prefs_(NULL),
+      incognito_(false),
+      last_session_exited_cleanly_(true),
+      extension_special_storage_policy_(extension_policy),
+      user_cloud_policy_manager_(user_cloud_policy_manager.release()),
+      profile_path_(path),
+      profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
+      delegate_(delegate) {
+
+  // If no profile path was supplied, create one.
+  if (profile_path_.empty()) {
+    CreateTempProfileDir();
+    profile_path_ = temp_dir_.path();
+  }
+
+  Init();
+  // If caller supplied a delegate, delay the FinishInit invocation until other
+  // tasks have run.
+  // TODO(atwilson): See if this is still required once we convert the current
+  // users of the constructor that takes a Delegate* param.
+  if (delegate_) {
+    MessageLoop::current()->PostTask(FROM_HERE,
+                                     base::Bind(&TestingProfile::FinishInit,
+                                                base::Unretained(this)));
+  } else {
+    FinishInit();
+  }
+}
+
+void TestingProfile::CreateTempProfileDir() {
+  if (!temp_dir_.CreateUniqueTempDir()) {
+    LOG(ERROR) << "Failed to create unique temporary directory.";
+
+    // Fallback logic in case we fail to create unique temporary directory.
+    FilePath system_tmp_dir;
+    bool success = PathService::Get(base::DIR_TEMP, &system_tmp_dir);
+
+    // We're severly screwed if we can't get the system temporary
+    // directory. Die now to avoid writing to the filesystem root
+    // or other bad places.
+    CHECK(success);
+
+    FilePath fallback_dir(system_tmp_dir.AppendASCII("TestingProfilePath"));
+    file_util::Delete(fallback_dir, true);
+    file_util::CreateDirectory(fallback_dir);
+    if (!temp_dir_.Set(fallback_dir)) {
+      // That shouldn't happen, but if it does, try to recover.
+      LOG(ERROR) << "Failed to use a fallback temporary directory.";
+
+      // We're screwed if this fails, see CHECK above.
+      CHECK(temp_dir_.Set(system_tmp_dir));
+    }
   }
 }
 
@@ -256,14 +299,20 @@ TestingProfile::~TestingProfile() {
     host_content_settings_map_->ShutdownOnUIThread();
 
   DestroyTopSites();
-  DestroyFaviconService();
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
 }
 
+static ProfileKeyedService* BuildFaviconService(Profile* profile) {
+  return new FaviconService(
+      HistoryServiceFactory::GetForProfileWithoutCreating(profile));
+}
+
 void TestingProfile::CreateFaviconService() {
-  favicon_service_.reset(new FaviconService(this));
+  // It is up to the caller to create the history service if one is needed.
+  FaviconServiceFactory::GetInstance()->SetTestingFactory(
+      this, BuildFaviconService);
 }
 
 static scoped_refptr<RefcountedProfileKeyedService> BuildHistoryService(
@@ -331,10 +380,6 @@ void TestingProfile::DestroyTopSites() {
   }
 }
 
-void TestingProfile::DestroyFaviconService() {
-  favicon_service_.reset();
-}
-
 static ProfileKeyedService* BuildBookmarkModel(Profile* profile) {
   BookmarkModel* bookmark_model = new BookmarkModel(profile);
   bookmark_model->Load();
@@ -379,15 +424,37 @@ void TestingProfile::CreateWebDataService() {
 }
 
 void TestingProfile::BlockUntilBookmarkModelLoaded() {
-  DCHECK(GetBookmarkModel());
-  if (GetBookmarkModel()->IsLoaded())
+  // Only get the bookmark model if it actually exists since the caller of the
+  // test should explicitly call CreateBookmarkModel to build it.
+  BookmarkModel* bookmark_model =
+      BookmarkModelFactory::GetForProfileIfExists(this);
+  DCHECK(bookmark_model);
+  if (bookmark_model->IsLoaded())
     return;
   base::RunLoop run_loop;
   BookmarkLoadObserver observer(content::GetQuitTaskForRunLoop(&run_loop));
-  GetBookmarkModel()->AddObserver(&observer);
+  bookmark_model->AddObserver(&observer);
   run_loop.Run();
-  GetBookmarkModel()->RemoveObserver(&observer);
-  DCHECK(GetBookmarkModel()->IsLoaded());
+  bookmark_model->RemoveObserver(&observer);
+  DCHECK(bookmark_model->IsLoaded());
+}
+
+void TestingProfile::BlockUntilHistoryIndexIsRefreshed() {
+  // Only get the history service if it actually exists since the caller of the
+  // test should explicitly call CreateHistoryService to build it.
+  HistoryService* history_service =
+      HistoryServiceFactory::GetForProfileWithoutCreating(this);
+  DCHECK(history_service);
+  history::InMemoryURLIndex* index = history_service->InMemoryIndex();
+  if (!index || index->restored())
+    return;
+  base::RunLoop run_loop;
+  HistoryIndexRestoreObserver observer(
+      content::GetQuitTaskForRunLoop(&run_loop));
+  index->set_restore_cache_observer(&observer);
+  run_loop.Run();
+  index->set_restore_cache_observer(NULL);
+  DCHECK(index->restored());
 }
 
 // TODO(phajdan.jr): Doesn't this hang if Top Sites are already loaded?
@@ -395,7 +462,7 @@ void TestingProfile::BlockUntilTopSitesLoaded() {
   content::WindowedNotificationObserver top_sites_loaded_observer(
       chrome::NOTIFICATION_TOP_SITES_LOADED,
       content::NotificationService::AllSources());
-  if (!GetHistoryService(Profile::EXPLICIT_ACCESS))
+  if (!HistoryServiceFactory::GetForProfile(this, Profile::EXPLICIT_ACCESS))
     GetTopSites()->HistoryLoaded();
   top_sites_loaded_observer.Wait();
 }
@@ -475,23 +542,15 @@ TestingProfile::GetExtensionSpecialStoragePolicy() {
   return extension_special_storage_policy_.get();
 }
 
-FaviconService* TestingProfile::GetFaviconService(ServiceAccessType access) {
-  return favicon_service_.get();
-}
-
-HistoryService* TestingProfile::GetHistoryService(ServiceAccessType access) {
-  return HistoryServiceFactory::GetForProfileIfExists(this, access);
-}
-
-HistoryService* TestingProfile::GetHistoryServiceWithoutCreating() {
-  return HistoryServiceFactory::GetForProfileWithoutCreating(this);
-}
-
 net::CookieMonster* TestingProfile::GetCookieMonster() {
   if (!GetRequestContext())
     return NULL;
   return GetRequestContext()->GetURLRequestContext()->cookie_store()->
       GetCookieMonster();
+}
+
+policy::UserCloudPolicyManager* TestingProfile::GetUserCloudPolicyManager() {
+  return user_cloud_policy_manager_.get();
 }
 
 policy::PolicyService* TestingProfile::GetPolicyService() {
@@ -557,7 +616,7 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContextForRenderProcess(
     const extensions::Extension* installed_app = extension_service->
         GetInstalledAppForRenderer(renderer_child_id);
     if (installed_app != NULL && installed_app->is_storage_isolated())
-      return GetRequestContextForIsolatedApp(installed_app->id());
+      return GetRequestContextForStoragePartition(installed_app->id());
   }
 
   content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
@@ -569,7 +628,7 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContextForRenderProcess(
     // non-persistent context using the RPH's id.
     std::string id("guest-");
     id.append(base::IntToString(renderer_child_id));
-    return GetRequestContextForIsolatedApp(id);
+    return GetRequestContextForStoragePartition(id);
   }
 
   return GetRequestContext();
@@ -590,7 +649,19 @@ void TestingProfile::ResetRequestContext() {
   request_context_ = NULL;
 }
 
-net::URLRequestContextGetter* TestingProfile::GetRequestContextForMedia() {
+net::URLRequestContextGetter* TestingProfile::GetMediaRequestContext() {
+  return NULL;
+}
+
+net::URLRequestContextGetter*
+TestingProfile::GetMediaRequestContextForRenderProcess(
+    int renderer_child_id) {
+  return NULL;
+}
+
+net::URLRequestContextGetter*
+TestingProfile::GetMediaRequestContextForStoragePartition(
+    const std::string& partition_id) {
   return NULL;
 }
 
@@ -604,9 +675,10 @@ net::SSLConfigService* TestingProfile::GetSSLConfigService() {
   return NULL;
 }
 
-net::URLRequestContextGetter* TestingProfile::GetRequestContextForIsolatedApp(
-    const std::string& app_id) {
-  // We don't test isolated app storage here yet, so returning the same dummy
+net::URLRequestContextGetter*
+TestingProfile::GetRequestContextForStoragePartition(
+    const std::string& partition_id) {
+  // We don't test storage partitions here yet, so returning the same dummy
   // context is sufficient for now.
   return GetRequestContext();
 }
@@ -620,9 +692,11 @@ content::ResourceContext* TestingProfile::GetResourceContext() {
 HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), false);
+#if defined(ENABLE_EXTENSIONS)
     ExtensionService* extension_service = GetExtensionService();
     if (extension_service)
       host_content_settings_map_->RegisterExtensionService(extension_service);
+#endif
   }
   return host_content_settings_map_.get();
 }
@@ -659,10 +733,6 @@ void TestingProfile::SetID(const std::wstring& id) {
 
 bool TestingProfile::DidLastSessionExitCleanly() {
   return last_session_exited_cleanly_;
-}
-
-BookmarkModel* TestingProfile::GetBookmarkModel() {
-  return BookmarkModelFactory::GetForProfileIfExists(this);
 }
 
 bool TestingProfile::IsSameProfile(Profile *p) {
@@ -731,4 +801,45 @@ bool TestingProfile::WasCreatedByVersionOrLater(const std::string& version) {
 base::Callback<ChromeURLDataManagerBackend*(void)>
     TestingProfile::GetChromeURLDataManagerBackendGetter() const {
   return base::Callback<ChromeURLDataManagerBackend*(void)>();
+}
+
+TestingProfile::Builder::Builder()
+    : build_called_(false),
+      delegate_(NULL) {
+}
+
+TestingProfile::Builder::~Builder() {
+}
+
+void TestingProfile::Builder::SetPath(const FilePath& path) {
+  path_ = path;
+}
+
+void TestingProfile::Builder::SetDelegate(Delegate* delegate) {
+  delegate_ = delegate;
+}
+
+void TestingProfile::Builder::SetExtensionSpecialStoragePolicy(
+    scoped_refptr<ExtensionSpecialStoragePolicy> policy) {
+  extension_policy_ = policy;
+}
+
+void TestingProfile::Builder::SetPrefService(scoped_ptr<PrefService> prefs) {
+  pref_service_ = prefs.Pass();
+}
+
+void TestingProfile::Builder::SetUserCloudPolicyManager(
+    scoped_ptr<policy::UserCloudPolicyManager> manager) {
+  user_cloud_policy_manager_ = manager.Pass();
+}
+
+scoped_ptr<TestingProfile> TestingProfile::Builder::Build() {
+  DCHECK(!build_called_);
+  build_called_ = true;
+  return scoped_ptr<TestingProfile>(new TestingProfile(
+      path_,
+      delegate_,
+      extension_policy_,
+      pref_service_.Pass(),
+      user_cloud_policy_manager_.Pass()));
 }

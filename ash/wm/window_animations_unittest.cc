@@ -6,6 +6,7 @@
 
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/workspace_controller.h"
 #include "base/time.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
@@ -19,15 +20,22 @@ using ui::Layer;
 namespace ash {
 namespace internal {
 
-typedef ash::test::AshTestBase WindowAnimationsTest;
+class WindowAnimationsTest : public ash::test::AshTestBase {
+ public:
+  WindowAnimationsTest() {}
+
+  virtual void TearDown() OVERRIDE {
+    ui::LayerAnimator::set_disable_animations_for_test(true);
+    AshTestBase::TearDown();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(WindowAnimationsTest);
+};
 
 TEST_F(WindowAnimationsTest, HideShow) {
-  aura::Window* default_container =
-      ash::Shell::GetContainer(
-          Shell::GetPrimaryRootWindow(),
-          internal::kShellWindowId_DefaultContainer);
   scoped_ptr<aura::Window> window(
-      aura::test::CreateTestWindowWithId(0, default_container));
+      aura::test::CreateTestWindowWithId(0, NULL));
   window->Show();
   EXPECT_TRUE(window->layer()->visible());
   // Hiding.
@@ -60,12 +68,8 @@ TEST_F(WindowAnimationsTest, HideShow) {
 }
 
 TEST_F(WindowAnimationsTest, ShowHide) {
-  aura::Window* default_container =
-      ash::Shell::GetContainer(
-          Shell::GetPrimaryRootWindow(),
-          internal::kShellWindowId_DefaultContainer);
   scoped_ptr<aura::Window> window(
-      aura::test::CreateTestWindowWithId(0, default_container));
+      aura::test::CreateTestWindowWithId(0, NULL));
   window->Show();
   EXPECT_TRUE(window->layer()->visible());
   // Showing -- should be a no-op.
@@ -98,12 +102,8 @@ TEST_F(WindowAnimationsTest, ShowHide) {
 }
 
 TEST_F(WindowAnimationsTest, HideShowBrightnessGrayscaleAnimation) {
-  aura::Window* default_container =
-      ash::Shell::GetContainer(
-          Shell::GetPrimaryRootWindow(),
-          internal::kShellWindowId_DefaultContainer);
   scoped_ptr<aura::Window> window(
-      aura::test::CreateTestWindowWithId(0, default_container));
+      aura::test::CreateTestWindowWithId(0, NULL));
   window->Show();
   EXPECT_TRUE(window->layer()->visible());
 
@@ -139,12 +139,8 @@ TEST_F(WindowAnimationsTest, HideShowBrightnessGrayscaleAnimation) {
 }
 
 TEST_F(WindowAnimationsTest, LayerTargetVisibility) {
-  aura::Window* default_container =
-      ash::Shell::GetContainer(
-          Shell::GetPrimaryRootWindow(),
-          internal::kShellWindowId_DefaultContainer);
   scoped_ptr<aura::Window> window(
-      aura::test::CreateTestWindowWithId(0, default_container));
+      aura::test::CreateTestWindowWithId(0, NULL));
 
   // Layer target visibility changes according to Show/Hide.
   window->Show();
@@ -156,14 +152,10 @@ TEST_F(WindowAnimationsTest, LayerTargetVisibility) {
 }
 
 TEST_F(WindowAnimationsTest, CrossFadeToBounds) {
-  internal::SetDelayedOldLayerDeletionInCrossFadeForTest(true);
+  ui::LayerAnimator::set_disable_animations_for_test(false);
 
-  Window* default_container =
-      ash::Shell::GetContainer(
-          Shell::GetPrimaryRootWindow(),
-          internal::kShellWindowId_DefaultContainer);
   scoped_ptr<Window> window(
-      aura::test::CreateTestWindowWithId(0, default_container));
+      aura::test::CreateTestWindowWithId(0, NULL));
   window->SetBounds(gfx::Rect(5, 10, 320, 240));
   window->Show();
 
@@ -185,8 +177,11 @@ TEST_F(WindowAnimationsTest, CrossFadeToBounds) {
   EXPECT_EQ(1.0f, window->layer()->GetTargetOpacity());
   EXPECT_EQ(ui::Transform(), window->layer()->GetTargetTransform());
 
-  // Allow the animation observer to delete itself.
-  RunAllPendingInMessageLoop();
+  // Run the animations to completion.
+  static_cast<ui::AnimationContainerElement*>(old_layer->GetAnimator())->Step(
+      base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1));
+  static_cast<ui::AnimationContainerElement*>(window->layer()->GetAnimator())->
+      Step(base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1));
 
   // Cross fade to a smaller size, as in a restore animation.
   old_layer = window->layer();
@@ -204,11 +199,16 @@ TEST_F(WindowAnimationsTest, CrossFadeToBounds) {
   EXPECT_EQ(1.0f, window->layer()->GetTargetOpacity());
   EXPECT_EQ(ui::Transform(), window->layer()->GetTargetTransform());
 
-  RunAllPendingInMessageLoop();
-  internal::SetDelayedOldLayerDeletionInCrossFadeForTest(false);
+  static_cast<ui::AnimationContainerElement*>(old_layer->GetAnimator())->Step(
+      base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1));
+  static_cast<ui::AnimationContainerElement*>(window->layer()->GetAnimator())->
+      Step(base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1));
 }
 
 TEST_F(WindowAnimationsTest, GetCrossFadeDuration) {
+  if (WorkspaceController::IsWorkspace2Enabled())
+    return;
+
   gfx::Rect empty;
   gfx::Rect screen(0, 0, 1000, 500);
 

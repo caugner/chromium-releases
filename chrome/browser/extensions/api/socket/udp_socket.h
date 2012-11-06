@@ -16,7 +16,8 @@ class ApiResourceEventNotifier;
 
 class UDPSocket : public Socket {
  public:
-  explicit UDPSocket(ApiResourceEventNotifier* event_notifier);
+  UDPSocket(const std::string& owner_extension_id,
+            ApiResourceEventNotifier* event_notifier);
   virtual ~UDPSocket();
 
   virtual void Connect(const std::string& address,
@@ -33,9 +34,9 @@ class UDPSocket : public Socket {
                       const std::string& address,
                       int port,
                       const CompletionCallback& callback) OVERRIDE;
-  virtual bool IsTCPSocket() OVERRIDE;
   virtual bool GetPeerAddress(net::IPEndPoint* address) OVERRIDE;
   virtual bool GetLocalAddress(net::IPEndPoint* address) OVERRIDE;
+  virtual Socket::SocketType GetSocketType() const OVERRIDE;
 
  protected:
   virtual int WriteImpl(net::IOBuffer* io_buffer,

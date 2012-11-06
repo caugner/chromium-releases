@@ -78,6 +78,7 @@ FilePath ChromeFrameTestWithWebServer::CFInstance_path_;
 ScopedTempDir ChromeFrameTestWithWebServer::temp_dir_;
 FilePath ChromeFrameTestWithWebServer::chrome_user_data_dir_;
 chrome_frame_test::TimedMsgLoop* ChromeFrameTestWithWebServer::loop_;
+std::string ChromeFrameTestWithWebServer::local_address_;
 testing::StrictMock<MockWebServerListener>*
     ChromeFrameTestWithWebServer::listener_mock_;
 testing::StrictMock<MockWebServer>* ChromeFrameTestWithWebServer::server_mock_;
@@ -115,9 +116,10 @@ void ChromeFrameTestWithWebServer::SetUpTestCase() {
 
   loop_ = new chrome_frame_test::TimedMsgLoop();
   loop_->set_snapshot_on_timeout(true);
+  local_address_ = chrome_frame_test::GetLocalIPv4Address();
   listener_mock_ = new testing::StrictMock<MockWebServerListener>();
   server_mock_ = new testing::StrictMock<MockWebServer>(
-      1337, ASCIIToWide(chrome_frame_test::GetLocalIPv4Address()),
+      1337, ASCIIToWide(local_address_),
       chrome_frame_test::GetTestDataFolder());
   server_mock_->set_listener(listener_mock_);
 }
@@ -128,6 +130,7 @@ void ChromeFrameTestWithWebServer::TearDownTestCase() {
   server_mock_ = NULL;
   delete listener_mock_;
   listener_mock_ = NULL;
+  local_address_.clear();
   delete loop_;
   loop_ = NULL;
   file_util::Delete(CFInstall_path_, false);
@@ -750,7 +753,8 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_AnchorUrlNavigateTest) {
 
 // Test whether POST-ing a form from an mshtml page to a CF page will cause
 // the request to get reissued.  It should not.
-TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestPostReissue) {
+// https://code.google.com/p/chromium/issues/detail?id=143699
+TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_TestPostReissue) {
   // The order of pages in this array is assumed to be mshtml, cf, script.
   const wchar_t* kPages[] = {
     L"full_tab_post_mshtml.html",
@@ -758,7 +762,7 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestPostReissue) {
     L"chrome_frame_tester_helpers.js",
   };
 
-  SimpleWebServerTest server(46664);
+  SimpleWebServerTest server(local_address_, 46664);
   server.PopulateStaticFileListT<test_server::FileResponse>(kPages,
       arraysize(kPages), GetCFTestFilePath());
 
@@ -789,7 +793,7 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestMultipleGet) {
     L"chrome_frame_tester_helpers.js",
   };
 
-  SimpleWebServerTest server(46664);
+  SimpleWebServerTest server(local_address_, 46664);
 
   server.PopulateStaticFileListT<test_server::FileResponse>(kPages,
       arraysize(kPages), GetCFTestFilePath());
@@ -907,7 +911,7 @@ TEST_F(ChromeFrameTestWithWebServer, FAILS_FullTabModeIE_RefreshMshtmlTest) {
     L"mshtml_refresh_test_popup.html",
   };
 
-  SimpleWebServerTest server(46664);
+  SimpleWebServerTest server(local_address_, 46664);
   server.PopulateStaticFileListT<UaTemplateFileResponse>(kPages,
       arraysize(kPages), GetCFTestFilePath());
 
@@ -1047,7 +1051,7 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestDownloadFromForm) {
       .Times(testing::AtMost(1))
       .WillOnce(QUIT_LOOP(loop()));
 
-  SimpleWebServerTest server(46664);
+  SimpleWebServerTest server(local_address_, 46664);
   CustomResponse* response = new CustomResponse("/form.html");
   server.web_server()->AddResponse(response);
 

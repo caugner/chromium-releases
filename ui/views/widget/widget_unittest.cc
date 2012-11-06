@@ -71,13 +71,70 @@ typedef NativeWidgetWin NativeWidgetPlatformForTest;
 // A view that always processes all mouse events.
 class MouseView : public View {
  public:
-  MouseView() : View() {
+  MouseView()
+      : View(),
+        entered_(0),
+        exited_(0),
+        pressed_(0) {
   }
   virtual ~MouseView() {}
 
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE {
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE {
+    pressed_++;
     return true;
   }
+
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE {
+    entered_++;
+  }
+
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE {
+    exited_++;
+  }
+
+  // Return the number of OnMouseEntered calls and reset the counter.
+  int EnteredCalls() {
+    int i = entered_;
+    entered_ = 0;
+    return i;
+  }
+
+  // Return the number of OnMouseExited calls and reset the counter.
+  int ExitedCalls() {
+    int i = exited_;
+    exited_ = 0;
+    return i;
+  }
+
+  int pressed() const { return pressed_; }
+
+ private:
+  int entered_;
+  int exited_;
+
+  int pressed_;
+
+  DISALLOW_COPY_AND_ASSIGN(MouseView);
+};
+
+// A view that does a capture on gesture-begin events.
+class GestureCaptureView : public View {
+ public:
+  GestureCaptureView() {}
+  virtual ~GestureCaptureView() {}
+
+ private:
+  // Overridden from View:
+  virtual ui::EventResult OnGestureEvent(
+      const ui::GestureEvent& event) OVERRIDE {
+    if (event.type() == ui::ET_GESTURE_BEGIN) {
+      GetWidget()->SetCapture(this);
+      return ui::ER_CONSUMED;
+    }
+    return ui::ER_UNHANDLED;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(GestureCaptureView);
 };
 
 typedef ViewsTestBase WidgetTest;
@@ -213,14 +270,17 @@ TEST_F(WidgetTest, DISABLED_GrabUngrab) {
   RunPendingMessages();
 
   // Click on child1
-  MouseEvent pressed(ui::ET_MOUSE_PRESSED, 45, 45, ui::EF_LEFT_MOUSE_BUTTON);
+  gfx::Point p1(45, 45);
+  ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, p1, p1,
+                         ui::EF_LEFT_MOUSE_BUTTON);
   toplevel->OnMouseEvent(pressed);
 
   EXPECT_TRUE(WidgetHasMouseCapture(toplevel));
   EXPECT_TRUE(WidgetHasMouseCapture(child1));
   EXPECT_FALSE(WidgetHasMouseCapture(child2));
 
-  MouseEvent released(ui::ET_MOUSE_RELEASED, 45, 45, ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent released(ui::ET_MOUSE_RELEASED, p1, p1,
+                          ui::EF_LEFT_MOUSE_BUTTON);
   toplevel->OnMouseEvent(released);
 
   EXPECT_FALSE(WidgetHasMouseCapture(toplevel));
@@ -230,18 +290,65 @@ TEST_F(WidgetTest, DISABLED_GrabUngrab) {
   RunPendingMessages();
 
   // Click on child2
-  MouseEvent pressed2(ui::ET_MOUSE_PRESSED, 315, 45, ui::EF_LEFT_MOUSE_BUTTON);
+  gfx::Point p2(315, 45);
+  ui::MouseEvent pressed2(ui::ET_MOUSE_PRESSED, p2, p2,
+                          ui::EF_LEFT_MOUSE_BUTTON);
   EXPECT_TRUE(toplevel->OnMouseEvent(pressed2));
   EXPECT_TRUE(WidgetHasMouseCapture(toplevel));
   EXPECT_TRUE(WidgetHasMouseCapture(child2));
   EXPECT_FALSE(WidgetHasMouseCapture(child1));
 
-  MouseEvent released2(ui::ET_MOUSE_RELEASED, 315, 45,
-                       ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent released2(ui::ET_MOUSE_RELEASED, p2, p2,
+                           ui::EF_LEFT_MOUSE_BUTTON);
   toplevel->OnMouseEvent(released2);
   EXPECT_FALSE(WidgetHasMouseCapture(toplevel));
   EXPECT_FALSE(WidgetHasMouseCapture(child1));
   EXPECT_FALSE(WidgetHasMouseCapture(child2));
+
+  toplevel->CloseNow();
+}
+
+// Tests mouse move outside of the window into the "resize controller" and back
+// will still generate an OnMouseEntered and OnMouseExited event..
+TEST_F(WidgetTest, CheckResizeControllerEvents) {
+  Widget* toplevel = CreateTopLevelPlatformWidget();
+
+  toplevel->SetBounds(gfx::Rect(0, 0, 100, 100));
+
+  MouseView* view = new MouseView();
+  view->SetBounds(90, 90, 10, 10);
+  toplevel->GetRootView()->AddChildView(view);
+
+  toplevel->Show();
+  RunPendingMessages();
+
+  // Move to an outside position.
+  gfx::Point p1(200, 200);
+  ui::MouseEvent moved_out(ui::ET_MOUSE_MOVED, p1, p1, ui::EF_NONE);
+  toplevel->OnMouseEvent(moved_out);
+  EXPECT_EQ(0, view->EnteredCalls());
+  EXPECT_EQ(0, view->ExitedCalls());
+
+  // Move onto the active view.
+  gfx::Point p2(95, 95);
+  ui::MouseEvent moved_over(ui::ET_MOUSE_MOVED, p2, p2, ui::EF_NONE);
+  toplevel->OnMouseEvent(moved_over);
+  EXPECT_EQ(1, view->EnteredCalls());
+  EXPECT_EQ(0, view->ExitedCalls());
+
+  // Move onto the outer resizing border.
+  gfx::Point p3(102, 95);
+  ui::MouseEvent moved_resizer(ui::ET_MOUSE_MOVED, p3, p3, ui::EF_NONE);
+  toplevel->OnMouseEvent(moved_resizer);
+  EXPECT_EQ(0, view->EnteredCalls());
+  EXPECT_EQ(1, view->ExitedCalls());
+
+  // Move onto the view again.
+  toplevel->OnMouseEvent(moved_over);
+  EXPECT_EQ(1, view->EnteredCalls());
+  EXPECT_EQ(0, view->ExitedCalls());
+
+  RunPendingMessages();
 
   toplevel->CloseNow();
 }
@@ -817,6 +924,54 @@ TEST_F(WidgetTest, ExitFullscreenRestoreState) {
   EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, GetWidgetShowState(toplevel));
 
   // Clean up.
+  toplevel->Close();
+  RunPendingMessages();
+}
+
+TEST_F(WidgetTest, ResetCaptureOnGestureEnd) {
+  Widget* toplevel = CreateTopLevelPlatformWidget();
+  View* container = new View;
+  toplevel->SetContentsView(container);
+
+  View* gesture = new GestureCaptureView;
+  gesture->SetBounds(0, 0, 30, 30);
+  container->AddChildView(gesture);
+
+  MouseView* mouse = new MouseView;
+  mouse->SetBounds(30, 0, 30, 30);
+  container->AddChildView(mouse);
+
+  toplevel->SetSize(gfx::Size(100, 100));
+  toplevel->Show();
+
+  // Start a gesture on |gesture|.
+  ui::GestureEvent begin(ui::ET_GESTURE_BEGIN,
+      15, 15, 0, base::TimeDelta(),
+      ui::GestureEventDetails(ui::ET_GESTURE_BEGIN, 0, 0), 1);
+  ui::GestureEvent end(ui::ET_GESTURE_END,
+      15, 15, 0, base::TimeDelta(),
+      ui::GestureEventDetails(ui::ET_GESTURE_END, 0, 0), 1);
+  toplevel->OnGestureEvent(begin);
+
+  // Now try to click on |mouse|. Since |gesture| will have capture, |mouse|
+  // will not receive the event.
+  gfx::Point click_location(45, 15);
+  ui::MouseEvent press(ui::ET_MOUSE_PRESSED, click_location, click_location,
+      ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent release(ui::ET_MOUSE_RELEASED, click_location, click_location,
+      ui::EF_LEFT_MOUSE_BUTTON);
+
+  toplevel->OnMouseEvent(press);
+  toplevel->OnMouseEvent(release);
+  EXPECT_EQ(0, mouse->pressed());
+
+  // The end of the gesture should release the capture, and pressing on |mouse|
+  // should now reach |mouse|.
+  toplevel->OnGestureEvent(end);
+  toplevel->OnMouseEvent(press);
+  toplevel->OnMouseEvent(release);
+  EXPECT_EQ(1, mouse->pressed());
+
   toplevel->Close();
   RunPendingMessages();
 }

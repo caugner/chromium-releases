@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "ui/base/events/event.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_font_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -47,13 +48,33 @@ void BuildRootLayers(View* view, std::vector<ui::Layer*>* layers) {
   }
 }
 
+// Create a native widget implementation.
+// First, use the supplied one if non-NULL.
+// Second, ask the delegate.
+// Finally, make a default one.
+NativeWidget* CreateNativeWidget(NativeWidget* native_widget,
+                                 internal::NativeWidgetDelegate* delegate,
+                                 gfx::NativeView parent) {
+  if (!native_widget) {
+    if (ViewsDelegate::views_delegate) {
+      native_widget =
+          ViewsDelegate::views_delegate->CreateNativeWidget(delegate, parent);
+    }
+    if (!native_widget) {
+      native_widget =
+          internal::NativeWidgetPrivate::CreateNativeWidget(delegate);
+    }
+  }
+  return native_widget;
+}
+
 }  // namespace
 
 // This class is used to keep track of the event a Widget is processing, and
 // restore any previously active event afterwards.
 class ScopedEvent {
  public:
-  ScopedEvent(Widget* widget, const Event& event)
+  ScopedEvent(Widget* widget, const ui::Event& event)
       : widget_(widget),
         event_(&event) {
     widget->event_stack_.push(this);
@@ -68,13 +89,13 @@ class ScopedEvent {
     widget_ = NULL;
   }
 
-  const Event* event() {
+  const ui::Event* event() {
     return event_;
   }
 
  private:
   Widget* widget_;
-  const Event* event_;
+  const ui::Event* event_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedEvent);
 };
@@ -308,9 +329,9 @@ void Widget::Init(const InitParams& params) {
   widget_delegate_ = params.delegate ?
       params.delegate : new DefaultWidgetDelegate(this, params);
   ownership_ = params.ownership;
-  native_widget_ = params.native_widget ?
-      params.native_widget->AsNativeWidgetPrivate() :
-      internal::NativeWidgetPrivate::CreateNativeWidget(this);
+  native_widget_ =
+      CreateNativeWidget(params.native_widget, this, params.GetParent())->
+          AsNativeWidgetPrivate();
   GetRootView();
   default_theme_provider_.reset(new DefaultThemeProvider);
   if (params.type == InitParams::TYPE_MENU) {
@@ -456,8 +477,8 @@ void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
   native_widget_->SetVisibilityChangedAnimationsEnabled(value);
 }
 
-Widget::MoveLoopResult Widget::RunMoveLoop() {
-  return native_widget_->RunMoveLoop();
+Widget::MoveLoopResult Widget::RunMoveLoop(const gfx::Point& drag_offset) {
+  return native_widget_->RunMoveLoop(drag_offset);
 }
 
 void Widget::EndMoveLoop() {
@@ -657,8 +678,11 @@ const FocusManager* Widget::GetFocusManager() const {
 
 InputMethod* Widget::GetInputMethod() {
   if (is_top_level()) {
-    if (!input_method_.get())
+    if (!input_method_.get()) {
       input_method_.reset(native_widget_->CreateInputMethod());
+      if (input_method_.get())
+        input_method_->Init(this);
+    }
     return input_method_.get();
   } else {
     Widget* toplevel = GetTopLevelWidget();
@@ -758,10 +782,6 @@ void Widget::ClearNativeFocus() {
 
 void Widget::FocusNativeView(gfx::NativeView native_view) {
   native_widget_->FocusNativeView(native_view);
-}
-
-void Widget::UpdateFrameAfterFrameChange() {
-  native_widget_->UpdateFrameAfterFrameChange();
 }
 
 NonClientFrameView* Widget::CreateNonClientFrameView() {
@@ -869,7 +889,7 @@ bool Widget::HasCapture() {
   return native_widget_->HasCapture();
 }
 
-const Event* Widget::GetCurrentEvent() {
+const ui::Event* Widget::GetCurrentEvent() {
   return event_stack_.empty() ? NULL : event_stack_.top()->event();
 }
 
@@ -1057,12 +1077,12 @@ int Widget::GetNonClientComponent(const gfx::Point& point) {
       HTNOWHERE;
 }
 
-bool Widget::OnKeyEvent(const KeyEvent& event) {
+bool Widget::OnKeyEvent(const ui::KeyEvent& event) {
   ScopedEvent scoped(this, event);
   return static_cast<internal::RootView*>(GetRootView())->OnKeyEvent(event);
 }
 
-bool Widget::OnMouseEvent(const MouseEvent& event) {
+bool Widget::OnMouseEvent(const ui::MouseEvent& event) {
   ScopedEvent scoped(this, event);
   switch (event.type()) {
     case ui::ET_MOUSE_PRESSED:
@@ -1104,10 +1124,10 @@ bool Widget::OnMouseEvent(const MouseEvent& event) {
       return false;
     case ui::ET_MOUSEWHEEL:
       return GetRootView()->OnMouseWheel(
-          reinterpret_cast<const MouseWheelEvent&>(event));
+          reinterpret_cast<const ui::MouseWheelEvent&>(event));
     case ui::ET_SCROLL:
       return GetRootView()->OnScrollEvent(
-          reinterpret_cast<const ScrollEvent&>(event));
+          reinterpret_cast<const ui::ScrollEvent&>(event));
     default:
       return false;
   }
@@ -1121,12 +1141,12 @@ void Widget::OnMouseCaptureLost() {
   is_mouse_button_pressed_ = false;
 }
 
-ui::TouchStatus Widget::OnTouchEvent(const TouchEvent& event) {
+ui::TouchStatus Widget::OnTouchEvent(const ui::TouchEvent& event) {
   ScopedEvent scoped(this, event);
   return GetRootView()->OnTouchEvent(event);
 }
 
-ui::GestureStatus Widget::OnGestureEvent(const GestureEvent& event) {
+ui::EventResult Widget::OnGestureEvent(const ui::GestureEvent& event) {
   ScopedEvent scoped(this, event);
   switch (event.type()) {
     case ui::ET_GESTURE_TAP_DOWN:
@@ -1258,7 +1278,7 @@ void Widget::SetInitialBounds(const gfx::Rect& bounds) {
   if (GetSavedWindowPlacement(&saved_bounds, &saved_show_state_)) {
     if (saved_show_state_ == ui::SHOW_STATE_MAXIMIZED) {
       // If we're going to maximize, wait until Show is invoked to set the
-      // bounds. That way we avoid a noticable resize.
+      // bounds. That way we avoid a noticeable resize.
       initial_restored_bounds_ = saved_bounds;
     } else {
       SetBounds(saved_bounds);
@@ -1319,7 +1339,7 @@ bool Widget::GetSavedWindowPlacement(gfx::Rect* bounds,
 
 void Widget::ReplaceInputMethod(InputMethod* input_method) {
   input_method_.reset(input_method);
-  input_method->set_delegate(native_widget_);
+  input_method->set_delegate(native_widget_->GetInputMethodDelegate());
   input_method->Init(this);
 }
 

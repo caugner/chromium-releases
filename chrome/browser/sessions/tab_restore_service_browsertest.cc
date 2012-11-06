@@ -4,9 +4,10 @@
 
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service.h"
+#include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_types.h"
+#include "chrome/browser/sessions/session_types_test_helper.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -21,6 +22,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/test/render_view_test.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
@@ -57,6 +59,8 @@ class TabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
     url1_ = GURL("http://1");
     url2_ = GURL("http://2");
     url3_ = GURL("http://3");
+    user_agent_override_ = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/535.19"
+        " (KHTML, like Gecko) Chrome/18.0.1025.45 Safari/535.19";
   }
 
   ~TabRestoreServiceTest() {
@@ -116,9 +120,9 @@ class TabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
     session_service->SetSelectedTabInWindow(window_id, 0);
     if (pinned)
       session_service->SetPinnedState(window_id, tab_id, true);
-    scoped_ptr<NavigationEntry> entry(NavigationEntry::Create());
-    entry->SetURL(url1_);
-    session_service->UpdateTabNavigation(window_id, tab_id, 0, *entry.get());
+    session_service->UpdateTabNavigation(
+        window_id, tab_id,
+        SessionTypesTestHelper::CreateNavigation(url1_.spec(), "title"));
   }
 
   // Creates a SessionService and assigns it to the Profile. The SessionService
@@ -139,6 +143,7 @@ class TabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
   GURL url1_;
   GURL url2_;
   GURL url3_;
+  std::string user_agent_override_;
   scoped_ptr<TabRestoreService> service_;
   TabRestoreTimeFactory* time_factory_;
   content::RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox
@@ -165,19 +170,21 @@ TEST_F(TabRestoreServiceTest, Basic) {
   EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
   EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
   EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
+  EXPECT_EQ("", tab->user_agent_override);
   EXPECT_EQ(2, tab->current_navigation_index);
   EXPECT_EQ(time_factory_->TimeNow().ToInternalValue(),
             tab->timestamp.ToInternalValue());
 
   NavigateToIndex(1);
 
-  // And check again.
+  // And check again, but set the user agent override this time.
+  contents()->SetUserAgentOverride(user_agent_override_);
   service_->CreateHistoricalTab(contents(), -1);
 
   // There should be two entries now.
   ASSERT_EQ(2U, service_->entries().size());
 
-  // Make sure the entry matches
+  // Make sure the entry matches.
   entry = service_->entries().front();
   ASSERT_EQ(TabRestoreService::TAB, entry->type);
   tab = static_cast<Tab*>(entry);
@@ -186,6 +193,7 @@ TEST_F(TabRestoreServiceTest, Basic) {
   EXPECT_EQ(url1_, tab->navigations[0].virtual_url());
   EXPECT_EQ(url2_, tab->navigations[1].virtual_url());
   EXPECT_EQ(url3_, tab->navigations[2].virtual_url());
+  EXPECT_EQ(user_agent_override_, tab->user_agent_override);
   EXPECT_EQ(1, tab->current_navigation_index);
   EXPECT_EQ(time_factory_->TimeNow().ToInternalValue(),
             tab->timestamp.ToInternalValue());
@@ -550,10 +558,10 @@ TEST_F(TabRestoreServiceTest, PruneEntries) {
 
   const size_t max_entries = TabRestoreService::kMaxEntries;
   for (size_t i = 0; i < max_entries + 5; i++) {
-    TabNavigation navigation;
-    navigation.set_virtual_url(GURL(StringPrintf("http://%d",
-                                                 static_cast<int>(i))));
-    navigation.set_title(ASCIIToUTF16(StringPrintf("%d", static_cast<int>(i))));
+    TabNavigation navigation =
+        SessionTypesTestHelper::CreateNavigation(
+            StringPrintf("http://%d", static_cast<int>(i)),
+            StringPrintf("%d", static_cast<int>(i)));
 
     Tab* tab = new Tab();
     tab->navigations.push_back(navigation);
@@ -571,10 +579,9 @@ TEST_F(TabRestoreServiceTest, PruneEntries) {
   EXPECT_EQ(max_entries, service_->entries_.size());
 
   // Prune older first.
-  TabNavigation navigation;
   const char kRecentUrl[] = "http://recent";
-  navigation.set_virtual_url(GURL(kRecentUrl));
-  navigation.set_title(ASCIIToUTF16("Most recent"));
+  TabNavigation navigation =
+      SessionTypesTestHelper::CreateNavigation(kRecentUrl, "Most recent");
   Tab* tab = new Tab();
   tab->navigations.push_back(navigation);
   tab->current_navigation_index = 0;
@@ -587,8 +594,9 @@ TEST_F(TabRestoreServiceTest, PruneEntries) {
           navigations[0].virtual_url());
 
   // Ignore NTPs.
-  navigation.set_virtual_url(GURL(chrome::kChromeUINewTabURL));
-  navigation.set_title(ASCIIToUTF16("New tab"));
+  navigation =
+      SessionTypesTestHelper::CreateNavigation(
+          chrome::kChromeUINewTabURL, "New tab");
 
   tab = new Tab();
   tab->navigations.push_back(navigation);

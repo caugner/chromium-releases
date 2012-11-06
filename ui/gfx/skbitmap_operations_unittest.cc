@@ -197,14 +197,15 @@ TEST(SkBitmapOperationsTest, CreateMaskedBitmap) {
       SkColor masked_pixel = *masked.getAddr32(x, y);
 
       int alpha_value = SkAlphaMul(SkColorGetA(src_pixel),
-                                   SkColorGetA(alpha_pixel));
+                                   SkAlpha255To256(SkColorGetA(alpha_pixel)));
+      int alpha_value_256 = SkAlpha255To256(alpha_value);
       SkColor expected_pixel = SkColorSetARGB(
           alpha_value,
-          SkAlphaMul(SkColorGetR(src_pixel), alpha_value),
-          SkAlphaMul(SkColorGetG(src_pixel), alpha_value),
-          SkAlphaMul(SkColorGetB(src_pixel), alpha_value));
+          SkAlphaMul(SkColorGetR(src_pixel), alpha_value_256),
+          SkAlphaMul(SkColorGetG(src_pixel), alpha_value_256),
+          SkAlphaMul(SkColorGetB(src_pixel), alpha_value_256));
 
-      EXPECT_TRUE(ColorsClose(expected_pixel, masked_pixel));
+      EXPECT_EQ(expected_pixel, masked_pixel);
     }
   }
 }
@@ -273,7 +274,7 @@ TEST(SkBitmapOperationsTest, CreateHSLShiftedBitmapHueOnly) {
 
   for (int y = 0, i = 0; y < src_h; y++) {
     for (int x = 0; x < src_w; x++) {
-      EXPECT_TRUE(ColorsClose(*shifted.getAddr32(x, y),
+      EXPECT_TRUE(ColorsClose(shifted.getColor(x, y),
                               SkColorSetARGB(255, i % 255, 0, 0)));
       i++;
     }
@@ -477,10 +478,11 @@ TEST(SkBitmapOperationsTest, UnPreMultiply) {
   input.setConfig(SkBitmap::kARGB_8888_Config, 2, 2);
   input.allocPixels();
 
-  *input.getAddr32(0, 0) = 0x80000000;
-  *input.getAddr32(1, 0) = 0x80808080;
-  *input.getAddr32(0, 1) = 0xFF00CC88;
-  *input.getAddr32(1, 1) = 0x0000CC88;
+  // Set PMColors into the bitmap
+  *input.getAddr32(0, 0) = SkPackARGB32NoCheck(0x80, 0x00, 0x00, 0x00);
+  *input.getAddr32(1, 0) = SkPackARGB32NoCheck(0x80, 0x80, 0x80, 0x80);
+  *input.getAddr32(0, 1) = SkPackARGB32NoCheck(0xFF, 0x00, 0xCC, 0x88);
+  *input.getAddr32(1, 1) = SkPackARGB32NoCheck(0x00, 0x00, 0xCC, 0x88);
 
   SkBitmap result = SkBitmapOperations::UnPreMultiply(input);
   EXPECT_EQ(2, result.width());

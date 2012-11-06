@@ -443,6 +443,10 @@ class NotificationBridge : public content::NotificationObserver {
   locationBarView_->SetStarred(isStarred ? true : false);
 }
 
+- (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
+  locationBarView_->ZoomChangedForActiveTab(canShowBubble ? true : false);
+}
+
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
   [reloadButton_ setIsLoading:isLoading force:force];
 }
@@ -711,10 +715,6 @@ class NotificationBridge : public content::NotificationObserver {
 
 - (NSPoint)bookmarkBubblePoint {
   return locationBarView_->GetBookmarkBubblePoint();
-}
-
-- (NSPoint)chromeToMobileBubblePoint {
-  return locationBarView_->GetChromeToMobileBubblePoint();
 }
 
 - (CGFloat)desiredHeightForCompression:(CGFloat)compressByHeight {

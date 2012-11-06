@@ -11,7 +11,6 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/events/event.h"
 
 class TabContents;
 
@@ -46,16 +45,15 @@ class ZoomBubbleView : public views::BubbleDelegateView,
   void StopTimer();
 
   // views::View method.
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
 
   // views::ButtonListener method.
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // views::BubbleDelegateView method.
   virtual void Init() OVERRIDE;
-  virtual gfx::Rect GetAnchorRect() OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
 
   // Singleton instance of the zoom bubble. The zoom bubble can only be shown on

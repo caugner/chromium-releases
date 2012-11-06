@@ -127,13 +127,33 @@ class SessionManagerClientImpl : public SessionManagerClient {
                    weak_ptr_factory_.GetWeakPtr()));
   }
 
+  virtual void StartDeviceWipe() OVERRIDE {
+    dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
+                                 login_manager::kSessionManagerStartDeviceWipe);
+    session_manager_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&SessionManagerClientImpl::OnDeviceWipe,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
+
   virtual void RequestLockScreen() OVERRIDE {
     SimpleMethodCallToSessionManager(login_manager::kSessionManagerLockScreen);
+  }
+
+  virtual void NotifyLockScreenShown() OVERRIDE {
+    SimpleMethodCallToSessionManager(
+        login_manager::kSessionManagerHandleLockScreenShown);
   }
 
   virtual void RequestUnlockScreen() OVERRIDE {
     SimpleMethodCallToSessionManager(
         login_manager::kSessionManagerUnlockScreen);
+  }
+
+  virtual void NotifyLockScreenDismissed() OVERRIDE {
+    SimpleMethodCallToSessionManager(
+        login_manager::kSessionManagerHandleLockScreenDismissed);
   }
 
   virtual bool GetIsScreenLocked() OVERRIDE {
@@ -230,6 +250,13 @@ class SessionManagerClientImpl : public SessionManagerClient {
         << login_manager::kSessionManagerStopSession;
   }
 
+  // Called when kSessionManagerStopSession method is complete.
+  void OnDeviceWipe(dbus::Response* response) {
+    LOG_IF(ERROR, !response)
+        << "Failed to call "
+        << login_manager::kSessionManagerStartDeviceWipe;
+  }
+
   // Called when kSessionManagerRetrievePolicy or
   // kSessionManagerRetrieveUserPolicy  method is complete.
   void OnRetrievePolicy(const std::string& method_name,
@@ -313,6 +340,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
   dbus::ObjectProxy* session_manager_proxy_;
   ObserverList<Observer> observers_;
   bool screen_locked_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<SessionManagerClientImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionManagerClientImpl);
@@ -341,14 +371,17 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
   virtual void RestartEntd() OVERRIDE {}
   virtual void StartSession(const std::string& user_email) OVERRIDE {}
   virtual void StopSession() OVERRIDE {}
+  virtual void StartDeviceWipe() OVERRIDE {}
   virtual void RequestLockScreen() OVERRIDE {
     screen_locked_ = true;
     FOR_EACH_OBSERVER(Observer, observers_, LockScreen());
   }
+  virtual void NotifyLockScreenShown() OVERRIDE {}
   virtual void RequestUnlockScreen() OVERRIDE {
     screen_locked_ = false;
     FOR_EACH_OBSERVER(Observer, observers_, UnlockScreen());
   }
+  virtual void NotifyLockScreenDismissed() OVERRIDE {}
   virtual bool GetIsScreenLocked() OVERRIDE { return screen_locked_; }
   virtual void RetrieveDevicePolicy(
       const RetrievePolicyCallback& callback) OVERRIDE {

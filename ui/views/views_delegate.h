@@ -14,6 +14,7 @@
 #include "base/string16.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/views/views_export.h"
 
 namespace content {
@@ -26,20 +27,19 @@ namespace gfx {
 class Rect;
 }
 
-namespace ui {
-class Clipboard;
-}
-
 namespace views {
 
+class NativeWidget;
 class NonClientFrameView;
 class View;
 class Widget;
-
 #if defined(USE_AURA)
 class NativeWidgetAura;
 class NativeWidgetHelperAura;
 #endif
+namespace internal {
+class NativeWidgetDelegate;
+}
 
 // ViewsDelegate is an interface implemented by an object using the views
 // framework. It is used to obtain various high level application utilities
@@ -53,9 +53,6 @@ class VIEWS_EXPORT ViewsDelegate {
   static ViewsDelegate* views_delegate;
 
   virtual ~ViewsDelegate() {}
-
-  // Gets the clipboard.
-  virtual ui::Clipboard* GetClipboard() const = 0;
 
   // Saves the position, size and "show" state for the window with the
   // specified name.
@@ -104,7 +101,7 @@ class VIEWS_EXPORT ViewsDelegate {
   virtual void AddRef() = 0;
   virtual void ReleaseRef() = 0;
 
-  // Converts views::Event::flags to a WindowOpenDisposition.
+  // Converts ui::Event::flags to a WindowOpenDisposition.
   virtual int GetDispositionForEvent(int event_flags) = 0;
 
 #if defined(USE_AURA)
@@ -118,6 +115,12 @@ class VIEWS_EXPORT ViewsDelegate {
   virtual content::WebContents* CreateWebContents(
       content::BrowserContext* browser_context,
       content::SiteInstance* site_instance) = 0;
+
+  // Creates a NativeWidget implementation. Returning NULL means Widget will
+  // create a default implementation for the platform.
+  virtual NativeWidget* CreateNativeWidget(
+      internal::NativeWidgetDelegate* delegate,
+      gfx::NativeView parent) = 0;
 };
 
 }  // namespace views

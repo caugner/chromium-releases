@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/event_disposition.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -30,7 +31,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
-#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/favicon_size.h"
 
 using content::NavigationController;
 using content::NavigationEntry;
@@ -79,6 +80,11 @@ int BackForwardMenuModel::GetItemCount() const {
 
 ui::MenuModel::ItemType BackForwardMenuModel::GetTypeAt(int index) const {
   return IsSeparator(index) ? TYPE_SEPARATOR : TYPE_COMMAND;
+}
+
+ui::MenuSeparatorType BackForwardMenuModel::GetSeparatorTypeAt(
+    int index) const {
+  return ui::NORMAL_SEPARATOR;
 }
 
 int BackForwardMenuModel::GetCommandIdAt(int index) const {
@@ -133,16 +139,16 @@ int BackForwardMenuModel::GetGroupIdAt(int index) const {
   return false;
 }
 
-bool BackForwardMenuModel::GetIconAt(int index, gfx::ImageSkia* icon) {
+bool BackForwardMenuModel::GetIconAt(int index, gfx::Image* icon) {
   if (!ItemHasIcon(index))
     return false;
 
   if (index == GetItemCount() - 1) {
-    *icon = *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+    *icon = ResourceBundle::GetSharedInstance().GetNativeImageNamed(
         IDR_HISTORY_FAVICON);
   } else {
     NavigationEntry* entry = GetNavigationEntry(index);
-    *icon = *entry->GetFavicon().image.ToImageSkia();
+    *icon = entry->GetFavicon().image;
     if (!entry->GetFavicon().valid && menu_model_delegate()) {
       FetchFavicon(entry);
     }
@@ -240,12 +246,13 @@ void BackForwardMenuModel::FetchFavicon(NavigationEntry* entry) {
     return;
   }
   requested_favicons_.insert(entry->GetUniqueID());
-  FaviconService* favicon_service =
-      browser_->profile()->GetFaviconService(Profile::EXPLICIT_ACCESS);
+  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+      browser_->profile(), Profile::EXPLICIT_ACCESS);
   if (!favicon_service)
     return;
-  FaviconService::Handle handle = favicon_service->GetFaviconForURL(
-      entry->GetURL(), history::FAVICON, &load_consumer_,
+  FaviconService::Handle handle = favicon_service->GetFaviconImageForURL(
+      FaviconService::FaviconForURLParams(browser_->profile(), entry->GetURL(),
+          history::FAVICON, gfx::kFaviconSize, &load_consumer_),
       base::Bind(&BackForwardMenuModel::OnFavIconDataAvailable,
                  base::Unretained(this)));
   load_consumer_.SetClientData(favicon_service, handle, entry->GetUniqueID());
@@ -253,8 +260,8 @@ void BackForwardMenuModel::FetchFavicon(NavigationEntry* entry) {
 
 void BackForwardMenuModel::OnFavIconDataAvailable(
     FaviconService::Handle handle,
-    history::FaviconData favicon) {
-  if (favicon.is_valid()) {
+    const history::FaviconImageResult& image_result) {
+  if (!image_result.image.IsEmpty()) {
     int unique_id = load_consumer_.GetClientDataForCurrentRequest();
     // Find the current model_index for the unique_id.
     NavigationEntry* entry = NULL;
@@ -277,20 +284,13 @@ void BackForwardMenuModel::OnFavIconDataAvailable(
 
     // Now that we have a valid NavigationEntry, decode the favicon and assign
     // it to the NavigationEntry.
-    SkBitmap fav_icon;
-    if (gfx::PNGCodec::Decode(favicon.image_data->front(),
-                              favicon.image_data->size(),
-                              &fav_icon)) {
-      entry->GetFavicon().valid = true;
-      entry->GetFavicon().url = favicon.icon_url;
-      if (fav_icon.empty())
-        return;
-      // TODO: Once the history service returns more representations,
-      // use them all instead of having just the lodpi favicon.
-      entry->GetFavicon().image = gfx::Image(fav_icon);
-      if (menu_model_delegate()) {
-        menu_model_delegate()->OnIconChanged(model_index);
-      }
+    entry->GetFavicon().valid = true;
+    entry->GetFavicon().url = image_result.icon_url;
+    // TODO: Once the history service returns more representations,
+    // use them all instead of having just the lodpi favicon.
+    entry->GetFavicon().image = image_result.image;
+    if (menu_model_delegate()) {
+      menu_model_delegate()->OnIconChanged(model_index);
     }
   }
 }

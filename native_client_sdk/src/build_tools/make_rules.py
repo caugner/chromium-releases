@@ -5,6 +5,8 @@
 
 import os
 
+# pylint: disable=C0301
+# This file contains lines longer than 80
 
 #
 # Default macros for various platforms.
@@ -42,6 +44,14 @@ PNACL_LDFLAGS?=-pthread
 TRANSLATE:=$(TC_PATH)/$(OSNAME)_x86_pnacl/newlib/bin/pnacl-translate
 """
 
+LINUX_DEFAULTS = """
+LINUX_CC?=gcc -c
+LINUX_CXX?=g++ -c -std=gnu++98
+LINUX_LINK?=g++ -shared -Wl,-as-needed
+LINUX_LIB?=ar r
+LINUX_CCFLAGS=-I$(NACL_SDK_ROOT)/include -I$(NACL_SDK_ROOT)/include/linux
+"""
+
 WIN_DEFAULTS = """
 WIN_CC?=cl.exe /nologo
 WIN_CXX?=cl.exe /nologo
@@ -53,33 +63,37 @@ WIN_CCFLAGS=/I$(NACL_SDK_ROOT)/include /I$(NACL_SDK_ROOT)/include/win -D WIN32 -
 #
 # Compile rules for various platforms.
 #
-CC_RULE = '<tc>/<config>/<name>_<ARCH>.o : %.<ext> $(THIS_MAKE) | <tc>/<config>'
 NACL_CC_RULES = {
-  'Debug': '<TAB>$(<CC>) -o $@ $< -g -O0 <MACH> $(<PROJ>_<EXT>FLAGS) -DTCNAME=<tc> $(<TC>_CCFLAGS) <DEFLIST> <INCLIST>',
-  'Release': '<TAB>$(<CC>) -o $@ $< -O2 <MACH> $(<PROJ>_<EXT>FLAGS) -DTCNAME=<tc> $(<TC>_CCFLAGS) <DEFLIST> <INCLIST>',
+  'Debug': '<TAB>$(<CC>) -o $@ $< -g -O0 <MACH> $(<TC>_CCFLAGS) $(<PROJ>_<EXT>FLAGS) <DEFLIST> <INCLIST>',
+  'Release': '<TAB>$(<CC>) -o $@ $< -O2 <MACH> $(<TC>_CCFLAGS) $(<PROJ>_<EXT>FLAGS) <DEFLIST> <INCLIST>',
 }
 
 SO_CC_RULES = {
-  'Debug': '<TAB>$(<CC>) -o $@ $< -g -O0 <MACH> -fPIC $(<PROJ>_<EXT>FLAGS) -DTCNAME=<tc> $(<TC>_CCFLAGS) <DEFLIST> <INCLIST>',
-  'Release': '<TAB>$(<CC>) -o $@ $< -02 <MACH> -fPIC $(<PROJ>_<EXT>FLAGS) -DTCNAME=<tc> $(<TC>_CCFLAGS) <DEFLIST> <INCLIST>'
+  'Debug': '<TAB>$(<CC>) -o $@ $< -g -O0 <MACH> -fPIC $(<TC>_CCFLAGS) $(<PROJ>_<EXT>FLAGS) <DEFLIST> <INCLIST>',
+  'Release': '<TAB>$(<CC>) -o $@ $< -O2 <MACH> -fPIC $(<TC>_CCFLAGS) $(<PROJ>_<EXT>FLAGS) <DEFLIST> <INCLIST>'
 }
 
 WIN_CC_RULES = {
-  'Debug': '<TAB>$(<CC>) /Od /Fo$@ /MTd /Zi /c $< -DTCNAME=host $(WIN_CCFLAGS) <DEFLIST> <INCLIST>',
-  'Release': '<TAB>$(<CC>) /O2 /Fo$@ /MT /c $< -DTCNAME=host $(WIN_CCFLAGS) <DEFLIST> <INCLIST>'
+  'Debug': '<TAB>$(<CC>) /Od /Fo$@ /MTd /Zi /c $< $(WIN_CCFLAGS) <DEFLIST> <INCLIST>',
+  'Release': '<TAB>$(<CC>) /O2 /Fo$@ /MT /c $< $(WIN_CCFLAGS) <DEFLIST> <INCLIST>'
 }
 
 #
 # Link rules for various platforms.
 #
 NEXE_LINK_RULES = {
-  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> $(<PROJ>_LDFLAGS) $(<TC>_LDFLAGS) <LIBLIST>',
-  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> $(<PROJ>_LDFLAGS) $(<TC>_LDFLAGS) <LIBLIST>'
+  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config> <LIBLIST>',
+  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config> <LIBLIST>'
 }
 
 SO_LINK_RULES = {
-  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> -shared $(<PROJ>_LDFLAGS) <LIBLIST>',
-  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> -shared $(<PROJ>_LDFLAGS) <LIBLIST>',
+  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tcname>/<config> <LIBLIST>',
+  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tcname>/<config> <LIBLIST>',
+}
+
+LINUX_SO_LINK_RULES = {
+  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<tcname>/<config> <LIBLIST>',
+  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<tcname>/<config> <LIBLIST>',
 }
 
 PEXE_TRANSLATE_RULE = """
@@ -93,8 +107,8 @@ PEXE_TRANSLATE_RULE = """
 <TAB>$(TRANSLATE) -arch arm $< -o $@"""
 
 PEXE_LINK_RULES = {
-  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g $(<PROJ>_LDFLAGS) $(<TC>_LDFLAGS) <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
-  'Release': '<TAB>$(<LINK>) -o $@ $^ $(<PROJ>_LDFLAGS) $(<TC>_LDFLAGS) <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
+  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config> <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
+  'Release': '<TAB>$(<LINK>) -o $@ $^ $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config> <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
 }
 
 WIN_LINK_RULES = {
@@ -102,11 +116,6 @@ WIN_LINK_RULES = {
   'Release': '<TAB>$(<LINK>) /DLL /OUT:$@ $(<PROJ>_LDFLAGS) /LIBPATH:$(NACL_SDK_ROOT)/lib/win_x86_32_host/Release $^ <LIBLIST> $(WIN_LDFLAGS)'
 }
 
-WIN_LAUNCH_RULES = """
-HOST_ARGS:=--register-pepper-plugins=$(abspath win/<proj>.dll);application/x-nacl
-LAUNCH_HOST: CHECK_FOR_CHROME all
-<TAB>$(CHROME_PATH) $(HOST_ARGS) "localhost:5103/index_win.html"
-"""
 
 #
 # Lib rules for various platforms.
@@ -159,6 +168,16 @@ WIN_TOOL = {
   'LIB': '$(NACL_SDK_ROOT)/lib/win_<ARCH>_host/<config>/<proj>.lib',
 }
 
+LINUX_TOOL = {
+  'DEFINE': '-D%s',
+  'INCLUDE': '-I%s',
+  'LIBRARY': '-l%s',
+  'MAIN': '<tc>/<config>/lib<proj>.so',
+  'NMFMAIN': '<tc>/<config>/lib<proj>.so',
+  'SO': '<tc>/<config>/lib<proj>.so',
+  'LIB': '$(NACL_SDK_ROOT)/lib/linux_host/<config>/lib<proj>.a',
+}
+
 NACL_TOOL = {
   'DEFINE': '-D%s',
   'INCLUDE': '-I%s',
@@ -186,6 +205,11 @@ PNACL_TOOL = {
 #
 # Various Architectures
 #
+LINUX = {
+  '<arch>': '',
+  '<ARCH>': '',
+  '<MACH>': '',
+}
 NACL_X86_32 = {
   '<arch>': '32',
   '<ARCH>': 'x86_32',
@@ -252,6 +276,17 @@ BUILD_RULES = {
     'LIB': WIN_LIB_RULES,
     'SO': None,
     'TOOL': WIN_TOOL
+  },
+  'linux' : {
+    'ARCHES': [LINUX],
+    'DEFS': LINUX_DEFAULTS,
+    'CC': SO_CC_RULES,
+    'CXX': SO_CC_RULES,
+    'NMF' : NMF_EMPTY,
+    'MAIN': LINUX_SO_LINK_RULES,
+    'LIB': POSIX_LIB_RULES,
+    'SO': None,
+    'TOOL': LINUX_TOOL
   }
 }
 
@@ -266,6 +301,10 @@ class MakeRules(object):
 
   def __init__(self, tc, cfg=None, arch=None):
     self.tc = tc
+    self.project = ''
+    self.cfg = ''
+    self.arch = ''
+    self.ptype = ''
     self.defines = []
     self.includes = []
     self.libraries = []
@@ -304,7 +343,7 @@ class MakeRules(object):
     self.vars['<EXT>'] = EXT
     out = '<tc>/<config>/%s_<ARCH>.o : %s $(THIS_MAKE) | <tc>/<config>\n' % (
         os.path.splitext(src)[0], src)
-    out+= BUILD_RULES[self.tc][EXT][self.cfg] + '\n\n'
+    out += BUILD_RULES[self.tc][EXT][self.cfg] + '\n\n'
     return self.Replace(out)
 
   def BuildLinkRule(self):
@@ -328,6 +367,13 @@ class MakeRules(object):
   def GetObjectList(self):
     return '%s_%s_%s_%s_O' % (self.project.upper(), self.tc.upper(),
                               self.cfg.upper(), self.arch['<ARCH>'])
+
+  def GetPepperPlugin(self):
+    plugin = self.Replace(BUILD_RULES[self.tc]['TOOL']['MAIN'])
+    text = 'PPAPI_<CONFIG>:=$(abspath %s)' % plugin
+    text += ';application/x-ppapi-%s\n' % self.vars['<config>'].lower()
+    return self.Replace(text)
+
 
   def SetArch(self, arch):
     self.arch = arch
@@ -361,17 +407,21 @@ class MakeRules(object):
     self.SetLibraries(libs)
 
   def SetSource(self, src):
-    self.source = source
     self.vars['<src>'] = src
 
   def SetToolchain(self, tc):
     TC = tc.upper()
+    if tc in ('linux', 'win'):
+      tcname = 'host'
+    else:
+      tcname = tc
     self.vars['<CC>'] = '%s_CC' % TC
     self.vars['<CXX>'] = '%s_CXX' % TC
     self.vars['<DUMP>'] = '%s_DUMP' % TC
     self.vars['<LIB>'] = '%s_LIB' % TC
     self.vars['<LINK>'] = '%s_LINK' % TC
     self.vars['<tc>'] = tc
+    self.vars['<tcname>'] = tcname
     self.vars['<TC>'] = TC
     self.SetDefines(self.defines)
     self.SetIncludes(self.includes)
@@ -381,7 +431,6 @@ class MakeRules(object):
     # Add other passed in replacements
     for key in kwargs:
       self.vars['<%s>' % key] = kwargs[key]
-    self.var_set = kwargs
 
   def Replace(self, text):
     return Replace(text, self.vars)

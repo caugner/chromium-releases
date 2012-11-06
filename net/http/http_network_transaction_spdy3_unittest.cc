@@ -33,7 +33,7 @@
 #include "net/base/ssl_config_service_defaults.h"
 #include "net/base/ssl_info.h"
 #include "net/base/test_completion_callback.h"
-#include "net/base/upload_data.h"
+#include "net/base/upload_file_element_reader.h"
 #include "net/http/http_auth_handler_digest.h"
 #include "net/http/http_auth_handler_mock.h"
 #include "net/http/http_auth_handler_ntlm.h"
@@ -2523,11 +2523,9 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectFailure) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
-  EXPECT_EQ(OK, rv);
+  EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, rv);
 
-  const HttpResponseInfo* response = trans->GetResponseInfo();
-  ASSERT_TRUE(response != NULL);
-  EXPECT_EQ(500, response->headers->response_code());
+  // TODO(ttuttle): Anything else to check here?
 }
 
 // Test the challenge-response-retry sequence through an HTTPS Proxy
@@ -4783,9 +4781,9 @@ TEST_F(HttpNetworkTransactionSpdy3Test, RedirectOfHttpsConnectViaSpdyProxy) {
   EXPECT_EQ("http://login.example.com/", url);
 }
 
-// Test an HTTPS Proxy's ability to provide a response to a CONNECT request
+// Test that an HTTPS proxy's response to a CONNECT request is filtered.
 TEST_F(HttpNetworkTransactionSpdy3Test,
-       ErrorResponseTofHttpsConnectViaHttpsProxy) {
+       ErrorResponseToHttpsConnectViaHttpsProxy) {
   SessionDependencies session_deps(
       ProxyService::CreateFixed("https://proxy:70"));
 
@@ -4823,25 +4821,14 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
-  EXPECT_EQ(OK, rv);
-  const HttpResponseInfo* response = trans->GetResponseInfo();
+  EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, rv);
 
-  ASSERT_TRUE(response != NULL);
-
-  EXPECT_EQ(404, response->headers->response_code());
-  EXPECT_EQ(23, response->headers->GetContentLength());
-  EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
-  EXPECT_FALSE(response->ssl_info.is_valid());
-
-  std::string response_data;
-  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
-  EXPECT_EQ("The host does not exist", response_data);
+  // TODO(ttuttle): Anything else to check here?
 }
 
-// Test an HTTPS (SPDY) Proxy's ability to provide a response to a CONNECT
-// request
+// Test that a SPDY proxy's response to a CONNECT request is filtered.
 TEST_F(HttpNetworkTransactionSpdy3Test,
-       ErrorResponseTofHttpsConnectViaSpdyProxy) {
+       ErrorResponseToHttpsConnectViaSpdyProxy) {
   SessionDependencies session_deps(
       ProxyService::CreateFixed("https://proxy:70"));
 
@@ -4851,9 +4838,10 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   request.load_flags = 0;
 
   scoped_ptr<SpdyFrame> conn(ConstructSpdyConnect(NULL, 0, 1));
-  scoped_ptr<SpdyFrame> goaway(ConstructSpdyRstStream(1, CANCEL));
+  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, CANCEL));
   MockWrite data_writes[] = {
     CreateMockWrite(*conn.get(), 0, SYNCHRONOUS),
+    CreateMockWrite(*rst.get(), 3, SYNCHRONOUS),
   };
 
   static const char* const kExtraHeaders[] = {
@@ -4868,7 +4856,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   MockRead data_reads[] = {
     CreateMockRead(*resp.get(), 1, SYNCHRONOUS),
     CreateMockRead(*body.get(), 2, SYNCHRONOUS),
-    MockRead(ASYNC, 0, 3),  // EOF
+    MockRead(ASYNC, 0, 4),  // EOF
   };
 
   DelayedSocketData data(
@@ -4890,17 +4878,9 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
-  EXPECT_EQ(OK, rv);
-  const HttpResponseInfo* response = trans->GetResponseInfo();
+  EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, rv);
 
-  ASSERT_TRUE(response != NULL);
-
-  EXPECT_EQ(404, response->headers->response_code());
-  EXPECT_FALSE(response->ssl_info.is_valid());
-
-  std::string response_data;
-  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
-  EXPECT_EQ("The host does not exist", response_data);
+  // TODO(ttuttle): Anything else to check here?
 }
 
 // Test the request-challenge-retry sequence for basic auth, through
@@ -6516,14 +6496,14 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UploadFileSmallerThanLength) {
   FilePath temp_file_path;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
   const uint64 kFakeSize = 100000;  // file is actually blank
+  UploadFileElementReader::ScopedOverridingContentLengthForTests
+      overriding_content_length(kFakeSize);
 
-  std::vector<UploadData::Element> elements;
-  UploadData::Element element;
+  std::vector<UploadElement> elements;
+  UploadElement element;
   element.SetToFilePath(temp_file_path);
-  element.SetContentLength(kFakeSize);
   elements.push_back(element);
   request.upload_data->SetElements(elements);
-  EXPECT_EQ(kFakeSize, request.upload_data->GetContentLengthSync());
 
   MockRead data_reads[] = {
     MockRead("HTTP/1.0 200 OK\r\n\r\n"),
@@ -6575,8 +6555,8 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UploadUnreadableFile) {
                                    temp_file_content.length()));
   ASSERT_TRUE(file_util::MakeFileUnreadable(temp_file));
 
-  std::vector<UploadData::Element> elements;
-  UploadData::Element element;
+  std::vector<UploadElement> elements;
+  UploadElement element;
   element.SetToFilePath(temp_file);
   elements.push_back(element);
   request.upload_data->SetElements(elements);
@@ -6630,8 +6610,8 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UnreadableUploadFileAfterAuthRestart) {
   ASSERT_TRUE(file_util::WriteFile(temp_file, temp_file_contents.c_str(),
                                    temp_file_contents.length()));
 
-  std::vector<UploadData::Element> elements;
-  UploadData::Element element;
+  std::vector<UploadElement> elements;
+  UploadElement element;
   element.SetToFilePath(temp_file);
   elements.push_back(element);
   request.upload_data->SetElements(elements);
@@ -6655,7 +6635,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UnreadableUploadFileAfterAuthRestart) {
     MockWrite("POST /upload HTTP/1.1\r\n"
               "Host: www.google.com\r\n"
               "Connection: keep-alive\r\n"
-              "Content-Length: 16\r\n"
+              "Content-Length: 0\r\n"
               "Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
     MockWrite(SYNCHRONOUS, unreadable_contents.c_str(),
               temp_file_contents.length()),

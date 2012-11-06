@@ -49,8 +49,7 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         prefs::kWebKitAllowDisplayingInsecureContent, false },
       { switches::kAllowCrossOriginAuthPrompt,
         prefs::kAllowCrossOriginAuthPrompt, true },
-      { switches::kEnableOriginBoundCerts, prefs::kEnableOriginBoundCerts,
-          true },
+      { switches::kEnableTLSChannelID, prefs::kEnableOriginBoundCerts, true },
       { switches::kDisableSSLFalseStart, prefs::kDisableSSLRecordSplitting,
           true },
       { switches::kEnableMemoryInfo, prefs::kEnableMemoryInfo, true },
@@ -64,6 +63,8 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
       { switches::kEnableTouchpadThreeFingerClick,
           prefs::kEnableTouchpadThreeFingerClick, true },
 #endif
+      { switches::kLoadCloudPolicyOnSignin, prefs::kLoadCloudPolicyOnSignin,
+        true },
 };
 
 const CommandLinePrefStore::IntegerSwitchToPreferenceMapEntry

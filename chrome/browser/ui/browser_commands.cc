@@ -62,11 +62,15 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "content/public/browser/web_intents_dispatcher.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_restriction.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
+#include "webkit/glue/web_intent_data.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/user_agent/user_agent_util.h"
 
 #if defined(OS_MACOSX)
 #include "ui/base/cocoa/find_pasteboard.h"
@@ -76,6 +80,10 @@
 #include "base/win/metro.h"
 #endif
 
+namespace {
+const char kOsOverrideForTabletSite[] = "Linux; Android 4.0.3";
+}
+
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -83,6 +91,17 @@ using content::Referrer;
 using content::SSLStatus;
 using content::UserMetricsAction;
 using content::WebContents;
+
+// TODO(avi): Kill this when TabContents goes away.
+class BrowserCommandsTabContentsCreator {
+ public:
+  static TabContents* CreateTabContents(content::WebContents* contents) {
+    return TabContents::Factory::CreateTabContents(contents);
+  }
+  static TabContents* CloneTabContents(TabContents* contents) {
+    return TabContents::Factory::CloneTabContents(contents);
+  }
+};
 
 namespace chrome {
 namespace {
@@ -93,7 +112,8 @@ WebContents* GetOrCloneTabForDisposition(Browser* browser,
   switch (disposition) {
     case NEW_FOREGROUND_TAB:
     case NEW_BACKGROUND_TAB: {
-      current_tab = current_tab->Clone();
+      current_tab =
+          BrowserCommandsTabContentsCreator::CloneTabContents(current_tab);
       browser->tab_strip_model()->AddTabContents(
           current_tab, -1, content::PAGE_TRANSITION_LINK,
           disposition == NEW_FOREGROUND_TAB ? TabStripModel::ADD_ACTIVE :
@@ -101,7 +121,8 @@ WebContents* GetOrCloneTabForDisposition(Browser* browser,
       break;
     }
     case NEW_WINDOW: {
-      current_tab = current_tab->Clone();
+      current_tab =
+          BrowserCommandsTabContentsCreator::CloneTabContents(current_tab);
       Browser* b = new Browser(Browser::CreateParams(browser->profile()));
       b->tab_strip_model()->AddTabContents(
           current_tab, -1, content::PAGE_TRANSITION_LINK,
@@ -118,17 +139,6 @@ WebContents* GetOrCloneTabForDisposition(Browser* browser,
 void ReloadInternal(Browser* browser,
                     WindowOpenDisposition disposition,
                     bool ignore_cache) {
-  // If we are showing an interstitial, treat this as an OpenURL.
-  WebContents* current_tab = GetActiveWebContents(browser);
-  if (current_tab && current_tab->ShowingInterstitialPage()) {
-    NavigationEntry* entry = current_tab->GetController().GetActiveEntry();
-    DCHECK(entry);  // Should exist if interstitial is showing.
-    browser->OpenURL(OpenURLParams(
-        entry->GetURL(), Referrer(), disposition,
-        content::PAGE_TRANSITION_RELOAD, false));
-    return;
-  }
-
   // As this is caused by a user action, give the focus to the page.
   //
   // Also notify RenderViewHostDelegate of the user gesture; this is
@@ -487,10 +497,11 @@ bool CanDuplicateTab(const Browser* browser) {
   return contents && contents->GetController().GetLastCommittedEntry();
 }
 
-void DuplicateTabAt(Browser* browser, int index) {
+TabContents* DuplicateTabAt(Browser* browser, int index) {
   TabContents* contents = GetTabContentsAt(browser, index);
   CHECK(contents);
-  TabContents* contents_dupe = contents->Clone();
+  TabContents* contents_dupe =
+      BrowserCommandsTabContentsCreator::CloneTabContents(contents);
 
   bool pinned = false;
   if (browser->CanSupportWindowFeature(Browser::FEATURE_TABSTRIP)) {
@@ -536,6 +547,7 @@ void DuplicateTabAt(Browser* browser, int index) {
       SessionServiceFactory::GetForProfileIfExisting(browser->profile());
   if (session_service)
     session_service->TabRestored(contents_dupe, pinned);
+  return contents_dupe;
 }
 
 bool CanDuplicateTabAt(Browser* browser, int index) {
@@ -604,7 +616,7 @@ bool CanBookmarkAllTabs(const Browser* browser) {
 }
 
 void TogglePagePinnedToStartScreen(Browser* browser) {
-  GetActiveTabContents(browser)->metro_pin_tab_helper()->
+  MetroPinTabHelper::FromWebContents(GetActiveWebContents(browser))->
       TogglePinnedToStartScreen();
 }
 
@@ -641,11 +653,11 @@ void ShowPageInfo(Browser* browser,
   TabContents* tab_contents = TabContents::FromWebContents(web_contents);
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableWebsiteSettings)) {
+      switches::kDisableWebsiteSettings)) {
+    browser->window()->ShowPageInfo(web_contents, url, ssl, show_history);
+  } else {
     browser->window()->ShowWebsiteSettings(
         profile, tab_contents, url, ssl, show_history);
-  } else {
-    browser->window()->ShowPageInfo(web_contents, url, ssl, show_history);
   }
 }
 
@@ -656,14 +668,27 @@ void ShowChromeToMobileBubble(Browser* browser) {
     browser->window()->ShowChromeToMobileBubble();
 }
 
+void ShareCurrentPage(Browser* browser) {
+  const GURL& current_url = chrome::GetActiveWebContents(browser)->GetURL();
+  webkit_glue::WebIntentData intent_data(
+      ASCIIToUTF16("http://webintents.org/share"),
+      ASCIIToUTF16("text/uri-list"),
+      UTF8ToUTF16(current_url.spec()));
+  scoped_ptr<content::WebIntentsDispatcher> dispatcher(
+      content::WebIntentsDispatcher::Create(intent_data));
+  static_cast<content::WebContentsDelegate*>(browser)->
+      WebIntentDispatch(NULL, dispatcher.release());
+}
+
 void Print(Browser* browser) {
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          GetActiveWebContents(browser));
   if (browser->profile()->GetPrefs()->GetBoolean(
-      prefs::kPrintPreviewDisabled)) {
-    GetActiveTabContents(browser)->print_view_manager()->PrintNow();
-  } else {
-    GetActiveTabContents(browser)->print_view_manager()->
-        PrintPreviewNow();
-  }
+      prefs::kPrintPreviewDisabled))
+    print_view_manager->PrintNow();
+  else
+    print_view_manager->PrintPreviewNow();
 }
 
 bool CanPrint(const Browser* browser) {
@@ -677,8 +702,10 @@ bool CanPrint(const Browser* browser) {
 }
 
 void AdvancedPrint(Browser* browser) {
-  GetActiveTabContents(browser)->print_view_manager()->
-      AdvancedPrintNow();
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          GetActiveWebContents(browser));
+  print_view_manager->AdvancedPrintNow();
 }
 
 bool CanAdvancedPrint(const Browser* browser) {
@@ -689,7 +716,10 @@ bool CanAdvancedPrint(const Browser* browser) {
 }
 
 void PrintToDestination(Browser* browser) {
-  GetActiveTabContents(browser)->print_view_manager()->PrintToDestination();
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          GetActiveWebContents(browser));
+  print_view_manager->PrintToDestination();
 }
 
 void EmailPageLocation(Browser* browser) {
@@ -803,10 +833,7 @@ void ToggleDevToolsWindow(Browser* browser, DevToolsToggleAction action) {
     content::RecordAction(UserMetricsAction("DevTools_ToggleConsole"));
   else
     content::RecordAction(UserMetricsAction("DevTools_ToggleWindow"));
-
-  DevToolsWindow::ToggleDevToolsWindow(
-      GetActiveWebContents(browser)->GetRenderViewHost(),
-      action);
+  DevToolsWindow::ToggleDevToolsWindow(browser, action);
 }
 
 bool CanOpenTaskManager() {
@@ -854,14 +881,50 @@ void ToggleSpeechInput(Browser* browser) {
   GetActiveWebContents(browser)->GetRenderViewHost()->ToggleSpeechInput();
 }
 
+bool CanRequestTabletSite(WebContents* current_tab) {
+  if (!current_tab)
+    return false;
+  return current_tab->GetController().GetActiveEntry() != NULL;
+}
+
+bool IsRequestingTabletSite(Browser* browser) {
+  WebContents* current_tab = chrome::GetActiveWebContents(browser);
+  if (!current_tab)
+    return false;
+  content::NavigationEntry* entry =
+      current_tab->GetController().GetActiveEntry();
+  if (!entry)
+    return false;
+  return entry->GetIsOverridingUserAgent();
+}
+
+void ToggleRequestTabletSite(Browser* browser) {
+  WebContents* current_tab = GetActiveWebContents(browser);
+  if (!current_tab)
+    return;
+  NavigationController& controller = current_tab->GetController();
+  NavigationEntry* entry = controller.GetActiveEntry();
+  if (!entry)
+    return;
+  if (entry->GetIsOverridingUserAgent()) {
+    entry->SetIsOverridingUserAgent(false);
+  } else {
+    entry->SetIsOverridingUserAgent(true);
+    current_tab->SetUserAgentOverride(
+        webkit_glue::BuildUserAgentFromOSAndProduct(
+            kOsOverrideForTabletSite,
+            content::GetContentClient()->GetProduct()));
+  }
+  controller.ReloadOriginalRequestURL(true);
+}
+
 void ToggleFullscreenMode(Browser* browser) {
   browser->fullscreen_controller()->ToggleFullscreenMode();
 }
 
 void ClearCache(Browser* browser) {
-  BrowsingDataRemover* remover = new BrowsingDataRemover(browser->profile(),
-      BrowsingDataRemover::EVERYTHING,
-      base::Time::Now());
+  BrowsingDataRemover* remover =
+      BrowsingDataRemover::CreateForUnboundedRange(browser->profile());
   remover->Remove(BrowsingDataRemover::REMOVE_CACHE,
                   BrowsingDataHelper::UNPROTECTED_WEB);
   // BrowsingDataRemover takes care of deleting itself when done.
@@ -895,7 +958,8 @@ void ViewSource(Browser* browser,
 
   // Note that Clone does not copy the pending or transient entries, so the
   // active entry in view_source_contents will be the last committed entry.
-  TabContents* view_source_contents = contents->Clone();
+  TabContents* view_source_contents =
+      BrowserCommandsTabContentsCreator::CloneTabContents(contents);
   view_source_contents->web_contents()->GetController().PruneAllButActive();
   NavigationEntry* active_entry =
       view_source_contents->web_contents()->GetController().GetActiveEntry();
@@ -957,12 +1021,12 @@ bool CanViewSource(const Browser* browser) {
 
 void CreateApplicationShortcuts(Browser* browser) {
   content::RecordAction(UserMetricsAction("CreateShortcut"));
-  GetActiveTabContents(browser)->extension_tab_helper()->
+  extensions::TabHelper::FromWebContents(GetActiveWebContents(browser))->
       CreateApplicationShortcuts();
 }
 
 bool CanCreateApplicationShortcuts(const Browser* browser) {
-  return GetActiveTabContents(browser)->extension_tab_helper()->
+  return extensions::TabHelper::FromWebContents(GetActiveWebContents(browser))->
       CanCreateApplicationShortcuts();
 }
 
@@ -979,8 +1043,10 @@ void ConvertTabToAppWindow(Browser* browser,
       Browser::CreateParams::CreateForApp(
           Browser::TYPE_POPUP, app_name, gfx::Rect(), browser->profile()));
   TabContents* tab_contents = TabContents::FromWebContents(contents);
-  if (!tab_contents)
-    tab_contents = new TabContents(contents);
+  if (!tab_contents) {
+    tab_contents =
+        BrowserCommandsTabContentsCreator::CreateTabContents(contents);
+  }
   app_browser->tab_strip_model()->AppendTabContents(tab_contents, true);
 
   contents->GetMutableRendererPrefs()->can_accept_load_drops = false;

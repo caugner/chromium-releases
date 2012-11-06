@@ -123,6 +123,7 @@ void ImageTransportHelper::SendAcceleratedSurfaceBuffersSwapped(
                        "width", surface_->GetSize().width());
   params.surface_id = stub_->surface_id();
   params.route_id = route_id_;
+  params.size = surface_->GetSize();
 #if defined(OS_MACOSX)
   params.window = handle_;
 #endif
@@ -221,7 +222,8 @@ void ImageTransportHelper::Resize(gfx::Size size) {
   // decoder so that future calls to MakeCurrent do not early out on the
   // assumption that neither the context or surface have actually changed.
 #if defined(OS_WIN)
-  Decoder()->ReleaseCurrent();
+  if (handle_ != NULL)
+    Decoder()->ReleaseCurrent();
 #endif
 
   surface_->OnResize(size);
@@ -231,8 +233,10 @@ void ImageTransportHelper::Resize(gfx::Size size) {
 #endif
 
 #if defined(OS_WIN)
-  Decoder()->MakeCurrent();
-  SetSwapInterval(Decoder()->GetGLContext());
+  if (handle_ != NULL) {
+    Decoder()->MakeCurrent();
+    SetSwapInterval(Decoder()->GetGLContext());
+  }
 #endif
 }
 
@@ -268,9 +272,6 @@ bool PassThroughImageTransportSurface::SwapBuffers() {
     // SwapBuffers message.
     GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
     params.surface_handle = 0;
-#if defined(OS_WIN)
-    params.size = GetSize();
-#endif
     helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
     helper_->SetScheduled(false);

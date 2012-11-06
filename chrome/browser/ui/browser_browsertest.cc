@@ -187,11 +187,6 @@ class TestInterstitialPage : public content::InterstitialPageDelegate {
 
 class BrowserTest : public ExtensionBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
-    ExtensionBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnablePointerLock);
-  }
-
   // In RTL locales wrap the page title with RTL embedding characters so that it
   // matches the value returned by GetWindowTitle().
   string16 LocaleWindowCaptionFromPageTitle(const string16& expected_title) {
@@ -270,7 +265,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
 }
 
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(NDEBUG)
 // http://crbug.com/114859. Times out frequently on Windows.
 #define MAYBE_ThirtyFourTabs DISABLED_ThirtyFourTabs
 #else
@@ -361,7 +356,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
   // Wait for the ShouldClose_ACK to arrive.  We can detect it by waiting for
   // the pending RVH to be destroyed.
   host_destroyed_observer.Wait();
-  EXPECT_EQ(url.spec(), UTF16ToUTF8(browser()->toolbar_model()->GetText()));
+  EXPECT_EQ(url, browser()->toolbar_model()->GetURL());
 
   // Clear the beforeunload handler so the test can easily exit.
   chrome::GetActiveWebContents(browser())->GetRenderViewHost()->
@@ -799,8 +794,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   TabContents* app_contents = chrome::TabContentsFactory(
-      browser()->profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
-  app_contents->extension_tab_helper()->SetExtensionApp(extension_app);
+      browser()->profile(), NULL, MSG_ROUTING_NONE, NULL);
+  extensions::TabHelper* extensions_tab_helper =
+      extensions::TabHelper::FromWebContents(app_contents->web_contents());
+  extensions_tab_helper->SetExtensionApp(extension_app);
 
   model->AddTabContents(app_contents, 0, content::PageTransitionFromInt(0),
                         TabStripModel::ADD_NONE);
@@ -918,8 +915,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   const Extension* extension_app = GetExtension();
   ui_test_utils::NavigateToURL(browser(), url);
   TabContents* app_contents = chrome::TabContentsFactory(
-      browser()->profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
-  app_contents->extension_tab_helper()->SetExtensionApp(extension_app);
+      browser()->profile(), NULL, MSG_ROUTING_NONE, NULL);
+  extensions::TabHelper* extensions_tab_helper =
+      extensions::TabHelper::FromWebContents(app_contents->web_contents());
+  extensions_tab_helper->SetExtensionApp(extension_app);
   model->AddTabContents(app_contents, 0, content::PageTransitionFromInt(0),
                         TabStripModel::ADD_NONE);
   model->SetTabPinned(0, true);
@@ -975,8 +974,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
       new_model->GetTabContentsAt(2)->web_contents()->GetURL());
 
   EXPECT_TRUE(
-      new_model->GetTabContentsAt(0)->extension_tab_helper()->extension_app() ==
-          extension_app);
+      extensions::TabHelper::FromWebContents(
+          new_model->GetTabContentsAt(0)->web_contents())->
+              extension_app() == extension_app);
 }
 #endif  // !defined(OS_CHROMEOS)
 
@@ -1007,10 +1007,11 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
                                        NEW_WINDOW));
   ASSERT_TRUE(app_window);
 
-  // Apps launched in a window from the NTP do not have extension_app set in
-  // tab contents.
-  TabContents* tab_contents = TabContents::FromWebContents(app_window);
-  EXPECT_FALSE(tab_contents->extension_tab_helper()->extension_app());
+  // Apps launched in a window from the NTP have an extensions tab helper but
+  // do not have extension_app set in it.
+  ASSERT_TRUE(extensions::TabHelper::FromWebContents(app_window));
+  EXPECT_FALSE(
+      extensions::TabHelper::FromWebContents(app_window)->extension_app());
   EXPECT_EQ(extension_app->GetFullLaunchURL(), app_window->GetURL());
 
   // The launch should have created a new browser.
@@ -1226,7 +1227,14 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_IMPORT_SETTINGS));
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserTest, PageZoom) {
+#if defined(OS_WIN)
+// Flakes regularly on Windows XP
+// http://crbug.com/146040
+#define MAYBE_PageZoom DISABLED_PageZoom
+#else
+#define MAYBE_PageZoom PageZoom
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
   WebContents* contents = chrome::GetActiveWebContents(browser());
   bool enable_plus, enable_minus;
 
@@ -1486,7 +1494,13 @@ class KioskModeTest : public BrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(KioskModeTest, EnableKioskModeTest) {
+#if defined(OS_MACOSX)
+// http://crbug.com/103912
+#define MAYBE_EnableKioskModeTest DISABLED_EnableKioskModeTest
+#else
+#define MAYBE_EnableKioskModeTest EnableKioskModeTest
+#endif
+IN_PROC_BROWSER_TEST_F(KioskModeTest, MAYBE_EnableKioskModeTest) {
   // Check if browser is in fullscreen mode.
   ASSERT_TRUE(browser()->window()->IsFullscreen());
   ASSERT_FALSE(browser()->window()->IsFullscreenBubbleVisible());
@@ -1502,7 +1516,7 @@ class LaunchBrowserWithNonAsciiUserDatadir : public BrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     FilePath tmp_profile = temp_dir_.path().AppendASCII("tmp_profile");
-    tmp_profile = tmp_profile.Append(L"Test Chrome G�raldine");
+    tmp_profile = tmp_profile.Append(L"Test Chrome G\u00E9raldine");
 
     ASSERT_TRUE(file_util::CreateDirectory(tmp_profile));
     command_line->AppendSwitchPath(switches::kUserDataDir, tmp_profile);
@@ -1590,4 +1604,19 @@ IN_PROC_BROWSER_TEST_F(AppModeTest, EnableAppModeTest) {
 
   // Verify the browser is in application mode.
   EXPECT_TRUE(browser()->IsApplication());
+}
+
+// Confirm about:version contains some expected content.
+IN_PROC_BROWSER_TEST_F(BrowserTest, AboutVersion) {
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutVersionURL));
+  TabContents* tab = chrome::GetActiveTabContents(browser());
+  ASSERT_GT(ui_test_utils::FindInPage(tab, ASCIIToUTF16("WebKit"), true, true,
+                                      NULL, NULL),
+            0);
+  ASSERT_GT(ui_test_utils::FindInPage(tab, ASCIIToUTF16("OS"), true, true,
+                                      NULL, NULL),
+            0);
+  ASSERT_GT(ui_test_utils::FindInPage(tab, ASCIIToUTF16("JavaScript"), true,
+                                      true, NULL, NULL),
+            0);
 }

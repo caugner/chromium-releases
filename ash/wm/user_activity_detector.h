@@ -32,19 +32,22 @@ class ASH_EXPORT UserActivityDetector : public aura::EventFilter {
   void AddObserver(UserActivityObserver* observer);
   void RemoveObserver(UserActivityObserver* observer);
 
+  // Called when chrome has received a request to turn of all displays.
+  void OnAllOutputsTurnedOff();
+
   // aura::EventFilter implementation.
   virtual bool PreHandleKeyEvent(
       aura::Window* target,
-      aura::KeyEvent* event) OVERRIDE;
+      ui::KeyEvent* event) OVERRIDE;
   virtual bool PreHandleMouseEvent(
       aura::Window* target,
-      aura::MouseEvent* event) OVERRIDE;
+      ui::MouseEvent* event) OVERRIDE;
   virtual ui::TouchStatus PreHandleTouchEvent(
       aura::Window* target,
-      aura::TouchEvent* event) OVERRIDE;
-  virtual ui::GestureStatus PreHandleGestureEvent(
+      ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult PreHandleGestureEvent(
       aura::Window* target,
-      aura::GestureEvent* event) OVERRIDE;
+      ui::GestureEvent* event) OVERRIDE;
 
  private:
   // Notifies observers if enough time has passed since the last notification.
@@ -58,6 +61,11 @@ class ASH_EXPORT UserActivityDetector : public aura::EventFilter {
   // If set, used when the current time is needed.  This can be set by tests to
   // simulate the passage of time.
   base::TimeTicks now_for_test_;
+
+  // When this is true, the next mouse event is ignored. This is to
+  // avoid mis-detecting a mouse enter event that occurs when turning
+  // off display as a user activity.
+  bool ignore_next_mouse_event_;
 
   DISALLOW_COPY_AND_ASSIGN(UserActivityDetector);
 };

@@ -48,6 +48,7 @@
   F(PPB_NetworkList_Private_API) \
   F(PPB_NetworkMonitor_Private_API) \
   F(PPB_PDFFont_API) \
+  F(PPB_Printing_API) \
   F(PPB_ResourceArray_API) \
   F(PPB_Scrollbar_API) \
   F(PPB_Talk_Private_API) \
@@ -70,6 +71,12 @@ class Message;
 }
 
 namespace ppapi {
+
+// Normally we shouldn't reply on proxy here, but this is to support
+// OnReplyReceived. See that comment.
+namespace proxy {
+class ResourceMessageReplyParams;
+}
 
 // Forward declare all the resource APIs.
 namespace thunk {
@@ -101,7 +108,7 @@ class PPAPI_SHARED_EXPORT Resource : public base::RefCounted<Resource> {
   // lives only in the plugin and doesn't have a corresponding object in the
   // host. If you have a host resource ID, use the constructor below which
   // takes that HostResource value.
-  explicit Resource(ResourceObjectType type, PP_Instance instance);
+  Resource(ResourceObjectType type, PP_Instance instance);
 
   // For constructing given a host resource.
   //
@@ -114,8 +121,14 @@ class PPAPI_SHARED_EXPORT Resource : public base::RefCounted<Resource> {
   // reason for supporting this constructor at all for the IMPL case is that
   // some shared objects use a host resource for both modes to keep things the
   // same.
-  explicit Resource(ResourceObjectType type,
-                    const HostResource& host_resource);
+  Resource(ResourceObjectType type, const HostResource& host_resource);
+
+  // Constructor for untracked objects. These have no associated instance. Use
+  // this with care, as the object is likely to persist for the lifetime of the
+  // plugin module. This is appropriate in some rare cases, like the
+  // PPB_MessageLoop resource for the main thread.
+  struct Untracked {};
+  explicit Resource(Untracked);
 
   virtual ~Resource();
 
@@ -166,10 +179,8 @@ class PPAPI_SHARED_EXPORT Resource : public base::RefCounted<Resource> {
   template <typename T> T* GetAs() { return NULL; }
 
   // Called when a PpapiPluginMsg_ResourceReply reply is received for a
-  // previous CallRenderer. The sequence number is the value returned the
-  // send function for the given request. The message is the nested reply
-  // message, which may be an empty message (depending on what the host
-  // sends).
+  // previous CallRenderer. The message is the nested reply message, which may
+  // be an empty message (depending on what the host sends).
   //
   // The default implementation will assert (if you send a request, you should
   // override this function).
@@ -177,8 +188,7 @@ class PPAPI_SHARED_EXPORT Resource : public base::RefCounted<Resource> {
   // (This function would make more conceptual sense on PluginResource but we
   // need to call this function from general code that doesn't know how to
   // distinguish the classes.)
-  virtual void OnReplyReceived(int sequence,
-                               int32_t result,
+  virtual void OnReplyReceived(const proxy::ResourceMessageReplyParams& params,
                                const IPC::Message& msg);
 
  protected:

@@ -12,14 +12,14 @@
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/gfx/insets.h"
+#include "ui/views/bubble/bubble_border_2.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/bubble/bubble_border_2.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
@@ -96,6 +96,7 @@ LauncherTooltipManager::LauncherTooltipBubble::LauncherTooltipBubble(
   set_close_on_esc(false);
   set_close_on_deactivate(false);
   set_use_focusless(true);
+  set_accept_events(false);
   set_margins(gfx::Insets(kTooltipTopBottomMargin, kTooltipLeftRightMargin,
                           kTooltipTopBottomMargin, kTooltipLeftRightMargin));
   SetLayoutManager(new views::FillLayout());
@@ -120,6 +121,9 @@ LauncherTooltipManager::LauncherTooltipBubble::LauncherTooltipBubble(
   set_anchor_insets(gfx::Insets(kArrowOffset, kArrowOffset, kArrowOffset,
       kArrowOffset));
   GetBubbleFrameView()->SetBubbleBorder(bubble_border_);
+
+  // BubbleBorder2 paints its own background.
+  GetBubbleFrameView()->set_background(NULL);
 }
 
 void LauncherTooltipManager::LauncherTooltipBubble::SetText(
@@ -291,13 +295,13 @@ bool LauncherTooltipManager::IsVisible() {
 }
 
 bool LauncherTooltipManager::PreHandleKeyEvent(aura::Window* target,
-                                               aura::KeyEvent* event) {
+                                               ui::KeyEvent* event) {
   // Not handled.
   return false;
 }
 
 bool LauncherTooltipManager::PreHandleMouseEvent(aura::Window* target,
-                                                 aura::MouseEvent* event) {
+                                                 ui::MouseEvent* event) {
   DCHECK(target);
   DCHECK(event);
   if (!widget_ || !widget_->IsVisible())
@@ -312,12 +316,12 @@ bool LauncherTooltipManager::PreHandleMouseEvent(aura::Window* target,
   }
 
   gfx::Point location_in_launcher_view = event->location();
-  aura::Window::ConvertPointToWindow(
+  aura::Window::ConvertPointToTarget(
       target, launcher_view_->GetWidget()->GetNativeWindow(),
       &location_in_launcher_view);
 
   gfx::Point location_on_screen = event->location();
-  aura::Window::ConvertPointToWindow(
+  aura::Window::ConvertPointToTarget(
       target, target->GetRootWindow(), &location_on_screen);
   gfx::Rect bubble_rect = widget_->GetWindowBoundsInScreen();
 
@@ -332,21 +336,21 @@ bool LauncherTooltipManager::PreHandleMouseEvent(aura::Window* target,
 }
 
 ui::TouchStatus LauncherTooltipManager::PreHandleTouchEvent(
-    aura::Window* target, aura::TouchEvent* event) {
+    aura::Window* target, ui::TouchEvent* event) {
   if (widget_ && widget_->IsVisible() && widget_->GetNativeWindow() != target)
     Close();
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus LauncherTooltipManager::PreHandleGestureEvent(
-    aura::Window* target, aura::GestureEvent* event) {
+ui::EventResult LauncherTooltipManager::PreHandleGestureEvent(
+    aura::Window* target, ui::GestureEvent* event) {
   if (widget_ && widget_->IsVisible()) {
     // Because this mouse event may arrive to |view_|, here we just schedule
     // the closing event rather than directly calling Close().
     CloseSoon();
   }
 
-  return ui::GESTURE_STATUS_UNKNOWN;
+  return ui::ER_UNHANDLED;
 }
 
 void LauncherTooltipManager::WillDeleteShelf() {

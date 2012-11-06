@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/navigation_controller.h"
@@ -21,11 +21,13 @@ TabContentsSyncedTabDelegate::TabContentsSyncedTabDelegate(
 TabContentsSyncedTabDelegate::~TabContentsSyncedTabDelegate() {}
 
 SessionID::id_type TabContentsSyncedTabDelegate::GetWindowId() const {
-  return tab_contents_->restore_tab_helper()->window_id().id();
+  return SessionTabHelper::FromWebContents(tab_contents_->web_contents())->
+      window_id().id();
 }
 
 SessionID::id_type TabContentsSyncedTabDelegate::GetSessionId() const {
-  return tab_contents_->restore_tab_helper()->session_id().id();
+  return SessionTabHelper::FromWebContents(tab_contents_->web_contents())->
+      session_id().id();
 }
 
 bool TabContentsSyncedTabDelegate::IsBeingDestroyed() const {
@@ -37,14 +39,15 @@ Profile* TabContentsSyncedTabDelegate::profile() const {
 }
 
 bool TabContentsSyncedTabDelegate::HasExtensionAppId() const {
-  return (tab_contents_->extension_tab_helper() &&
-      tab_contents_->extension_tab_helper()->extension_app());
+  return !!(extensions::TabHelper::FromWebContents(
+      tab_contents_->web_contents())->extension_app());
 }
 
 const std::string& TabContentsSyncedTabDelegate::GetExtensionAppId()
     const {
   DCHECK(HasExtensionAppId());
-  return tab_contents_->extension_tab_helper()->extension_app()->id();
+  return extensions::TabHelper::FromWebContents(tab_contents_->web_contents())->
+      extension_app()->id();
 }
 
 int TabContentsSyncedTabDelegate::GetCurrentEntryIndex() const {

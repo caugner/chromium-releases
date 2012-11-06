@@ -44,7 +44,8 @@ class ProfileImplIOData : public ProfileIOData {
               const FilePath& media_cache_path,
               int media_cache_max_size,
               const FilePath& extensions_cookie_path,
-              const FilePath& app_path,
+              const FilePath& profile_path,
+              const FilePath& infinite_cache_path,
               chrome_browser_net::Predictor* predictor,
               PrefService* local_state,
               IOThread* io_thread,
@@ -65,6 +66,9 @@ class ProfileImplIOData : public ProfileIOData {
         GetExtensionsRequestContextGetter() const;
     scoped_refptr<ChromeURLRequestContextGetter>
         GetIsolatedAppRequestContextGetter(
+            const std::string& app_id) const;
+    scoped_refptr<ChromeURLRequestContextGetter>
+        GetIsolatedMediaRequestContextGetter(
             const std::string& app_id) const;
 
     void ClearNetworkingHistorySince(base::Time time);
@@ -94,6 +98,8 @@ class ProfileImplIOData : public ProfileIOData {
     mutable scoped_refptr<ChromeURLRequestContextGetter>
         extensions_request_context_getter_;
     mutable ChromeURLRequestContextGetterMap app_request_context_getter_map_;
+    mutable ChromeURLRequestContextGetterMap
+        isolated_media_request_context_getter_map_;
     ProfileImplIOData* const io_data_;
 
     Profile* const profile_;
@@ -118,6 +124,7 @@ class ProfileImplIOData : public ProfileIOData {
     FilePath media_cache_path;
     int media_cache_max_size;
     FilePath extensions_cookie_path;
+    FilePath infinite_cache_path;
     bool restore_old_session_cookies;
     scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy;
   };
@@ -132,18 +139,33 @@ class ProfileImplIOData : public ProfileIOData {
       ProfileParams* profile_params) const OVERRIDE;
   virtual ChromeURLRequestContext* InitializeAppRequestContext(
       ChromeURLRequestContext* main_context,
+      const std::string& app_id,
+      scoped_ptr<net::URLRequestJobFactory::Interceptor>
+          protocol_handler_interceptor) const OVERRIDE;
+  virtual ChromeURLRequestContext* InitializeMediaRequestContext(
+      ChromeURLRequestContext* original_context,
       const std::string& app_id) const OVERRIDE;
   virtual ChromeURLRequestContext*
       AcquireMediaRequestContext() const OVERRIDE;
   virtual ChromeURLRequestContext*
       AcquireIsolatedAppRequestContext(
           ChromeURLRequestContext* main_context,
+          const std::string& app_id,
+          scoped_ptr<net::URLRequestJobFactory::Interceptor>
+              protocol_handler_interceptor) const OVERRIDE;
+  virtual ChromeURLRequestContext*
+      AcquireIsolatedMediaRequestContext(
+          ChromeURLRequestContext* app_context,
           const std::string& app_id) const OVERRIDE;
-  virtual chrome_browser_net::CacheStats* GetCacheStats(
+  virtual chrome_browser_net::LoadTimeStats* GetLoadTimeStats(
       IOThread::Globals* io_thread_globals) const OVERRIDE;
 
-  void CreateFtpProtocolHandler(net::URLRequestJobFactory* job_factory,
-                                net::FtpAuthCache* ftp_auth_cache) const;
+  void SetUpJobFactory(net::URLRequestJobFactory* job_factory,
+                       scoped_ptr<net::URLRequestJobFactory::Interceptor>
+                           protocol_handler_interceptor,
+                       net::NetworkDelegate* network_delegate,
+                       net::FtpTransactionFactory* ftp_transaction_factory,
+                       net::FtpAuthCache* ftp_auth_cache) const;
 
   // Clears the networking history since |time|.
   void ClearNetworkingHistorySinceOnIOThread(base::Time time);
@@ -152,7 +174,6 @@ class ProfileImplIOData : public ProfileIOData {
   mutable scoped_ptr<LazyParams> lazy_params_;
 
   mutable scoped_ptr<net::HttpTransactionFactory> main_http_factory_;
-  mutable scoped_ptr<net::HttpTransactionFactory> media_http_factory_;
   mutable scoped_ptr<net::FtpTransactionFactory> ftp_factory_;
 
   mutable scoped_ptr<chrome_browser_net::Predictor> predictor_;
@@ -164,7 +185,9 @@ class ProfileImplIOData : public ProfileIOData {
   mutable scoped_ptr<net::URLRequestJobFactory> extensions_job_factory_;
 
   // Parameters needed for isolated apps.
-  FilePath app_path_;
+  FilePath profile_path_;
+  int app_cache_max_size_;
+  int app_media_cache_max_size_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileImplIOData);
 };

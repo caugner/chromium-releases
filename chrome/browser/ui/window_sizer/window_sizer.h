@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "ui/gfx/rect.h"
 
 class Browser;
@@ -93,11 +94,15 @@ class WindowSizer {
                                      gfx::Rect* window_bounds);
 
   // Returns the default origin for popups of the given size.
-  static gfx::Point GetDefaultPopupOrigin(const gfx::Size& size);
+  static gfx::Point GetDefaultPopupOrigin(const gfx::Size& size,
+                                          chrome::HostDesktopType type);
 
   // The number of pixels which are kept free top, left and right when a window
   // gets positioned to its default location.
   static const int kDesktopBorderSize;
+
+  // Maximum width of a window even if there is more room on the desktop.
+  static const int kMaximumWindowWidth;
 
   // How much horizontal and vertical offset there is between newly
   // opened windows.  This value may be different on each platform.
@@ -143,11 +148,11 @@ class WindowSizer {
   // will be called before DetermineWindowBounds. It will return true when the
   // function was setting the bounds structure to the desired size. Otherwise
   // another algorithm should get used to determine the correct bounds.
-  bool GetBoundsIgnoringPreviousState(const gfx::Rect& specified_bounds,
-                                      gfx::Rect* bounds) const;
+  bool GetBoundsOverride(const gfx::Rect& specified_bounds,
+                         gfx::Rect* bounds) const;
 #if defined(USE_ASH)
-  bool GetBoundsIgnoringPreviousStateAsh(const gfx::Rect& specified_bounds,
-                                         gfx::Rect* bounds) const;
+  bool GetBoundsOverrideAsh(const gfx::Rect& specified_bounds,
+                            gfx::Rect* bounds_in_screen) const;
 #endif
 
   // Providers for persistent storage and monitor metrics.

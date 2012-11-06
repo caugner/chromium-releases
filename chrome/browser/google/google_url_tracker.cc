@@ -87,7 +87,7 @@ bool GoogleURLTrackerInfoBarDelegate::LinkClicked(
       content::Referrer(),
       (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
       content::PAGE_TRANSITION_LINK, false);
-  owner()->web_contents()->OpenURL(params);
+  owner()->GetWebContents()->OpenURL(params);
   return false;
 }
 
@@ -148,7 +148,7 @@ void GoogleURLTrackerInfoBarDelegate::Close(bool redo_search) {
     if (new_search_url.is_valid()) {
       content::OpenURLParams params(new_search_url, content::Referrer(),
           CURRENT_TAB, content::PAGE_TRANSITION_GENERATED, false);
-      owner()->web_contents()->OpenURL(params);
+      owner()->GetWebContents()->OpenURL(params);
     }
   }
 
@@ -285,7 +285,8 @@ void GoogleURLTracker::OnURLFetchComplete(const net::URLFetcher* source) {
   if (!url.is_valid() || (url.path().length() > 1) || url.has_query() ||
       url.has_ref() ||
       !google_util::IsGoogleDomainUrl(url.spec(),
-                                      google_util::DISALLOW_SUBDOMAIN))
+                                      google_util::DISALLOW_SUBDOMAIN,
+                                      google_util::DISALLOW_NON_STANDARD_PORTS))
     return;
 
   std::swap(url, fetched_google_url_);

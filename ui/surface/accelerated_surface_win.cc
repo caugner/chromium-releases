@@ -4,6 +4,7 @@
 
 #include "ui/surface/accelerated_surface_win.h"
 
+#include <dwmapi.h>
 #include <windows.h>
 #include <algorithm>
 
@@ -228,12 +229,14 @@ class PresentThreadPool {
 class AcceleratedPresenterMap {
  public:
   AcceleratedPresenterMap();
-  scoped_refptr<AcceleratedPresenter> CreatePresenter(gfx::NativeWindow window);
+  scoped_refptr<AcceleratedPresenter> CreatePresenter(
+      gfx::PluginWindowHandle window);
   void RemovePresenter(const scoped_refptr<AcceleratedPresenter>& presenter);
-  scoped_refptr<AcceleratedPresenter> GetPresenter(gfx::NativeWindow window);
+  scoped_refptr<AcceleratedPresenter> GetPresenter(
+      gfx::PluginWindowHandle window);
  private:
   base::Lock lock_;
-  typedef std::map<gfx::NativeWindow, AcceleratedPresenter*> PresenterMap;
+  typedef std::map<gfx::PluginWindowHandle, AcceleratedPresenter*> PresenterMap;
   PresenterMap presenters_;
   DISALLOW_COPY_AND_ASSIGN(AcceleratedPresenterMap);
 };
@@ -380,7 +383,7 @@ AcceleratedPresenterMap::AcceleratedPresenterMap() {
 }
 
 scoped_refptr<AcceleratedPresenter> AcceleratedPresenterMap::CreatePresenter(
-    gfx::NativeWindow window) {
+    gfx::PluginWindowHandle window) {
   scoped_refptr<AcceleratedPresenter> presenter(
       new AcceleratedPresenter(window));
 
@@ -407,7 +410,7 @@ void AcceleratedPresenterMap::RemovePresenter(
 }
 
 scoped_refptr<AcceleratedPresenter> AcceleratedPresenterMap::GetPresenter(
-    gfx::NativeWindow window) {
+    gfx::PluginWindowHandle window) {
   base::AutoLock locked(lock_);
   PresenterMap::iterator it = presenters_.find(window);
   if (it == presenters_.end())
@@ -416,7 +419,7 @@ scoped_refptr<AcceleratedPresenter> AcceleratedPresenterMap::GetPresenter(
   return it->second;
 }
 
-AcceleratedPresenter::AcceleratedPresenter(gfx::NativeWindow window)
+AcceleratedPresenter::AcceleratedPresenter(gfx::PluginWindowHandle window)
     : present_thread_(g_present_thread_pool.Pointer()->NextThread()),
       window_(window),
       event_(false, false),
@@ -424,18 +427,18 @@ AcceleratedPresenter::AcceleratedPresenter(gfx::NativeWindow window)
 }
 
 scoped_refptr<AcceleratedPresenter> AcceleratedPresenter::GetForWindow(
-    gfx::NativeWindow window) {
+    gfx::PluginWindowHandle window) {
   return g_accelerated_presenter_map.Pointer()->GetPresenter(window);
 }
 
 void AcceleratedPresenter::AsyncPresentAndAcknowledge(
     const gfx::Size& size,
     int64 surface_handle,
-    const base::Callback<void(bool)>& completion_task) {
+    const CompletionTask& completion_task) {
   if (!surface_handle) {
     TRACE_EVENT1("gpu", "EarlyOut_ZeroSurfaceHandle",
                  "surface_handle", surface_handle);
-    completion_task.Run(true);
+    completion_task.Run(true, base::TimeTicks(), base::TimeDelta());
     return;
   }
 
@@ -674,9 +677,11 @@ static base::TimeDelta GetSwapDelay() {
 void AcceleratedPresenter::DoPresentAndAcknowledge(
     const gfx::Size& size,
     int64 surface_handle,
-    const base::Callback<void(bool)>& completion_task) {
-  TRACE_EVENT1(
-      "gpu", "DoPresentAndAcknowledge", "surface_handle", surface_handle);
+    const CompletionTask& completion_task) {
+  TRACE_EVENT2(
+      "gpu", "DoPresentAndAcknowledge",
+      "width", size.width(),
+      "height", size.height());
 
   HRESULT hr;
 
@@ -687,26 +692,36 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
 
   if (!present_thread_->device()) {
     if (!completion_task.is_null())
-      completion_task.Run(false);
+      completion_task.Run(false, base::TimeTicks(), base::TimeDelta());
+    TRACE_EVENT0("gpu", "EarlyOut_NoDevice");
     return;
   }
 
   // Ensure the task is always run and while the lock is taken.
-  base::ScopedClosureRunner scoped_completion_runner(base::Bind(completion_task,
-                                                                true));
+  base::ScopedClosureRunner scoped_completion_runner(
+      base::Bind(completion_task, true, base::TimeTicks(), base::TimeDelta()));
 
   // If invalidated, do nothing, the window is gone.
-  if (!window_)
+  if (!window_) {
+    TRACE_EVENT0("gpu", "EarlyOut_NoWindow");
     return;
+  }
 
+#if !defined(USE_AURA)
   // If the window is a different size than the swap chain that is being
   // presented then drop the frame.
   RECT window_rect;
   GetClientRect(window_, &window_rect);
   if (hidden_ && (window_rect.right != size.width() ||
       window_rect.bottom != size.height())) {
+    TRACE_EVENT2("gpu", "EarlyOut_WrongWindowSize",
+                 "backwidth", size.width(), "backheight", size.height());
+    TRACE_EVENT2("gpu", "EarlyOut_WrongWindowSize2",
+                 "windowwidth", window_rect.right,
+                 "windowheight", window_rect.bottom);
     return;
   }
+#endif
 
   // Round up size so the swap chain is not continuously resized with the
   // surface, which could lead to memory fragmentation.
@@ -757,15 +772,19 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
 
   base::win::ScopedComPtr<IDirect3DSurface9> source_surface;
   hr = source_texture_->GetSurfaceLevel(0, source_surface.Receive());
-  if (FAILED(hr))
+  if (FAILED(hr)) {
+    TRACE_EVENT0("gpu", "EarlyOut_NoSurfaceLevel");
     return;
+  }
 
   base::win::ScopedComPtr<IDirect3DSurface9> dest_surface;
   hr = swap_chain_->GetBackBuffer(0,
                                   D3DBACKBUFFER_TYPE_MONO,
                                   dest_surface.Receive());
-  if (FAILED(hr))
+  if (FAILED(hr)) {
+    TRACE_EVENT0("gpu", "EarlyOut_NoBackbuffer");
     return;
+  }
 
   RECT rect = {
     0, 0,
@@ -821,18 +840,6 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
 
   present_size_ = size;
 
-  // Wait for the StretchRect to complete before notifying the GPU process
-  // that it is safe to write to its backing store again.
-  {
-    TRACE_EVENT0("gpu", "spin");
-    do {
-      hr = present_thread_->query()->GetData(NULL, 0, D3DGETDATA_FLUSH);
-
-      if (hr == S_FALSE)
-        Sleep(1);
-    } while (hr == S_FALSE);
-  }
-
   static const base::TimeDelta swap_delay = GetSwapDelay();
   if (swap_delay.ToInternalValue())
     base::PlatformThread::Sleep(swap_delay);
@@ -849,6 +856,54 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
   }
 
   hidden_ = false;
+
+  D3DDISPLAYMODE display_mode;
+  hr = present_thread_->device()->GetDisplayMode(0, &display_mode);
+  if (FAILED(hr))
+    return;
+
+  D3DRASTER_STATUS raster_status;
+  hr = swap_chain_->GetRasterStatus(&raster_status);
+  if (FAILED(hr))
+    return;
+
+  // I can't figure out how to determine how many scanlines are in the
+  // vertical blank so clamp it such that scanline / height <= 1.
+  int clamped_scanline = std::min(raster_status.ScanLine, display_mode.Height);
+
+  // The Internet says that on some GPUs, the scanline is not available
+  // while in the vertical blank.
+  if (raster_status.InVBlank)
+    clamped_scanline = display_mode.Height;
+
+  base::TimeTicks current_time = base::TimeTicks::HighResNow();
+
+  // Figure out approximately how far back in time the last vsync was based on
+  // the ratio of the raster scanline to the display height.
+  base::TimeTicks last_vsync_time;
+  base::TimeDelta refresh_period;
+  if (display_mode.Height) {
+      last_vsync_time = current_time -
+        base::TimeDelta::FromMilliseconds((clamped_scanline * 1000) /
+            (display_mode.RefreshRate * display_mode.Height));
+      refresh_period = base::TimeDelta::FromMicroseconds(
+          1000000 / display_mode.RefreshRate);
+  }
+
+  // Wait for the StretchRect to complete before notifying the GPU process
+  // that it is safe to write to its backing store again.
+  {
+    TRACE_EVENT0("gpu", "spin");
+    do {
+      hr = present_thread_->query()->GetData(NULL, 0, D3DGETDATA_FLUSH);
+
+      if (hr == S_FALSE)
+        Sleep(1);
+    } while (hr == S_FALSE);
+  }
+
+  scoped_completion_runner.Release();
+  completion_task.Run(true, last_vsync_time, refresh_period);
 }
 
 void AcceleratedPresenter::DoSuspend() {
@@ -861,7 +916,7 @@ void AcceleratedPresenter::DoReleaseSurface() {
   source_texture_.Release();
 }
 
-AcceleratedSurface::AcceleratedSurface(gfx::NativeWindow window)
+AcceleratedSurface::AcceleratedSurface(gfx::PluginWindowHandle window)
     : presenter_(g_accelerated_presenter_map.Pointer()->CreatePresenter(
           window)) {
 }

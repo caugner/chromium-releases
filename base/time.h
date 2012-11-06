@@ -45,6 +45,8 @@
 #include <windows.h>
 #endif
 
+#include <limits>
+
 namespace base {
 
 class Time;
@@ -246,6 +248,11 @@ class BASE_EXPORT Time {
     return us_ == 0;
   }
 
+  // Returns true if the time object is the maximum time.
+  bool is_max() const {
+    return us_ == std::numeric_limits<int64>::max();
+  }
+
   // Returns the time for epoch in Unix-like system (Jan 1, 1970).
   static Time UnixEpoch();
 
@@ -253,6 +260,10 @@ class BASE_EXPORT Time {
   // in which case time will actually go backwards. We don't guarantee that
   // times are increasing, or that two calls to Now() won't be the same.
   static Time Now();
+
+  // Returns the maximum time, which should be greater than any reasonable time
+  // with which we might compare it.
+  static Time Max();
 
   // Returns the current time. Same as Now() except that this function always
   // uses system time so that there are no discrepancies between the returned

@@ -8,8 +8,9 @@
 #include "chrome/browser/ui/search/search_types.h"
 #include "chrome/browser/ui/search/toolbar_search_animator_observer.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
-#include "ui/base/animation/slide_animation.h"
+#include "ui/base/animation/multi_animation.h"
 
 namespace {
 
@@ -24,35 +25,44 @@ const double kMaxOpacity = 1.0f;
 namespace chrome {
 namespace search {
 
-ToolbarSearchAnimator::ToolbarSearchAnimator(SearchModel* search_model)
+ToolbarSearchAnimator::ToolbarSearchAnimator(SearchModel* search_model,
+                                             ToolbarModel* toolbar_model)
     : search_model_(search_model),
-      animate_state_(ANIMATE_STATE_NONE) {
+      toolbar_model_(toolbar_model),
+      background_change_delay_ms_(kBackgroundChangeDelayMs),
+      background_change_duration_ms_(kBackgroundChangeDurationMs),
+      is_omnibox_popup_open_(false) {
   search_model_->AddObserver(this);
 }
 
 ToolbarSearchAnimator::~ToolbarSearchAnimator() {
+  if (background_animation_.get())
+    background_animation_->Stop();
   search_model_->RemoveObserver(this);
 }
 
-void ToolbarSearchAnimator::GetCurrentBackgroundState(
-    BackgroundState* background_state,
-    double* search_background_opacity) const {
-  // Should only be called for SEARCH mode.
-  DCHECK(search_model_->mode().is_search());
-  *background_state = BACKGROUND_STATE_DEFAULT;
-  *search_background_opacity = -1.0f;
-  switch (animate_state_) {
-    case ANIMATE_STATE_WAITING:
-      *background_state = BACKGROUND_STATE_NTP;
-      break;
-    case ANIMATE_STATE_RUNNING:
-      *background_state = BACKGROUND_STATE_NTP_SEARCH;
-      *search_background_opacity = background_animation_->CurrentValueBetween(
-          kMinOpacity, kMaxOpacity);
-      break;
-    case ANIMATE_STATE_NONE:
-      break;
-  }
+double ToolbarSearchAnimator::GetGradientOpacity() const {
+  if (background_animation_.get() && background_animation_->is_animating())
+    return background_animation_->CurrentValueBetween(kMinOpacity, kMaxOpacity);
+  return search_model_->mode().is_ntp() ? kMinOpacity : kMaxOpacity;
+}
+
+bool ToolbarSearchAnimator::IsToolbarSeparatorVisible() const {
+  // The toolbar separator is only visible in 2 scenarios:
+  // 1) when mode is |SEARCH_SUGGESTIONS|, user input is not in progress, and
+  //    the omnibox popup has finished retracting before the navigation URL was
+  //    committed, i.e. before the mode was changed to |DEFAULT|.
+  // 2) when mode is |DEFAULT| and the omnibox popup has finished retracting.
+  return !is_omnibox_popup_open_ &&
+      ((search_model_->mode().mode == Mode::MODE_SEARCH_SUGGESTIONS &&
+        !toolbar_model_->input_in_progress()) ||
+       search_model_->mode().is_default());
+}
+
+void ToolbarSearchAnimator::OnOmniboxPopupClosed() {
+  is_omnibox_popup_open_ = false;
+  FOR_EACH_OBSERVER(ToolbarSearchAnimatorObserver, observers_,
+                    OnToolbarSeparatorChanged());
 }
 
 void ToolbarSearchAnimator::FinishAnimation(TabContents* tab_contents) {
@@ -69,68 +79,83 @@ void ToolbarSearchAnimator::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-void ToolbarSearchAnimator::ModeChanged(const Mode& mode) {
-  int delay_ms = kBackgroundChangeDelayMs *
-      InstantUI::GetSlowAnimationScaleFactor();
-  if (mode.is_search() && mode.animate &&
-      animate_state_ == ANIMATE_STATE_NONE) {
-    background_change_timer_.Start(
-        FROM_HERE,
-        base::TimeDelta::FromMilliseconds(delay_ms),
-        this,
-        &ToolbarSearchAnimator::StartBackgroundChange);
-    animate_state_ = ANIMATE_STATE_WAITING;
+void ToolbarSearchAnimator::ModeChanged(const Mode& old_mode,
+                                        const Mode& new_mode) {
+  bool prev_omnibox_popup_opened = is_omnibox_popup_open_;
+  is_omnibox_popup_open_ = new_mode.mode == Mode::MODE_SEARCH_SUGGESTIONS;
+
+  // If the mode transitions from |NTP| to |SEARCH| and we're not animating
+  // background, start fading in gradient background.
+  // TODO(kuan): check with UX folks if we need to animate from gradient to flat
+  // when mode transitions from |SEARCH| or |DEFAULT| to |NTP|.
+  if (new_mode.animate && old_mode.is_ntp() && new_mode.is_search() &&
+      !(background_animation_.get() && background_animation_->is_animating())) {
+    StartBackgroundChange();
     return;
   }
-  // For all other cases, reset |animate_state_| and stop timer or animation.
+
+  // If the mode transitions from |SEARCH| to |DEFAULT| and we're already
+  // animating background, let animation continue.
+  if (new_mode.animate && old_mode.is_search() && new_mode.is_default() &&
+      background_animation_.get() && background_animation_->is_animating()) {
+    return;
+  }
+
+  // Notify observers if toolbar separator has changed.
+  if (is_omnibox_popup_open_ != prev_omnibox_popup_opened) {
+    FOR_EACH_OBSERVER(ToolbarSearchAnimatorObserver, observers_,
+                      OnToolbarSeparatorChanged());
+  }
+
+  // For all other cases, reset animation.
   // Stopping animation will jump to the end of it.
   Reset(NULL);
 }
 
 void ToolbarSearchAnimator::AnimationProgressed(
     const ui::Animation* animation) {
-  DCHECK_EQ(animation, background_animation_.get());
-  animate_state_ = ANIMATE_STATE_RUNNING;
+  DCHECK_EQ(background_animation_.get(), animation);
   FOR_EACH_OBSERVER(ToolbarSearchAnimatorObserver, observers_,
                     OnToolbarBackgroundAnimatorProgressed());
 }
 
 void ToolbarSearchAnimator::AnimationEnded(const ui::Animation* animation) {
-  DCHECK_EQ(animation, background_animation_.get());
-  // Only notify observers via OnToolbarBackgroundAnimatorProgressed if the
-  // animation has runs its full course i.e |animate_state_| is still
-  // ANIMATE_STATE_RUNNING.
-  // Animation that is canceled, i.e. |animate_state_| has been set to
-  // ANIMATE_STATE_NONE in Reset, should notify observers via
-  // OnToolbarBackgroundAnimatorCanceled.
-  if (animate_state_ == ANIMATE_STATE_RUNNING) {
-    animate_state_ = ANIMATE_STATE_NONE;
-    FOR_EACH_OBSERVER(ToolbarSearchAnimatorObserver, observers_,
-                      OnToolbarBackgroundAnimatorProgressed());
-  }
+  // We only get this callback when |animation| has run its full course.
+  // If animation was canceled (in Reset()), we won't get an AnimationEnded()
+  // callback because we had cleared the animation's delegate in Reset().
+  DCHECK_EQ(background_animation_.get(), animation);
+  FOR_EACH_OBSERVER(ToolbarSearchAnimatorObserver, observers_,
+                    OnToolbarBackgroundAnimatorProgressed());
+}
+
+void ToolbarSearchAnimator::InitBackgroundAnimation() {
+  ui::MultiAnimation::Parts parts;
+  parts.push_back(ui::MultiAnimation::Part(
+      background_change_delay_ms_ * InstantUI::GetSlowAnimationScaleFactor(),
+      ui::Tween::ZERO));
+  parts.push_back(ui::MultiAnimation::Part(
+      background_change_duration_ms_ * InstantUI::GetSlowAnimationScaleFactor(),
+      ui::Tween::LINEAR));
+  background_animation_.reset(new ui::MultiAnimation(
+      parts,
+      ui::MultiAnimation::GetDefaultTimerInterval()));
+  background_animation_->set_continuous(false);
+  background_animation_->set_delegate(this);
 }
 
 void ToolbarSearchAnimator::StartBackgroundChange() {
-  if (!background_animation_.get()) {
-    background_animation_.reset(new ui::SlideAnimation(this));
-    background_animation_->SetTweenType(ui::Tween::LINEAR);
-    background_animation_->SetSlideDuration(
-        kBackgroundChangeDurationMs * InstantUI::GetSlowAnimationScaleFactor());
-  }
-  background_animation_->Reset(0.0);
-  background_animation_->Show();
+  InitBackgroundAnimation();
+  background_animation_->Start();
 }
 
 void ToolbarSearchAnimator::Reset(TabContents* tab_contents) {
-  bool notify_observers = animate_state_ != ANIMATE_STATE_NONE;
-  animate_state_ = ANIMATE_STATE_NONE;
-  background_change_timer_.Stop();
-  // If animation is still running, stopping it will trigger AnimationEnded
-  // where we've prevented from notifying observers via BackgroundChanged;
-  // see comments in AnimationEnded.
-  if (background_animation_.get())
-    background_animation_->Stop();
-  if (notify_observers) {
+  bool notify_background_observers =
+      background_animation_.get() && background_animation_->is_animating();
+
+  background_animation_.reset();
+
+  // Notify observers of animation cancelation.
+  if (notify_background_observers) {
     FOR_EACH_OBSERVER(ToolbarSearchAnimatorObserver, observers_,
                       OnToolbarBackgroundAnimatorCanceled(tab_contents));
   }

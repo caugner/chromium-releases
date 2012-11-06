@@ -8,12 +8,12 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/visibility_client.h"
-#include "ui/aura/event.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/root_window_host.h"
@@ -25,6 +25,7 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_property.h"
+#include "ui/base/events/event.h"
 #include "ui/base/gestures/gesture_configuration.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -164,19 +165,20 @@ class CaptureWindowDelegateImpl : public TestWindowDelegate {
   int touch_event_count() const { return touch_event_count_; }
   int gesture_event_count() const { return gesture_event_count_; }
 
-  virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE {
+  virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
     if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED)
       capture_changed_event_count_++;
     mouse_event_count_++;
-    return false;
+    return ui::ER_UNHANDLED;
   }
-  virtual ui::TouchStatus OnTouchEvent(TouchEvent* event) OVERRIDE {
+  virtual ui::TouchStatus OnTouchEvent(ui::TouchEvent* event) OVERRIDE {
     touch_event_count_++;
     return ui::TOUCH_STATUS_UNKNOWN;
   }
-  virtual ui::GestureStatus OnGestureEvent(GestureEvent* event) OVERRIDE {
+  virtual ui::EventResult OnGestureEvent(
+      ui::GestureEvent* event) OVERRIDE {
     gesture_event_count_++;
-    return ui::GESTURE_STATUS_UNKNOWN;
+    return ui::ER_UNHANDLED;
   }
   virtual void OnCaptureLost() OVERRIDE {
     capture_lost_count_++;
@@ -216,9 +218,10 @@ class GestureTrackPositionDelegate : public TestWindowDelegate {
  public:
   GestureTrackPositionDelegate() {}
 
-  virtual ui::GestureStatus OnGestureEvent(GestureEvent* event) OVERRIDE {
+  virtual ui::EventResult OnGestureEvent(
+      ui::GestureEvent* event) OVERRIDE {
     position_ = event->location();
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
   const gfx::Point& position() const { return position_; }
@@ -232,6 +235,20 @@ class GestureTrackPositionDelegate : public TestWindowDelegate {
 base::TimeDelta getTime() {
   return base::Time::NowFromSystemTime() - base::Time();
 }
+
+class SelfEventHandlingWindowDelegate : public TestWindowDelegate {
+ public:
+  SelfEventHandlingWindowDelegate() {}
+
+  virtual bool ShouldDescendIntoChildForEventHandling(
+      Window* child,
+      const gfx::Point& location) OVERRIDE {
+    return false;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SelfEventHandlingWindowDelegate);
+};
 
 }  // namespace
 
@@ -294,7 +311,7 @@ TEST_F(WindowTest, ConvertPointToWindow) {
   scoped_ptr<Window> w1(CreateTestWindowWithId(1, NULL));
   gfx::Point reference_point(100, 100);
   gfx::Point test_point = reference_point;
-  Window::ConvertPointToWindow(NULL, w1.get(), &test_point);
+  Window::ConvertPointToTarget(NULL, w1.get(), &test_point);
   EXPECT_EQ(reference_point, test_point);
 }
 
@@ -427,15 +444,27 @@ TEST_F(WindowTest, HitTest) {
   EXPECT_FALSE(w1.HitTest(gfx::Point(-1, -1)));
 
   // We can expand the bounds slightly to track events outside our border.
-  w1.set_hit_test_bounds_override_outer(gfx::Insets(-1, -1, -1, -1));
+  w1.SetHitTestBoundsOverrideOuter(gfx::Insets(-1, -1, -1, -1), 5);
   EXPECT_TRUE(w1.HitTest(gfx::Point(-1, -1)));
+  EXPECT_FALSE(w1.HitTest(gfx::Point(-2, -2)));
+
+  ui::TouchEvent pressed(
+      ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0, getTime());
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&pressed);
+  EXPECT_TRUE(w1.HitTest(gfx::Point(-2, -2)));
+  EXPECT_TRUE(w1.HitTest(gfx::Point(-5, -5)));
+  EXPECT_FALSE(w1.HitTest(gfx::Point(-5, -6)));
+  ui::TouchEvent released(
+      ui::ET_TOUCH_RELEASED, gfx::Point(50, 50), 0, getTime());
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&released);
   EXPECT_FALSE(w1.HitTest(gfx::Point(-2, -2)));
 
   // TODO(beng): clip Window to parent.
 }
 
 TEST_F(WindowTest, HitTestMask) {
-  Window w1(new MaskedWindowDelegate(gfx::Rect(5, 6, 20, 30)));
+  MaskedWindowDelegate d1(gfx::Rect(5, 6, 20, 30));
+  Window w1(&d1);
   w1.Init(ui::LAYER_NOT_DRAWN);
   w1.SetBounds(gfx::Rect(10, 20, 50, 60));
   w1.Show();
@@ -498,6 +527,21 @@ TEST_F(WindowTest, GetEventHandlerForPointWithOverride) {
   parent->set_hit_test_bounds_override_inner(gfx::Insets(1, 1, 1, 1));
   EXPECT_EQ(parent.get(), parent->GetEventHandlerForPoint(gfx::Point(0, 0)));
   EXPECT_EQ(child.get(),  parent->GetEventHandlerForPoint(gfx::Point(1, 1)));
+}
+
+TEST_F(WindowTest, GetEventHandlerForPointWithOverrideDescendingOrder) {
+  scoped_ptr<SelfEventHandlingWindowDelegate> parent_delegate(
+      new SelfEventHandlingWindowDelegate);
+  scoped_ptr<Window> parent(CreateTestWindowWithDelegate(
+      parent_delegate.get(), 1, gfx::Rect(10, 20, 400, 500), NULL));
+  scoped_ptr<Window> child(
+      CreateTestWindow(SK_ColorRED, 2, gfx::Rect(0, 0, 390, 480),
+                       parent.get()));
+
+  // We can override ShouldDescendIntoChildForEventHandling to make the parent
+  // grab all events.
+  EXPECT_EQ(parent.get(), parent->GetEventHandlerForPoint(gfx::Point(0, 0)));
+  EXPECT_EQ(parent.get(), parent->GetEventHandlerForPoint(gfx::Point(50, 50)));
 }
 
 TEST_F(WindowTest, GetTopWindowContainingPoint) {
@@ -570,7 +614,9 @@ TEST_F(WindowTest, WindowAddedToRootWindowShouldNotifyChildAndNotParent) {
   AddedToRootWindowObserver parent_observer;
   AddedToRootWindowObserver child_observer;
   scoped_ptr<Window> parent_window(CreateTestWindowWithId(1, NULL));
-  scoped_ptr<Window> child_window(CreateTestWindowWithId(1, NULL));
+  scoped_ptr<Window> child_window(new Window(NULL));
+  child_window->Init(ui::LAYER_TEXTURED);
+  child_window->Show();
 
   parent_window->AddObserver(&parent_observer);
   child_window->AddObserver(&child_observer);
@@ -753,7 +799,8 @@ TEST_F(WindowTest, CaptureTests) {
   EXPECT_EQ(2, delegate.mouse_event_count());
   delegate.ResetCounts();
 
-  TouchEvent touchev(ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0, getTime());
+  ui::TouchEvent touchev(
+      ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&touchev);
   EXPECT_EQ(1, delegate.touch_event_count());
   delegate.ResetCounts();
@@ -768,7 +815,8 @@ TEST_F(WindowTest, CaptureTests) {
   generator.PressLeftButton();
   EXPECT_EQ(1, delegate.mouse_event_count());
 
-  TouchEvent touchev2(ui::ET_TOUCH_PRESSED, gfx::Point(250, 250), 1, getTime());
+  ui::TouchEvent touchev2(
+      ui::ET_TOUCH_PRESSED, gfx::Point(250, 250), 1, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&touchev2);
   EXPECT_EQ(1, delegate.touch_event_count());
 
@@ -790,8 +838,8 @@ TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
       &delegate2, 0, gfx::Rect(20, 20, 20, 20), NULL));
 
   // Press on w1.
-  TouchEvent press(ui::ET_TOUCH_PRESSED,
-                   gfx::Point(10, 10), 0, getTime());
+  ui::TouchEvent press(
+      ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
   EXPECT_EQ(2, delegate1.gesture_event_count());
@@ -806,24 +854,23 @@ TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
   delegate1.ResetCounts();
   delegate2.ResetCounts();
 
-  TouchEvent move(ui::ET_TOUCH_MOVED,
-                  gfx::Point(10, 10), 0, getTime());
+  ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(10, 10), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&move);
 
   // This touch id is now ignored, no scroll fired.
   EXPECT_EQ(0, delegate1.gesture_event_count());
   EXPECT_EQ(0, delegate2.gesture_event_count());
 
-  TouchEvent release(ui::ET_TOUCH_RELEASED,
-                     gfx::Point(10, 10), 0, getTime());
+  ui::TouchEvent release(
+      ui::ET_TOUCH_RELEASED, gfx::Point(10, 10), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   EXPECT_EQ(0, delegate1.gesture_event_count());
   EXPECT_EQ(0, delegate2.gesture_event_count());
 
   // A new press is captured by w2.
 
-  TouchEvent press2(ui::ET_TOUCH_PRESSED,
-                    gfx::Point(10, 10), 0, getTime());
+  ui::TouchEvent press2(
+      ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press2);
   EXPECT_EQ(0, delegate1.gesture_event_count());
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
@@ -835,8 +882,8 @@ TEST_F(WindowTest, TouchCaptureDoesntCancelCapturedTouches) {
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(
       &delegate, 0, gfx::Rect(0, 0, 20, 20), NULL));
 
-  TouchEvent press(ui::ET_TOUCH_PRESSED,
-                   gfx::Point(10, 10), 0, getTime());
+  ui::TouchEvent press(
+      ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
@@ -849,9 +896,9 @@ TEST_F(WindowTest, TouchCaptureDoesntCancelCapturedTouches) {
 
   // The move event should still create a gesture, as this touch was
   // on the window which was captured.
-  TouchEvent release(ui::ET_TOUCH_RELEASED,
-                     gfx::Point(10, 10), 0, getTime() +
-                     base::TimeDelta::FromMilliseconds(50));
+  ui::TouchEvent release(ui::ET_TOUCH_RELEASED,
+                             gfx::Point(10, 10), 0, getTime() +
+                                 base::TimeDelta::FromMilliseconds(50));
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   EXPECT_EQ(2, delegate.gesture_event_count());
 }
@@ -862,7 +909,7 @@ TEST_F(WindowTest, TransferCaptureTouchEvents) {
   CaptureWindowDelegateImpl d1;
   scoped_ptr<Window> w1(CreateTestWindowWithDelegate(
       &d1, 0, gfx::Rect(0, 0, 20, 20), NULL));
-  TouchEvent p1(ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, getTime());
+  ui::TouchEvent p1(ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&p1);
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
   EXPECT_EQ(2, d1.gesture_event_count());
@@ -872,7 +919,7 @@ TEST_F(WindowTest, TransferCaptureTouchEvents) {
   CaptureWindowDelegateImpl d2;
   scoped_ptr<Window> w2(CreateTestWindowWithDelegate(
       &d2, 0, gfx::Rect(40, 0, 40, 20), NULL));
-  TouchEvent p2(ui::ET_TOUCH_PRESSED, gfx::Point(41, 10), 1, getTime());
+  ui::TouchEvent p2(ui::ET_TOUCH_PRESSED, gfx::Point(41, 10), 1, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&p2);
   EXPECT_EQ(0, d1.gesture_event_count());
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN for new target window.
@@ -880,9 +927,10 @@ TEST_F(WindowTest, TransferCaptureTouchEvents) {
   d1.ResetCounts();
   d2.ResetCounts();
 
-  // Set capture on |w2|, this should send a cancel to |w1| but not |w2|.
+  // Set capture on |w2|, this should send a cancel (TAP_CANCEL, END) to |w1|
+  // but not |w2|.
   w2->SetCapture();
-  EXPECT_EQ(1, d1.gesture_event_count());
+  EXPECT_EQ(2, d1.gesture_event_count());
   EXPECT_EQ(0, d2.gesture_event_count());
   d1.ResetCounts();
   d2.ResetCounts();
@@ -898,12 +946,12 @@ TEST_F(WindowTest, TransferCaptureTouchEvents) {
 
   // Move touch id originally associated with |w2|. Since capture was transfered
   // from 2 to 3 only |w3| should get the event.
-  TouchEvent m3(ui::ET_TOUCH_MOVED, gfx::Point(110, 105), 1, getTime());
+  ui::TouchEvent m3(ui::ET_TOUCH_MOVED, gfx::Point(110, 105), 1, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&m3);
   EXPECT_EQ(0, d1.gesture_event_count());
   EXPECT_EQ(0, d2.gesture_event_count());
-  // |w3| gets two events, both scroll related.
-  EXPECT_EQ(2, d3.gesture_event_count());
+  // |w3| gets a TAP_CANCEL and two scroll related events.
+  EXPECT_EQ(3, d3.gesture_event_count());
 }
 
 // Changes capture while capture is already ongoing.
@@ -986,7 +1034,7 @@ class MouseEnterExitWindowDelegate : public TestWindowDelegate {
  public:
   MouseEnterExitWindowDelegate() : entered_(false), exited_(false) {}
 
-  virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE {
+  virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
     switch (event->type()) {
       case ui::ET_MOUSE_ENTERED:
         entered_ = true;
@@ -997,7 +1045,7 @@ class MouseEnterExitWindowDelegate : public TestWindowDelegate {
       default:
         break;
     }
-    return false;
+    return ui::ER_UNHANDLED;
   }
 
   bool entered() const { return entered_; }
@@ -1310,8 +1358,8 @@ TEST_F(WindowTest, TransformGesture) {
   transform.ConcatTranslate(size.height(), 0);
   root_window()->SetTransform(transform);
 
-  TouchEvent press(ui::ET_TOUCH_PRESSED,
-                   gfx::Point(size.height() - 10, 10), 0, getTime());
+  ui::TouchEvent press(
+      ui::ET_TOUCH_PRESSED, gfx::Point(size.height() - 10, 10), 0, getTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   EXPECT_EQ(gfx::Point(10, 10).ToString(), delegate->position().ToString());
 }
@@ -2445,6 +2493,54 @@ TEST_F(WindowTest, DelegateNotifiedAsBoundsChangeInHiddenLayer) {
   // delegate is NULL.
   EXPECT_FALSE(delegate.bounds_changed());
   EXPECT_NE("0,0 100x100", window->bounds().ToString());
+}
+
+namespace {
+
+// Used by AddChildNotifications to track notification counts.
+class AddChildNotificationsObserver : public WindowObserver {
+ public:
+  AddChildNotificationsObserver() : added_count_(0), removed_count_(0) {}
+
+  std::string CountStringAndReset() {
+    std::string result = base::IntToString(added_count_) + " " +
+        base::IntToString(removed_count_);
+    added_count_ = removed_count_ = 0;
+    return result;
+  }
+
+  // WindowObserver overrides:
+  virtual void OnWindowAddedToRootWindow(Window* window) OVERRIDE {
+    added_count_++;
+  }
+  virtual void OnWindowRemovingFromRootWindow(Window* window) OVERRIDE {
+    removed_count_++;
+  }
+
+ private:
+  int added_count_;
+  int removed_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(AddChildNotificationsObserver);
+};
+
+}  // namespace
+
+// Assertions around when root window notifications are sent.
+TEST_F(WindowTest, AddChildNotifications) {
+  AddChildNotificationsObserver observer;
+  scoped_ptr<Window> w1(CreateTestWindowWithId(1, NULL));
+  scoped_ptr<Window> w2(CreateTestWindowWithId(1, NULL));
+  w2->AddObserver(&observer);
+  w2->Focus();
+  EXPECT_TRUE(w2->HasFocus());
+
+  // Move |w2| to be a child of |w1|.
+  w1->AddChild(w2.get());
+  // Sine we moved in the same root, observer shouldn't be notified.
+  EXPECT_EQ("0 0", observer.CountStringAndReset());
+  // |w2| should still have focus after moving.
+  EXPECT_TRUE(w2->HasFocus());
 }
 
 }  // namespace test

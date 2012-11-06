@@ -11,6 +11,10 @@ using content::IndexedDBKey;
 using content::IndexedDBKeyPath;
 using content::SerializedScriptValue;
 
+namespace {
+const int32 kDatabaseNotAdded = -1;
+}
+
 IndexedDBCallbacksBase::IndexedDBCallbacksBase(
     IndexedDBDispatcherHost* dispatcher_host,
     int32 thread_id,
@@ -37,8 +41,49 @@ void IndexedDBCallbacksBase::onBlocked() {
                                                            response_id_));
 }
 
-template<>
-void IndexedDBCallbacks<WebKit::WebIDBDatabase>::onUpgradeNeeded(
+IndexedDBCallbacksTransaction::IndexedDBCallbacksTransaction(
+      IndexedDBDispatcherHost* dispatcher_host,
+      int32 thread_id,
+      int32 response_id,
+      const GURL& origin_url)
+      : IndexedDBCallbacksBase(dispatcher_host, thread_id, response_id),
+        origin_url_(origin_url) {
+}
+
+void IndexedDBCallbacksTransaction::onSuccess(
+    WebKit::WebIDBTransaction* idb_object) {
+  int32 object_id =
+      dispatcher_host()->Add(idb_object, thread_id(), origin_url_);
+  dispatcher_host()->Send(
+      new IndexedDBMsg_CallbacksSuccessIDBTransaction(thread_id(),
+          response_id(), object_id));
+}
+
+IndexedDBCallbacksDatabase::IndexedDBCallbacksDatabase(
+    IndexedDBDispatcherHost* dispatcher_host,
+    int32 thread_id,
+    int32 response_id,
+    const GURL& origin_url)
+    : IndexedDBCallbacksBase(dispatcher_host, thread_id, response_id),
+      origin_url_(origin_url),
+      database_id_(kDatabaseNotAdded) {
+}
+
+void IndexedDBCallbacksDatabase::onSuccess(
+    WebKit::WebIDBDatabase* idb_object) {
+  int32 object_id = database_id_;
+  if (object_id == kDatabaseNotAdded) {
+    object_id = dispatcher_host()->Add(idb_object, thread_id(), origin_url_);
+  } else {
+    // We already have this database and don't need a new copy of it.
+    delete idb_object;
+  }
+  dispatcher_host()->Send(
+      new IndexedDBMsg_CallbacksSuccessIDBDatabase(thread_id(), response_id(),
+          object_id));
+}
+
+void IndexedDBCallbacksDatabase::onUpgradeNeeded(
     long long old_version,
     WebKit::WebIDBTransaction* transaction,
     WebKit::WebIDBDatabase* database) {
@@ -54,15 +99,18 @@ void IndexedDBCallbacks<WebKit::WebIDBDatabase>::onUpgradeNeeded(
 }
 
 void IndexedDBCallbacks<WebKit::WebIDBCursor>::onSuccess(
-    WebKit::WebIDBCursor* idb_object) {
+    WebKit::WebIDBCursor* idb_object,
+    const WebKit::WebIDBKey& key,
+    const WebKit::WebIDBKey& primaryKey,
+    const WebKit::WebSerializedScriptValue& value) {
   int32 object_id = dispatcher_host()->Add(idb_object);
   IndexedDBMsg_CallbacksSuccessIDBCursor_Params params;
   params.thread_id = thread_id();
   params.response_id = response_id();
   params.cursor_id = object_id;
-  params.key = IndexedDBKey(idb_object->key());
-  params.primary_key = IndexedDBKey(idb_object->primaryKey());
-  params.serialized_value = SerializedScriptValue(idb_object->value());
+  params.key = IndexedDBKey(key);
+  params.primary_key = IndexedDBKey(primaryKey);
+  params.serialized_value = SerializedScriptValue(value);
   dispatcher_host()->Send(new IndexedDBMsg_CallbacksSuccessIDBCursor(params));
 }
 
@@ -73,7 +121,10 @@ void IndexedDBCallbacks<WebKit::WebIDBCursor>::onSuccess(
           thread_id(), response_id(), SerializedScriptValue(value)));
 }
 
-void IndexedDBCallbacks<WebKit::WebIDBCursor>::onSuccessWithContinuation() {
+void IndexedDBCallbacks<WebKit::WebIDBCursor>::onSuccess(
+    const WebKit::WebIDBKey& key,
+    const WebKit::WebIDBKey& primaryKey,
+    const WebKit::WebSerializedScriptValue& value) {
   DCHECK(cursor_id_ != -1);
   WebKit::WebIDBCursor* idb_cursor = dispatcher_host()->GetCursorFromId(
       cursor_id_);
@@ -85,10 +136,9 @@ void IndexedDBCallbacks<WebKit::WebIDBCursor>::onSuccessWithContinuation() {
   params.thread_id = thread_id();
   params.response_id = response_id();
   params.cursor_id = cursor_id_;
-  params.key = IndexedDBKey(idb_cursor->key());
-  params.primary_key = IndexedDBKey(idb_cursor->primaryKey());
-  params.serialized_value = SerializedScriptValue(idb_cursor->value());
-
+  params.key = IndexedDBKey(key);
+  params.primary_key = IndexedDBKey(primaryKey);
+  params.serialized_value = SerializedScriptValue(value);
   dispatcher_host()->Send(
       new IndexedDBMsg_CallbacksSuccessCursorContinue(params));
 }

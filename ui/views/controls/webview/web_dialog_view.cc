@@ -6,7 +6,6 @@
 
 #include <vector>
 
-#include "base/property_bag.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -16,7 +15,6 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/controls/webview/webview.h"
-#include "ui/views/events/event.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
@@ -24,7 +22,7 @@
 #include "ui/web_dialogs/web_dialog_ui.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/event.h"
+#include "ui/base/events/event.h"
 #include "ui/views/widget/native_widget_aura.h"
 #endif
 
@@ -246,9 +244,10 @@ void WebDialogView::MoveContents(WebContents* source, const gfx::Rect& pos) {
 // A simplified version of BrowserView::HandleKeyboardEvent().
 // We don't handle global keyboard shortcuts here, but that's fine since
 // they're all browser-specific. (This may change in the future.)
-void WebDialogView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
+void WebDialogView::HandleKeyboardEvent(content::WebContents* source,
+                                        const NativeWebKeyboardEvent& event) {
 #if defined(USE_AURA)
-  aura::KeyEvent aura_event(event.os_event->native_event(), false);
+  ui::KeyEvent aura_event(event.os_event->native_event(), false);
   views::NativeWidgetAura* aura_widget =
       static_cast<views::NativeWidgetAura*>(GetWidget()->native_widget());
   aura_widget->OnKeyEvent(&aura_event);
@@ -282,13 +281,15 @@ void WebDialogView::AddNewContents(content::WebContents* source,
                                    content::WebContents* new_contents,
                                    WindowOpenDisposition disposition,
                                    const gfx::Rect& initial_pos,
-                                   bool user_gesture) {
+                                   bool user_gesture,
+                                   bool* was_blocked) {
   if (delegate_ && delegate_->HandleAddNewContents(
           source, new_contents, disposition, initial_pos, user_gesture)) {
     return;
   }
   WebDialogWebContentsDelegate::AddNewContents(
-      source, new_contents, disposition, initial_pos, user_gesture);
+      source, new_contents, disposition, initial_pos, user_gesture,
+      was_blocked);
 }
 
 void WebDialogView::LoadingStateChanged(content::WebContents* source) {
@@ -308,8 +309,7 @@ void WebDialogView::InitDialog() {
 
   // Set the delegate. This must be done before loading the page. See
   // the comment above WebDialogUI in its header file for why.
-  WebDialogUI::GetPropertyAccessor().SetProperty(
-      web_contents->GetPropertyBag(), this);
+  WebDialogUI::SetDelegate(web_contents, this);
 
   if (delegate_) {
     gfx::Size out;

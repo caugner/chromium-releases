@@ -10,6 +10,15 @@ AudioRendererHostTest.*
 # http://code.google.com/p/drmemory/issues/detail?id=548
 DownloadManagerTest.StartDownload
 
+# http://code.google.com/p/drmemory/issues/detail?id=979
+FirefoxProfileImporterTest.Firefox35Importer
+
+# http://code.google.com/p/drmemory/issues/detail?id=980
+MetricsLogManagerTest.*
+
+# http://code.google.com/p/drmemory/issues/detail?id=983
+ProfileShortcutManagerTest.*
+
 ##################################################
 # Chromium bugs:
 
@@ -33,3 +42,14 @@ WebsiteSettingsModelTest.*
 # fails with gmock errors
 # http://crbug.com/117796
 SyncNewNonFrontendDataTypeControllerTest.StartAfterSyncShutdown
+
+# fails to create thread
+# http://crbug.com/144087
+DesktopNotificationServiceTest.SettingsForSchemes
+TemplateURLFetcherTest.*
+
+# times out on the bot.
+# http://crbug.com/148644
+GAIAInfoUpdateServiceTest.*
+ProfileManagerTest.*
+ProfileInfoCacheTest.*

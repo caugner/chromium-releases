@@ -5,6 +5,8 @@
 #ifndef MEDIA_BASE_VIDEO_RENDERER_H_
 #define MEDIA_BASE_VIDEO_RENDERER_H_
 
+#include <list>
+
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
@@ -17,11 +19,14 @@ class Size;
 
 namespace media {
 
+class DemuxerStream;
 class VideoDecoder;
 
 class MEDIA_EXPORT VideoRenderer
     : public base::RefCountedThreadSafe<VideoRenderer> {
  public:
+  typedef std::list<scoped_refptr<VideoDecoder> > VideoDecoderList;
+
   // Used to update the pipeline's clock time. The parameter is the time that
   // the clock should not exceed.
   typedef base::Callback<void(base::TimeDelta)> TimeCB;
@@ -32,8 +37,8 @@ class MEDIA_EXPORT VideoRenderer
   // Used to query the current time or duration of the media.
   typedef base::Callback<base::TimeDelta()> TimeDeltaCB;
 
-  // Initialize a VideoRenderer with the given VideoDecoder, executing
-  // |init_cb| callback upon completion.
+  // Initialize a VideoRenderer with the given DemuxerStream and
+  // VideoDecoderList, executing |init_cb| callback upon completion.
   //
   // |statistics_cb| is executed periodically with video rendering stats, such
   // as dropped frames.
@@ -50,7 +55,8 @@ class MEDIA_EXPORT VideoRenderer
   // |get_time_cb| is used to query the current media playback time.
   //
   // |get_duration_cb| is used to query the media duration.
-  virtual void Initialize(const scoped_refptr<VideoDecoder>& decoder,
+  virtual void Initialize(const scoped_refptr<DemuxerStream>& stream,
+                          const VideoDecoderList& decoders,
                           const PipelineStatusCB& init_cb,
                           const StatisticsCB& statistics_cb,
                           const TimeCB& time_cb,
@@ -84,9 +90,6 @@ class MEDIA_EXPORT VideoRenderer
 
   // Updates the current playback rate.
   virtual void SetPlaybackRate(float playback_rate) = 0;
-
-  // Returns true if all video data has been rendered.
-  virtual bool HasEnded() = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<VideoRenderer>;

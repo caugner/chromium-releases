@@ -185,6 +185,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/metrics/entropy_provider.h"
 #include "chrome/common/metrics/metrics_log_manager.h"
 #include "chrome/common/net/test_server_locations.h"
 #include "chrome/common/pref_names.h"
@@ -195,6 +196,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -212,6 +215,7 @@
 
 #if defined(OS_WIN)
 #include <windows.h>  // Needed for STATUS_* codes
+#include "sandbox/win/src/sandbox_types.h"  // For termination codes.
 #endif
 
 using base::Time;
@@ -274,12 +278,16 @@ ResponseStatus ResponseCodeToStatus(int response_code) {
 // The argument used to generate a non-identifying entropy source. We want no
 // more than 13 bits of entropy, so use this max to return a number between 1
 // and 2^13 = 8192 as the entropy source.
-const uint32 kMaxEntropySize = (1 << 13);
+const uint32 kMaxLowEntropySize = (1 << 13);
+
+// Default prefs value for prefs::kMetricsLowEntropySource to indicate that the
+// value has not yet been set.
+const int kLowEntropySourceNotSet = -1;
 
 // Generates a new non-identifying entropy source used to seed persistent
 // activities.
 int GenerateLowEntropySource() {
-  return base::RandInt(1, kMaxEntropySize);
+  return base::RandInt(0, kMaxLowEntropySize - 1);
 }
 
 // Converts an exit code into something that can be inserted into our
@@ -339,12 +347,18 @@ std::vector<int> GetAllCrashExitCodes() {
 
   for (size_t i = 0; i < arraysize(kExceptionCodes); ++i)
     codes.push_back(MapCrashExitCodeForHistogram(kExceptionCodes[i]));
+
+  // Add the sandbox fatal termination codes.
+  for (int i = sandbox::SBOX_FATAL_INTEGRITY;
+       i <= sandbox::SBOX_FATAL_LAST; ++i) {
+    codes.push_back(MapCrashExitCodeForHistogram(i));
+  }
 #endif
 
   return codes;
 }
 
-}
+}  // namespace
 
 // static
 MetricsService::ShutdownCleanliness MetricsService::clean_shutdown_status_ =
@@ -412,7 +426,8 @@ class MetricsMemoryDetails : public MemoryDetails {
 void MetricsService::RegisterPrefs(PrefService* local_state) {
   DCHECK(IsSingleThreaded());
   local_state->RegisterStringPref(prefs::kMetricsClientID, "");
-  local_state->RegisterIntegerPref(prefs::kMetricsLowEntropySource, 0);
+  local_state->RegisterIntegerPref(prefs::kMetricsLowEntropySource,
+                                   kLowEntropySourceNotSet);
   local_state->RegisterInt64Pref(prefs::kMetricsClientIDTimestamp, 0);
   local_state->RegisterInt64Pref(prefs::kStabilityLaunchTimeSec, 0);
   local_state->RegisterInt64Pref(prefs::kStabilityLastTimestampSec, 0);
@@ -539,7 +554,8 @@ std::string MetricsService::GetClientId() {
   return client_id_;
 }
 
-std::string MetricsService::GetEntropySource(bool reporting_will_be_enabled) {
+scoped_ptr<const base::FieldTrial::EntropyProvider>
+    MetricsService::CreateEntropyProvider(bool reporting_will_be_enabled) {
   // For metrics reporting-enabled users, we combine the client ID and low
   // entropy source to get the final entropy source. Otherwise, only use the low
   // entropy source.
@@ -547,17 +563,22 @@ std::string MetricsService::GetEntropySource(bool reporting_will_be_enabled) {
   //  1) It makes the entropy source less identifiable for parties that do not
   //     know the low entropy source.
   //  2) It makes the final entropy source resettable.
-  std::string low_entropy_source = base::IntToString(GetLowEntropySource());
   if (reporting_will_be_enabled) {
     if (entropy_source_returned_ == LAST_ENTROPY_NONE)
       entropy_source_returned_ = LAST_ENTROPY_HIGH;
     DCHECK_EQ(LAST_ENTROPY_HIGH, entropy_source_returned_);
-    return client_id_ + low_entropy_source;
+    const std::string high_entropy_source =
+        client_id_ + base::IntToString(GetLowEntropySource());
+    return scoped_ptr<const base::FieldTrial::EntropyProvider>(
+        new metrics::SHA1EntropyProvider(high_entropy_source));
   }
+
   if (entropy_source_returned_ == LAST_ENTROPY_NONE)
     entropy_source_returned_ = LAST_ENTROPY_LOW;
   DCHECK_EQ(LAST_ENTROPY_LOW, entropy_source_returned_);
-  return low_entropy_source;
+  return scoped_ptr<const base::FieldTrial::EntropyProvider>(
+      new metrics::PermutedEntropyProvider(GetLowEntropySource(),
+                                           kMaxLowEntropySize));
 }
 
 void MetricsService::ForceClientIdCreation() {
@@ -666,14 +687,26 @@ void MetricsService::Observe(int type,
       break;
 
     case chrome::NOTIFICATION_BROWSER_OPENED:
-    case chrome::NOTIFICATION_BROWSER_CLOSED:
-      LogWindowChange(type, source, details);
+    case chrome::NOTIFICATION_BROWSER_CLOSED: {
+      Browser* browser = content::Source<Browser>(source).ptr();
+      LogWindowOrTabChange(type, reinterpret_cast<uintptr_t>(browser));
       break;
+    }
 
-    case chrome::NOTIFICATION_TAB_PARENTED:
-    case chrome::NOTIFICATION_TAB_CLOSING:
-      LogWindowChange(type, source, details);
+    case chrome::NOTIFICATION_TAB_PARENTED: {
+      content::WebContents* web_contents =
+          content::Source<content::WebContents>(source).ptr();
+      LogWindowOrTabChange(type, reinterpret_cast<uintptr_t>(web_contents));
       break;
+    }
+
+    case chrome::NOTIFICATION_TAB_CLOSING: {
+      content::NavigationController* controller =
+          content::Source<content::NavigationController>(source).ptr();
+      content::WebContents* web_contents = controller->GetWebContents();
+      LogWindowOrTabChange(type, reinterpret_cast<uintptr_t>(web_contents));
+      break;
+    }
 
     case content::NOTIFICATION_LOAD_STOP:
       LogLoadComplete(type, source, details);
@@ -1017,9 +1050,15 @@ int MetricsService::GetLowEntropySource() {
   // Only try to load the value from prefs if the user did not request a reset.
   // Otherwise, skip to generating a new value.
   if (!command_line->HasSwitch(switches::kResetVariationState)) {
-    low_entropy_source_ = pref->GetInteger(prefs::kMetricsLowEntropySource);
-    if (low_entropy_source_)
+    const int value = pref->GetInteger(prefs::kMetricsLowEntropySource);
+    if (value != kLowEntropySourceNotSet) {
+      // Ensure the prefs value is in the range [0, kMaxLowEntropySize). Old
+      // versions of the code would generate values in the range of [1, 8192],
+      // so the below line ensures 8192 gets mapped to 0 and also guards against
+      // the case of corrupted values.
+      low_entropy_source_ = value % kMaxLowEntropySize;
       return low_entropy_source_;
+    }
   }
 
   low_entropy_source_ = GenerateLowEntropySource();
@@ -1499,12 +1538,8 @@ void MetricsService::OnURLFetchComplete(const net::URLFetcher* source) {
   }
 }
 
-void MetricsService::LogWindowChange(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+void MetricsService::LogWindowOrTabChange(int type, uintptr_t window_or_tab) {
   int controller_id = -1;
-  uintptr_t window_or_tab = source.map_key();
   MetricsLog::WindowEventType window_type;
 
   // Note: since we stop all logging when a single OTR session is active, it is
@@ -1575,6 +1610,7 @@ void MetricsService::IncrementLongPrefsValue(const char* path) {
 }
 
 void MetricsService::LogLoadStarted() {
+  content::RecordAction(content::UserMetricsAction("PageLoad"));
   HISTOGRAM_ENUMERATION("Chrome.UmaPageloadCounter", 1, 2);
   IncrementPrefValue(prefs::kStabilityPageLoadCount);
   IncrementLongPrefsValue(prefs::kUninstallMetricsPageLoadCount);

@@ -42,6 +42,7 @@ static const char* kErrorCancelled = "Transfer was cancelled";
 static const char* kErrorStalled = "Transfer stalled";
 static const char* kErrorDisconnect = "Device disconnected";
 static const char* kErrorOverflow = "Inbound transfer overflow";
+static const char* kErrorTransferLength = "Transfer length is insufficient";
 
 static bool ConvertDirection(const string& input,
                              UsbDevice::TransferDirection* output) {
@@ -111,17 +112,18 @@ static bool GetTransferSize(const T& input, size_t* output) {
 template<class T>
 static scoped_refptr<net::IOBuffer> CreateBufferForTransfer(const T& input) {
   size_t size = 0;
-  if (!GetTransferSize(input, &size)) {
+  if (!GetTransferSize(input, &size))
     return NULL;
-  }
 
-  scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(size);
-  if (!input.data.get()) {
+  // Allocate a |size|-bytes buffer, or a one-byte buffer if |size| is 0. This
+  // is due to an impedance mismatch between IOBuffer and URBs. An IOBuffer
+  // cannot represent a zero-length buffer, while an URB can.
+  scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(std::max(
+      static_cast<size_t>(1), size));
+  if (!input.data.get())
     return buffer;
-  }
 
   memcpy(buffer->data(), input.data->data(), size);
-
   return buffer;
 }
 
@@ -142,6 +144,8 @@ static const char* ConvertTransferStatusToErrorString(
       return kErrorDisconnect;
     case USB_TRANSFER_OVERFLOW:
       return kErrorOverflow;
+    case USB_TRANSFER_LENGTH_SHORT:
+      return kErrorTransferLength;
   }
 
   NOTREACHED();
@@ -152,11 +156,18 @@ static const char* ConvertTransferStatusToErrorString(
 
 namespace extensions {
 
-UsbDeviceResource::UsbDeviceResource(ApiResourceEventNotifier* notifier,
+UsbDeviceResource::UsbDeviceResource(const std::string& owner_extension_id,
+                                     ApiResourceEventNotifier* notifier,
                                      UsbDevice* device)
-    : ApiResource(notifier), device_(device) {}
+    : ApiResource(owner_extension_id, notifier), device_(device) {}
 
-UsbDeviceResource::~UsbDeviceResource() {}
+UsbDeviceResource::~UsbDeviceResource() {
+  Close();
+}
+
+void UsbDeviceResource::Close() {
+  device_->Close();
+}
 
 void UsbDeviceResource::ControlTransfer(const ControlTransferInfo& transfer) {
   UsbDevice::TransferDirection direction;

@@ -32,10 +32,11 @@ class Extension;
 //     chrome.test.fail
 // (4) Verify expected browser state.
 // TODO(erikkay): There should also be a way to drive events in these tests.
-
 class ExtensionApiTest : public ExtensionBrowserTest {
  public:
   // Flags used to configure how the tests are run.
+  // TODO(aa): Many of these are dupes of ExtensionBrowserTest::Flags. Combine
+  // somehow?
   enum Flags {
     kFlagNone = 0,
 
@@ -52,7 +53,14 @@ class ExtensionApiTest : public ExtensionBrowserTest {
     kFlagLoadAsComponent = 1 << 3,
 
     // Launch the extension as a platform app.
-    kFlagLaunchPlatformApp = 1 << 4
+    kFlagLaunchPlatformApp = 1 << 4,
+
+    // Don't fail when the loaded manifest has warnings.
+    kFlagIgnoreManifestWarnings = 1 << 5,
+
+    // Allow manifest versions older that Extension::kModernManifestVersion.
+    // Used to test old manifest features.
+    kFlagAllowOldManifestVersions = 1 << 6,
   };
 
   ExtensionApiTest();
@@ -108,6 +116,12 @@ class ExtensionApiTest : public ExtensionBrowserTest {
 
   // Same as RunExtensionTest, but enables the extension for incognito mode.
   bool RunExtensionTestIncognito(const char* extension_name);
+
+  // Same as RunExtensionTest, but ignores any warnings in the manifest.
+  bool RunExtensionTestIgnoreManifestWarnings(const char* extension_name);
+
+  // Same as RunExtensionTest, allow old manifest ersions.
+  bool RunExtensionTestAllowOldManifestVersion(const char* extension_name);
 
   // Same as RunExtensionTest, but loads extension as component.
   bool RunComponentExtensionTest(const char* extension_name);

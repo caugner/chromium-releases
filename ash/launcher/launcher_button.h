@@ -5,7 +5,6 @@
 #ifndef ASH_LAUNCHER_LAUNCHER_BUTTON_H_
 #define ASH_LAUNCHER_LAUNCHER_BUTTON_H_
 
-#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/image_view.h"
@@ -32,11 +31,7 @@ class LauncherButton : public views::CustomButton {
     STATE_ACTIVE    = 1 << 2,
     // Underlying LauncherItem needs user's attention.
     STATE_ATTENTION = 1 << 3,
-    // Underlying LauncherItem has pending operations.
-    //   e.g. A TYPE_APP_SHORTCUT item whose corresponding app is being
-    //        installed.
-    STATE_PENDING   = 1 << 4,
-    STATE_FOCUSED   = 1 << 5,
+    STATE_FOCUSED   = 1 << 4,
   };
 
   virtual ~LauncherButton();
@@ -71,7 +66,7 @@ class LauncherButton : public views::CustomButton {
     int icon_size() const { return icon_size_; }
 
     // views::View overrides.
-    virtual bool HitTest(const gfx::Point& l) const OVERRIDE;
+    virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
 
    private:
     // Set to non-zero to force icons to be resized to fit within a square,
@@ -82,17 +77,18 @@ class LauncherButton : public views::CustomButton {
   };
 
   // View overrides:
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual bool OnMouseDragged(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
-  virtual ui::GestureStatus OnGestureEvent(const views::GestureEvent& event)
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(const ui::GestureEvent& event)
       OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
 
@@ -107,7 +103,6 @@ class LauncherButton : public views::CustomButton {
 
  private:
   class BarView;
-  class IconPulseAnimation;
 
   // Returns true if the shelf is horizontal. If this returns false the shelf is
   // vertical.
@@ -124,10 +119,6 @@ class LauncherButton : public views::CustomButton {
   // The current state of the application, multiple values of AppState are or'd
   // together.
   int state_;
-
-  // Runs a pulse animation for |icon_view_|. It is created when button state
-  // has a STATE_PENDING bit and destroyed when that bit is clear.
-  scoped_ptr<IconPulseAnimation> icon_pulse_animation_;
 
   gfx::ShadowValues icon_shadows_;
 

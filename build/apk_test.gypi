@@ -19,6 +19,12 @@
 #
 
 {
+  'variables': {
+    'input_jars_paths': [
+      # Needed by ChromeNativeTestActivity.java.
+      '<(PRODUCT_DIR)/lib.java/chromium_base.jar',
+    ],
+  },
   'target_conditions': [
     ['_toolset == "target"', {
       'conditions': [
@@ -30,7 +36,7 @@
               '<(DEPTH)/testing/android/AndroidManifest.xml',
               '<(DEPTH)/testing/android/generate_native_test.py',
               '<(input_shlib_path)',
-              '<@(input_jars_paths)',
+              '>@(input_jars_paths)',
             ],
             'outputs': [
               '<(PRODUCT_DIR)/<(test_suite_name)_apk/<(test_suite_name)-debug.apk',
@@ -40,9 +46,10 @@
               '--native_library',
               '<(input_shlib_path)',
               '--jars',
-              '"<@(input_jars_paths)"',
+              '">@(input_jars_paths)"',
               '--output',
               '<(PRODUCT_DIR)/<(test_suite_name)_apk',
+              '--strip-binary=<(android_strip)',
               '--app_abi',
               '<(android_app_abi)',
               '--sdk-build=<(sdk_build)',
@@ -57,8 +64,9 @@
               '--ant-args',
               '-DANDROID_SDK_VERSION=<(android_sdk_version)',
               '--ant-args',
-              '-DANDROID_TOOLCHAIN=<(android_toolchain)',
-              '--ant-compile'
+              '-DANDROID_GDBSERVER=<(android_gdbserver)',
+              '--ant-args',
+              '-DCHROMIUM_SRC=<(ant_build_out)/../..',
             ],
           }],
         }],  # 'OS == "android" and gtest_target_type == "shared_library"

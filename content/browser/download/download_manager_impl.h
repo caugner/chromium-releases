@@ -44,7 +44,6 @@ class CONTENT_EXPORT DownloadManagerImpl
   virtual DownloadItemImpl* CreateSavePackageDownloadItem(
       const FilePath& main_file_path,
       const GURL& page_url,
-      bool is_otr,
       const std::string& mime_type,
       content::DownloadItem::Observer* observer);
 
@@ -52,12 +51,7 @@ class CONTENT_EXPORT DownloadManagerImpl
   virtual void SetDelegate(content::DownloadManagerDelegate* delegate) OVERRIDE;
   virtual content::DownloadManagerDelegate* GetDelegate() const OVERRIDE;
   virtual void Shutdown() OVERRIDE;
-  virtual void GetTemporaryDownloads(const FilePath& dir_path,
-                                     DownloadVector* result) OVERRIDE;
-  virtual void GetAllDownloads(const FilePath& dir_path,
-                               DownloadVector* result) OVERRIDE;
-  virtual void SearchDownloads(const string16& query,
-                               DownloadVector* result) OVERRIDE;
+  virtual void GetAllDownloads(DownloadVector* result) OVERRIDE;
   virtual bool Init(content::BrowserContext* browser_context) OVERRIDE;
   virtual content::DownloadId StartDownload(
       scoped_ptr<DownloadCreateInfo> info,
@@ -92,7 +86,6 @@ class CONTENT_EXPORT DownloadManagerImpl
   virtual void SavePageDownloadFinished(
       content::DownloadItem* download) OVERRIDE;
   virtual content::DownloadItem* GetActiveDownloadItem(int id) OVERRIDE;
-  virtual bool GenerateFileHash() OVERRIDE;
 
  private:
   typedef std::set<content::DownloadItem*> DownloadSet;

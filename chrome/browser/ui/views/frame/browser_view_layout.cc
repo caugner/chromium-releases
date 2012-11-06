@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
 
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -35,15 +36,15 @@ const int kSpacerBookmarkBarOverlap = 1;
 // The number of pixels the metro switcher is offset from the right edge.
 const int kWindowSwitcherOffsetX = 7;
 
-// Combines View::ConvertPointToView and View::HitTest for a given |point|.
+// Combines View::ConvertPointToTarget and View::HitTest for a given |point|.
 // Converts |point| from |src| to |dst| and hit tests it against |dst|. The
 // converted |point| can then be retrieved and used for additional tests.
 bool ConvertedHitTest(views::View* src, views::View* dst, gfx::Point* point) {
   DCHECK(src);
   DCHECK(dst);
   DCHECK(point);
-  views::View::ConvertPointToView(src, dst, point);
-  return dst->HitTest(*point);
+  views::View::ConvertPointToTarget(src, dst, point);
+  return dst->HitTestPoint(*point);
 }
 
 }  // namespace
@@ -133,7 +134,7 @@ gfx::Rect BrowserViewLayout::GetFindBarBoundingBox() const {
 bool BrowserViewLayout::IsPositionInWindowCaption(
     const gfx::Point& point) {
   gfx::Point tabstrip_point(point);
-  views::View::ConvertPointToView(browser_view_, tabstrip_, &tabstrip_point);
+  views::View::ConvertPointToTarget(browser_view_, tabstrip_, &tabstrip_point);
   return tabstrip_->IsPositionInWindowCaption(tabstrip_point);
 }
 
@@ -147,7 +148,7 @@ int BrowserViewLayout::NonClientHitTest(
   views::View* parent = browser_view_->parent();
 
   gfx::Point point_in_browser_view_coords(point);
-  views::View::ConvertPointToView(
+  views::View::ConvertPointToTarget(
       parent, browser_view_, &point_in_browser_view_coords);
   gfx::Point test_point(point);
 
@@ -258,8 +259,9 @@ void BrowserViewLayout::Layout(views::View* host) {
   vertical_layout_rect_ = browser_view_->GetLocalBounds();
   int top = LayoutTabStripRegion();
   if (browser_view_->IsTabStripVisible()) {
-    tabstrip_->SetBackgroundOffset(gfx::Point(
-        tabstrip_->GetMirroredX() + browser_view_->GetMirroredX(),
+    int x = tabstrip_->GetMirroredX() + browser_view_->GetMirroredX() +
+        browser_view_->frame()->GetThemeBackgroundXInset();
+    tabstrip_->SetBackgroundOffset(gfx::Point(x,
         browser_view_->frame()->GetTabStripInsets(false).top));
   }
   top = LayoutToolbar(top);
@@ -309,7 +311,7 @@ int BrowserViewLayout::LayoutTabStripRegion() {
   gfx::Rect tabstrip_bounds(
       browser_view_->frame()->GetBoundsForTabStrip(tabstrip_));
   gfx::Point tabstrip_origin(tabstrip_bounds.origin());
-  views::View::ConvertPointToView(browser_view_->parent(), browser_view_,
+  views::View::ConvertPointToTarget(browser_view_->parent(), browser_view_,
                                   &tabstrip_origin);
   tabstrip_bounds.set_origin(tabstrip_origin);
 
@@ -319,11 +321,15 @@ int BrowserViewLayout::LayoutTabStripRegion() {
 
   // The metro window switcher sits at the far right edge of the tabstrip
   // a |kWindowSwitcherOffsetX| pixels from the right edge.
-  // Only visible if there is an incognito window because switching between
-  // regular and incognito windows is the only use case that works right now.
+  // Only visible if there is more than one type of window to switch between.
+  // TODO(mad): update this code when more window types than just incognito
+  // and regular are available.
   views::Button* switcher_button = browser_view_->window_switcher_button_;
   if (switcher_button) {
-    if (browser_view_->browser()->profile()->HasOffTheRecordProfile()) {
+    if (browser()->profile()->HasOffTheRecordProfile() &&
+        browser::FindBrowserWithProfile(
+            browser()->profile()->GetOriginalProfile(),
+            browser()->host_desktop_type()) != NULL) {
       switcher_button->SetVisible(true);
       int width = browser_view_->width();
       gfx::Size ps = switcher_button->GetPreferredSize();

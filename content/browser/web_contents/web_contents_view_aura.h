@@ -26,6 +26,10 @@ class WebContentsViewDelegate;
 class WebDragDestDelegate;
 }
 
+namespace ui {
+class DropTargetEvent;
+}
+
 class CONTENT_EXPORT WebContentsViewAura
     : public content::WebContentsView,
       public content::RenderViewHostDelegateView,
@@ -68,7 +72,8 @@ class CONTENT_EXPORT WebContentsViewAura
 
   // Overridden from RenderViewHostDelegateView:
   virtual void ShowContextMenu(
-      const content::ContextMenuParams& params) OVERRIDE;
+      const content::ContextMenuParams& params,
+      content::ContextMenuSourceType type) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -90,15 +95,11 @@ class CONTENT_EXPORT WebContentsViewAura
                                const gfx::Rect& new_bounds) OVERRIDE;
   virtual void OnFocus(aura::Window* old_focused_window) OVERRIDE;
   virtual void OnBlur() OVERRIDE;
-  virtual bool OnKeyEvent(aura::KeyEvent* event) OVERRIDE;
   virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
   virtual bool ShouldDescendIntoChildForEventHandling(
       aura::Window* child,
       const gfx::Point& location) OVERRIDE;
-  virtual bool OnMouseEvent(aura::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(aura::TouchEvent* event) OVERRIDE;
-  virtual ui::GestureStatus OnGestureEvent(aura::GestureEvent* event) OVERRIDE;
   virtual bool CanFocus() OVERRIDE;
   virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
@@ -108,12 +109,19 @@ class CONTENT_EXPORT WebContentsViewAura
   virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE;
   virtual bool HasHitTestMask() const OVERRIDE;
   virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
+  virtual scoped_refptr<ui::Texture> CopyTexture() OVERRIDE;
+
+  // Overridden from ui::EventHandler:
+  virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from aura::client::DragDropDelegate:
-  virtual void OnDragEntered(const aura::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const aura::DropTargetEvent& event) OVERRIDE;
+  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
   virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const aura::DropTargetEvent& event) OVERRIDE;
+  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
 
   gfx::Size initial_size_;
 

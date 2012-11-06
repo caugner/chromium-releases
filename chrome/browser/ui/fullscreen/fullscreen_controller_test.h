@@ -38,10 +38,6 @@ class FullscreenControllerTest : public InProcessBrowserTest {
  protected:
   FullscreenControllerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
-  void ToggleTabFullscreen(bool enter_fullscreen);
-  void ToggleTabFullscreenNoRetries(bool enter_fullscreen);
-  void ToggleBrowserFullscreen(bool enter_fullscreen);
   void RequestToLockMouse(bool user_gesture,
                           bool last_unlocked_by_target);
   void LostMouseLock();

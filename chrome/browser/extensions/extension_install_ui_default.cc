@@ -6,11 +6,11 @@
 
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -114,6 +114,13 @@ void ExtensionInstallUIDefault::OnInstallSuccess(const Extension* extension,
   if (skip_post_install_ui_)
     return;
 
+  if (!profile_) {
+    // TODO(zelidrag): Figure out what exact conditions cause crash
+    // http://crbug.com/159437 and write browser test to cover it.
+    NOTREACHED();
+    return;
+  }
+
   if (extension->is_theme()) {
     ShowThemeInfoBar(previous_theme_id_, previous_using_native_theme_,
                      extension, profile_);
@@ -186,7 +193,7 @@ void ExtensionInstallUIDefault::ShowThemeInfoBar(
 
   // First find any previous theme preview infobars.
   InfoBarDelegate* old_delegate = NULL;
-  for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
+  for (size_t i = 0; i < infobar_helper->GetInfoBarCount(); ++i) {
     InfoBarDelegate* delegate = infobar_helper->GetInfoBarDelegateAt(i);
     ThemeInstalledInfoBarDelegate* theme_infobar =
         delegate->AsThemePreviewInfobarDelegate();

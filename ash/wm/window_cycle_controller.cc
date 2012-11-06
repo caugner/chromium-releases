@@ -11,9 +11,10 @@
 #include "ash/wm/activation_controller.h"
 #include "ash/wm/window_cycle_list.h"
 #include "ash/wm/window_util.h"
-#include "ui/aura/event.h"
+#include "ash/wm/workspace_controller.h"
 #include "ui/aura/event_filter.h"
 #include "ui/aura/root_window.h"
+#include "ui/base/events/event.h"
 
 namespace ash {
 
@@ -34,14 +35,15 @@ class WindowCycleEventFilter : public aura::EventFilter {
 
   // Overridden from aura::EventFilter:
   virtual bool PreHandleKeyEvent(aura::Window* target,
-                                 aura::KeyEvent* event) OVERRIDE;
+                                 ui::KeyEvent* event) OVERRIDE;
   virtual bool PreHandleMouseEvent(aura::Window* target,
-                                   aura::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus PreHandleTouchEvent(aura::Window* target,
-                                              aura::TouchEvent* event) OVERRIDE;
-  virtual ui::GestureStatus PreHandleGestureEvent(
+                                   ui::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus PreHandleTouchEvent(
       aura::Window* target,
-      aura::GestureEvent* event) OVERRIDE;
+      ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult PreHandleGestureEvent(
+      aura::Window* target,
+      ui::GestureEvent* event) OVERRIDE;
  private:
   DISALLOW_COPY_AND_ASSIGN(WindowCycleEventFilter);
 };
@@ -55,7 +57,7 @@ WindowCycleEventFilter::~WindowCycleEventFilter() {
 
 bool WindowCycleEventFilter::PreHandleKeyEvent(
     aura::Window* target,
-    aura::KeyEvent* event) {
+    ui::KeyEvent* event) {
   // Views uses VKEY_MENU for both left and right Alt keys.
   if (event->key_code() == ui::VKEY_MENU &&
       event->type() == ui::ET_KEY_RELEASED) {
@@ -67,20 +69,48 @@ bool WindowCycleEventFilter::PreHandleKeyEvent(
 
 bool WindowCycleEventFilter::PreHandleMouseEvent(
     aura::Window* target,
-    aura::MouseEvent* event) {
+    ui::MouseEvent* event) {
   return false;  // Not handled.
 }
 
 ui::TouchStatus WindowCycleEventFilter::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   return ui::TOUCH_STATUS_UNKNOWN;  // Not handled.
 }
 
-ui::GestureStatus WindowCycleEventFilter::PreHandleGestureEvent(
+ui::EventResult WindowCycleEventFilter::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;  // Not handled.
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;  // Not handled.
+}
+
+// Adds all the children of |window| to |windows|.
+void AddAllChildren(aura::Window* window,
+                    WindowCycleList::WindowList* windows) {
+  const WindowCycleList::WindowList& children(window->children());
+  windows->insert(windows->end(), children.begin(), children.end());
+}
+
+// Adds all the children of all of |window|s children to |windows|.
+void AddWorkspace2Children(aura::Window* window,
+                           WindowCycleList::WindowList* windows) {
+  for (size_t i = 0; i < window->children().size(); ++i)
+    AddAllChildren(window->children()[i], windows);
+}
+
+// Adds the windows that can be cycled through for the specified window id to
+// |windows|.
+void AddCycleWindows(aura::RootWindow* root,
+                     int container_id,
+                     WindowCycleList::WindowList* windows) {
+  aura::Window* container = Shell::GetContainer(root, container_id);
+  if (container_id == internal::kShellWindowId_DefaultContainer &&
+      internal::WorkspaceController::IsWorkspace2Enabled()) {
+    AddWorkspace2Children(container, windows);
+  } else {
+    AddAllChildren(container, windows);
+  }
 }
 
 }  // namespace
@@ -90,7 +120,7 @@ ui::GestureStatus WindowCycleEventFilter::PreHandleGestureEvent(
 
 WindowCycleController::WindowCycleController(
     internal::ActivationController* activation_controller)
-  : activation_controller_(activation_controller) {
+    : activation_controller_(activation_controller) {
   activation_controller_->AddObserver(this);
 }
 
@@ -102,6 +132,16 @@ WindowCycleController::~WindowCycleController() {
       aura::Window* container = Shell::GetContainer(*iter, kContainerIds[i]);
       if (container)
         container->RemoveObserver(this);
+    }
+    aura::Window* default_container =
+        Shell::GetContainer(*iter, internal::kShellWindowId_DefaultContainer);
+    if (default_container) {
+      for (size_t i = 0; i < default_container->children().size(); ++i) {
+        aura::Window* workspace_window = default_container->children()[i];
+        DCHECK_EQ(internal::kShellWindowId_WorkspaceContainer,
+                  workspace_window->id());
+        workspace_window->RemoveObserver(this);
+      }
     }
   }
 
@@ -151,26 +191,19 @@ std::vector<aura::Window*> WindowCycleController::BuildWindowList(
   WindowCycleList::WindowList windows;
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
 
+  aura::RootWindow* active_root = Shell::GetActiveRootWindow();
   for (Shell::RootWindowList::const_iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter) {
-    if (*iter == Shell::GetActiveRootWindow())
+    if (*iter == active_root)
       continue;
-    for (size_t i = 0; i < arraysize(kContainerIds); ++i) {
-      aura::Window* container = Shell::GetContainer(*iter, kContainerIds[i]);
-      WindowCycleList::WindowList children = container->children();
-      windows.insert(windows.end(), children.begin(), children.end());
-    }
+    for (size_t i = 0; i < arraysize(kContainerIds); ++i)
+      AddCycleWindows(*iter, kContainerIds[i], &windows);
   }
 
   // Add windows in the active root windows last so that the topmost window
   // in the active root window becomes the front of the list.
-  for (size_t i = 0; i < arraysize(kContainerIds); ++i) {
-    aura::Window* container =
-        Shell::GetContainer(Shell::GetActiveRootWindow(), kContainerIds[i]);
-
-    WindowCycleList::WindowList children = container->children();
-    windows.insert(windows.end(), children.begin(), children.end());
-  }
+  for (size_t i = 0; i < arraysize(kContainerIds); ++i)
+    AddCycleWindows(active_root, kContainerIds[i], &windows);
 
   // Removes unfocusable windows.
   WindowCycleList::WindowList::iterator last =
@@ -207,6 +240,16 @@ void WindowCycleController::OnRootWindowAdded(aura::RootWindow* root_window) {
     aura::Window* container =
         Shell::GetContainer(root_window, kContainerIds[i]);
     container->AddObserver(this);
+  }
+
+  aura::Window* default_container =
+      Shell::GetContainer(root_window,
+                          internal::kShellWindowId_DefaultContainer);
+  for (size_t i = 0; i < default_container->children().size(); ++i) {
+    aura::Window* workspace_window = default_container->children()[i];
+    DCHECK_EQ(internal::kShellWindowId_WorkspaceContainer,
+              workspace_window->id());
+    workspace_window->AddObserver(this);
   }
 }
 
@@ -246,7 +289,7 @@ bool WindowCycleController::IsTrackedContainer(aura::Window* window) {
       return true;
     }
   }
-  return false;
+  return window->id() == internal::kShellWindowId_WorkspaceContainer;
 }
 
 void WindowCycleController::InstallEventFilter() {
@@ -262,8 +305,15 @@ void WindowCycleController::OnWindowActivated(aura::Window* active,
   }
 }
 
+void WindowCycleController::OnWindowAdded(aura::Window* window) {
+  if (window->id() == internal::kShellWindowId_WorkspaceContainer)
+    window->AddObserver(this);
+}
+
 void WindowCycleController::OnWillRemoveWindow(aura::Window* window) {
   mru_windows_.remove(window);
+  if (window->id() == internal::kShellWindowId_WorkspaceContainer)
+    window->RemoveObserver(this);
 }
 
 void WindowCycleController::OnWindowDestroying(aura::Window* window) {

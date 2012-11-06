@@ -11,6 +11,7 @@
 #include "ash/shell.h"
 #include "base/callback.h"
 #include "base/string16.h"
+#include "base/time.h"
 
 namespace app_list {
 class AppListViewDelegate;
@@ -29,6 +30,7 @@ class Widget;
 
 namespace ash {
 
+class CapsLockDelegate;
 class LauncherDelegate;
 class LauncherModel;
 struct LauncherItem;
@@ -37,12 +39,15 @@ class SystemTrayDelegate;
 class UserWallpaperDelegate;
 
 enum UserMetricsAction {
-  UMA_ACCEL_PREVWINDOW_TAB,
+  UMA_ACCEL_MAXIMIZE_RESTORE_F4,
+  UMA_ACCEL_NEWTAB_T,
+  UMA_ACCEL_NEXTWINDOW_F5,
   UMA_ACCEL_NEXTWINDOW_TAB,
   UMA_ACCEL_PREVWINDOW_F5,
-  UMA_ACCEL_NEXTWINDOW_F5,
-  UMA_ACCEL_NEWTAB_T,
+  UMA_ACCEL_PREVWINDOW_TAB,
   UMA_ACCEL_SEARCH_LWIN,
+  UMA_LAUNCHER_CLICK_ON_APP,
+  UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON,
   UMA_MOUSE_DOWN,
   UMA_TOUCHSCREEN_TAP_DOWN,
 };
@@ -58,6 +63,11 @@ class ASH_EXPORT ShellDelegate {
 
   // Returns true if we're logged in and browser has been started
   virtual bool IsSessionStarted() = 0;
+
+  // Returns true if this is the first time that the shell has been run after
+  // the system has booted.  false is returned after the shell has been
+  // restarted, typically due to logging in as a guest or logging out.
+  virtual bool IsFirstRunAfterBoot() = 0;
 
   // Invoked when a user locks the screen.
   virtual void LockScreen() = 0;
@@ -79,6 +89,9 @@ class ASH_EXPORT ShellDelegate {
 
   // Invoked when the user uses Ctrl-N or Ctrl-Shift-N to open a new window.
   virtual void NewWindow(bool incognito) = 0;
+
+  // Invoked when the user uses F4 to toggle window maximized state.
+  virtual void ToggleMaximized() = 0;
 
   // Invoked when the user uses Ctrl-M or Ctrl-O to open file manager.
   virtual void OpenFileManager(bool as_dialog) = 0;
@@ -127,6 +140,9 @@ class ASH_EXPORT ShellDelegate {
   // Creates a user wallpaper delegate. Shell takes ownership of the delegate.
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() = 0;
 
+  // Creates a caps lock delegate. Shell takes ownership of the delegate.
+  virtual CapsLockDelegate* CreateCapsLockDelegate() = 0;
+
   // Creates a user action client. Shell takes ownership of the object.
   virtual aura::client::UserActionClient* CreateUserActionClient() = 0;
 
@@ -135,6 +151,20 @@ class ASH_EXPORT ShellDelegate {
 
   // Records that the user performed an action.
   virtual void RecordUserMetricsAction(UserMetricsAction action) = 0;
+
+  // Handles the Next Track Media shortcut key.
+  virtual void HandleMediaNextTrack() = 0;
+
+  // Handles the Play/Pause Toggle Media shortcut key.
+  virtual void HandleMediaPlayPause() = 0;
+
+  // Handles the Previous Track Media shortcut key.
+  virtual void HandleMediaPrevTrack() = 0;
+
+  // Produces l10n-ed text of remaining time, e.g.: "13 mins left" or
+  // "13 Minuten übrig".
+  // Used, for example, to display the remaining battery life.
+  virtual string16 GetTimeRemainingString(base::TimeDelta delta) = 0;
 };
 
 }  // namespace ash

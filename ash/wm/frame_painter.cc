@@ -7,9 +7,12 @@
 #include "ash/ash_constants.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/property_util.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace_controller.h"
 #include "base/logging.h"  // DCHECK
-#include "grit/ui_resources.h"
+#include "grit/ash_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -25,6 +28,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -33,20 +37,10 @@ namespace {
 // TODO(jamescook): Border is specified to be a single pixel overlapping
 // the web content and may need to be built into the shadow layers instead.
 const int kBorderThickness = 0;
-// In the window corners, the resize areas don't actually expand bigger, but the
-// 16 px at the end of each edge triggers diagonal resizing.
-const int kResizeAreaCornerSize = 16;
-// Ash windows do not have a traditional visible window frame. Window content
-// extends to the edge of the window. We consider a small region outside the
-// window bounds and an even smaller region overlapping the window to be the
-// "non-client" area and use it for resizing.
-const int kResizeOutsideBoundsSizeTouch = 30;
-const int kResizeOutsideBoundsSize = 6;
-const int kResizeInsideBoundsSize = 1;
 // Space between left edge of window and popup window icon.
-const int kIconOffsetX = 4;
+const int kIconOffsetX = 9;
 // Space between top of window and popup window icon.
-const int kIconOffsetY = 6;
+const int kIconOffsetY = 9;
 // Height and width of window icon.
 const int kIconSize = 16;
 // Space between the title text and the caption buttons.
@@ -55,8 +49,6 @@ const int kTitleLogoSpacing = 5;
 const int kTitleIconOffsetX = 4;
 // Space between window edge and title text, when there is no icon.
 const int kTitleNoIconOffsetX = 8;
-// Space between title text and top of window.
-const int kTitleOffsetY = 7;
 // Color for the title text.
 const SkColor kTitleTextColor = SkColorSetRGB(40, 40, 40);
 // Size of header/content separator line below the header image.
@@ -76,7 +68,7 @@ const int kButtonOverlap = 1;
 // we need to copy the theme image for the window header from a few pixels
 // inset to preserve alignment with the NTP image, or else we'll break a bunch
 // of existing themes.  We do something similar on OS X for the same reason.
-const int kThemeFrameImageOffsetX = 5;
+const int kThemeFrameImageInsetX = 5;
 // Duration of crossfade animation for activating and deactivating frame.
 const int kActivationCrossfadeDurationMs = 200;
 // Alpha/opacity value for fully-opaque headers.
@@ -89,7 +81,7 @@ void TileRoundRect(gfx::Canvas* canvas,
                    const SkPaint& paint,
                    const gfx::ImageSkia& image,
                    int corner_radius,
-                   int image_offset_x) {
+                   int image_inset_x) {
   // To get the shader to sample the image |inset_y| pixels in but tile across
   // the whole image, we adjust the target rectangle for the shader to the right
   // and translate the canvas left to compensate.
@@ -103,7 +95,7 @@ void TileRoundRect(gfx::Canvas* canvas,
       0, 0};  // bottom-left
   SkPath path;
   path.addRoundRect(rect, radii, SkPath::kCW_Direction);
-  canvas->DrawImageInPath(image, -image_offset_x, 0, path, paint);
+  canvas->DrawImageInPath(image, -image_inset_x, 0, path, paint);
 }
 
 // Returns true if |window| is a visible, normal window.
@@ -191,12 +183,10 @@ void FramePainter::Init(views::Widget* frame,
 
   window_ = frame->GetNativeWindow();
   // Ensure we get resize cursors for a few pixels outside our bounds.
-  int outside_bounds = ui::GetDisplayLayout() == ui::LAYOUT_TOUCH ?
-      kResizeOutsideBoundsSizeTouch :
-      kResizeOutsideBoundsSize;
-  window_->set_hit_test_bounds_override_outer(
-      gfx::Insets(-outside_bounds, -outside_bounds,
-                  -outside_bounds, -outside_bounds));
+  window_->SetHitTestBoundsOverrideOuter(
+      gfx::Insets(-kResizeOutsideBoundsSize, -kResizeOutsideBoundsSize,
+                  -kResizeOutsideBoundsSize, -kResizeOutsideBoundsSize),
+      kResizeOutsideBoundsScaleForTouch);
   // Ensure we get resize cursors just inside our bounds as well.
   window_->set_hit_test_bounds_override_inner(
       gfx::Insets(kResizeInsideBoundsSize, kResizeInsideBoundsSize,
@@ -232,10 +222,8 @@ int FramePainter::NonClientHitTest(views::NonClientFrameView* view,
   gfx::Rect expanded_bounds = view->bounds();
   int outside_bounds = kResizeOutsideBoundsSize;
 
-  if (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH &&
-      aura::Env::GetInstance()->is_touch_down()) {
-    outside_bounds = kResizeOutsideBoundsSizeTouch;
-  }
+  if (aura::Env::GetInstance()->is_touch_down())
+    outside_bounds *= kResizeOutsideBoundsScaleForTouch;
   expanded_bounds.Inset(-outside_bounds, -outside_bounds);
 
   if (!expanded_bounds.Contains(point))
@@ -259,6 +247,7 @@ int FramePainter::NonClientHitTest(views::NonClientFrameView* view,
                                                      kResizeAreaCornerSize,
                                                      kResizeAreaCornerSize,
                                                      can_ever_resize);
+  frame_component = AdjustFrameHitCodeForMaximizedModes(frame_component);
   if (frame_component != HTNOWHERE)
     return frame_component;
 
@@ -301,6 +290,10 @@ int FramePainter::GetRightInset() const {
       kButtonOverlap;
 }
 
+int FramePainter::GetThemeBackgroundXInset() const {
+  return kThemeFrameImageInsetX;
+}
+
 void FramePainter::PaintHeader(views::NonClientFrameView* view,
                                gfx::Canvas* canvas,
                                HeaderMode header_mode,
@@ -308,11 +301,26 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
                                const gfx::ImageSkia* theme_frame_overlay) {
   if (previous_theme_frame_id_ != 0 &&
       previous_theme_frame_id_ != theme_frame_id) {
-    crossfade_animation_.reset(new ui::SlideAnimation(this));
-    crossfade_theme_frame_id_ = previous_theme_frame_id_;
-    crossfade_opacity_ = previous_opacity_;
-    crossfade_animation_->SetSlideDuration(kActivationCrossfadeDurationMs);
-    crossfade_animation_->Show();
+    aura::Window* parent = frame_->GetNativeWindow()->parent();
+    // Don't animate the header if the parent (a workspace) is already
+    // animating. Doing so results in continually painting during the animation
+    // and gives a slower frame rate.
+    // TODO(sky): expose a better way to determine this rather than assuming
+    // the parent is a workspace.
+    bool parent_animating = parent &&
+        (parent->layer()->GetAnimator()->IsAnimatingProperty(
+            ui::LayerAnimationElement::OPACITY) ||
+         parent->layer()->GetAnimator()->IsAnimatingProperty(
+             ui::LayerAnimationElement::VISIBILITY));
+    if (!parent_animating) {
+      crossfade_animation_.reset(new ui::SlideAnimation(this));
+      crossfade_theme_frame_id_ = previous_theme_frame_id_;
+      crossfade_opacity_ = previous_opacity_;
+      crossfade_animation_->SetSlideDuration(kActivationCrossfadeDurationMs);
+      crossfade_animation_->Show();
+    } else {
+      crossfade_animation_.reset();
+    }
   }
 
   int opacity =
@@ -341,7 +349,7 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
                     paint,
                     *crossfade_theme_frame,
                     kCornerRadius,
-                    kThemeFrameImageOffsetX);
+                    GetThemeBackgroundXInset());
 
       paint.setAlpha(new_alpha);
     } else {
@@ -358,7 +366,7 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
                 paint,
                 *theme_frame,
                 kCornerRadius,
-                kThemeFrameImageOffsetX);
+                GetThemeBackgroundXInset());
 
   previous_theme_frame_id_ = theme_frame_id;
   previous_opacity_ = opacity;
@@ -369,15 +377,20 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
 
   // Separator between the maximize and close buttons.  It overlaps the left
   // edge of the close button.
+  gfx::Rect divider(close_button_->x(), close_button_->y(),
+                    button_separator_->width(), close_button_->height());
   canvas->DrawImageInt(*button_separator_,
-                       close_button_->x(),
+                       view->GetMirroredXForRect(divider),
                        close_button_->y());
 
   // We don't need the extra lightness in the edges when we're at the top edge
-  // of the screen.
-  // TODO(oshima): This will not work under multi-display, need to add method
-  // like GetWindowBoundsInDisplay().
-  if (frame_->GetWindowBoundsInScreen().y() == 0)
+  // of the screen or maximized. We have the maximized check as during
+  // animations the bounds may not be at 0, but the border shouldn't be drawn.
+  //
+  // TODO(sky): this isn't quite right. What we really want is a method that
+  // returns bounds ignoring transforms on certain windows (such as workspaces)
+  // and is relative to the root.
+  if (frame_->GetNativeWindow()->bounds().y() == 0 || frame_->IsMaximized())
     return;
 
   // Draw the top corners and edge.
@@ -439,9 +452,10 @@ void FramePainter::PaintTitleBar(views::NonClientFrameView* view,
   views::WidgetDelegate* delegate = frame_->widget_delegate();
   if (delegate && delegate->ShouldShowWindowTitle()) {
     int title_x = GetTitleOffsetX();
-    int title_y = ui::LAYOUT_TOUCH == ui::GetDisplayLayout() ?
-        (view->GetBoundsForClientView().y() - title_font.GetHeight()) / 2
-        : kTitleOffsetY;
+    // Center the text in the middle of the caption - this way it adapts
+    // automatically to the caption height (which is given by the owner).
+    int title_y =
+        (view->GetBoundsForClientView().y() - title_font.GetHeight()) / 2;
     gfx::Rect title_bounds(
         title_x,
         std::max(0, title_y),
@@ -459,9 +473,24 @@ void FramePainter::PaintTitleBar(views::NonClientFrameView* view,
 }
 
 void FramePainter::LayoutHeader(views::NonClientFrameView* view,
-                                bool maximized_layout) {
-  // The maximized layout uses shorter buttons.
-  if (maximized_layout) {
+                                bool shorter_layout) {
+  // The new assets only make sense if the window is actually maximized.
+  if (internal::WorkspaceController::IsWorkspace2Enabled() &&
+      shorter_layout && frame_->IsMaximized() &&
+      GetTrackedByWorkspace(frame_->GetNativeWindow())) {
+    SetButtonImages(close_button_,
+                    IDR_AURA_WINDOW_MAXIMIZED_CLOSE2,
+                    IDR_AURA_WINDOW_MAXIMIZED_CLOSE2_H,
+                    IDR_AURA_WINDOW_MAXIMIZED_CLOSE2_P);
+    // The chat window cannot be restored but only minimized.
+    // Case: (size_button_behavior_ == SIZE_BUTTON_MINIMIZES). We used to have
+    // a special set of artwork to show this case, but per discussion we
+    // removed this.
+    SetButtonImages(size_button_,
+                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE2,
+                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE2_H,
+                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE2_P);
+  } else if (shorter_layout) {
     SetButtonImages(close_button_,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE_H,
@@ -510,6 +539,13 @@ void FramePainter::LayoutHeader(views::NonClientFrameView* view,
 void FramePainter::OnWindowPropertyChanged(aura::Window* window,
                                            const void* key,
                                            intptr_t old) {
+  if (key == internal::kWindowTrackedByWorkspaceKey &&
+      GetTrackedByWorkspace(window)) {
+    // When 'kWindowTrackedByWorkspaceKey' changes we're going to paint the
+    // header differently. Schedule a paint to ensure everything is updated
+    // correctly.
+    frame_->non_client_view()->SchedulePaint();
+  }
   if (key != aura::client::kShowStateKey)
     return;
 
@@ -550,6 +586,18 @@ void FramePainter::OnWindowDestroying(aura::Window* destroying) {
     SchedulePaintForSoloWindow();
 }
 
+void FramePainter::OnWindowBoundsChanged(aura::Window* window,
+                                         const gfx::Rect& old_bounds,
+                                         const gfx::Rect& new_bounds) {
+  // TODO(sky): this isn't quite right. What we really want is a method that
+  // returns bounds ignoring transforms on certain windows (such as workspaces).
+  if (!frame_->IsMaximized() &&
+      ((old_bounds.y() == 0 && new_bounds.y() != 0) ||
+       (old_bounds.y() != 0 && new_bounds.y() == 0))) {
+    SchedulePaintForHeader();
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // ui::AnimationDelegate overrides:
 
@@ -588,6 +636,13 @@ int FramePainter::GetHeaderOpacity(HeaderMode header_mode,
   if (theme_frame_overlay)
     return kFullyOpaque;
 
+  // Maximized windows with workspace2 are totally transparent, except those not
+  // tracked by workspace code (which are used for tab dragging).
+  if (frame_->IsMaximized() &&
+      internal::WorkspaceController::IsWorkspace2Enabled() &&
+      GetTrackedByWorkspace(frame_->GetNativeWindow()))
+    return 0;
+
   // Single browser window is very transparent.
   if (UseSoloWindowHeader())
     return kSoloWindowOpacity;
@@ -598,9 +653,49 @@ int FramePainter::GetHeaderOpacity(HeaderMode header_mode,
   return kInactiveWindowOpacity;
 }
 
+int FramePainter::AdjustFrameHitCodeForMaximizedModes(int hit_code) {
+  if (hit_code != HTNOWHERE && wm::IsWindowNormal(window_) &&
+      GetRestoreBoundsInScreen(window_)) {
+    // When there is a restore rectangle, a left/right maximized window might
+    // be active.
+    const gfx::Rect& bounds = frame_->GetWindowBoundsInScreen();
+    const gfx::Rect& screen =
+        gfx::Screen::GetDisplayMatching(bounds).work_area();
+    if (bounds.y() == screen.y() && bounds.bottom() == screen.bottom()) {
+      // The window is probably either left or right maximized.
+      if (bounds.x() == screen.x()) {
+        // It is left maximized and we can only allow a right resize.
+        return (hit_code == HTBOTTOMRIGHT ||
+                hit_code == HTTOPRIGHT ||
+                hit_code == HTRIGHT) ? HTRIGHT : HTNOWHERE;
+      } else if (bounds.right() == screen.right()) {
+        // It is right maximized and we can only allow a left resize.
+        return (hit_code == HTBOTTOMLEFT ||
+                hit_code == HTTOPLEFT ||
+                hit_code == HTLEFT) ? HTLEFT : HTNOWHERE;
+      }
+    } else if (bounds.x() == screen.x() &&
+               bounds.right() == screen.right()) {
+      // If horizontal fill mode is activated we don't allow a left/right
+      // resizing.
+      if (hit_code == HTTOPRIGHT ||
+          hit_code == HTTOP ||
+          hit_code == HTTOPLEFT)
+        return HTTOP;
+      return (hit_code == HTBOTTOMRIGHT ||
+              hit_code == HTBOTTOM ||
+              hit_code == HTBOTTOMLEFT) ? HTBOTTOM : HTNOWHERE;
+    }
+  }
+  return hit_code;
+}
+
 // static
 bool FramePainter::UseSoloWindowHeader() {
-  int window_count = 0;
+  if (!instances_)
+    return false;  // Return value shouldn't matter.
+
+  aura::Window* window = NULL;
   for (std::set<FramePainter*>::const_iterator it = instances_->begin();
        it != instances_->end();
        ++it) {
@@ -608,16 +703,22 @@ bool FramePainter::UseSoloWindowHeader() {
     // the existence of a layout manager gets additionally tested.
     if (IsVisibleNormalWindow((*it)->window_) &&
         (!(*it)->window_->GetProperty(ash::kConstrainedWindowKey))) {
-      window_count++;
-      if (window_count > 1)
+      if (window)
         return false;
+      window = (*it)->window_;
     }
   }
-  return window_count == 1;
+  // We don't use the translucent background when a window is maximized with
+  // workspace2 as otherwise the system background shows through the header.
+  return window && (!internal::WorkspaceController::IsWorkspace2Enabled() ||
+                    !wm::IsWindowMaximized(window));
 }
 
 // static
 void FramePainter::SchedulePaintForSoloWindow() {
+  if (!instances_)
+    return;
+
   for (std::set<FramePainter*>::const_iterator it = instances_->begin();
        it != instances_->end();
        ++it) {
@@ -625,6 +726,14 @@ void FramePainter::SchedulePaintForSoloWindow() {
     if (IsVisibleNormalWindow(painter->window_))
       painter->frame_->non_client_view()->SchedulePaint();
   }
+}
+
+void FramePainter::SchedulePaintForHeader() {
+  int top_left_height = top_left_corner_->height();
+  int top_right_height = top_right_corner_->height();
+  frame_->non_client_view()->SchedulePaintInRect(
+      gfx::Rect(0, 0, frame_->non_client_view()->width(),
+                std::max(top_left_height, top_right_height)));
 }
 
 }  // namespace ash

@@ -12,16 +12,16 @@
 // that a lot of the functions can be simplified and made more elegant. Revisit
 // after other audio cleanup is done. (crbug.com/120319)
 
+#include "media/audio/audio_util.h"
+
 #include <algorithm>
 #include <limits>
 
-#include "base/atomicops.h"
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/shared_memory.h"
 #include "base/time.h"
 #include "media/audio/audio_parameters.h"
-#include "media/audio/audio_util.h"
+#include "media/base/audio_bus.h"
 
 #if defined(OS_MACOSX)
 #include "media/audio/mac/audio_low_latency_input_mac.h"
@@ -32,12 +32,9 @@
 #include "media/audio/audio_manager_base.h"
 #include "media/audio/win/audio_low_latency_input_win.h"
 #include "media/audio/win/audio_low_latency_output_win.h"
+#include "media/base/limits.h"
 #include "media/base/media_switches.h"
 #endif
-
-using base::subtle::Atomic32;
-
-const uint32 kUnknownDataSize = static_cast<uint32>(-1);
 
 namespace media {
 
@@ -181,100 +178,6 @@ bool FoldChannels(void* buf,
   return false;
 }
 
-bool DeinterleaveAudioChannel(void* source,
-                              float* destination,
-                              int channels,
-                              int channel_index,
-                              int bytes_per_sample,
-                              size_t number_of_frames) {
-  switch (bytes_per_sample) {
-    case 1:
-    {
-      uint8* source8 = reinterpret_cast<uint8*>(source) + channel_index;
-      const float kScale = 1.0f / 128.0f;
-      for (unsigned i = 0; i < number_of_frames; ++i) {
-        destination[i] = kScale * (static_cast<int>(*source8) - 128);
-        source8 += channels;
-      }
-      return true;
-    }
-
-    case 2:
-    {
-      int16* source16 = reinterpret_cast<int16*>(source) + channel_index;
-      const float kScale = 1.0f / 32768.0f;
-      for (unsigned i = 0; i < number_of_frames; ++i) {
-        destination[i] = kScale * *source16;
-        source16 += channels;
-      }
-      return true;
-    }
-
-    case 4:
-    {
-      int32* source32 = reinterpret_cast<int32*>(source) + channel_index;
-      const float kScale = 1.0f / 2147483648.0f;
-      for (unsigned i = 0; i < number_of_frames; ++i) {
-        destination[i] = kScale * *source32;
-        source32 += channels;
-      }
-      return true;
-    }
-
-    default:
-     break;
-  }
-  return false;
-}
-
-// |Format| is the destination type, |Fixed| is a type larger than |Format|
-// such that operations can be made without overflowing.
-template<class Format, class Fixed>
-static void InterleaveFloatToInt(const std::vector<float*>& source,
-                                 void* dst_bytes, size_t number_of_frames) {
-  Format* destination = reinterpret_cast<Format*>(dst_bytes);
-  Fixed max_value = std::numeric_limits<Format>::max();
-  Fixed min_value = std::numeric_limits<Format>::min();
-
-  Format bias = 0;
-  if (!std::numeric_limits<Format>::is_signed) {
-    bias = max_value / 2;
-    max_value = bias;
-    min_value = -(bias - 1);
-  }
-
-  int channels = source.size();
-  for (int i = 0; i < channels; ++i) {
-    float* channel_data = source[i];
-    for (size_t j = 0; j < number_of_frames; ++j) {
-      Fixed sample = max_value * channel_data[j];
-      if (sample > max_value)
-        sample = max_value;
-      else if (sample < min_value)
-        sample = min_value;
-
-      destination[j * channels + i] = static_cast<Format>(sample) + bias;
-    }
-  }
-}
-
-void InterleaveFloatToInt(const std::vector<float*>& source, void* dst,
-                          size_t number_of_frames, int bytes_per_sample) {
-  switch (bytes_per_sample) {
-    case 1:
-      InterleaveFloatToInt<uint8, int32>(source, dst, number_of_frames);
-      break;
-    case 2:
-      InterleaveFloatToInt<int16, int32>(source, dst, number_of_frames);
-      break;
-    case 4:
-      InterleaveFloatToInt<int32, int64>(source, dst, number_of_frames);
-      break;
-    default:
-      break;
-  }
-}
-
 // TODO(enal): use template specialization and size-specific intrinsics.
 //             Call is on the time-critical path, and by using SSE/AVX
 //             instructions we can speed things up by ~4-8x, more for the case
@@ -403,10 +306,13 @@ size_t GetAudioHardwareBufferSize() {
 #if defined(OS_MACOSX)
   return 128;
 #elif defined(OS_WIN)
+  // Buffer size to use when a proper size can't be determined from the system.
+  static const int kFallbackBufferSize = 2048;
+
   if (!IsWASAPISupported()) {
     // Fall back to Windows Wave implementation on Windows XP or lower
     // and assume 48kHz as default sample rate.
-    return 2048;
+    return kFallbackBufferSize;
   }
 
   // TODO(crogers): tune this size to best possible WebAudio performance.
@@ -421,12 +327,29 @@ size_t GetAudioHardwareBufferSize() {
   // TODO(tommi): http://code.google.com/p/chromium/issues/detail?id=103835.
   int mixing_sample_rate =
       WASAPIAudioOutputStream::HardwareSampleRate(eConsole);
-  if (mixing_sample_rate == 48000)
-    return 480;
-  else if (mixing_sample_rate == 44100)
-    return 448;
-  else
-    return 960;
+
+  // Windows will return a sample rate of 0 when no audio output is available
+  // (i.e. via RemoteDesktop with remote audio disabled), but we should never
+  // return a buffer size of zero.
+  if (mixing_sample_rate == 0)
+    return kFallbackBufferSize;
+
+  // Use different buffer sizes depening on the sample rate . The existing
+  // WASAPI implementation is tuned to provide the most stable callback
+  // sequence using these combinations.
+  if (mixing_sample_rate % 11025 == 0)
+    // Use buffer size of ~10.15873 ms.
+    return (112 * (mixing_sample_rate / 11025));
+
+  if (mixing_sample_rate % 8000 == 0)
+    // Use buffer size of 10ms.
+    return (80 * (mixing_sample_rate / 8000));
+
+  // Ensure we always return a buffer size which is somewhat appropriate.
+  LOG(ERROR) << "Unknown sample rate " << mixing_sample_rate << " detected.";
+  if (mixing_sample_rate > limits::kMinSampleRate)
+    return (mixing_sample_rate / 100);
+  return kFallbackBufferSize;
 #else
   return 2048;
 #endif
@@ -480,56 +403,6 @@ size_t GetHighLatencyOutputBufferSize(int sample_rate) {
     samples *= 2;
   }
   return samples;
-}
-
-// When transferring data in the shared memory, first word is size of data
-// in bytes. Actual data starts immediately after it.
-
-uint32 TotalSharedMemorySizeInBytes(uint32 packet_size) {
-  // Need to reserve extra 4 bytes for size of data.
-  return packet_size + sizeof(Atomic32);
-}
-
-uint32 PacketSizeSizeInBytes(uint32 shared_memory_created_size) {
-  return shared_memory_created_size - sizeof(Atomic32);
-}
-
-uint32 GetActualDataSizeInBytes(base::SharedMemory* shared_memory,
-                                uint32 shared_memory_size) {
-  char* ptr = static_cast<char*>(shared_memory->memory()) + shared_memory_size;
-  DCHECK_EQ(0u, reinterpret_cast<size_t>(ptr) & 3);
-
-  // Actual data size stored at the end of the buffer.
-  uint32 actual_data_size =
-      base::subtle::Acquire_Load(reinterpret_cast<volatile Atomic32*>(ptr));
-  return std::min(actual_data_size, shared_memory_size);
-}
-
-void SetActualDataSizeInBytes(base::SharedMemory* shared_memory,
-                              uint32 shared_memory_size,
-                              uint32 actual_data_size) {
-  char* ptr = static_cast<char*>(shared_memory->memory()) + shared_memory_size;
-  DCHECK_EQ(0u, reinterpret_cast<size_t>(ptr) & 3);
-
-  // Set actual data size at the end of the buffer.
-  base::subtle::Release_Store(reinterpret_cast<volatile Atomic32*>(ptr),
-                              actual_data_size);
-}
-
-void SetUnknownDataSize(base::SharedMemory* shared_memory,
-                        uint32 shared_memory_size) {
-  SetActualDataSizeInBytes(shared_memory, shared_memory_size, kUnknownDataSize);
-}
-
-bool IsUnknownDataSize(base::SharedMemory* shared_memory,
-                       uint32 shared_memory_size) {
-  char* ptr = static_cast<char*>(shared_memory->memory()) + shared_memory_size;
-  DCHECK_EQ(0u, reinterpret_cast<size_t>(ptr) & 3);
-
-  // Actual data size stored at the end of the buffer.
-  uint32 actual_data_size =
-      base::subtle::Acquire_Load(reinterpret_cast<volatile Atomic32*>(ptr));
-  return actual_data_size == kUnknownDataSize;
 }
 
 #if defined(OS_WIN)

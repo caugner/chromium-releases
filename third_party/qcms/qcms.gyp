@@ -39,6 +39,9 @@
           './src',
         ],
       },
+      # Warning (sign-conversion) fixed upstream by large refactoring. Can be
+      # removed on next roll.
+      'msvs_disabled_warnings': [ 4018 ],
       'conditions': [
         [ 'qcms_use_sse==1', {
           'defines': [

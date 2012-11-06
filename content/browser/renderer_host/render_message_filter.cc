@@ -276,7 +276,8 @@ RenderMessageFilter::RenderMessageFilter(
     BrowserContext* browser_context,
     net::URLRequestContextGetter* request_context,
     RenderWidgetHelper* render_widget_helper,
-    MediaObserver* media_observer)
+    MediaObserver* media_observer,
+    DOMStorageContextImpl* dom_storage_context)
     : resource_dispatcher_host_(ResourceDispatcherHostImpl::Get()),
       plugin_service_(plugin_service),
       profile_data_directory_(browser_context->GetPath()),
@@ -284,9 +285,7 @@ RenderMessageFilter::RenderMessageFilter(
       resource_context_(browser_context->GetResourceContext()),
       render_widget_helper_(render_widget_helper),
       incognito_(browser_context->IsOffTheRecord()),
-      dom_storage_context_(static_cast<DOMStorageContextImpl*>(
-          BrowserContext::GetDOMStorageContext(browser_context,
-                                               render_process_id_))),
+      dom_storage_context_(dom_storage_context),
       render_process_id_(render_process_id),
       cpu_usage_(0),
       media_observer_(media_observer) {
@@ -364,6 +363,10 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                                     OnOpenChannelToPlugin)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_OpenChannelToPepperPlugin,
                                     OnOpenChannelToPepperPlugin)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidCreateOutOfProcessPepperInstance,
+                        OnDidCreateOutOfProcessPepperInstance)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidDeleteOutOfProcessPepperInstance,
+                        OnDidDeleteOutOfProcessPepperInstance)
     IPC_MESSAGE_HANDLER(ViewHostMsg_OpenChannelToPpapiBroker,
                         OnOpenChannelToPpapiBroker)
     IPC_MESSAGE_HANDLER_GENERIC(ViewHostMsg_UpdateRect,
@@ -438,17 +441,17 @@ void RenderMessageFilter::OnMsgCreateWindow(
   }
 
   // This will clone the sessionStorage for namespace_id_to_clone.
-  scoped_refptr<SessionStorageNamespaceImpl> session_storage_namespace =
+  scoped_refptr<SessionStorageNamespaceImpl> cloned_namespace =
       new SessionStorageNamespaceImpl(dom_storage_context_,
                                       params.session_storage_namespace_id);
-  *cloned_session_storage_namespace_id = session_storage_namespace->id();
+  *cloned_session_storage_namespace_id = cloned_namespace->id();
 
   render_widget_helper_->CreateNewWindow(params,
                                          no_javascript_access,
                                          peer_handle(),
                                          route_id,
                                          surface_id,
-                                         session_storage_namespace.get());
+                                         cloned_namespace);
 }
 
 void RenderMessageFilter::OnMsgCreateWidget(int opener_id,
@@ -676,6 +679,27 @@ void RenderMessageFilter::OnOpenChannelToPepperPlugin(
           this, resource_context_, reply_msg));
 }
 
+void RenderMessageFilter::OnDidCreateOutOfProcessPepperInstance(
+    int plugin_child_id,
+    int32 pp_instance,
+    int render_view_id) {
+  // It's important that we supply the render process ID ourselves based on the
+  // channel the message arrived on. We use the
+  //   PP_Instance -> (process id, view id)
+  // mapping to decide how to handle messages received from the (untrusted)
+  // plugin, so an exploited renderer must not be able to insert fake mappings
+  // that may allow it access to other render processes.
+  PpapiPluginProcessHost::DidCreateOutOfProcessInstance(
+      plugin_child_id, pp_instance, render_process_id_, render_view_id);
+}
+
+void RenderMessageFilter::OnDidDeleteOutOfProcessPepperInstance(
+    int plugin_child_id,
+    int32 pp_instance) {
+  PpapiPluginProcessHost::DidDeleteOutOfProcessInstance(
+      plugin_child_id, pp_instance);
+}
+
 void RenderMessageFilter::OnOpenChannelToPpapiBroker(int routing_id,
                                                      int request_id,
                                                      const FilePath& path) {
@@ -732,10 +756,8 @@ void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                         const string16& suggested_name) {
   DownloadSaveInfo save_info;
   save_info.suggested_name = suggested_name;
-  scoped_ptr<net::URLRequest> request(new net::URLRequest(
-      url,
-      NULL,
-      resource_context_->GetRequestContext()));
+  scoped_ptr<net::URLRequest> request(
+      resource_context_->GetRequestContext()->CreateRequest(url, NULL));
   request->set_referrer(referrer.url.spec());
   webkit_glue::ConfigureURLRequestForReferrerPolicy(
       request.get(), referrer.policy);

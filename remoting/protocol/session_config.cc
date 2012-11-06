@@ -11,8 +11,14 @@ namespace protocol {
 
 const int kDefaultStreamVersion = 2;
 
-ChannelConfig::ChannelConfig() {
-  Reset();
+ChannelConfig ChannelConfig::None() {
+  return ChannelConfig();
+}
+
+ChannelConfig::ChannelConfig()
+    : transport(TRANSPORT_NONE),
+      version(0),
+      codec(CODEC_UNDEFINED) {
 }
 
 ChannelConfig::ChannelConfig(TransportType transport, int version, Codec codec)
@@ -22,16 +28,14 @@ ChannelConfig::ChannelConfig(TransportType transport, int version, Codec codec)
 }
 
 bool ChannelConfig::operator==(const ChannelConfig& b) const {
+  // If the transport field is set to NONE then all other fields are irrelevant.
+  if (transport == ChannelConfig::TRANSPORT_NONE)
+    return transport == b.transport;
   return transport == b.transport && version == b.version && codec == b.codec;
 }
 
-void ChannelConfig::Reset() {
-  transport = TRANSPORT_STREAM;
-  version = kDefaultStreamVersion;
-  codec = CODEC_UNDEFINED;
-}
-
 SessionConfig::SessionConfig() {
+
 }
 
 // static
@@ -163,29 +167,56 @@ scoped_ptr<CandidateSessionConfig> CandidateSessionConfig::CreateFrom(
 // static
 scoped_ptr<CandidateSessionConfig> CandidateSessionConfig::CreateDefault() {
   scoped_ptr<CandidateSessionConfig> result = CreateEmpty();
+
+  // Control channel.
+  result->mutable_control_configs()->push_back(
+      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
+                    kDefaultStreamVersion,
+                    ChannelConfig::CODEC_UNDEFINED));
   result->mutable_control_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
+                    kDefaultStreamVersion,
+                    ChannelConfig::CODEC_UNDEFINED));
+
+  // Event channel.
+  result->mutable_event_configs()->push_back(
+      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_UNDEFINED));
   result->mutable_event_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_UNDEFINED));
+
+  // Video channel.
   result->mutable_video_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_VP8));
-#if defined(ENABLE_REMOTING_AUDIO)
+
+  // Audio channel.
+  result->mutable_audio_configs()->push_back(
+      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
+                    kDefaultStreamVersion,
+                    ChannelConfig::CODEC_SPEEX));
   result->mutable_audio_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                     kDefaultStreamVersion,
-                    ChannelConfig::CODEC_VERBATIM));
-#endif  // defined(ENABLE_REMOTING_AUDIO)
+                    ChannelConfig::CODEC_SPEEX));
   result->mutable_audio_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_NONE,
+      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_VERBATIM));
+  result->mutable_audio_configs()->push_back(ChannelConfig::None());
+
   return result.Pass();
+}
+
+// static
+void CandidateSessionConfig::DisableAudioChannel(
+  CandidateSessionConfig* config) {
+  config->mutable_audio_configs()->clear();
+  config->mutable_audio_configs()->push_back(ChannelConfig());
 }
 
 }  // namespace protocol

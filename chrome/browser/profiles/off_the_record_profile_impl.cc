@@ -219,26 +219,9 @@ GAIAInfoUpdateService* OffTheRecordProfileImpl::GetGAIAInfoUpdateService() {
   return NULL;
 }
 
-HistoryService* OffTheRecordProfileImpl::GetHistoryService(
-    ServiceAccessType sat) {
-  if (sat == EXPLICIT_ACCESS)
-    return profile_->GetHistoryService(sat);
-
-  NOTREACHED() << "This profile is OffTheRecord";
-  return NULL;
-}
-
-HistoryService* OffTheRecordProfileImpl::GetHistoryServiceWithoutCreating() {
-  return profile_->GetHistoryServiceWithoutCreating();
-}
-
-FaviconService* OffTheRecordProfileImpl::GetFaviconService(
-    ServiceAccessType sat) {
-  if (sat == EXPLICIT_ACCESS)
-    return profile_->GetFaviconService(sat);
-
-  NOTREACHED() << "This profile is OffTheRecord";
-  return NULL;
+policy::UserCloudPolicyManager*
+    OffTheRecordProfileImpl::GetUserCloudPolicyManager() {
+  return profile_->GetUserCloudPolicyManager();
 }
 
 policy::PolicyService* OffTheRecordProfileImpl::GetPolicyService() {
@@ -269,7 +252,7 @@ net::URLRequestContextGetter*
     const extensions::Extension* installed_app = GetExtensionService()->
         GetInstalledAppForRenderer(renderer_child_id);
     if (installed_app != NULL && installed_app->is_storage_isolated()) {
-      return GetRequestContextForIsolatedApp(installed_app->id());
+      return GetRequestContextForStoragePartition(installed_app->id());
     }
   }
 
@@ -282,16 +265,29 @@ net::URLRequestContextGetter*
     // non-persistent context using the RPH's id.
     std::string id("guest-");
     id.append(base::IntToString(renderer_child_id));
-    return GetRequestContextForIsolatedApp(id);
+    return GetRequestContextForStoragePartition(id);
   }
 
   return GetRequestContext();
 }
 
 net::URLRequestContextGetter*
-    OffTheRecordProfileImpl::GetRequestContextForMedia() {
+    OffTheRecordProfileImpl::GetMediaRequestContext() {
   // In OTR mode, media request context is the same as the original one.
-  return io_data_.GetMainRequestContextGetter();
+  return GetRequestContext();
+}
+
+net::URLRequestContextGetter*
+    OffTheRecordProfileImpl::GetMediaRequestContextForRenderProcess(
+        int renderer_child_id) {
+  // In OTR mode, media request context is the same as the original one.
+  return GetRequestContextForRenderProcess(renderer_child_id);
+}
+
+net::URLRequestContextGetter*
+OffTheRecordProfileImpl::GetMediaRequestContextForStoragePartition(
+    const std::string& partition_id) {
+  return GetRequestContextForStoragePartition(partition_id);
 }
 
 net::URLRequestContextGetter*
@@ -300,9 +296,9 @@ net::URLRequestContextGetter*
 }
 
 net::URLRequestContextGetter*
-    OffTheRecordProfileImpl::GetRequestContextForIsolatedApp(
-        const std::string& app_id) {
-  return io_data_.GetIsolatedAppRequestContextGetter(app_id);
+    OffTheRecordProfileImpl::GetRequestContextForStoragePartition(
+        const std::string& partition_id) {
+  return io_data_.GetIsolatedAppRequestContextGetter(partition_id);
 }
 
 content::ResourceContext* OffTheRecordProfileImpl::GetResourceContext() {
@@ -319,9 +315,11 @@ HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
   profile_->GetHostContentSettingsMap();
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), true);
+#if defined(ENABLE_EXTENSIONS)
     ExtensionService* extension_service = GetExtensionService();
     if (extension_service)
       host_content_settings_map_->RegisterExtensionService(extension_service);
+#endif
   }
   return host_content_settings_map_.get();
 }
@@ -343,10 +341,6 @@ bool OffTheRecordProfileImpl::DidLastSessionExitCleanly() {
 quota::SpecialStoragePolicy*
     OffTheRecordProfileImpl::GetSpecialStoragePolicy() {
   return GetExtensionSpecialStoragePolicy();
-}
-
-BookmarkModel* OffTheRecordProfileImpl::GetBookmarkModel() {
-  return profile_->GetBookmarkModel();
 }
 
 ProtocolHandlerRegistry* OffTheRecordProfileImpl::GetProtocolHandlerRegistry() {

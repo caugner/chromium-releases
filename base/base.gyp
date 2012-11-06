@@ -122,10 +122,11 @@
             }],
           ],
           'dependencies': [
+            'base_java',
+            'base_jni_headers',
             'symbolize',
             '../third_party/ashmem/ashmem.gyp:ashmem',
             '../third_party/icu/icu.gyp:icuuc',
-            'base_jni_headers',
           ],
           'include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)/base',
@@ -140,6 +141,9 @@
           ],
           'sources!': [
             'debug/stack_trace_posix.cc',
+          ],
+          'export_dependent_settings': [
+            'base_java',
           ],
         }],
         ['os_bsd==1', {
@@ -381,6 +385,7 @@
         'debug/leak_tracker_unittest.cc',
         'debug/stack_trace_unittest.cc',
         'debug/trace_event_unittest.cc',
+        'debug/trace_event_unittest.h',
         'debug/trace_event_win_unittest.cc',
         'environment_unittest.cc',
         'file_descriptor_shuffle_unittest.cc',
@@ -402,6 +407,7 @@
         'i18n/rtl_unittest.cc',
         'i18n/string_search_unittest.cc',
         'i18n/time_formatting_unittest.cc',
+        'ios/device_util_unittest.mm',
         'json/json_parser_unittest.cc',
         'json/json_reader_unittest.cc',
         'json/json_value_converter_unittest.cc',
@@ -437,6 +443,7 @@
         'metrics/bucket_ranges_unittest.cc',
         'metrics/field_trial_unittest.cc',
         'metrics/histogram_unittest.cc',
+        'metrics/sparse_histogram_unittest.cc',
         'metrics/stats_table_unittest.cc',
         'metrics/statistics_recorder_unittest.cc',
         'observer_list_unittest.cc',
@@ -450,7 +457,6 @@
         'process_util_unittest_mac.h',
         'process_util_unittest_mac.mm',
         'profiler/tracked_time_unittest.cc',
-        'property_bag_unittest.cc',
         'rand_util_unittest.cc',
         'scoped_native_library_unittest.cc',
         'scoped_observer.h',
@@ -517,7 +523,8 @@
         'win/scoped_bstr_unittest.cc',
         'win/scoped_comptr_unittest.cc',
         'win/scoped_process_information_unittest.cc',
-        'win/scoped_startup_info_ex_unittest.cc',
+        'win/shortcut_unittest.cc',
+        'win/startup_information_unittest.cc',
         'win/scoped_variant_unittest.cc',
         'win/win_util_unittest.cc',
         'win/wrapped_window_proc_unittest.cc',
@@ -682,6 +689,17 @@
             'test/test_file_util_linux.cc',
           ],
         }],
+        ['OS=="win"', {
+          'direct_dependent_settings': {
+            'msvs_settings': {
+              'VCLinkerTool': {
+                'DelayLoadDLLs': [
+                  'propsys.dll',
+                ],
+              },
+            },
+          },
+        }],
       ],
       'sources': [
         'perftimer.cc',
@@ -714,6 +732,8 @@
         'test/test_listener_ios.mm',
         'test/test_reg_util_win.cc',
         'test/test_reg_util_win.h',
+        'test/test_shortcut_win.cc',
+        'test/test_shortcut_win.h',
         'test/test_suite.cc',
         'test/test_suite.h',
         'test/test_support_android.cc',
@@ -731,6 +751,15 @@
         'test/values_test_util.cc',
         'test/values_test_util.h',
       ],
+      'target_conditions': [
+        ['OS == "ios"', {
+          'sources/': [
+            # Pull in specific Mac files for iOS (which have been filtered out
+            # by file name rules).
+            ['include', '^test/test_file_util_mac\\.cc$'],
+          ],
+        }],
+      ],  # target_conditions
     },
     {
       'target_name': 'test_support_perf',
@@ -934,7 +963,19 @@
           'type': 'none',
           'variables': {
             'package_name': 'base',
-            'java_in_dir': 'android/java',
+            'java_in_dir': '../base/android/java',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+        {
+          'target_name': 'base_java_test_support',
+          'type': 'none',
+          'dependencies': [
+            'base_java',
+          ],
+          'variables': {
+            'package_name': 'base_javatests',
+            'java_in_dir': '../base/android/javatests',
           },
           'includes': [ '../build/java.gypi' ],
         },
@@ -974,21 +1015,8 @@
           'variables': {
             'test_suite_name': 'base_unittests',
             'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)base_unittests<(SHARED_LIB_SUFFIX)',
-            'input_jars_paths': ['<(PRODUCT_DIR)/lib.java/chromium_base.jar',],
           },
           'includes': [ '../build/apk_test.gypi' ],
-        },
-        {
-          'target_name': 'base_java_test_support',
-          'type': 'none',
-          'dependencies': [
-            'base_java',
-          ],
-          'variables': {
-            'package_name': 'base_javatests',
-            'java_in_dir': '../base/android/javatests',
-          },
-          'includes': [ '../build/java.gypi' ],
         },
       ],
     }],

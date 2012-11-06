@@ -7,6 +7,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/win/pe_image.h"
+#include "base/win/startup_information.h"
 #include "base/win/windows_version.h"
 #include "sandbox/win/src/crosscall_server.h"
 #include "sandbox/win/src/crosscall_client.h"
@@ -31,27 +32,6 @@ void CopyPolicyToTarget(const void* source, size_t size, void* dest) {
       buffer -= offset;
       policy->entry[i] = reinterpret_cast<sandbox::PolicyBuffer*>(buffer);
     }
-  }
-}
-
-// Reserve a random range at the bottom of the address space in the target
-// process to prevent predictable alocations at low addresses.
-void PoisonLowerAddressRange(HANDLE process) {
-  unsigned int limit;
-  rand_s(&limit);
-  char* ptr = 0;
-  const size_t kMask64k = 0xFFFF;
-  // Random range (512k-16.5mb) in 64k steps.
-  const char* end = ptr + ((((limit % 16384) + 512) * 1024) & ~kMask64k);
-  while (ptr < end) {
-    MEMORY_BASIC_INFORMATION memory_info;
-    if (!::VirtualQueryEx(process, ptr, &memory_info, sizeof(memory_info)))
-      break;
-    size_t size = std::min((memory_info.RegionSize + kMask64k) & ~kMask64k,
-                           static_cast<SIZE_T>(end - ptr));
-    if (ptr && memory_info.State == MEM_FREE)
-      ::VirtualAllocEx(process, ptr, size, MEM_RESERVE, PAGE_NOACCESS);
-    ptr += size;
   }
 }
 
@@ -130,27 +110,24 @@ TargetProcess::~TargetProcess() {
 // object.
 DWORD TargetProcess::Create(const wchar_t* exe_path,
                             const wchar_t* command_line,
-                            const wchar_t* desktop,
+                            const base::win::StartupInformation& startup_info,
                             base::win::ScopedProcessInformation* target_info) {
   exe_name_.reset(_wcsdup(exe_path));
 
   // the command line needs to be writable by CreateProcess().
   scoped_ptr_malloc<wchar_t> cmd_line(_wcsdup(command_line));
-  scoped_ptr_malloc<wchar_t> desktop_name(desktop ? _wcsdup(desktop) : NULL);
 
   // Start the target process suspended.
   DWORD flags =
       CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS;
 
+  if (startup_info.has_extended_startup_info())
+    flags |= EXTENDED_STARTUPINFO_PRESENT;
+
   if (base::win::GetVersion() < base::win::VERSION_WIN8) {
     // Windows 8 implements nested jobs, but for older systems we need to
     // break out of any job we're in to enforce our restrictions.
     flags |= CREATE_BREAKAWAY_FROM_JOB;
-  }
-
-  STARTUPINFO startup_info = {sizeof(STARTUPINFO)};
-  if (desktop) {
-    startup_info.lpDesktop = desktop_name.get();
   }
 
   base::win::ScopedProcessInformation process_info;
@@ -164,29 +141,27 @@ DWORD TargetProcess::Create(const wchar_t* exe_path,
                               flags,
                               NULL,   // Use the environment of the caller.
                               NULL,   // Use current directory of the caller.
-                              &startup_info,
+                              startup_info.startup_info(),
                               process_info.Receive())) {
     return ::GetLastError();
   }
   lockdown_token_.Close();
 
-  PoisonLowerAddressRange(process_info.process_handle());
-
   DWORD win_result = ERROR_SUCCESS;
 
-  // Assign the suspended target to the windows job object
+  // Assign the suspended target to the windows job object.
   if (!::AssignProcessToJobObject(job_, process_info.process_handle())) {
     win_result = ::GetLastError();
     // It might be a security breach if we let the target run outside the job
-    // so kill it before it causes damage
+    // so kill it before it causes damage.
     ::TerminateProcess(process_info.process_handle(), 0);
     return win_result;
   }
 
-  // Change the token of the main thread of the new process for the
-  // impersonation token with more rights. This allows the target to start;
-  // otherwise it will crash too early for us to help.
-  {
+  if (initial_token_.IsValid()) {
+    // Change the token of the main thread of the new process for the
+    // impersonation token with more rights. This allows the target to start;
+    // otherwise it will crash too early for us to help.
     HANDLE temp_thread = process_info.thread_handle();
     if (!::SetThreadToken(&temp_thread, initial_token_)) {
       win_result = ::GetLastError();

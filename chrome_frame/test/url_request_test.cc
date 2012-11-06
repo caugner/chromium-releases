@@ -39,10 +39,10 @@ static void AppendToStream(IStream* s, void* buffer, ULONG cb) {
 
 class MockUrlDelegate : public PluginUrlRequestDelegate {
  public:
-  MOCK_METHOD8(OnResponseStarted, void(int request_id, const char* mime_type,
+  MOCK_METHOD9(OnResponseStarted, void(int request_id, const char* mime_type,
       const char* headers, int size, base::Time last_modified,
       const std::string& redirect_url, int redirect_status,
-      const net::HostPortPair& socket_address));
+      const net::HostPortPair& socket_address, uint64 upload_size));
   MOCK_METHOD2(OnReadComplete, void(int request_id, const std::string& data));
   MOCK_METHOD2(OnResponseEnd, void(int request_id,
                                    const net::URLRequestStatus& status));
@@ -67,7 +67,8 @@ TEST(UrlmonUrlRequestTest, Simple1) {
   MockUrlDelegate mock;
   chrome_frame_test::TimedMsgLoop loop;
 
-  testing::StrictMock<MockWebServer> mock_server(1337, L"127.0.0.1",
+  testing::StrictMock<MockWebServer> mock_server(1337,
+      ASCIIToWide(chrome_frame_test::GetLocalIPv4Address()),
       chrome_frame_test::GetTestDataFolder());
   mock_server.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
 
@@ -88,7 +89,7 @@ TEST(UrlmonUrlRequestTest, Simple1) {
   testing::InSequence s;
   EXPECT_CALL(mock, OnResponseStarted(1, testing::_, testing::_, testing::_,
                                       testing::_, testing::_, testing::_,
-                                      testing::_))
+                                      testing::_, testing::_))
     .Times(1)
     .WillOnce(testing::IgnoreResult(testing::InvokeWithoutArgs(CreateFunctor(
         &request, &UrlmonUrlRequest::Read, 512))));
@@ -125,7 +126,7 @@ TEST(UrlmonUrlRequestTest, Head) {
 
   request.AddRef();
   request.Initialize(&mock, 1,  // request_id
-      "http://localhost:13337/head",
+      base::StringPrintf("http://%s:13337/head", server.host().c_str()),
       "head",
       "",      // referrer
       "",      // extra request
@@ -137,7 +138,7 @@ TEST(UrlmonUrlRequestTest, Head) {
   testing::InSequence s;
   EXPECT_CALL(mock, OnResponseStarted(1, testing::_, testing::_, testing::_,
                                       testing::_, testing::_, testing::_,
-                                      testing::_))
+                                      testing::_, testing::_))
     .Times(1)
     .WillOnce(testing::IgnoreResult(testing::InvokeWithoutArgs(CreateFunctor(
         &request, &UrlmonUrlRequest::Read, 512))));
@@ -160,7 +161,8 @@ TEST(UrlmonUrlRequestTest, UnreachableUrl) {
   base::win::ScopedCOMInitializer init_com;
   CComObjectStackEx<UrlmonUrlRequest> request;
 
-  testing::StrictMock<MockWebServer> mock_server(1337, L"127.0.0.1",
+  testing::StrictMock<MockWebServer> mock_server(1337,
+      ASCIIToWide(chrome_frame_test::GetLocalIPv4Address()),
       chrome_frame_test::GetTestDataFolder());
   mock_server.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
 
@@ -181,7 +183,7 @@ TEST(UrlmonUrlRequestTest, UnreachableUrl) {
   EXPECT_CALL(mock, OnResponseStarted(1, testing::_,
                                       testing::StartsWith("HTTP/1.1 404"),
                                       testing::_, testing::_, testing::_,
-                                      testing::_, testing::_))
+                                      testing::_, testing::_, testing::_))
     .Times(1)
     .WillOnce(QUIT_LOOP_SOON(loop, base::TimeDelta::FromSeconds(2)));
 
@@ -199,7 +201,8 @@ TEST(UrlmonUrlRequestTest, ZeroLengthResponse) {
   MockUrlDelegate mock;
   chrome_frame_test::TimedMsgLoop loop;
 
-  testing::StrictMock<MockWebServer> mock_server(1337, L"127.0.0.1",
+  testing::StrictMock<MockWebServer> mock_server(1337,
+      ASCIIToWide(chrome_frame_test::GetLocalIPv4Address()),
       chrome_frame_test::GetTestDataFolder());
   mock_server.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
 
@@ -219,7 +222,7 @@ TEST(UrlmonUrlRequestTest, ZeroLengthResponse) {
   // Expect headers
   EXPECT_CALL(mock, OnResponseStarted(1, testing::_, testing::_, testing::_,
                                       testing::_, testing::_, testing::_,
-                                      testing::_))
+                                      testing::_, testing::_))
     .Times(1)
     .WillOnce(QUIT_LOOP(loop));
 
@@ -255,7 +258,8 @@ TEST(UrlmonUrlRequestManagerTest, Simple1) {
   MockUrlDelegate mock;
   chrome_frame_test::TimedMsgLoop loop;
 
-  testing::StrictMock<MockWebServer> mock_server(1337, L"127.0.0.1",
+  testing::StrictMock<MockWebServer> mock_server(1337,
+      ASCIIToWide(chrome_frame_test::GetLocalIPv4Address()),
       chrome_frame_test::GetTestDataFolder());
   mock_server.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
 
@@ -268,7 +272,8 @@ TEST(UrlmonUrlRequestManagerTest, Simple1) {
   r1.load_flags = 0;
 
   EXPECT_CALL(mock, OnResponseStarted(1, testing::_, testing::_, testing::_,
-                             testing::_, testing::_, testing::_, testing::_))
+                             testing::_, testing::_, testing::_, testing::_,
+                             testing::_))
       .Times(1)
       .WillOnce(ManagerRead(&loop, mgr.get(), 1, 512));
 
@@ -290,7 +295,8 @@ TEST(UrlmonUrlRequestManagerTest, Abort1) {
   MockUrlDelegate mock;
   chrome_frame_test::TimedMsgLoop loop;
 
-  testing::StrictMock<MockWebServer> mock_server(1337, L"127.0.0.1",
+  testing::StrictMock<MockWebServer> mock_server(1337,
+      ASCIIToWide(chrome_frame_test::GetLocalIPv4Address()),
       chrome_frame_test::GetTestDataFolder());
   mock_server.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
 
@@ -303,7 +309,8 @@ TEST(UrlmonUrlRequestManagerTest, Abort1) {
   r1.load_flags = 0;
 
   EXPECT_CALL(mock, OnResponseStarted(1, testing::_, testing::_, testing::_,
-                               testing::_, testing::_, testing::_, testing::_))
+                               testing::_, testing::_, testing::_, testing::_,
+                               testing::_))
     .Times(1)
     .WillOnce(testing::DoAll(
         ManagerEndRequest(&loop, mgr.get(), 1),

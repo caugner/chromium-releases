@@ -131,16 +131,42 @@ class DownloadItemTest : public testing::Test {
  public:
   class MockObserver : public DownloadItem::Observer {
    public:
-    explicit MockObserver(DownloadItem* item) : item_(item), updated_(false) {
+    explicit MockObserver(DownloadItem* item)
+      : item_(item),
+        removed_(false),
+        destroyed_(false),
+        updated_(false) {
       item_->AddObserver(this);
     }
-    ~MockObserver() { item_->RemoveObserver(this); }
+
+    virtual ~MockObserver() {
+      if (item_) item_->RemoveObserver(this);
+    }
+
+    virtual void OnDownloadRemoved(DownloadItem* download) {
+      removed_ = true;
+    }
 
     virtual void OnDownloadUpdated(DownloadItem* download) {
       updated_ = true;
     }
 
-    virtual void OnDownloadOpened(DownloadItem* download) { }
+    virtual void OnDownloadOpened(DownloadItem* download) {
+    }
+
+    virtual void OnDownloadDestroyed(DownloadItem* download) {
+      destroyed_ = true;
+      item_->RemoveObserver(this);
+      item_ = NULL;
+    }
+
+    bool CheckRemoved() {
+      return removed_;
+    }
+
+    bool CheckDestroyed() {
+      return destroyed_;
+    }
 
     bool CheckUpdated() {
       bool was_updated = updated_;
@@ -150,6 +176,8 @@ class DownloadItemTest : public testing::Test {
 
    private:
     DownloadItem* item_;
+    bool removed_;
+    bool destroyed_;
     bool updated_;
   };
 
@@ -193,7 +221,7 @@ class DownloadItemTest : public testing::Test {
         new testing::NiceMock<MockRequestHandle>);
     DownloadItemImpl* download =
         new DownloadItemImpl(&delegate_, *(info_.get()),
-                             request_handle.Pass(), false, net::BoundNetLog());
+                             request_handle.Pass(), net::BoundNetLog());
     allocated_downloads_.insert(download);
     return download;
   }
@@ -302,12 +330,21 @@ TEST_F(DownloadItemTest, NotificationAfterDelete) {
   ASSERT_TRUE(observer.CheckUpdated());
 }
 
+TEST_F(DownloadItemTest, NotificationAfterDestroyed) {
+  DownloadItemImpl* item = CreateDownloadItem(DownloadItem::IN_PROGRESS);
+  MockObserver observer(item);
+
+  DestroyDownloadItem(item);
+  ASSERT_TRUE(observer.CheckDestroyed());
+}
+
 TEST_F(DownloadItemTest, NotificationAfterRemove) {
   DownloadItemImpl* item = CreateDownloadItem(DownloadItem::IN_PROGRESS);
   MockObserver observer(item);
 
   item->Remove();
   ASSERT_TRUE(observer.CheckUpdated());
+  ASSERT_TRUE(observer.CheckRemoved());
 }
 
 TEST_F(DownloadItemTest, NotificationAfterOnContentCheckCompleted) {
@@ -406,73 +443,6 @@ TEST_F(DownloadItemTest, DisplayName) {
   item->SetDisplayName(FilePath(FILE_PATH_LITERAL("new.name")));
   EXPECT_EQ(FILE_PATH_LITERAL("new.name"),
             item->GetFileNameToReportUser().value());
-}
-
-static char external_data_test_string[] = "External data test";
-static int destructor_called = 0;
-
-class TestExternalData : public DownloadItem::ExternalData {
- public:
-  int value;
-  virtual ~TestExternalData() {
-    destructor_called++;
-  }
-};
-
-TEST_F(DownloadItemTest, ExternalData) {
-  DownloadItemImpl* item = CreateDownloadItem(DownloadItem::IN_PROGRESS);
-  const DownloadItemImpl* const_item = item;
-
-  // Shouldn't be anything there before set.
-  EXPECT_EQ(NULL, item->GetExternalData(&external_data_test_string));
-  EXPECT_EQ(NULL, const_item->GetExternalData(&external_data_test_string));
-
-  TestExternalData* test1(new TestExternalData());
-  test1->value = 2;
-
-  // Should be able to get back what you set.
-  item->SetExternalData(&external_data_test_string, test1);
-  TestExternalData* test_result =
-      static_cast<TestExternalData*>(
-          item->GetExternalData(&external_data_test_string));
-  EXPECT_EQ(test1, test_result);
-
-  // Ditto for const lookup.
-  const TestExternalData* test_const_result =
-      static_cast<const TestExternalData*>(
-          const_item->GetExternalData(&external_data_test_string));
-  EXPECT_EQ(static_cast<const TestExternalData*>(test1),
-            test_const_result);
-
-  // Destructor should be called if value overwritten.  New value
-  // should then be retrievable.
-  TestExternalData* test2(new TestExternalData());
-  test2->value = 3;
-  EXPECT_EQ(0, destructor_called);
-  item->SetExternalData(&external_data_test_string, test2);
-  EXPECT_EQ(1, destructor_called);
-  EXPECT_EQ(static_cast<DownloadItem::ExternalData*>(test2),
-            item->GetExternalData(&external_data_test_string));
-
-  // Overwriting with the same value shouldn't do anything.
-  EXPECT_EQ(1, destructor_called);
-  item->SetExternalData(&external_data_test_string, test2);
-  EXPECT_EQ(1, destructor_called);
-  EXPECT_EQ(static_cast<DownloadItem::ExternalData*>(test2),
-            item->GetExternalData(&external_data_test_string));
-
-  // Overwriting with NULL should result in destruction.
-  item->SetExternalData(&external_data_test_string, NULL);
-  EXPECT_EQ(2, destructor_called);
-
-  // Destroying the download item should destroy the external data.
-
-  TestExternalData* test3(new TestExternalData());
-  item->SetExternalData(&external_data_test_string, test3);
-  EXPECT_EQ(static_cast<DownloadItem::ExternalData*>(test3),
-            item->GetExternalData(&external_data_test_string));
-  DestroyDownloadItem(item);
-  EXPECT_EQ(3, destructor_called);
 }
 
 // Test that the delegate is invoked after the download file is renamed.

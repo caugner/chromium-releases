@@ -7,16 +7,21 @@
  *
  * @param {Element} container The main DOM container.
  * @param {number} opt_timeout Hide timeout in ms.
+ * @param {function():boolean=} opt_toolsActive Function that returns |true|
+ *     if the tools are active and should not be hidden.
  * @constructor
  */
-function MouseInactivityWatcher(container, opt_timeout) {
+function MouseInactivityWatcher(container, opt_timeout, opt_toolsActive) {
   this.container_ = container;
   this.timeout_ = opt_timeout || MouseInactivityWatcher.DEFAULT_TIMEOUT;
+  this.toolsActive_ = opt_toolsActive || function() { return false };
 
   this.onTimeoutBound_ = this.onTimeout_.bind(this);
   this.timeoutID_ = null;
   this.mouseOverTool_ = false;
 
+  this.clientX_ = 0;
+  this.clientY_ = 0;
   this.container_.addEventListener('mousemove', this.onMouseMove_.bind(this));
 }
 
@@ -62,7 +67,7 @@ MouseInactivityWatcher.prototype.startActivity = function() {
  * @param {number} opt_timeout Timeout.
  */
 MouseInactivityWatcher.prototype.stopActivity = function(opt_timeout) {
-  if (this.mouseOverTool_)
+  if (this.mouseOverTool_ || this.toolsActive_())
     return;
 
   if (this.timeoutID_)
@@ -106,5 +111,6 @@ MouseInactivityWatcher.prototype.onMouseMove_ = function(e) {
  */
 MouseInactivityWatcher.prototype.onTimeout_ = function() {
   this.timeoutID_ = null;
-  this.showTools(false);
+  if (!this.toolsActive_())
+    this.showTools(false);
 };

@@ -11,13 +11,16 @@
 
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
-#include "webkit/fileapi/local_file_util.h"
+#include "webkit/fileapi/fileapi_export.h"
 #include "webkit/quota/special_storage_policy.h"
 
 namespace fileapi {
 class FileSystemFileUtil;
+class IsolatedContext;
+class LocalFileUtil;
 }
 
 namespace chromeos {
@@ -25,23 +28,20 @@ namespace chromeos {
 class FileAccessPermissions;
 
 // An interface to provide local filesystem paths.
-class CrosMountPointProvider
+class FILEAPI_EXPORT CrosMountPointProvider
     : public fileapi::ExternalFileSystemMountPointProvider {
  public:
   using fileapi::FileSystemMountPointProvider::ValidateFileSystemCallback;
   using fileapi::FileSystemMountPointProvider::DeleteFileSystemCallback;
 
-  // Mount point file system location enum.
-  enum FileSystemLocation {
-    // File system that is locally mounted by the underlying OS.
-    LOCAL,
-    // File system that is remotely hosted on the net.
-    REMOTE,
-  };
-
   CrosMountPointProvider(
       scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy);
   virtual ~CrosMountPointProvider();
+
+  // Returns true if CrosMountpointProvider can handle |url|, i.e. its
+  // file system type matches with what this provider supports.
+  // This could be called on any threads.
+  static bool CanHandleURL(const fileapi::FileSystemURL& url);
 
   // fileapi::FileSystemMountPointProvider overrides.
   virtual void ValidateFileSystemRoot(
@@ -54,18 +54,16 @@ class CrosMountPointProvider
       fileapi::FileSystemType type,
       const FilePath& virtual_path,
       bool create) OVERRIDE;
-  virtual bool IsAccessAllowed(
-      const GURL& origin_url,
-      fileapi::FileSystemType type,
-      const FilePath& virtual_path) OVERRIDE;
+  virtual bool IsAccessAllowed(const fileapi::FileSystemURL& url) OVERRIDE;
   virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
   virtual fileapi::FileSystemFileUtil* GetFileUtil(
       fileapi::FileSystemType type) OVERRIDE;
   virtual FilePath GetPathForPermissionsCheck(const FilePath& virtual_path)
       const OVERRIDE;
-  virtual fileapi::FileSystemOperationInterface* CreateFileSystemOperation(
+  virtual fileapi::FileSystemOperation* CreateFileSystemOperation(
       const fileapi::FileSystemURL& url,
-      fileapi::FileSystemContext* context) const OVERRIDE;
+      fileapi::FileSystemContext* context,
+      base::PlatformFileError* error_code) const OVERRIDE;
   virtual webkit_blob::FileStreamReader* CreateFileStreamReader(
       const fileapi::FileSystemURL& path,
       int64 offset,
@@ -91,6 +89,8 @@ class CrosMountPointProvider
       const std::string& extension_id) OVERRIDE;
   virtual bool HasMountPoint(const FilePath& mount_point) OVERRIDE;
   virtual void AddLocalMountPoint(const FilePath& mount_point) OVERRIDE;
+  virtual void AddRestrictedLocalMountPoint(
+      const FilePath& mount_point) OVERRIDE;
   virtual void AddRemoteMountPoint(
       const FilePath& mount_point,
       fileapi::RemoteFileSystemProxyInterface* remote_proxy) OVERRIDE;
@@ -99,39 +99,19 @@ class CrosMountPointProvider
                               FilePath* virtual_path) OVERRIDE;
 
  private:
-  // Representation of a mount point exposed by this external mount point
-  // provider.
-  struct MountPoint {
-    MountPoint(const FilePath& web_path,
-               const FilePath& local_path,
-               FileSystemLocation loc,
-               fileapi::RemoteFileSystemProxyInterface* proxy);
-    virtual ~MountPoint();
-    // Virtual web path, relative to external root in filesystem URLs.
-    // For example, in "filesystem://.../external/foo/bar/" this path would
-    // map to "foo/bar/".
-    const FilePath web_root_path;
-    // Parent directory for the exposed file system path. For example,
-    // mount point that exposes "/media/removable" would have this
-    // root path as "/media".
-    const FilePath local_root_path;
-    // File system location.
-    const FileSystemLocation location;
-    // Remote file system proxy for remote mount points.
-    scoped_refptr<fileapi::RemoteFileSystemProxyInterface> remote_proxy;
-  };
+  typedef scoped_refptr<fileapi::RemoteFileSystemProxyInterface> RemoteProxy;
+  typedef std::map<FilePath::StringType, RemoteProxy> RemoteProxyMap;
 
-  typedef std::map<std::string, MountPoint> MountPointMap;
+  fileapi::IsolatedContext* isolated_context() const;
 
-  // Gives the real file system's |root_path| for given |virtual_path|. Returns
-  // false when |virtual_path| cannot be mapped to the real file system.
-  bool GetRootForVirtualPath(const FilePath& virtual_path, FilePath* root_path);
-  // Returns mount point info for a given |virtual_path|, NULL if the path is
-  // not part of the mounted file systems exposed through this provider.
-  const MountPoint* GetMountPoint(const FilePath& virtual_path) const;
+  // Represents a map from mount point name to a remote proxy.
+  RemoteProxyMap remote_proxy_map_;
 
-  base::Lock mount_point_map_lock_;
-  MountPointMap mount_point_map_;
+  // Reverse map for GetVirtualPath.
+  std::map<FilePath, FilePath> local_to_virtual_map_;
+
+  mutable base::Lock mount_point_map_lock_;
+
   scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;
   scoped_ptr<FileAccessPermissions> file_access_permissions_;
   scoped_ptr<fileapi::LocalFileUtil> local_file_util_;

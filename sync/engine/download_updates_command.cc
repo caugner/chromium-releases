@@ -9,8 +9,9 @@
 #include "base/command_line.h"
 #include "sync/engine/syncer.h"
 #include "sync/engine/syncer_proto_util.h"
-#include "sync/internal_api/public/base/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type_state_map.h"
 #include "sync/syncable/directory.h"
+#include "sync/syncable/nigori_handler.h"
 #include "sync/syncable/read_transaction.h"
 
 using sync_pb::DebugInfo;
@@ -37,13 +38,14 @@ SyncerError HandleGetEncryptionKeyResponse(
     return SERVER_RESPONSE_VALIDATION_FAILED;
   }
   syncable::ReadTransaction trans(FROM_HERE, dir);
-  Cryptographer* cryptographer = dir->GetCryptographer(&trans);
-  success = cryptographer->SetKeystoreKey(
-      update_response.get_updates().encryption_key());
+  syncable::NigoriHandler* nigori_handler = dir->GetNigoriHandler();
+  success = nigori_handler->SetKeystoreKey(
+      update_response.get_updates().encryption_key(),
+      &trans);
 
   DVLOG(1) << "GetUpdates returned encryption key of length "
            << update_response.get_updates().encryption_key().length()
-           << ". Cryptographer keystore key "
+           << ". Nigori keystore key "
            << (success ? "" : "not ") << "updated.";
   return (success ? SYNCER_OK : SERVER_RESPONSE_VALIDATION_FAILED);
 }
@@ -71,7 +73,7 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
            << ModelTypeSetToString(enabled_types);
   DCHECK(!enabled_types.Empty());
 
-  const ModelTypePayloadMap& type_payload_map = session->source().types;
+  const ModelTypeStateMap& type_state_map = session->source().types;
   for (ModelTypeSet::Iterator it = enabled_types.First();
        it.Good(); it.Inc()) {
     sync_pb::DataTypeProgressMarker* progress_marker =
@@ -79,10 +81,10 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
     dir->GetDownloadProgress(it.Get(), progress_marker);
 
     // Set notification hint if present.
-    ModelTypePayloadMap::const_iterator type_payload =
-        type_payload_map.find(it.Get());
-    if (type_payload != type_payload_map.end()) {
-      progress_marker->set_notification_hint(type_payload->second);
+    ModelTypeStateMap::const_iterator type_state =
+        type_state_map.find(it.Get());
+    if (type_state != type_state_map.end()) {
+      progress_marker->set_notification_hint(type_state->second.payload);
     }
   }
 
@@ -90,9 +92,8 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
   if (session->context()->keystore_encryption_enabled()) {
     syncable::Directory* dir = session->context()->directory();
     syncable::ReadTransaction trans(FROM_HERE, dir);
-    Cryptographer* cryptographer =
-        session->context()->directory()->GetCryptographer(&trans);
-    need_encryption_key = !cryptographer->HasKeystoreKey();
+    syncable::NigoriHandler* nigori_handler = dir->GetNigoriHandler();
+    need_encryption_key = nigori_handler->NeedKeystoreKey(&trans);
     get_updates->set_need_encryption_key(need_encryption_key);
 
   }
@@ -108,15 +109,12 @@ SyncerError DownloadUpdatesCommand::ExecuteImpl(SyncSession* session) {
   get_updates->mutable_caller_info()->set_notifications_enabled(
       session->context()->notifications_enabled());
 
-  SyncerProtoUtil::SetProtocolVersion(&client_to_server_message);
-  SyncerProtoUtil::AddRequestBirthday(dir, &client_to_server_message);
-
   DebugInfo* debug_info = client_to_server_message.mutable_debug_info();
 
   AppendClientDebugInfoIfNeeded(session, debug_info);
 
   SyncerError result = SyncerProtoUtil::PostClientToServerMessage(
-      client_to_server_message,
+      &client_to_server_message,
       &update_response,
       session);
 

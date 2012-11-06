@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/message_loop_proxy.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/shared_memory.h"
 #include "base/sync_socket.h"
@@ -26,6 +26,7 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/shared_impl/dir_contents.h"
 #include "ui/gfx/size.h"
 #include "webkit/fileapi/file_system_types.h"
@@ -299,12 +300,10 @@ class PluginDelegate {
   // Provides access to the ppapi broker.
   class Broker {
    public:
-    virtual void Connect(webkit::ppapi::PPB_Broker_Impl* client) = 0;
-
     // Decrements the references to the broker.
     // When there are no more references, this renderer's dispatcher is
     // destroyed, allowing the broker to shutdown if appropriate.
-    // Callers should not reference this object after calling Disconnect.
+    // Callers should not reference this object after calling Disconnect().
     virtual void Disconnect(webkit::ppapi::PPB_Broker_Impl* client) = 0;
 
    protected:
@@ -366,6 +365,9 @@ class PluginDelegate {
   // The caller will own the pointer returned from this.
   virtual PlatformContext3D* CreateContext3D() = 0;
 
+  // Set that the context will now present to the delegate.
+  virtual void ReparentContext(PlatformContext3D*) = 0;
+
   // If |device_id| is empty, the default video capture device will be used. The
   // user can start using the returned object to capture video right away.
   // Otherwise, the specified device will be used. The user needs to wait till
@@ -404,7 +406,7 @@ class PluginDelegate {
 
   // A pointer is returned immediately, but it is not ready to be used until
   // BrokerConnected has been called.
-  // The caller is responsible for calling Release() on the returned pointer
+  // The caller is responsible for calling Disconnect() on the returned pointer
   // to clean up the corresponding resources allocated during this call.
   virtual Broker* ConnectToBroker(webkit::ppapi::PPB_Broker_Impl* client) = 0;
 
@@ -526,6 +528,10 @@ class PluginDelegate {
 
   // For PPB_UDPSocket_Private.
   virtual uint32 UDPSocketCreate() = 0;
+  virtual void UDPSocketSetBoolSocketFeature(PPB_UDPSocket_Private_Impl* socket,
+                                             uint32 socket_id,
+                                             int32_t name,
+                                             bool value) = 0;
   virtual void UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
                              uint32 socket_id,
                              const PP_NetAddress_Private& addr) = 0;
@@ -602,9 +608,6 @@ class PluginDelegate {
   // Tells the browser to bring up SaveAs dialog to save specified URL.
   virtual void SaveURLAs(const GURL& url) = 0;
 
-  // Creates P2PTransport object.
-  virtual webkit_glue::P2PTransport* CreateP2PTransport() = 0;
-
   virtual double GetLocalTimeZoneOffset(base::Time t) = 0;
 
   // Create an anonymous shared memory segment of size |size| bytes, and return
@@ -659,6 +662,9 @@ class PluginDelegate {
   // callback will be the same as the return value.
   virtual int EnumerateDevices(PP_DeviceType_Dev type,
                                const EnumerateDevicesCallback& callback) = 0;
+  // Stop enumerating devices of the specified |request_id|. The |request_id|
+  // is the return value of EnumerateDevicesCallback.
+  virtual void StopEnumerateDevices(int request_id) = 0;
   // Create a ClipboardClient for writing to the clipboard. The caller will own
   // the pointer to this.
   virtual webkit_glue::ClipboardClient* CreateClipboardClient() const = 0;

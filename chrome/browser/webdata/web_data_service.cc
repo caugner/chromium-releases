@@ -61,7 +61,7 @@ void NotifyOfMultipleAutofillChangesTask(
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_AUTOFILL_MULTIPLE_CHANGED,
-      content::Source<WebDataService>(web_data_service.get()),
+      content::Source<WebDataServiceBase>(web_data_service.get()),
       content::NotificationService::NoDetails());
 }
 
@@ -81,8 +81,7 @@ WDKeywordsResult::WDKeywordsResult()
 WDKeywordsResult::~WDKeywordsResult() {}
 
 WebDataService::WebDataService()
-    : RefcountedProfileKeyedService(BrowserThread::UI),
-      is_running_(false),
+    : is_running_(false),
       db_(NULL),
       autocomplete_syncable_service_(NULL),
       autofill_profile_syncable_service_(NULL),
@@ -138,6 +137,10 @@ void WebDataService::CancelRequest(Handle h) {
     return;
   }
   i->second->Cancel();
+}
+
+content::NotificationSource WebDataService::GetNotificationSource() {
+  return content::Source<WebDataService>(this);
 }
 
 bool WebDataService::IsDatabaseLoaded() {
@@ -332,6 +335,17 @@ void WebDataService::RemoveDefaultWebIntentService(
   ScheduleTask(FROM_HERE,
                Bind(&WebDataService::RemoveDefaultWebIntentServiceImpl, this,
                     request));
+}
+
+void WebDataService::RemoveWebIntentServiceDefaults(
+    const GURL& service_url) {
+  GenericRequest<GURL>* request =
+      new GenericRequest<GURL>(
+          this, GetNextRequestHandle(), NULL, service_url);
+  RegisterRequest(request);
+  ScheduleTask(
+      FROM_HERE,
+      Bind(&WebDataService::RemoveWebIntentServiceDefaultsImpl, this, request));
 }
 
 WebDataService::Handle WebDataService::GetDefaultWebIntentServicesForAction(
@@ -960,6 +974,17 @@ void WebDataService::RemoveDefaultWebIntentServiceImpl(
   if (db_ && !request->IsCancelled(NULL)) {
     const DefaultWebIntentService& service = request->arg();
     db_->GetWebIntentsTable()->RemoveDefaultService(service);
+    ScheduleCommit();
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveWebIntentServiceDefaultsImpl(
+    GenericRequest<GURL>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled(NULL)) {
+    const GURL& service_url = request->arg();
+    db_->GetWebIntentsTable()->RemoveServiceDefaults(service_url);
     ScheduleCommit();
   }
   request->RequestComplete();

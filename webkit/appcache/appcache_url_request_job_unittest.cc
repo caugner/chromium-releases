@@ -127,14 +127,17 @@ class AppCacheURLRequestJobTest : public testing::Test {
     bool kill_with_io_pending_;
   };
 
-  static net::URLRequestJob* MockHttpJobFactory(net::URLRequest* request,
-                                                const std::string& scheme) {
+  static net::URLRequestJob* MockHttpJobFactory(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const std::string& scheme) {
     if (mock_factory_job_) {
       net::URLRequestJob* temp = mock_factory_job_;
       mock_factory_job_ = NULL;
       return temp;
     } else {
       return new net::URLRequestErrorJob(request,
+                                         network_delegate,
                                          net::ERR_INTERNET_DISCONNECTED);
     }
   }
@@ -375,7 +378,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
 
     // Create an instance and see that it looks as expected.
 
-    job = new AppCacheURLRequestJob(&request, storage);
+    job = new AppCacheURLRequestJob(
+        &request, empty_context_.network_delegate(), storage);
     EXPECT_TRUE(job->is_waiting());
     EXPECT_FALSE(job->is_delivering_appcache_response());
     EXPECT_FALSE(job->is_delivering_network_response());
@@ -398,17 +402,20 @@ class AppCacheURLRequestJobTest : public testing::Test {
     // Create an instance, give it a delivery order and see that
     // it looks as expected.
 
-    job = new AppCacheURLRequestJob(&request, storage);
+    job = new AppCacheURLRequestJob(
+        &request, empty_context_.network_delegate(), storage);
     job->DeliverErrorResponse();
     EXPECT_TRUE(job->is_delivering_error_response());
     EXPECT_FALSE(job->has_been_started());
 
-    job = new AppCacheURLRequestJob(&request, storage);
+    job = new AppCacheURLRequestJob(
+        &request, empty_context_.network_delegate(), storage);
     job->DeliverNetworkResponse();
     EXPECT_TRUE(job->is_delivering_network_response());
     EXPECT_FALSE(job->has_been_started());
 
-    job = new AppCacheURLRequestJob(&request, storage);
+    job = new AppCacheURLRequestJob(
+        &request, empty_context_.network_delegate(), storage);
     const GURL kManifestUrl("http://blah/");
     const int64 kCacheId(1);
     const int64 kGroupId(1);
@@ -436,14 +443,13 @@ class AppCacheURLRequestJobTest : public testing::Test {
                    base::Unretained(this)));
 
     AppCacheStorage* storage = service_->storage();
-    request_.reset(
-        new net::URLRequest(GURL("http://blah/"),
-                            url_request_delegate_.get(),
-                            &empty_context_));
+    request_.reset(empty_context_.CreateRequest(
+        GURL("http://blah/"), url_request_delegate_.get()));
 
     // Setup to create an AppCacheURLRequestJob with orders to deliver
     // a network response.
-    mock_factory_job_ = new AppCacheURLRequestJob(request_.get(), storage);
+    mock_factory_job_ = new AppCacheURLRequestJob(
+        request_.get(), empty_context_.network_delegate(), storage);
     mock_factory_job_->DeliverNetworkResponse();
     EXPECT_TRUE(mock_factory_job_->is_delivering_network_response());
     EXPECT_FALSE(mock_factory_job_->has_been_started());
@@ -471,14 +477,13 @@ class AppCacheURLRequestJobTest : public testing::Test {
                    base::Unretained(this)));
 
     AppCacheStorage* storage = service_->storage();
-    request_.reset(
-        new net::URLRequest(GURL("http://blah/"),
-                            url_request_delegate_.get(),
-                            &empty_context_));
+    request_.reset(empty_context_.CreateRequest(GURL(
+        "http://blah/"), url_request_delegate_.get()));
 
     // Setup to create an AppCacheURLRequestJob with orders to deliver
     // a network response.
-    mock_factory_job_ = new AppCacheURLRequestJob(request_.get(), storage);
+    mock_factory_job_ = new AppCacheURLRequestJob(
+        request_.get(), empty_context_.network_delegate(), storage);
     mock_factory_job_->DeliverErrorResponse();
     EXPECT_TRUE(mock_factory_job_->is_delivering_error_response());
     EXPECT_FALSE(mock_factory_job_->has_been_started());
@@ -521,15 +526,13 @@ class AppCacheURLRequestJobTest : public testing::Test {
 
   void RequestAppCachedResource(bool start_after_delivery_orders) {
     AppCacheStorage* storage = service_->storage();
-    request_.reset(
-        new net::URLRequest(GURL("http://blah/"),
-                            url_request_delegate_.get(),
-                            &empty_context_));
+    request_.reset(empty_context_.CreateRequest(
+        GURL("http://blah/"), url_request_delegate_.get()));
 
     // Setup to create an AppCacheURLRequestJob with orders to deliver
     // a network response.
-    scoped_refptr<AppCacheURLRequestJob> job(
-        new AppCacheURLRequestJob(request_.get(), storage));
+    scoped_refptr<AppCacheURLRequestJob> job(new AppCacheURLRequestJob(
+        request_.get(), empty_context_.network_delegate(), storage));
 
     if (start_after_delivery_orders) {
       job->DeliverAppCachedResponse(
@@ -635,10 +638,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
 
   void MakeRangeRequest() {
     AppCacheStorage* storage = service_->storage();
-    request_.reset(
-        new net::URLRequest(GURL("http://blah/"),
-                            url_request_delegate_.get(),
-                            &empty_context_));
+    request_.reset(empty_context_.CreateRequest(
+        GURL("http://blah/"), url_request_delegate_.get()));
 
     // Request a range, the 3 middle chars out of 'Hello'
     net::HttpRequestHeaders extra_headers;
@@ -646,8 +647,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
     request_->SetExtraRequestHeaders(extra_headers);
 
     // Create job with orders to deliver an appcached entry.
-    scoped_refptr<AppCacheURLRequestJob> job(
-        new AppCacheURLRequestJob(request_.get(), storage));
+    scoped_refptr<AppCacheURLRequestJob> job(new AppCacheURLRequestJob(
+        request_.get(), empty_context_.network_delegate(), storage));
     job->DeliverAppCachedResponse(
         GURL(), 0, 111,
         AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_),

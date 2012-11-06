@@ -6,7 +6,6 @@
 
 #include <vector>
 
-#include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/chromeos/chromeos_version.h"
@@ -26,7 +25,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cryptohome/async_method_caller.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -35,7 +33,6 @@
 #include "chrome/browser/chromeos/login/user_image.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/ownership_service.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -47,10 +44,12 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "chrome/common/pref_names.h"
+#include "chromeos/cryptohome/async_method_caller.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -187,7 +186,7 @@ void RemoveUserInternal(const std::string& user_email,
 }  // namespace
 
 UserManagerImpl::UserManagerImpl()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_(new UserImageLoader)),
+    : image_loader_(new UserImageLoader(ImageDecoder::DEFAULT_CODEC)),
       logged_in_user_(NULL),
       session_started_(false),
       is_current_user_owner_(false),
@@ -202,7 +201,7 @@ UserManagerImpl::UserManagerImpl()
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   MigrateWallpaperData();
-  registrar_.Add(this, chrome::NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED,
+  registrar_.Add(this, chrome::NOTIFICATION_OWNERSHIP_STATUS_CHANGED,
       content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_ADDED,
       content::NotificationService::AllSources());
@@ -211,7 +210,7 @@ UserManagerImpl::UserManagerImpl()
 
 UserManagerImpl::~UserManagerImpl() {
   // Can't use STLDeleteElements because of the private destructor of User.
-  for (size_t i = 0; i < users_.size();++i)
+  for (size_t i = 0; i < users_.size(); ++i)
     delete users_[i];
   users_.clear();
   if (is_current_user_ephemeral_)
@@ -339,6 +338,7 @@ void UserManagerImpl::GuestUserLoggedIn() {
   is_current_user_ephemeral_ = true;
   WallpaperManager::Get()->SetInitialUserWallpaper(kGuestUser, false);
   logged_in_user_ = CreateUser(kGuestUser, /* is_ephemeral= */ true);
+  logged_in_user_->SetStubImage(User::kInvalidImageIndex);
   NotifyOnLogin();
 }
 
@@ -546,7 +546,7 @@ void UserManagerImpl::SetLoggedInUserCustomWallpaperLayout(
       GetWallpaperPathForUser(username, false).value();
   SaveWallpaperToLocalState(username, file_path, layout, User::CUSTOMIZED);
   // Load wallpaper from file.
-  WallpaperManager::Get()->OnUserSelected(username);
+  WallpaperManager::Get()->SetUserWallpaper(username);
 }
 
 void UserManagerImpl::SaveUserImageFromFile(const std::string& username,
@@ -561,7 +561,7 @@ void UserManagerImpl::SaveUserImageFromFile(const std::string& username,
 void UserManagerImpl::SaveUserImageFromProfileImage(
     const std::string& username) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!downloaded_profile_image_.empty()) {
+  if (!downloaded_profile_image_.isNull()) {
     // Profile image has already been downloaded, so save it to file right now.
     DCHECK(profile_image_url_.is_valid());
     SaveUserImageInternal(
@@ -584,13 +584,9 @@ void UserManagerImpl::Observe(int type,
                               const content::NotificationSource& source,
                               const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED:
-      BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                              base::Bind(&UserManagerImpl::CheckOwnership,
-                                         base::Unretained(this)));
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::Bind(&UserManagerImpl::RetrieveTrustedDevicePolicies,
-          base::Unretained(this)));
+    case chrome::NOTIFICATION_OWNERSHIP_STATUS_CHANGED:
+      CheckOwnership();
+      RetrieveTrustedDevicePolicies();
       break;
     case chrome::NOTIFICATION_PROFILE_ADDED:
       if (IsUserLoggedIn() && !IsLoggedInAsGuest()) {
@@ -617,13 +613,13 @@ void UserManagerImpl::OnStateChanged() {
       state != AuthError::CONNECTION_FAILED &&
       state != AuthError::SERVICE_UNAVAILABLE &&
       state != AuthError::REQUEST_CANCELED) {
-      // Invalidate OAuth token to force Gaia sign-in flow. This is needed
-      // because sign-out/sign-in solution is suggested to the user.
-      // TODO(altimofeev): this code isn't needed after crosbug.com/25978 is
-      // implemented.
-      DVLOG(1) << "Invalidate OAuth token because of a sync error.";
-      SaveUserOAuthStatus(GetLoggedInUser().email(),
-                          User::OAUTH_TOKEN_STATUS_INVALID);
+    // Invalidate OAuth token to force Gaia sign-in flow. This is needed
+    // because sign-out/sign-in solution is suggested to the user.
+    // TODO(altimofeev): this code isn't needed after crosbug.com/25978 is
+    // implemented.
+    DVLOG(1) << "Invalidate OAuth token because of a sync error.";
+    SaveUserOAuthStatus(GetLoggedInUser().email(),
+                        User::OAUTH_TOKEN_STATUS_INVALID);
   }
 }
 
@@ -674,27 +670,48 @@ bool UserManagerImpl::IsSessionStarted() const {
   return session_started_;
 }
 
-void UserManagerImpl::AddObserver(Observer* obs) {
+bool UserManagerImpl::IsEphemeralUser(const std::string& email) const {
+  // The guest and stub user always are ephemeral.
+  if (email == kGuestUser || email == kStubUser)
+    return true;
+
+  // The currently logged-in user is ephemeral iff logged in as ephemeral.
+  if (logged_in_user_ && (email == logged_in_user_->email()))
+    return is_current_user_ephemeral_;
+
+  // The owner and any users found in the persistent list are never ephemeral.
+  if (email == owner_email_  || FindUserInList(email))
+    return false;
+
+  // Any other user is ephemeral when:
+  // a) Going through the regular login flow and ephemeral users are enabled.
+  //    - or -
+  // b) The browser is restarting after a crash.
+  return AreEphemeralUsersEnabled() ||
+         (base::chromeos::IsRunningOnChromeOS() &&
+          !CommandLine::ForCurrentProcess()->
+              HasSwitch(switches::kLoginManager));
+}
+
+void UserManagerImpl::AddObserver(UserManager::Observer* obs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   observer_list_.AddObserver(obs);
 }
 
-void UserManagerImpl::RemoveObserver(Observer* obs) {
+void UserManagerImpl::RemoveObserver(UserManager::Observer* obs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   observer_list_.RemoveObserver(obs);
 }
 
-const SkBitmap& UserManagerImpl::DownloadedProfileImage() const {
+const gfx::ImageSkia& UserManagerImpl::DownloadedProfileImage() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return downloaded_profile_image_;
 }
 
 void UserManagerImpl::NotifyLocalStateChanged() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  FOR_EACH_OBSERVER(
-    Observer,
-    observer_list_,
-    LocalStateChanged(this));
+  FOR_EACH_OBSERVER(UserManager::Observer, observer_list_,
+                    LocalStateChanged(this));
 }
 
 FilePath UserManagerImpl::GetImagePathForUser(const std::string& username) {
@@ -853,29 +870,6 @@ bool UserManagerImpl::AreEphemeralUsersEnabled() const {
       !owner_email_.empty());
 }
 
-bool UserManagerImpl::IsEphemeralUser(const std::string& email) const {
-  // The guest and stub user always are ephemeral.
-  if (email == kGuestUser || email == kStubUser)
-    return true;
-
-  // The currently logged-in user is ephemeral iff logged in as ephemeral.
-  if (logged_in_user_ && (email == logged_in_user_->email()))
-    return is_current_user_ephemeral_;
-
-  // The owner and any users found in the persistent list are never ephemeral.
-  if (email == owner_email_  || FindUserInList(email))
-    return false;
-
-  // Any other user is ephemeral when:
-  // a) Going through the regular login flow and ephemeral users are enabled.
-  //    - or -
-  // b) The browser is restarting after a crash.
-  return AreEphemeralUsersEnabled() ||
-         (base::chromeos::IsRunningOnChromeOS() &&
-          !CommandLine::ForCurrentProcess()->
-              HasSwitch(switches::kLoginManager));
-}
-
 const User* UserManagerImpl::FindUserInList(const std::string& email) const {
   const UserList& users = GetUsers();
   for (UserList::const_iterator it = users.begin(); it != users.end(); ++it) {
@@ -894,10 +888,9 @@ void UserManagerImpl::NotifyOnLogin() {
 
   CrosLibrary::Get()->GetCertLibrary()->LoadKeyStore();
 
-  // Schedules current user ownership check on file thread.
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          base::Bind(&UserManagerImpl::CheckOwnership,
-                                     base::Unretained(this)));
+  // Indicate to DeviceSettingsService that the owner key may have become
+  // available.
+  DeviceSettingsService::Get()->SetUsername(logged_in_user_->email());
 }
 
 void UserManagerImpl::SetInitialUserImage(const std::string& username) {
@@ -972,7 +965,7 @@ void UserManagerImpl::SetUserImage(const std::string& username,
     DCHECK(user->image_index() != User::kInvalidImageIndex ||
            is_current_user_new_);
     bool image_changed = user->image_index() != User::kInvalidImageIndex;
-    if (!user_image.image().empty())
+    if (!user_image.image().isNull())
       user->SetImage(user_image, image_index);
     else
       user->SetStubImage(image_index);
@@ -1109,11 +1102,11 @@ bool UserManagerImpl::SaveBitmapToFile(const UserImage& user_image,
 void UserManagerImpl::InitDownloadedProfileImage() {
   DCHECK(logged_in_user_);
   DCHECK_EQ(logged_in_user_->image_index(), User::kProfileImageIndex);
-  if (downloaded_profile_image_.empty() && !logged_in_user_->image_is_stub()) {
+  if (downloaded_profile_image_.isNull() && !logged_in_user_->image_is_stub()) {
     VLOG(1) << "Profile image initialized";
     downloaded_profile_image_ = logged_in_user_->image();
     downloaded_profile_image_data_url_ =
-        web_ui_util::GetImageDataUrl(gfx::ImageSkia(downloaded_profile_image_));
+        web_ui_util::GetImageDataUrl(downloaded_profile_image_);
     profile_image_url_ = logged_in_user_->image_url();
   }
 }
@@ -1154,32 +1147,18 @@ void UserManagerImpl::DeleteUserImage(const FilePath& image_path) {
   }
 }
 
-void UserManagerImpl::UpdateOwnership(bool is_owner) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+void UserManagerImpl::UpdateOwnership(
+    DeviceSettingsService::OwnershipStatus status,
+    bool is_owner) {
+  VLOG(1) << "Current user " << (is_owner ? "is owner" : "is not owner");
 
   SetCurrentUserIsOwner(is_owner);
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_OWNERSHIP_CHECKED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
-  if (is_owner) {
-    // Also update cached value.
-    CrosSettings::Get()->SetString(kDeviceOwner, GetLoggedInUser().email());
-  }
 }
 
 void UserManagerImpl::CheckOwnership() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  bool is_owner = OwnershipService::GetSharedInstance()->IsCurrentUserOwner();
-  VLOG(1) << "Current user " << (is_owner ? "is owner" : "is not owner");
-
-  // UserManagerImpl should be accessed only on UI thread.
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
+  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
       base::Bind(&UserManagerImpl::UpdateOwnership,
-                 base::Unretained(this),
-                 is_owner));
+                 base::Unretained(this)));
 }
 
 // ProfileDownloaderDelegate override.
@@ -1258,7 +1237,7 @@ void UserManagerImpl::OnProfileDownloadSuccess(ProfileDownloader* downloader) {
     return;
 
   downloaded_profile_image_data_url_ = new_image_data_url;
-  downloaded_profile_image_ = downloader->GetProfilePicture();
+  downloaded_profile_image_ = gfx::ImageSkia(downloader->GetProfilePicture());
   profile_image_url_ = GURL(downloader->GetProfilePictureURL());
 
   if (GetLoggedInUser().image_index() == User::kProfileImageIndex) {
@@ -1270,13 +1249,10 @@ void UserManagerImpl::OnProfileDownloadSuccess(ProfileDownloader* downloader) {
     SaveUserImageFromProfileImage(GetLoggedInUser().email());
   }
 
-  // TODO(ivankr): temporary measure until UserManager is fully migrated
-  // to use ImageSkia instead of SkBitmap.
-  gfx::ImageSkia profile_image(downloaded_profile_image_);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PROFILE_IMAGE_UPDATED,
       content::Source<UserManagerImpl>(this),
-      content::Details<const gfx::ImageSkia>(&profile_image));
+      content::Details<const gfx::ImageSkia>(&downloaded_profile_image_));
 }
 
 void UserManagerImpl::OnProfileDownloadFailure(ProfileDownloader* downloader) {
@@ -1327,6 +1303,14 @@ void UserManagerImpl::RemoveUserFromListInternal(const std::string& email) {
                                                kUserWallpapersProperties);
   prefs_wallpapers_update->RemoveWithoutPathExpansion(email, NULL);
 
+  bool new_wallpaper_ui_disabled = CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kDisableNewWallpaperUI);
+  if (!new_wallpaper_ui_disabled) {
+    DictionaryPrefUpdate prefs_wallpapers_info_update(prefs,
+        prefs::kUsersWallpaperInfo);
+    prefs_wallpapers_info_update->RemoveWithoutPathExpansion(email, NULL);
+  }
+
   // Remove user wallpaper thumbnail
   FilePath wallpaper_thumb_path = WallpaperManager::Get()->
       GetWallpaperPathForUser(email, true);
@@ -1345,6 +1329,14 @@ void UserManagerImpl::RemoveUserFromListInternal(const std::string& email) {
       base::Bind(&UserManagerImpl::DeleteUserImage,
                  base::Unretained(this),
                  wallpaper_path));
+  FilePath wallpaper_original_path = WallpaperManager::Get()->
+      GetOriginalWallpaperPathForUser(email);
+  BrowserThread::PostTask(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UserManagerImpl::DeleteUserImage,
+                 base::Unretained(this),
+                 wallpaper_original_path));
 
   DictionaryPrefUpdate prefs_images_update(prefs, kUserImages);
   std::string image_path_string;

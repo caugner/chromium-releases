@@ -18,14 +18,15 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/metro.h"
+#include "base/win/text_services_message_filter.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/browser_util_win.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/media_gallery/media_device_notifications_window_win.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
-#include "chrome/browser/profiles/profile_shortcut_manager_win.h"
+#include "chrome/browser/profiles/profile_shortcut_manager.h"
+#include "chrome/browser/system_monitor/removable_device_notifications_window_win.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/common/chrome_constants.h"
@@ -132,11 +133,7 @@ int DoUninstallTasks(bool chrome_still_running) {
             dist, ShellUtil::CURRENT_USER, ShellUtil::SHORTCUT_NO_OPTIONS)) {
       VLOG(1) << "Failed to delete desktop shortcut.";
     }
-    if (!ShellUtil::RemoveChromeDesktopShortcutsWithAppendedNames(
-        ProfileShortcutManagerWin::GenerateShortcutsFromProfiles(
-            ProfileInfoCache::GetProfileNames()))) {
-      VLOG(1) << "Failed to delete desktop profiles shortcuts.";
-    }
+    // TODO(rlp): Cleanup profiles shortcuts.
     if (!ShellUtil::RemoveChromeQuickLaunchShortcut(dist,
                                                     ShellUtil::CURRENT_USER)) {
       VLOG(1) << "Failed to delete quick launch shortcut.";
@@ -160,11 +157,14 @@ ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
     GetMetroSwitches metro_switches_proc = reinterpret_cast<GetMetroSwitches>(
         GetProcAddress(base::win::GetMetroModule(),
                        "GetMetroCommandLineSwitches"));
-    string16 metro_switches = (*metro_switches_proc)();
-    if (!metro_switches.empty()) {
-      CommandLine extra_switches(CommandLine::NO_PROGRAM);
-      extra_switches.ParseFromString(metro_switches);
-      CommandLine::ForCurrentProcess()->AppendArguments(extra_switches, false);
+    if (metro_switches_proc) {
+      string16 metro_switches = (*metro_switches_proc)();
+      if (!metro_switches.empty()) {
+        CommandLine extra_switches(CommandLine::NO_PROGRAM);
+        extra_switches.ParseFromString(metro_switches);
+        CommandLine::ForCurrentProcess()->AppendArguments(extra_switches,
+                                                          false);
+      }
     }
   }
 }
@@ -188,8 +188,29 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
     // Make sure that we know how to handle exceptions from the message loop.
     InitializeWindowProcExceptions();
   }
-  media_device_notifications_window_ =
-    new chrome::MediaDeviceNotificationsWindowWin();
+  removable_device_notifications_window_ =
+      new chrome::RemovableDeviceNotificationsWindowWin();
+}
+
+void ChromeBrowserMainPartsWin::PostMainMessageLoopStart() {
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+
+  if (base::win::IsTsfAwareRequired()) {
+    // Create a TSF message filter for the message loop. MessageLoop takes
+    // ownership of the filter.
+    scoped_ptr<base::win::TextServicesMessageFilter> tsf_message_filter(
+      new base::win::TextServicesMessageFilter);
+    if (tsf_message_filter->Init()) {
+      MessageLoopForUI::current()->SetMessageFilter(
+        tsf_message_filter.PassAs<MessageLoopForUI::MessageFilter>());
+    }
+  }
+}
+
+void ChromeBrowserMainPartsWin::PreMainMessageLoopRun() {
+  ChromeBrowserMainParts::PreMainMessageLoopRun();
+
+  removable_device_notifications_window_->Init();
 }
 
 // static
@@ -308,18 +329,28 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
     std::wstring exe = exe_path.value();
     FilePath user_exe_path(installer::GetChromeInstallPath(false, dist));
     if (FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
-      const string16 text =
-          l10n_util::GetStringUTF16(IDS_MACHINE_LEVEL_INSTALL_CONFLICT);
-      const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-      const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
-      ui::MessageBox(NULL, text, caption, flags);
+      bool is_metro = base::win::IsMetroProcess();
+      if (!is_metro) {
+        // The dialog cannot be shown in Win8 Metro as doing so hangs Chrome on
+        // an invisible dialog.
+        // TODO (gab): Get rid of this dialog altogether and auto-launch
+        // system-level Chrome instead.
+        const string16 text =
+            l10n_util::GetStringUTF16(IDS_MACHINE_LEVEL_INSTALL_CONFLICT);
+        const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+        const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
+        ui::MessageBox(NULL, text, caption, flags);
+      }
       CommandLine uninstall_cmd(
           InstallUtil::GetChromeUninstallCmd(false, dist->GetType()));
       if (!uninstall_cmd.GetProgram().empty()) {
         uninstall_cmd.AppendSwitch(installer::switches::kForceUninstall);
         uninstall_cmd.AppendSwitch(
             installer::switches::kDoNotRemoveSharedItems);
-        base::LaunchProcess(uninstall_cmd, base::LaunchOptions(), NULL);
+        base::LaunchOptions launch_options;
+        if (is_metro)
+          launch_options.force_breakaway_from_job_ = true;
+        base::LaunchProcess(uninstall_cmd, launch_options, NULL);
       }
       return true;
     }

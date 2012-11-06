@@ -786,115 +786,70 @@ class PpbNetAddressPrivateRpcClient {
   void operator=(const PpbNetAddressPrivateRpcClient);
 };  // class PpbNetAddressPrivateRpcClient
 
-class PpbPdfRpcClient {
+class PpbNetworkListPrivateClient {
  public:
-  static NaClSrpcError PPB_PDF_GetLocalizedString(
+  static NaClSrpcError PPB_NetworkList_Private_IsNetworkList(
       NaClSrpcChannel* channel,
-      PP_Instance instance,
-      int32_t string_id,
-      nacl_abi_size_t* string_bytes, char* string);
-  static NaClSrpcError PPB_PDF_GetResourceImage(
+      PP_Resource resource,
+      int32_t* out_bool);
+  static NaClSrpcError PPB_NetworkList_Private_GetCount(
       NaClSrpcChannel* channel,
-      PP_Instance instance,
-      int32_t image_id,
-      PP_Resource* image);
-  static NaClSrpcError PPB_PDF_GetFontFileWithFallback(
-      NaClSrpcChannel* channel,
-      PP_Instance instance,
-      nacl_abi_size_t description_bytes, char* description,
-      nacl_abi_size_t face_bytes, char* face,
-      int32_t charset,
-      PP_Resource* font);
-  static NaClSrpcError PPB_PDF_GetFontTableForPrivateFontFile(
-      NaClSrpcChannel* channel,
-      PP_Resource font_file,
-      int32_t table,
-      nacl_abi_size_t* output_bytes, char* output,
-      int32_t* success);
-  static NaClSrpcError PPB_PDF_SearchString(
-      NaClSrpcChannel* channel,
-      PP_Instance instance,
-      nacl_abi_size_t string_bytes, char* string,
-      nacl_abi_size_t term_bytes, char* term,
-      int32_t case_sensitive,
-      nacl_abi_size_t* results_bytes, char* results,
+      PP_Resource resource,
       int32_t* count);
-  static NaClSrpcError PPB_PDF_DidStartLoading(
+  static NaClSrpcError PPB_NetworkList_Private_GetName(
       NaClSrpcChannel* channel,
-      PP_Instance instance);
-  static NaClSrpcError PPB_PDF_DidStopLoading(
+      PP_Resource resource,
+      int32_t index,
+      nacl_abi_size_t* name_bytes, char* name);
+  static NaClSrpcError PPB_NetworkList_Private_GetType(
       NaClSrpcChannel* channel,
-      PP_Instance instance);
-  static NaClSrpcError PPB_PDF_SetContentRestriction(
+      PP_Resource resource,
+      int32_t index,
+      int32_t* type);
+  static NaClSrpcError PPB_NetworkList_Private_GetState(
       NaClSrpcChannel* channel,
-      PP_Instance instance,
-      int32_t restrictions);
-  static NaClSrpcError PPB_PDF_HistogramPDFPageCount(
+      PP_Resource resource,
+      int32_t index,
+      int32_t* state);
+  static NaClSrpcError PPB_NetworkList_Private_GetIpAddresses(
       NaClSrpcChannel* channel,
-      int32_t count);
-  static NaClSrpcError PPB_PDF_UserMetricsRecordAction(
+      PP_Resource resource,
+      int32_t index,
+      nacl_abi_size_t* addr_bytes, char* addr,
+      int32_t* addresses_count);
+  static NaClSrpcError PPB_NetworkList_Private_GetDisplayName(
       NaClSrpcChannel* channel,
-      nacl_abi_size_t action_bytes, char* action);
-  static NaClSrpcError PPB_PDF_HasUnsupportedFeature(
+      PP_Resource resource,
+      int32_t index,
+      nacl_abi_size_t* display_name_bytes, char* display_name);
+  static NaClSrpcError PPB_NetworkList_Private_GetMTU(
       NaClSrpcChannel* channel,
-      PP_Instance instance);
-  static NaClSrpcError PPB_PDF_SaveAs(
-      NaClSrpcChannel* channel,
-      PP_Instance instance);
+      PP_Resource resource,
+      int32_t index,
+      int32_t* mtu);
 
  private:
-  PpbPdfRpcClient();
-  PpbPdfRpcClient(const PpbPdfRpcClient&);
-  void operator=(const PpbPdfRpcClient);
-};  // class PpbPdfRpcClient
+  PpbNetworkListPrivateClient();
+  PpbNetworkListPrivateClient(const PpbNetworkListPrivateClient&);
+  void operator=(const PpbNetworkListPrivateClient);
+};  // class PpbNetworkListPrivateClient
 
-class PpbScrollbarRpcClient {
+class PpbNetworkMonitorPrivateClient {
  public:
-  static NaClSrpcError PPB_Scrollbar_Create(
+  static NaClSrpcError PPB_NetworkMonitor_Private_Create(
       NaClSrpcChannel* channel,
       PP_Instance instance,
-      int32_t vertical,
-      PP_Resource* scrollbar);
-  static NaClSrpcError PPB_Scrollbar_IsScrollbar(
+      PP_Resource* out_resource);
+  static NaClSrpcError PPB_NetworkMonitor_Private_IsNetworkMonitor(
       NaClSrpcChannel* channel,
       PP_Resource resource,
-      int32_t* is_scrollbar);
-  static NaClSrpcError PPB_Scrollbar_IsOverlay(
-      NaClSrpcChannel* channel,
-      PP_Resource resource,
-      int32_t* is_overlay);
-  static NaClSrpcError PPB_Scrollbar_GetThickness(
-      NaClSrpcChannel* channel,
-      PP_Resource resource,
-      int32_t* thickness);
-  static NaClSrpcError PPB_Scrollbar_GetValue(
-      NaClSrpcChannel* channel,
-      PP_Resource scrollbar,
-      int32_t* value);
-  static NaClSrpcError PPB_Scrollbar_SetValue(
-      NaClSrpcChannel* channel,
-      PP_Resource scrollbar,
-      int32_t value);
-  static NaClSrpcError PPB_Scrollbar_SetDocumentSize(
-      NaClSrpcChannel* channel,
-      PP_Resource scrollbar,
-      int32_t size);
-  static NaClSrpcError PPB_Scrollbar_SetTickMarks(
-      NaClSrpcChannel* channel,
-      PP_Resource scrollbar,
-      nacl_abi_size_t tick_marks_bytes, char* tick_marks,
-      int32_t count);
-  static NaClSrpcError PPB_Scrollbar_ScrollBy(
-      NaClSrpcChannel* channel,
-      PP_Resource scrollbar,
-      int32_t unit,
-      int32_t multiplier);
+      int32_t* out_bool);
 
  private:
-  PpbScrollbarRpcClient();
-  PpbScrollbarRpcClient(const PpbScrollbarRpcClient&);
-  void operator=(const PpbScrollbarRpcClient);
-};  // class PpbScrollbarRpcClient
+  PpbNetworkMonitorPrivateClient();
+  PpbNetworkMonitorPrivateClient(const PpbNetworkMonitorPrivateClient&);
+  void operator=(const PpbNetworkMonitorPrivateClient);
+};  // class PpbNetworkMonitorPrivateClient
 
 class PpbTCPServerSocketPrivateRpcClient {
  public:
@@ -1037,6 +992,12 @@ class PpbUDPSocketPrivateRpcClient {
       NaClSrpcChannel* channel,
       PP_Resource resource_id,
       int32_t* is_udp_socket_private);
+  static NaClSrpcError PPB_UDPSocket_Private_SetSocketFeature(
+      NaClSrpcChannel* channel,
+      PP_Resource udp_socket,
+      int32_t name,
+      nacl_abi_size_t value_bytes, char* value,
+      int32_t* pp_error);
   static NaClSrpcError PPB_UDPSocket_Private_Bind(
       NaClSrpcChannel* channel,
       PP_Resource udp_socket,
@@ -1269,39 +1230,6 @@ class PpbWebSocketRpcClient {
   PpbWebSocketRpcClient(const PpbWebSocketRpcClient&);
   void operator=(const PpbWebSocketRpcClient);
 };  // class PpbWebSocketRpcClient
-
-class PpbWidgetRpcClient {
- public:
-  static NaClSrpcError PPB_Widget_IsWidget(
-      NaClSrpcChannel* channel,
-      PP_Resource resource,
-      int32_t* is_widget);
-  static NaClSrpcError PPB_Widget_Paint(
-      NaClSrpcChannel* channel,
-      PP_Resource widget,
-      nacl_abi_size_t rect_bytes, char* rect,
-      PP_Resource image,
-      int32_t* success);
-  static NaClSrpcError PPB_Widget_HandleEvent(
-      NaClSrpcChannel* channel,
-      PP_Resource widget,
-      PP_Resource event,
-      int32_t* handled);
-  static NaClSrpcError PPB_Widget_GetLocation(
-      NaClSrpcChannel* channel,
-      PP_Resource widget,
-      nacl_abi_size_t* location_bytes, char* location,
-      int32_t* visible);
-  static NaClSrpcError PPB_Widget_SetLocation(
-      NaClSrpcChannel* channel,
-      PP_Resource widget,
-      nacl_abi_size_t location_bytes, char* location);
-
- private:
-  PpbWidgetRpcClient();
-  PpbWidgetRpcClient(const PpbWidgetRpcClient&);
-  void operator=(const PpbWidgetRpcClient);
-};  // class PpbWidgetRpcClient
 
 class PpbZoomRpcClient {
  public:

@@ -24,6 +24,7 @@
 #include "net/base/net_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
@@ -110,13 +111,13 @@ class FileSystemURLRequestJobTest : public testing::Test {
     // Make delegate_ exit the MessageLoop when the request is done.
     delegate_->set_quit_on_complete(true);
     delegate_->set_quit_on_redirect(true);
-    request_.reset(
-        new net::URLRequest(url, delegate_.get(), &empty_context_));
+    request_.reset(empty_context_.CreateRequest(url, delegate_.get()));
     if (headers)
       request_->SetExtraRequestHeaders(*headers);
     ASSERT_TRUE(!job_);
     job_ = new FileSystemURLRequestJob(
         request_.get(),
+        empty_context_.network_delegate(),
         file_system_context_.get());
     pending_job_ = job_;
 
@@ -188,6 +189,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
 
   static net::URLRequestJob* FileSystemURLRequestJobFactory(
       net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
       const std::string& scheme) {
     DCHECK(job_);
     net::URLRequestJob* temp = job_;

@@ -41,7 +41,7 @@ const double kRatingTextSize = 12.1;  // 12.1px = 9pt @ 96dpi
 // Adds a Skia image as an icon control to the given container.
 void AddResourceIcon(const gfx::ImageSkia* icon, void* data) {
   GtkWidget* container = static_cast<GtkWidget*>(data);
-  GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(*icon);
+  GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(*icon->bitmap());
   GtkWidget* icon_widget = gtk_image_new_from_pixbuf(icon_pixbuf);
   g_object_unref(icon_pixbuf);
   gtk_box_pack_start(GTK_BOX(container), icon_widget, FALSE, FALSE, 0);
@@ -84,7 +84,7 @@ class ExtensionInstallDialog {
  public:
   ExtensionInstallDialog(gfx::NativeWindow parent,
                          content::PageNavigator* navigator,
-                         ExtensionInstallPrompt::Delegate *delegate,
+                         ExtensionInstallPrompt::Delegate* delegate,
                          const ExtensionInstallPrompt::Prompt& prompt);
  private:
   ~ExtensionInstallDialog();
@@ -151,11 +151,16 @@ ExtensionInstallDialog::ExtensionInstallDialog(
   GtkWidget* top_content_hbox = gtk_hbox_new(FALSE, ui::kContentAreaSpacing);
   gtk_box_pack_start(GTK_BOX(content_vbox), top_content_hbox, TRUE, TRUE, 0);
 
+  // We don't show the image for bunle installs, so let the left column take up
+  // that space.
+  const int left_column_min_width =
+      kLeftColumnMinWidth + (is_bundle_install ? kImageSize : 0);
+
   // Create a new vbox for the left column.
   GtkWidget* left_column_area = gtk_vbox_new(FALSE, ui::kControlSpacing);
   gtk_box_pack_start(GTK_BOX(top_content_hbox), left_column_area,
                      TRUE, TRUE, 0);
-  gtk_widget_set_size_request(left_column_area, kLeftColumnMinWidth, -1);
+  gtk_widget_set_size_request(left_column_area, left_column_min_width, -1);
 
   GtkWidget* heading_vbox = gtk_vbox_new(FALSE, 0);
   // If we are not going to show anything else, vertically center the title.
@@ -167,8 +172,7 @@ ExtensionInstallDialog::ExtensionInstallDialog(
   // Heading
   GtkWidget* heading_label = gtk_util::CreateBoldLabel(
       UTF16ToUTF8(prompt.GetHeading().c_str()));
-  gtk_label_set_line_wrap(GTK_LABEL(heading_label), true);
-  gtk_misc_set_alignment(GTK_MISC(heading_label), 0.0, 0.5);
+  gtk_util::SetLabelWidth(heading_label, left_column_min_width);
   gtk_box_pack_start(GTK_BOX(heading_vbox), heading_label, center_heading,
                      center_heading, 0);
 
@@ -186,7 +190,7 @@ ExtensionInstallDialog::ExtensionInstallDialog(
     // User count.
     GtkWidget* users_label = gtk_label_new(UTF16ToUTF8(
         prompt.GetUserCount()).c_str());
-    gtk_util::SetLabelWidth(users_label, kLeftColumnMinWidth);
+    gtk_util::SetLabelWidth(users_label, left_column_min_width);
     gtk_util::SetLabelColor(users_label, &ui::kGdkGray);
     gtk_util::ForceFontSizePixels(rating_label, kRatingTextSize);
     gtk_box_pack_start(GTK_BOX(heading_vbox), users_label,
@@ -215,7 +219,7 @@ ExtensionInstallDialog::ExtensionInstallDialog(
     for (size_t i = 0; i < items.size(); ++i) {
       GtkWidget* extension_label = gtk_label_new(UTF16ToUTF8(
           items[i].GetNameForDisplay()).c_str());
-      gtk_util::SetLabelWidth(extension_label, kLeftColumnMinWidth);
+      gtk_util::SetLabelWidth(extension_label, left_column_min_width);
       gtk_box_pack_start(GTK_BOX(extensions_vbox), extension_label,
                          FALSE, FALSE, kExtensionsPadding);
     }
@@ -252,14 +256,15 @@ ExtensionInstallDialog::ExtensionInstallDialog(
 
     GtkWidget* permissions_header = gtk_util::CreateBoldLabel(
         UTF16ToUTF8(prompt.GetPermissionsHeading()).c_str());
-    gtk_util::SetLabelWidth(permissions_header, kLeftColumnMinWidth);
+    gtk_util::SetLabelWidth(permissions_header, left_column_min_width);
     gtk_box_pack_start(GTK_BOX(permissions_container), permissions_header,
                        FALSE, FALSE, 0);
 
     for (size_t i = 0; i < prompt.GetPermissionCount(); ++i) {
-      GtkWidget* permission_label = gtk_label_new(UTF16ToUTF8(
-          prompt.GetPermission(i)).c_str());
-      gtk_util::SetLabelWidth(permission_label, kLeftColumnMinWidth);
+      std::string permission = l10n_util::GetStringFUTF8(
+          IDS_EXTENSION_PERMISSION_LINE, prompt.GetPermission(i));
+      GtkWidget* permission_label = gtk_label_new(permission.c_str());
+      gtk_util::SetLabelWidth(permission_label, left_column_min_width);
       gtk_box_pack_start(GTK_BOX(permissions_container), permission_label,
                          FALSE, FALSE, kPermissionsPadding);
     }
@@ -271,7 +276,7 @@ ExtensionInstallDialog::ExtensionInstallDialog(
     // the permissions usually go.
     GtkWidget* oauth_issues_container =
         show_permissions ? content_vbox : left_column_area;
-    int pixel_width = kLeftColumnMinWidth +
+    int pixel_width = left_column_min_width +
         (show_permissions ? kImageSize : 0);
 
     GtkWidget* oauth_issues_header = gtk_util::CreateBoldLabel(

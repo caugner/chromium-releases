@@ -81,6 +81,7 @@
 <translation id="5564962323737505851">設定密碼管理員。如果已啟用密碼管理員，那麼您就能選擇是否要允許使用者以純文字顯示儲存密碼。</translation>
 <translation id="4668325077104657568">預設圖片設定</translation>
 <translation id="7161193985878519056">無痕模式已停用。</translation>
+<translation id="2524379983318108884">允許擷取音訊</translation>
 <translation id="4492287494009043413">停用螢幕畫面擷取功能</translation>
 <translation id="6368403635025849609">允許這些網站的 JavaScript</translation>
 <translation id="6074963268421707432">不允許任何網站顯示桌面通知</translation>
@@ -148,19 +149,13 @@
       已知部分網路應用程式會耗用許多連線來處理停滯的 GET 動作，如果調降後的值低於 32，開啟太多這類網路應用程式時可能會導致瀏覽器網路當機。請自行承擔低於預設值的風險。
 
       如果您未設定這項政策，系統將採用 32 做為預設值。</translation>
+<translation id="5395271912574071439">連線狀態下啟用遠端存取主機遮幕。
+
+          如果您啟用這項設定，在遠端連線進行時，兩台主機的實體輸入與輸出裝置均會停用。
+
+          如果這個選項設定為停用或並未做任何設定，則在共用主機時，本機與遠端使用者皆可操作主機。</translation>
 <translation id="2312509925391670075">每當有任何網站要使用我的攝影機和/或麥克風時詢問我</translation>
 <translation id="1426410128494586442">是</translation>
-<translation id="1692788808502061374">允許您指定要以無訊息方式安裝不需與使用者互動的擴充功能清單。
-
-          每個清單項目都是一條字串，包含以分號間隔的一個擴充功能 ID 和一個更新網址 (<ph name="SEMICOLON"/>)。在開發人員模式下，可以在 <ph name="CHROME_EXTENSIONS_LINK"/> 等地方找到擴充功能 ID，由 32 個字母組成的字串。更新網址會指向更新資訊清單 XML 文件，如 <ph name="LINK_TO_EXTENSION_DOC1"/> 所述。
-
-          <ph name="PRODUCT_NAME"/> 會從指定更新網址的更新服務，為每個項目擷取擴充功能 ID 指定的擴充功能，並以無訊息方式加以安裝。
-
-          舉例來說，<ph name="EXTENSION_POLICY_EXAMPLE"/> 從標準 Chrome 線上應用程式商店更新網址安裝 <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> 擴充功能。如要進一步瞭解如何管理擴充功能，請參閱：<ph name="LINK_TO_EXTENSION_DOC2"/>。
-
-          使用者無法自行解除安裝這項政策所指定的擴充功能。如果您從這份清單移除擴充功能，則 <ph name="PRODUCT_NAME"/> 會自動解除安裝該擴充功能。
-
-          如果未設定這項政策，使用者即可解除安裝 <ph name="PRODUCT_NAME"/> 中的任何擴充功能。</translation>
 <translation id="4962195944157514011">指定執行預設搜尋時使用的搜尋引擎網址。網址應包含「<ph name="SEARCH_TERM_MARKER"/>」字串，使用者搜尋時輸入的文字會取代這條字串。啟用「DefaultSearchProviderEnabled」政策時，則必須設定這個選項，並且只有在這個情況下，系統才會遵循這項政策。</translation>
 <translation id="6009903244351574348">允許「<ph name="PRODUCT_FRAME_NAME"/>」處理列出的內容類型。如果未設定這項政策，所有網站都會使用「ChromeFrameRendererSettings」政策指定的預設轉譯器。</translation>
 <translation id="3381968327636295719">根據預設使用主機瀏覽器</translation>
@@ -196,6 +191,13 @@
 <translation id="7003334574344702284">如果啟用這項政策，則會強制從之前的預設瀏覽器匯入儲存的密碼，並影響匯入對話方塊。如果停用這項政策，則不會匯入儲存的密碼。如果未設定這項政策，系統會自動匯入儲存的密碼，或詢問使用者是否要匯入儲存的密碼。</translation>
 <translation id="6258193603492867656">指定產生的 Kerberos SPN 是否應該包含非標準的通訊埠。如果您啟用這項設定並輸入非標準通訊埠 (例如 80 或 443 之外的通訊埠)，那麼產生的 Kerberos SPN 就會包含該通訊埠。如果您停用或未調整這項設定，那麼不論在任何情況下，產生的 Kerberos SPN 都不會包含通訊埠。</translation>
 <translation id="3236046242843493070">允許安裝擴充功能、應用程式和使用者指令碼的來源網址模式清單</translation>
+<translation id="3442095178490656861">指定裝置上所使用的時區。使用者可以為目前工作階段覆寫指定時區；不過登出後，系統將會恢復原本指定的時區。若提供無效值，系統會以「GMT」為時區並依舊啟用政策。
+
+      如果不啟用這項政策，系統雖仍會套用目前作用中的時區，但這時使用者不僅可變更時區，且變更將永久有效；這也意味著某個使用者所做的變更將會影響登入畫面與其他使用者。
+
+      新裝置一開始的時區預設為「美國/太平洋」。
+
+      時區值格式均依照「時區信息資料庫」中訂定的時區名稱所設 (請參閱：「http://en.wikipedia.org/wiki/List_of_tz_database_time」)。具體上，大部分時區均是依照「洲/大城市」或「洋/大城市」的格式定名。</translation>
 <translation id="8992176907758534924">不允許任何網站顯示圖片</translation>
 <translation id="262740370354162807">啟用「<ph name="CLOUD_PRINT_NAME"/>」文件提交功能</translation>
 <translation id="8704831857353097849">停用的外掛程式清單</translation>
@@ -253,6 +255,7 @@
 
       如果未設定這項政策，使用者就可以變更啟動器中的固定應用程式清單。</translation>
 <translation id="7625444193696794922">指定裝置的固定發佈頻道。</translation>
+<translation id="2552966063069741410">時區</translation>
 <translation id="3088288048720661397">如果您設為「Ture」，就會在使用行動網路連線時停用 Google 文件同步功能。這種情形下，系統只有在連上 Wi-Fi 或乙太網路連線時才會將資料同步處理至 Google 文件。
 
           如果您設為「False」或未設定，使用者即可透過行動網路連線將檔案傳輸至 Google 文件。</translation>
@@ -322,6 +325,7 @@
 <translation id="6392973646875039351">啟用「<ph name="PRODUCT_NAME"/>」的「自動填入」功能，並允許使用者使用先前儲存的地址或信用卡資料等資訊自動填寫網路表單。如果您停用這項設定，使用者就無法使用「自動填入」功能。如果您啟用這項設定或未設定任何值，使用者就能掌控「自動填入」功能。這允許使用者設定「自動填入」設定檔，並可自行決定是否要開啟「自動填入」功能。</translation>
 <translation id="6157537876488211233">以逗號間隔的 Proxy 略過規則清單</translation>
 <translation id="3965339130942650562">逾時直到閒置使用者登出</translation>
+<translation id="5293547923319914979">啟用遠端存取主機遮幕</translation>
 <translation id="7091198954851103976">一律執行需要驗證的外掛程式</translation>
 <translation id="2021307518684405078">不允許任何網站使用我的攝影機和麥克風</translation>
 <translation id="8870318296973696995">首頁</translation>
@@ -346,6 +350,13 @@
 <translation id="8469342921412620373">啟用預設搜尋引擎。如果您啟用這項設定，每當使用者在網址列中輸入文字而非網址時，系統就會執行預設搜尋。如要指定要使用的預設搜尋引擎，請設定其他預設搜尋政策。如未填寫這些欄位，使用者就能選擇預設引擎。如果您停用這項設定，那麼當使用者在網址列中輸入文字而非網址時就不會執行搜尋。不論您啟用或停用這項設定，使用者都無法在「<ph name="PRODUCT_NAME"/>」中變更或覆寫這項設定。如果未設定這項政策，系統會啟用預設搜尋引擎，且使用者可以設定搜尋引擎清單。</translation>
 <translation id="8731693562790917685">內容設定允許您指定特定內容型類 (例如，Cookie、圖片或 JavaScript) 的處理方式。</translation>
 <translation id="2411919772666155530">封鎖這些網站的通知</translation>
+<translation id="5281259077246025371">允許擷取音訊。
+
+      如果這項政策設定為「False」，使用者登入時將無法透過裝置擷取音訊。
+
+      這項政策會影響包括內建麥克風在內，所有類型的音訊輸入設備。
+
+      如果這個選項設定為「True」或並未做任何設定，使用者即可在自己的裝置上使用所有受支援的音訊輸入設備。</translation>
 <translation id="6923366716660828830">指定預設搜尋引擎名稱。如果名稱欄位留空或未設定，系統會使用搜尋網址指定的主機名稱。只有在啟用「DefaultSearchProviderEnabled」政策時，系統才會遵循這項政策。</translation>
 <translation id="467236746355332046">支援功能</translation>
 <translation id="7632724434767231364">GSSAPI 資料庫名稱</translation>
@@ -377,6 +388,13 @@
           如果您啟用這項設定，使用者將無法在 <ph name="PRODUCT_NAME"/> 中變更或覆寫設定。
 
           停用這項設定等同未進行任何設定，使用者仍然可以在 <ph name="PRODUCT_NAME"/> 中變更設定。</translation>
+<translation id="8161570238552664224">允許播放音訊。
+
+      如果這項政策設定為「False」，使用者登入時將無法透過裝置輸出音訊。
+
+      這項政策會影響包括內建喇叭在內，所有類型的音訊輸出設備，並且禁止所有音訊播放功能。如果您的使用者需使用螢幕閱讀器，請不要啟用這項政策。
+
+      如果這個選項設定為「True」或並未做任何設定，使用者即可在自己的裝置上使用所有受支援的音訊輸出設備。</translation>
 <translation id="5761030451068906335">調整 <ph name="PRODUCT_NAME"/> 的 Proxy 設定。
 
       這項政策尚未準備完成，請勿使用。</translation>
@@ -465,6 +483,7 @@
 <translation id="1675002386741412210">支援對象：</translation>
 <translation id="3547954654003013442">Proxy 設定</translation>
 <translation id="4482640907922304445">顯示「<ph name="PRODUCT_NAME"/>」工具列上的 [首頁] 按鈕。如果您啟用這項設定，系統會顯示 [首頁] 按鈕。如果您停用這項設定，系統就不會顯示 [首頁] 按鈕。不論您啟用或停用這項設定，使用者都無法變更或覆寫「<ph name="PRODUCT_NAME"/>」中的這項設定。如果您不設定這項政策，使用者就能選擇是否要顯示 [首頁] 按鈕。</translation>
+<translation id="2518231489509538392">允許播放音訊</translation>
 <translation id="7547044444554936129">啟用「<ph name="PRODUCT_NAME"/>」的「互動智慧搜尋」功能，並且禁止使用者變更這項設定。如果您啟用這項設定，系統會啟用「<ph name="PRODUCT_NAME"/>」的「互動智慧搜尋」。如果您停用這項設定，系統會停用「<ph name="PRODUCT_NAME"/>」的「互動智慧搜尋」。不論您啟用或停用這項設定，使用者都無法變更或覆寫這項設定。如果您未調整這項設定，使用者可決定是否要使用這項功能。</translation>
 <translation id="3264793472749429012">預設搜尋引擎編碼</translation>
 <translation id="8101760444435022591">由於軟失敗線上撤銷檢查不會提供有效的安全性效益，因此在 <ph name="PRODUCT_NAME"/> 版本 19 和更新版本中，根據預設這些檢查已停用。將這項政策設定為 True，系統會還原先前行為，並且會執行線上 OCSP/CRL 檢查。
@@ -513,6 +532,7 @@
 <translation id="8889026535261486875">「<ph name="PRODUCT_NAME"/>」要委任的伺服器。用逗號隔開多個伺服器的名稱，並且可以使用萬用字元 (*)。如果未設定這項政策，任何伺服器都無法參與整合驗證。</translation>
 <translation id="2299220924812062390">指定停用的外掛程式清單</translation>
 <translation id="924557436754151212">第一次執行時從預設瀏覽器匯入已儲存的密碼</translation>
+<translation id="1465619815762735808">點選播放</translation>
 <translation id="7227967227357489766">定義可登入裝置的使用者允許清單，項目格式為「<ph name="USER_WHITELIST_ENTRY_FORMAT"/>」(例如「<ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>」)。如要允許網域的任意使用者，請使用格式為「<ph name="USER_WHITELIST_ENTRY_WILDCARD"/>」的項目。
 
       如果您未設定這項政策，則所有使用者均可登入裝置。注意，如要建立新的使用者，您必須妥善設定「<ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/>」政策。</translation>
@@ -554,6 +574,11 @@
 <translation id="8631434304112909927">到第 <ph name="UNTIL_VERSION"/> 版為止</translation>
 <translation id="7469554574977894907">啟用搜尋建議</translation>
 <translation id="4906194810004762807">裝置政策的重新整理頻率</translation>
+<translation id="1398889361882383850">讓您設定是否要允許網站自動執行外掛程式。您可以允許或禁止所有網站自動執行外掛程式。
+
+          啟用 [點選播放] 選項時，使用者必須手動點選外掛程式，程式才會開始執行。
+
+          如未設定這項政策，系統將會採用「AllowPlugins」，而使用者亦可變更這項設定。</translation>
 <translation id="7974114691960514888">系統不再支援這項政策。連線至遠端用戶時，啟用 STUN 使用量和轉送伺服器。如果啟用這項設定，那麼即使遠端主機電腦被防火牆隔開，這台電腦也能發現遠端主機電腦並建立連結。如果停用這項設定，並且外傳 UDP 連結遭到防火牆篩選，則這台電腦只會與當地網路內的主機電腦建立連線。</translation>
 <translation id="5511702823008968136">啟用書籤列</translation>
 <translation id="7882585827992171421">這項政策僅在零售模式下有效。
@@ -572,7 +597,6 @@
 <translation id="4121350739760194865">阻止應用程式宣傳資訊在新分頁上顯示</translation>
 <translation id="2127599828444728326">允許這些網站的通知</translation>
 <translation id="7635471475589566552">設定「<ph name="PRODUCT_NAME"/>」的應用程式語言代碼，並且禁止使用者變更語言代碼。如果您啟用這項設定，「<ph name="PRODUCT_NAME"/>」就會使用指定的語言代碼。如果設定的語言代碼不受支援，就會改用「en-US」。如果停用或尚未調整這項設定，「<ph name="PRODUCT_NAME"/>」就會使用使用者指定的偏好語言代碼 (如果已設定)、系統語言代碼或備用語言代碼「en-US」。</translation>
-<translation id="7271483295221961083">允許您設定是否要讓網站自動執行外掛程式。您可以允許或禁止所有網站自動執行外掛程式。如果未設定這項政策，系統會使用「AllowPlugins」，而且使用者能加以變更。</translation>
 <translation id="718956142899066210">允許進行更新的連線類型</translation>
 <translation id="6985168562472482191">企業線上應用程式商店的名稱會顯示在新分頁中的應用程式圖示下方。只有在設定 EnterpriseWebStoreURL 時，這項設定才會生效。如果停用這項設定，企業線上應用程式商店應用程式 (如果有的話) 會標上自己的網址。</translation>
 <translation id="1734716591049455502">設定遠端存取選項</translation>
@@ -599,6 +623,17 @@
 <translation id="6658245400435704251">指定裝置可以任意延遲下載某項更新的秒數上限 (以該項更新初次被推送到伺服器的時間為準)。您可以將這項裝置等待時間的其中一部分設定為等待的時間長度，剩下的部分則設定為檢查更新的次數。不論採取哪種方式，分散時間皆不得超過固定時間長度，這樣就可以避免裝置由於持續等待下載某項更新而停止回應。</translation>
 <translation id="1948757837129151165">HTTP 驗證政策</translation>
 <translation id="5946082169633555022">測試頻道</translation>
+<translation id="145467868108778033">讓您指定要以無訊息方式安裝的擴充功能清單，所指定的擴充功能在安裝時不需與使用者互動。
+
+          每個清單項目都是一條字串，包含擴充功能 ID 和一個更新網址 (兩者以分號「<ph name="SEMICOLON"/>」分隔)。擴充功能 ID 為 32 個字元的字串，如需查看範例，請在開發人員模式下前往 <ph name="CHROME_EXTENSIONS_LINK"/>。更新網址應指向更新資訊清單 XML 文件 (如 <ph name="LINK_TO_EXTENSION_DOC1"/> 所述)。請注意，這項政策中設定的更新網址只可用於初次安裝，後續的擴充功能更新將會使用擴充功能資訊清單中指定的更新網址。
+
+          「<ph name="PRODUCT_NAME"/>」會為每個項目從指定的更新網址中擷取以 ID 指定的擴充功能，並以無訊息方式加以安裝。
+
+          例如，「<ph name="EXTENSION_POLICY_EXAMPLE"/>」會從 Chrome 線上應用程式商店標準版的更新網址安裝 <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> 擴充功能。如要進一步瞭解如何管理擴充功能，請參閱：<ph name="LINK_TO_EXTENSION_DOC2"/>。
+
+          使用者無法解除安裝這項政策所指定的擴充功能；但如果您從清單中移除某個擴充功能，「<ph name="PRODUCT_NAME"/>」會自動將其解除安裝。
+
+          如未設定這項政策，使用者即可解除安裝「<ph name="PRODUCT_NAME"/>」中的任何擴充功能。</translation>
 <translation id="8303314579975657113">指定 HTTP 驗證要用的 GSSAPI 資料庫。您可以設定資料庫名稱或完整路徑。如果沒有提供任何設定，「<ph name="PRODUCT_NAME"/>」會回復為預設資料庫名稱。</translation>
 <translation id="7749402620209366169">為遠端存取主機啟用雙重驗證機制，而不採用使用者指定的 PIN。
 

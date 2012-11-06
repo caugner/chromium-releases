@@ -6,7 +6,21 @@
 
 #include "base/logging.h"
 
+// static
+SkColor ConstrainedWindow::GetBackgroundColor() {
+  return SkColorSetRGB(0xfb, 0xfb, 0xfb);
+}
+
+// static
+SkColor ConstrainedWindow::GetTextColor() {
+  return SkColorSetRGB(0x33, 0x33, 0x33);
+}
+
 void ConstrainedWindow::FocusConstrainedWindow() {
+}
+
+bool ConstrainedWindow::CanShowConstrainedWindow() {
+  return true;
 }
 
 gfx::NativeWindow ConstrainedWindow::GetNativeWindow() {

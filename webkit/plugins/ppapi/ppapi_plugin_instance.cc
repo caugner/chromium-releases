@@ -9,10 +9,13 @@
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/message_loop.h"
+#include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_offset_string_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "media/base/decoder_buffer.h"
+#include "media/base/decryptor_client.h"
 #include "ppapi/c/dev/ppb_find_dev.h"
 #include "ppapi/c/dev/ppb_zoom_dev.h"
 #include "ppapi/c/dev/ppp_find_dev.h"
@@ -27,7 +30,10 @@
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/ppp_messaging.h"
 #include "ppapi/c/ppp_mouse_lock.h"
+#include "ppapi/c/private/pp_content_decryptor.h"
 #include "ppapi/c/private/ppp_instance_private.h"
+#include "ppapi/shared_impl/ppapi_preferences.h"
+#include "ppapi/shared_impl/ppb_gamepad_shared.h"
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
 #include "ppapi/shared_impl/ppb_url_util_shared.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
@@ -59,6 +65,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/range/range.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "webkit/plugins/plugin_constants.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/event_conversion.h"
@@ -94,6 +101,7 @@
 
 #if defined(OS_WIN)
 #include "base/metrics/histogram.h"
+#include "base/win/windows_version.h"
 #include "skia/ext/platform_canvas.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/gdi_util.h"
@@ -114,6 +122,7 @@ using ppapi::thunk::PPB_Graphics2D_API;
 using ppapi::thunk::PPB_Graphics3D_API;
 using ppapi::thunk::PPB_ImageData_API;
 using ppapi::Var;
+using ppapi::ArrayBufferVar;
 using ppapi::ViewData;
 using WebKit::WebBindings;
 using WebKit::WebCanvas;
@@ -294,6 +303,82 @@ scoped_array<const char*> StringVectorToArgArray(
   return array.Pass();
 }
 
+// Creates a PP_Resource containing a PPB_Buffer_Impl, copies |data| into the
+// buffer resource, and returns it. Returns a an invalid PP_Resource with an ID
+// of 0 on failure. Upon success, the returned Buffer resource has a reference
+// count of 1.
+PP_Resource MakeBufferResource(PP_Instance instance,
+                               const uint8* data, int size) {
+  if (!data || !size)
+    return 0;
+
+  ScopedPPResource resource(PPB_Buffer_Impl::Create(instance, size));
+  if (!resource.get())
+    return 0;
+
+  EnterResourceNoLock<PPB_Buffer_API> enter(resource, true);
+  if (enter.failed())
+    return 0;
+
+  BufferAutoMapper mapper(enter.object());
+  if (!mapper.data() || mapper.size() < static_cast<size_t>(size))
+    return 0;
+
+  memcpy(mapper.data(), data, size);
+  return resource.get();
+}
+
+// Copies the content of |str| into |array|.
+// Returns true if copy succeeded. Returns false if copy failed, e.g. if the
+// |array_size| is smaller than the |str| length.
+template <uint32_t array_size>
+bool CopyStringToArray(const std::string& str, uint8 (&array)[array_size]) {
+  if (array_size < str.size())
+    return false;
+
+  memcpy(array, str.data(), str.size());
+  return true;
+}
+
+// Fills the |block_info| with information from |decrypt_config|, |timestamp|
+// and |request_id|.
+// Returns true if |block_info| is successfully filled. Returns false otherwise.
+bool MakeEncryptedBlockInfo(
+    const media::DecryptConfig& decrypt_config,
+    int64_t timestamp,
+    uint32_t request_id,
+    PP_EncryptedBlockInfo* block_info) {
+  DCHECK(block_info);
+
+  // TODO(xhwang): Fix initialization of PP_EncryptedBlockInfo here and
+  // anywhere else.
+  memset(block_info, 0, sizeof(*block_info));
+
+  block_info->tracking_info.request_id = request_id;
+  block_info->tracking_info.timestamp = timestamp;
+  block_info->data_offset = decrypt_config.data_offset();
+
+  if (!CopyStringToArray(decrypt_config.key_id(), block_info->key_id) ||
+      !CopyStringToArray(decrypt_config.iv(), block_info->iv))
+    return false;
+
+  block_info->key_id_size = decrypt_config.key_id().size();
+  block_info->iv_size = decrypt_config.iv().size();
+
+  if (decrypt_config.subsamples().size() > arraysize(block_info->subsamples))
+    return false;
+
+  block_info->num_subsamples = decrypt_config.subsamples().size();
+  for (uint32_t i = 0; i < block_info->num_subsamples; ++i) {
+    block_info->subsamples[i].clear_bytes =
+        decrypt_config.subsamples()[i].clear_bytes;
+    block_info->subsamples[i].cipher_bytes =
+        decrypt_config.subsamples()[i].cypher_bytes;
+  }
+
+  return true;
+}
+
 }  // namespace
 
 // static
@@ -306,6 +391,17 @@ PluginInstance* PluginInstance::Create(PluginDelegate* delegate,
   if (!ppp_instance_combined)
     return NULL;
   return new PluginInstance(delegate, module, ppp_instance_combined);
+}
+
+PluginInstance::GamepadImpl::GamepadImpl(PluginDelegate* delegate)
+    : delegate_(delegate) {
+}
+
+void PluginInstance::GamepadImpl::Sample(PP_GamepadsSampleData* data) {
+  WebKit::WebGamepads webkit_data;
+  delegate_->SampleGamepads(&webkit_data);
+  ConvertWebKitGamepadData(
+      *reinterpret_cast<const ::ppapi::WebKitGamepads*>(&webkit_data), data);
 }
 
 PluginInstance::PluginInstance(
@@ -323,6 +419,7 @@ PluginInstance::PluginInstance(
       has_webkit_focus_(false),
       has_content_area_focus_(false),
       find_identifier_(-1),
+      plugin_decryption_interface_(NULL),
       plugin_find_interface_(NULL),
       plugin_input_event_interface_(NULL),
       plugin_messaging_interface_(NULL),
@@ -334,6 +431,7 @@ PluginInstance::PluginInstance(
       plugin_zoom_interface_(NULL),
       checked_for_plugin_input_event_interface_(false),
       checked_for_plugin_messaging_interface_(false),
+      gamepad_impl_(delegate),
       plugin_print_interface_(NULL),
       plugin_graphics_3d_interface_(NULL),
       always_on_top_(false),
@@ -351,7 +449,9 @@ PluginInstance::PluginInstance(
       selection_caret_(0),
       selection_anchor_(0),
       pending_user_gesture_(0.0),
-      flash_impl_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      flash_impl_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      decryptor_client_(NULL),
+      next_decryption_request_id_(1) {
   pp_instance_ = HostGlobals::Get()->AddInstance(this);
 
   memset(&current_print_settings_, 0, sizeof(current_print_settings_));
@@ -384,7 +484,12 @@ PluginInstance::~PluginInstance() {
 
   delegate_->InstanceDeleted(this);
   module_->InstanceDeleted(this);
+  // If we switched from the NaCl plugin module, notify it too.
+  if (original_module_.get())
+    original_module_->InstanceDeleted(this);
 
+  // This should be last since some of the above "instance deleted" calls will
+  // want to look up in the global map to get info off of our object.
   HostGlobals::Get()->InstanceDeleted(pp_instance_);
 }
 
@@ -402,9 +507,13 @@ void PluginInstance::Delete() {
   // destroy it. We want to do this prior to calling DidDestroy in case the
   // destructor of the instance object tries to use the instance.
   message_channel_->SetPassthroughObject(NULL);
-  instance_interface_->DidDestroy(pp_instance());
-  if (nacl_plugin_instance_interface_.get())
-    nacl_plugin_instance_interface_->DidDestroy(pp_instance());
+  // If this is a NaCl plugin instance, shut down the NaCl plugin by calling
+  // its DidDestroy. Don't call DidDestroy on the untrusted plugin instance,
+  // since there is little that it can do at this point.
+  if (original_instance_interface_.get())
+    original_instance_interface_->DidDestroy(pp_instance());
+  else
+    instance_interface_->DidDestroy(pp_instance());
 
   if (fullscreen_container_) {
     fullscreen_container_->Destroy();
@@ -491,6 +600,37 @@ void PluginInstance::InstanceCrashed() {
   delegate()->PluginCrashed(this);
 }
 
+static void SetGPUHistogram(const ::ppapi::Preferences& prefs,
+                            const std::vector<std::string>& arg_names,
+                            const std::vector<std::string>& arg_values) {
+  // Calculate a histogram to let us determine how likely people are to try to
+  // run Stage3D content on machines that have it blacklisted.
+#if defined(OS_WIN)
+  bool needs_gpu = false;
+  bool is_xp = base::win::GetVersion() <= base::win::VERSION_XP;
+
+  for (size_t i = 0; i < arg_names.size(); i++) {
+    if (arg_names[i] == "wmode") {
+      // In theory content other than Flash could have a "wmode" argument,
+      // but that's pretty unlikely.
+      if (arg_values[i] == "direct" || arg_values[i] == "gpu")
+        needs_gpu = true;
+      break;
+    }
+  }
+  // 0 : No 3D content and GPU is blacklisted
+  // 1 : No 3D content and GPU is not blacklisted
+  // 2 : 3D content but GPU is blacklisted
+  // 3 : 3D content and GPU is not blacklisted
+  // 4 : No 3D content and GPU is blacklisted on XP
+  // 5 : No 3D content and GPU is not blacklisted on XP
+  // 6 : 3D content but GPU is blacklisted on XP
+  // 7 : 3D content and GPU is not blacklisted on XP
+  UMA_HISTOGRAM_ENUMERATION("Flash.UsesGPU",
+      is_xp * 4 + needs_gpu * 2 + prefs.is_webgl_supported, 8);
+#endif
+}
+
 bool PluginInstance::Initialize(WebPluginContainer* container,
                                 const std::vector<std::string>& arg_names,
                                 const std::vector<std::string>& arg_values,
@@ -501,6 +641,8 @@ bool PluginInstance::Initialize(WebPluginContainer* container,
   full_frame_ = full_frame;
 
   container_->setIsAcceptingTouchEvents(IsAcceptingTouchEvents());
+
+  SetGPUHistogram(delegate_->GetPreferences(), arg_names, arg_values);
 
   argn_ = arg_names;
   argv_ = arg_values;
@@ -740,7 +882,8 @@ PP_Var PluginInstance::GetInstanceObject() {
 }
 
 void PluginInstance::ViewChanged(const gfx::Rect& position,
-                                 const gfx::Rect& clip) {
+                                 const gfx::Rect& clip,
+                                 const std::vector<gfx::Rect>& cut_outs_rects) {
   // WebKit can give weird (x,y) positions for empty clip rects (since the
   // position technically doesn't matter). But we want to make these
   // consistent since this is given to the plugin, so force everything to 0
@@ -748,6 +891,8 @@ void PluginInstance::ViewChanged(const gfx::Rect& position,
   gfx::Rect new_clip;
   if (!clip.IsEmpty())
     new_clip = clip;
+
+  cut_outs_rects_ = cut_outs_rects;
 
   ViewData previous_view = view_data_;
 
@@ -845,7 +990,8 @@ bool PluginInstance::GetBitmapForOptimizedPluginPaint(
     const gfx::Rect& paint_bounds,
     TransportDIB** dib,
     gfx::Rect* location,
-    gfx::Rect* clip) {
+    gfx::Rect* clip,
+    float* scale_factor) {
   if (!always_on_top_)
     return false;
   if (!GetBoundGraphics2D() || !GetBoundGraphics2D()->is_always_opaque())
@@ -859,19 +1005,45 @@ bool PluginInstance::GetBitmapForOptimizedPluginPaint(
   // optimized this way.
   if (!image_data->PlatformImage())
     return false;
-  gfx::Rect plugin_backing_store_rect(
-      PP_ToGfxPoint(view_data_.rect.point),
-      gfx::Size(image_data->width(), image_data->height()));
+
+  gfx::Point plugin_origin = PP_ToGfxPoint(view_data_.rect.point);
+  // Convert |paint_bounds| to be relative to the left-top corner of the plugin.
+  gfx::Rect relative_paint_bounds(paint_bounds);
+  relative_paint_bounds.Offset(-plugin_origin.x(), -plugin_origin.y());
+
+  gfx::Rect pixel_plugin_backing_store_rect(
+      0, 0, image_data->width(), image_data->height());
+  float scale = GetBoundGraphics2D()->GetScale();
+#if !defined(USE_AURA) && (defined(OS_WIN) || defined(OS_LINUX))
+  // Linux and Windows don't yet support scaled UpdateRects
+  // TODO(jbauman): Add support and remove this.
+  if (scale != 1.0f)
+    return false;
+#endif
+  gfx::Rect plugin_backing_store_rect =
+    pixel_plugin_backing_store_rect.Scale(scale);
 
   gfx::Rect clip_page = PP_ToGfxRect(view_data_.clip_rect);
-  clip_page.Offset(PP_ToGfxPoint(view_data_.rect.point));
   gfx::Rect plugin_paint_rect = plugin_backing_store_rect.Intersect(clip_page);
-  if (!plugin_paint_rect.Contains(paint_bounds))
+  if (!plugin_paint_rect.Contains(relative_paint_bounds))
     return false;
 
+  // Don't do optimized painting if the area to paint intersects with the
+  // cut-out rects, otherwise we will paint over them.
+  for (std::vector<gfx::Rect>::const_iterator iter = cut_outs_rects_.begin();
+       iter != cut_outs_rects_.end(); ++iter) {
+    if (relative_paint_bounds.Intersects(*iter))
+      return false;
+  }
+
   *dib = image_data->PlatformImage()->GetTransportDIB();
+  plugin_backing_store_rect.Offset(plugin_origin);
   *location = plugin_backing_store_rect;
+  clip_page.Offset(plugin_origin);
   *clip = clip_page;
+  // The plugin scale factor is inverted, e.g. for a device scale factor of 2x
+  // the plugin scale factor is 0.5.
+  *scale_factor = 1.0 / scale;
   return true;
 }
 
@@ -959,6 +1131,16 @@ void PluginInstance::StopFind() {
     return;
   find_identifier_ = -1;
   plugin_find_interface_->StopFind(pp_instance());
+}
+
+bool PluginInstance::LoadContentDecryptorInterface() {
+  if (!plugin_decryption_interface_) {
+    plugin_decryption_interface_ =
+        static_cast<const PPP_ContentDecryptor_Private*>(
+          module_->GetPluginInterface(
+              PPP_CONTENTDECRYPTOR_PRIVATE_INTERFACE));
+  }
+  return !!plugin_decryption_interface_;
 }
 
 bool PluginInstance::LoadFindInterface() {
@@ -1278,6 +1460,116 @@ void PluginInstance::RotateView(WebPlugin::RotationType type) {
   // NOTE: plugin instance may have been deleted.
 }
 
+void PluginInstance::set_decrypt_client(
+    media::DecryptorClient* decryptor_client) {
+  DCHECK(decryptor_client);
+  decryptor_client_ = decryptor_client;
+}
+
+bool PluginInstance::GenerateKeyRequest(const std::string& key_system,
+                                        const std::string& init_data) {
+  if (!LoadContentDecryptorInterface())
+    return false;
+  if (key_system.empty())
+    return false;
+
+  PP_Var init_data_array =
+      PpapiGlobals::Get()->GetVarTracker()->MakeArrayBufferPPVar(
+          init_data.size(), init_data.data());
+
+  plugin_decryption_interface_->GenerateKeyRequest(
+      pp_instance(),
+      StringVar::StringToPPVar(key_system),
+      init_data_array);
+  return true;
+}
+
+bool PluginInstance::AddKey(const std::string& session_id,
+                            const std::string& key,
+                            const std::string& init_data) {
+  if (!LoadContentDecryptorInterface())
+    return false;
+  PP_Var key_array =
+      PpapiGlobals::Get()->GetVarTracker()->MakeArrayBufferPPVar(key.size(),
+                                                                 key.data());
+  PP_Var init_data_array =
+      PpapiGlobals::Get()->GetVarTracker()->MakeArrayBufferPPVar(
+          init_data.size(),
+          init_data.data());
+
+  plugin_decryption_interface_->AddKey(
+      pp_instance(),
+      StringVar::StringToPPVar(session_id),
+      key_array,
+      init_data_array);
+  return true;
+}
+
+bool PluginInstance::CancelKeyRequest(const std::string& session_id) {
+  if (!LoadContentDecryptorInterface())
+    return false;
+  plugin_decryption_interface_->CancelKeyRequest(
+      pp_instance(),
+      StringVar::StringToPPVar(session_id));
+  return true;
+}
+
+bool PluginInstance::Decrypt(
+    const scoped_refptr<media::DecoderBuffer>& encrypted_buffer,
+    const media::Decryptor::DecryptCB& decrypt_cb) {
+  if (!LoadContentDecryptorInterface())
+    return false;
+
+  ScopedPPResource encrypted_resource(
+      ScopedPPResource::PassRef(),
+      MakeBufferResource(pp_instance(),
+                         encrypted_buffer->GetData(),
+                         encrypted_buffer->GetDataSize()));
+  if (!encrypted_resource.get())
+    return false;
+
+  uint32_t request_id = next_decryption_request_id_++;
+
+  PP_EncryptedBlockInfo block_info;
+  DCHECK(encrypted_buffer->GetDecryptConfig());
+  if (!MakeEncryptedBlockInfo(*encrypted_buffer->GetDecryptConfig(),
+                              encrypted_buffer->GetTimestamp().InMicroseconds(),
+                              request_id,
+                              &block_info)) {
+    return false;
+  }
+
+  DCHECK(!ContainsKey(pending_decryption_cbs_, request_id));
+  pending_decryption_cbs_.insert(std::make_pair(request_id, decrypt_cb));
+
+  plugin_decryption_interface_->Decrypt(pp_instance(),
+                                        encrypted_resource,
+                                        &block_info);
+  return true;
+}
+
+bool PluginInstance::DecryptAndDecode(
+    const scoped_refptr<media::DecoderBuffer>& encrypted_buffer,
+    const media::Decryptor::DecryptCB& decrypt_cb) {
+  if (!LoadContentDecryptorInterface())
+    return false;
+
+  ScopedPPResource encrypted_resource(MakeBufferResource(
+      pp_instance(),
+      encrypted_buffer->GetData(),
+      encrypted_buffer->GetDataSize()));
+  if (!encrypted_resource.get())
+    return false;
+
+  PP_EncryptedBlockInfo block_info;
+
+  // TODO(tomfinegan): Store callback and ID in a map, and pass ID to decryptor.
+  plugin_decryption_interface_->DecryptAndDecode(pp_instance(),
+                                                 encrypted_resource,
+                                                 &block_info);
+  return true;
+}
+
 bool PluginInstance::FlashIsFullscreenOrPending() {
   return fullscreen_container_ != NULL;
 }
@@ -1323,6 +1615,7 @@ bool PluginInstance::SetFullscreen(bool fullscreen) {
 }
 
 void PluginInstance::FlashSetFullscreen(bool fullscreen, bool delay_report) {
+  TRACE_EVENT0("ppapi", "PluginInstance::FlashSetFullscreen");
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PluginInstance> ref(this);
 
@@ -1333,10 +1626,10 @@ void PluginInstance::FlashSetFullscreen(bool fullscreen, bool delay_report) {
     return;
 
   // Unbind current 2D or 3D graphics context.
-  BindGraphics(pp_instance(), 0);
   VLOG(1) << "Setting fullscreen to " << (fullscreen ? "on" : "off");
   if (fullscreen) {
     DCHECK(!fullscreen_container_);
+    setBackingTextureId(0, false);
     fullscreen_container_ = delegate_->CreateFullscreenContainer(this);
   } else {
     DCHECK(fullscreen_container_);
@@ -1360,6 +1653,17 @@ void PluginInstance::UpdateFlashFullscreenState(bool flash_fullscreen) {
     if (!flash_fullscreen && is_mouselock_pending)
       TrackedCallback::ClearAndRun(&lock_mouse_callback_, PP_ERROR_FAILED);
     return;
+  }
+
+  PPB_Graphics3D_Impl* graphics_3d  = GetBoundGraphics3D();
+  if (graphics_3d) {
+    if (flash_fullscreen) {
+      fullscreen_container_->ReparentContext(graphics_3d->platform_context());
+    } else {
+      delegate_->ReparentContext(graphics_3d->platform_context());
+      setBackingTextureId(graphics_3d->GetBackingTextureId(),
+                          graphics_3d->IsOpaque());
+    }
   }
 
   bool old_plugin_focus = PluginHasFocus();
@@ -1431,13 +1735,6 @@ bool PluginInstance::IsRectTopmost(const gfx::Rect& rect) {
 #endif
 }
 
-void PluginInstance::SampleGamepads(PP_Instance instance,
-                                    PP_GamepadsSampleData* data) {
-  WebKit::WebGamepads webkit_data;
-  delegate()->SampleGamepads(&webkit_data);
-  ConvertWebKitGamepadData(webkit_data, data);
-}
-
 bool PluginInstance::IsViewAccelerated() {
   if (!container_)
     return false;
@@ -1500,7 +1797,7 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
   if (metafile.InitFromData(mapper.data(), mapper.size())) {
     // Flip the transform.
     CGContextRef cgContext = canvas;
-    CGContextSaveGState(cgContext);
+    gfx::ScopedCGContextSaveGState save_gstate(cgContext)
     CGContextTranslateCTM(cgContext, 0,
                           current_print_settings_.printable_area.size.height);
     CGContextScaleCTM(cgContext, 1.0, -1.0);
@@ -1511,7 +1808,6 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
     page_rect.size.height = current_print_settings_.printable_area.size.height;
 
     ret = metafile.RenderPage(1, cgContext, page_rect, true, false, true, true);
-    CGContextRestoreGState(cgContext);
   }
 #elif defined(OS_WIN)
   printing::Metafile* metafile =
@@ -1730,6 +2026,7 @@ void PluginInstance::ClosePendingUserGesture(PP_Instance instance,
 
 PP_Bool PluginInstance::BindGraphics(PP_Instance instance,
                                      PP_Resource device) {
+  TRACE_EVENT0("ppapi", "PluginInstance::BindGraphics");
   // The Graphics3D instance can't be destroyed until we call
   // setBackingTextureId.
   scoped_refptr< ::ppapi::Resource> old_graphics = bound_graphics_;
@@ -1886,6 +2183,139 @@ PP_Var PluginInstance::GetFontFamilies(PP_Instance instance) {
   return PP_MakeUndefined();
 }
 
+void PluginInstance::NeedKey(PP_Instance instance,
+                             PP_Var key_system_var,
+                             PP_Var session_id_var,
+                             PP_Var init_data_var) {
+  // TODO(tomfinegan): send the data to media stack.
+}
+
+void PluginInstance::KeyAdded(PP_Instance instance,
+                              PP_Var key_system_var,
+                              PP_Var session_id_var) {
+  StringVar* key_system_string = StringVar::FromPPVar(key_system_var);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id_var);
+  if (!key_system_string || !session_id_string) {
+    decryptor_client_->KeyError("", "", media::Decryptor::kUnknownError, 0);
+    return;
+  }
+
+  DCHECK(decryptor_client_);
+  decryptor_client_->KeyAdded(key_system_string->value(),
+                              session_id_string->value());
+}
+
+void PluginInstance::KeyMessage(PP_Instance instance,
+                                PP_Var key_system_var,
+                                PP_Var session_id_var,
+                                PP_Resource message_resource,
+                                PP_Var default_url_var) {
+  StringVar* key_system_string = StringVar::FromPPVar(key_system_var);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id_var);
+  StringVar* default_url_string = StringVar::FromPPVar(default_url_var);
+
+  if (!key_system_string || !session_id_string || !default_url_string) {
+    decryptor_client_->KeyError("", "", media::Decryptor::kUnknownError, 0);
+    return;
+  }
+
+  EnterResourceNoLock<PPB_Buffer_API> enter(message_resource, true);
+  if (!enter.succeeded()) {
+    decryptor_client_->KeyError(key_system_string->value(),
+                                session_id_string->value(),
+                                media::Decryptor::kUnknownError,
+                                0);
+    return;
+  }
+
+  BufferAutoMapper mapper(enter.object());
+  scoped_array<uint8> message_array(new uint8[mapper.size()]);
+  if (mapper.data() && mapper.size())
+    memcpy(message_array.get(), mapper.data(), mapper.size());
+
+  DCHECK(decryptor_client_);
+  decryptor_client_->KeyMessage(key_system_string->value(),
+                                session_id_string->value(),
+                                message_array.Pass(),
+                                mapper.size(),
+                                default_url_string->value());
+}
+
+void PluginInstance::KeyError(PP_Instance instance,
+                              PP_Var key_system_var,
+                              PP_Var session_id_var,
+                              int32_t media_error,
+                              int32_t system_code) {
+  StringVar* key_system_string = StringVar::FromPPVar(key_system_var);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id_var);
+  if (!key_system_string || !session_id_string) {
+    decryptor_client_->KeyError("", "", media::Decryptor::kUnknownError, 0);
+    return;
+  }
+
+  DCHECK(decryptor_client_);
+  decryptor_client_->KeyError(
+      key_system_string->value(),
+      session_id_string->value(),
+      static_cast<media::Decryptor::KeyError>(media_error),
+      system_code);
+}
+
+void PluginInstance::DeliverBlock(PP_Instance instance,
+                                  PP_Resource decrypted_block,
+                                  const PP_DecryptedBlockInfo* block_info) {
+  DCHECK(block_info);
+  DecryptionCBMap::iterator found = pending_decryption_cbs_.find(
+      block_info->tracking_info.request_id);
+  if (found == pending_decryption_cbs_.end())
+    return;
+  media::Decryptor::DecryptCB decrypt_cb = found->second;
+  pending_decryption_cbs_.erase(found);
+
+  if (block_info->result == PP_DECRYPTRESULT_DECRYPT_NOKEY) {
+    decrypt_cb.Run(media::Decryptor::kNoKey, NULL);
+    return;
+  }
+  if (block_info->result != PP_DECRYPTRESULT_SUCCESS) {
+    decrypt_cb.Run(media::Decryptor::kError, NULL);
+    return;
+  }
+
+  EnterResourceNoLock<PPB_Buffer_API> enter(decrypted_block, true);
+  if (!enter.succeeded()) {
+    decrypt_cb.Run(media::Decryptor::kError, NULL);
+    return;
+  }
+  BufferAutoMapper mapper(enter.object());
+  if (!mapper.data() || !mapper.size()) {
+    decrypt_cb.Run(media::Decryptor::kError, NULL);
+    return;
+  }
+
+  // TODO(tomfinegan): Find a way to take ownership of the shared memory
+  // managed by the PPB_Buffer_Dev, and avoid the extra copy.
+  scoped_refptr<media::DecoderBuffer> decrypted_buffer(
+      media::DecoderBuffer::CopyFrom(
+          reinterpret_cast<const uint8*>(mapper.data()), mapper.size()));
+  decrypted_buffer->SetTimestamp(base::TimeDelta::FromMicroseconds(
+      block_info->tracking_info.timestamp));
+  decrypt_cb.Run(media::Decryptor::kSuccess, decrypted_buffer);
+}
+
+void PluginInstance::DeliverFrame(PP_Instance instance,
+                                  PP_Resource decrypted_frame,
+                                  const PP_DecryptedBlockInfo* block_info) {
+  // TODO(tomfinegan): To be implemented after completion of v0.1 of the
+  // EME/CDM work.
+}
+
+void PluginInstance::DeliverSamples(PP_Instance instance,
+                                    PP_Resource decrypted_samples,
+                                    const PP_DecryptedBlockInfo* block_info) {
+  // TODO(tomfinegan): To be implemented after completion of v0.1 of the
+  // EME/CDM work.
+}
+
 void PluginInstance::NumberOfFindResultsChanged(PP_Instance instance,
                                                 int32_t total,
                                                 PP_Bool final_result) {
@@ -1913,6 +2343,11 @@ PP_Bool PluginInstance::GetScreenSize(PP_Instance instance, PP_Size* size) {
 
 ::ppapi::thunk::PPB_Flash_API* PluginInstance::GetFlashAPI() {
   return &flash_impl_;
+}
+
+::ppapi::thunk::PPB_Gamepad_API* PluginInstance::GetGamepadAPI(
+    PP_Instance /* instance */) {
+  return &gamepad_impl_;
 }
 
 int32_t PluginInstance::RequestInputEvents(PP_Instance instance,
@@ -2029,13 +2464,6 @@ void PluginInstance::UnlockMouse(PP_Instance instance) {
   delegate()->UnlockMouse(this);
 }
 
-PP_Bool PluginInstance::GetDefaultPrintSettings(
-    PP_Instance instance,
-    PP_PrintSettings_Dev* print_settings) {
-  // TODO(raymes): Not implemented for in-process.
-  return PP_FALSE;
-}
-
 void PluginInstance::SetTextInputType(PP_Instance instance,
                                       PP_TextInput_Type type) {
   int itype = type;
@@ -2141,11 +2569,15 @@ PP_Var PluginInstance::GetPluginInstanceURL(
                                                         components);
 }
 
-bool PluginInstance::ResetAsProxied() {
-  // Remember the existing instance interface, so we can call DidDestroy in
-  // our Delete() method. This will delete the NaCl plugin instance, which
-  // will shut down the NaCl process.
-  nacl_plugin_instance_interface_.reset(instance_interface_.release());
+bool PluginInstance::ResetAsProxied(scoped_refptr<PluginModule> module) {
+  // Save the original module and switch over to the new one now that this
+  // plugin is using the IPC-based proxy.
+  original_module_ = module_;
+  module_ = module;
+
+  // For NaCl instances, remember the NaCl plugin instance interface, so we
+  // can shut it down by calling its DidDestroy in our Delete() method.
+  original_instance_interface_.reset(instance_interface_.release());
 
   base::Callback<const void*(const char*)> get_plugin_interface_func =
       base::Bind(&PluginModule::GetPluginInterface, module_.get());

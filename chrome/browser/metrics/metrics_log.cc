@@ -31,10 +31,10 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/metrics/experiments_helper.h"
 #include "chrome/common/metrics/proto/omnibox_event.pb.h"
 #include "chrome/common/metrics/proto/profiler_event.pb.h"
 #include "chrome/common/metrics/proto/system_profile.pb.h"
+#include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/public/browser/content_browser_client.h"
@@ -59,7 +59,7 @@ using metrics::OmniboxEventProto;
 using metrics::ProfilerEventProto;
 using metrics::SystemProfileProto;
 using tracked_objects::ProcessDataSnapshot;
-typedef experiments_helper::SelectedGroupId SelectedGroupId;
+typedef chrome_variations::SelectedGroupId SelectedGroupId;
 typedef SystemProfileProto::GoogleUpdate::ProductInfo ProductInfo;
 
 namespace {
@@ -121,6 +121,8 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
       return OmniboxEventProto::Suggestion::SEARCH_OTHER_ENGINE;
     case AutocompleteMatch::EXTENSION_APP:
       return OmniboxEventProto::Suggestion::EXTENSION_APP;
+    case AutocompleteMatch::CONTACT:
+      return OmniboxEventProto::Suggestion::CONTACT;
     default:
       NOTREACHED();
       return OmniboxEventProto::Suggestion::UNKNOWN_RESULT_TYPE;
@@ -343,13 +345,17 @@ gfx::Size MetricsLog::GetScreenSize() const {
   return gfx::Screen::GetPrimaryDisplay().GetSizeInPixel();
 }
 
+float MetricsLog::GetScreenDeviceScaleFactor() const {
+  return gfx::Screen::GetPrimaryDisplay().device_scale_factor();
+}
+
 int MetricsLog::GetScreenCount() const {
   return gfx::Screen::GetNumDisplays();
 }
 
 void MetricsLog::GetFieldTrialIds(
     std::vector<SelectedGroupId>* field_trial_ids) const {
-  experiments_helper::GetFieldTrialSelectedGroupIds(field_trial_ids);
+  chrome_variations::GetFieldTrialSelectedGroupIds(field_trial_ids);
 }
 
 void MetricsLog::WriteStabilityElement(
@@ -787,6 +793,7 @@ void MetricsLog::RecordEnvironmentProto(
   const gfx::Size display_size = GetScreenSize();
   hardware->set_primary_screen_width(display_size.width());
   hardware->set_primary_screen_height(display_size.height());
+  hardware->set_primary_screen_scale_factor(GetScreenDeviceScaleFactor());
   hardware->set_screen_count(GetScreenCount());
 
   WriteGoogleUpdateProto(google_update_metrics);
@@ -928,7 +935,7 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
          i != log.result.end(); ++i) {
       OPEN_ELEMENT_FOR_SCOPE("autocompleteitem");
       if (i->provider)
-        WriteAttribute("provider", i->provider->name());
+        WriteAttribute("provider", i->provider->GetName());
       const std::string result_type(AutocompleteMatch::TypeToString(i->type));
       if (!result_type.empty())
         WriteAttribute("resulttype", result_type);

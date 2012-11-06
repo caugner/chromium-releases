@@ -6,6 +6,8 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/shell_window_geometry_cache.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
@@ -17,6 +19,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/native_shell_window.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/view_type_utils.h"
@@ -36,6 +39,7 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_intents_dispatcher.h"
+#include "content/public/common/media_stream_request.h"
 #include "content/public/common/renderer_preferences.h"
 
 using content::BrowserThread;
@@ -62,7 +66,11 @@ void SuspendRenderViewHost(RenderViewHost* rvh) {
 
 ShellWindow::CreateParams::CreateParams()
   : frame(ShellWindow::CreateParams::FRAME_CHROME),
-    bounds(10, 10, kDefaultWidth, kDefaultHeight) {
+    bounds(-1, -1, kDefaultWidth, kDefaultHeight),
+    restore_position(true), restore_size(true) {
+}
+
+ShellWindow::CreateParams::~CreateParams() {
 }
 
 ShellWindow* ShellWindow::Create(Profile* profile,
@@ -70,34 +78,58 @@ ShellWindow* ShellWindow::Create(Profile* profile,
                                  const GURL& url,
                                  const ShellWindow::CreateParams& params) {
   // This object will delete itself when the window is closed.
-  ShellWindow* window =
-      ShellWindow::CreateImpl(profile, extension, url, params);
-  ShellWindowRegistry::Get(profile)->AddShellWindow(window);
+  ShellWindow* window = new ShellWindow(profile, extension);
+  window->Init(url, params);
+  extensions::ShellWindowRegistry::Get(profile)->AddShellWindow(window);
   return window;
 }
 
 ShellWindow::ShellWindow(Profile* profile,
-                         const extensions::Extension* extension,
-                         const GURL& url)
+                         const extensions::Extension* extension)
     : profile_(profile),
       extension_(extension),
+      web_contents_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(profile, this)) {
-  // TODO(jeremya) this should all be done in an Init() method, not in the
-  // constructor. During this code, WebContents will be calling
-  // WebContentsDelegate methods, but at this point the vftables for the
-  // subclass are not yet in place, since it's still halfway through its
-  // constructor. As a result, overridden virtual methods won't be called.
+}
+
+void ShellWindow::Init(const GURL& url,
+                       const ShellWindow::CreateParams& params) {
   web_contents_ = WebContents::Create(
-      profile, SiteInstance::CreateForURL(profile, url), MSG_ROUTING_NONE, NULL,
+      profile(), SiteInstance::CreateForURL(profile(), url), MSG_ROUTING_NONE,
       NULL);
-  contents_.reset(new TabContents(web_contents_));
+  contents_.reset(TabContents::Factory::CreateTabContents(web_contents_));
   content::WebContentsObserver::Observe(web_contents_);
   web_contents_->SetDelegate(this);
   chrome::SetViewType(web_contents_, chrome::VIEW_TYPE_APP_SHELL);
   web_contents_->GetMutableRendererPrefs()->
       browser_handles_all_top_level_requests = true;
   web_contents_->GetRenderViewHost()->SyncRendererPrefs();
+
+  native_window_.reset(NativeShellWindow::Create(this, params));
+
+  if (!params.window_key.empty()) {
+    window_key_ = params.window_key;
+
+    if (params.restore_position || params.restore_size) {
+      extensions::ShellWindowGeometryCache* cache =
+          extensions::ExtensionSystem::Get(profile())->
+            shell_window_geometry_cache();
+      gfx::Rect cached_bounds;
+      if (cache->GetGeometry(extension()->id(), params.window_key,
+                             &cached_bounds)) {
+        gfx::Rect bounds = native_window_->GetBounds();
+
+        if (params.restore_position)
+          bounds.set_origin(cached_bounds.origin());
+        if (params.restore_size)
+          bounds.set_size(cached_bounds.size());
+
+        native_window_->SetBounds(bounds);
+      }
+    }
+  }
+
 
   // Block the created RVH from loading anything until the background page
   // has had a chance to do any initialization it wants.
@@ -133,6 +165,8 @@ ShellWindow::ShellWindow(Profile* profile,
 
   // Prevent the browser process from shutting down while this window is open.
   browser::StartKeepAlive();
+
+  UpdateExtensionAppIcon();
 }
 
 ShellWindow::~ShellWindow() {
@@ -144,29 +178,32 @@ ShellWindow::~ShellWindow() {
   browser::EndKeepAlive();
 }
 
-bool ShellWindow::IsFullscreenOrPending() const {
-  return false;
-}
-
 void ShellWindow::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest* request,
     const content::MediaResponseCallback& callback) {
   content::MediaStreamDevices devices;
 
-  content::MediaStreamDeviceMap::const_iterator iter =
-      request->devices.find(content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE);
-  if (iter != request->devices.end() &&
-      extension()->HasAPIPermission(APIPermission::kAudioCapture) &&
-      !iter->second.empty()) {
-    devices.push_back(iter->second[0]);
-  }
-
-  iter = request->devices.find(content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE);
-  if (iter != request->devices.end() &&
-      extension()->HasAPIPermission(APIPermission::kVideoCapture) &&
-      !iter->second.empty()) {
-    devices.push_back(iter->second[0]);
+  // Auto-accept the first audio device and the first video device from the
+  // request when the appropriate API permissions exist.
+  bool accepted_an_audio_device = false;
+  bool accepted_a_video_device = false;
+  for (content::MediaStreamDeviceMap::const_iterator it =
+           request->devices.begin();
+       it != request->devices.end(); ++it) {
+    if (!accepted_an_audio_device &&
+        content::IsAudioMediaType(it->first) &&
+        extension()->HasAPIPermission(APIPermission::kAudioCapture) &&
+        !it->second.empty()) {
+      devices.push_back(it->second.front());
+      accepted_an_audio_device = true;
+    } else if (!accepted_a_video_device &&
+               content::IsVideoMediaType(it->first) &&
+               extension()->HasAPIPermission(APIPermission::kVideoCapture) &&
+               !it->second.empty()) {
+      devices.push_back(it->second.front());
+      accepted_a_video_device = true;
+    }
   }
 
   callback.Run(devices);
@@ -221,7 +258,8 @@ void ShellWindow::AddNewContents(WebContents* source,
                                  WebContents* new_contents,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
-                                 bool user_gesture) {
+                                 bool user_gesture,
+                                 bool* was_blocked) {
   DCHECK(source == web_contents_);
   DCHECK(Profile::FromBrowserContext(new_contents->GetBrowserContext()) ==
       profile_);
@@ -231,12 +269,23 @@ void ShellWindow::AddNewContents(WebContents* source,
   disposition =
       disposition == NEW_BACKGROUND_TAB ? disposition : NEW_FOREGROUND_TAB;
   chrome::AddWebContents(browser, NULL, new_contents, disposition, initial_pos,
-                         user_gesture);
+                         user_gesture, was_blocked);
+}
+
+void ShellWindow::HandleKeyboardEvent(
+    WebContents* source,
+    const content::NativeWebKeyboardEvent& event) {
+  DCHECK_EQ(source, web_contents_);
+  native_window_->HandleKeyboardEvent(event);
 }
 
 void ShellWindow::OnNativeClose() {
-  ShellWindowRegistry::Get(profile_)->RemoveShellWindow(this);
+  extensions::ShellWindowRegistry::Get(profile_)->RemoveShellWindow(this);
   delete this;
+}
+
+BaseWindow* ShellWindow::GetBaseWindow() {
+  return native_window_.get();
 }
 
 string16 ShellWindow::GetTitle() const {
@@ -246,20 +295,51 @@ string16 ShellWindow::GetTitle() const {
   if (!web_contents()->GetController().GetActiveEntry() ||
       web_contents()->GetController().GetActiveEntry()->GetTitle().empty())
     return UTF8ToUTF16(extension()->name());
-  return web_contents()->GetTitle();
+  string16 title = web_contents()->GetTitle();
+  Browser::FormatTitleForDisplay(&title);
+  return title;
 }
 
 bool ShellWindow::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ShellWindow, message)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_UpdateDraggableRegions,
+                        UpdateDraggableRegions)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
+void ShellWindow::UpdateDraggableRegions(
+    const std::vector<extensions::DraggableRegion>& regions) {
+  native_window_->UpdateDraggableRegions(regions);
+}
+
+void ShellWindow::OnImageLoaded(const gfx::Image& image,
+                                const std::string& extension_id,
+                                int index) {
+  if (!image.IsEmpty()) {
+    app_icon_ = image;
+    native_window_->UpdateWindowIcon();
+  }
+  app_icon_loader_.reset();
+}
+
+void ShellWindow::UpdateExtensionAppIcon() {
+  app_icon_loader_.reset(new ImageLoadingTracker(this));
+  app_icon_loader_->LoadImage(
+      extension(),
+      extension()->GetIconResource(extension_misc::EXTENSION_ICON_SMALLISH,
+                                   ExtensionIconSet::MATCH_BIGGER),
+      gfx::Size(extension_misc::EXTENSION_ICON_SMALLISH,
+                extension_misc::EXTENSION_ICON_SMALLISH),
+      ImageLoadingTracker::CACHE);
+}
+
 void ShellWindow::CloseContents(WebContents* contents) {
-  Close();
+  DCHECK(contents == web_contents_);
+  native_window_->Close();
 }
 
 bool ShellWindow::ShouldSuppressDialogs() {
@@ -291,26 +371,28 @@ bool ShellWindow::IsPopupOrPanel(const WebContents* source) const {
 
 void ShellWindow::MoveContents(WebContents* source, const gfx::Rect& pos) {
   DCHECK(source == web_contents_);
-  SetBounds(pos);
+  native_window_->SetBounds(pos);
 }
 
 void ShellWindow::NavigationStateChanged(
     const content::WebContents* source, unsigned changed_flags) {
   DCHECK(source == web_contents_);
   if (changed_flags & content::INVALIDATE_TYPE_TITLE)
-    UpdateWindowTitle();
+    native_window_->UpdateWindowTitle();
+  else if (changed_flags & content::INVALIDATE_TYPE_TAB)
+    native_window_->UpdateWindowIcon();
 }
 
 void ShellWindow::ToggleFullscreenModeForTab(content::WebContents* source,
                                              bool enter_fullscreen) {
   DCHECK(source == web_contents_);
-  SetFullscreen(enter_fullscreen);
+  native_window_->SetFullscreen(enter_fullscreen);
 }
 
 bool ShellWindow::IsFullscreenForTabOrPending(
     const content::WebContents* source) const {
   DCHECK(source == web_contents_);
-  return IsFullscreenOrPending();
+  return native_window_->IsFullscreenOrPending();
 }
 
 void ShellWindow::Observe(int type,
@@ -332,11 +414,11 @@ void ShellWindow::Observe(int type,
           content::Details<extensions::UnloadedExtensionInfo>(
               details)->extension;
       if (extension_ == unloaded_extension)
-        Close();
+        native_window_->Close();
       break;
     }
     case content::NOTIFICATION_APP_TERMINATING:
-      Close();
+      native_window_->Close();
       break;
     default:
       NOTREACHED() << "Received unexpected notification";
@@ -358,4 +440,17 @@ void ShellWindow::AddMessageToDevToolsConsole(ConsoleMessageLevel level,
   content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
   rvh->Send(new ExtensionMsg_AddMessageToConsole(
       rvh->GetRoutingID(), level, message));
+}
+
+void ShellWindow::SaveWindowPosition()
+{
+  if (window_key_.empty())
+    return;
+
+  extensions::ShellWindowGeometryCache* cache =
+      extensions::ExtensionSystem::Get(profile())->
+          shell_window_geometry_cache();
+
+  gfx::Rect bounds = native_window_->GetBounds();
+  cache->SaveGeometry(extension()->id(), window_key_, bounds);
 }

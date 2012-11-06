@@ -5,10 +5,8 @@
 #ifndef REMOTING_PROTOCOL_MOUSE_INPUT_FILTER_H_
 #define REMOTING_PROTOCOL_MOUSE_INPUT_FILTER_H_
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "remoting/protocol/input_filter.h"
-#include "remoting/protocol/input_stub.h"
 #include "third_party/skia/include/core/SkTypes.h"
 #include "third_party/skia/include/core/SkSize.h"
 
@@ -20,6 +18,7 @@ namespace protocol {
 // output dimensions, before passing events on to |input_stub|.
 class MouseInputFilter : public InputFilter {
  public:
+  MouseInputFilter();
   explicit MouseInputFilter(InputStub* input_stub);
   virtual ~MouseInputFilter();
 

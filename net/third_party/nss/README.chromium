@@ -2,9 +2,14 @@ Name: Network Security Services (NSS)
 URL: http://www.mozilla.org/projects/security/pki/nss/
 Version: 3.13.4 pre-release snapshot 20120319
 Security Critical: Yes
+License: MPL 1.1/GPL 2.0/LGPL 2.1
+License FILE: NOT_SHIPPED
 
 This directory includes a copy of NSS's libssl from the CVS repo at:
   :pserver:anonymous@cvs-mirror.mozilla.org:/cvsroot
+
+The same module appears in crypto/third_party/nss (and third_party/nss on some
+platforms), so we don't repeat the license file here.
 
 The snapshot was updated to the CVS tag: NSS_SSL_3_13_4_20120319_TAG
 
@@ -89,6 +94,10 @@ Patches:
     most TLS 1.0 if we don't know what protocol version the server supports.
     https://bugzilla.mozilla.org/show_bug.cgi?id=774547
     patches/recordlayerversion.patch
+
+  * Replace hardcoded ssl_variant_stream by ss->protocolVariant.
+    https://bugzilla.mozilla.org/show_bug.cgi?id=681065
+    patches/sslprotocolvariant.patch
 
   * When renegotiating, continue to use the client_version used in the
     initial ClientHello to work around a Windows SChannel bug.

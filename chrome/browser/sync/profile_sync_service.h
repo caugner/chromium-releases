@@ -23,14 +23,16 @@
 #include "chrome/browser/sync/failed_datatypes_handler.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
+#include "chrome/browser/sync/glue/data_type_manager_observer.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/invalidation_frontend.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_prefs.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "googleurl/src/gurl.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
@@ -38,7 +40,7 @@
 #include "sync/internal_api/public/util/experiments.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/js/sync_js_controller.h"
-#include "sync/notifier/sync_notifier_registrar.h"
+#include "sync/notifier/invalidator_registrar.h"
 
 class Profile;
 class ProfileSyncComponentsFactory;
@@ -149,9 +151,11 @@ class EncryptedData;
 //
 class ProfileSyncService : public browser_sync::SyncFrontend,
                            public browser_sync::SyncPrefObserver,
+                           public browser_sync::DataTypeManagerObserver,
                            public syncer::UnrecoverableErrorHandler,
                            public content::NotificationObserver,
-                           public ProfileKeyedService {
+                           public ProfileKeyedService,
+                           public InvalidationFrontend {
  public:
   typedef ProfileSyncServiceObserver Observer;
   typedef browser_sync::SyncBackendHost::Status Status;
@@ -254,13 +258,12 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual bool HasSyncSetupCompleted() const;
   virtual void SetSyncSetupCompleted();
 
-  // syncer::SyncNotifier implementation (via SyncFrontend).
-  virtual void OnNotificationsEnabled() OVERRIDE;
-  virtual void OnNotificationsDisabled(
-      syncer::NotificationsDisabledReason reason) OVERRIDE;
-  virtual void OnIncomingNotification(
-      const syncer::ObjectIdPayloadMap& id_payloads,
-      syncer::IncomingNotificationSource source) OVERRIDE;
+  // syncer::InvalidationHandler implementation (via SyncFrontend).
+  virtual void OnInvalidatorStateChange(
+      syncer::InvalidatorState state) OVERRIDE;
+  virtual void OnIncomingInvalidation(
+      const syncer::ObjectIdStateMap& id_state_map,
+      syncer::IncomingInvalidationSource source) OVERRIDE;
 
   // SyncFrontend implementation.
   virtual void OnBackendInitialized(
@@ -285,6 +288,13 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
       const syncer::Experiments& experiments) OVERRIDE;
   virtual void OnActionableError(
       const syncer::SyncProtocolError& error) OVERRIDE;
+
+  // DataTypeManagerObserver implementation.
+  virtual void OnConfigureBlocked() OVERRIDE;
+  virtual void OnConfigureDone(
+      const browser_sync::DataTypeManager::ConfigureResult& result) OVERRIDE;
+  virtual void OnConfigureRetry() OVERRIDE;
+  virtual void OnConfigureStart() OVERRIDE;
 
   // Update the last auth error and notify observers of error state.
   void UpdateAuthErrorState(const GoogleServiceAuthError& error);
@@ -552,58 +562,23 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // been cleared yet. Virtual for testing purposes.
   virtual bool waiting_for_auth() const;
 
-  // Invalidation clients should follow the pattern below:
-  //
-  // When starting the client:
-  //
-  //   pss->RegisterInvalidationHandler(client_handler);
-  //
-  // When the set of IDs to register changes for the client during its lifetime
-  // (i.e., between calls to RegisterInvalidationHandler(client_handler) and
-  // UnregisterInvalidationHandler(client_handler):
-  //
-  //   pss->UpdateRegisteredInvalidationIds(client_handler, client_ids);
-  //
-  // When shutting down the client for browser shutdown:
-  //
-  //   pss->UnregisterInvalidationHandler(client_handler);
-  //
-  // Note that there's no call to UpdateRegisteredIds() -- this is because the
-  // invalidation API persists registrations across browser restarts.
-  //
-  // When permanently shutting down the client, e.g. when disabling the related
-  // feature:
-  //
-  //   pss->UpdateRegisteredInvalidationIds(client_handler, ObjectIdSet());
-  //   pss->UnregisterInvalidationHandler(client_handler);
-
-  // NOTE(akalin): Invalidations that come in during browser shutdown may get
-  // dropped.  This won't matter once we have an Acknowledge API, though: see
-  // http://crbug.com/78462 and http://crbug.com/124149.
-
-  // Starts sending notifications to |handler|.  |handler| must not be NULL,
-  // and it must already be registered.
-  //
-  // Handler registrations are persisted across restarts of sync.
-  void RegisterInvalidationHandler(syncer::SyncNotifierObserver* handler);
-
-  // Updates the set of ObjectIds associated with |handler|.  |handler| must
-  // not be NULL, and must already be registered.  An ID must be registered for
-  // at most one handler.
-  //
-  // Registered IDs are persisted across restarts of sync.
-  void UpdateRegisteredInvalidationIds(syncer::SyncNotifierObserver* handler,
-                                       const syncer::ObjectIdSet& ids);
-
-  // Stops sending notifications to |handler|.  |handler| must not be NULL, and
-  // it must already be registered.  Note that this doesn't unregister the IDs
-  // associated with |handler|.
-  //
-  // Handler registrations are persisted across restarts of sync.
-  void UnregisterInvalidationHandler(syncer::SyncNotifierObserver* handler);
+  // InvalidationFrontend implementation.
+  virtual void RegisterInvalidationHandler(
+      syncer::InvalidationHandler* handler) OVERRIDE;
+  virtual void UpdateRegisteredInvalidationIds(
+      syncer::InvalidationHandler* handler,
+      const syncer::ObjectIdSet& ids) OVERRIDE;
+  virtual void UnregisterInvalidationHandler(
+      syncer::InvalidationHandler* handler) OVERRIDE;
+  virtual syncer::InvalidatorState GetInvalidatorState() const OVERRIDE;
 
   // ProfileKeyedService implementation.
   virtual void Shutdown() OVERRIDE;
+
+  // Simulate an incoming notification for the given id and payload.
+  void EmitInvalidationForTest(
+      const invalidation::ObjectId& id,
+      const std::string& payload);
 
  protected:
   // Used by test classes that derive from ProfileSyncService.
@@ -781,9 +756,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // called.
   base::Time start_up_time_;
 
-  // The time that NOTIFICATION_SYNC_CONFIGURE_START is received.  This member
-  // is zero if NOTIFICATION_SYNC_CONFIGURE_START has not been fired yet, and
-  // is reset to zero once NOTIFICATION_SYNC_CONFIGURE_DONE is received.
+  // The time that OnConfigureStart is called. This member is zero if
+  // OnConfigureStart has not yet been called, and is reset to zero once
+  // OnConfigureDone is called.
   base::Time sync_configure_start_time_;
 
   // Indicates if this is the first time sync is being configured.  This value
@@ -877,7 +852,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   syncer::SyncManagerFactory sync_manager_factory_;
 
   // Dispatches invalidations to handlers.
-  syncer::SyncNotifierRegistrar notifier_registrar_;
+  syncer::InvalidatorRegistrar invalidator_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };

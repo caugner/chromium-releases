@@ -14,14 +14,9 @@
 #include "chrome/browser/ui/panels/base_panel_browser_test.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
-#include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/common/show_desktop_notification_params.h"
 #include "ui/gfx/screen.h"
-
-
-// Refactor has only been done for Win and Mac panels so far.
-#if defined(OS_WIN) || defined(OS_MACOSX)
 
 // Desktop notification code subscribes to various panel change notifications
 // so that it knows when to adjusts balloon positions. In order to give
@@ -145,12 +140,6 @@ IN_PROC_BROWSER_TEST_F(PanelAndDesktopNotificationTest, AddAndClosePanel) {
 
 IN_PROC_BROWSER_TEST_F(PanelAndDesktopNotificationTest,
                        ExpandAndCollapsePanel) {
-  // Disable mouse watcher since we don't want mouse movements to affect panel
-  // testing for title-only state.
-  PanelManager* panel_manager = PanelManager::GetInstance();
-  PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
-  panel_manager->SetMouseWatcherForTesting(mouse_watcher);
-
   Balloon* balloon = CreateBalloon();
 
   // Create a docked panel. Expect that the notification balloon moves up to be
@@ -410,5 +399,3 @@ IN_PROC_BROWSER_TEST_F(PanelAndDesktopNotificationTest, InteractWithTwoPanels) {
   MessageLoopForUI::current()->RunAllPending();
   EXPECT_EQ(original_balloon_bottom, GetBalloonBottomPosition(balloon));
 }
-
-#endif // OS_WIN || OS_MACOSX

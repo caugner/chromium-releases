@@ -8,27 +8,12 @@
 #include <cstring>
 
 #include "base/memory/scoped_ptr.h"
-#include "net/base/address_list.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/shared_impl/private/net_address_private_impl.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/thunk.h"
 
 namespace ppapi {
-
-NetAddressList* CreateNetAddressListFromAddressList(
-    const net::AddressList& list) {
-  scoped_ptr<NetAddressList> net_address_list(new NetAddressList());
-  PP_NetAddress_Private address;
-
-  for (size_t i = 0; i < list.size(); ++i) {
-    if (!NetAddressPrivateImpl::IPEndPointToNetAddress(list[i], &address))
-      return NULL;
-    net_address_list->push_back(address);
-  }
-
-  return net_address_list.release();
-}
 
 PPB_HostResolver_Shared::PPB_HostResolver_Shared(PP_Instance instance)
     : Resource(OBJECT_IS_IMPL, instance),
@@ -90,7 +75,7 @@ bool PPB_HostResolver_Shared::GetNetAddress(uint32 index,
 void PPB_HostResolver_Shared::OnResolveCompleted(
     bool succeeded,
     const std::string& canonical_name,
-    const NetAddressList& net_address_list) {
+    const std::vector<PP_NetAddress_Private>& net_address_list) {
   if (succeeded) {
     canonical_name_ = canonical_name;
     net_address_list_ = net_address_list;

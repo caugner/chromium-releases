@@ -10,13 +10,15 @@
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "sync/internal_api/public/sync_manager.h"
-#include "sync/notifier/sync_notifier_registrar.h"
+#include "sync/notifier/invalidator_registrar.h"
 
 namespace base {
 class SequencedTaskRunner;
 }
 
 namespace syncer {
+
+class FakeSyncEncryptionHandler;
 
 class FakeSyncManager : public SyncManager {
  public:
@@ -52,14 +54,11 @@ class FakeSyncManager : public SyncManager {
   ModelTypeSet GetAndResetEnabledTypes();
 
   // Posts a method to invalidate the given IDs on the sync thread.
-  void Invalidate(const ObjectIdPayloadMap& id_payloads,
-                  IncomingNotificationSource source);
+  void Invalidate(const ObjectIdStateMap& id_state_map,
+                  IncomingInvalidationSource source);
 
-  // Posts a method to enable notifications on the sync thread.
-  void EnableNotifications();
-
-  // Posts a method to disable notifications on the sync thread.
-  void DisableNotifications(NotificationsDisabledReason reason);
+  // Posts a method to update the invalidator state on the sync thread.
+  void UpdateInvalidatorState(InvalidatorState state);
 
   // Block until the sync thread has finished processing any pending messages.
   void WaitForSyncThread();
@@ -67,7 +66,7 @@ class FakeSyncManager : public SyncManager {
   // SyncManager implementation.
   // Note: we treat whatever message loop this is called from as the sync
   // loop for purposes of callbacks.
-  virtual bool Init(
+  virtual void Init(
       const FilePath& database_location,
       const WeakHandle<JsEventHandler>& event_handler,
       const std::string& sync_server_and_path,
@@ -79,10 +78,9 @@ class FakeSyncManager : public SyncManager {
       ExtensionsActivityMonitor* extensions_activity_monitor,
       ChangeDelegate* change_delegate,
       const SyncCredentials& credentials,
-      scoped_ptr<SyncNotifier> sync_notifier,
+      scoped_ptr<Invalidator> invalidator,
       const std::string& restored_key_for_bootstrapping,
       const std::string& restored_keystore_key_for_bootstrapping,
-      bool keystore_encryption_enabled,
       scoped_ptr<InternalComponentsFactory> internal_components_factory,
       Encryptor* encryptor,
       UnrecoverableErrorHandler* unrecoverable_error_handler,
@@ -94,46 +92,38 @@ class FakeSyncManager : public SyncManager {
       ModelTypeSet types) OVERRIDE;
   virtual bool PurgePartiallySyncedTypes() OVERRIDE;
   virtual void UpdateCredentials(const SyncCredentials& credentials) OVERRIDE;
-  virtual void UpdateEnabledTypes(const ModelTypeSet& types) OVERRIDE;
+  virtual void UpdateEnabledTypes(ModelTypeSet types) OVERRIDE;
   virtual void RegisterInvalidationHandler(
-      SyncNotifierObserver* handler) OVERRIDE;
+      InvalidationHandler* handler) OVERRIDE;
   virtual void UpdateRegisteredInvalidationIds(
-      SyncNotifierObserver* handler,
+      InvalidationHandler* handler,
       const ObjectIdSet& ids) OVERRIDE;
   virtual void UnregisterInvalidationHandler(
-      SyncNotifierObserver* handler) OVERRIDE;
+      InvalidationHandler* handler) OVERRIDE;
   virtual void StartSyncingNormally(
       const ModelSafeRoutingInfo& routing_info) OVERRIDE;
-  virtual void SetEncryptionPassphrase(const std::string& passphrase,
-                                       bool is_explicit) OVERRIDE;
-  virtual void SetDecryptionPassphrase(const std::string& passphrase) OVERRIDE;
   virtual void ConfigureSyncer(
       ConfigureReason reason,
-      const ModelTypeSet& types_to_config,
+      ModelTypeSet types_to_config,
       const ModelSafeRoutingInfo& new_routing_info,
       const base::Closure& ready_task,
       const base::Closure& retry_task) OVERRIDE;
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual SyncStatus GetDetailedStatus() const OVERRIDE;
-  virtual bool IsUsingExplicitPassphrase() OVERRIDE;
-  virtual bool GetKeystoreKeyBootstrapToken(std::string* token) OVERRIDE;
   virtual void SaveChanges() OVERRIDE;
   virtual void StopSyncingForShutdown(const base::Closure& callback) OVERRIDE;
   virtual void ShutdownOnSyncThread() OVERRIDE;
   virtual UserShare* GetUserShare() OVERRIDE;
-  virtual void RefreshNigori(const std::string& chrome_version,
-                             const base::Closure& done_callback) OVERRIDE;
-  virtual void EnableEncryptEverything() OVERRIDE;
   virtual bool ReceivedExperiment(Experiments* experiments) OVERRIDE;
   virtual bool HasUnsyncedItems() OVERRIDE;
+  virtual SyncEncryptionHandler* GetEncryptionHandler() OVERRIDE;
 
  private:
   void InvalidateOnSyncThread(
-      const ObjectIdPayloadMap& id_payloads,
-      IncomingNotificationSource source);
-  void EnableNotificationsOnSyncThread();
-  void DisableNotificationsOnSyncThread(NotificationsDisabledReason reason);
+      const ObjectIdStateMap& id_state_map,
+      IncomingInvalidationSource source);
+  void UpdateInvalidatorStateOnSyncThread(InvalidatorState state);
 
   scoped_refptr<base::SequencedTaskRunner> sync_task_runner_;
 
@@ -154,8 +144,10 @@ class FakeSyncManager : public SyncManager {
   // The set of types that have been enabled.
   ModelTypeSet enabled_types_;
 
-  // Faked notifier state.
-  SyncNotifierRegistrar registrar_;
+  // Faked invalidator state.
+  InvalidatorRegistrar registrar_;
+
+  scoped_ptr<FakeSyncEncryptionHandler> fake_encryption_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSyncManager);
 };

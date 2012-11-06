@@ -55,15 +55,15 @@ class URLRequestHttpJob::HttpFilterContext : public FilterContext {
   virtual ~HttpFilterContext();
 
   // FilterContext implementation.
-  virtual bool GetMimeType(std::string* mime_type) const;
-  virtual bool GetURL(GURL* gurl) const;
-  virtual base::Time GetRequestTime() const;
-  virtual bool IsCachedContent() const;
-  virtual bool IsDownload() const;
-  virtual bool IsSdchResponse() const;
-  virtual int64 GetByteReadCount() const;
-  virtual int GetResponseCode() const;
-  virtual void RecordPacketStats(StatisticSelector statistic) const;
+  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
+  virtual bool GetURL(GURL* gurl) const OVERRIDE;
+  virtual base::Time GetRequestTime() const OVERRIDE;
+  virtual bool IsCachedContent() const OVERRIDE;
+  virtual bool IsDownload() const OVERRIDE;
+  virtual bool IsSdchResponse() const OVERRIDE;
+  virtual int64 GetByteReadCount() const OVERRIDE;
+  virtual int GetResponseCode() const OVERRIDE;
+  virtual void RecordPacketStats(StatisticSelector statistic) const OVERRIDE;
 
   // Method to allow us to reset filter context for a response that should have
   // been SDCH encoded when there is an update due to an explicit HTTP header.
@@ -80,7 +80,9 @@ class URLRequestHttpJob::HttpTransactionDelegateImpl
  public:
   explicit HttpTransactionDelegateImpl(URLRequest* request)
       : request_(request),
-        network_delegate_(request->context()->network_delegate())  {
+        network_delegate_(request->context()->network_delegate()),
+        cache_active_(false),
+        network_active_(false) {
   }
   virtual ~HttpTransactionDelegateImpl() {
     OnDetachRequest();
@@ -88,28 +90,54 @@ class URLRequestHttpJob::HttpTransactionDelegateImpl
   void OnDetachRequest() {
     if (request_ == NULL || network_delegate_ == NULL)
       return;
-    network_delegate_->NotifyCacheWaitStateChange(
+    network_delegate_->NotifyRequestWaitStateChange(
         *request_,
-        NetworkDelegate::CACHE_WAIT_STATE_RESET);
+        NetworkDelegate::REQUEST_WAIT_STATE_RESET);
+    cache_active_ = false;
+    network_active_ = false;
     request_ = NULL;
   }
   virtual void OnCacheActionStart() OVERRIDE {
     if (request_ == NULL || network_delegate_ == NULL)
       return;
-    network_delegate_->NotifyCacheWaitStateChange(
+    DCHECK(!cache_active_ && !network_active_);
+    cache_active_ = true;
+    network_delegate_->NotifyRequestWaitStateChange(
         *request_,
-        NetworkDelegate::CACHE_WAIT_STATE_START);
+        NetworkDelegate::REQUEST_WAIT_STATE_CACHE_START);
   }
   virtual void OnCacheActionFinish() OVERRIDE {
     if (request_ == NULL || network_delegate_ == NULL)
       return;
-    network_delegate_->NotifyCacheWaitStateChange(
+    DCHECK(cache_active_ && !network_active_);
+    cache_active_ = false;
+    network_delegate_->NotifyRequestWaitStateChange(
         *request_,
-        NetworkDelegate::CACHE_WAIT_STATE_FINISH);
+        NetworkDelegate::REQUEST_WAIT_STATE_CACHE_FINISH);
+  }
+  virtual void OnNetworkActionStart() OVERRIDE {
+    if (request_ == NULL || network_delegate_ == NULL)
+      return;
+    DCHECK(!cache_active_ && !network_active_);
+    network_active_ = true;
+    network_delegate_->NotifyRequestWaitStateChange(
+        *request_,
+        NetworkDelegate::REQUEST_WAIT_STATE_NETWORK_START);
+  }
+  virtual void OnNetworkActionFinish() OVERRIDE {
+    if (request_ == NULL || network_delegate_ == NULL)
+      return;
+    DCHECK(!cache_active_ && network_active_);
+    network_active_ = false;
+    network_delegate_->NotifyRequestWaitStateChange(
+        *request_,
+        NetworkDelegate::REQUEST_WAIT_STATE_NETWORK_FINISH);
   }
  private:
   URLRequest* request_;
   NetworkDelegate* network_delegate_;
+  bool cache_active_;
+  bool network_active_;
 };
 
 URLRequestHttpJob::HttpFilterContext::HttpFilterContext(URLRequestHttpJob* job)
@@ -169,24 +197,26 @@ void URLRequestHttpJob::HttpFilterContext::RecordPacketStats(
 // TODO(darin): make sure the port blocking code is not lost
 // static
 URLRequestJob* URLRequestHttpJob::Factory(URLRequest* request,
+                                          NetworkDelegate* network_delegate,
                                           const std::string& scheme) {
   DCHECK(scheme == "http" || scheme == "https");
 
-  if (!request->context() ||
-      !request->context()->http_transaction_factory()) {
+  if (!request->context()->http_transaction_factory()) {
     NOTREACHED() << "requires a valid context";
-    return new URLRequestErrorJob(request, ERR_INVALID_ARGUMENT);
+    return new URLRequestErrorJob(
+        request, network_delegate, ERR_INVALID_ARGUMENT);
   }
 
   GURL redirect_url;
   if (request->GetHSTSRedirect(&redirect_url))
-    return new URLRequestRedirectJob(request, redirect_url);
-  return new URLRequestHttpJob(request);
+    return new URLRequestRedirectJob(request, network_delegate, redirect_url);
+  return new URLRequestHttpJob(request, network_delegate);
 }
 
 
-URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
-    : URLRequestJob(request, request->context()->network_delegate()),
+URLRequestHttpJob::URLRequestHttpJob(URLRequest* request,
+                                     NetworkDelegate* network_delegate)
+    : URLRequestJob(request, network_delegate),
       response_info_(NULL),
       response_cookies_save_index_(0),
       proxy_auth_state_(AUTH_STATE_DONT_NEED_AUTH),
@@ -294,7 +324,7 @@ void URLRequestHttpJob::DestroyTransaction() {
 }
 
 void URLRequestHttpJob::StartTransaction() {
-  if (request_->context() && request_->context()->network_delegate()) {
+  if (request_->context()->network_delegate()) {
     int rv = request_->context()->network_delegate()->NotifyBeforeSendHeaders(
         request_, notify_before_headers_sent_callback_,
         &request_info_.extra_headers);
@@ -332,7 +362,7 @@ void URLRequestHttpJob::StartTransactionInternal() {
 
   int rv;
 
-  if (request_->context() && request_->context()->network_delegate()) {
+  if (request_->context()->network_delegate()) {
     request_->context()->network_delegate()->NotifySendHeaders(
         request_, request_info_.extra_headers);
   }
@@ -341,7 +371,6 @@ void URLRequestHttpJob::StartTransactionInternal() {
     rv = transaction_->RestartWithAuth(auth_credentials_, start_callback_);
     auth_credentials_ = AuthCredentials();
   } else {
-    DCHECK(request_->context());
     DCHECK(request_->context()->http_transaction_factory());
 
     rv = request_->context()->http_transaction_factory()->CreateTransaction(
@@ -435,19 +464,17 @@ void URLRequestHttpJob::AddExtraHeaders() {
   }
 
   const URLRequestContext* context = request_->context();
-  if (context) {
-    // Only add default Accept-Language and Accept-Charset if the request
-    // didn't have them specified.
-    if (!context->accept_language().empty()) {
-      request_info_.extra_headers.SetHeaderIfMissing(
-          HttpRequestHeaders::kAcceptLanguage,
-          context->accept_language());
-    }
-    if (!context->accept_charset().empty()) {
-      request_info_.extra_headers.SetHeaderIfMissing(
-          HttpRequestHeaders::kAcceptCharset,
-          context->accept_charset());
-    }
+  // Only add default Accept-Language and Accept-Charset if the request
+  // didn't have them specified.
+  if (!context->accept_language().empty()) {
+    request_info_.extra_headers.SetHeaderIfMissing(
+        HttpRequestHeaders::kAcceptLanguage,
+        context->accept_language());
+  }
+  if (!context->accept_charset().empty()) {
+    request_info_.extra_headers.SetHeaderIfMissing(
+        HttpRequestHeaders::kAcceptCharset,
+        context->accept_charset());
   }
 }
 
@@ -460,8 +487,7 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
   if (!request_)
     return;
 
-  CookieStore* cookie_store =
-      request_->context()->cookie_store();
+  CookieStore* cookie_store = request_->context()->cookie_store();
   if (cookie_store && !(request_info_.load_flags & LOAD_DO_NOT_SEND_COOKIES)) {
     net::CookieMonster* cookie_monster = cookie_store->GetCookieMonster();
     if (cookie_monster) {
@@ -646,7 +672,7 @@ void URLRequestHttpJob::ProcessStrictTransportSecurityHeader() {
   // Only accept strict transport security headers on HTTPS connections that
   // have no certificate errors.
   if (!ssl_info.is_valid() || IsCertStatusError(ssl_info.cert_status) ||
-      !ctx || !ctx->transport_security_state()) {
+      !ctx->transport_security_state()) {
     return;
   }
 
@@ -683,7 +709,7 @@ void URLRequestHttpJob::ProcessPublicKeyPinsHeader() {
   // Only accept public key pins headers on HTTPS connections that have no
   // certificate errors.
   if (!ssl_info.is_valid() || IsCertStatusError(ssl_info.cert_status) ||
-      !ctx || !ctx->transport_security_state()) {
+      !ctx->transport_security_state()) {
     return;
   }
 
@@ -746,7 +772,7 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
 
   if (result == OK) {
     scoped_refptr<HttpResponseHeaders> headers = GetResponseHeaders();
-    if (context && context->network_delegate()) {
+    if (context->network_delegate()) {
       // Note that |this| may not be deleted until
       // |on_headers_received_callback_| or
       // |NetworkDelegate::URLRequestDestroyed()| has been called.
@@ -872,17 +898,17 @@ void URLRequestHttpJob::Start() {
                                           referrer.spec());
   }
 
-  if (request_->context()) {
-    request_info_.extra_headers.SetHeaderIfMissing(
-        HttpRequestHeaders::kUserAgent,
-        request_->context()->GetUserAgent(request_->url()));
-  }
+  request_info_.extra_headers.SetHeaderIfMissing(
+      HttpRequestHeaders::kUserAgent,
+      request_->context()->GetUserAgent(request_->url()));
 
   AddExtraHeaders();
   AddCookieHeaderAndStart();
 }
 
 void URLRequestHttpJob::Kill() {
+  http_transaction_delegate_->OnDetachRequest();
+
   if (!transaction_.get())
     return;
 
@@ -896,8 +922,9 @@ LoadState URLRequestHttpJob::GetLoadState() const {
       transaction_->GetLoadState() : LOAD_STATE_IDLE;
 }
 
-uint64 URLRequestHttpJob::GetUploadProgress() const {
-  return transaction_.get() ? transaction_->GetUploadProgress() : 0;
+UploadProgress URLRequestHttpJob::GetUploadProgress() const {
+  return transaction_.get() ?
+      transaction_->GetUploadProgress() : UploadProgress();
 }
 
 bool URLRequestHttpJob::GetMimeType(std::string* mime_type) const {

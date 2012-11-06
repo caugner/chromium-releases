@@ -12,7 +12,7 @@
 #include "ui/base/models/menu_model.h"
 
 namespace gfx {
-class ImageSkia;
+class Image;
 }
 
 namespace ui {
@@ -44,7 +44,7 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
     // Gets the icon for the item with the specified id, returning true if there
     // is an icon, false otherwise.
     virtual bool GetIconForCommandId(int command_id,
-                                     gfx::ImageSkia* icon) const;
+                                     gfx::Image* icon) const;
 
     // Notifies the delegate that the item with the specified command id was
     // visually highlighted within the menu.
@@ -74,7 +74,7 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
   // Methods for adding items to the model.
   void AddItem(int command_id, const string16& label);
   void AddItemWithStringId(int command_id, int string_id);
-  void AddSeparator();
+  void AddSeparator(MenuSeparatorType separator_type);
   void AddCheckItem(int command_id, const string16& label);
   void AddCheckItemWithStringId(int command_id, int string_id);
   void AddRadioItem(int command_id, const string16& label, int group_id);
@@ -89,7 +89,7 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
   // Methods for inserting items into the model.
   void InsertItemAt(int index, int command_id, const string16& label);
   void InsertItemWithStringIdAt(int index, int command_id, int string_id);
-  void InsertSeparatorAt(int index);
+  void InsertSeparatorAt(int index, MenuSeparatorType separator_type);
   void InsertCheckItemAt(int index, int command_id, const string16& label);
   void InsertCheckItemWithStringIdAt(int index, int command_id, int string_id);
   void InsertRadioItemAt(
@@ -102,7 +102,7 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
       int index, int command_id, int string_id, MenuModel* model);
 
   // Sets the icon for the item at |index|.
-  void SetIcon(int index, const gfx::ImageSkia& icon);
+  void SetIcon(int index, const gfx::Image& icon);
 
   // Clears all items. Note that it does not free MenuModel of submenu.
   void Clear();
@@ -115,6 +115,7 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
   virtual bool HasIcons() const OVERRIDE;
   virtual int GetItemCount() const OVERRIDE;
   virtual ItemType GetTypeAt(int index) const OVERRIDE;
+  virtual ui::MenuSeparatorType GetSeparatorTypeAt(int index) const OVERRIDE;
   virtual int GetCommandIdAt(int index) const OVERRIDE;
   virtual string16 GetLabelAt(int index) const OVERRIDE;
   virtual bool IsItemDynamicAt(int index) const OVERRIDE;
@@ -122,7 +123,7 @@ class UI_EXPORT SimpleMenuModel : public MenuModel {
                                 ui::Accelerator* accelerator) const OVERRIDE;
   virtual bool IsItemCheckedAt(int index) const OVERRIDE;
   virtual int GetGroupIdAt(int index) const OVERRIDE;
-  virtual bool GetIconAt(int index, gfx::ImageSkia* icon) OVERRIDE;
+  virtual bool GetIconAt(int index, gfx::Image* icon) OVERRIDE;
   virtual ui::ButtonMenuItemModel* GetButtonMenuItemAt(
       int index) const OVERRIDE;
   virtual bool IsEnabledAt(int index) const OVERRIDE;

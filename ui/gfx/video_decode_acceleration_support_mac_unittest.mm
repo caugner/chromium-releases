@@ -7,7 +7,6 @@
 #import "base/bind.h"
 #include "base/location.h"
 #import "base/mac/foundation_util.h"
-#import "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/message_loop.h"
 #import "base/sys_info.h"
@@ -36,10 +35,9 @@ const uint8_t kSampleAVCData[] =  {
 // Check to see if the OS we're running on should have
 // VideoDecodeAcceleration.framework installed.
 bool OSShouldHaveFramework() {
-  if (base::mac::IsOSLeopardOrEarlier())
-    return false;
-
   // 10.6.2 and earlier doesn't have the framework.
+  // If we ever drop 10.6 support and clean up IsOSSnowLeopard() calls, this
+  // can be removed too.
   int32 major, minor, bugfix;
   base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
   if (major == 10 && minor == 6 && bugfix <= 2)
@@ -72,7 +70,8 @@ class VideoDecodeAccelerationSupportTest : public ui::CocoaTest {
 
 // Test that creating VideoDecodeAccelerationSupport works on hardware that
 // supports it.
-TEST_F(VideoDecodeAccelerationSupportTest, Create) {
+// http://crbug.com/103912
+TEST_F(VideoDecodeAccelerationSupportTest, DISABLED_Create) {
   scoped_refptr<gfx::VideoDecodeAccelerationSupport> vda(
       new gfx::VideoDecodeAccelerationSupport);
   gfx::VideoDecodeAccelerationSupport::Status status = vda->Create(

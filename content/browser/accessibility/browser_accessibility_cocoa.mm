@@ -64,6 +64,9 @@ RoleMap BuildRoleMap() {
     { AccessibilityNodeData::ROLE_BUSY_INDICATOR,
         NSAccessibilityBusyIndicatorRole },
     { AccessibilityNodeData::ROLE_BUTTON, NSAccessibilityButtonRole },
+    { AccessibilityNodeData::ROLE_CANVAS, NSAccessibilityImageRole },
+    { AccessibilityNodeData::ROLE_CANVAS_WITH_FALLBACK_CONTENT,
+        NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_CELL, @"AXCell" },
     { AccessibilityNodeData::ROLE_CHECKBOX, NSAccessibilityCheckBoxRole },
     { AccessibilityNodeData::ROLE_COLOR_WELL, NSAccessibilityColorWellRole },
@@ -81,16 +84,19 @@ RoleMap BuildRoleMap() {
     { AccessibilityNodeData::ROLE_DRAWER, NSAccessibilityDrawerRole },
     { AccessibilityNodeData::ROLE_EDITABLE_TEXT, NSAccessibilityTextFieldRole },
     { AccessibilityNodeData::ROLE_FOOTER, NSAccessibilityGroupRole },
+    { AccessibilityNodeData::ROLE_FORM, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_GRID, NSAccessibilityGridRole },
     { AccessibilityNodeData::ROLE_GROUP, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_GROW_AREA, NSAccessibilityGrowAreaRole },
     { AccessibilityNodeData::ROLE_HEADING, @"AXHeading" },
     { AccessibilityNodeData::ROLE_HELP_TAG, NSAccessibilityHelpTagRole },
+    { AccessibilityNodeData::ROLE_HORIZONTAL_RULE, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_IGNORED, NSAccessibilityUnknownRole },
     { AccessibilityNodeData::ROLE_IMAGE, NSAccessibilityImageRole },
     { AccessibilityNodeData::ROLE_IMAGE_MAP, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_IMAGE_MAP_LINK, NSAccessibilityLinkRole },
     { AccessibilityNodeData::ROLE_INCREMENTOR, NSAccessibilityIncrementorRole },
+    { AccessibilityNodeData::ROLE_LABEL, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_LANDMARK_APPLICATION,
         NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_LANDMARK_BANNER, NSAccessibilityGroupRole },
@@ -120,8 +126,10 @@ RoleMap BuildRoleMap() {
     { AccessibilityNodeData::ROLE_MENU_LIST_POPUP, NSAccessibilityUnknownRole },
     { AccessibilityNodeData::ROLE_NOTE, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_OUTLINE, NSAccessibilityOutlineRole },
+    { AccessibilityNodeData::ROLE_PARAGRAPH, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_POPUP_BUTTON,
         NSAccessibilityPopUpButtonRole },
+    { AccessibilityNodeData::ROLE_PRESENTATIONAL, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_PROGRESS_INDICATOR,
         NSAccessibilityProgressIndicatorRole },
     { AccessibilityNodeData::ROLE_RADIO_BUTTON,
@@ -137,10 +145,11 @@ RoleMap BuildRoleMap() {
     // TODO(dtseng): we don't correctly support the attributes for these roles.
     // { AccessibilityNodeData::ROLE_SCROLLAREA,
     //    NSAccessibilityScrollAreaRole },
-    // { AccessibilityNodeData::ROLE_SCROLLBAR, NSAccessibilityScrollBarRole },
+    { AccessibilityNodeData::ROLE_SCROLLBAR, NSAccessibilityScrollBarRole },
     { AccessibilityNodeData::ROLE_SHEET, NSAccessibilitySheetRole },
     { AccessibilityNodeData::ROLE_SLIDER, NSAccessibilitySliderRole },
     { AccessibilityNodeData::ROLE_SLIDER_THUMB, NSAccessibilityGroupRole },
+    { AccessibilityNodeData::ROLE_SPIN_BUTTON, NSAccessibilitySliderRole },
     { AccessibilityNodeData::ROLE_SPLITTER, NSAccessibilitySplitterRole },
     { AccessibilityNodeData::ROLE_SPLIT_GROUP, NSAccessibilitySplitGroupRole },
     { AccessibilityNodeData::ROLE_STATIC_TEXT, NSAccessibilityStaticTextRole },
@@ -157,6 +166,7 @@ RoleMap BuildRoleMap() {
     { AccessibilityNodeData::ROLE_TEXTAREA, NSAccessibilityTextAreaRole },
     { AccessibilityNodeData::ROLE_TEXT_FIELD, NSAccessibilityTextFieldRole },
     { AccessibilityNodeData::ROLE_TIMER, NSAccessibilityGroupRole },
+    { AccessibilityNodeData::ROLE_TOGGLE_BUTTON, NSAccessibilityButtonRole },
     { AccessibilityNodeData::ROLE_TOOLBAR, NSAccessibilityToolbarRole },
     { AccessibilityNodeData::ROLE_TOOLTIP, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_TREE, NSAccessibilityOutlineRole },
@@ -259,6 +269,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     { NSAccessibilityMaxValueAttribute, @"maxValue" },
     { NSAccessibilityMinValueAttribute, @"minValue" },
     { NSAccessibilityNumberOfCharactersAttribute, @"numberOfCharacters" },
+    { NSAccessibilityOrientationAttribute, @"orientation" },
     { NSAccessibilityParentAttribute, @"parent" },
     { NSAccessibilityPositionAttribute, @"position" },
     { NSAccessibilityRoleAttribute, @"role" },
@@ -272,6 +283,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     { NSAccessibilityTopLevelUIElementAttribute, @"window" },
     { NSAccessibilityURLAttribute, @"url" },
     { NSAccessibilityValueAttribute, @"value" },
+    { NSAccessibilityValueDescriptionAttribute, @"valueDescription" },
     { NSAccessibilityVisibleCharacterRangeAttribute, @"visibleCharacterRange" },
     { NSAccessibilityWindowAttribute, @"window" },
     { @"AXAccessKey", @"accessKey" },
@@ -488,6 +500,20 @@ NSDictionary* attributeToMethodNameMap = nil;
   return [NSNumber numberWithFloat:floatValue];
 }
 
+- (NSString*)orientation {
+  // We present a spin button as a vertical slider, with a role description
+  // of "spin button".
+  AccessibilityNodeData::Role internal_role =
+      static_cast<AccessibilityNodeData::Role>(browserAccessibility_->role());
+  if (internal_role == AccessibilityNodeData::ROLE_SPIN_BUTTON)
+    return NSAccessibilityVerticalOrientationValue;
+
+  if (GetState(browserAccessibility_, AccessibilityNodeData::STATE_VERTICAL))
+    return NSAccessibilityVerticalOrientationValue;
+  else
+    return NSAccessibilityHorizontalOrientationValue;
+}
+
 - (NSNumber*)numberOfCharacters {
   return [NSNumber numberWithInt:browserAccessibility_->value().length()];
 }
@@ -573,9 +599,16 @@ NSDictionary* attributeToMethodNameMap = nil;
 
   AccessibilityNodeData::Role internal_role =
       static_cast<AccessibilityNodeData::Role>(browserAccessibility_->role());
-  if (internal_role == AccessibilityNodeData::ROLE_FOOTER) {
-      return base::SysUTF16ToNSString(content_client->GetLocalizedString(
-          IDS_AX_ROLE_FOOTER));
+  switch(internal_role) {
+  case AccessibilityNodeData::ROLE_FOOTER:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_FOOTER));
+  case AccessibilityNodeData::ROLE_SPIN_BUTTON:
+    // This control is similar to what VoiceOver calls a "stepper".
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_STEPPER));
+  default:
+    break;
   }
 
   return NSAccessibilityRoleDescription(role, nil);
@@ -708,6 +741,13 @@ NSDictionary* attributeToMethodNameMap = nil;
   }
 
   return base::SysUTF16ToNSString(browserAccessibility_->value());
+}
+
+- (NSString*)valueDescription {
+  if (!browserAccessibility_->value().empty())
+    return base::SysUTF16ToNSString(browserAccessibility_->value());
+  else
+    return nil;
 }
 
 - (NSValue*)visibleCharacterRange {
@@ -932,6 +972,8 @@ NSDictionary* attributeToMethodNameMap = nil;
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityMaxValueAttribute,
         NSAccessibilityMinValueAttribute,
+        NSAccessibilityOrientationAttribute,
+        NSAccessibilityValueDescriptionAttribute,
         nil]];
   }
 

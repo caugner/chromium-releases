@@ -5,21 +5,24 @@
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/caps_lock_delegate.h"
+#include "ash/display/multi_display_manager.h"
 #include "ash/ime_control_delegate.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/brightness/brightness_control_delegate.h"
 #include "ash/system/keyboard_brightness/keyboard_brightness_control_delegate.h"
+#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/window_util.h"
-#include "ui/aura/event.h"
+#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event.h"
 
 #if defined(USE_X11)
 #include <X11/Xlib.h>
@@ -70,9 +73,8 @@ class DummyScreenshotDelegate : public ScreenshotDelegate {
   virtual ~DummyScreenshotDelegate() {}
 
   // Overridden from ScreenshotDelegate:
-  virtual void HandleTakeScreenshot(aura::Window* window) OVERRIDE {
-    if (window != NULL)
-      ++handle_take_screenshot_count_;
+  virtual void HandleTakeScreenshotForAllRootWindows() OVERRIDE {
+    ++handle_take_screenshot_count_;
   }
 
   virtual void HandleTakePartialScreenshot(
@@ -91,30 +93,6 @@ class DummyScreenshotDelegate : public ScreenshotDelegate {
   int handle_take_screenshot_count_;
 
   DISALLOW_COPY_AND_ASSIGN(DummyScreenshotDelegate);
-};
-
-class DummyCapsLockDelegate : public CapsLockDelegate {
- public:
-  explicit DummyCapsLockDelegate(bool consume)
-      : consume_(consume),
-        handle_caps_lock_count_(0) {
-  }
-  virtual ~DummyCapsLockDelegate() {}
-
-  virtual bool HandleToggleCapsLock() OVERRIDE {
-    ++handle_caps_lock_count_;
-    return consume_;
-  }
-
-  int handle_caps_lock_count() const {
-    return handle_caps_lock_count_;
-  }
-
- private:
-  const bool consume_;
-  int handle_caps_lock_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(DummyCapsLockDelegate);
 };
 
 class DummyVolumeControlDelegate : public VolumeControlDelegate {
@@ -143,6 +121,16 @@ class DummyVolumeControlDelegate : public VolumeControlDelegate {
     return consume_;
   }
   virtual void SetVolumePercent(double percent) OVERRIDE {
+  }
+  virtual bool IsAudioMuted() const OVERRIDE {
+    return false;
+  }
+  virtual void SetAudioMuted(bool muted) OVERRIDE {
+  }
+  virtual float GetVolumeLevel() const OVERRIDE {
+    return 0.0;
+  }
+  virtual void SetVolumeLevel(float level) OVERRIDE {
   }
 
   int handle_volume_mute_count() const {
@@ -325,7 +313,17 @@ class AcceleratorControllerTest : public AshTestBase {
   AcceleratorControllerTest() {};
   virtual ~AcceleratorControllerTest() {};
 
+ protected:
+  void EnableInternalDisplay() {
+    static_cast<internal::MultiDisplayManager*>(
+        aura::Env::GetInstance()->display_manager())->
+        EnableInternalDisplayForTest();
+  }
+
   static AcceleratorController* GetController();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(AcceleratorControllerTest);
 };
 
 AcceleratorController* AcceleratorControllerTest::GetController() {
@@ -435,9 +433,6 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
     GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
     EXPECT_NE(window->bounds().ToString(), snap_left.ToString());
 
-    GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
-    EXPECT_NE(window->bounds().ToString(), snap_left.ToString());
-
     // It should cycle back to the first snapped position.
     GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
     EXPECT_EQ(window->bounds().ToString(), snap_left.ToString());
@@ -448,9 +443,6 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
     GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
     EXPECT_NE(window->bounds().ToString(), snap_right.ToString());
 
-    GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
-    EXPECT_NE(window->bounds().ToString(), snap_right.ToString());
-
     // It should cycle back to the first snapped position.
     GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
     EXPECT_EQ(window->bounds().ToString(), snap_right.ToString());
@@ -458,23 +450,23 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
   {
     gfx::Rect normal_bounds = window->bounds();
 
-    GetController()->PerformAction(WINDOW_MAXIMIZE_RESTORE, dummy);
+    GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
     EXPECT_TRUE(wm::IsWindowMaximized(window.get()));
     EXPECT_NE(normal_bounds.ToString(), window->bounds().ToString());
 
-    GetController()->PerformAction(WINDOW_MAXIMIZE_RESTORE, dummy);
+    GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
     EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
     EXPECT_EQ(normal_bounds.ToString(), window->bounds().ToString());
 
-    GetController()->PerformAction(WINDOW_MAXIMIZE_RESTORE, dummy);
+    GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
     GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
     EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
 
-    GetController()->PerformAction(WINDOW_MAXIMIZE_RESTORE, dummy);
+    GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
     GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
     EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
 
-    GetController()->PerformAction(WINDOW_MAXIMIZE_RESTORE, dummy);
+    GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
     EXPECT_TRUE(wm::IsWindowMaximized(window.get()));
     GetController()->PerformAction(WINDOW_MINIMIZE, dummy);
     EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
@@ -497,17 +489,17 @@ TEST_F(AcceleratorControllerTest, ProcessOnce) {
   // The accelerator is processed only once.
 #if defined(OS_WIN)
   MSG msg1 = { NULL, WM_KEYDOWN, ui::VKEY_A, 0 };
-  aura::TranslatedKeyEvent key_event1(msg1, false);
+  ui::TranslatedKeyEvent key_event1(msg1, false);
   EXPECT_TRUE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
       OnHostKeyEvent(&key_event1));
 
   MSG msg2 = { NULL, WM_CHAR, L'A', 0 };
-  aura::TranslatedKeyEvent key_event2(msg2, true);
+  ui::TranslatedKeyEvent key_event2(msg2, true);
   EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
       OnHostKeyEvent(&key_event2));
 
   MSG msg3 = { NULL, WM_KEYUP, ui::VKEY_A, 0 };
-  aura::TranslatedKeyEvent key_event3(msg3, false);
+  ui::TranslatedKeyEvent key_event3(msg3, false);
   EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
       OnHostKeyEvent(&key_event3));
 #elif defined(USE_X11)
@@ -516,11 +508,11 @@ TEST_F(AcceleratorControllerTest, ProcessOnce) {
                               ui::VKEY_A,
                               0,
                               &key_event);
-  aura::TranslatedKeyEvent key_event1(&key_event, false);
+  ui::TranslatedKeyEvent key_event1(&key_event, false);
   EXPECT_TRUE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
       OnHostKeyEvent(&key_event1));
 
-  aura::TranslatedKeyEvent key_event2(&key_event, true);
+  ui::TranslatedKeyEvent key_event2(&key_event, true);
   EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
       OnHostKeyEvent(&key_event2));
 
@@ -528,7 +520,7 @@ TEST_F(AcceleratorControllerTest, ProcessOnce) {
                               ui::VKEY_A,
                               0,
                               &key_event);
-  aura::TranslatedKeyEvent key_event3(&key_event, false);
+  ui::TranslatedKeyEvent key_event3(&key_event, false);
   EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
       OnHostKeyEvent(&key_event3));
 #endif
@@ -590,38 +582,80 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
     EXPECT_TRUE(GetController()->Process(
         ui::Accelerator(ui::VKEY_LWIN, ui::EF_NONE)));
   }
+  // DisableCapsLock
+  {
+    CapsLockDelegate* delegate = Shell::GetInstance()->caps_lock_delegate();
+    delegate->SetCapsLockEnabled(true);
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
+    // Handled only on key release.
+    EXPECT_FALSE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_LSHIFT, ui::EF_NONE)));
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
+    EXPECT_TRUE(GetController()->Process(
+        ReleaseAccelerator(ui::VKEY_SHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(delegate->IsCapsLockEnabled());
+    delegate->SetCapsLockEnabled(true);
+    EXPECT_FALSE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_RSHIFT, ui::EF_NONE)));
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
+    EXPECT_TRUE(GetController()->Process(
+        ReleaseAccelerator(ui::VKEY_LSHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(delegate->IsCapsLockEnabled());
+    delegate->SetCapsLockEnabled(true);
+    EXPECT_FALSE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_SHIFT, ui::EF_NONE)));
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
+    EXPECT_TRUE(GetController()->Process(
+        ReleaseAccelerator(ui::VKEY_RSHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(delegate->IsCapsLockEnabled());
+
+    // Do not handle when a shift pressed with other keys.
+    delegate->SetCapsLockEnabled(true);
+    EXPECT_FALSE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_A, ui::EF_SHIFT_DOWN)));
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
+    EXPECT_FALSE(GetController()->Process(
+        ReleaseAccelerator(ui::VKEY_A, ui::EF_SHIFT_DOWN)));
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
+
+    // Do not consume shift keyup when caps lock is off.
+    delegate->SetCapsLockEnabled(false);
+    EXPECT_FALSE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_LSHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(GetController()->Process(
+        ReleaseAccelerator(ui::VKEY_LSHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_RSHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(GetController()->Process(
+        ReleaseAccelerator(ui::VKEY_RSHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_SHIFT, ui::EF_NONE)));
+    EXPECT_FALSE(GetController()->Process(
+        ReleaseAccelerator(ui::VKEY_SHIFT, ui::EF_NONE)));
+  }
   // ToggleCapsLock
   {
-    EXPECT_FALSE(GetController()->Process(
-        ui::Accelerator(ui::VKEY_LWIN, ui::EF_SHIFT_DOWN)));
-    DummyCapsLockDelegate* delegate = new DummyCapsLockDelegate(false);
-    GetController()->SetCapsLockDelegate(
-        scoped_ptr<CapsLockDelegate>(delegate).Pass());
-    EXPECT_EQ(0, delegate->handle_caps_lock_count());
-    EXPECT_FALSE(GetController()->Process(
-        ui::Accelerator(ui::VKEY_LWIN, ui::EF_SHIFT_DOWN)));
-    EXPECT_EQ(1, delegate->handle_caps_lock_count());
-  }
-  {
-    DummyCapsLockDelegate* delegate = new DummyCapsLockDelegate(true);
-    GetController()->SetCapsLockDelegate(
-        scoped_ptr<CapsLockDelegate>(delegate).Pass());
-    EXPECT_EQ(0, delegate->handle_caps_lock_count());
+    CapsLockDelegate* delegate = Shell::GetInstance()->caps_lock_delegate();
+    delegate->SetCapsLockEnabled(true);
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
     EXPECT_TRUE(GetController()->Process(
-        ui::Accelerator(ui::VKEY_LWIN, ui::EF_SHIFT_DOWN)));
-    EXPECT_EQ(1, delegate->handle_caps_lock_count());
+        ui::Accelerator(ui::VKEY_LWIN, ui::EF_ALT_DOWN)));
+    EXPECT_FALSE(delegate->IsCapsLockEnabled());
+    EXPECT_TRUE(GetController()->Process(
+        ui::Accelerator(ui::VKEY_LWIN, ui::EF_ALT_DOWN)));
+    EXPECT_TRUE(delegate->IsCapsLockEnabled());
   }
   // Volume
   const ui::Accelerator f8(ui::VKEY_F8, ui::EF_NONE);
   const ui::Accelerator f9(ui::VKEY_F9, ui::EF_NONE);
   const ui::Accelerator f10(ui::VKEY_F10, ui::EF_NONE);
   {
-    EXPECT_FALSE(GetController()->Process(f8));
-    EXPECT_FALSE(GetController()->Process(f9));
-    EXPECT_FALSE(GetController()->Process(f10));
+    EXPECT_TRUE(GetController()->Process(f8));
+    EXPECT_TRUE(GetController()->Process(f9));
+    EXPECT_TRUE(GetController()->Process(f10));
     DummyVolumeControlDelegate* delegate =
         new DummyVolumeControlDelegate(false);
-    GetController()->SetVolumeControlDelegate(
+    ash::Shell::GetInstance()->tray_delegate()->SetVolumeControlDelegate(
         scoped_ptr<VolumeControlDelegate>(delegate).Pass());
     EXPECT_EQ(0, delegate->handle_volume_mute_count());
     EXPECT_FALSE(GetController()->Process(f8));
@@ -638,7 +672,7 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
   }
   {
     DummyVolumeControlDelegate* delegate = new DummyVolumeControlDelegate(true);
-    GetController()->SetVolumeControlDelegate(
+    ash::Shell::GetInstance()->tray_delegate()->SetVolumeControlDelegate(
         scoped_ptr<VolumeControlDelegate>(delegate).Pass());
     EXPECT_EQ(0, delegate->handle_volume_mute_count());
     EXPECT_TRUE(GetController()->Process(f8));
@@ -659,7 +693,7 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
   {
     DummyVolumeControlDelegate* delegate =
         new DummyVolumeControlDelegate(false);
-    GetController()->SetVolumeControlDelegate(
+    ash::Shell::GetInstance()->tray_delegate()->SetVolumeControlDelegate(
         scoped_ptr<VolumeControlDelegate>(delegate).Pass());
     EXPECT_EQ(0, delegate->handle_volume_mute_count());
     EXPECT_FALSE(GetController()->Process(volume_mute));
@@ -676,7 +710,7 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
   }
   {
     DummyVolumeControlDelegate* delegate = new DummyVolumeControlDelegate(true);
-    GetController()->SetVolumeControlDelegate(
+    ash::Shell::GetInstance()->tray_delegate()->SetVolumeControlDelegate(
         scoped_ptr<VolumeControlDelegate>(delegate).Pass());
     EXPECT_EQ(0, delegate->handle_volume_mute_count());
     EXPECT_TRUE(GetController()->Process(volume_mute));
@@ -694,6 +728,11 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
   // Brightness
   const ui::Accelerator f6(ui::VKEY_F6, ui::EF_NONE);
   const ui::Accelerator f7(ui::VKEY_F7, ui::EF_NONE);
+  // TODO(oshima): Temporarily removed the tests for
+  // no internal display case. Add this back when
+  // re-enabling extended desktop. crbug.com/152003
+  // Enable internal display.
+  EnableInternalDisplay();
   {
     EXPECT_FALSE(GetController()->Process(f6));
     EXPECT_FALSE(GetController()->Process(f7));
@@ -921,11 +960,9 @@ TEST_F(AcceleratorControllerTest, ImeGlobalAccelerators) {
   // Test IME shortcuts again with unnormalized accelerators (Chrome OS only).
   {
     const ui::Accelerator shift_alt_press(ui::VKEY_MENU, ui::EF_SHIFT_DOWN);
-    const ReleaseAccelerator shift_alt(ui::VKEY_MENU,
-                                       ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN);
+    const ReleaseAccelerator shift_alt(ui::VKEY_MENU, ui::EF_SHIFT_DOWN);
     const ui::Accelerator alt_shift_press(ui::VKEY_SHIFT, ui::EF_ALT_DOWN);
-    const ReleaseAccelerator alt_shift(ui::VKEY_SHIFT,
-                                       ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN);
+    const ReleaseAccelerator alt_shift(ui::VKEY_SHIFT, ui::EF_ALT_DOWN);
 
     DummyImeControlDelegate* delegate = new DummyImeControlDelegate(true);
     GetController()->SetImeControlDelegate(
@@ -963,17 +1000,7 @@ TEST_F(AcceleratorControllerTest, ReservedAccelerators) {
       ui::Accelerator(ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN)));
 #if defined(OS_CHROMEOS)
   EXPECT_TRUE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F5, ui::EF_NONE)));
-  EXPECT_TRUE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F6, ui::EF_NONE)));
-  EXPECT_TRUE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F7, ui::EF_NONE)));
-  EXPECT_TRUE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F8, ui::EF_NONE)));
-  EXPECT_TRUE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F9, ui::EF_NONE)));
-  EXPECT_TRUE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F10, ui::EF_NONE)));
+      ui::Accelerator(ui::VKEY_POWER, ui::EF_NONE)));
 #endif
   // Others are not reserved.
   EXPECT_FALSE(GetController()->IsReservedAccelerator(

@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/search/toolbar_search_animator.h"
 
 class TabContents;
+class ToolbarModel;
 
 namespace chrome {
 namespace search {
@@ -25,11 +26,12 @@ class SearchModel;
 // Browser-level model.
 class SearchDelegate : public SearchModelObserver {
  public:
-  explicit SearchDelegate(SearchModel* model);
+  SearchDelegate(SearchModel* browser_search_model,
+                 ToolbarModel* toolbar_model);
   virtual ~SearchDelegate();
 
   // Overrides for SearchModelObserver:
-  virtual void ModeChanged(const Mode& mode) OVERRIDE;
+  virtual void ModeChanged(const Mode& old_mode, const Mode& new_mode) OVERRIDE;
 
   // When the active tab is changed, the model state of this new active tab is
   // propagated to the browser.

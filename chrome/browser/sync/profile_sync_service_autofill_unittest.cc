@@ -45,9 +45,9 @@
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_browser_thread.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
@@ -423,7 +423,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
                             web_data_service_.get(),
                             data_type_controller);
 
-    EXPECT_CALL(*components_factory, CreateDataTypeManager(_, _)).
+    EXPECT_CALL(*components_factory, CreateDataTypeManager(_, _, _)).
         WillOnce(ReturnNewDataTypeManager());
 
     EXPECT_CALL(*personal_data_manager_, IsDataLoaded()).

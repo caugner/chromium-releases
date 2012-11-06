@@ -69,19 +69,16 @@
         'desktop/desktop_screen_x11.cc',
         'desktop/desktop_stacking_client.cc',
         'desktop/desktop_stacking_client.h',
-        'dispatcher_linux.cc',
-        'dispatcher_linux.h',
+        'device_list_updater_aurax11.cc',
+        'device_list_updater_aurax11.h',
         'dispatcher_win.cc',
         'display_observer.cc',
         'display_observer.h',
         'env.cc',
         'env.h',
         'env_observer.h',
-        'event.cc',
-        'event.h',
+        'event_filter.cc',
         'event_filter.h',
-        'event_mac.mm',
-        'event_mac.h',
         'focus_change_observer.h',
         'focus_manager.cc',
         'focus_manager.h',
@@ -117,12 +114,11 @@
         'ui_controls_x11.cc',
         'window.cc',
         'window.h',
+        'window_delegate.cc',
         'window_delegate.h',
         'window_observer.h',
         'window_tracker.cc',
         'window_tracker.h',
-        'x11_atom_cache.cc',
-        'x11_atom_cache.h',
       ],
       'conditions': [
         ['OS=="mac"', {
@@ -134,6 +130,8 @@
         ['OS=="linux"', {
           'link_settings': {
             'libraries': [
+              '-lX11',
+              '-lXi',
               '-lXfixes',
               '-lXrandr',
             ],
@@ -221,6 +219,8 @@
         '../compositor/compositor.gyp:compositor_test_support',
         '../ui.gyp:ui',
         '../ui.gyp:ui_resources',
+        '../viewer/viewer.gyp:viewer',
+        '../../ipc/ipc.gyp:ipc',
         'aura',
       ],
       'include_dirs': [
@@ -281,7 +281,6 @@
         'shared/compound_event_filter_unittest.cc',
         'shared/input_method_event_filter_unittest.cc',
         'event_filter_unittest.cc',
-        'event_unittest.cc',
         'window_unittest.cc',
       ],
       'conditions': [

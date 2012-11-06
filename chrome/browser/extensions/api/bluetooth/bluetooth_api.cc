@@ -11,6 +11,7 @@
 #include <string>
 
 #include "chrome/browser/extensions/api/bluetooth/bluetooth_api_utils.h"
+#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/experimental_bluetooth.h"
@@ -32,12 +33,15 @@ chromeos::ExtensionBluetoothEventRouter* GetEventRouter(Profile* profile) {
   return profile->GetExtensionService()->bluetooth_event_router();
 }
 
-const chromeos::BluetoothAdapter* GetAdapter(Profile* profile) {
+const chromeos::BluetoothAdapter& GetAdapter(Profile* profile) {
   return GetEventRouter(profile)->adapter();
 }
 
 chromeos::BluetoothAdapter* GetMutableAdapter(Profile* profile) {
-  return GetEventRouter(profile)->GetMutableAdapter();
+  chromeos::BluetoothAdapter* adapter =
+      GetEventRouter(profile)->GetMutableAdapter();
+  CHECK(adapter);
+  return adapter;
 }
 
 }  // namespace
@@ -54,8 +58,7 @@ const char kInvalidDevice[] = "Invalid device";
 const char kInvalidUuid[] = "Invalid UUID";
 const char kServiceDiscoveryFailed[] = "Service discovery failed";
 const char kSocketNotFoundError[] = "Socket not found: invalid socket id";
-const char kStartDiscoveryFailed[] =
-    "Starting discovery failed, or already discovering";
+const char kStartDiscoveryFailed[] = "Starting discovery failed";
 const char kStopDiscoveryFailed[] = "Failed to stop discovery";
 
 }  // namespace
@@ -75,31 +78,45 @@ namespace api {
 #if defined(OS_CHROMEOS)
 
 bool BluetoothIsAvailableFunction::RunImpl() {
-  SetResult(Value::CreateBooleanValue(GetAdapter(profile())->IsPresent()));
+  SetResult(Value::CreateBooleanValue(GetAdapter(profile()).IsPresent()));
   return true;
 }
 
 bool BluetoothIsPoweredFunction::RunImpl() {
-  SetResult(Value::CreateBooleanValue(GetAdapter(profile())->IsPowered()));
+  SetResult(Value::CreateBooleanValue(GetAdapter(profile()).IsPowered()));
   return true;
 }
 
 bool BluetoothGetAddressFunction::RunImpl() {
-  SetResult(Value::CreateStringValue(GetAdapter(profile())->address()));
+  SetResult(Value::CreateStringValue(GetAdapter(profile()).address()));
+  return true;
+}
+
+bool BluetoothGetNameFunction::RunImpl() {
+  SetResult(Value::CreateStringValue(GetAdapter(profile()).name()));
   return true;
 }
 
 BluetoothGetDevicesFunction::BluetoothGetDevicesFunction()
     : callbacks_pending_(0) {}
 
-void BluetoothGetDevicesFunction::AddDeviceIfTrueCallback(
-    ListValue* list,
+void BluetoothGetDevicesFunction::DispatchDeviceSearchResult(
+    const chromeos::BluetoothDevice& device) {
+  experimental_bluetooth::Device extension_device;
+  experimental_bluetooth::BluetoothDeviceToApiDevice(device, &extension_device);
+  GetEventRouter(profile())->DispatchDeviceEvent(
+      extensions::event_names::kBluetoothOnDeviceSearchResult,
+      extension_device);
+}
+
+void BluetoothGetDevicesFunction::ProvidesServiceCallback(
     const chromeos::BluetoothDevice* device,
-    bool shouldAdd) {
+    bool providesService) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  if (shouldAdd)
-    list->Append(experimental_bluetooth::BluetoothDeviceToValue(*device));
+  CHECK(device);
+  if (providesService)
+    DispatchDeviceSearchResult(*device);
 
   callbacks_pending_--;
   if (callbacks_pending_ == -1)
@@ -122,9 +139,6 @@ bool BluetoothGetDevicesFunction::RunImpl() {
     }
   }
 
-  ListValue* matches = new ListValue;
-  SetResult(matches);
-
   CHECK_EQ(0, callbacks_pending_);
 
   chromeos::BluetoothAdapter::DeviceList devices =
@@ -132,21 +146,21 @@ bool BluetoothGetDevicesFunction::RunImpl() {
   for (chromeos::BluetoothAdapter::DeviceList::iterator i = devices.begin();
       i != devices.end(); ++i) {
     chromeos::BluetoothDevice* device = *i;
+    CHECK(device);
 
     if (!uuid.empty() && !(device->ProvidesServiceWithUUID(uuid)))
       continue;
 
     if (options.name.get() == NULL) {
-      matches->Append(experimental_bluetooth::BluetoothDeviceToValue(*device));
+      DispatchDeviceSearchResult(*device);
       continue;
     }
 
     callbacks_pending_++;
     device->ProvidesServiceWithName(
         *(options.name),
-        base::Bind(&BluetoothGetDevicesFunction::AddDeviceIfTrueCallback,
+        base::Bind(&BluetoothGetDevicesFunction::ProvidesServiceCallback,
                    this,
-                   matches,
                    device));
   }
   callbacks_pending_--;
@@ -459,6 +473,7 @@ bool BluetoothGetLocalOutOfBandPairingDataFunction::RunImpl() {
 }
 
 void BluetoothStartDiscoveryFunction::OnSuccessCallback() {
+  GetEventRouter(profile())->SetResponsibleForDiscovery(true);
   SendResponse(true);
 }
 
@@ -470,8 +485,7 @@ void BluetoothStartDiscoveryFunction::OnErrorCallback() {
 bool BluetoothStartDiscoveryFunction::RunImpl() {
   GetEventRouter(profile())->SetSendDiscoveryEvents(true);
 
-  // BluetoothAdapter will throw an error if we SetDiscovering(true) when
-  // discovery is already in progress
+  // If the adapter is already discovering, there is nothing else to do.
   if (GetMutableAdapter(profile())->IsDiscovering()) {
     SendResponse(true);
     return true;
@@ -494,9 +508,11 @@ void BluetoothStopDiscoveryFunction::OnErrorCallback() {
 
 bool BluetoothStopDiscoveryFunction::RunImpl() {
   GetEventRouter(profile())->SetSendDiscoveryEvents(false);
-  GetMutableAdapter(profile())->SetDiscovering(false,
-      base::Bind(&BluetoothStopDiscoveryFunction::OnSuccessCallback, this),
-      base::Bind(&BluetoothStopDiscoveryFunction::OnErrorCallback, this));
+  if (GetEventRouter(profile())->IsResponsibleForDiscovery()) {
+    GetMutableAdapter(profile())->SetDiscovering(false,
+        base::Bind(&BluetoothStopDiscoveryFunction::OnSuccessCallback, this),
+        base::Bind(&BluetoothStopDiscoveryFunction::OnErrorCallback, this));
+  }
   return true;
 }
 
@@ -516,6 +532,11 @@ bool BluetoothIsPoweredFunction::RunImpl() {
 }
 
 bool BluetoothGetAddressFunction::RunImpl() {
+  NOTREACHED() << "Not implemented yet";
+  return false;
+}
+
+bool BluetoothGetNameFunction::RunImpl() {
   NOTREACHED() << "Not implemented yet";
   return false;
 }

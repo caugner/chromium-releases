@@ -19,7 +19,43 @@
 #include "chrome/common/pref_names.h"
 #include "ui/base/l10n/l10n_util.h"
 
-static bool ShouldInstallInProfile(Profile* profile) {
+namespace {
+
+const char kGmailId[] = "pjkljhegncpnkpknbcohdijeoejaedia";
+const char kSearchId[] = "coobgpohoikkiipiblmjeljniedjpjpf";
+const char kYoutubeId[] = "blpcfgokakmgnkcojhhkbfbldkacnbeo";
+
+// Returns true if the app was a default app in Chrome 22
+bool IsOldDefaultApp(const std::string& extension_id) {
+  return extension_id == kGmailId || extension_id == kSearchId
+      || extension_id == kYoutubeId;
+}
+
+bool IsLocaleSupported() {
+  // Don't bother installing default apps in locales where it is known that
+  // they don't work.
+  // TODO(rogerta): Do this check dynamically once the webstore can expose
+  // an API. See http://crbug.com/101357
+  const std::string& locale = g_browser_process->GetApplicationLocale();
+  static const char* unsupported_locales[] = {"CN", "TR", "IR"};
+  for (size_t i = 0; i < arraysize(unsupported_locales); ++i) {
+    if (EndsWith(locale, unsupported_locales[i], false)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
+namespace default_apps {
+
+void RegisterUserPrefs(PrefService* prefs) {
+  prefs->RegisterIntegerPref(prefs::kDefaultAppsInstallState, kUnknown,
+                             PrefService::UNSYNCABLE_PREF);
+}
+
+bool Provider::ShouldInstallInProfile() {
   // We decide to install or not install default apps based on the following
   // criteria, from highest priority to lowest priority:
   //
@@ -28,24 +64,25 @@ static bool ShouldInstallInProfile(Profile* profile) {
   // - The command line option.  Tests use this option to disable installation
   //   of default apps in some cases.
   // - If the locale is not compatible with the defaults, don't install them.
-  // - If the profile says to either always install or never install default
-  //   apps, obey.
   // - The kDefaultApps preferences value in the profile.  This value is
   //   usually set in the master_preferences file.
   bool install_apps =
-      profile->GetPrefs()->GetString(prefs::kDefaultApps) == "install";
+      profile_->GetPrefs()->GetString(prefs::kDefaultApps) == "install";
 
-  default_apps::InstallState state =
-      static_cast<default_apps::InstallState>(profile->GetPrefs()->GetInteger(
+  InstallState state =
+      static_cast<InstallState>(profile_->GetPrefs()->GetInteger(
           prefs::kDefaultAppsInstallState));
+
+  is_migration_ = (state == kProvideLegacyDefaultApps);
+
   switch (state) {
-    case default_apps::kUnknown: {
+    case kUnknown: {
       // Only new installations and profiles get default apps. In theory the
       // new profile checks should catch new installations, but that is not
       // always the case (http:/crbug.com/145351).
       chrome::VersionInfo version_info;
       bool is_new_profile =
-          profile->WasCreatedByVersionOrLater(version_info.Version().c_str());
+          profile_->WasCreatedByVersionOrLater(version_info.Version().c_str());
       // Android excludes most of the first run code, so it can't determine
       // if this is a first run. That's OK though, because Android doesn't
       // use default apps in general.
@@ -58,29 +95,28 @@ static bool ShouldInstallInProfile(Profile* profile) {
         install_apps = false;
       break;
     }
-    case default_apps::kAlwaysProvideDefaultApps:
-      install_apps = true;
+
+    // The old default apps were provided as external extensions and were
+    // installed everytime Chrome was run. Thus, changing the list of default
+    // apps affected all users. Migrate old default apps to new mechanism where
+    // they are installed only once as INTERNAL.
+    // TODO(grv) : remove after Q1-2013.
+    case kProvideLegacyDefaultApps:
+      profile_->GetPrefs()->SetInteger(
+          prefs::kDefaultAppsInstallState,
+          kAlreadyInstalledDefaultApps);
       break;
-    case default_apps::kNeverProvideDefaultApps:
+
+    case kAlreadyInstalledDefaultApps:
+    case kNeverInstallDefaultApps:
       install_apps = false;
       break;
     default:
       NOTREACHED();
   }
 
-  if (install_apps) {
-    // Don't bother installing default apps in locales where it is known that
-    // they don't work.
-    // TODO(rogerta): Do this check dynamically once the webstore can expose
-    // an API. See http://crbug.com/101357
-    const std::string& locale = g_browser_process->GetApplicationLocale();
-    static const char* unsupported_locales[] = {"CN", "TR", "IR"};
-    for (size_t i = 0; i < arraysize(unsupported_locales); ++i) {
-      if (EndsWith(locale, unsupported_locales[i], false)) {
-        install_apps = false;
-        break;
-      }
-    }
+  if (install_apps && !IsLocaleSupported()) {
+    install_apps = false;
   }
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -93,36 +129,20 @@ static bool ShouldInstallInProfile(Profile* profile) {
         kDefaultAppsTrialName)->group_name() != kDefaultAppsTrialNoAppsGroup;
   }
 
-  // Save the state if needed.  Once it is decided whether we are installing
-  // default apps or not, we want to always respond with same value.  Therefore
-  // on first run of this feature (i.e. the current state is kUnknown) the
-  // state is updated to remember the choice that was made at this time.  The
-  // next time chrome runs it will use the same decision.
-  //
-  // The reason for responding with the same value is that once an external
-  // extenson provider has provided apps for a given profile, it must continue
-  // to provide those extensions on each subsequent run.  Otherwise the
-  // extension manager will automatically uninstall the apps.  The extension
-  // manager is smart enough to know not to reinstall the apps on all
-  // subsequent runs of chrome.
-  if (state == default_apps::kUnknown) {
+  // Default apps are only installed on profile creation or a new chrome
+  // download.
+  if (state == kUnknown) {
     if (install_apps) {
-      profile->GetPrefs()->SetInteger(prefs::kDefaultAppsInstallState,
-                                      default_apps::kAlwaysProvideDefaultApps);
+      profile_->GetPrefs()->SetInteger(
+          prefs::kDefaultAppsInstallState,
+          kAlreadyInstalledDefaultApps);
     } else {
-      profile->GetPrefs()->SetInteger(prefs::kDefaultAppsInstallState,
-                                      default_apps::kNeverProvideDefaultApps);
+      profile_->GetPrefs()->SetInteger(prefs::kDefaultAppsInstallState,
+                                       kNeverInstallDefaultApps);
     }
   }
 
   return install_apps;
-}
-
-namespace default_apps {
-
-void RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterIntegerPref(prefs::kDefaultAppsInstallState, kUnknown,
-                             PrefService::UNSYNCABLE_PREF);
 }
 
 Provider::Provider(Profile* profile,
@@ -139,13 +159,32 @@ Provider::Provider(Profile* profile,
 }
 
 void Provider::VisitRegisteredExtension() {
-  if (!profile_ || !ShouldInstallInProfile(profile_)) {
+  if (!profile_ || !ShouldInstallInProfile()) {
     base::DictionaryValue* prefs = new base::DictionaryValue;
     SetPrefs(prefs);
     return;
   }
 
   extensions::ExternalProviderImpl::VisitRegisteredExtension();
+}
+
+void Provider::SetPrefs(base::DictionaryValue* prefs) {
+  if (is_migration_) {
+    std::set<std::string> new_default_apps;
+    for (base::DictionaryValue::key_iterator i = prefs->begin_keys();
+         i != prefs->end_keys(); ++i) {
+      if (!IsOldDefaultApp(*i)) {
+        new_default_apps.insert(*i);
+      }
+    }
+    // Filter out the new default apps for migrating users.
+    for (std::set<std::string>::iterator it = new_default_apps.begin();
+         it != new_default_apps.end(); ++it) {
+      prefs->Remove(*it, NULL);
+    }
+  }
+
+  ExternalProviderImpl::SetPrefs(prefs);
 }
 
 }  // namespace default_apps

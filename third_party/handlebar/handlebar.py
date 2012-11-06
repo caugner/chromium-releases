@@ -43,9 +43,6 @@ class CustomContext(object):
 print(Handlebar('hello {{world}}').render(CustomContext()).text)
 """
 
-def _SafeStr(obj):
-  return obj if (type(obj) in [str, unicode]) else str(obj)
-
 class ParseException(Exception):
   """ Exception thrown while parsing the template.
   """
@@ -65,21 +62,23 @@ class StringBuilder(object):
   """
   def __init__(self):
     self._buf = []
-    self._length = 0
 
   def __len__(self):
-    return self._length
+    self._Collapse()
+    return len(self._buf[0])
 
-  def append(self, obj):
-    string = _SafeStr(obj)
+  def append(self, string):
     self._buf.append(string)
-    self._length += len(string)
 
   def toString(self):
-    return u''.join(self._buf)
+    self._Collapse()
+    return self._buf[0]
 
   def __str__(self):
     return self.toString()
+
+  def _Collapse(self):
+    self._buf = [u''.join(self._buf)]
 
 class RenderState(object):
   """ The state of a render call.
@@ -110,7 +109,7 @@ class RenderState(object):
       return self
     buf = StringBuilder()
     for message in messages:
-      buf.append(message)
+      buf.append(str(message))
     self.errors.append(buf.toString())
     return self
 
@@ -144,16 +143,16 @@ class Identifier(object):
       return self._resolveFromContext(renderState.getFirstContext())
 
     resolved = self._resolveFromContexts(renderState.localContexts)
-    if resolved == None:
+    if resolved is None:
       resolved = self._resolveFromContexts(renderState.globalContexts)
-    if resolved == None:
+    if resolved is None:
       renderState.addError("Couldn't resolve identifier ", self._path)
     return resolved
 
   def _resolveFromContexts(self, contexts):
     for context in contexts:
       resolved = self._resolveFromContext(context)
-      if resolved != None:
+      if resolved is not None:
         return resolved
     return None
 
@@ -162,7 +161,7 @@ class Identifier(object):
     for next in self._path:
       # Only require that contexts provide a get method, meaning that callers
       # can provide dict-like contexts (for example, to populate values lazily).
-      if result == None or not getattr(result, "get", None):
+      if result is None or not getattr(result, "get", None):
         return None
       result = result.get(next)
     return result
@@ -236,31 +235,25 @@ class InlineNode(DecoratorNode):
     self._content.render(contentRenderState)
 
     renderState.errors.extend(contentRenderState.errors)
-
-    for c in contentRenderState.text.toString():
-      if c != '\n':
-        renderState.text.append(c)
+    renderState.text.append(
+        contentRenderState.text.toString().replace('\n', ''))
 
 class IndentedNode(DecoratorNode):
   def __init__(self, content, indentation):
     DecoratorNode.__init__(self, content)
-    self._indentation = indentation
+    self._indent_str = ' ' * indentation
 
   def render(self, renderState):
     contentRenderState = renderState.inSameContext()
     self._content.render(contentRenderState)
 
     renderState.errors.extend(contentRenderState.errors)
-
-    self._indent(renderState.text)
-    for i, c in enumerate(contentRenderState.text.toString()):
-      renderState.text.append(c)
-      if c == '\n' and i < len(contentRenderState.text) - 1:
-        self._indent(renderState.text)
+    renderState.text.append(self._indent_str)
+    # TODO: this might introduce an extra \n at the end? need test.
+    renderState.text.append(
+        contentRenderState.text.toString().replace('\n',
+                                                   '\n' + self._indent_str))
     renderState.text.append('\n')
-
-  def _indent(self, buf):
-    buf.append(' ' * self._indentation)
 
 class BlockNode(DecoratorNode):
   def __init__(self, content):
@@ -354,19 +347,13 @@ class EscapedVariableNode(LeafNode):
 
   def render(self, renderState):
     value = self._id.resolve(renderState)
-    if value != None:
-      self._appendEscapedHtml(renderState.text, _SafeStr(value))
+    if value is None:
+      return
 
-  def _appendEscapedHtml(self, escaped, unescaped):
-    for c in unescaped:
-      if c == '<':
-        escaped.append("&lt;")
-      elif c == '>':
-        escaped.append("&gt;")
-      elif c == '&':
-        escaped.append("&amp;")
-      else:
-        escaped.append(c)
+    string = value if isinstance(value, basestring) else str(value)
+    renderState.text.append(string.replace('&', '&amp;')
+                                  .replace('<', '&lt;')
+                                  .replace('>', '&gt;'))
 
 class UnescapedVariableNode(LeafNode):
   """ {{{foo}}}
@@ -377,8 +364,10 @@ class UnescapedVariableNode(LeafNode):
 
   def render(self, renderState):
     value = self._id.resolve(renderState)
-    if value != None:
-      renderState.text.append(value)
+    if value is None:
+      return
+    renderState.text.append(
+        value if isinstance(value, basestring) else str(value))
 
 class SectionNode(DecoratorNode):
   """ {{#foo}} ... {{/}}
@@ -389,22 +378,21 @@ class SectionNode(DecoratorNode):
 
   def render(self, renderState):
     value = self._id.resolve(renderState)
-    if value == None:
+    if value is None:
       return
 
-    type_ = type(value)
-    if type_ == list:
+    if isinstance(value, list):
       for item in value:
         renderState.localContexts.insert(0, item)
         self._content.render(renderState)
         renderState.localContexts.pop(0)
-    elif type_ == dict:
+    elif isinstance(value, dict):
       renderState.localContexts.insert(0, value)
       self._content.render(renderState)
       renderState.localContexts.pop(0)
     else:
       renderState.addError("{{#", self._id,
-                           "}} cannot be rendered with a ", type_)
+                           "}} cannot be rendered with a ", type(value))
 
 class VertedSectionNode(DecoratorNode):
   """ {{?foo}} ... {{/}}
@@ -421,20 +409,21 @@ class VertedSectionNode(DecoratorNode):
       renderState.localContexts.pop(0)
 
 def _VertedSectionNodeShouldRender(value):
-  if value == None:
+  if value is None:
     return False
-  type_ = type(value)
-  if type_ == bool:
+  if isinstance(value, bool):
     return value
-  if type_ in [int, float]:
+  if (isinstance(value, int) or
+      isinstance(value, long) or
+      isinstance(value, float)):
     return True
-  if type_ in [str, unicode]:
+  if isinstance(value, basestring):
     return True
-  if type_ == list:
+  if isinstance(value, list):
     return len(value) > 0
-  if type_ == dict:
+  if isinstance(value, dict):
     return True
-  raise TypeError("Unhandled type: " + str(type_))
+  raise TypeError("Unhandled type %s" % type(value))
 
 class InvertedSectionNode(DecoratorNode):
   """ {{^foo}} ... {{/}}
@@ -457,8 +446,9 @@ class JsonNode(LeafNode):
 
   def render(self, renderState):
     value = self._id.resolve(renderState)
-    if value != None:
-      renderState.text.append(json.dumps(value, separators=(',',':')))
+    if value is None:
+      return
+    renderState.text.append(json.dumps(value, separators=(',',':')))
 
 class PartialNode(LeafNode):
   """ {{+foo}}
@@ -549,7 +539,7 @@ class TokenStream(object):
     self.advance()
 
   def hasNext(self):
-    return self.nextToken != None
+    return self.nextToken is not None
 
   def advance(self):
     if self.nextContents == '\n':
@@ -588,6 +578,14 @@ class TokenStream(object):
       self.advance()
     return buf.toString()
 
+  def advanceToNextWhitespace(self):
+    return self.advanceOverNextString(excluded=' \n\r\t')
+
+  def skipWhitespace(self):
+    while len(self.nextContents) > 0 and \
+          ' \n\r\t'.find(self.nextContents) >= 0:
+      self.advance()
+
 class Handlebar(object):
   """ A handlebar template.
   """
@@ -620,17 +618,17 @@ class Handlebar(object):
         nodes.append(token.clazz(id, tokens.nextLine))
       elif token == Token.OPEN_START_PARTIAL:
         tokens.advance()
-        id = Identifier(tokens.advanceOverNextString(excluded=' '),
+        id = Identifier(tokens.advanceToNextWhitespace(),
                         tokens.nextLine)
         partialNode = PartialNode(id, tokens.nextLine)
 
         while tokens.nextToken == Token.CHARACTER:
-          tokens.advance()
+          tokens.skipWhitespace()
           key = tokens.advanceOverNextString(excluded=':')
           tokens.advance()
           partialNode.addArgument(
               key,
-              Identifier(tokens.advanceOverNextString(excluded=' '),
+              Identifier(tokens.advanceToNextWhitespace(),
                          tokens.nextLine))
 
         tokens.advanceOver(Token.CLOSE_MUSTACHE)

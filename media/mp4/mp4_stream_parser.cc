@@ -145,7 +145,6 @@ bool MP4StreamParser::ParseBox(bool* err) {
 
 
 bool MP4StreamParser::ParseMoov(BoxReader* reader) {
-  // TODO(strobe): Respect edit lists.
   moov_.reset(new Movie);
   RCHECK(moov_->Parse(reader));
   runs_.reset(new TrackRunIterator(moov_.get()));
@@ -228,24 +227,18 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
       gfx::Size natural_size = GetNaturalSize(visible_rect.size(),
                                               entry.pixel_aspect.h_spacing,
                                               entry.pixel_aspect.v_spacing);
+      bool is_encrypted = entry.sinf.info.track_encryption.is_encrypted;
       video_config.Initialize(kCodecH264, H264PROFILE_MAIN,  VideoFrame::YV12,
                               coded_size, visible_rect, natural_size,
                               // No decoder-specific buffer needed for AVC;
                               // SPS/PPS are embedded in the video stream
-                              NULL, 0, true);
+                              NULL, 0, is_encrypted, true);
       has_video_ = true;
       video_track_id_ = track->header.track_id;
     }
   }
 
-  // TODO(strobe): For now, we avoid sending new configs on a new
-  // reinitialization segment, and instead simply embed the updated parameter
-  // sets into the video stream.  The conditional should be removed when
-  // http://crbug.com/122913 is fixed.  (We detect whether we've already sent
-  // configs by looking at init_cb_ instead of config_cb_, because init_cb_
-  // should only be fired once even after that bug is fixed.)
-  if (!init_cb_.is_null())
-    RCHECK(config_cb_.Run(audio_config, video_config));
+  RCHECK(config_cb_.Run(audio_config, video_config));
 
   base::TimeDelta duration;
   if (moov_->extends.header.fragment_duration > 0) {
@@ -317,6 +310,25 @@ bool MP4StreamParser::PrepareAVCBuffer(
   return true;
 }
 
+bool MP4StreamParser::PrepareAACBuffer(
+    const AAC& aac_config, std::vector<uint8>* frame_buf,
+    std::vector<SubsampleEntry>* subsamples) const {
+  // Append an ADTS header to every audio sample.
+  RCHECK(aac_config.ConvertEsdsToADTS(frame_buf));
+
+  // As above, adjust subsample information to account for the headers. AAC is
+  // not required to use subsample encryption, so we may need to add an entry.
+  if (subsamples->empty()) {
+    SubsampleEntry entry;
+    entry.clear_bytes = AAC::kADTSHeaderSize;
+    entry.cypher_bytes = frame_buf->size() - AAC::kADTSHeaderSize;
+    subsamples->push_back(entry);
+  } else {
+    (*subsamples)[0].clear_bytes += AAC::kADTSHeaderSize;
+  }
+  return true;
+}
+
 bool MP4StreamParser::EnqueueSample(BufferQueue* audio_buffers,
                                     BufferQueue* video_buffers,
                                     bool* err) {
@@ -374,37 +386,37 @@ bool MP4StreamParser::EnqueueSample(BufferQueue* audio_buffers,
   if (buf_size < runs_->sample_size()) return false;
 
   scoped_ptr<DecryptConfig> decrypt_config;
-  if (runs_->is_encrypted())
+  std::vector<SubsampleEntry> subsamples;
+  if (runs_->is_encrypted()) {
     decrypt_config = runs_->GetDecryptConfig();
+    subsamples = decrypt_config->subsamples();
+  }
 
   std::vector<uint8> frame_buf(buf, buf + runs_->sample_size());
   if (video) {
-    std::vector<SubsampleEntry> subsamples;
-    if (decrypt_config.get())
-      subsamples = decrypt_config->subsamples();
     if (!PrepareAVCBuffer(runs_->video_description().avcc,
                           &frame_buf, &subsamples)) {
       DLOG(ERROR) << "Failed to prepare AVC sample for decode";
       *err = true;
       return false;
     }
-    if (!subsamples.empty()) {
-      decrypt_config.reset(new DecryptConfig(
-          decrypt_config->key_id(),
-          decrypt_config->iv(),
-          decrypt_config->checksum(),
-          decrypt_config->data_offset(),
-          subsamples));
-    }
   }
 
   if (audio) {
-    const AAC& aac = runs_->audio_description().esds.aac;
-    if (!aac.ConvertEsdsToADTS(&frame_buf)) {
-      DLOG(ERROR) << "Failed to convert ESDS to ADTS";
+    if (!PrepareAACBuffer(runs_->audio_description().esds.aac,
+                          &frame_buf, &subsamples)) {
+      DLOG(ERROR) << "Failed to prepare AAC sample for decode";
       *err = true;
       return false;
     }
+  }
+
+  if (decrypt_config.get() != NULL && !subsamples.empty()) {
+    decrypt_config.reset(new DecryptConfig(
+        decrypt_config->key_id(),
+        decrypt_config->iv(),
+        decrypt_config->data_offset(),
+        subsamples));
   }
 
   scoped_refptr<StreamParserBuffer> stream_buf =

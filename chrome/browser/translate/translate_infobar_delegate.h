@@ -10,10 +10,11 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_delegate.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/common/translate_errors.h"
 
+class InfoBarTabHelper;
 class PrefService;
 class TranslateInfoBarView;
 
@@ -162,7 +163,7 @@ class TranslateInfoBarDelegate : public InfoBarDelegate {
   typedef std::pair<std::string, string16> LanguageNamePair;
 
   // InfoBarDelegate:
-  virtual InfoBar* CreateInfoBar(InfoBarTabHelper* infobar_helper) OVERRIDE;
+  virtual InfoBar* CreateInfoBar(InfoBarService* infobar_helper) OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual gfx::Image* GetIcon() const OVERRIDE;
   virtual InfoBarDelegate::Type GetInfoBarType() const OVERRIDE;

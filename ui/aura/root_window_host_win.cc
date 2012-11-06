@@ -11,8 +11,8 @@
 #include "base/message_loop.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
+#include "ui/base/events/event.h"
 #include "ui/base/view_prop.h"
 
 using std::max;
@@ -24,6 +24,7 @@ namespace {
 
 const char* kRootWindowHostWinKey = "__AURA_ROOT_WINDOW_HOST_WIN__";
 
+// TODO(mazda): Move the cursor code to ui/base/cursor/cursor_loader_win.{cc,h}.
 const wchar_t* GetCursorId(gfx::NativeCursor native_cursor) {
   switch (native_cursor.native_type()) {
     case ui::kCursorNull:
@@ -151,6 +152,10 @@ gfx::AcceleratedWidget RootWindowHostWin::GetAcceleratedWidget() {
 
 void RootWindowHostWin::Show() {
   ShowWindow(hwnd(), SW_SHOWNORMAL);
+}
+
+void RootWindowHostWin::Hide() {
+  NOTIMPLEMENTED();
 }
 
 void RootWindowHostWin::ToggleFullScreen() {
@@ -300,6 +305,10 @@ void RootWindowHostWin::OnDeviceScaleFactorChanged(
   NOTIMPLEMENTED();
 }
 
+void RootWindowHostWin::PrepareForShutdown() {
+  NOTIMPLEMENTED();
+}
+
 void RootWindowHostWin::OnClose() {
   // TODO: this obviously shouldn't be here.
   MessageLoopForUI::current()->Quit();
@@ -309,7 +318,7 @@ LRESULT RootWindowHostWin::OnKeyEvent(UINT message,
                                       WPARAM w_param,
                                       LPARAM l_param) {
   MSG msg = { hwnd(), message, w_param, l_param };
-  KeyEvent keyev(msg, message == WM_CHAR);
+  ui::KeyEvent keyev(msg, message == WM_CHAR);
   SetMsgHandled(delegate_->OnHostKeyEvent(&keyev));
   return 0;
 }
@@ -319,7 +328,7 @@ LRESULT RootWindowHostWin::OnMouseRange(UINT message,
                                         LPARAM l_param) {
   MSG msg = { hwnd(), message, w_param, l_param, 0,
               { GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param) } };
-  MouseEvent event(msg);
+  ui::MouseEvent event(msg);
   bool handled = false;
   if (!(event.flags() & ui::EF_IS_NON_CLIENT))
     handled = delegate_->OnHostMouseEvent(&event);

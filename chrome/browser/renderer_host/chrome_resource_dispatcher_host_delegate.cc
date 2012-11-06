@@ -16,7 +16,6 @@
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/instant/instant_loader.h"
 #include "chrome/browser/net/load_timing_observer.h"
 #include "chrome/browser/net/resource_prefetch_predictor_observer.h"
 #include "chrome/browser/prerender/prerender_manager.h"
@@ -31,7 +30,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/user_script.h"
-#include "chrome/common/metrics/experiments_helper.h"
+#include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/metrics/proto/chrome_experiments.pb.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/browser_thread.h"
@@ -120,6 +119,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
 void ChromeResourceDispatcherHostDelegate::RequestBeginning(
     net::URLRequest* request,
     content::ResourceContext* resource_context,
+    appcache::AppCacheService* appcache_service,
     ResourceType::Type resource_type,
     int child_id,
     int route_id,
@@ -140,7 +140,7 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
     // We check offline first, then check safe browsing so that we still can
     // block unsafe site after we remove offline page.
     throttles->push_back(new OfflineResourceThrottle(
-        child_id, route_id, request, resource_context));
+        child_id, route_id, request, appcache_service));
   }
 #endif
 
@@ -237,17 +237,6 @@ bool ChromeResourceDispatcherHostDelegate::AcceptAuthRequest(
 ResourceDispatcherHostLoginDelegate*
     ChromeResourceDispatcherHostDelegate::CreateLoginDelegate(
         net::AuthChallengeInfo* auth_info, net::URLRequest* request) {
-  std::string instant_header_value;
-  // For instant, return a NULL delegate. Auth navigations don't commit the load
-  // (the load remains pending) until the user cancels or succeeds in
-  // authorizing. Since we don't allow merging of WebContents with pending loads
-  // we disallow auth dialogs from showing during instant. Returning NULL does
-  // that.
-  // TODO: see if we can handle this case more robustly.
-  if (request->extra_request_headers().GetHeader(
-          InstantLoader::kInstantHeader, &instant_header_value) &&
-      instant_header_value == InstantLoader::kInstantHeaderValue)
-    return NULL;
   return CreateLoginPrompt(auth_info, request);
 }
 
@@ -288,30 +277,31 @@ void ChromeResourceDispatcherHostDelegate::AppendChromeMetricsHeaders(
     content::ResourceContext* resource_context,
     ResourceType::Type resource_type) {
   // Don't attempt to append headers to requests that have already started.
-  // TODO(stevet): Remove this once we've resolved the request ordering issues
+  // TODO(stevet): Remove this once the request ordering issues are resolved
   // in crbug.com/128048.
   if (request->is_pending())
     return;
 
-  // Note our criteria for attaching Chrome experiment headers:
+  // Note the criteria for attaching Chrome experiment headers:
   // 1. We only transmit to *.google.<TLD> domains. NOTE that this use of
   //    google_util helpers to check this does not guarantee that the URL is
   //    Google-owned, only that it is of the form *.google.<TLD>. In the future
   //    we may choose to reinforce this check.
-  // 2. We only transmit for non-Incognito profiles.
-  // 3. For the X-Chrome-UMA-Enabled bit, we only set it if UMA is in fact
-  //    enabled for this install of Chrome.
-  // 4. For the X-Chrome-Variations, we only include non-empty variation IDs.
+  // 2. Only transmit for non-Incognito profiles.
+  // 3. For the X-Chrome-UMA-Enabled bit, only set it if UMA is in fact enabled
+  //    for this install of Chrome.
+  // 4. For the X-Chrome-Variations, only include non-empty variation IDs.
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
   if (io_data->is_incognito() ||
       !google_util::IsGoogleDomainUrl(request->url().spec(),
-                                      google_util::ALLOW_SUBDOMAIN))
+                                      google_util::ALLOW_SUBDOMAIN,
+                                      google_util::ALLOW_NON_STANDARD_PORTS))
     return;
 
   if (io_data->GetMetricsEnabledStateOnIOThread())
     request->SetExtraRequestHeaderByName("X-Chrome-UMA-Enabled", "1", false);
 
-  // Lazily initialize the header, if not already done, before we attempt to
+  // Lazily initialize the header, if not already done, before attempting to
   // transmit it.
   InitVariationIDsCacheIfNeeded();
   if (!variation_ids_header_.empty()) {
@@ -356,6 +346,14 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
   // suggest auto-login, if available.
   AutoLoginPrompter::ShowInfoBarIfPossible(request, info->GetChildID(),
                                            info->GetRouteID());
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  // See if the response contains the Google-Accounts-SignIn header.  If so,
+  // then the user has just finished signing in, and the server is allowing the
+  // browser to suggest connecting the user's profile to the account.
+  OneClickSigninHelper::ShowInfoBarIfPossible(request, info->GetChildID(),
+                                              info->GetRouteID());
+#endif
 
   // Build in additional protection for the chrome web store origin.
   GURL webstore_url(extension_urls::GetWebstoreLaunchURL());
@@ -402,7 +400,7 @@ void ChromeResourceDispatcherHostDelegate::OnFieldTrialGroupFinalized(
     const std::string& group_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   chrome_variations::VariationID new_id =
-      experiments_helper::GetGoogleVariationID(trial_name, group_name);
+      chrome_variations::GetGoogleVariationID(trial_name, group_name);
   if (new_id == chrome_variations::kEmptyID)
     return;
   variation_ids_set_.insert(new_id);
@@ -414,8 +412,8 @@ void ChromeResourceDispatcherHostDelegate::InitVariationIDsCacheIfNeeded() {
   if (variation_ids_cache_initialized_)
     return;
 
-  // Register for additional cache updates. We do this first to avoid a race
-  // that could cause us to miss registered FieldTrials.
+  // Register for additional cache updates. This is done first to avoid a race
+  // that could cause registered FieldTrials to be missed.
   base::FieldTrialList::AddObserver(this);
 
   base::FieldTrial::SelectedGroups initial_groups;
@@ -423,7 +421,7 @@ void ChromeResourceDispatcherHostDelegate::InitVariationIDsCacheIfNeeded() {
   for (base::FieldTrial::SelectedGroups::const_iterator it =
        initial_groups.begin(); it != initial_groups.end(); ++it) {
     chrome_variations::VariationID id =
-        experiments_helper::GetGoogleVariationID(it->trial, it->group);
+        chrome_variations::GetGoogleVariationID(it->trial, it->group);
     if (id != chrome_variations::kEmptyID)
       variation_ids_set_.insert(id);
   }
@@ -433,10 +431,20 @@ void ChromeResourceDispatcherHostDelegate::InitVariationIDsCacheIfNeeded() {
 }
 
 void ChromeResourceDispatcherHostDelegate::UpdateVariationIDsHeaderValue() {
-  // The header value is a serialized protobuffer of Variation IDs which we
-  // base64 encode before transmitting as a string.
+  // The header value is a serialized protobuffer of Variation IDs which is
+  // base64 encoded before transmitting as a string.
   if (variation_ids_set_.empty())
     return;
+
+  // This is the bottleneck for the creation of the header, so validate the size
+  // here. Force a hard maximum on the ID count in case the Variations server
+  // returns too many IDs and DOSs receiving servers with large requests.
+  DCHECK_LE(variation_ids_set_.size(), 10U);
+  if (variation_ids_set_.size() > 20) {
+    variation_ids_header_.clear();
+    return;
+  }
+
   metrics::ChromeVariations proto;
   for (std::set<chrome_variations::VariationID>::const_iterator it =
       variation_ids_set_.begin(); it != variation_ids_set_.end(); ++it)
@@ -449,8 +457,8 @@ void ChromeResourceDispatcherHostDelegate::UpdateVariationIDsHeaderValue() {
   if (base::Base64Encode(serialized, &hashed)) {
     // If successful, swap the header value with the new one.
     // Note that the list of IDs and the header could be temporarily out of sync
-    // if IDs are added as we are recreating the header, but we're OK with those
-    // descrepancies.
+    // if IDs are added as the header is recreated. The receiving servers are OK
+    // with such descrepancies.
     variation_ids_header_ = hashed;
   } else {
     DVLOG(1) << "Failed to base64 encode Variation IDs value: " << serialized;

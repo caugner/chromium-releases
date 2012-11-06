@@ -166,8 +166,23 @@ void BrowserEventRouter::TabCreatedAt(WebContents* contents,
                                       int index,
                                       bool active) {
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
-  DispatchEventWithTab(profile, "", events::kOnTabCreated, contents, active,
-                       EventRouter::USER_GESTURE_NOT_ENABLED);
+  const EventListenerMap::ListenerList& listeners(
+      ExtensionSystem::Get(profile)->event_router()->
+      listeners().GetEventListenersByName(events::kOnTabCreated));
+  for (EventListenerMap::ListenerList::const_iterator it = listeners.begin();
+       it != listeners.end();
+       ++it) {
+    scoped_ptr<ListValue> args(new ListValue());
+    DictionaryValue* tab_value = ExtensionTabUtil::CreateTabValue(
+        contents,
+        profile->GetExtensionService()->extensions()->GetByID(
+            (*it)->extension_id));
+    args->Append(tab_value);
+    tab_value->SetBoolean(tab_keys::kSelectedKey, active);
+    DispatchEventToExtension(profile, (*it)->extension_id,
+                             events::kOnTabCreated, args.Pass(),
+                             EventRouter::USER_GESTURE_NOT_ENABLED);
+  }
 
   RegisterForTabNotifications(contents);
 }
@@ -184,20 +199,17 @@ void BrowserEventRouter::TabInsertedAt(TabContents* contents,
     return;
   }
 
-  ListValue args;
-  args.Append(Value::CreateIntegerValue(tab_id));
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(Value::CreateIntegerValue(tab_id));
 
   DictionaryValue* object_args = new DictionaryValue();
   object_args->Set(tab_keys::kNewWindowIdKey, Value::CreateIntegerValue(
       ExtensionTabUtil::GetWindowIdOfTab(contents->web_contents())));
   object_args->Set(tab_keys::kNewPositionKey, Value::CreateIntegerValue(
       index));
-  args.Append(object_args);
+  args->Append(object_args);
 
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-
-  DispatchEvent(contents->profile(), events::kOnTabAttached, json_args,
+  DispatchEvent(contents->profile(), events::kOnTabAttached, args.Pass(),
                 EventRouter::USER_GESTURE_UNKNOWN);
 }
 
@@ -207,8 +219,8 @@ void BrowserEventRouter::TabDetachedAt(TabContents* contents, int index) {
     return;
   }
 
-  ListValue args;
-  args.Append(Value::CreateIntegerValue(
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(Value::CreateIntegerValue(
       ExtensionTabUtil::GetTabId(contents->web_contents())));
 
   DictionaryValue* object_args = new DictionaryValue();
@@ -216,12 +228,9 @@ void BrowserEventRouter::TabDetachedAt(TabContents* contents, int index) {
       ExtensionTabUtil::GetWindowIdOfTab(contents->web_contents())));
   object_args->Set(tab_keys::kOldPositionKey, Value::CreateIntegerValue(
       index));
-  args.Append(object_args);
+  args->Append(object_args);
 
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-
-  DispatchEvent(contents->profile(), events::kOnTabDetached, json_args,
+  DispatchEvent(contents->profile(), events::kOnTabDetached, args.Pass(),
                 EventRouter::USER_GESTURE_UNKNOWN);
 }
 
@@ -230,18 +239,15 @@ void BrowserEventRouter::TabClosingAt(TabStripModel* tab_strip_model,
                                       int index) {
   int tab_id = ExtensionTabUtil::GetTabId(contents->web_contents());
 
-  ListValue args;
-  args.Append(Value::CreateIntegerValue(tab_id));
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(Value::CreateIntegerValue(tab_id));
 
   DictionaryValue* object_args = new DictionaryValue();
   object_args->SetBoolean(tab_keys::kWindowClosing,
                           tab_strip_model->closing_all());
-  args.Append(object_args);
+  args->Append(object_args);
 
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-
-  DispatchEvent(contents->profile(), events::kOnTabRemoved, json_args,
+  DispatchEvent(contents->profile(), events::kOnTabRemoved, args.Pass(),
                 EventRouter::USER_GESTURE_UNKNOWN);
 
   int removed_count = tab_entries_.erase(tab_id);
@@ -254,33 +260,29 @@ void BrowserEventRouter::ActiveTabChanged(TabContents* old_contents,
                                           TabContents* new_contents,
                                           int index,
                                           bool user_gesture) {
-  ListValue args;
+  scoped_ptr<ListValue> args(new ListValue());
   int tab_id = ExtensionTabUtil::GetTabId(new_contents->web_contents());
-  args.Append(Value::CreateIntegerValue(tab_id));
+  args->Append(Value::CreateIntegerValue(tab_id));
 
   DictionaryValue* object_args = new DictionaryValue();
   object_args->Set(tab_keys::kWindowIdKey, Value::CreateIntegerValue(
       ExtensionTabUtil::GetWindowIdOfTab(new_contents->web_contents())));
-  args.Append(object_args);
+  args->Append(object_args);
 
   // The onActivated event replaced onActiveChanged and onSelectionChanged. The
   // deprecated events take two arguments: tabId, {windowId}.
-  std::string old_json_args;
-  base::JSONWriter::Write(&args, &old_json_args);
-
-  // The onActivated event takes one argument: {windowId, tabId}.
-  std::string new_json_args;
-  args.Remove(0, NULL);
-  object_args->Set(tab_keys::kTabIdKey, Value::CreateIntegerValue(tab_id));
-  base::JSONWriter::Write(&args, &new_json_args);
-
   Profile* profile = new_contents->profile();
   EventRouter::UserGestureState gesture = user_gesture ?
       EventRouter::USER_GESTURE_ENABLED : EventRouter::USER_GESTURE_NOT_ENABLED;
-  DispatchEvent(profile, events::kOnTabSelectionChanged, old_json_args,
-                gesture);
-  DispatchEvent(profile, events::kOnTabActiveChanged, old_json_args, gesture);
-  DispatchEvent(profile, events::kOnTabActivated, new_json_args, gesture);
+  DispatchEvent(profile, events::kOnTabSelectionChanged,
+                scoped_ptr<ListValue>(args->DeepCopy()), gesture);
+  DispatchEvent(profile, events::kOnTabActiveChanged,
+                scoped_ptr<ListValue>(args->DeepCopy()), gesture);
+
+  // The onActivated event takes one argument: {windowId, tabId}.
+  args->Remove(0, NULL);
+  object_args->Set(tab_keys::kTabIdKey, Value::CreateIntegerValue(tab_id));
+  DispatchEvent(profile, events::kOnTabActivated, args.Pass(), gesture);
 }
 
 void BrowserEventRouter::TabSelectionChanged(
@@ -299,31 +301,29 @@ void BrowserEventRouter::TabSelectionChanged(
     all->Append(Value::CreateIntegerValue(tab_id));
   }
 
-  ListValue args;
+  scoped_ptr<ListValue> args(new ListValue());
   DictionaryValue* select_info = new DictionaryValue();
 
   select_info->Set(tab_keys::kWindowIdKey, Value::CreateIntegerValue(
       ExtensionTabUtil::GetWindowIdOfTabStripModel(tab_strip_model)));
 
   select_info->Set(tab_keys::kTabIdsKey, all);
-  args.Append(select_info);
-
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
+  args->Append(select_info);
 
   // The onHighlighted event replaced onHighlightChanged.
   Profile* profile = tab_strip_model->profile();
-  DispatchEvent(profile, events::kOnTabHighlightChanged, json_args,
+  DispatchEvent(profile, events::kOnTabHighlightChanged,
+                scoped_ptr<ListValue>(args->DeepCopy()),
                 EventRouter::USER_GESTURE_UNKNOWN);
-  DispatchEvent(profile, events::kOnTabHighlighted, json_args,
+  DispatchEvent(profile, events::kOnTabHighlighted, args.Pass(),
                 EventRouter::USER_GESTURE_UNKNOWN);
 }
 
 void BrowserEventRouter::TabMoved(TabContents* contents,
                                   int from_index,
                                   int to_index) {
-  ListValue args;
-  args.Append(Value::CreateIntegerValue(
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(Value::CreateIntegerValue(
       ExtensionTabUtil::GetTabId(contents->web_contents())));
 
   DictionaryValue* object_args = new DictionaryValue();
@@ -333,12 +333,9 @@ void BrowserEventRouter::TabMoved(TabContents* contents,
       from_index));
   object_args->Set(tab_keys::kToIndexKey, Value::CreateIntegerValue(
       to_index));
-  args.Append(object_args);
+  args->Append(object_args);
 
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-
-  DispatchEvent(contents->profile(), events::kOnTabMoved, json_args,
+  DispatchEvent(contents->profile(), events::kOnTabMoved, args.Pass(),
                 EventRouter::USER_GESTURE_UNKNOWN);
 }
 
@@ -360,61 +357,40 @@ void BrowserEventRouter::TabUpdated(WebContents* contents, bool did_navigate) {
 void BrowserEventRouter::DispatchEvent(
     Profile* profile,
     const char* event_name,
-    const std::string& json_args,
+    scoped_ptr<ListValue> args,
     EventRouter::UserGestureState user_gesture) {
   if (!profile_->IsSameProfile(profile) || !profile->GetExtensionEventRouter())
     return;
 
   profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-      event_name, json_args, profile, GURL(), user_gesture);
+      event_name, args.Pass(), profile, GURL(), user_gesture);
 }
 
 void BrowserEventRouter::DispatchEventToExtension(
     Profile* profile,
     const std::string& extension_id,
     const char* event_name,
-    const std::string& json_args,
+    scoped_ptr<ListValue> event_args,
     EventRouter::UserGestureState user_gesture) {
   if (!profile_->IsSameProfile(profile) || !profile->GetExtensionEventRouter())
     return;
 
   profile->GetExtensionEventRouter()->DispatchEventToExtension(
-      extension_id, event_name, json_args, profile, GURL(), user_gesture);
+      extension_id, event_name, event_args.Pass(), profile, GURL(),
+      user_gesture);
 }
 
 void BrowserEventRouter::DispatchEventsAcrossIncognito(
     Profile* profile,
     const char* event_name,
-    const std::string& json_args,
-    const std::string& cross_incognito_args) {
+    scoped_ptr<ListValue> event_args,
+    scoped_ptr<ListValue> cross_incognito_args) {
   if (!profile_->IsSameProfile(profile) || !profile->GetExtensionEventRouter())
     return;
 
   profile->GetExtensionEventRouter()->DispatchEventsToRenderersAcrossIncognito(
-      event_name, json_args, profile, cross_incognito_args, GURL());
-}
-
-void BrowserEventRouter::DispatchEventWithTab(
-    Profile* profile,
-    const std::string& extension_id,
-    const char* event_name,
-    const WebContents* web_contents,
-    bool active,
-    EventRouter::UserGestureState user_gesture) {
-  if (!profile_->IsSameProfile(profile))
-    return;
-
-  ListValue args;
-  args.Append(ExtensionTabUtil::CreateTabValueActive(
-      web_contents, active));
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-  if (!extension_id.empty()) {
-    DispatchEventToExtension(profile, extension_id, event_name, json_args,
-                             user_gesture);
-  } else {
-    DispatchEvent(profile, event_name, json_args, user_gesture);
-  }
+      event_name, event_args.Pass(), profile, cross_incognito_args.Pass(),
+      GURL());
 }
 
 void BrowserEventRouter::DispatchSimpleBrowserEvent(
@@ -422,13 +398,10 @@ void BrowserEventRouter::DispatchSimpleBrowserEvent(
   if (!profile_->IsSameProfile(profile))
     return;
 
-  ListValue args;
-  args.Append(Value::CreateIntegerValue(window_id));
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(Value::CreateIntegerValue(window_id));
 
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-
-  DispatchEvent(profile, event_name, json_args,
+  DispatchEvent(profile, event_name, args.Pass(),
                 EventRouter::USER_GESTURE_UNKNOWN);
 }
 
@@ -439,23 +412,33 @@ void BrowserEventRouter::DispatchTabUpdatedEvent(
 
   // The state of the tab (as seen from the extension point of view) has
   // changed.  Send a notification to the extension.
-  ListValue args;
+  scoped_ptr<ListValue> args_base(new ListValue());
 
   // First arg: The id of the tab that changed.
-  args.Append(Value::CreateIntegerValue(ExtensionTabUtil::GetTabId(contents)));
+  args_base->AppendInteger(ExtensionTabUtil::GetTabId(contents));
 
   // Second arg: An object containing the changes to the tab state.
-  args.Append(changed_properties);
+  args_base->Append(changed_properties);
 
   // Third arg: An object containing the state of the tab.
-  args.Append(ExtensionTabUtil::CreateTabValue(contents));
-
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
-  DispatchEvent(profile, events::kOnTabUpdated, json_args,
-                EventRouter::USER_GESTURE_UNKNOWN);
+
+  const EventListenerMap::ListenerList& listeners(
+      ExtensionSystem::Get(profile)->event_router()->
+      listeners().GetEventListenersByName(events::kOnTabUpdated));
+  for (EventListenerMap::ListenerList::const_iterator it = listeners.begin();
+       it != listeners.end();
+       ++it) {
+    scoped_ptr<ListValue> args(args_base->DeepCopy());
+    DictionaryValue* tab_value = ExtensionTabUtil::CreateTabValue(
+        contents,
+        profile->GetExtensionService()->extensions()->GetByID(
+            (*it)->extension_id));
+    args->Append(tab_value);
+    DispatchEventToExtension(profile, (*it)->extension_id,
+                             events::kOnTabUpdated, args.Pass(),
+                             EventRouter::USER_GESTURE_UNKNOWN);
+  }
 }
 
 BrowserEventRouter::TabEntry* BrowserEventRouter::GetTabEntry(
@@ -523,19 +506,16 @@ void BrowserEventRouter::DispatchOldPageActionEvent(
     int tab_id,
     const std::string& url,
     int button) {
-  ListValue args;
-  args.Append(Value::CreateStringValue(page_action_id));
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(Value::CreateStringValue(page_action_id));
 
   DictionaryValue* data = new DictionaryValue();
   data->Set(tab_keys::kTabIdKey, Value::CreateIntegerValue(tab_id));
   data->Set(tab_keys::kTabUrlKey, Value::CreateStringValue(url));
   data->Set(page_action_keys::kButtonKey, Value::CreateIntegerValue(button));
-  args.Append(data);
+  args->Append(data);
 
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
-
-  DispatchEventToExtension(profile, extension_id, "pageActions", json_args,
+  DispatchEventToExtension(profile, extension_id, "pageActions", args.Pass(),
                            EventRouter::USER_GESTURE_ENABLED);
 }
 
@@ -580,15 +560,13 @@ void BrowserEventRouter::ScriptBadgeExecuted(
 void BrowserEventRouter::CommandExecuted(Profile* profile,
                                          const std::string& extension_id,
                                          const std::string& command) {
-  ListValue args;
-  args.Append(Value::CreateStringValue(command));
-  std::string json_args;
-  base::JSONWriter::Write(&args, &json_args);
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(Value::CreateStringValue(command));
 
   DispatchEventToExtension(profile,
                            extension_id,
-                           "experimental.commands.onCommand",
-                           json_args,
+                           "commands.onCommand",
+                           args.Pass(),
                            EventRouter::USER_GESTURE_ENABLED);
 }
 
@@ -610,12 +588,17 @@ void BrowserEventRouter::ExtensionActionExecuted(
   }
 
   if (event_name) {
-    DispatchEventWithTab(profile,
-                         extension_action.extension_id(),
-                         event_name,
-                         tab_contents->web_contents(),
-                         true,
-                         EventRouter::USER_GESTURE_ENABLED);
+    scoped_ptr<ListValue> args(new ListValue());
+    DictionaryValue* tab_value = ExtensionTabUtil::CreateTabValue(
+        tab_contents->web_contents(),
+        ExtensionTabUtil::INCLUDE_PRIVACY_SENSITIVE_FIELDS);
+    args->Append(tab_value);
+
+    DispatchEventToExtension(profile,
+                             extension_action.extension_id(),
+                             event_name,
+                             args.Pass(),
+                             EventRouter::USER_GESTURE_ENABLED);
   }
 }
 

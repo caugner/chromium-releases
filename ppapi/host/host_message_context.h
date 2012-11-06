@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef PPAPI_COMMON_HOST_MESSAGE_CONTEXT_H_
-#define PPAPI_COMMON_HOST_MESSAGE_CONTEXT_H_
+#ifndef PPAPI_HOST_HOST_MESSAGE_CONTEXT_H_
+#define PPAPI_HOST_HOST_MESSAGE_CONTEXT_H_
 
 #include "ipc/ipc_message.h"
 #include "ppapi/host/ppapi_host_export.h"
@@ -15,9 +15,13 @@ namespace host {
 // This context structure provides information about incoming resource message
 // call requests when passed to resources.
 struct PPAPI_HOST_EXPORT HostMessageContext {
-  explicit HostMessageContext(const ppapi::proxy::ResourceMessageCallParams& cp)
-      : params(cp) {
-  }
+  explicit HostMessageContext(
+      const ppapi::proxy::ResourceMessageCallParams& cp);
+  ~HostMessageContext();
+
+  // Returns a "reply params" struct with the same resource and sequence number
+  // as this request.
+  ppapi::proxy::ResourceMessageReplyParams MakeReplyParams() const;
 
   // The original call parameters passed to the resource message call.
   const ppapi::proxy::ResourceMessageCallParams& params;
@@ -32,4 +36,4 @@ struct PPAPI_HOST_EXPORT HostMessageContext {
 }  // namespace host
 }  // namespace ppapi
 
-#endif  // PPAPI_COMMON_HOST_MESSAGE_CONTEXT_H_
+#endif  // PPAPI_HOST_HOST_MESSAGE_CONTEXT_H_
