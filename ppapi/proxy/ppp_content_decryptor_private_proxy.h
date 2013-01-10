@@ -32,6 +32,7 @@ class PPP_ContentDecryptor_Private_Proxy : public InterfaceProxy {
   // Message handlers.
   void OnMsgGenerateKeyRequest(PP_Instance instance,
                                SerializedVarReceiveInput key_system,
+                               SerializedVarReceiveInput type,
                                SerializedVarReceiveInput init_data);
   void OnMsgAddKey(PP_Instance instance,
                    SerializedVarReceiveInput session_id,
@@ -42,8 +43,23 @@ class PPP_ContentDecryptor_Private_Proxy : public InterfaceProxy {
   void OnMsgDecrypt(PP_Instance instance,
                     const PPPDecryptor_Buffer& encrypted_buffer,
                     const std::string& serialized_encrypted_block_info);
+  void OnMsgInitializeAudioDecoder(
+      PP_Instance instance,
+      const std::string& decoder_config,
+      const PPPDecryptor_Buffer& extra_data_buffer);
+  void OnMsgInitializeVideoDecoder(
+      PP_Instance instance,
+      const std::string& decoder_config,
+      const PPPDecryptor_Buffer& extra_data_buffer);
+  void OnMsgDeinitializeDecoder(PP_Instance instance,
+                                PP_DecryptorStreamType decoder_type,
+                                uint32_t request_id);
+  void OnMsgResetDecoder(PP_Instance instance,
+                         PP_DecryptorStreamType decoder_type,
+                         uint32_t request_id);
   void OnMsgDecryptAndDecode(
       PP_Instance instance,
+      PP_DecryptorStreamType decoder_type,
       const PPPDecryptor_Buffer& encrypted_buffer,
       const std::string& serialized_encrypted_block_info);
 

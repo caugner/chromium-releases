@@ -8,20 +8,30 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/automation/automation_util.h"
-#include "chrome/browser/tab_contents/render_view_context_menu.h"
+#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/extensions/app_restore_service_factory.h"
+#include "chrome/browser/extensions/app_restore_service.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/extensions/extension_prefs.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 #include "chrome/browser/extensions/platform_app_launcher.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
+#include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_intents_dispatcher.h"
+#include "content/public/test/test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/web_intent_data.h"
 
@@ -97,6 +107,36 @@ class LaunchReplyHandler {
   bool waiting_;
   content::WebIntentsDispatcher* intents_dispatcher_;
   base::WeakPtrFactory<LaunchReplyHandler> weak_ptr_factory_;
+};
+
+// This class keeps track of tabs as they are added to the browser. It will be
+// "done" (i.e. won't block on Wait()) once |observations| tabs have been added.
+class TabsAddedNotificationObserver
+    : public content::WindowedNotificationObserver {
+ public:
+  explicit TabsAddedNotificationObserver(size_t observations)
+      : content::WindowedNotificationObserver(
+            chrome::NOTIFICATION_TAB_ADDED,
+            content::NotificationService::AllSources()),
+        observations_(observations) {
+  }
+
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
+    observed_tabs_.push_back(
+        content::Details<WebContents>(details).ptr());
+    if (observed_tabs_.size() == observations_)
+      content::WindowedNotificationObserver::Observe(type, source, details);
+  }
+
+  const std::vector<content::WebContents*>& tabs() { return observed_tabs_; }
+
+ private:
+  size_t observations_;
+  std::vector<content::WebContents*> observed_tabs_;
+
+  DISALLOW_COPY_AND_ASSIGN(TabsAddedNotificationObserver);
 };
 
 const char kTestFilePath[] = "platform_apps/launch_files/test.txt";
@@ -187,7 +227,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, EmptyContextMenu) {
   menu.reset(new PlatformAppContextMenu(web_contents, params));
   menu->Init();
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
-  ASSERT_TRUE(menu->HasCommandWithId(IDC_RELOAD));
+  ASSERT_TRUE(
+      menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_BACK));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_SAVE_PAGE));
 }
@@ -212,7 +254,37 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenu) {
   ASSERT_TRUE(menu->HasCommandWithId(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST));
   ASSERT_TRUE(menu->HasCommandWithId(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + 1));
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
-  ASSERT_TRUE(menu->HasCommandWithId(IDC_RELOAD));
+  ASSERT_TRUE(
+      menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_BACK));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_SAVE_PAGE));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_UNDO));
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, InstalledAppWithContextMenu) {
+  ExtensionTestMessageListener launched_listener("Launched", false);
+  InstallAndLaunchPlatformApp("context_menu");
+
+  // Wait for the extension to tell us it's initialized its context menus and
+  // launched a window.
+  ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+
+  // The context_menu app has two context menu items. For an installed app
+  // these are all that should be in the menu.
+  WebContents* web_contents = GetFirstShellWindowWebContents();
+  ASSERT_TRUE(web_contents);
+  WebKit::WebContextMenuData data;
+  content::ContextMenuParams params(data);
+  scoped_ptr<PlatformAppContextMenu> menu;
+  menu.reset(new PlatformAppContextMenu(web_contents, params));
+  menu->Init();
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + 1));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
+  ASSERT_FALSE(
+      menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE));
+  ASSERT_FALSE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_BACK));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_SAVE_PAGE));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_UNDO));
@@ -238,7 +310,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuTextField) {
   menu->Init();
   ASSERT_TRUE(menu->HasCommandWithId(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST));
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
-  ASSERT_TRUE(menu->HasCommandWithId(IDC_RELOAD));
+  ASSERT_TRUE(
+      menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP));
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_UNDO));
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_COPY));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_BACK));
@@ -265,7 +339,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuSelection) {
   menu->Init();
   ASSERT_TRUE(menu->HasCommandWithId(IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST));
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
-  ASSERT_TRUE(menu->HasCommandWithId(IDC_RELOAD));
+  ASSERT_TRUE(
+      menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE));
+  ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_UNDO));
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_COPY));
   ASSERT_FALSE(menu->HasCommandWithId(IDC_BACK));
@@ -300,8 +376,17 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuClicked) {
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowNavigation) {
+  TabsAddedNotificationObserver observer(2);
+
   ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/navigation")) << message_;
+
+  observer.Wait();
+  ASSERT_EQ(2U, observer.tabs().size());
+  EXPECT_EQ(std::string(chrome::kExtensionInvalidRequestURL),
+            observer.tabs()[0]->GetURL().spec());
+  EXPECT_EQ("http://chromium.org/",
+            observer.tabs()[1]->GetURL().spec());
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Iframes) {
@@ -399,7 +484,8 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ExtensionWindowingApis) {
   // TODO(jeremya): as above, this requires more extension functions.
 }
 
-// TODO(benwells): fix these tests for ChromeOS.
+// ChromeOS does not support passing arguments on the command line, so the tests
+// that rely on this functionality are disabled.
 #if !defined(OS_CHROMEOS)
 // Tests that command line parameters get passed through to platform apps
 // via launchData correctly when launching with a file.
@@ -521,7 +607,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MutationEventsDisabled) {
 
 // Test that windows created with an id will remember and restore their
 // geometry when opening new windows.
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ShellWindowRestorePosition) {
+// Flaky, see http://crbug.com/155459.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       FLAKY_ShellWindowRestorePosition) {
   ExtensionTestMessageListener page2_listener("WaitForPage2", true);
   ExtensionTestMessageListener page3_listener("WaitForPage3", true);
   ExtensionTestMessageListener done_listener("Done1", false);
@@ -585,6 +673,91 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ShellWindowRestorePosition) {
   // Wait for javascript to verify that the third window got the restored size
   // and explicitly specified coordinates.
   ASSERT_TRUE(done3_listener.WaitUntilSatisfied());
+}
+
+// Tests that a running app is recorded in the preferences as such.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, RunningAppsAreRecorded) {
+  content::WindowedNotificationObserver extension_suspended(
+      chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
+      content::NotificationService::AllSources());
+
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("platform_apps/restart_test"));
+  ASSERT_TRUE(extension);
+  ExtensionService* extension_service =
+      ExtensionSystem::Get(browser()->profile())->extension_service();
+  ExtensionPrefs* extension_prefs = extension_service->extension_prefs();
+
+  // App is running.
+  ASSERT_TRUE(extension_prefs->IsExtensionRunning(extension->id()));
+
+  // Wait for the extension to get suspended.
+  extension_suspended.Wait();
+
+  // App isn't running because it got suspended.
+  ASSERT_FALSE(extension_prefs->IsExtensionRunning(extension->id()));
+
+  // Pretend that the app is supposed to be running.
+  extension_prefs->SetExtensionRunning(extension->id(), true);
+
+  ExtensionTestMessageListener restart_listener("onRestarted", false);
+  AppRestoreServiceFactory::GetForProfile(browser()->profile())->
+      HandleStartup(true);
+  restart_listener.WaitUntilSatisfied();
+}
+
+// Tests that relaunching an app with devtools open reopens devtools.
+#ifdef NDEBUG
+#define MAYBE_DevToolsOpenedWithReload DevToolsOpenedWithReload
+#else
+// This is currently expected to fail in debug builds due to a segfault in
+// WebKit triggered by a dereference between #ifndef NDEBUG guards see
+// http://crbug.com/157097 .
+// The test is disabled because of timeouts, see http://crbug.com/158283.
+#define MAYBE_DevToolsOpenedWithReload DISABLED_DevToolsOpenedWithReload
+#endif
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_DevToolsOpenedWithReload) {
+  using content::DevToolsAgentHostRegistry;
+
+  ExtensionTestMessageListener launched_listener("Launched", false);
+  const Extension* extension = LoadAndLaunchPlatformApp("minimal_id");
+  ASSERT_TRUE(extension);
+  ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+  ShellWindow* window = GetFirstShellWindow();
+  ASSERT_TRUE(window);
+  content::RenderViewHost* rvh = window->web_contents()->GetRenderViewHost();
+  ASSERT_TRUE(rvh);
+
+  // Ensure no DevTools open for the ShellWindow, then open one.
+  ASSERT_FALSE(DevToolsAgentHostRegistry::HasDevToolsAgentHost(rvh));
+  DevToolsWindow* devtools_window = DevToolsWindow::OpenDevToolsWindow(rvh);
+  content::WindowedNotificationObserver loaded_observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::Source<content::NavigationController>(
+          &devtools_window->tab_contents()->web_contents()->GetController()));
+  loaded_observer.Wait();
+  ASSERT_TRUE(DevToolsAgentHostRegistry::HasDevToolsAgentHost(rvh));
+
+  // Close the ShellWindow, and ensure it is gone.
+  CloseShellWindow(window);
+  ASSERT_FALSE(GetFirstShellWindow());
+
+  // Relaunch the app and get a new ShellWindow.
+  content::WindowedNotificationObserver app_loaded_observer(
+      content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+      content::NotificationService::AllSources());
+  application_launch::OpenApplication(application_launch::LaunchParams(
+      browser()->profile(), extension, extension_misc::LAUNCH_NONE,
+      NEW_WINDOW));
+  app_loaded_observer.Wait();
+  window = GetFirstShellWindow();
+  ASSERT_TRUE(window);
+
+  // DevTools should have reopened with the relaunch.
+  rvh = window->web_contents()->GetRenderViewHost();
+  ASSERT_TRUE(rvh);
+  ASSERT_TRUE(DevToolsAgentHostRegistry::HasDevToolsAgentHost(rvh));
 }
 
 }  // namespace extensions

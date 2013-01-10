@@ -21,8 +21,7 @@
 #include "ipc/ipc_sync_message_filter.h"
 #include "ui/gl/gl_implementation.h"
 
-const int kGpuTimeout = 10000;
-
+namespace content {
 namespace {
 
 bool GpuProcessLogMessageHandler(int severity,
@@ -48,10 +47,12 @@ bool GpuProcessLogMessageHandler(int severity,
 
 }  // namespace
 
-GpuChildThread::GpuChildThread(bool dead_on_arrival,
-                               const content::GPUInfo& gpu_info)
+GpuChildThread::GpuChildThread(GpuWatchdogThread* watchdog_thread,
+                               bool dead_on_arrival,
+                               const GPUInfo& gpu_info)
     : dead_on_arrival_(dead_on_arrival),
       gpu_info_(gpu_info) {
+  watchdog_thread_ = watchdog_thread;
 #if defined(OS_WIN)
   target_services_ = NULL;
   collecting_dx_diagnostics_ = false;
@@ -134,28 +135,6 @@ void GpuChildThread::OnInitialize() {
   // take a significant amount of time.
   gpu_info_.initialization_time = base::Time::Now() - process_start_time_;
 
-  // In addition to disabling the watchdog if the command line switch is
-  // present, disable it in two other cases. OSMesa is expected to run very
-  // slowly.  Also disable the watchdog on valgrind because the code is expected
-  // to run slowly in that case.
-  bool enable_watchdog =
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGpuWatchdog) &&
-      gfx::GetGLImplementation() != gfx::kGLImplementationOSMesaGL &&
-      !RunningOnValgrind();
-
-  // Disable the watchdog in debug builds because they tend to only be run by
-  // developers who will not appreciate the watchdog killing the GPU process.
-#ifndef NDEBUG
-  enable_watchdog = false;
-#endif
-
-  // Start the GPU watchdog only after anything that is expected to be time
-  // consuming has completed, otherwise the process is liable to be aborted.
-  if (enable_watchdog) {
-    watchdog_thread_ = new GpuWatchdogThread(kGpuTimeout);
-    watchdog_thread_->Start();
-  }
 
   // Defer creation of the render thread. This is to prevent it from handling
   // IPC messages before the sandbox has been enabled and all other necessary
@@ -180,17 +159,16 @@ void GpuChildThread::StopWatchdog() {
 }
 
 void GpuChildThread::OnCollectGraphicsInfo() {
-  if (!gpu_info_.finalized &&
-      (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGpuSandbox) ||
-       CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess) ||
-       CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessGPU))) {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kDisableGpuSandbox) ||
+      command_line->ForCurrentProcess()->HasSwitch(switches::kSingleProcess) ||
+      command_line->ForCurrentProcess()->HasSwitch(switches::kInProcessGPU)) {
     // GPU full info collection should only happen on un-sandboxed GPU process
     // or single process/in-process gpu mode.
 
     if (!gpu_info_collector::CollectGraphicsInfo(&gpu_info_))
       VLOG(1) << "gpu_info_collector::CollectGraphicsInfo failed";
-    content::GetContentClient()->SetGpuInfo(gpu_info_);
+    GetContentClient()->SetGpuInfo(gpu_info_);
 
 #if defined(OS_WIN)
     if (!collecting_dx_diagnostics_) {
@@ -214,7 +192,7 @@ void GpuChildThread::OnCollectGraphicsInfo() {
 }
 
 void GpuChildThread::OnGetVideoMemoryUsageStats() {
-  content::GPUVideoMemoryUsageStats video_memory_usage_stats;
+  GPUVideoMemoryUsageStats video_memory_usage_stats;
   if (gpu_channel_manager_.get())
     gpu_channel_manager_->gpu_memory_manager()->GetVideoMemoryUsageStats(
         video_memory_usage_stats);
@@ -252,7 +230,7 @@ void GpuChildThread::OnHang() {
 // Runs on a worker thread. The GPU process never terminates voluntarily so
 // it is safe to assume that its message loop is valid.
 void GpuChildThread::CollectDxDiagnostics(GpuChildThread* thread) {
-  content::DxDiagNode node;
+  DxDiagNode node;
   gpu_info_collector::GetDxDiagnostics(&node);
 
   thread->message_loop()->PostTask(
@@ -261,7 +239,7 @@ void GpuChildThread::CollectDxDiagnostics(GpuChildThread* thread) {
 
 // Runs on the main thread.
 void GpuChildThread::SetDxDiagnostics(GpuChildThread* thread,
-                                      const content::DxDiagNode& node) {
+                                      const DxDiagNode& node) {
   thread->gpu_info_.dx_diagnostics = node;
   thread->gpu_info_.finalized = true;
   thread->collecting_dx_diagnostics_ = false;
@@ -269,3 +247,6 @@ void GpuChildThread::SetDxDiagnostics(GpuChildThread* thread,
 }
 
 #endif
+
+}  // namespace content
+

@@ -32,9 +32,7 @@
 #include "ui/surface/accelerated_surface_win.h"
 #endif
 
-using content::BrowserGpuChannelHostFactory;
-using content::GLHelper;
-
+namespace content {
 namespace {
 
 ImageTransportFactory* g_factory;
@@ -61,12 +59,14 @@ class DefaultTransportFactory
 
   virtual scoped_refptr<ui::Texture> CreateTransportClient(
       const gfx::Size& size,
+      float device_scale_factor,
       uint64 transport_handle) OVERRIDE {
     return NULL;
   }
 
   virtual scoped_refptr<ui::Texture> CreateOwnedTexture(
       const gfx::Size& size,
+      float device_scale_factor,
       unsigned int texture_id) OVERRIDE {
     return NULL;
   }
@@ -97,13 +97,19 @@ class ImageTransportClientTexture : public ui::Texture {
   ImageTransportClientTexture(
       WebKit::WebGraphicsContext3D* host_context,
       const gfx::Size& size,
+      float device_scale_factor,
       uint64 surface_id)
-          : ui::Texture(true, size),
-            host_context_(host_context) {
-    set_texture_id(surface_id);
+          : ui::Texture(true, size, device_scale_factor),
+            host_context_(host_context),
+            texture_id_(surface_id) {
   }
 
-  virtual WebKit::WebGraphicsContext3D* HostContext3D() {
+  // ui::Texture overrides:
+  virtual unsigned int PrepareTexture() OVERRIDE {
+    return texture_id_;
+  }
+
+  virtual WebKit::WebGraphicsContext3D* HostContext3D() OVERRIDE {
     return host_context_;
   }
 
@@ -115,6 +121,7 @@ class ImageTransportClientTexture : public ui::Texture {
   // before the |host_context_| via
   // |ImageTransportFactoryObserver::OnLostContext()| handlers.
   WebKit::WebGraphicsContext3D* host_context_;
+  unsigned texture_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageTransportClientTexture);
 };
@@ -123,14 +130,19 @@ class OwnedTexture : public ui::Texture, ImageTransportFactoryObserver {
  public:
   OwnedTexture(WebKit::WebGraphicsContext3D* host_context,
                const gfx::Size& size,
+               float device_scale_factor,
                unsigned int texture_id)
-      : ui::Texture(true, size),
-        host_context_(host_context) {
+      : ui::Texture(true, size, device_scale_factor),
+        host_context_(host_context),
+        texture_id_(texture_id) {
     ImageTransportFactory::GetInstance()->AddObserver(this);
-    set_texture_id(texture_id);
   }
 
   // ui::Texture overrides:
+  virtual unsigned int PrepareTexture() OVERRIDE {
+    return texture_id_;
+  }
+
   virtual WebKit::WebGraphicsContext3D* HostContext3D() OVERRIDE {
     return host_context_;
   }
@@ -148,9 +160,9 @@ class OwnedTexture : public ui::Texture, ImageTransportFactoryObserver {
 
  private:
   void DeleteTexture() {
-    if (texture_id()) {
-      host_context_->deleteTexture(texture_id());
-      set_texture_id(0);
+    if (texture_id_) {
+      host_context_->deleteTexture(texture_id_);
+      texture_id_ = 0;
     }
   }
 
@@ -158,6 +170,7 @@ class OwnedTexture : public ui::Texture, ImageTransportFactoryObserver {
   // before the |host_context_| via
   // |ImageTransportFactoryObserver::OnLostContext()| handlers.
   WebKit::WebGraphicsContext3D* host_context_;
+  unsigned texture_id_;
 
   DISALLOW_COPY_AND_ASSIGN(OwnedTexture);
 };
@@ -281,22 +294,26 @@ class GpuProcessTransportFactory :
 
   virtual scoped_refptr<ui::Texture> CreateTransportClient(
       const gfx::Size& size,
+      float device_scale_factor,
       uint64 transport_handle) {
     if (!shared_context_.get())
         return NULL;
     scoped_refptr<ImageTransportClientTexture> image(
         new ImageTransportClientTexture(shared_context_.get(),
-                                        size, transport_handle));
+                                        size, device_scale_factor,
+                                        transport_handle));
     return image;
   }
 
   virtual scoped_refptr<ui::Texture> CreateOwnedTexture(
       const gfx::Size& size,
+      float device_scale_factor,
       unsigned int texture_id) OVERRIDE {
     if (!shared_context_.get())
         return NULL;
     scoped_refptr<OwnedTexture> image(
-        new OwnedTexture(shared_context_.get(), size, texture_id));
+        new OwnedTexture(shared_context_.get(), size, device_scale_factor,
+                         texture_id));
     return image;
   }
 
@@ -392,6 +409,7 @@ class GpuProcessTransportFactory :
     attrs.depth = false;
     attrs.stencil = false;
     attrs.antialias = false;
+    attrs.noAutomaticFlushes = true;
     GpuChannelHostFactory* factory = BrowserGpuChannelHostFactory::instance();
     GURL url("chrome://gpu/GpuProcessTransportFactory::CreateContextCommon");
     scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context(
@@ -403,7 +421,7 @@ class GpuProcessTransportFactory :
     if (!context->Initialize(
         attrs,
         false,
-        content::CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE))
+        CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE))
       return NULL;
     return context.release();
   }
@@ -470,7 +488,7 @@ void ImageTransportFactory::Initialize() {
   }
   if (ui::IsTestCompositorEnabled()) {
     g_factory = new DefaultTransportFactory();
-    content::WebKitPlatformSupportImpl::SetOffscreenContextFactoryForTest(
+    WebKitPlatformSupportImpl::SetOffscreenContextFactoryForTest(
         CreateTestContext);
   } else {
     g_factory = new GpuProcessTransportFactory();
@@ -489,3 +507,5 @@ void ImageTransportFactory::Terminate() {
 ImageTransportFactory* ImageTransportFactory::GetInstance() {
   return g_factory;
 }
+
+}  // namespace content

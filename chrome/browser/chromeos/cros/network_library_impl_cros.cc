@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/cros/network_library_impl_cros.h"
 
-#include <dbus/dbus-glib.h>
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/json/json_writer.h"  // for debug output only.
@@ -33,13 +32,6 @@ struct NetworkLibraryImplCros::IPParameterInfo {
 };
 
 namespace {
-
-// List of cellular operators names that should have data roaming always enabled
-// to be able to connect to any network.
-const char* kAlwaysInRoamingOperators[] = {
-  "CUBIC",
-  "Cubic",
-};
 
 // List of interfaces that have portal check enabled by default.
 const char kDefaultCheckPortalList[] = "ethernet,wifi,cellular";
@@ -449,12 +441,7 @@ bool NetworkLibraryImplCros::IsCellularAlwaysInRoaming() {
         "w/o cellular device.";
     return false;
   }
-  const std::string& home_provider_name = cellular->home_provider_name();
-  for (size_t i = 0; i < arraysize(kAlwaysInRoamingOperators); i++) {
-    if (home_provider_name == kAlwaysInRoamingOperators[i])
-      return true;
-  }
-  return false;
+  return cellular->provider_requires_roaming();
 }
 
 void NetworkLibraryImplCros::RequestNetworkScan() {

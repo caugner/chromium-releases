@@ -40,12 +40,11 @@
 #include "net/base/escape.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #endif
 
 using content::BrowserContext;
 using content::BrowserThread;
-using content::DownloadId;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::NavigationController;
@@ -101,7 +100,7 @@ void GetDownloadFilePath(
 
 #if defined (OS_CHROMEOS)
   // Do not use drive for extension downloads.
-  if (gdata::util::IsUnderDriveMountPoint(directory))
+  if (drive::util::IsUnderDriveMountPoint(directory))
     directory = download_util::GetDefaultDownloadDirectory();
 #endif
 
@@ -135,6 +134,16 @@ void GetDownloadFilePath(
 }  // namespace
 
 namespace extensions {
+
+void WebstoreInstaller::Delegate::OnExtensionDownloadStarted(
+    const std::string& id,
+    content::DownloadItem* item) {
+}
+
+void WebstoreInstaller::Delegate::OnExtensionDownloadProgress(
+    const std::string& id,
+    content::DownloadItem* item) {
+}
 
 WebstoreInstaller::Approval::Approval()
     : profile(NULL),
@@ -201,7 +210,7 @@ void WebstoreInstaller::Start() {
   AddRef();  // Balanced in ReportSuccess and ReportFailure.
 
   if (!Extension::IdIsValid(id_)) {
-    ReportFailure(kInvalidIdError);
+    ReportFailure(kInvalidIdError, FAILURE_REASON_OTHER);
     return;
   }
 
@@ -224,7 +233,7 @@ void WebstoreInstaller::Observe(int type,
       if (extension == NULL && download_item_ != NULL &&
           installer->download_url() == download_item_->GetURL() &&
           installer->profile()->IsSameProfile(profile_)) {
-        ReportFailure(kInstallCanceledError);
+        ReportFailure(kInstallCanceledError, FAILURE_REASON_CANCELLED);
       }
       break;
     }
@@ -249,7 +258,7 @@ void WebstoreInstaller::Observe(int type,
       const string16* error = content::Details<const string16>(details).ptr();
       const std::string utf8_error = UTF16ToUTF8(*error);
       if (download_url_ == crx_installer->original_download_url())
-        ReportFailure(utf8_error);
+        ReportFailure(utf8_error, FAILURE_REASON_OTHER);
       break;
     }
 
@@ -273,24 +282,21 @@ WebstoreInstaller::~WebstoreInstaller() {
   }
 }
 
-void WebstoreInstaller::OnDownloadStarted(DownloadId id, net::Error error) {
-  if (error != net::OK) {
-    ReportFailure(net::ErrorToString(error));
+void WebstoreInstaller::OnDownloadStarted(
+    DownloadItem* item, net::Error error) {
+  if (!item) {
+    DCHECK_NE(net::OK, error);
+    ReportFailure(net::ErrorToString(error), FAILURE_REASON_OTHER);
     return;
   }
 
-  CHECK(id.IsValid());
-
-  DownloadManager* download_manager =
-      BrowserContext::GetDownloadManager(profile_);
-  if (!download_manager)
-    return;
-  download_item_ = download_manager->GetDownload(id.local());
-  if (download_item_) {
-    download_item_->AddObserver(this);
-    if (approval_.get())
-      download_item_->SetUserData(kApprovalKey, approval_.release());
-  }
+  DCHECK_EQ(net::OK, error);
+  download_item_ = item;
+  download_item_->AddObserver(this);
+  if (approval_.get())
+    download_item_->SetUserData(kApprovalKey, approval_.release());
+  if (delegate_)
+    delegate_->OnExtensionDownloadStarted(id_, download_item_);
 }
 
 void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
@@ -298,15 +304,21 @@ void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
 
   switch (download->GetState()) {
     case DownloadItem::CANCELLED:
-      ReportFailure(kDownloadCanceledError);
+      ReportFailure(kDownloadCanceledError, FAILURE_REASON_CANCELLED);
       break;
     case DownloadItem::INTERRUPTED:
-      ReportFailure(kDownloadInterruptedError);
+      ReportFailure(kDownloadInterruptedError, FAILURE_REASON_OTHER);
       break;
     case DownloadItem::COMPLETE:
       // Wait for other notifications if the download is really an extension.
       if (!download_crx_util::IsExtensionDownload(*download))
-        ReportFailure(kInvalidDownloadError);
+        ReportFailure(kInvalidDownloadError, FAILURE_REASON_OTHER);
+      else if (delegate_)
+        delegate_->OnExtensionDownloadProgress(id_, download);
+      break;
+    case DownloadItem::IN_PROGRESS:
+      if (delegate_)
+        delegate_->OnExtensionDownloadProgress(id_, download);
       break;
     default:
       // Continue listening if the download is not in one of the above states.
@@ -333,12 +345,13 @@ void WebstoreInstaller::StartDownload(const FilePath& file) {
       !controller_->GetWebContents()->GetBrowserContext() ||
       !controller_->GetWebContents()->GetBrowserContext()
         ->GetResourceContext()) {
-    ReportFailure(kDownloadDirectoryError);
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
     return;
   }
 
-  content::DownloadSaveInfo save_info;
-  save_info.file_path = file;
+  scoped_ptr<content::DownloadSaveInfo> save_info(
+      new content::DownloadSaveInfo());
+  save_info->file_path = file;
 
   // The download url for the given extension is contained in |download_url_|.
   // We will navigate the current tab to this url to start the download. The
@@ -347,7 +360,7 @@ void WebstoreInstaller::StartDownload(const FilePath& file) {
       download_util::INITIATED_BY_WEBSTORE_INSTALLER);
   scoped_ptr<DownloadUrlParameters> params(
       DownloadUrlParameters::FromWebContents(
-          controller_->GetWebContents(), download_url_, save_info));
+          controller_->GetWebContents(), download_url_, save_info.Pass()));
   if (controller_->GetActiveEntry())
     params->set_referrer(
         content::Referrer(controller_->GetActiveEntry()->GetURL(),
@@ -356,9 +369,10 @@ void WebstoreInstaller::StartDownload(const FilePath& file) {
   download_manager->DownloadUrl(params.Pass());
 }
 
-void WebstoreInstaller::ReportFailure(const std::string& error) {
+void WebstoreInstaller::ReportFailure(const std::string& error,
+                                      FailureReason reason) {
   if (delegate_) {
-    delegate_->OnExtensionInstallFailure(id_, error);
+    delegate_->OnExtensionInstallFailure(id_, error, reason);
     delegate_ = NULL;
   }
 

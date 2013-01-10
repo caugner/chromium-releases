@@ -18,8 +18,11 @@ import sys
 import tempfile
 import time
 
-import pexpect
 import io_stats_parser
+try:
+  import pexpect
+except:
+  pexpect = None
 
 CHROME_SRC = os.path.join(
     os.path.abspath(os.path.dirname(__file__)), '..', '..', '..')
@@ -45,10 +48,6 @@ LOCAL_PROPERTIES_PATH = '/data/local.prop'
 
 # Property in /data/local.prop that controls Java assertions.
 JAVA_ASSERT_PROPERTY = 'dalvik.vm.enableassertions'
-
-BOOT_COMPLETE_RE = re.compile(
-    'android.intent.action.MEDIA_MOUNTED path: /\w+/sdcard\d?'
-    '|PowerManagerService(\(\s+\d+\))?: bootCompleted')
 
 MEMORY_INFO_RE = re.compile('^(?P<key>\w+):\s+(?P<usage_kb>\d+) kB$')
 NVIDIA_MEMORY_INFO_RE = re.compile('^\s*(?P<user>\S+)\s*(?P<name>\S+)\s*'
@@ -110,6 +109,9 @@ def GetAttachedDevices():
     devices.remove(preferred_device)
     devices.insert(0, preferred_device)
   return devices
+
+def IsDeviceAttached(device):
+  return device in GetAttachedDevices()
 
 def _GetFilesFromRecursiveLsOutput(path, ls_output, re_file, utc_offset=None):
   """Gets a list of files from `ls` command output.
@@ -200,7 +202,9 @@ class AndroidCommands(object):
     self._adb = adb_interface.AdbInterface()
     if device:
       self._adb.SetTargetSerial(device)
+    self._device = device
     self._logcat = None
+    self.logcat_process = None
     self._pushed_files = []
     self._device_utc_offset = self.RunShellCommand('date +%z')[0]
     self._md5sum_path = ''
@@ -214,6 +218,20 @@ class AndroidCommands(object):
     """Checks if root is enabled on the device."""
     root_test_output = self.RunShellCommand('ls /root') or ['']
     return not 'Permission denied' in root_test_output[0]
+
+  def EnableAdbRoot(self):
+    """Enables adb root on the device.
+
+    Returns:
+      True: if output from executing adb root was as expected.
+      False: otherwise.
+    """
+    return_value = self._adb.EnableAdbRoot()
+    # EnableAdbRoot inserts a call for wait-for-device only when adb logcat
+    # output matches what is expected. Just to be safe add a call to
+    # wait-for-device.
+    self._adb.SendCommand('wait-for-device')
+    return return_value
 
   def GetDeviceYear(self):
     """Returns the year information of the date on device."""
@@ -269,9 +287,10 @@ class AndroidCommands(object):
     else:
       self.RestartShell()
       timeout = 120
+    # To run tests we need at least the package manager and the sd card (or
+    # other external storage) to be ready.
     self.WaitForDevicePm()
-    self.StartMonitoringLogcat(timeout=timeout)
-    self.WaitForLogMatch(BOOT_COMPLETE_RE, None)
+    self.WaitForSdCardReady(timeout)
 
   def Uninstall(self, package):
     """Uninstalls the specified package from the device.
@@ -454,12 +473,37 @@ class AndroidCommands(object):
       process: name of the process to kill off
 
     Returns:
-      the number of processess killed
+      the number of processes killed
     """
     pids = self.ExtractPid(process)
     if pids:
       self.RunShellCommand('kill ' + ' '.join(pids))
     return len(pids)
+
+  def KillAllBlocking(self, process, timeout_sec):
+    """Blocking version of killall, connected via adb.
+
+    This waits until no process matching the corresponding name appears in ps'
+    output anymore.
+
+    Args:
+      process: name of the process to kill off
+      timeout_sec: the timeout in seconds
+
+    Returns:
+      the number of processes killed
+    """
+    processes_killed = self.KillAll(process)
+    if processes_killed:
+      elapsed = 0
+      wait_period = 0.1
+      # Note that this doesn't take into account the time spent in ExtractPid().
+      while self.ExtractPid(process) and elapsed < timeout_sec:
+        time.sleep(wait_period)
+        elapsed += wait_period
+      if elapsed >= timeout_sec:
+        return 0
+    return processes_killed
 
   def StartActivity(self, package, activity, wait_for_completion=False,
                     action='android.intent.action.VIEW',
@@ -504,6 +548,11 @@ class AndroidCommands(object):
       cmd += ' --start-profiler ' + trace_file_name
     self.RunShellCommand(cmd)
 
+  def GoHome(self):
+    """Tell the device to return to the home screen. Blocks until completion."""
+    self.RunShellCommand('am start -W '
+        '-a android.intent.action.MAIN -c android.intent.category.HOME')
+
   def CloseApplication(self, package):
     """Attempt to close down the application, using increasing violence.
 
@@ -545,7 +594,7 @@ class AndroidCommands(object):
       if not os.path.exists(md5sum_path):
         md5sum_path = '%s/out/Release/md5sum_bin' % (CHROME_SRC)
         if not os.path.exists(md5sum_path):
-          print >>sys.stderr, 'Please build md5sum.'
+          print >> sys.stderr, 'Please build md5sum.'
           sys.exit(1)
       command = 'push %s %s' % (md5sum_path, MD5SUM_DEVICE_PATH)
       assert _HasAdbPushSucceeded(self._adb.SendCommand(command))
@@ -615,7 +664,6 @@ class AndroidCommands(object):
         path, self.RunShellCommand('ls -lR %s' % path), re_file,
         self._device_utc_offset)
 
-
   def SetJavaAssertsEnabled(self, enable):
     """Sets or removes the device java assertions property.
 
@@ -652,6 +700,17 @@ class AndroidCommands(object):
                                               enable and 'all' or ''))
     return True
 
+  def GetBuildId(self):
+    """Returns the build ID of the system (e.g. JRM79C)."""
+    build_id = self.RunShellCommand('getprop ro.build.id')[0]
+    assert build_id
+    return build_id
+
+  def GetBuildType(self):
+    """Returns the build type of the system (e.g. eng)."""
+    build_type = self.RunShellCommand('getprop ro.build.type')[0]
+    assert build_type
+    return build_type
 
   def StartMonitoringLogcat(self, clear=True, timeout=10, logfile=None,
                             filters=None):
@@ -675,25 +734,6 @@ class AndroidCommands(object):
       args.append('*:v')
 
     if logfile:
-      class NewLineNormalizer(object):
-        """A file-like object to normalize EOLs to '\n'.
-
-        Pexpect runs adb within a pseudo-tty device (see
-        http://www.noah.org/wiki/pexpect), so any '\n' printed by adb is written
-        as '\r\n' to the logfile. Since adb already uses '\r\n' to terminate
-        lines, the log ends up having '\r\r\n' at the end of each line. This
-        filter replaces the above with a single '\n' in the data stream.
-        """
-        def __init__(self, output):
-          self.output = output
-
-        def write(self, data):
-          data = data.replace('\r\r\n', '\n')
-          self.output.write(data)
-
-        def flush(self):
-          self.output.flush()
-
       logfile = NewLineNormalizer(logfile)
 
     # Spawn logcat and syncronize with it.
@@ -732,31 +772,44 @@ class AndroidCommands(object):
       The re match object if |success_re| is matched first or None if |error_re|
       is matched first.
     """
-    if not self._logcat:
-      self.StartMonitoringLogcat(clear)
     logging.info('<<< Waiting for logcat:' + str(success_re.pattern))
     t0 = time.time()
-    try:
-      while True:
-        # Note this will block for upto the timeout _per log line_, so we need
-        # to calculate the overall timeout remaining since t0.
-        time_remaining = t0 + self._logcat.timeout - time.time()
-        if time_remaining < 0: raise pexpect.TIMEOUT(self._logcat)
-        self._logcat.expect(PEXPECT_LINE_RE, timeout=time_remaining)
-        line = self._logcat.match.group(1)
-        if error_re:
-          error_match = error_re.search(line)
-          if error_match:
-            return None
-        success_match = success_re.search(line)
-        if success_match:
-          return success_match
-        logging.info('<<< Skipped Logcat Line:' + str(line))
-    except pexpect.TIMEOUT:
-      raise pexpect.TIMEOUT(
-          'Timeout (%ds) exceeded waiting for pattern "%s" (tip: use -vv '
-          'to debug)' %
-          (self._logcat.timeout, success_re.pattern))
+    while True:
+      if not self._logcat:
+        self.StartMonitoringLogcat(clear)
+      try:
+        while True:
+          # Note this will block for upto the timeout _per log line_, so we need
+          # to calculate the overall timeout remaining since t0.
+          time_remaining = t0 + self._logcat.timeout - time.time()
+          if time_remaining < 0: raise pexpect.TIMEOUT(self._logcat)
+          self._logcat.expect(PEXPECT_LINE_RE, timeout=time_remaining)
+          line = self._logcat.match.group(1)
+          if error_re:
+            error_match = error_re.search(line)
+            if error_match:
+              return None
+          success_match = success_re.search(line)
+          if success_match:
+            return success_match
+          logging.info('<<< Skipped Logcat Line:' + str(line))
+      except pexpect.TIMEOUT:
+        raise pexpect.TIMEOUT(
+            'Timeout (%ds) exceeded waiting for pattern "%s" (tip: use -vv '
+            'to debug)' %
+            (self._logcat.timeout, success_re.pattern))
+      except pexpect.EOF:
+        # It seems that sometimes logcat can end unexpectedly. This seems
+        # to happen during Chrome startup after a reboot followed by a cache
+        # clean. I don't understand why this happens, but this code deals with
+        # getting EOF in logcat.
+        logging.critical('Found EOF in adb logcat. Restarting...')
+        # Rerun spawn with original arguments. Note that self._logcat.args[0] is
+        # the path of adb, so we don't want it in the arguments.
+        self._logcat = pexpect.spawn('adb',
+                                     self._logcat.args[1:],
+                                     timeout=self._logcat.timeout,
+                                     logfile=self._logcat.logfile)
 
   def StartRecordingLogcat(self, clear=True, filters=['*:v']):
     """Starts recording logcat output to eventually be saved as a string.
@@ -984,7 +1037,7 @@ class AndroidCommands(object):
     return pids
 
   def FileExistsOnDevice(self, file_name):
-    """Checks whether the given (regular) file exists on the device.
+    """Checks whether the given file exists on the device.
 
     Args:
       file_name: Full path of file to check.
@@ -993,11 +1046,38 @@ class AndroidCommands(object):
       True if the file exists, False otherwise.
     """
     assert '"' not in file_name, 'file_name cannot contain double quotes'
-    status = self._adb.SendShellCommand(
-        '\'test -f "%s"; echo $?\'' % (file_name))
-    if 'test: not found' not in status:
-      return int(status) == 0
+    try:
+      status = self._adb.SendShellCommand(
+          '\'test -e "%s"; echo $?\'' % (file_name))
+      if 'test: not found' not in status:
+        return int(status) == 0
 
-    status = self._adb.SendShellCommand(
-        '\'ls "%s" >/dev/null 2>&1; echo $?\'' % (file_name))
-    return int(status) == 0
+      status = self._adb.SendShellCommand(
+          '\'ls "%s" >/dev/null 2>&1; echo $?\'' % (file_name))
+      return int(status) == 0
+    except ValueError:
+      if IsDeviceAttached(self._device):
+        raise errors.DeviceUnresponsiveError('Device may be offline.')
+
+      return False
+
+
+class NewLineNormalizer(object):
+  """A file-like object to normalize EOLs to '\n'.
+
+  Pexpect runs adb within a pseudo-tty device (see
+  http://www.noah.org/wiki/pexpect), so any '\n' printed by adb is written
+  as '\r\n' to the logfile. Since adb already uses '\r\n' to terminate
+  lines, the log ends up having '\r\r\n' at the end of each line. This
+  filter replaces the above with a single '\n' in the data stream.
+  """
+  def __init__(self, output):
+    self._output = output
+
+  def write(self, data):
+    data = data.replace('\r\r\n', '\n')
+    self._output.write(data)
+
+  def flush(self):
+    self._output.flush()
+

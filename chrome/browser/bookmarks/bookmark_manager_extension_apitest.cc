@@ -3,12 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/prefs/public/pref_service_base.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
@@ -19,7 +19,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, BookmarkManager) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
 
-  ASSERT_TRUE(RunExtensionTest("bookmark_manager/standard")) << message_;
+  ASSERT_TRUE(RunComponentExtensionTest("bookmark_manager/standard"))
+      << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, BookmarkManagerEditDisabled) {
@@ -37,7 +38,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, BookmarkManagerEditDisabled) {
   model->AddURL(bar, 1, ASCIIToUTF16("AAA"), GURL("http://aaa.example.com"));
   model->AddURL(folder, 0, ASCIIToUTF16("BBB"), GURL("http://bbb.example.com"));
 
-  profile->GetPrefs()->SetBoolean(prefs::kEditBookmarksEnabled, false);
+  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile);
+  prefs->SetBoolean(prefs::kEditBookmarksEnabled, false);
 
-  ASSERT_TRUE(RunExtensionTest("bookmark_manager/edit_disabled")) << message_;
+  ASSERT_TRUE(RunComponentExtensionTest("bookmark_manager/edit_disabled"))
+      << message_;
 }

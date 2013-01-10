@@ -33,6 +33,7 @@
 #include "sync/engine/traffic_recorder.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/base/node_ordinal.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
 #include "sync/protocol/nigori_specifics.pb.h"
 #include "sync/protocol/preference_specifics.pb.h"
@@ -96,7 +97,7 @@ using syncable::PREV_ID;
 using syncable::BASE_SERVER_SPECIFICS;
 using syncable::SERVER_IS_DEL;
 using syncable::SERVER_PARENT_ID;
-using syncable::SERVER_POSITION_IN_PARENT;
+using syncable::SERVER_ORDINAL_IN_PARENT;
 using syncable::SERVER_SPECIFICS;
 using syncable::SERVER_VERSION;
 using syncable::UNIQUE_CLIENT_TAG;
@@ -105,7 +106,6 @@ using syncable::SPECIFICS;
 using syncable::SYNCING;
 using syncable::UNITTEST;
 
-using sessions::ConflictProgress;
 using sessions::ScopedSetSessionWriteTransaction;
 using sessions::StatusController;
 using sessions::SyncSessionContext;
@@ -178,14 +178,15 @@ class SyncerTest : public testing::Test,
     std::vector<ModelSafeWorker*> workers;
     GetModelSafeRoutingInfo(&info);
     GetWorkers(&workers);
-    ModelTypeStateMap types =
-        ModelSafeRoutingInfoToStateMap(info, std::string());
+    ModelTypeInvalidationMap invalidation_map =
+        ModelSafeRoutingInfoToInvalidationMap(info, std::string());
     return new SyncSession(context_.get(), this,
-        sessions::SyncSourceInfo(sync_pb::GetUpdatesCallerInfo::UNKNOWN, types),
+        sessions::SyncSourceInfo(sync_pb::GetUpdatesCallerInfo::UNKNOWN,
+                                 invalidation_map),
         info, workers);
   }
 
-  bool SyncShareAsDelegate(
+  void SyncShareAsDelegate(
       SyncSchedulerImpl::SyncSessionJob::SyncSessionJobPurpose purpose) {
     SyncerStep start;
     SyncerStep end;
@@ -193,27 +194,16 @@ class SyncerTest : public testing::Test,
 
     session_.reset(MakeSession());
     syncer_->SyncShare(session_.get(), start, end);
-    return session_->HasMoreToSync();
   }
 
-  bool SyncShareNudge() {
+  void SyncShareNudge() {
     session_.reset(MakeSession());
-    return SyncShareAsDelegate(SyncSchedulerImpl::SyncSessionJob::NUDGE);
+    SyncShareAsDelegate(SyncSchedulerImpl::SyncSessionJob::NUDGE);
   }
 
-  bool SyncShareConfigure() {
+  void SyncShareConfigure() {
     session_.reset(MakeSession());
-    return SyncShareAsDelegate(
-        SyncSchedulerImpl::SyncSessionJob::CONFIGURATION);
-  }
-
-  void LoopSyncShare() {
-    bool should_loop = false;
-    int loop_iterations = 0;
-    do {
-      ASSERT_LT(++loop_iterations, 100) << "infinite loop detected. please fix";
-      should_loop = SyncShareNudge();
-    } while (should_loop);
+    SyncShareAsDelegate(SyncSchedulerImpl::SyncSessionJob::CONFIGURATION);
   }
 
   virtual void SetUp() {
@@ -283,6 +273,29 @@ class SyncerTest : public testing::Test,
     EXPECT_TRUE(specifics.has_bookmark());
     EXPECT_EQ("PNG", specifics.bookmark().favicon());
     EXPECT_EQ("http://demo/", specifics.bookmark().url());
+  }
+
+  void VerifyHierarchyConflictsReported(
+      const sync_pb::ClientToServerMessage& message) {
+    // Our request should have included a warning about hierarchy conflicts.
+    const sync_pb::ClientStatus& client_status = message.client_status();
+    EXPECT_TRUE(client_status.has_hierarchy_conflict_detected());
+    EXPECT_TRUE(client_status.hierarchy_conflict_detected());
+  }
+
+  void VerifyNoHierarchyConflictsReported(
+      const sync_pb::ClientToServerMessage& message) {
+    // Our request should have reported no hierarchy conflicts detected.
+    const sync_pb::ClientStatus& client_status = message.client_status();
+    EXPECT_TRUE(client_status.has_hierarchy_conflict_detected());
+    EXPECT_FALSE(client_status.hierarchy_conflict_detected());
+  }
+
+  void VerifyHierarchyConflictsUnspecified(
+      const sync_pb::ClientToServerMessage& message) {
+    // Our request should have neither confirmed nor denied hierarchy conflicts.
+    const sync_pb::ClientStatus& client_status = message.client_status();
+    EXPECT_FALSE(client_status.has_hierarchy_conflict_detected());
   }
 
   bool initial_sync_ended_for_type(ModelType type) {
@@ -390,7 +403,7 @@ class SyncerTest : public testing::Test,
         test++;
       }
     }
-    LoopSyncShare();
+    SyncShareNudge();
     ASSERT_TRUE(expected_positions.size() ==
                 mock_server_->committed_ids().size());
     // If this test starts failing, be aware other sort orders could be valid.
@@ -1582,12 +1595,12 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
 
   // Id 3 should be in conflict now.
   EXPECT_EQ(1, status().TotalNumConflictingItems());
-  {
-    sessions::ScopedModelSafeGroupRestriction r(
-        session_->mutable_status_controller(), GROUP_PASSIVE);
-    ASSERT_TRUE(status().conflict_progress());
-    EXPECT_EQ(1, status().conflict_progress()->HierarchyConflictingItemsSize());
-  }
+  EXPECT_EQ(1, status().num_hierarchy_conflicts());
+
+  // The only request in that loop should have been a GetUpdate.
+  // At that point, we didn't know whether or not we had conflicts.
+  ASSERT_TRUE(mock_server_->last_request().has_get_updates());
+  VerifyHierarchyConflictsUnspecified(mock_server_->last_request());
 
   // These entries will be used in the second set of updates.
   mock_server_->AddUpdateDirectory(4, 0, "newer_version", 20, 10);
@@ -1601,12 +1614,11 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
   // The three items with an unresolved parent should be unapplied (3, 9, 100).
   // The name clash should also still be in conflict.
   EXPECT_EQ(3, status().TotalNumConflictingItems());
-  {
-    sessions::ScopedModelSafeGroupRestriction r(
-        session_->mutable_status_controller(), GROUP_PASSIVE);
-    ASSERT_TRUE(status().conflict_progress());
-    EXPECT_EQ(3, status().conflict_progress()->HierarchyConflictingItemsSize());
-  }
+  EXPECT_EQ(3, status().num_hierarchy_conflicts());
+
+  // This time around, we knew that there were conflicts.
+  ASSERT_TRUE(mock_server_->last_request().has_get_updates());
+  VerifyHierarchyConflictsReported(mock_server_->last_request());
 
   {
     WriteTransaction trans(FROM_HERE, UNITTEST, directory());
@@ -1696,12 +1708,7 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
 
   EXPECT_FALSE(saw_syncer_event_);
   EXPECT_EQ(4, status().TotalNumConflictingItems());
-  {
-    sessions::ScopedModelSafeGroupRestriction r(
-        session_->mutable_status_controller(), GROUP_PASSIVE);
-    ASSERT_TRUE(status().conflict_progress());
-    EXPECT_EQ(4, status().conflict_progress()->HierarchyConflictingItemsSize());
-  }
+  EXPECT_EQ(4, status().num_hierarchy_conflicts());
 }
 
 TEST_F(SyncerTest, CommitTimeRename) {
@@ -2012,7 +2019,7 @@ TEST_F(SyncerTest, ConflictMatchingEntryHandlesUnsanitizedNames) {
     B.Put(IS_UNAPPLIED_UPDATE, true);
     B.Put(SERVER_VERSION, 20);
   }
-  LoopSyncShare();
+  SyncShareNudge();
   saw_syncer_event_ = false;
   mock_server_->set_conflict_all_commits(false);
 
@@ -2052,7 +2059,7 @@ TEST_F(SyncerTest, ConflictMatchingEntryHandlesNormalNames) {
     B.Put(IS_UNAPPLIED_UPDATE, true);
     B.Put(SERVER_VERSION, 20);
   }
-  LoopSyncShare();
+  SyncShareNudge();
   saw_syncer_event_ = false;
   mock_server_->set_conflict_all_commits(false);
 
@@ -2079,7 +2086,7 @@ TEST_F(SyncerTest, ReverseFolderOrderingTest) {
   mock_server_->AddUpdateDirectory(5, 4, "gggchild", 10, 10);
   mock_server_->AddUpdateDirectory(2, 1, "child", 10, 10);
   mock_server_->AddUpdateDirectory(1, 0, "parent", 10, 10);
-  LoopSyncShare();
+  SyncShareNudge();
   syncable::ReadTransaction trans(FROM_HERE, directory());
 
   Id child_id = GetOnlyEntryWithName(
@@ -2200,7 +2207,7 @@ TEST_F(SyncerTest, DoublyChangedWithResolver) {
   }
   mock_server_->AddUpdateBookmark(child_id_, parent_id_, "Pete2.htm", 11, 10);
   mock_server_->set_conflict_all_commits(true);
-  LoopSyncShare();
+  SyncShareNudge();
   syncable::Directory::ChildHandles children;
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
@@ -2239,7 +2246,7 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
   SyncShareNudge();
   syncable::Id id;
   int64 version;
-  int64 server_position_in_parent;
+  NodeOrdinal server_ordinal_in_parent;
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, syncable::GET_BY_HANDLE, entry_metahandle);
@@ -2247,14 +2254,16 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
     id = entry.Get(ID);
     EXPECT_TRUE(id.ServerKnows());
     version = entry.Get(BASE_VERSION);
-    server_position_in_parent = entry.Get(SERVER_POSITION_IN_PARENT);
+    server_ordinal_in_parent = entry.Get(SERVER_ORDINAL_IN_PARENT);
   }
   sync_pb::SyncEntity* update = mock_server_->AddUpdateFromLastCommit();
   EXPECT_EQ("Pete", update->name());
   EXPECT_EQ(id.GetServerId(), update->id_string());
   EXPECT_EQ(root_id_.GetServerId(), update->parent_id_string());
   EXPECT_EQ(version, update->version());
-  EXPECT_EQ(server_position_in_parent, update->position_in_parent());
+  EXPECT_EQ(
+      NodeOrdinalToInt64(server_ordinal_in_parent),
+      update->position_in_parent());
   SyncShareNudge();
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
@@ -2391,7 +2400,7 @@ TEST_F(SyncerTest, DeletingEntryInFolder) {
     existing.Put(IS_DEL, true);
   }
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_EQ(0, status().TotalNumServerConflictingItems());
+  EXPECT_EQ(0, status().num_server_conflicts());
 }
 
 TEST_F(SyncerTest, DeletingEntryWithLocalEdits) {
@@ -2500,7 +2509,7 @@ TEST_F(SyncerTest, CommitManyItemsInOneGo_Success) {
   }
   ASSERT_EQ(items_to_commit, directory()->unsynced_entity_count());
 
-  EXPECT_FALSE(SyncShareNudge());
+  SyncShareNudge();
   EXPECT_EQ(num_batches, mock_server_->commit_messages().size());
   EXPECT_EQ(0, directory()->unsynced_entity_count());
 }
@@ -2844,6 +2853,9 @@ TEST_F(SyncerTest, DualDeletionWithNewItemNameClash) {
   saw_syncer_event_ = false;
 }
 
+// When we undelete an entity as a result of conflict resolution, we reuse the
+// existing server id and preserve the old version, simply updating the server
+// version with the new non-deleted entity.
 TEST_F(SyncerTest, ResolveWeWroteTheyDeleted) {
   int64 bob_metahandle;
 
@@ -2866,9 +2878,11 @@ TEST_F(SyncerTest, ResolveWeWroteTheyDeleted) {
     Entry bob(&trans, GET_BY_HANDLE, bob_metahandle);
     ASSERT_TRUE(bob.good());
     EXPECT_TRUE(bob.Get(IS_UNSYNCED));
-    EXPECT_FALSE(bob.Get(ID).ServerKnows());
+    EXPECT_TRUE(bob.Get(ID).ServerKnows());
     EXPECT_FALSE(bob.Get(IS_UNAPPLIED_UPDATE));
     EXPECT_FALSE(bob.Get(IS_DEL));
+    EXPECT_EQ(2, bob.Get(SERVER_VERSION));
+    EXPECT_EQ(2, bob.Get(BASE_VERSION));
   }
   saw_syncer_event_ = false;
 }
@@ -3040,8 +3054,8 @@ TEST_F(SyncerTest, LongChangelistWithApplicationConflict) {
   mock_server_->AddUpdateDirectory(folder_id,
       TestIdFactory::root(), "folder", 1, 1);
   mock_server_->SetChangesRemaining(0);
-  LoopSyncShare();
-  LoopSyncShare();
+  SyncShareNudge();
+  SyncShareNudge();
   // Check that everything is as expected after the commit.
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
@@ -3891,6 +3905,12 @@ TEST_F(SyncerTest, UpdateThenCommit) {
   int64 commit_handle = CreateUnsyncedDirectory("y", to_commit);
   SyncShareNudge();
 
+  // The sync cycle should have included a GetUpdate, then a commit.  By the
+  // time the commit happened, we should have known for sure that there were no
+  // hierarchy conflicts, and reported this fact to the server.
+  ASSERT_TRUE(mock_server_->last_request().has_commit());
+  VerifyNoHierarchyConflictsReported(mock_server_->last_request());
+
   syncable::ReadTransaction trans(FROM_HERE, directory());
 
   Entry received(&trans, GET_BY_ID, to_receive);
@@ -4505,7 +4525,9 @@ class SyncerPositionUpdateTest : public SyncerTest {
       Entry entry_with_id(&trans, GET_BY_ID, id);
       EXPECT_TRUE(entry_with_id.good());
       EXPECT_EQ(prev_id, entry_with_id.Get(PREV_ID));
-      EXPECT_EQ(i->first, entry_with_id.Get(SERVER_POSITION_IN_PARENT));
+      EXPECT_EQ(
+          i->first,
+          NodeOrdinalToInt64(entry_with_id.Get(SERVER_ORDINAL_IN_PARENT)));
       if (next == position_map_.end()) {
         EXPECT_EQ(Id(), entry_with_id.Get(NEXT_ID));
       } else {

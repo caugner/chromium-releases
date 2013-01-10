@@ -19,8 +19,9 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_condition.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
@@ -39,6 +40,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/prerender_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
@@ -165,17 +167,29 @@ PrerenderManager::PrerenderManagerMode PrerenderManager::mode_ =
     PRERENDER_MODE_ENABLED;
 
 struct PrerenderManager::NavigationRecord {
-  GURL url_;
-  base::TimeTicks time_;
   NavigationRecord(const GURL& url, base::TimeTicks time)
-      : url_(url),
-        time_(time) {
+      : url(url),
+        time(time) {
   }
+
+  GURL url;
+  base::TimeTicks time;
 };
+
+PrerenderManager::PrerenderedWebContentsData::
+PrerenderedWebContentsData(Origin origin) : origin(origin) {
+}
+
+PrerenderManager::WouldBePrerenderedWebContentsData::
+WouldBePrerenderedWebContentsData(Origin origin)
+    : origin(origin),
+      state(WAITING_FOR_PROVISIONAL_LOAD) {
+}
 
 PrerenderManager::PrerenderManager(Profile* profile,
                                    PrerenderTracker* prerender_tracker)
-    : enabled_(true),
+    : enabled_(profile && profile->GetPrefs() &&
+          profile->GetPrefs()->GetBoolean(prefs::kNetworkPredictionEnabled)),
       profile_(profile),
       prerender_tracker_(prerender_tracker),
       prerender_contents_factory_(PrerenderContents::CreateFactory()),
@@ -221,6 +235,26 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromLinkRelPrerender(
   return NULL;
 #else
   DCHECK(!size.IsEmpty());
+  Origin origin = ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN;
+  SessionStorageNamespace* session_storage_namespace = NULL;
+  // Unit tests pass in a process_id == -1.
+  if (process_id != -1) {
+    RenderViewHost* source_render_view_host =
+        RenderViewHost::FromID(process_id, route_id);
+    if (!source_render_view_host)
+      return NULL;
+    WebContents* source_web_contents =
+        WebContents::FromRenderViewHost(source_render_view_host);
+    if (!source_web_contents)
+      return NULL;
+    if (source_web_contents->GetURL().host() == url.host())
+      origin = ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN;
+    // TODO(ajwong): This does not correctly handle storage for isolated apps.
+    session_storage_namespace =
+        source_web_contents->GetController()
+            .GetDefaultSessionStorageNamespace();
+  }
+
   if (PrerenderData* parent_prerender_data =
           FindPrerenderDataForChildAndRoute(process_id, route_id)) {
     // Instead of prerendering from inside of a running prerender, we will defer
@@ -231,31 +265,13 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromLinkRelPrerender(
       PrerenderHandle* prerender_handle =
           new PrerenderHandle(pending_prerender_list_.back().get());
       contents->AddPendingPrerender(
-          prerender_handle->weak_ptr_factory_.GetWeakPtr(),
+          prerender_handle->weak_ptr_factory_.GetWeakPtr(), origin,
           url, referrer, size);
       return prerender_handle;
     }
   }
 
-  // Unit tests pass in a process_id == -1.
-  SessionStorageNamespace* session_storage_namespace = NULL;
-  if (process_id != -1) {
-    RenderViewHost* source_render_view_host =
-        RenderViewHost::FromID(process_id, route_id);
-    if (!source_render_view_host)
-      return NULL;
-    WebContents* source_web_contents =
-        WebContents::FromRenderViewHost(source_render_view_host);
-    if (!source_web_contents)
-      return NULL;
-    // TODO(ajwong): This does not correctly handle storage for isolated apps.
-    session_storage_namespace =
-        source_web_contents->GetController()
-            .GetDefaultSessionStorageNamespace();
-  }
-
-  return AddPrerender(ORIGIN_LINK_REL_PRERENDER,
-                      process_id, url, referrer, size,
+  return AddPrerender(origin, process_id, url, referrer, size,
                       session_storage_namespace);
 #endif
 }
@@ -291,7 +307,7 @@ void PrerenderManager::CancelAllPrerenders() {
 bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
                                                const GURL& url) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!IsWebContentsPrerendering(web_contents));
+  DCHECK(!IsWebContentsPrerendering(web_contents, NULL));
 
   DeleteOldEntries();
   DeletePendingDeleteEntries();
@@ -328,7 +344,8 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
   // that prerendering hasn't even started yet), record that |web_contents| now
   // would be showing a prerendered contents, but otherwise, don't do anything.
   if (!prerender_contents->prerendering_has_started()) {
-    MarkWebContentsAsWouldBePrerendered(web_contents);
+    MarkWebContentsAsWouldBePrerendered(web_contents,
+                                        prerender_contents->origin());
     prerender_contents.release()->Destroy(FINAL_STATUS_WOULD_HAVE_BEEN_USED);
     return false;
   }
@@ -353,7 +370,8 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
   // For bookkeeping purposes, we need to mark this WebContents to
   // reflect that it would have been prerendered.
   if (GetMode() == PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP) {
-    MarkWebContentsAsWouldBePrerendered(web_contents);
+    MarkWebContentsAsWouldBePrerendered(web_contents,
+                                        prerender_contents->origin());
     prerender_contents.release()->Destroy(FINAL_STATUS_WOULD_HAVE_BEEN_USED);
     return false;
   }
@@ -372,11 +390,13 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
 
   if (!prerender_contents->load_start_time().is_null()) {
     histograms_->RecordTimeUntilUsed(
+        prerender_contents->origin(),
         GetCurrentTimeTicks() - prerender_contents->load_start_time(),
         config_.time_to_live);
   }
 
-  histograms_->RecordPerSessionCount(++prerenders_per_session_count_);
+  histograms_->RecordPerSessionCount(prerender_contents->origin(),
+                                     ++prerenders_per_session_count_);
   histograms_->RecordUsedPrerender(prerender_contents->origin());
   prerender_contents->set_final_status(FINAL_STATUS_USED);
 
@@ -397,29 +417,30 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
   DCHECK(new_tab_contents);
   DCHECK(old_tab_contents);
 
-  MarkWebContentsAsPrerendered(new_tab_contents->web_contents());
+  MarkWebContentsAsPrerendered(new_tab_contents->web_contents(),
+                               prerender_contents->origin());
 
   // Merge the browsing history.
   new_tab_contents->web_contents()->GetController().CopyStateFromAndPrune(
       &old_tab_contents->web_contents()->GetController());
-  old_tab_contents->core_tab_helper()->delegate()->
-      SwapTabContents(old_tab_contents, new_tab_contents);
+  CoreTabHelper::FromWebContents(old_tab_contents->web_contents())->delegate()->
+      SwapTabContents(old_tab_contents->web_contents(),
+                      new_tab_contents->web_contents());
   prerender_contents->CommitHistory(new_tab_contents);
 
   GURL icon_url = prerender_contents->icon_url();
   if (!icon_url.is_empty()) {
     std::vector<FaviconURL> urls;
     urls.push_back(FaviconURL(icon_url, FaviconURL::FAVICON));
-    new_tab_contents->favicon_tab_helper()->OnUpdateFaviconURL(
-        prerender_contents->page_id(),
-        urls);
+    FaviconTabHelper::FromWebContents(new_tab_contents->web_contents())->
+        OnUpdateFaviconURL(prerender_contents->page_id(), urls);
   }
 
   // Update PPLT metrics:
   // If the tab has finished loading, record a PPLT of 0.
   // If the tab is still loading, reset its start time to the current time.
   PrerenderTabHelper* prerender_tab_helper =
-      new_tab_contents->prerender_tab_helper();
+      PrerenderTabHelper::FromWebContents(new_tab_contents->web_contents());
   DCHECK(prerender_tab_helper != NULL);
   prerender_tab_helper->PrerenderSwappedIn();
 
@@ -511,23 +532,41 @@ void PrerenderManager::RecordPerceivedPageLoadTime(
     return;
   if (!prerender_manager->IsEnabled())
     return;
-  bool was_prerender =
-      prerender_manager->IsWebContentsPrerendered(web_contents);
-  bool was_complete_prerender = was_prerender ||
-      prerender_manager->WouldWebContentsBePrerendered(web_contents);
-  if (prerender_manager->IsWebContentsPrerendering(web_contents)) {
+
+  Origin prerender_origin = ORIGIN_NONE;
+  if (prerender_manager->IsWebContentsPrerendering(web_contents,
+                                                   &prerender_origin)) {
     prerender_manager->histograms_->RecordPageLoadTimeNotSwappedIn(
-        perceived_page_load_time, url);
-  } else {
-    prerender_manager->histograms_->RecordPerceivedPageLoadTime(
-        perceived_page_load_time, was_prerender, was_complete_prerender, url);
-    prerender_manager->histograms_->RecordPercentLoadDoneAtSwapin(
-        fraction_plt_elapsed_at_swap_in);
-    if (prerender_manager->local_predictor_.get()) {
-      prerender_manager->local_predictor_->
-          OnPLTEventForURL(url, perceived_page_load_time);
-    }
+        prerender_origin, perceived_page_load_time, url);
+    return;
   }
+
+  bool was_prerender = prerender_manager->IsWebContentsPrerendered(
+      web_contents, &prerender_origin);
+  bool was_complete_prerender = was_prerender ||
+      prerender_manager->WouldWebContentsBePrerendered(web_contents,
+                                                       &prerender_origin);
+  prerender_manager->histograms_->RecordPerceivedPageLoadTime(
+      prerender_origin, perceived_page_load_time, was_prerender,
+      was_complete_prerender, url);
+
+  if (was_prerender) {
+    prerender_manager->histograms_->RecordPercentLoadDoneAtSwapin(
+        prerender_origin, fraction_plt_elapsed_at_swap_in);
+  }
+  if (prerender_manager->local_predictor_.get()) {
+    prerender_manager->local_predictor_->
+        OnPLTEventForURL(url, perceived_page_load_time);
+  }
+}
+
+void PrerenderManager::RecordFractionPixelsFinalAtSwapin(
+    content::WebContents* web_contents,
+    double fraction) {
+  Origin origin = ORIGIN_NONE;
+  bool is_prerendered = IsWebContentsPrerendered(web_contents, &origin);
+  DCHECK(is_prerendered);
+  histograms_->RecordFractionPixelsFinalAtSwapin(origin, fraction);
 }
 
 void PrerenderManager::set_enabled(bool enabled) {
@@ -599,20 +638,15 @@ bool PrerenderManager::IsNoUseGroup() {
   return GetMode() == PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP;
 }
 
-// static
 bool PrerenderManager::IsWebContentsPrerendering(
-    WebContents* web_contents) const {
+    WebContents* web_contents,
+    Origin* origin) const {
   DCHECK(CalledOnValidThread());
-  for (std::list<linked_ptr<PrerenderData> >::const_iterator it =
-           active_prerender_list_.begin();
-       it != active_prerender_list_.end();
-       ++it) {
-    TabContents* prerender_tab_contents =
-        it->get()->contents_->prerender_contents();
-    if (prerender_tab_contents &&
-        prerender_tab_contents->web_contents() == web_contents) {
-      return true;
-    }
+  if (PrerenderContents* prerender_contents =
+          GetPrerenderContents(web_contents)) {
+    if (origin)
+      *origin = prerender_contents->origin();
+    return true;
   }
 
   // Also look through the pending-deletion list.
@@ -622,34 +656,64 @@ bool PrerenderManager::IsWebContentsPrerendering(
        ++it) {
     TabContents* prerender_tab_contents = (*it)->prerender_contents();
     if (prerender_tab_contents &&
-        prerender_tab_contents->web_contents() == web_contents)
+        prerender_tab_contents->web_contents() == web_contents) {
+      if (origin)
+        *origin = (*it)->origin();
       return true;
+    }
   }
 
   return false;
 }
 
-void PrerenderManager::MarkWebContentsAsPrerendered(WebContents* web_contents) {
+PrerenderContents* PrerenderManager::GetPrerenderContents(
+    content::WebContents* web_contents) const {
   DCHECK(CalledOnValidThread());
-  prerendered_tab_contents_set_.insert(web_contents);
+  for (std::list<linked_ptr<PrerenderData> >::const_iterator it =
+           active_prerender_list_.begin();
+       it != active_prerender_list_.end();
+       ++it) {
+    TabContents* prerender_tab_contents =
+        it->get()->contents_->prerender_contents();
+    if (prerender_tab_contents &&
+        prerender_tab_contents->web_contents() == web_contents) {
+      return it->get()->contents_;
+    }
+  }
+  return NULL;
+}
+
+void PrerenderManager::MarkWebContentsAsPrerendered(WebContents* web_contents,
+                                                    Origin origin) {
+  DCHECK(CalledOnValidThread());
+  prerendered_web_contents_data_.insert(
+      base::hash_map<content::WebContents*,
+                     PrerenderedWebContentsData>::value_type(
+                         web_contents, PrerenderedWebContentsData(origin)));
 }
 
 void PrerenderManager::MarkWebContentsAsWouldBePrerendered(
-    WebContents* web_contents) {
+    WebContents* web_contents,
+    Origin origin) {
   DCHECK(CalledOnValidThread());
-  would_be_prerendered_map_[web_contents] = true;
+  would_be_prerendered_map_.insert(
+      base::hash_map<content::WebContents*,
+                     WouldBePrerenderedWebContentsData>::value_type(
+                         web_contents,
+                         WouldBePrerenderedWebContentsData(origin)));
 }
 
 void PrerenderManager::MarkWebContentsAsNotPrerendered(
     WebContents* web_contents) {
   DCHECK(CalledOnValidThread());
-  prerendered_tab_contents_set_.erase(web_contents);
-  WouldBePrerenderedMap::iterator it =
-      would_be_prerendered_map_.find(web_contents);
+  prerendered_web_contents_data_.erase(web_contents);
+  base::hash_map<content::WebContents*, WouldBePrerenderedWebContentsData>::
+      iterator it = would_be_prerendered_map_.find(web_contents);
   if (it != would_be_prerendered_map_.end()) {
-    bool first_time = it->second;
-    if (first_time) {
-      it->second = false;
+    if (it->second.state ==
+            WouldBePrerenderedWebContentsData::WAITING_FOR_PROVISIONAL_LOAD) {
+      it->second.state =
+          WouldBePrerenderedWebContentsData::SEEN_PROVISIONAL_LOAD;
     } else {
       would_be_prerendered_map_.erase(it);
     }
@@ -657,18 +721,33 @@ void PrerenderManager::MarkWebContentsAsNotPrerendered(
 }
 
 bool PrerenderManager::IsWebContentsPrerendered(
-    content::WebContents* web_contents) const {
+    content::WebContents* web_contents,
+    Origin* origin) const {
   DCHECK(CalledOnValidThread());
-  return prerendered_tab_contents_set_.count(web_contents) > 0;
+  base::hash_map<content::WebContents*, PrerenderedWebContentsData>::
+      const_iterator it = prerendered_web_contents_data_.find(web_contents);
+  if (it == prerendered_web_contents_data_.end())
+    return false;
+  if (origin)
+    *origin = it->second.origin;
+  return true;
 }
 
 bool PrerenderManager::WouldWebContentsBePrerendered(
-    WebContents* web_contents) const {
+    WebContents* web_contents,
+    Origin* origin) const {
   DCHECK(CalledOnValidThread());
-  return would_be_prerendered_map_.count(web_contents) > 0;
+  base::hash_map<content::WebContents*, WouldBePrerenderedWebContentsData>::
+      const_iterator it = would_be_prerendered_map_.find(web_contents);
+  if (it == would_be_prerendered_map_.end())
+    return false;
+  if (origin)
+    *origin = it->second.origin;
+  return true;
 }
 
-bool PrerenderManager::HasRecentlyBeenNavigatedTo(const GURL& url) {
+bool PrerenderManager::HasRecentlyBeenNavigatedTo(Origin origin,
+                                                  const GURL& url) {
   DCHECK(CalledOnValidThread());
 
   CleanUpOldNavigations();
@@ -677,9 +756,9 @@ bool PrerenderManager::HasRecentlyBeenNavigatedTo(const GURL& url) {
            navigations_.rbegin();
        it != end;
        ++it) {
-    if (it->url_ == url) {
-      base::TimeDelta delta = GetCurrentTimeTicks() - it->time_;
-      histograms_->RecordTimeSinceLastRecentVisit(delta);
+    if (it->url == url) {
+      base::TimeDelta delta = GetCurrentTimeTicks() - it->time;
+      histograms_->RecordTimeSinceLastRecentVisit(origin, delta);
       return true;
     }
   }
@@ -913,7 +992,8 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   if (!IsEnabled())
     return NULL;
 
-  if (origin == ORIGIN_LINK_REL_PRERENDER &&
+  if ((origin == ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN ||
+       origin == ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN) &&
       IsGoogleSearchResultURL(referrer.url)) {
     origin = ORIGIN_GWS_PRERENDER;
   }
@@ -961,7 +1041,7 @@ PrerenderHandle* PrerenderManager::AddPrerender(
 #endif
 
   // Check if enough time has passed since the last prerender.
-  if (!DoesRateLimitAllowPrerender()) {
+  if (!DoesRateLimitAllowPrerender(origin)) {
     // Cancel the prerender. We could add it to the pending prerender list but
     // this doesn't make sense as the next prerender request will be triggered
     // by a navigation and is unlikely to be the same site.
@@ -1164,11 +1244,11 @@ PrerenderManager::FindIteratorForPrerenderContents(
   return active_prerender_list_.end();
 }
 
-bool PrerenderManager::DoesRateLimitAllowPrerender() const {
+bool PrerenderManager::DoesRateLimitAllowPrerender(Origin origin) const {
   DCHECK(CalledOnValidThread());
   base::TimeDelta elapsed_time =
       GetCurrentTimeTicks() - last_prerender_start_time_;
-  histograms_->RecordTimeBetweenPrerenderRequests(elapsed_time);
+  histograms_->RecordTimeBetweenPrerenderRequests(origin, elapsed_time);
   if (!config_.rate_limit_enabled)
     return true;
   return elapsed_time >
@@ -1191,7 +1271,7 @@ void PrerenderManager::CleanUpOldNavigations() {
   base::TimeTicks cutoff = GetCurrentTimeTicks() -
       base::TimeDelta::FromMilliseconds(kNavigationRecordWindowMs);
   while (!navigations_.empty()) {
-    if (navigations_.front().time_ > cutoff)
+    if (navigations_.front().time > cutoff)
       break;
     navigations_.pop_front();
   }

@@ -7,6 +7,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/base_window.h"
@@ -20,7 +21,6 @@
 
 class GURL;
 class Profile;
-class TabContents;
 class NativeShellWindow;
 
 namespace content {
@@ -41,7 +41,8 @@ class ShellWindow : public content::NotificationObserver,
                     public content::WebContentsDelegate,
                     public content::WebContentsObserver,
                     public ExtensionFunctionDispatcher::Delegate,
-                    public ImageLoadingTracker::Observer  {
+                    public ImageLoadingTracker::Observer,
+                    public extensions::ExtensionKeybindingRegistry::Delegate {
  public:
   struct CreateParams {
     enum Frame {
@@ -64,6 +65,12 @@ class ShellWindow : public content::NotificationObserver,
     gfx::Size maximum_size;
 
     std::string window_key;
+
+    // The process ID of the process that requested the create.
+    int32 creator_process_id;
+
+    // If true, don't show the window after creation.
+    bool hidden;
   };
 
   static ShellWindow* Create(Profile* profile,
@@ -71,10 +78,15 @@ class ShellWindow : public content::NotificationObserver,
                              const GURL& url,
                              const CreateParams& params);
 
+  // Convert draggable regions in raw format to SkRegion format. Caller is
+  // responsible for deleting the returned SkRegion instance.
+  static SkRegion* RawDraggableRegionsToSkRegion(
+      const std::vector<extensions::DraggableRegion>& regions);
+
+  const std::string& window_key() const { return window_key_; }
   const SessionID& session_id() const { return session_id_; }
   const extensions::Extension* extension() const { return extension_; }
-  TabContents* tab_contents() const { return contents_.get(); }
-  content::WebContents* web_contents() const { return web_contents_; }
+  content::WebContents* web_contents() const { return web_contents_.get(); }
   Profile* profile() const { return profile_; }
   const gfx::Image& app_icon() const { return app_icon_; }
 
@@ -173,6 +185,10 @@ class ShellWindow : public content::NotificationObserver,
                              const std::string& extension_id,
                              int index) OVERRIDE;
 
+  // extensions::ExtensionKeybindingRegistry::Delegate implementation.
+  virtual extensions::ActiveTabPermissionGranter*
+      GetActiveTabPermissionGranter() OVERRIDE;
+
   Profile* profile_;  // weak pointer - owned by ProfileManager.
   // weak pointer - owned by ExtensionService.
   const extensions::Extension* extension_;
@@ -182,9 +198,7 @@ class ShellWindow : public content::NotificationObserver,
   std::string window_key_;
 
   const SessionID session_id_;
-  scoped_ptr<TabContents> contents_;
-  // web_contents_ is owned by contents_.
-  content::WebContents* web_contents_;
+  scoped_ptr<content::WebContents> web_contents_;
   content::NotificationRegistrar registrar_;
   ExtensionFunctionDispatcher extension_function_dispatcher_;
 

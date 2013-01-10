@@ -16,12 +16,10 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/common/gpu_feature_type.h"
-
-class Version;
+#include "content/public/common/gpu_switching_option.h"
 
 namespace content {
 struct GPUInfo;
-}
 
 class CONTENT_EXPORT GpuBlacklist {
  public:
@@ -42,12 +40,12 @@ class CONTENT_EXPORT GpuBlacklist {
   };
 
   struct Decision {
-    content::GpuFeatureType blacklisted_features;
-    content::GpuSwitchingOption gpu_switching;
+    GpuFeatureType blacklisted_features;
+    GpuSwitchingOption gpu_switching;
 
     Decision()
-        : blacklisted_features(content::GPU_FEATURE_TYPE_UNKNOWN),
-          gpu_switching(content::GPU_SWITCHING_AUTOMATIC) {
+        : blacklisted_features(GPU_FEATURE_TYPE_UNKNOWN),
+          gpu_switching(GPU_SWITCHING_OPTION_UNKNOWN) {
     }
   };
 
@@ -63,15 +61,15 @@ class CONTENT_EXPORT GpuBlacklist {
 
   // Collects system information and combines them with gpu_info and blacklist
   // information to make the blacklist decision.
-  // If os is kOsAny, use the current OS; if os_version is null, use the
+  // If os is kOsAny, use the current OS; if os_version is empty, use the
   // current OS version.
   Decision MakeBlacklistDecision(
-      OsType os, Version* os_version, const content::GPUInfo& gpu_info);
+      OsType os, std::string os_version, const GPUInfo& gpu_info);
 
   // Collects the active entries from the last MakeBlacklistDecision() call.
   // If disabled set to true, return entries that are disabled; otherwise,
   // return enabled entries.
-  void GetDecisionEntries(std::vector<uint32>& entry_ids,
+  void GetDecisionEntries(std::vector<uint32>* entry_ids,
                           bool disabled) const;
 
   // Returns the description and bugs from active entries from the last
@@ -83,7 +81,7 @@ class CONTENT_EXPORT GpuBlacklist {
   //    "crBugs": [1234],
   //    "webkitBugs": []
   // }
-  void GetBlacklistReasons(ListValue* problem_list) const;
+  void GetBlacklistReasons(base::ListValue* problem_list) const;
 
   // Return the largest entry id.  This is used for histogramming.
   uint32 max_entry_id() const;
@@ -91,13 +89,19 @@ class CONTENT_EXPORT GpuBlacklist {
   // Returns the version of the current blacklist.
   std::string GetVersion() const;
 
+  // Check if we needs more gpu info to make the blacklisting decisions.
+  // This is computed from the last MakeBlacklistDecision() call.
+  // If yes, we should create a gl context and do a full gpu info collection.
+  bool needs_more_info() const { return needs_more_info_; }
+
  private:
   friend class GpuBlacklistTest;
   FRIEND_TEST_ALL_PREFIXES(GpuBlacklistTest, ChromeVersionEntry);
   FRIEND_TEST_ALL_PREFIXES(GpuBlacklistTest, CurrentBlacklistValidation);
-  FRIEND_TEST_ALL_PREFIXES(GpuBlacklistTest, UnknownField);
+  FRIEND_TEST_ALL_PREFIXES(GpuBlacklistTest, DualGpuModel);
   FRIEND_TEST_ALL_PREFIXES(GpuBlacklistTest, UnknownExceptionField);
   FRIEND_TEST_ALL_PREFIXES(GpuBlacklistTest, UnknownFeature);
+  FRIEND_TEST_ALL_PREFIXES(GpuBlacklistTest, UnknownField);
 
   enum BrowserVersionSupport {
     kSupported,
@@ -126,7 +130,10 @@ class CONTENT_EXPORT GpuBlacklist {
     ~VersionInfo();
 
     // Determines if a given version is included in the VersionInfo range.
-    bool Contains(const Version& version) const;
+    // "splitter" divides version string into segments.
+    bool Contains(const std::string& version, char splitter) const;
+    // Same as above, using '.' as splitter.
+    bool Contains(const std::string& version) const;
 
     // Determine if the version_style is lexical.
     bool IsLexical() const;
@@ -143,10 +150,25 @@ class CONTENT_EXPORT GpuBlacklist {
 
     static VersionStyle StringToVersionStyle(const std::string& version_style);
 
+    // Compare two version strings.
+    // Return 1 if version > version_ref,
+    //        0 if version = version_ref,
+    //       -1 if version < version_ref.
+    // Note that we only compare as many as segments as version_ref contains.
+    // If version_ref is xxx.yyy, it's considered as xxx.yyy.*
+    // For example: Compare("10.3.1", "10.3") returns 0,
+    //              Compare("10.3", "10.3.1") returns -1.
+    // If "version_style" is Lexical, the first segment is compared
+    // numerically, all other segments are compared lexically.
+    // Lexical is used for AMD Linux driver versions only.
+    static int Compare(const std::vector<std::string>& version,
+                       const std::vector<std::string>& version_ref,
+                       VersionStyle version_style);
+
     NumericOp op_;
     VersionStyle version_style_;
-    scoped_ptr<Version> version_;
-    scoped_ptr<Version> version2_;
+    std::vector<std::string> version_;
+    std::vector<std::string> version2_;
   };
 
   class OsInfo {
@@ -158,7 +180,7 @@ class CONTENT_EXPORT GpuBlacklist {
     ~OsInfo();
 
     // Determines if a given os/version is included in the OsInfo set.
-    bool Contains(OsType type, const Version& version) const;
+    bool Contains(OsType type, const std::string& version) const;
 
     // Determines if the VersionInfo contains valid information.
     bool IsValid() const;
@@ -217,6 +239,44 @@ class CONTENT_EXPORT GpuBlacklist {
     float value2_;
   };
 
+  class IntInfo {
+   public:
+    IntInfo(const std::string& int_op,
+            const std::string& int_value,
+            const std::string& int_value2);
+
+    // Determines if a given int is included in the IntInfo.
+    bool Contains(int value) const;
+
+    // Determines if the IntInfo contains valid information.
+    bool IsValid() const;
+
+   private:
+    NumericOp op_;
+    int value_;
+    int value2_;
+  };
+
+  class MachineModelInfo {
+   public:
+    MachineModelInfo(const std::string& name_op,
+                     const std::string& name_value,
+                     const std::string& version_op,
+                     const std::string& version_string,
+                     const std::string& version_string2);
+    ~MachineModelInfo();
+
+    // Determines if a given name/version is included in the MachineModelInfo.
+    bool Contains(const std::string& name, const std::string& version) const;
+
+    // Determines if the MachineModelInfo contains valid information.
+    bool IsValid() const;
+
+   private:
+    scoped_ptr<StringInfo> name_info_;
+    scoped_ptr<VersionInfo> version_info_;
+  };
+
   class GpuBlacklistEntry;
   typedef scoped_refptr<GpuBlacklistEntry> ScopedGpuBlacklistEntry;
 
@@ -227,10 +287,14 @@ class CONTENT_EXPORT GpuBlacklist {
     static ScopedGpuBlacklistEntry GetGpuBlacklistEntryFromValue(
         const base::DictionaryValue* value, bool top_level);
 
-    // Determines if a given os/gc/driver is included in the Entry set.
-    bool Contains(OsType os_type,
-                  const Version& os_version,
-                  const content::GPUInfo& gpu_info) const;
+    // Determines if a given os/gc/machine_model/driver is included in the
+    // Entry set.
+    bool Contains(OsType os_type, const std::string& os_version,
+                  const GPUInfo& gpu_info) const;
+
+    // Determines whether we needs more gpu info to make the blacklisting
+    // decision.  It should only be checked if Contains() returns true.
+    bool NeedsMoreInfo(const GPUInfo& gpu_info) const;
 
     // Returns the OsType.
     OsType GetOsType() const;
@@ -249,10 +313,10 @@ class CONTENT_EXPORT GpuBlacklist {
     const std::vector<int>& webkit_bugs() const { return webkit_bugs_; }
 
     // Returns the GpuFeatureType.
-    content::GpuFeatureType GetGpuFeatureType() const;
+    GpuFeatureType GetGpuFeatureType() const;
 
     // Returns the GpuSwitchingOption.
-    content::GpuSwitchingOption GetGpuSwitchingOption() const;
+    GpuSwitchingOption GetGpuSwitchingOption() const;
 
     // Returns true if an unknown field is encountered.
     bool contains_unknown_fields() const {
@@ -317,6 +381,9 @@ class CONTENT_EXPORT GpuBlacklist {
     bool SetGLRendererInfo(const std::string& renderer_op,
                            const std::string& renderer_value);
 
+    bool SetCpuBrand(const std::string& cpu_op,
+                     const std::string& cpu_value);
+
     bool SetPerfGraphicsInfo(const std::string& op,
                              const std::string& float_string,
                              const std::string& float_string2);
@@ -328,6 +395,16 @@ class CONTENT_EXPORT GpuBlacklist {
     bool SetPerfOverallInfo(const std::string& op,
                             const std::string& float_string,
                             const std::string& float_string2);
+
+    bool SetMachineModelInfo(const std::string& name_op,
+                             const std::string& name_value,
+                             const std::string& version_op,
+                             const std::string& version_string,
+                             const std::string& version_string2);
+
+    bool SetGpuCountInfo(const std::string& op,
+                         const std::string& int_string,
+                         const std::string& int_string2);
 
     bool SetBlacklistedFeatures(
         const std::vector<std::string>& blacklisted_features);
@@ -356,9 +433,12 @@ class CONTENT_EXPORT GpuBlacklist {
     scoped_ptr<VersionInfo> driver_date_info_;
     scoped_ptr<StringInfo> gl_vendor_info_;
     scoped_ptr<StringInfo> gl_renderer_info_;
+    scoped_ptr<StringInfo> cpu_brand_;
     scoped_ptr<FloatInfo> perf_graphics_info_;
     scoped_ptr<FloatInfo> perf_gaming_info_;
     scoped_ptr<FloatInfo> perf_overall_info_;
+    scoped_ptr<MachineModelInfo> machine_model_info_;
+    scoped_ptr<IntInfo> gpu_count_info_;
     Decision decision_;
     std::vector<ScopedGpuBlacklistEntry> exceptions_;
     bool contains_unknown_fields_;
@@ -387,10 +467,10 @@ class CONTENT_EXPORT GpuBlacklist {
 
   static NumericOp StringToNumericOp(const std::string& op);
 
-  scoped_ptr<Version> version_;
+  std::string version_;
   std::vector<ScopedGpuBlacklistEntry> blacklist_;
 
-  scoped_ptr<Version> browser_version_;
+  std::string browser_version_;
 
   // This records all the blacklist entries that are appliable to the current
   // user machine.  It is updated everytime MakeBlacklistDecision() is
@@ -401,8 +481,11 @@ class CONTENT_EXPORT GpuBlacklist {
 
   bool contains_unknown_fields_;
 
+  bool needs_more_info_;
+
   DISALLOW_COPY_AND_ASSIGN(GpuBlacklist);
 };
 
-#endif  // CONTENT_BROWSER_GPU_GPU_BLACKLIST_H_
+}  // namespace content
 
+#endif  // CONTENT_BROWSER_GPU_GPU_BLACKLIST_H_

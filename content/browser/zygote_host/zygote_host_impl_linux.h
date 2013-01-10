@@ -8,16 +8,18 @@
 #include <string>
 #include <vector>
 
-#include "base/global_descriptors_posix.h"
 #include "base/pickle.h"
 #include "base/process_util.h"
 #include "base/synchronization/lock.h"
+#include "content/public/browser/file_descriptor_info.h"
 #include "content/public/browser/zygote_host_linux.h"
 
 template<typename Type>
 struct DefaultSingletonTraits;
 
-class CONTENT_EXPORT ZygoteHostImpl : public content::ZygoteHost {
+namespace content {
+
+class CONTENT_EXPORT ZygoteHostImpl : public ZygoteHost {
  public:
   // Returns the singleton instance.
   static ZygoteHostImpl* GetInstance();
@@ -28,7 +30,7 @@ class CONTENT_EXPORT ZygoteHostImpl : public content::ZygoteHost {
   // Returns its pid on success, otherwise
   // base::kNullProcessHandle;
   pid_t ForkRequest(const std::vector<std::string>& command_line,
-                    const base::GlobalDescriptors::Mapping& mapping,
+                    const std::vector<FileDescriptorInfo>& mapping,
                     const std::string& process_type);
   void EnsureProcessTerminated(pid_t process);
 
@@ -71,5 +73,7 @@ class CONTENT_EXPORT ZygoteHostImpl : public content::ZygoteHost {
   bool have_read_sandbox_status_word_;
   int sandbox_status_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_ZYGOTE_HOST_ZYGOTE_HOST_IMPL_LINUX_H_

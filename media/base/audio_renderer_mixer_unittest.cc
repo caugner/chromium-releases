@@ -24,7 +24,7 @@ static const int kMixerInputs = 8;
 static const int kMixerCycles = 3;
 
 // Parameters used for testing.
-static const int kBitsPerChannel = 16;
+static const int kBitsPerChannel = 32;
 static const ChannelLayout kChannelLayout = CHANNEL_LAYOUT_STEREO;
 static const int kHighLatencyBufferSize = 8192;
 static const int kLowLatencyBufferSize = 256;
@@ -164,7 +164,7 @@ class AudioRendererMixerTest
     EXPECT_TRUE(RenderAndValidateAudioData(0.0f));
 
     // Start() all even numbered mixer inputs and ensure we still get silence.
-    for (size_t i = 0; i < mixer_inputs_.size(); ++i)
+    for (size_t i = 0; i < mixer_inputs_.size(); i += 2)
       mixer_inputs_[i]->Start();
     FillAudioData(1.0f);
     EXPECT_TRUE(RenderAndValidateAudioData(0.0f));
@@ -386,6 +386,38 @@ TEST_P(AudioRendererMixerTest, OnRenderError) {
   mixer_callback_->OnRenderError();
   for (size_t i = 0; i < mixer_inputs_.size(); ++i)
     mixer_inputs_[i]->Stop();
+}
+
+// Verify that audio delay information is scaled to the input parameters.
+TEST_P(AudioRendererMixerTest, DelayTest) {
+  InitializeInputs(1);
+  static const int kAudioDelayMilliseconds = 100;
+  ASSERT_EQ(mixer_inputs_.size(), 1u);
+
+  // Start the input and issue a single render callback.
+  mixer_inputs_[0]->Start();
+  mixer_inputs_[0]->Play();
+  mixer_callback_->Render(audio_bus_.get(), kAudioDelayMilliseconds);
+
+  // The input to output ratio should only include the sample rate difference.
+  double io_ratio = input_parameters_.sample_rate() /
+      static_cast<double>(output_parameters_.sample_rate());
+
+  EXPECT_EQ(static_cast<int>(kAudioDelayMilliseconds / io_ratio),
+            fake_callbacks_[0]->last_audio_delay_milliseconds());
+  mixer_inputs_[0]->Stop();
+}
+
+// Ensure constructing an AudioRendererMixerInput, but not initializing it does
+// not call RemoveMixer().
+TEST_P(AudioRendererMixerTest, NoInitialize) {
+  EXPECT_CALL(*this, RemoveMixer(testing::_)).Times(0);
+  scoped_refptr<AudioRendererMixerInput> audio_renderer_mixer =
+      new AudioRendererMixerInput(
+          base::Bind(&AudioRendererMixerTest::GetMixer,
+                     base::Unretained(this)),
+          base::Bind(&AudioRendererMixerTest::RemoveMixer,
+                     base::Unretained(this)));
 }
 
 INSTANTIATE_TEST_CASE_P(

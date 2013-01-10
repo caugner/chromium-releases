@@ -5,35 +5,14 @@ include_rules = [
   "-chrome/browser",
   "+chrome/browser/api",
   "+chrome/browser/autofill",
+  "+chrome/browser/common",
 
   # Permanently-allowed DEPS beyond the standard Browser
   # Components-like DEPS above go here.
   "+third_party/libphonenumber",  # For phone number i18n.
 
-  # TODO(joi): Bring this list to zero.
-  #
-  # Do not add to the list of temporarily-allowed dependencies below,
-  # and please do not introduce more #includes of these files.
-
-  # Can go once ProfileSyncService is converted.
-  "!chrome/browser/profiles/profile.h",
-
-  # Moving to api
+  # TODO(joi): May be able to remove this if PKS is moved to c/b/api.
   "!chrome/browser/profiles/profile_keyed_service.h",
-
-  # Will go when PersonalDataManagerFactory moves to c/b/configuration.
-  "!chrome/browser/profiles/profile_dependency_manager.h",
-  "!chrome/browser/profiles/profile_keyed_service_factory.h",
-
-  # Needs abstract base.
-  "!chrome/browser/sync/profile_sync_service.h",
-  "!chrome/browser/sync/profile_sync_service_factory.h",
-  "!chrome/browser/sync/profile_sync_service_observer.h",
-
-  "!chrome/browser/ui/tab_contents/tab_contents.h",
-
-  # Do not add to the list of temporarily-allowed dependencies above,
-  # and please do not introduce more #includes of these files.
 
   # TODO(akalin): Remove this dependency.
   "!sync/util/data_encryption_win.h",
@@ -45,7 +24,13 @@ specific_include_rules = {
   # Do not add to the list of temporarily-allowed dependencies below,
   # and please do not introduce more #includes of these files.
   '.*_[a-z]*test\.cc': [
+    "!chrome/browser/infobars/infobar_tab_helper.h",
     "!chrome/browser/password_manager/encryptor.h",
+    "!chrome/browser/password_manager/password_manager.h",
+    "!chrome/browser/password_manager/password_manager_delegate_impl.h",
+    "!chrome/browser/profiles/profile.h",
+    "!chrome/browser/sync/profile_sync_service.h",
+    "!chrome/browser/sync/profile_sync_service_factory.h",
     "!chrome/browser/translate/translate_infobar_delegate.h",
     "!chrome/browser/translate/translate_manager.h",
     "!chrome/browser/webdata/autofill_web_data_service_impl.h",
@@ -55,13 +40,14 @@ specific_include_rules = {
     "!chrome/browser/ui/browser.h",
     "!chrome/browser/ui/browser_tabstrip.h",
     "!chrome/browser/ui/browser_window.h",
-    "!chrome/browser/ui/tab_contents/tab_autofill_manager_delegate.h",
-    "!chrome/browser/ui/tab_contents/test_tab_contents.h",
   ],
 
-  # TODO(joi): Get rid of the need for this, e.g. by moving
-  # PersonalDataManagerFactory to chrome/browser/configuration.
-  'personal_data_manager_factory\.cc': [
+  # TODO(joi): May be able to get rid of the need for this by moving
+  # PersonalDataManagerFactory to chrome/browser/profiles.
+  'personal_data_manager_factory\.(h|cc)': [
+    "!chrome/browser/profiles/profile_dependency_manager.h",
+    "!chrome/browser/profiles/profile_keyed_service_factory.h",
+    "!chrome/browser/profiles/profile.h",
     "!chrome/browser/webdata/web_data_service_factory.h",
   ],
 }

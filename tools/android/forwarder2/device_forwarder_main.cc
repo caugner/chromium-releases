@@ -8,8 +8,8 @@
 
 #include <string>
 
-#include "base/logging.h"
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/stringprintf.h"
 #include "tools/android/common/daemon.h"
 #include "tools/android/forwarder2/device_controller.h"
@@ -26,7 +26,7 @@ const char kDefaultAdbSocket[] = "chrome_device_forwarder";
 void KillHandler(int /* unused */) {
   CHECK(g_notifier);
   if (!g_notifier->Notify())
-    exit(-1);
+    exit(1);
 }
 
 }  // namespace
@@ -58,8 +58,9 @@ int main(int argc, char** argv) {
   signal(SIGINT, KillHandler);
   CHECK(g_notifier);
   forwarder2::DeviceController controller(g_notifier->receiver_fd());
+  if (!controller.Init(adb_socket_path))
+    return 1;
   printf("Starting Device Forwarder.\n");
-  controller.Start(adb_socket_path);
-
+  controller.Start();
   return 0;
 }

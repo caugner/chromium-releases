@@ -20,6 +20,8 @@ using base::Value;
 using base::DictionaryValue;
 using base::ListValue;
 
+namespace google_apis {
+
 namespace {
 
 // Converts |url_string| to |result|.  Always returns true to be used
@@ -89,6 +91,7 @@ const char kTitle[] = "title";
 const char kMimeType[] = "mimeType";
 const char kCreatedDate[] = "createdDate";
 const char kModifiedByMeDate[] = "modifiedByMeDate";
+const char kLastViewedByMeDate[] = "lastViewedByMeDate";
 const char kDownloadUrl[] = "downloadUrl";
 const char kFileExtension[] = "fileExtension";
 const char kMd5Checksum[] = "md5Checksum";
@@ -139,14 +142,14 @@ const char kGoogleTableMimeType[] = "application/vnd.google-apps.table";
 
 // Maps category name to enum IconCategory.
 struct AppIconCategoryMap {
-  gdata::DriveAppIcon::IconCategory category;
+  DriveAppIcon::IconCategory category;
   const char* category_name;
 };
 
 const AppIconCategoryMap kAppIconCategoryMap[] = {
-  { gdata::DriveAppIcon::DOCUMENT, "document" },
-  { gdata::DriveAppIcon::APPLICATION, "application" },
-  { gdata::DriveAppIcon::SHARED_DOCUMENT, "documentShared" },
+  { DriveAppIcon::DOCUMENT, "document" },
+  { DriveAppIcon::APPLICATION, "application" },
+  { DriveAppIcon::SHARED_DOCUMENT, "documentShared" },
 };
 
 // Checks if the JSON is expected kind.  In Drive API, JSON data structure has
@@ -162,9 +165,6 @@ bool IsResourceKindExpected(const base::Value& value,
 }
 
 }  // namespace
-
-// TODO(kochi): Rename to namespace drive. http://crbug.com/136371
-namespace gdata {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AboutResource implementation
@@ -214,7 +214,7 @@ bool AboutResource::Parse(const base::Value& value) {
 ////////////////////////////////////////////////////////////////////////////////
 // DriveAppIcon implementation
 
-DriveAppIcon::DriveAppIcon() {}
+DriveAppIcon::DriveAppIcon() : category_(UNKNOWN), icon_side_length_(0) {}
 
 DriveAppIcon::~DriveAppIcon() {}
 
@@ -266,7 +266,12 @@ bool DriveAppIcon::GetIconCategory(const base::StringPiece& category,
 ////////////////////////////////////////////////////////////////////////////////
 // AppResource implementation
 
-AppResource::AppResource() {}
+AppResource::AppResource()
+    : supports_create_(false),
+      supports_import_(false),
+      installed_(false),
+      authorized_(false) {
+}
 
 AppResource::~AppResource() {}
 
@@ -406,11 +411,15 @@ void FileResource::RegisterJSONConverter(
   converter->RegisterCustomField<base::Time>(
       kCreatedDate,
       &FileResource::created_date_,
-      &gdata::util::GetTimeFromString);
+      &util::GetTimeFromString);
   converter->RegisterCustomField<base::Time>(
       kModifiedByMeDate,
       &FileResource::modified_by_me_date_,
-      &gdata::util::GetTimeFromString);
+      &util::GetTimeFromString);
+  converter->RegisterCustomField<base::Time>(
+      kLastViewedByMeDate,
+      &FileResource::last_viewed_by_me_date_,
+      &util::GetTimeFromString);
   converter->RegisterCustomField<GURL>(kDownloadUrl,
                                        &FileResource::download_url_,
                                        GetGURLFromString);
@@ -573,7 +582,7 @@ void ChangeList::RegisterJSONConverter(
                                         &ChangeList::largest_change_id_,
                                         &base::StringToInt64);
   converter->RegisterRepeatedMessage<ChangeResource>(kItems,
-                                                   &ChangeList::items_);
+                                                     &ChangeList::items_);
 }
 
 // static
@@ -638,4 +647,4 @@ bool FileLabels::Parse(const base::Value& value) {
   return true;
 }
 
-}  // namespace gdata
+}  // namespace google_apis

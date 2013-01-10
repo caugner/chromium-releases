@@ -9,6 +9,7 @@
 
 #include "base/location.h"
 #include "base/string16.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -34,6 +35,9 @@ namespace browser_sync {
 
 static const char kMobileBookmarksTag[] = "synced_bookmarks";
 
+// Key for sync transaction version in bookmark node meta info.
+const char kBookmarkTransactionVersionKey[] = "sync.transaction_version";
+
 BookmarkChangeProcessor::BookmarkChangeProcessor(
     BookmarkModelAssociator* model_associator,
     DataTypeErrorHandler* error_handler)
@@ -45,6 +49,11 @@ BookmarkChangeProcessor::BookmarkChangeProcessor(
   DCHECK(error_handler);
 }
 
+BookmarkChangeProcessor::~BookmarkChangeProcessor() {
+  if (bookmark_model_)
+    bookmark_model_->RemoveObserver(this);
+}
+
 void BookmarkChangeProcessor::StartImpl(Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!bookmark_model_);
@@ -53,21 +62,18 @@ void BookmarkChangeProcessor::StartImpl(Profile* profile) {
   bookmark_model_->AddObserver(this);
 }
 
-void BookmarkChangeProcessor::StopImpl() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(bookmark_model_);
-  bookmark_model_->RemoveObserver(this);
-  bookmark_model_ = NULL;
-  model_associator_ = NULL;
-}
-
 void BookmarkChangeProcessor::UpdateSyncNodeProperties(
-    const BookmarkNode* src, BookmarkModel* model, syncer::WriteNode* dst) {
+    const BookmarkNode* src,
+    BookmarkModel* model,
+    syncer::WriteNode* dst) {
   // Set the properties of the item.
   dst->SetIsFolder(src->is_folder());
   dst->SetTitle(UTF16ToWideHack(src->GetTitle()));
+  sync_pb::BookmarkSpecifics bookmark_specifics(dst->GetBookmarkSpecifics());
   if (!src->is_folder())
-    dst->SetURL(src->url());
+    bookmark_specifics.set_url(src->url().spec());
+  bookmark_specifics.set_creation_time_us(src->date_added().ToInternalValue());
+  dst->SetBookmarkSpecifics(bookmark_specifics);
   SetSyncNodeFavicon(src, model, dst);
 }
 
@@ -150,14 +156,13 @@ void BookmarkChangeProcessor::Loaded(BookmarkModel* model,
 
 void BookmarkChangeProcessor::BookmarkModelBeingDeleted(
     BookmarkModel* model) {
-  DCHECK(!running()) << "BookmarkModel deleted while ChangeProcessor running.";
+  NOTREACHED();
   bookmark_model_ = NULL;
 }
 
 void BookmarkChangeProcessor::BookmarkNodeAdded(BookmarkModel* model,
                                                 const BookmarkNode* parent,
                                                 int index) {
-  DCHECK(running());
   DCHECK(share_handle());
 
   // Acquire a scoped write lock via a transaction.
@@ -199,13 +204,11 @@ void BookmarkChangeProcessor::BookmarkNodeRemoved(BookmarkModel* model,
                                                     const BookmarkNode* parent,
                                                     int index,
                                                     const BookmarkNode* node) {
-  DCHECK(running());
   RemoveSyncNodeHierarchy(node);
 }
 
 void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
                                                   const BookmarkNode* node) {
-  DCHECK(running());
   // We shouldn't see changes to the top-level nodes.
   if (model->is_permanent_node(node)) {
     NOTREACHED() << "Saw update to permanent node!";
@@ -278,14 +281,14 @@ void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
   // This node's index should be one more than the predecessor's index.
   DCHECK_EQ(node->parent()->GetIndexOf(node),
             CalculateBookmarkModelInsertionIndex(node->parent(),
-                                                 &sync_node));
+                                                 &sync_node,
+                                                 model_associator_));
 }
 
 
 void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
       const BookmarkNode* old_parent, int old_index,
       const BookmarkNode* new_parent, int new_index) {
-  DCHECK(running());
   const BookmarkNode* child = new_parent->GetChild(new_index);
   // We shouldn't see changes to the top-level nodes.
   if (model->is_permanent_node(child)) {
@@ -315,7 +318,6 @@ void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
 void BookmarkChangeProcessor::BookmarkNodeFaviconChanged(
     BookmarkModel* model,
     const BookmarkNode* node) {
-  DCHECK(running());
   BookmarkNodeChanged(model, node);
 }
 
@@ -388,6 +390,7 @@ bool BookmarkChangeProcessor::PlaceSyncNode(MoveOrCreate operation,
   return success;
 }
 
+// Static.
 // Determine the bookmark model index to which a node must be moved so that
 // predecessor of the node (in the bookmark model) matches the predecessor of
 // |source| (in the sync model).
@@ -395,7 +398,8 @@ bool BookmarkChangeProcessor::PlaceSyncNode(MoveOrCreate operation,
 // updated and is already in the correct position in the bookmark model.
 int BookmarkChangeProcessor::CalculateBookmarkModelInsertionIndex(
     const BookmarkNode* parent,
-    const syncer::BaseNode* child_info) const {
+    const syncer::BaseNode* child_info,
+    BookmarkModelAssociator* model_associator) {
   DCHECK(parent);
   DCHECK(child_info);
   int64 predecessor_id = child_info->GetPredecessorId();
@@ -405,7 +409,7 @@ int BookmarkChangeProcessor::CalculateBookmarkModelInsertionIndex(
 
   // Otherwise, insert after the predecessor bookmark node.
   const BookmarkNode* predecessor =
-      model_associator_->GetChromeNodeFromSyncId(predecessor_id);
+      model_associator->GetChromeNodeFromSyncId(predecessor_id);
   DCHECK(predecessor);
   DCHECK_EQ(predecessor->parent(), parent);
   return parent->GetIndexOf(predecessor) + 1;
@@ -416,9 +420,8 @@ int BookmarkChangeProcessor::CalculateBookmarkModelInsertionIndex(
 // model.
 void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
     const syncer::BaseTransaction* trans,
+    int64 model_version,
     const syncer::ImmutableChangeRecordList& changes) {
-  if (!running())
-    return;
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // A note about ordering.  Sync backend is responsible for ordering the change
   // records in the following order:
@@ -502,7 +505,7 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
         return;
       }
 
-      if (!CreateOrUpdateBookmarkNode(&src, model)) {
+      if (!CreateOrUpdateBookmarkNode(&src, model, model_associator_)) {
         // Because the Synced Bookmarks node can be created server side, it's
         // possible it'll arrive at the client as an update. In that case it
         // won't have been associated at startup, the GetChromeNodeFromSyncId
@@ -540,15 +543,22 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
 
   // We are now ready to hear about bookmarks changes again.
   model->AddObserver(this);
+
+  // All changes are applied in bookmark model. Set transaction version on
+  // bookmark model to mark as synced.
+  model->SetNodeMetaInfo(model->root_node(), kBookmarkTransactionVersionKey,
+                         base::Int64ToString(model_version));
 }
 
+// Static.
 // Create a bookmark node corresponding to |src| if one is not already
 // associated with |src|.
 const BookmarkNode* BookmarkChangeProcessor::CreateOrUpdateBookmarkNode(
     syncer::BaseNode* src,
-    BookmarkModel* model) {
+    BookmarkModel* model,
+    BookmarkModelAssociator* model_associator) {
   const BookmarkNode* parent =
-      model_associator_->GetChromeNodeFromSyncId(src->GetParentId());
+      model_associator->GetChromeNodeFromSyncId(src->GetParentId());
   if (!parent) {
     DLOG(WARNING) << "Could not find parent of node being added/updated."
       << " Node title: " << src->GetTitle()
@@ -556,13 +566,15 @@ const BookmarkNode* BookmarkChangeProcessor::CreateOrUpdateBookmarkNode(
 
     return NULL;
   }
-  int index = CalculateBookmarkModelInsertionIndex(parent, src);
-  const BookmarkNode* dst = model_associator_->GetChromeNodeFromSyncId(
+  int index = CalculateBookmarkModelInsertionIndex(parent,
+                                                   src,
+                                                   model_associator);
+  const BookmarkNode* dst = model_associator->GetChromeNodeFromSyncId(
       src->GetId());
   if (!dst) {
     dst = CreateBookmarkNode(src, parent, model, index);
     if (dst)
-      model_associator_->Associate(dst, src->GetId());
+      model_associator->Associate(dst, src->GetId());
   } else {
     // URL and is_folder are not expected to change.
     // TODO(ncarter): Determine if such changes should be legal or not.
@@ -574,6 +586,11 @@ const BookmarkNode* BookmarkChangeProcessor::CreateOrUpdateBookmarkNode(
     if (!src->GetIsFolder())
       model->SetURL(dst, src->GetURL());
     model->SetTitle(dst, UTF8ToUTF16(src->GetTitle()));
+    if (src->GetBookmarkSpecifics().has_creation_time_us()) {
+      model->SetDateAdded(dst,
+                          base::Time::FromInternalValue(
+                              src->GetBookmarkSpecifics().creation_time_us()));
+    }
 
     SetBookmarkFavicon(src, dst, model);
   }
@@ -597,9 +614,14 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
     node = model->AddFolder(parent, index,
                             UTF8ToUTF16(sync_node->GetTitle()));
   } else {
-    node = model->AddURL(parent, index,
-                         UTF8ToUTF16(sync_node->GetTitle()),
-                         sync_node->GetURL());
+    // 'creation_time_us' was added in m24. Assume a time of 0 means now.
+    const int64 create_time_internal =
+        sync_node->GetBookmarkSpecifics().creation_time_us();
+    base::Time create_time = (create_time_internal == 0) ?
+        base::Time::Now() : base::Time::FromInternalValue(create_time_internal);
+    node = model->AddURLWithCreationTime(parent, index,
+                                         UTF8ToUTF16(sync_node->GetTitle()),
+                                         sync_node->GetURL(), create_time);
     if (node)
       SetBookmarkFavicon(sync_node, node, model);
   }
@@ -629,13 +651,6 @@ void BookmarkChangeProcessor::ApplyBookmarkFavicon(
     const BookmarkNode* bookmark_node,
     Profile* profile,
     const std::vector<unsigned char>& icon_bytes_vector) {
-  // Registering a favicon requires that we provide a source URL, but we
-  // don't know where these came from.  Currently we just use the
-  // destination URL, which is not correct, but since the favicon URL
-  // is used as a key in the history's thumbnail DB, this gives us a value
-  // which does not collide with others.
-  GURL fake_icon_url = bookmark_node->url();
-
   HistoryService* history =
       HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
   FaviconService* favicon_service =
@@ -651,7 +666,6 @@ void BookmarkChangeProcessor::ApplyBookmarkFavicon(
       new base::RefCountedBytes(icon_bytes_vector));
   gfx::Size pixel_size(gfx::kFaviconSize, gfx::kFaviconSize);
   favicon_service->MergeFavicon(bookmark_node->url(),
-                                fake_icon_url,
                                 history::FAVICON,
                                 bitmap_data,
                                 pixel_size);

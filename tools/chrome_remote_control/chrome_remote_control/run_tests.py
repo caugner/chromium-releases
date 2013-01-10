@@ -2,13 +2,13 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import fnmatch
-import functools
 import logging
 import os
 import traceback
 import unittest
 
 from chrome_remote_control import browser_options
+from chrome_remote_control import options_for_unittests
 
 def RequiresBrowserOfType(*types):
   def wrap(func):
@@ -18,9 +18,10 @@ def RequiresBrowserOfType(*types):
 
 def Discover(start_dir, pattern = 'test*.py', top_level_dir = None):
   if hasattr(unittest.defaultTestLoader, 'discover'):
-    return unittest.defaultTestLoader.discover(start_dir,
-                                               pattern,
-                                               top_level_dir)
+    return unittest.defaultTestLoader.discover( # pylint: disable=E1101
+      start_dir,
+      pattern,
+      top_level_dir)
 
   modules = []
   for dirpath, _, filenames in os.walk(start_dir):
@@ -41,7 +42,7 @@ def Discover(start_dir, pattern = 'test*.py', top_level_dir = None):
       # load the module
       try:
         module = __import__(fqn, fromlist=[True])
-      except:
+      except Exception:
         print 'While importing [%s]\n' % fqn
         traceback.print_exc()
         continue
@@ -88,10 +89,10 @@ def DiscoverAndRunTests(dir_name, args, top_level_dir):
         return False
 
     if hasattr(test, '_testMethodName'):
-      method = getattr(test, test._testMethodName)
+      method = getattr(test, test._testMethodName) # pylint: disable=W0212
       if hasattr(method, '_requires_browser_types'):
-        types = method._requires_browser_types
-        if browser_options.browser_type_for_unittests not in types:
+        types = method._requires_browser_types # pylint: disable=W0212
+        if options_for_unittests.GetBrowserType() not in types:
           logging.debug('Skipping test %s because it requires %s' %
                         (test.id(), types))
           return False
@@ -115,6 +116,9 @@ def Main(args, start_dir, top_level_dir):
 
   _, args = parser.parse_args(args)
 
+  if default_options.verbosity == 0:
+    logging.getLogger().setLevel(logging.ERROR)
+
   from chrome_remote_control import browser_finder
   browser_to_create = browser_finder.FindBrowser(default_options)
   if browser_to_create == None:
@@ -123,16 +127,17 @@ def Main(args, start_dir, top_level_dir):
     logging.error('Re-run with --browser=list to see available browser types.')
     return 1
 
-  browser_options.options_for_unittests = default_options
-  browser_options.browser_type_for_unittests = browser_to_create.browser_type
+  options_for_unittests.Set(default_options,
+                            browser_to_create.browser_type)
   olddir = os.getcwd()
   num_errors = 0
   try:
     os.chdir(top_level_dir)
-    for _ in range(default_options.run_test_repeat_count):
+    for _ in range(
+        default_options.run_test_repeat_count): # pylint: disable=E1101
       num_errors += DiscoverAndRunTests(start_dir, args, top_level_dir)
   finally:
     os.chdir(olddir)
-    browser_options.options_for_unittests = None
+    options_for_unittests.Set(None, None)
 
-  return num_errors
+  return max(num_errors, 255)

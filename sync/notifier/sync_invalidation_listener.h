@@ -21,7 +21,7 @@
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/invalidator_state.h"
-#include "sync/notifier/object_id_state_map.h"
+#include "sync/notifier/object_id_invalidation_map.h"
 #include "sync/notifier/state_writer.h"
 #include "sync/notifier/sync_system_resources.h"
 
@@ -56,7 +56,8 @@ class SyncInvalidationListener
    public:
     virtual ~Delegate();
 
-    virtual void OnInvalidate(const ObjectIdStateMap& id_state_map) = 0;
+    virtual void OnInvalidate(
+        const ObjectIdInvalidationMap& invalidation_map) = 0;
 
     virtual void OnInvalidatorStateChange(InvalidatorState state) = 0;
   };
@@ -73,8 +74,8 @@ class SyncInvalidationListener
       const CreateInvalidationClientCallback&
           create_invalidation_client_callback,
       const std::string& client_id, const std::string& client_info,
-      const std::string& state,
-      const InvalidationVersionMap& initial_max_invalidation_versions,
+      const std::string& invalidation_bootstrap_data,
+      const InvalidationStateMap& initial_invalidation_state_map,
       const WeakHandle<InvalidationStateTracker>& invalidation_state_tracker,
       Delegate* delegate);
 
@@ -136,12 +137,12 @@ class SyncInvalidationListener
 
   void EmitStateChange();
 
-  void EmitInvalidation(const ObjectIdStateMap& id_state_map);
+  void EmitInvalidation(const ObjectIdInvalidationMap& invalidation_map);
 
   // Owned by |sync_system_resources_|.
   notifier::PushClient* const push_client_;
   SyncSystemResources sync_system_resources_;
-  InvalidationVersionMap max_invalidation_versions_;
+  InvalidationStateMap invalidation_state_map_;
   WeakHandle<InvalidationStateTracker> invalidation_state_tracker_;
   Delegate* delegate_;
   scoped_ptr<invalidation::InvalidationClient> invalidation_client_;

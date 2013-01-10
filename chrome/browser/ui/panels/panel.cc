@@ -8,6 +8,7 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -89,13 +90,11 @@ PanelExtensionWindowController::CreateWindowValueWithTabs(
   content::WebContents* web_contents = panel_->GetWebContents();
   if (web_contents) {
     DictionaryValue* tab_value = new DictionaryValue();
-    // TabId must be >= 0. Use panel session id to avoid conflict with
-    // browser tab ids (which are also session ids).
     tab_value->SetInteger(extensions::tabs_constants::kIdKey,
-                          panel_->session_id().id());
+                          SessionID::IdForTab(web_contents));
     tab_value->SetInteger(extensions::tabs_constants::kIndexKey, 0);
-    tab_value->SetInteger(
-        extensions::tabs_constants::kWindowIdKey, GetWindowId());
+    tab_value->SetInteger(extensions::tabs_constants::kWindowIdKey,
+                          SessionID::IdForWindowContainingTab(web_contents));
     tab_value->SetString(
         extensions::tabs_constants::kUrlKey, web_contents->GetURL().spec());
     tab_value->SetString(extensions::tabs_constants::kStatusKey,
@@ -152,6 +151,7 @@ Panel::Panel(const std::string& app_name,
 }
 
 Panel::~Panel() {
+  DCHECK(!panel_strip_);
   // Invoked by native panel destructor. Do not access native_panel_ here.
   browser::EndKeepAlive();  // Remove shutdown prevention.
 }
@@ -180,7 +180,7 @@ void Panel::Initialize(Profile* profile, const GURL& url,
   // Close when the extension is unloaded or the browser is exiting.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(profile));
-  registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
+  registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
@@ -215,6 +215,10 @@ void Panel::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_COPY, true);
   command_updater_.UpdateCommandEnabled(IDC_CUT, true);
   command_updater_.UpdateCommandEnabled(IDC_PASTE, true);
+
+  // DevTools
+  command_updater_.UpdateCommandEnabled(IDC_DEV_TOOLS, true);
+  command_updater_.UpdateCommandEnabled(IDC_DEV_TOOLS_CONSOLE, true);
 }
 
 void Panel::OnNativePanelClosed() {
@@ -415,6 +419,10 @@ void Panel::ShowInactive() {
   native_panel_->ShowPanelInactive();
 }
 
+void Panel::Hide() {
+  // Not implemented.
+}
+
 void Panel::SetBounds(const gfx::Rect& bounds) {
   // Ignore bounds position as the panel manager controls all positioning.
   if (!panel_strip_)
@@ -605,6 +613,22 @@ void Panel::ExecuteCommandWithDisposition(int id,
       panel_host_->Zoom(content::PAGE_ZOOM_OUT);
       break;
 
+    // DevTools
+    case IDC_DEV_TOOLS:
+      content::RecordAction(UserMetricsAction("DevTools_ToggleWindow"));
+      DevToolsWindow::ToggleDevToolsWindow(
+          GetWebContents()->GetRenderViewHost(),
+          true,
+          DEVTOOLS_TOGGLE_ACTION_SHOW);
+      break;
+    case IDC_DEV_TOOLS_CONSOLE:
+      content::RecordAction(UserMetricsAction("DevTools_ToggleConsole"));
+      DevToolsWindow::ToggleDevToolsWindow(
+          GetWebContents()->GetRenderViewHost(),
+          true,
+          DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
+      break;
+
     default:
       LOG(WARNING) << "Received unimplemented command: " << id;
       break;
@@ -632,7 +656,7 @@ void Panel::Observe(int type,
               details)->extension->id() == extension_id())
         Close();
       break;
-    case content::NOTIFICATION_APP_TERMINATING:
+    case chrome::NOTIFICATION_APP_TERMINATING:
       Close();
       break;
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
@@ -656,14 +680,12 @@ void Panel::OnActiveStateChanged(bool active) {
   if (panel_strip_)
     panel_strip_->OnPanelActiveStateChanged(this);
 
-  // Send extension event about window becoming active.
-  if (active) {
-    ExtensionService* service =
-        extensions::ExtensionSystem::Get(profile())->extension_service();
-    if (service) {
-      service->window_event_router()->OnActiveWindowChanged(
-          extension_window_controller_.get());
-    }
+  // Send extension event about window changing active state.
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile())->extension_service();
+  if (service) {
+    service->window_event_router()->OnActiveWindowChanged(
+        active ? extension_window_controller_.get() : NULL);
   }
 
   content::NotificationService::current()->Notify(
@@ -802,10 +824,10 @@ void Panel::UpdateAppIcon() {
   app_icon_loader_.reset(new ImageLoadingTracker(this));
   app_icon_loader_->LoadImage(
       extension,
-      extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALLISH,
+      extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALL,
                                  ExtensionIconSet::MATCH_BIGGER),
-      gfx::Size(extension_misc::EXTENSION_ICON_SMALLISH,
-                extension_misc::EXTENSION_ICON_SMALLISH),
+      gfx::Size(extension_misc::EXTENSION_ICON_SMALL,
+                extension_misc::EXTENSION_ICON_SMALL),
       ImageLoadingTracker::CACHE);
 }
 
@@ -817,4 +839,9 @@ void Panel::OnImageLoaded(const gfx::Image& image,
     native_panel_->UpdatePanelTitleBar();
   }
   app_icon_loader_.reset();
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_PANEL_APP_ICON_LOADED,
+      content::Source<Panel>(this),
+      content::NotificationService::NoDetails());
 }

@@ -265,6 +265,31 @@ history::URLDatabase* HistoryService::InMemoryDatabase() {
   return NULL;
 }
 
+bool HistoryService::GetTypedCountForURL(const GURL& url, int* typed_count) {
+  history::URLRow url_row;
+  if (!GetRowForURL(url, &url_row))
+    return false;
+  *typed_count = url_row.typed_count();
+  return true;
+}
+
+bool HistoryService::GetLastVisitTimeForURL(const GURL& url,
+                                            base::Time* last_visit) {
+  history::URLRow url_row;
+  if (!GetRowForURL(url, &url_row))
+    return false;
+  *last_visit = url_row.last_visit();
+  return true;
+}
+
+bool HistoryService::GetVisitCountForURL(const GURL& url, int* visit_count) {
+  history::URLRow url_row;
+  if (!GetRowForURL(url, &url_row))
+    return false;
+  *visit_count = url_row.visit_count();
+  return true;
+}
+
 void HistoryService::ShutdownOnUIThread() {
   // It's possible that bookmarks haven't loaded and history is waiting for
   // bookmarks to complete loading. In such a situation history can't shutdown
@@ -344,31 +369,28 @@ void HistoryService::SetOnBackendDestroyTask(const base::Closure& task) {
 }
 
 void HistoryService::AddPage(const GURL& url,
-                             const void* id_scope,
-                             int32 page_id,
-                             const GURL& referrer,
-                             content::PageTransition transition,
-                             const history::RedirectList& redirects,
-                             history::VisitSource visit_source,
-                             bool did_replace_entry) {
-  AddPage(url, Time::Now(), id_scope, page_id, referrer, transition, redirects,
-          visit_source, did_replace_entry);
-}
-
-void HistoryService::AddPage(const GURL& url,
                              Time time,
                              const void* id_scope,
                              int32 page_id,
                              const GURL& referrer,
-                             content::PageTransition transition,
                              const history::RedirectList& redirects,
+                             content::PageTransition transition,
                              history::VisitSource visit_source,
                              bool did_replace_entry) {
-  scoped_refptr<history::HistoryAddPageArgs> request(
-      new history::HistoryAddPageArgs(url, time, id_scope, page_id, referrer,
-                                      redirects, transition, visit_source,
-                                      did_replace_entry));
-  AddPage(*request);
+  AddPage(
+      history::HistoryAddPageArgs(url, time, id_scope, page_id, referrer,
+                                  redirects, transition, visit_source,
+                                  did_replace_entry));
+}
+
+void HistoryService::AddPage(const GURL& url,
+                             base::Time time,
+                             history::VisitSource visit_source) {
+  AddPage(
+      history::HistoryAddPageArgs(url, time, NULL, 0, GURL(),
+                                  history::RedirectList(),
+                                  content::PAGE_TRANSITION_LINK,
+                                  visit_source, false));
 }
 
 void HistoryService::AddPage(const history::HistoryAddPageArgs& add_page_args) {
@@ -383,7 +405,8 @@ void HistoryService::AddPage(const history::HistoryAddPageArgs& add_page_args) {
 
   // Add link & all redirects to visited link list.
   VisitedLinkMaster* visited_links;
-  if (profile_ && (visited_links = profile_->GetVisitedLinkMaster())) {
+  if (profile_ &&
+      (visited_links = VisitedLinkMaster::FromProfile(profile_))) {
     visited_links->AddURL(add_page_args.url);
 
     if (!add_page_args.redirects.empty()) {
@@ -398,9 +421,7 @@ void HistoryService::AddPage(const history::HistoryAddPageArgs& add_page_args) {
     }
   }
 
-  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::AddPage,
-                    scoped_refptr<history::HistoryAddPageArgs>(
-                        add_page_args.Clone()));
+  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::AddPage, add_page_args);
 }
 
 void HistoryService::AddPageNoVisitForBookmark(const GURL& url,
@@ -438,8 +459,10 @@ void HistoryService::AddPageWithDetails(const GURL& url,
 
   // Add to the visited links system.
   VisitedLinkMaster* visited_links;
-  if (profile_ && (visited_links = profile_->GetVisitedLinkMaster()))
+  if (profile_ &&
+      (visited_links = VisitedLinkMaster::FromProfile(profile_))) {
     visited_links->AddURL(url);
+  }
 
   history::URLRow row(url);
   row.set_title(title);
@@ -460,7 +483,8 @@ void HistoryService::AddPagesWithDetails(const history::URLRows& info,
 
   // Add to the visited links system.
   VisitedLinkMaster* visited_links;
-  if (profile_ && (visited_links = profile_->GetVisitedLinkMaster())) {
+  if (profile_ &&
+      (visited_links = VisitedLinkMaster::FromProfile(profile_))) {
     std::vector<GURL> urls;
     urls.reserve(info.size());
     for (history::URLRows::const_iterator i = info.begin(); i != info.end();
@@ -533,7 +557,6 @@ void HistoryService::UpdateFaviconMappingsAndFetch(
 
 void HistoryService::MergeFavicon(
     const GURL& page_url,
-    const GURL& icon_url,
     history::IconType icon_type,
     scoped_refptr<base::RefCountedMemory> bitmap_data,
     const gfx::Size& pixel_size) {
@@ -541,7 +564,7 @@ void HistoryService::MergeFavicon(
     return;
 
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::MergeFavicon, page_url,
-      icon_url, icon_type, bitmap_data, pixel_size);
+                    icon_type, bitmap_data, pixel_size);
 }
 
 void HistoryService::SetFavicons(
@@ -736,7 +759,8 @@ void HistoryService::Observe(int type,
       if (!profile_)
         return;  // No profile, probably unit testing.
       content::Details<history::URLsDeletedDetails> deleted_details(details);
-      VisitedLinkMaster* visited_links = profile_->GetVisitedLinkMaster();
+      VisitedLinkMaster* visited_links =
+          VisitedLinkMaster::FromProfile(profile_);
       if (!visited_links)
         return;  // Nobody to update.
       if (deleted_details->all_history)
@@ -926,6 +950,11 @@ void HistoryService::OnDBLoaded(int backend_id) {
     if (ts)
       ts->HistoryLoaded();
   }
+}
+
+bool HistoryService::GetRowForURL(const GURL& url, history::URLRow* url_row) {
+  history::URLDatabase* db = InMemoryDatabase();
+  return db && (db->GetRowForURL(url, url_row) != 0);
 }
 
 void HistoryService::StartTopSitesMigration(int backend_id) {

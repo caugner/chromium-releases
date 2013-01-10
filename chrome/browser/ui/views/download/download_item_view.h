@@ -24,7 +24,7 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/icon_manager.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -213,6 +213,11 @@ class DownloadItemView : public views::ButtonListener,
 
   // Update the location of the drop down button.
   void UpdateDropDownButtonPosition();
+
+  // Show/Hide/Reset |animation| based on the state transition specified by
+  // |from| and |to|.
+  void AnimateStateTransition(State from, State to,
+                              ui::SlideAnimation* animation);
 
   // The different images used for the background.
   BodyImageSet normal_body_image_set_;

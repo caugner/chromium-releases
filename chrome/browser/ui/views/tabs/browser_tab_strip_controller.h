@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/browser/ui/search/toolbar_search_animator_observer.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
@@ -75,6 +75,8 @@ class BrowserTabStripController
   virtual void ClickActiveTab(int index) OVERRIDE;
   virtual bool IsIncognito() OVERRIDE;
   virtual void LayoutTypeMaybeChanged() OVERRIDE;
+  virtual bool IsInstantExtendedAPIEnabled() OVERRIDE;
+  virtual bool ShouldShowWhiteNTP() OVERRIDE;
 
   // TabStripModelObserver implementation:
   virtual void TabInsertedAt(TabContents* contents,
@@ -109,7 +111,7 @@ class BrowserTabStripController
   // chrome::search::ToolbarSearchAnimatorObserver implementation:
   virtual void OnToolbarBackgroundAnimatorProgressed() OVERRIDE;
   virtual void OnToolbarBackgroundAnimatorCanceled(
-      TabContents* tab_contents) OVERRIDE;
+      content::WebContents* web_contents) OVERRIDE;
   virtual void OnToolbarSeparatorChanged() OVERRIDE {}
 
   // content::NotificationObserver implementation:
@@ -140,7 +142,7 @@ class BrowserTabStripController
   class TabContextMenuContents;
 
   // Invokes tabstrip_->SetTabData.
-  void SetTabDataAt(TabContents* contents, int model_index);
+  void SetTabDataAt(content::WebContents* web_contents, int model_index);
 
   void StartHighlightTabsForCommand(
       TabStripModel::ContextMenuCommand command_id,

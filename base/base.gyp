@@ -122,7 +122,6 @@
             }],
           ],
           'dependencies': [
-            'base_java',
             'base_jni_headers',
             'symbolize',
             '../third_party/ashmem/ashmem.gyp:ashmem',
@@ -142,7 +141,9 @@
           'sources!': [
             'debug/stack_trace_posix.cc',
           ],
-          'export_dependent_settings': [
+        }],
+        ['OS == "android" and _toolset == "target" and android_build_type == 0', {
+          'dependencies': [
             'base_java',
           ],
         }],
@@ -367,6 +368,7 @@
       'sources': [
         # Tests.
         'android/jni_android_unittest.cc',
+        'android/jni_array_unittest.cc',
         'android/path_utils_unittest.cc',
         'android/scoped_java_ref_unittest.cc',
         'at_exit_unittest.cc',
@@ -394,6 +396,7 @@
         'file_util_unittest.cc',
         'file_version_info_unittest.cc',
         'files/dir_reader_posix_unittest.cc',
+        'files/important_file_writer_unittest.cc',
         'gmock_unittest.cc',
         'guid_unittest.cc',
         'hi_res_timer_manager_unittest.cc',
@@ -440,6 +443,8 @@
         'message_loop_unittest.cc',
         'message_pump_glib_unittest.cc',
         'message_pump_libevent_unittest.cc',
+        'metrics/sample_map_unittest.cc',
+        'metrics/sample_vector_unittest.cc',
         'metrics/bucket_ranges_unittest.cc',
         'metrics/field_trial_unittest.cc',
         'metrics/histogram_unittest.cc',
@@ -548,10 +553,6 @@
       },
       'conditions': [
         ['OS == "android"', {
-          'sources!': [
-            # TODO(michaelbai): Removed the below once the fix upstreamed.
-            'debug/stack_trace_unittest.cc',
-          ],
           'dependencies': [
             'android/jni_generator/jni_generator.gyp:jni_generator_tests',
           ],
@@ -575,6 +576,26 @@
             # get a minimal target building.
             # Unittests that don't pass.
             ['exclude', '^message_loop_unittest\\.cc$'],
+          ],
+          'conditions': [
+            ['coverage != 0', {
+              'sources!': [
+                # These sources can't be built with coverage due to a toolchain
+                # bug: http://openradar.appspot.com/radar?id=1499403
+                'json/json_reader_unittest.cc',
+                'string_piece_unittest.cc',
+
+                # These tests crash when run with coverage turned on due to an
+                # issue with llvm_gcda_increment_indirect_counter:
+                # http://crbug.com/156058
+                'debug/trace_event_unittest.cc',
+                'debug/trace_event_unittest.h',
+                'logging_unittest.cc',
+                'string_util_unittest.cc',
+                'test/trace_event_analyzer_unittest.cc',
+                'utf_offset_string_conversions_unittest.cc',
+              ],
+            }],
           ],
           'actions': [
             {
@@ -719,6 +740,8 @@
         'test/perf_test_suite.h',
         'test/scoped_locale.cc',
         'test/scoped_locale.h',
+        'test/scoped_path_override.cc',
+        'test/scoped_path_override.h',
         'test/sequenced_task_runner_test_template.cc',
         'test/sequenced_task_runner_test_template.h',
         'test/task_runner_test_template.cc',
@@ -952,6 +975,7 @@
             'android/java/src/org/chromium/base/PathService.java',
             'android/java/src/org/chromium/base/PathUtils.java',
             'android/java/src/org/chromium/base/SystemMessageHandler.java',
+            'android/java/src/org/chromium/base/SystemMonitor.java',
           ],
           'variables': {
             'jni_gen_dir': 'base',
@@ -975,7 +999,7 @@
           ],
           'variables': {
             'package_name': 'base_javatests',
-            'java_in_dir': '../base/android/javatests',
+            'java_in_dir': '../base/test/android/javatests',
           },
           'includes': [ '../build/java.gypi' ],
         },
@@ -1029,29 +1053,11 @@
             'base_unittests',
           ],
           'includes': [
+            '../build/isolate.gypi',
             'base_unittests.isolate',
           ],
-          'actions': [
-            {
-              'action_name': 'isolate',
-              'inputs': [
-                'base_unittests.isolate',
-                '<@(isolate_dependency_tracked)',
-              ],
-              'outputs': [
-                '<(PRODUCT_DIR)/base_unittests.results',
-              ],
-              'action': [
-                'python',
-                '../tools/isolate/isolate.py',
-                '<(test_isolation_mode)',
-                '--outdir', '<(test_isolation_outdir)',
-                '--variable', 'PRODUCT_DIR', '<(PRODUCT_DIR)',
-                '--variable', 'OS', '<(OS)',
-                '--result', '<@(_outputs)',
-                '--isolate', 'base_unittests.isolate',
-              ],
-            },
+          'sources': [
+            'base_unittests.isolate',
           ],
         },
       ],

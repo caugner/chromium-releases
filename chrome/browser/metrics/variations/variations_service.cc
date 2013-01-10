@@ -25,6 +25,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
@@ -100,12 +101,19 @@ GURL GetVariationsServerURL() {
 VariationsService::VariationsService()
     : variations_server_url_(GetVariationsServerURL()),
       create_trials_from_seed_called_(false),
-      was_offline_during_last_request_attempt_(false) {
-  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+      resource_request_allowed_notifier_(
+          new ResourceRequestAllowedNotifier) {
+  resource_request_allowed_notifier_->Init(this);
+}
+
+VariationsService::VariationsService(ResourceRequestAllowedNotifier* notifier)
+    : variations_server_url_(GetVariationsServerURL()),
+      create_trials_from_seed_called_(false),
+      resource_request_allowed_notifier_(notifier) {
+  resource_request_allowed_notifier_->Init(this);
 }
 
 VariationsService::~VariationsService() {
-  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
 }
 
 bool VariationsService::CreateTrialsFromSeed(PrefService* local_prefs) {
@@ -151,18 +159,18 @@ void VariationsService::StartRepeatedVariationsSeedFetch() {
                this, &VariationsService::FetchVariationsSeed);
 }
 
-void VariationsService::FetchVariationsSeed() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+// static
+void VariationsService::RegisterPrefs(PrefService* prefs) {
+  prefs->RegisterStringPref(prefs::kVariationsSeed, std::string());
+  prefs->RegisterInt64Pref(prefs::kVariationsSeedDate,
+                           base::Time().ToInternalValue());
+}
 
-  was_offline_during_last_request_attempt_ =
-      net::NetworkChangeNotifier::IsOffline();
-  UMA_HISTOGRAM_BOOLEAN("Variations.NetworkAvailability",
-                        !was_offline_during_last_request_attempt_);
-  if (was_offline_during_last_request_attempt_) {
-    DVLOG(1) << "Network was offline.";
-    return;
-  }
+void VariationsService::SetCreateTrialsFromSeedCalledForTesting(bool called) {
+  create_trials_from_seed_called_ = called;
+}
 
+void VariationsService::DoActualFetch() {
   pending_seed_request_.reset(net::URLFetcher::Create(
       variations_server_url_, net::URLFetcher::GET, this));
   pending_seed_request_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
@@ -175,18 +183,19 @@ void VariationsService::FetchVariationsSeed() {
                                                  variations_serial_number_);
   }
   pending_seed_request_->Start();
+
+  last_request_started_time_ = base::TimeTicks::Now();
 }
 
-void VariationsService::SetWasOfflineDuringLastRequestAttemptForTesting(
-    bool offline) {
-  was_offline_during_last_request_attempt_ = offline;
-}
+void VariationsService::FetchVariationsSeed() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-// static
-void VariationsService::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterStringPref(prefs::kVariationsSeed, std::string());
-  prefs->RegisterInt64Pref(prefs::kVariationsSeedDate,
-                           base::Time().ToInternalValue());
+  if (!resource_request_allowed_notifier_->ResourceRequestsAllowed()) {
+    DVLOG(1) << "Resource requests were not allowed. Waiting for notification.";
+    return;
+  }
+
+  DoActualFetch();
 }
 
 void VariationsService::OnURLFetchComplete(const net::URLFetcher* source) {
@@ -199,11 +208,24 @@ void VariationsService::OnURLFetchComplete(const net::URLFetcher* source) {
     return;
   }
 
+  // Log the response code.
+  UMA_HISTOGRAM_CUSTOM_ENUMERATION("Variations.SeedFetchResponseCode",
+      net::HttpUtil::MapStatusCodeForHistogram(request->GetResponseCode()),
+      net::HttpUtil::GetStatusCodesForHistogram());
+
+  const base::TimeDelta latency =
+      base::TimeTicks::Now() - last_request_started_time_;
+
   if (request->GetResponseCode() != 200) {
     DVLOG(1) << "Variations server request returned non-200 response code: "
              << request->GetResponseCode();
+    if (request->GetResponseCode() == 304)
+      UMA_HISTOGRAM_MEDIUM_TIMES("Variations.FetchNotModifiedLatency", latency);
+    else
+      UMA_HISTOGRAM_MEDIUM_TIMES("Variations.FetchOtherLatency", latency);
     return;
   }
+  UMA_HISTOGRAM_MEDIUM_TIMES("Variations.FetchSuccessLatency", latency);
 
   std::string seed_data;
   bool success = request->GetResponseAsString(&seed_data);
@@ -216,24 +238,17 @@ void VariationsService::OnURLFetchComplete(const net::URLFetcher* source) {
   StoreSeedData(seed_data, response_date, g_browser_process->local_state());
 }
 
-void VariationsService::OnConnectionTypeChanged(
-    net::NetworkChangeNotifier::ConnectionType type) {
-  // If the connection type is back online, start a request if the last request
-  // failed due to being offline.
-  if (was_offline_during_last_request_attempt_ &&
-      type != net::NetworkChangeNotifier::CONNECTION_NONE) {
-    VLOG(1) << "Retrying fetch due to network reconnect.";
-    FetchVariationsSeed();
-
-    // Since FetchVariationsSeed was explicitly called here, reset the timer to
-    // avoid retrying for a full period.
-    // net::NetworkChangeNotifier::IsOffline may be inconsistent with |type|, so
-    // we check if FetchVariationsSeed set
-    // |was_offline_during_last_request_attempt_| to true before we reset the
-    // timer.
-    if (!was_offline_during_last_request_attempt_ && timer_.IsRunning())
-      timer_.Reset();
-  }
+void VariationsService::OnResourceRequestsAllowed() {
+  // Note that this only attempts to fetch the seed at most once per period
+  // (kSeedFetchPeriodHours). This works because
+  // |resource_request_allowed_notifier_| only calls this method if an
+  // attempt was made earlier that fails (which implies that the period had
+  // elapsed). After a successful attempt is made, the notifier will know not
+  // to call this method again until another failed attempt occurs.
+  DVLOG(1) << "Retrying fetch.";
+  DoActualFetch();
+  if (timer_.IsRunning())
+    timer_.Reset();
 }
 
 bool VariationsService::StoreSeedData(const std::string& seed_data,
@@ -497,7 +512,14 @@ void VariationsService::CreateTrialFromStudy(const Study& study,
   }
 
   trial->SetForced();
-  if (IsStudyExpired(study, reference_date))
+  bool study_expired = IsStudyExpired(study, reference_date);
+  // This metric is used to help track down a specific problem with the
+  // uniformity trials. It can be removed when that investigation is complete.
+  if (study.name() == "UMA-Uniformity-Trial-1-Percent") {
+    UMA_HISTOGRAM_BOOLEAN("Variations.ServerStudyExpiredUniformity1Percent",
+                          study_expired);
+  }
+  if (study_expired)
     trial->Disable();
 }
 

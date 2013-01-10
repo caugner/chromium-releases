@@ -15,6 +15,8 @@
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/api/prefs/pref_member.h"
+#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/infobars/infobar_container.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
@@ -26,14 +28,16 @@
 
 class BookmarkBarGtk;
 class Browser;
-class BrowserTitlebarBase;
+class BrowserTitlebar;
 class BrowserToolbarGtk;
+class DevToolsWindow;
 class DownloadShelfGtk;
 class ExtensionKeybindingRegistryGtk;
 class FindBarGtk;
 class FullscreenExitBubbleGtk;
 class GlobalMenuBar;
 class InfoBarContainerGtk;
+class InstantPreviewControllerGtk;
 class LocationBar;
 class PrefService;
 class StatusBubbleGtk;
@@ -45,6 +49,7 @@ class PasswordGenerator;
 }
 
 namespace extensions {
+class ActiveTabPermissionGranter;
 class Extension;
 }
 
@@ -52,22 +57,24 @@ class Extension;
 // Cross-platform code will interact with this object when
 // it needs to manipulate the window.
 
-class BrowserWindowGtk : public BrowserWindow,
-                         public content::NotificationObserver,
-                         public TabStripModelObserver,
-                         public ui::ActiveWindowWatcherXObserver,
-                         public InfoBarContainer::Delegate {
+class BrowserWindowGtk
+    : public BrowserWindow,
+      public content::NotificationObserver,
+      public TabStripModelObserver,
+      public ui::ActiveWindowWatcherXObserver,
+      public InfoBarContainer::Delegate,
+      public extensions::ExtensionKeybindingRegistry::Delegate {
  public:
   explicit BrowserWindowGtk(Browser* browser);
   virtual ~BrowserWindowGtk();
 
-  // Separating initialization from constructor allows invocation of virtual
-  // functions during initialization.
-  virtual void Init();
+  // Separating initialization from constructor.
+  void Init();
 
   // Overridden from BrowserWindow:
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
+  virtual void Hide() OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void Activate() OVERRIDE;
@@ -82,7 +89,6 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE;
   virtual void UpdateDevTools() OVERRIDE;
-  virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE;
@@ -156,19 +162,18 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void Cut() OVERRIDE;
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
-  virtual void ShowInstant(TabContents* preview) OVERRIDE;
-  virtual void HideInstant() OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual bool IsInstantTabShowing() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
+  virtual bool GetConstrainedWindowTopY(int* top_y) OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
-      const webkit::forms::PasswordForm& form,
+      const content::PasswordForm& form,
       autofill::PasswordGenerator* password_generator) OVERRIDE;
 
   // Overridden from NotificationObserver:
@@ -191,16 +196,12 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void InfoBarContainerStateChanged(bool is_animating) OVERRIDE;
   virtual bool DrawInfoBarArrows(int* x) const OVERRIDE;
 
+  // Overridden from ExtensionKeybindingRegistry::Delegate:
+  virtual extensions::ActiveTabPermissionGranter*
+      GetActiveTabPermissionGranter() OVERRIDE;
+
   // Accessor for the tab strip.
   TabStripGtk* tabstrip() const { return tabstrip_.get(); }
-
-  void UpdateDevToolsForContents(content::WebContents* contents);
-
-  // Shows docked devtools.
-  void ShowDevToolsContainer();
-
-  // Hides docked devtools.
-  void HideDevToolsContainer();
 
   void OnDebouncedBoundsChanged();
 
@@ -237,7 +238,7 @@ class BrowserWindowGtk : public BrowserWindow,
 
   GtkWindow* window() const { return window_; }
 
-  BrowserTitlebarBase* titlebar() const { return titlebar_.get(); }
+  BrowserTitlebar* titlebar() const { return titlebar_.get(); }
 
   GtkWidget* titlebar_widget() const;
 
@@ -259,56 +260,39 @@ class BrowserWindowGtk : public BrowserWindow,
   // |relative_to| coordinates. This is the middle of the omnibox location icon.
   int GetXPositionOfLocationIcon(GtkWidget* relative_to);
 
+  // Show or hide the bookmark bar.
+  void MaybeShowBookmarkBar(bool animate);
+
  protected:
   virtual void DestroyBrowser() OVERRIDE;
-
-  // Returns an instance of |BrowserTitlebarBase| to be used for this window.
-  virtual BrowserTitlebarBase* CreateBrowserTitlebar();
 
   // Checks to see if the mouse pointer at |x|, |y| is over the border of the
   // custom frame (a spot that should trigger a window resize). Returns true if
   // it should and sets |edge|.
-  virtual bool GetWindowEdge(int x, int y, GdkWindowEdge* edge);
+  bool GetWindowEdge(int x, int y, GdkWindowEdge* edge);
 
   // Returns the window shape for the window with |width| and |height|.
   // The caller is responsible for destroying the region if non-null region is
   // returned.
-  virtual GdkRegion* GetWindowShape(int width, int height) const;
-
-  // Draws the frame, including background, border and drop shadow.
-  virtual void DrawFrame(GtkWidget* widget, GdkEventExpose* event);
-
-  virtual bool HandleTitleBarLeftMousePress(GdkEventButton* event);
-
-  // Returns true if handled.
-  virtual bool HandleWindowEdgeLeftMousePress(GtkWindow* window,
-                                              GdkWindowEdge edge,
-                                              GdkEventButton* event);
+  GdkRegion* GetWindowShape(int width, int height) const;
 
   // Save the window position in the prefs.
-  virtual void SaveWindowPosition();
+  void SaveWindowPosition();
 
   // Sets the default size for the window and the way the user is allowed to
   // resize it.
-  virtual void SetGeometryHints();
+  void SetGeometryHints();
 
   // Returns |true| if we should use the custom frame.
-  virtual bool UseCustomFrame() const;
-
-  // Called when the window size changed.
-  virtual void OnSizeChanged(int width, int height);
-
-  // 'focus-in-event' handler.
-  virtual void HandleFocusIn(GtkWidget* widget, GdkEventFocus* event);
-
-  // Returns the size of the window frame around the client content area.
-  gfx::Size GetNonClientFrameSize() const;
+  bool UseCustomFrame() const;
 
   // Invalidate window to force repaint.
   void InvalidateWindow();
 
   // Top level window.
   GtkWindow* window_;
+  // Determines whether window was shown.
+  bool window_has_shown_;
   // GtkAlignment that holds the interior components of the chromium window.
   // This is used to draw the custom frame border and content shadow.
   GtkWidget* window_container_;
@@ -327,9 +311,6 @@ class BrowserWindowGtk : public BrowserWindow,
   scoped_ptr<Browser> browser_;
 
  private:
-  // Show or hide the bookmark bar.
-  void MaybeShowBookmarkBar(bool animate);
-
   // Connect to signals on |window_|.
   void ConnectHandlersToSignals();
 
@@ -462,6 +443,25 @@ class BrowserWindowGtk : public BrowserWindow,
   // Put the bookmark bar where it belongs.
   void PlaceBookmarkBar(bool is_floating);
 
+  // Decides if we should draw the frame as if the window is active.
+  bool DrawFrameAsActive() const;
+
+  // Updates devtools window for given contents. This method will show docked
+  // devtools window for inspected |contents| that has docked devtools
+  // and hide it for NULL or not inspected |contents|. It will also make
+  // sure devtools window size and position are restored for given tab.
+  void UpdateDevToolsForContents(content::WebContents* contents);
+
+  // Shows docked devtools.
+  void ShowDevToolsContainer();
+
+  // Hides docked devtools.
+  void HideDevToolsContainer();
+
+  // Reads split position from the current tab's devtools window and applies
+  // it to the devtools split.
+  void UpdateDevToolsSplitPosition();
+
   // Determine whether we use should default to native decorations or the custom
   // frame based on the currently-running window manager.
   static bool GetCustomFramePrefDefault();
@@ -483,7 +483,7 @@ class BrowserWindowGtk : public BrowserWindow,
   scoped_ptr<GlobalMenuBar> global_menu_bar_;
 
   // The container for the titlebar + tab strip.
-  scoped_ptr<BrowserTitlebarBase> titlebar_;
+  scoped_ptr<BrowserTitlebar> titlebar_;
 
   // The object that manages all of the widgets in the toolbar.
   scoped_ptr<BrowserToolbarGtk> toolbar_;
@@ -507,12 +507,19 @@ class BrowserWindowGtk : public BrowserWindow,
   // selected tab contents.
   scoped_ptr<TabContentsContainerGtk> devtools_container_;
 
+  // A sub-controller that manages the Instant preview visual state.
+  scoped_ptr<InstantPreviewControllerGtk> instant_preview_controller_;
+
   // The Extension Keybinding Registry responsible for registering listeners for
   // accelerators that are sent to the window, that are destined to be turned
   // into events and sent to the extension.
   scoped_ptr<ExtensionKeybindingRegistryGtk> extension_keybinding_registry_;
 
   DevToolsDockSide devtools_dock_side_;
+
+  // Docked devtools window instance. NULL when current tab is not inspected
+  // or is inspected with undocked version of DevToolsWindow.
+  DevToolsWindow* devtools_window_;
 
   // Split pane containing the contents_container_ and the devtools_container_.
   GtkWidget* contents_hsplit_;

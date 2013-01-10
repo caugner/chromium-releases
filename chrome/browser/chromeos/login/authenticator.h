@@ -90,8 +90,8 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   // authentication process.
   Profile* authentication_profile() { return authentication_profile_; }
 
-  // Sets consumer explicitly.
-  void SetConsumer(LoginStatusConsumer* consumer);
+  // Resets consumer.
+  void ResetConsumer();
 
  protected:
   virtual ~Authenticator();

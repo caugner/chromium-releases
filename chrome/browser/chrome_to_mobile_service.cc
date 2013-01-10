@@ -13,6 +13,7 @@
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/chrome_to_mobile_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,13 +24,12 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/cloud_print/cloud_print_helpers.h"
-#include "chrome/common/extensions/extension_switch_utils.h"
+#include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -50,6 +50,30 @@
 
 namespace {
 
+enum Metric {
+  DEVICES_REQUESTED = 0,  // Cloud print was contacted to list devices.
+  DEVICES_AVAILABLE,      // Cloud print returned 1+ compatible devices.
+  BUBBLE_SHOWN,           // The page action bubble was shown.
+  SNAPSHOT_GENERATED,     // A snapshot was successfully generated.
+  SNAPSHOT_ERROR,         // An error occurred during snapshot generation.
+  SENDING_URL,            // Send was invoked (with or without a snapshot).
+  SENDING_SNAPSHOT,       // A snapshot was sent along with the page URL.
+  SEND_SUCCESS,           // Cloud print responded with success on send.
+  SEND_ERROR,             // Cloud print responded with failure on send.
+  LEARN_MORE_CLICKED,     // The "Learn more" help article link was clicked.
+  BAD_TOKEN,              // The cloud print access token could not be minted.
+  BAD_SEARCH_AUTH,        // The cloud print search request failed (auth).
+  BAD_SEARCH_OTHER,       // The cloud print search request failed (other).
+  BAD_SEND_407,           // The cloud print send response was errorCode==407.
+                          // "Print job added but failed to notify printer..."
+  BAD_SEND_ERROR,         // The cloud print send response was errorCode!=407.
+  BAD_SEND_AUTH,          // The cloud print send request failed (auth).
+  BAD_SEND_OTHER,         // The cloud print send request failed (other).
+  SEARCH_SUCCESS,         // Cloud print responded with success on search.
+  SEARCH_ERROR,           // Cloud print responded with failure on search.
+  NUM_METRICS,
+};
+
 // The maximum number of retries for the URLFetcher requests.
 const size_t kMaxRetries = 5;
 
@@ -67,9 +91,8 @@ const char kTypeAndroid[] = "ANDROID_CHROME_SNAPSHOT";
 const char kTypeIOS[] = "IOS_CHROME_SNAPSHOT";
 
 // Log a metric for the "ChromeToMobile.Service" histogram.
-void LogServiceMetric(ChromeToMobileService::Metric metric) {
-  UMA_HISTOGRAM_ENUMERATION("ChromeToMobile.Service", metric,
-                            ChromeToMobileService::NUM_METRICS);
+void LogMetric(Metric metric) {
+  UMA_HISTOGRAM_ENUMERATION("ChromeToMobile.Service", metric, NUM_METRICS);
 }
 
 // Get the job type string for a cloud print job submission.
@@ -151,7 +174,7 @@ void CreateSnapshotFile(CreateSnapshotFileCallback callback) {
     file.clear();
   if (!content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
                                         base::Bind(callback, file))) {
-    LogServiceMetric(ChromeToMobileService::SNAPSHOT_ERROR);
+    LogMetric(SNAPSHOT_ERROR);
     NOTREACHED();
   }
 }
@@ -169,7 +192,7 @@ void ReadSnapshotFile(scoped_ptr<ChromeToMobileService::JobData> data,
     data->snapshot_content.clear();
   if (!content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
           base::Bind(callback, base::Passed(&data)))) {
-    LogServiceMetric(ChromeToMobileService::SNAPSHOT_ERROR);
+    LogMetric(SNAPSHOT_ERROR);
     NOTREACHED();
   }
 }
@@ -182,7 +205,18 @@ void DeleteSnapshotFile(const FilePath& snapshot) {
   DCHECK(success);
 }
 
+// Returns true if the url can be sent via Chrome To Mobile.
+bool CanSendURL(const GURL& url) {
+  return url.SchemeIs(chrome::kHttpScheme) ||
+         url.SchemeIs(chrome::kHttpsScheme) ||
+         url.SchemeIs(chrome::kFtpScheme);
+}
+
 }  // namespace
+
+ChromeToMobileService::Observer::Observer() {
+  LogMetric(BUBBLE_SHOWN);
+}
 
 ChromeToMobileService::Observer::~Observer() {}
 
@@ -193,7 +227,22 @@ ChromeToMobileService::JobData::~JobData() {}
 // static
 bool ChromeToMobileService::IsChromeToMobileEnabled() {
   // Chrome To Mobile is currently gated on the Action Box UI.
-  return extensions::switch_utils::IsActionBoxEnabled();
+  return extensions::FeatureSwitch::action_box()->IsEnabled();
+}
+
+// static
+bool ChromeToMobileService::UpdateAndGetCommandState(Browser* browser) {
+  bool enabled = IsChromeToMobileEnabled();
+  if (enabled) {
+    const ChromeToMobileService* service =
+        ChromeToMobileServiceFactory::GetForProfile(browser->profile());
+    DCHECK(!browser->profile()->IsOffTheRecord() || !service);
+    enabled = service && service->HasMobiles() &&
+        CanSendURL(chrome::GetActiveWebContents(browser)->GetURL());
+  }
+  browser->command_controller()->command_updater()->
+      UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE, enabled);
+  return enabled;
 }
 
 // static
@@ -278,6 +327,7 @@ void ChromeToMobileService::SendToMobile(const base::DictionaryValue* mobile,
   if (!mobile->GetString("id", &data->mobile_id))
     NOTREACHED();
   content::WebContents* web_contents = chrome::GetActiveWebContents(browser);
+  DCHECK(CanSendURL(web_contents->GetURL()));
   data->url = web_contents->GetURL();
   data->title = web_contents->GetTitle();
   data->snapshot = snapshot;
@@ -315,10 +365,6 @@ void ChromeToMobileService::DeleteSnapshot(const FilePath& snapshot) {
   }
 }
 
-void ChromeToMobileService::LogMetric(Metric metric) const {
-  LogServiceMetric(metric);
-}
-
 void ChromeToMobileService::LearnMore(Browser* browser) const {
   LogMetric(LEARN_MORE_CLICKED);
   chrome::NavigateParams params(browser,
@@ -337,10 +383,12 @@ void ChromeToMobileService::Shutdown() {
 }
 
 void ChromeToMobileService::OnURLFetchComplete(const net::URLFetcher* source) {
-  if (source->GetURL() == GetSearchURL(cloud_print_url_))
+  if (source->GetOriginalURL() == GetSearchURL(cloud_print_url_))
     HandleSearchResponse(source);
-  else
+  else if (source->GetOriginalURL() == GetSubmitURL(cloud_print_url_))
     HandleSubmitResponse(source);
+  else
+    NOTREACHED();
 
   // Remove the URLFetcher from the ScopedVector; this deletes the URLFetcher.
   for (ScopedVector<net::URLFetcher>::iterator it = url_fetchers_.begin();
@@ -394,7 +442,13 @@ void ChromeToMobileService::OnGetTokenSuccess(
 
 void ChromeToMobileService::OnGetTokenFailure(
     const GoogleServiceAuthError& error) {
+  // Log a general auth error metric for the "ChromeToMobile.Service" histogram.
   LogMetric(BAD_TOKEN);
+  // Log a more detailed metric for the "ChromeToMobile.AuthError" histogram.
+  UMA_HISTOGRAM_ENUMERATION("ChromeToMobile.AuthError", error.state(),
+                            GoogleServiceAuthError::NUM_STATES);
+  VLOG(0) << "ChromeToMobile auth failed: " << error.ToString();
+
   access_token_.clear();
   access_token_fetcher_.reset();
   auth_retry_timer_.Stop();
@@ -407,20 +461,18 @@ void ChromeToMobileService::OnGetTokenFailure(
   // Clear the mobile list, which may be (or become) out of date.
   ListValue empty;
   profile_->GetPrefs()->Set(prefs::kChromeToMobileDeviceList, empty);
-  UpdateCommandState();
 }
 
 void ChromeToMobileService::OnInvalidatorStateChange(
     syncer::InvalidatorState state) {
   sync_invalidation_enabled_ = (state == syncer::INVALIDATIONS_ENABLED);
-  UpdateCommandState();
 }
 
 void ChromeToMobileService::OnIncomingInvalidation(
-    const syncer::ObjectIdStateMap& id_state_map,
+    const syncer::ObjectIdInvalidationMap& invalidation_map,
     syncer::IncomingInvalidationSource source) {
-  DCHECK_EQ(1U, id_state_map.size());
-  DCHECK_EQ(1U, id_state_map.count(invalidation::ObjectId(
+  DCHECK_EQ(1U, invalidation_map.size());
+  DCHECK_EQ(1U, invalidation_map.count(invalidation::ObjectId(
       ipc::invalidation::ObjectSource::CHROME_COMPONENTS,
       kSyncInvalidationObjectIdChromeToMobileDeviceList)));
   RequestDeviceSearch();
@@ -435,18 +487,6 @@ void ChromeToMobileService::SetAccessTokenForTest(
   access_token_ = access_token;
 }
 
-void ChromeToMobileService::UpdateCommandState() const {
-  // Ensure the feature is not disabled by commandline options.
-  DCHECK(IsChromeToMobileEnabled());
-  const bool has_mobiles = HasMobiles();
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    Browser* browser = *i;
-    if (browser->profile() == profile_)
-      browser->command_controller()->SendToMobileStateChanged(has_mobiles);
-  }
-}
-
 void ChromeToMobileService::SnapshotFileCreated(
     base::WeakPtr<Observer> observer,
     SessionID::id_type browser_id,
@@ -455,17 +495,23 @@ void ChromeToMobileService::SnapshotFileCreated(
   // Track the set of temporary files to be deleted later.
   snapshots_.insert(path);
 
+  // Generate the snapshot and callback SnapshotGenerated, or signal failure.
   Browser* browser = browser::FindBrowserWithID(browser_id);
   if (!path.empty() && browser && chrome::GetActiveWebContents(browser)) {
-    // Generate the snapshot and have the observer be called back on completion.
     chrome::GetActiveWebContents(browser)->GenerateMHTML(path,
-        base::Bind(&Observer::SnapshotGenerated, observer));
+        base::Bind(&ChromeToMobileService::SnapshotGenerated,
+                   weak_ptr_factory_.GetWeakPtr(), observer));
   } else {
-    LogMetric(SNAPSHOT_ERROR);
-    // Signal snapshot generation failure.
-    if (observer.get())
-      observer->SnapshotGenerated(FilePath(), 0);
+    SnapshotGenerated(observer, FilePath(), 0);
   }
+}
+
+void ChromeToMobileService::SnapshotGenerated(base::WeakPtr<Observer> observer,
+                                              const FilePath& path,
+                                              int64 bytes) {
+  LogMetric(bytes > 0 ? SNAPSHOT_GENERATED : SNAPSHOT_ERROR);
+  if (observer.get())
+    observer->SnapshotGenerated(path, bytes);
 }
 
 void ChromeToMobileService::SnapshotFileRead(base::WeakPtr<Observer> observer,
@@ -590,33 +636,36 @@ void ChromeToMobileService::RequestDeviceSearch() {
 void ChromeToMobileService::HandleSearchResponse(
     const net::URLFetcher* source) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DCHECK_EQ(source->GetURL(), GetSearchURL(cloud_print_url_));
+  DCHECK_EQ(source->GetOriginalURL(), GetSearchURL(cloud_print_url_));
 
   ListValue mobiles;
   std::string data;
+  bool success = false;
   ListValue* list = NULL;
   DictionaryValue* dictionary = NULL;
   source->GetResponseAsString(&data);
   scoped_ptr<Value> json(base::JSONReader::Read(data));
-  if (json.get() && json->GetAsDictionary(&dictionary) && dictionary &&
-      dictionary->GetList(cloud_print::kPrinterListValue, &list)) {
-    std::string type, name, id;
-    DictionaryValue* printer = NULL;
-    DictionaryValue* mobile = NULL;
-    for (size_t index = 0; index < list->GetSize(); ++index) {
-      if (list->GetDictionary(index, &printer) &&
-          printer->GetString("type", &type) &&
-          (type.compare(kTypeAndroid) == 0 || type.compare(kTypeIOS) == 0)) {
-        // Copy just the requisite values from the full |printer| definition.
-        if (printer->GetString("displayName", &name) &&
-            printer->GetString("id", &id)) {
-          mobile = new DictionaryValue();
-          mobile->SetString("type", type);
-          mobile->SetString("name", name);
-          mobile->SetString("id", id);
-          mobiles.Append(mobile);
-        } else {
-          NOTREACHED();
+  if (json.get() && json->GetAsDictionary(&dictionary) && dictionary) {
+    dictionary->GetBoolean("success", &success);
+    if (dictionary->GetList(cloud_print::kPrinterListValue, &list)) {
+      std::string type, name, id;
+      DictionaryValue* printer = NULL;
+      DictionaryValue* mobile = NULL;
+      for (size_t index = 0; index < list->GetSize(); ++index) {
+        if (list->GetDictionary(index, &printer) &&
+            printer->GetString("type", &type) &&
+            (type.compare(kTypeAndroid) == 0 || type.compare(kTypeIOS) == 0)) {
+          // Copy just the requisite values from the full |printer| definition.
+          if (printer->GetString("displayName", &name) &&
+              printer->GetString("id", &id)) {
+            mobile = new DictionaryValue();
+            mobile->SetString("type", type);
+            mobile->SetString("name", name);
+            mobile->SetString("id", id);
+            mobiles.Append(mobile);
+          } else {
+            NOTREACHED();
+          }
         }
       }
     }
@@ -635,14 +684,19 @@ void ChromeToMobileService::HandleSearchResponse(
 
   // Update the cached mobile device list in profile prefs.
   profile_->GetPrefs()->Set(prefs::kChromeToMobileDeviceList, mobiles);
+
   if (HasMobiles())
     LogMetric(DEVICES_AVAILABLE);
-  UpdateCommandState();
+  LogMetric(success ? SEARCH_SUCCESS : SEARCH_ERROR);
+  VLOG_IF(0, !success) << "ChromeToMobile search failed (" <<
+                          source->GetResponseCode() << "): " << data;
 }
 
 void ChromeToMobileService::HandleSubmitResponse(
     const net::URLFetcher* source) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_EQ(source->GetOriginalURL(), GetSubmitURL(cloud_print_url_));
+
   // Get the success value from the cloud print server response data.
   std::string data;
   bool success = false;
@@ -662,8 +716,8 @@ void ChromeToMobileService::HandleSubmitResponse(
 
   // Log each URL and [DELAYED_]SNAPSHOT job submission response.
   LogMetric(success ? SEND_SUCCESS : SEND_ERROR);
-  LOG_IF(INFO, !success) << "ChromeToMobile send failed (" <<
-                            source->GetResponseCode() << "): " << data;
+  VLOG_IF(0, !success) << "ChromeToMobile send failed (" <<
+                          source->GetResponseCode() << "): " << data;
 
   // Get the observer for this job submission response.
   base::WeakPtr<Observer> observer;

@@ -19,6 +19,19 @@ class AwWebContentsDelegate
  public:
   AwWebContentsDelegate(JNIEnv* env, jobject obj);
   virtual ~AwWebContentsDelegate();
+  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator()
+      OVERRIDE;
+  virtual void FindReply(content::WebContents* web_contents,
+                         int request_id,
+                         int number_of_matches,
+                         const gfx::Rect& selection_rect,
+                         int active_match_ordinal,
+                         bool final_update) OVERRIDE;
+  virtual bool CanDownload(content::RenderViewHost* source,
+                           int request_id,
+                           const std::string& request_method) OVERRIDE;
+  virtual void OnStartDownload(content::WebContents* source,
+                               content::DownloadItem* download) OVERRIDE;
 };
 
 }  // namespace android_webview

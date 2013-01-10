@@ -8,9 +8,7 @@
 #ifndef SYNC_ENGINE_CONFLICT_RESOLVER_H_
 #define SYNC_ENGINE_CONFLICT_RESOLVER_H_
 
-#include <map>
 #include <set>
-#include <string>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
@@ -19,16 +17,13 @@
 namespace syncer {
 
 namespace syncable {
-class BaseTransaction;
 class Id;
-class MutableEntry;
 class WriteTransaction;
 }  // namespace syncable
 
 class Cryptographer;
 
 namespace sessions {
-class ConflictProgress;
 class StatusController;
 }  // namespace sessions
 
@@ -54,27 +49,17 @@ class ConflictResolver {
   ~ConflictResolver();
   // Called by the syncer at the end of a update/commit cycle.
   // Returns true if the syncer should try to apply its updates again.
-  bool ResolveConflicts(syncable::WriteTransaction* trans,
+  void ResolveConflicts(syncable::WriteTransaction* trans,
                         const Cryptographer* cryptographer,
-                        const sessions::ConflictProgress& progress,
+                        const std::set<syncable::Id>& simple_conflict_ids,
                         sessions::StatusController* status);
 
  private:
-  enum ProcessSimpleConflictResult {
-    NO_SYNC_PROGRESS,  // No changes to advance syncing made.
-    SYNC_PROGRESS,     // Progress made.
-  };
-
-  ProcessSimpleConflictResult ProcessSimpleConflict(
+  void ProcessSimpleConflict(
       syncable::WriteTransaction* trans,
       const syncable::Id& id,
       const Cryptographer* cryptographer,
       sessions::StatusController* status);
-
-  bool ResolveSimpleConflicts(syncable::WriteTransaction* trans,
-                              const Cryptographer* cryptographer,
-                              const sessions::ConflictProgress& progress,
-                              sessions::StatusController* status);
 
   DISALLOW_COPY_AND_ASSIGN(ConflictResolver);
 };

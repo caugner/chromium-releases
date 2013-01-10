@@ -6,6 +6,9 @@
 #include "base/memory/scoped_vector.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -15,7 +18,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/result_codes.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "net/base/mock_host_resolver.h"
@@ -49,7 +54,7 @@ void WaitForTabsAndPopups(Browser* browser,
   const base::TimeDelta kWaitTime = base::TimeDelta::FromSeconds(15);
   base::TimeTicks end_time = base::TimeTicks::Now() + kWaitTime;
   while (base::TimeTicks::Now() < end_time) {
-    if (browser::GetBrowserCount(browser->profile()) == num_browsers &&
+    if (chrome::GetBrowserCount(browser->profile()) == num_browsers &&
         browser->tab_count() == num_tabs &&
         PanelManager::GetInstance()->num_panels() == num_panels)
       break;
@@ -57,7 +62,7 @@ void WaitForTabsAndPopups(Browser* browser,
     content::RunAllPendingInMessageLoop();
   }
 
-  EXPECT_EQ(num_browsers, browser::GetBrowserCount(browser->profile()));
+  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(browser->profile()));
   EXPECT_EQ(num_tabs, browser->tab_count());
   EXPECT_EQ(num_panels, PanelManager::GetInstance()->num_panels());
 
@@ -282,6 +287,57 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
   WaitForTabsAndPopups(browser(), 1, num_popups, 0);
 }
 
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, ClosePanelsOnExtensionCrash) {
+#if defined(USE_ASH)
+  // On Ash, new panel windows open as popup windows instead.
+  int num_popups = 4;
+  int num_panels = 0;
+#else
+  int num_popups = 2;
+  int num_panels = 2;
+#endif
+  ASSERT_TRUE(StartTestServer());
+
+  // Setup listeners to wait on strings we expect the extension pages to send.
+  std::vector<std::string> test_strings;
+  test_strings.push_back("content_tab");
+  if (num_panels)
+    test_strings.push_back("content_panel");
+  test_strings.push_back("content_popup");
+
+  ScopedVector<ExtensionTestMessageListener> listeners;
+  for (size_t i = 0; i < test_strings.size(); ++i) {
+    listeners.push_back(
+        new ExtensionTestMessageListener(test_strings[i], false));
+  }
+
+  const extensions::Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("window_open").AppendASCII(
+          "close_panels_on_uninstall"));
+  ASSERT_TRUE(extension);
+
+  // Two tabs. One in extension domain and one in non-extension domain.
+  // Two popups - one in extension domain and one in non-extension domain.
+  // Two panels - one in extension domain and one in non-extension domain.
+  WaitForTabsAndPopups(browser(), 2, num_popups, num_panels);
+
+  // Wait on test messages to make sure the pages loaded.
+  for (size_t i = 0; i < listeners.size(); ++i)
+    ASSERT_TRUE(listeners[i]->WaitUntilSatisfied());
+
+  // Crash the extension.
+  extensions::ExtensionHost* extension_host =
+      extensions::ExtensionSystem::Get(browser()->profile())->
+          process_manager()->GetBackgroundHostForExtension(extension->id());
+  ASSERT_TRUE(extension_host);
+  base::KillProcess(extension_host->render_process_host()->GetHandle(),
+                    content::RESULT_CODE_KILLED, false);
+  WaitForExtensionCrash(extension->id());
+
+  // Only expect panels to close. The rest stay open to show a sad-tab.
+  WaitForTabsAndPopups(browser(), 2, num_popups, 0);
+}
+
 #if defined(USE_ASH)
 // This test is not applicable on Ash. Ash opens panel windows as popup
 // windows. The modified window.open behavior only applies to panel windows.
@@ -315,7 +371,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenExtension) {
   GURL start_url(std::string("chrome-extension://") +
       last_loaded_extension_id_ + "/test.html");
   ui_test_utils::NavigateToURL(browser(), start_url);
-  WebContents* newtab;
+  WebContents* newtab = NULL;
   ASSERT_NO_FATAL_FAILURE(OpenWindow(chrome::GetActiveWebContents(browser()),
                           start_url.Resolve("newtab.html"), true, &newtab));
 
@@ -350,7 +406,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenNoPrivileges) {
       test_data_dir_.AppendASCII("uitest").AppendASCII("window_open")));
 
   ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
-  WebContents* newtab;
+  WebContents* newtab = NULL;
   ASSERT_NO_FATAL_FAILURE(OpenWindow(chrome::GetActiveWebContents(browser()),
       GURL(std::string("chrome-extension://") + last_loaded_extension_id_ +
           "/newtab.html"), false, &newtab));

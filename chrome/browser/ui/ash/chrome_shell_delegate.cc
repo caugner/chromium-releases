@@ -11,6 +11,7 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
@@ -18,15 +19,18 @@
 #include "chrome/browser/ui/ash/app_list/app_list_controller_ash.h"
 #include "chrome/browser/ui/ash/caps_lock_handler.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
 #include "chrome/browser/ui/ash/user_action_handler.h"
 #include "chrome/browser/ui/ash/window_positioner.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
@@ -63,7 +67,8 @@ Browser* GetTargetBrowser() {
   if (browser)
     return browser;
   return browser::FindOrCreateTabbedBrowser(
-      ProfileManager::GetDefaultProfileOrOffTheRecord());
+      ProfileManager::GetDefaultProfileOrOffTheRecord(),
+      chrome::HOST_DESKTOP_TYPE_ASH);
 }
 
 }  // namespace
@@ -73,7 +78,8 @@ ChromeShellDelegate* ChromeShellDelegate::instance_ = NULL;
 
 ChromeShellDelegate::ChromeShellDelegate()
     : window_positioner_(new ash::WindowPositioner()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      launcher_delegate_(NULL) {
   instance_ = this;
 #if defined(OS_CHROMEOS)
   registrar_.Add(
@@ -279,15 +285,16 @@ void ChromeShellDelegate::ShowKeyboardOverlay() {
   // TODO(mazda): Move the show logic to ash (http://crbug.com/124222).
   Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
   std::string url(chrome::kChromeUIKeyboardOverlayURL);
-  KeyboardOverlayView::ShowDialog(profile,
-                                  new ChromeWebContentsHandler,
-                                  GURL(url));
+  ash::KeyboardOverlayView::ShowDialog(profile,
+                                       new ChromeWebContentsHandler,
+                                       GURL(url));
 #endif
 }
 
 void ChromeShellDelegate::ShowTaskManager() {
   Browser* browser = browser::FindOrCreateTabbedBrowser(
-      ProfileManager::GetDefaultProfileOrOffTheRecord());
+      ProfileManager::GetDefaultProfileOrOffTheRecord(),
+      chrome::HOST_DESKTOP_TYPE_ASH);
   chrome::OpenTaskManager(browser, false);
 }
 
@@ -320,15 +327,19 @@ app_list::AppListViewDelegate*
   DCHECK(ash::Shell::HasInstance());
   // Shell will own the created delegate, and the delegate will own
   // the controller.
-  return new AppListViewDelegate(new AppListControllerAsh());
+  return new AppListViewDelegate(new AppListControllerDelegateAsh());
 }
 
 ash::LauncherDelegate* ChromeShellDelegate::CreateLauncherDelegate(
     ash::LauncherModel* model) {
-  ChromeLauncherController* controller =
-      new ChromeLauncherController(NULL, model);
-  controller->Init();
-  return controller;
+  // TODO(oshima): This is currently broken with multiple launchers.
+  // Refactor so that there is just one launcher delegate in the
+  // shell.
+  if (!launcher_delegate_) {
+    launcher_delegate_ = new ChromeLauncherController(NULL, model);
+    launcher_delegate_->Init();
+  }
+  return launcher_delegate_;
 }
 
 ash::SystemTrayDelegate* ChromeShellDelegate::CreateSystemTrayDelegate(
@@ -404,6 +415,14 @@ void ChromeShellDelegate::RecordUserMetricsAction(
     case ash::UMA_LAUNCHER_CLICK_ON_APP:
       content::RecordAction(content::UserMetricsAction("Launcher_ClickOnApp"));
       break;
+    case ash::UMA_ACCEL_KEYBOARD_BRIGHTNESS_DOWN_F6:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_KeyboardBrightnessDown_F6"));
+      break;
+    case ash::UMA_ACCEL_KEYBOARD_BRIGHTNESS_UP_F7:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_KeyboardBrightnessUp_F7"));
+      break;
   }
 }
 
@@ -426,7 +445,28 @@ void ChromeShellDelegate::HandleMediaPrevTrack() {
 }
 
 string16 ChromeShellDelegate::GetTimeRemainingString(base::TimeDelta delta) {
-  return TimeFormat::TimeRemaining(delta);
+  return TimeFormat::TimeRemainingLong(delta);
+}
+
+void ChromeShellDelegate::SaveScreenMagnifierScale(double scale) {
+#if defined(OS_CHROMEOS)
+  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
+  profile->GetPrefs()->SetDouble(prefs::kScreenMagnifierScale, scale);
+#endif
+}
+
+double ChromeShellDelegate::GetSavedScreenMagnifierScale() {
+#if defined(OS_CHROMEOS)
+  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
+  if (profile->GetPrefs()->HasPrefPath(prefs::kScreenMagnifierScale))
+    return profile->GetPrefs()->GetDouble(prefs::kScreenMagnifierScale);
+#endif
+  return std::numeric_limits<double>::min();
+}
+
+ui::MenuModel* ChromeShellDelegate::CreateContextMenu(aura::RootWindow* root) {
+  DCHECK(launcher_delegate_);
+  return new LauncherContextMenu(launcher_delegate_, root);
 }
 
 void ChromeShellDelegate::Observe(int type,

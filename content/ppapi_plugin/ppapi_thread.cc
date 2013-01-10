@@ -45,6 +45,8 @@ extern sandbox::TargetServices* g_target_services;
 extern void* g_target_services;
 #endif
 
+namespace content {
+
 typedef int32_t (*InitializeBrokerFunc)
     (PP_ConnectInstance_Func* connect_instance_func);
 
@@ -155,8 +157,8 @@ IPC::PlatformFileForTransit PpapiThread::ShareHandleWithRemote(
   }
 #endif
 
-  return content::BrokerGetFileHandleForProcess(handle, channel.peer_pid(),
-                                                should_close_source);
+  return BrokerGetFileHandleForProcess(handle, channel.peer_pid(),
+                                       should_close_source);
 }
 
 std::set<PP_Instance>* PpapiThread::GetGloballySeenInstanceIDSet() {
@@ -187,7 +189,7 @@ void PpapiThread::PreCacheFont(const void* logfontw) {
 }
 
 void PpapiThread::SetActiveURL(const std::string& url) {
-  content::GetContentClient()->SetActiveURL(GURL(url));
+  GetContentClient()->SetActiveURL(GURL(url));
 }
 
 uint32 PpapiThread::Register(ppapi::proxy::PluginDispatcher* plugin_dispatcher) {
@@ -211,8 +213,13 @@ void PpapiThread::Unregister(uint32 plugin_dispatcher_id) {
   plugin_dispatchers_.erase(plugin_dispatcher_id);
 }
 
-void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
+void PpapiThread::OnMsgLoadPlugin(const FilePath& path,
+                                  const ppapi::PpapiPermissions& permissions) {
   SavePluginName(path);
+
+  // This must be set before calling into the plugin so it can get the
+  // interfaces it has permission for.
+  ppapi::proxy::InterfaceList::SetProcessGlobalPermissions(permissions);
 
   std::string error;
   base::ScopedNativeLibrary library(base::LoadNativeLibrary(path, &error));
@@ -271,7 +278,7 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
     // We need to do this after getting |PPP_GetInterface()| (or presumably
     // doing something nontrivial with the library), else the sandbox
     // intercedes.
-    if (!content::InitializeSandbox()) {
+    if (!InitializeSandbox()) {
       LOG(WARNING) << "Failed to initialize sandbox";
     }
 #endif
@@ -294,10 +301,11 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
   }
 
   library_.Reset(library.Release());
+
+  permissions_ = permissions;
 }
 
-void PpapiThread::OnMsgCreateChannel(int renderer_id,
-                                     bool incognito) {
+void PpapiThread::OnMsgCreateChannel(int renderer_id, bool incognito) {
   IPC::ChannelHandle channel_handle;
   if (!library_.is_valid() ||  // Plugin couldn't be loaded.
       !SetupRendererChannel(renderer_id, incognito, &channel_handle)) {
@@ -358,7 +366,9 @@ bool PpapiThread::SetupRendererChannel(int renderer_id,
     dispatcher = broker_dispatcher;
   } else {
     PluginProcessDispatcher* plugin_dispatcher =
-        new PluginProcessDispatcher(get_plugin_interface_, incognito);
+        new PluginProcessDispatcher(get_plugin_interface_,
+                                    permissions_,
+                                    incognito);
     init_result = plugin_dispatcher->InitPluginWithChannel(this,
                                                            plugin_handle,
                                                            false);
@@ -391,8 +401,10 @@ void PpapiThread::SavePluginName(const FilePath& path) {
 
   // plugin() is NULL when in-process.  Which is fine, because this is
   // just a hook for setting the process name.
-  if (content::GetContentClient()->plugin()) {
-    content::GetContentClient()->plugin()->PluginProcessStarted(
+  if (GetContentClient()->plugin()) {
+    GetContentClient()->plugin()->PluginProcessStarted(
         path.BaseName().RemoveExtension().LossyDisplayName());
   }
 }
+
+}  // namespace content

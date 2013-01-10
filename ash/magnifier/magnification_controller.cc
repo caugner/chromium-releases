@@ -5,6 +5,9 @@
 #include "ash/magnifier/magnification_controller.h"
 
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
+#include "ash/system/tray/system_tray_delegate.h"
+#include "ui/aura/client/cursor_client.h"
 #include "ui/aura/event_filter.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/shared/compound_event_filter.h"
@@ -66,6 +69,10 @@ class MagnificationControllerImpl : virtual public MagnificationController,
   bool Redraw(const gfx::Point& position, float scale, bool animate);
   bool RedrawDIP(const gfx::Point& position, float scale, bool animate);
 
+  // Redraw with the given zoom scale keeping the mouse cursor location. In
+  // other words, zoom (or unzoom) centering around the cursor.
+  void RedrawKeepingMousePosition(float scale, bool animate);
+
   // Ensures that the given point, rect or last mouse location is inside
   // magnification window. If not, the controller moves the window to contain
   // the given point/rect.
@@ -88,6 +95,19 @@ class MagnificationControllerImpl : virtual public MagnificationController,
 
   // Returns if the magnification scale is 1.0 or not (larger then 1.0).
   bool IsMagnified() const;
+
+  // Returns the default scale which depends on the login status.
+  float GetDefaultZoomScale() const {
+    user::LoginStatus login = Shell::GetInstance()->tray_delegate() ?
+        Shell::GetInstance()->tray_delegate()->GetUserLoginStatus() :
+        user::LOGGED_IN_NONE;
+
+    // On login screen, don't magnify the screen by default.
+    if (login == user::LOGGED_IN_NONE)
+      return kNonMagnifiedScale;
+
+    return kInitialMagnifiedScale;
+  }
 
   // Returns the rect of the magnification window.
   gfx::Rect GetWindowRectDIP(float scale) const;
@@ -131,12 +151,21 @@ MagnificationControllerImpl::MagnificationControllerImpl()
     : root_window_(ash::Shell::GetPrimaryRootWindow()),
       is_on_zooming_(false),
       is_enabled_(false),
-      scale_(kNonMagnifiedScale) {
+      scale_(std::numeric_limits<double>::min()) {
   Shell::GetInstance()->AddEnvEventFilter(this);
 }
 
 MagnificationControllerImpl::~MagnificationControllerImpl() {
   Shell::GetInstance()->RemoveEnvEventFilter(this);
+}
+
+void MagnificationControllerImpl::RedrawKeepingMousePosition(
+    float scale, bool animate) {
+  gfx::Point mouse_in_root = root_window_->GetLastMouseLocationInRoot();
+  const gfx::Point origin =
+      gfx::Point(mouse_in_root.x() * (1.0f - 1.0f / scale),
+                 mouse_in_root.y() * (1.0f - 1.0f / scale));
+  Redraw(origin, scale, animate);
 }
 
 bool MagnificationControllerImpl::Redraw(const gfx::Point& position,
@@ -181,7 +210,7 @@ bool MagnificationControllerImpl::RedrawDIP(const gfx::Point& position_in_dip,
   scale_ = scale;
 
   // Creates transform matrix.
-  ui::Transform transform;
+  gfx::Transform transform;
   // Flips the signs intentionally to convert them from the position of the
   // magnification window.
   transform.ConcatTranslate(-origin_.x(), -origin_.y());
@@ -295,7 +324,10 @@ void MagnificationControllerImpl::OnMouseMove(const gfx::Point& location) {
       int y_diff = origin_.y() - window_rect.y();
       // If the magnified region is moved, hides the mouse cursor and moves it.
       if (x_diff != 0 || y_diff != 0) {
-        root_window_->ShowCursor(false);
+        aura::client::CursorClient* cursor_client =
+            aura::client::GetCursorClient(root_window_);
+        if (cursor_client)
+          cursor_client->ShowCursor(false);
         mouse.set_x(mouse.x() - (origin_.x() - window_rect.x()));
         mouse.set_y(mouse.y() - (origin_.y() - window_rect.y()));
         root_window_->MoveCursorTo(mouse);
@@ -333,10 +365,15 @@ void MagnificationControllerImpl::ValidateScale(float* scale) {
   // |kMinMagnifiedScaleThreshold|;
   if (*scale > kMaxMagnifiedScaleThreshold)
     *scale = kMaxMagnifiedScale;
+
+  DCHECK(kNonMagnifiedScale <= *scale && *scale <= kMaxMagnifiedScale);
 }
 
 void MagnificationControllerImpl::OnImplicitAnimationsCompleted() {
-  root_window_->ShowCursor(true);
+  aura::client::CursorClient* cursor_client =
+      aura::client::GetCursorClient(root_window_);
+  if (cursor_client)
+    cursor_client->ShowCursor(true);
   is_on_zooming_ = false;
 }
 
@@ -347,9 +384,9 @@ void MagnificationControllerImpl::SwitchTargetRootWindow(
 
   float scale = GetScale();
 
-  SetScale(1.0f, true);
+  RedrawKeepingMousePosition(1.0f, true);
   root_window_ = new_root_window;
-  SetScale(scale, true);
+  RedrawKeepingMousePosition(scale, true);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -360,12 +397,8 @@ void MagnificationControllerImpl::SetScale(float scale, bool animate) {
     return;
 
   ValidateScale(&scale);
-
-  gfx::Point mouse_in_root = root_window_->GetLastMouseLocationInRoot();
-  const gfx::Point origin =
-      gfx::Point(mouse_in_root.x() * (1.0f - 1.0f / scale),
-                 mouse_in_root.y() * (1.0f - 1.0f / scale));
-  Redraw(origin, scale, animate);
+  ash::Shell::GetInstance()->delegate()->SaveScreenMagnifierScale(scale);
+  RedrawKeepingMousePosition(scale, animate);
 }
 
 void MagnificationControllerImpl::MoveWindow(int x, int y, bool animate) {
@@ -403,10 +436,15 @@ void MagnificationControllerImpl::EnsurePointIsVisible(
 
 void MagnificationControllerImpl::SetEnabled(bool enabled) {
   if (enabled) {
+    float scale =
+        ash::Shell::GetInstance()->delegate()->GetSavedScreenMagnifierScale();
+    if (scale <= 0.0f)
+      scale = GetDefaultZoomScale();
+    ValidateScale(&scale);
+    RedrawKeepingMousePosition(scale, true);
     is_enabled_ = enabled;
-    SetScale(kInitialMagnifiedScale, true);
   } else {
-    SetScale(kNonMagnifiedScale, true);
+    RedrawKeepingMousePosition(kNonMagnifiedScale, true);
     is_enabled_ = enabled;
   }
 }
@@ -421,7 +459,9 @@ bool MagnificationControllerImpl::PreHandleKeyEvent(aura::Window* target,
 
 bool MagnificationControllerImpl::PreHandleMouseEvent(aura::Window* target,
                                                       ui::MouseEvent* event) {
-  if (event->type() == ui::ET_SCROLL && event->IsAltDown()) {
+  if (event->type() == ui::ET_SCROLL &&
+      event->IsAltDown() &
+      event->IsControlDown()) {
     ui::ScrollEvent* scroll_event = static_cast<ui::ScrollEvent*>(event);
     float scale = GetScale();
     scale += scroll_event->y_offset() * kScrollScaleChangeFactor;

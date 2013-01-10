@@ -211,7 +211,7 @@ void SearchProviderTest::QueryForInputAndSetWYTMatch(
   QueryForInput(text, string16(), false);
   profile_.BlockUntilHistoryProcessesPendingRequests();
   ASSERT_NO_FATAL_FAILURE(FinishDefaultSuggestQuery());
-  EXPECT_NE(InstantController::IsSuggestEnabled(&profile_), provider_->done());
+  EXPECT_NE(InstantController::IsInstantEnabled(&profile_), provider_->done());
   if (!wyt_match)
     return;
   ASSERT_GE(provider_->matches().size(), 1u);
@@ -415,7 +415,10 @@ TEST_F(SearchProviderTest, FinalizeInstantQuery) {
                                                       NULL));
 
   // Tell the provider instant is done.
-  provider_->FinalizeInstantQuery(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"));
+  provider_->FinalizeInstantQuery(ASCIIToUTF16("foo"),
+                                  InstantSuggestion(ASCIIToUTF16("bar"),
+                                                    INSTANT_COMPLETE_NOW,
+                                                    INSTANT_SUGGESTION_SEARCH));
 
   // The provider should now be done.
   EXPECT_TRUE(provider_->done());
@@ -452,7 +455,10 @@ TEST_F(SearchProviderTest, RememberInstantQuery) {
   QueryForInput(ASCIIToUTF16("foo"), string16(), false);
 
   // Finalize the instant query immediately.
-  provider_->FinalizeInstantQuery(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"));
+  provider_->FinalizeInstantQuery(ASCIIToUTF16("foo"),
+                                  InstantSuggestion(ASCIIToUTF16("bar"),
+                                                    INSTANT_COMPLETE_NOW,
+                                                    INSTANT_SUGGESTION_SEARCH));
 
   // There should be two matches, one for what you typed, the other for
   // 'foobar'.
@@ -488,7 +494,10 @@ TEST_F(SearchProviderTest, DifferingText) {
                                                       NULL));
 
   // Finalize the instant query immediately.
-  provider_->FinalizeInstantQuery(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"));
+  provider_->FinalizeInstantQuery(ASCIIToUTF16("foo"),
+                                  InstantSuggestion(ASCIIToUTF16("bar"),
+                                                    INSTANT_COMPLETE_NOW,
+                                                    INSTANT_SUGGESTION_SEARCH));
 
   // Query with the same input text, but trailing whitespace.
   AutocompleteMatch instant_match;

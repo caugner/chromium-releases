@@ -10,22 +10,6 @@
 
 namespace chrome {
 
-void SetNewHomePagePrefs(PrefService* prefs) {
-  const PrefService::Preference* home_page_pref =
-      prefs->FindPreference(prefs::kHomePage);
-  if (home_page_pref &&
-      !home_page_pref->IsManaged() &&
-      !prefs->HasPrefPath(prefs::kHomePage)) {
-    prefs->SetString(prefs::kHomePage, std::string());
-  }
-  const PrefService::Preference* home_page_is_new_tab_page_pref =
-      prefs->FindPreference(prefs::kHomePageIsNewTabPage);
-  if (home_page_is_new_tab_page_pref &&
-      !home_page_is_new_tab_page_pref->IsManaged() &&
-      !prefs->HasPrefPath(prefs::kHomePageIsNewTabPage))
-    prefs->SetBoolean(prefs::kHomePageIsNewTabPage, false);
-}
-
 void RegisterBrowserPrefs(PrefService* prefs) {
   prefs->RegisterIntegerPref(prefs::kOptionsWindowLastTabIndex, 0);
   prefs->RegisterBooleanPref(prefs::kAllowFileSelectionDialogs, true);
@@ -41,6 +25,9 @@ void RegisterBrowserUserPrefs(PrefService* prefs) {
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kShowHomeButton,
                              false,
+                             PrefService::SYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kExtensionsSideloadWipeoutBubbleShown,
+                             0,
                              PrefService::SYNCABLE_PREF);
 #if defined(OS_MACOSX)
   // This really belongs in platform code, but there's no good place to

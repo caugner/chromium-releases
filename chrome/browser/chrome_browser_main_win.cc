@@ -26,6 +26,7 @@
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/system_monitor/removable_device_notifications_window_win.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/uninstall_browser_prompt.h"
@@ -48,6 +49,10 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
+
+#if defined(USE_AURA)
+#include "chrome/browser/metro_viewer/metro_viewer_process_host_win.h"
+#endif
 
 
 namespace {
@@ -100,9 +105,15 @@ void WarnAboutMinimumSystemRequirements() {
 }
 
 void ShowCloseBrowserFirstMessageBox() {
+  int message_id = IDS_UNINSTALL_CLOSE_APP;
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
+      (ShellIntegration::IsDefaultBrowser() ==
+           ShellIntegration::IS_DEFAULT_WEB_CLIENT)) {
+    message_id = IDS_UNINSTALL_CLOSE_APP_IMMERSIVE;
+  }
   chrome::ShowMessageBox(NULL,
                          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-                         l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP),
+                         l10n_util::GetStringUTF16(message_id),
                          chrome::MESSAGE_BOX_TYPE_WARNING);
 }
 
@@ -129,14 +140,24 @@ int DoUninstallTasks(bool chrome_still_running) {
     // We want to remove user level shortcuts and we only care about the ones
     // created by us and not by the installer so |alternate| is false.
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    if (!ShellUtil::RemoveChromeDesktopShortcut(
-            dist, ShellUtil::CURRENT_USER, ShellUtil::SHORTCUT_NO_OPTIONS)) {
-      VLOG(1) << "Failed to delete desktop shortcut.";
-    }
-    // TODO(rlp): Cleanup profiles shortcuts.
-    if (!ShellUtil::RemoveChromeQuickLaunchShortcut(dist,
-                                                    ShellUtil::CURRENT_USER)) {
-      VLOG(1) << "Failed to delete quick launch shortcut.";
+    FilePath chrome_exe;
+    if (PathService::Get(base::FILE_EXE, &chrome_exe)) {
+      ShellUtil::ChromeShortcutLocation user_shortcut_locations[] = {
+        ShellUtil::SHORTCUT_DESKTOP,
+        ShellUtil::SHORTCUT_QUICK_LAUNCH,
+        ShellUtil::SHORTCUT_START_MENU,
+      };
+      for (size_t i = 0; i < arraysize(user_shortcut_locations); ++i) {
+        if (!ShellUtil::RemoveChromeShortcut(
+                user_shortcut_locations[i], dist, chrome_exe.value(),
+                ShellUtil::CURRENT_USER, NULL)) {
+          VLOG(1) << "Failed to delete shortcut at location "
+                  << user_shortcut_locations[i];
+        }
+      }
+      // TODO(rlp): Cleanup profiles shortcuts.
+    } else {
+      NOTREACHED();
     }
   }
   return result;
@@ -188,8 +209,8 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
     // Make sure that we know how to handle exceptions from the message loop.
     InitializeWindowProcExceptions();
   }
-  removable_device_notifications_window_ =
-      new chrome::RemovableDeviceNotificationsWindowWin();
+  removable_device_notifications_window_.reset(
+      chrome::RemovableDeviceNotificationsWindowWin::Create());
 }
 
 void ChromeBrowserMainPartsWin::PostMainMessageLoopStart() {
@@ -211,6 +232,9 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopRun() {
   ChromeBrowserMainParts::PreMainMessageLoopRun();
 
   removable_device_notifications_window_->Init();
+#if defined(USE_AURA)
+  metro_viewer_process_host_.reset(new MetroViewerProcessHost);
+#endif
 }
 
 // static
@@ -329,28 +353,18 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
     std::wstring exe = exe_path.value();
     FilePath user_exe_path(installer::GetChromeInstallPath(false, dist));
     if (FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
-      bool is_metro = base::win::IsMetroProcess();
-      if (!is_metro) {
-        // The dialog cannot be shown in Win8 Metro as doing so hangs Chrome on
-        // an invisible dialog.
-        // TODO (gab): Get rid of this dialog altogether and auto-launch
-        // system-level Chrome instead.
-        const string16 text =
-            l10n_util::GetStringUTF16(IDS_MACHINE_LEVEL_INSTALL_CONFLICT);
-        const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-        const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
-        ui::MessageBox(NULL, text, caption, flags);
-      }
+      const string16 text =
+          l10n_util::GetStringUTF16(IDS_MACHINE_LEVEL_INSTALL_CONFLICT);
+      const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+      const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
+      ui::MessageBox(NULL, text, caption, flags);
       CommandLine uninstall_cmd(
           InstallUtil::GetChromeUninstallCmd(false, dist->GetType()));
       if (!uninstall_cmd.GetProgram().empty()) {
         uninstall_cmd.AppendSwitch(installer::switches::kForceUninstall);
         uninstall_cmd.AppendSwitch(
             installer::switches::kDoNotRemoveSharedItems);
-        base::LaunchOptions launch_options;
-        if (is_metro)
-          launch_options.force_breakaway_from_job_ = true;
-        base::LaunchProcess(uninstall_cmd, launch_options, NULL);
+        base::LaunchProcess(uninstall_cmd, base::LaunchOptions(), NULL);
       }
       return true;
     }

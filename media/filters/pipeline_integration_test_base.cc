@@ -14,6 +14,7 @@
 #include "media/filters/file_data_source.h"
 
 using ::testing::AnyNumber;
+using ::testing::AtMost;
 
 namespace media {
 
@@ -88,8 +89,10 @@ void PipelineIntegrationTestBase::OnError(PipelineStatus status) {
 
 bool PipelineIntegrationTestBase::Start(const std::string& url,
                                         PipelineStatus expected_status) {
-  EXPECT_CALL(*this, OnBufferingState(Pipeline::kHaveMetadata));
-  EXPECT_CALL(*this, OnBufferingState(Pipeline::kPrerollCompleted));
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kHaveMetadata))
+      .Times(AtMost(1));
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kPrerollCompleted))
+      .Times(AtMost(1));
   pipeline_->Start(
       CreateFilterCollection(url),
       base::Bind(&PipelineIntegrationTestBase::OnEnded, base::Unretained(this)),
@@ -109,8 +112,10 @@ bool PipelineIntegrationTestBase::Start(const std::string& url,
 }
 
 bool PipelineIntegrationTestBase::Start(const std::string& url) {
-  EXPECT_CALL(*this, OnBufferingState(Pipeline::kHaveMetadata));
-  EXPECT_CALL(*this, OnBufferingState(Pipeline::kPrerollCompleted));
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kHaveMetadata))
+      .Times(AtMost(1));
+  EXPECT_CALL(*this, OnBufferingState(Pipeline::kPrerollCompleted))
+      .Times(AtMost(1));
   pipeline_->Start(
       CreateFilterCollection(url),
       base::Bind(&PipelineIntegrationTestBase::OnEnded, base::Unretained(this)),
@@ -192,16 +197,17 @@ PipelineIntegrationTestBase::CreateFilterCollection(
     Decryptor* decryptor) {
   scoped_ptr<FilterCollection> collection(new FilterCollection());
   collection->SetDemuxer(demuxer);
-  collection->AddAudioDecoder(new FFmpegAudioDecoder(
+  scoped_refptr<AudioDecoder> audio_decoder = new FFmpegAudioDecoder(
       base::Bind(&MessageLoopFactory::GetMessageLoop,
                  base::Unretained(message_loop_factory_.get()),
-                 media::MessageLoopFactory::kDecoder)));
-  scoped_refptr<VideoDecoder> decoder = new FFmpegVideoDecoder(
+                 media::MessageLoopFactory::kDecoder));
+  scoped_refptr<VideoDecoder> video_decoder = new FFmpegVideoDecoder(
       base::Bind(&MessageLoopFactory::GetMessageLoop,
                  base::Unretained(message_loop_factory_.get()),
                  media::MessageLoopFactory::kDecoder),
       decryptor);
-  collection->GetVideoDecoders()->push_back(decoder);
+  collection->GetAudioDecoders()->push_back(audio_decoder);
+  collection->GetVideoDecoders()->push_back(video_decoder);
 
   // Disable frame dropping if hashing is enabled.
   renderer_ = new VideoRendererBase(

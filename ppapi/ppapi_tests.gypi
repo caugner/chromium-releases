@@ -29,7 +29,7 @@
             'tests/test_case.html',
             'tests/test_case.html.mock-http-headers',
             'tests/test_page.css',
-            'native_client/tests/ppapi_tests/ppapi_nacl_tests_newlib.nmf',
+            'tests/ppapi_nacl_tests_newlib.nmf',
           ],
         },
         {
@@ -142,6 +142,7 @@
         'proxy/run_all_unittests.cc',
 
         'proxy/file_chooser_resource_unittest.cc',
+        'proxy/flash_resource_unittest.cc',
         'proxy/mock_resource.cc',
         'proxy/mock_resource.h',
         'proxy/plugin_dispatcher_unittest.cc',
@@ -153,9 +154,21 @@
         'proxy/ppp_messaging_proxy_unittest.cc',
         'proxy/printing_resource_unittest.cc',
         'proxy/serialized_var_unittest.cc',
+        'proxy/websocket_resource_unittest.cc',
         'shared_impl/resource_tracker_unittest.cc',
         'shared_impl/tracked_callback_unittest.cc',
         'shared_impl/var_tracker_unittest.cc',
+      ],
+      'conditions': [
+        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
+          'conditions': [
+            [ 'linux_use_tcmalloc == 1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        }],
       ],
     },
     {
@@ -396,6 +409,16 @@
       ],
       'sources': [
         'examples/video_capture/video_capture.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_enumerate_devices',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/enumerate_devices/enumerate_devices.cc',
       ],
     },
     {

@@ -15,6 +15,8 @@
 
 using content::WebContents;
 
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(CoreTabHelper)
+
 CoreTabHelper::CoreTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       delegate_(NULL) {

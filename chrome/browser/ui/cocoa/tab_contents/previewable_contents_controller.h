@@ -7,6 +7,12 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/memory/scoped_ptr.h"
+
+class Browser;
+class InstantPreviewControllerMac;
+@class BrowserWindowController;
+
 namespace content {
 class WebContents;
 }
@@ -29,9 +35,16 @@ class WebContents;
 
   // The preview WebContents.  Will be NULL if no preview is currently showing.
   content::WebContents* previewContents_;  // weak
+
+  // C++ bridge to the Instant model change interface.
+  scoped_ptr<InstantPreviewControllerMac> instantPreviewController_;
 }
 
 @property(readonly, nonatomic) NSView* activeContainer;
+
+// Initialization.
+- (id)initWithBrowser:(Browser*)browser
+     windowController:(BrowserWindowController*)windowController;
 
 // Sets the current preview and installs its WebContentsView into the view
 // hierarchy.  Hides the active view.  |preview| must not be NULL.
@@ -39,6 +52,10 @@ class WebContents;
 
 // Closes the current preview and shows the active view.
 - (void)hidePreview;
+
+// Called when a tab with |contents| is activated, so that we can check to see
+// if it's the preview being activated (and adjust internal state accordingly).
+- (void)onActivateTabWithContents:(content::WebContents*)contents;
 
 // Returns YES if the preview contents is currently showing.
 - (BOOL)isShowingPreview;

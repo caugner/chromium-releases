@@ -45,7 +45,7 @@
 using base::TimeDelta;
 using content::BrowserThread;
 
-int printing::PrintViewManager::kUserDataKey;
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(printing::PrintViewManager)
 
 namespace {
 
@@ -274,7 +274,14 @@ void PrintViewManager::OnDidPrintPage(
       web_contents()->Stop();
       return;
     }
+  } else if (!print_job_->settings().supports_alpha_blend() &&
+             metafile->IsAlphaBlendUsed()) {
+    scoped_ptr<NativeMetafile> raster_metafile(
+        metafile->RasterizeAlphaBlend());
+    if (raster_metafile.get())
+      metafile.swap(raster_metafile);
   }
+
 #endif
 
   // Update the rendered document. It will send notifications to the listener.
@@ -300,8 +307,7 @@ void PrintViewManager::OnPrintingFailed(int cookie) {
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PRINT_JOB_RELEASED,
-      content::Source<TabContents>(
-          TabContents::FromWebContents(web_contents())),
+      content::Source<content::WebContents>(web_contents()),
       content::NotificationService::NoDetails());
 }
 
@@ -407,8 +413,7 @@ void PrintViewManager::OnNotifyPrintJobEvent(
 
       content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_PRINT_JOB_RELEASED,
-          content::Source<TabContents>(
-              TabContents::FromWebContents(web_contents())),
+          content::Source<content::WebContents>(web_contents()),
           content::NotificationService::NoDetails());
       break;
     }
@@ -438,8 +443,7 @@ void PrintViewManager::OnNotifyPrintJobEvent(
 
       content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_PRINT_JOB_RELEASED,
-          content::Source<TabContents>(
-              TabContents::FromWebContents(web_contents())),
+          content::Source<content::WebContents>(web_contents()),
           content::NotificationService::NoDetails());
       break;
     }

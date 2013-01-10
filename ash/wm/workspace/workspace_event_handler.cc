@@ -5,6 +5,7 @@
 #include "ash/wm/workspace/workspace_event_handler.h"
 
 #include "ash/screen_ash.h"
+#include "ash/shell.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
@@ -47,7 +48,7 @@ void ToggleMaximizedState(aura::Window* window) {
     } else {
       window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
     }
-  } else {
+  } else if (wm::CanMaximizeWindow(window)) {
     window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   }
 }
@@ -118,21 +119,6 @@ ui::EventResult WorkspaceEventHandler::OnGestureEvent(ui::GestureEvent* event) {
   return ToplevelWindowEventHandler::OnGestureEvent(event);
 }
 
-WindowResizer* WorkspaceEventHandler::CreateWindowResizer(
-    aura::Window* window,
-    const gfx::Point& point_in_parent,
-    int window_component) {
-  // Allow dragging maximized windows if it's not tracked by workspace. This is
-  // set by tab dragging code.
-  if (!wm::IsWindowNormal(window) &&
-      (window_component != HTCAPTION || GetTrackedByWorkspace(window))) {
-    return NULL;
-  }
-  return WorkspaceWindowResizer::Create(
-      window, point_in_parent, window_component,
-      std::vector<aura::Window*>());
-}
-
 void WorkspaceEventHandler::HandleVerticalResizeDoubleClick(
     aura::Window* target,
     ui::MouseEvent* event) {
@@ -141,7 +127,7 @@ void WorkspaceEventHandler::HandleVerticalResizeDoubleClick(
     int component =
         target->delegate()->GetNonClientComponent(event->location());
     gfx::Rect work_area =
-        gfx::Screen::GetDisplayNearestWindow(target).work_area();
+        Shell::GetScreen()->GetDisplayNearestWindow(target).work_area();
     const gfx::Rect* restore_bounds =
         target->GetProperty(aura::client::kRestoreBoundsKey);
     if (component == HTBOTTOM || component == HTTOP) {

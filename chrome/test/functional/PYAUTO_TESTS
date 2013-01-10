@@ -96,8 +96,14 @@
       '-omnibox.OmniboxTest.testDifferentTypesOfResults',
       # crbug.com/85600
       '-prefs.PrefsTest.testNavigationStateOnSessionRestore',
+      # crbug.com/157271
+      '-prefs_ui.BasicSettingsUITest.testCancelStartupURLSetting',
+      '-prefs_ui.BasicSettingsUITest.testSetStartupPages',
+      '-prefs_ui.BasicSettingsUITest.testUseCurrentPagesForStartup',
       # crbug.com/112051
       '-prefs_ui.PrefsUITest.testChangeExceptionBehaviorUI',
+      # crbug.com/157271
+      '-prefs_ui.PrefsUITest.testDeleteExceptionUI',
       # crbug.com/88593
       '-sync.SyncTest.testPersonalStuffSyncSection',
       # crbug.com/124913
@@ -149,6 +155,8 @@
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
+      # Keychain popups make autofill/password tests difficult: crbug.com/49378
+      '-prefs_ui.PrefsUITest.testSetPasswordAndDelete',
       # codesign tests should run *after* signing. crbug.com/50481
       '-codesign',
       # crbug.com/124922
@@ -412,6 +420,12 @@
       '-execute_javascript.ExecuteJavascriptTest.testExecuteJavascriptInExtension',
       # crbug.com/132285
       '-special_tabs.SpecialTabsTest.testSpecialURLTabs',
+      # crbug.com/145006
+      '-about_plugins_ui.ChromeAboutPluginsUITest.testEnableAndDisableFlashPlugin',
+      # crbug.com/151972
+      '-extensions.ExtensionsTest.testGetExtensionPermissions',
+      # crbug.com/151973
+      '-prefs_ui.PrefsUITest.testInitialLineEntryInIncognitoUI',
     ],
 
     'win': [
@@ -437,9 +451,7 @@
       # crbug.com/94682
       '-gpu.GpuTest.test2dCanvas',
       # crbug.com/125424
-      '-media.media_basic_playback.MediaConstrainedNetworkPerfTest.testBasicPlaybackMatrix',
-      # crbug.com/95621
-      '-youtube.YoutubeTest.testPlayerStatus',
+      '-media.media_basic_playback.MediaBasicPlaybackTest.testBasicPlaybackMatrix',
     ],
 
     'mac': [
@@ -447,7 +459,7 @@
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
       # crbug.com/157394
-      '-media.media_basic_playback.MediaConstrainedNetworkPerfTest.testBasicPlaybackMatrix',
+      '-media.media_basic_playback.MediaBasicPlaybackTest.testBasicPlaybackMatrix',
 
       # ===========================
       # Permanently-disabled tests.
@@ -503,6 +515,8 @@
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
       '-perf.HTML5BenchmarkTest',  # crbug.com/134476
+      '-perf.LiveWebappLoadTest.testNewTabGmail',  # crbug.com/136554
+      '-perf.ScrollTest.testGmailScroll',  # crbug.com/136554
       '-perf.WebGLTest.testWebGLField',  # crbug.com/132797
 
       # ===========================
@@ -669,6 +683,7 @@
   'AV_PERF': {
      'linux': [
        'media.audio_latency_perf',
+       'media.audio_playback_perf',
        'media.media_constrained_network_perf',
        'media.media_scrub_perf',
        'media.media_seek_perf',
@@ -677,6 +692,7 @@
      ],
      'win': [
        'media.audio_latency_perf',
+       'media.audio_playback_perf',
        'media.media_constrained_network_perf',
        'media.media_scrub_perf',
        'media.media_seek_perf',
@@ -733,9 +749,8 @@
       '-plugins',
       '-omnibox',
       '-special_tabs',
-      '-youtube.YoutubeTest.testPlayerStatus',
       '-ntp.NTPTest.testLaunchAppFullScreen',
-      '-media.media_basic_playback.MediaConstrainedNetworkPerfTest.testBasicPlaybackMatrix',
+      '-media.media_basic_playback.MediaBasicPlaybackTest.testBasicPlaybackMatrix',
       '-search_engines.SearchEnginesTest.testDiscoverSearchEngine',
       '-ntp.NTPTest.testUninstallApp',
       '-ntp.NTPTest.testLaunchAppWithDefaultSettings',

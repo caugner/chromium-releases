@@ -7,13 +7,14 @@ import json
 
 from chrome_remote_control import adb_commands
 from chrome_remote_control import browser_backend
+from chrome_remote_control import browser_gone_exception
 
 class AndroidBrowserBackend(browser_backend.BrowserBackend):
   """The backend for controlling a browser instance running on Android.
   """
-  def __init__(self, options, adb, package, is_content_shell,
-               cmdline_file, activity, devtools_remote_port):
-    super(AndroidBrowserBackend, self).__init__(is_content_shell)
+  def __init__(self, options, adb, package,
+               is_content_shell, cmdline_file, activity, devtools_remote_port):
+    super(AndroidBrowserBackend, self).__init__(is_content_shell, options)
     # Initialize fields so that an explosion during init doesn't break in Close.
     self._options = options
     self._adb = adb
@@ -23,17 +24,9 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     self._port = 9222
     self._devtools_remote_port = devtools_remote_port
 
-    # Beginnings of a basic command line.
-    if is_content_shell:
-      pseudo_exec_name = 'content_shell'
-    else:
-      pseudo_exec_name = 'chrome'
-    args = [pseudo_exec_name,
-            '--disable-fre', '--no-first-run']
-
     # Kill old browser.
     self._adb.KillAll(self._package)
-    self._adb.KillAll('forwarder')
+    self._adb.KillAll('device_forwarder')
     self._adb.Forward('tcp:9222', self._devtools_remote_port)
 
     # Chrome Android doesn't listen to --user-data-dir.
@@ -47,9 +40,18 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
       pass
 
     # Set up the command line.
-    args.extend(options.extra_browser_args)
+    if is_content_shell:
+      pseudo_exec_name = 'content_shell'
+    else:
+      pseudo_exec_name = 'chrome'
+
+    args = [pseudo_exec_name]
+    args.extend(self.GetBrowserStartupArgs())
+
     with tempfile.NamedTemporaryFile() as f:
-      f.write(' '.join(args))
+      def EscapeIfNeeded(arg):
+        return arg.replace(' ', '" "')
+      f.write(' '.join([EscapeIfNeeded(arg) for arg in args]))
       f.flush()
       self._adb.Push(f.name, cmdline_file)
 
@@ -63,7 +65,8 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
         logging.critical(
             'android_browser_backend: Could not find preferences file ' +
             '%s for %s' % (prefs_file, self._package))
-        raise browser_backend.BrowserGoneException('Missing preferences file.')
+        raise browser_gone_exception.BrowserGoneException(
+          'Missing preferences file.')
 
       with tempfile.NamedTemporaryFile() as raw_f:
         self._adb.Pull(prefs_file, raw_f.name)
@@ -102,10 +105,16 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
       self.Close()
       raise
 
+  def GetBrowserStartupArgs(self):
+    args = super(AndroidBrowserBackend, self).GetBrowserStartupArgs()
+    args.append('--disable-fre')
+    return args
+
   def __del__(self):
     self.Close()
 
   def Close(self):
+    self._adb.RunShellCommand('rm %s' % self._cmdline_file)
     self._adb.KillAll(self._package)
 
   def IsBrowserRunning(self):

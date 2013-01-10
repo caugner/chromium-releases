@@ -14,7 +14,7 @@
 #include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/display/display_preferences.h"
-#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
@@ -72,6 +72,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kEnableTouchpadThreeFingerClick,
                              false,
                              PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kEnableTouchpadThreeFingerSwipe,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kNaturalScroll,
                              false,
                              PrefService::SYNCABLE_PREF);
@@ -102,6 +105,11 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                                false,
                                PrefService::UNSYNCABLE_PREF);
   }
+  if (prefs->FindPreference(prefs::kScreenMagnifierScale) == NULL) {
+    prefs->RegisterDoublePref(prefs::kScreenMagnifierScale,
+                              std::numeric_limits<double>::min(),
+                              PrefService::UNSYNCABLE_PREF);
+  }
   if (prefs->FindPreference(prefs::kVirtualKeyboardEnabled) == NULL) {
     prefs->RegisterBooleanPref(prefs::kVirtualKeyboardEnabled,
                                false,
@@ -116,13 +124,13 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kUse24HourClock,
                              base::GetHourClockType() == base::k24HourClock,
                              PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kDisableGData,
+  prefs->RegisterBooleanPref(prefs::kDisableDrive,
                              false,
                              PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kDisableGDataOverCellular,
+  prefs->RegisterBooleanPref(prefs::kDisableDriveOverCellular,
                              true,
                              PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kDisableGDataHostedFiles,
+  prefs->RegisterBooleanPref(prefs::kDisableDriveHostedFiles,
                              false,
                              PrefService::SYNCABLE_PREF);
   // We don't sync prefs::kLanguageCurrentInputMethod and PreviousInputMethod
@@ -211,13 +219,13 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
         language_prefs::kMozcIntegerPrefs[i].default_pref_value,
         language_prefs::kMozcIntegerPrefs[i].sync_status);
   }
-  prefs->RegisterIntegerPref(prefs::kLanguageXkbRemapSearchKeyTo,
+  prefs->RegisterIntegerPref(prefs::kLanguageRemapSearchKeyTo,
                              input_method::kSearchKey,
                              PrefService::SYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kLanguageXkbRemapControlKeyTo,
+  prefs->RegisterIntegerPref(prefs::kLanguageRemapControlKeyTo,
                              input_method::kControlKey,
                              PrefService::SYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kLanguageXkbRemapAltKeyTo,
+  prefs->RegisterIntegerPref(prefs::kLanguageRemapAltKeyTo,
                              input_method::kAltKey,
                              PrefService::SYNCABLE_PREF);
   // We don't sync the following keyboard prefs since they are not user-
@@ -280,15 +288,17 @@ void Preferences::InitUserPrefs(PrefService* prefs) {
   tap_to_click_enabled_.Init(prefs::kTapToClickEnabled, prefs, this);
   three_finger_click_enabled_.Init(prefs::kEnableTouchpadThreeFingerClick,
       prefs, this);
+  three_finger_swipe_enabled_.Init(prefs::kEnableTouchpadThreeFingerSwipe,
+      prefs, this);
   natural_scroll_.Init(prefs::kNaturalScroll, prefs, this);
   accessibility_enabled_.Init(prefs::kSpokenFeedbackEnabled, prefs, this);
   mouse_sensitivity_.Init(prefs::kMouseSensitivity, prefs, this);
   touchpad_sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, this);
   use_24hour_clock_.Init(prefs::kUse24HourClock, prefs, this);
-  disable_drive_.Init(prefs::kDisableGData, prefs, this);
-  disable_drive_over_cellular_.Init(prefs::kDisableGDataOverCellular,
+  disable_drive_.Init(prefs::kDisableDrive, prefs, this);
+  disable_drive_over_cellular_.Init(prefs::kDisableDriveOverCellular,
                                    prefs, this);
-  disable_drive_hosted_files_.Init(prefs::kDisableGDataHostedFiles,
+  disable_drive_hosted_files_.Init(prefs::kDisableDriveHostedFiles,
                                    prefs, this);
   download_default_directory_.Init(prefs::kDownloadDefaultDirectory,
                                    prefs, this);
@@ -407,6 +417,14 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     else
       UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerClick.Started", enabled);
   }
+  if (!pref_name || *pref_name == prefs::kEnableTouchpadThreeFingerSwipe) {
+    const bool enabled = three_finger_swipe_enabled_.GetValue();
+    system::touchpad_settings::SetThreeFingerSwipe(enabled);
+    if (pref_name)
+      UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerSwipe.Changed", enabled);
+    else
+      UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerSwipe.Started", enabled);
+  }
   if (!pref_name || *pref_name == prefs::kNaturalScroll) {
     // Force natural scroll to on if kNaturalScrollDefault is specified on the
     // cmd line.
@@ -420,6 +438,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     }
 
     const bool enabled = natural_scroll_.GetValue();
+    DVLOG(1) << "Natural scroll set to " << enabled;
     ui::SetNaturalScroll(enabled);
     if (pref_name)
       UMA_HISTOGRAM_BOOLEAN("Touchpad.NaturalScroll.Changed", enabled);
@@ -464,7 +483,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     }
   }
   if (!pref_name || *pref_name == prefs::kDownloadDefaultDirectory) {
-    const bool default_download_to_drive = gdata::util::IsUnderDriveMountPoint(
+    const bool default_download_to_drive = drive::util::IsUnderDriveMountPoint(
         download_default_directory_.GetValue());
     if (pref_name)
       UMA_HISTOGRAM_BOOLEAN(
@@ -621,11 +640,11 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     system::ToggleDrm(enable_drm_.GetValue());
   }
 
-  // Change the download directory to the default value if a GData directory is
-  // selected and GData is disabled.
-  if (!pref_name || *pref_name == prefs::kDisableGData) {
+  // Change the download directory to the default value if a Drive directory is
+  // selected and Drive is disabled.
+  if (!pref_name || *pref_name == prefs::kDisableDrive) {
     if (disable_drive_.GetValue()) {
-      if (gdata::util::IsUnderDriveMountPoint(
+      if (drive::util::IsUnderDriveMountPoint(
           download_default_directory_.GetValue())) {
         prefs_->SetFilePath(prefs::kDownloadDefaultDirectory,
                             download_util::GetDefaultDownloadDirectory());

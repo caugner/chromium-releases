@@ -5,23 +5,26 @@
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_STORAGE_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_STORAGE_H_
 
+#include "base/files/important_file_writer.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_index.h"
-#include "chrome/common/important_file_writer.h"
 
 class BookmarkModel;
 class BookmarkPermanentNode;
-class Profile;
+
+namespace content {
+class BrowserContext;
+}
 
 // BookmarkLoadDetails is used by BookmarkStorage when loading bookmarks.
 // BookmarkModel creates a BookmarkLoadDetails and passes it (including
-// ownership) to BookmarkStorage. BoomarkStorage loads the bookmarks (and index)
-// in the background thread, then calls back to the BookmarkModel (on the main
-// thread) when loading is done, passing ownership back to the BookmarkModel.
-// While loading BookmarkModel does not maintain references to the contents
-// of the BookmarkLoadDetails, this ensures we don't have any threading
-// problems.
+// ownership) to BookmarkStorage. BookmarkStorage loads the bookmarks (and
+// index) in the background thread, then calls back to the BookmarkModel (on
+// the main thread) when loading is done, passing ownership back to the
+// BookmarkModel. While loading BookmarkModel does not maintain references to
+// the contents of the BookmarkLoadDetails, this ensures we don't have any
+// threading problems.
 class BookmarkLoadDetails {
  public:
   BookmarkLoadDetails(BookmarkPermanentNode* bb_node,
@@ -47,6 +50,11 @@ class BookmarkLoadDetails {
   }
   BookmarkIndex* index() { return index_.get(); }
   BookmarkIndex* release_index() { return index_.release(); }
+
+  const std::string& model_meta_info() { return model_meta_info_; }
+  void set_model_meta_info(const std::string& meta_info) {
+    model_meta_info_ = meta_info;
+  }
 
   // Max id of the nodes.
   void set_max_id(int64 max_id) { max_id_ = max_id; }
@@ -76,6 +84,7 @@ class BookmarkLoadDetails {
   scoped_ptr<BookmarkPermanentNode> other_folder_node_;
   scoped_ptr<BookmarkPermanentNode> mobile_folder_node_;
   scoped_ptr<BookmarkIndex> index_;
+  std::string model_meta_info_;
   int64 max_id_;
   std::string computed_checksum_;
   std::string stored_checksum_;
@@ -89,11 +98,11 @@ class BookmarkLoadDetails {
 // as notifying the BookmarkStorage every time the model changes.
 //
 // Internally BookmarkStorage uses BookmarkCodec to do the actual read/write.
-class BookmarkStorage : public ImportantFileWriter::DataSerializer,
+class BookmarkStorage : public base::ImportantFileWriter::DataSerializer,
                         public base::RefCountedThreadSafe<BookmarkStorage> {
  public:
   // Creates a BookmarkStorage for the specified model
-  BookmarkStorage(Profile* profile, BookmarkModel* model);
+  BookmarkStorage(content::BrowserContext* context, BookmarkModel* model);
 
   // Loads the bookmarks into the model, notifying the model when done. This
   // takes ownership of |details|. See BookmarkLoadDetails for details.
@@ -125,7 +134,7 @@ class BookmarkStorage : public ImportantFileWriter::DataSerializer,
   BookmarkModel* model_;
 
   // Helper to write bookmark data safely.
-  ImportantFileWriter writer_;
+  base::ImportantFileWriter writer_;
 
   // See class description of BookmarkLoadDetails for details on this.
   scoped_ptr<BookmarkLoadDetails> details_;

@@ -24,8 +24,8 @@
 #include "ui/views/widget/widget.h"
 
 using ash::internal::DesktopBackgroundWidgetController;
-using ash::internal::kComponentWrapper;
-using ash::internal::kWindowDesktopComponent;
+using ash::internal::kAnimatingDesktopController;
+using ash::internal::kDesktopController;
 
 namespace ash {
 namespace {
@@ -85,10 +85,6 @@ class DesktopBackgroundController::WallpaperOperation
 
   void Cancel() {
     cancel_flag_.Set();
-  }
-
-  int index() const {
-    return index_;
   }
 
   WallpaperData* ReleaseWallpaperData() {
@@ -158,7 +154,7 @@ void DesktopBackgroundController::OnRootWindowAdded(
     }
   }
 
-  InstallComponent(root_window);
+  InstallDesktopController(root_window);
 }
 
 void DesktopBackgroundController::CacheDefaultWallpaper(int index) {
@@ -185,14 +181,9 @@ void DesktopBackgroundController::SetDefaultWallpaper(int index,
     return;
   }
 
-  // Prevents loading of the same wallpaper as the currently loading/loaded
-  // one.
-  if (!force_reload &&
-      ((wallpaper_op_.get() && wallpaper_op_->index() == index) ||
-       (current_wallpaper_.get() &&
-        current_wallpaper_->wallpaper_index == index))) {
+  if (!force_reload && current_wallpaper_.get() &&
+      current_wallpaper_->wallpaper_index == index)
     return;
-  }
 
   CancelPendingWallpaperOperation();
 
@@ -212,11 +203,6 @@ void DesktopBackgroundController::SetCustomWallpaper(
     const gfx::ImageSkia& wallpaper,
     WallpaperLayout layout) {
   CancelPendingWallpaperOperation();
-  if (current_wallpaper_.get() &&
-      current_wallpaper_->wallpaper_image.BackedBySameObjectAs(wallpaper)) {
-    return;
-  }
-
   current_wallpaper_.reset(new WallpaperData(layout, wallpaper));
   SetDesktopBackgroundImageMode();
 }
@@ -235,7 +221,7 @@ void DesktopBackgroundController::SetDesktopBackgroundSolidColorMode(
   background_color_ = color;
   desktop_background_mode_ = BACKGROUND_SOLID_COLOR;
 
-  InstallComponentForAllWindows();
+  InstallDesktopControllerForAllWindows();
 }
 
 void DesktopBackgroundController::CreateEmptyWallpaper() {
@@ -256,32 +242,32 @@ WallpaperResolution DesktopBackgroundController::GetAppropriateResolution() {
   return resolution;
 }
 
-void DesktopBackgroundController::MoveDesktopToLockedContainer() {
+bool DesktopBackgroundController::MoveDesktopToLockedContainer() {
   if (locked_)
-    return;
+    return false;
   locked_ = true;
-  ReparentBackgroundWidgets(GetBackgroundContainerId(false),
-                            GetBackgroundContainerId(true));
+  return ReparentBackgroundWidgets(GetBackgroundContainerId(false),
+                                   GetBackgroundContainerId(true));
 }
 
-void DesktopBackgroundController::MoveDesktopToUnlockedContainer() {
+bool DesktopBackgroundController::MoveDesktopToUnlockedContainer() {
   if (!locked_)
-    return;
+    return false;
   locked_ = false;
-  ReparentBackgroundWidgets(GetBackgroundContainerId(true),
-                            GetBackgroundContainerId(false));
+  return ReparentBackgroundWidgets(GetBackgroundContainerId(true),
+                                   GetBackgroundContainerId(false));
 }
 
 void DesktopBackgroundController::OnWindowDestroying(aura::Window* window) {
-  window->SetProperty(internal::kWindowDesktopComponent,
+  window->SetProperty(kDesktopController,
       static_cast<internal::DesktopBackgroundWidgetController*>(NULL));
-  window->SetProperty(internal::kComponentWrapper,
-      static_cast<internal::ComponentWrapper*>(NULL));
+  window->SetProperty(kAnimatingDesktopController,
+      static_cast<internal::AnimatingDesktopController*>(NULL));
 }
 
 void DesktopBackgroundController::SetDesktopBackgroundImageMode() {
   desktop_background_mode_ = BACKGROUND_IMAGE;
-  InstallComponentForAllWindows();
+  InstallDesktopControllerForAllWindows();
 }
 
 void DesktopBackgroundController::OnWallpaperLoadCompleted(
@@ -317,7 +303,7 @@ ui::Layer* DesktopBackgroundController::SetColorLayerForContainer(
   return background_layer;
 }
 
-void DesktopBackgroundController::InstallComponent(
+void DesktopBackgroundController::InstallDesktopController(
     aura::RootWindow* root_window) {
   internal::DesktopBackgroundWidgetController* component = NULL;
   int container_id = GetBackgroundContainerId(locked_);
@@ -340,51 +326,60 @@ void DesktopBackgroundController::InstallComponent(
       NOTREACHED();
     }
   }
-  if (NULL == root_window->GetProperty(internal::kComponentWrapper)) {
-    // First time for this root window
+  // Ensure we're only observing the root window once. Don't rely on a window
+  // property check as those can be cleared by tests resetting the background.
+  if (!root_window->HasObserver(this))
     root_window->AddObserver(this);
-  }
-  root_window->SetProperty(internal::kComponentWrapper,
-                           new internal::ComponentWrapper(component));
+
+  internal::AnimatingDesktopController* animating_controller =
+      root_window->GetProperty(kAnimatingDesktopController);
+  if (animating_controller)
+    animating_controller->StopAnimating();
+  root_window->SetProperty(kAnimatingDesktopController,
+                           new internal::AnimatingDesktopController(component));
 }
 
-void DesktopBackgroundController::InstallComponentForAllWindows() {
+void DesktopBackgroundController::InstallDesktopControllerForAllWindows() {
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
   for (Shell::RootWindowList::iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter) {
-    InstallComponent(*iter);
+    InstallDesktopController(*iter);
   }
 }
 
-void DesktopBackgroundController::ReparentBackgroundWidgets(int src_container,
+bool DesktopBackgroundController::ReparentBackgroundWidgets(int src_container,
                                                             int dst_container) {
+  bool moved = false;
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
   for (Shell::RootWindowList::iterator iter = root_windows.begin();
     iter != root_windows.end(); ++iter) {
     aura::RootWindow* root_window = *iter;
     // In the steady state (no animation playing) the background widget
-    // controller exists in the kWindowDesktopComponent property.
-    DesktopBackgroundWidgetController* desktop_component = root_window->
-        GetProperty(kWindowDesktopComponent);
-    if (desktop_component) {
-      desktop_component->Reparent(root_window,
-                                  src_container,
-                                  dst_container);
+    // controller exists in the kDesktopController property.
+    DesktopBackgroundWidgetController* desktop_controller = root_window->
+        GetProperty(kDesktopController);
+    if (desktop_controller) {
+      moved |= desktop_controller->Reparent(root_window,
+                                            src_container,
+                                            dst_container);
     }
-    // During desktop show animations the controller lives in kComponentWrapper.
+    // During desktop show animations the controller lives in
+    // kAnimatingDesktopController.
     // NOTE: If a wallpaper load happens during a desktop show animation there
     // can temporarily be two desktop background widgets.  We must reparent
     // both of them - one above and one here.
-    DesktopBackgroundWidgetController* wrapped_component =
-        root_window->GetProperty(kComponentWrapper) ?
-        root_window->GetProperty(kComponentWrapper)->GetComponent(false) :
+    DesktopBackgroundWidgetController* animating_controller =
+        root_window->GetProperty(kAnimatingDesktopController) ?
+        root_window->GetProperty(kAnimatingDesktopController)->
+            GetController(false) :
         NULL;
-    if (wrapped_component) {
-      wrapped_component->Reparent(root_window,
-                                  src_container,
-                                  dst_container);
+    if (animating_controller) {
+      moved |= animating_controller->Reparent(root_window,
+                                              src_container,
+                                              dst_container);
     }
   }
+  return moved;
 }
 
 int DesktopBackgroundController::GetBackgroundContainerId(bool locked) {

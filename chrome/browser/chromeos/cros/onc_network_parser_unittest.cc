@@ -54,19 +54,9 @@ net::CertType GetCertType(const net::X509Certificate* cert) {
 
 class OncNetworkParserTest : public testing::Test {
  public:
-  static void SetUpTestCase() {
-    // Ideally, we'd open a test DB for each test case, and close it
-    // again, removing the temp dir, but unfortunately, there's a
-    // bug in NSS that prevents this from working, so we just open
-    // it once, and empty it for each test case.  Here's the bug:
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=588269
-    ASSERT_TRUE(crypto::OpenTestNSSDB());
-    // There is no matching TearDownTestCase call to close the test NSS DB
-    // because that would leave NSS in a potentially broken state for further
-    // tests, due to https://bugzilla.mozilla.org/show_bug.cgi?id=588269
-  }
-
   virtual void SetUp() {
+    ASSERT_TRUE(test_nssdb_.is_open());
+
     slot_ = net::NSSCertDatabase::GetInstance()->GetPublicModule();
 
     // Don't run the test if the setup failed.
@@ -137,6 +127,7 @@ class OncNetworkParserTest : public testing::Test {
   }
 
   ScopedStubCrosEnabler stub_cros_enabler_;
+  crypto::ScopedTestNSSDB test_nssdb_;
 };
 
 const base::Value* OncNetworkParserTest::GetExpectedProperty(
@@ -329,6 +320,32 @@ TEST_F(OncNetworkParserTest, TestLoadVPNCertificatePattern) {
             vpn->client_cert_pattern().enrollment_uri_list()[0]);
   EXPECT_EQ("chrome-extension://abc/keygen-cert.html",
             vpn->client_cert_pattern().enrollment_uri_list()[1]);
+}
+
+TEST_F(OncNetworkParserTest, TestNoCertificatePatternForDevicePolicy) {
+  std::string test_blob;
+  GetTestData("cert-pattern.onc", &test_blob);
+  OncNetworkParser parser(test_blob, "",
+                          NetworkUIData::ONC_SOURCE_DEVICE_POLICY);
+
+  // Make sure we fail when parsing a certificate pattern from a device policy
+  // ONC file.
+  ASSERT_TRUE(parser.parse_error().empty());
+  EXPECT_EQ(1, parser.GetNetworkConfigsSize());
+  EXPECT_EQ(2, parser.GetCertificatesSize());
+  scoped_ptr<Network> network(parser.ParseNetwork(0, NULL));
+  ASSERT_TRUE(network.get());
+
+  EXPECT_EQ(chromeos::TYPE_WIFI, network->type());
+  WifiNetwork* wifi = static_cast<WifiNetwork*>(network.get());
+  EXPECT_EQ(chromeos::SECURITY_8021X, wifi->encryption());
+  EXPECT_EQ("WirelessNetwork", wifi->name());
+  EXPECT_FALSE(wifi->auto_connect());
+  EXPECT_EQ("", wifi->passphrase());
+  EXPECT_EQ(chromeos::EAP_METHOD_TLS, wifi->eap_method());
+  EXPECT_EQ(chromeos::CLIENT_CERT_TYPE_PATTERN, wifi->client_cert_type());
+  EXPECT_EQ("", wifi->client_cert_pattern().issuer().organization());
+  ASSERT_EQ(0ul, wifi->client_cert_pattern().enrollment_uri_list().size());
 }
 
 TEST_F(OncNetworkParserTest, TestCreateNetworkWifiEAP1) {

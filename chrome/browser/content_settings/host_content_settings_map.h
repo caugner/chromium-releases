@@ -14,9 +14,9 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/synchronization/lock.h"
 #include "base/tuple.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/content_settings/content_settings_observer.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
@@ -188,6 +188,16 @@ class HostContentSettingsMap
   static bool ShouldAllowAllContent(const GURL& primary_url,
                                     const GURL& secondary_url,
                                     ContentSettingsType content_type);
+
+  // Returns the ProviderType associated with the given source string.
+  // TODO(estade): I regret adding this. At the moment there are no legitimate
+  // uses. We should stick to ProviderType rather than string so we don't have
+  // to convert backwards.
+  static ProviderType GetProviderTypeFromSource(const std::string& source);
+
+  bool is_off_the_record() const {
+    return is_off_the_record_;
+  }
 
  private:
   friend class base::RefCountedThreadSafe<HostContentSettingsMap>;

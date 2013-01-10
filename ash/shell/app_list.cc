@@ -279,8 +279,12 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
       Shell::GetInstance()->ToggleAppList();
   }
 
-  virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE {
-    return gfx::ImageSkia();
+  virtual void ViewClosing() OVERRIDE {
+    // Nothing needs to be done.
+  }
+
+  virtual void ViewActivationChanged(bool active) OVERRIDE {
+    // Nothing needs to be done.
   }
 
   app_list::AppListModel* model_;

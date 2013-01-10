@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browser_about_handler.h"
 
+#include <algorithm>
 #include <string>
 
 #include "base/command_line.h"
@@ -19,44 +20,43 @@ namespace {
 
 // Add paths here to be included in chrome://chrome-urls (about:about).
 // These paths will also be suggested by BuiltinProvider.
-const char* const kChromePaths[] = {
+const char* const kPaths[] = {
   chrome::kChromeUIAppCacheInternalsHost,
   chrome::kChromeUIBlobInternalsHost,
-  chrome::kChromeUIBookmarksHost,
   chrome::kChromeUICacheHost,
   chrome::kChromeUIChromeURLsHost,
   chrome::kChromeUICrashesHost,
   chrome::kChromeUICreditsHost,
   chrome::kChromeUIDNSHost,
-  chrome::kChromeUIDownloadsHost,
-  chrome::kChromeUIExtensionsHost,
-  chrome::kChromeUIFlagsHost,
-  chrome::kChromeUIFlashHost,
   chrome::kChromeUIGpuInternalsHost,
   chrome::kChromeUIHistoryHost,
   chrome::kChromeUIIPCHost,
-  chrome::kChromeUIInspectHost,
   chrome::kChromeUIMediaInternalsHost,
   chrome::kChromeUIMemoryHost,
-  chrome::kChromeUINaClHost,
   chrome::kChromeUINetInternalsHost,
   chrome::kChromeUINetworkViewCacheHost,
   chrome::kChromeUINewTabHost,
   chrome::kChromeUIOmniboxHost,
-  chrome::kChromeUIPluginsHost,
-  chrome::kChromeUIPolicyHost,
   chrome::kChromeUIPredictorsHost,
   chrome::kChromeUIProfilerHost,
   chrome::kChromeUIQuotaInternalsHost,
-  chrome::kChromeUISettingsHost,
   chrome::kChromeUIStatsHost,
   chrome::kChromeUISyncInternalsHost,
-#if defined(OS_CHROMEOS)
-  chrome::kChromeUITaskManagerHost,
-#endif
   chrome::kChromeUITermsHost,
-  chrome::kChromeUITracingHost,
   chrome::kChromeUIVersionHost,
+#if defined(OS_ANDROID)
+  chrome::kChromeUIWelcomeHost,
+#else
+  chrome::kChromeUIBookmarksHost,
+  chrome::kChromeUIDownloadsHost,
+  // TODO(dfalcantara): Enable after http://crbug.com/143146 is fixed.
+  chrome::kChromeUIFlagsHost,
+  chrome::kChromeUIFlashHost,
+  chrome::kChromeUIInspectHost,
+  chrome::kChromeUIPluginsHost,
+  chrome::kChromeUISettingsHost,
+  chrome::kChromeUITracingHost,
+#endif
 #if defined(OS_WIN)
   chrome::kChromeUIConflictsHost,
 #endif
@@ -78,7 +78,17 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIOSCreditsHost,
   chrome::kChromeUIProxySettingsHost,
   chrome::kChromeUISystemInfoHost,
+  chrome::kChromeUITaskManagerHost,
   chrome::kChromeUIWallpaperHost,
+#endif
+#if !defined(DISABLE_NACL)
+  chrome::kChromeUINaClHost,
+#endif
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  chrome::kChromeUIPolicyHost,
+#endif
+#if defined(ENABLE_EXTENSIONS)
+  chrome::kChromeUIExtensionsHost,
 #endif
 #if defined(ENABLE_PRINTING)
   chrome::kChromeUIPrintHost,
@@ -133,6 +143,10 @@ bool WillHandleBrowserAboutURL(GURL* url,
   } else if (host == chrome::kChromeUISettingsHost) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUISettingsHost + url->path();
+  // Redirect chrome://help
+  } else if (host == chrome::kChromeUIHelpHost) {
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIHelpHost + url->path();
   }
   GURL::Replacements replacements;
   replacements.SetHostStr(host);
@@ -164,9 +178,7 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
 }
 
 std::vector<std::string> ChromePaths() {
-  std::vector<std::string> paths;
-  paths.reserve(arraysize(kChromePaths));
-  for (size_t i = 0; i < arraysize(kChromePaths); i++)
-    paths.push_back(kChromePaths[i]);
+  std::vector<std::string> paths(kPaths, kPaths + arraysize(kPaths));
+  std::sort(paths.begin(), paths.end());
   return paths;
 }

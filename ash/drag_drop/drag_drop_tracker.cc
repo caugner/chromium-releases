@@ -14,14 +14,11 @@
 namespace {
 
 // Creates a window for capturing drag events.
-aura::Window* CreateCaptureWindow(aura::RootWindow* root_window) {
+aura::Window* CreateCaptureWindow() {
   aura::Window* window = new aura::Window(NULL);
   window->SetType(aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_NOT_DRAWN);
   window->SetParent(NULL);
-  window->SetBoundsInScreen(gfx::Rect(root_window->GetBoundsInScreen().origin(),
-                                      gfx::Size()),
-                            gfx::Screen::GetDisplayNearestWindow(root_window));
   window->Show();
   return window;
 }
@@ -31,8 +28,8 @@ aura::Window* CreateCaptureWindow(aura::RootWindow* root_window) {
 namespace ash {
 namespace internal {
 
-DragDropTracker::DragDropTracker(aura::RootWindow* root_window)
-    : capture_window_(CreateCaptureWindow(root_window)) {
+DragDropTracker::DragDropTracker()
+    : capture_window_(CreateCaptureWindow()) {
   capture_window_->SetCapture();
 }
 
@@ -41,27 +38,34 @@ DragDropTracker::~DragDropTracker()  {
 }
 
 aura::Window* DragDropTracker::GetTarget(const ui::LocatedEvent& event) {
-  std::pair<aura::RootWindow*, gfx::Point> pair =
-      ash::wm::GetRootWindowRelativeToWindow(capture_window_.get(),
-                                             event.location());
-  return pair.first->GetEventHandlerForPoint(pair.second);
+  DCHECK(capture_window_.get());
+  gfx::Point location_in_screen = event.location();
+  wm::ConvertPointToScreen(capture_window_.get(),
+                           &location_in_screen);
+  aura::RootWindow* root_window_at_point =
+      wm::GetRootWindowAt(location_in_screen);
+  gfx::Point location_in_root = location_in_screen;
+  wm::ConvertPointFromScreen(root_window_at_point, &location_in_root);
+  return root_window_at_point->GetEventHandlerForPoint(location_in_root);
 }
 
 ui::MouseEvent* DragDropTracker::ConvertMouseEvent(
     aura::Window* target,
     const ui::MouseEvent& event) {
   DCHECK(capture_window_.get());
-  std::pair<aura::RootWindow*, gfx::Point> location_pair =
-      ash::wm::GetRootWindowRelativeToWindow(capture_window_.get(),
-                                             event.location());
-  aura::Window::ConvertPointToTarget(location_pair.first, target,
-                                     &location_pair.second);
-  std::pair<aura::RootWindow*, gfx::Point> root_location_pair =
-      ash::wm::GetRootWindowRelativeToWindow(capture_window_->GetRootWindow(),
-                                             event.root_location());
+  gfx::Point target_location = event.location();
+  aura::Window::ConvertPointToTarget(capture_window_.get(), target,
+                                     &target_location);
+  gfx::Point location_in_screen = event.location();
+  ash::wm::ConvertPointToScreen(capture_window_.get(), &location_in_screen);
+  gfx::Point target_root_location = event.root_location();
+  aura::Window::ConvertPointToTarget(
+      capture_window_->GetRootWindow(),
+      ash::wm::GetRootWindowAt(location_in_screen),
+      &target_root_location);
   return new ui::MouseEvent(event.type(),
-                            location_pair.second,
-                            root_location_pair.second,
+                            target_location,
+                            target_root_location,
                             event.flags());
 }
 

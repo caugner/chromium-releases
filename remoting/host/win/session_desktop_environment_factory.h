@@ -10,13 +10,17 @@
 
 namespace remoting {
 
+class ClientSession;
+
 class SessionDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
  public:
-  SessionDesktopEnvironmentFactory(const base::Closure& inject_sas);
+  SessionDesktopEnvironmentFactory(
+      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+      const base::Closure& inject_sas);
   virtual ~SessionDesktopEnvironmentFactory();
 
-  virtual scoped_ptr<DesktopEnvironment> Create(
-      ChromotingHostContext* context) OVERRIDE;
+  virtual scoped_ptr<DesktopEnvironment> Create(ClientSession* client) OVERRIDE;
 
  private:
   // Used to ask the daemon to inject Secure Attention Sequence.

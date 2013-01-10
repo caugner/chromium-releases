@@ -21,7 +21,7 @@
 #include "sync/engine/syncer_types.h"
 #include "sync/internal_api/change_reorder_buffer.h"
 #include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/base/model_type_state_map.h"
+#include "sync/internal_api/public/base/model_type_invalidation_map.h"
 #include "sync/internal_api/public/base_node.h"
 #include "sync/internal_api/public/configure_reason.h"
 #include "sync/internal_api/public/engine/polling_constants.h"
@@ -475,54 +475,6 @@ void SyncManagerImpl::Init(
                         true, InitialSyncEndedTypes()));
 }
 
-void SyncManagerImpl::UpdateSessionNameCallback(
-    const std::string& chrome_version,
-    const std::string& session_name) {
-  WriteTransaction trans(FROM_HERE, GetUserShare());
-  WriteNode node(&trans);
-  // TODO(rlarocque): switch to device info node.
-  if (node.InitByTagLookup(syncer::kNigoriTag) != syncer::BaseNode::INIT_OK) {
-    return;
-  }
-
-  sync_pb::NigoriSpecifics nigori(node.GetNigoriSpecifics());
-  // Add or update device information.
-  bool contains_this_device = false;
-  for (int i = 0; i < nigori.device_information_size(); ++i) {
-    const sync_pb::DeviceInformation& device_information =
-        nigori.device_information(i);
-    if (device_information.cache_guid() == directory()->cache_guid()) {
-      // Update the version number in case it changed due to an update.
-      if (device_information.chrome_version() != chrome_version) {
-        sync_pb::DeviceInformation* mutable_device_information =
-            nigori.mutable_device_information(i);
-        mutable_device_information->set_chrome_version(
-            chrome_version);
-      }
-      contains_this_device = true;
-    }
-  }
-
-  if (!contains_this_device) {
-    sync_pb::DeviceInformation* device_information =
-        nigori.add_device_information();
-    device_information->set_cache_guid(directory()->cache_guid());
-#if defined(OS_CHROMEOS)
-    device_information->set_platform("ChromeOS");
-#elif defined(OS_LINUX)
-    device_information->set_platform("Linux");
-#elif defined(OS_MACOSX)
-    device_information->set_platform("Mac");
-#elif defined(OS_WIN)
-    device_information->set_platform("Windows");
-#endif
-    device_information->set_name(session_name);
-    device_information->set_chrome_version(chrome_version);
-  }
-  node.SetNigoriSpecifics(nigori);
-}
-
-
 void SyncManagerImpl::OnPassphraseRequired(
     PassphraseRequiredReason reason,
     const sync_pb::EncryptedData& pending_keys) {
@@ -557,7 +509,9 @@ void SyncManagerImpl::OnCryptographerStateChanged(
       sync_encryption_handler_->migration_time());
 }
 
-void SyncManagerImpl::OnPassphraseTypeChanged(PassphraseType type) {
+void SyncManagerImpl::OnPassphraseTypeChanged(
+    PassphraseType type,
+    base::Time explicit_passphrase_time) {
   allstatus_.SetPassphraseType(type);
   allstatus_.SetKeystoreMigrationTime(
       sync_encryption_handler_->migration_time());
@@ -841,8 +795,14 @@ SyncManagerImpl::HandleTransactionEndingChangeEvent(
     CHECK(change_buffers_[type].GetAllChangesInTreeOrder(&read_trans,
                                                          &ordered_changes));
     if (!ordered_changes.Get().empty()) {
+      // Increment transaction version so that change processor can read
+      // updated value and set it in native model after changes are applied.
+      trans->directory()->IncrementTransactionVersion(type);
+
       change_delegate_->
-          OnChangesApplied(type, &read_trans, ordered_changes);
+          OnChangesApplied(type,
+                           trans->directory()->GetTransactionVersion(type),
+                           &read_trans, ordered_changes);
       change_observer_.Call(FROM_HERE,
           &SyncManager::ChangeObserver::OnChangesApplied,
           type, write_transaction_info.Get().id, ordered_changes);
@@ -979,6 +939,7 @@ void SyncManagerImpl::RequestNudgeForDataTypes(
   base::TimeDelta nudge_delay = NudgeStrategy::GetNudgeDelayTimeDelta(
       types.First().Get(),
       this);
+  allstatus_.IncrementNudgeCounter(NUDGE_SOURCE_LOCAL);
   scheduler_->ScheduleNudgeAsync(nudge_delay,
                                  NUDGE_SOURCE_LOCAL,
                                  types,
@@ -1015,9 +976,10 @@ void SyncManagerImpl::OnSyncEngineEvent(const SyncEngineEvent& event) {
         (event.snapshot.model_neutral_state().num_successful_commits > 0);
     if (is_notifiable_commit) {
       if (invalidator_.get()) {
-        const ObjectIdStateMap& id_state_map =
-            ModelTypeStateMapToObjectIdStateMap(event.snapshot.source().types);
-        invalidator_->SendInvalidation(id_state_map);
+        const ObjectIdInvalidationMap& invalidation_map =
+            ModelTypeInvalidationMapToObjectIdInvalidationMap(
+                event.snapshot.source().types);
+        invalidator_->SendInvalidation(invalidation_map);
       } else {
         DVLOG(1) << "Not sending invalidation: invalidator_ is NULL";
       }
@@ -1235,9 +1197,9 @@ JsArgList SyncManagerImpl::GetChildNodeIds(const JsArgList& args) {
 }
 
 void SyncManagerImpl::UpdateNotificationInfo(
-    const ModelTypeStateMap& type_state_map) {
-  for (ModelTypeStateMap::const_iterator it = type_state_map.begin();
-       it != type_state_map.end(); ++it) {
+    const ModelTypeInvalidationMap& invalidation_map) {
+  for (ModelTypeInvalidationMap::const_iterator it = invalidation_map.begin();
+       it != invalidation_map.end(); ++it) {
     NotificationInfo* info = &notification_info_map_[it->first];
     info->total_count++;
     info->payload = it->second.payload;
@@ -1267,24 +1229,26 @@ void SyncManagerImpl::OnInvalidatorStateChange(InvalidatorState state) {
 }
 
 void SyncManagerImpl::OnIncomingInvalidation(
-    const ObjectIdStateMap& id_state_map,
+    const ObjectIdInvalidationMap& invalidation_map,
     IncomingInvalidationSource source) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  const ModelTypeStateMap& type_state_map =
-      ObjectIdStateMapToModelTypeStateMap(id_state_map);
+  const ModelTypeInvalidationMap& type_invalidation_map =
+      ObjectIdInvalidationMapToModelTypeInvalidationMap(invalidation_map);
   if (source == LOCAL_INVALIDATION) {
+    allstatus_.IncrementNudgeCounter(NUDGE_SOURCE_LOCAL_REFRESH);
     scheduler_->ScheduleNudgeWithStatesAsync(
         TimeDelta::FromMilliseconds(kSyncRefreshDelayMsec),
         NUDGE_SOURCE_LOCAL_REFRESH,
-        type_state_map, FROM_HERE);
-  } else if (!type_state_map.empty()) {
+        type_invalidation_map, FROM_HERE);
+  } else if (!type_invalidation_map.empty()) {
+    allstatus_.IncrementNudgeCounter(NUDGE_SOURCE_NOTIFICATION);
     scheduler_->ScheduleNudgeWithStatesAsync(
         TimeDelta::FromMilliseconds(kSyncSchedulerDelayMsec),
         NUDGE_SOURCE_NOTIFICATION,
-        type_state_map, FROM_HERE);
+        type_invalidation_map, FROM_HERE);
     allstatus_.IncrementNotificationsReceived();
-    UpdateNotificationInfo(type_state_map);
-    debug_info_event_listener_.OnIncomingNotification(type_state_map);
+    UpdateNotificationInfo(type_invalidation_map);
+    debug_info_event_listener_.OnIncomingNotification(type_invalidation_map);
   } else {
     LOG(WARNING) << "Sync received invalidation without any type information.";
   }
@@ -1293,8 +1257,9 @@ void SyncManagerImpl::OnIncomingInvalidation(
     DictionaryValue details;
     ListValue* changed_types = new ListValue();
     details.Set("changedTypes", changed_types);
-    for (ModelTypeStateMap::const_iterator it = type_state_map.begin();
-         it != type_state_map.end(); ++it) {
+    for (ModelTypeInvalidationMap::const_iterator it =
+             type_invalidation_map.begin(); it != type_invalidation_map.end();
+         ++it) {
       const std::string& model_type_str =
           ModelTypeToString(it->first);
       changed_types->Append(Value::CreateStringValue(model_type_str));

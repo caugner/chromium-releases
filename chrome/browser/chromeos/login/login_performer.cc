@@ -71,8 +71,6 @@ LoginPerformer::~LoginPerformer() {
   DVLOG(1) << "Deleting LoginPerformer";
   DCHECK(default_performer_ != NULL) << "Default instance should exist.";
   default_performer_ = NULL;
-  if (authenticator_)
-    authenticator_->SetConsumer(NULL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

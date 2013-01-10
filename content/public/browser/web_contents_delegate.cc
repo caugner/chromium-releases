@@ -29,8 +29,6 @@ bool WebContentsDelegate::IsPopupOrPanel(const WebContents* source) const {
   return false;
 }
 
-bool WebContentsDelegate::IsApplication() const { return false; }
-
 bool WebContentsDelegate::CanLoadDataURLsInWebUI() const { return false; }
 
 gfx::Rect WebContentsDelegate::GetRootWindowResizerRect() const {
@@ -78,10 +76,6 @@ bool WebContentsDelegate::HandleContextMenu(
   return false;
 }
 
-bool WebContentsDelegate::ExecuteContextMenuCommand(int command) {
-  return false;
-}
-
 void WebContentsDelegate::ViewSourceForTab(WebContents* source,
                                            const GURL& page_url) {
   // Fall back implementation based entirely on the view-source scheme.
@@ -116,16 +110,6 @@ bool WebContentsDelegate::OnGoToEntryOffset(int offset) {
   return true;
 }
 
-bool WebContentsDelegate::ShouldAddNavigationToHistory(
-    const history::HistoryAddPageArgs& add_page_args,
-    NavigationType navigation_type) {
-  return true;
-}
-
-gfx::NativeWindow WebContentsDelegate::GetFrameNativeWindow() {
-  return NULL;
-}
-
 bool WebContentsDelegate::ShouldCreateWebContents(
     WebContents* web_contents,
     int route_id,
@@ -134,12 +118,6 @@ bool WebContentsDelegate::ShouldCreateWebContents(
     const GURL& target_url) {
   return true;
 }
-
-#if defined(OS_ANDROID)
-bool WebContentsDelegate::ShouldOverrideLoading(const GURL& url) {
-  return false;
-}
-#endif
 
 JavaScriptDialogCreator* WebContentsDelegate::GetJavaScriptDialogCreator() {
   return NULL;

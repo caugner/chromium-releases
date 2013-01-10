@@ -4,6 +4,7 @@
 
 #include "ppapi/proxy/file_chooser_resource.h"
 
+#include "base/bind.h"
 #include "base/string_split.h"
 #include "ipc/ipc_message.h"
 #include "ppapi/c/pp_errors.h"
@@ -97,15 +98,6 @@ void FileChooserResource::PopulateAcceptTypes(
   }
 }
 
-void FileChooserResource::OnReplyReceived(
-    const ResourceMessageReplyParams& params,
-    const IPC::Message& msg) {
-  IPC_BEGIN_MESSAGE_MAP(FileChooserResource, msg)
-    PPAPI_DISPATCH_RESOURCE_REPLY(PpapiPluginMsg_FileChooser_ShowReply,
-                                  OnPluginMsgShowReply)
-  IPC_END_MESSAGE_MAP()
-}
-
 void FileChooserResource::OnPluginMsgShowReply(
     const ResourceMessageReplyParams& params,
     const std::vector<PPB_FileRef_CreateInfo>& chosen_files) {
@@ -138,16 +130,18 @@ int32_t FileChooserResource::ShowInternal(
     return PP_ERROR_INPROGRESS;
 
   if (!sent_create_to_renderer())
-    SendCreateToRenderer(PpapiHostMsg_FileChooser_Create());
+    SendCreate(RENDERER, PpapiHostMsg_FileChooser_Create());
 
   callback_ = callback;
   StringVar* sugg_str = StringVar::FromPPVar(suggested_file_name);
 
-  CallRenderer(PpapiHostMsg_FileChooser_Show(
-      PP_ToBool(save_as),
-      mode_ == PP_FILECHOOSERMODE_OPENMULTIPLE,
-      sugg_str ? sugg_str->value() : std::string(),
-      accept_types_));
+  PpapiHostMsg_FileChooser_Show msg(
+        PP_ToBool(save_as),
+        mode_ == PP_FILECHOOSERMODE_OPENMULTIPLE,
+        sugg_str ? sugg_str->value() : std::string(),
+        accept_types_);
+  Call<PpapiPluginMsg_FileChooser_ShowReply>(RENDERER, msg,
+      base::Bind(&FileChooserResource::OnPluginMsgShowReply, this));
   return PP_OK_COMPLETIONPENDING;
 }
 

@@ -23,7 +23,6 @@
 #include "media/base/media.h"
 #include "net/socket/ssl_server_socket.h"
 #include "ppapi/cpp/completion_callback.h"
-#include "ppapi/cpp/dev/url_util_dev.h"
 #include "ppapi/cpp/input_event.h"
 #include "ppapi/cpp/mouse_cursor.h"
 #include "ppapi/cpp/rect.h"
@@ -55,9 +54,6 @@ namespace {
 const int kBytesPerPixel = 4;
 
 const int kPerfStatsIntervalMs = 1000;
-
-// URL scheme used by Chrome apps and extensions.
-const char kChromeExtensionUrlScheme[] = "chrome-extension";
 
 std::string ConnectionStateToString(protocol::ConnectionToHost::State state) {
   // Values returned by this function must match the
@@ -130,7 +126,7 @@ logging::LogMessageHandlerFunction g_logging_old_handler = NULL;
 // String sent in the "hello" message to the plugin to describe features.
 const char ChromotingInstance::kApiFeatures[] =
     "highQualityScaling injectKeyEvent sendClipboardItem remapKey trapKey "
-    "notifyClientDimensions pauseVideo";
+    "notifyClientDimensions pauseVideo pauseAudio";
 
 bool ChromotingInstance::ParseAuthMethods(const std::string& auth_methods_str,
                                           ClientConfig* config) {
@@ -193,17 +189,17 @@ ChromotingInstance::~ChromotingInstance() {
   view_.reset();
 
   if (client_.get()) {
-    base::WaitableEvent done_event(true, false);
-    client_->Stop(base::Bind(&base::WaitableEvent::Signal,
-                             base::Unretained(&done_event)));
-    done_event.Wait();
+    client_->Stop(base::Bind(&PluginThreadTaskRunner::Quit,
+                  plugin_task_runner_));
+  } else {
+    plugin_task_runner_->Quit();
   }
+
+  // Ensure that nothing touches the plugin thread delegate after this point.
+  plugin_task_runner_->DetachAndRunShutdownLoop();
 
   // Stopping the context shuts down all chromoting threads.
   context_.Stop();
-
-  // Ensure that nothing touches the plugin thread delegate after this point.
-  plugin_task_runner_->Detach();
 }
 
 bool ChromotingInstance::Init(uint32_t argc,
@@ -218,12 +214,6 @@ bool ChromotingInstance::Init(uint32_t argc,
   // http://crbug.com/91521.
   if (!media::IsMediaLibraryInitialized()) {
     LOG(ERROR) << "Media library not initialized.";
-    return false;
-  }
-
-  // Check that the calling content is part of an app or extension.
-  if (!IsCallerAppOrExtension()) {
-    LOG(ERROR) << "Not an app or extension";
     return false;
   }
 
@@ -355,6 +345,13 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
       return;
     }
     PauseVideo(pause);
+  } else if (method == "pauseAudio") {
+    bool pause = false;
+    if (!data->GetBoolean("pause", &pause)) {
+      LOG(ERROR) << "Invalid pauseAudio.";
+      return;
+    }
+    PauseAudio(pause);
   }
 }
 
@@ -590,6 +587,15 @@ void ChromotingInstance::PauseVideo(bool pause) {
   host_connection_->host_stub()->ControlVideo(video_control);
 }
 
+void ChromotingInstance::PauseAudio(bool pause) {
+  if (!IsConnected()) {
+    return;
+  }
+  protocol::AudioControl audio_control;
+  audio_control.set_enable(!pause);
+  host_connection_->host_stub()->ControlAudio(audio_control);
+}
+
 ChromotingStats* ChromotingInstance::GetStats() {
   if (!client_.get())
     return NULL;
@@ -742,22 +748,6 @@ void ChromotingInstance::ProcessLogToUI(const std::string& message) {
   data->SetString("message", message);
   PostChromotingMessage("logDebugMessage", data.Pass());
   g_logging_to_plugin = false;
-}
-
-bool ChromotingInstance::IsCallerAppOrExtension() {
-  const pp::URLUtil_Dev* url_util = pp::URLUtil_Dev::Get();
-  if (!url_util)
-    return false;
-
-  PP_URLComponents_Dev url_components;
-  pp::Var url_var = url_util->GetDocumentURL(this, &url_components);
-  if (!url_var.is_string())
-    return false;
-
-  std::string url = url_var.AsString();
-  std::string url_scheme = url.substr(url_components.scheme.begin,
-                                      url_components.scheme.len);
-  return url_scheme == kChromeExtensionUrlScheme;
 }
 
 bool ChromotingInstance::IsConnected() {

@@ -36,6 +36,7 @@
 #include "webkit/user_agent/user_agent_util.h"
 
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
+#include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
@@ -69,14 +70,21 @@ const char kO3DPluginName[] = "Google Talk Plugin Video Accelerator";
 const char kO3DPluginMimeType[] ="application/vnd.o3d.auto";
 const char kO3DPluginExtension[] = "";
 const char kO3DPluginDescription[] = "O3D MIME";
+const uint32 kO3DPluginPermissions = ppapi::PERMISSION_PRIVATE |
+                                     ppapi::PERMISSION_DEV;
 
 const char kGTalkPluginName[] = "Google Talk Plugin";
 const char kGTalkPluginMimeType[] ="application/googletalk";
 const char kGTalkPluginExtension[] = ".googletalk";
 const char kGTalkPluginDescription[] = "Google Talk Plugin";
+const uint32 kGTalkPluginPermissions = ppapi::PERMISSION_PRIVATE |
+                                       ppapi::PERMISSION_DEV;
 
-const char kInterposeLibraryPath[] =
-    "@executable_path/../../../libplugin_carbon_interpose.dylib";
+#if defined(WIDEVINE_CDM_AVAILABLE)
+const char kWidevineCdmPluginExtension[] = "";
+const uint32 kWidevineCdmPluginPermissions = ppapi::PERMISSION_PRIVATE |
+                                             ppapi::PERMISSION_DEV;
+#endif  // WIDEVINE_CDM_AVAILABLE
 
 #if defined(ENABLE_REMOTING)
 #if defined(GOOGLE_CHROME_BUILD)
@@ -97,6 +105,9 @@ const char kRemotingViewerPluginMimeType[] =
 const char kRemotingViewerPluginMimeExtension[] = "";
 const char kRemotingViewerPluginMimeDescription[] = "";
 #endif  // defined(ENABLE_REMOTING)
+
+const char kInterposeLibraryPath[] =
+    "@executable_path/../../../libplugin_carbon_interpose.dylib";
 
 // Appends the known built-in plugins to the given vector. Some built-in
 // plugins are "internal" which means they are compiled into the Chrome binary,
@@ -162,6 +173,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       o3d.name = kO3DPluginName;
       o3d.is_out_of_process = true;
       o3d.is_sandboxed = false;
+      o3d.permissions = kO3DPluginPermissions;
       webkit::WebPluginMimeType o3d_mime_type(kO3DPluginMimeType,
                                               kO3DPluginExtension,
                                               kO3DPluginDescription);
@@ -180,6 +192,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       gtalk.name = kGTalkPluginName;
       gtalk.is_out_of_process = true;
       gtalk.is_sandboxed = false;
+      gtalk.permissions = kGTalkPluginPermissions;
       webkit::WebPluginMimeType gtalk_mime_type(kGTalkPluginMimeType,
                                                 kGTalkPluginExtension,
                                                 kGTalkPluginDescription);
@@ -189,6 +202,29 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       skip_gtalk_file_check = true;
     }
   }
+
+#if defined(WIDEVINE_CDM_AVAILABLE)
+  static bool skip_widevine_cdm_file_check = false;
+  if (PathService::Get(chrome::FILE_WIDEVINE_CDM_PLUGIN, &path)) {
+    if (skip_widevine_cdm_file_check || file_util::PathExists(path)) {
+      content::PepperPluginInfo widevine_cdm;
+      widevine_cdm.is_out_of_process = true;
+      widevine_cdm.path = path;
+      widevine_cdm.name = kWidevineCdmPluginName;
+      widevine_cdm.description = kWidevineCdmPluginDescription;
+      widevine_cdm.version = WIDEVINE_CDM_VERSION_STRING;
+      webkit::WebPluginMimeType widevine_cdm_mime_type(
+          kWidevineCdmPluginMimeType,
+          kWidevineCdmPluginExtension,
+          kWidevineCdmPluginMimeTypeDescription);
+      widevine_cdm.mime_types.push_back(widevine_cdm_mime_type);
+      widevine_cdm.permissions = kWidevineCdmPluginPermissions;
+      plugins->push_back(widevine_cdm);
+
+      skip_widevine_cdm_file_check = true;
+    }
+  }
+#endif  // WIDEVINE_CDM_AVAILABLE
 
   // The Remoting Viewer plugin is built-in.
 #if defined(ENABLE_REMOTING)
@@ -304,60 +340,6 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin,
 #endif  // FLAPPER_AVAILABLE
 }
 
-#if defined(OS_WIN)
-// Launches the privileged flash broker, used when flash is sandboxed.
-// The broker is the same flash dll, except that it uses a different
-// entrypoint (BrokerMain) and it is hosted in windows' generic surrogate
-// process rundll32. After launching the broker we need to pass to
-// the flash plugin the process id of the broker via the command line
-// using --flash-broker=pid.
-// More info about rundll32 at http://support.microsoft.com/kb/164787.
-bool LoadFlashBroker(const FilePath& plugin_path, CommandLine* cmd_line) {
-  FilePath rundll;
-  if (!PathService::Get(base::DIR_SYSTEM, &rundll))
-    return false;
-  rundll = rundll.AppendASCII("rundll32.exe");
-  // Rundll32 cannot handle paths with spaces, so we use the short path.
-  wchar_t short_path[MAX_PATH];
-  if (0 == ::GetShortPathNameW(plugin_path.value().c_str(),
-                               short_path, arraysize(short_path)))
-    return false;
-  // Here is the kicker, if the user has disabled 8.3 (short path) support
-  // on the volume GetShortPathNameW does not fail but simply returns the
-  // input path. In this case if the path had any spaces then rundll32 will
-  // incorrectly interpret its parameters. So we quote the path, even though
-  // the kb/164787 says you should not.
-  std::wstring cmd_final =
-      base::StringPrintf(L"%ls \"%ls\",BrokerMain browser=chrome",
-                         rundll.value().c_str(),
-                         short_path);
-  base::ProcessHandle process;
-  base::LaunchOptions options;
-  options.start_hidden = true;
-  if (!base::LaunchProcess(cmd_final, options, &process))
-    return false;
-
-  cmd_line->AppendSwitchASCII("flash-broker",
-                              base::Int64ToString(::GetProcessId(process)));
-
-  // The flash broker, unders some circumstances can linger beyond the lifetime
-  // of the flash player, so we put it in a job object, when the browser
-  // terminates the job object is destroyed (by the OS) and the flash broker
-  // is terminated.
-  HANDLE job = ::CreateJobObjectW(NULL, NULL);
-  if (base::SetJobObjectAsKillOnJobClose(job)) {
-    ::AssignProcessToJobObject(job, process);
-    // Yes, we are leaking the object here. Read comment above.
-  } else {
-    ::CloseHandle(job);
-    return false;
-  }
-
-  ::CloseHandle(process);
-  return true;
-}
-#endif  // OS_WIN
-
 }  // namespace
 
 namespace chrome {
@@ -457,70 +439,6 @@ base::StringPiece ChromeContentClient::GetDataResource(
 gfx::Image& ChromeContentClient::GetNativeImageNamed(int resource_id) const {
   return ResourceBundle::GetSharedInstance().GetNativeImageNamed(resource_id);
 }
-
-#if defined(OS_WIN)
-bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
-                                        sandbox::TargetPolicy* policy) {
-  std::wstring plugin_dll = command_line->
-      GetSwitchValueNative(switches::kPluginPath);
-
-  FilePath builtin_flash;
-  if (!PathService::Get(chrome::FILE_FLASH_PLUGIN_EXISTING, &builtin_flash))
-    return false;
-
-  FilePath plugin_path(plugin_dll);
-  if (plugin_path.BaseName() != builtin_flash.BaseName())
-    return false;
-
-  if (base::win::GetVersion() <= base::win::VERSION_XP ||
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableFlashSandbox)) {
-    return false;
-  }
-
-  // Add policy for the plugin proxy window pump event
-  // used by WebPluginDelegateProxy::HandleInputEvent().
-  if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
-                      sandbox::TargetPolicy::HANDLES_DUP_ANY,
-                      L"Event") != sandbox::SBOX_ALL_OK) {
-    NOTREACHED();
-    return false;
-  }
-
-  // Add the policy for the pipes.
-  if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
-                      sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
-                      L"\\\\.\\pipe\\chrome.*") != sandbox::SBOX_ALL_OK) {
-    NOTREACHED();
-    return false;
-  }
-
-  // Spawn the flash broker and apply sandbox policy.
-  if (LoadFlashBroker(plugin_path, command_line)) {
-    // UI job restrictions break windowless Flash, so just pick up single
-    // process limit for now.
-    policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
-    policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                          sandbox::USER_INTERACTIVE);
-    // Allow the Flash plugin to forward some messages back to Chrome.
-    if (base::win::GetVersion() == base::win::VERSION_VISTA) {
-      // Per-window message filters required on Win7 or later must be added to:
-      // render_widget_host_view_win.cc RenderWidgetHostViewWin::ReparentWindow
-      ::ChangeWindowMessageFilter(WM_MOUSEWHEEL, MSGFLT_ADD);
-      ::ChangeWindowMessageFilter(WM_APPCOMMAND, MSGFLT_ADD);
-    }
-    policy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
-  } else {
-    // Could not start the broker, use a very weak policy instead.
-    DLOG(WARNING) << "Failed to start flash broker";
-    policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
-    policy->SetTokenLevel(
-        sandbox::USER_UNPROTECTED, sandbox::USER_UNPROTECTED);
-  }
-
-  return true;
-}
-#endif
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 bool ChromeContentClient::GetSandboxProfileForSandboxType(

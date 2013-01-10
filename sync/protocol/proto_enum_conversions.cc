@@ -35,7 +35,7 @@ const char* GetBrowserTypeString(
 const char* GetPageTransitionString(
     sync_pb::SyncEnums::PageTransition page_transition) {
   ASSERT_ENUM_BOUNDS(sync_pb::SyncEnums, PageTransition,
-                     LINK, CHAIN_END);
+                     LINK, KEYWORD_GENERATED);
   switch (page_transition) {
     ENUM_CASE(sync_pb::SyncEnums, LINK);
     ENUM_CASE(sync_pb::SyncEnums, TYPED);
@@ -48,17 +48,15 @@ const char* GetPageTransitionString(
     ENUM_CASE(sync_pb::SyncEnums, RELOAD);
     ENUM_CASE(sync_pb::SyncEnums, KEYWORD);
     ENUM_CASE(sync_pb::SyncEnums, KEYWORD_GENERATED);
-    ENUM_CASE(sync_pb::SyncEnums, CHAIN_START);
-    ENUM_CASE(sync_pb::SyncEnums, CHAIN_END);
   }
   NOTREACHED();
   return "";
 }
 
-const char* GetPageTransitionQualifierString(
-    sync_pb::SyncEnums::PageTransitionQualifier
+const char* GetPageTransitionRedirectTypeString(
+    sync_pb::SyncEnums::PageTransitionRedirectType
         page_transition_qualifier) {
-  ASSERT_ENUM_BOUNDS(sync_pb::SyncEnums, PageTransitionQualifier,
+  ASSERT_ENUM_BOUNDS(sync_pb::SyncEnums, PageTransitionRedirectType,
                      CLIENT_REDIRECT, SERVER_REDIRECT);
   switch (page_transition_qualifier) {
     ENUM_CASE(sync_pb::SyncEnums, CLIENT_REDIRECT);
@@ -141,16 +139,16 @@ const char* GetActionString(sync_pb::SyncEnums::Action action) {
 }
 
 const char* GetDeviceTypeString(
-    sync_pb::SessionHeader::DeviceType device_type) {
-  ASSERT_ENUM_BOUNDS(sync_pb::SessionHeader, DeviceType, TYPE_WIN, TYPE_TABLET);
+    sync_pb::SyncEnums::DeviceType device_type) {
+  ASSERT_ENUM_BOUNDS(sync_pb::SyncEnums, DeviceType, TYPE_WIN, TYPE_TABLET);
   switch (device_type) {
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_WIN);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_MAC);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_LINUX);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_CROS);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_OTHER);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_PHONE);
-    ENUM_CASE(sync_pb::SessionHeader, TYPE_TABLET);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_WIN);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_MAC);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_LINUX);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_CROS);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_OTHER);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_PHONE);
+    ENUM_CASE(sync_pb::SyncEnums, TYPE_TABLET);
   }
   NOTREACHED();
   return "";

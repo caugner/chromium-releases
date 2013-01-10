@@ -9,6 +9,10 @@
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/web_contents/interstitial_page_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -40,17 +44,20 @@ WebContentsView* CreateWebContentsView(
   *render_view_host_delegate_view = rv;
   return rv;
 }
-}
 
 namespace {
 
 // Listens to all mouse drag events during a drag and drop and sends them to
 // the renderer.
-class WebDragSourceAura : public MessageLoopForUI::Observer {
+class WebDragSourceAura : public MessageLoopForUI::Observer,
+                          public NotificationObserver {
  public:
-  explicit WebDragSourceAura(WebContentsImpl* contents)
-      : contents_(contents) {
+  WebDragSourceAura(aura::Window* window, WebContentsImpl* contents)
+      : window_(window),
+        contents_(contents) {
     MessageLoopForUI::current()->AddObserver(this);
+    registrar_.Add(this, NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
+                   Source<WebContents>(contents));
   }
 
   virtual ~WebDragSourceAura() {
@@ -63,14 +70,16 @@ class WebDragSourceAura : public MessageLoopForUI::Observer {
     return base::EVENT_CONTINUE;
   }
   virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE {
+    if (!contents_)
+      return;
     ui::EventType type = ui::EventTypeFromNative(event);
-    content::RenderViewHost* rvh = NULL;
+    RenderViewHost* rvh = NULL;
     switch (type) {
       case ui::ET_MOUSE_DRAGGED:
         rvh = contents_->GetRenderViewHost();
         if (rvh) {
           gfx::Point screen_loc_in_pixel = ui::EventLocationFromNative(event);
-          gfx::Point screen_loc = content::ConvertPointToDIP(rvh->GetView(),
+          gfx::Point screen_loc = ConvertPointToDIP(rvh->GetView(),
               screen_loc_in_pixel);
           gfx::Point client_loc = screen_loc;
           aura::Window* window = rvh->GetView()->GetNativeView();
@@ -85,9 +94,28 @@ class WebDragSourceAura : public MessageLoopForUI::Observer {
     }
   }
 
+  virtual void Observe(int type,
+      const NotificationSource& source,
+      const NotificationDetails& details) OVERRIDE {
+    if (type != NOTIFICATION_WEB_CONTENTS_DISCONNECTED)
+      return;
+
+    // Cancel the drag if it is still in progress.
+    aura::client::DragDropClient* dnd_client =
+        aura::client::GetDragDropClient(window_->GetRootWindow());
+    if (dnd_client && dnd_client->IsDragDropInProgress())
+      dnd_client->DragCancel();
+
+    window_ = NULL;
+    contents_ = NULL;
+  }
+
+  aura::Window* window() const { return window_; }
 
  private:
+  aura::Window* window_;
   WebContentsImpl* contents_;
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDragSourceAura);
 };
@@ -208,12 +236,11 @@ int ConvertAuraEventFlagsToWebInputEventModifiers(int aura_event_flags) {
 
 WebContentsViewAura::WebContentsViewAura(
     WebContentsImpl* web_contents,
-    content::WebContentsViewDelegate* delegate)
+    WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
       view_(NULL),
       delegate_(delegate),
       current_drag_op_(WebKit::WebDragOperationNone),
-      close_tab_after_drag_ends_(false),
       drag_dest_delegate_(NULL),
       current_rvh_for_drag_(NULL) {
 }
@@ -230,7 +257,7 @@ WebContentsViewAura::~WebContentsViewAura() {
 void WebContentsViewAura::SizeChangedCommon(const gfx::Size& size) {
   if (web_contents_->GetInterstitialPage())
     web_contents_->GetInterstitialPage()->SetSize(size);
-  content::RenderWidgetHostView* rwhv =
+  RenderWidgetHostView* rwhv =
       web_contents_->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetSize(size);
@@ -238,9 +265,10 @@ void WebContentsViewAura::SizeChangedCommon(const gfx::Size& size) {
 
 void WebContentsViewAura::EndDrag(WebKit::WebDragOperationsMask ops) {
   aura::RootWindow* root_window = GetNativeView()->GetRootWindow();
-  gfx::Point screen_loc = gfx::Screen::GetCursorScreenPoint();
+  gfx::Point screen_loc =
+      gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
   gfx::Point client_loc = screen_loc;
-  content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+  RenderViewHost* rvh = web_contents_->GetRenderViewHost();
   aura::Window* window = rvh->GetView()->GetNativeView();
   aura::Window::ConvertPointToTarget(root_window, window, &client_loc);
   rvh->DragSourceEndedAt(client_loc.x(), client_loc.y(), screen_loc.x(),
@@ -251,7 +279,9 @@ void WebContentsViewAura::EndDrag(WebKit::WebDragOperationsMask ops) {
 // WebContentsViewAura, WebContentsView implementation:
 
 void WebContentsViewAura::CreateView(const gfx::Size& initial_size) {
-  initial_size_ = initial_size;
+  // NOTE: we ignore |initial_size| since in some cases it's wrong (such as
+  // if the bookmark bar is not shown and you create a new tab). The right
+  // value is set shortly after this, so its safe to ignore.
 
   window_.reset(new aura::Window(this));
   window_->set_owned_by_parent(false);
@@ -269,8 +299,8 @@ void WebContentsViewAura::CreateView(const gfx::Size& initial_size) {
     drag_dest_delegate_ = delegate_->GetDragDestDelegate();
 }
 
-content::RenderWidgetHostView* WebContentsViewAura::CreateViewForWidget(
-    content::RenderWidgetHost* render_widget_host) {
+RenderWidgetHostView* WebContentsViewAura::CreateViewForWidget(
+    RenderWidgetHost* render_widget_host) {
   if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
@@ -281,7 +311,7 @@ content::RenderWidgetHostView* WebContentsViewAura::CreateViewForWidget(
     return render_widget_host->GetView();
   }
 
-  view_ = content::RenderWidgetHostView::CreateViewForWidget(
+  view_ = RenderWidgetHostView::CreateViewForWidget(
       render_widget_host);
   view_->InitAsChild(NULL);
   GetNativeView()->AddChild(view_->GetNativeView());
@@ -333,7 +363,7 @@ void WebContentsViewAura::SizeContents(const gfx::Size& size) {
   }
 }
 
-void WebContentsViewAura::RenderViewCreated(content::RenderViewHost* host) {
+void WebContentsViewAura::RenderViewCreated(RenderViewHost* host) {
 }
 
 void WebContentsViewAura::Focus() {
@@ -345,8 +375,7 @@ void WebContentsViewAura::Focus() {
   if (delegate_.get() && delegate_->Focus())
     return;
 
-  content::RenderWidgetHostView* rwhv =
-      web_contents_->GetRenderWidgetHostView();
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->Focus();
 }
@@ -368,25 +397,6 @@ void WebContentsViewAura::RestoreFocus() {
     delegate_->RestoreFocus();
 }
 
-bool WebContentsViewAura::IsDoingDrag() const {
-  aura::RootWindow* root_window = GetNativeView()->GetRootWindow();
-  if (aura::client::GetDragDropClient(root_window))
-    return aura::client::GetDragDropClient(root_window)->IsDragDropInProgress();
-  return false;
-}
-
-void WebContentsViewAura::CancelDragAndCloseTab() {
-  DCHECK(IsDoingDrag());
-  // We can't close the tab while we're in the drag and
-  // |drag_handler_->CancelDrag()| is async.  Instead, set a flag to cancel
-  // the drag and when the drag nested message loop ends, close the tab.
-  aura::RootWindow* root_window = GetNativeView()->GetRootWindow();
-  if (aura::client::GetDragDropClient(root_window))
-    aura::client::GetDragDropClient(root_window)->DragCancel();
-
-  close_tab_after_drag_ends_ = true;
-}
-
 WebDropData* WebContentsViewAura::GetDropData() const {
   return NULL;
 }
@@ -406,8 +416,8 @@ gfx::Rect WebContentsViewAura::GetViewBounds() const {
 // WebContentsViewAura, RenderViewHostDelegateView implementation:
 
 void WebContentsViewAura::ShowContextMenu(
-    const content::ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+    const ContextMenuParams& params,
+    ContextMenuSourceType type) {
   if (delegate_.get())
     delegate_->ShowContextMenu(params, type);
 }
@@ -441,7 +451,7 @@ void WebContentsViewAura::StartDragging(
   ui::OSExchangeData data(provider);  // takes ownership of |provider|.
 
   scoped_ptr<WebDragSourceAura> drag_source(
-      new WebDragSourceAura(web_contents_));
+      new WebDragSourceAura(GetNativeView(), web_contents_));
 
   // We need to enable recursive tasks on the message loop so we can get
   // updates while in the system DoDragDrop loop.
@@ -451,11 +461,20 @@ void WebContentsViewAura::StartDragging(
     // always start from a mouse-event (e.g. a touch or gesture event could
     // initiate the drag). The location information should be carried over from
     // webkit. http://crbug.com/114754
-    gfx::Point location(gfx::Screen::GetCursorScreenPoint());
+    gfx::Point location(
+        gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint());
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
     result_op = aura::client::GetDragDropClient(root_window)->StartDragAndDrop(
         data, root_window, location, ConvertFromWeb(operations));
   }
+
+  // Bail out immediately if the contents view window is gone. Note that it is
+  // not safe to access any class members after system drag-and-drop returns
+  // since the class instance might be gone. The local variable |drag_source|
+  // is still valid and we can check its window property that is set to NULL
+  // when the contents are gone.
+  if (!drag_source->window())
+    return;
 
   EndDrag(ConvertToWeb(result_op));
   web_contents_->GetRenderViewHost()->DragSourceSystemDragEnded();
@@ -584,7 +603,9 @@ ui::EventResult WebContentsViewAura::OnMouseEvent(ui::MouseEvent* event) {
       break;
     case ui::ET_MOUSE_MOVED:
       web_contents_->GetDelegate()->ContentsMouseEvent(
-          web_contents_, gfx::Screen::GetCursorScreenPoint(), true);
+          web_contents_,
+          gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint(),
+          true);
       break;
     default:
       break;
@@ -592,8 +613,8 @@ ui::EventResult WebContentsViewAura::OnMouseEvent(ui::MouseEvent* event) {
   return ui::ER_UNHANDLED;
 }
 
-ui::TouchStatus WebContentsViewAura::OnTouchEvent(ui::TouchEvent* event) {
-  return ui::TOUCH_STATUS_UNKNOWN;
+ui::EventResult WebContentsViewAura::OnTouchEvent(ui::TouchEvent* event) {
+  return ui::ER_UNHANDLED;
 }
 
 ui::EventResult WebContentsViewAura::OnGestureEvent(
@@ -612,7 +633,8 @@ void WebContentsViewAura::OnDragEntered(const ui::DropTargetEvent& event) {
   PrepareWebDropData(&drop_data, event.data());
   WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
 
-  gfx::Point screen_pt = gfx::Screen::GetCursorScreenPoint();
+  gfx::Point screen_pt =
+      gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
   current_rvh_for_drag_ = web_contents_->GetRenderViewHost();
   web_contents_->GetRenderViewHost()->DragTargetDragEnter(
       drop_data, event.location(), screen_pt, op,
@@ -630,7 +652,8 @@ int WebContentsViewAura::OnDragUpdated(const ui::DropTargetEvent& event) {
     OnDragEntered(event);
 
   WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
-  gfx::Point screen_pt = gfx::Screen::GetCursorScreenPoint();
+  gfx::Point screen_pt =
+      gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
   web_contents_->GetRenderViewHost()->DragTargetDragOver(
       event.location(), screen_pt, op,
       ConvertAuraEventFlagsToWebInputEventModifiers(event.flags()));
@@ -658,9 +681,11 @@ int WebContentsViewAura::OnPerformDrop(const ui::DropTargetEvent& event) {
 
   web_contents_->GetRenderViewHost()->DragTargetDrop(
       event.location(),
-      gfx::Screen::GetCursorScreenPoint(),
+      gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint(),
       ConvertAuraEventFlagsToWebInputEventModifiers(event.flags()));
   if (drag_dest_delegate_)
     drag_dest_delegate_->OnDrop();
   return current_drag_op_;
 }
+
+}  // namespace content

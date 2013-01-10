@@ -1,22 +1,30 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win'],
+  # TODO(binji): pnacl doesn't build right now because gtest doesn't build yet.
+  'TOOLS': ['newlib', 'glibc', 'win'],
+
+  # Need to add ../../examples for common.js
+  'SEARCH': ['.', '../../examples'],
   'TARGETS': [
     {
       'NAME' : 'nacl_mounts_test',
       'TYPE' : 'main',
       'SOURCES' : [
-        'kernel_intercept_test.cc',
         'kernel_object_test.cc',
+        'kernel_proxy_mock.h',
         'kernel_proxy_test.cc',
+        'kernel_wrap_test.cc',
+        'module.cc',
         'mount_node_test.cc',
         'mount_test.cc',
         'path_test.cc',
-        'test.cc',
       ],
-      'LIBS': ['ppapi', 'pthread', 'gtest', 'nacl_mounts']
+      'LIBS': ['ppapi', 'pthread', 'gtest', 'gmock', 'nacl_mounts', 'ppapi_cpp', 'gtest_ppapi']
     }
   ],
-  'DEST': 'testing',
+  'DATA': [
+    'example.js'
+  ],
+  'DEST': 'tests',
   'NAME': 'nacl_mounts_test',
-  'EXPERIMENTAL': True,
+  'TITLE': 'NaCl Mounts test',
 }

@@ -10,6 +10,8 @@
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/client_session.h"
 #include "remoting/host/continue_window.h"
+#include "remoting/host/desktop_environment.h"
+#include "remoting/host/desktop_environment_factory.h"
 #include "remoting/host/disconnect_window.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/host_status_observer.h"
@@ -112,9 +114,24 @@ class MockClientSessionEventHandler : public ClientSession::EventHandler {
       ClientSession* client,
       const std::string& channel_name,
       const protocol::TransportRoute& route));
+  MOCK_METHOD2(OnClientDimensionsChanged, void(ClientSession* client,
+                                               const SkISize& size));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockClientSessionEventHandler);
+};
+
+class MockDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
+ public:
+  MockDesktopEnvironmentFactory();
+  virtual ~MockDesktopEnvironmentFactory();
+
+  MOCK_METHOD1(CreatePtr, DesktopEnvironment*(ClientSession* client));
+
+  virtual scoped_ptr<DesktopEnvironment> Create(ClientSession* client) OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockDesktopEnvironmentFactory);
 };
 
 class MockEventExecutor : public EventExecutor {

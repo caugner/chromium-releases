@@ -35,10 +35,7 @@
 #include "net/url_request/url_request.h"
 #include "webkit/glue/resource_type.h"
 
-class DownloadFileManager;
 class ResourceHandler;
-class SaveFileManager;
-class WebContentsImpl;
 struct ResourceHostMsg_Request;
 struct ViewMsg_SwapOut_Params;
 
@@ -55,6 +52,8 @@ class ResourceContext;
 class ResourceDispatcherHostDelegate;
 class ResourceMessageFilter;
 class ResourceRequestInfoImpl;
+class SaveFileManager;
+class WebContentsImpl;
 struct DownloadSaveInfo;
 struct GlobalRequestID;
 struct Referrer;
@@ -80,7 +79,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       int child_id,
       int route_id,
       bool prefer_cache,
-      const DownloadSaveInfo& save_info,
+      scoped_ptr<DownloadSaveInfo> save_info,
       const DownloadStartedCallback& started_callback) OVERRIDE;
   virtual void ClearLoginDelegateForRequest(net::URLRequest* request) OVERRIDE;
   virtual void BlockRequestsForRoute(int child_id, int route_id) OVERRIDE;
@@ -144,16 +143,17 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // request. Experimentally obtained.
   static const int kAvgBytesPerOutstandingRequest = 4400;
 
-  DownloadFileManager* download_file_manager() const {
-    return download_file_manager_;
-  }
-
   SaveFileManager* save_file_manager() const {
     return save_file_manager_;
   }
 
   // Called when the unload handler for a cross-site request has finished.
   void OnSwapOutACK(const ViewMsg_SwapOut_Params& params);
+
+  // Called when we want to simulate the renderer process sending
+  // ViewHostMsg_SwapOut_ACK in cases where the renderer has died or is
+  // unresponsive.
+  void OnSimulateSwapOutACK(const ViewMsg_SwapOut_Params& params);
 
   // Called when the renderer loads a resource from its internal cache.
   void OnDidLoadResourceFromMemoryCache(const GURL& url,
@@ -204,7 +204,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   scoped_ptr<ResourceHandler> CreateResourceHandlerForDownload(
       net::URLRequest* request,
       bool is_content_initiated,
-      const DownloadSaveInfo& save_info,
+      scoped_ptr<DownloadSaveInfo> save_info,
       const DownloadResourceHandler::OnStartedCallback& started_cb);
 
   void ClearSSLClientAuthHandlerForRequest(net::URLRequest* request);
@@ -249,6 +249,12 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   // A shutdown helper that runs on the IO thread.
   void OnShutdown();
+
+  // The real implementation of the OnSwapOutACK logic. OnSwapOutACK and
+  // OnSimulateSwapOutACK just call this method, supplying the |timed_out|
+  // parameter, which indicates whether the call is due to a timeout while
+  // waiting for SwapOut acknowledgement from the renderer process.
+  void HandleSwapOutACK(const ViewMsg_SwapOut_Params& params, bool timed_out);
 
   // Helper function for regular and download requests.
   void BeginRequestInternal(scoped_ptr<net::URLRequest> request,
@@ -355,9 +361,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // is not empty.
   scoped_ptr<base::RepeatingTimer<ResourceDispatcherHostImpl> >
       update_load_states_timer_;
-
-  // We own the download file writing thread and manager
-  scoped_refptr<DownloadFileManager> download_file_manager_;
 
   // We own the save file manager.
   scoped_refptr<SaveFileManager> save_file_manager_;

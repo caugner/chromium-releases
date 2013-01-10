@@ -57,20 +57,7 @@ class WebrtcCallTest(webrtc_test_base.WebrtcTestBase):
     run for a while and try to hang up the call after that. We verify video is
     playing by using the video detector.
     """
-    url = self.GetFileURLForDataPath('webrtc', test_page)
-    self.NavigateToURL(url)
-    self.AppendTab(pyauto.GURL(url))
-
-    self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=0))
-    self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=1))
-    self.Connect('user_1', tab_index=0)
-    self.Connect('user_2', tab_index=1)
-
-    self.EstablishCall(from_tab_with_index=0)
-
-    self._StartDetectingVideo(tab_index=0, video_element='remote-view')
-
-    self._WaitForVideoToPlay()
+    self._SetupCall(test_page)
 
     # The hang-up will automatically propagate to the second tab.
     self.HangUp(from_tab_with_index=0)
@@ -82,10 +69,6 @@ class WebrtcCallTest(webrtc_test_base.WebrtcTestBase):
     # Ensure we didn't miss any errors.
     self.AssertNoFailures(tab_index=0)
     self.AssertNoFailures(tab_index=1)
-
-  def testSimpleWebrtcJsepCall(self):
-    """Uses a draft of the PeerConnection API, using JSEP00."""
-    self._SimpleWebrtcCall('webrtc_jsep_test.html')
 
   def testSimpleWebrtcJsep01Call(self):
     """Uses a draft of the PeerConnection API, using JSEP01."""
@@ -100,16 +83,16 @@ class WebrtcCallTest(webrtc_test_base.WebrtcTestBase):
     detect video in that tag using the video detector, and if we see video
     moving the test passes.
     """
-    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep_test.html')
+    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep01_test.html')
     self.NavigateToURL(url)
     self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=0))
     self._StartDetectingVideo(tab_index=0, video_element='local-view')
 
-    self._WaitForVideoToPlay()
+    self._WaitForVideo(tab_index=0, expect_playing=True)
 
   def testHandlesNewGetUserMediaRequestSeparately(self):
     """Ensures WebRTC doesn't allow new requests to piggy-back on old ones."""
-    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep_test.html')
+    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep01_test.html')
     self.NavigateToURL(url)
     self.AppendTab(pyauto.GURL(url))
 
@@ -125,17 +108,73 @@ class WebrtcCallTest(webrtc_test_base.WebrtcTestBase):
     self.assertEquals('failed-with-error-1',
                       self.GetUserMedia(tab_index=0, action='dismiss'))
 
+  def testMediaStreamTrackEnable(self):
+    """Tests MediaStreamTrack.enable on tracks connected to a PeerConnection.
+
+    This test will check that if a local track is muted, the remote end don't
+    get video. Also test that if a remote track is disabled, the video is not
+    updated in the video tag."""
+
+    # TODO(perkj): Also verify that the local preview is muted when the
+    # feature is implemented.
+    # TODO(perkj): Verify that audio is muted.
+
+    self._SetupCall('webrtc_jsep01_test.html')
+    select_video_function = 'function(local) { return local.videoTracks[0]; }'
+    self.assertEquals('ok-video-toggled-to-false', self.ExecuteJavascript(
+        'toggleLocalStream(' + select_video_function + ', "video")',
+        tab_index=0))
+    self._WaitForVideo(tab_index=1, expect_playing=False)
+
+    self.assertEquals('ok-video-toggled-to-true', self.ExecuteJavascript(
+        'toggleLocalStream(' + select_video_function + ', "video")',
+        tab_index=0))
+    self._WaitForVideo(tab_index=1, expect_playing=True)
+
+    # Test disabling a remote stream. The remote video is not played."""
+    self.assertEquals('ok-video-toggled-to-false', self.ExecuteJavascript(
+        'toggleRemoteStream(' + select_video_function + ', "video")',
+        tab_index=1))
+    self._WaitForVideo(tab_index=1, expect_playing=False)
+
+    self.assertEquals('ok-video-toggled-to-true', self.ExecuteJavascript(
+        'toggleRemoteStream(' + select_video_function + ', "video")',
+        tab_index=1))
+    self._WaitForVideo(tab_index=1, expect_playing=True)
+
+  def _SetupCall(self, test_page):
+    url = self.GetFileURLForDataPath('webrtc', test_page)
+    self.NavigateToURL(url)
+    self.AppendTab(pyauto.GURL(url))
+
+    self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=0))
+    self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=1))
+    self.Connect('user_1', tab_index=0)
+    self.Connect('user_2', tab_index=1)
+
+    self.EstablishCall(from_tab_with_index=0)
+
+    self._StartDetectingVideo(tab_index=0, video_element='remote-view')
+    self._StartDetectingVideo(tab_index=1, video_element='remote-view')
+
+    self._WaitForVideo(tab_index=0, expect_playing=True)
+    self._WaitForVideo(tab_index=1, expect_playing=True)
+
   def _StartDetectingVideo(self, tab_index, video_element):
     self.assertEquals('ok-started', self.ExecuteJavascript(
         'startDetection("%s", "frame-buffer", 320, 240)' % video_element,
         tab_index=tab_index));
 
-  def _WaitForVideoToPlay(self):
+  def _WaitForVideo(self, tab_index, expect_playing):
+    expect_retval='video-playing' if expect_playing else 'video-not-playing'
+
     video_playing = self.WaitUntil(
-        function=lambda: self.ExecuteJavascript('isVideoPlaying()'),
-        expect_retval='video-playing')
+        function=lambda: self.ExecuteJavascript('isVideoPlaying()',
+                                                tab_index=tab_index),
+        expect_retval=expect_retval)
     self.assertTrue(video_playing,
-                    msg='Timed out while trying to detect video.')
+                    msg= 'Timed out while waiting for isVideoPlaying to ' +
+                         'return ' + expect_retval + '.')
 
 
 if __name__ == '__main__':

@@ -16,8 +16,10 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/hash_tables.h"
+#include "base/observer_list.h"
+#include "base/prefs/public/pref_service_base.h"
 #include "base/threading/non_thread_safe.h"
-#include "chrome/browser/api/prefs/pref_service_base.h"
 
 class CommandLine;
 class DefaultPrefStore;
@@ -25,6 +27,7 @@ class PersistentPrefStore;
 class PrefModelAssociator;
 class PrefNotifier;
 class PrefNotifierImpl;
+class PrefServiceObserver;
 class PrefStore;
 class PrefValueStore;
 
@@ -90,7 +93,6 @@ class PrefService : public PrefServiceBase, public base::NonThreadSafe {
     // Reference to the PrefService in which this pref was created.
     const PrefService* pref_service_;
 
-    DISALLOW_COPY_AND_ASSIGN(Preference);
   };
 
   // Factory method that creates a new instance of a PrefService with the
@@ -127,6 +129,18 @@ class PrefService : public PrefServiceBase, public base::NonThreadSafe {
   // Lands pending writes to disk. This should only be used if we need to save
   // immediately (basically, during shutdown).
   void CommitPendingWrite();
+
+  void AddObserver(PrefServiceObserver* observer);
+  void RemoveObserver(PrefServiceObserver* observer);
+
+  // Returns true if preferences state has synchronized with the remote
+  // preferences. If true is returned it can be assumed the local preferences
+  // has applied changes from the remote preferences. The two may not be
+  // identical if a change is in flight (from either side).
+  bool IsSyncing();
+
+  // Invoked internally when the IsSyncing() state changes.
+  void OnIsSyncingChanged();
 
   // PrefServiceBase implementation.
   virtual bool IsManagedPreference(const char* pref_name) const OVERRIDE;
@@ -273,13 +287,11 @@ class PrefService : public PrefServiceBase, public base::NonThreadSafe {
   scoped_ptr<PrefNotifierImpl> pref_notifier_;
 
  private:
-  class PreferencePathComparator {
-   public:
-    bool operator() (Preference* lhs, Preference* rhs) const {
-      return lhs->name() < rhs->name();
-    }
-  };
-  typedef std::set<Preference*, PreferencePathComparator> PreferenceSet;
+  // Hash map expected to be fastest here since it minimises expensive
+  // string comparisons. Order is unimportant, and deletions are rare.
+  // Confirmed on Android where this speeded Chrome startup by roughly 50ms
+  // vs. std::map, and by roughly 180ms vs. std::set of Preference pointers.
+  typedef base::hash_map<std::string, Preference> PreferenceMap;
 
   friend class PrefServiceMockBuilder;
 
@@ -333,7 +345,7 @@ class PrefService : public PrefServiceBase, public base::NonThreadSafe {
   // Local cache of registered Preference objects. The default_store_
   // is authoritative with respect to what the types and default values
   // of registered preferences are.
-  mutable PreferenceSet prefs_;
+  mutable PreferenceMap prefs_map_;
 
   // The model associator that maintains the links with the sync db.
   scoped_ptr<PrefModelAssociator> pref_sync_associator_;
@@ -342,6 +354,8 @@ class PrefService : public PrefServiceBase, public base::NonThreadSafe {
   // CreatePrefServiceWithPerTabPrefStore() have been called to create a
   // "forked" PrefService.
   bool pref_service_forked_;
+
+  ObserverList<PrefServiceObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(PrefService);
 };

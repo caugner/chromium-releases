@@ -8,10 +8,11 @@
 #include <map>
 #include <set>
 
+#include "ash/ash_export.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "ash/ash_export.h"
 #include "ui/base/accelerators/accelerator.h"
 
 namespace ui {
@@ -76,9 +77,6 @@ class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget {
       scoped_ptr<BrightnessControlDelegate> brightness_control_delegate);
   void SetImeControlDelegate(
       scoped_ptr<ImeControlDelegate> ime_control_delegate);
-  void SetKeyboardBrightnessControlDelegate(
-      scoped_ptr<KeyboardBrightnessControlDelegate>
-      keyboard_brightness_control_delegate);
   void SetScreenshotDelegate(
       scoped_ptr<ScreenshotDelegate> screenshot_delegate);
   BrightnessControlDelegate* brightness_control_delegate() const {
@@ -86,6 +84,8 @@ class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget {
   }
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(AcceleratorControllerTest, GlobalAccelerators);
+
   // Initializes the accelerators this class handles as a target.
   void Init();
 
@@ -96,6 +96,10 @@ class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget {
   // Registers the specified accelerators.
   void RegisterAccelerators(const AcceleratorData accelerators[],
                             size_t accelerators_length);
+
+  void SetKeyboardBrightnessControlDelegate(
+      scoped_ptr<KeyboardBrightnessControlDelegate>
+      keyboard_brightness_control_delegate);
 
   scoped_ptr<ui::AcceleratorManager> accelerator_manager_;
 
@@ -115,8 +119,17 @@ class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget {
   std::set<int> actions_allowed_at_login_screen_;
   // Actions allowed when the screen is locked.
   std::set<int> actions_allowed_at_lock_screen_;
+  // Actions allowed when a modal window is up.
+  std::set<int> actions_allowed_at_modal_window_;
   // Reserved actions. See accelerator_table.h for details.
   std::set<int> reserved_actions_;
+
+  // Used to suppress accelerator handling on key repeat.
+  bool toggle_maximized_suppressed_;
+  bool cycle_backward_linear_suppressed_;
+  bool cycle_forward_linear_suppressed_;
+  bool cycle_backward_mru_suppressed_;
+  bool cycle_forward_mru_suppressed_;
 
   DISALLOW_COPY_AND_ASSIGN(AcceleratorController);
 };

@@ -16,14 +16,20 @@ const char kAshBootAnimationFunction3[] = "ash-boot-animation-function3";
 // Constrains the pointer movement within a root window on desktop.
 const char kAshConstrainPointerToRoot[] = "ash-constrain-pointer-to-root";
 
+// Copies the host window's content to the system background layer at startup.
+// Can make boot slightly slower, but also hides an even-longer awkward period
+// where we display a white background if the login wallpaper takes a long time
+// to load.
+const char kAshCopyHostBackgroundAtBoot[] = "ash-copy-host-background-at-boot";
+
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
-// Disables Workspace2.
-const char kAshDisableWorkspace2[] = "ash-disable-workspace2";
-
 // Disables boot animation v2, go back to v1.
 const char kAshDisableBootAnimation2[] = "ash-disable-boot-animation2";
+
+// Disables panel fitting (used for mirror mode).
+const char kAshDisablePanelFitting[] = "ash-disable-panel-fitting";
 
 // Enable advanced gestures (e.g. for window management).
 const char kAshEnableAdvancedGestures[] = "ash-enable-advanced-gestures";
@@ -34,8 +40,11 @@ const char kAshEnableOak[] = "ash-enable-oak";
 // Enables showing the tray bubble by dragging on the shelf.
 const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
 
-// Disable using Ash notifications.
-const char kAshNotifyDisabled[] = "ash-notify-disabled";
+// Enables creating a launcher per display.
+const char kAshLauncherPerDisplay[] = "ash-launcher-per-display";
+
+// If present new lock animations are enabled.
+const char kAshNewLockAnimationsEnabled[] = "ash-new-lock-animations-enabled";
 
 // Specifies the layout mode and offsets for the secondary display for
 // testing. The format is "<t|r|b|l>,<offset>" where t=TOP, r=RIGHT,

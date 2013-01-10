@@ -6,12 +6,12 @@
 
 #include "base/basictypes.h"
 #include "base/path_service.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -740,7 +740,7 @@ class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
     prefs()->OnExtensionInstalled(
-        extension_.get(), Extension::DISABLED, false,
+        extension_.get(), Extension::DISABLED,
         syncer::StringOrdinal());
   }
 
@@ -760,7 +760,7 @@ class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->WasAppDraggedByUser(extension_->id()));
     prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
-                                  false, syncer::StringOrdinal());
+                                  syncer::StringOrdinal());
   }
 
   virtual void Verify() {
@@ -922,7 +922,7 @@ void ExtensionPrefsPrepopulatedTest::EnsureExtensionInstalled(Extension *ext) {
   for (size_t i = 0; i < arraysize(extensions); ++i) {
     if (ext == extensions[i] && !installed[i]) {
       prefs()->OnExtensionInstalled(ext, Extension::ENABLED,
-                                    false, syncer::StringOrdinal());
+                                    syncer::StringOrdinal());
       installed[i] = true;
       break;
     }

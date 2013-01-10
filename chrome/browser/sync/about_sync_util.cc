@@ -18,6 +18,9 @@
 using base::DictionaryValue;
 using base::ListValue;
 
+const char kCredentialsTitle[] = "Credentials";
+const char kDetailsKey[] = "details";
+
 namespace {
 
 // Creates a 'section' for display on about:sync, consisting of a title and a
@@ -143,13 +146,13 @@ std::string GetVersionString() {
       version_modifier;
 }
 
-std::string GetKeystoreMigrationTimeStr(base::Time migration_time) {
-  std::string migration_time_str;
-  if (migration_time.is_null())
-    migration_time_str = "Not Migrated";
+std::string GetTimeStr(base::Time time, const std::string& default_msg) {
+  std::string time_str;
+  if (time.is_null())
+    time_str = default_msg;
   else
-    migration_time_str = syncer::GetTimeDebugString(migration_time);
-  return migration_time_str;
+    time_str = syncer::GetTimeDebugString(time);
+  return time_str;
 }
 
 }  // namespace
@@ -175,7 +178,7 @@ scoped_ptr<DictionaryValue> ConstructAboutInformation(
   StringSyncStat client_version(section_version, "Client Version");
   StringSyncStat server_url(section_version, "Server URL");
 
-  ListValue* section_credentials = AddSection(stats_list, "Credentials");
+  ListValue* section_credentials = AddSection(stats_list, kCredentialsTitle);
   StringSyncStat client_id(section_credentials, "Client ID");
   StringSyncStat username(section_credentials, "Username");
   BoolSyncStat is_token_available(section_credentials, "Sync Token Available");
@@ -209,6 +212,8 @@ scoped_ptr<DictionaryValue> ConstructAboutInformation(
                                          "Keystore Migration Time");
   StringSyncStat passphrase_type(section_encryption,
                                  "Passphrase Type");
+  StringSyncStat passphrase_time(section_encryption,
+                                 "Passphrase Time");
 
   ListValue* section_last_session = AddSection(
       stats_list, "Status from Last Completed Session");
@@ -232,7 +237,7 @@ scoped_ptr<DictionaryValue> ConstructAboutInformation(
   IntSyncStat updates_received(section_counters, "Updates Downloaded");
   IntSyncStat tombstone_updates(section_counters, "Tombstone Updates");
   IntSyncStat reflected_updates(section_counters, "Reflected Updates");
-  IntSyncStat successful_commits(section_counters, "Syccessful Commits");
+  IntSyncStat successful_commits(section_counters, "Successful Commits");
   IntSyncStat conflicts_resolved_local_wins(section_counters,
                                      "Conflicts Resolved: Client Wins");
   IntSyncStat conflicts_resolved_server_wins(section_counters,
@@ -253,9 +258,17 @@ scoped_ptr<DictionaryValue> ConstructAboutInformation(
   IntSyncStat committed_count(section_that_cycle, "Committed Count");
   IntSyncStat entries(section_that_cycle, "Entries");
 
+  ListValue* section_nudge_info = AddSection(
+      stats_list, "Nudge Source Counters");
+  IntSyncStat nudge_source_notification(
+      section_nudge_info, "Server Invalidations");
+  IntSyncStat nudge_source_local(section_nudge_info, "Local Changes");
+  IntSyncStat nudge_source_continuation(section_nudge_info, "Continuations");
+  IntSyncStat nudge_source_local_refresh(section_nudge_info, "Local Refreshes");
+
   // This list of sections belongs in the 'details' field of the returned
   // message.
-  about_info->Set("details", stats_list);
+  about_info->Set(kDetailsKey, stats_list);
 
   // Populate all the fields we declared above.
   client_version.SetValue(GetVersionString());
@@ -303,6 +316,8 @@ scoped_ptr<DictionaryValue> ConstructAboutInformation(
     is_using_explicit_passphrase.SetValue(
         service->IsUsingSecondaryPassphrase());
     is_passphrase_required.SetValue(service->IsPassphraseRequired());
+    passphrase_time.SetValue(
+        GetTimeStr(service->GetExplicitPassphraseTime(), "No Passphrase Time"));
   }
   if (is_status_valid) {
     is_cryptographer_ready.SetValue(full_status.cryptographer_ready);
@@ -311,7 +326,7 @@ scoped_ptr<DictionaryValue> ConstructAboutInformation(
         ModelTypeSetToString(full_status.encrypted_types));
     has_keystore_key.SetValue(full_status.has_keystore_key);
     keystore_migration_time.SetValue(
-        GetKeystoreMigrationTimeStr(full_status.keystore_migration_time));
+        GetTimeStr(full_status.keystore_migration_time, "Not Migrated"));
     passphrase_type.SetValue(
         PassphraseTypeToString(full_status.passphrase_type));
   }
@@ -357,6 +372,13 @@ scoped_ptr<DictionaryValue> ConstructAboutInformation(
     server_conflicts.SetValue(full_status.server_conflicts);
     committed_items.SetValue(full_status.committed_count);
     updates_remaining.SetValue(full_status.updates_available);
+  }
+
+  if (is_status_valid) {
+    nudge_source_notification.SetValue(full_status.nudge_source_notification);
+    nudge_source_local.SetValue(full_status.nudge_source_local);
+    nudge_source_continuation.SetValue(full_status.nudge_source_continuation);
+    nudge_source_local_refresh.SetValue(full_status.nudge_source_local_refresh);
   }
 
   if (snapshot.is_initialized()) {

@@ -10,6 +10,7 @@
 
 #include "base/message_pump_aurax11.h"
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/user_action_client.h"
 #include "ui/aura/desktop/desktop_activation_client.h"
@@ -18,13 +19,25 @@
 #include "ui/aura/root_window.h"
 #include "ui/aura/shared/compound_event_filter.h"
 #include "ui/aura/shared/input_method_event_filter.h"
+#include "ui/aura/window_property.h"
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/views/ime/input_method_bridge.h"
 #include "ui/views/widget/desktop_capture_client.h"
+#include "ui/views/widget/desktop_layout_manager.h"
+#include "ui/views/widget/desktop_native_widget_aura.h"
+#include "ui/views/widget/desktop_screen_position_client.h"
 #include "ui/views/widget/x11_desktop_handler.h"
+#include "ui/views/widget/x11_desktop_window_move_client.h"
 #include "ui/views/widget/x11_window_event_filter.h"
 
 namespace views {
+
+DesktopRootWindowHostLinux* DesktopRootWindowHostLinux::g_current_capture =
+    NULL;
+
+DEFINE_WINDOW_PROPERTY_KEY(
+    aura::Window*, kViewsWindowForRootWindow, NULL);
 
 namespace {
 
@@ -32,11 +45,20 @@ namespace {
 const int kBackMouseButton = 8;
 const int kForwardMouseButton = 9;
 
+// Constants that are part of EWMH.
+const int k_NET_WM_STATE_ADD = 1;
+const int k_NET_WM_STATE_REMOVE = 0;
+
 const char* kAtomsToCache[] = {
   "WM_DELETE_WINDOW",
-  "_NET_WM_PING",
-  "_NET_WM_PID",
   "WM_S0",
+  "_NET_WM_PID",
+  "_NET_WM_PING",
+  "_NET_WM_STATE",
+  "_NET_WM_STATE_FULLSCREEN",
+  "_NET_WM_STATE_HIDDEN",
+  "_NET_WM_STATE_MAXIMIZED_HORZ",
+  "_NET_WM_STATE_MAXIMIZED_VERT",
   NULL
 };
 
@@ -45,35 +67,51 @@ const char* kAtomsToCache[] = {
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHostLinux, public:
 
-DesktopRootWindowHostLinux::DesktopRootWindowHostLinux()
-    : xdisplay_(base::MessagePumpAuraX11::GetDefaultXDisplay()),
+DesktopRootWindowHostLinux::DesktopRootWindowHostLinux(
+    internal::NativeWidgetDelegate* native_widget_delegate,
+    DesktopNativeWidgetAura* desktop_native_widget_aura,
+    const gfx::Rect& initial_bounds)
+    : close_widget_factory_(this),
+      xdisplay_(base::MessagePumpAuraX11::GetDefaultXDisplay()),
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
       atom_cache_(xdisplay_, kAtomsToCache),
       window_mapped_(false),
-      focus_when_shown_(false) {
+      focus_when_shown_(false),
+      cursor_loader_(),
+      current_cursor_(ui::kCursorNull),
+      cursor_shown_(true),
+      native_widget_delegate_(native_widget_delegate),
+      desktop_native_widget_aura_(desktop_native_widget_aura) {
 }
 
 DesktopRootWindowHostLinux::~DesktopRootWindowHostLinux() {
-  base::MessagePumpAuraX11::Current()->RemoveDispatcherForWindow(xwindow_);
-  XDestroyWindow(xdisplay_, xwindow_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHostLinux, private:
 
-void DesktopRootWindowHostLinux::InitX11Window(const gfx::Rect& bounds) {
+void DesktopRootWindowHostLinux::InitX11Window(
+    const Widget::InitParams& params) {
+  unsigned long attribute_mask = CWBackPixmap;
   XSetWindowAttributes swa;
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
+
+  if (params.type == Widget::InitParams::TYPE_MENU) {
+    swa.override_redirect = True;
+    attribute_mask |= CWOverrideRedirect;
+  }
+
   xwindow_ = XCreateWindow(
       xdisplay_, x_root_window_,
-      bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+      params.bounds.x(), params.bounds.y(),
+      params.bounds.width(), params.bounds.height(),
       0,               // border width
       CopyFromParent,  // depth
       InputOutput,
       CopyFromParent,  // visual
-      CWBackPixmap,
+      attribute_mask,
       &swa);
   base::MessagePumpAuraX11::Current()->AddDispatcherForWindow(this, xwindow_);
 
@@ -88,8 +126,10 @@ void DesktopRootWindowHostLinux::InitX11Window(const gfx::Rect& bounds) {
   XSelectInput(xdisplay_, xwindow_, event_mask);
   XFlush(xdisplay_);
 
-  // TODO(erg): Something about an invisible cursor here? Don't think I need
-  // it, but this is where it was.
+  if (base::MessagePumpForUI::HasXInput2())
+    ui::TouchFactory::GetInstance()->SetupXI2ForXWindow(xwindow_);
+
+  invisible_cursor_ = ui::CreateInvisibleCursor();
 
   // TODO(erg): We currently only request window deletion events. We also
   // should listen for activation events and anything else that GTK+ listens
@@ -113,29 +153,39 @@ void DesktopRootWindowHostLinux::InitX11Window(const gfx::Rect& bounds) {
                   32,
                   PropModeReplace,
                   reinterpret_cast<unsigned char*>(&pid), 1);
+}
 
-  // TODO(erg): Now that we're forked from RootWindowHostLinux, we should be
-  // doing a much better job about communicating things like the window title
-  // and icon to the window manager, which should replace this piece of copied
-  // code.
-  static int root_window_number = 0;
-  std::string name = StringPrintf("aura_root_%d", root_window_number++);
-  XStoreName(xdisplay_, xwindow_, name.c_str());
+// static
+aura::Window* DesktopRootWindowHostLinux::GetContentWindowForXID(XID xid) {
+  aura::RootWindow* root = aura::RootWindow::GetForAcceleratedWidget(xid);
+  return root ? root->GetProperty(kViewsWindowForRootWindow) : NULL;
 }
 
 // TODO(erg): This method should basically be everything I need form
 // RootWindowHostLinux::RootWindowHostLinux().
-void DesktopRootWindowHostLinux::InitRootWindow(
+aura::RootWindow* DesktopRootWindowHostLinux::InitRootWindow(
     const Widget::InitParams& params) {
-  aura::RootWindow::CreateParams rw_params(params.bounds);
+  bounds_ = params.bounds;
+
+  aura::RootWindow::CreateParams rw_params(bounds_);
   rw_params.host = this;
-  root_window_.reset(new aura::RootWindow(rw_params));
+  root_window_ = new aura::RootWindow(rw_params);
   root_window_->Init();
   root_window_->AddChild(content_window_);
-  root_window_host_delegate_ = root_window_.get();
+  root_window_->SetLayoutManager(new DesktopLayoutManager(root_window_));
+  root_window_->SetProperty(kViewsWindowForRootWindow, content_window_);
+  root_window_host_delegate_ = root_window_;
+
+  // If we're given a parent, we need to mark ourselves as transient to another
+  // window. Otherwise activation gets screwy.
+  gfx::NativeView parent = params.GetParent();
+  if (!params.child && params.GetParent())
+    parent->AddTransientChild(content_window_);
+
+  native_widget_delegate_->OnNativeWidgetCreated();
 
   capture_client_.reset(new DesktopCaptureClient);
-  aura::client::SetCaptureClient(root_window_.get(), capture_client_.get());
+  aura::client::SetCaptureClient(root_window_, capture_client_.get());
 
   root_window_->set_focus_manager(
       X11DesktopHandler::get()->get_focus_manager());
@@ -143,11 +193,23 @@ void DesktopRootWindowHostLinux::InitRootWindow(
   aura::DesktopActivationClient* activation_client =
       X11DesktopHandler::get()->get_activation_client();
   aura::client::SetActivationClient(
-      root_window_.get(), activation_client);
+      root_window_, activation_client);
 
   dispatcher_client_.reset(new aura::DesktopDispatcherClient);
-  aura::client::SetDispatcherClient(root_window_.get(),
+  aura::client::SetDispatcherClient(root_window_,
                                     dispatcher_client_.get());
+
+  // The cursor client is a curious thing; it proxies some, but not all, calls
+  // to our SetCursor() method. We require all calls to go through a route that
+  // uses a CursorLoader, which includes all the ones in views:: internal.
+  //
+  // TODO(erg): This is a code smell. I suspect that I'm working around the
+  // CursorClient's interface being plain wrong.
+  aura::client::SetCursorClient(root_window_, this);
+
+  position_client_.reset(new DesktopScreenPositionClient());
+  aura::client::SetScreenPositionClient(root_window_,
+                                        position_client_.get());
 
   // No event filter for aura::Env. Create CompoundEvnetFilter per RootWindow.
   root_window_event_filter_ = new aura::shared::CompoundEventFilter;
@@ -155,14 +217,21 @@ void DesktopRootWindowHostLinux::InitRootWindow(
   root_window_->SetEventFilter(root_window_event_filter_);
 
   input_method_filter_.reset(new aura::shared::InputMethodEventFilter());
-  input_method_filter_->SetInputMethodPropertyInRootWindow(root_window_.get());
+  input_method_filter_->SetInputMethodPropertyInRootWindow(root_window_);
   root_window_event_filter_->AddFilter(input_method_filter_.get());
 
   // TODO(erg): Unify this code once the other consumer goes away.
   x11_window_event_filter_.reset(
-      new X11WindowEventFilter(root_window_.get(), activation_client));
+      new X11WindowEventFilter(root_window_, activation_client));
   x11_window_event_filter_->SetUseHostWindowBorders(false);
   root_window_event_filter_->AddFilter(x11_window_event_filter_.get());
+
+  x11_window_move_client_.reset(new X11DesktopWindowMoveClient);
+  root_window_event_filter_->AddFilter(x11_window_move_client_.get());
+  aura::client::SetWindowMoveClient(root_window_,
+                                    x11_window_move_client_.get());
+
+  return root_window_;
 }
 
 bool DesktopRootWindowHostLinux::IsWindowManagerPresent() {
@@ -172,38 +241,83 @@ bool DesktopRootWindowHostLinux::IsWindowManagerPresent() {
       xdisplay_, atom_cache_.GetAtom("WM_S0")) != None;
 }
 
+void DesktopRootWindowHostLinux::SetWMSpecState(bool enabled,
+                                                ::Atom state1,
+                                                ::Atom state2) {
+  XEvent xclient;
+  memset(&xclient, 0, sizeof(xclient));
+  xclient.type = ClientMessage;
+  xclient.xclient.window = xwindow_;
+  xclient.xclient.message_type = atom_cache_.GetAtom("_NET_WM_STATE");
+  xclient.xclient.format = 32;
+  xclient.xclient.data.l[0] =
+      enabled ? k_NET_WM_STATE_ADD : k_NET_WM_STATE_REMOVE;
+  xclient.xclient.data.l[1] = state1;
+  xclient.xclient.data.l[2] = state2;
+  xclient.xclient.data.l[3] = 1;
+  xclient.xclient.data.l[4] = 0;
+
+  XSendEvent(xdisplay_, x_root_window_, False,
+             SubstructureRedirectMask | SubstructureNotifyMask,
+             &xclient);
+}
+
+bool DesktopRootWindowHostLinux::HasWMSpecProperty(const char* property) const {
+  return window_properties_.find(atom_cache_.GetAtom(property)) !=
+      window_properties_.end();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHostLinux, DesktopRootWindowHost implementation:
 
-void DesktopRootWindowHostLinux::Init(aura::Window* content_window,
-                                      const Widget::InitParams& params) {
+aura::RootWindow* DesktopRootWindowHostLinux::Init(
+    aura::Window* content_window,
+    const Widget::InitParams& params) {
   content_window_ = content_window;
 
   // TODO(erg): Check whether we *should* be building a RootWindowHost here, or
   // whether we should be proxying requests to another DRWHL.
 
-  // TODO(erg): We can finally solve the role problem! Based on params, try to
-  // determine whether this is a utility window such as a menu.
+  // In some situations, views tries to make a zero sized window, and that
+  // makes us crash. Make sure we have valid sizes.
+  Widget::InitParams sanitized_params = params;
+  if (sanitized_params.bounds.width() == 0)
+    sanitized_params.bounds.set_width(100);
+  if (sanitized_params.bounds.height() == 0)
+    sanitized_params.bounds.set_height(100);
 
-  InitX11Window(params.bounds);
-  InitRootWindow(params);
-
-  // TODO(erg): This should be done by a LayoutManager instead of being a
-  // one-off hack.
-  content_window_->SetBounds(params.bounds);
-
-  // This needs to be the intersection of:
-  // - NativeWidgetAura::InitNativeWidget()
-  // - DesktopNativeWidgetHelperAura::PreInitialize()
+  InitX11Window(sanitized_params);
+  return InitRootWindow(sanitized_params);
 }
 
 void DesktopRootWindowHostLinux::Close() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  // TODO(erg): Might need to do additional hiding tasks here.
+
+  if (!close_widget_factory_.HasWeakPtrs()) {
+    // And we delay the close so that if we are called from an ATL callback,
+    // we don't destroy the window before the callback returned (as the caller
+    // may delete ourselves on destroy and the ATL callback would still
+    // dereference us when the callback returns).
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&DesktopRootWindowHostLinux::CloseNow,
+                   close_widget_factory_.GetWeakPtr()));
+  }
 }
 
 void DesktopRootWindowHostLinux::CloseNow() {
-  NOTIMPLEMENTED();
+  // Remove the event listeners we've installed. We need to remove these
+  // because otherwise we get assert during ~RootWindow().
+  root_window_event_filter_->RemoveFilter(x11_window_move_client_.get());
+  root_window_event_filter_->RemoveFilter(x11_window_event_filter_.get());
+  root_window_event_filter_->RemoveFilter(input_method_filter_.get());
+
+  // Actually free our native resources.
+  base::MessagePumpAuraX11::Current()->RemoveDispatcherForWindow(xwindow_);
+  XDestroyWindow(xdisplay_, xwindow_);
+  xwindow_ = None;
+
+  desktop_native_widget_aura_->OnHostClosed();
 }
 
 aura::RootWindowHost* DesktopRootWindowHostLinux::AsRootWindowHost() {
@@ -225,6 +339,9 @@ void DesktopRootWindowHostLinux::ShowMaximizedWithBounds(
     const gfx::Rect& restored_bounds) {
   // TODO(erg):
   NOTIMPLEMENTED();
+
+  // TODO(erg): We shouldn't completely fall down here.
+  Show();
 }
 
 bool DesktopRootWindowHostLinux::IsVisible() const {
@@ -237,31 +354,72 @@ void DesktopRootWindowHostLinux::SetSize(const gfx::Size& size) {
 }
 
 void DesktopRootWindowHostLinux::CenterWindow(const gfx::Size& size) {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  gfx::Rect parent_bounds = GetWorkAreaBoundsInScreen();
+
+  // If |window_|'s transient parent bounds are big enough to contain |size|,
+  // use them instead.
+  if (content_window_->transient_parent()) {
+    gfx::Rect transient_parent_rect =
+        content_window_->transient_parent()->GetBoundsInScreen();
+    if (transient_parent_rect.height() >= size.height() &&
+        transient_parent_rect.width() >= size.width()) {
+      parent_bounds = transient_parent_rect;
+    }
+  }
+
+  gfx::Rect window_bounds(
+      parent_bounds.x() + (parent_bounds.width() - size.width()) / 2,
+      parent_bounds.y() + (parent_bounds.height() - size.height()) / 2,
+      size.width(),
+      size.height());
+  // Don't size the window bigger than the parent, otherwise the user may not be
+  // able to close or move it.
+  window_bounds.AdjustToFit(parent_bounds);
+
+  SetBounds(window_bounds);
 }
 
 void DesktopRootWindowHostLinux::GetWindowPlacement(
     gfx::Rect* bounds,
     ui::WindowShowState* show_state) const {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  *bounds = bounds_;
+
+  // TODO(erg): This needs a better implementation. For now, we're just pass
+  // back the normal state until we keep track of this.
+  *show_state = ui::SHOW_STATE_NORMAL;
 }
 
 gfx::Rect DesktopRootWindowHostLinux::GetWindowBoundsInScreen() const {
+  return bounds_;
+}
+
+gfx::Rect DesktopRootWindowHostLinux::GetClientAreaBoundsInScreen() const {
+  // TODO(erg): The NativeWidgetAura version returns |bounds_|, claiming its
+  // needed for View::ConvertPointToScreen() to work
+  // correctly. DesktopRootWindowHostWin::GetClientAreaBoundsInScreen() just
+  // asks windows what it thinks the client rect is.
+  //
+  // Attempts to calculate the rect by asking the NonClientFrameView what it
+  // thought its GetBoundsForClientView() were broke combobox drop down
+  // placement.
+  return bounds_;
+}
+
+gfx::Rect DesktopRootWindowHostLinux::GetRestoredBounds() const {
   // TODO(erg):
   NOTIMPLEMENTED();
   return gfx::Rect();
 }
 
-gfx::Rect DesktopRootWindowHostLinux::GetClientAreaBoundsInScreen() const {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-  return gfx::Rect(100, 100);
-}
+gfx::Rect DesktopRootWindowHostLinux::GetWorkAreaBoundsInScreen() const {
+  std::vector<int> value;
+  if (ui::GetIntArrayProperty(x_root_window_, "_NET_WORKAREA", &value) &&
+      value.size() >= 4) {
+    return gfx::Rect(value[0], value[1], value[2], value[3]);
+  }
 
-gfx::Rect DesktopRootWindowHostLinux::GetRestoredBounds() const {
-  // TODO(erg):
+  // TODO(erg): As a fallback, we should return the bounds for the current
+  // monitor. However, that's pretty difficult and requires futzing with XRR.
   NOTIMPLEMENTED();
   return gfx::Rect();
 }
@@ -271,57 +429,69 @@ void DesktopRootWindowHostLinux::SetShape(gfx::NativeRegion native_region) {
   NOTIMPLEMENTED();
 }
 
-bool DesktopRootWindowHostLinux::ShouldUseNativeFrame() {
-  return false;
-}
-
 void DesktopRootWindowHostLinux::Activate() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  aura::client::GetActivationClient(root_window_)->ActivateWindow(
+      content_window_);
 }
 
 void DesktopRootWindowHostLinux::Deactivate() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  aura::client::GetActivationClient(root_window_)->DeactivateWindow(
+      content_window_);
 }
 
 bool DesktopRootWindowHostLinux::IsActive() const {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-  return true;
+  return aura::client::GetActivationClient(root_window_)->
+      GetActiveWindow() == content_window_;
 }
 
 void DesktopRootWindowHostLinux::Maximize() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  SetWMSpecState(true,
+                 atom_cache_.GetAtom("_NET_WM_STATE_MAXIMIZED_VERT"),
+                 atom_cache_.GetAtom("_NET_WM_STATE_MAXIMIZED_HORZ"));
 }
 
 void DesktopRootWindowHostLinux::Minimize() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  XIconifyWindow(xdisplay_, xwindow_, 0);
 }
 
 void DesktopRootWindowHostLinux::Restore() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
+  SetWMSpecState(false,
+                 atom_cache_.GetAtom("_NET_WM_STATE_MAXIMIZED_VERT"),
+                 atom_cache_.GetAtom("_NET_WM_STATE_MAXIMIZED_HORZ"));
 }
 
 bool DesktopRootWindowHostLinux::IsMaximized() const {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-  return false;
+  return (HasWMSpecProperty("_NET_WM_STATE_MAXIMIZED_VERT") ||
+          HasWMSpecProperty("_NET_WM_STATE_MAXIMIZED_HORZ"));
 }
 
 bool DesktopRootWindowHostLinux::IsMinimized() const {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-  return false;
+  return HasWMSpecProperty("_NET_WM_STATE_HIDDEN");
+}
+
+void DesktopRootWindowHostLinux::SetCursorInternal(gfx::NativeCursor cursor) {
+  XDefineCursor(xdisplay_, xwindow_, cursor.platform());
+}
+
+void DesktopRootWindowHostLinux::OnCaptureReleased() {
+  native_widget_delegate_->OnMouseCaptureLost();
+  g_current_capture = NULL;
+}
+
+void DesktopRootWindowHostLinux::DispatchMouseEvent(ui::MouseEvent* event) {
+  if (!g_current_capture || g_current_capture == this) {
+    root_window_host_delegate_->OnHostMouseEvent(event);
+  } else {
+    // Another DesktopRootWindowHostLinux has installed itself as
+    // capture. Translate the event's location and dispatch to the other.
+    event->ConvertLocationToTarget(root_window_,
+                                   g_current_capture->root_window_);
+    g_current_capture->root_window_host_delegate_->OnHostMouseEvent(event);
+  }
 }
 
 bool DesktopRootWindowHostLinux::HasCapture() const {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-  return false;
+  return g_current_capture == this;
 }
 
 void DesktopRootWindowHostLinux::SetAlwaysOnTop(bool always_on_top) {
@@ -330,28 +500,129 @@ void DesktopRootWindowHostLinux::SetAlwaysOnTop(bool always_on_top) {
 }
 
 InputMethod* DesktopRootWindowHostLinux::CreateInputMethod() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-  return NULL;
+  ui::InputMethod* host = input_method_filter_->input_method();
+  return new InputMethodBridge(this, host);
 }
 
 internal::InputMethodDelegate*
     DesktopRootWindowHostLinux::GetInputMethodDelegate() {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-  return NULL;
+  return this;
 }
 
 void DesktopRootWindowHostLinux::SetWindowTitle(const string16& title) {
+  XStoreName(xdisplay_, xwindow_, UTF16ToUTF8(title).c_str());
+}
+
+void DesktopRootWindowHostLinux::ClearNativeFocus() {
+  // This method is weird and misnamed. Instead of clearing the native focus,
+  // it sets the focus to our |content_window_|, which will trigger a cascade
+  // of focus changes into views.
+  if (content_window_ && content_window_->GetFocusManager() &&
+      content_window_->Contains(
+          content_window_->GetFocusManager()->GetFocusedWindow())) {
+    content_window_->GetFocusManager()->SetFocusedWindow(content_window_, NULL);
+  }
+}
+
+Widget::MoveLoopResult DesktopRootWindowHostLinux::RunMoveLoop(
+    const gfx::Point& drag_offset) {
+  SetCapture();
+
+  if (x11_window_move_client_->RunMoveLoop(content_window_, drag_offset) ==
+      aura::client::MOVE_SUCCESSFUL)
+    return Widget::MOVE_LOOP_SUCCESSFUL;
+
+  return Widget::MOVE_LOOP_CANCELED;
+}
+
+void DesktopRootWindowHostLinux::EndMoveLoop() {
+  x11_window_move_client_->EndMoveLoop();
+}
+
+void DesktopRootWindowHostLinux::SetVisibilityChangedAnimationsEnabled(
+    bool value) {
   // TODO(erg):
   NOTIMPLEMENTED();
+}
+
+bool DesktopRootWindowHostLinux::ShouldUseNativeFrame() {
+  return false;
+}
+
+void DesktopRootWindowHostLinux::FrameTypeChanged() {
+}
+
+NonClientFrameView* DesktopRootWindowHostLinux::CreateNonClientFrameView() {
+  return NULL;
+}
+
+void DesktopRootWindowHostLinux::SetFullscreen(bool fullscreen) {
+  SetWMSpecState(fullscreen,
+                 atom_cache_.GetAtom("_NET_WM_STATE_FULLSCREEN"),
+                 None);
+}
+
+bool DesktopRootWindowHostLinux::IsFullscreen() const {
+  return HasWMSpecProperty("_NET_WM_STATE_FULLSCREEN");
+}
+
+void DesktopRootWindowHostLinux::SetOpacity(unsigned char opacity) {
+  // TODO(erg):
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::SetWindowIcons(
+    const gfx::ImageSkia& window_icon, const gfx::ImageSkia& app_icon) {
+  // TODO(erg):
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::SetAccessibleName(const string16& name) {
+  // TODO(erg):
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::SetAccessibleRole(
+    ui::AccessibilityTypes::Role role) {
+  // TODO(erg):
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::SetAccessibleState(
+    ui::AccessibilityTypes::State state) {
+  // TODO(erg):
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::InitModalType(ui::ModalType modal_type) {
+  // TODO(erg):
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::FlashFrame(bool flash_frame) {
+  // TODO(erg):
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::OnNativeWidgetFocus() {
+  native_widget_delegate_->AsWidget()->GetInputMethod()->OnFocus();
+}
+
+void DesktopRootWindowHostLinux::OnNativeWidgetBlur() {
+  if (xwindow_)
+    native_widget_delegate_->AsWidget()->GetInputMethod()->OnBlur();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHostLinux, aura::RootWindowHost implementation:
 
+void DesktopRootWindowHostLinux::SetDelegate(
+    aura::RootWindowHostDelegate* delegate) {
+  root_window_host_delegate_ = delegate;
+}
+
 aura::RootWindow* DesktopRootWindowHostLinux::GetRootWindow() {
-  return root_window_.get();
+  return root_window_;
 }
 
 gfx::AcceleratedWidget DesktopRootWindowHostLinux::GetAcceleratedWidget() {
@@ -386,44 +657,100 @@ void DesktopRootWindowHostLinux::Hide() {
 }
 
 void DesktopRootWindowHostLinux::ToggleFullScreen() {
+  NOTIMPLEMENTED();
 }
 
 gfx::Rect DesktopRootWindowHostLinux::GetBounds() const {
-  return gfx::Rect(100, 100);
+  return bounds_;
 }
 
 void DesktopRootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
+  bool size_changed = bounds.size() != bounds_.size();
+
+  if (bounds != bounds_) {
+    XMoveResizeWindow(xdisplay_, xwindow_, bounds.x(), bounds.y(),
+                      bounds.width(), bounds.height());
+    bounds_ = bounds;
+  }
+
+  if (size_changed)
+    root_window_host_delegate_->OnHostResized(bounds_.size());
+  else
+    root_window_host_delegate_->OnHostPaint();
 }
 
 gfx::Point DesktopRootWindowHostLinux::GetLocationOnNativeScreen() const {
-  return gfx::Point(1, 1);
+  return bounds_.origin();
 }
 
 void DesktopRootWindowHostLinux::SetCapture() {
+  // This is vaguely based on the old NativeWidgetGtk implementation.
+  //
+  // X11's XPointerGrab() shouldn't be used for everything; it doesn't map
+  // cleanly to Windows' SetCapture(). GTK only provides a separate concept of
+  // a grab that wasn't the X11 pointer grab, but was instead a manual
+  // redirection of the event. (You need to drop into GDK if you want to
+  // perform a raw X11 grab).
+
+  if (g_current_capture)
+    g_current_capture->OnCaptureReleased();
+
+  g_current_capture = this;
+
+  // TODO(erg): In addition to the above, NativeWidgetGtk performs a full X
+  // pointer grab when our NativeWidget is of type Menu. However, things work
+  // without it. Clicking inside a chrome window causes a release capture, and
+  // clicking outside causes an activation change. Since previous attempts at
+  // using XPointerGrab() to implement this have locked my X server, I'm going
+  // to skip this for now.
 }
 
 void DesktopRootWindowHostLinux::ReleaseCapture() {
+  if (g_current_capture)
+    g_current_capture->OnCaptureReleased();
 }
 
 void DesktopRootWindowHostLinux::SetCursor(gfx::NativeCursor cursor) {
-}
+  cursor_loader_.SetPlatformCursor(&cursor);
 
-void DesktopRootWindowHostLinux::ShowCursor(bool show) {
+  if (cursor == current_cursor_)
+    return;
+  current_cursor_ = cursor;
+
+  if (cursor_shown_)
+    SetCursorInternal(cursor);
 }
 
 bool DesktopRootWindowHostLinux::QueryMouseLocation(
     gfx::Point* location_return) {
-  return false;
+  ::Window root_return, child_return;
+  int root_x_return, root_y_return, win_x_return, win_y_return;
+  unsigned int mask_return;
+  XQueryPointer(xdisplay_,
+                xwindow_,
+                &root_return,
+                &child_return,
+                &root_x_return, &root_y_return,
+                &win_x_return, &win_y_return,
+                &mask_return);
+  *location_return = gfx::Point(
+      std::max(0, std::min(bounds_.width(), win_x_return)),
+      std::max(0, std::min(bounds_.height(), win_y_return)));
+  return (win_x_return >= 0 && win_x_return < bounds_.width() &&
+          win_y_return >= 0 && win_y_return < bounds_.height());
 }
 
 bool DesktopRootWindowHostLinux::ConfineCursorToRootWindow() {
+  NOTIMPLEMENTED();
   return false;
 }
 
 void DesktopRootWindowHostLinux::UnConfineCursor() {
+  NOTIMPLEMENTED();
 }
 
 void DesktopRootWindowHostLinux::MoveCursorTo(const gfx::Point& location) {
+  NOTIMPLEMENTED();
 }
 
 void DesktopRootWindowHostLinux::SetFocusWhenShown(bool focus_when_shown) {
@@ -437,9 +764,18 @@ void DesktopRootWindowHostLinux::SetFocusWhenShown(bool focus_when_shown) {
   }
 }
 
+bool DesktopRootWindowHostLinux::CopyAreaToSkCanvas(
+    const gfx::Rect& source_bounds,
+    const gfx::Point& dest_offset,
+    SkCanvas* canvas) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 bool DesktopRootWindowHostLinux::GrabSnapshot(
       const gfx::Rect& snapshot_bounds,
       std::vector<unsigned char>* png_representation) {
+  NOTIMPLEMENTED();
   return false;
 }
 
@@ -484,6 +820,48 @@ void DesktopRootWindowHostLinux::PrepareForShutdown() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// DesktopRootWindowHostLinux, aura::CursorClient implementation:
+
+void DesktopRootWindowHostLinux::ShowCursor(bool show) {
+  if (show == cursor_shown_)
+    return;
+  cursor_shown_ = show;
+  SetCursorInternal(show ? current_cursor_ : invisible_cursor_);
+}
+
+bool DesktopRootWindowHostLinux::IsCursorVisible() const {
+  return cursor_shown_;
+}
+
+void DesktopRootWindowHostLinux::SetDeviceScaleFactor(
+    float device_scale_factor) {
+  cursor_loader_.UnloadAll();
+  cursor_loader_.set_device_scale_factor(device_scale_factor);
+}
+
+void DesktopRootWindowHostLinux::LockCursor() {
+  // TODO(mazda): Implement this.
+  NOTIMPLEMENTED();
+}
+
+void DesktopRootWindowHostLinux::UnlockCursor() {
+  // TODO(mazda): Implement this.
+  NOTIMPLEMENTED();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// DesktopRootWindowHostLinux, views::internal::InputMethodDelegate:
+
+void DesktopRootWindowHostLinux::DispatchKeyEventPostIME(
+    const ui::KeyEvent& key) {
+  FocusManager* focus_manager =
+      native_widget_delegate_->AsWidget()->GetFocusManager();
+  if (native_widget_delegate_->OnKeyEvent(key) || !focus_manager)
+    return;
+  focus_manager->OnKeyEvent(key);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHostLinux, MessageLoop::Dispatcher implementation:
 
 bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
@@ -510,7 +888,7 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
       if (static_cast<int>(xev->xbutton.button) == kBackMouseButton ||
           static_cast<int>(xev->xbutton.button) == kForwardMouseButton) {
         aura::client::UserActionClient* gesture_client =
-            aura::client::GetUserActionClient(root_window_.get());
+            aura::client::GetUserActionClient(root_window_);
         if (gesture_client) {
           gesture_client->OnUserAction(
               static_cast<int>(xev->xbutton.button) == kBackMouseButton ?
@@ -522,12 +900,16 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
     }  // fallthrough
     case ButtonRelease: {
       ui::MouseEvent mouseev(xev);
-      root_window_host_delegate_->OnHostMouseEvent(&mouseev);
+      DispatchMouseEvent(&mouseev);
       break;
     }
     case FocusOut:
-      if (xev->xfocus.mode != NotifyGrab)
-        root_window_host_delegate_->OnHostLostCapture();
+      if (xev->xfocus.mode != NotifyGrab) {
+        ReleaseCapture();
+        root_window_host_delegate_->OnHostLostWindowCapture();
+      } else {
+        root_window_host_delegate_->OnHostLostMouseGrab();
+      }
       break;
     case ConfigureNotify: {
       DCHECK_EQ(xwindow_, xev->xconfigure.window);
@@ -576,9 +958,9 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
           if (type == ui::ET_MOUSE_MOVED || type == ui::ET_MOUSE_DRAGGED) {
             // If this is a motion event, we want to coalesce all pending motion
             // events that are at the top of the queue.
-            // num_coalesced = CoalescePendingMotionEvents(xev, &last_event);
-            // if (num_coalesced > 0)
-            //   xev = &last_event;
+            num_coalesced = ui::CoalescePendingMotionEvents(xev, &last_event);
+            if (num_coalesced > 0)
+              xev = &last_event;
           } else if (type == ui::ET_MOUSE_PRESSED) {
             XIDeviceEvent* xievent =
                 static_cast<XIDeviceEvent*>(xev->xcookie.data);
@@ -600,12 +982,12 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
             }
           }
           ui::MouseEvent mouseev(xev);
-          root_window_host_delegate_->OnHostMouseEvent(&mouseev);
+          DispatchMouseEvent(&mouseev);
           break;
         }
         case ui::ET_MOUSEWHEEL: {
           ui::MouseWheelEvent mouseev(xev);
-          root_window_host_delegate_->OnHostMouseEvent(&mouseev);
+          DispatchMouseEvent(&mouseev);
           break;
         }
         case ui::ET_SCROLL_FLING_START:
@@ -685,8 +1067,25 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
       }
 
       ui::MouseEvent mouseev(xev);
-      root_window_host_delegate_->OnHostMouseEvent(&mouseev);
+      DispatchMouseEvent(&mouseev);
       break;
+    }
+    case PropertyNotify: {
+      // Get our new window property state if the WM has told us its changed.
+      ::Atom state = atom_cache_.GetAtom("_NET_WM_STATE");
+
+      std::vector< ::Atom> atom_list;
+      if (xev->xproperty.atom == state &&
+          ui::GetAtomArrayProperty(xwindow_, "_NET_WM_STATE", &atom_list)) {
+        window_properties_.clear();
+        std::copy(atom_list.begin(), atom_list.end(),
+                  inserter(window_properties_, window_properties_.begin()));
+
+        // Now that we have different window properties, we may need to
+        // relayout the window. (The windows code doesn't need this because
+        // their window change is synchronous.)
+        native_widget_delegate_->AsWidget()->GetRootView()->Layout();
+      }
     }
   }
   return true;
@@ -698,8 +1097,11 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
 // static
 DesktopRootWindowHost* DesktopRootWindowHost::Create(
     internal::NativeWidgetDelegate* native_widget_delegate,
+    DesktopNativeWidgetAura* desktop_native_widget_aura,
     const gfx::Rect& initial_bounds) {
-  return new DesktopRootWindowHostLinux;
+  return new DesktopRootWindowHostLinux(native_widget_delegate,
+                                        desktop_native_widget_aura,
+                                        initial_bounds);
 }
 
 }  // namespace views

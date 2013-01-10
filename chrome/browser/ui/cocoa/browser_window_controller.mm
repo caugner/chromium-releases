@@ -17,7 +17,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/instant/instant_controller.h"
-#include "chrome/browser/managed_mode.h"
+#include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -268,8 +268,11 @@ enum {
     // Note that this may leave a significant portion of the window
     // offscreen, but there will always be enough window onscreen to
     // drag the whole window back into view.
-    gfx::Rect desiredContentRect =
-        chrome::GetSavedWindowBounds(browser_.get());
+    ui::WindowShowState show_state = ui::SHOW_STATE_DEFAULT;
+    gfx::Rect desiredContentRect;
+    chrome::GetSavedWindowBoundsAndShowState(browser_.get(),
+                                             &desiredContentRect,
+                                             &show_state);
     gfx::Rect windowRect = desiredContentRect;
     windowRect = [self enforceMinWindowSize:windowRect];
 
@@ -300,7 +303,8 @@ enum {
     // Create the previewable contents controller.  This provides the switch
     // view that TabStripController needs.
     previewableContentsController_.reset(
-        [[PreviewableContentsController alloc] init]);
+        [[PreviewableContentsController alloc] initWithBrowser:browser
+                                              windowController:self]);
     [[previewableContentsController_ view]
         setFrame:[[devToolsController_ view] bounds]];
     [[devToolsController_ view]
@@ -417,7 +421,8 @@ enum {
     extension_keybinding_registry_.reset(
         new ExtensionKeybindingRegistryCocoa(browser_->profile(),
             [self window],
-            extensions::ExtensionKeybindingRegistry::ALL_EXTENSIONS));
+            extensions::ExtensionKeybindingRegistry::ALL_EXTENSIONS,
+            windowShim_.get()));
 
     // We are done initializing now.
     initializing_ = NO;
@@ -532,11 +537,6 @@ enum {
 - (void)updateDevToolsForContents:(WebContents*)contents {
   [devToolsController_ updateDevToolsForWebContents:contents
                                         withProfile:browser_->profile()];
-}
-
-- (void)setDevToolsDockToRight:(bool)dock_to_right {
-  [devToolsController_ setDockToRight:dock_to_right
-                          withProfile:browser_->profile()];
 }
 
 // Called when the user wants to close a window or from the shutdown process.
@@ -996,14 +996,6 @@ enum {
   }
 }
 
-- (BOOL)supportsFullscreen {
-  // TODO(avi, thakis): GTMWindowSheetController has no api to move
-  // tabsheets between windows. Until then, we have to prevent having to
-  // move a tabsheet between windows, e.g. no fullscreen toggling
-  NSArray* a = [[tabStripController_ sheetController] viewsWithAttachedSheets];
-  return [a count] == 0;
-}
-
 // Called to validate menu and toolbar items when this window is key. All the
 // items we care about have been set with the |-commandDispatch:| or
 // |-commandDispatchUsingKeyModifiers:| actions and a target of FirstResponder
@@ -1033,7 +1025,6 @@ enum {
             enable &= !![[static_cast<NSMenuItem*>(item) keyEquivalent] length];
           break;
         case IDC_FULLSCREEN: {
-          enable &= [self supportsFullscreen];
           if ([static_cast<NSObject*>(item) isKindOfClass:[NSMenuItem class]]) {
             NSString* menuTitle = l10n_util::GetNSString(
                 [self isFullscreen] && ![self inPresentationMode] ?
@@ -1047,7 +1038,6 @@ enum {
           break;
         }
         case IDC_PRESENTATION_MODE: {
-          enable &= [self supportsFullscreen];
           if ([static_cast<NSObject*>(item) isKindOfClass:[NSMenuItem class]]) {
             NSString* menuTitle = l10n_util::GetNSString(
                 [self inPresentationMode] ? IDS_EXIT_PRESENTATION_MAC :
@@ -1526,10 +1516,11 @@ enum {
   // between windows. Until then, we have to prevent having to move a tabsheet
   // between windows, e.g. no tearing off of tabs.
   int index = [tabStripController_ modelIndexForTabView:tabView];
-  TabContents* contents = chrome::GetTabContentsAt(browser_.get(), index);
+  WebContents* contents = chrome::GetWebContentsAt(browser_.get(), index);
   if (!contents)
     return NO;
-  return !contents->constrained_window_tab_helper()->constrained_window_count();
+  return ConstrainedWindowTabHelper::FromWebContents(contents)->
+      constrained_window_count() == 0;
 }
 
 // TabStripControllerDelegate protocol.
@@ -1550,16 +1541,9 @@ enum {
   // applicable)?
   [self updateBookmarkBarVisibilityWithAnimation:NO];
 
-  TabContents* tabContents = TabContents::FromWebContents(contents);
-  // Without the .get(), xcode fails.
-  [infoBarContainerController_.get() changeTabContents:tabContents];
-}
+  [infoBarContainerController_ changeWebContents:contents];
 
-- (void)onReplaceTabWithContents:(WebContents*)contents {
-  // Simply remove the preview view if it exists; the tab strip
-  // controller will reinstall the view as the active view.
-  [previewableContentsController_ hidePreview];
-  [self updateBookmarkBarVisibilityWithAnimation:NO];
+  [previewableContentsController_ onActivateTabWithContents:contents];
 }
 
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
@@ -1579,8 +1563,7 @@ enum {
 }
 
 - (void)onTabDetachedWithContents:(WebContents*)contents {
-  TabContents* tabContents = TabContents::FromWebContents(contents);
-  [infoBarContainerController_ tabDetachedWithContents:tabContents];
+  [infoBarContainerController_ tabDetachedWithContents:contents];
 }
 
 - (void)userChangedTheme {
@@ -1899,21 +1882,6 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   return fullscreenExitBubbleController_.get();
 }
 
-- (void)showInstant:(WebContents*)previewContents {
-  [previewableContentsController_ showPreview:previewContents];
-  [self updateBookmarkBarVisibilityWithAnimation:NO];
-}
-
-- (void)hideInstant {
-  // TODO(rohitrao): Revisit whether or not this method should be called when
-  // instant isn't showing.
-  if (![previewableContentsController_ isShowingPreview])
-    return;
-
-  [previewableContentsController_ hidePreview];
-  [self updateBookmarkBarVisibilityWithAnimation:NO];
-}
-
 - (void)commitInstant {
   InstantController* instant = browser_->instant_controller()->instant();
   if (instant && instant->IsCurrent())
@@ -1972,7 +1940,7 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   if (fullscreen == [self isFullscreen])
     return;
 
-  if (![self supportsFullscreen])
+  if (!chrome::IsCommandEnabled(browser_.get(), IDC_FULLSCREEN))
     return;
 
   if (base::mac::IsOSLionOrLater()) {

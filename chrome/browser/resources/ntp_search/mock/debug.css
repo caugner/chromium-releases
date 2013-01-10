@@ -8,39 +8,9 @@
    according to the new specification.
    ========================================================================= */
 
-#ntp5 #card-slider-frame {
-  bottom: 0;
-  position: absolute;
-  top: inherit;
-}
-
 #ntp5 .tile-page-scrollbar,
 #ntp5 .top-margin {
   display: none;
-}
-
-#ntp5 .tile-page {
-  display: block;
-}
-
-#ntp5 #page-list {
-  margin-top: 0;
-  padding-bottom: 0;
-}
-
-#ntp5 .thumbnail-image {
-  border-radius: 2px;
-  opacity: 1;
-}
-
-#ntp5 .tile-page-content {
-  padding: 0;
-}
-
-#ntp5 #notification-container {
-  bottom: inherit;
-  position: absolute;
-  top: 32px;
 }
 
 /* =========================================================================
@@ -51,22 +21,22 @@
    Debug
 ----------------------------------------------------------------------------- */
 
+.debug #bottom-panel {
+  background: rgb(250, 255, 255);
+  outline: 1px solid rgb(111, 255, 255);
+}
+
 .debug #card-slider-frame {
-  bottom: 0;
-  height: 95%;
-  position: absolute;
-  text-align: center;
-  width: 100%;
+  background: rgb(227, 255, 255);
+  outline: 1px solid rgb(171, 255, 255);
 }
 
-.debug #page-list {
-  height: 100% !important;
-}
-
-.debug #page-list-menu {
+.debug #bottom-panel-footer,
+.debug #bottom-panel-toolbar {
   background: rgb(255, 170, 255);
 }
 
+.debug #dot-list,
 .debug .tile-page-content {
   background: rgb(119, 255, 255);
 }

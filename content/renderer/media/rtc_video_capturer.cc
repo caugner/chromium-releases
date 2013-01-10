@@ -6,22 +6,26 @@
 
 #include "base/bind.h"
 
+namespace content {
+
 RtcVideoCapturer::RtcVideoCapturer(
     const media::VideoCaptureSessionId id,
-    VideoCaptureImplManager* vc_manager)
-    : delegate_(new RtcVideoCaptureDelegate(id, vc_manager)),
-      state_(video_capture::kStopped) {
+    VideoCaptureImplManager* vc_manager,
+    bool is_screencast)
+    : is_screencast_(is_screencast),
+      delegate_(new RtcVideoCaptureDelegate(id, vc_manager)),
+      state_(VIDEO_CAPTURE_STATE_STOPPED) {
 }
 
 RtcVideoCapturer::~RtcVideoCapturer() {
-  DCHECK(video_capture::kStopped);
+  DCHECK(VIDEO_CAPTURE_STATE_STOPPED);
   DVLOG(3) << " RtcVideoCapturer::dtor";
 }
 
 cricket::CaptureState RtcVideoCapturer::Start(
     const cricket::VideoFormat& capture_format) {
   DVLOG(3) << " RtcVideoCapturer::Start ";
-  if (state_ == video_capture::kStarted) {
+  if (state_ == VIDEO_CAPTURE_STATE_STARTED) {
     DVLOG(1) << "Got a StartCapture when already started!!! ";
     return cricket::CS_FAILED;
   }
@@ -32,25 +36,27 @@ cricket::CaptureState RtcVideoCapturer::Start(
   cap.frame_rate = capture_format.framerate();
   cap.color = media::VideoCaptureCapability::kI420;
 
-  state_ = video_capture::kStarted;
+  state_ = VIDEO_CAPTURE_STATE_STARTED;
   start_time_ = base::Time::Now();
-  delegate_->StartCapture(cap, base::Bind(&RtcVideoCapturer::OnFrameCaptured,
-                                          base::Unretained(this)));
-  return cricket::CS_RUNNING;
+  delegate_->StartCapture(cap,
+      base::Bind(&RtcVideoCapturer::OnFrameCaptured, base::Unretained(this)),
+      base::Bind(&RtcVideoCapturer::OnStateChange, base::Unretained(this)));
+  return cricket::CS_STARTING;
 }
 
 void RtcVideoCapturer::Stop() {
   DVLOG(3) << " RtcVideoCapturer::Stop ";
-  if (state_ == video_capture::kStopped) {
+  if (state_ == VIDEO_CAPTURE_STATE_STOPPED) {
     DVLOG(1) << "Got a StopCapture while not started.";
     return;
   }
-  state_ = video_capture::kStopped;
+  state_ = VIDEO_CAPTURE_STATE_STOPPED;
   delegate_->StopCapture();
+  SignalStateChange(this, cricket::CS_STOPPED);
 }
 
 bool RtcVideoCapturer::IsRunning() {
-  return state_ == video_capture::kStarted;
+  return state_ == VIDEO_CAPTURE_STATE_STARTED;
 }
 
 bool RtcVideoCapturer::GetPreferredFourccs(std::vector<uint32>* fourccs) {
@@ -58,6 +64,10 @@ bool RtcVideoCapturer::GetPreferredFourccs(std::vector<uint32>* fourccs) {
     return false;
   fourccs->push_back(cricket::FOURCC_I420);
   return true;
+}
+
+bool RtcVideoCapturer::IsScreencast() {
+  return is_screencast_;
 }
 
 bool RtcVideoCapturer::GetBestCaptureFormat(const cricket::VideoFormat& desired,
@@ -95,3 +105,25 @@ void RtcVideoCapturer::OnFrameCaptured(
   // libJingle have no assumptions on what thread this signal come from.
   SignalFrameCaptured(this, &frame);
 }
+
+void RtcVideoCapturer::OnStateChange(
+    RtcVideoCaptureDelegate::CaptureState state) {
+  cricket::CaptureState converted_state = cricket::CS_FAILED;
+  switch (state) {
+    case RtcVideoCaptureDelegate::CAPTURE_STOPPED:
+      converted_state = cricket::CS_STOPPED;
+      break;
+    case RtcVideoCaptureDelegate::CAPTURE_RUNNING:
+      converted_state = cricket::CS_RUNNING;
+      break;
+    case RtcVideoCaptureDelegate::CAPTURE_FAILED:
+      converted_state = cricket::CS_FAILED;
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+  SignalStateChange(this, converted_state);
+}
+
+}  // namespace content

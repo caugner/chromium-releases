@@ -9,6 +9,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/media/media_internals.h"
+#include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -24,11 +26,13 @@
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -370,6 +374,14 @@ void BrowserTabStripController::LayoutTypeMaybeChanged() {
       static_cast<int>(tabstrip_->layout_type()));
 }
 
+bool BrowserTabStripController::IsInstantExtendedAPIEnabled() {
+  return chrome::search::IsInstantExtendedAPIEnabled(browser_->profile());
+}
+
+bool BrowserTabStripController::ShouldShowWhiteNTP() {
+  return InstantUI::ShouldShowWhiteNTP(browser_->profile());
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, TabStripModelObserver implementation:
 
@@ -417,14 +429,14 @@ void BrowserTabStripController::TabChangedAt(TabContents* contents,
     return;
   }
 
-  SetTabDataAt(contents, model_index);
+  SetTabDataAt(contents->web_contents(), model_index);
 }
 
 void BrowserTabStripController::TabReplacedAt(TabStripModel* tab_strip_model,
                                               TabContents* old_contents,
                                               TabContents* new_contents,
                                               int model_index) {
-  SetTabDataAt(new_contents, model_index);
+  SetTabDataAt(new_contents->web_contents(), model_index);
 }
 
 void BrowserTabStripController::TabPinnedStateChanged(
@@ -433,16 +445,14 @@ void BrowserTabStripController::TabPinnedStateChanged(
   // Currently none of the renderers render pinned state differently.
 }
 
-void BrowserTabStripController::TabMiniStateChanged(
-    TabContents* contents,
-    int model_index) {
-  SetTabDataAt(contents, model_index);
+void BrowserTabStripController::TabMiniStateChanged(TabContents* contents,
+                                                    int model_index) {
+  SetTabDataAt(contents->web_contents(), model_index);
 }
 
-void BrowserTabStripController::TabBlockedStateChanged(
-    TabContents* contents,
-    int model_index) {
-  SetTabDataAt(contents, model_index);
+void BrowserTabStripController::TabBlockedStateChanged(TabContents* contents,
+                                                       int model_index) {
+  SetTabDataAt(contents->web_contents(), model_index);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -455,7 +465,7 @@ void BrowserTabStripController::ModeChanged(
   // repainting of tab's background.
   int active_index = GetActiveIndex();
   DCHECK_NE(active_index, -1);
-  SetTabDataAt(chrome::GetTabContentsAt(browser_, active_index), active_index);
+  SetTabDataAt(chrome::GetWebContentsAt(browser_, active_index), active_index);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -467,11 +477,11 @@ void BrowserTabStripController::OnToolbarBackgroundAnimatorProgressed() {
   // background.
   int active_index = GetActiveIndex();
   DCHECK_NE(active_index, -1);
-  SetTabDataAt(chrome::GetTabContentsAt(browser_, active_index), active_index);
+  SetTabDataAt(chrome::GetWebContentsAt(browser_, active_index), active_index);
 }
 
 void BrowserTabStripController::OnToolbarBackgroundAnimatorCanceled(
-    TabContents* tab_contents) {
+    content::WebContents* web_contents) {
   // Fade in of tab background has been canceled, which can happen in 2
   // scenarios:
   // 1) a deactivated or detached or closing tab, whose |tab_contents| is the
@@ -481,12 +491,12 @@ void BrowserTabStripController::OnToolbarBackgroundAnimatorCanceled(
   // If we proceed, set tab data so that
   // |TabRendererData::gradient_background_opacity| will be reset.
   // Repainting of tab's background will be triggered in the process.
-  int index = tab_contents ? model_->GetIndexOfTabContents(tab_contents) :
+  int index = web_contents ? model_->GetIndexOfWebContents(web_contents) :
                              GetActiveIndex();
   if (index == -1)
     return;
-  SetTabDataAt(tab_contents ? tab_contents :
-      chrome::GetTabContentsAt(browser_, index), index);
+  SetTabDataAt(web_contents ? web_contents :
+      chrome::GetWebContentsAt(browser_, index), index);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -514,32 +524,36 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
     int model_index,
     TabRendererData* data,
     TabStatus tab_status) {
-  TabContents* tab_contents = TabContents::FromWebContents(contents);
+  FaviconTabHelper* favicon_tab_helper =
+      FaviconTabHelper::FromWebContents(contents);
 
-  data->favicon =
-      tab_contents->favicon_tab_helper()->GetFavicon().AsImageSkia();
+  data->favicon = favicon_tab_helper->GetFavicon().AsImageSkia();
   data->network_state = TabContentsNetworkState(contents);
   data->title = contents->GetTitle();
   data->url = contents->GetURL();
   data->loading = contents->IsLoading();
   data->crashed_status = contents->GetCrashedStatus();
   data->incognito = contents->GetBrowserContext()->IsOffTheRecord();
-  data->show_icon = tab_contents->favicon_tab_helper()->ShouldDisplayFavicon();
+  data->show_icon = favicon_tab_helper->ShouldDisplayFavicon();
   data->mini = model_->IsMiniTab(model_index);
   data->blocked = model_->IsTabBlocked(model_index);
   data->app = extensions::TabHelper::FromWebContents(contents)->is_app();
+  int render_process_id = contents->GetRenderProcessHost()->GetID();
+  int render_view_id = contents->GetRenderViewHost()->GetRoutingID();
+  scoped_refptr<MediaStreamCaptureIndicator> capture_indicator =
+      MediaInternals::GetInstance()->GetMediaStreamCaptureIndicator();
+  data->recording =
+      capture_indicator->IsProcessCapturing(render_process_id, render_view_id);
   data->mode = browser_->search_model()->mode().mode;
   // Get current gradient background animation to paint.
   data->gradient_background_opacity = browser_->search_delegate()->
       toolbar_search_animator().GetGradientOpacity();
 }
 
-void BrowserTabStripController::SetTabDataAt(
-    TabContents* contents,
-    int model_index) {
+void BrowserTabStripController::SetTabDataAt(content::WebContents* web_contents,
+                                             int model_index) {
   TabRendererData data;
-  SetTabRendererDataFromModel(contents->web_contents(), model_index, &data,
-                              EXISTING_TAB);
+  SetTabRendererDataFromModel(web_contents, model_index, &data, EXISTING_TAB);
   tabstrip_->SetTabData(model_index, data);
 }
 

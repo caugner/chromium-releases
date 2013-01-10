@@ -10,7 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_types.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -62,8 +62,6 @@ class PreferencesBrowserTest : public InProcessBrowserTest,
   // Set user-modified pref values directly in the C++ backend.
   void SetUserValues(const std::vector<std::string>& names,
                      const std::vector<base::Value*>& values);
-  // Helper deleting a vector of values.
-  void DeleteValues(std::vector<base::Value*>& values);
 
   // Verifies that a dictionary contains a (key, value) pair. Takes ownership of
   // |expected|.

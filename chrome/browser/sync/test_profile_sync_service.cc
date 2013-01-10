@@ -5,13 +5,13 @@
 #include "chrome/browser/sync/test_profile_sync_service.h"
 
 #include "chrome/browser/signin/signin_manager.h"
-#include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/test/test_http_bridge_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "sync/internal_api/public/test/test_user_share.h"
 #include "sync/internal_api/public/user_share.h"
 #include "sync/js/js_reply_handler.h"
 #include "sync/protocol/encryption.pb.h"
@@ -25,6 +25,9 @@ using syncer::sessions::SyncSessionSnapshot;
 using syncer::sessions::SyncSourceInfo;
 using syncer::UserShare;
 using syncer::syncable::Directory;
+using syncer::NIGORI;
+using syncer::DEVICE_INFO;
+using syncer::EXPERIMENTS;
 
 namespace browser_sync {
 
@@ -118,12 +121,15 @@ void SyncBackendHostForProfileSyncTest
       UserShare* user_share = GetUserShare();
       Directory* directory = user_share->directory.get();
 
-      if (!directory->initial_sync_ended_for_type(syncer::NIGORI)) {
-        ProfileSyncServiceTestHelper::CreateRoot(
-            syncer::NIGORI, user_share, &id_factory_);
+      if (!directory->initial_sync_ended_for_type(NIGORI)) {
+        syncer::TestUserShare::CreateRoot(NIGORI, user_share);
 
         // A side effect of adding the NIGORI mode (normally done by the
         // syncer) is a decryption attempt, which will fail the first time.
+      }
+
+      if (!directory->initial_sync_ended_for_type(EXPERIMENTS)) {
+        syncer::TestUserShare::CreateRoot(EXPERIMENTS, user_share);
       }
 
       SetInitialSyncEndedForAllTypes();
@@ -152,9 +158,9 @@ void SyncBackendHostForProfileSyncTest::EmitOnInvalidatorStateChange(
 }
 
 void SyncBackendHostForProfileSyncTest::EmitOnIncomingInvalidation(
-    const syncer::ObjectIdStateMap& id_state_map,
+    const syncer::ObjectIdInvalidationMap& invalidation_map,
     const syncer::IncomingInvalidationSource source) {
-  frontend()->OnIncomingInvalidation(id_state_map, source);
+  frontend()->OnIncomingInvalidation(invalidation_map, source);
 }
 
 }  // namespace browser_sync

@@ -9,11 +9,11 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
-#include "chrome/common/content_settings_types.h"
 #include "chrome/common/content_settings.h"
+#include "chrome/common/content_settings_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -162,6 +162,12 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
   // The method does nothing if |force| is false and the cache has been
   // initialized.
   void RefreshFlashSettingsCache(bool force);
+
+  // Fills in |exceptions| with Values for the given |type| from |map|.
+  void GetExceptionsFromHostContentSettingsMap(
+      const HostContentSettingsMap* map,
+      ContentSettingsType type,
+      base::ListValue* exceptions);
 
   static ExContentSettingsType ExContentSettingsTypeFromGroupName(
       const std::string& name);

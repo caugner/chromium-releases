@@ -15,9 +15,15 @@
 #include "chrome/common/chrome_paths_internal.h"
 #include "ui/base/ui_base_paths.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/path_utils.h"
+#endif
+
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #endif
+
+#include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 namespace {
 
@@ -197,15 +203,23 @@ bool PathProvider(int key, FilePath* result) {
       // Fall through for all other platforms.
 #endif
     case chrome::DIR_DEFAULT_DOWNLOADS:
+#if defined(OS_ANDROID)
+      if (!base::android::GetDownloadsDirectory(&cur))
+        return false;
+#else
       if (!GetUserDownloadsDirectory(&cur))
         return false;
       // Do not create the download directory here, we have done it twice now
       // and annoyed a lot of users.
+#endif
       break;
     case chrome::DIR_CRASH_DUMPS:
 #if defined(OS_CHROMEOS)
       // ChromeOS uses a separate directory. See http://crosbug.com/25089
       cur = FilePath("/var/log/chrome");
+#elif defined(OS_ANDROID)
+      if (!base::android::GetCacheDirectory(&cur))
+        return false;
 #else
       // The crash reports are always stored relative to the default user data
       // directory.  This avoids the problem of having to re-initialize the
@@ -216,10 +230,6 @@ bool PathProvider(int key, FilePath* result) {
 #endif
       cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
       create_dir = true;
-      break;
-    case chrome::DIR_USER_DESKTOP:
-      if (!GetUserDesktop(&cur))
-        return false;
       break;
     case chrome::DIR_RESOURCES:
 #if defined(OS_MACOSX)
@@ -250,11 +260,6 @@ bool PathProvider(int key, FilePath* result) {
 #endif
       cur = cur.Append(FILE_PATH_LITERAL("Dictionaries"));
       create_dir = true;
-      break;
-    case chrome::DIR_USER_DATA_TEMP:
-      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("Temp"));
       break;
     case chrome::DIR_INTERNAL_PLUGINS:
       if (!GetInternalPluginsDirectory(&cur))
@@ -323,14 +328,21 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.Append(kInternalNaClHelperBootstrapFileName);
       break;
     case chrome::FILE_O3D_PLUGIN:
-        if (!PathService::Get(base::DIR_MODULE, &cur))
-          return false;
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
       cur = cur.Append(kO3DPluginFileName);
       break;
     case chrome::FILE_GTALK_PLUGIN:
-        if (!PathService::Get(base::DIR_MODULE, &cur))
-          return false;
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
       cur = cur.Append(kGTalkPluginFileName);
+      break;
+#endif
+#if defined(WIDEVINE_CDM_AVAILABLE)
+    case chrome::FILE_WIDEVINE_CDM_PLUGIN:
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
+      cur = cur.Append(kWidevineCdmPluginFileName);
       break;
 #endif
     case chrome::FILE_RESOURCES_PACK:

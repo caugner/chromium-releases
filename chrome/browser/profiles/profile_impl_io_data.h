@@ -160,7 +160,7 @@ class ProfileImplIOData : public ProfileIOData {
   virtual chrome_browser_net::LoadTimeStats* GetLoadTimeStats(
       IOThread::Globals* io_thread_globals) const OVERRIDE;
 
-  void SetUpJobFactory(net::URLRequestJobFactory* job_factory,
+  void SetUpJobFactory(net::URLRequestJobFactoryImpl* job_factory,
                        scoped_ptr<net::URLRequestJobFactory::Interceptor>
                            protocol_handler_interceptor,
                        net::NetworkDelegate* network_delegate,
@@ -181,7 +181,6 @@ class ProfileImplIOData : public ProfileIOData {
   mutable scoped_ptr<ChromeURLRequestContext> media_request_context_;
 
   mutable scoped_ptr<net::URLRequestJobFactory> main_job_factory_;
-  mutable scoped_ptr<net::URLRequestJobFactory> media_request_job_factory_;
   mutable scoped_ptr<net::URLRequestJobFactory> extensions_job_factory_;
 
   // Parameters needed for isolated apps.

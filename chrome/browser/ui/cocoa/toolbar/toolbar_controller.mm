@@ -168,7 +168,6 @@ class NotificationBridge : public content::NotificationObserver {
     commandObserver_->ObserveCommand(IDC_RELOAD);
     commandObserver_->ObserveCommand(IDC_HOME);
     commandObserver_->ObserveCommand(IDC_BOOKMARK_PAGE);
-    commandObserver_->ObserveCommand(IDC_CHROME_TO_MOBILE_PAGE);
   }
   return self;
 }
@@ -432,7 +431,7 @@ class NotificationBridge : public content::NotificationObserver {
                shouldRestoreState:(BOOL)shouldRestore {
   locationBarView_->Update(tab, shouldRestore ? true : false);
 
-  [locationBar_ updateCursorAndToolTipRects];
+  [locationBar_ updateMouseTracking];
 
   if (browserActionsController_.get()) {
     [browserActionsController_ update];

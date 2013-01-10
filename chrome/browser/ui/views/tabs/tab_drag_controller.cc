@@ -7,6 +7,7 @@
 #include <math.h>
 #include <set>
 
+#include "base/auto_reset.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
@@ -95,17 +96,11 @@ class DockView : public views::View {
   }
 
   virtual void OnPaintBackground(gfx::Canvas* canvas) {
-    SkRect outer_rect = { SkIntToScalar(0), SkIntToScalar(0),
-                          SkIntToScalar(width()),
-                          SkIntToScalar(height()) };
-
     // Fill the background rect.
     SkPaint paint;
     paint.setColor(SkColorSetRGB(108, 108, 108));
     paint.setStyle(SkPaint::kFill_Style);
-    canvas->sk_canvas()->drawRoundRect(
-        outer_rect, SkIntToScalar(kRoundedRectRadius),
-        SkIntToScalar(kRoundedRectRadius), paint);
+    canvas->DrawRoundRect(GetLocalBounds(), kRoundedRectRadius, paint);
 
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
@@ -363,7 +358,8 @@ TabDragController::TabDragController()
       waiting_for_run_loop_to_exit_(false),
       tab_strip_to_attach_to_after_exit_(NULL),
       move_loop_widget_(NULL),
-      destroyed_(NULL) {
+      destroyed_(NULL),
+      is_mutating_(false) {
   instance_ = this;
 }
 
@@ -408,6 +404,8 @@ void TabDragController::Init(
   DCHECK(!tabs.empty());
   DCHECK(std::find(tabs.begin(), tabs.end(), source_tab) != tabs.end());
   source_tabstrip_ = source_tabstrip;
+  screen_ = gfx::Screen::GetScreenFor(
+      source_tabstrip->GetWidget()->GetNativeView());
   source_tab_offset_ = source_tab_offset;
   start_point_in_screen_ = gfx::Point(source_tab_offset, mouse_offset.y());
   views::View::ConvertPointToScreen(source_tab, &start_point_in_screen_);
@@ -509,8 +507,10 @@ void TabDragController::InitTabDragData(BaseTab* tab,
   drag_data->contents = GetModel(source_tabstrip_)->GetTabContentsAt(
       drag_data->source_model_index);
   drag_data->pinned = source_tabstrip_->IsTabPinned(tab);
-  registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 content::Source<TabContents>(drag_data->contents));
+  registrar_.Add(
+      this,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::Source<WebContents>(drag_data->contents->web_contents()));
 
   if (!detach_into_browser_) {
     drag_data->original_delegate =
@@ -600,12 +600,11 @@ void TabDragController::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED, type);
-  TabContents* destroyed_tab_contents =
-      content::Source<TabContents>(source).ptr();
-  WebContents* destroyed_web_contents = destroyed_tab_contents->web_contents();
+  DCHECK_EQ(content::NOTIFICATION_WEB_CONTENTS_DESTROYED, type);
+  WebContents* destroyed_web_contents =
+      content::Source<WebContents>(source).ptr();
   for (size_t i = 0; i < drag_data_.size(); ++i) {
-    if (drag_data_[i].contents == destroyed_tab_contents) {
+    if (drag_data_[i].contents->web_contents() == destroyed_web_contents) {
       // One of the tabs we're dragging has been destroyed. Cancel the drag.
       if (destroyed_web_contents->GetDelegate() == this)
         destroyed_web_contents->SetDelegate(NULL);
@@ -677,7 +676,7 @@ gfx::Point TabDragController::GetWindowCreatePoint(
 
   // If the cursor is outside the monitor area, move it inside. For example,
   // dropping a tab onto the task bar on Windows produces this situation.
-  gfx::Rect work_area = gfx::Screen::GetDisplayNearestPoint(origin).work_area();
+  gfx::Rect work_area = screen_->GetDisplayNearestPoint(origin).work_area();
   gfx::Point create_point(origin);
   if (!work_area.IsEmpty()) {
     if (create_point.x() < work_area.x())
@@ -785,8 +784,7 @@ void TabDragController::ContinueDragging(const gfx::Point& point_in_screen) {
   if (!is_dragging_window_) {
     if (attached_tabstrip_) {
       if (move_only()) {
-        if (attached_tabstrip_->touch_layout_.get())
-          DragActiveTabStacked(point_in_screen);
+        DragActiveTabStacked(point_in_screen);
       } else {
         MoveAttached(point_in_screen);
         if (tab_strip_changed) {
@@ -1138,6 +1136,7 @@ void TabDragController::Attach(TabStrip* attached_tabstrip,
     tab_strip_point.Offset(-mouse_offset_.x(), -mouse_offset_.y());
     gfx::Rect bounds = GetDraggedViewTabStripBounds(tab_strip_point);
     int index = GetInsertionIndexForDraggedBounds(bounds);
+    AutoReset<bool> setter(&is_mutating_, true);
     for (size_t i = 0; i < drag_data_.size(); ++i) {
       int add_types = TabStripModel::ADD_NONE;
       if (attached_tabstrip_->touch_layout_.get()) {
@@ -1613,10 +1612,13 @@ void TabDragController::RevertDrag() {
   bool restore_frame = !detach_into_browser_ &&
                        attached_tabstrip_ != source_tabstrip_;
   if (attached_tabstrip_) {
-    if (attached_tabstrip_ == source_tabstrip_)
-      source_tabstrip_->StoppedDraggingTabs(tabs);
-    else
+    if (attached_tabstrip_ == source_tabstrip_) {
+      source_tabstrip_->StoppedDraggingTabs(
+          tabs, initial_tab_positions_, move_behavior_ == MOVE_VISIBILE_TABS,
+          false);
+    } else {
       attached_tabstrip_->DraggedTabsDetached();
+    }
   }
 
   if (initial_selection_model_.empty())
@@ -1663,6 +1665,7 @@ void TabDragController::RevertDragAt(size_t drag_index) {
   DCHECK(started_drag_);
   DCHECK(source_tabstrip_);
 
+  AutoReset<bool> setter(&is_mutating_, true);
   TabDragData* data = &(drag_data_[drag_index]);
   if (attached_tabstrip_) {
     int index =
@@ -1697,7 +1700,10 @@ void TabDragController::CompleteDrag() {
 
   if (attached_tabstrip_) {
     attached_tabstrip_->StoppedDraggingTabs(
-        GetTabsMatchingDraggedContents(attached_tabstrip_));
+        GetTabsMatchingDraggedContents(attached_tabstrip_),
+        initial_tab_positions_,
+        move_behavior_ == MOVE_VISIBILE_TABS,
+        true);
   } else {
     if (dock_info_.type() != DockInfo::NONE) {
       switch (dock_info_.type()) {
@@ -1755,6 +1761,7 @@ void TabDragController::CompleteDrag() {
       // the top-right corner.
       window_bounds.set_x(window_bounds.x() - window_bounds.width());
     }
+    AutoReset<bool> setter(&is_mutating_, true);
     Browser* new_browser =
         GetModel(source_tabstrip_)->delegate()->CreateNewStripWithContents(
             drag_data_[0].contents, window_bounds, dock_info_,
@@ -1984,7 +1991,7 @@ gfx::Point TabDragController::GetCursorScreenPoint() {
     return touch_point;
   }
 #endif
-  return gfx::Screen::GetCursorScreenPoint();
+  return screen_->GetCursorScreenPoint();
 }
 
 gfx::Point TabDragController::GetWindowOffset(

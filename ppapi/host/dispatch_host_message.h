@@ -63,7 +63,7 @@ inline int32_t DispatchResourceCall(ObjT* obj, Method method,
 
 // Note that this only works for message with 1 or more parameters. For
 // 0-parameter messages you need to use the _0 version below (since there are
-// no Params in the message).
+// no params in the message).
 #define PPAPI_DISPATCH_HOST_RESOURCE_CALL(msg_class, member_func) \
     case msg_class::ID: { \
       TRACK_RUN_IN_IPC_HANDLER(member_func); \
@@ -87,4 +87,3 @@ inline int32_t DispatchResourceCall(ObjT* obj, Method method,
 }  // namespace ppapi
 
 #endif  // PPAPI_HOST_DISPATCH_HOST_MESSAGE_H_
-

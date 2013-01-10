@@ -10,9 +10,10 @@
 namespace extensions {
 
 struct DraggableRegion {
-  std::string label;
+  bool draggable;
   gfx::Rect bounds;
-  gfx::Rect clip;
+
+  DraggableRegion();
 };
 
 }  // namespace extensions

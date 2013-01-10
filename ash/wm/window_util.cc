@@ -52,6 +52,18 @@ aura::Window* GetActivatableWindow(aura::Window* window) {
   return internal::ActivationController::GetActivatableWindow(window, NULL);
 }
 
+bool IsActiveWindowFullscreen() {
+  aura::Window* window = GetActiveWindow();
+  while (window) {
+    if (window->GetProperty(aura::client::kShowStateKey) ==
+        ui::SHOW_STATE_FULLSCREEN) {
+      return true;
+    }
+    window = window->parent();
+  }
+  return false;
+}
+
 bool CanActivateWindow(aura::Window* window) {
   DCHECK(window);
   if (!window->GetRootWindow())
@@ -108,8 +120,10 @@ void ToggleMaximizedWindow(aura::Window* window) {
 }
 
 void CenterWindow(aura::Window* window) {
-  const gfx::Display display = gfx::Screen::GetDisplayNearestWindow(window);
-  gfx::Rect center = display.work_area().Center(window->bounds().size());
+  const gfx::Display display =
+      Shell::GetScreen()->GetDisplayNearestWindow(window);
+  gfx::Rect center = display.work_area();
+  center.ClampToCenteredSize(window->bounds().size());
   window->SetBounds(center);
 }
 

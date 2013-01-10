@@ -46,8 +46,12 @@ class PepperInProcessResourceCreation
       PP_Instance instance,
       PP_FileChooserMode_Dev mode,
       const char* accept_types) OVERRIDE;
-
   virtual PP_Resource CreatePrinting(
+      PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateURLRequestInfo(
+      PP_Instance instance,
+      const ::ppapi::URLRequestInfoData& data) OVERRIDE;
+  virtual PP_Resource CreateWebSocket(
       PP_Instance instance) OVERRIDE;
 
  private:

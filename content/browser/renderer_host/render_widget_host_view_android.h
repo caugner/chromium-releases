@@ -11,13 +11,20 @@
 #include "base/process.h"
 #include "content/browser/renderer_host/ime_adapter_android.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayer.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "ui/gfx/size.h"
 
 struct ViewHostMsg_TextInputState_Params;
 
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
+
+namespace WebKit {
+class WebTouchEvent;
+class WebMouseEvent;
+}
 
 namespace content {
 class ContentViewCoreImpl;
@@ -74,6 +81,11 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
   virtual void SelectionChanged(const string16& text,
                                 size_t offset,
                                 const ui::Range& range) OVERRIDE;
+  virtual void SelectionBoundsChanged(
+      const gfx::Rect& start_rect,
+      WebKit::WebTextDirection start_direction,
+      const gfx::Rect& end_rect,
+      WebKit::WebTextDirection end_direction) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -88,15 +100,15 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
       const base::Callback<void(bool)>& callback,
-      skia::PlatformCanvas* output) OVERRIDE;
+      skia::PlatformBitmap* output) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
-  virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
-                               bool processed) OVERRIDE;
+  virtual void ProcessAckedTouchEvent(const WebKit::WebTouchEvent& touch,
+                                      bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -104,15 +116,27 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
   virtual void StartContentIntent(const GURL& content_url) OVERRIDE;
-  virtual void DidSetNeedTouchEvents(bool need_touch_events) OVERRIDE;
+  virtual void HasTouchEventHandlers(bool need_touch_events) OVERRIDE;
+  virtual void SetCachedBackgroundColor(SkColor color) OVERRIDE;
+  virtual void SetCachedPageScaleFactorLimits(float minimum_scale,
+                                              float maximum_scale) OVERRIDE;
+  virtual void UpdateFrameInfo(const gfx::Point& scroll_offset,
+                               float page_scale_factor,
+                               const gfx::Size& content_size) OVERRIDE;
 
+  // Non-virtual methods
   void SetContentViewCore(ContentViewCoreImpl* content_view_core);
-
+  SkColor GetCachedBackgroundColor() const;
   void SendKeyEvent(const NativeWebKeyboardEvent& event);
-  void TouchEvent(const WebKit::WebTouchEvent& event);
-  void GestureEvent(const WebKit::WebGestureEvent& event);
+  void SendTouchEvent(const WebKit::WebTouchEvent& event);
+  void SendMouseEvent(const WebKit::WebMouseEvent& event);
+  void SendMouseWheelEvent(const WebKit::WebMouseWheelEvent& event);
+  void SendGestureEvent(const WebKit::WebGestureEvent& event);
 
   int GetNativeImeAdapter();
+
+  WebKit::WebGLId GetScaledContentTexture(const gfx::Size& size);
+  bool PopulateBitmapWithContents(jobject jbitmap);
 
   // Select all text between the given coordinates.
   void SelectRange(const gfx::Point& start, const gfx::Point& end);
@@ -133,8 +157,14 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
 
   ImeAdapterAndroid ime_adapter_android_;
 
+  // Body background color of the underlying document.
+  SkColor cached_background_color_;
+
   // The texture layer for this view when using browser-side compositing.
   scoped_ptr<WebKit::WebExternalTextureLayer> texture_layer_;
+
+  // The most recent texture id that was pushed to the texture layer.
+  unsigned int texture_id_in_layer_;
 
   // The handle for the transport surface (between renderer and browser-side
   // compositor) for this view.

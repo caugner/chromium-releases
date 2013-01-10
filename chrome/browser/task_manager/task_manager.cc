@@ -10,6 +10,7 @@
 #include "base/i18n/rtl.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
@@ -19,6 +20,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager_resource_providers.h"
@@ -101,6 +103,8 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       new TaskManagerChildProcessResourceProvider(task_manager));
   AddResourceProvider(
       new TaskManagerExtensionProcessResourceProvider(task_manager));
+  AddResourceProvider(
+      new TaskManagerGuestResourceProvider(task_manager));
 
 #if defined(ENABLE_NOTIFICATIONS)
   TaskManager::ResourceProvider* provider =
@@ -878,18 +882,10 @@ void TaskManagerModel::Clear() {
     resources_.clear();
 
     // Clear the groups.
-    for (GroupMap::iterator iter = group_map_.begin();
-         iter != group_map_.end(); ++iter) {
-      delete iter->second;
-    }
-    group_map_.clear();
+    STLDeleteValues(&group_map_);
 
     // Clear the process related info.
-    for (MetricsMap::iterator iter = metrics_map_.begin();
-         iter != metrics_map_.end(); ++iter) {
-      delete iter->second;
-    }
-    metrics_map_.clear();
+    STLDeleteValues(&metrics_map_);
     cpu_usage_map_.clear();
 
     // Clear the network maps.
@@ -951,7 +947,6 @@ void TaskManagerModel::NotifyV8HeapStats(base::ProcessId renderer_id,
 class TaskManagerModelGpuDataManagerObserver
     : public content::GpuDataManagerObserver {
  public:
-
   TaskManagerModelGpuDataManagerObserver() {
     content::GpuDataManager::GetInstance()->AddObserver(this);
   }
@@ -983,8 +978,7 @@ class TaskManagerModelGpuDataManagerObserver
   }
 };
 
-void TaskManagerModel::RefreshVideoMemoryUsageStats()
-{
+void TaskManagerModel::RefreshVideoMemoryUsageStats() {
   if (pending_video_memory_usage_stats_update_) return;
   if (!video_memory_usage_stats_observer_.get()) {
     video_memory_usage_stats_observer_.reset(
@@ -1081,11 +1075,6 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
     return;
   }
 
-  if (param.byte_count == 0) {
-    // Nothing to do if no bytes were actually read.
-    return;
-  }
-
   // TODO(jcampan): this should be improved once we have a better way of
   // linking a network notification back to the object that initiated it.
   TaskManager::Resource* resource = NULL;
@@ -1123,9 +1112,32 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
     current_byte_count_map_[resource] = iter_res->second + param.byte_count;
 }
 
+void TaskManagerModel::MultipleBytesRead(
+    const std::vector<BytesReadParam>* params) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  for (std::vector<BytesReadParam>::const_iterator it = params->begin();
+       it != params->end(); ++it) {
+    BytesRead(*it);
+  }
+}
+
+void TaskManagerModel::NotifyMultipleBytesRead() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(!bytes_read_buffer_.empty());
+
+  std::vector<BytesReadParam>* bytes_read_buffer =
+      new std::vector<BytesReadParam>;
+  bytes_read_buffer_.swap(*bytes_read_buffer);
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&TaskManagerModel::MultipleBytesRead, this,
+                 base::Owned(bytes_read_buffer)));
+}
 
 void TaskManagerModel::NotifyBytesRead(const net::URLRequest& request,
                                        int byte_count) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
   // Only net::URLRequestJob instances created by the ResourceDispatcherHost
   // have an associated ResourceRequestInfo.
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(&request);
@@ -1144,12 +1156,16 @@ void TaskManagerModel::NotifyBytesRead(const net::URLRequest& request,
   if (info)
     origin_pid = info->GetOriginPID();
 
-  // This happens in the IO thread, post it to the UI thread.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&TaskManagerModel::BytesRead, this,
-                 BytesReadParam(origin_pid, render_process_host_child_id,
-                                routing_id, byte_count)));
+  if (bytes_read_buffer_.empty()) {
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&TaskManagerModel::NotifyMultipleBytesRead, this),
+        base::TimeDelta::FromSeconds(1));
+  }
+
+  bytes_read_buffer_.push_back(
+      BytesReadParam(origin_pid, render_process_host_child_id,
+                     routing_id, byte_count));
 }
 
 bool TaskManagerModel::GetProcessMetricsForRow(
@@ -1263,10 +1279,11 @@ TaskManager* TaskManager::GetInstance() {
 }
 
 void TaskManager::OpenAboutMemory() {
+  // TODO(robertshield): FTB - Merge MAD's TaskManager change.
   Browser* browser = browser::FindOrCreateTabbedBrowser(
       ProfileManager::GetDefaultProfileOrOffTheRecord());
- chrome::NavigateParams params(browser, GURL(chrome::kChromeUIMemoryURL),
-                               content::PAGE_TRANSITION_LINK);
+  chrome::NavigateParams params(browser, GURL(chrome::kChromeUIMemoryURL),
+                                content::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
   chrome::Navigate(&params);
 }
@@ -1289,7 +1306,8 @@ namespace {
 // Counts the number of extension background pages associated with this profile.
 int CountExtensionBackgroundPagesForProfile(Profile* profile) {
   int count = 0;
-  ExtensionProcessManager* manager = profile->GetExtensionProcessManager();
+  ExtensionProcessManager* manager =
+      extensions::ExtensionSystem::Get(profile)->process_manager();
   if (!manager)
     return count;
 

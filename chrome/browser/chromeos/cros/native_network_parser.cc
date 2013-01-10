@@ -73,6 +73,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kHardwareRevisionProperty, PROPERTY_INDEX_HARDWARE_REVISION },
   { flimflam::kHomeProviderProperty, PROPERTY_INDEX_HOME_PROVIDER },
   { flimflam::kHostProperty, PROPERTY_INDEX_HOST },
+  { flimflam::kIccidProperty, PROPERTY_INDEX_ICCID },
   { flimflam::kIdentityProperty, PROPERTY_INDEX_IDENTITY },
   { flimflam::kImeiProperty, PROPERTY_INDEX_IMEI },
   { flimflam::kImsiProperty, PROPERTY_INDEX_IMSI },
@@ -116,10 +117,13 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kProfilesProperty, PROPERTY_INDEX_PROFILES },
   { flimflam::kProviderHostProperty, PROPERTY_INDEX_PROVIDER_HOST },
   { flimflam::kProviderProperty, PROPERTY_INDEX_PROVIDER },
+  { shill::kProviderRequiresRoamingProperty,
+    PROPERTY_INDEX_PROVIDER_REQUIRES_ROAMING },
   { flimflam::kProviderTypeProperty, PROPERTY_INDEX_PROVIDER_TYPE },
   { flimflam::kProxyConfigProperty, PROPERTY_INDEX_PROXY_CONFIG },
   { flimflam::kRoamingStateProperty, PROPERTY_INDEX_ROAMING_STATE },
   { flimflam::kSIMLockStatusProperty, PROPERTY_INDEX_SIM_LOCK },
+  { shill::kSIMPresentProperty, PROPERTY_INDEX_SIM_PRESENT },
   { flimflam::kSSIDProperty, PROPERTY_INDEX_SSID },
   { flimflam::kSaveCredentialsProperty, PROPERTY_INDEX_SAVE_CREDENTIALS },
   { flimflam::kScanningProperty, PROPERTY_INDEX_SCANNING },
@@ -365,7 +369,15 @@ bool NativeNetworkDeviceParser::ParseValue(
       }
       break;
     }
+    case PROPERTY_INDEX_PROVIDER_REQUIRES_ROAMING: {
+      bool provider_requires_roaming;
+      if (!value.GetAsBoolean(&provider_requires_roaming))
+        return false;
+      device->set_provider_requires_roaming(provider_requires_roaming);
+      return true;
+    }
     case PROPERTY_INDEX_MEID:
+    case PROPERTY_INDEX_ICCID:
     case PROPERTY_INDEX_IMEI:
     case PROPERTY_INDEX_IMSI:
     case PROPERTY_INDEX_ESN:
@@ -382,6 +394,9 @@ bool NativeNetworkDeviceParser::ParseValue(
       switch (index) {
         case PROPERTY_INDEX_MEID:
           device->set_meid(item);
+          break;
+        case PROPERTY_INDEX_ICCID:
+          device->set_iccid(item);
           break;
         case PROPERTY_INDEX_IMEI:
           device->set_imei(item);
@@ -438,6 +453,13 @@ bool NativeNetworkDeviceParser::ParseValue(
         return true;
       }
       break;
+    case PROPERTY_INDEX_SIM_PRESENT: {
+      bool sim_present;
+      if (!value.GetAsBoolean(&sim_present))
+        return false;
+      device->set_sim_present(sim_present);
+      return true;
+    }
     case PROPERTY_INDEX_POWERED:
       // we don't care about the value, just the fact that it changed
       return true;

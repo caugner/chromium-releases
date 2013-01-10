@@ -27,15 +27,12 @@ namespace ui {
 class GestureEvent;
 }
 
-namespace views {
-class Widget;
-}
-
 namespace ash {
 class ScreenAsh;
 namespace internal {
 
 class ShelfLayoutManagerTest;
+class StatusAreaWidget;
 class WorkspaceController;
 
 // ShelfLayoutManager is the layout manager responsible for the launcher and
@@ -79,16 +76,12 @@ class ASH_EXPORT ShelfLayoutManager :
 
   // We reserve a small area at the bottom of the workspace area to ensure that
   // the bottom-of-window resize handle can be hit.
-  // TODO(jamescook): Some day we may want the workspace area to be an even
-  // multiple of the size of the grid (currently 8 pixels), which will require
-  // removing this and finding a way for hover and click events to pass through
-  // the invisible parts of the launcher.
   static const int kWorkspaceAreaBottomInset;
 
   // Size of the shelf when auto-hidden.
   static const int kAutoHideSize;
 
-  explicit ShelfLayoutManager(views::Widget* status);
+  explicit ShelfLayoutManager(StatusAreaWidget* status);
   virtual ~ShelfLayoutManager();
 
   // Sets the ShelfAutoHideBehavior. See enum description for details.
@@ -112,7 +105,7 @@ class ASH_EXPORT ShelfLayoutManager :
   const views::Widget* launcher_widget() const {
     return launcher_ ? launcher_->widget() : NULL;
   }
-  views::Widget* status() { return status_; }
+  StatusAreaWidget* status_area_widget() { return status_area_widget_; }
 
   bool in_layout() const { return in_layout_; }
 
@@ -214,10 +207,6 @@ class ASH_EXPORT ShelfLayoutManager :
     bool is_screen_locked;
   };
 
-  // Returns the bounds the specified window should be when maximized.
-  gfx::Rect GetMaximizedWindowBounds(aura::Window* window);
-  gfx::Rect GetUnmaximizedWorkAreaBounds(aura::Window* window);
-
   // Sets the visibility of the shelf to |state|.
   void SetState(VisibilityState visibility_state);
 
@@ -281,7 +270,7 @@ class ASH_EXPORT ShelfLayoutManager :
   State state_;
 
   Launcher* launcher_;
-  views::Widget* status_;
+  StatusAreaWidget* status_area_widget_;
 
   WorkspaceController* workspace_controller_;
 

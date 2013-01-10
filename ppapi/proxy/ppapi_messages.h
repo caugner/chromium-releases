@@ -21,6 +21,7 @@
 #include "ppapi/c/dev/pp_video_capture_dev.h"
 #include "ppapi/c/dev/pp_video_dev.h"
 #include "ppapi/c/dev/ppb_text_input_dev.h"
+#include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_file_info.h"
@@ -31,6 +32,8 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/pp_time.h"
+#include "ppapi/c/private/pp_content_decryptor.h"
+#include "ppapi/c/private/pp_private_font_charset.h"
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/c/private/ppb_host_resolver_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
@@ -42,15 +45,16 @@
 #include "ppapi/proxy/resource_message_params.h"
 #include "ppapi/proxy/serialized_flash_menu.h"
 #include "ppapi/proxy/serialized_structs.h"
+#include "ppapi/proxy/serialized_var.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
 #include "ppapi/shared_impl/ppb_device_ref_shared.h"
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
 #include "ppapi/shared_impl/ppb_network_list_private_shared.h"
-#include "ppapi/shared_impl/ppb_url_request_info_shared.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
 #include "ppapi/shared_impl/ppp_flash_browser_operations_shared.h"
 #include "ppapi/shared_impl/private/ppb_host_resolver_shared.h"
 #include "ppapi/shared_impl/private/ppb_x509_certificate_private_shared.h"
+#include "ppapi/shared_impl/url_request_info_data.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT PPAPI_PROXY_EXPORT
@@ -58,6 +62,7 @@
 #define IPC_MESSAGE_START PpapiMsgStart
 
 IPC_ENUM_TRAITS(PP_DeviceType_Dev)
+IPC_ENUM_TRAITS(PP_DecryptorStreamType)
 IPC_ENUM_TRAITS(PP_Flash_BrowserOperations_Permission)
 IPC_ENUM_TRAITS(PP_Flash_BrowserOperations_SettingType)
 IPC_ENUM_TRAITS(PP_FlashSetting)
@@ -69,6 +74,7 @@ IPC_ENUM_TRAITS(PP_NetworkListType_Private)
 IPC_ENUM_TRAITS(PP_PrintOrientation_Dev)
 IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)
 IPC_ENUM_TRAITS(PP_PrintScalingOption_Dev)
+IPC_ENUM_TRAITS(PP_PrivateFontCharset)
 IPC_ENUM_TRAITS(PP_TextInput_Type)
 IPC_ENUM_TRAITS(PP_VideoDecodeError_Dev)
 IPC_ENUM_TRAITS(PP_VideoDecoder_Profile)
@@ -129,6 +135,22 @@ IPC_STRUCT_TRAITS_BEGIN(PP_PrintSettings_Dev)
   IPC_STRUCT_TRAITS_MEMBER(print_scaling_option)
   IPC_STRUCT_TRAITS_MEMBER(grayscale)
   IPC_STRUCT_TRAITS_MEMBER(format)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(PP_URLComponent_Dev)
+  IPC_STRUCT_TRAITS_MEMBER(begin)
+  IPC_STRUCT_TRAITS_MEMBER(len)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(PP_URLComponents_Dev)
+  IPC_STRUCT_TRAITS_MEMBER(scheme)
+  IPC_STRUCT_TRAITS_MEMBER(username)
+  IPC_STRUCT_TRAITS_MEMBER(password)
+  IPC_STRUCT_TRAITS_MEMBER(host)
+  IPC_STRUCT_TRAITS_MEMBER(port)
+  IPC_STRUCT_TRAITS_MEMBER(path)
+  IPC_STRUCT_TRAITS_MEMBER(query)
+  IPC_STRUCT_TRAITS_MEMBER(ref)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ppapi::DeviceRefData)
@@ -200,7 +222,7 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::HostPortPair)
   IPC_STRUCT_TRAITS_MEMBER(port)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(ppapi::PPB_URLRequestInfo_Data)
+IPC_STRUCT_TRAITS_BEGIN(ppapi::URLRequestInfoData)
   IPC_STRUCT_TRAITS_MEMBER(url)
   IPC_STRUCT_TRAITS_MEMBER(method)
   IPC_STRUCT_TRAITS_MEMBER(headers)
@@ -221,7 +243,7 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::PPB_URLRequestInfo_Data)
   IPC_STRUCT_TRAITS_MEMBER(body)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(ppapi::PPB_URLRequestInfo_Data::BodyItem)
+IPC_STRUCT_TRAITS_BEGIN(ppapi::URLRequestInfoData::BodyItem)
   IPC_STRUCT_TRAITS_MEMBER(is_file)
   IPC_STRUCT_TRAITS_MEMBER(data)
   // Note: we don't serialize file_ref.
@@ -259,7 +281,9 @@ IPC_STRUCT_TRAITS_END()
 
 // These are from the browser to the plugin.
 // Loads the given plugin.
-IPC_MESSAGE_CONTROL1(PpapiMsg_LoadPlugin, FilePath /* path */)
+IPC_MESSAGE_CONTROL2(PpapiMsg_LoadPlugin,
+                     FilePath /* path */,
+                     ppapi::PpapiPermissions /* permissions */)
 
 // Creates a channel to talk to a renderer. The plugin will respond with
 // PpapiHostMsg_ChannelCreated.
@@ -270,8 +294,9 @@ IPC_MESSAGE_CONTROL2(PpapiMsg_CreateChannel,
 // Creates a channel to talk to a renderer. This message is only used by the
 // NaCl IPC proxy. It is intercepted by NaClIPCAdapter, which creates the
 // actual channel and rewrites the message for the untrusted side.
-IPC_MESSAGE_CONTROL3(PpapiMsg_CreateNaClChannel,
+IPC_MESSAGE_CONTROL4(PpapiMsg_CreateNaClChannel,
                      int /* renderer_id */,
+                     ppapi::PpapiPermissions /* permissions */,
                      bool /* incognito */,
                      ppapi::proxy::SerializedHandle /* channel_handle */)
 
@@ -605,9 +630,10 @@ IPC_MESSAGE_ROUTED3(
     int32_t /* result */)
 
 // PPP_ContentDecryptor_Dev
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_GenerateKeyRequest,
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_GenerateKeyRequest,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* key_system, String */,
+                    ppapi::proxy::SerializedVar /* type, String */,
                     ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
 IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_AddKey,
                     PP_Instance /* instance */,
@@ -621,8 +647,27 @@ IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_Decrypt,
                     PP_Instance /* instance */,
                     ppapi::proxy::PPPDecryptor_Buffer /* buffer */,
                     std::string /* serialized_block_info */)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_DecryptAndDecode,
+IPC_MESSAGE_ROUTED3(
+    PpapiMsg_PPPContentDecryptor_InitializeAudioDecoder,
+    PP_Instance /* instance */,
+    std::string /* serialized_decoder_config */,
+    ppapi::proxy::PPPDecryptor_Buffer /* extra_data_buffer */)
+IPC_MESSAGE_ROUTED3(
+    PpapiMsg_PPPContentDecryptor_InitializeVideoDecoder,
+    PP_Instance /* instance */,
+    std::string /* serialized_decoder_config */,
+    ppapi::proxy::PPPDecryptor_Buffer /* extra_data_buffer. */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_DeinitializeDecoder,
                     PP_Instance /* instance */,
+                    PP_DecryptorStreamType /* decoder_type */,
+                    uint32_t /* request_id */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_ResetDecoder,
+                    PP_Instance /* instance */,
+                    PP_DecryptorStreamType /* decoder_type */,
+                    uint32_t /* request_id */)
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_DecryptAndDecode,
+                    PP_Instance /* instance */,
+                    PP_DecryptorStreamType /* decoder_type */,
                     ppapi::proxy::PPPDecryptor_Buffer /* buffer */,
                     std::string /* serialized_block_info */)
 
@@ -675,12 +720,10 @@ IPC_MESSAGE_ROUTED4(PpapiMsg_PPBUDPSocket_SendToACK,
                     bool /* succeeded */,
                     int32_t /* bytes_written */)
 
-#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPB_URLLoader_Trusted
 IPC_MESSAGE_ROUTED1(
     PpapiMsg_PPBURLLoader_UpdateProgress,
     ppapi::proxy::PPBURLLoader_UpdateProgress_Params /* params */)
-#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_TCPServerSocket_Private.
 
@@ -1045,8 +1088,9 @@ IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_DocumentCanAccessDocument,
                            PP_Instance /* active */,
                            PP_Instance /* target */,
                            PP_Bool /* result */)
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetDocumentURL,
+IPC_SYNC_MESSAGE_ROUTED1_2(PpapiHostMsg_PPBInstance_GetDocumentURL,
                            PP_Instance /* active */,
+                           PP_URLComponents_Dev /* components */,
                            ppapi::proxy::SerializedVar /* result */)
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetPluginInstanceURL,
                            PP_Instance /* active */,
@@ -1077,7 +1121,7 @@ IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBURLLoader_Create,
                            ppapi::HostResource /* result */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBURLLoader_Open,
                     ppapi::HostResource /* loader */,
-                    ppapi::PPB_URLRequestInfo_Data /* request_data */)
+                    ppapi::URLRequestInfoData /* request_data */)
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBURLLoader_FollowRedirect,
                     ppapi::HostResource /* loader */)
 IPC_SYNC_MESSAGE_ROUTED1_1(
@@ -1208,13 +1252,26 @@ IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverBlock,
                     PP_Instance /* instance */,
                     PP_Resource /* decrypted_block, PPB_Buffer_Dev */,
                     std::string /* serialized_block_info */)
+IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_DecoderInitializeDone,
+                    PP_Instance /* instance */,
+                    PP_DecryptorStreamType /* decoder_type */,
+                    uint32_t /* request_id */,
+                    PP_Bool /* success */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DecoderDeinitializeDone,
+                    PP_Instance /* instance */,
+                    PP_DecryptorStreamType /* decoder_type */,
+                    uint32_t /* request_id */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DecoderResetDone,
+                    PP_Instance /* instance */,
+                    PP_DecryptorStreamType /* decoder_type */,
+                    uint32_t /* request_id */)
 IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverFrame,
                     PP_Instance /* instance */,
                     PP_Resource /* decrypted_frame, PPB_Buffer_Dev */,
                     std::string /* serialized_block_info */)
 IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverSamples,
                     PP_Instance /* instance */,
-                    PP_Resource /* decrypted_samples, PPB_Buffer_Dev */,
+                    PP_Resource /* audio_frames, PPB_Buffer_Dev */,
                     std::string /* serialized_block_info */)
 #endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
@@ -1335,7 +1392,7 @@ IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBFlash_GetProxyForURL,
                            ppapi::proxy::SerializedVar /* result */)
 IPC_SYNC_MESSAGE_ROUTED4_1(PpapiHostMsg_PPBFlash_Navigate,
                            PP_Instance /* instance */,
-                           ppapi::PPB_URLRequestInfo_Data /* request_data */,
+                           ppapi::URLRequestInfoData /* request_data */,
                            std::string /* target */,
                            PP_Bool /* from_user_action */,
                            int32_t /* result */)
@@ -1540,6 +1597,12 @@ IPC_MESSAGE_CONTROL2(
     ppapi::proxy::ResourceMessageReplyParams /* reply_params */,
     IPC::Message /* nested_msg */)
 
+IPC_SYNC_MESSAGE_CONTROL2_2(PpapiHostMsg_ResourceSyncCall,
+    ppapi::proxy::ResourceMessageCallParams /* call_params */,
+    IPC::Message /* nested_msg */,
+    ppapi::proxy::ResourceMessageReplyParams /* reply_params */,
+    IPC::Message /* reply_msg */)
+
 //-----------------------------------------------------------------------------
 // Messages for resources using call/reply above.
 
@@ -1575,3 +1638,101 @@ IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_Create)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_GetDefaultPrintSettings)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_Printing_GetDefaultPrintSettingsReply,
                      PP_PrintSettings_Dev /* print_settings */)
+
+// WebSocket ------------------------------------------------------------------
+
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_WebSocket_Create)
+
+// Establishes the connection to a server. This message requires
+// WebSocket_ConnectReply as a reply message.
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_WebSocket_Connect,
+                     std::string /* url */,
+                     std::vector<std::string> /* protocols */)
+
+// Closes established connection with graceful closing handshake. This message
+// requires WebSocket_CloseReply as a reply message.
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_WebSocket_Close,
+                     int32_t /* code */,
+                     std::string /* reason */)
+
+// Sends a text frame to the server. No reply is defined.
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_WebSocket_SendText,
+                     std::string /* message */)
+
+// Sends a binary frame to the server. No reply is defined.
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_WebSocket_SendBinary,
+                     std::vector<uint8_t> /* message */)
+
+// Fails the connection. This message invokes RFC6455 defined
+// _Fail the WebSocket Connection_ operation. No reply is defined.
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_WebSocket_Fail,
+                     std::string /* message */)
+
+// This message is a reply to WebSocket_Connect. If the |url| and |protocols|
+// are invalid, WebSocket_ConnectReply is issued immediately and it contains
+// proper error code in its result. Otherwise, WebSocket_ConnectReply is sent
+// with valid |url|, |protocol|, and result PP_OK. |protocol| is not a passed
+// |protocols|, but a result of opening handshake negotiation. If the
+// connection can not be established successfully, WebSocket_ConnectReply is
+// not issued, but WebSocket_ClosedReply is sent instead.
+IPC_MESSAGE_CONTROL2(PpapiPluginMsg_WebSocket_ConnectReply,
+                     std::string /* url */,
+                     std::string /* protocol */)
+
+// This message is a reply to WebSocket_Close. If the operation fails,
+// WebSocket_CloseReply is issued immediately and it contains PP_ERROR_FAILED.
+// Otherwise, CloseReply will be issued after the closing handshake is
+// finished. All arguments will be valid iff the result is PP_OK and it means
+// that the client initiated closing handshake is finished gracefully.
+IPC_MESSAGE_CONTROL4(PpapiPluginMsg_WebSocket_CloseReply,
+                     unsigned long /* buffered_amount */,
+                     bool /* was_clean */,
+                     unsigned short /* code */,
+                     std::string /* reason */)
+
+// Unsolicited reply message to transmit a receiving text frame.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_WebSocket_ReceiveTextReply,
+                     std::string /* message */)
+
+// Unsolicited reply message to transmit a receiving binary frame.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_WebSocket_ReceiveBinaryReply,
+                     std::vector<uint8_t> /* message */)
+
+// Unsolicited reply message to notify a error on underlying network connetion.
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_WebSocket_ErrorReply)
+
+// Unsolicited reply message to update the buffered amount value.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_WebSocket_BufferedAmountReply,
+                     unsigned long /* buffered_amount */)
+
+// Unsolicited reply message to update |state| because of incoming external
+// events, e.g., protocol error, or unexpected network closure.
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_WebSocket_StateReply,
+                     int32_t /* state */)
+
+// Unsolicited reply message to notify that the connection is closed without
+// any WebSocket_Close request. Server initiated closing handshake or
+// unexpected network errors will invoke this message.
+IPC_MESSAGE_CONTROL4(PpapiPluginMsg_WebSocket_ClosedReply,
+                     unsigned long /* buffered_amount */,
+                     bool /* was_clean */,
+                     unsigned short /* code */,
+                     std::string /* reason */)
+
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
+// Flash font file.
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_FlashFontFile_Create,
+                     ppapi::proxy::SerializedFontDescription /* description */,
+                     PP_PrivateFontCharset /* charset */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashFontFile_GetFontTable,
+                     uint32_t /* table */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashFontFile_GetFontTableReply,
+                     std::string /* output */)
+
+// Flash functions.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Flash_Create)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_Flash_EnumerateVideoCaptureDevices,
+                     ppapi::HostResource /* video_capture */)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_Flash_EnumerateVideoCaptureDevicesReply,
+                     std::vector<ppapi::DeviceRefData> /* devices */)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)

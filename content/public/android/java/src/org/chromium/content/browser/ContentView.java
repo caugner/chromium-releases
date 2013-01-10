@@ -4,9 +4,12 @@
 
 package org.chromium.content.browser;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Rect;
 import android.os.Build;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
@@ -16,11 +19,12 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
-import android.webkit.DownloadListener;
 import android.widget.FrameLayout;
 
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content.common.TraceEvent;
 import org.chromium.ui.gfx.NativeWindow;
+
+import java.util.ArrayList;
 
 /**
  * The containing view for {@link ContentViewCore} that exists in the Android UI hierarchy and
@@ -37,6 +41,9 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     public static final int PAGE_TRANSITION_TYPED = 1;
     public static final int PAGE_TRANSITION_AUTO_BOOKMARK = 2;
     public static final int PAGE_TRANSITION_START_PAGE = 6;
+    // Flag that should be ORed to the page transition when a navigation is initiated from the
+    // omnibox.
+    public static final int PAGE_TRANSITION_FROM_ADDRESS_BAR = 0x02000000;
 
     // Used when ContentView implements a standalone View.
     public static final int PERSONALITY_VIEW = ContentViewCore.PERSONALITY_VIEW;
@@ -56,6 +63,22 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      * Cap on the maximum number of renderer processes that can be requested.
      */
     public static final int MAX_RENDERERS_LIMIT = AndroidBrowserProcess.MAX_RENDERERS_LIMIT;
+
+    /**
+     * Allow a callback to be notified when the SurfaceTexture of the TextureView has been
+     * updated.
+     *
+     * TODO(nileshagrawal): Remove this interface.
+     */
+    public static interface SurfaceTextureUpdatedListener {
+        /**
+         * Called when the {@link android.graphics.SurfaceTexture} of the
+         * {@link android.view.TextureView} held in this ContentView has been updated.
+         *
+         * @param view The ContentView that was updated.
+         */
+        public void onSurfaceTextureUpdated(ContentView view);
+    }
 
     /**
      * Enable multi-process ContentView. This should be called by the application before
@@ -84,11 +107,14 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      * @param context Context used to obtain the application context.
      * @param maxRendererProcesses Same as ContentView.enableMultiProcess()
      * @return Whether the process actually needed to be initialized (false if already running).
-     * @hide Only used by the platform browser.
      */
     public static boolean initChromiumBrowserProcess(Context context, int maxRendererProcesses) {
         return ContentViewCore.initChromiumBrowserProcess(context, maxRendererProcesses);
     }
+
+    // Used for showing a temporary bitmap while the actual texture is being drawn.
+    private final ArrayList<SurfaceTextureUpdatedListener> mSurfaceTextureUpdatedListeners =
+            new ArrayList<SurfaceTextureUpdatedListener>();
 
     private ContentViewCore mContentViewCore;
 
@@ -156,7 +182,7 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         super(context, attrs, defStyle);
 
         mContentViewCore = new ContentViewCore(context, personality);
-        mContentViewCore.initialize(this, this, true, nativeWebContents, nativeWindow, false);
+        mContentViewCore.initialize(this, this, nativeWebContents, nativeWindow, false);
     }
 
     /**
@@ -165,6 +191,36 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      */
     public ContentViewCore getContentViewCore() {
         return mContentViewCore;
+    }
+
+    /**
+     * Allows an external source to listen to SurfaceTexture updates.
+     *
+     * @param listener
+     */
+    public void registerSurfaceTextureListener(SurfaceTextureUpdatedListener listener) {
+        if (!mSurfaceTextureUpdatedListeners.contains(listener)) {
+            mSurfaceTextureUpdatedListeners.add(listener);
+        }
+    }
+
+    /**
+     * Unregisters the current external listener that waits for SurfaceTexture updates.
+     */
+    public void unregisterSurfaceTextureListener(SurfaceTextureUpdatedListener listener) {
+        mSurfaceTextureUpdatedListeners.remove(listener);
+    }
+
+    /**
+     * Returns true if the given Activity has hardware acceleration enabled
+     * in its manifest, or in its foreground window.
+     *
+     * TODO(husky): Remove when ContentViewCore.initialize() is refactored (see TODO there)
+     * TODO(dtrainor) This is still used by other classes.  Make sure to pull some version of this
+     * out before removing it.
+     */
+    public static boolean hasHardwareAcceleration(Activity activity) {
+        return ContentViewCore.hasHardwareAcceleration(activity);
     }
 
     /**
@@ -208,6 +264,10 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         return mContentViewCore.getContentViewClient();
     }
 
+    public int getBackgroundColor() {
+        return mContentViewCore.getBackgroundColor();
+    }
+
     /**
      * Load url without fixing up the url string. Consumers of ContentView are responsible for
      * ensuring the URL passed in is properly formatted (i.e. the scheme has been added if left
@@ -246,6 +306,23 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      */
     public String getTitle() {
         return mContentViewCore.getTitle();
+    }
+
+    public Bitmap getBitmap() {
+        return getBitmap(getWidth(), getHeight());
+    }
+
+    public Bitmap getBitmap(int width, int height) {
+        return mContentViewCore.getBitmap(width, height);
+    }
+
+    /**
+     * @return Whether the ContentView is covered by an overlay that is more than half
+     *         of it's surface. This is used to determine if we need to do a slow bitmap capture or
+     *         to show the ContentView without them.
+     */
+    public boolean hasLargeOverlay() {
+        return mContentViewCore.hasLargeOverlay();
     }
 
     /**
@@ -308,17 +385,62 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         mContentViewCore.clearHistory();
     }
 
+    String getSelectedText() {
+        return mContentViewCore.getSelectedText();
+    }
+
+    /**
+     * Start profiling the update speed. You must call {@link #stopFpsProfiling}
+     * to stop profiling.
+     *
+     * @VisibleForTesting
+     */
+    public void startFpsProfiling() {
+        // TODO(nileshagrawal): Implement this.
+    }
+
+    /**
+     * Stop profiling the update speed.
+     *
+     * @VisibleForTesting
+     */
+    public float stopFpsProfiling() {
+        // TODO(nileshagrawal): Implement this.
+        return 0.0f;
+    }
+
+    /**
+     * Fling the ContentView from the current position.
+     * @param x Fling touch starting position
+     * @param y Fling touch starting position
+     * @param velocityX Initial velocity of the fling (X) measured in pixels per second.
+     * @param velocityY Initial velocity of the fling (Y) measured in pixels per second.
+     *
+     * @VisibleForTesting
+     */
+    public void fling(long timeMs, int x, int y, int velocityX, int velocityY) {
+        mContentViewCore.getContentViewGestureHandler().fling(timeMs, x, y, velocityX, velocityY);
+    }
+
+    void endFling(long timeMs) {
+        mContentViewCore.getContentViewGestureHandler().endFling(timeMs);
+    }
+
     /**
      * Start pinch zoom. You must call {@link #pinchEnd} to stop.
+     *
+     * @VisibleForTesting
      */
-    void pinchBegin(long timeMs, int x, int y) {
+    public void pinchBegin(long timeMs, int x, int y) {
         mContentViewCore.getContentViewGestureHandler().pinchBegin(timeMs, x, y);
     }
 
     /**
      * Stop pinch zoom.
+     *
+     * @VisibleForTesting
      */
-    void pinchEnd(long timeMs) {
+    public void pinchEnd(long timeMs) {
         mContentViewCore.getContentViewGestureHandler().pinchEnd(timeMs);
     }
 
@@ -337,9 +459,26 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      *            coordinate.
      * @param anchorY The magnification anchor (Y) in the current view
      *            coordinate.
+     *
+     * @VisibleForTesting
      */
-    void pinchBy(long timeMs, int anchorX, int anchorY, float delta) {
+    public void pinchBy(long timeMs, int anchorX, int anchorY, float delta) {
         mContentViewCore.getContentViewGestureHandler().pinchBy(timeMs, anchorX, anchorY, delta);
+    }
+
+    /**
+     * Injects the passed JavaScript code in the current page and evaluates it.
+     * Once evaluated, an asynchronous call to
+     * ContentViewClient.onJavaScriptEvaluationResult is made. Used in automation
+     * tests.
+     *
+     * @return an id that is passed along in the asynchronous onJavaScriptEvaluationResult callback
+     * @throws IllegalStateException If the ContentView has been destroyed.
+     *
+     * TODO(nileshagrawal): Remove this method from the public interface.
+     */
+    public int evaluateJavaScript(String script) throws IllegalStateException {
+        return mContentViewCore.evaluateJavaScript(script);
     }
 
     /**
@@ -384,6 +523,13 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         return mContentViewCore.getContentSettings();
     }
 
+    /**
+     * Hides the select action bar.
+     */
+    public void hideSelectActionBar() {
+        mContentViewCore.hideSelectActionBar();
+    }
+
     // FrameLayout overrides.
 
     // Needed by ContentViewCore.InternalAccessDelegate
@@ -409,13 +555,99 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     @Override
+    protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
+        TraceEvent.begin();
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
+        mContentViewCore.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
+        TraceEvent.end();
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        return mContentViewCore.onKeyUp(keyCode, event);
+    }
+
+    @Override
+    public boolean dispatchKeyEventPreIme(KeyEvent event) {
+        return mContentViewCore.dispatchKeyEventPreIme(event);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        return mContentViewCore.dispatchKeyEvent(event);
+    }
+
+    @Override
     public boolean onTouchEvent(MotionEvent event) {
         return mContentViewCore.onTouchEvent(event);
+    }
+
+    /**
+     * Mouse move events are sent on hover enter, hover move and hover exit.
+     * They are sent on hover exit because sometimes it acts as both a hover
+     * move and hover exit.
+     */
+    @Override
+    public boolean onHoverEvent(MotionEvent event) {
+        return mContentViewCore.onHoverEvent(event);
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        return mContentViewCore.onGenericMotionEvent(event);
     }
 
     @Override
     protected void onConfigurationChanged(Configuration newConfig) {
         mContentViewCore.onConfigurationChanged(newConfig);
+    }
+
+    /**
+     * Currently the ContentView scrolling happens in the native side. In
+     * the Java view system, it is always pinned at (0, 0). scrollBy() and scrollTo()
+     * are overridden, so that View's mScrollX and mScrollY will be unchanged at
+     * (0, 0). This is critical for drawing ContentView correctly.
+     */
+    @Override
+    public void scrollBy(int x, int y) {
+        mContentViewCore.scrollBy(x, y);
+    }
+
+    @Override
+    public void scrollTo(int x, int y) {
+        mContentViewCore.scrollTo(x, y);
+    }
+
+    @Override
+    protected int computeHorizontalScrollExtent() {
+        // TODO (dtrainor): Need to expose scroll events properly to public. Either make getScroll*
+        // work or expose computeHorizontalScrollOffset()/computeVerticalScrollOffset as public.
+        return mContentViewCore.computeHorizontalScrollExtent();
+    }
+
+    @Override
+    protected int computeHorizontalScrollOffset() {
+        return mContentViewCore.computeHorizontalScrollOffset();
+    }
+
+    @Override
+    protected int computeHorizontalScrollRange() {
+        return mContentViewCore.computeHorizontalScrollRange();
+    }
+
+    @Override
+    protected int computeVerticalScrollExtent() {
+        return mContentViewCore.computeVerticalScrollExtent();
+    }
+
+    @Override
+    protected int computeVerticalScrollOffset() {
+        return mContentViewCore.computeVerticalScrollOffset();
+    }
+
+    @Override
+    protected int computeVerticalScrollRange() {
+        return mContentViewCore.computeVerticalScrollRange();
     }
 
     // End FrameLayout overrides.
@@ -430,12 +662,24 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         return super.awakenScrollBars();
     }
 
+    public int getSingleTapX()  {
+        return mContentViewCore.getContentViewGestureHandler().getSingleTapX();
+    }
+
+    public int getSingleTapY()  {
+        return mContentViewCore.getContentViewGestureHandler().getSingleTapY();
+    }
+
     @Override
     public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
         super.onInitializeAccessibilityNodeInfo(info);
         mContentViewCore.onInitializeAccessibilityNodeInfo(info);
     }
 
+    /**
+     * Fills in scrolling values for AccessibilityEvents.
+     * @param event Event being fired.
+     */
     @Override
     public void onInitializeAccessibilityEvent(AccessibilityEvent event) {
         super.onInitializeAccessibilityEvent(event);
@@ -454,6 +698,12 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         mContentViewCore.onDetachedFromWindow();
     }
 
+    @Override
+    protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        mContentViewCore.onVisibilityChanged(changedView, visibility);
+    }
+
     void updateMultiTouchZoomSupport() {
         mContentViewCore.updateMultiTouchZoomSupport();
     }
@@ -463,30 +713,10 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     /**
-     * Register the listener to be used when content can not be handled by the
-     * rendering engine, and should be downloaded instead. This will replace the
-     * current listener.
-     * @param listener An implementation of DownloadListener.
-     */
-    // TODO(nileshagrawal): decide if setDownloadDelegate will be public API. If so,
-    // this method should be deprecated and the javadoc should make reference to the
-    // fact that a ContentViewDownloadDelegate will be used in preference to a
-    // DownloadListener.
-    public void setDownloadListener(DownloadListener listener) {
-        mContentViewCore.setDownloadListener(listener);
-    }
-
-    // Called by DownloadController.
-    DownloadListener downloadListener() {
-        return mContentViewCore.downloadListener();
-    }
-
-    /**
      * Register the delegate to be used when content can not be handled by
      * the rendering engine, and should be downloaded instead. This will replace
-     * the current delegate or existing DownloadListner.
-     * Embedders should prefer this over the legacy DownloadListener.
-     * @param listener An implementation of ContentViewDownloadDelegate.
+     * the current delegate.
+     * @param delegate An implementation of ContentViewDownloadDelegate.
      */
     public void setDownloadDelegate(ContentViewDownloadDelegate delegate) {
         mContentViewCore.setDownloadDelegate(delegate);
@@ -495,6 +725,19 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     // Called by DownloadController.
     ContentViewDownloadDelegate getDownloadDelegate() {
         return mContentViewCore.getDownloadDelegate();
+    }
+
+    public boolean getUseDesktopUserAgent() {
+        return mContentViewCore.getUseDesktopUserAgent();
+    }
+
+    /**
+     * Set whether or not we're using a desktop user agent for the currently loaded page.
+     * @param override If true, use a desktop user agent.  Use a mobile one otherwise.
+     * @param reloadOnChange Reload the page if the UA has changed.
+     */
+    public void setUseDesktopUserAgent(boolean override, boolean reloadOnChange) {
+        mContentViewCore.setUseDesktopUserAgent(override, reloadOnChange);
     }
 
     /**
@@ -557,6 +800,17 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
         return mContentViewCore.zoomOut();
     }
 
+    /**
+     * Resets the zoom factor of the WebView.
+     *
+     * @return True if there was a zoom change, false otherwise.
+     */
+    // This method uses the term 'zoom' for legacy reasons, but relates
+    // to what chrome calls the 'page scale factor'.
+    public boolean zoomReset() {
+        return mContentViewCore.zoomReset();
+    }
+
     // Invokes the graphical zoom picker widget for this ContentView.
     public void invokeZoomPicker() {
         mContentViewCore.invokeZoomPicker();
@@ -566,6 +820,52 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     // this method returns built-in zoom controls. This method is used in tests.
     public View getZoomControlsForTest() {
         return mContentViewCore.getZoomControlsForTest();
+    }
+
+    /**
+     * Return the current scale of the WebView
+     * @return The current scale.
+     */
+    public float getScale() {
+        return mContentViewCore.getScale();
+    }
+
+    /**
+     * If the view is ready to draw contents to the screen. In hardware mode,
+     * the initialization of the surface texture may not occur until after the
+     * view has been added to the layout. This method will return {@code true}
+     * once the texture is actually ready.
+     */
+    public boolean isReady() {
+        return mContentViewCore.isReady();
+    }
+
+    /**
+     * @return Whether or not the texture view is available or not.
+     */
+    public boolean isAvailable() {
+        return mContentViewCore.isAvailable();
+    }
+
+    /**
+     * Returns whether or not accessibility injection is being used.
+     */
+    public boolean isInjectingAccessibilityScript() {
+        return mContentViewCore.isInjectingAccessibilityScript();
+    }
+
+    /**
+     * Enable or disable accessibility features.
+     */
+    public void setAccessibilityState(boolean state) {
+        mContentViewCore.setAccessibilityState(state);
+    }
+
+    /**
+     * Stop any TTS notifications that are currently going on.
+     */
+    public void stopCurrentAccessibilityNotifications() {
+        mContentViewCore.stopCurrentAccessibilityNotifications();
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////

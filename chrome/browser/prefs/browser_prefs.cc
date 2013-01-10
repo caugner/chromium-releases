@@ -6,7 +6,6 @@
 
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/accessibility/invert_bubble_prefs.h"
-#include "chrome/browser/autocomplete/zero_suggest_provider.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -29,7 +28,7 @@
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/intents/web_intents_util.h"
 #include "chrome/browser/intranet_redirect_detector.h"
-#include "chrome/browser/managed_mode.h"
+#include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
@@ -42,8 +41,6 @@
 #include "chrome/browser/page_info_model.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
-#include "chrome/browser/policy/cloud_policy_subsystem.h"
-#include "chrome/browser/policy/url_blacklist_manager.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -66,6 +63,7 @@
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
+#include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
@@ -75,6 +73,12 @@
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/render_process_host.h"
+
+#if defined(ENABLE_CONFIGURATION_POLICY)
+#include "chrome/browser/policy/cloud_policy_subsystem.h"
+#include "chrome/browser/policy/policy_statistics_collector.h"
+#include "chrome/browser/policy/url_blacklist_manager.h"
+#endif
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/confirm_quit.h"
@@ -92,6 +96,8 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/display/display_preferences.h"
+#include "chrome/browser/chromeos/login/user_image_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -115,6 +121,10 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/ntp/android/promo_handler.h"
+#endif
+
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+#include "chrome/browser/web_resource/plugins_resource_service.h"
 #endif
 
 namespace {
@@ -150,8 +160,13 @@ void RegisterLocalState(PrefService* local_state) {
   WebCacheManager::RegisterPrefs(local_state);
   chrome::RegisterScreenshotPrefs(local_state);
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+  PluginsResourceService::RegisterPrefs(local_state);
+#endif
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::CloudPolicySubsystem::RegisterPrefs(local_state);
+  policy::PolicyStatisticsCollector::RegisterPrefs(local_state);
 #endif
 
 #if defined(ENABLE_NOTIFICATIONS)
@@ -178,12 +193,14 @@ void RegisterLocalState(PrefService* local_state) {
 
 #if defined(OS_CHROMEOS)
   chromeos::AudioHandler::RegisterPrefs(local_state);
-  chromeos::language_prefs::RegisterPrefs(local_state);
   chromeos::DataPromoNotification::RegisterPrefs(local_state);
-  chromeos::ProxyConfigServiceImpl::RegisterPrefs(local_state);
-  chromeos::UserManager::RegisterPrefs(local_state);
-  chromeos::ServicesCustomizationDocument::RegisterPrefs(local_state);
   chromeos::device_settings_cache::RegisterPrefs(local_state);
+  chromeos::language_prefs::RegisterPrefs(local_state);
+  chromeos::ProxyConfigServiceImpl::RegisterPrefs(local_state);
+  chromeos::RegisterDisplayLocalStatePrefs(local_state);
+  chromeos::ServicesCustomizationDocument::RegisterPrefs(local_state);
+  chromeos::UserImageManager::RegisterPrefs(local_state);
+  chromeos::UserManager::RegisterPrefs(local_state);
   chromeos::WallpaperManager::RegisterPrefs(local_state);
   chromeos::WizardController::RegisterPrefs(local_state);
   policy::AutoEnrollmentClient::RegisterPrefs(local_state);
@@ -226,7 +243,7 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
   TranslatePrefs::RegisterUserPrefs(user_prefs);
   web_intents::RegisterUserPrefs(user_prefs);
-  ZeroSuggestProvider::RegisterUserPrefs(user_prefs);
+  InstantUI::RegisterUserPrefs(user_prefs);
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::URLBlacklistManager::RegisterPrefs(user_prefs);

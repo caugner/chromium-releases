@@ -13,25 +13,22 @@
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/webui/screenshot_source.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
-#include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
@@ -47,77 +44,9 @@ const int64 kVisualFeedbackLayerDisplayTimeMs = 100;
 // more than 1000 to prevent the conflict of filenames.
 const int kScreenshotMinimumIntervalInMS = 1000;
 
-bool ShouldUse24HourClock() {
-#if defined(OS_CHROMEOS)
-  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-  if (profile) {
-    PrefService* pref_service = profile->GetPrefs();
-    if (pref_service) {
-      return pref_service->GetBoolean(prefs::kUse24HourClock);
-    }
-  }
-#endif
-  return base::GetHourClockType() == base::k24HourClock;
-}
 
-bool AreScreenshotsDisabled() {
-  return g_browser_process->local_state()->GetBoolean(
-      prefs::kDisableScreenshots);
-}
-
-std::string GetScreenshotBaseFilename() {
-  base::Time::Exploded now;
-  base::Time::Now().LocalExplode(&now);
-
-  // We don't use base/i18n/time_formatting.h here because it doesn't
-  // support our format.  Don't use ICU either to avoid i18n file names
-  // for non-English locales.
-  // TODO(mukai): integrate this logic somewhere time_formatting.h
-  std::string file_name = base::StringPrintf(
-      "Screenshot %d-%02d-%02d at ", now.year, now.month, now.day_of_month);
-
-  if (ShouldUse24HourClock()) {
-    file_name.append(base::StringPrintf(
-        "%02d.%02d.%02d", now.hour, now.minute, now.second));
-  } else {
-    int hour = now.hour;
-    if (hour > 12) {
-      hour -= 12;
-    } else if (hour == 0) {
-      hour = 12;
-    }
-    file_name.append(base::StringPrintf(
-        "%d.%02d.%02d ", hour, now.minute, now.second));
-    file_name.append((now.hour >= 12) ? "PM" : "AM");
-  }
-
-  return file_name;
-}
-
-bool GetScreenshotDirectory(FilePath* directory) {
-  if (AreScreenshotsDisabled())
-    return false;
-
-  bool is_logged_in = true;
-#if defined(OS_CHROMEOS)
-  is_logged_in = chromeos::UserManager::Get()->IsUserLoggedIn();
-#endif
-
-  if (is_logged_in) {
-    DownloadPrefs* download_prefs = DownloadPrefs::FromBrowserContext(
-        ash::Shell::GetInstance()->delegate()->GetCurrentBrowserContext());
-    *directory = download_prefs->DownloadPath();
-  } else {
-    if (!file_util::GetTempDir(directory)) {
-      LOG(ERROR) << "Failed to find temporary directory.";
-      return false;
-    }
-  }
-  return true;
-}
-
-void SaveScreenshot(const FilePath& screenshot_path,
-                    scoped_refptr<base::RefCountedBytes> png_data) {
+void SaveScreenshotInternal(const FilePath& screenshot_path,
+                            scoped_refptr<base::RefCountedBytes> png_data) {
   DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(!screenshot_path.empty());
   if (static_cast<size_t>(file_util::WriteFile(
@@ -128,27 +57,62 @@ void SaveScreenshot(const FilePath& screenshot_path,
   }
 }
 
+void SaveScreenshot(const FilePath& screenshot_path,
+                    scoped_refptr<base::RefCountedBytes> png_data) {
+  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  DCHECK(!screenshot_path.empty());
+
+  if (!file_util::CreateDirectory(screenshot_path.DirName())) {
+    LOG(ERROR) << "Failed to ensure the existence of "
+               << screenshot_path.DirName().value();
+    return;
+  }
+  SaveScreenshotInternal(screenshot_path, png_data);
+}
+
 // TODO(kinaba): crbug.com/140425, remove this ungly #ifdef dispatch.
 #ifdef OS_CHROMEOS
 void SaveScreenshotToDrive(scoped_refptr<base::RefCountedBytes> png_data,
-                           gdata::DriveFileError error,
+                           drive::DriveFileError error,
                            const FilePath& local_path) {
-  if (error != gdata::DRIVE_FILE_OK) {
+  if (error != drive::DRIVE_FILE_OK) {
     LOG(ERROR) << "Failed to write screenshot image to Google Drive: " << error;
     return;
   }
-  SaveScreenshot(local_path, png_data);
+  SaveScreenshotInternal(local_path, png_data);
+}
+
+void EnsureDirectoryExistsCallback(
+    Profile* profile,
+    const FilePath& screenshot_path,
+    scoped_refptr<base::RefCountedBytes> png_data,
+    drive::DriveFileError error) {
+  // It is okay to fail with DRIVE_FILE_ERROR_EXISTS since anyway the directory
+  // of the target file exists.
+  if (error == drive::DRIVE_FILE_OK ||
+      error == drive::DRIVE_FILE_ERROR_EXISTS) {
+    drive::util::PrepareWritableFileAndRun(
+        profile,
+        screenshot_path,
+        base::Bind(&SaveScreenshotToDrive, png_data));
+  } else {
+    LOG(ERROR) << "Failed to ensure the existence of the specified directory "
+               << "in Google Drive: " << error;
+  }
 }
 
 void PostSaveScreenshotTask(const FilePath& screenshot_path,
                             scoped_refptr<base::RefCountedBytes> png_data) {
-  if (gdata::util::IsUnderDriveMountPoint(screenshot_path)) {
+  if (drive::util::IsUnderDriveMountPoint(screenshot_path)) {
     Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
     if (profile) {
-      gdata::util::PrepareWritableFileAndRun(
+      drive::util::EnsureDirectoryExists(
           profile,
-          screenshot_path,
-          base::Bind(&SaveScreenshotToDrive, png_data));
+          screenshot_path.DirName(),
+          base::Bind(&EnsureDirectoryExistsCallback,
+                     profile,
+                     screenshot_path,
+                     png_data));
     }
   } else {
     content::BrowserThread::GetBlockingPool()->PostTask(
@@ -169,7 +133,7 @@ bool GrabWindowSnapshot(aura::Window* window,
 #if defined(OS_LINUX)
   // chrome::GrabWindowSnapshotForUser checks this too, but
   // RootWindow::GrabSnapshot does not.
-  if (AreScreenshotsDisabled())
+  if (ScreenshotSource::AreScreenshotsDisabled())
     return false;
 
   // We use XGetImage() for Linux/ChromeOS for performance reasons.
@@ -192,10 +156,11 @@ ScreenshotTaker::~ScreenshotTaker() {
 
 void ScreenshotTaker::HandleTakeScreenshotForAllRootWindows() {
   FilePath screenshot_directory;
-  if (!GetScreenshotDirectory(&screenshot_directory))
+  if (!ScreenshotSource::GetScreenshotDirectory(&screenshot_directory))
     return;
 
-  std::string screenshot_basename = GetScreenshotBaseFilename();
+  std::string screenshot_basename =
+      ScreenshotSource::GetScreenshotBaseFilename();
   ash::Shell::RootWindowList root_windows = ash::Shell::GetAllRootWindows();
   for (size_t i = 0; i < root_windows.size(); ++i) {
     aura::RootWindow* root_window = root_windows[i];
@@ -220,7 +185,7 @@ void ScreenshotTaker::HandleTakePartialScreenshot(
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   FilePath screenshot_directory;
-  if (!GetScreenshotDirectory(&screenshot_directory))
+  if (!ScreenshotSource::GetScreenshotDirectory(&screenshot_directory))
     return;
 
   scoped_refptr<base::RefCountedBytes> png_data(new base::RefCountedBytes);
@@ -229,8 +194,9 @@ void ScreenshotTaker::HandleTakePartialScreenshot(
     last_screenshot_timestamp_ = base::Time::Now();
     DisplayVisualFeedback(rect);
     PostSaveScreenshotTask(
-        screenshot_directory.AppendASCII(GetScreenshotBaseFilename() + ".png"),
-        png_data);
+        screenshot_directory.AppendASCII(
+                   ScreenshotSource::GetScreenshotBaseFilename() + ".png"),
+                   png_data);
   } else {
     LOG(ERROR) << "Failed to grab the window screenshot";
   }

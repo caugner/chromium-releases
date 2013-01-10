@@ -18,10 +18,15 @@ class AppListViewDelegate;
 }
 
 namespace aura {
+class RootWindow;
 class Window;
 namespace client {
 class UserActionClient;
 }
+}
+
+namespace ui {
+class MenuModel;
 }
 
 namespace views {
@@ -39,6 +44,8 @@ class SystemTrayDelegate;
 class UserWallpaperDelegate;
 
 enum UserMetricsAction {
+  UMA_ACCEL_KEYBOARD_BRIGHTNESS_DOWN_F6,
+  UMA_ACCEL_KEYBOARD_BRIGHTNESS_UP_F7,
   UMA_ACCEL_MAXIMIZE_RESTORE_F4,
   UMA_ACCEL_NEWTAB_T,
   UMA_ACCEL_NEXTWINDOW_F5,
@@ -165,6 +172,16 @@ class ASH_EXPORT ShellDelegate {
   // "13 Minuten übrig".
   // Used, for example, to display the remaining battery life.
   virtual string16 GetTimeRemainingString(base::TimeDelta delta) = 0;
+
+  // Saves the zoom scale of the full screen magnifier.
+  virtual void SaveScreenMagnifierScale(double scale) = 0;
+
+  // Gets a saved value of the zoom scale of full screen magnifier. If a value
+  // is not saved, return a negative value.
+  virtual double GetSavedScreenMagnifierScale() = 0;
+
+  // Creates a menu model of the context for the |root_window|.
+  virtual ui::MenuModel* CreateContextMenu(aura::RootWindow* root_window) = 0;
 };
 
 }  // namespace ash

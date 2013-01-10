@@ -4,6 +4,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
@@ -126,14 +127,13 @@ class DefaultSearchProviderChangeTest : public InProcessBrowserTest {
   }
 
   void ExpectHistogramCount(const std::string& name,
-                            size_t bucket,
-                            base::Histogram::Count count) {
+                            base::HistogramBase::Sample sample,
+                            base::Histogram::Count expected_count) {
     base::Histogram* histogram = base::StatisticsRecorder::FindHistogram(name);
     EXPECT_TRUE(histogram != NULL);
-    base::Histogram::SampleSet sample;
-    histogram->SnapshotSample(&sample);
-    EXPECT_EQ(count, sample.counts(bucket)) <<
-        "Invalid " << name << " value for bucket " << bucket;
+    scoped_ptr<base::HistogramSamples> samples(histogram->SnapshotSamples());
+    EXPECT_EQ(expected_count, samples->GetCount(sample))
+        << "Invalid histogram " << name << " count for sample: " << sample;
   }
 
  protected:

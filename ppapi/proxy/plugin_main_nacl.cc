@@ -28,7 +28,14 @@
 #include "ppapi/shared_impl/ppb_audio_shared.h"
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
+#include "base/hash_tables.h"
+
+LogFunctionMap g_log_function_mapping;
+
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
+#define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
+  g_log_function_mapping[msg_id] = logger
+
 #endif
 #include "ppapi/proxy/ppapi_messages.h"
 
@@ -76,6 +83,7 @@ class PpapiDispatcher : public ProxyChannel,
 
  private:
   void OnMsgCreateNaClChannel(int renderer_id,
+                              const ppapi::PpapiPermissions& permissions,
                               bool incognito,
                               SerializedHandle handle);
   void OnPluginDispatcherMessageReceived(const IPC::Message& msg);
@@ -88,7 +96,8 @@ class PpapiDispatcher : public ProxyChannel,
 };
 
 PpapiDispatcher::PpapiDispatcher(scoped_refptr<base::MessageLoopProxy> io_loop)
-    : message_loop_(io_loop),
+    : next_plugin_dispatcher_id_(0),
+      message_loop_(io_loop),
       shutdown_event_(true, false) {
   IPC::ChannelHandle channel_handle(
       "NaCl IPC", base::FileDescriptor(NACL_IPC_FD, false));
@@ -136,7 +145,7 @@ void PpapiDispatcher::Unregister(uint32 plugin_dispatcher_id) {
 }
 
 bool PpapiDispatcher::SendToBrowser(IPC::Message* msg) {
-  Send(msg);
+  return Send(msg);
 }
 
 IPC::Sender* PpapiDispatcher::GetBrowserSender() {
@@ -159,34 +168,24 @@ void PpapiDispatcher::SetActiveURL(const std::string& url) {
 bool PpapiDispatcher::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PpapiDispatcher, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_CreateNaClChannel, OnMsgCreateNaClChannel)
-
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_ListenACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_AcceptACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ConnectACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ReadACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_WriteACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_RecvFromACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_SendToACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_BindACK,
-                                OnPluginDispatcherMessageReceived(msg))
+    // All other messages are simply forwarded to a PluginDispatcher.
+    IPC_MESSAGE_UNHANDLED(OnPluginDispatcherMessageReceived(msg))
   IPC_END_MESSAGE_MAP()
   return true;
 }
 
-void PpapiDispatcher::OnMsgCreateNaClChannel(int renderer_id,
-                                             bool incognito,
-                                             SerializedHandle handle) {
+void PpapiDispatcher::OnMsgCreateNaClChannel(
+    int renderer_id,
+    const ppapi::PpapiPermissions& permissions,
+    bool incognito,
+    SerializedHandle handle) {
+  // Tell the process-global GetInterface which interfaces it can return to the
+  // plugin.
+  ppapi::proxy::InterfaceList::SetProcessGlobalPermissions(
+      permissions);
+
   PluginDispatcher* dispatcher =
-      new PluginDispatcher(::PPP_GetInterface, incognito);
+      new PluginDispatcher(::PPP_GetInterface, permissions, incognito);
   // The channel handle's true name is not revealed here.
   IPC::ChannelHandle channel_handle("nacl", handle.descriptor());
   if (!dispatcher->InitPluginWithChannel(this, channel_handle, false)) {
@@ -260,6 +259,7 @@ int PpapiPluginMain() {
     return error;
 
   PpapiDispatcher ppapi_dispatcher(io_thread.message_loop_proxy());
+  plugin_globals.set_plugin_proxy_delegate(&ppapi_dispatcher);
 
   loop.Run();
 
@@ -267,4 +267,3 @@ int PpapiPluginMain() {
 
   return 0;
 }
-

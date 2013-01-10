@@ -68,6 +68,18 @@ struct ResponseCookie {
   DISALLOW_COPY_AND_ASSIGN(ResponseCookie);
 };
 
+// Data container for FilterResponseCookies as defined in the declarative
+// WebRequest API definition.
+struct FilterResponseCookie : ResponseCookie {
+  FilterResponseCookie();
+  ~FilterResponseCookie();
+  scoped_ptr<int> age_lower_bound;
+  scoped_ptr<int> age_upper_bound;
+  scoped_ptr<bool> session_cookie;
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FilterResponseCookie);
+};
+
 enum CookieModificationType {
   ADD,
   EDIT,
@@ -91,7 +103,7 @@ struct ResponseCookieModification {
   ~ResponseCookieModification();
   CookieModificationType type;
   // Used for EDIT and REMOVE.
-  scoped_ptr<ResponseCookie> filter;
+  scoped_ptr<FilterResponseCookie> filter;
   // Used for ADD and EDIT.
   scoped_ptr<ResponseCookie> modification;
  private:
@@ -184,7 +196,7 @@ EventResponseDelta* CalculateOnHeadersReceivedDelta(
     const std::string& extension_id,
     const base::Time& extension_install_time,
     bool cancel,
-    net::HttpResponseHeaders* old_response_headers,
+    const net::HttpResponseHeaders* old_response_headers,
     ResponseHeaders* new_response_headers);
 // Destructively moves the auth credentials from |auth_credentials| to the
 // returned EventResponseDelta.
@@ -272,12 +284,6 @@ const char* ResourceTypeToString(ResourceType::Type type);
 // success.
 bool ParseResourceType(const std::string& type_str,
                        ResourceType::Type* type);
-
-// Returns whether |extension| may access |url| based on host permissions.
-// In addition to that access is granted to about: URLs and extension URLs
-// that are in the scope of |extension|.
-bool CanExtensionAccessURL(const extensions::Extension* extension,
-                           const GURL& url);
 
 // Triggers clearing each renderer's in-memory cache the next time it navigates.
 void ClearCacheOnNavigation();

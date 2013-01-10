@@ -14,6 +14,7 @@
 #include "base/debug/trace_event.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/proxy/flash_resource.h"
 #include "ppapi/proxy/gamepad_resource.h"
 #include "ppapi/proxy/interface_list.h"
 #include "ppapi/proxy/interface_proxy.h"
@@ -60,8 +61,9 @@ InstanceData::~InstanceData() {
 }
 
 PluginDispatcher::PluginDispatcher(PP_GetInterface_Func get_interface,
+                                   const PpapiPermissions& permissions,
                                    bool incognito)
-    : Dispatcher(get_interface),
+    : Dispatcher(get_interface, permissions),
       plugin_delegate_(NULL),
       received_preferences_(false),
       plugin_dispatcher_id_(0),
@@ -102,6 +104,10 @@ PluginDispatcher* PluginDispatcher::GetForResource(const Resource* resource) {
 
 // static
 const void* PluginDispatcher::GetBrowserInterface(const char* interface_name) {
+  DCHECK(interface_name) << "|interface_name| is null. Did you forget to add "
+      "the |interface_name()| template function to the interface's C++ "
+      "wrapper?";
+
   return InterfaceList::GetInstance()->GetInterfaceForPPB(interface_name);
 }
 
@@ -267,7 +273,8 @@ void PluginDispatcher::DispatchResourceReply(
   Resource* resource = PpapiGlobals::Get()->GetResourceTracker()->GetResource(
       reply_params.pp_resource());
   if (!resource) {
-    NOTREACHED();
+    if (reply_params.sequence())
+      NOTREACHED();
     return;
   }
   resource->OnReplyReceived(reply_params, nested_msg);

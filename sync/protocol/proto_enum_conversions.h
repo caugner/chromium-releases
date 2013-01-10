@@ -24,9 +24,9 @@ const char* GetBrowserTypeString(
 const char* GetPageTransitionString(
     sync_pb::SyncEnums::PageTransition page_transition);
 
-const char* GetPageTransitionQualifierString(
-    sync_pb::SyncEnums::PageTransitionQualifier
-        page_transition_qualifier);
+const char* GetPageTransitionRedirectTypeString(
+    sync_pb::SyncEnums::PageTransitionRedirectType
+        redirect_type);
 
 const char* GetUpdatesSourceString(
     sync_pb::GetUpdatesCallerInfo::GetUpdatesSource updates_source);
@@ -39,7 +39,7 @@ const char* GetErrorTypeString(sync_pb::SyncEnums::ErrorType error_type);
 const char* GetActionString(sync_pb::SyncEnums::Action action);
 
 const char* GetDeviceTypeString(
-    sync_pb::SessionHeader::DeviceType device_type);
+    sync_pb::SyncEnums::DeviceType device_type);
 
 const char* GetFaviconTypeString(
     sync_pb::SessionTab::FaviconType favicon_type);

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_UI_METRO_DRIVER_CHROME_APP_VIEW_H_
-#define CHROME_BROWSER_UI_METRO_DRIVER_CHROME_APP_VIEW_H_
+#ifndef WIN8_METRO_DRIVER_CHROME_APP_VIEW_H_
+#define WIN8_METRO_DRIVER_CHROME_APP_VIEW_H_
 
 #include <windows.applicationmodel.core.h>
 #include <windows.ui.core.h>
@@ -23,6 +23,11 @@
 #include "win8/metro_driver/metro_dialog_box.h"
 #include "win8/metro_driver/settings_handler.h"
 #include "win8/metro_driver/toast_notification_handler.h"
+
+namespace IPC {
+  class Listener;
+  class ChannelProxy;
+}
 
 class ChromeAppView
     : public mswr::RuntimeClass<winapp::Core::IFrameworkView> {
@@ -134,15 +139,6 @@ class ChromeAppView
   MetroDialogBox dialog_box_;
 };
 
-class ChromeAppViewFactory
-    : public mswr::RuntimeClass<winapp::Core::IFrameworkViewSource> {
- public:
-  ChromeAppViewFactory(winapp::Core::ICoreApplication* icore_app,
-                       LPTHREAD_START_ROUTINE host_main,
-                       void* host_context);
-  IFACEMETHOD(CreateView)(winapp::Core::IFrameworkView** view);
-};
-
 // This function is exported by chrome.exe.
 typedef int (__cdecl *BreakpadExceptionHandler)(EXCEPTION_POINTERS* info);
 
@@ -174,4 +170,4 @@ struct Globals {
 
 extern Globals globals;
 
-#endif  // CHROME_BROWSER_UI_METRO_DRIVER_CHROME_APP_VIEW_H_
+#endif  // WIN8_METRO_DRIVER_CHROME_APP_VIEW_H_

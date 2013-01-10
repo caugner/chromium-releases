@@ -9,9 +9,10 @@
 #include "content/public/common/gpu_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace content {
 namespace {
 
-class TestObserver : public content::GpuDataManagerObserver {
+class TestObserver : public GpuDataManagerObserver {
  public:
   TestObserver()
       : gpu_info_updated_(false),
@@ -29,7 +30,7 @@ class TestObserver : public content::GpuDataManagerObserver {
   }
 
   virtual void OnVideoMemoryUsageStatsUpdate(
-      const content::GPUVideoMemoryUsageStats& stats) OVERRIDE {
+      const GPUVideoMemoryUsageStats& stats) OVERRIDE {
     video_memory_usage_stats_updated_ = true;
   }
 
@@ -93,20 +94,19 @@ TEST_F(GpuDataManagerImplTest, GpuSideBlacklisting) {
       "  ]\n"
       "}";
 
-  content::GPUInfo gpu_info;
+  GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x10de;
   gpu_info.gpu.device_id = 0x0640;
   manager->InitializeForTesting(blacklist_json, gpu_info);
 
   EXPECT_TRUE(manager->GpuAccessAllowed());
-  EXPECT_EQ(content::GPU_FEATURE_TYPE_WEBGL,
-            manager->GetBlacklistedFeatures());
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, manager->GetBlacklistedFeatures());
 
   gpu_info.gl_renderer = "NVIDIA GeForce GT 120";
   manager->UpdateGpuInfo(gpu_info);
   EXPECT_FALSE(manager->GpuAccessAllowed());
-  EXPECT_EQ(content::GPU_FEATURE_TYPE_WEBGL |
-            content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL |
+            GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
             manager->GetBlacklistedFeatures());
 
   delete manager;
@@ -140,14 +140,13 @@ TEST_F(GpuDataManagerImplTest, GpuSideExceptions) {
       "  ]\n"
       "}";
 
-  content::GPUInfo gpu_info;
+  GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x10de;
   gpu_info.gpu.device_id = 0x0640;
   manager->InitializeForTesting(blacklist_json, gpu_info);
 
   EXPECT_TRUE(manager->GpuAccessAllowed());
-  EXPECT_EQ(content::GPU_FEATURE_TYPE_WEBGL,
-            manager->GetBlacklistedFeatures());
+  EXPECT_EQ(0, manager->GetBlacklistedFeatures());
 
   // Now assue gpu process launches and full GPU info is collected.
   gpu_info.gl_renderer = "NVIDIA GeForce GT 120";
@@ -166,11 +165,54 @@ TEST_F(GpuDataManagerImplTest, BlacklistCard) {
 
   manager->BlacklistCard();
   EXPECT_FALSE(manager->GpuAccessAllowed());
+  EXPECT_EQ(GPU_FEATURE_TYPE_ALL, manager->GetBlacklistedFeatures());
+
+  delete manager;
+}
+
+TEST_F(GpuDataManagerImplTest, SoftwareRendering) {
+  // Blacklist, then register SwiftShader.
+  GpuDataManagerImpl* manager = new GpuDataManagerImpl();
+  ASSERT_TRUE(manager);
+  EXPECT_EQ(0, manager->GetBlacklistedFeatures());
+  EXPECT_TRUE(manager->GpuAccessAllowed());
+  EXPECT_FALSE(manager->ShouldUseSoftwareRendering());
+
+  manager->BlacklistCard();
+  EXPECT_FALSE(manager->GpuAccessAllowed());
+  EXPECT_FALSE(manager->ShouldUseSoftwareRendering());
 
   // If software rendering is enabled, even if we blacklist GPU,
   // GPU process is still allowed.
-  manager->software_rendering_ = true;
+  const FilePath test_path(FILE_PATH_LITERAL("AnyPath"));
+  manager->RegisterSwiftShaderPath(test_path);
+  EXPECT_TRUE(manager->ShouldUseSoftwareRendering());
   EXPECT_TRUE(manager->GpuAccessAllowed());
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
+            manager->GetBlacklistedFeatures());
+
+  delete manager;
+}
+
+TEST_F(GpuDataManagerImplTest, SoftwareRendering2) {
+  // Register SwiftShader, then blacklist.
+  GpuDataManagerImpl* manager = new GpuDataManagerImpl();
+  ASSERT_TRUE(manager);
+  EXPECT_EQ(0, manager->GetBlacklistedFeatures());
+  EXPECT_TRUE(manager->GpuAccessAllowed());
+  EXPECT_FALSE(manager->ShouldUseSoftwareRendering());
+
+  const FilePath test_path(FILE_PATH_LITERAL("AnyPath"));
+  manager->RegisterSwiftShaderPath(test_path);
+  EXPECT_EQ(0, manager->GetBlacklistedFeatures());
+  EXPECT_TRUE(manager->GpuAccessAllowed());
+  EXPECT_FALSE(manager->ShouldUseSoftwareRendering());
+
+  manager->BlacklistCard();
+  EXPECT_TRUE(manager->GpuAccessAllowed());
+  EXPECT_TRUE(manager->ShouldUseSoftwareRendering());
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
+            manager->GetBlacklistedFeatures());
 
   delete manager;
 }
@@ -184,7 +226,7 @@ TEST_F(GpuDataManagerImplTest, GpuInfoUpdate) {
 
   EXPECT_FALSE(observer.gpu_info_updated());
 
-  content::GPUInfo gpu_info;
+  GPUInfo gpu_info;
   manager->UpdateGpuInfo(gpu_info);
 
   base::RunLoop run_loop;
@@ -203,7 +245,7 @@ TEST_F(GpuDataManagerImplTest, GPUVideoMemoryUsageStatsUpdate) {
 
   EXPECT_FALSE(observer.video_memory_usage_stats_updated());
 
-  content::GPUVideoMemoryUsageStats vram_stats;
+  GPUVideoMemoryUsageStats vram_stats;
   manager->UpdateVideoMemoryUsageStats(vram_stats);
 
   base::RunLoop run_loop;
@@ -213,3 +255,4 @@ TEST_F(GpuDataManagerImplTest, GPUVideoMemoryUsageStatsUpdate) {
   delete manager;
 }
 
+}  // namespace content

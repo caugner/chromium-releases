@@ -26,6 +26,14 @@ def AddBuildTypeOption(option_parser):
                            help='If set, run test suites under out/Release. '
                                 'Default is env var BUILDTYPE or Debug.')
 
+def AddInstallAPKOption(option_parser):
+  """Decorates OptionParser with apk option used to install the APK."""
+  option_parser.add_option('--apk',
+                           help=('The name of the apk containing the '
+                                 ' application (with the .apk extension).'))
+  option_parser.add_option('--apk_package',
+                           help=('The package name used by the apk containing '
+                                 'the application.'))
 
 def AddTestRunnerOptions(option_parser, default_timeout=60):
   """Decorates OptionParser with options applicable to all tests."""
@@ -85,10 +93,9 @@ def AddInstrumentationOptions(option_parser):
                                  'of the result. (Default is 1)'))
   option_parser.add_option('--test-apk', dest='test_apk',
                            help=('The name of the apk containing the tests '
-                                 '(without the .apk extension) or for SDK '
-                                 'builds, the path to the APK from '
-                                 'out/(Debug|Release) (for example, '
-                                 'content_shell_test/ContentShellTest-debug).'))
+                                 '(without the .apk extension). For SDK '
+                                 'builds, the apk name without the debug '
+                                 'suffix(for example, ContentShellTest).'))
   option_parser.add_option('--screenshot', dest='screenshot_failures',
                            action='store_true',
                            help='Capture screenshots of test failures')
@@ -102,6 +109,22 @@ def AddInstrumentationOptions(option_parser):
                            help='Serial number of device we should use.')
   option_parser.add_option('--python_test_root',
                            help='Root of the python-driven tests.')
+  option_parser.add_option('--keep_test_server_ports',
+                           action='store_true',
+                           help='Indicates the test server ports must be '
+                                'kept. When this is run via a sharder '
+                                'the test server ports should be kept and '
+                                'should not be reset.')
+  option_parser.add_option('--flakiness-dashboard-server',
+                           dest='flakiness_dashboard_server',
+                           help=('Address of the server that is hosting the '
+                                 'Chrome for Android flakiness dashboard.'))
+  option_parser.add_option('--buildbot-step-failure',
+                           action='store_true',
+                           help=('If present, will set the buildbot status '
+                                 'as STEP_FAILURE, otherwise as STEP_WARNINGS '
+                                 'when test(s) fail.'))
+
 
 def ValidateInstrumentationOptions(option_parser, options, args):
   """Validate options/arguments and populate options with defaults."""
@@ -111,6 +134,8 @@ def ValidateInstrumentationOptions(option_parser, options, args):
   if options.java_only and options.python_only:
     option_parser.error('Options java_only (-j) and python_only (-p) '
                         'are mutually exclusive.')
+  if not options.test_apk:
+    option_parser.error('--test-apk must be specified.')
 
   options.run_java_tests = True
   options.run_python_tests = True
@@ -119,13 +144,18 @@ def ValidateInstrumentationOptions(option_parser, options, args):
   elif options.python_only:
     options.run_java_tests = False
 
-  options.test_apk_path = os.path.join(_SDK_OUT_DIR,
-                                       options.build_type,
-                                       '%s.apk' % options.test_apk)
-  options.test_apk_jar_path = os.path.join(_SDK_OUT_DIR,
-                                           options.build_type,
-                                           '%s.jar'
-                                           % options.test_apk)
+  if os.path.exists(options.test_apk):
+    # The APK is fully qualified, assume the JAR lives along side.
+    options.test_apk_path = options.test_apk
+    options.test_apk_jar_path = os.path.splitext(options.test_apk_path) + '.jar'
+  else:
+    options.test_apk_path = os.path.join(_SDK_OUT_DIR,
+                                         options.build_type,
+                                         constants.SDK_BUILD_APKS_DIR,
+                                         '%s.apk' % options.test_apk)
+    options.test_apk_jar_path = os.path.join(
+        _SDK_OUT_DIR, options.build_type, constants.SDK_BUILD_TEST_JAVALIB_DIR,
+        '%s.jar' %  options.test_apk)
   if options.annotation_str:
     options.annotation = options.annotation_str.split()
   elif options.test_filter:

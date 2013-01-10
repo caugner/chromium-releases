@@ -14,12 +14,11 @@
 #include "ipc/ipc_sender.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class WebContentsImpl;
-
 namespace content {
 
 class RenderViewHost;
 class WebContents;
+class WebContentsImpl;
 struct FrameNavigateParams;
 struct LoadCommittedDetails;
 struct Referrer;
@@ -49,9 +48,13 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
       const LoadCommittedDetails& details,
       const FrameNavigateParams& params) {}
   // |render_view_host| is the RenderViewHost for which the provisional load is
-  // happening.
+  // happening. |frame_id| is a positive, non-zero integer identifying the
+  // navigating frame in the given |render_view_host|. |parent_frame_id| is the
+  // frame identifier of the frame containing the navigating frame, or -1 if the
+  // frame is not contained in another frame.
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
@@ -171,7 +174,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   WebContents* web_contents() const;
 
  private:
-  friend class ::WebContentsImpl;
+  friend class WebContentsImpl;
 
   // Invoked from WebContentsImpl. Invokes WebContentsDestroyed and NULL out
   // |web_contents_|.

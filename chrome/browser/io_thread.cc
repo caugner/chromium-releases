@@ -31,6 +31,7 @@
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
+#include "chrome/browser/net/spdyproxy/http_auth_handler_spdyproxy.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -75,6 +76,13 @@ class SafeBrowsingURLRequestContext;
 
 namespace {
 
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+void ObserveKeychainEvents() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  net::CertDatabase::GetInstance()->SetMessageLoopForKeychainEvents();
+}
+#endif
+
 // Custom URLRequestContext used by requests which aren't associated with a
 // particular profile. We need to use a subclass of URLRequestContext in order
 // to provide the correct User-Agent.
@@ -108,12 +116,12 @@ class SystemURLRequestContext : public URLRequestContextWithUserAgent {
   }
 };
 
-net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
+scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
   bool allow_async_dns_field_trial = true;
 
-  size_t parallelism = net::HostResolver::kDefaultParallelism;
+  net::HostResolver::Options options;
 
   // Use the concurrency override from the command-line, if any.
   if (command_line.HasSwitch(switches::kHostResolverParallelism)) {
@@ -124,13 +132,11 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
     // Parse the switch (it should be a positive integer formatted as decimal).
     int n;
     if (base::StringToInt(s, &n) && n > 0) {
-      parallelism = static_cast<size_t>(n);
+      options.max_concurrent_resolves = static_cast<size_t>(n);
     } else {
       LOG(ERROR) << "Invalid switch for host resolver parallelism: " << s;
     }
   }
-
-  size_t retry_attempts = net::HostResolver::kDefaultRetryAttempts;
 
   // Use the retry attempts override from the command-line, if any.
   if (command_line.HasSwitch(switches::kHostResolverRetryAttempts)) {
@@ -140,32 +146,25 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
     // Parse the switch (it should be a non-negative integer).
     int n;
     if (base::StringToInt(s, &n) && n >= 0) {
-      retry_attempts = static_cast<size_t>(n);
+      options.max_retry_attempts = static_cast<size_t>(n);
     } else {
       LOG(ERROR) << "Invalid switch for host resolver retry attempts: " << s;
     }
   }
 
-  net::HostResolver* global_host_resolver = NULL;
-  bool use_async = false;
   if (command_line.HasSwitch(switches::kEnableAsyncDns)) {
     allow_async_dns_field_trial = false;
-    use_async = true;
+    options.enable_async = true;
   } else if (command_line.HasSwitch(switches::kDisableAsyncDns)) {
     allow_async_dns_field_trial = false;
-    use_async = false;
+    options.enable_async = false;
   }
 
   if (allow_async_dns_field_trial)
-    use_async = chrome_browser_net::ConfigureAsyncDnsFieldTrial();
+    options.enable_async = chrome_browser_net::ConfigureAsyncDnsFieldTrial();
 
-  if (use_async) {
-    global_host_resolver =
-        net::CreateAsyncHostResolver(parallelism, retry_attempts, net_log);
-  } else {
-    global_host_resolver =
-        net::CreateSystemHostResolver(parallelism, retry_attempts, net_log);
-  }
+  scoped_ptr<net::HostResolver> global_host_resolver(
+      net::HostResolver::CreateSystemResolver(options, net_log));
 
   // Determine if we should disable IPv6 support.
   if (!command_line.HasSwitch(switches::kEnableIPv6)) {
@@ -180,13 +179,13 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
   // rules on top of the real host resolver. This allows forwarding all requests
   // through a designated test server.
   if (!command_line.HasSwitch(switches::kHostResolverRules))
-    return global_host_resolver;
+    return global_host_resolver.PassAs<net::HostResolver>();
 
-  net::MappedHostResolver* remapped_resolver =
-      new net::MappedHostResolver(global_host_resolver);
+  scoped_ptr<net::MappedHostResolver> remapped_resolver(
+      new net::MappedHostResolver(global_host_resolver.Pass()));
   remapped_resolver->SetRulesFromString(
       command_line.GetSwitchValueASCII(switches::kHostResolverRules));
-  return remapped_resolver;
+  return remapped_resolver.PassAs<net::HostResolver>();
 }
 
 // TODO(willchan): Remove proxy script fetcher context since it's not necessary
@@ -245,22 +244,38 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
 }  // namespace
 
 class IOThread::LoggingNetworkChangeObserver
-    : public net::NetworkChangeNotifier::IPAddressObserver {
+    : public net::NetworkChangeNotifier::IPAddressObserver,
+      public net::NetworkChangeNotifier::ConnectionTypeObserver {
  public:
   // |net_log| must remain valid throughout our lifetime.
   explicit LoggingNetworkChangeObserver(net::NetLog* net_log)
       : net_log_(net_log) {
     net::NetworkChangeNotifier::AddIPAddressObserver(this);
+    net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
   }
 
   ~LoggingNetworkChangeObserver() {
     net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+    net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
   }
 
-  virtual void OnIPAddressChanged() {
+  virtual void OnIPAddressChanged() OVERRIDE {
     VLOG(1) << "Observed a change to the network IP addresses";
 
     net_log_->AddGlobalEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED);
+  }
+
+  virtual void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE {
+    std::string type_as_string =
+        net::NetworkChangeNotifier::ConnectionTypeToString(type);
+
+    VLOG(1) << "Observed a change to network connectivity state "
+            << type_as_string;
+
+    net_log_->AddGlobalEntry(
+        net::NetLog::TYPE_NETWORK_CONNECTIVITY_CHANGED,
+        net::NetLog::StringCallback("new_connection_type", &type_as_string));
   }
 
  private:
@@ -438,11 +453,14 @@ void IOThread::Init() {
   if (command_line.HasSwitch(switches::kDisableExtensionsHttpThrottling))
     network_delegate->NeverThrottleRequests();
   globals_->system_network_delegate.reset(network_delegate);
-  globals_->host_resolver.reset(
-      CreateGlobalHostResolver(net_log_));
+  globals_->host_resolver = CreateGlobalHostResolver(net_log_);
   globals_->cert_verifier.reset(net::CertVerifier::CreateDefault());
   globals_->transport_security_state.reset(new net::TransportSecurityState());
   globals_->ssl_config_service = GetSSLConfigService();
+  if (command_line.HasSwitch(switches::kSpdyProxyOrigin)) {
+    spdyproxy_origin_ =
+        command_line.GetSwitchValueASCII(switches::kSpdyProxyOrigin);
+  }
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
   globals_->http_server_properties.reset(new net::HttpServerPropertiesImpl);
@@ -526,6 +544,14 @@ void IOThread::Init() {
 
   sdch_manager_ = new net::SdchManager();
 
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  // Start observing Keychain events. This needs to be done on the UI thread,
+  // as Keychain services requires a CFRunLoop.
+  BrowserThread::PostTask(BrowserThread::UI,
+                          FROM_HERE,
+                          base::Bind(&ObserveKeychainEvents));
+#endif
+
   // InitSystemRequestContext turns right around and posts a task back
   // to the IO thread, so we can't let it run until we know the IO
   // thread has started.
@@ -576,14 +602,18 @@ void IOThread::CleanUp() {
 // static
 void IOThread::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterStringPref(prefs::kAuthSchemes,
-                                  "basic,digest,ntlm,negotiate");
+                                  "basic,digest,ntlm,negotiate,"
+                                  "spdyproxy");
   local_state->RegisterBooleanPref(prefs::kDisableAuthNegotiateCnameLookup,
                                    false);
   local_state->RegisterBooleanPref(prefs::kEnableAuthNegotiatePort, false);
   local_state->RegisterStringPref(prefs::kAuthServerWhitelist, "");
   local_state->RegisterStringPref(prefs::kAuthNegotiateDelegateWhitelist, "");
   local_state->RegisterStringPref(prefs::kGSSAPILibraryName, "");
+  local_state->RegisterStringPref(prefs::kSpdyProxyOrigin, "");
   local_state->RegisterBooleanPref(prefs::kEnableReferrers, true);
+  local_state->RegisterInt64Pref(prefs::kHttpReceivedContentLength, 0);
+  local_state->RegisterInt64Pref(prefs::kHttpOriginalContentLength, 0);
 }
 
 net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
@@ -604,13 +634,26 @@ net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
   std::vector<std::string> supported_schemes;
   base::SplitString(auth_schemes_, ',', &supported_schemes);
 
-  return net::HttpAuthHandlerRegistryFactory::Create(
-      supported_schemes,
-      globals_->url_security_manager.get(),
-      resolver,
-      gssapi_library_name_,
-      negotiate_disable_cname_lookup_,
-      negotiate_enable_port_);
+  scoped_ptr<net::HttpAuthHandlerRegistryFactory> registry_factory(
+      net::HttpAuthHandlerRegistryFactory::Create(
+          supported_schemes, globals_->url_security_manager.get(),
+          resolver, gssapi_library_name_, negotiate_disable_cname_lookup_,
+          negotiate_enable_port_));
+
+  if (!spdyproxy_origin_.empty()) {
+    GURL origin_url(spdyproxy_origin_);
+    if (origin_url.is_valid()) {
+      registry_factory->RegisterSchemeFactory(
+          "spdyproxy",
+          new spdyproxy::HttpAuthHandlerSpdyProxy::Factory(origin_url));
+    } else {
+      LOG(WARNING) << "Skipping creation of SpdyProxy auth handler since "
+                   << "authorized origin is invalid: "
+                   << spdyproxy_origin_;
+    }
+  }
+
+  return registry_factory.release();
 }
 
 void IOThread::ClearHostCache() {

@@ -17,6 +17,7 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -199,11 +200,6 @@ void MediaStreamCaptureIndicator::DoDevicesOpenedOnUIThread(
 
   CreateStatusTray();
 
-  // If we don't have a status icon or one could not be created successfully,
-  // then no need to continue.
-  if (!status_icon_)
-    return;
-
   AddCaptureDeviceTab(render_process_id, render_view_id, devices);
 }
 
@@ -212,8 +208,6 @@ void MediaStreamCaptureIndicator::DoDevicesClosedOnUIThread(
     int render_view_id,
     const content::MediaStreamDevices& devices) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!status_icon_)
-    return;
 
   RemoveCaptureDeviceTab(render_process_id, render_view_id, devices);
 }
@@ -287,7 +281,7 @@ void MediaStreamCaptureIndicator::ShowBalloon(
   string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
   string16 body = l10n_util::GetStringFUTF16(message_id,
       GetSecurityOrigin(render_process_id, render_view_id));
-  status_icon_->DisplayBalloon(*balloon_image_->bitmap(), title, body);
+  status_icon_->DisplayBalloon(*balloon_image_, title, body);
 }
 
 void MediaStreamCaptureIndicator::OnImageLoaded(
@@ -299,9 +293,9 @@ void MediaStreamCaptureIndicator::OnImageLoaded(
   pending_messages_.erase(index);
 
   const gfx::ImageSkia* image_skia = !image.IsEmpty() ? image.ToImageSkia() :
-      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
           IDR_APP_DEFAULT_ICON);
-  status_icon_->DisplayBalloon(*image_skia->bitmap(), string16(), message);
+  status_icon_->DisplayBalloon(*image_skia, string16(), message);
 }
 
 void MediaStreamCaptureIndicator::Hide() {
@@ -375,13 +369,13 @@ void MediaStreamCaptureIndicator::UpdateStatusTrayIconDisplay(
   int message_id = 0;
   if (audio && video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_AND_VIDEO;
-    status_icon_->SetImage(*camera_image_->bitmap());
+    status_icon_->SetImage(*camera_image_);
   } else if (audio && !video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_ONLY;
-    status_icon_->SetImage(*mic_image_->bitmap());
+    status_icon_->SetImage(*mic_image_);
   } else if (!audio && video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_VIDEO_ONLY;
-    status_icon_->SetImage(*camera_image_->bitmap());
+    status_icon_->SetImage(*camera_image_);
   }
 
   status_icon_->SetToolTip(l10n_util::GetStringFUTF16(
@@ -414,6 +408,13 @@ void MediaStreamCaptureIndicator::AddCaptureDeviceTab(
       NOTIMPLEMENTED();
     }
   }
+
+  WebContents* web_contents = tab_util::GetWebContentsByID(
+      render_process_id, render_view_id);
+  web_contents->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
+
+  if (!status_icon_)
+    return;
 
   UpdateStatusTrayIconContextMenu();
 
@@ -448,7 +449,25 @@ void MediaStreamCaptureIndicator::RemoveCaptureDeviceTab(
       tabs_.erase(iter);
   }
 
+  WebContents* web_contents = tab_util::GetWebContentsByID(
+      render_process_id, render_view_id);
+  if (web_contents)
+    web_contents->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
+
+  if (!status_icon_)
+    return;
+
   UpdateStatusTrayIconContextMenu();
+}
+
+bool MediaStreamCaptureIndicator::IsProcessCapturing(int render_process_id,
+                                                     int render_view_id) const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  CaptureDeviceTabs::const_iterator iter = std::find_if(
+      tabs_.begin(), tabs_.end(), TabEquals(render_process_id, render_view_id));
+  if (iter == tabs_.end())
+    return false;
+  return (iter->audio_ref_count > 0 || iter->video_ref_count > 0);
 }
 
 void MediaStreamCaptureIndicator::EnsureImageLoadingTracker() {

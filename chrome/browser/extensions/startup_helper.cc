@@ -10,7 +10,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/webstore_inline_installer.h"
+#include "chrome/browser/extensions/webstore_standalone_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -90,7 +90,7 @@ class AppInstallHelper {
   bool success() { return success_; }
   const std::string& error() { return error_; }
 
-  WebstoreInlineInstaller::Callback Callback();
+  WebstoreStandaloneInstaller::Callback Callback();
   void OnAppInstallComplete(bool success, const std::string& error);
 
  private:
@@ -103,7 +103,7 @@ AppInstallHelper::AppInstallHelper() : success_(false) {}
 
 AppInstallHelper::~AppInstallHelper() {}
 
-WebstoreInlineInstaller::Callback AppInstallHelper::Callback() {
+WebstoreStandaloneInstaller::Callback AppInstallHelper::Callback() {
   return base::Bind(&AppInstallHelper::OnAppInstallComplete,
                     base::Unretained(this));
 }
@@ -126,19 +126,20 @@ bool StartupHelper::InstallFromWebstore(const CommandLine& cmd_line,
   }
 
   // TODO(asargent) - it would be nice not to need a WebContents just to
-  // use the inline installer. (crbug.com/149039)
+  // use the standalone installer. (crbug.com/149039)
   scoped_ptr<content::WebContents> web_contents(
       content::WebContents::Create(profile, NULL, MSG_ROUTING_NONE, NULL));
 
   AppInstallHelper helper;
-  WebstoreInlineInstaller::Callback callback =
+  WebstoreStandaloneInstaller::Callback callback =
       base::Bind(&AppInstallHelper::OnAppInstallComplete,
                  base::Unretained(&helper));
-  scoped_refptr<WebstoreInlineInstaller> installer(
-      new WebstoreInlineInstaller(
+  scoped_refptr<WebstoreStandaloneInstaller> installer(
+      new WebstoreStandaloneInstaller(
           web_contents.get(),
           id,
-          WebstoreInlineInstaller::DO_NOT_REQUIRE_VERIFIED_SITE,
+          WebstoreStandaloneInstaller::DO_NOT_REQUIRE_VERIFIED_SITE,
+          WebstoreStandaloneInstaller::STANDARD_PROMPT,
           GURL(),
           callback));
   installer->set_skip_post_install_ui(true);

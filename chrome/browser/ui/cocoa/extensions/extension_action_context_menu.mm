@@ -4,9 +4,12 @@
 
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -25,7 +28,6 @@
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -96,16 +98,6 @@ enum {
   kExtensionContextManage = 7,
 };
 
-int CurrentTabId() {
-  Browser* browser = browser::GetLastActiveBrowser();
-  if(!browser)
-    return -1;
-  WebContents* contents = chrome::GetActiveWebContents(browser);
-  if (!contents)
-    return -1;
-  return ExtensionTabUtil::GetTabId(contents);
-}
-
 }  // namespace
 
 - (id)initWithExtension:(const Extension*)extension
@@ -141,7 +133,8 @@ int CurrentTabId() {
         // Only browser actions can have their button hidden. Page actions
         // should never show the "Hide" menu item.
         if ([itemObj tag] == kExtensionContextHide &&
-            !extension->browser_action()) {
+            !extensions::ExtensionActionManager::Get(browser_->profile())->
+            GetBrowserAction(*extension)) {
           [itemObj setTarget:nil];  // Item is disabled.
           [itemObj setHidden:YES];  // Item is hidden.
         } else {
@@ -169,8 +162,8 @@ int CurrentTabId() {
     }
     case kExtensionContextOptions: {
       DCHECK(!extension_->options_url().is_empty());
-      browser_->profile()->GetExtensionProcessManager()->OpenOptionsPage(
-          extension_, browser_);
+      extensions::ExtensionSystem::Get(browser_->profile())->process_manager()->
+          OpenOptionsPage(extension_, browser_);
       break;
     }
     case kExtensionContextDisable: {

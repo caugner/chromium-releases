@@ -367,6 +367,54 @@ TEST_F(ChromeRenderViewTest, LanguageMetaTag) {
   EXPECT_EQ("fr", params.a);
 }
 
+// Tests that the language meta tag works even with non-all-lower-case.
+// http://code.google.com/p/chromium/issues/detail?id=145689
+TEST_F(ChromeRenderViewTest, LanguageMetaTagCase) {
+  // Suppress the normal delay that occurs when the page is loaded before which
+  // the renderer sends the page contents to the browser.
+  SendContentStateImmediately();
+
+  LoadHTML("<html><head><meta http-equiv=\"Content-Language\" content=\"es\">"
+           "</head><body>A random page with random content.</body></html>");
+  const IPC::Message* message = render_thread_->sink().GetUniqueMessageMatching(
+      ChromeViewHostMsg_TranslateLanguageDetermined::ID);
+  ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
+  ChromeViewHostMsg_TranslateLanguageDetermined::Param params;
+  ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
+  EXPECT_EQ("es", params.a);
+  render_thread_->sink().ClearMessages();
+
+  // Makes sure we support multiple languages specified.
+  LoadHTML("<html><head><meta http-equiv=\"Content-Language\" "
+           "content=\" fr , es,en \">"
+           "</head><body>A random page with random content.</body></html>");
+  message = render_thread_->sink().GetUniqueMessageMatching(
+      ChromeViewHostMsg_TranslateLanguageDetermined::ID);
+  ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
+  ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
+  EXPECT_EQ("fr", params.a);
+}
+
+// Tests that the language meta tag is converted to Chrome standard of dashes
+// instead of underscores and proper capitalization.
+// http://code.google.com/p/chromium/issues/detail?id=159487
+TEST_F(ChromeRenderViewTest, LanguageCommonMistakesAreCorrected) {
+  // Suppress the normal delay that occurs when the page is loaded before which
+  // the renderer sends the page contents to the browser.
+  SendContentStateImmediately();
+
+  LoadHTML("<html><head><meta http-equiv='Content-Language' content='EN_us'>"
+           "</head><body>A random page with random content.</body></html>");
+  const IPC::Message* message = render_thread_->sink().GetUniqueMessageMatching(
+      ChromeViewHostMsg_TranslateLanguageDetermined::ID);
+  ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
+  ChromeViewHostMsg_TranslateLanguageDetermined::Param params;
+  ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
+  EXPECT_EQ("en-US", params.a);
+  render_thread_->sink().ClearMessages();
+}
+
+
 // Tests that a back navigation gets a translate language message.
 TEST_F(ChromeRenderViewTest, BackToTranslatablePage) {
   SendContentStateImmediately();

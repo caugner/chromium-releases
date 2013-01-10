@@ -17,6 +17,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -222,14 +223,17 @@ void CrashTab(WebContents* web_contents) {
   observer.Wait();
 }
 
-void SimulateMouseClick(WebContents* web_contents) {
+void SimulateMouseClick(WebContents* web_contents,
+                        int modifiers,
+                        WebKit::WebMouseEvent::Button button) {
   int x = web_contents->GetView()->GetContainerSize().width() / 2;
   int y = web_contents->GetView()->GetContainerSize().height() / 2;
   WebKit::WebMouseEvent mouse_event;
   mouse_event.type = WebKit::WebInputEvent::MouseDown;
-  mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  mouse_event.button = button;
   mouse_event.x = x;
   mouse_event.y = y;
+  mouse_event.modifiers = modifiers;
   // Mac needs globalX/globalY for events to plugins.
   gfx::Rect offset;
   web_contents->GetView()->GetContainerBounds(&offset);
@@ -420,153 +424,42 @@ void TitleWatcher::Observe(int type,
   }
 }
 
-TestWebSocketServer::TestWebSocketServer()
-    : started_(false),
-      port_(kDefaultWsPort),
-      secure_(false) {
-#if defined(OS_POSIX)
-  process_group_id_ = base::kNullProcessHandle;
-#endif
+DOMMessageQueue::DOMMessageQueue() : waiting_for_message_(false) {
+  registrar_.Add(this, NOTIFICATION_DOM_OPERATION_RESPONSE,
+                 NotificationService::AllSources());
 }
 
-int TestWebSocketServer::UseRandomPort() {
-  port_ = base::RandInt(1024, 65535);
-  return port_;
+DOMMessageQueue::~DOMMessageQueue() {}
+
+void DOMMessageQueue::Observe(int type,
+                              const NotificationSource& source,
+                              const NotificationDetails& details) {
+  Details<DomOperationNotificationDetails> dom_op_details(details);
+  Source<RenderViewHost> sender(source);
+  message_queue_.push(dom_op_details->json);
+  if (waiting_for_message_) {
+    waiting_for_message_ = false;
+    message_loop_runner_->Quit();
+  }
 }
 
-void TestWebSocketServer::UseTLS() {
-  secure_ = true;
+void DOMMessageQueue::ClearQueue() {
+  message_queue_ = std::queue<std::string>();
 }
 
-bool TestWebSocketServer::Start(const FilePath& root_directory) {
-  if (started_)
-    return true;
-  // Append CommandLine arguments after the server script, switches won't work.
-  scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
-  cmd_line->AppendArg("--server=start");
-  cmd_line->AppendArg("--chromium");
-  cmd_line->AppendArg("--register_cygwin");
-  cmd_line->AppendArgNative(FILE_PATH_LITERAL("--root=") +
-                            root_directory.value());
-  cmd_line->AppendArg("--port=" + base::IntToString(port_));
-  if (secure_)
-    cmd_line->AppendArg("--tls");
-  if (!temp_dir_.CreateUniqueTempDir()) {
-    LOG(ERROR) << "Unable to create a temporary directory.";
-    return false;
+bool DOMMessageQueue::WaitForMessage(std::string* message) {
+  if (message_queue_.empty()) {
+    waiting_for_message_ = true;
+    // This will be quit when a new message comes in.
+    message_loop_runner_ = new MessageLoopRunner;
+    message_loop_runner_->Run();
   }
-  cmd_line->AppendArgNative(FILE_PATH_LITERAL("--output-dir=") +
-                            temp_dir_.path().value());
-  websocket_pid_file_ = temp_dir_.path().AppendASCII("websocket.pid");
-  cmd_line->AppendArgNative(FILE_PATH_LITERAL("--pidfile=") +
-                            websocket_pid_file_.value());
-  SetPythonPath();
-
-  base::LaunchOptions options;
-  base::ProcessHandle process_handle;
-
-#if defined(OS_POSIX)
-  options.new_process_group = true;
-#elif defined(OS_WIN)
-  job_handle_.Set(CreateJobObject(NULL, NULL));
-  if (!job_handle_.IsValid()) {
-    LOG(ERROR) << "Could not create JobObject.";
+  // The queue should not be empty, unless we were quit because of a timeout.
+  if (message_queue_.empty())
     return false;
-  }
-
-  if (!base::SetJobObjectAsKillOnJobClose(job_handle_.Get())) {
-    LOG(ERROR) << "Could not SetInformationJobObject.";
-    return false;
-  }
-
-  options.inherit_handles = true;
-  options.job_handle = job_handle_.Get();
-#endif
-
-  // Launch a new WebSocket server process.
-  if (!base::LaunchProcess(*cmd_line.get(), options, &process_handle)) {
-    LOG(ERROR) << "Unable to launch websocket server:\n"
-               << cmd_line.get()->GetCommandLineString();
-    return false;
-  }
-#if defined(OS_POSIX)
-  process_group_id_ = process_handle;
-#endif
-  int exit_code;
-  bool wait_success = base::WaitForExitCodeWithTimeout(
-      process_handle,
-      &exit_code,
-      TestTimeouts::action_max_timeout());
-  base::CloseProcessHandle(process_handle);
-
-  if (!wait_success || exit_code != 0) {
-    LOG(ERROR) << "Failed to run new-run-webkit-websocketserver: "
-               << "wait_success = " << wait_success << ", "
-               << "exit_code = " << exit_code << ", "
-               << "command_line = " << cmd_line.get()->GetCommandLineString();
-    return false;
-  }
-
-  started_ = true;
+  if (message)
+    *message = message_queue_.front();
   return true;
-}
-
-CommandLine* TestWebSocketServer::CreatePythonCommandLine() {
-  // Note: Python's first argument must be the script; do not append CommandLine
-  // switches, as they would precede the script path and break this CommandLine.
-  CommandLine* cmd_line = new CommandLine(CommandLine::NO_PROGRAM);
-  // TODO(phajdan.jr): Instead of CHECKing, return a boolean indicating success.
-  CHECK(GetPythonCommand(cmd_line));
-  return cmd_line;
-}
-
-void TestWebSocketServer::SetPythonPath() {
-  FilePath scripts_path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &scripts_path);
-
-  scripts_path = scripts_path
-      .Append(FILE_PATH_LITERAL("third_party"))
-      .Append(FILE_PATH_LITERAL("WebKit"))
-      .Append(FILE_PATH_LITERAL("Tools"))
-      .Append(FILE_PATH_LITERAL("Scripts"));
-  AppendToPythonPath(scripts_path);
-}
-
-CommandLine* TestWebSocketServer::CreateWebSocketServerCommandLine() {
-  FilePath src_path;
-  // Get to 'src' dir.
-  PathService::Get(base::DIR_SOURCE_ROOT, &src_path);
-
-  FilePath script_path(src_path);
-  script_path = script_path.AppendASCII("third_party");
-  script_path = script_path.AppendASCII("WebKit");
-  script_path = script_path.AppendASCII("Tools");
-  script_path = script_path.AppendASCII("Scripts");
-  script_path = script_path.AppendASCII("new-run-webkit-websocketserver");
-
-  CommandLine* cmd_line = CreatePythonCommandLine();
-  cmd_line->AppendArgPath(script_path);
-  return cmd_line;
-}
-
-TestWebSocketServer::~TestWebSocketServer() {
-  if (!started_)
-    return;
-  // Append CommandLine arguments after the server script, switches won't work.
-  scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
-  cmd_line->AppendArg("--server=stop");
-  cmd_line->AppendArg("--chromium");
-  cmd_line->AppendArgNative(FILE_PATH_LITERAL("--pidfile=") +
-                            websocket_pid_file_.value());
-  base::LaunchOptions options;
-  options.wait = true;
-  base::LaunchProcess(*cmd_line.get(), options, NULL);
-
-#if defined(OS_POSIX)
-  // Just to make sure that the server process terminates certainly.
-  if (process_group_id_ != base::kNullProcessHandle)
-    base::KillProcessGroup(process_group_id_);
-#endif
 }
 
 }  // namespace content

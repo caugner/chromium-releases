@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
+#include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
+#include "chrome/common/form_data.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_details.h"
@@ -27,10 +29,10 @@
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/forms/form_data.h"
 
 using content::BrowserThread;
-using webkit::forms::FormData;
+
+namespace {
 
 ACTION(QuitUIMessageLoop) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -44,6 +46,17 @@ class PersonalDataLoadedObserverMock : public PersonalDataManagerObserver {
 
   MOCK_METHOD0(OnPersonalDataChanged, void());
 };
+
+// Unlike the base AutofillMetrics, exposes copy and assignment constructors,
+// which are handy for briefer test code.  The AutofillMetrics class is
+// stateless, so this is safe.
+class TestAutofillMetrics : public AutofillMetrics {
+ public:
+  TestAutofillMetrics() {}
+  virtual ~TestAutofillMetrics() {}
+};
+
+}  // anonymous namespace
 
 class PersonalDataManagerTest : public testing::Test {
  protected:
@@ -483,7 +496,7 @@ TEST_F(PersonalDataManagerTest, Refresh) {
 
 TEST_F(PersonalDataManagerTest, ImportFormData) {
   FormData form;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -506,7 +519,7 @@ TEST_F(PersonalDataManagerTest, ImportFormData) {
       "Zip:", "zip", "94102", "text", &field);
   form.fields.push_back(field);
   FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
+  form_structure.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure,
                                              &imported_credit_card));
@@ -528,7 +541,7 @@ TEST_F(PersonalDataManagerTest, ImportFormData) {
 
 TEST_F(PersonalDataManagerTest, ImportFormDataBadEmail) {
   FormData form;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -551,7 +564,7 @@ TEST_F(PersonalDataManagerTest, ImportFormDataBadEmail) {
       "Zip:", "zip", "94102", "text", &field);
   form.fields.push_back(field);
   FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
+  form_structure.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_FALSE(personal_data_->ImportFormData(form_structure,
                                               &imported_credit_card));
@@ -563,7 +576,7 @@ TEST_F(PersonalDataManagerTest, ImportFormDataBadEmail) {
 
 TEST_F(PersonalDataManagerTest, ImportFormDataNotEnoughFilledFields) {
   FormData form;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -574,7 +587,7 @@ TEST_F(PersonalDataManagerTest, ImportFormDataNotEnoughFilledFields) {
       "Card number:", "card_number", "4111 1111 1111 1111", "text", &field);
   form.fields.push_back(field);
   FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
+  form_structure.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_FALSE(personal_data_->ImportFormData(form_structure,
                                               &imported_credit_card));
@@ -588,7 +601,7 @@ TEST_F(PersonalDataManagerTest, ImportFormDataNotEnoughFilledFields) {
 
 TEST_F(PersonalDataManagerTest, ImportPhoneNumberSplitAcrossMultipleFields) {
   FormData form;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -620,7 +633,7 @@ TEST_F(PersonalDataManagerTest, ImportPhoneNumberSplitAcrossMultipleFields) {
       "Zip:", "zip", "94102", "text", &field);
   form.fields.push_back(field);
   FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
+  form_structure.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure,
                                              &imported_credit_card));
@@ -679,7 +692,7 @@ TEST_F(PersonalDataManagerTest, SetUniqueCreditCardLabels) {
 
 TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
   FormData form1;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -703,7 +716,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -747,7 +760,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);
@@ -770,7 +783,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
 
 TEST_F(PersonalDataManagerTest, AggregateTwoProfilesWithMultiValue) {
   FormData form1;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -794,7 +807,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoProfilesWithMultiValue) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -838,7 +851,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoProfilesWithMultiValue) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);
@@ -865,7 +878,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoProfilesWithMultiValue) {
 
 TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   FormData form1;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -896,7 +909,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -951,7 +964,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);
@@ -975,7 +988,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
 
 TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInOld) {
   FormData form1;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -996,7 +1009,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInOld) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1040,7 +1053,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInOld) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);
@@ -1062,7 +1075,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInOld) {
 
 TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInNew) {
   FormData form1;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -1089,7 +1102,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInNew) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1134,7 +1147,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInNew) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);
@@ -1153,7 +1166,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInNew) {
 
 TEST_F(PersonalDataManagerTest, AggregateProfileWithInsufficientAddress) {
   FormData form1;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -1174,7 +1187,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithInsufficientAddress) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_FALSE(personal_data_->ImportFormData(form_structure1,
                                               &imported_credit_card));
@@ -1203,7 +1216,7 @@ TEST_F(PersonalDataManagerTest, AggregateExistingAuxiliaryProfile) {
   // Simulate a form submission with a subset of the info.
   // Note that the phone number format is different from the saved format.
   FormData form;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "Tester", "text", &field);
   form.fields.push_back(field);
@@ -1230,7 +1243,7 @@ TEST_F(PersonalDataManagerTest, AggregateExistingAuxiliaryProfile) {
   form.fields.push_back(field);
 
   FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
+  form_structure.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure,
                                              &imported_credit_card));
@@ -1250,7 +1263,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentCreditCards) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1265,7 +1278,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentCreditCards) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1301,7 +1314,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentCreditCards) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   ASSERT_TRUE(imported_credit_card);
@@ -1326,7 +1339,7 @@ TEST_F(PersonalDataManagerTest, AggregateInvalidCreditCard) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1341,7 +1354,7 @@ TEST_F(PersonalDataManagerTest, AggregateInvalidCreditCard) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1377,7 +1390,7 @@ TEST_F(PersonalDataManagerTest, AggregateInvalidCreditCard) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_FALSE(personal_data_->ImportFormData(form_structure2,
                                               &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);
@@ -1393,7 +1406,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithConflict) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1408,7 +1421,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithConflict) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1445,7 +1458,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithConflict) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   EXPECT_FALSE(imported_credit_card);
@@ -1469,7 +1482,7 @@ TEST_F(PersonalDataManagerTest, AggregateEmptyCreditCardWithConflict) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1484,7 +1497,7 @@ TEST_F(PersonalDataManagerTest, AggregateEmptyCreditCardWithConflict) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1517,7 +1530,7 @@ TEST_F(PersonalDataManagerTest, AggregateEmptyCreditCardWithConflict) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_FALSE(personal_data_->ImportFormData(form_structure2,
                                               &imported_credit_card));
   EXPECT_FALSE(imported_credit_card);
@@ -1537,7 +1550,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInNew) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1552,7 +1565,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInNew) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1587,7 +1600,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInNew) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   EXPECT_FALSE(imported_credit_card);
@@ -1616,7 +1629,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInNew) {
   // Note missing expiration month and year..
 
   FormStructure form_structure3(form3);
-  form_structure3.DetermineHeuristicTypes();
+  form_structure3.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_FALSE(personal_data_->ImportFormData(form_structure3,
                                               &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);
@@ -1653,7 +1666,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInOld) {
   // Add a second different valid credit card where the year is different but
   // the credit card number matches.
   FormData form;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form.fields.push_back(field);
@@ -1668,7 +1681,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInOld) {
   form.fields.push_back(field);
 
   FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
+  form_structure.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure,
                                              &imported_credit_card));
@@ -1710,7 +1723,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithSeparators) {
 
   // Import the same card info, but with different separators in the number.
   FormData form;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form.fields.push_back(field);
@@ -1725,7 +1738,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithSeparators) {
   form.fields.push_back(field);
 
   FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
+  form_structure.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure,
                                              &imported_credit_card));
@@ -1864,7 +1877,7 @@ TEST_F(PersonalDataManagerTest, GetNonEmptyTypes) {
 
 TEST_F(PersonalDataManagerTest, CaseInsensitiveMultiValueAggregation) {
   FormData form1;
-  webkit::forms::FormField field;
+  FormFieldData field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -1891,7 +1904,7 @@ TEST_F(PersonalDataManagerTest, CaseInsensitiveMultiValueAggregation) {
   form1.fields.push_back(field);
 
   FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes();
+  form_structure1.DetermineHeuristicTypes(TestAutofillMetrics());
   const CreditCard* imported_credit_card;
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure1,
                                              &imported_credit_card));
@@ -1938,7 +1951,7 @@ TEST_F(PersonalDataManagerTest, CaseInsensitiveMultiValueAggregation) {
   form2.fields.push_back(field);
 
   FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes();
+  form_structure2.DetermineHeuristicTypes(TestAutofillMetrics());
   EXPECT_TRUE(personal_data_->ImportFormData(form_structure2,
                                              &imported_credit_card));
   ASSERT_FALSE(imported_credit_card);

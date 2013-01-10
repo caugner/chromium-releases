@@ -26,7 +26,11 @@
 
 #if defined(OS_ANDROID)
 #include "net/base/network_change_notifier.h"
-#include "net/android/network_change_notifier_factory.h"
+#include "net/android/network_change_notifier_factory_android.h"
+#endif
+
+#if defined(USE_AURA) && defined(USE_X11)
+#include "ui/base/touch/touch_factory.h"
 #endif
 
 namespace content {
@@ -79,6 +83,9 @@ ShellBrowserMainParts::~ShellBrowserMainParts() {
 
 #if !defined(OS_MACOSX)
 void ShellBrowserMainParts::PreMainMessageLoopStart() {
+#if defined(USE_AURA) && defined(USE_X11)
+  ui::TouchFactory::SetTouchDeviceListFromCommandLine();
+#endif
 }
 #endif
 
@@ -91,7 +98,7 @@ void ShellBrowserMainParts::PostMainMessageLoopStart() {
 void ShellBrowserMainParts::PreEarlyInitialization() {
 #if defined(OS_ANDROID)
   net::NetworkChangeNotifier::SetFactory(
-      new net::android::NetworkChangeNotifierFactory());
+      new net::NetworkChangeNotifierFactoryAndroid());
 #endif
 }
 
@@ -120,8 +127,7 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
     }
   }
 #endif
-  devtools_delegate_ = new ShellDevToolsDelegate(
-      port, browser_context_->GetRequestContext());
+  devtools_delegate_ = new ShellDevToolsDelegate(browser_context_.get(), port);
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
     Shell::CreateNewWindow(browser_context_.get(),

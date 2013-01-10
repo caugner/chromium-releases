@@ -4,11 +4,14 @@
 """A library for chrome-based tests.
 
 """
-from chrome_remote_control.browser_finder import *
-from chrome_remote_control.browser_options import *
-from chrome_remote_control.browser import *
-from chrome_remote_control.tab import *
-from chrome_remote_control.util import *
+from chrome_remote_control.browser import Browser
+from chrome_remote_control.browser_finder import FindBrowser
+from chrome_remote_control.browser_finder import GetAllAvailableBrowserTypes
+from chrome_remote_control.browser_gone_exception import BrowserGoneException
+from chrome_remote_control.browser_options import BrowserOptions
+from chrome_remote_control.tab import Tab
+from chrome_remote_control.tab_crash_exception import TabCrashException
+from chrome_remote_control.util import TimeoutException, WaitFor
 
 def CreateBrowser(browser_type):
   """Shorthand way to create a browser of a given type

@@ -6,6 +6,9 @@
 
 #include <string>
 
+#if defined(OS_CHROMEOS)
+#include "ash/ash_switches.h"
+#endif
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -14,6 +17,7 @@
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
+#include "cc/switches.h"
 #include "chrome/browser/crash_upload_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
@@ -22,12 +26,12 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/compositor_util.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "content/public/common/compositor_util.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/gpu_info.h"
 #include "grit/browser_resources.h"
@@ -84,6 +88,7 @@ Value* NewStatusValue(const char* name, const char* status) {
   return value;
 }
 
+#if defined(OS_WIN)
 // Output DxDiagNode tree as nested array of {description,value} pairs
 ListValue* DxDiagNodeToList(const content::DxDiagNode& node) {
   ListValue* list = new ListValue();
@@ -103,6 +108,7 @@ ListValue* DxDiagNodeToList(const content::DxDiagNode& node) {
   }
   return list;
 }
+#endif
 
 std::string GPUDeviceToString(const content::GPUInfo::GPUDevice& gpu) {
   std::string vendor = base::StringPrintf("0x%04x", gpu.vendor_id);
@@ -145,6 +151,8 @@ DictionaryValue* GpuInfoAsDictionaryValue() {
                                              gpu_info.pixel_shader_version));
   basic_info->Append(NewDescriptionValuePair("Vertex shader version",
                                              gpu_info.vertex_shader_version));
+  basic_info->Append(NewDescriptionValuePair("Machine model",
+                                             gpu_info.machine_model));
   basic_info->Append(NewDescriptionValuePair("GL version",
                                              gpu_info.gl_version));
   basic_info->Append(NewDescriptionValuePair("GL_VENDOR",
@@ -233,7 +241,7 @@ Value* GetFeatureStatus() {
           "css_animation",
           flags & (content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING |
                    content::GPU_FEATURE_TYPE_3D_CSS),
-          command_line.HasSwitch(switches::kDisableThreadedAnimation) ||
+          command_line.HasSwitch(cc::switches::kDisableThreadedAnimation) ||
           command_line.HasSwitch(switches::kDisableAcceleratedCompositing) ||
           command_line.HasSwitch(switches::kDisableAcceleratedLayers),
           "Accelerated CSS animation has been disabled at the command line.",
@@ -298,6 +306,18 @@ Value* GetFeatureStatus() {
           "Accelerated video presentation has been disabled, either via"
           " about:flags or command line.",
           true
+      },
+      {
+          "panel_fitting",
+          flags & content::GPU_FEATURE_TYPE_PANEL_FITTING,
+#if defined(OS_CHROMEOS)
+          command_line.HasSwitch(ash::switches::kAshDisablePanelFitting),
+#else
+          true,
+#endif
+          "Panel fitting is unavailable, either disabled at the command"
+          " line or not supported by the current system.",
+          false
       }
   };
   const size_t kNumFeatures = sizeof(kGpuFeatureInfo) / sizeof(GpuFeatureInfo);
@@ -357,13 +377,13 @@ Value* GetFeatureStatus() {
         gpu_info.optimus || gpu_info.amd_switchable) {
       std::string gpu_switching;
       switch (GpuDataManager::GetInstance()->GetGpuSwitchingOption()) {
-        case content::GPU_SWITCHING_AUTOMATIC:
+        case content::GPU_SWITCHING_OPTION_AUTOMATIC:
           gpu_switching = "gpu_switching_automatic";
           break;
-        case content::GPU_SWITCHING_FORCE_DISCRETE:
+        case content::GPU_SWITCHING_OPTION_FORCE_DISCRETE:
           gpu_switching = "gpu_switching_force_discrete";
           break;
-        case content::GPU_SWITCHING_FORCE_INTEGRATED:
+        case content::GPU_SWITCHING_OPTION_FORCE_INTEGRATED:
           gpu_switching = "gpu_switching_force_integrated";
           break;
         default:

@@ -12,6 +12,7 @@
 #include "chrome/browser/event_disposition.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/event_utils.h"
@@ -109,7 +110,8 @@ string16 BookmarkMenuDelegate::GetTooltipText(
   const BookmarkNode* node = i->second;
   if (node->is_url()) {
     return BookmarkBarView::CreateToolTipForURLAndTitle(
-        screen_loc, node->url(), node->GetTitle(), profile_);
+        screen_loc, node->url(), node->GetTitle(), profile_,
+        parent()->GetNativeView());
   }
   return string16();
 }
@@ -128,8 +130,7 @@ void BookmarkMenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
   std::vector<const BookmarkNode*> selection;
   selection.push_back(node);
 
-  bookmark_utils::OpenAll(
-      parent_->GetNativeWindow(), page_navigator_, selection,
+  chrome::OpenAll(parent_->GetNativeWindow(), page_navigator_, selection,
       chrome::DispositionFromEventFlags(mouse_event_flags));
   bookmark_utils::RecordBookmarkLaunch(location_);
 }
@@ -331,8 +332,7 @@ void BookmarkMenuDelegate::BookmarkNodeFaviconChanged(
     MenuItemView* menu_item = i->second->GetMenuItemByID(menu_pair->second);
     if (menu_item) {
       const gfx::Image& favicon = model->GetFavicon(node);
-      menu_item->SetIcon(
-          favicon.IsEmpty() ? SkBitmap() : *favicon.ToSkBitmap());
+      menu_item->SetIcon(favicon.AsImageSkia());
       return;
     }
   }
@@ -342,8 +342,7 @@ void BookmarkMenuDelegate::BookmarkNodeFaviconChanged(
         menu_pair->second);
     if (menu_item) {
       const gfx::Image& favicon = model->GetFavicon(node);
-      menu_item->SetIcon(
-          favicon.IsEmpty() ? SkBitmap() : *favicon.ToSkBitmap());
+      menu_item->SetIcon(favicon.AsImageSkia());
     }
   }
 }

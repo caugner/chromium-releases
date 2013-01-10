@@ -9,6 +9,7 @@
 #include "chrome/browser/extensions/api/extension_action/extension_page_actions_api_constants.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/event_names.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -359,11 +360,13 @@ void BrowserEventRouter::DispatchEvent(
     const char* event_name,
     scoped_ptr<ListValue> args,
     EventRouter::UserGestureState user_gesture) {
-  if (!profile_->IsSameProfile(profile) || !profile->GetExtensionEventRouter())
+  if (!profile_->IsSameProfile(profile) ||
+      !extensions::ExtensionSystem::Get(profile)->event_router())
     return;
 
-  profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-      event_name, args.Pass(), profile, GURL(), user_gesture);
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventToRenderers(event_name, args.Pass(), profile, GURL(),
+                               user_gesture);
 }
 
 void BrowserEventRouter::DispatchEventToExtension(
@@ -372,12 +375,13 @@ void BrowserEventRouter::DispatchEventToExtension(
     const char* event_name,
     scoped_ptr<ListValue> event_args,
     EventRouter::UserGestureState user_gesture) {
-  if (!profile_->IsSameProfile(profile) || !profile->GetExtensionEventRouter())
+  if (!profile_->IsSameProfile(profile) ||
+      !extensions::ExtensionSystem::Get(profile)->event_router())
     return;
 
-  profile->GetExtensionEventRouter()->DispatchEventToExtension(
-      extension_id, event_name, event_args.Pass(), profile, GURL(),
-      user_gesture);
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventToExtension(extension_id, event_name, event_args.Pass(),
+                               profile, GURL(), user_gesture);
 }
 
 void BrowserEventRouter::DispatchEventsAcrossIncognito(
@@ -385,12 +389,13 @@ void BrowserEventRouter::DispatchEventsAcrossIncognito(
     const char* event_name,
     scoped_ptr<ListValue> event_args,
     scoped_ptr<ListValue> cross_incognito_args) {
-  if (!profile_->IsSameProfile(profile) || !profile->GetExtensionEventRouter())
+  if (!profile_->IsSameProfile(profile) ||
+      !extensions::ExtensionSystem::Get(profile)->event_router())
     return;
 
-  profile->GetExtensionEventRouter()->DispatchEventsToRenderersAcrossIncognito(
-      event_name, event_args.Pass(), profile, cross_incognito_args.Pass(),
-      GURL());
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventsToRenderersAcrossIncognito(event_name, event_args.Pass(),
+          profile, cross_incognito_args.Pass(), GURL());
 }
 
 void BrowserEventRouter::DispatchSimpleBrowserEvent(
@@ -576,13 +581,13 @@ void BrowserEventRouter::ExtensionActionExecuted(
     TabContents* tab_contents) {
   const char* event_name = NULL;
   switch (extension_action.action_type()) {
-    case ExtensionAction::TYPE_BROWSER:
+    case Extension::ActionInfo::TYPE_BROWSER:
       event_name = "browserAction.onClicked";
       break;
-    case ExtensionAction::TYPE_PAGE:
+    case Extension::ActionInfo::TYPE_PAGE:
       event_name = "pageAction.onClicked";
       break;
-    case ExtensionAction::TYPE_SCRIPT_BADGE:
+    case Extension::ActionInfo::TYPE_SCRIPT_BADGE:
       event_name = "scriptBadge.onClicked";
       break;
   }

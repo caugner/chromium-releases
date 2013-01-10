@@ -45,13 +45,17 @@ void DeviceController::KillAllListeners() {
   }
 }
 
-bool DeviceController::Start(const std::string& adb_unix_socket) {
+bool DeviceController::Init(const std::string& adb_unix_socket) {
   if (!kickstart_adb_socket_.BindUnix(adb_unix_socket,
                                       true /* abstract */)) {
-    LOG(ERROR) << "Could not BindAndListen DeviceController socket on port: "
-               << adb_unix_socket;
+    LOG(ERROR) << "Could not BindAndListen DeviceController socket on port "
+               << adb_unix_socket << ": " << safe_strerror(errno);
     return false;
   }
+  return true;
+}
+
+void DeviceController::Start() {
   while (true) {
     CleanUpDeadListeners();
     scoped_ptr<Socket> socket(new Socket);
@@ -81,10 +85,19 @@ bool DeviceController::Start(const std::string& adb_unix_socket) {
           // Remove deletes the listener object.
           listeners_.Remove(port);
         }
-        // Listener object will be deleted by the CleanUpDeadListeners method.
-        DeviceListener* new_listener = new DeviceListener(socket.Pass(), port);
-        listeners_.AddWithID(new_listener, port);
+        scoped_ptr<DeviceListener> new_listener(
+            new DeviceListener(socket.Pass(), port));
+        if (!new_listener->BindListenerSocket())
+          continue;
         new_listener->Start();
+        // |port| can be zero, to allow dynamically allocated port, so instead,
+        // we call DeviceListener::listener_port() to retrieve the currently
+        // allocated port to this new listener, which has been set by the
+        // BindListenerSocket() method in case of success.
+        const int listener_port = new_listener->listener_port();
+        // |new_listener| is now owned by listeners_ map.
+        listeners_.AddWithID(new_listener.release(), listener_port);
+        printf("Forwarding device port %d to host.\n", listener_port);
         break;
       }
       case command::DATA_CONNECTION:
@@ -115,8 +128,6 @@ bool DeviceController::Start(const std::string& adb_unix_socket) {
   KillAllListeners();
   CleanUpDeadListeners();
   kickstart_adb_socket_.Close();
-
-  return true;
 }
 
 }  // namespace forwarder

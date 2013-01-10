@@ -18,6 +18,8 @@
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gl_implementation.h"
 
+namespace content {
+
 ImageTransportSurface::ImageTransportSurface() {}
 
 ImageTransportSurface::~ImageTransportSurface() {}
@@ -30,7 +32,8 @@ void ImageTransportSurface::GetRegionsToCopy(
     const gfx::Rect& previous_damage_rect,
     const gfx::Rect& new_damage_rect,
     std::vector<gfx::Rect>* regions) {
-  gfx::Rect intersection = previous_damage_rect.Intersect(new_damage_rect);
+  gfx::Rect intersection =
+      gfx::IntersectRects(previous_damage_rect, new_damage_rect);
 
   if (intersection.IsEmpty()) {
     regions->push_back(previous_damage_rect);
@@ -134,6 +137,7 @@ void ImageTransportHelper::SendAcceleratedSurfacePostSubBuffer(
     GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params) {
   params.surface_id = stub_->surface_id();
   params.route_id = route_id_;
+  params.surface_size = surface_->GetSize();
 #if defined(OS_MACOSX)
   params.window = handle_;
 #endif
@@ -208,8 +212,9 @@ void ImageTransportHelper::OnSetFrontSurfaceIsProtected(
   surface_->OnSetFrontSurfaceIsProtected(is_protected, protection_state_id);
 }
 
-void ImageTransportHelper::OnBufferPresented(uint32 sync_point) {
-  surface_->OnBufferPresented(sync_point);
+void ImageTransportHelper::OnBufferPresented(bool presented,
+                                             uint32 sync_point) {
+  surface_->OnBufferPresented(presented, sync_point);
 }
 
 void ImageTransportHelper::OnResizeViewACK() {
@@ -307,7 +312,9 @@ bool PassThroughImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
   return true;
 }
 
-void PassThroughImageTransportSurface::OnBufferPresented(uint32 sync_point) {
+void PassThroughImageTransportSurface::OnBufferPresented(
+    bool /* presented */,
+    uint32 /* sync_point */) {
   DCHECK(transport_);
   helper_->SetScheduled(true);
 }
@@ -335,5 +342,7 @@ gfx::Size PassThroughImageTransportSurface::GetSize() {
 }
 
 PassThroughImageTransportSurface::~PassThroughImageTransportSurface() {}
+
+}  // namespace content
 
 #endif  // defined(ENABLE_GPU)

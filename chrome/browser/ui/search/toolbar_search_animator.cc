@@ -7,7 +7,6 @@
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/search/search_types.h"
 #include "chrome/browser/ui/search/toolbar_search_animator_observer.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
 #include "ui/base/animation/multi_animation.h"
@@ -55,7 +54,7 @@ bool ToolbarSearchAnimator::IsToolbarSeparatorVisible() const {
   // 2) when mode is |DEFAULT| and the omnibox popup has finished retracting.
   return !is_omnibox_popup_open_ &&
       ((search_model_->mode().mode == Mode::MODE_SEARCH_SUGGESTIONS &&
-        !toolbar_model_->input_in_progress()) ||
+        !toolbar_model_->GetInputInProgress()) ||
        search_model_->mode().is_default());
 }
 
@@ -65,8 +64,9 @@ void ToolbarSearchAnimator::OnOmniboxPopupClosed() {
                     OnToolbarSeparatorChanged());
 }
 
-void ToolbarSearchAnimator::FinishAnimation(TabContents* tab_contents) {
-  Reset(tab_contents);
+void ToolbarSearchAnimator::FinishAnimation(
+    content::WebContents* web_contents) {
+  Reset(web_contents);
 }
 
 void ToolbarSearchAnimator::AddObserver(
@@ -148,7 +148,7 @@ void ToolbarSearchAnimator::StartBackgroundChange() {
   background_animation_->Start();
 }
 
-void ToolbarSearchAnimator::Reset(TabContents* tab_contents) {
+void ToolbarSearchAnimator::Reset(content::WebContents* web_contents) {
   bool notify_background_observers =
       background_animation_.get() && background_animation_->is_animating();
 
@@ -157,7 +157,7 @@ void ToolbarSearchAnimator::Reset(TabContents* tab_contents) {
   // Notify observers of animation cancelation.
   if (notify_background_observers) {
     FOR_EACH_OBSERVER(ToolbarSearchAnimatorObserver, observers_,
-                      OnToolbarBackgroundAnimatorCanceled(tab_contents));
+                      OnToolbarBackgroundAnimatorCanceled(web_contents));
   }
 }
 

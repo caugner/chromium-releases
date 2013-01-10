@@ -22,6 +22,7 @@
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/rotator/screen_rotation.h"
+#include "ash/screen_ash.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
@@ -32,6 +33,7 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/partial_screenshot_view.h"
+#include "ash/wm/power_button_controller.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_cycle_controller.h"
 #include "ash/wm/window_util.h"
@@ -48,13 +50,16 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/gfx/screen.h"
 #include "ui/oak/oak.h"
 #include "ui/views/debug_utils.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/display/output_configurator_animation.h"
+#include "ash/system/chromeos/keyboard_brightness_controller.h"
 #include "base/chromeos/chromeos_version.h"
+#include "base/time.h"
 #include "chromeos/display/output_configurator.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -84,7 +89,7 @@ bool HandleCycleWindowMRU(WindowCycleController::Direction direction,
 }
 
 void HandleCycleWindowLinear(CycleDirection direction) {
-  Shell::GetInstance()->launcher()->CycleWindowLinear(direction);
+  Launcher::ForPrimaryDisplay()->CycleWindowLinear(direction);
 }
 
 #if defined(OS_CHROMEOS)
@@ -117,6 +122,13 @@ void HandleCycleDisplayMode() {
     animation->StartFadeOutAnimation(base::Bind(
         base::IgnoreResult(&chromeos::OutputConfigurator::CycleDisplayMode),
         base::Unretained(shell->output_configurator())));
+  }
+}
+
+void HandleSwapPrimaryDisplay() {
+  if (Shell::GetScreen()->GetNumDisplays() > 1) {
+    Shell::GetInstance()->display_controller()->SetPrimaryDisplay(
+        ScreenAsh::GetSecondaryDisplay());
   }
 }
 
@@ -176,6 +188,12 @@ bool HandleRotateWindows() {
   for (size_t i = 0; i < controllers.size(); ++i) {
     aura::Window* target = controllers[i]->GetContainer(
         internal::kShellWindowId_DefaultContainer);
+    // The rotation animation bases its target transform on the current
+    // rotation and position. Since there could be an animation in progress
+    // right now, queue this animation so when it starts it picks up a neutral
+    // rotation and position. Use replace so we only enqueue one at a time.
+    target->layer()->GetAnimator()->
+        set_preemption_strategy(ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
     scoped_ptr<ui::LayerAnimationSequence> screen_rotation(
         new ui::LayerAnimationSequence(new ash::ScreenRotation(360)));
     target->layer()->GetAnimator()->StartAnimation(
@@ -323,7 +341,12 @@ bool HandlePrintWindowHierarchy() {
 // AcceleratorController, public:
 
 AcceleratorController::AcceleratorController()
-    : accelerator_manager_(new ui::AcceleratorManager) {
+    : accelerator_manager_(new ui::AcceleratorManager),
+      toggle_maximized_suppressed_(false),
+      cycle_backward_linear_suppressed_(false),
+      cycle_forward_linear_suppressed_(false),
+      cycle_backward_mru_suppressed_(false),
+      cycle_forward_mru_suppressed_(false) {
   Init();
 }
 
@@ -337,17 +360,22 @@ void AcceleratorController::Init() {
     actions_allowed_at_lock_screen_.insert(
         kActionsAllowedAtLoginOrLockScreen[i]);
   }
-  for (size_t i = 0; i < kActionsAllowedAtLockScreenLength; ++i) {
+  for (size_t i = 0; i < kActionsAllowedAtLockScreenLength; ++i)
     actions_allowed_at_lock_screen_.insert(kActionsAllowedAtLockScreen[i]);
-  }
-  for (size_t i = 0; i < kReservedActionsLength; ++i) {
+  for (size_t i = 0; i < kActionsAllowedAtModalWindowLength; ++i)
+    actions_allowed_at_modal_window_.insert(kActionsAllowedAtModalWindow[i]);
+  for (size_t i = 0; i < kReservedActionsLength; ++i)
     reserved_actions_.insert(kReservedActions[i]);
-  }
 
   RegisterAccelerators(kAcceleratorData, kAcceleratorDataLength);
 
   if (DebugShortcutsEnabled())
     RegisterAccelerators(kDebugAcceleratorData, kDebugAcceleratorDataLength);
+
+#if defined(OS_CHROMEOS)
+  keyboard_brightness_control_delegate_.reset(
+      new KeyboardBrightnessController());
+#endif
 }
 
 void AcceleratorController::Register(const ui::Accelerator& accelerator,
@@ -384,9 +412,6 @@ bool AcceleratorController::IsReservedAccelerator(
   const ui::Accelerator remapped_accelerator = ime_control_delegate_.get() ?
       ime_control_delegate_->RemapAccelerator(accelerator) : accelerator;
 
-  if (!accelerator_manager_->ShouldHandle(remapped_accelerator))
-    return false;
-
   std::map<ui::Accelerator, int>::const_iterator iter =
       accelerators_.find(remapped_accelerator);
   if (iter == accelerators_.end())
@@ -402,45 +427,87 @@ bool AcceleratorController::PerformAction(int action,
 #if defined(OS_CHROMEOS)
   at_login_screen = shell->delegate() && !shell->delegate()->IsSessionStarted();
 #endif
-  bool at_lock_screen = shell->IsScreenLocked();
-
   if (at_login_screen &&
       actions_allowed_at_login_screen_.find(action) ==
       actions_allowed_at_login_screen_.end()) {
     return false;
   }
-  if (at_lock_screen &&
+  if (shell->IsScreenLocked() &&
       actions_allowed_at_lock_screen_.find(action) ==
       actions_allowed_at_lock_screen_.end()) {
     return false;
   }
+  if (shell->IsModalWindowOpen() &&
+      actions_allowed_at_modal_window_.find(action) ==
+      actions_allowed_at_modal_window_.end()) {
+    // Note: we return true. This indicates the shortcut is handled
+    // and will not be passed to the modal window. This is important
+    // for things like Alt+Tab that would cause an undesired effect
+    // in the modal window by cycling through its window elements.
+    return true;
+  }
   const ui::KeyboardCode key_code = accelerator.key_code();
+
+  const ui::AcceleratorManagerContext& context =
+      accelerator_manager_->GetContext();
+  const ui::EventType last_event_type = context.GetLastEventType();
 
   // You *MUST* return true when some action is performed. Otherwise, this
   // function might be called *twice*, via BrowserView::PreHandleKeyboardEvent
   // and BrowserView::HandleKeyboardEvent, for a single accelerator press.
   switch (action) {
-    case CYCLE_BACKWARD_MRU:
+    case CYCLE_BACKWARD_MRU_PRESSED:
+      if (cycle_backward_mru_suppressed_)
+        return true;
+      // Temporarily disable the feature until crbug.com/158213 is fixed.
+      // TODO(mtomasz): Reenable the feature.
+      // cycle_backward_mru_suppressed_ = true;
       if (key_code == ui::VKEY_TAB && shell->delegate())
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_PREVWINDOW_TAB);
       return HandleCycleWindowMRU(WindowCycleController::BACKWARD,
                                   accelerator.IsAltDown());
-    case CYCLE_FORWARD_MRU:
+    case CYCLE_BACKWARD_MRU_RELEASED:
+      cycle_backward_mru_suppressed_ = false;
+      return true;
+    case CYCLE_FORWARD_MRU_PRESSED:
+      if (cycle_forward_mru_suppressed_)
+        return true;
+      // Temporarily disable the feature until crbug.com/158213 is fixed.
+      // TODO(mtomasz): Reenable the feature.
+      // cycle_forward_mru_suppressed_ = true;
       if (key_code == ui::VKEY_TAB && shell->delegate())
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_NEXTWINDOW_TAB);
       return HandleCycleWindowMRU(WindowCycleController::FORWARD,
                                   accelerator.IsAltDown());
-    case CYCLE_BACKWARD_LINEAR:
+    case CYCLE_FORWARD_MRU_RELEASED:
+      cycle_forward_mru_suppressed_ = false;
+      return true;
+    case CYCLE_BACKWARD_LINEAR_PRESSED:
+      if (cycle_backward_linear_suppressed_)
+        return true;
+      cycle_backward_linear_suppressed_ = true;
       if (key_code == ui::VKEY_F5 && shell->delegate())
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_PREVWINDOW_F5);
       HandleCycleWindowLinear(CYCLE_BACKWARD);
       return true;
-    case CYCLE_FORWARD_LINEAR:
+    case CYCLE_BACKWARD_LINEAR_RELEASED:
+      cycle_backward_linear_suppressed_ = false;
+      return true;
+    case CYCLE_FORWARD_LINEAR_PRESSED:
+      if (cycle_forward_linear_suppressed_)
+        return true;
+      cycle_forward_linear_suppressed_ = true;
       if (key_code == ui::VKEY_F5 && shell->delegate())
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_NEXTWINDOW_F5);
       HandleCycleWindowLinear(CYCLE_FORWARD);
       return true;
+    case CYCLE_FORWARD_LINEAR_RELEASED:
+      cycle_forward_linear_suppressed_ = false;
+      return true;
 #if defined(OS_CHROMEOS)
+    case CYCLE_DISPLAY_MODE:
+      HandleCycleDisplayMode();
+      return true;
     case LOCK_SCREEN:
       return HandleLock();
     case OPEN_FILE_MANAGER_DIALOG:
@@ -449,14 +516,14 @@ bool AcceleratorController::PerformAction(int action,
       return HandleFileManager(false /* as_dialog */);
     case OPEN_CROSH:
       return HandleCrosh();
+    case SWAP_PRIMARY_DISPLAY:
+      HandleSwapPrimaryDisplay();
+      return true;
     case TOGGLE_SPOKEN_FEEDBACK:
       return HandleToggleSpokenFeedback();
     case TOGGLE_WIFI:
       if (Shell::GetInstance()->tray_delegate())
         Shell::GetInstance()->tray_delegate()->ToggleWifi();
-      return true;
-    case CYCLE_DISPLAY_MODE:
-      HandleCycleDisplayMode();
       return true;
 #endif
     case OPEN_FEEDBACK_PAGE:
@@ -501,6 +568,11 @@ bool AcceleratorController::PerformAction(int action,
       ash::Shell::GetInstance()->ToggleAppList();
       return true;
     case DISABLE_CAPS_LOCK:
+      // See: case NEXT_IME.
+      if (last_event_type == ui::ET_KEY_RELEASED) {
+        // We totally ignore this accelerator.
+        return false;
+      }
       if (shell->caps_lock_delegate()->IsCapsLockEnabled()) {
         shell->caps_lock_delegate()->SetCapsLockEnabled(false);
         return true;
@@ -540,8 +612,8 @@ bool AcceleratorController::PerformAction(int action,
           HandleVolumeUp(accelerator);
       break;
     case FOCUS_LAUNCHER:
-      if (shell->launcher())
-        return shell->focus_cycler()->FocusWidget(shell->launcher()->widget());
+      return shell->focus_cycler()->FocusWidget(
+          Launcher::ForPrimaryDisplay()->widget());
       break;
     case FOCUS_NEXT_PANE:
       return HandleRotatePaneFocus(Shell::FORWARD);
@@ -553,7 +625,6 @@ bool AcceleratorController::PerformAction(int action,
             shell->system_tray()->GetWidget());
       break;
     case SHOW_KEYBOARD_OVERLAY:
-    case SHOW_KEYBOARD_OVERLAY_BY_F14_KEY:
       ash::Shell::GetInstance()->delegate()->ShowKeyboardOverlay();
       return true;
     case SHOW_OAK:
@@ -566,6 +637,14 @@ bool AcceleratorController::PerformAction(int action,
     case SHOW_TASK_MANAGER:
       return HandleShowTaskManager();
     case NEXT_IME:
+      // This check is necessary e.g. not to process the Shift+Alt+
+      // ET_KEY_RELEASED accelerator for Chrome OS (see ash/accelerators/
+      // accelerator_controller.cc) when Shift+Alt+Tab is pressed and then Tab
+      // is released.
+      if (last_event_type == ui::ET_KEY_RELEASED) {
+        // We totally ignore this accelerator.
+        return false;
+      }
       if (ime_control_delegate_.get())
         return ime_control_delegate_->HandleNextIme();
       break;
@@ -651,12 +730,21 @@ bool AcceleratorController::PerformAction(int action,
       }
       break;
     }
-    case TOGGLE_MAXIMIZED: {
+    case TOGGLE_MAXIMIZED_PRESSED: {
+      // We do not want to toggle maximization on the acceleration key
+      // repeating.
+      if (toggle_maximized_suppressed_)
+        return true;
+      toggle_maximized_suppressed_ = true;
       if (key_code == ui::VKEY_F4 && shell->delegate()) {
         shell->delegate()->RecordUserMetricsAction(
             UMA_ACCEL_MAXIMIZE_RESTORE_F4);
       }
       shell->delegate()->ToggleMaximized();
+      return true;
+    }
+    case TOGGLE_MAXIMIZED_RELEASED: {
+      toggle_maximized_suppressed_ = false;
       return true;
     }
     case WINDOW_POSITION_CENTER: {
@@ -690,10 +778,35 @@ bool AcceleratorController::PerformAction(int action,
        return HandleMediaPrevTrack();
     case POWER_PRESSED:  // fallthrough
     case POWER_RELEASED:
-       // We don't do anything with these at present, but we consume them to
-       // prevent them from getting passed to apps -- see
-       // http://crbug.com/146609.
-       return true;
+#if defined(OS_CHROMEOS)
+      if (!base::chromeos::IsRunningOnChromeOS()) {
+        // There is no powerd in linux desktop, so call the
+        // PowerButtonController here.
+        Shell::GetInstance()->power_button_controller()->
+            OnPowerButtonEvent(action == POWER_PRESSED, base::TimeTicks());
+      }
+#endif
+      // We don't do anything with these at present on the device,
+      // (power button evets are reported to us from powerm via
+      // D-BUS), but we consume them to prevent them from getting
+      // passed to apps -- see http://crbug.com/146609.
+      return true;
+    case LOCK_PRESSED:
+    case LOCK_RELEASED:
+#if defined(OS_CHROMEOS)
+      if (!base::chromeos::IsRunningOnChromeOS()) {
+        // There is no powerd in linux desktop, so call the
+        // PowerButtonController here.
+        Shell::GetInstance()->power_button_controller()->
+            OnLockButtonEvent(action == LOCK_PRESSED, base::TimeTicks());
+        return true;
+      }
+#endif
+      // LOCK_PRESSED/RELEASED in debug only action that is meant for
+      // testing lock behavior on linux desktop. If we ever reached
+      // here (when you run a debug build on the device), pass it onto
+      // apps.
+      return false;
 #if !defined(NDEBUG)
     case PRINT_LAYER_HIERARCHY:
       return HandlePrintLayerHierarchy();
@@ -710,21 +823,18 @@ bool AcceleratorController::PerformAction(int action,
 
 void AcceleratorController::SetBrightnessControlDelegate(
     scoped_ptr<BrightnessControlDelegate> brightness_control_delegate) {
-  // TODO(oshima): Show brightness control regardless of display type
-  // temporarily. crbug.com/152003.
-  brightness_control_delegate_.swap(brightness_control_delegate);
+  internal::MultiDisplayManager* display_manager =
+      static_cast<internal::MultiDisplayManager*>(
+          aura::Env::GetInstance()->display_manager());
+  // Install brightness control delegate only when internal
+  // display exists.
+  if (display_manager->HasInternalDisplay())
+    brightness_control_delegate_.swap(brightness_control_delegate);
 }
 
 void AcceleratorController::SetImeControlDelegate(
     scoped_ptr<ImeControlDelegate> ime_control_delegate) {
   ime_control_delegate_.swap(ime_control_delegate);
-}
-
-void AcceleratorController::SetKeyboardBrightnessControlDelegate(
-    scoped_ptr<KeyboardBrightnessControlDelegate>
-    keyboard_brightness_control_delegate) {
-  keyboard_brightness_control_delegate_.swap(
-      keyboard_brightness_control_delegate);
 }
 
 void AcceleratorController::SetScreenshotDelegate(
@@ -744,10 +854,9 @@ bool AcceleratorController::AcceleratorPressed(
 }
 
 void AcceleratorController::SwitchToWindow(int window) {
-  const LauncherItems& items =
-      Shell::GetInstance()->launcher()->model()->items();
-  int item_count =
-      Shell::GetInstance()->launcher()->model()->item_count();
+  Launcher* launcher = Launcher::ForPrimaryDisplay();
+  const LauncherItems& items = launcher->model()->items();
+  int item_count = launcher->model()->item_count();
   int indexes_left = window >= 0 ? window : item_count;
   int found_index = -1;
 
@@ -768,7 +877,7 @@ void AcceleratorController::SwitchToWindow(int window) {
       (items[found_index].status == ash::STATUS_RUNNING ||
        items[found_index].status == ash::STATUS_CLOSED)) {
     // Then set this one as active.
-    Shell::GetInstance()->launcher()->ActivateLauncherItem(found_index);
+    launcher->ActivateLauncherItem(found_index);
   }
 }
 
@@ -784,6 +893,13 @@ void AcceleratorController::RegisterAccelerators(
     accelerators_.insert(
         std::make_pair(accelerator, accelerators[i].action));
   }
+}
+
+void AcceleratorController::SetKeyboardBrightnessControlDelegate(
+    scoped_ptr<KeyboardBrightnessControlDelegate>
+    keyboard_brightness_control_delegate) {
+  keyboard_brightness_control_delegate_ =
+      keyboard_brightness_control_delegate.Pass();
 }
 
 bool AcceleratorController::CanHandleAccelerators() const {

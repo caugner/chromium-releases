@@ -7,7 +7,7 @@
 #include "base/callback.h"
 #include "base/message_loop.h"
 #include "chrome/browser/captive_portal/captive_portal_service.h"
-#include "chrome/browser/ui/tab_contents/test_tab_contents.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
@@ -51,10 +51,6 @@ class TestCaptivePortalTabReloader : public CaptivePortalTabReloader {
     CaptivePortalTabReloader::set_slow_ssl_load_time(slow_ssl_load_time);
   }
 
-  content::WebContents* web_contents() {
-    return CaptivePortalTabReloader::web_contents();
-  }
-
   // CaptivePortalTabReloader:
   MOCK_METHOD0(ReloadTab, void());
   MOCK_METHOD0(MaybeOpenCaptivePortalLoginTab, void());
@@ -91,10 +87,13 @@ class MockInterstitialPageDelegate : public content::InterstitialPageDelegate {
   DISALLOW_COPY_AND_ASSIGN(MockInterstitialPageDelegate);
 };
 
-class CaptivePortalTabReloaderTest : public TabContentsTestHarness {
+class CaptivePortalTabReloaderTest : public ChromeRenderViewHostTestHarness {
  public:
   CaptivePortalTabReloaderTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_) {
+      : ui_thread_(content::BrowserThread::UI, &message_loop_),
+        file_user_blocking_thread_(content::BrowserThread::FILE_USER_BLOCKING,
+                                   &message_loop_),
+        io_thread_(content::BrowserThread::IO, &message_loop_) {
   }
 
   virtual ~CaptivePortalTabReloaderTest() {
@@ -102,10 +101,9 @@ class CaptivePortalTabReloaderTest : public TabContentsTestHarness {
 
   // testing::Test:
   virtual void SetUp() OVERRIDE {
-    TabContentsTestHarness::SetUp();
-    web_contents_.reset(CreateTestWebContents());
+    ChromeRenderViewHostTestHarness::SetUp();
     tab_reloader_.reset(new testing::StrictMock<TestCaptivePortalTabReloader>(
-        web_contents_.get()));
+        web_contents()));
 
     // Most tests don't run the message loop, so don't use a timer for them.
     tab_reloader_->set_slow_ssl_load_time(base::TimeDelta());
@@ -114,16 +112,16 @@ class CaptivePortalTabReloaderTest : public TabContentsTestHarness {
   virtual void TearDown() OVERRIDE {
     EXPECT_FALSE(tab_reloader().TimerRunning());
     tab_reloader_.reset(NULL);
-    web_contents_.reset(NULL);
-    TabContentsTestHarness::TearDown();
+    ChromeRenderViewHostTestHarness::TearDown();
   }
 
   TestCaptivePortalTabReloader& tab_reloader() { return *tab_reloader_.get(); }
 
  private:
   content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_user_blocking_thread_;
+  content::TestBrowserThread io_thread_;
 
-  scoped_ptr<content::WebContents> web_contents_;
   scoped_ptr<TestCaptivePortalTabReloader> tab_reloader_;
 };
 
@@ -543,7 +541,7 @@ TEST_F(CaptivePortalTabReloaderTest, SSLCertErrorLogin) {
             tab_reloader().state());
   EXPECT_FALSE(tab_reloader().TimerRunning());
   // The MockInterstitialPageDelegate will cleaned up by the WebContents.
-  new MockInterstitialPageDelegate(tab_reloader().web_contents());
+  new MockInterstitialPageDelegate(web_contents());
 
   // Captive portal probe finds a captive portal.
   EXPECT_CALL(tab_reloader(), MaybeOpenCaptivePortalLoginTab()).Times(1);

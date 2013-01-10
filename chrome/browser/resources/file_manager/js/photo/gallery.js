@@ -51,11 +51,6 @@ function Gallery(context) {
 }
 
 /**
- * Flag to enable the mosaic view.
- */
-Gallery.ENABLE_MOSAIC = false;
-
-/**
  * Create and initialize a Gallery object based on a context.
  *
  * @param {Object} context Gallery context.
@@ -123,6 +118,7 @@ Gallery.openStandalone = function(path, pageState) {
         metadataCache: MetadataCache.createFull(),
         pageState: pageState,
         onClose: onClose,
+        allowMosaic: true, /* For debugging purposes */
         displayStringFunction: strf
       };
       Gallery.open(context, urls, selectedUrls);
@@ -169,6 +165,16 @@ Gallery.prototype.initListeners_ = function() {
           Gallery.FADE_TIMEOUT);
   this.document_.body.addEventListener('touchend', initiateFading);
   this.document_.body.addEventListener('touchcancel', initiateFading);
+
+  var thumbnailObserverId = this.metadataCache_.addObserver(
+      this.context_.curDirEntry,
+      MetadataCache.CHILDREN,
+      'thumbnail',
+      this.updateThumbnails_.bind(this));
+
+  this.document_.defaultView.addEventListener('unload',
+      this.metadataCache_.removeObserver.bind(
+          this.metadataCache_, thumbnailObserverId));
 };
 
 /**
@@ -206,20 +212,23 @@ Gallery.prototype.initDom_ = function() {
   this.prompt_ = new ImageEditor.Prompt(
       this.container_, this.displayStringFunction_);
 
-  if (Gallery.ENABLE_MOSAIC) {
+  var onThumbnailError = this.context_.onThumbnailError || function() {};
+
+  if (this.context_.allowMosaic) {
     this.modeButton_ = util.createChild(this.toolbar_, 'button mode');
     this.modeButton_.addEventListener('click',
         this.toggleMode_.bind(this, null));
 
     this.mosaicMode_ = new MosaicMode(content,
         this.dataModel_, this.selectionModel_, this.metadataCache_,
-        this.toggleMode_.bind(this, null));
+        this.toggleMode_.bind(this, null), onThumbnailError);
   }
 
   this.slideMode_ = new SlideMode(this.container_, content,
       this.toolbar_, this.prompt_,
-      this.dataModel_, this.selectionModel_,
-      this.context_, this.toggleMode_.bind(this), this.displayStringFunction_);
+      this.dataModel_, this.selectionModel_, this.context_,
+      this.toggleMode_.bind(this), onThumbnailError,
+      this.displayStringFunction_);
 
   var deleteButton = this.document_.createElement('div');
   deleteButton.className = 'button delete';
@@ -229,6 +238,7 @@ Gallery.prototype.initDom_ = function() {
       deleteButton, this.toolbar_.querySelector('.edit'));
 
   this.shareButton_ = util.createChild(this.toolbar_, 'button share');
+  this.shareButton_.setAttribute('disabled', '');
   this.shareButton_.title = this.displayStringFunction_('share');
   this.shareButton_.addEventListener('click', this.toggleShare_.bind(this));
 
@@ -368,7 +378,9 @@ Gallery.prototype.checkActivity_ = function() {
 */
 Gallery.prototype.onUserAction_ = function() {
   this.closeShareMenu_();
+  // Show the toolbar and hide it after the default timeout.
   this.inactivityWatcher_.startActivity();
+  this.inactivityWatcher_.stopActivity();
 };
 
 /**
@@ -588,8 +600,7 @@ Gallery.prototype.onKeyDown_ = function(event) {
 
 
     case 'U+0056':  // 'v'
-      this.slideMode_.toggleSlideshow(
-          SlideMode.SLIDESHOW_INTERVAL_FIRST, event);
+      this.slideMode_.startSlideshow(SlideMode.SLIDESHOW_INTERVAL_FIRST, event);
       return;
 
     case 'U+007F':  // Delete
@@ -789,4 +800,19 @@ Gallery.prototype.updateShareMenu_ = function() {
     ImageUtil.setAttribute(this.shareButton_, 'disabled', empty);
     this.shareMenu_.hidden = wasHidden || empty;
   }.bind(this));
+};
+
+/**
+ * Update thumbnails.
+ * @private
+ */
+Gallery.prototype.updateThumbnails_ = function() {
+  if (this.currentMode_ == this.slideMode_)
+    this.slideMode_.updateThumbnails();
+
+  if (this.mosaicMode_) {
+    var mosaic = this.mosaicMode_.getMosaic();
+    if (mosaic.isInitialized())
+      mosaic.reload();
+  }
 };

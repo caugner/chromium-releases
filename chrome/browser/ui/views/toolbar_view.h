@@ -27,6 +27,7 @@ class BrowserActionsContainer;
 class Browser;
 class LocationBarContainer;
 class WrenchMenu;
+class WrenchMenuModel;
 
 namespace chrome {
 namespace search {
@@ -55,10 +56,8 @@ class ToolbarView : public views::AccessiblePaneView,
   virtual ~ToolbarView();
 
   // Create the contents of the Browser Toolbar. |location_bar_parent| is the
-  // view the LocationBarContainer is added to. |popup_parent_view| is the
-  // View to add the omnibox popup view to.
-  // TODO(sky): clearly describe when |popup_parent_view| is used.
-  void Init(views::View* location_bar_parent, views::View* popup_parent_view);
+  // view the LocationBarContainer is added to.
+  void Init(views::View* location_bar_parent);
 
   // Updates the toolbar (and transitively the location bar) with the states of
   // the specified |tab|.  If |should_restore_state| is true, we're switching
@@ -90,6 +89,9 @@ class ToolbarView : public views::AccessiblePaneView,
   // is specified. Depending on the toolbar mode, this can result in
   // some toolbar children views change in visibility.
   void LayoutForSearch();
+
+  // Returns the view to which the bookmark bubble should be anchored.
+  views::View* GetBookmarkBubbleAnchor();
 
   // Accessors...
   Browser* browser() const { return browser_; }
@@ -237,11 +239,15 @@ class ToolbarView : public views::AccessiblePaneView,
   // Controls whether or not a home button should be shown on the toolbar.
   BooleanPrefMember show_home_button_;
 
+  // A pref that counts how often the bubble has been shown.
+  IntegerPrefMember sideload_wipeout_bubble_shown_;
+
   // The display mode used when laying out the toolbar.
   DisplayMode display_mode_;
 
   // Wrench menu.
   scoped_ptr<WrenchMenu> wrench_menu_;
+  scoped_ptr<WrenchMenuModel> wrench_menu_model_;
 
   // A list of listeners to call when the menu opens.
   ObserverList<views::MenuListener> menu_listeners_;

@@ -17,6 +17,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "third_party/skia/include/core/SkRegion.h"
 
 @interface NSWindow (NSPrivateApis)
 - (void)setBottomCornerRounded:(BOOL)rounded;
@@ -144,15 +145,43 @@
 
 @end
 
-@interface ControlRegionView : NSView
+@interface ControlRegionView : NSView {
+ @private
+  ShellWindowCocoa* shellWindow_;  // Weak; owns self.
+}
+
 @end
+
 @implementation ControlRegionView
+
+- (id)initWithShellWindow:(ShellWindowCocoa*)shellWindow {
+  if ((self = [super init]))
+    shellWindow_ = shellWindow;
+  return self;
+}
+
 - (BOOL)mouseDownCanMoveWindow {
   return NO;
 }
+
 - (NSView*)hitTest:(NSPoint)aPoint {
-  return nil;
+  if (shellWindow_->use_system_drag())
+    return nil;
+  if (!shellWindow_->draggable_region() ||
+      !shellWindow_->draggable_region()->contains(aPoint.x, aPoint.y)) {
+    return nil;
+  }
+  return self;
 }
+
+- (void)mouseDown:(NSEvent*)event {
+  shellWindow_->HandleMouseEvent(event);
+}
+
+- (void)mouseDragged:(NSEvent*)event {
+  shellWindow_->HandleMouseEvent(event);
+}
+
 @end
 
 @interface NSView (WebContentsView)
@@ -163,7 +192,8 @@ ShellWindowCocoa::ShellWindowCocoa(ShellWindow* shell_window,
                                    const ShellWindow::CreateParams& params)
     : shell_window_(shell_window),
       has_frame_(params.frame == ShellWindow::CreateParams::FRAME_CHROME),
-      attention_request_id_(0) {
+      attention_request_id_(0),
+      use_system_drag_(true) {
   // Flip coordinates based on the primary screen.
   NSRect main_screen_rect = [[[NSScreen screens] objectAtIndex:0] frame];
   NSRect cocoa_bounds = NSMakeRect(params.bounds.x(),
@@ -173,11 +203,11 @@ ShellWindowCocoa::ShellWindowCocoa(ShellWindow* shell_window,
   // If coordinates are < 0, center window on primary screen
   if (params.bounds.x() < 0) {
     cocoa_bounds.origin.x =
-        (NSWidth(main_screen_rect) - NSWidth(cocoa_bounds)) / 2;
+        floor((NSWidth(main_screen_rect) - NSWidth(cocoa_bounds)) / 2);
   }
   if (params.bounds.y() < 0) {
     cocoa_bounds.origin.y =
-        (NSHeight(main_screen_rect) - NSHeight(cocoa_bounds)) / 2;
+        floor((NSHeight(main_screen_rect) - NSHeight(cocoa_bounds)) / 2);
   }
 
   NSUInteger style_mask = NSTitledWindowMask | NSClosableWindowMask |
@@ -198,14 +228,15 @@ ShellWindowCocoa::ShellWindowCocoa(ShellWindow* shell_window,
                       defer:NO]);
   }
   [window setTitle:base::SysUTF8ToNSString(extension()->name())];
-  gfx::Size min_size = params.minimum_size;
-  if (min_size.width() || min_size.height()) {
-    [window setContentMinSize:NSMakeSize(min_size.width(), min_size.height())];
+  min_size_ = params.minimum_size;
+  if (min_size_.width() || min_size_.height()) {
+    [window setContentMinSize:
+        NSMakeSize(min_size_.width(), min_size_.height())];
   }
-  gfx::Size max_size = params.maximum_size;
-  if (max_size.width() || max_size.height()) {
-    CGFloat max_width = max_size.width() ? max_size.width() : CGFLOAT_MAX;
-    CGFloat max_height = max_size.height() ? max_size.height() : CGFLOAT_MAX;
+  max_size_ = params.maximum_size;
+  if (max_size_.width() || max_size_.height()) {
+    CGFloat max_width = max_size_.width() ? max_size_.width() : CGFLOAT_MAX;
+    CGFloat max_height = max_size_.height() ? max_size_.height() : CGFLOAT_MAX;
     [window setContentMaxSize:NSMakeSize(max_width, max_height)];
   }
 
@@ -219,14 +250,23 @@ ShellWindowCocoa::ShellWindowCocoa(ShellWindow* shell_window,
   NSView* view = web_contents()->GetView()->GetNativeView();
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
+  // By default, the whole frameless window is not draggable.
+  if (!has_frame_) {
+    gfx::Rect window_bounds(
+        0, 0, NSWidth(cocoa_bounds), NSHeight(cocoa_bounds));
+    system_drag_exclude_areas_.push_back(window_bounds);
+  }
+
   InstallView();
 
   [[window_controller_ window] setDelegate:window_controller_];
   [window_controller_ setShellWindow:this];
 
-  extension_keybinding_registry_.reset(
-      new ExtensionKeybindingRegistryCocoa(shell_window_->profile(), window,
-          extensions::ExtensionKeybindingRegistry::PLATFORM_APPS_ONLY));
+  extension_keybinding_registry_.reset(new ExtensionKeybindingRegistryCocoa(
+      shell_window_->profile(),
+      window,
+      extensions::ExtensionKeybindingRegistry::PLATFORM_APPS_ONLY,
+      shell_window));
 }
 
 void ShellWindowCocoa::InstallView() {
@@ -234,6 +274,10 @@ void ShellWindowCocoa::InstallView() {
   if (has_frame_) {
     [view setFrame:[[window() contentView] bounds]];
     [[window() contentView] addSubview:view];
+    if (!max_size_.IsEmpty() && min_size_ == max_size_) {
+      [[window() standardWindowButton:NSWindowZoomButton] setEnabled:NO];
+      [window() setShowsResizeIndicator:NO];
+    }
   } else {
     // TODO(jeremya): find a cleaner way to send this information to the
     // WebContentsViewCocoa view.
@@ -248,6 +292,11 @@ void ShellWindowCocoa::InstallView() {
     [[window() standardWindowButton:NSWindowZoomButton] setHidden:YES];
     [[window() standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
     [[window() standardWindowButton:NSWindowCloseButton] setHidden:YES];
+
+    // Some third-party OS X utilities check the zoom button's enabled state to
+    // determine whether to show custom UI on hover, so we disable it here to
+    // prevent them from doing so in a frameless app window.
+    [[window() standardWindowButton:NSWindowZoomButton] setEnabled:NO];
 
     InstallDraggableRegionViews();
   }
@@ -358,6 +407,10 @@ void ShellWindowCocoa::ShowInactive() {
   [window() orderFront:window_controller_];
 }
 
+void ShellWindowCocoa::Hide() {
+  [window() orderOut:window_controller_];
+}
+
 void ShellWindowCocoa::Close() {
   [window() performClose:nil];
 }
@@ -428,8 +481,123 @@ void ShellWindowCocoa::UpdateDraggableRegions(
   if (has_frame_)
     return;
 
-  draggable_regions_ = regions;
+  // To use system drag, the window has to be marked as draggable with
+  // non-draggable areas being excluded via overlapping views.
+  // 1) If no draggable area is provided, the window is not draggable at all.
+  // 2) If only one draggable area is given, as this is the most common
+  //    case, use the system drag. The non-draggable areas that are opposite of
+  //    the draggable area are computed.
+  // 3) Otherwise, use the custom drag. As such, we lose the capability to
+  //    support some features like snapping into other space.
+
+  // Determine how to perform the drag by counting the number of draggable
+  // areas.
+  const extensions::DraggableRegion* draggable_area = NULL;
+  use_system_drag_ = true;
+  for (std::vector<extensions::DraggableRegion>::const_iterator iter =
+           regions.begin();
+       iter != regions.end();
+       ++iter) {
+    if (iter->draggable) {
+      // If more than one draggable area is found, use custom drag.
+      if (draggable_area) {
+        use_system_drag_ = false;
+        break;
+      }
+      draggable_area = &(*iter);
+    }
+  }
+
+  if (use_system_drag_)
+    UpdateDraggableRegionsForSystemDrag(regions, draggable_area);
+  else
+    UpdateDraggableRegionsForCustomDrag(regions);
+
   InstallDraggableRegionViews();
+}
+
+void ShellWindowCocoa::UpdateDraggableRegionsForSystemDrag(
+    const std::vector<extensions::DraggableRegion>& regions,
+    const extensions::DraggableRegion* draggable_area) {
+  NSView* web_view = web_contents()->GetView()->GetNativeView();
+  NSInteger web_view_width = NSWidth([web_view bounds]);
+  NSInteger web_view_height = NSHeight([web_view bounds]);
+
+  system_drag_exclude_areas_.clear();
+
+  // The whole window is not draggable if no draggable area is given.
+  if (!draggable_area) {
+    gfx::Rect window_bounds(0, 0, web_view_width, web_view_height);
+    system_drag_exclude_areas_.push_back(window_bounds);
+    return;
+  }
+
+  // Otherwise, there is only one draggable area. Compute non-draggable areas
+  // that are the opposite of the given draggable area, combined with the
+  // remaining provided non-draggable areas.
+
+  // Copy all given non-draggable areas.
+  for (std::vector<extensions::DraggableRegion>::const_iterator iter =
+           regions.begin();
+       iter != regions.end();
+       ++iter) {
+    if (!iter->draggable)
+      system_drag_exclude_areas_.push_back(iter->bounds);
+  }
+
+  gfx::Rect draggable_bounds = draggable_area->bounds;
+  gfx::Rect non_draggable_bounds;
+
+  // Add the non-draggable area above the given draggable area.
+  if (draggable_bounds.y() > 0) {
+    non_draggable_bounds.SetRect(0,
+                                 0,
+                                 web_view_width,
+                                 draggable_bounds.y() - 1);
+    system_drag_exclude_areas_.push_back(non_draggable_bounds);
+  }
+
+  // Add the non-draggable area below the given draggable area.
+  if (draggable_bounds.bottom() < web_view_height) {
+    non_draggable_bounds.SetRect(0,
+                                 draggable_bounds.bottom() + 1,
+                                 web_view_width,
+                                 web_view_height - draggable_bounds.bottom());
+    system_drag_exclude_areas_.push_back(non_draggable_bounds);
+  }
+
+  // Add the non-draggable area to the left of the given draggable area.
+  if (draggable_bounds.x() > 0) {
+    non_draggable_bounds.SetRect(0,
+                                 draggable_bounds.y(),
+                                 draggable_bounds.x() - 1,
+                                 draggable_bounds.height());
+    system_drag_exclude_areas_.push_back(non_draggable_bounds);
+  }
+
+  // Add the non-draggable area to the right of the given draggable area.
+  if (draggable_bounds.right() < web_view_width) {
+    non_draggable_bounds.SetRect(draggable_bounds.right() + 1,
+                                 draggable_bounds.y(),
+                                 web_view_width - draggable_bounds.right(),
+                                 draggable_bounds.height());
+    system_drag_exclude_areas_.push_back(non_draggable_bounds);
+  }
+}
+
+void ShellWindowCocoa::UpdateDraggableRegionsForCustomDrag(
+    const std::vector<extensions::DraggableRegion>& regions) {
+  // We still need one ControlRegionView to cover the whole window such that
+  // mouse events could be captured.
+  NSView* web_view = web_contents()->GetView()->GetNativeView();
+  gfx::Rect window_bounds(
+      0, 0, NSWidth([web_view bounds]), NSHeight([web_view bounds]));
+  system_drag_exclude_areas_.clear();
+  system_drag_exclude_areas_.push_back(window_bounds);
+
+  // Aggregate the draggable areas and non-draggable areas such that hit test
+  // could be performed easily.
+  draggable_region_.reset(ShellWindow::RawDraggableRegionsToSkRegion(regions));
 }
 
 void ShellWindowCocoa::HandleKeyboardEvent(
@@ -461,16 +629,16 @@ void ShellWindowCocoa::InstallDraggableRegionViews() {
 
   // Create and add ControlRegionView for each region that needs to be excluded
   // from the dragging.
-  for (std::vector<extensions::DraggableRegion>::const_iterator iter =
-           draggable_regions_.begin();
-       iter != draggable_regions_.end();
+  for (std::vector<gfx::Rect>::const_iterator iter =
+           system_drag_exclude_areas_.begin();
+       iter != system_drag_exclude_areas_.end();
        ++iter) {
-    const extensions::DraggableRegion& region = *iter;
-    scoped_nsobject<NSView> controlRegion([[ControlRegionView alloc] init]);
-    [controlRegion setFrame:NSMakeRect(region.bounds.x(),
-                                       webViewHeight - region.bounds.bottom(),
-                                       region.bounds.width(),
-                                       region.bounds.height())];
+    scoped_nsobject<NSView> controlRegion(
+        [[ControlRegionView alloc] initWithShellWindow:this]);
+    [controlRegion setFrame:NSMakeRect(iter->x(),
+                                       webViewHeight - iter->bottom(),
+                                       iter->width(),
+                                       iter->height())];
     [webView addSubview:controlRegion];
   }
 }
@@ -526,6 +694,21 @@ void ShellWindowCocoa::WindowDidMove() {
 bool ShellWindowCocoa::HandledByExtensionCommand(NSEvent* event) {
   return extension_keybinding_registry_->ProcessKeyEvent(
       content::NativeWebKeyboardEvent(event));
+}
+
+void ShellWindowCocoa::HandleMouseEvent(NSEvent* event) {
+  if ([event type] == NSLeftMouseDown) {
+    last_mouse_location_ =
+        [window() convertBaseToScreen:[event locationInWindow]];
+  } else if ([event type] == NSLeftMouseDragged) {
+    NSPoint current_mouse_location =
+        [window() convertBaseToScreen:[event locationInWindow]];
+    NSPoint frame_origin = [window() frame].origin;
+    frame_origin.x += current_mouse_location.x - last_mouse_location_.x;
+    frame_origin.y += current_mouse_location.y - last_mouse_location_.y;
+    [window() setFrameOrigin:frame_origin];
+    last_mouse_location_ = current_mouse_location;
+  }
 }
 
 ShellWindowCocoa::~ShellWindowCocoa() {

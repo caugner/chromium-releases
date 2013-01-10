@@ -9,10 +9,10 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/widget/widget_observer.h"
@@ -89,6 +89,9 @@ class PageActionImageView : public views::ImageView,
  private:
   // Overridden from ExtensionAction::IconAnimation::Observer:
   virtual void OnIconChanged() OVERRIDE;
+
+  // Overridden from View.
+  virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
 
   // Shows the popup, with the given URL.
   void ShowPopupWithURL(const GURL& popup_url,

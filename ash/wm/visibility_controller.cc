@@ -5,7 +5,6 @@
 #include "ash/wm/visibility_controller.h"
 
 #include "ash/shell.h"
-#include "ash/wm/window_animation_delegate.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_properties.h"
 #include "ui/aura/window.h"
@@ -17,13 +16,8 @@ namespace internal {
 namespace {
 
 bool ShouldAnimateWindow(aura::Window* window) {
-  if (!window->parent() || !window->parent()->GetProperty(
-          internal::kChildWindowVisibilityChangesAnimatedKey))
-    return false;
-
-  WindowAnimationDelegate* delegate =
-      WindowAnimationDelegate::GetDelegate(window->parent());
-  return !delegate || delegate->ShouldAnimateWindow(window);
+  return window->parent() && window->parent()->GetProperty(
+      internal::kChildWindowVisibilityChangesAnimatedKey);
 }
 
 }  // namespace
@@ -58,6 +52,24 @@ void VisibilityController::UpdateLayerVisibility(aura::Window* window,
 }
 
 }  // namespace internal
+
+SuspendChildWindowVisibilityAnimations::SuspendChildWindowVisibilityAnimations(
+    aura::Window* window)
+    : window_(window),
+      original_enabled_(window->GetProperty(
+          internal::kChildWindowVisibilityChangesAnimatedKey)) {
+  window_->ClearProperty(internal::kChildWindowVisibilityChangesAnimatedKey);
+}
+
+SuspendChildWindowVisibilityAnimations::
+    ~SuspendChildWindowVisibilityAnimations() {
+  if (original_enabled_) {
+    window_->SetProperty(internal::kChildWindowVisibilityChangesAnimatedKey,
+                         true);
+  } else {
+    window_->ClearProperty(internal::kChildWindowVisibilityChangesAnimatedKey);
+  }
+}
 
 void SetChildWindowVisibilityChangesAnimated(aura::Window* window) {
   window->SetProperty(internal::kChildWindowVisibilityChangesAnimatedKey, true);

@@ -27,6 +27,7 @@
 #include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_url_loader_api.h"
+#include "ppapi/thunk/ppb_url_request_info_api.h"
 #include "ppapi/thunk/resource_creation_api.h"
 #include "ppapi/thunk/thunk.h"
 
@@ -91,6 +92,9 @@ class URLLoader : public Resource, public PPB_URLLoader_API {
 
   // PPB_URLLoader_API implementation.
   virtual int32_t Open(PP_Resource request_id,
+                       scoped_refptr<TrackedCallback> callback) OVERRIDE;
+  virtual int32_t Open(const URLRequestInfoData& data,
+                       int requestor_pid,
                        scoped_refptr<TrackedCallback> callback) OVERRIDE;
   virtual int32_t FollowRedirect(
       scoped_refptr<TrackedCallback> callback) OVERRIDE;
@@ -189,6 +193,13 @@ int32_t URLLoader::Open(PP_Resource request_id,
         " PP_URLREQUESTPROPERTY_ALLOWCROSSORIGINREQUESTS.");
     return PP_ERROR_BADRESOURCE;
   }
+  return Open(enter.object()->GetData(), 0, callback);
+}
+
+int32_t URLLoader::Open(const URLRequestInfoData& data,
+                        int requestor_pid,
+                        scoped_refptr<TrackedCallback> callback) {
+  DCHECK_EQ(0, requestor_pid);  // Used in-process only.
 
   if (TrackedCallback::IsPending(current_callback_))
     return PP_ERROR_INPROGRESS;
@@ -196,7 +207,7 @@ int32_t URLLoader::Open(PP_Resource request_id,
   current_callback_ = callback;
 
   GetDispatcher()->Send(new PpapiHostMsg_PPBURLLoader_Open(
-      API_ID_PPB_URL_LOADER, host_resource(), enter.object()->GetData()));
+      API_ID_PPB_URL_LOADER, host_resource(), data));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -417,10 +428,8 @@ bool PPB_URLLoader_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgClose)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBURLLoader_GrantUniversalAccess,
                         OnMsgGrantUniversalAccess)
-#if !defined(OS_NACL)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBURLLoader_UpdateProgress,
                         OnMsgUpdateProgress)
-#endif
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBURLLoader_ReadResponseBody_Ack,
                         OnMsgReadResponseBodyAck)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBURLLoader_CallbackComplete,
@@ -453,18 +462,12 @@ void PPB_URLLoader_Proxy::OnMsgCreate(PP_Instance instance,
 }
 
 void PPB_URLLoader_Proxy::OnMsgOpen(const HostResource& loader,
-                                    const PPB_URLRequestInfo_Data& data) {
+                                    const URLRequestInfoData& data) {
+  int peer_pid = dispatcher()->channel()->peer_pid();
+
   EnterHostFromHostResourceForceCallback<PPB_URLLoader_API> enter(
       loader, callback_factory_, &PPB_URLLoader_Proxy::OnCallback, loader);
-  thunk::EnterResourceCreation enter_creation(loader.instance());
-  if (enter.failed() || enter_creation.failed())
-    return;
-
-  ScopedPPResource request_resource(
-      ScopedPPResource::PassRef(),
-      enter_creation.functions()->CreateURLRequestInfo(loader.instance(),
-                                                       data));
-  enter.SetResult(enter.object()->Open(request_resource, enter.callback()));
+  enter.SetResult(enter.object()->Open(data, peer_pid, enter.callback()));
   // TODO(brettw) bug 73236 register for the status callbacks.
 }
 

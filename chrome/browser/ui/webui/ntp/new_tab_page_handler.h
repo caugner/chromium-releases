@@ -39,11 +39,17 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
   // Callback for "notificationPromoViewed". No arguments.
   void HandleNotificationPromoViewed(const ListValue* args);
 
+  // Callback for "notificationPromoLinkClicked". No arguments.
+  void HandleNotificationPromoLinkClicked(const ListValue* args);
+
   // Callback for "bubblePromoClosed". No arguments.
   void HandleBubblePromoClosed(const ListValue* args);
 
   // Callback for "bubblePromoViewed". No arguments.
   void HandleBubblePromoViewed(const ListValue* args);
+
+  // Callback for "bubblePromoLinkClicked". No arguments.
+  void HandleBubblePromoLinkClicked(const ListValue* args);
 
   // Callback for "pageSelected".
   void HandlePageSelected(const ListValue* args);
@@ -59,6 +65,8 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
   // group, and the rest of the bits are used for the page group ID (defined
   // here).
   static const int kPageIdOffset = 10;
+  // TODO(vadimt): create a new enum and a new UMA histogram for search ntp so
+  // the two histograms don't get mixed in together.
   enum {
     INDEX_MASK = (1 << kPageIdOffset) - 1,
     MOST_VISITED_PAGE_ID = 1 << kPageIdOffset,
@@ -66,7 +74,8 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
     BOOKMARKS_PAGE_ID = 3 << kPageIdOffset,
     SUGGESTIONS_PAGE_ID = 4 << kPageIdOffset,
     RECENTLY_CLOSED_PAGE_ID = 5 << kPageIdOffset,
-    LAST_PAGE_ID = RECENTLY_CLOSED_PAGE_ID
+    OTHER_DEVICES_PAGE_ID = 6 << kPageIdOffset,
+    LAST_PAGE_ID = OTHER_DEVICES_PAGE_ID
   };
   static const int kHistogramEnumerationMax =
       (LAST_PAGE_ID >> kPageIdOffset) + 1;

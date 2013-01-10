@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -114,13 +115,6 @@ void ExtensionInstallUIDefault::OnInstallSuccess(const Extension* extension,
   if (skip_post_install_ui_)
     return;
 
-  if (!profile_) {
-    // TODO(zelidrag): Figure out what exact conditions cause crash
-    // http://crbug.com/159437 and write browser test to cover it.
-    NOTREACHED();
-    return;
-  }
-
   if (extension->is_theme()) {
     ShowThemeInfoBar(previous_theme_id_, previous_using_native_theme_,
                      extension, profile_);
@@ -158,10 +152,11 @@ void ExtensionInstallUIDefault::OnInstallFailure(
     return;
 
   Browser* browser = browser::FindLastActiveWithProfile(profile_);
-  TabContents* tab_contents = chrome::GetActiveTabContents(browser);
-  if (!tab_contents)
+  WebContents* web_contents = chrome::GetActiveWebContents(browser);
+  if (!web_contents)
     return;
-  InfoBarTabHelper* infobar_helper = tab_contents->infobar_tab_helper();
+  InfoBarTabHelper* infobar_helper =
+      InfoBarTabHelper::FromWebContents(web_contents);
   infobar_helper->AddInfoBar(
       new ErrorInfobarDelegate(infobar_helper, browser, error));
 }
@@ -186,10 +181,11 @@ void ExtensionInstallUIDefault::ShowThemeInfoBar(
   if (!browser)
     return;
 
-  TabContents* tab_contents = chrome::GetActiveTabContents(browser);
-  if (!tab_contents)
+  WebContents* web_contents = chrome::GetActiveWebContents(browser);
+  if (!web_contents)
     return;
-  InfoBarTabHelper* infobar_helper = tab_contents->infobar_tab_helper();
+  InfoBarTabHelper* infobar_helper =
+      InfoBarTabHelper::FromWebContents(web_contents);
 
   // First find any previous theme preview infobars.
   InfoBarDelegate* old_delegate = NULL;
@@ -210,7 +206,7 @@ void ExtensionInstallUIDefault::ShowThemeInfoBar(
 
   // Then either replace that old one or add a new one.
   InfoBarDelegate* new_delegate = GetNewThemeInstalledInfoBarDelegate(
-      tab_contents, new_theme, previous_theme_id, previous_using_native_theme);
+      web_contents, new_theme, previous_theme_id, previous_using_native_theme);
 
   if (old_delegate)
     infobar_helper->ReplaceInfoBar(old_delegate, new_delegate);
@@ -219,13 +215,14 @@ void ExtensionInstallUIDefault::ShowThemeInfoBar(
 }
 
 InfoBarDelegate* ExtensionInstallUIDefault::GetNewThemeInstalledInfoBarDelegate(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     const Extension* new_theme,
     const std::string& previous_theme_id,
     bool previous_using_native_theme) {
-  Profile* profile = tab_contents->profile();
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   return new ThemeInstalledInfoBarDelegate(
-      tab_contents->infobar_tab_helper(),
+      InfoBarTabHelper::FromWebContents(web_contents),
       profile->GetExtensionService(),
       ThemeServiceFactory::GetForProfile(profile),
       new_theme,
@@ -270,15 +267,17 @@ void ExtensionInstallUI::DisableFailureUIForTests() {
 }
 
 // static
-ExtensionInstallPrompt* ExtensionInstallUI::CreateInstallPromptWithWebContents(
-    content::WebContents* web_contents) {
-  Browser* browser = browser::FindBrowserWithWebContents(web_contents);
-  return chrome::CreateExtensionInstallPromptWithBrowser(browser);
+ExtensionInstallPrompt* ExtensionInstallUI::CreateInstallPromptWithBrowser(
+    Browser* browser) {
+  content::WebContents* web_contents = NULL;
+  if (browser)
+    web_contents = browser->tab_strip_model()->GetActiveWebContents();
+  return new ExtensionInstallPrompt(web_contents);
 }
 
 // static
 ExtensionInstallPrompt* ExtensionInstallUI::CreateInstallPromptWithProfile(
     Profile* profile) {
   Browser* browser = browser::FindLastActiveWithProfile(profile);
-  return chrome::CreateExtensionInstallPromptWithBrowser(browser);
+  return CreateInstallPromptWithBrowser(browser);
 }

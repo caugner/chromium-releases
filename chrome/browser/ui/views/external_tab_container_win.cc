@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/win_util.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -30,9 +31,9 @@
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/tab_contents/render_view_context_menu_win.h"
 #include "chrome/common/automation_messages.h"
@@ -198,8 +199,11 @@ bool ExternalTabContainerWin::Init(Profile* profile,
     tab_contents_.reset(TabContents::Factory::CreateTabContents(new_contents));
   }
 
-  if (!infobars_enabled)
-    tab_contents_->infobar_tab_helper()->set_infobars_enabled(false);
+  if (!infobars_enabled) {
+    InfoBarTabHelper* infobar_tab_helper =
+        InfoBarTabHelper::FromWebContents(tab_contents_->web_contents());
+    infobar_tab_helper->set_infobars_enabled(false);
+  }
 
   tab_contents_->web_contents()->SetDelegate(this);
 
@@ -256,7 +260,8 @@ bool ExternalTabContainerWin::Init(Profile* profile,
 
   LoadAccelerators();
   SetupExternalTabView();
-  tab_contents_->blocked_content_tab_helper()->set_delegate(this);
+  BlockedContentTabHelper::FromWebContents(tab_contents_->web_contents())->
+      set_delegate(this);
   return true;
 }
 
@@ -328,6 +333,26 @@ void ExternalTabContainerWin::SetTabHandle(int handle) {
 
 int ExternalTabContainerWin::GetTabHandle() const {
   return tab_handle_;
+}
+
+bool ExternalTabContainerWin::ExecuteContextMenuCommand(int command) {
+  if (!external_context_menu_.get()) {
+    NOTREACHED();
+    return false;
+  }
+
+  switch (command) {
+    case IDS_CONTENT_CONTEXT_SAVEAUDIOAS:
+    case IDS_CONTENT_CONTEXT_SAVEVIDEOAS:
+    case IDS_CONTENT_CONTEXT_SAVEIMAGEAS:
+    case IDS_CONTENT_CONTEXT_SAVELINKAS: {
+      NOTREACHED();  // Should be handled in host.
+      break;
+    }
+  }
+
+  external_context_menu_->ExecuteCommand(command);
+  return true;
 }
 
 void ExternalTabContainerWin::RunUnloadHandlers(IPC::Message* reply_message) {
@@ -431,14 +456,13 @@ WebContents* ExternalTabContainerWin::OpenURLFromTab(
         nav_params.page_id = -1;
         nav_params.transition = content::PAGE_TRANSITION_LINK;
 
-        content::LoadCommittedDetails details;
-        details.did_replace_entry = false;
-
-        scoped_refptr<history::HistoryAddPageArgs> add_page_args(
-            tab_contents_->history_tab_helper()->
-                CreateHistoryAddPageArgs(params.url, details, nav_params));
-        tab_contents_->history_tab_helper()->
-            UpdateHistoryForNavigation(add_page_args);
+        HistoryTabHelper* history_tab_helper =
+            HistoryTabHelper::FromWebContents(tab_contents_->web_contents());
+        const history::HistoryAddPageArgs& add_page_args =
+            history_tab_helper->CreateHistoryAddPageArgs(
+                params.url, base::Time::Now(),
+                false /* did_replace_entry */, nav_params);
+        history_tab_helper->UpdateHistoryForNavigation(add_page_args);
 
         return tab_contents_->web_contents();
       }
@@ -568,8 +592,8 @@ void ExternalTabContainerWin::MoveContents(WebContents* source,
     automation_->Send(new AutomationMsg_MoveWindow(tab_handle_, pos));
 }
 
-TabContents* ExternalTabContainerWin::GetConstrainingTabContents(
-    TabContents* source) {
+content::WebContents* ExternalTabContainerWin::GetConstrainingWebContents(
+    content::WebContents* source) {
   return source;
 }
 
@@ -592,10 +616,6 @@ void ExternalTabContainerWin::UpdateTargetURL(WebContents* source,
 }
 
 void ExternalTabContainerWin::ContentsZoomChange(bool zoom_in) {
-}
-
-gfx::NativeWindow ExternalTabContainerWin::GetFrameNativeWindow() {
-  return GetNativeView();
 }
 
 bool ExternalTabContainerWin::TakeFocus(content::WebContents* source,
@@ -710,26 +730,6 @@ bool ExternalTabContainerWin::HandleContextMenu(
   return true;
 }
 
-bool ExternalTabContainerWin::ExecuteContextMenuCommand(int command) {
-  if (!external_context_menu_.get()) {
-    NOTREACHED();
-    return false;
-  }
-
-  switch (command) {
-    case IDS_CONTENT_CONTEXT_SAVEAUDIOAS:
-    case IDS_CONTENT_CONTEXT_SAVEVIDEOAS:
-    case IDS_CONTENT_CONTEXT_SAVEIMAGEAS:
-    case IDS_CONTENT_CONTEXT_SAVELINKAS: {
-      NOTREACHED();  // Should be handled in host.
-      break;
-    }
-  }
-
-  external_context_menu_->ExecuteCommand(command);
-  return true;
-}
-
 bool ExternalTabContainerWin::PreHandleKeyboardEvent(
     content::WebContents* source,
     const NativeWebKeyboardEvent& event,
@@ -770,7 +770,7 @@ void ExternalTabContainerWin::BeforeUnloadFired(WebContents* tab,
 }
 
 void ExternalTabContainerWin::ShowRepostFormWarningDialog(WebContents* source) {
-  chrome::ShowTabModalConfirmDialog(new RepostFormWarningController(source),
+  TabModalConfirmDialog::Create(new RepostFormWarningController(source),
                                     TabContents::FromWebContents(source));
 }
 
@@ -1200,8 +1200,11 @@ void ExternalTabContainerWin::SetupExternalTabView() {
   // widget is torn down.
   external_tab_view_ = new views::View();
 
-  InfoBarContainerView* info_bar_container = new InfoBarContainerView(this);
-  info_bar_container->ChangeTabContents(tab_contents_->infobar_tab_helper());
+  InfoBarContainerView* info_bar_container =
+      new InfoBarContainerView(this, NULL);
+  InfoBarTabHelper* infobar_tab_helper =
+      InfoBarTabHelper::FromWebContents(tab_contents_->web_contents());
+  info_bar_container->ChangeTabContents(infobar_tab_helper);
 
   views::GridLayout* layout = new views::GridLayout(external_tab_view_);
   // Give this column an identifier of 0.

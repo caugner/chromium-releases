@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "content/public/browser/file_descriptor_info.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/window_container_type.h"
 #include "net/cookies/canonical_cookie.h"
@@ -23,7 +24,6 @@
 class CommandLine;
 class FilePath;
 class GURL;
-class PluginProcessHost;
 
 namespace webkit_glue {
 struct WebPreferences;
@@ -448,12 +448,16 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns true if renderer processes can use private Pepper File APIs.
   virtual bool AllowPepperPrivateFileAPI();
 
+  // Returns the directory containing hyphenation dictionaries.
+  virtual FilePath GetHyphenDictionaryDirectory();
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Populates |mappings| with all files that need to be mapped before launching
   // a child process.
   virtual void GetAdditionalMappedFilesForChildProcess(
       const CommandLine& command_line,
-      base::GlobalDescriptors::Mapping* mappings) {}
+      int child_process_id,
+      std::vector<FileDescriptorInfo>* mappings) {}
 #endif
 
 #if defined(OS_WIN)

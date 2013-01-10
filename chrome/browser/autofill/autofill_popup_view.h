@@ -11,6 +11,7 @@
 #include "base/string16.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_observer.h"
+#include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
 
 namespace content {
@@ -70,7 +71,17 @@ class AutofillPopupView : public content::NotificationObserver {
     return autofill_unique_ids_;
   }
 
+  const gfx::Font& label_font() const { return label_font_; }
+  const gfx::Font& value_font() const { return value_font_; }
+
   int selected_line() const { return selected_line_; }
+  bool delete_icon_selected() const { return delete_icon_selected_; }
+
+  // Change which line is selected by the user, based on coordinates.
+  void SetSelectedPosition(int x, int y);
+
+  // Select the value at the given position.
+  void AcceptSelectedPosition(int x, int y);
 
   // Change which line is currently selected by the user.
   void SetSelectedLine(int selected_line);
@@ -96,6 +107,47 @@ class AutofillPopupView : public content::NotificationObserver {
 
   // Returns true if the given id refers to an element that can be deleted.
   bool CanDelete(int id);
+
+  // Get width of popup needed by values.
+  int GetPopupRequiredWidth();
+
+  // Get height of popup needed by values.
+  int GetPopupRequiredHeight();
+
+  // Convert a y-coordinate to the closest line.
+  int LineFromY(int y);
+
+  // Get the height of the given row.
+  int GetRowHeightFromId(int unique_id);
+
+  // Returns the rectangle containing the item at position |index| in the popup.
+  gfx::Rect GetRectForRow(size_t row, int width);
+
+  // Returns true if the given |x| and |y| coordinates refer to a point that
+  // hits the delete icon in the current selected line.
+  bool DeleteIconIsSelected(int x, int y);
+
+  // Constants that are needed by the subclasses.
+  // The size of the boarder around the entire results popup, in pixels.
+  static const size_t kBorderThickness;
+
+  // The amount of padding between icons in pixels.
+  static const size_t kIconPadding;
+
+  // The amount of padding at the end of the popup in pixels.
+  static const size_t kEndPadding;
+
+  // Height of the delete icon in pixels.
+  static const size_t kDeleteIconHeight;
+
+  // Width of the delete icon in pixels.
+  static const size_t kDeleteIconWidth;
+
+  // Height of the Autofill icons in pixels.
+  static const size_t kAutofillIconHeight;
+
+  // Width of the Autofill icons in pixels.
+  static const size_t kAutofillIconWidth;
 
  private:
   // Returns true if the given id refers to an element that can be accepted.
@@ -123,9 +175,16 @@ class AutofillPopupView : public content::NotificationObserver {
   std::vector<string16> autofill_icons_;
   std::vector<int> autofill_unique_ids_;
 
+  // The fonts for the popup text.
+  gfx::Font value_font_;
+  gfx::Font label_font_;
+
   // The line that is currently selected by the user.
   // |kNoSelection| indicates that no line is currently selected.
   int selected_line_;
+
+  // Used to indicate if the delete icon within a row is currently selected.
+  bool delete_icon_selected_;
 };
 
 #endif  // CHROME_BROWSER_AUTOFILL_AUTOFILL_POPUP_VIEW_H_

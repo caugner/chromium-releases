@@ -26,9 +26,6 @@
 
 using content::RenderViewHost;
 
-const int kContentBorder = 4;
-const int kHorizontalSpacing = 4;
-
 namespace {
 
 GdkPixbuf* GetImage(int resource_id) {
@@ -42,7 +39,7 @@ GdkPixbuf* GetImage(int resource_id) {
 
 PasswordGenerationBubbleGtk::PasswordGenerationBubbleGtk(
     const gfx::Rect& anchor_rect,
-    const webkit::forms::PasswordForm& form,
+    const content::PasswordForm& form,
     TabContents* tab,
     autofill::PasswordGenerator* password_generator)
     : form_(form),
@@ -65,7 +62,7 @@ PasswordGenerationBubbleGtk::PasswordGenerationBubbleGtk(
 
   // The second contains the password in a text field, a regenerate button, and
   // an accept button.
-  GtkWidget* password_line = gtk_hbox_new(FALSE, kHorizontalSpacing);
+  GtkWidget* password_line = gtk_hbox_new(FALSE, ui::kControlSpacing);
   text_field_ = gtk_entry_new();
   gtk_entry_set_text(GTK_ENTRY(text_field_),
                      password_generator_->Generate().c_str());
@@ -78,7 +75,8 @@ PasswordGenerationBubbleGtk::PasswordGenerationBubbleGtk(
   gtk_box_pack_start(GTK_BOX(password_line), text_field_, TRUE, TRUE, 0);
   gtk_box_pack_start(GTK_BOX(password_line), accept_button, TRUE, TRUE, 0);
 
-  gtk_container_set_border_width(GTK_CONTAINER(content), kContentBorder);
+  gtk_container_set_border_width(GTK_CONTAINER(content),
+                                 ui::kContentAreaBorder);
   gtk_box_pack_start(GTK_BOX(content), title_line, TRUE, TRUE, 0);
   gtk_box_pack_start(GTK_BOX(content), password_line, TRUE, TRUE, 0);
 
@@ -127,7 +125,8 @@ void PasswordGenerationBubbleGtk::OnAcceptClicked(GtkWidget* widget) {
   render_view_host->Send(new AutofillMsg_GeneratedPasswordAccepted(
       render_view_host->GetRoutingID(),
       UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(text_field_)))));
-  tab_->password_manager()->SetFormHasGeneratedPassword(form_);
+  PasswordManager::FromWebContents(tab_->web_contents())->
+      SetFormHasGeneratedPassword(form_);
   bubble_->Close();
 }
 

@@ -21,6 +21,7 @@
 #include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_system_test_helper.h"
 #include "webkit/fileapi/sandbox_file_stream_writer.h"
+#include "webkit/quota/quota_manager.h"
 
 namespace fileapi {
 
@@ -220,9 +221,11 @@ void FileWriterDelegateTest::TearDown() {
 // FileWriterDelegateTest.WriteSuccessWithoutQuotaLimit is flaky on windows
 // http://crbug.com/130401
 #if defined(OS_WIN)
-#define MAYBE_WriteSuccessWithoutQuotaLimit DISABLED_WriteSuccessWithoutQuotaLimit
+#define MAYBE_WriteSuccessWithoutQuotaLimit \
+    DISABLED_WriteSuccessWithoutQuotaLimit
 #else
-#define MAYBE_WriteSuccessWithoutQuotaLimit WriteSuccessWithoutQuotaLimit
+#define MAYBE_WriteSuccessWithoutQuotaLimit \
+    WriteSuccessWithoutQuotaLimit
 #endif
 TEST_F(FileWriterDelegateTest, MAYBE_WriteSuccessWithoutQuotaLimit) {
   const GURL kBlobURL("blob:nolimit");

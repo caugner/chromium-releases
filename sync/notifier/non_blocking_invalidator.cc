@@ -30,8 +30,8 @@ class NonBlockingInvalidator::Core
   // Helpers called on I/O thread.
   void Initialize(
       const notifier::NotifierOptions& notifier_options,
-      const InvalidationVersionMap& initial_max_invalidation_versions,
-      const std::string& initial_invalidation_state,
+      const InvalidationStateMap& initial_invalidation_state_map,
+      const std::string& invalidation_bootstrap_data,
       const WeakHandle<InvalidationStateTracker>& invalidation_state_tracker,
       const std::string& client_info);
   void Teardown();
@@ -44,7 +44,7 @@ class NonBlockingInvalidator::Core
   // InvalidationNotifier).
   virtual void OnInvalidatorStateChange(InvalidatorState reason) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const ObjectIdStateMap& id_state_map,
+      const ObjectIdInvalidationMap& invalidation_map,
       IncomingInvalidationSource source) OVERRIDE;
 
  private:
@@ -72,8 +72,8 @@ NonBlockingInvalidator::Core::~Core() {
 
 void NonBlockingInvalidator::Core::Initialize(
     const notifier::NotifierOptions& notifier_options,
-    const InvalidationVersionMap& initial_max_invalidation_versions,
-    const std::string& initial_invalidation_state,
+    const InvalidationStateMap& initial_invalidation_state_map,
+    const std::string& invalidation_bootstrap_data,
     const WeakHandle<InvalidationStateTracker>& invalidation_state_tracker,
     const std::string& client_info) {
   DCHECK(notifier_options.request_context_getter);
@@ -85,8 +85,8 @@ void NonBlockingInvalidator::Core::Initialize(
   invalidation_notifier_.reset(
       new InvalidationNotifier(
           notifier::PushClient::CreateDefaultOnIOThread(notifier_options),
-          initial_max_invalidation_versions,
-          initial_invalidation_state,
+          initial_invalidation_state_map,
+          invalidation_bootstrap_data,
           invalidation_state_tracker,
           client_info));
   invalidation_notifier_->RegisterHandler(this);
@@ -129,18 +129,19 @@ void NonBlockingInvalidator::Core::OnInvalidatorStateChange(
 }
 
 void NonBlockingInvalidator::Core::OnIncomingInvalidation(
-    const ObjectIdStateMap& id_state_map, IncomingInvalidationSource source) {
+    const ObjectIdInvalidationMap& invalidation_map,
+    IncomingInvalidationSource source) {
   DCHECK(network_task_runner_->BelongsToCurrentThread());
   delegate_observer_.Call(FROM_HERE,
                           &InvalidationHandler::OnIncomingInvalidation,
-                          id_state_map,
+                          invalidation_map,
                           source);
 }
 
 NonBlockingInvalidator::NonBlockingInvalidator(
     const notifier::NotifierOptions& notifier_options,
-    const InvalidationVersionMap& initial_max_invalidation_versions,
-    const std::string& initial_invalidation_state,
+    const InvalidationStateMap& initial_max_invalidation_versions,
+    const std::string& invalidation_bootstrap_data,
     const WeakHandle<InvalidationStateTracker>&
         invalidation_state_tracker,
     const std::string& client_info)
@@ -158,7 +159,7 @@ NonBlockingInvalidator::NonBlockingInvalidator(
               core_.get(),
               notifier_options,
               initial_max_invalidation_versions,
-              initial_invalidation_state,
+              invalidation_bootstrap_data,
               invalidation_state_tracker,
               client_info))) {
     NOTREACHED();
@@ -237,9 +238,9 @@ void NonBlockingInvalidator::UpdateCredentials(const std::string& email,
 }
 
 void NonBlockingInvalidator::SendInvalidation(
-    const ObjectIdStateMap& id_state_map) {
+    const ObjectIdInvalidationMap& invalidation_map) {
   DCHECK(parent_task_runner_->BelongsToCurrentThread());
-  // InvalidationClient doesn't implement SendInvalidation(), so no
+  // InvalidationNotifier doesn't implement SendInvalidation(), so no
   // need to forward on the call.
 }
 
@@ -249,10 +250,10 @@ void NonBlockingInvalidator::OnInvalidatorStateChange(InvalidatorState state) {
 }
 
 void NonBlockingInvalidator::OnIncomingInvalidation(
-        const ObjectIdStateMap& id_state_map,
+        const ObjectIdInvalidationMap& invalidation_map,
         IncomingInvalidationSource source) {
   DCHECK(parent_task_runner_->BelongsToCurrentThread());
-  registrar_.DispatchInvalidationsToHandlers(id_state_map, source);
+  registrar_.DispatchInvalidationsToHandlers(invalidation_map, source);
 }
 
 }  // namespace syncer

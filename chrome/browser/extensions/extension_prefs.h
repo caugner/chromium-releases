@@ -59,9 +59,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Vector containing identifiers for preferences.
   typedef std::set<std::string> PrefKeySet;
 
-  // Vector containing identifiers for extensions.
-  typedef std::vector<std::string> ExtensionIds;
-
   // This enum is used for the launch type the user wants to use for an
   // application.
   // Do not remove items or re-order this enum as it is used in preferences
@@ -88,7 +85,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Returns all installed extensions from extension preferences provided by
   // |pref_service|. This is exposed for ProtectedPrefsWatcher because it needs
   // access to the extension ID list before the ExtensionService is initialized.
-  static ExtensionIds GetExtensionsFrom(const PrefService* pref_service);
+  static ExtensionIdList GetExtensionsFrom(const PrefService* pref_service);
 
   // If |extensions_disabled| is true, extension controlled preferences and
   // content settings do not become effective.
@@ -109,19 +106,18 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   bool IsExtensionDisabled(const std::string& id) const;
 
   // Get/Set the order that the browser actions appear in the toolbar.
-  ExtensionIds GetToolbarOrder();
-  void SetToolbarOrder(const ExtensionIds& extension_ids);
+  ExtensionIdList GetToolbarOrder();
+  void SetToolbarOrder(const ExtensionIdList& extension_ids);
 
   // Get/Set the order that the browser actions appear in the action box.
-  ExtensionIds GetActionBoxOrder();
-  void SetActionBoxOrder(const ExtensionIds& extension_ids);
+  ExtensionIdList GetActionBoxOrder();
+  void SetActionBoxOrder(const ExtensionIdList& extension_ids);
 
   // Called when an extension is installed, so that prefs get created.
   // If |page_ordinal| is an invalid ordinal, then a page will be found
   // for the App.
   void OnExtensionInstalled(const Extension* extension,
                             Extension::State initial_state,
-                            bool from_webstore,
                             const syncer::StringOrdinal& page_ordinal);
 
   // Called when an extension is uninstalled, so that prefs get cleaned up.
@@ -133,7 +129,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void SetExtensionState(const std::string& extension_id, Extension::State);
 
   // Returns all installed extensions
-  void GetExtensions(ExtensionIds* out);
+  void GetExtensions(ExtensionIdList* out);
 
   // Getter and setter for browser action visibility.
   bool GetBrowserActionVisibility(const Extension* extension);
@@ -176,6 +172,10 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // Based on extension id, checks prefs to see if it is orphaned.
   bool IsExtensionOrphaned(const std::string& id);
+
+  // Increment the count of how many times we prompted the user to acknowledge
+  // the given extension, and return the new count.
+  int IncrementAcknowledgePromptCount(const std::string& extension_id);
 
   // Whether the user has acknowledged an external extension.
   bool IsExternalExtensionAcknowledged(const std::string& extension_id);
@@ -269,6 +269,10 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void SetActivePermissions(const std::string& extension_id,
                             const PermissionSet* permissions);
 
+  // Returns true if registered events are from this version of Chrome. Else,
+  // clear them, and return false.
+  bool CheckRegisteredEventsUpToDate();
+
   // Returns the list of events that the given extension has registered for.
   std::set<std::string> GetRegisteredEvents(const std::string& extension_id);
   void SetRegisteredEvents(const std::string& extension_id,
@@ -288,6 +292,13 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // registered.
   const DictionaryValue* GetFilteredEvents(
       const std::string& extension_id) const;
+
+  // Records whether or not this extension is currently running.
+  void SetExtensionRunning(const std::string& extension_id, bool is_running);
+
+  // Returns whether or not this extension is marked as running. This is used to
+  // restart apps across browser restarts.
+  bool IsExtensionRunning(const std::string& extension_id);
 
   // Controls the omnibox default suggestion as set by the extension.
   ExtensionOmniboxSuggestion GetOmniboxDefaultSuggestion(
@@ -372,6 +383,11 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   bool GetWebStoreLogin(std::string* result);
   void SetWebStoreLogin(const std::string& login);
 
+  // Returns true if the one-time Sideload Wipeout effort has been executed.
+  bool GetSideloadWipeoutDone() const;
+  // Mark the one-time Sideload Wipeout effort as finished.
+  void SetSideloadWipeoutDone();
+
   // Returns true if the user repositioned the app on the app launcher via drag
   // and drop.
   bool WasAppDraggedByUser(const std::string& extension_id);
@@ -421,6 +437,9 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // Clears incognito session-only content settings for all extensions.
   void ClearIncognitoSessionOnlyContentSettings();
+
+  // Returns the creation flags mask for the extension.
+  int GetCreationFlags(const std::string& extension_id) const;
 
   // Returns true if the extension was installed from the Chrome Web Store.
   bool IsFromWebStore(const std::string& extension_id) const;
@@ -529,17 +548,20 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // Fix missing preference entries in the extensions that are were introduced
   // in a later Chrome version.
-  void FixMissingPrefs(const ExtensionIds& extension_ids);
+  void FixMissingPrefs(const ExtensionIdList& extension_ids);
 
   // Installs the persistent extension preferences into |prefs_|'s extension
   // pref store. Does nothing if |extensions_disabled| is true.
   void InitPrefStore(bool extensions_disabled);
 
   // Migrates the permissions data in the pref store.
-  void MigratePermissions(const ExtensionIds& extension_ids);
+  void MigratePermissions(const ExtensionIdList& extension_ids);
 
   // Migrates the disable reasons from a single enum to a bit mask.
-  void MigrateDisableReasons(const ExtensionIds& extension_ids);
+  void MigrateDisableReasons(const ExtensionIdList& extension_ids);
+
+  // Clears the registered events for event pages.
+  void ClearRegisteredEvents();
 
   // Checks whether there is a state pref for the extension and if so, whether
   // it matches |check_state|.
@@ -547,9 +569,9 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
                               Extension::State check_state) const;
 
   // Helper function to Get/Set array of strings from/to prefs.
-  ExtensionIds GetExtensionPrefAsVector(const char* pref);
+  ExtensionIdList GetExtensionPrefAsVector(const char* pref);
   void SetExtensionPrefFromVector(const char* pref,
-                                  const ExtensionIds& extension_ids);
+                                  const ExtensionIdList& extension_ids);
 
   // The pref service specific to this set of extension prefs. Owned by profile.
   PrefService* prefs_;

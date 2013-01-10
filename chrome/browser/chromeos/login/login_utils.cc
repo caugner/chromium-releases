@@ -24,6 +24,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "cc/switches.h"
 #include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -540,7 +541,7 @@ void LoginUtilsImpl::OnProfileCreated(
       google_services_username.Init(prefs::kGoogleServicesUsername,
                                     user_profile->GetPrefs(), NULL);
       google_services_username.SetValue(
-          UserManager::Get()->GetLoggedInUser().display_email());
+          UserManager::Get()->GetLoggedInUser()->display_email());
       // Make sure we flip every profile to not share proxies if the user hasn't
       // specified so explicitly.
       const PrefService::Preference* use_shared_proxies_pref =
@@ -661,7 +662,7 @@ void LoginUtilsImpl::StartSignedInServices(
   // Make sure SigninManager is connected to our current user (this should
   // happen automatically because we set kGoogleServicesUsername in
   // OnProfileCreated()).
-  DCHECK_EQ(UserManager::Get()->GetLoggedInUser().display_email(),
+  DCHECK_EQ(UserManager::Get()->GetLoggedInUser()->display_email(),
             signin->GetAuthenticatedUsername());
   static bool initialized = false;
   if (!initialized) {
@@ -746,7 +747,6 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
     CommandLine* command_line) {
   static const char* kForwardSwitches[] = {
       ::switches::kAllowWebUICompositing,
-      ::switches::kCompressSystemFeedback,
       ::switches::kDeviceManagementUrl,
       ::switches::kForceDeviceScaleFactor,
       ::switches::kDisableAccelerated2dCanvas,
@@ -757,19 +757,16 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kDisableOobeAnimation,
       ::switches::kDisableSeccompFilterSandbox,
       ::switches::kDisableSeccompSandbox,
-      ::switches::kDisableThreadedAnimation,
       ::switches::kEnableBrowserTextSubpixelPositioning,
       ::switches::kEnableCompositingForFixedPosition,
+      ::switches::kEnableEncryptedMedia,
       ::switches::kEnableGView,
       ::switches::kEnableLogging,
-      ::switches::kEnablePartialSwap,
       ::switches::kEnableUIReleaseFrontSurface,
       ::switches::kEnablePinch,
       ::switches::kEnableGestureTapHighlight,
       ::switches::kEnableSmoothScrolling,
       ::switches::kEnableThreadedCompositing,
-      ::switches::kEnableTouchCalibration,
-      ::switches::kEnableTouchEvents,
       ::switches::kEnableViewport,
       ::switches::kEnableWebkitTextSubpixelPositioning,
       ::switches::kDisableThreadedCompositing,
@@ -777,7 +774,6 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kGpuStartupDialog,
       ::switches::kLoginProfile,
       ::switches::kScrollPixels,
-      ::switches::kNaturalScrollDefault,
       ::switches::kNoFirstRun,
       ::switches::kNoSandbox,
       ::switches::kPpapiFlashArgs,
@@ -787,6 +783,9 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kRendererStartupDialog,
       ::switches::kFlingTapSuppressMaxDown,
       ::switches::kFlingTapSuppressMaxGap,
+#if defined(USE_XI2_MT)
+      ::switches::kTouchCalibration,
+#endif
       ::switches::kTouchDevices,
       ::switches::kTouchOptimizedUI,
       ::switches::kOldCheckboxStyle,
@@ -794,8 +793,12 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ash::switches::kAshWindowAnimationsDisabled,
       ash::switches::kAuraLegacyPowerButton,
       ash::switches::kAuraNoShadows,
-      ash::switches::kAshNotifyDisabled,
+      ash::switches::kAshDisablePanelFitting,
+      cc::switches::kDisableThreadedAnimation,
+      cc::switches::kEnablePartialSwap,
+      cc::switches::kEnablePinchInCompositor,
       ::switches::kUIEnablePartialSwap,
+      ::switches::kUIEnableThreadedCompositing,
       ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
       ::switches::kUseCras,
@@ -889,16 +892,12 @@ scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
   // Screen locker needs new Authenticator instance each time.
   if (ScreenLocker::default_screen_locker()) {
     if (authenticator_)
-      authenticator_->SetConsumer(NULL);
+      authenticator_->ResetConsumer();
     authenticator_ = NULL;
   }
 
-  if (authenticator_ == NULL) {
+  if (authenticator_ == NULL)
     authenticator_ = new ParallelAuthenticator(consumer);
-  } else {
-    // TODO(nkostylev): Fix this hack by improving Authenticator dependencies.
-    authenticator_->SetConsumer(consumer);
-  }
   return authenticator_;
 }
 
@@ -1040,7 +1039,7 @@ bool LoginUtilsImpl::ReadOAuth1AccessToken(Profile* user_profile,
                                            std::string* secret) {
   // Skip reading oauth token if user does not have a valid status.
   if (UserManager::Get()->IsUserLoggedIn() &&
-      UserManager::Get()->GetLoggedInUser().oauth_token_status() !=
+      UserManager::Get()->GetLoggedInUser()->oauth_token_status() !=
       User::OAUTH_TOKEN_STATUS_VALID) {
     return false;
   }
@@ -1072,6 +1071,7 @@ void LoginUtilsImpl::StoreOAuth1AccessToken(Profile* user_profile,
   std::string encrypted_secret =
       CrosLibrary::Get()->GetCertLibrary()->EncryptToken(secret);
   PrefService* pref_service = user_profile->GetPrefs();
+  User* user = UserManager::Get()->GetLoggedInUser();
   if (!encrypted_token.empty() && !encrypted_secret.empty()) {
     pref_service->SetString(prefs::kOAuth1Token, encrypted_token);
     pref_service->SetString(prefs::kOAuth1Secret, encrypted_secret);
@@ -1079,15 +1079,13 @@ void LoginUtilsImpl::StoreOAuth1AccessToken(Profile* user_profile,
     // ...then record the presence of valid OAuth token for this account in
     // local state as well.
     UserManager::Get()->SaveUserOAuthStatus(
-        UserManager::Get()->GetLoggedInUser().email(),
-        User::OAUTH_TOKEN_STATUS_VALID);
+        user->email(), User::OAUTH_TOKEN_STATUS_VALID);
   } else {
     LOG(WARNING) << "Failed to get OAuth1 token/secret encrypted.";
     // Set the OAuth status invalid so that the user will go through full
     // GAIA login next time.
     UserManager::Get()->SaveUserOAuthStatus(
-        UserManager::Get()->GetLoggedInUser().email(),
-        User::OAUTH_TOKEN_STATUS_INVALID);
+        user->email(), User::OAUTH_TOKEN_STATUS_INVALID);
   }
 }
 
@@ -1106,7 +1104,7 @@ void LoginUtilsImpl::FetchCredentials(Profile* user_profile,
                                       const std::string& secret) {
   oauth_login_verifier_.reset(new OAuthLoginVerifier(
       this, user_profile, token, secret,
-      UserManager::Get()->GetLoggedInUser().email()));
+      UserManager::Get()->GetLoggedInUser()->email()));
   oauth_login_verifier_->StartOAuthVerification();
 }
 
@@ -1166,6 +1164,8 @@ void LoginUtilsImpl::OnOAuth1AccessTokenAvailable(const std::string& token,
 void LoginUtilsImpl::OnOAuth1AccessTokenFetchFailed() {
   // TODO(kochi): Show failure notification UI here?
   LOG(ERROR) << "Failed to fetch OAuth1 access token.";
+  g_browser_process->browser_policy_connector()->RegisterForUserPolicy(
+      EmptyString());
 }
 
 void LoginUtilsImpl::OnOAuthVerificationSucceeded(

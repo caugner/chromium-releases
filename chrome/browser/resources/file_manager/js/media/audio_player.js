@@ -387,11 +387,13 @@ AudioPlayer.prototype.syncHeight_ = function() {
       Math.min(this.urls_.length, 3) * AudioPlayer.TRACK_HEIGHT;
   this.trackList_.style.height = expandedListHeight + 'px';
 
+  var targetClientHeight = AudioPlayer.CONTROLS_HEIGHT +
+      (this.isCompact_() ?
+      AudioPlayer.TRACK_HEIGHT :
+      AudioPlayer.HEADER_HEIGHT + expandedListHeight);
+
   chrome.mediaPlayerPrivate.setWindowHeight(
-    (this.isCompact_() ?
-        AudioPlayer.TRACK_HEIGHT :
-        AudioPlayer.HEADER_HEIGHT + expandedListHeight) +
-    AudioPlayer.CONTROLS_HEIGHT);
+      targetClientHeight - this.container_.clientHeight);
 };
 
 
@@ -445,6 +447,7 @@ AudioPlayer.TrackInfo.prototype.getDefaultTitle = function() {
   var title = this.url_.split('/').pop();
   var dotIndex = title.lastIndexOf('.');
   if (dotIndex >= 0) title = title.substr(0, dotIndex);
+  title = decodeURIComponent(title);
   return title;
 };
 
@@ -479,9 +482,10 @@ AudioPlayer.TrackInfo.prototype.setMetadata = function(
     }.bind(this);
     this.img_.src = metadata.thumbnail.url;
   }
-  this.title_.textContent = metadata.media.title || this.getDefaultTitle();
-  this.artist_.textContent =
-      error || metadata.media.artist || this.getDefaultArtist();
+  this.title_.textContent = (metadata.media && metadata.media.title) ||
+      this.getDefaultTitle();
+  this.artist_.textContent = error ||
+      (metadata.media && metadata.media.artist) || this.getDefaultArtist();
 };
 
 /**
@@ -501,6 +505,13 @@ function FullWindowAudioControls(container, advanceTrack, onError) {
     // to deinitialize ASAP.
     this.getMedia().src = '';
     this.getMedia().load();
+  }.bind(this));
+
+  document.addEventListener('keydown', function(e) {
+    if (e.keyIdentifier == 'U+0020') {
+      this.togglePlayState();
+      e.preventDefault();
+    }
   }.bind(this));
 }
 

@@ -15,8 +15,8 @@
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/tab_contents/web_contents_user_data.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "net/base/network_delegate.h"
 
 namespace base {
@@ -121,13 +121,14 @@ class LoadTimeStats {
 // spinner starts or stops for it, and whenever a renderer is no longer used.
 class LoadTimeStatsTabHelper
     : public content::WebContentsObserver,
-      public WebContentsUserData<LoadTimeStatsTabHelper> {
+      public content::WebContentsUserData<LoadTimeStatsTabHelper> {
  public:
   virtual ~LoadTimeStatsTabHelper();
 
   // content::WebContentsObserver implementation
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
@@ -137,8 +138,7 @@ class LoadTimeStatsTabHelper
 
  private:
   explicit LoadTimeStatsTabHelper(content::WebContents* web_contents);
-  static int kUserDataKey;
-  friend class WebContentsUserData<LoadTimeStatsTabHelper>;
+  friend class content::WebContentsUserData<LoadTimeStatsTabHelper>;
 
   // Calls into LoadTimeStats to notify that a reportable event has occurred
   // for the tab being observed.

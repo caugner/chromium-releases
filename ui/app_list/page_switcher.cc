@@ -67,8 +67,8 @@ class PageSwitcherButton : public views::CustomButton {
  private:
   // Paints a button that has two rounded corner at bottom.
   void PaintButton(gfx::Canvas* canvas, SkColor base_color) {
-    gfx::Rect rect(GetContentsBounds().Center(
-            gfx::Size(button_width_, kButtonHeight)));
+    gfx::Rect rect(GetContentsBounds());
+    rect.ClampToCenteredSize(gfx::Size(button_width_, kButtonHeight));
 
     SkPath path;
     path.addRoundRect(gfx::RectToSkRect(rect),
@@ -137,6 +137,40 @@ PageSwitcher::~PageSwitcher() {
   model_->RemoveObserver(this);
 }
 
+int PageSwitcher::GetPageForPoint(const gfx::Point& point) const {
+  if (!buttons_->bounds().Contains(point))
+    return -1;
+
+  gfx::Point buttons_point(point);
+  views::View::ConvertPointToTarget(this, buttons_, &buttons_point);
+
+  for (int i = 0; i < buttons_->child_count(); ++i) {
+    const views::View* button = buttons_->child_at(i);
+    if (button->bounds().Contains(buttons_point))
+      return i;
+  }
+
+  return -1;
+}
+
+void PageSwitcher::UpdateUIForDragPoint(const gfx::Point& point) {
+  int page = GetPageForPoint(point);
+
+  const int button_count = buttons_->child_count();
+  if (page >= 0 && page < button_count) {
+    PageSwitcherButton* button =
+        static_cast<PageSwitcherButton*>(buttons_->child_at(page));
+    button->SetState(views::CustomButton::BS_HOT);
+    return;
+  }
+
+  for (int i = 0; i < button_count; ++i) {
+    PageSwitcherButton* button =
+        static_cast<PageSwitcherButton*>(buttons_->child_at(i));
+    button->SetState(views::CustomButton::BS_NORMAL);
+  }
+}
+
 gfx::Size PageSwitcher::GetPreferredSize() {
   // Always return a size with correct height so that container resize is not
   // needed when more pages are added.
@@ -155,11 +189,11 @@ void PageSwitcher::Layout() {
                            rect.y(),
                            buttons_size.width(),
                            rect.height());
-  buttons_->SetBoundsRect(rect.Intersect(buttons_bounds));
+  buttons_->SetBoundsRect(gfx::IntersectRects(rect, buttons_bounds));
 }
 
 void PageSwitcher::CalculateButtonWidthAndSpacing(int contents_width) {
-  int button_count = buttons_->child_count();
+  const int button_count = buttons_->child_count();
   if (!button_count)
     return;
 

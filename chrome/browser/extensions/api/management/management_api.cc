@@ -102,7 +102,7 @@ scoped_ptr<management::ExtensionInfo> CreateExtensionInfo(
       UserMayModifySettings(&extension, NULL);
   info->is_app = extension.is_app();
   if (info->is_app) {
-    if (extension.is_packaged_app())
+    if (extension.is_legacy_packaged_app())
       info->type = ExtensionInfo::TYPE_LEGACY_PACKAGED_APP;
     else if (extension.is_hosted_app())
       info->type = ExtensionInfo::TYPE_HOSTED_APP;
@@ -473,7 +473,7 @@ bool SetEnabledFunction::RunImpl() {
       }
       AddRef(); // Matched in InstallUIProceed/InstallUIAbort
       install_prompt_.reset(
-          chrome::CreateExtensionInstallPromptWithBrowser(GetCurrentBrowser()));
+          new ExtensionInstallPrompt(GetAssociatedWebContents()));
       install_prompt_->ConfirmReEnable(this, extension);
       return true;
     }
@@ -647,6 +647,7 @@ void ExtensionManagementEventRouter::Observe(
     args->Append(info->ToValue().release());
   }
 
-  profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-      event_name, args.Pass(), NULL, GURL(), extensions::EventFilteringInfo());
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventToRenderers(event_name, args.Pass(), NULL, GURL(),
+                               extensions::EventFilteringInfo());
 }

@@ -7,7 +7,6 @@
 
 #include <deque>
 #include <map>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -30,7 +29,6 @@
 #include "ui/base/range/range.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
 #include "ui/surface/transport_dib.h"
 #include "webkit/glue/webcursor.h"
 
@@ -44,16 +42,6 @@ class SyncMessage;
 namespace WebKit {
 class WebMouseEvent;
 class WebTouchEvent;
-class WebWidget;
-}
-
-namespace content {
-struct GpuRenderingStats;
-class RenderWidgetTest;
-}
-
-namespace gfx {
-class Point;
 }
 
 namespace skia {
@@ -73,6 +61,10 @@ namespace ppapi {
 class PluginInstance;
 }  // namespace ppapi
 }  // namespace webkit
+
+namespace content {
+struct GpuRenderingStats;
+class RenderWidgetTest;
 
 // RenderWidget provides a communication bridge between a WebWidget and
 // a RenderWidgetHost, the latter of which lives in a different process.
@@ -166,7 +158,7 @@ class CONTENT_EXPORT RenderWidget
   // GPU rendering, e.g. count of texture uploads performed, time spent
   // uploading.
   // This call is relatively expensive as it blocks on the GPU process
-  bool GetGpuRenderingStats(content::GpuRenderingStats*) const;
+  bool GetGpuRenderingStats(GpuRenderingStats*) const;
 
   // Callback for use with BeginSmoothScroll.
   typedef base::Callback<void()> SmoothScrollCompletionCallback;
@@ -175,8 +167,10 @@ class CONTENT_EXPORT RenderWidget
   // performance characteristics as a user-initiated scroll. Returns an ID of
   // the scroll gesture.
   void BeginSmoothScroll(bool scroll_down,
-                         bool scroll_far,
-                         const SmoothScrollCompletionCallback& callback);
+                         const SmoothScrollCompletionCallback& callback,
+                         int pixels_to_scroll,
+                         int mouse_event_x,
+                         int mouse_event_y);
 
   // Close the underlying WebWidget.
   virtual void Close();
@@ -185,12 +179,17 @@ class CONTENT_EXPORT RenderWidget
     return filtered_time_per_frame_;
   }
 
+  enum ShowIme {
+    DO_NOT_SHOW_IME,
+    SHOW_IME_IF_NEEDED
+  };
+
  protected:
   // Friend RefCounted so that the dtor can be non-public. Using this class
   // without ref-counting is an error.
   friend class base::RefCounted<RenderWidget>;
   // For unit tests.
-  friend class content::RenderWidgetTest;
+  friend class RenderWidgetTest;
 
   enum ResizeAck {
     SEND_RESIZE_ACK,
@@ -304,6 +303,8 @@ class CONTENT_EXPORT RenderWidget
   // the context is lost.
   virtual bool SupportsAsynchronousSwapBuffers();
 
+  virtual bool ForceCompositingModeEnabled();
+
   // Notifies scheduler that the RenderWidget's subclass has finished or aborted
   // a swap buffers.
   void OnSwapBuffersPosted();
@@ -351,7 +352,9 @@ class CONTENT_EXPORT RenderWidget
 
   // Checks if the text input state and compose inline mode have been changed.
   // If they are changed, the new value will be sent to the browser process.
-  void UpdateTextInputState();
+  // |show_ime_if_needed| should be SHOW_IME_IF_NEEDED iff the update may cause
+  // the ime to be displayed, e.g. after a tap on an input field on mobile.
+  void UpdateTextInputState(ShowIme show_ime);
 
   // Checks if the selection bounds have been changed. If they are changed,
   // the new value will be sent to the browser process.
@@ -363,7 +366,6 @@ class CONTENT_EXPORT RenderWidget
   virtual void UpdateCompositionInfo(
       const ui::Range& range,
       const std::vector<gfx::Rect>& character_bounds);
-
 
   // Override point to obtain that the current input method state and caret
   // position.
@@ -606,7 +608,12 @@ class CONTENT_EXPORT RenderWidget
       PendingSmoothScrollGestureMap;
   PendingSmoothScrollGestureMap pending_smooth_scroll_gestures_;
 
+  // Specified whether the compositor will run in its own thread.
+  bool is_threaded_compositing_enabled_;
+
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_RENDER_WIDGET_H_

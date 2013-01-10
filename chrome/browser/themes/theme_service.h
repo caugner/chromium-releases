@@ -12,6 +12,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
@@ -20,6 +21,7 @@
 
 class BrowserThemePack;
 class ThemeServiceTest;
+class ThemeSyncableService;
 class FilePath;
 class Profile;
 
@@ -159,10 +161,9 @@ class ThemeService : public base::NonThreadSafe,
   //
   // TODO(erg): Make this part of the ui::ThemeProvider and the main way to get
   // theme properties out of the theme provider since it's cross platform.
-  virtual const gfx::Image* GetImageNamed(int id) const;
+  virtual gfx::Image GetImageNamed(int id) const;
 
   // Overridden from ui::ThemeProvider:
-  virtual SkBitmap* GetBitmapNamed(int id) const OVERRIDE;
   virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const OVERRIDE;
   virtual SkColor GetColor(int id) const OVERRIDE;
   virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE;
@@ -247,6 +248,10 @@ class ThemeService : public base::NonThreadSafe,
   // Remove preference values for themes that are no longer in use.
   void RemoveUnusedThemes();
 
+  // Returns the syncable service for syncing theme. The returned service is
+  // owned by |this| object.
+  virtual ThemeSyncableService* GetThemeSyncableService() const;
+
   // Save the images to be written to disk, mapping file path to id.
   typedef std::map<FilePath, int> ImagesDiskCache;
 
@@ -321,6 +326,8 @@ class ThemeService : public base::NonThreadSafe,
   int number_of_infobars_;
 
   content::NotificationRegistrar registrar_;
+
+  scoped_ptr<ThemeSyncableService> theme_syncable_service_;
 
   DISALLOW_COPY_AND_ASSIGN(ThemeService);
 };

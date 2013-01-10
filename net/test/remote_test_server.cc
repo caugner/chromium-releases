@@ -50,6 +50,9 @@ std::string GetServerTypeString(BaseTestServer::Type type) {
     case BaseTestServer::TYPE_HTTP:
     case BaseTestServer::TYPE_HTTPS:
       return "http";
+    case BaseTestServer::TYPE_WS:
+    case BaseTestServer::TYPE_WSS:
+      return "ws";
     case BaseTestServer::TYPE_SYNC:
       return "sync";
     case BaseTestServer::TYPE_TCP_ECHO:
@@ -138,6 +141,16 @@ bool RemoteTestServer::Stop() {
   // Explicitly reset |spawner_communicator_| to avoid reusing the stopped one.
   spawner_communicator_.reset(NULL);
   return stopped;
+}
+
+// On Android, the document root in the device is not the same as the document
+// root in the host machine where the test server is launched. So prepend
+// DIR_SOURCE_ROOT here to get the actual path of document root on the Android
+// device.
+FilePath RemoteTestServer::GetDocumentRoot() const {
+  FilePath src_dir;
+  PathService::Get(base::DIR_SOURCE_ROOT, &src_dir);
+  return src_dir.Append(document_root());
 }
 
 bool RemoteTestServer::Init(const FilePath& document_root) {

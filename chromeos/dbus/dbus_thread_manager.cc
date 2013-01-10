@@ -8,6 +8,7 @@
 
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
+#include "base/observer_list.h"
 #include "base/threading/thread.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
@@ -20,6 +21,7 @@
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
+#include "chromeos/dbus/dbus_thread_manager_observer.h"
 #include "chromeos/dbus/debug_daemon_client.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_ipconfig_client.h"
@@ -34,7 +36,6 @@
 #include "chromeos/dbus/ibus/ibus_input_context_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
-#include "chromeos/dbus/media_transfer_protocol_daemon_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
@@ -124,10 +125,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     // Create the introspectable object client.
     introspectable_client_.reset(
         IntrospectableClient::Create(client_type, system_bus_.get()));
-    // Create the media transfer protocol daemon client.
-    media_transfer_protocol_daemon_client_.reset(
-        MediaTransferProtocolDaemonClient::Create(client_type,
-                                                  system_bus_.get()));
     // Create the ModemMessaging client.
     modem_messaging_client_.reset(
         ModemMessagingClient::Create(client_type, system_bus_.get()));
@@ -152,6 +149,9 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   }
 
   virtual ~DBusThreadManagerImpl() {
+    FOR_EACH_OBSERVER(DBusThreadManagerObserver, observers_,
+                      OnDBusThreadManagerDestroying(this));
+
     // Shut down the bus. During the browser shutdown, it's ok to shut down
     // the bus synchronously.
     system_bus_->ShutdownOnDBusThreadAndBlock();
@@ -167,6 +167,18 @@ class DBusThreadManagerImpl : public DBusThreadManager {
 
     // Stop the D-Bus thread.
     dbus_thread_->Stop();
+  }
+
+  // DBusThreadManager override.
+  virtual void AddObserver(DBusThreadManagerObserver* observer) OVERRIDE {
+    DCHECK(observer);
+    observers_.AddObserver(observer);
+  }
+
+  // DBusThreadManager override.
+  virtual void RemoveObserver(DBusThreadManagerObserver* observer) OVERRIDE {
+    DCHECK(observer);
+    observers_.RemoveObserver(observer);
   }
 
   // DBusThreadManager override.
@@ -307,12 +319,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   }
 
   // DBusThreadManager override.
-  virtual MediaTransferProtocolDaemonClient*
-  GetMediaTransferProtocolDaemonClient() OVERRIDE {
-    return media_transfer_protocol_daemon_client_.get();
-  }
-
-  // DBusThreadManager override.
   virtual ModemMessagingClient* GetModemMessagingClient() OVERRIDE {
     return modem_messaging_client_.get();
   }
@@ -411,8 +417,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   scoped_ptr<GsmSMSClient> gsm_sms_client_;
   scoped_ptr<ImageBurnerClient> image_burner_client_;
   scoped_ptr<IntrospectableClient> introspectable_client_;
-  scoped_ptr<MediaTransferProtocolDaemonClient>
-      media_transfer_protocol_daemon_client_;
   scoped_ptr<ModemMessagingClient> modem_messaging_client_;
   scoped_ptr<PermissionBrokerClient> permission_broker_client_;
   scoped_ptr<PowerManagerClient> power_manager_client_;
@@ -426,6 +430,8 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   std::map<dbus::ObjectPath, IBusEngineService*> ibus_engine_services_;
 
   std::string ibus_address_;
+
+  ObserverList<DBusThreadManagerObserver> observers_;
 };
 
 // static

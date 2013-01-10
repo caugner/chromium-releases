@@ -12,6 +12,7 @@
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "ui/gl/gl_surface.h"
 
+namespace content {
 class GpuChannelManager;
 
 class TextureImageTransportSurface :
@@ -27,6 +28,7 @@ class TextureImageTransportSurface :
   // gfx::GLSurface implementation.
   virtual bool Initialize() OVERRIDE;
   virtual void Destroy() OVERRIDE;
+  virtual bool DeferDraws() OVERRIDE;
   virtual bool Resize(const gfx::Size& size) OVERRIDE;
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
@@ -46,6 +48,7 @@ class TextureImageTransportSurface :
  protected:
   // ImageTransportSurface implementation.
   virtual void OnBufferPresented(
+      bool presented,
       uint32 sync_point) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnSetFrontSurfaceIsProtected(
@@ -81,7 +84,7 @@ class TextureImageTransportSurface :
   void ReleaseTexture(int id);
   void ReleaseParentStub();
   void AdjustFrontBufferAllocation();
-  void BufferPresentedImpl();
+  void BufferPresentedImpl(bool presented);
   int front() const { return front_; }
   int back() const { return 1 - front_; }
 
@@ -110,7 +113,23 @@ class TextureImageTransportSurface :
   gfx::GLSurfaceHandle handle_;
   GpuCommandBufferStub* parent_stub_;
 
+  // The offscreen surface used to make the context current. However note that
+  // the actual rendering is always redirected to an FBO.
+  scoped_refptr<GLSurface> surface_;
+
+  // Whether a SwapBuffers is pending.
+  bool is_swap_buffers_pending_;
+
+  // Whether we unscheduled command buffer because of pending SwapBuffers.
+  bool did_unschedule_;
+
+  // Whether or not the buffer flip went through browser side on the last
+  // swap or post sub buffer.
+  bool did_flip_;
+
   DISALLOW_COPY_AND_ASSIGN(TextureImageTransportSurface);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_GPU_TEXTURE_IMAGE_TRANSPORT_SURFACE_H_

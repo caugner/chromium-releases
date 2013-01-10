@@ -32,6 +32,8 @@ class DownloadItem;
 namespace gfx {
 class Canvas;
 class Image;
+class ImageSkia;
+class Rect;
 }
 
 namespace download_util {
@@ -91,6 +93,14 @@ enum PaintDownloadProgressSize {
 // require the containing View in addition to the canvas because if we are
 // drawing in a right-to-left locale, we need to mirror the position of the
 // progress animation within the containing View.
+void PaintCustomDownloadProgress(gfx::Canvas* canvas,
+                                 const gfx::ImageSkia& background_image,
+                                 const gfx::ImageSkia& foreground_image,
+                                 int image_size,
+                                 const gfx::Rect& bounds,
+                                 int start_angle,
+                                 int percent_done);
+
 void PaintDownloadProgress(gfx::Canvas* canvas,
 #if defined(TOOLKIT_VIEWS)
                            views::View* containing_view,
@@ -187,6 +197,12 @@ void RecordDownloadCount(ChromeDownloadCountTypes type);
 
 // Record initiation of a download from a specific source.
 void RecordDownloadSource(ChromeDownloadSource source);
+
+// Check whether a download should be displayed in the download shelf.
+bool ShouldShowInShelf(content::DownloadItem* item);
+
+// Set whether a download should be displayed in the download shelf.
+void SetShouldShowInShelf(content::DownloadItem* item, bool should_show);
 
 }  // namespace download_util
 

@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/time.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/sync_encryption_handler.h"
@@ -80,6 +81,12 @@ struct SYNC_EXPORT SyncStatus {
   // Count of useless and useful syncs we perform.
   int useless_sync_cycles;
   int useful_sync_cycles;
+
+  // Nudge counts for each possible source
+  int nudge_source_notification;
+  int nudge_source_local;
+  int nudge_source_continuation;
+  int nudge_source_local_refresh;
 
   // Encryption related.
   ModelTypeSet encrypted_types;

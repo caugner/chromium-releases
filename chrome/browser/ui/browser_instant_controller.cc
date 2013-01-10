@@ -7,13 +7,13 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/instant/instant_controller.h"
-#include "chrome/browser/instant/instant_unload_handler.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
@@ -28,15 +28,18 @@ namespace chrome {
 // BrowserInstantController, public:
 
 BrowserInstantController::BrowserInstantController(Browser* browser)
-    : browser_(browser) {
+    : browser_(browser),
+      instant_unload_handler_(browser) {
   profile_pref_registrar_.Init(browser_->profile()->GetPrefs());
   profile_pref_registrar_.Add(prefs::kInstantEnabled, this);
   ResetInstant();
   browser_->tab_strip_model()->AddObserver(this);
+  browser_->search_model()->AddObserver(this);
 }
 
 BrowserInstantController::~BrowserInstantController() {
   browser_->tab_strip_model()->RemoveObserver(this);
+  browser_->search_model()->RemoveObserver(this);
 }
 
 bool BrowserInstantController::OpenInstant(WindowOpenDisposition disposition) {
@@ -45,91 +48,45 @@ bool BrowserInstantController::OpenInstant(WindowOpenDisposition disposition) {
   if (!instant() || !instant_->IsCurrent() || disposition == NEW_BACKGROUND_TAB)
     return false;
 
-  if (disposition == CURRENT_TAB) {
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_INSTANT_COMMITTED,
-        content::Source<TabContents>(instant_->CommitCurrentPreview(
-            INSTANT_COMMIT_PRESSED_ENTER)),
-        content::NotificationService::NoDetails());
-    return true;
-  }
+  // The omnibox currently doesn't use other dispositions, so we don't attempt
+  // to handle them. If you hit this DCHECK file a bug and I'll (sky) add
+  // support for the new disposition.
+  DCHECK(disposition == CURRENT_TAB ||
+         disposition == NEW_FOREGROUND_TAB) << disposition;
 
-  if (disposition == NEW_FOREGROUND_TAB) {
-    TabContents* preview = instant_->ReleasePreviewContents(
-        INSTANT_COMMIT_PRESSED_ENTER);
-    preview->web_contents()->GetController().PruneAllButActive();
+  instant_->CommitCurrentPreview(disposition == CURRENT_TAB ?
+      INSTANT_COMMIT_PRESSED_ENTER : INSTANT_COMMIT_PRESSED_ALT_ENTER);
+  return true;
+}
+
+void BrowserInstantController::CommitInstant(TabContents* preview,
+                                             bool in_new_tab) {
+  if (in_new_tab) {
+    // TabStripModel takes ownership of |preview|.
     browser_->tab_strip_model()->AddTabContents(preview, -1,
         instant_->last_transition_type(), TabStripModel::ADD_ACTIVE);
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_INSTANT_COMMITTED,
-        content::Source<TabContents>(preview),
-        content::NotificationService::NoDetails());
-    return true;
-  }
+  } else {
+    TabContents* active_tab = chrome::GetActiveTabContents(browser_);
+    int index = browser_->tab_strip_model()->GetIndexOfTabContents(active_tab);
+    DCHECK_NE(TabStripModel::kNoTab, index);
+    // TabStripModel takes ownership of |preview|.
+    browser_->tab_strip_model()->ReplaceTabContentsAt(index, preview);
+    // InstantUnloadHandler takes ownership of |active_tab|.
+    instant_unload_handler_.RunUnloadListenersOrDestroy(active_tab, index);
 
-  // The omnibox currently doesn't use other dispositions, so we don't attempt
-  // to handle them. If you hit this NOTREACHED file a bug and I'll (sky) add
-  // support for the new disposition.
-  NOTREACHED();
-  return false;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// BrowserInstantController, InstantControllerDelegate implementation:
-
-void BrowserInstantController::ShowInstant() {
-  // Call ShowInstant() first, before WasShown(), so that the preview is added
-  // to the window hierarchy before it's painted. http://crbug.com/145568
-  TabContents* preview = instant_->GetPreviewContents();
-  browser_->window()->ShowInstant(preview);
-
-  // TODO(beng): Investigate if we can avoid this and instead rely on the
-  //             visibility of the WebContentsView.
-  preview->web_contents()->WasShown();
-  chrome::GetActiveWebContents(browser_)->WasHidden();
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_INSTANT_CONTROLLER_SHOWN,
-      content::Source<InstantController>(instant()),
-      content::NotificationService::NoDetails());
-}
-
-void BrowserInstantController::HideInstant() {
-  browser_->window()->HideInstant();
-
-  if (chrome::GetActiveWebContents(browser_))
-    chrome::GetActiveWebContents(browser_)->WasShown();
-  if (TabContents* preview = instant_->GetPreviewContents())
-    preview->web_contents()->WasHidden();
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_INSTANT_CONTROLLER_HIDDEN,
-      content::Source<InstantController>(instant()),
-      content::NotificationService::NoDetails());
-}
-
-void BrowserInstantController::CommitInstant(TabContents* preview) {
-  TabContents* active_tab = chrome::GetActiveTabContents(browser_);
-  int index = browser_->tab_strip_model()->GetIndexOfTabContents(active_tab);
-  DCHECK_NE(TabStripModel::kNoTab, index);
-  // TabStripModel takes ownership of |preview|.
-  browser_->tab_strip_model()->ReplaceTabContentsAt(index, preview);
-  // InstantUnloadHandler takes ownership of |active_tab|.
-  instant_unload_handler_->RunUnloadListenersOrDestroy(active_tab, index);
-
-  GURL url = preview->web_contents()->GetURL();
-  DCHECK(browser_->profile()->GetExtensionService());
-  if (browser_->profile()->GetExtensionService()->IsInstalledApp(url)) {
-    AppLauncherHandler::RecordAppLaunchType(
-        extension_misc::APP_LAUNCH_OMNIBOX_INSTANT);
+    GURL url = preview->web_contents()->GetURL();
+    DCHECK(browser_->profile()->GetExtensionService());
+    if (browser_->profile()->GetExtensionService()->IsInstalledApp(url)) {
+      AppLauncherHandler::RecordAppLaunchType(
+          extension_misc::APP_LAUNCH_OMNIBOX_INSTANT);
+    }
   }
 }
 
-void BrowserInstantController::SetSuggestedText(
-    const string16& text,
-    InstantCompleteBehavior behavior) {
+void BrowserInstantController::SetInstantSuggestion(
+    const InstantSuggestion& suggestion) {
   if (browser_->window()->GetLocationBar())
-    browser_->window()->GetLocationBar()->SetSuggestedText(text, behavior);
+    browser_->window()->GetLocationBar()->SetInstantSuggestion(suggestion);
 }
 
 gfx::Rect BrowserInstantController::GetInstantBounds() {
@@ -168,6 +125,15 @@ void BrowserInstantController::TabDeactivated(TabContents* contents) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// BrowserInstantController, search::SearchModelObserver implementation:
+
+void BrowserInstantController::ModeChanged(const search::Mode& old_mode,
+                                           const search::Mode& new_mode) {
+  if (instant() && old_mode.is_ntp() != new_mode.is_ntp())
+    instant_->OnActiveTabModeChanged(new_mode.is_ntp());
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // BrowserInstantController, private:
 
 void BrowserInstantController::ResetInstant() {
@@ -175,8 +141,12 @@ void BrowserInstantController::ResetInstant() {
       !browser_shutdown::ShuttingDownWithoutClosingBrowsers() &&
       browser_->is_type_tabbed() ?
           InstantController::CreateInstant(browser_->profile(), this) : NULL);
-  instant_unload_handler_.reset(instant() ?
-      new InstantUnloadHandler(browser_) : NULL);
+
+  // Notify any observers that they need to reset.
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_BROWSER_INSTANT_RESET,
+      content::Source<BrowserInstantController>(this),
+      content::NotificationService::NoDetails());
 }
 
 }  // namespace chrome

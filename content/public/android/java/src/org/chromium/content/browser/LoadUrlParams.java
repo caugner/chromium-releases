@@ -7,6 +7,8 @@ package org.chromium.content.browser;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 
+import java.util.Map;
+
 /**
  * Holds parameters for ContentViewCore.LoadUrl. Parameters should match
  * counterparts in NavigationController::LoadURLParams, including default
@@ -35,10 +37,11 @@ public class LoadUrlParams {
     int mLoadUrlType;
     int mTransitionType;
     int mUaOverrideOption;
-    String mExtraHeaders;
+    private Map<String, String> mExtraHeaders;
     byte[] mPostData;
     String mBaseUrlForDataUrl;
     String mVirtualUrlForDataUrl;
+    boolean mCanLoadLocalResources;
 
     public LoadUrlParams(String url) {
         // Check initializeConstants was called.
@@ -76,6 +79,47 @@ public class LoadUrlParams {
     }
 
     /**
+     * Helper method to create a LoadUrlParams object for data url with base
+     * and virtual url.
+     * @param data Data to be loaded.
+     * @param mimeType Mime type of the data.
+     * @param isBase64Encoded True if the data is encoded in Base 64 format.
+     * @param baseUrl Base url of this data load. Note that for WebView compatibility,
+     *                baseUrl and historyUrl are ignored if this is a data: url.
+     *                Defaults to about:blank if null.
+     * @param historyUrl History url for this data load. Note that for WebView compatibility,
+     *                   this is ignored if baseUrl is a data: url. Defaults to about:blank
+     *                   if null.
+     */
+    public static LoadUrlParams createLoadDataParamsWithBaseUrl(
+            String data, String mimeType, boolean isBase64Encoded,
+            String baseUrl, String historyUrl) {
+        LoadUrlParams params = createLoadDataParams(data, mimeType, isBase64Encoded);
+        // For WebView compatibility, when the base URL has the 'data:'
+        // scheme, we treat it as a regular data URL load and skip setting
+        // baseUrl and historyUrl.
+        if (baseUrl == null || !baseUrl.toLowerCase().startsWith("data:")) {
+            params.setBaseUrlForDataUrl(baseUrl != null ? baseUrl : "about:blank");
+            params.setVirtualUrlForDataUrl(historyUrl != null ? historyUrl : "about:blank");
+        }
+        return params;
+    }
+
+    /**
+     * Helper method to create a LoadUrlParams object for an HTTP POST load.
+     * @param url URL of the load.
+     * @param postData Post data of the load. Can be null.
+     */
+    public static LoadUrlParams createLoadHttpPostParams(
+            String url, byte[] postData) {
+        LoadUrlParams params = new LoadUrlParams(url);
+        params.setLoadType(LOAD_TYPE_BROWSER_INITIATED_HTTP_POST);
+        params.setTransitionType(ContentViewCore.PAGE_TRANSITION_TYPED);
+        params.setPostData(postData);
+        return params;
+    }
+
+    /**
      * Set load type of this load. Defaults to LOAD_TYPE_DEFAULT.
      * @param loadType One of LOAD_TYPE static constants above.
      */
@@ -101,10 +145,32 @@ public class LoadUrlParams {
 
     /**
      * Set extra headers for this load.
-     * @param extraHeaders Extra headers seperated by "\n".
+     * @param extraHeaders Extra HTTP headers for this load. Note that these
+     *                     headers will never overwrite existing ones set by Chromium.
      */
-    public void setExtraHeaders(String extraHeaders) {
+    public void setExtraHeaders(Map<String, String> extraHeaders) {
         mExtraHeaders = extraHeaders;
+    }
+
+    /**
+     * Return the extra headers as a single String separated by "\n", or null if no extra header
+     * is set. This form is suitable for passing to native
+     * NavigationController::LoadUrlParams::extra_headers.
+     */
+    String getExtraHeadersString() {
+        if (mExtraHeaders == null) return null;
+
+        StringBuilder headerBuilder = new StringBuilder();
+        for (Map.Entry<String, String> header : mExtraHeaders.entrySet()) {
+            if (headerBuilder.length() > 0) headerBuilder.append("\n");
+
+            // Header name should be lower case.
+            headerBuilder.append(header.getKey().toLowerCase());
+            headerBuilder.append(":");
+            headerBuilder.append(header.getValue());
+        }
+
+        return headerBuilder.toString();
     }
 
     /**
@@ -135,6 +201,27 @@ public class LoadUrlParams {
         mVirtualUrlForDataUrl = virtualUrl;
     }
 
+    /**
+     * Set whether the load should be able to access local resources. This
+     * defaults to false.
+     */
+    public void setCanLoadLocalResources(boolean canLoad) {
+        mCanLoadLocalResources = canLoad;
+    }
+
+    public int getLoadUrlType() {
+        return mLoadUrlType;
+    }
+
+    public boolean isBaseUrlDataScheme() {
+        // If there's no base url set, but this is a data load then
+        // treat the scheme as data:.
+        if (mBaseUrlForDataUrl == null && mLoadUrlType == LOAD_TYPE_DATA) {
+            return true;
+        }
+        return nativeIsDataScheme(mBaseUrlForDataUrl);
+    }
+
     @SuppressWarnings("unused")
     @CalledByNative
     private static void initializeConstants(
@@ -151,4 +238,10 @@ public class LoadUrlParams {
         UA_OVERRIDE_FALSE = ua_override_false;
         UA_OVERRIDE_TRUE = ua_override_true;
     }
+
+    /**
+     * Parses |url| as a GURL on the native side, and
+     * returns true if it's scheme is data:.
+     */
+    private static native boolean nativeIsDataScheme(String url);
 }

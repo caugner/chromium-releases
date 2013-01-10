@@ -48,9 +48,10 @@ class AURA_EXPORT CompoundEventFilter : public EventFilter {
 
   // Adds/removes additional event filters. This does not take ownership of
   // the EventFilter.
+  // NOTE: EventFilters are deprecated. Use env::AddPreTargetEventHandler etc.
+  // instead.
   void AddFilter(EventFilter* filter);
   void RemoveFilter(EventFilter* filter);
-  size_t GetFilterCount() const;
 
  private:
   // Updates the cursor if the target provides a custom one, and provides
@@ -60,7 +61,7 @@ class AURA_EXPORT CompoundEventFilter : public EventFilter {
   // Dispatches event to additional filters.
   ui::EventResult FilterKeyEvent(ui::KeyEvent* event);
   ui::EventResult FilterMouseEvent(ui::MouseEvent* event);
-  ui::TouchStatus FilterTouchEvent(Window* target, ui::TouchEvent* event);
+  ui::EventResult FilterTouchEvent(ui::TouchEvent* event);
 
   // Sets the visibility of the cursor if the event is not synthesized and
   // 1) it's hiding (show=false) when the cursor is currently shown, or
@@ -72,15 +73,11 @@ class AURA_EXPORT CompoundEventFilter : public EventFilter {
                                   ui::Event* event,
                                   bool show);
 
-  // Overridden from EventFilter:
-  virtual ui::TouchStatus PreHandleTouchEvent(Window* target,
-                                              ui::TouchEvent* event) OVERRIDE;
-
   // Overridden from ui::EventHandler:
   virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
   virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
   virtual ui::EventResult OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
   virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   // Additional event filters that pre-handles events.
   ObserverList<EventFilter, true> filters_;

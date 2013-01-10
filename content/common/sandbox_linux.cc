@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include "base/command_line.h"
@@ -70,6 +72,7 @@ namespace content {
 
 LinuxSandbox::LinuxSandbox()
     : proc_fd_(-1),
+      seccomp_bpf_started_(false),
       pre_initialized_(false),
       seccomp_legacy_supported_(false),
       seccomp_bpf_supported_(false),
@@ -190,6 +193,10 @@ bool LinuxSandbox::IsSingleThreaded() const {
   return num_threads == 1 || num_threads == 0;
 }
 
+bool LinuxSandbox::seccomp_bpf_started() const {
+  return seccomp_bpf_started_;
+}
+
 sandbox::SetuidSandboxClient*
     LinuxSandbox::setuid_sandbox_client() const {
   return setuid_sandbox_client_.get();
@@ -216,16 +223,16 @@ bool LinuxSandbox::StartSeccompLegacy(const std::string& process_type) {
 
 // For seccomp-bpf, we use the SandboxSeccompBpf class.
 bool LinuxSandbox::StartSeccompBpf(const std::string& process_type) {
+  CHECK(!seccomp_bpf_started_);
   if (!pre_initialized_)
     PreinitializeSandbox(process_type);
-  bool started_bpf_sandbox = false;
   if (seccomp_bpf_supported())
-    started_bpf_sandbox = SandboxSeccompBpf::StartSandbox(process_type);
+    seccomp_bpf_started_ = SandboxSeccompBpf::StartSandbox(process_type);
 
-  if (started_bpf_sandbox)
+  if (seccomp_bpf_started_)
     LogSandboxStarted("seccomp-bpf");
 
-  return started_bpf_sandbox;
+  return seccomp_bpf_started_;
 }
 
 bool LinuxSandbox::seccomp_legacy_supported() const {
@@ -236,6 +243,30 @@ bool LinuxSandbox::seccomp_legacy_supported() const {
 bool LinuxSandbox::seccomp_bpf_supported() const {
   CHECK(pre_initialized_);
   return seccomp_bpf_supported_;
+}
+
+bool LinuxSandbox::LimitAddressSpace(const std::string& process_type) {
+  (void) process_type;
+#if defined(__x86_64__) && !defined(ADDRESS_SANITIZER)
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kNoSandbox)) {
+    return false;
+  }
+  // Limit the address space to 8GB.
+  const rlim_t kNewAddressSpaceMaxSize = 0x200000000L;
+  struct rlimit old_address_space_limit;
+  if (getrlimit(RLIMIT_AS, &old_address_space_limit))
+    return false;
+  // Make sure we don't raise the existing limit.
+  const struct rlimit new_address_space_limit = {
+      std::min(old_address_space_limit.rlim_cur, kNewAddressSpaceMaxSize),
+      std::min(old_address_space_limit.rlim_max, kNewAddressSpaceMaxSize)
+      };
+  int rc = setrlimit(RLIMIT_AS, &new_address_space_limit);
+  return (rc == 0);
+#else
+  return false;
+#endif  // __x86_64__ && !defined(ADDRESS_SANITIZER)
 }
 
 }  // namespace content

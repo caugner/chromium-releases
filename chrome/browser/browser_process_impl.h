@@ -16,9 +16,9 @@
 #include "base/debug/stack_trace.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
 #include "content/public/browser/notification_observer.h"
@@ -27,6 +27,10 @@ class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
 class RemoteDebuggingServer;
+
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+class PluginsResourceService;
+#endif
 
 namespace policy {
 class BrowserPolicyConnector;
@@ -75,7 +79,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
-  virtual ThumbnailGenerator* GetThumbnailGenerator() OVERRIDE;
+  virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
   virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
@@ -148,12 +152,15 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_watchdog_thread_;
   scoped_ptr<WatchDogThread> watchdog_thread_;
 
-  // Must be destroyed after |policy_service_| if StartTearDown() isn't invoked
-  // during an early shutdown.
   bool created_browser_policy_connector_;
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  // Must be destroyed after |local_state_|.
   scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
+#endif
 
   // Must be destroyed after |local_state_|.
+  // This is a stub when policy is not enabled. Otherwise, the PolicyService
+  // is owned by the |browser_policy_connector_| and this is not used.
   scoped_ptr<policy::PolicyService> policy_service_;
 
   bool created_profile_manager_;
@@ -207,9 +214,9 @@ class BrowserProcessImpl : public BrowserProcess,
   bool checked_for_new_frames_;
   bool using_new_frames_;
 
-  // This service just sits around and makes thumbnails for tabs. It does
+  // This service just sits around and makes snapshots for renderers. It does
   // nothing in the constructor so we don't have to worry about lazy init.
-  scoped_ptr<ThumbnailGenerator> thumbnail_generator_;
+  scoped_ptr<RenderWidgetSnapshotTaker> render_widget_snapshot_taker_;
 
   // Download status updates (like a changing application icon on dock/taskbar)
   // are global per-application. DownloadStatusUpdater does no work in the ctor
@@ -253,6 +260,9 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<CRLSetFetcher> crl_set_fetcher_;
 #endif
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+  scoped_refptr<PluginsResourceService> plugins_resource_service_;
+#endif
   // TODO(eroman): Remove this when done debugging 113031. This tracks
   // the callstack which released the final module reference count.
   base::debug::StackTrace release_last_reference_callstack_;

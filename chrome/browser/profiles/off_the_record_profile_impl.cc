@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/prefs/json_pref_store.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "build/build_config.h"
@@ -24,13 +25,12 @@
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
-#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/plugin_prefs.h"
+#include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
@@ -41,7 +41,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/browser_thread.h"
@@ -53,6 +52,10 @@
 #include "net/base/transport_security_state.h"
 #include "net/http/http_server_properties.h"
 #include "webkit/database/database_tracker.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
+#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/preferences.h"
@@ -93,6 +96,10 @@ void OffTheRecordProfileImpl::Init() {
 
   DCHECK_NE(IncognitoModePrefs::DISABLED,
             IncognitoModePrefs::GetAvailability(profile_->GetPrefs()));
+
+#if defined(OS_ANDROID)
+  UseSystemProxy();
+#endif  // defined(OS_ANDROID)
 
   // TODO(oshima): Remove the need to eagerly initialize the request context
   // getter. chromeos::OnlineAttempt is illegally trying to access this
@@ -157,6 +164,22 @@ void OffTheRecordProfileImpl::InitHostZoomMap() {
                  content::Source<HostZoomMap>(parent_host_zoom_map));
 }
 
+#if defined(OS_ANDROID)
+void OffTheRecordProfileImpl::UseSystemProxy() {
+  // Force the use of the system-assigned proxy when off the record.
+  const char kProxyMode[] = "mode";
+  const char kProxyServer[] = "server";
+  const char kProxyBypassList[] = "bypass_list";
+  const char kProxyPacUrl[] = "pac_url";
+  DictionaryPrefUpdate update(prefs_, prefs::kProxy);
+  DictionaryValue* dict = update.Get();
+  dict->SetString(kProxyMode, ProxyModeToString(ProxyPrefs::MODE_SYSTEM));
+  dict->SetString(kProxyPacUrl, "");
+  dict->SetString(kProxyServer, "");
+  dict->SetString(kProxyBypassList, "");
+}
+#endif  // defined(OS_ANDROID)
+
 std::string OffTheRecordProfileImpl::GetProfileName() {
   // Incognito profile should not return the profile name.
   return std::string();
@@ -187,27 +210,8 @@ Profile* OffTheRecordProfileImpl::GetOriginalProfile() {
   return profile_;
 }
 
-VisitedLinkMaster* OffTheRecordProfileImpl::GetVisitedLinkMaster() {
-  // We don't provide access to the VisitedLinkMaster when we're OffTheRecord
-  // because we don't want to leak the sites that the user has visited before.
-  return NULL;
-}
-
 ExtensionService* OffTheRecordProfileImpl::GetExtensionService() {
   return extensions::ExtensionSystem::Get(this)->extension_service();
-}
-
-extensions::UserScriptMaster* OffTheRecordProfileImpl::GetUserScriptMaster() {
-  return extensions::ExtensionSystem::Get(this)->user_script_master();
-}
-
-ExtensionProcessManager*
-    OffTheRecordProfileImpl::GetExtensionProcessManager() {
-  return extensions::ExtensionSystem::Get(this)->process_manager();
-}
-
-extensions::EventRouter* OffTheRecordProfileImpl::GetExtensionEventRouter() {
-  return extensions::ExtensionSystem::Get(this)->event_router();
 }
 
 ExtensionSpecialStoragePolicy*
@@ -222,6 +226,11 @@ GAIAInfoUpdateService* OffTheRecordProfileImpl::GetGAIAInfoUpdateService() {
 policy::UserCloudPolicyManager*
     OffTheRecordProfileImpl::GetUserCloudPolicyManager() {
   return profile_->GetUserCloudPolicyManager();
+}
+
+policy::ManagedModePolicyProvider*
+    OffTheRecordProfileImpl::GetManagedModePolicyProvider() {
+  return profile_->GetManagedModePolicyProvider();
 }
 
 policy::PolicyService* OffTheRecordProfileImpl::GetPolicyService() {
@@ -248,12 +257,13 @@ net::URLRequestContextGetter* OffTheRecordProfileImpl::GetRequestContext() {
 net::URLRequestContextGetter*
     OffTheRecordProfileImpl::GetRequestContextForRenderProcess(
         int renderer_child_id) {
-  if (GetExtensionService()) {
-    const extensions::Extension* installed_app = GetExtensionService()->
-        GetInstalledAppForRenderer(renderer_child_id);
-    if (installed_app != NULL && installed_app->is_storage_isolated()) {
-      return GetRequestContextForStoragePartition(installed_app->id());
-    }
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(this)->extension_service();
+  if (extension_service) {
+    const extensions::Extension* extension =
+        extension_service->GetIsolatedAppForRenderer(renderer_child_id);
+    if (extension)
+      return GetRequestContextForStoragePartition(extension->id());
   }
 
   content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
@@ -334,10 +344,6 @@ content::SpeechRecognitionPreferences*
   return profile_->GetSpeechRecognitionPreferences();
 }
 
-bool OffTheRecordProfileImpl::DidLastSessionExitCleanly() {
-  return profile_->DidLastSessionExitCleanly();
-}
-
 quota::SpecialStoragePolicy*
     OffTheRecordProfileImpl::GetSpecialStoragePolicy() {
   return GetExtensionSpecialStoragePolicy();
@@ -363,7 +369,7 @@ history::TopSites* OffTheRecordProfileImpl::GetTopSites() {
   return NULL;
 }
 
-void OffTheRecordProfileImpl::MarkAsCleanShutdown() {
+void OffTheRecordProfileImpl::SetExitType(ExitType exit_type) {
 }
 
 void OffTheRecordProfileImpl::InitPromoResources() {
@@ -386,6 +392,10 @@ void OffTheRecordProfileImpl::set_last_selected_directory(
 bool OffTheRecordProfileImpl::WasCreatedByVersionOrLater(
     const std::string& version) {
   return profile_->WasCreatedByVersionOrLater(version);
+}
+
+Profile::ExitType OffTheRecordProfileImpl::GetLastSessionExitType() {
+  return profile_->GetLastSessionExitType();
 }
 
 #if defined(OS_CHROMEOS)

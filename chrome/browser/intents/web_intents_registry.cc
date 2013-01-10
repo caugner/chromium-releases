@@ -13,6 +13,7 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/intents/default_web_intent_service.h"
+#include "chrome/browser/intents/native_services.h"
 #include "chrome/browser/intents/web_intents_util.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/extensions/extension.h"
@@ -190,7 +191,9 @@ class WebIntentsRegistry::QueryAdapter : public WebDataServiceConsumer {
   ResultsHandler handler_;
 };
 
-WebIntentsRegistry::WebIntentsRegistry() {}
+WebIntentsRegistry::WebIntentsRegistry() {
+  native_services_.reset(new web_intents::NativeServiceRegistry());
+}
 
 WebIntentsRegistry::~WebIntentsRegistry() {
 
@@ -232,6 +235,9 @@ void WebIntentsRegistry::OnWebIntentsResultReceived(
       }
     }
   }
+
+  // add native services.
+  native_services_->GetSupportedServices(params.action_, &matching_services);
 
   // Filter out all services not matching the query type.
   FilterServicesByType(params.type_, &matching_services);
@@ -297,16 +303,33 @@ void WebIntentsRegistry::OnWebIntentsDefaultsResultReceived(
     }
   }
 
+  // If QuickOffice is the default for this, recompute defaults.
+  if (default_service.service_url
+      == web_intents::kQuickOfficeViewerServiceURL ||
+      default_service.service_url
+      == web_intents::kQuickOfficeViewerDevServiceURL) {
+    default_service.user_date = -1;
+  }
+
   // TODO(hshi): Temporary workaround for http://crbug.com/134197.
   // If no user-set default service is found, use built-in QuickOffice Viewer as
   // default for MS office files. Remove this once full defaults is in place.
+
   if (default_service.user_date <= 0) {
+    const char kQuickOfficeDevExtensionId[] =
+        "ionpfmkccalenbmnddpbmocokhaknphg";
+    std::string service_url = web_intents::kQuickOfficeViewerServiceURL;
+    if (extension_service_->GetInstalledExtension(kQuickOfficeDevExtensionId) &&
+        extension_service_->IsExtensionEnabled(kQuickOfficeDevExtensionId)) {
+        service_url = web_intents::kQuickOfficeViewerDevServiceURL;
+    }
+
     for (size_t i = 0; i < sizeof(kQuickOfficeViewerMimeType) / sizeof(char*);
          ++i) {
       DefaultWebIntentService qoviewer_service;
       qoviewer_service.action = ASCIIToUTF16(web_intents::kActionView);
       qoviewer_service.type = ASCIIToUTF16(kQuickOfficeViewerMimeType[i]);
-      qoviewer_service.service_url = web_intents::kQuickOfficeViewerServiceURL;
+      qoviewer_service.service_url = service_url;
       if (WebIntentsTypesMatch(qoviewer_service.type, params.type_)) {
         default_service = qoviewer_service;
         break;

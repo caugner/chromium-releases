@@ -17,11 +17,13 @@
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/custom_menu_commands.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
+#include "content/public/common/context_menu_params.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
 #include "grit/webkit_strings.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
@@ -40,9 +42,12 @@
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/webview_plugin.h"
+
+#if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
+#include "webkit/plugins/plugin_constants.h"
+#endif
 
 using content::RenderThread;
 using content::RenderView;
@@ -222,12 +227,16 @@ PluginPlaceholder::PluginPlaceholder(content::RenderView* render_view,
 #endif
       hidden_(false),
       has_host_(false),
-      finished_loading_(false) {
+      finished_loading_(false),
+      context_menu_request_id_(0) {
   RenderThread::Get()->AddObserver(this);
 }
 
 PluginPlaceholder::~PluginPlaceholder() {
   RenderThread::Get()->RemoveObserver(this);
+  if (context_menu_request_id_)
+    render_view()->CancelContextMenu(context_menu_request_id_);
+
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   if (placeholder_routing_id_ == MSG_ROUTING_NONE)
     return;
@@ -441,41 +450,26 @@ void PluginPlaceholder::PluginListChanged() {
   if (document.isNull())
     return;
 
-  ChromeViewHostMsg_GetPluginInfo_Status status;
-  webkit::WebPluginInfo plugin_info;
+  ChromeViewHostMsg_GetPluginInfo_Output output;
   std::string mime_type(plugin_params_.mimeType.utf8());
-  std::string actual_mime_type;
   render_view()->Send(new ChromeViewHostMsg_GetPluginInfo(
       routing_id(), GURL(plugin_params_.url), document.url(),
-      mime_type, &status, &plugin_info, &actual_mime_type));
-  if (status.value == status_->value)
+      mime_type, &output));
+  if (output.status.value == status_->value)
     return;
   chrome::ChromeContentRendererClient* client =
       static_cast<chrome::ChromeContentRendererClient*>(
           content::GetContentClient()->renderer());
   WebPlugin* new_plugin =
-      client->CreatePlugin(render_view(), frame_, plugin_params_,
-                           status, plugin_info, actual_mime_type);
+      client->CreatePlugin(render_view(), frame_, plugin_params_, output);
   ReplacePlugin(new_plugin);
 }
 
-void PluginPlaceholder::SetMessage(const string16& message) {
-  message_ = message;
-  if (finished_loading_)
-    UpdateMessage();
-}
-
-void PluginPlaceholder::UpdateMessage() {
-  std::string script = "window.setMessage(" +
-                       base::GetDoubleQuotedJson(message_) + ")";
-  plugin_->web_view()->mainFrame()->executeScript(
-      WebScriptSource(ASCIIToUTF16(script)));
-}
-
-void PluginPlaceholder::ContextMenuAction(unsigned id) {
+void PluginPlaceholder::OnMenuAction(int request_id, unsigned action) {
+  DCHECK_EQ(context_menu_request_id_, request_id);
   if (g_last_active_menu != this)
     return;
-  switch (id) {
+  switch (action) {
     case chrome::MENU_COMMAND_PLUGIN_RUN: {
       RenderThread::Get()->RecordUserMetrics("Plugin_Load_Menu");
       LoadPlugin();
@@ -491,25 +485,39 @@ void PluginPlaceholder::ContextMenuAction(unsigned id) {
   }
 }
 
+void PluginPlaceholder::OnMenuClosed(int request_id) {
+  DCHECK_EQ(context_menu_request_id_, request_id);
+  context_menu_request_id_ = 0;
+}
+
+void PluginPlaceholder::SetMessage(const string16& message) {
+  message_ = message;
+  if (finished_loading_)
+    UpdateMessage();
+}
+
+void PluginPlaceholder::UpdateMessage() {
+  std::string script = "window.setMessage(" +
+                       base::GetDoubleQuotedJson(message_) + ")";
+  plugin_->web_view()->mainFrame()->executeScript(
+      WebScriptSource(ASCIIToUTF16(script)));
+}
+
 void PluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
-  WebContextMenuData menu_data;
+  if (context_menu_request_id_)
+    return;  // Don't allow nested context menu requests.
 
-  size_t num_items = 3u;
-  if (!plugin_info_.path.value().empty())
-    num_items++;
+  content::ContextMenuParams params;
 
-  WebVector<WebMenuItemInfo> custom_items(num_items);
-
-  size_t i = 0;
   WebMenuItemInfo name_item;
   name_item.label = title_;
   name_item.hasTextDirectionOverride = false;
   name_item.textDirection =  WebKit::WebTextDirectionDefault;
-  custom_items[i++] = name_item;
+  params.custom_items.push_back(WebMenuItem(name_item));
 
   WebMenuItemInfo separator_item;
   separator_item.type = WebMenuItemInfo::Separator;
-  custom_items[i++] = separator_item;
+  params.custom_items.push_back(WebMenuItem(separator_item));
 
   if (!plugin_info_.path.value().empty()) {
     WebMenuItemInfo run_item;
@@ -520,7 +528,7 @@ void PluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
         l10n_util::GetStringUTF8(IDS_CONTENT_CONTEXT_PLUGIN_RUN).c_str());
     run_item.hasTextDirectionOverride = false;
     run_item.textDirection =  WebKit::WebTextDirectionDefault;
-    custom_items[i++] = run_item;
+    params.custom_items.push_back(WebMenuItem(run_item));
   }
 
   WebMenuItemInfo hide_item;
@@ -530,11 +538,12 @@ void PluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
       l10n_util::GetStringUTF8(IDS_CONTENT_CONTEXT_PLUGIN_HIDE).c_str());
   hide_item.hasTextDirectionOverride = false;
   hide_item.textDirection =  WebKit::WebTextDirectionDefault;
-  custom_items[i++] = hide_item;
+  params.custom_items.push_back(WebMenuItem(hide_item));
 
-  menu_data.customItems.swap(custom_items);
-  menu_data.mousePosition = WebPoint(event.windowX, event.windowY);
-  render_view()->ShowContextMenu(NULL, menu_data);
+  params.x = event.windowX;
+  params.y = event.windowY;
+
+  context_menu_request_id_ = render_view()->ShowContextMenu(this, params);
   g_last_active_menu = this;
 }
 
@@ -641,6 +650,6 @@ bool PluginPlaceholder::IsYouTubeURL(const GURL& url,
       EndsWith(host, "youtube-nocookie.com", true);
 
   return is_youtube && IsValidYouTubeVideo(url.path()) &&
-      LowerCaseEqualsASCII(mime_type, "application/x-shockwave-flash");
+      LowerCaseEqualsASCII(mime_type, kFlashPluginSwfMimeType);
 }
 #endif

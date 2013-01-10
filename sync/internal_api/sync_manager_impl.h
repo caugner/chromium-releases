@@ -127,7 +127,9 @@ class SyncManagerImpl : public SyncManager,
   virtual void OnEncryptionComplete() OVERRIDE;
   virtual void OnCryptographerStateChanged(
       Cryptographer* cryptographer) OVERRIDE;
-  virtual void OnPassphraseTypeChanged(PassphraseType type) OVERRIDE;
+  virtual void OnPassphraseTypeChanged(
+      PassphraseType type,
+      base::Time explicit_passphrase_time) OVERRIDE;
 
   // Return the currently active (validated) username for use with syncable
   // types.
@@ -169,7 +171,7 @@ class SyncManagerImpl : public SyncManager,
   // InvalidationHandler implementation.
   virtual void OnInvalidatorStateChange(InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const ObjectIdStateMap& id_state_map,
+      const ObjectIdInvalidationMap& invalidation_map,
       IncomingInvalidationSource source) OVERRIDE;
 
   // Called only by our NetworkChangeNotifier.
@@ -244,16 +246,10 @@ class SyncManagerImpl : public SyncManager,
                                 bool existed_before,
                                 bool exists_now);
 
-  // Internal callback used by GetSessionName.
-  // TODO(rlarocque): not currently called from anywhere. This should be
-  // hooked up to something once we start preserving device information again.
-  void UpdateSessionNameCallback(const std::string& chrome_version,
-                                 const std::string& session_name);
-
   // Called for every notification. This updates the notification statistics
   // to be displayed in about:sync.
   void UpdateNotificationInfo(
-      const ModelTypeStateMap& type_state_map);
+      const ModelTypeInvalidationMap& invalidation_map);
 
   // Checks for server reachabilty and requests a nudge.
   void OnIPAddressChangedImpl();

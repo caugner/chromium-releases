@@ -18,6 +18,8 @@
 #include "base/string16.h"
 #include "base/time.h"
 #include "base/timer.h"
+#include "chrome/browser/api/sync/profile_sync_service_base.h"
+#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/sync/backend_unrecoverable_error_handler.h"
 #include "chrome/browser/sync/failed_datatypes_handler.h"
@@ -27,7 +29,6 @@
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/invalidation_frontend.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -40,7 +41,6 @@
 #include "sync/internal_api/public/util/experiments.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/js/sync_js_controller.h"
-#include "sync/notifier/invalidator_registrar.h"
 
 class Profile;
 class ProfileSyncComponentsFactory;
@@ -59,6 +59,7 @@ namespace sessions { class SyncSessionSnapshot; }
 
 namespace syncer {
 class BaseTransaction;
+class InvalidatorRegistrar;
 struct SyncCredentials;
 struct UserShare;
 }
@@ -149,7 +150,8 @@ class EncryptedData;
 //   tell the sync engine that setup is completed and it can begin downloading
 //   data from the sync server.
 //
-class ProfileSyncService : public browser_sync::SyncFrontend,
+class ProfileSyncService : public ProfileSyncServiceBase,
+                           public browser_sync::SyncFrontend,
                            public browser_sync::SyncPrefObserver,
                            public browser_sync::DataTypeManagerObserver,
                            public syncer::UnrecoverableErrorHandler,
@@ -157,7 +159,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
                            public ProfileKeyedService,
                            public InvalidationFrontend {
  public:
-  typedef ProfileSyncServiceObserver Observer;
   typedef browser_sync::SyncBackendHost::Status Status;
 
   enum SyncEventCodes  {
@@ -217,9 +218,19 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
                      StartBehavior start_behavior);
   virtual ~ProfileSyncService();
 
-  // Initializes the object. This should be called every time an object of this
-  // class is constructed.
+  // Initializes the object. This must be called at most once, and
+  // immediately after an object of this class is constructed.
   void Initialize();
+
+  virtual void SetSyncSetupCompleted();
+
+  // ProfileSyncServiceBase implementation.
+  virtual bool HasSyncSetupCompleted() const OVERRIDE;
+  virtual bool ShouldPushChanges() OVERRIDE;
+  virtual syncer::ModelTypeSet GetPreferredDataTypes() const OVERRIDE;
+  virtual void AddObserver(Observer* observer) OVERRIDE;
+  virtual void RemoveObserver(Observer* observer) OVERRIDE;
+  virtual bool HasObserver(Observer* observer) const OVERRIDE;
 
   void RegisterAuthNotifications();
 
@@ -254,15 +265,11 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Disables sync for user. Use ShowLoginDialog to enable.
   virtual void DisableForUser();
 
-  // Whether sync is enabled by user or not.
-  virtual bool HasSyncSetupCompleted() const;
-  virtual void SetSyncSetupCompleted();
-
   // syncer::InvalidationHandler implementation (via SyncFrontend).
   virtual void OnInvalidatorStateChange(
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdStateMap& id_state_map,
+      const syncer::ObjectIdInvalidationMap& invalidation_map,
       syncer::IncomingInvalidationSource source) OVERRIDE;
 
   // SyncFrontend implementation.
@@ -370,14 +377,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // The profile we are syncing for.
   Profile* profile() const { return profile_; }
 
-  // Adds/removes an observer. ProfileSyncService does not take ownership of
-  // the observer.
-  virtual void AddObserver(Observer* observer);
-  virtual void RemoveObserver(Observer* observer);
-
-  // Returns true if |observer| has already been added as an observer.
-  bool HasObserver(Observer* observer) const;
-
   // Returns a weak pointer to the service's JsController.
   // Overrideable for testing purposes.
   virtual base::WeakPtr<syncer::JsController> GetJsController();
@@ -468,11 +467,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void ChangePreferredDataTypes(
       syncer::ModelTypeSet preferred_types);
 
-  // Get the set of currently enabled data types (as chosen or configured by
-  // the user).  See class comment for more on what it means for a datatype
-  // to be Preferred.
-  virtual syncer::ModelTypeSet GetPreferredDataTypes() const;
-
   // Gets the set of all data types that could be allowed (the set that
   // should be advertised to the user).  These will typically only change
   // via a command-line option.  See class comment for more on what it means
@@ -485,9 +479,17 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual bool IsCryptographerReady(
       const syncer::BaseTransaction* trans) const;
 
-  // Returns true if a secondary passphrase is being used. It is not legal
-  // to call this method before the backend is initialized.
+  // Returns true if a secondary (explicit) passphrase is being used. It is not
+  // legal to call this method before the backend is initialized.
   virtual bool IsUsingSecondaryPassphrase() const;
+
+  // Returns the actual passphrase type being used for encryption.
+  virtual syncer::PassphraseType GetPassphraseType() const;
+
+  // Returns the time the current explicit passphrase (if any), was set.
+  // If no secondary passphrase is in use, or no time is available, returns an
+  // unset base::Time.
+  virtual base::Time GetExplicitPassphraseTime() const;
 
   // Note about setting passphrases: There are different scenarios under which
   // we might want to apply a passphrase. It could be for first-time encryption,
@@ -527,10 +529,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Returns true if the syncer is waiting for new datatypes to be encrypted.
   virtual bool encryption_pending() const;
 
-  // Returns whether processing changes is allowed.  Check this before doing
-  // any model-modifying operations.
-  bool ShouldPushChanges();
-
   const GURL& sync_service_url() const { return sync_service_url_; }
   bool auto_start_enabled() const { return auto_start_enabled_; }
   SigninManager* signin() const { return signin_; }
@@ -562,7 +560,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // been cleared yet. Virtual for testing purposes.
   virtual bool waiting_for_auth() const;
 
-  // InvalidationFrontend implementation.
+  // InvalidationFrontend implementation.  It is an error to have
+  // registered handlers when Shutdown() is called.
   virtual void RegisterInvalidationHandler(
       syncer::InvalidationHandler* handler) OVERRIDE;
   virtual void UpdateRegisteredInvalidationIds(
@@ -572,7 +571,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
       syncer::InvalidationHandler* handler) OVERRIDE;
   virtual syncer::InvalidatorState GetInvalidatorState() const OVERRIDE;
 
-  // ProfileKeyedService implementation.
+  // ProfileKeyedService implementation.  This must be called exactly
+  // once (before this object is destroyed).
   virtual void Shutdown() OVERRIDE;
 
   // Simulate an incoming notification for the given id and payload.
@@ -723,6 +723,11 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
                                     bool delete_sync_database,
                                     UnrecoverableErrorReason reason);
 
+  // Must be called every time |backend_initialized_| or
+  // |invalidator_state_| is changed (but only if
+  // |invalidator_registrar_| is not NULL).
+  void UpdateInvalidatorRegistrarState();
+
   // Destroys / recreates an instance of ProfileSyncService. Used exclusively by
   // the sync integration tests so they can restart sync from scratch without
   // tearing down and recreating the browser process. Needed because simply
@@ -851,8 +856,15 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Factory the backend will use to build the SyncManager.
   syncer::SyncManagerFactory sync_manager_factory_;
 
-  // Dispatches invalidations to handlers.
-  syncer::InvalidatorRegistrar invalidator_registrar_;
+  // Holds the current invalidator state as updated by
+  // OnInvalidatorStateChange().  Note that this is different from the
+  // state known by |invalidator_registrar_| (See
+  // UpdateInvalidatorState()).
+  syncer::InvalidatorState invalidator_state_;
+
+  // Dispatches invalidations to handlers.  Set in Initialize() and
+  // unset in Shutdown().
+  scoped_ptr<syncer::InvalidatorRegistrar> invalidator_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };

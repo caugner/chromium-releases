@@ -50,16 +50,22 @@
 #import "ui/base/cocoa/underlay_opengl_hosting_window.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/point.h"
+#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/surface/io_surface_support_mac.h"
 #include "webkit/plugins/npapi/webplugin.h"
 
 using content::BackingStoreMac;
+using content::BrowserAccessibility;
+using content::BrowserAccessibilityManager;
+using content::EditCommand;
 using content::NativeWebKeyboardEvent;
 using content::RenderViewHostImpl;
 using content::RenderWidgetHostImpl;
 using content::RenderWidgetHostViewMac;
 using content::RenderWidgetHostViewMacEditCommandHelper;
+using content::TextInputClientMac;
 using WebKit::WebInputEvent;
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseEvent;
@@ -283,7 +289,8 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
       can_compose_inline_(true),
       is_loading_(false),
       is_hidden_(false),
-      weak_factory_(this) {
+      weak_factory_(this),
+      fullscreen_parent_host_view_(NULL) {
   // |cocoa_view_| owns us and we will be deleted when |cocoa_view_|
   // goes away.  Since we autorelease it, our caller must put
   // |GetNativeView()| into the view hierarchy right after calling us.
@@ -340,6 +347,8 @@ void RenderWidgetHostViewMac::InitAsPopup(
 // will enter fullscreen instead.
 void RenderWidgetHostViewMac::InitAsFullscreen(
     RenderWidgetHostView* reference_host_view) {
+  fullscreen_parent_host_view_ =
+      static_cast<RenderWidgetHostViewMac*>(reference_host_view);
   NSWindow* parent_window = nil;
   if (reference_host_view)
     parent_window = [reference_host_view->GetNativeView() window];
@@ -597,7 +606,10 @@ void RenderWidgetHostViewMac::TextInputStateChanged(
       // Let AppKit cache the new input context to make IMEs happy.
       // See http://crbug.com/73039.
       [NSApp updateWindows];
+
+#ifndef __LP64__
       UseInputWindow(TSMGetActiveDocument(), !can_compose_inline_);
+#endif
     }
   }
 }
@@ -832,30 +844,31 @@ void RenderWidgetHostViewMac::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
     const base::Callback<void(bool)>& callback,
-    skia::PlatformCanvas* output) {
+    skia::PlatformBitmap* output) {
   base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
   if (!compositing_iosurface_.get() ||
       !compositing_iosurface_->HasIOSurface())
     return;
 
   float scale = ScaleFactor(cocoa_view_);
-  gfx::Size dst_pixel_size = dst_size.Scale(scale);
-  if (!output->initialize(
+  gfx::Size dst_pixel_size = gfx::ToFlooredSize(dst_size.Scale(scale));
+  if (!output->Allocate(
       dst_pixel_size.width(), dst_pixel_size.height(), true))
     return;
+  scoped_callback_runner.Release();
 
   // Convert |src_subrect| from the views coordinate (upper-left origin) into
   // the OpenGL coordinate (lower-left origin).
   gfx::Rect src_gl_subrect = src_subrect;
   src_gl_subrect.set_y(GetViewBounds().height() - src_subrect.bottom());
 
-  gfx::Rect src_pixel_gl_subrect = src_gl_subrect.Scale(scale);
-  const bool result = compositing_iosurface_->CopyTo(
+  gfx::Rect src_pixel_gl_subrect = gfx::ToEnclosingRect(
+      gfx::ScaleRect(src_gl_subrect, scale));
+  compositing_iosurface_->CopyTo(
       src_pixel_gl_subrect,
       dst_pixel_size,
-      output->getTopDevice()->accessBitmap(true).getPixels());
-  scoped_callback_runner.Release();
-  callback.Run(result);
+      output->GetBitmap().getPixels(),
+      callback);
 }
 
 // Sets whether or not to accept first responder status.
@@ -1030,6 +1043,7 @@ void RenderWidgetHostViewMac::AckPendingSwapBuffers() {
       RenderWidgetHostImpl::AcknowledgeBufferPresent(
           pending_swap_buffers_acks_.front().first,
           pending_swap_buffers_acks_.front().second,
+          true,
           0);
       if (render_widget_host_) {
         render_widget_host_->AcknowledgeSwapBuffersToRenderer();
@@ -1115,7 +1129,7 @@ gfx::Rect RenderWidgetHostViewMac::GetFirstRectForCompositionRange(
   *actual_range = ui::Range(range.start(), end_idx);
   gfx::Rect rect = composition_bounds_[range.start()];
   for (size_t i = range.start() + 1; i < end_idx; ++i) {
-    rect = rect.Union(composition_bounds_[i]);
+    rect.Union(composition_bounds_[i]);
   }
   return rect;
 }
@@ -1226,8 +1240,8 @@ void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
   // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
   // plugin windows.
   if (params.window == gfx::kNullPluginWindow) {
-    NOTIMPLEMENTED();
-    AckPendingSwapBuffers();
+    if (CompositorSwapBuffers(params.surface_handle, params.surface_size))
+      AckPendingSwapBuffers();
   } else {
     // Deprecated accelerated plugin code path.
     AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
@@ -1315,10 +1329,6 @@ void RenderWidgetHostViewMac::ForceTextureReload() {
   plugin_container_manager_.ForceTextureReload();
 }
 
-void RenderWidgetHostViewMac::ProcessTouchAck(
-    WebKit::WebInputEvent::Type type, bool processed) {
-}
-
 void RenderWidgetHostViewMac::SetHasHorizontalScrollbar(
     bool has_horizontal_scrollbar) {
   [cocoa_view_ setHasHorizontalScrollbar:has_horizontal_scrollbar];
@@ -1398,8 +1408,15 @@ void RenderWidgetHostViewMac::GotSoftwareFrame() {
 }
 
 void RenderWidgetHostViewMac::SetActive(bool active) {
-  if (render_widget_host_)
+  if (render_widget_host_) {
     render_widget_host_->SetActive(active);
+    if (active) {
+      if (HasFocus())
+        render_widget_host_->Focus();
+    } else {
+      render_widget_host_->Blur();
+    }
+  }
   if (HasFocus())
     SetTextInputActive(active);
   if (!active) {
@@ -1497,6 +1514,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 @implementation RenderWidgetHostViewCocoa
 
 @synthesize selectedRange = selectedRange_;
+@synthesize suppressNextEscapeKeyUp = suppressNextEscapeKeyUp_;
 @synthesize markedRange = markedRange_;
 
 - (id)initWithRenderWidgetHostViewMac:(RenderWidgetHostViewMac*)r {
@@ -1848,7 +1866,18 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   if (event.type == NativeWebKeyboardEvent::RawKeyDown &&
       event.windowsKeyCode == ui::VKEY_ESCAPE &&
       renderWidgetHostView_->pepper_fullscreen_window()) {
+    RenderWidgetHostViewMac* parent =
+        renderWidgetHostView_->fullscreen_parent_host_view();
+    if (parent)
+      parent->cocoa_view()->suppressNextEscapeKeyUp_ = YES;
     widgetHost->Shutdown();
+    return;
+  }
+
+  // Suppress the escape key up event if necessary.
+  if (event.windowsKeyCode == ui::VKEY_ESCAPE && suppressNextEscapeKeyUp_) {
+    if (event.type == NativeWebKeyboardEvent::KeyUp)
+      suppressNextEscapeKeyUp_ = NO;
     return;
   }
 
@@ -2148,7 +2177,8 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 }
 
 - (void)windowChangedScreen:(NSNotification*)notification {
-  renderWidgetHostView_->UpdateScreenInfo();
+  renderWidgetHostView_->UpdateScreenInfo(
+      renderWidgetHostView_->GetNativeView());
 }
 
 - (void)setFrameSize:(NSSize)newSize {
@@ -2269,7 +2299,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     // smaller and the renderer hasn't yet repainted.
     int yOffset = NSHeight([self bounds]) - backingStore->size().height();
 
-    gfx::Rect paintRect = bitmapRect.Intersect(damagedRect);
+    gfx::Rect paintRect = gfx::IntersectRects(bitmapRect, damagedRect);
     if (!paintRect.IsEmpty()) {
       // if we have a CGLayer, draw that into the window
       if (backingStore->cg_layer()) {

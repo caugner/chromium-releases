@@ -4,19 +4,25 @@
 
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 
+#include <cmath>
+
 #include "base/bind.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_log.h"
+#include "net/cookies/cookie_util.h"
 #include "net/cookies/parsed_cookie.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
+
+using base::Time;
 
 namespace extension_web_request_api_helpers {
 
@@ -64,6 +70,28 @@ void ClearCacheOnNavigationOnUI() {
   WebCacheManager::GetInstance()->ClearCacheOnNavigation();
 }
 
+bool ParseCookieLifetime(net::ParsedCookie* cookie,
+                         int64* seconds_till_expiry) {
+  // 'Max-Age' is processed first because according to:
+  // http://tools.ietf.org/html/rfc6265#section-5.3 'Max-Age' attribute
+  // overrides 'Expires' attribute.
+  if (cookie->HasMaxAge() &&
+      base::StringToInt64(cookie->MaxAge(), seconds_till_expiry)) {
+    return true;
+  }
+
+  Time parsed_expiry_time;
+  if (cookie->HasExpires())
+    parsed_expiry_time = net::cookie_util::ParseCookieTime(cookie->Expires());
+
+  if (!parsed_expiry_time.is_null()) {
+    *seconds_till_expiry =
+        ceil((parsed_expiry_time - Time::Now()).InSecondsF());
+    return *seconds_till_expiry >= 0;
+  }
+  return false;
+}
+
 }  // namespace
 
 RequestCookie::RequestCookie() {}
@@ -71,6 +99,9 @@ RequestCookie::~RequestCookie() {}
 
 ResponseCookie::ResponseCookie() {}
 ResponseCookie::~ResponseCookie() {}
+
+FilterResponseCookie::FilterResponseCookie() {}
+FilterResponseCookie::~FilterResponseCookie() {}
 
 RequestCookieModification::RequestCookieModification() {}
 RequestCookieModification::~RequestCookieModification() {}
@@ -209,7 +240,7 @@ EventResponseDelta* CalculateOnHeadersReceivedDelta(
     const std::string& extension_id,
     const base::Time& extension_install_time,
     bool cancel,
-    net::HttpResponseHeaders* old_response_headers,
+    const net::HttpResponseHeaders* old_response_headers,
     ResponseHeaders* new_response_headers) {
   EventResponseDelta* result =
       new EventResponseDelta(extension_id, extension_install_time);
@@ -711,7 +742,7 @@ static bool ApplyResponseCookieModification(ResponseCookie* modification,
 }
 
 static bool DoesResponseCookieMatchFilter(net::ParsedCookie* cookie,
-                                          ResponseCookie* filter) {
+                                          FilterResponseCookie* filter) {
   if (!cookie->IsValid()) return false;
   if (!filter) return true;
   if (filter->name.get() && cookie->Name() != *filter->name) return false;
@@ -740,6 +771,26 @@ static bool DoesResponseCookieMatchFilter(net::ParsedCookie* cookie,
     return false;
   if (filter->http_only.get() && cookie->IsHttpOnly() != *filter->http_only)
     return false;
+  int64 seconds_till_expiry;
+  bool lifetime_parsed = false;
+  if (filter->age_upper_bound.get() ||
+      filter->age_lower_bound.get() ||
+      (filter->session_cookie.get() && *filter->session_cookie)) {
+    lifetime_parsed = ParseCookieLifetime(cookie, &seconds_till_expiry);
+  }
+  if (filter->age_upper_bound.get()) {
+    if (seconds_till_expiry > *filter->age_upper_bound)
+      return false;
+  }
+  if (filter->age_lower_bound.get()) {
+    if (seconds_till_expiry < *filter->age_lower_bound)
+      return false;
+  }
+  if (filter->session_cookie.get() &&
+      *filter->session_cookie &&
+      lifetime_parsed) {
+    return false;
+  }
   return true;
 }
 
@@ -1013,14 +1064,6 @@ bool ParseResourceType(const std::string& type_str,
     return false;
   *type = kResourceTypeValues[iter - kResourceTypeStrings];
   return true;
-}
-
-bool CanExtensionAccessURL(const extensions::Extension* extension,
-                           const GURL& url) {
-  // about: URLs are not covered in host permissions, but are allowed anyway.
-  return (url.SchemeIs(chrome::kAboutScheme) ||
-          extension->HasHostPermission(url) ||
-          url.GetOrigin() == extension->url());
 }
 
 void ClearCacheOnNavigation() {

@@ -22,6 +22,7 @@ class FileBrowserNotifications
   enum NotificationType {
     DEVICE,
     DEVICE_FAIL,
+    DEVICE_HARD_UNPLUG,
     FORMAT_SUCCESS,
     FORMAT_FAIL,
     FORMAT_START,
@@ -78,9 +79,6 @@ class FileBrowserNotifications
 
   std::string CreateNotificationId(NotificationType type,
                                    const std::string& path);
-  NotificationMessage* GetNotification(NotificationType type,
-                                       const std::string& path,
-                                       const string16& message);
   void ShowNotificationById(NotificationType type,
                             const std::string& notification_id,
                             const string16& message);

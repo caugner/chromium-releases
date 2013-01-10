@@ -132,7 +132,7 @@ class PerformanceMonitor : public content::NotificationObserver {
 
   // Since Database::AddMetric() is overloaded, base::Bind() does not work and
   // we need a helper function.
-  void AddMetricOnBackgroundThread(MetricType type, const std::string& value);
+  void AddMetricOnBackgroundThread(const Metric& metric);
 
   // Notify any listeners that PerformanceMonitor has finished the initializing.
   void NotifyInitialized();
@@ -164,9 +164,10 @@ class PerformanceMonitor : public content::NotificationObserver {
   void AddExtensionEvent(EventType type,
                          const extensions::Extension* extension);
 
-  // Generate an appropriate CrashEvent for a renderer crash and insert it in
-  // the database.
-  void AddCrashEvent(
+  // Generate an appropriate RendererFailure for a renderer crash and insert it
+  // in the database.
+  void AddRendererClosedEvent(
+      content::RenderProcessHost* host,
       const content::RenderProcessHost::RendererClosedDetails& details);
 
   // Called on the IO thread, this will call InsertIOData on the background
@@ -174,9 +175,9 @@ class PerformanceMonitor : public content::NotificationObserver {
   // any possible race conditions.
   void CallInsertIOData();
 
-  // Insert the collected IO data into the database (deliberately not const & so
-  // we create a copy and it becomes thread-safe).
-  void InsertIOData(PerformanceDataForIOThread performance_data_for_io_thread);
+  // Insert the collected IO data into the database.
+  void InsertIOData(
+      const PerformanceDataForIOThread& performance_data_for_io_thread);
 
   // The store for all performance data that must be gathered from the IO
   // thread.

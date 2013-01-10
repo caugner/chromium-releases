@@ -18,6 +18,8 @@
 #include "third_party/libva/va/va.h"
 #include "ui/gl/gl_bindings.h"
 
+namespace content {
+
 #define RETURN_AND_NOTIFY_ON_FAILURE(result, log, error_code, ret)  \
   do {                                                              \
     if (!(result)) {                                                \
@@ -26,8 +28,6 @@
       return ret;                                                   \
     }                                                               \
   } while (0)
-
-using content::VaapiH264Decoder;
 
 VaapiVideoDecodeAccelerator::InputBuffer::InputBuffer() : id(0), size(0) {
 }
@@ -43,13 +43,15 @@ void VaapiVideoDecodeAccelerator::NotifyError(Error error) {
     return;
   }
 
-  DVLOG(1) << "Notifying of error " << error;
+  // Post Cleanup() as a task so we don't recursively acquire lock_.
+  message_loop_->PostTask(FROM_HERE, base::Bind(
+      &VaapiVideoDecodeAccelerator::Cleanup, weak_this_));
 
+  DVLOG(1) << "Notifying of error " << error;
   if (client_) {
     client_->NotifyError(error);
     client_ptr_factory_.InvalidateWeakPtrs();
   }
-  Cleanup();
 }
 
 VaapiVideoDecodeAccelerator::VaapiVideoDecodeAccelerator(
@@ -110,12 +112,9 @@ bool VaapiVideoDecodeAccelerator::Initialize(
 
 void VaapiVideoDecodeAccelerator::SubmitDecode(
     int32 output_id,
-    std::queue<VABufferID>* va_bufs_ptr,
-    std::queue<VABufferID>* slice_bufs_ptr) {
+    scoped_ptr<std::queue<VABufferID> > va_bufs,
+    scoped_ptr<std::queue<VABufferID> > slice_bufs) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
-
-  scoped_ptr<std::queue<VABufferID> > va_bufs(va_bufs_ptr);
-  scoped_ptr<std::queue<VABufferID> > slice_bufs(slice_bufs_ptr);
 
   TRACE_EVENT1("Video Decoder", "VAVDA::Decode", "output_id", output_id);
 
@@ -599,3 +598,5 @@ void VaapiVideoDecodeAccelerator::PreSandboxInitialization() {
 bool VaapiVideoDecodeAccelerator::PostSandboxInitialization() {
   return VaapiH264Decoder::PostSandboxInitialization();
 }
+
+}  // namespace content

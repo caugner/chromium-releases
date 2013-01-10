@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
@@ -15,6 +16,7 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/event_listener_map.h"
 #include "chrome/common/extensions/event_filtering_info.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ipc/ipc_sender.h"
@@ -30,6 +32,7 @@ class RenderProcessHost;
 namespace extensions {
 class Extension;
 class ExtensionHost;
+class ExtensionPrefs;
 
 struct Event;
 
@@ -54,7 +57,7 @@ class EventRouter : public content::NotificationObserver,
                             UserGestureState user_gesture,
                             const EventFilteringInfo& info);
 
-  explicit EventRouter(Profile* profile);
+  EventRouter(Profile* profile, ExtensionPrefs* extension_prefs);
   virtual ~EventRouter();
 
   // Add or remove the process/extension pair as a listener for |event_name|.
@@ -168,6 +171,11 @@ class EventRouter : public content::NotificationObserver,
   // to that event.
   typedef std::map<std::string, std::set<ListenerProcess> > ListenerMap;
 
+  // An identifier for an event dispatch that is used to prevent double dispatch
+  // due to race conditions between the direct and lazy dispatch paths.
+  typedef std::pair<const content::BrowserContext*, std::string>
+      EventDispatchIdentifier;
+
   // TODO(gdk): Document this.
   static void DispatchExtensionMessage(
       IPC::Sender* ipc_sender,
@@ -197,8 +205,11 @@ class EventRouter : public content::NotificationObserver,
 
   // Ensures that all lazy background pages that are interested in the given
   // event are loaded, and queues the event if the page is not ready yet.
+  // Inserts an EventDispatchIdentifier into |already_dispatched| for each lazy
+  // event dispatch that is queued.
   void DispatchLazyEvent(const std::string& extension_id,
-                         const linked_ptr<Event>& event);
+                         const linked_ptr<Event>& event,
+                         std::set<EventDispatchIdentifier>* already_dispatched);
 
   // Dispatches the event to the specified extension running in |process|.
   void DispatchEventToProcess(const std::string& extension_id,
@@ -215,8 +226,9 @@ class EventRouter : public content::NotificationObserver,
                                  base::ListValue** event_args);
 
   // Possibly loads given extension's background page in preparation to
-  // dispatch an event.
-  void MaybeLoadLazyBackgroundPageToDispatchEvent(
+  // dispatch an event.  Returns true if the event was queued for subsequent
+  // dispatch, false otherwise.
+  bool MaybeLoadLazyBackgroundPageToDispatchEvent(
       Profile* profile,
       const Extension* extension,
       const linked_ptr<Event>& event);
@@ -240,6 +252,10 @@ class EventRouter : public content::NotificationObserver,
   scoped_refptr<ExtensionDevToolsManager> extension_devtools_manager_;
 
   EventListenerMap listeners_;
+
+  // True if we should dispatch the event signalling that Chrome was updated
+  // upon loading an extension.
+  bool dispatch_chrome_updated_event_;
 
   DISALLOW_COPY_AND_ASSIGN(EventRouter);
 };

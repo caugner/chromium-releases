@@ -11,6 +11,7 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/prefs/public/pref_service_base.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
@@ -27,12 +28,11 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/importer_host.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -115,7 +115,8 @@ bool BookmarksFunction::GetBookmarkIdAsInt64(
 }
 
 bool BookmarksFunction::EditBookmarksEnabled() {
-  if (profile_->GetPrefs()->GetBoolean(prefs::kEditBookmarksEnabled))
+  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+  if (prefs->GetBoolean(prefs::kEditBookmarksEnabled))
     return true;
   error_ = keys::kEditBookmarksDisabled;
   return false;
@@ -152,10 +153,10 @@ void BookmarkExtensionEventRouter::DispatchEvent(
     Profile* profile,
     const char* event_name,
     scoped_ptr<ListValue> event_args) {
-  if (profile->GetExtensionEventRouter()) {
-    profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-        event_name, event_args.Pass(), NULL, GURL(),
-        extensions::EventFilteringInfo());
+  if (extensions::ExtensionSystem::Get(profile)->event_router()) {
+    extensions::ExtensionSystem::Get(profile)->event_router()->
+        DispatchEventToRenderers(event_name, event_args.Pass(), NULL, GURL(),
+                                 extensions::EventFilteringInfo());
   }
 }
 
@@ -405,7 +406,8 @@ bool SearchBookmarksFunction::RunImpl() {
       bookmarks::Search::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  std::string lang = profile()->GetPrefs()->GetString(prefs::kAcceptLanguages);
+  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile_);
+  std::string lang = prefs->GetString(prefs::kAcceptLanguages);
   std::vector<const BookmarkNode*> nodes;
   bookmark_utils::GetBookmarksContainingText(
       BookmarkModelFactory::GetForProfile(profile()),

@@ -13,9 +13,11 @@ import android.view.KeyEvent;
 
 import org.chromium.content.app.AppResource;
 import org.chromium.content.app.LibraryLoader;
+import org.chromium.content.browser.ContentVideoView;
 import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.DeviceUtils;
 import org.chromium.content.common.CommandLine;
-import org.chromium.ui.gfx.NativeWindow;
+import org.chromium.ui.gfx.ActivityNativeWindow;
 
 /**
  * Activity for managing the Content Shell.
@@ -27,23 +29,36 @@ public class ContentShellActivity extends Activity {
 
     private static final String ACTIVE_SHELL_URL_KEY = "activeUrl";
     public static final String DEFAULT_SHELL_URL = "http://www.google.com";
+    public static final String COMMAND_LINE_ARGS_KEY = "commandLineArgs";
 
     private ShellManager mShellManager;
+    private ActivityNativeWindow mActivityNativeWindow;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         // Initializing the command line must occur before loading the library.
-        if (!CommandLine.isInitialized()) CommandLine.initFromFile(COMMAND_LINE_FILE);
+        if (!CommandLine.isInitialized()) {
+            CommandLine.initFromFile(COMMAND_LINE_FILE);
+            String[] commandLineParams = getCommandLineParamsFromIntent(getIntent());
+            if (commandLineParams != null) {
+                CommandLine.getInstance().appendSwitchesAndArguments(commandLineParams);
+            }
+        }
         waitForDebuggerIfNeeded();
+
+        DeviceUtils.addDeviceSpecificUserAgentSwitch(this);
 
         LibraryLoader.loadAndInitSync();
         initializeContentViewResources();
 
         setContentView(R.layout.content_shell_activity);
         mShellManager = (ShellManager) findViewById(R.id.shell_container);
-        mShellManager.setWindow(new NativeWindow(this));
+        mActivityNativeWindow = new ActivityNativeWindow(this);
+        mActivityNativeWindow.restoreInstanceState(savedInstanceState);
+        mShellManager.setWindow(mActivityNativeWindow);
+        ContentVideoView.registerChromeActivity(this);
 
         String startupUrl = getUrlFromIntent(getIntent());
         if (!TextUtils.isEmpty(startupUrl)) {
@@ -67,6 +82,8 @@ public class ContentShellActivity extends Activity {
         if (activeShell != null) {
             outState.putString(ACTIVE_SHELL_URL_KEY, activeShell.getContentView().getUrl());
         }
+
+        mActivityNativeWindow.saveInstanceState(outState);
     }
 
     private void waitForDebuggerIfNeeded() {
@@ -92,6 +109,10 @@ public class ContentShellActivity extends Activity {
 
     @Override
     protected void onNewIntent(Intent intent) {
+        if (getCommandLineParamsFromIntent(intent) != null) {
+            Log.i(TAG, "Ignoring command line params: can only be set when creating the activity.");
+        }
+
         String url = getUrlFromIntent(intent);
         if (!TextUtils.isEmpty(url)) {
             Shell activeView = getActiveShell();
@@ -117,8 +138,18 @@ public class ContentShellActivity extends Activity {
         if (view != null) view.onActivityResume();
     }
 
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        mActivityNativeWindow.onActivityResult(requestCode, resultCode, data);
+    }
+
     private static String getUrlFromIntent(Intent intent) {
         return intent != null ? intent.getDataString() : null;
+    }
+
+    private static String[] getCommandLineParamsFromIntent(Intent intent) {
+        return intent != null ? intent.getStringArrayExtra(COMMAND_LINE_ARGS_KEY) : null;
     }
 
     /**
@@ -147,7 +178,18 @@ public class ContentShellActivity extends Activity {
 
     private void initializeContentViewResources() {
         AppResource.DIMENSION_LINK_PREVIEW_OVERLAY_RADIUS = R.dimen.link_preview_overlay_radius;
+        AppResource.DRAWABLE_ICON_ACTION_BAR_SHARE = R.drawable.ic_menu_share_holo_light;
+        AppResource.DRAWABLE_ICON_ACTION_BAR_WEB_SEARCH = R.drawable.ic_menu_search_holo_light;
         AppResource.DRAWABLE_LINK_PREVIEW_POPUP_OVERLAY = R.drawable.popup_zoomer_overlay;
+        AppResource.STRING_ACTION_BAR_SHARE = R.string.action_bar_share;
+        AppResource.STRING_ACTION_BAR_WEB_SEARCH = R.string.action_bar_search;
         AppResource.STRING_CONTENT_VIEW_CONTENT_DESCRIPTION = R.string.accessibility_content_view;
+        AppResource.STRING_MEDIA_PLAYER_MESSAGE_PLAYBACK_ERROR =
+                R.string.media_player_error_text_invalid_progressive_playback;
+        AppResource.STRING_MEDIA_PLAYER_MESSAGE_UNKNOWN_ERROR =
+                R.string.media_player_error_text_unknown;
+        AppResource.STRING_MEDIA_PLAYER_ERROR_BUTTON = R.string.media_player_error_button;
+        AppResource.STRING_MEDIA_PLAYER_ERROR_TITLE = R.string.media_player_error_title;
+        AppResource.STRING_MEDIA_PLAYER_LOADING_VIDEO = R.string.media_player_loading_video;
     }
 }

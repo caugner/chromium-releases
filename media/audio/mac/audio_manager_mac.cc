@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
@@ -17,6 +18,7 @@
 #include "media/audio/mac/audio_output_mac.h"
 #include "media/audio/mac/audio_synchronized_mac.h"
 #include "media/audio/mac/audio_unified_mac.h"
+#include "media/base/bind_to_loop.h"
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 
@@ -32,7 +34,7 @@ static bool HasAudioHardware(AudioObjectPropertySelector selector) {
     kAudioObjectPropertyScopeGlobal,            // mScope
     kAudioObjectPropertyElementMaster           // mElement
   };
-  size_t output_device_id_size = sizeof(output_device_id);
+  UInt32 output_device_id_size = static_cast<UInt32>(sizeof(output_device_id));
   OSStatus err = AudioObjectGetPropertyData(kAudioObjectSystemObject,
                                             &property_address,
                                             0,     // inQualifierDataSize
@@ -120,36 +122,17 @@ static void GetAudioDeviceInfo(bool is_input,
 
   // Iterate over all available devices to gather information.
   for (int i = 0; i < device_count; ++i) {
-    int channels = 0;
     // Get the number of input or output channels of the device.
     property_address.mScope = is_input ?
         kAudioDevicePropertyScopeInput : kAudioDevicePropertyScopeOutput;
-    property_address.mSelector = kAudioDevicePropertyStreamConfiguration;
+    property_address.mSelector = kAudioDevicePropertyStreams;
+    size = 0;
     result = AudioObjectGetPropertyDataSize(device_ids[i],
                                             &property_address,
                                             0,
                                             NULL,
                                             &size);
-    if (result)
-      continue;
-
-    scoped_ptr_malloc<AudioBufferList>
-        buffer(reinterpret_cast<AudioBufferList*>(malloc(size)));
-    AudioBufferList* buffer_list = buffer.get();
-    result = AudioObjectGetPropertyData(device_ids[i],
-                                        &property_address,
-                                        0,
-                                        NULL,
-                                        &size,
-                                        buffer_list);
-    if (result)
-      continue;
-
-    for (uint32 j = 0; j < buffer_list->mNumberBuffers; ++j)
-      channels += buffer_list->mBuffers[j].mNumberChannels;
-
-    // Exclude those devices without the type of channel we are interested in.
-    if (!channels)
+    if (result || !size)
       continue;
 
     // Get device UID.
@@ -249,11 +232,56 @@ static AudioDeviceID GetAudioDeviceIdByUId(bool is_input,
   return audio_device_id;
 }
 
+// Property address to monitor for device changes.
+static const AudioObjectPropertyAddress kDeviceChangePropertyAddress = {
+  kAudioHardwarePropertyDefaultOutputDevice,
+  kAudioObjectPropertyScopeGlobal,
+  kAudioObjectPropertyElementMaster
+};
+
+// Callback from the system when the default device changes.  This can be called
+// either on the main thread or on an audio thread managed by the system
+// depending on what kAudioHardwarePropertyRunLoop is set to.
+static OSStatus OnDefaultDeviceChangedCallback(
+    AudioObjectID object,
+    UInt32 size,
+    const AudioObjectPropertyAddress addresses[],
+    void* context) {
+  static_cast<base::Closure*>(context)->Run();
+  return noErr;
+}
+
 AudioManagerMac::AudioManagerMac() {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
+
+  // Register a callback for device changes.
+  listener_cb_ = BindToLoop(GetMessageLoop(), base::Bind(
+      &AudioManagerMac::NotifyAllOutputDeviceChangeListeners,
+      base::Unretained(this)));
+
+  OSStatus result = AudioObjectAddPropertyListener(
+      kAudioObjectSystemObject,
+      &kDeviceChangePropertyAddress,
+      &OnDefaultDeviceChangedCallback,
+      &listener_cb_);
+
+  if (result != noErr) {
+    OSSTATUS_DLOG(ERROR, result) << "AudioObjectAddPropertyListener() failed!";
+    listener_cb_.Reset();
+  }
 }
 
 AudioManagerMac::~AudioManagerMac() {
+  if (!listener_cb_.is_null()) {
+    OSStatus result = AudioObjectRemovePropertyListener(
+        kAudioObjectSystemObject,
+        &kDeviceChangePropertyAddress,
+        &OnDefaultDeviceChangedCallback,
+        &listener_cb_);
+    OSSTATUS_DLOG_IF(ERROR, result != noErr, result)
+        << "AudioObjectRemovePropertyListener() failed!";
+  }
+
   Shutdown();
 }
 
@@ -267,11 +295,6 @@ bool AudioManagerMac::HasAudioInputDevices() {
 
 void AudioManagerMac::GetAudioInputDeviceNames(
     media::AudioDeviceNames* device_names) {
-  // This is needed because AudioObjectGetPropertyDataSize has memory leak
-  // when there is no soundcard in the machine.
-  if (!HasAudioInputDevices())
-    return;
-
   GetAudioDeviceInfo(true, device_names);
   if (!device_names->empty()) {
     // Prepend the default device to the list since we always want it to be

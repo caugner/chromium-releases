@@ -16,7 +16,7 @@
 #include "sync/notifier/fake_invalidation_handler.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/invalidator_test_template.h"
-#include "sync/notifier/object_id_state_map_test_util.h"
+#include "sync/notifier/object_id_invalidation_map_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -49,7 +49,7 @@ class NonBlockingInvalidatorTestDelegate {
     invalidator_.reset(
         new NonBlockingInvalidator(
             invalidator_options,
-            InvalidationVersionMap(),
+            InvalidationStateMap(),
             initial_state,
             MakeWeakHandle(invalidation_state_tracker),
             "fake_client_info"));
@@ -80,9 +80,10 @@ class NonBlockingInvalidatorTestDelegate {
     invalidator_->OnInvalidatorStateChange(state);
   }
 
-  void TriggerOnIncomingInvalidation(const ObjectIdStateMap& id_state_map,
-                                     IncomingInvalidationSource source) {
-    invalidator_->OnIncomingInvalidation(id_state_map, source);
+  void TriggerOnIncomingInvalidation(
+      const ObjectIdInvalidationMap& invalidation_map,
+      IncomingInvalidationSource source) {
+    invalidator_->OnIncomingInvalidation(invalidation_map, source);
   }
 
   static bool InvalidatorHandlesDeprecatedState() {

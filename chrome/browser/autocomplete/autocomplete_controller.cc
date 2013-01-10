@@ -15,6 +15,7 @@
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
+#include "chrome/browser/autocomplete/bookmark_provider.h"
 #include "chrome/browser/autocomplete/builtin_provider.h"
 #include "chrome/browser/autocomplete/extension_app_provider.h"
 #include "chrome/browser/autocomplete/history_contents_provider.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -52,6 +54,8 @@ int AutocompleteMatchToAssistedQueryType(const AutocompleteMatch::Type& type) {
     case AutocompleteMatch::HISTORY_TITLE:         return 61;
     case AutocompleteMatch::HISTORY_BODY:          return 62;
     case AutocompleteMatch::HISTORY_KEYWORD:       return 63;
+    case AutocompleteMatch::BOOKMARK_TITLE:        return 65;
+    // NOTE: Default must remain 64 for server-side compatability.
     default:                                       return 64;
   }
 }
@@ -131,10 +135,16 @@ AutocompleteController::AutocompleteController(
     providers_.push_back(new ShortcutsProvider(this, profile));
 
   // Create ZeroSuggest if it is enabled.
-  zero_suggest_provider_ = ZeroSuggestProvider::Create(this, profile);
-  if (zero_suggest_provider_) {
-    providers_.push_back(zero_suggest_provider_);
+  if (provider_types & AutocompleteProvider::TYPE_ZERO_SUGGEST) {
+    zero_suggest_provider_ = ZeroSuggestProvider::Create(this, profile);
+    if (zero_suggest_provider_)
+      providers_.push_back(zero_suggest_provider_);
   }
+
+  if ((provider_types & AutocompleteProvider::TYPE_BOOKMARK) &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableBookmarkAutocompleteProvider))
+    providers_.push_back(new BookmarkProvider(this, profile));
 
   for (ACProviders::iterator i(providers_.begin()); i != providers_.end(); ++i)
     (*i)->AddRef();
@@ -268,7 +278,7 @@ void AutocompleteController::OnProviderUpdate(bool updated_matches) {
     // because results from other providers are stale.
     result_.Reset();
     result_.AppendMatches(zero_suggest_provider_->matches());
-    result_.SortAndCull(input_);
+    result_.SortAndCull(input_, profile_);
     NotifyChanged(true);
   } else {
     CheckIfDone();
@@ -301,7 +311,7 @@ void AutocompleteController::UpdateResult(bool is_synchronous_pass) {
     result_.AppendMatches((*i)->matches());
 
   // Sort the matches and trim to a small number of "best" matches.
-  result_.SortAndCull(input_);
+  result_.SortAndCull(input_, profile_);
 
   // Need to validate before invoking CopyOldMatches as the old matches are not
   // valid against the current input.
@@ -312,7 +322,7 @@ void AutocompleteController::UpdateResult(bool is_synchronous_pass) {
   if (!done_) {
     // This conditional needs to match the conditional in Start that invokes
     // StartExpireTimer.
-    result_.CopyOldMatches(input_, last_result);
+    result_.CopyOldMatches(input_, last_result, profile_);
   }
 
   UpdateKeywordDescriptions(&result_);
@@ -399,7 +409,7 @@ void AutocompleteController::UpdateAssistedQueryStats(
   // Go over all matches and set AQS if the match supports it.
   for (size_t index = 0; index < result->size(); ++index) {
     AutocompleteMatch* match = result->match_at(index);
-    const TemplateURL* template_url = match->GetTemplateURL(profile_);
+    const TemplateURL* template_url = match->GetTemplateURL(profile_, false);
     if (!template_url || !match->search_terms_args.get())
       continue;
     match->search_terms_args->assisted_query_stats =
@@ -424,7 +434,7 @@ void AutocompleteController::UpdateKeywordDescriptions(
       i->description_class.clear();
       DCHECK(!i->keyword.empty());
       if (i->keyword != last_keyword) {
-        const TemplateURL* template_url = i->GetTemplateURL(profile_);
+        const TemplateURL* template_url = i->GetTemplateURL(profile_, false);
         if (template_url) {
           i->description = l10n_util::GetStringFUTF16(
               IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,

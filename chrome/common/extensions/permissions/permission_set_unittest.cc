@@ -25,9 +25,9 @@ namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
 namespace {
 
-static scoped_refptr<Extension> LoadManifest(const std::string& dir,
-                                             const std::string& test_file,
-                                             int extra_flags) {
+scoped_refptr<Extension> LoadManifest(const std::string& dir,
+                                      const std::string& test_file,
+                                      int extra_flags) {
   FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions")
@@ -49,18 +49,9 @@ static scoped_refptr<Extension> LoadManifest(const std::string& dir,
   return extension;
 }
 
-static scoped_refptr<Extension> LoadManifest(const std::string& dir,
-                                             const std::string& test_file) {
+scoped_refptr<Extension> LoadManifest(const std::string& dir,
+                                      const std::string& test_file) {
   return LoadManifest(dir, test_file, Extension::NO_FLAGS);
-}
-
-void CompareLists(const std::vector<std::string>& expected,
-                  const std::vector<std::string>& actual) {
-  ASSERT_EQ(expected.size(), actual.size());
-
-  for (size_t i = 0; i < expected.size(); ++i) {
-    EXPECT_EQ(expected[i], actual[i]);
-  }
 }
 
 static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
@@ -68,8 +59,8 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   extent->AddPattern(URLPattern(schemes, pattern));
 }
 
-static size_t IndexOf(const std::vector<string16>& warnings,
-                      const std::string& warning) {
+size_t IndexOf(const std::vector<string16>& warnings,
+               const std::string& warning) {
   for (size_t i = 0; i < warnings.size(); ++i) {
     if (warnings[i] == ASCIIToUTF16(warning))
       return i;
@@ -78,8 +69,8 @@ static size_t IndexOf(const std::vector<string16>& warnings,
   return warnings.size();
 }
 
-static bool Contains(const std::vector<string16>& warnings,
-                     const std::string& warning) {
+bool Contains(const std::vector<string16>& warnings,
+              const std::string& warning) {
   return IndexOf(warnings, warning) != warnings.size();
 }
 
@@ -664,7 +655,6 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kAppRuntime);
   skip.insert(APIPermission::kAppWindow);
   skip.insert(APIPermission::kAppCurrentWindowInternal);
-  skip.insert(APIPermission::kBrowserTag);
   skip.insert(APIPermission::kBrowsingData);
   skip.insert(APIPermission::kContextMenus);
   skip.insert(APIPermission::kFontSettings);
@@ -674,6 +664,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kUnlimitedStorage);
   skip.insert(APIPermission::kStorage);
   skip.insert(APIPermission::kTts);
+  skip.insert(APIPermission::kWebView);
 
   // TODO(erikkay) add a string for this permission.
   skip.insert(APIPermission::kBackground);
@@ -684,12 +675,13 @@ TEST(PermissionsTest, PermissionMessages) {
   // permissions.
   skip.insert(APIPermission::kCookie);
 
-  // The ime, proxy, and webRequest permissions are warned as part of host
-  // permission checks.
+  // These are warned as part of host permission checks.
+  skip.insert(APIPermission::kPageCapture);
   skip.insert(APIPermission::kProxy);
   skip.insert(APIPermission::kWebRequest);
   skip.insert(APIPermission::kWebRequestBlocking);
   skip.insert(APIPermission::kDeclarativeWebRequest);
+  skip.insert(APIPermission::kTabCapture);
 
   // This permission requires explicit user action (context menu handler)
   // so we won't prompt for it for now.
@@ -698,12 +690,14 @@ TEST(PermissionsTest, PermissionMessages) {
   // These permissions require explicit user action (configuration dialog)
   // so we don't prompt for them at install time.
   skip.insert(APIPermission::kMediaGalleries);
+  skip.insert(APIPermission::kMediaGalleriesRead);
 
   // If you've turned on the experimental command-line flag, we don't need
   // to warn you further.
   skip.insert(APIPermission::kExperimental);
 
   // These are private.
+  skip.insert(APIPermission::kBookmarkManagerPrivate);
   skip.insert(APIPermission::kChromeosInfoPrivate);
   skip.insert(APIPermission::kCloudPrintPrivate);
   skip.insert(APIPermission::kEchoPrivate);
@@ -722,11 +716,16 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kWebSocketProxyPrivate);
   skip.insert(APIPermission::kWebstorePrivate);
 
+  // Available only on trunk.
+  // TODO(kinuko) add a string for this permission.
+  skip.insert(APIPermission::kSyncFileSystem);
+
   // Warned as part of host permissions.
   skip.insert(APIPermission::kDevtools);
 
   // Platform apps.
   skip.insert(APIPermission::kFileSystem);
+  skip.insert(APIPermission::kSocket);
 
   PermissionsInfo* info = PermissionsInfo::GetInstance();
   APIPermissionSet permissions = info->GetAll();
@@ -887,18 +886,68 @@ TEST(PermissionsTest, GetWarningMessages_Serial) {
   ASSERT_EQ(1u, warnings.size());
 }
 
-TEST(PermissionsTest, GetWarningMessages_Socket) {
-   extensions::Feature::ScopedCurrentChannel channel(
-       chrome::VersionInfo::CHANNEL_DEV);
-   scoped_refptr<Extension> extension =
-       LoadManifest("permissions", "socket.json");
+TEST(PermissionsTest, GetWarningMessages_Socket_AnyHost) {
+  extensions::Feature::ScopedCurrentChannel channel(
+      chrome::VersionInfo::CHANNEL_DEV);
 
-   EXPECT_TRUE(extension->is_platform_app());
-   EXPECT_TRUE(extension->HasAPIPermission(APIPermission::kSocket));
-   std::vector<string16> warnings = extension->GetPermissionMessageStrings();
-   EXPECT_TRUE(Contains(warnings,
-                        "Exchange data with other computers"));
-   ASSERT_EQ(1u, warnings.size());
+  scoped_refptr<Extension> extension =
+      LoadManifest("permissions", "socket_any_host.json");
+  EXPECT_TRUE(extension->is_platform_app());
+  EXPECT_TRUE(extension->HasAPIPermission(APIPermission::kSocket));
+  std::vector<string16> warnings = extension->GetPermissionMessageStrings();
+  EXPECT_EQ(1u, warnings.size());
+  EXPECT_TRUE(Contains(warnings, "Exchange data with any computer "
+                                 "on the local network or internet"));
+}
+
+TEST(PermissionsTest, GetWarningMessages_Socket_OneDomainTwoHostnames) {
+  extensions::Feature::ScopedCurrentChannel channel(
+      chrome::VersionInfo::CHANNEL_DEV);
+
+  scoped_refptr<Extension> extension =
+      LoadManifest("permissions", "socket_one_domain_two_hostnames.json");
+  EXPECT_TRUE(extension->is_platform_app());
+  EXPECT_TRUE(extension->HasAPIPermission(APIPermission::kSocket));
+  std::vector<string16> warnings = extension->GetPermissionMessageStrings();
+
+  // Verify the warnings, including support for unicode characters, the fact
+  // that domain host warnings come before specific host warnings, and the fact
+  // that domains and hostnames are in alphabetical order regardless of the
+  // order in the manifest file.
+  EXPECT_EQ(2u, warnings.size());
+  if (warnings.size() > 0)
+    EXPECT_EQ(warnings[0],
+              UTF8ToUTF16("Exchange data with any computer in the domain "
+                          "example.org"));
+  if (warnings.size() > 1)
+    EXPECT_EQ(warnings[1],
+              UTF8ToUTF16("Exchange data with the computers named: "
+                          "b\xC3\xA5r.example.com foo.example.com"));
+                          // "\xC3\xA5" = UTF-8 for lowercase A with ring above
+}
+
+TEST(PermissionsTest, GetWarningMessages_Socket_TwoDomainsOneHostname) {
+  extensions::Feature::ScopedCurrentChannel channel(
+      chrome::VersionInfo::CHANNEL_DEV);
+
+  scoped_refptr<Extension> extension =
+      LoadManifest("permissions", "socket_two_domains_one_hostname.json");
+  EXPECT_TRUE(extension->is_platform_app());
+  EXPECT_TRUE(extension->HasAPIPermission(APIPermission::kSocket));
+  std::vector<string16> warnings = extension->GetPermissionMessageStrings();
+
+  // Verify the warnings, including the fact that domain host warnings come
+  // before specific host warnings and the fact that domains and hostnames are
+  // in alphabetical order regardless of the order in the manifest file.
+  EXPECT_EQ(2u, warnings.size());
+  if (warnings.size() > 0)
+    EXPECT_EQ(warnings[0],
+              UTF8ToUTF16("Exchange data with any computer in the domains: "
+                           "example.com foo.example.org"));
+  if (warnings.size() > 1)
+    EXPECT_EQ(warnings[1],
+              UTF8ToUTF16("Exchange data with the computer named "
+                           "bar.example.org"));
 }
 
 TEST(PermissionsTest, GetWarningMessages_PlatformApppHosts) {

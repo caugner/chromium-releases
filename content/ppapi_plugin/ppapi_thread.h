@@ -27,11 +27,14 @@
 
 class CommandLine;
 class FilePath;
-class PpapiWebKitPlatformSupportImpl;
 
 namespace IPC {
 struct ChannelHandle;
 }
+
+namespace content {
+
+class PpapiWebKitPlatformSupportImpl;
 
 class PpapiThread : public ChildThread,
                     public ppapi::proxy::PluginDispatcher::PluginDelegate,
@@ -67,7 +70,8 @@ class PpapiThread : public ChildThread,
   virtual void SetActiveURL(const std::string& url) OVERRIDE;
 
   // Message handlers.
-  void OnMsgLoadPlugin(const FilePath& path);
+  void OnMsgLoadPlugin(const FilePath& path,
+                       const ppapi::PpapiPermissions& permissions);
   void OnMsgCreateChannel(int renderer_id,
                           bool incognito);
   void OnMsgResourceReply(
@@ -89,6 +93,8 @@ class PpapiThread : public ChildThread,
   bool is_broker_;
 
   base::ScopedNativeLibrary library_;
+
+  ppapi::PpapiPermissions permissions_;
 
   // Global state tracking for the proxy.
   ppapi::proxy::PluginGlobals plugin_globals_;
@@ -124,5 +130,7 @@ class PpapiThread : public ChildThread,
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(PpapiThread);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_PPAPI_PLUGIN_PPAPI_THREAD_H_

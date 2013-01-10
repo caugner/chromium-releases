@@ -40,6 +40,12 @@ class TestVisibleClient : public aura::client::CursorClient {
   virtual void SetDeviceScaleFactor(float scale_factor) OVERRIDE {
   }
 
+  virtual void LockCursor() OVERRIDE {
+  }
+
+  virtual void UnlockCursor() OVERRIDE {
+  }
+
  private:
   bool visible_;
 };
@@ -89,7 +95,9 @@ namespace test {
 typedef AuraTestBase CompoundEventFilterTest;
 
 TEST_F(CompoundEventFilterTest, TouchHidesCursor) {
-  aura::Env::GetInstance()->SetEventFilter(new shared::CompoundEventFilter());
+  scoped_ptr<shared::CompoundEventFilter> compound_filter(
+      new shared::CompoundEventFilter());
+  aura::Env::GetInstance()->AddPreTargetHandler(compound_filter.get());
   TestWindowDelegate delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(&delegate, 1234,
       gfx::Rect(5, 5, 100, 100), NULL));
@@ -133,11 +141,14 @@ TEST_F(CompoundEventFilterTest, TouchHidesCursor) {
       root_window())->ActivateWindow(window.get());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press1);
   EXPECT_FALSE(cursor_client.IsCursorVisible());
+  aura::Env::GetInstance()->RemovePreTargetHandler(compound_filter.get());
 }
 
 // Tests that tapping a window gives the window focus.
 TEST_F(CompoundEventFilterTest, GestureFocusesWindow) {
-  aura::Env::GetInstance()->SetEventFilter(new shared::CompoundEventFilter());
+  scoped_ptr<shared::CompoundEventFilter> compound_filter(
+      new shared::CompoundEventFilter());
+  aura::Env::GetInstance()->AddPreTargetHandler(compound_filter.get());
   TestWindowDelegate delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(&delegate, 1234,
       gfx::Rect(5, 5, 100, 100), NULL));
@@ -150,16 +161,17 @@ TEST_F(CompoundEventFilterTest, GestureFocusesWindow) {
   EventGenerator generator(root_window(), gfx::Point(50, 50));
   generator.PressTouch();
   EXPECT_TRUE(window->HasFocus());
+  aura::Env::GetInstance()->RemovePreTargetHandler(compound_filter.get());
 }
 
 // Tests that if an event filter consumes a gesture, then it doesn't focus the
 // window.
 TEST_F(CompoundEventFilterTest, FilterConsumedGesture) {
-  shared::CompoundEventFilter* compound_filter =
-      new shared::CompoundEventFilter();
+  scoped_ptr<shared::CompoundEventFilter> compound_filter(
+      new shared::CompoundEventFilter());
   scoped_ptr<EventFilter> gesture_filter(new ConsumeGestureEventFilter());
   compound_filter->AddFilter(gesture_filter.get());
-  aura::Env::GetInstance()->SetEventFilter(compound_filter);
+  aura::Env::GetInstance()->AddPreTargetHandler(compound_filter.get());
   TestWindowDelegate delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(&delegate, 1234,
       gfx::Rect(5, 5, 100, 100), NULL));
@@ -175,6 +187,7 @@ TEST_F(CompoundEventFilterTest, FilterConsumedGesture) {
   EXPECT_FALSE(window->HasFocus());
 
   compound_filter->RemoveFilter(gesture_filter.get());
+  aura::Env::GetInstance()->AddPreTargetHandler(compound_filter.get());
 }
 
 }  // namespace test

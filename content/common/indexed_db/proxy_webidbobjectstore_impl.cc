@@ -20,9 +20,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
-using content::IndexedDBKey;
-using content::IndexedDBKeyPath;
-using content::IndexedDBKeyRange;
 using content::SerializedScriptValue;
 using WebKit::WebDOMStringList;
 using WebKit::WebExceptionCode;
@@ -36,6 +33,8 @@ using WebKit::WebIDBTransaction;
 using WebKit::WebSerializedScriptValue;
 using WebKit::WebString;
 using WebKit::WebVector;
+
+namespace content {
 
 RendererWebIDBObjectStoreImpl::RendererWebIDBObjectStoreImpl(
     int32 idb_object_store_id)
@@ -144,6 +143,7 @@ void RendererWebIDBObjectStoreImpl::clear(
 }
 
 WebIDBIndex* RendererWebIDBObjectStoreImpl::createIndex(
+    long long id,
     const WebString& name,
     const WebIDBKeyPath& key_path,
     bool unique,
@@ -151,6 +151,7 @@ WebIDBIndex* RendererWebIDBObjectStoreImpl::createIndex(
     const WebIDBTransaction& transaction,
     WebExceptionCode& ec) {
   IndexedDBHostMsg_ObjectStoreCreateIndex_Params params;
+  params.id = id;
   params.name = name;
   params.key_path = IndexedDBKeyPath(key_path);
   params.unique = unique;
@@ -212,3 +213,5 @@ void RendererWebIDBObjectStoreImpl::count(
       idb_key_range, callbacks,  idb_object_store_id_,
       transaction, &ec);
 }
+
+}  // namespace content

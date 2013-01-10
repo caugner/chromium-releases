@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
@@ -56,22 +57,36 @@ void PanelHost::Init(const GURL& url) {
   web_contents_->SetDelegate(this);
   content::WebContentsObserver::Observe(web_contents_.get());
 
-  favicon_tab_helper_.reset(new FaviconTabHelper(web_contents_.get()));
-  prefs_tab_helper_.reset(new PrefsTabHelper(web_contents_.get()));
+  // Needed to give the web contents a Tab ID. Extension APIs
+  // expect web contents to have a Tab ID.
+  SessionTabHelper::CreateForWebContents(web_contents_.get());
+  SessionTabHelper::FromWebContents(web_contents_.get())->SetWindowID(
+      panel_->session_id());
+
+  FaviconTabHelper::CreateForWebContents(web_contents_.get());
+  PrefsTabHelper::CreateForWebContents(web_contents_.get());
 
   web_contents_->GetController().LoadURL(
       url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
 }
 
 void PanelHost::DestroyWebContents() {
-  favicon_tab_helper_.reset();
-  prefs_tab_helper_.reset();
-  web_contents_.reset();
+  // Cannot do a web_contents_.reset() because web_contents_.get() will
+  // still return the pointer when we CHECK in WebContentsDestroyed (or if
+  // we get called back in the middle of web contents destruction, which
+  // WebView might do when it detects the web contents is destroyed).
+  content::WebContents* contents = web_contents_.release();
+  delete contents;
 }
 
 gfx::Image PanelHost::GetPageIcon() const {
-  return favicon_tab_helper_.get() ?
-      favicon_tab_helper_->GetFavicon() : gfx::Image();
+  if (!web_contents_.get())
+    return gfx::Image();
+
+  FaviconTabHelper* favicon_tab_helper =
+      FaviconTabHelper::FromWebContents(web_contents_.get());
+  CHECK(favicon_tab_helper);
+  return favicon_tab_helper->GetFavicon();
 }
 
 content::WebContents* PanelHost::OpenURLFromTab(
@@ -164,14 +179,6 @@ void PanelHost::ContentsZoomChange(bool zoom_in) {
   Zoom(zoom_in ? content::PAGE_ZOOM_IN : content::PAGE_ZOOM_OUT);
 }
 
-bool PanelHost::IsApplication() const {
-  return true;
-}
-
-bool PanelHost::HandleContextMenu(const content::ContextMenuParams& params) {
-  return true;  // Disallow context menu.
-}
-
 void PanelHost::HandleKeyboardEvent(
     content::WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
@@ -198,6 +205,9 @@ void PanelHost::RenderViewGone(base::TerminationStatus status) {
 }
 
 void PanelHost::WebContentsDestroyed(content::WebContents* web_contents) {
+  // Web contents should only be destroyed by us.
+  CHECK(!web_contents_.get());
+
   // Close the panel after we return to the message loop (not immediately,
   // otherwise, it may destroy this object before the stack has a chance
   // to cleanly unwind.)

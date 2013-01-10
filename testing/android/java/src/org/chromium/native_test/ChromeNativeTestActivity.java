@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.util.Log;
 
 import org.chromium.base.PathUtils;
+import org.chromium.base.SystemMonitor;
 
 import java.io.File;
 
@@ -39,6 +40,9 @@ public class ChromeNativeTestActivity extends Activity {
 
         // Needed by path_utils_unittest.cc
         PathUtils.setPrivateDataDirectorySuffix("chrome");
+
+        // Needed by system_monitor_unittest.cc
+        SystemMonitor.createForTests(this);
 
         try {
             loadLibrary();
@@ -69,13 +73,8 @@ public class ChromeNativeTestActivity extends Activity {
     }
 
     private void runTests() {
-        Log.e(TAG, ">>nativeRunTests");
         // This directory is used by build/android/pylib/test_package_apk.py.
-        File filesDir = new File(Environment.getExternalStorageDirectory(),
-                                 "native_tests/");
-        filesDir.mkdirs();
-        nativeRunTests(filesDir.getAbsolutePath(), getApplicationContext());
-        Log.e(TAG, "<<nativeRunTests");
+        nativeRunTests(getFilesDir().getAbsolutePath(), getApplicationContext());
     }
 
     // Signal a failure of the native test loader to python scripts

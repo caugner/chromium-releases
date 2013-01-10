@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
@@ -19,9 +20,9 @@
 #include "base/values.h"
 #include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/plugin_finder.h"
-#include "chrome/browser/plugin_installer.h"
-#include "chrome/browser/plugin_prefs.h"
+#include "chrome/browser/plugins/plugin_finder.h"
+#include "chrome/browser/plugins/plugin_metadata.h"
+#include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
@@ -44,7 +45,6 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/plugins/npapi/plugin_group.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/chromeos/ui_account_tweaks.h"
@@ -53,7 +53,6 @@
 using content::PluginService;
 using content::WebContents;
 using content::WebUIMessageHandler;
-using webkit::npapi::PluginGroup;
 using webkit::WebPluginInfo;
 
 namespace {
@@ -78,6 +77,8 @@ ChromeWebUIDataSource* CreatePluginsUIHTMLSource() {
                              IDS_PLUGINS_DISABLED_BY_POLICY_PLUGIN);
   source->AddLocalizedString("pluginEnabledByPolicy",
                              IDS_PLUGINS_ENABLED_BY_POLICY_PLUGIN);
+  source->AddLocalizedString("pluginGroupManagedByPolicy",
+                             IDS_PLUGINS_GROUP_MANAGED_BY_POLICY);
   source->AddLocalizedString("pluginDownload", IDS_PLUGINS_DOWNLOAD);
   source->AddLocalizedString("pluginName", IDS_PLUGINS_NAME);
   source->AddLocalizedString("pluginVersion", IDS_PLUGINS_VERSION);
@@ -163,15 +164,10 @@ class PluginsDOMHandler : public WebUIMessageHandler,
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  // Call this to start getting the plugins on the UI thread.
-  void GetPluginFinder();
-
-  // Called when we have a PluginFinder and need to load the list of plug-ins.
-  void LoadPlugins(PluginFinder* plugin_finder);
+  void LoadPlugins();
 
   // Called on the UI thread when the plugin information is ready.
-  void PluginsLoaded(PluginFinder* plugin_finder,
-                     const std::vector<webkit::WebPluginInfo>& plugins);
+  void PluginsLoaded(const std::vector<webkit::WebPluginInfo>& plugins);
 
   content::NotificationRegistrar registrar_;
 
@@ -221,7 +217,7 @@ void PluginsDOMHandler::RegisterMessages() {
 }
 
 void PluginsDOMHandler::HandleRequestPluginsData(const ListValue* args) {
-  GetPluginFinder();
+  LoadPlugins();
 }
 
 void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
@@ -254,7 +250,7 @@ void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
     if (enable) {
       // See http://crbug.com/50105 for background.
       string16 adobereader = ASCIIToUTF16(
-          PluginGroup::kAdobeReaderGroupName);
+          PluginMetadata::kAdobeReaderGroupName);
       string16 internalpdf =
           ASCIIToUTF16(chrome::ChromeContentClient::kPDFPluginName);
       if (group_name == adobereader)
@@ -320,37 +316,33 @@ void PluginsDOMHandler::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED, type);
-  GetPluginFinder();
+  LoadPlugins();
 }
 
-void PluginsDOMHandler::GetPluginFinder() {
+void PluginsDOMHandler::LoadPlugins() {
   if (weak_ptr_factory_.HasWeakPtrs())
     return;
 
-  PluginFinder::Get(base::Bind(&PluginsDOMHandler::LoadPlugins,
-                               weak_ptr_factory_.GetWeakPtr()));
-}
-
-void PluginsDOMHandler::LoadPlugins(PluginFinder* plugin_finder) {
   PluginService::GetInstance()->GetPlugins(
       base::Bind(&PluginsDOMHandler::PluginsLoaded,
-          weak_ptr_factory_.GetWeakPtr(), plugin_finder));
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PluginsDOMHandler::PluginsLoaded(
-    PluginFinder* plugin_finder,
     const std::vector<webkit::WebPluginInfo>& plugins) {
   Profile* profile = Profile::FromWebUI(web_ui());
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
 
   ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
 
+  PluginFinder* plugin_finder = PluginFinder::GetInstance();
   // Group plug-ins by identifier. This is done to be able to display
   // the plug-ins in UI in a grouped fashion.
   PluginGroups groups;
   for (size_t i = 0; i < plugins.size(); ++i) {
-    PluginInstaller* installer = plugin_finder->GetPluginInstaller(plugins[i]);
-    groups[installer->identifier()].push_back(&plugins[i]);
+    scoped_ptr<PluginMetadata> plugin(
+        plugin_finder->GetPluginMetadata(plugins[i]));
+    groups[plugin->identifier()].push_back(&plugins[i]);
   }
 
   // Construct DictionaryValues to return to UI.
@@ -359,13 +351,14 @@ void PluginsDOMHandler::PluginsLoaded(
       it != groups.end(); ++it) {
     const std::vector<const WebPluginInfo*>& group_plugins = it->second;
     ListValue* plugin_files = new ListValue();
-    PluginInstaller* plugin_installer =
-        plugin_finder->GetPluginInstaller(*group_plugins[0]);
-    string16 group_name = plugin_installer->name();
-    std::string group_identifier = plugin_installer->identifier();
+    scoped_ptr<PluginMetadata> plugin_metadata(
+        plugin_finder->GetPluginMetadata(*group_plugins[0]));
+    string16 group_name = plugin_metadata->name();
+    std::string group_identifier = plugin_metadata->identifier();
     bool group_enabled = false;
     bool all_plugins_enabled_by_policy = true;
     bool all_plugins_disabled_by_policy = true;
+    bool all_plugins_managed_by_policy = true;
     const WebPluginInfo* active_plugin = NULL;
     for (size_t j = 0; j < group_plugins.size(); ++j) {
       const WebPluginInfo& group_plugin = *group_plugins[j];
@@ -410,6 +403,7 @@ void PluginsDOMHandler::PluginsLoaded(
       if (plugin_status == PluginPrefs::POLICY_ENABLED ||
           group_status == PluginPrefs::POLICY_ENABLED) {
         enabled_mode = "enabledByPolicy";
+        all_plugins_disabled_by_policy = false;
       } else {
         all_plugins_enabled_by_policy = false;
         if (plugin_status == PluginPrefs::POLICY_DISABLED ||
@@ -417,6 +411,7 @@ void PluginsDOMHandler::PluginsLoaded(
           enabled_mode = "disabledByPolicy";
         } else {
           all_plugins_disabled_by_policy = false;
+          all_plugins_managed_by_policy = false;
           if (plugin_enabled) {
             enabled_mode = "enabledByUser";
           } else {
@@ -437,14 +432,10 @@ void PluginsDOMHandler::PluginsLoaded(
     group_data->SetString("version", active_plugin->version);
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-    PluginInstaller* installer =
-        plugin_finder->FindPluginWithIdentifier(group_identifier);
-    if (installer) {
-      bool out_of_date = installer->GetSecurityStatus(*active_plugin) ==
-                         PluginInstaller::SECURITY_STATUS_OUT_OF_DATE;
-      group_data->SetBoolean("critical", out_of_date);
-      group_data->SetString("update_url", installer->plugin_url().spec());
-    }
+    bool out_of_date = plugin_metadata->GetSecurityStatus(*active_plugin) ==
+        PluginMetadata::SECURITY_STATUS_OUT_OF_DATE;
+    group_data->SetBoolean("critical", out_of_date);
+    group_data->SetString("update_url", plugin_metadata->plugin_url().spec());
 #endif
 
     std::string enabled_mode;
@@ -452,6 +443,8 @@ void PluginsDOMHandler::PluginsLoaded(
       enabled_mode = "enabledByPolicy";
     } else if (all_plugins_disabled_by_policy) {
       enabled_mode = "disabledByPolicy";
+    } else if (all_plugins_managed_by_policy) {
+      enabled_mode = "managedByPolicy";
     } else if (group_enabled) {
       enabled_mode = "enabledByUser";
     } else {
@@ -501,9 +494,6 @@ base::RefCountedMemory* PluginsUI::GetFaviconResourceBytes(
 void PluginsUI::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kPluginsShowDetails,
                              false,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kPluginsShowSetReaderDefaultInfobar,
-                             true,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterDictionaryPref(prefs::kContentSettingsPluginWhitelist,
                                 PrefService::SYNCABLE_PREF);

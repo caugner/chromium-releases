@@ -93,6 +93,7 @@ class NetworkDevice {
   ConnectionType type() const { return type_; }
   bool scanning() const { return scanning_; }
   const std::string& meid() const { return meid_; }
+  const std::string& iccid() const { return iccid_; }
   const std::string& imei() const { return imei_; }
   const std::string& imsi() const { return imsi_; }
   const std::string& esn() const { return esn_; }
@@ -109,7 +110,7 @@ class NetworkDevice {
   // returns false: GSM modem and SIM card is present or CDMA modem.
   bool is_sim_absent() const {
     return technology_family() == TECHNOLOGY_FAMILY_GSM &&
-           !is_sim_locked() && imsi().empty();
+           !is_sim_locked() && !sim_present_;
   }
   const int sim_retries_left() const { return sim_retries_left_; }
   SimPinRequire sim_pin_required() const { return sim_pin_required_; }
@@ -122,6 +123,9 @@ class NetworkDevice {
   }
   const std::string& home_provider_id() const { return home_provider_id_; }
   const std::string& home_provider_name() const { return home_provider_name_; }
+  const bool provider_requires_roaming() const {
+    return provider_requires_roaming_;
+  }
   const std::string& selected_cellular_network() const {
     return selected_cellular_network_;
   }
@@ -171,6 +175,7 @@ class NetworkDevice {
   void set_type(ConnectionType type) { type_ = type; }
   void set_scanning(bool scanning) { scanning_ = scanning; }
   void set_meid(const std::string& meid) { meid_ = meid; }
+  void set_iccid(const std::string& iccid) { iccid_ = iccid; }
   void set_imei(const std::string& imei) { imei_ = imei; }
   void set_imsi(const std::string& imsi) { imsi_ = imsi; }
   void set_esn(const std::string& esn) { esn_ = esn; }
@@ -195,6 +200,9 @@ class NetworkDevice {
   void set_home_provider_name(const std::string& home_provider_name) {
     home_provider_name_ = home_provider_name;
   }
+  void set_provider_requires_roaming(bool provider_requires_roaming) {
+    provider_requires_roaming_ = provider_requires_roaming;
+  }
   void set_model_id(const std::string& model_id) { model_id_ = model_id; }
   void set_manufacturer(const std::string& manufacturer) {
     manufacturer_ = manufacturer;
@@ -210,6 +218,9 @@ class NetworkDevice {
   }
   void set_sim_pin_required(SimPinRequire sim_pin_required) {
     sim_pin_required_ = sim_pin_required;
+  }
+  void set_sim_present(bool sim_present) {
+    sim_present_ = sim_present;
   }
   void set_firmware_revision(const std::string& firmware_revision) {
     firmware_revision_ = firmware_revision;
@@ -251,8 +262,10 @@ class NetworkDevice {
   std::string home_provider_country_;
   std::string home_provider_id_;
   std::string home_provider_name_;
+  bool provider_requires_roaming_;
   std::string meid_;
   std::string imei_;
+  std::string iccid_;
   std::string imsi_;
   std::string esn_;
   std::string mdn_;
@@ -262,6 +275,7 @@ class NetworkDevice {
   SimLockState sim_lock_state_;
   int sim_retries_left_;
   SimPinRequire sim_pin_required_;
+  bool sim_present_;
   std::string firmware_revision_;
   std::string hardware_revision_;
   int prl_version_;
@@ -522,6 +536,8 @@ class Network {
                            TestLoadWifiCertificatePattern);
   FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
                            TestLoadVPNCertificatePattern);
+  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
+                           TestNoCertificatePatternForDevicePolicy);
   FRIEND_TEST_ALL_PREFIXES(NetworkLibraryStubTest, NetworkConnectOncWifi);
   FRIEND_TEST_ALL_PREFIXES(NetworkLibraryStubTest, NetworkConnectOncVPN);
 
@@ -1643,6 +1659,7 @@ class NetworkLibrary {
     std::string user_passphrase;
     std::string otp;
     std::string group_name;
+    bool save_credentials;
   };
   virtual void ConnectToUnconfiguredVirtualNetwork(
       const std::string& service_name,

@@ -28,6 +28,20 @@ hosts whose network requests you want to access.
   ...
 }</pre>
 
+<p>
+Note that certain types of non-sensitive requests do not require host
+permissions:
+<ul>
+  <li><code>CancelRequest</code>
+  <li><code>IgnoreRules</code>
+  <li><code>RedirectToEmptyDocument</code>
+  <li><code>RedirectToTransparentImage</code>
+  <li><code>RedirectByRegEx</code> when the redirect destination has
+    the same domain as the original request
+  <li><code>RedirectRequest</code> when the redirect destination has
+    the same domain as the original request
+</ul>
+
 <h2 id="rules">Rules</h2>
 
 <p>
@@ -139,6 +153,9 @@ request stages that are compatible with conditions and actions.
   <tr><td>excludeContentType<td><td><td>✓<td>
   <tr><td>responseHeaders<td><td><td>✓<td>
   <tr><td>excludeResponseHeaders<td><td><td>✓<td>
+  <tr><td>requestHeaders<td><td>✓<td><td>
+  <tr><td>excludeRequestHeaders<td><td>✓<td><td>
+  <tr><td>thirdPartyForCookies<td>✓<td>✓<td>✓<td>✓
   <tr>
     <th colspan="5" style="padding-top:2em">Request stages during which actions can be executed.
   </tr>

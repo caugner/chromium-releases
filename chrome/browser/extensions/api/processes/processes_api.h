@@ -78,7 +78,7 @@ class ProcessesEventRouter : public TaskManagerModelObserver,
 
   // Determines whether there is a registered listener for the specified event.
   // It helps to avoid collecing data if no one is interested in it.
-  bool HasEventListeners(std::string& event_name);
+  bool HasEventListeners(const std::string& event_name);
 
   // Used for tracking registrations to process related notifications.
   content::NotificationRegistrar registrar_;
@@ -105,6 +105,9 @@ class ProcessesEventRouter : public TaskManagerModelObserver,
 // currently in use by the specified Tab.
 class GetProcessIdForTabFunction : public AsyncExtensionFunction,
                                    public content::NotificationObserver {
+ public:
+  GetProcessIdForTabFunction();
+
  private:
   virtual ~GetProcessIdForTabFunction() {}
   virtual bool RunImpl() OVERRIDE;
@@ -131,6 +134,9 @@ class GetProcessIdForTabFunction : public AsyncExtensionFunction,
 // * guards against killing non-Chrome processes
 class TerminateFunction : public AsyncExtensionFunction,
                           public content::NotificationObserver {
+ public:
+  TerminateFunction();
+
  private:
   virtual ~TerminateFunction() {}
   virtual bool RunImpl() OVERRIDE;

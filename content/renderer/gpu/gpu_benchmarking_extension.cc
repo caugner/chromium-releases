@@ -103,19 +103,21 @@ class GpuBenchmarkingWrapper : public v8::Extension {
           "  native function PrintToSkPicture();"
           "  return PrintToSkPicture(dirname);"
           "};"
-          "chrome.gpuBenchmarking.beginSmoothScrollDown = "
-          "    function(scroll_far, opt_callback) {"
-          "  scroll_far = scroll_far || false;"
+          "chrome.gpuBenchmarking.smoothScrollBy = "
+          "    function(pixels_to_scroll, opt_callback, opt_mouse_event_x,"
+          "             opt_mouse_event_y) {"
+          "  pixels_to_scroll = pixels_to_scroll || 0;"
           "  callback = opt_callback || function() { };"
           "  native function BeginSmoothScroll();"
-          "  return BeginSmoothScroll(true, scroll_far, callback);"
-          "};"
-          "chrome.gpuBenchmarking.beginSmoothScrollUp = "
-          "    function(scroll_far, opt_callback) {"
-          "  scroll_far = scroll_far || false;"
-          "  callback = opt_callback || function() { };"
-          "  native function BeginSmoothScroll();"
-          "  return BeginSmoothScroll(false, scroll_far, callback);"
+          "  if (typeof opt_mouse_event_x !== 'undefined' &&"
+          "      typeof opt_mouse_event_y !== 'undefined') {"
+          "    return BeginSmoothScroll(pixels_to_scroll >= 0, callback,"
+          "                             Math.abs(pixels_to_scroll),"
+          "                             opt_mouse_event_x, opt_mouse_event_y);"
+          "  } else {"
+          "    return BeginSmoothScroll(pixels_to_scroll >= 0, callback,"
+          "                             Math.abs(pixels_to_scroll));"
+          "  }"
           "};"
           "chrome.gpuBenchmarking.runRenderingBenchmarks = function(filter) {"
           "  native function RunRenderingBenchmarks();"
@@ -137,7 +139,8 @@ class GpuBenchmarkingWrapper : public v8::Extension {
   }
 
   static v8::Handle<v8::Value> GetRenderingStats(const v8::Arguments& args) {
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 
@@ -154,7 +157,6 @@ class GpuBenchmarkingWrapper : public v8::Extension {
 
     content::GpuRenderingStats gpu_stats;
     render_view_impl->GetGpuRenderingStats(&gpu_stats);
-
     v8::Handle<v8::Object> stats_object = v8::Object::New();
     stats_object->Set(v8::String::New("numAnimationFrames"),
                       v8::Integer::New(stats.numAnimationFrames));
@@ -166,6 +168,15 @@ class GpuBenchmarkingWrapper : public v8::Extension {
                       v8::Number::New(stats.totalPaintTimeInSeconds));
     stats_object->Set(v8::String::New("totalRasterizeTimeInSeconds"),
                       v8::Number::New(stats.totalRasterizeTimeInSeconds));
+    stats_object->Set(v8::String::New("totalCommitTimeInSeconds"),
+                      v8::Number::New(stats.totalCommitTimeInSeconds));
+    stats_object->Set(v8::String::New("totalCommitCount"),
+                      v8::Integer::New(stats.totalCommitCount));
+    stats_object->Set(v8::String::New("numImplThreadScrolls"),
+                      v8::Integer::New(stats.numImplThreadScrolls));
+    stats_object->Set(v8::String::New("numMainThreadScrolls"),
+                      v8::Integer::New(stats.numMainThreadScrolls));
+
     stats_object->Set(v8::String::New("globalTextureUploadCount"),
                       v8::Number::New(gpu_stats.global_texture_upload_count));
     stats_object->Set(
@@ -196,7 +207,7 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (dirname.length() == 0)
       return v8::Undefined();
 
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 
@@ -240,7 +251,7 @@ class GpuBenchmarkingWrapper : public v8::Extension {
   }
 
   static v8::Handle<v8::Value> BeginSmoothScroll(const v8::Arguments& args) {
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 
@@ -252,30 +263,52 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (!render_view_impl)
       return v8::Undefined();
 
-    if (args.Length() != 3 ||
+    // Account for the 2 optional arguments, mouse_event_x and mouse_event_y.
+    int arglen = args.Length();
+    if (arglen < 3 ||
         !args[0]->IsBoolean() ||
-        !args[1]->IsBoolean() ||
-        !args[2]->IsFunction())
+        !args[1]->IsFunction() ||
+        !args[2]->IsNumber())
       return v8::False();
 
     bool scroll_down = args[0]->BooleanValue();
-    bool scroll_far = args[1]->BooleanValue();
     v8::Local<v8::Function> callback_local =
-        v8::Local<v8::Function>(v8::Function::Cast(*args[2]));
+        v8::Local<v8::Function>(v8::Function::Cast(*args[1]));
     v8::Persistent<v8::Function> callback =
         v8::Persistent<v8::Function>::New(callback_local);
     v8::Persistent<v8::Context> context =
         v8::Persistent<v8::Context>::New(web_frame->mainWorldScriptContext());
+
+    int pixels_to_scroll = args[2]->IntegerValue();
+
+    int mouse_event_x = 0;
+    int mouse_event_y = 0;
+
+    if (arglen == 3) {
+      WebKit::WebRect rect = render_view_impl->windowRect();
+      mouse_event_x = rect.x + rect.width / 2;
+      mouse_event_y = rect.y + rect.height / 2;
+    } else {
+      if (arglen != 5 ||
+          !args[3]->IsNumber() ||
+          !args[4]->IsNumber())
+        return v8::False();
+
+      mouse_event_x = args[3]->IntegerValue();
+      mouse_event_y = args[4]->IntegerValue();
+    }
 
     // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
     // progress, we will leak the callback and context. This needs to be fixed,
     // somehow.
     render_view_impl->BeginSmoothScroll(
         scroll_down,
-        scroll_far,
         base::Bind(&OnSmoothScrollCompleted,
                    callback,
-                   context));
+                   context),
+        pixels_to_scroll,
+        mouse_event_x,
+        mouse_event_y);
 
     return v8::True();
   }
@@ -299,7 +332,7 @@ class GpuBenchmarkingWrapper : public v8::Extension {
       name_filter = std::string(filter);
     }
 
-    WebFrame* web_frame = WebFrame::frameForEnteredContext();
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
     if (!web_frame)
       return v8::Undefined();
 

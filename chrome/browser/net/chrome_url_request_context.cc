@@ -352,6 +352,7 @@ ChromeURLRequestContext::ChromeURLRequestContext(
     ContextType type,
     chrome_browser_net::LoadTimeStats* load_time_stats)
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      chrome_url_data_manager_backend_(NULL),
       is_incognito_(false),
       load_time_stats_(load_time_stats) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -399,7 +400,6 @@ void ChromeURLRequestContext::OnAcceptLanguageChange(
 void ChromeURLRequestContext::OnDefaultCharsetChange(
     const std::string& default_charset) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  set_referrer_charset(default_charset);
   set_accept_charset(
       net::HttpUtil::GenerateAcceptCharsetHeader(default_charset));
 }

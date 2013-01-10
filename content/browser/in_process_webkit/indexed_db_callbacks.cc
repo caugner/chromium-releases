@@ -7,9 +7,7 @@
 #include "content/common/indexed_db/indexed_db_messages.h"
 #include "webkit/quota/quota_manager.h"
 
-using content::IndexedDBKey;
-using content::IndexedDBKeyPath;
-using content::SerializedScriptValue;
+namespace content {
 
 namespace {
 const int32 kDatabaseNotAdded = -1;
@@ -205,3 +203,19 @@ void IndexedDBCallbacks<WebKit::WebSerializedScriptValue>::onSuccess(
           thread_id(), response_id(), SerializedScriptValue(value),
           IndexedDBKey(primaryKey), IndexedDBKeyPath(keyPath)));
 }
+
+void IndexedDBCallbacks<WebKit::WebSerializedScriptValue>::onSuccess(
+    long long value) {
+    dispatcher_host()->Send(
+        new IndexedDBMsg_CallbacksSuccessInteger(thread_id(),
+                                                 response_id(),
+                                                 value));
+}
+
+void IndexedDBCallbacks<WebKit::WebSerializedScriptValue>::onSuccess() {
+    dispatcher_host()->Send(
+        new IndexedDBMsg_CallbacksSuccessUndefined(thread_id(),
+                                                   response_id()));
+}
+
+}  // namespace content

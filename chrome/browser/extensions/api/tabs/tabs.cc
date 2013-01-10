@@ -368,7 +368,7 @@ bool CreateWindowFunction::ShouldOpenIncognitoWindow(
   if (incognito && !Profile::IsGuestSession()) {
     std::string first_url_erased;
     for (size_t i = 0; i < urls->size();) {
-      if (chrome::IsURLAllowedInIncognito((*urls)[i])) {
+      if (chrome::IsURLAllowedInIncognito((*urls)[i], profile())) {
         i++;
       } else {
         if (first_url_erased.empty())
@@ -531,9 +531,12 @@ bool CreateWindowFunction::RunImpl() {
       // NOTE(rafaelw): It's ok if GetCurrentBrowser() returns NULL here.
       // GetBrowserWindowBounds will default to saved "default" values for
       // the app.
-      WindowSizer::GetBrowserWindowBounds(std::string(), gfx::Rect(),
-                                          GetCurrentBrowser(),
-                                          &window_bounds);
+      ui::WindowShowState show_state = ui::SHOW_STATE_DEFAULT;
+      WindowSizer::GetBrowserWindowBoundsAndShowState(std::string(),
+                                                      gfx::Rect(),
+                                                      GetCurrentBrowser(),
+                                                      &window_bounds,
+                                                      &show_state);
     }
 
     if (Browser::TYPE_PANEL == window_type &&
@@ -802,6 +805,13 @@ bool RemoveWindowFunction::RunImpl() {
   if (!GetWindowFromWindowID(this, window_id, &controller))
     return false;
 
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // In Windows 8 metro mode, an existing Browser instance is reused for
+  // hosting the extension tab. We should not be closing it as we don't own it.
+  if (base::win::IsMetroProcess())
+    return false;
+#endif
+
   WindowController::Reason reason;
   if (!controller->CanClose(&reason)) {
     if (reason == WindowController::REASON_NOT_EDITABLE)
@@ -990,7 +1000,7 @@ bool CreateTabFunction::RunImpl() {
 
   // TODO(jstritar): Add a constant, chrome.tabs.TAB_ID_ACTIVE, that
   // represents the active tab.
-  content::NavigationController* opener = NULL;
+  WebContents* opener = NULL;
   if (args->HasKey(keys::kOpenerTabIdKey)) {
     int opener_id = -1;
     EXTENSION_FUNCTION_VALIDATE(args->GetInteger(
@@ -1002,7 +1012,7 @@ bool CreateTabFunction::RunImpl() {
             NULL, NULL, &opener_contents, NULL))
       return false;
 
-    opener = &opener_contents->web_contents()->GetController();
+    opener = opener_contents->web_contents();
   }
 
   // TODO(rafaelw): handle setting remaining tab properties:
@@ -1085,7 +1095,7 @@ bool CreateTabFunction::RunImpl() {
   tab_strip = params.browser->tab_strip_model();
   int new_index = tab_strip->GetIndexOfTabContents(params.target_contents);
   if (opener)
-    tab_strip->SetOpenerOfTabContentsAt(new_index, opener);
+    tab_strip->SetOpenerOfWebContentsAt(new_index, opener);
 
   if (active)
     params.target_contents->web_contents()->GetView()->SetInitialFocus();
@@ -1309,8 +1319,8 @@ bool UpdateTabFunction::RunImpl() {
             NULL, NULL, &opener_contents, NULL))
       return false;
 
-    tab_strip->SetOpenerOfTabContentsAt(
-        tab_index, &opener_contents->web_contents()->GetController());
+    tab_strip->SetOpenerOfWebContentsAt(
+        tab_index, opener_contents->web_contents());
   }
 
   if (!is_async) {
@@ -1681,23 +1691,23 @@ bool CaptureVisibleTabFunction::RunImpl() {
     error_ = keys::kInternalVisibleTabCaptureError;
     return false;
   }
-  skia::PlatformCanvas* temp_canvas = new skia::PlatformCanvas;
+  skia::PlatformBitmap* temp_bitmap = new skia::PlatformBitmap;
   render_view_host->CopyFromBackingStore(
       gfx::Rect(),
       view->GetViewBounds().size(),
       base::Bind(&CaptureVisibleTabFunction::CopyFromBackingStoreComplete,
                  this,
-                 base::Owned(temp_canvas)),
-      temp_canvas);
+                 base::Owned(temp_bitmap)),
+      temp_bitmap);
   return true;
 }
 
 void CaptureVisibleTabFunction::CopyFromBackingStoreComplete(
-    skia::PlatformCanvas* canvas,
+    skia::PlatformBitmap* bitmap,
     bool succeeded) {
   if (succeeded) {
     VLOG(1) << "captureVisibleTab() got image from backing store.";
-    SendResultFromBitmap(skia::GetTopDevice(*canvas)->accessBitmap(false));
+    SendResultFromBitmap(bitmap->GetBitmap());
     return;
   }
 
@@ -1825,16 +1835,17 @@ bool DetectTabLanguageFunction::RunImpl() {
 
   AddRef();  // Balanced in GotLanguage()
 
-  TranslateTabHelper* helper = contents->translate_tab_helper();
-  if (!helper->language_state().original_language().empty()) {
+  TranslateTabHelper* translate_tab_helper =
+      TranslateTabHelper::FromWebContents(contents->web_contents());
+  if (!translate_tab_helper->language_state().original_language().empty()) {
     // Delay the callback invocation until after the current JS call has
     // returned.
     MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
         &DetectTabLanguageFunction::GotLanguage, this,
-        helper->language_state().original_language()));
+        translate_tab_helper->language_state().original_language()));
     return true;
   }
-  // The tab contents does not know its language yet.  Let's  wait until it
+  // The tab contents does not know its language yet.  Let's wait until it
   // receives it, or until the tab is closed/navigates to some other page.
   registrar_.Add(this, chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                  content::Source<WebContents>(contents->web_contents()));

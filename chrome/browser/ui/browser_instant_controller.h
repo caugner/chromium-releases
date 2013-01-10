@@ -8,9 +8,10 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/string16.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
-#include "chrome/browser/instant/instant_controller_delegate.h"
+#include "chrome/browser/instant/instant_unload_handler.h"
+#include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/common/instant_types.h"
 #include "content/public/browser/notification_observer.h"
@@ -19,7 +20,6 @@
 class Browser;
 class InstantController;
 class InstantTest;
-class InstantUnloadHandler;
 class TabContents;
 
 namespace content {
@@ -33,8 +33,8 @@ class Rect;
 
 namespace chrome {
 
-class BrowserInstantController : public InstantControllerDelegate,
-                                 public TabStripModelObserver,
+class BrowserInstantController : public TabStripModelObserver,
+                                 public search::SearchModelObserver,
                                  public content::NotificationObserver {
  public:
   explicit BrowserInstantController(Browser* browser);
@@ -48,16 +48,24 @@ class BrowserInstantController : public InstantControllerDelegate,
   // this BrowserInstantController.
   InstantController* instant() const { return instant_.get(); }
 
- private:
-  // Overridden from InstantControllerDelegate:
-  virtual void ShowInstant() OVERRIDE;
-  virtual void HideInstant() OVERRIDE;
-  virtual void CommitInstant(TabContents* preview) OVERRIDE;
-  virtual void SetSuggestedText(const string16& text,
-                                InstantCompleteBehavior behavior) OVERRIDE;
-  virtual gfx::Rect GetInstantBounds() OVERRIDE;
-  virtual void InstantPreviewFocused() OVERRIDE;
-  virtual TabContents* GetActiveTabContents() const OVERRIDE;
+  // Invoked by |instant_| to commit the |preview| by merging it into the active
+  // tab or adding it as a new tab. We take ownership of |preview|.
+  void CommitInstant(TabContents* preview, bool in_new_tab);
+
+  // Invoked by |instant_| to autocomplete the |suggestion| into the omnibox.
+  void SetInstantSuggestion(const InstantSuggestion& suggestion);
+
+  // Invoked by |instant_| to get the bounds that the preview is placed at,
+  // in screen coordinated.
+  gfx::Rect GetInstantBounds();
+
+  // Invoked by |instant_| to notify that the preview gained focus, usually due
+  // to the user clicking on it.
+  void InstantPreviewFocused();
+
+  // Invoked by |instant_| to get the currently active tab, over which the
+  // preview would be shown.
+  TabContents* GetActiveTabContents() const;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -67,6 +75,10 @@ class BrowserInstantController : public InstantControllerDelegate,
   // Overridden from TabStripModelObserver:
   virtual void TabDeactivated(TabContents* contents) OVERRIDE;
 
+  // Overridden from search::SearchModelObserver:
+  virtual void ModeChanged(const search::Mode& old_mode,
+                           const search::Mode& new_mode) OVERRIDE;
+
   // If this browser should have Instant, a new InstantController created;
   // otherwise any existing InstantController is destroyed.
   void ResetInstant();
@@ -74,7 +86,7 @@ class BrowserInstantController : public InstantControllerDelegate,
   Browser* browser_;
 
   scoped_ptr<InstantController> instant_;
-  scoped_ptr<InstantUnloadHandler> instant_unload_handler_;
+  InstantUnloadHandler instant_unload_handler_;
 
   PrefChangeRegistrar profile_pref_registrar_;
 

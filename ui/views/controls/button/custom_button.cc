@@ -47,6 +47,8 @@ void CustomButton::SetState(ButtonState state) {
 
   state_ = state;
   StateChanged();
+  if (state_changed_delegate_.get())
+    state_changed_delegate_->StateChanged(state_);
   SchedulePaint();
 }
 
@@ -72,7 +74,8 @@ bool CustomButton::IsMouseHovered() const {
   if (!GetWidget())
     return false;
 
-  gfx::Point cursor_pos(gfx::Screen::GetCursorScreenPoint());
+  gfx::Point cursor_pos(gfx::Screen::GetScreenFor(
+      GetWidget()->GetNativeView())->GetCursorScreenPoint());
   ConvertPointToTarget(NULL, this, &cursor_pos);
   return HitTestPoint(cursor_pos);
 }

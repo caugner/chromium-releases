@@ -192,7 +192,8 @@ class CrxInstaller
   void ConvertUserScriptOnFileThread();
 
   // Converts the source web app to an extension.
-  void ConvertWebAppOnFileThread(const WebApplicationInfo& web_app);
+  void ConvertWebAppOnFileThread(const WebApplicationInfo& web_app,
+                                 const FilePath& install_directory);
 
   // Called after OnUnpackSuccess as a last check to see whether the install
   // should complete.
@@ -363,6 +364,9 @@ class CrxInstaller
   scoped_ptr<RequirementsChecker> requirements_checker_;
 
   bool has_requirement_errors_;
+
+  // Used to show the install dialog.
+  ExtensionInstallPrompt::ShowDialogCallback show_dialog_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CrxInstaller);
 };

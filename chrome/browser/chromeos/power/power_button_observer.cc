@@ -11,7 +11,7 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/power/power_button_controller_delegate_chromeos.h"
+#include "chrome/browser/chromeos/power/session_state_controller_delegate_chromeos.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -25,7 +25,7 @@ ash::user::LoginStatus GetCurrentLoginStatus() {
   if (!user_manager->IsUserLoggedIn())
     return ash::user::LOGGED_IN_NONE;
 
-  if (user_manager->GetLoggedInUser().is_guest())
+  if (user_manager->GetLoggedInUser()->is_guest())
     return ash::user::LOGGED_IN_GUEST;
 
   return ash::user::LOGGED_IN_USER;
@@ -34,8 +34,8 @@ ash::user::LoginStatus GetCurrentLoginStatus() {
 }  // namespace
 
 PowerButtonObserver::PowerButtonObserver() {
-  ash::Shell::GetInstance()->power_button_controller()->
-      set_delegate(new PowerButtonControllerDelegateChromeos);
+  ash::Shell::GetInstance()->session_state_controller()->
+      SetDelegate(new SessionStateControllerDelegateChromeos);
 
   registrar_.Add(
       this,
@@ -43,7 +43,7 @@ PowerButtonObserver::PowerButtonObserver() {
       content::NotificationService::AllSources());
   registrar_.Add(
       this,
-      content::NOTIFICATION_APP_TERMINATING,
+      chrome::NOTIFICATION_APP_TERMINATING,
       content::NotificationService::AllSources());
   registrar_.Add(
       this,
@@ -74,7 +74,7 @@ void PowerButtonObserver::Observe(int type,
       ash::Shell::GetInstance()->OnLoginStateChanged(GetCurrentLoginStatus());
       break;
     }
-    case content::NOTIFICATION_APP_TERMINATING:
+    case chrome::NOTIFICATION_APP_TERMINATING:
       ash::Shell::GetInstance()->OnAppTerminating();
       break;
     case chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED: {
@@ -100,7 +100,7 @@ void PowerButtonObserver::LockButtonStateChanged(
 }
 
 void PowerButtonObserver::LockScreen() {
-  ash::Shell::GetInstance()->power_button_controller()->OnStartingLock();
+  ash::Shell::GetInstance()->session_state_controller()->OnStartingLock();
 }
 
 }  // namespace chromeos

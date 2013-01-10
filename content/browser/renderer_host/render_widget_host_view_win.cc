@@ -32,6 +32,7 @@
 #include "content/browser/renderer_host/backing_store_win.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/renderer_host/ui_events_helper.h"
 #include "content/common/accessibility_messages.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/plugin_messages.h"
@@ -259,10 +260,8 @@ WebKit::WebInputEvent::Type ConvertToWebInputEvent(ui::EventType t) {
     case ui::ET_GESTURE_SCROLL_UPDATE:
       return WebKit::WebGestureEvent::GestureScrollUpdate;
     case ui::ET_SCROLL_FLING_START:
-      // TODO: Confirm that ui and webkit agree on fling api.
       return WebKit::WebGestureEvent::GestureFlingStart;
     case ui::ET_SCROLL_FLING_CANCEL:
-      // TODO: Confirm that ui and webkit agree on fling api.
       return WebKit::WebGestureEvent::GestureFlingCancel;
     case ui::ET_GESTURE_TAP:
       return WebKit::WebGestureEvent::GestureTap;
@@ -303,6 +302,7 @@ WebKit::WebInputEvent::Type ConvertToWebInputEvent(ui::EventType t) {
   }
 }
 
+// Creates a WebGestureEvent corresponding to the given |gesture|
 WebKit::WebGestureEvent CreateWebGestureEvent(HWND hwnd,
                                               const ui::GestureEvent& gesture) {
   POINT client_point = gesture.location().ToPOINT();
@@ -311,6 +311,7 @@ WebKit::WebGestureEvent CreateWebGestureEvent(HWND hwnd,
   MapWindowPoints(hwnd, HWND_DESKTOP, &screen_point, 1);
 
   WebKit::WebGestureEvent gesture_event;
+  gesture_event.timeStampSeconds = gesture.time_stamp().InSecondsF();
   gesture_event.type = ConvertToWebInputEvent(gesture.type());
   gesture_event.x = client_point.x;
   gesture_event.y = client_point.y;
@@ -355,9 +356,22 @@ WebKit::WebGestureEvent CreateWebGestureEvent(HWND hwnd,
       gesture_event.data.longPress.height =
           gesture.details().bounding_box().height();
       break;
+    case ui::ET_GESTURE_TWO_FINGER_TAP:
+      gesture_event.data.twoFingerTap.firstFingerWidth =
+          gesture.details().first_finger_width();
+      gesture_event.data.twoFingerTap.firstFingerHeight =
+          gesture.details().first_finger_height();
+      break;
     default:
       break;
   }
+  return gesture_event;
+}
+
+WebKit::WebGestureEvent CreateFlingCancelEvent(double time_stamp) {
+  WebKit::WebGestureEvent gesture_event;
+  gesture_event.timeStampSeconds = time_stamp;
+  gesture_event.type = WebKit::WebGestureEvent::GestureFlingCancel;
   return gesture_event;
 }
 
@@ -379,6 +393,12 @@ class TouchEventFromWebTouchPoint : public ui::TouchEvent {
  private:
   DISALLOW_COPY_AND_ASSIGN(TouchEventFromWebTouchPoint);
 };
+
+bool ShouldSendPinchGesture() {
+  static bool pinch_allowed =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnablePinch);
+  return pinch_allowed;
+}
 
 }  // namespace
 
@@ -403,24 +423,6 @@ class WebTouchState {
   // Returns if any touches are modified in the event.
   bool is_changed() { return touch_event_.changedTouchesLength != 0; }
 
-  void QueueEvents(ui::GestureConsumer* consumer, ui::GestureRecognizer* gr) {
-    if (touch_event_.touchesLength > 0)
-      touch_count_.push(touch_event_.touchesLength);
-    base::TimeDelta timestamp = base::TimeDelta::FromMilliseconds(
-        touch_event_.timeStampSeconds * 1000);
-    for (size_t i = 0; i < touch_event_.touchesLength; ++i) {
-      gr->QueueTouchEventForGesture(consumer,
-          TouchEventFromWebTouchPoint(touch_event_.touches[i], timestamp));
-    }
-  }
-
-  int GetNextTouchCount() {
-    DCHECK(!touch_count_.empty());
-    int result = touch_count_.top();
-    touch_count_.pop();
-    return result;
-  }
-
  private:
   typedef std::map<unsigned int, int> MapType;
 
@@ -437,12 +439,6 @@ class WebTouchState {
 
   // Remove any mappings that are no longer in use.
   void RemoveExpiredMappings();
-
-  // The gesture recognizer processes touch events one at a time, but WebKit
-  // (ForwardTouchEvent) takes a set of touch events. |touchCount_| tracks how
-  // many individual touch events were sent to ForwardTouchEvent, so we can
-  // send the correct number of AdvanceTouchQueue's
-  std::stack<int> touch_count_;
 
   WebKit::WebTouchEvent touch_event_;
   const RenderWidgetHostViewWin* const window_;
@@ -476,6 +472,7 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       weak_factory_(this),
       is_loading_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
+      can_compose_inline_(true),
       is_fullscreen_(false),
       ignore_mouse_movement_(true),
       composition_range_(ui::Range::InvalidRange()),
@@ -539,7 +536,7 @@ void RenderWidgetHostViewWin::InitAsPopup(
 
 void RenderWidgetHostViewWin::InitAsFullscreen(
     RenderWidgetHostView* reference_host_view) {
-  gfx::Rect pos = gfx::Screen::GetDisplayNearestWindow(
+  gfx::Rect pos = gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(
       reference_host_view->GetNativeView()).bounds();
   is_fullscreen_ = true;
   DoPopupOrFullscreenInit(ui::GetWindowToParentTo(true), pos, 0);
@@ -763,12 +760,10 @@ void RenderWidgetHostViewWin::SetIsLoading(bool is_loading) {
 
 void RenderWidgetHostViewWin::TextInputStateChanged(
     const ViewHostMsg_TextInputState_Params& params) {
-  // TODO(kinaba): currently, can_compose_inline is ignored and always treated
-  // as true. We need to support "can_compose_inline=false" for PPAPI plugins
-  // that may want to avoid drawing composition-text by themselves and pass
-  // the responsibility to the browser.
-  if (text_input_type_ != params.type) {
+  if (text_input_type_ != params.type ||
+      can_compose_inline_ != params.can_compose_inline) {
     text_input_type_ = params.type;
+    can_compose_inline_ = params.can_compose_inline;
     UpdateIMEState();
   }
 }
@@ -782,7 +777,7 @@ void RenderWidgetHostViewWin::SelectionBoundsChanged(
       text_input_type_ != ui::TEXT_INPUT_TYPE_PASSWORD);
   // Only update caret position if the input method is enabled.
   if (is_enabled) {
-    caret_rect_ = start_rect.Union(end_rect);
+    caret_rect_ = gfx::UnionRects(start_rect, end_rect);
     ime_input_.UpdateCaretRect(m_hWnd, caret_rect_);
   }
 }
@@ -921,7 +916,7 @@ void RenderWidgetHostViewWin::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
     const base::Callback<void(bool)>& callback,
-    skia::PlatformCanvas* output) {
+    skia::PlatformBitmap* output) {
   base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
   if (!accelerated_surface_.get())
     return;
@@ -929,13 +924,13 @@ void RenderWidgetHostViewWin::CopyFromCompositingSurface(
   if (dst_size.IsEmpty())
     return;
 
-  if (!output->initialize(dst_size.width(), dst_size.height(), true))
+  if (!output->Allocate(dst_size.width(), dst_size.height(), true))
     return;
 
   const bool result = accelerated_surface_->CopyTo(
       src_subrect,
       dst_size,
-      output->getTopDevice()->accessBitmap(true).getPixels());
+      output->GetBitmap().getPixels());
   scoped_callback_runner.Release();
   callback.Run(result);
 }
@@ -945,71 +940,52 @@ void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
   render_widget_host_->SetBackground(background);
 }
 
-void RenderWidgetHostViewWin::ProcessTouchAck(
-    WebKit::WebInputEvent::Type type, bool processed) {
+void RenderWidgetHostViewWin::ProcessAckedTouchEvent(
+    const WebKit::WebTouchEvent& touch,
+    bool processed) {
+  DCHECK(touch_events_enabled_);
 
-  DCHECK(render_widget_host_->has_touch_handler() &&
-      touch_events_enabled_);
+  ScopedVector<ui::TouchEvent> events;
+  if (!MakeUITouchEventsFromWebTouchEvents(touch, &events))
+    return;
 
-  int touch_count = touch_state_->GetNextTouchCount();
-  for (int i = 0; i < touch_count; ++i) {
+  ui::EventResult result = processed ? ui::ER_HANDLED : ui::ER_UNHANDLED;
+  for (ScopedVector<ui::TouchEvent>::iterator iter = events.begin(),
+      end = events.end(); iter != end; ++iter)  {
     scoped_ptr<ui::GestureRecognizer::Gestures> gestures;
-    gestures.reset(gesture_recognizer_->AdvanceTouchQueue(this, processed));
+    gestures.reset(gesture_recognizer_->ProcessTouchEventForGesture(
+        *(*iter), result, this));
     ProcessGestures(gestures.get());
   }
-
-  if (type == WebKit::WebInputEvent::TouchStart)
-    UpdateDesiredTouchMode(processed);
 }
 
-void RenderWidgetHostViewWin::SetToGestureMode() {
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return;
-  UnregisterTouchWindow(m_hWnd);
-  // Single finger panning is consistent with other windows applications.
-  const DWORD gesture_allow = GC_PAN_WITH_SINGLE_FINGER_VERTICALLY |
-                              GC_PAN_WITH_SINGLE_FINGER_HORIZONTALLY;
-  const DWORD gesture_block = GC_PAN_WITH_GUTTER;
-  GESTURECONFIG gc[] = {
-      { GID_ZOOM, GC_ZOOM, 0 },
-      { GID_PAN, gesture_allow , gesture_block},
-      { GID_TWOFINGERTAP, GC_TWOFINGERTAP , 0},
-      { GID_PRESSANDTAP, GC_PRESSANDTAP , 0}
-  };
-  if (!SetGestureConfig(m_hWnd, 0, arraysize(gc), gc,
-      sizeof(GESTURECONFIG))) {
-    NOTREACHED();
-  }
-  touch_events_enabled_ = false;
-}
-
-bool RenderWidgetHostViewWin::SetToTouchMode() {
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return false;
-  bool touch_mode = RegisterTouchWindow(m_hWnd, TWF_WANTPALM) == TRUE;
-  touch_events_enabled_ = touch_mode;
-  return touch_mode;
-}
-
-void RenderWidgetHostViewWin::UpdateDesiredTouchMode(bool touch_mode) {
+void RenderWidgetHostViewWin::UpdateDesiredTouchMode() {
   // Make sure that touch events even make sense.
-  bool touch_mode_valid = base::win::GetVersion() >= base::win::VERSION_WIN7 &&
+  static bool touch_mode = base::win::GetVersion() >= base::win::VERSION_WIN7 &&
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTouchEvents);
-  touch_mode = touch_mode_valid;
 
-  // Already in correct mode, nothing to do.
-  if ((touch_mode && touch_events_enabled_) ||
-      (!touch_mode && !touch_events_enabled_))
+  if (!touch_mode)
     return;
 
   // Now we know that the window's current state doesn't match the desired
   // state. If we want touch mode, then we attempt to register for touch
   // events, and otherwise to unregister.
-  if (touch_mode) {
-    touch_mode = SetToTouchMode();
-  }
-  if (!touch_mode) {
-    SetToGestureMode();
+  touch_events_enabled_ = RegisterTouchWindow(m_hWnd, TWF_WANTPALM) == TRUE;
+
+  if (!touch_events_enabled_) {
+    UnregisterTouchWindow(m_hWnd);
+    // Single finger panning is consistent with other windows applications.
+    const DWORD gesture_allow = GC_PAN_WITH_SINGLE_FINGER_VERTICALLY |
+                                GC_PAN_WITH_SINGLE_FINGER_HORIZONTALLY;
+    const DWORD gesture_block = GC_PAN_WITH_GUTTER;
+    GESTURECONFIG gc[] = {
+        { GID_ZOOM, GC_ZOOM, 0 },
+        { GID_PAN, gesture_allow , gesture_block},
+        { GID_TWOFINGERTAP, GC_TWOFINGERTAP , 0},
+        { GID_PRESSANDTAP, GC_PRESSANDTAP , 0}
+    };
+    if (!SetGestureConfig(m_hWnd, 0, arraysize(gc), gc, sizeof(GESTURECONFIG)))
+      NOTREACHED();
   }
 }
 
@@ -1020,8 +996,10 @@ bool RenderWidgetHostViewWin::DispatchLongPressGestureEvent(
 
 bool RenderWidgetHostViewWin::DispatchCancelTouchEvent(
     ui::TouchEvent* event) {
-  if (!render_widget_host_ || !touch_events_enabled_)
+  if (!render_widget_host_ || !touch_events_enabled_ ||
+      !render_widget_host_->ShouldForwardTouchEvent()) {
     return false;
+  }
   DCHECK(event->type() == WebKit::WebInputEvent::TouchCancel);
   WebKit::WebTouchEvent cancel_event;
   cancel_event.type = WebKit::WebInputEvent::TouchCancel;
@@ -1264,13 +1242,7 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
   // scrolled when under the mouse pointer even if inactive.
   props_.push_back(ui::SetWindowSupportsRerouteMouseWheel(m_hWnd));
 
-  bool touch_enabled = base::win::GetVersion() >= base::win::VERSION_WIN7 &&
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTouchEvents);
-  if (touch_enabled)
-    SetToTouchMode();
-  else
-    SetToGestureMode();
-
+  UpdateDesiredTouchMode();
   UpdateIMEState();
 
   return 0;
@@ -1307,6 +1279,14 @@ void RenderWidgetHostViewWin::OnDestroy() {
 
 void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewWin::OnPaint");
+
+  // Grab the region to paint before creation of paint_dc since it clears the
+  // damage region.
+  base::win::ScopedGDIObject<HRGN> damage_region(CreateRectRgn(0, 0, 0, 0));
+  GetUpdateRgn(damage_region, FALSE);
+
+  CPaintDC paint_dc(m_hWnd);
+
   if (!render_widget_host_)
     return;
 
@@ -1317,9 +1297,6 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
   // do here is clear borders during resize.
   if (compositor_host_window_ &&
       render_widget_host_->is_accelerated_compositing_active()) {
-    // We initialize paint_dc here so that BeginPaint()/EndPaint()
-    // get called to validate the region.
-    CPaintDC paint_dc(m_hWnd);
     RECT host_rect, child_rect;
     GetClientRect(&host_rect);
     if (::GetClientRect(compositor_host_window_, &child_rect) &&
@@ -1328,6 +1305,12 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
       paint_dc.FillRect(&host_rect,
           reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
     }
+    return;
+  }
+
+  if (accelerated_surface_.get() &&
+      render_widget_host_->is_accelerated_compositing_active()) {
+    AcceleratedPaint(paint_dc.m_hDC);
     return;
   }
 
@@ -1340,27 +1323,14 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
   // changes and repaint them.
   about_to_validate_and_paint_ = false;
 
-  // Grab the region to paint before creation of paint_dc since it clears the
-  // damage region.
-  base::win::ScopedGDIObject<HRGN> damage_region(CreateRectRgn(0, 0, 0, 0));
-  GetUpdateRgn(damage_region, FALSE);
-
   if (compositor_host_window_ && hide_compositor_window_at_next_paint_) {
     ::ShowWindow(compositor_host_window_, SW_HIDE);
     hide_compositor_window_at_next_paint_ = false;
   }
 
-  CPaintDC paint_dc(m_hWnd);
-
   gfx::Rect damaged_rect(paint_dc.m_ps.rcPaint);
   if (damaged_rect.IsEmpty())
     return;
-
-  if (accelerated_surface_.get() &&
-      render_widget_host_->is_accelerated_compositing_active()) {
-    AcceleratedPaint(paint_dc.m_hDC);
-    return;
-  }
 
   if (backing_store) {
     gfx::Rect bitmap_rect(gfx::Point(), backing_store->size());
@@ -1393,7 +1363,8 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
     }
 
     for (DWORD i = 0; i < region_data->rdh.nCount; ++i) {
-      gfx::Rect paint_rect = bitmap_rect.Intersect(gfx::Rect(region_rects[i]));
+      gfx::Rect paint_rect =
+          gfx::IntersectRects(bitmap_rect, gfx::Rect(region_rects[i]));
       if (!paint_rect.IsEmpty()) {
         BitBlt(paint_dc.m_hDC,
                paint_rect.x(),
@@ -1459,7 +1430,9 @@ void RenderWidgetHostViewWin::DrawBackground(const RECT& dirty_rect,
     canvas.Translate(gfx::Point().Subtract(dirty_area.origin()));
 
     gfx::Rect dc_rect(dc->m_ps.rcPaint);
-    canvas.TileImageInt(background_, 0, 0, dc_rect.width(), dc_rect.height());
+    // TODO(pkotwicz): Fix |background_| such that it is an ImageSkia.
+    canvas.TileImageInt(gfx::ImageSkia(background_),
+                        0, 0, dc_rect.width(), dc_rect.height());
 
     skia::DrawToNativeContext(canvas.sk_canvas(), *dc, dirty_area.x(),
                               dirty_area.y(), NULL);
@@ -1599,6 +1572,10 @@ void RenderWidgetHostViewWin::OnInputLangChange(DWORD character_set,
       ime_notification_ = ime_status;
     }
   }
+  // Call DefWindowProc() for consistency with other Chrome windows.
+  // TODO(hbono): This is a speculative fix for Bug 36354 and this code may be
+  // reverted if it does not fix it.
+  SetMsgHandled(FALSE);
 }
 
 void RenderWidgetHostViewWin::OnThemeChanged() {
@@ -1676,10 +1653,12 @@ LRESULT RenderWidgetHostViewWin::OnImeStartComposition(
   // Reset the composition status and create IME windows.
   ime_input_.CreateImeWindow(m_hWnd);
   ime_input_.ResetComposition(m_hWnd);
-  // We have to prevent WTL from calling ::DefWindowProc() because the function
+  // When the focus is on an element that does not draw composition by itself
+  // (i.e., PPAPI plugin not handling IME), let IME to draw the text. Otherwise
+  // we have to prevent WTL from calling ::DefWindowProc() because the function
   // calls ::ImmSetCompositionWindow() and ::ImmSetCandidateWindow() to
   // over-write the position of IME windows.
-  handled = TRUE;
+  handled = (can_compose_inline_ ? TRUE : FALSE);
   return 0;
 }
 
@@ -1728,6 +1707,14 @@ LRESULT RenderWidgetHostViewWin::OnImeComposition(
   // We have to prevent WTL from calling ::DefWindowProc() because we do not
   // want for the IMM (Input Method Manager) to send WM_IME_CHAR messages.
   handled = TRUE;
+  if (!can_compose_inline_) {
+    // When the focus is on an element that does not draw composition by itself
+    // (i.e., PPAPI plugin not handling IME), let IME to draw the text, which
+    // is the default behavior of DefWindowProc. Note, however, even in this
+    // case we don't want GCS_RESULTSTR to be converted to WM_IME_CHAR messages.
+    // Thus we explicitly drop the flag.
+    return ::DefWindowProc(m_hWnd, message, wparam, lparam & ~GCS_RESULTSTR);
+  }
   return 0;
 }
 
@@ -1956,8 +1943,13 @@ LRESULT RenderWidgetHostViewWin::OnKeyEvent(UINT message, WPARAM wparam,
     }
   }
 
+  MSG msg = { m_hWnd, message, wparam, lparam };
+  ui::KeyEvent key_event(msg, message == WM_CHAR);
+  if (render_widget_host_ &&
+      render_widget_host_->KeyPressListenersHandleEvent(&key_event))
+    return 0;
+
   if (render_widget_host_ && !ignore_keyboard_event) {
-    MSG msg = { m_hWnd, message, wparam, lparam };
     render_widget_host_->ForwardKeyboardEvent(NativeWebKeyboardEvent(msg));
   }
   return 0;
@@ -2209,6 +2201,14 @@ unsigned int WebTouchState::GetMappedTouch(unsigned int os_touch_id) {
 LRESULT RenderWidgetHostViewWin::OnTouchEvent(UINT message, WPARAM wparam,
                                               LPARAM lparam, BOOL& handled) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewWin::OnTouchEvent");
+  // Finish the ongoing composition whenever a touch event happens.
+  // It matches IE's behavior.
+  if (base::win::IsTsfAwareRequired()) {
+    ui::TsfBridge::GetInstance()->CancelComposition();
+  } else {
+    ime_input_.CleanupComposition(m_hWnd);
+  }
+
   // TODO(jschuh): Add support for an arbitrary number of touchpoints.
   size_t total = std::min(static_cast<int>(LOWORD(wparam)),
       static_cast<int>(WebKit::WebTouchEvent::touchesLengthCap));
@@ -2227,17 +2227,15 @@ LRESULT RenderWidgetHostViewWin::OnTouchEvent(UINT message, WPARAM wparam,
         TOUCH_COORD_TO_PIXEL(points[0].y));
   }
 
-  bool has_touch_handler = render_widget_host_->has_touch_handler() &&
+  bool should_forward = render_widget_host_->ShouldForwardTouchEvent() &&
       touch_events_enabled_;
 
   // Send a copy of the touch events on to the gesture recognizer.
   for (size_t start = 0; start < total;) {
     start += touch_state_->UpdateTouchPoints(points + start, total - start);
-    if (has_touch_handler) {
-      if (touch_state_->is_changed()) {
+    if (should_forward) {
+      if (touch_state_->is_changed())
         render_widget_host_->ForwardTouchEvent(touch_state_->touch_event());
-        touch_state_->QueueEvents(this, gesture_recognizer_.get());
-      }
     } else {
       const WebKit::WebTouchEvent& touch_event = touch_state_->touch_event();
       base::TimeDelta timestamp = base::TimeDelta::FromMilliseconds(
@@ -2246,7 +2244,7 @@ LRESULT RenderWidgetHostViewWin::OnTouchEvent(UINT message, WPARAM wparam,
         scoped_ptr<ui::GestureRecognizer::Gestures> gestures;
         gestures.reset(gesture_recognizer_->ProcessTouchEventForGesture(
             TouchEventFromWebTouchPoint(touch_event.touches[i], timestamp),
-            ui::TOUCH_STATUS_UNKNOWN, this));
+            ui::ER_UNHANDLED, this));
         ProcessGestures(gestures.get());
       }
     }
@@ -2468,13 +2466,10 @@ static LRESULT CALLBACK CompositorHostWindowProc(HWND hWnd, UINT message,
 }
 
 void RenderWidgetHostViewWin::AcceleratedPaint(HDC dc) {
-  // If we have a previous frame then present it immediately. Otherwise request
-  // a new frame be composited.
-  if (!accelerated_surface_.get() ||
-      !accelerated_surface_->Present(dc)) {
-    if (render_widget_host_)
-      render_widget_host_->ScheduleComposite();
-  }
+  if (render_widget_host_)
+    render_widget_host_->ScheduleComposite();
+  if (accelerated_surface_.get())
+    accelerated_surface_->Present(dc);
 }
 
 // Creates a HWND within the RenderWidgetHostView that will serve as a host
@@ -2789,9 +2784,22 @@ bool RenderWidgetHostViewWin::ForwardGestureEventToRenderer(
   if (!render_widget_host_)
     return false;
 
+  // Pinch gestures are disabled by default on windows desktop. See
+  // crbug.com/128477 and crbug.com/148816
+  if ((gesture->type() == ui::ET_GESTURE_PINCH_BEGIN ||
+      gesture->type() == ui::ET_GESTURE_PINCH_UPDATE ||
+      gesture->type() == ui::ET_GESTURE_PINCH_END) &&
+      !ShouldSendPinchGesture()) {
+    return true;
+  }
+
   WebKit::WebGestureEvent web_gesture = CreateWebGestureEvent(m_hWnd, *gesture);
   if (web_gesture.type == WebKit::WebGestureEvent::Undefined)
     return false;
+  if (web_gesture.type == WebKit::WebGestureEvent::GestureTapDown) {
+    render_widget_host_->ForwardGestureEvent(
+        CreateFlingCancelEvent(gesture->time_stamp().InSecondsF()));
+  }
   render_widget_host_->ForwardGestureEvent(web_gesture);
   return true;
 }
@@ -2842,22 +2850,22 @@ void RenderWidgetHostViewWin::ForwardMouseEventToRenderer(UINT message,
     // Send the event to the renderer before changing mouse capture, so that
     // the capturelost event arrives after mouseup.
     render_widget_host_->ForwardMouseEvent(event);
-  }
 
-  switch (event.type) {
-    case WebInputEvent::MouseMove:
-      TrackMouseLeave(true);
-      break;
-    case WebInputEvent::MouseLeave:
-      TrackMouseLeave(false);
-      break;
-    case WebInputEvent::MouseDown:
-      SetCapture();
-      break;
-    case WebInputEvent::MouseUp:
-      if (GetCapture() == m_hWnd)
-        ReleaseCapture();
-      break;
+    switch (event.type) {
+      case WebInputEvent::MouseMove:
+        TrackMouseLeave(true);
+        break;
+      case WebInputEvent::MouseLeave:
+        TrackMouseLeave(false);
+        break;
+      case WebInputEvent::MouseDown:
+        SetCapture();
+        break;
+      case WebInputEvent::MouseUp:
+        if (GetCapture() == m_hWnd)
+          ReleaseCapture();
+        break;
+    }
   }
 
   if (IsActivatable() && event.type == WebInputEvent::MouseDown) {
@@ -3039,14 +3047,23 @@ LRESULT RenderWidgetHostViewWin::OnQueryCharPosition(
     IMECHARPOSITION* position) {
   DCHECK(position);
 
-  if (!ime_input_.is_composing() || composition_range_.is_empty() ||
-      position->dwSize < sizeof(IMECHARPOSITION) ||
-      position->dwCharPos >= composition_character_bounds_.size()) {
+  if (position->dwSize < sizeof(IMECHARPOSITION))
+    return 0;
+
+  RECT target_rect = {};
+  if (ime_input_.is_composing() && !composition_range_.is_empty() &&
+      position->dwCharPos < composition_character_bounds_.size()) {
+    target_rect =
+        composition_character_bounds_[position->dwCharPos].ToRECT();
+  } else if (position->dwCharPos == 0) {
+    // When there is no on-going composition but |position->dwCharPos| is 0,
+    // use the caret rect. This behavior is the same to RichEdit. In fact,
+    // CUAS (Cicero Unaware Application Support) relies on this behavior to
+    // implement ITfContextView::GetTextExt on top of IMM32-based applications.
+    target_rect = caret_rect_.ToRECT();
+  } else {
     return 0;
   }
-
-  RECT target_rect =
-      composition_character_bounds_[position->dwCharPos].ToRECT();
   ClientToScreen(&target_rect);
 
   RECT document_rect = GetViewBounds().ToRECT();
@@ -3067,6 +3084,7 @@ void RenderWidgetHostViewWin::UpdateIMEState() {
   if (text_input_type_ != ui::TEXT_INPUT_TYPE_NONE &&
       text_input_type_ != ui::TEXT_INPUT_TYPE_PASSWORD) {
     ime_input_.EnableIME(m_hWnd);
+    ime_input_.SetUseCompositionWindow(!can_compose_inline_);
   } else {
     ime_input_.DisableIME(m_hWnd);
   }

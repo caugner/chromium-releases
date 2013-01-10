@@ -42,14 +42,16 @@
       'sources': [
         'base/sync_export.h',
         'internal_api/public/base/enum_set.h',
-        'internal_api/public/base/invalidation_state.cc',
-        'internal_api/public/base/invalidation_state.h',
+        'internal_api/public/base/invalidation.cc',
+        'internal_api/public/base/invalidation.h',
         'internal_api/public/base/model_type.h',
-        'internal_api/public/base/model_type_state_map.cc',
-        'internal_api/public/base/model_type_state_map.h',
+        'internal_api/public/base/model_type_invalidation_map.cc',
+        'internal_api/public/base/model_type_invalidation_map.h',
         'internal_api/public/base/node_ordinal.cc',
         'internal_api/public/base/node_ordinal.h',
         'internal_api/public/base/ordinal.h',
+        'internal_api/public/base/progress_marker_map.cc',
+        'internal_api/public/base/progress_marker_map.h',
         'internal_api/public/engine/model_safe_worker.cc',
         'internal_api/public/engine/model_safe_worker.h',
         'internal_api/public/engine/passive_model_worker.cc',
@@ -80,8 +82,8 @@
         'engine/all_status.h',
         'engine/apply_control_data_updates.cc',
         'engine/apply_control_data_updates.h',
-        'engine/apply_updates_command.cc',
-        'engine/apply_updates_command.h',
+        'engine/apply_updates_and_resolve_conflicts_command.cc',
+        'engine/apply_updates_and_resolve_conflicts_command.h',
         'engine/backoff_delay_provider.cc',
         'engine/backoff_delay_provider.h',
         'engine/build_commit_command.cc',
@@ -108,8 +110,6 @@
         'engine/process_commit_response_command.h',
         'engine/process_updates_command.cc',
         'engine/process_updates_command.h',
-        'engine/resolve_conflicts_command.cc',
-        'engine/resolve_conflicts_command.h',
         'engine/store_timestamps_command.cc',
         'engine/store_timestamps_command.h',
         'engine/sync_engine_event.cc',
@@ -135,8 +135,6 @@
         'engine/traffic_recorder.h',
         'engine/update_applicator.cc',
         'engine/update_applicator.h',
-        'engine/verify_updates_command.cc',
-        'engine/verify_updates_command.h',
         'js/js_arg_list.cc',
         'js/js_arg_list.h',
         'js/js_backend.h',
@@ -254,7 +252,6 @@
         '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation',
         # TODO(akalin): Remove this (http://crbug.com/133352).
         '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_proto_cpp',
-        '../third_party/libjingle/libjingle.gyp:libjingle',
         'sync',
       ],
       'export_dependent_settings': [
@@ -272,8 +269,8 @@
         'notifier/invalidator_registrar.h',
         'notifier/invalidator_state.cc',
         'notifier/invalidator_state.h',
-        'notifier/object_id_state_map.cc',
-        'notifier/object_id_state_map.h',
+        'notifier/object_id_invalidation_map.cc',
+        'notifier/object_id_invalidation_map.h',
       ],
       'conditions': [
         ['OS != "android"', {
@@ -296,9 +293,13 @@
             'notifier/sync_system_resources.h',
           ],
         }],
+        ['OS != "ios"', {
+          'dependencies': [
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+          ],
+        }],
       ],
     },
-
     # The sync internal API library.
     {
       'target_name': 'syncapi_core',
@@ -428,10 +429,10 @@
         'sync',
       ],
       'sources': [
-        'internal_api/public/base/invalidation_state_test_util.cc',
-        'internal_api/public/base/invalidation_state_test_util.h',
-        'internal_api/public/base/model_type_state_map_test_util.cc',
-        'internal_api/public/base/model_type_state_map_test_util.h',
+        'internal_api/public/base/invalidation_test_util.cc',
+        'internal_api/public/base/invalidation_test_util.h',
+        'internal_api/public/base/model_type_invalidation_map_test_util.cc',
+        'internal_api/public/base/model_type_invalidation_map_test_util.h',
         'internal_api/public/base/model_type_test_util.cc',
         'internal_api/public/base/model_type_test_util.h',
         'js/js_test_util.cc',
@@ -498,8 +499,8 @@
         'notifier/fake_invalidation_handler.h',
         'notifier/invalidator_test_template.cc',
         'notifier/invalidator_test_template.h',
-        'notifier/object_id_state_map_test_util.cc',
-        'notifier/object_id_state_map_test_util.h',
+        'notifier/object_id_invalidation_map_test_util.cc',
+        'notifier/object_id_invalidation_map_test_util.h',
       ],
     },
 
@@ -592,27 +593,25 @@
         ],
         'sources': [
           'internal_api/public/base/enum_set_unittest.cc',
-          'internal_api/public/base/model_type_state_map_unittest.cc',
+          'internal_api/public/base/model_type_invalidation_map_unittest.cc',
           'internal_api/public/base/node_ordinal_unittest.cc',
           'internal_api/public/base/ordinal_unittest.cc',
           'internal_api/public/engine/model_safe_worker_unittest.cc',
           'internal_api/public/util/immutable_unittest.cc',
           'engine/apply_control_data_updates_unittest.cc',
-          'engine/apply_updates_command_unittest.cc',
+          'engine/apply_updates_and_resolve_conflicts_command_unittest.cc',
           'engine/backoff_delay_provider_unittest.cc',
           'engine/build_commit_command_unittest.cc',
           'engine/download_updates_command_unittest.cc',
           'engine/model_changing_syncer_command_unittest.cc',
           'engine/process_commit_response_command_unittest.cc',
           'engine/process_updates_command_unittest.cc',
-          'engine/resolve_conflicts_command_unittest.cc',
           'engine/sync_scheduler_unittest.cc',
           'engine/sync_scheduler_whitebox_unittest.cc',
           'engine/syncer_proto_util_unittest.cc',
           'engine/syncer_unittest.cc',
           'engine/throttled_data_type_tracker_unittest.cc',
           'engine/traffic_recorder_unittest.cc',
-          'engine/verify_updates_command_unittest.cc',
           'js/js_arg_list_unittest.cc',
           'js/js_event_details_unittest.cc',
           'js/sync_js_controller_unittest.cc',
@@ -636,6 +635,15 @@
           'util/protobuf_unittest.cc',
           'internal_api/public/util/weak_handle_unittest.cc',
         ],
+        'conditions': [
+          ['OS == "ios" and coverage != 0', {
+            # These sources can't be built with coverage due to a toolchain
+            # bug: http://openradar.appspot.com/radar?id=1499403
+            'sources!': [
+              'engine/syncer_unittest.cc',
+            ],
+          }],
+        ],
       },
     },
 
@@ -655,7 +663,6 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation',
-        '../third_party/libjingle/libjingle.gyp:libjingle',
         'sync',
         'sync_notifier',
         'test_support_sync_notifier',
@@ -669,7 +676,6 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation',
-        '../third_party/libjingle/libjingle.gyp:libjingle',
         'sync',
         'sync_notifier',
         'test_support_sync_notifier',
@@ -697,6 +703,16 @@
           }],
         ],
       },
+      'conditions': [
+        ['OS != "ios"', {
+          'dependencies': [
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+          ],
+          'export_dependent_settings': [
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+          ],
+        }],
+      ],
     },
 
     # Unit tests for the 'syncapi_core' target.  This cannot be a static
@@ -826,46 +842,49 @@
         }],
       ],
     },
-
-    # A tool to listen to sync notifications and print them out.
-    {
-      'target_name': 'sync_listen_notifications',
-      'type': 'executable',
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../jingle/jingle.gyp:notifier',
-        '../net/net.gyp:net',
-        '../net/net.gyp:net_test_support',
-        'sync',
-        'sync_notifier',
-      ],
-      'sources': [
-        'tools/sync_listen_notifications.cc',
-      ],
-    },
-
-    # A standalone command-line sync client.
-    {
-      'target_name': 'sync_client',
-      'type': 'executable',
-      'defines': [
-        'SYNC_TEST',
-      ],
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../jingle/jingle.gyp:notifier',
-        '../net/net.gyp:net',
-        '../net/net.gyp:net_test_support',
-        'sync',
-        'sync_notifier',
-        'syncapi_core',
-      ],
-      'sources': [
-        'tools/sync_client.cc',
-      ],
-    },
   ],
   'conditions': [
+    ['OS != "ios"', {
+      'targets': [
+        # A tool to listen to sync notifications and print them out.
+        {
+          'target_name': 'sync_listen_notifications',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../jingle/jingle.gyp:notifier',
+            '../net/net.gyp:net',
+            '../net/net.gyp:net_test_support',
+            'sync',
+            'sync_notifier',
+          ],
+          'sources': [
+            'tools/sync_listen_notifications.cc',
+          ],
+        },
+
+        # A standalone command-line sync client.
+        {
+          'target_name': 'sync_client',
+          'type': 'executable',
+          'defines': [
+            'SYNC_TEST',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../jingle/jingle.gyp:notifier',
+            '../net/net.gyp:net',
+            '../net/net.gyp:net_test_support',
+            'sync',
+            'sync_notifier',
+            'syncapi_core',
+          ],
+          'sources': [
+            'tools/sync_client.cc',
+          ],
+        },
+      ],
+    }],
     # Special target to wrap a gtest_target_type==shared_library
     # sync_unit_tests into an android apk for execution.
     ['OS == "android" and gtest_target_type == "shared_library"', {

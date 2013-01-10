@@ -36,6 +36,10 @@ const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 // as a dependent process of the Chrome Frame plugin.
 const char kChromeFrame[]                   = "chrome-frame";
 
+// Cause a GPU hang to cause a crash dump, allowing for easier debugging of
+// them.
+const char kCrashOnGpuHang[]                = "crash-on-gpu-hang";
+
 // Disables client-visible 3D APIs, in particular WebGL and Pepper 3D.
 // This is controlled by policy and is kept separate from the other
 // enable/disable switches to avoid accidentally regressing the policy
@@ -205,9 +209,6 @@ const char kEnableScriptedSpeech[]          = "enable-scripted-speech";
 // Specifies the request key for the continuous speech recognition webservice.
 const char kSpeechRecognitionWebserviceKey[] = "speech-service-key";
 
-// Disables animation on the compositor thread.
-const char kDisableThreadedAnimation[]      = "disable-threaded-animation";
-
 #if defined(OS_ANDROID)
 // Enable web audio API.
 const char kEnableWebAudio[]                = "enable-webaudio";
@@ -246,6 +247,10 @@ const char kEnableAcceleratedFilters[]      = "enable-accelerated-filters";
 
 // Turns on extremely verbose logging of accessibility events.
 const char kEnableAccessibilityLogging[]    = "enable-accessibility-logging";
+
+// Enables browser plugin for all types of pages.
+const char kEnableBrowserPluginForAllViewTypes[] =
+    "enable-browser-plugin-for-all-view-types";
 
 // Enables the creation of compositing layers for fixed position elements.
 const char kEnableCompositingForFixedPosition[] =
@@ -293,17 +298,21 @@ const char kEnableLogging[]                 = "enable-logging";
 // Disable Media Source API on <audio>/<video> elements.
 const char kDisableMediaSource[]             = "disable-media-source";
 
+// Disables using WebMediaPlayerMS for src of <audio>/<video> derived from
+// media stream.
+const char kDisableWebMediaPlayerMS[]       = "disable-web-media-player-ms";
+
 // Enables the deprecated PeerConnection functionality.
 const char kEnableDeprecatedPeerConnection[] =
     "enable-deprecated-peer-connection";
+
+// Use fake device for MediaStream to replace actual camera and microphone.
+const char kUseFakeDeviceForMediaStream[] = "use-fake-device-for-media-stream";
 
 // On Windows, converts the page to the currently-installed monitor profile.
 // This does NOT enable color management for images. The source is still
 // assumed to be sRGB.
 const char kEnableMonitorProfile[]          = "enable-monitor-profile";
-
-// Enables partial swaps in the WK compositor on platforms that support it.
-const char kEnablePartialSwap[]             = "enable-partial-swap";
 
 // Enables UI releasing handle to front surface for background tabs on platforms
 // that support it.
@@ -323,9 +332,6 @@ const char kEnablePrivilegedWebGLExtensions[] =
 // Aggressively free GPU command buffers belonging to hidden tabs.
 const char kEnablePruneGpuCommandBuffers[] =
     "enable-prune-gpu-command-buffers";
-
-// Enable renderer side mixing and low latency audio path for media elements.
-const char kEnableRendererSideMixing[] = "enable-renderer-side-mixing";
 
 // Enables TLS cached info extension.
 const char kEnableSSLCachedInfo[]  = "enable-ssl-cached-info";
@@ -405,6 +411,10 @@ const char kForceFieldTrials[]              = "force-fieldtrials";
 // overrides this if present.
 const char kForceRendererAccessibility[]    = "force-renderer-accessibility";
 
+// Force the compositor to use its software implementation instead of GL.
+const char kEnableSoftwareCompositingGLAdapter[] =
+    "enable-software-compositing-gl-adapter";
+
 // Passes gpu device_id from browser process to GPU process.
 const char kGpuDeviceID[]                   = "gpu-device-id";
 
@@ -430,6 +440,12 @@ const char kGpuVendorID[]                   = "gpu-vendor-id";
 // Used in conjunction with kRendererProcess. This causes the process
 // to run as a guest renderer instead of a regular renderer.
 const char kGuestRenderer[]                 = "guest-renderer";
+
+// These mappings only apply to the host resolver.
+const char kHostResolverRules[]             = "host-resolver-rules";
+
+// Ignores certificate-related errors.
+const char kIgnoreCertificateErrors[]       = "ignore-certificate-errors";
 
 // Ignores GPU blacklist.
 const char kIgnoreGpuBlacklist[]            = "ignore-gpu-blacklist";
@@ -468,6 +484,14 @@ const char kNoReferrers[]                   = "no-referrers";
 
 // Disables the sandbox for all process types that are normally sandboxed.
 const char kNoSandbox[]                     = "no-sandbox";
+
+// Enables the sandboxed processes to run without a job object assigned to them.
+// This flag is required to allow Chrome to run in RemoteApps or Citrix. This
+// flag can reduce the security of the sandboxed processes and allow them to do
+// certain API calls like shut down Windows or access the clipboard. Also we
+// lose the chance to kill some processes until the outer job that owns them
+// finishes.
+const char kAllowNoSandboxJob[]             = "allow-no-sandbox-job";
 
 // Specifies a command that should be used to launch the plugin process.  Useful
 // for running the plugin process through purify or quantify.  Ex:
@@ -576,12 +600,19 @@ const char kSingleProcess[]                 = "single-process";
 // content. The switch is intended only for tests.
 const char kSkipGpuDataLoading[]            = "skip-gpu-data-loading";
 
+// Skip collecting full GPU info upon GPU process launch.
+const char kSkipGpuFullInfoCollection[]     = "skip-gpu-full-info-collection";
+
 // GestureTapDown events are deferred by this many miillseconds before
 // sending them to the renderer.
 const char kTapDownDeferralTimeMs[]         = "tap-down-deferral-time";
 
 // Runs the security test for the renderer sandbox.
 const char kTestSandbox[]                   = "test-sandbox";
+
+// Allows for forcing socket connections to http/https to use fixed ports.
+const char kTestingFixedHttpPort[]          = "testing-fixed-http-port";
+const char kTestingFixedHttpsPort[]         = "testing-fixed-https-port";
 
 // Causes TRACE_EVENT flags to be recorded from startup. Optionally, can
 // specify the specific trace categories to include (e.g.
@@ -646,18 +677,21 @@ const char kZygoteProcess[]                 = "zygote";
 // Enables moving cursor by word in visual order.
 const char kEnableVisualWordMovement[]      = "enable-visual-word-movement";
 
-#if defined(OS_ANDROID)
 // Set when Chromium should use a mobile user agent.
 const char kUseMobileUserAgent[] = "use-mobile-user-agent";
-// Omnibus flag setting an Android graphics mode.  May be:
-//   "basic" (untiled software path)
-//   "compositor" (hardware-accelerated compositing),
-const char kGraphicsMode[]                  = "graphics-mode";
-const char kGraphicsModeValueBasic[]        = "basic";
-const char kGraphicsModeValueCompositor[]   = "compositor";
+
+#if defined(OS_ANDROID)
+// Disable history logging for media elements.
+const char kDisableMediaHistoryLogging[]    = "disable-media-history";
+
+// Whether to run media elements in the renderer process.
+const char kMediaPlayerInRenderProcess[]    = "media-player-in-render-process";
 
 // The telephony region (ISO country code) to use in phone number detection.
 const char kNetworkCountryIso[] = "network-country-iso";
+
+// Set to enable compatibility with legacy WebView synchronous APIs.
+const char kEnableWebViewSynchronousAPIs[] = "enable-webview-synchronous-apis";
 #endif
 
 #if defined(OS_POSIX)
@@ -676,8 +710,9 @@ const char kScrollPixels[]                  = "scroll-pixels";
 const char kUseSystemSSL[]                  = "use-system-ssl";
 #endif
 
-// Enable per-tile page painting.
-const char kEnablePerTilePainting[]         = "enable-per-tile-painting";
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+const char kDisableCarbonInterposing[]      = "disable-carbon-interposing";
+#endif
 
 // Disables the use of a 3D software rasterizer.
 const char kDisableSoftwareRasterizer[]     = "disable-software-rasterizer";
@@ -705,5 +740,8 @@ const char kEnableFixedPositionCreatesStackingContext[]
     = "enable-fixed-position-creates-stacking-context";
 const char kDisableFixedPositionCreatesStackingContext[]
     = "disable-fixed-position-creates-stacking-context";
+
+// Defer image decoding in WebKit until painting.
+const char kEnableDeferredImageDecoding[] = "enable-deferred-image-decoding";
 
 }  // namespace switches

@@ -22,9 +22,6 @@
 #include "ui/gl/gl_surface.h"
 #include "ui/surface/transport_dib.h"
 
-class GpuChannelManager;
-class GpuCommandBufferStub;
-
 struct GpuHostMsg_AcceleratedSurfaceNew_Params;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
@@ -41,6 +38,10 @@ namespace gles2 {
 class GLES2Decoder;
 }
 }
+
+namespace content {
+class GpuChannelManager;
+class GpuCommandBufferStub;
 
 // The GPU process is agnostic as to how it displays results. On some platforms
 // it renders directly to window. On others it renders offscreen and transports
@@ -59,7 +60,7 @@ class ImageTransportSurface {
  public:
   ImageTransportSurface();
 
-  virtual void OnBufferPresented(uint32 sync_point) = 0;
+  virtual void OnBufferPresented(bool presented, uint32 sync_point) = 0;
   virtual void OnResizeViewACK() = 0;
   virtual void OnResize(gfx::Size size) = 0;
   virtual void OnSetFrontSurfaceIsProtected(bool is_protected,
@@ -138,7 +139,7 @@ class ImageTransportHelper : public IPC::Listener {
   gpu::gles2::GLES2Decoder* Decoder();
 
   // IPC::Message handlers.
-  void OnBufferPresented(uint32 sync_point);
+  void OnBufferPresented(bool presented, uint32 sync_point);
   void OnResizeViewACK();
   void OnSetFrontSurfaceIsProtected(bool is_protected,
                                     uint32 protection_state_id);
@@ -176,7 +177,8 @@ class PassThroughImageTransportSurface
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
 
   // ImageTransportSurface implementation.
-  virtual void OnBufferPresented(uint32 sync_point) OVERRIDE;
+  virtual void OnBufferPresented(bool presented,
+                                 uint32 sync_point) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
@@ -192,6 +194,8 @@ class PassThroughImageTransportSurface
 
   DISALLOW_COPY_AND_ASSIGN(PassThroughImageTransportSurface);
 };
+
+}  // namespace content
 
 #endif  // defined(ENABLE_GPU)
 

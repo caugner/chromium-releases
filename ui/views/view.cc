@@ -107,6 +107,7 @@ View::View()
       registered_for_visible_bounds_notification_(false),
       clip_insets_(0, 0, 0, 0),
       needs_layout_(true),
+      focus_border_(FocusBorder::CreateDashedFocusBorder()),
       flip_canvas_on_paint_for_rtl_ui_(false),
       paint_to_layer_(false),
       accelerator_registration_delayed_(false),
@@ -324,7 +325,7 @@ gfx::Rect View::GetVisibleBounds() const {
   gfx::Rect vis_bounds(GetLocalBounds());
   gfx::Rect ancestor_bounds;
   const View* view = this;
-  ui::Transform transform;
+  gfx::Transform transform;
 
   while (view != NULL && !vis_bounds.IsEmpty()) {
     transform.ConcatTransform(view->GetTransform());
@@ -335,7 +336,7 @@ gfx::Rect View::GetVisibleBounds() const {
     const View* ancestor = view->parent_;
     if (ancestor != NULL) {
       ancestor_bounds.SetRect(0, 0, ancestor->width(), ancestor->height());
-      vis_bounds = vis_bounds.Intersect(ancestor_bounds);
+      vis_bounds.Intersect(ancestor_bounds);
     } else if (!view->GetWidget()) {
       // If the view has no Widget, we're not visible. Return an empty rect.
       return gfx::Rect();
@@ -425,12 +426,12 @@ void View::OnEnabledChanged() {
 
 // Transformations -------------------------------------------------------------
 
-const ui::Transform& View::GetTransform() const {
-  static const ui::Transform* no_op = new ui::Transform;
+const gfx::Transform& View::GetTransform() const {
+  static const gfx::Transform* no_op = new gfx::Transform;
   return layer() ? layer()->transform() : *no_op;
 }
 
-void View::SetTransform(const ui::Transform& transform) {
+void View::SetTransform(const gfx::Transform& transform) {
   if (!transform.HasChange()) {
     if (layer()) {
       layer()->SetTransform(transform);
@@ -765,9 +766,16 @@ View* View::GetEventHandlerForPoint(const gfx::Point& point) {
 }
 
 gfx::NativeCursor View::GetCursor(const ui::MouseEvent& event) {
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
+#if defined(USE_AURA)
+  static ui::Cursor arrow;
+  if (!arrow.platform())
+    arrow.SetPlatformCursor(LoadCursor(NULL, IDC_ARROW));
+  return arrow;
+#else
   static HCURSOR arrow = LoadCursor(NULL, IDC_ARROW);
   return arrow;
+#endif
 #else
   return gfx::kNullCursor;
 #endif
@@ -1141,11 +1149,12 @@ void View::OnPaintBorder(gfx::Canvas* canvas) {
 }
 
 void View::OnPaintFocusBorder(gfx::Canvas* canvas) {
-  if (HasFocus() && (focusable() || IsAccessibilityFocusable())) {
+  if (focus_border_.get() &&
+      HasFocus() && (focusable() || IsAccessibilityFocusable())) {
     TRACE_EVENT2("views", "views::OnPaintFocusBorder",
                  "width", canvas->sk_canvas()->getDevice()->width(),
                  "height", canvas->sk_canvas()->getDevice()->height());
-    canvas->DrawFocusRect(GetLocalBounds());
+    focus_border_->Paint(*this, canvas);
   }
 }
 
@@ -1756,7 +1765,7 @@ void View::SetLayerBounds(const gfx::Rect& bounds) {
 // Transformations -------------------------------------------------------------
 
 bool View::GetTransformRelativeTo(const View* ancestor,
-                                  ui::Transform* transform) const {
+                                  gfx::Transform* transform) const {
   const View* p = this;
 
   while (p && p != ancestor) {
@@ -1774,7 +1783,7 @@ bool View::GetTransformRelativeTo(const View* ancestor,
 
 bool View::ConvertPointForAncestor(const View* ancestor,
                                    gfx::Point* point) const {
-  ui::Transform trans;
+  gfx::Transform trans;
   // TODO(sad): Have some way of caching the transformation results.
   bool result = GetTransformRelativeTo(ancestor, &trans);
   gfx::Point3f p(*point);
@@ -1785,7 +1794,7 @@ bool View::ConvertPointForAncestor(const View* ancestor,
 
 bool View::ConvertPointFromAncestor(const View* ancestor,
                                     gfx::Point* point) const {
-  ui::Transform trans;
+  gfx::Transform trans;
   bool result = GetTransformRelativeTo(ancestor, &trans);
   gfx::Point3f p(*point);
   trans.TransformPointReverse(p);
@@ -1900,7 +1909,8 @@ void View::DestroyLayer() {
 
 // Input -----------------------------------------------------------------------
 
-bool View::ProcessMousePressed(const ui::MouseEvent& event, DragInfo* drag_info) {
+bool View::ProcessMousePressed(const ui::MouseEvent& event,
+                               DragInfo* drag_info) {
   int drag_operations =
       (enabled_ && event.IsOnlyLeftMouseButton() &&
        HitTestPoint(event.location())) ?
@@ -1922,7 +1932,8 @@ bool View::ProcessMousePressed(const ui::MouseEvent& event, DragInfo* drag_info)
   return !!context_menu_controller || result;
 }
 
-bool View::ProcessMouseDragged(const ui::MouseEvent& event, DragInfo* drag_info) {
+bool View::ProcessMouseDragged(const ui::MouseEvent& event,
+                               DragInfo* drag_info) {
   // Copy the field, that way if we're deleted after drag and drop no harm is
   // done.
   ContextMenuController* context_menu_controller = context_menu_controller_;
@@ -1966,6 +1977,10 @@ ui::TouchStatus View::ProcessTouchEvent(const ui::TouchEvent& event) {
 }
 
 ui::EventResult View::ProcessGestureEvent(const ui::GestureEvent& event) {
+  ui::EventResult status = OnGestureEvent(event);
+  if (status != ui::ER_UNHANDLED)
+    return status;
+
   if (context_menu_controller_ &&
       (event.type() == ui::ET_GESTURE_LONG_PRESS ||
        event.type() == ui::ET_GESTURE_TWO_FINGER_TAP)) {
@@ -1974,7 +1989,7 @@ ui::EventResult View::ProcessGestureEvent(const ui::GestureEvent& event) {
     ShowContextMenu(location, true);
     return ui::ER_CONSUMED;
   }
-  return OnGestureEvent(event);
+  return status;
 }
 
 // Accelerators ----------------------------------------------------------------

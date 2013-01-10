@@ -27,16 +27,14 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 
-class SkCanvas;
-
 namespace gfx {
 class Display;
+class Transform;
 }
 
 namespace ui {
 class Layer;
 class Texture;
-class Transform;
 }
 
 namespace aura {
@@ -147,7 +145,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // |aura::client::ScreenPositionClient| interface.
   gfx::Rect GetBoundsInScreen() const;
 
-  virtual void SetTransform(const ui::Transform& transform);
+  virtual void SetTransform(const gfx::Transform& transform);
 
   // Assigns a LayoutManager to size and place child windows.
   // The Window takes ownership of the LayoutManager.
@@ -239,6 +237,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Add/remove observer.
   void AddObserver(WindowObserver* observer);
   void RemoveObserver(WindowObserver* observer);
+  bool HasObserver(WindowObserver* observer);
 
   void set_ignore_events(bool ignore_events) { ignore_events_ = ignore_events; }
 
@@ -348,7 +347,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   void* GetNativeWindowProperty(const char* key) const;
 
   // Type of a function to delete a property that this window owns.
-  typedef void (*PropertyDeallocator)(intptr_t value);
+  typedef void (*PropertyDeallocator)(int64 value);
 
   // Overridden from ui::LayerDelegate:
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
@@ -369,12 +368,12 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   };
 
   // Called by the public {Set,Get,Clear}Property functions.
-  intptr_t SetPropertyInternal(const void* key,
-                               const char* name,
-                               PropertyDeallocator deallocator,
-                               intptr_t value,
-                               intptr_t default_value);
-  intptr_t GetPropertyInternal(const void* key, intptr_t default_value) const;
+  int64 SetPropertyInternal(const void* key,
+                            const char* name,
+                            PropertyDeallocator deallocator,
+                            int64 value,
+                            int64 default_value);
+  int64 GetPropertyInternal(const void* key, int64 default_value) const;
 
   // Changes the bounds of the window without condition.
   void SetBoundsInternal(const gfx::Rect& new_bounds);
@@ -494,7 +493,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // WindowProperty<>.
   struct Value {
     const char* name;
-    intptr_t value;
+    int64 value;
     PropertyDeallocator deallocator;
   };
 

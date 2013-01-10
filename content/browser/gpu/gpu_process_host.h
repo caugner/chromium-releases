@@ -20,20 +20,22 @@
 #include "content/public/common/gpu_info.h"
 #include "ipc/ipc_sender.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/size.h"
 
-class GpuMainThread;
 struct GPUCreateCommandBufferConfig;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 struct GpuHostMsg_AcceleratedSurfaceRelease_Params;
 
-class BrowserChildProcessHostImpl;
-
 namespace IPC {
 struct ChannelHandle;
 }
 
-class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
+namespace content {
+class BrowserChildProcessHostImpl;
+class GpuMainThread;
+
+class GpuProcessHost : public BrowserChildProcessHostDelegate,
                        public IPC::Sender,
                        public base::NonThreadSafe {
  public:
@@ -43,11 +45,12 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
     GPU_PROCESS_KIND_COUNT
   };
 
-  typedef base::Callback<void(const IPC::ChannelHandle&,
-                              const content::GPUInfo&)>
+  typedef base::Callback<void(const IPC::ChannelHandle&, const GPUInfo&)>
       EstablishChannelCallback;
 
   typedef base::Callback<void(int32)> CreateCommandBufferCallback;
+
+  typedef base::Callback<void(const gfx::Size)> CreateImageCallback;
 
   static bool gpu_enabled() { return gpu_enabled_; }
 
@@ -56,14 +59,13 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   // is not safe to store the pointer once control has returned to the message
   // loop as it can be destroyed. Instead store the associated GPU host ID.
   // This could return NULL if GPU access is not allowed (blacklisted).
-  static GpuProcessHost* Get(GpuProcessKind kind,
-                             content::CauseForGpuLaunch cause);
+  static GpuProcessHost* Get(GpuProcessKind kind, CauseForGpuLaunch cause);
 
   // Helper function to send the given message to the GPU process on the IO
   // thread.  Calls Get and if a host is returned, sends it.  Can be called from
   // any thread.  Deletes the message if it cannot be sent.
   CONTENT_EXPORT static void SendOnIO(GpuProcessKind kind,
-                                      content::CauseForGpuLaunch cause,
+                                      CauseForGpuLaunch cause,
                                       IPC::Message* message);
 
   // Get the GPU process host for the GPU process with the given ID. Returns
@@ -89,6 +91,16 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
       int client_id,
       const GPUCreateCommandBufferConfig& init_params,
       const CreateCommandBufferCallback& callback);
+
+  // Tells the GPU process to create a new image using the given window.
+  void CreateImage(
+      gfx::PluginWindowHandle window,
+      int client_id,
+      int image_id,
+      const CreateImageCallback& callback);
+
+    // Tells the GPU process to delete image.
+  void DeleteImage(int client_id, int image_id, int sync_point);
 
   // Whether this GPU process is set up to use software rendering.
   bool software_rendering();
@@ -120,6 +132,7 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   void OnChannelEstablished(const IPC::ChannelHandle& channel_handle);
   void OnCommandBufferCreated(const int32 route_id);
   void OnDestroyCommandBuffer(int32 surface_id);
+  void OnImageCreated(const gfx::Size size);
 
 #if defined(OS_MACOSX)
   void OnAcceleratedSurfaceBuffersSwapped(
@@ -143,9 +156,11 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
       const EstablishChannelCallback& callback,
       const IPC::ChannelHandle& channel_handle,
       base::ProcessHandle client_process_for_gpu,
-      const content::GPUInfo& gpu_info);
+      const GPUInfo& gpu_info);
   void CreateCommandBufferError(const CreateCommandBufferCallback& callback,
                                 int32 route_id);
+  void CreateImageError(const CreateImageCallback& callback,
+                        const gfx::Size size);
 
   // The serial number of the GpuProcessHost / GpuProcessHostUIShim pair.
   int host_id_;
@@ -156,6 +171,9 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
 
   // The pending create command buffer requests we need to reply to.
   std::queue<CreateCommandBufferCallback> create_command_buffer_requests_;
+
+  // The pending create image requests we need to reply to.
+  std::queue<CreateImageCallback> create_image_requests_;
 
 #if defined(TOOLKIT_GTK)
   // Encapsulates surfaces that we lock when creating view command buffers.
@@ -202,5 +220,7 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
 
   DISALLOW_COPY_AND_ASSIGN(GpuProcessHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_GPU_GPU_PROCESS_HOST_H_

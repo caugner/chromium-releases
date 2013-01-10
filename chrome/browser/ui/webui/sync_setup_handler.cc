@@ -9,6 +9,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/i18n/time_formatting.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/utf_string_conversions.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -28,6 +30,7 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -166,15 +169,6 @@ bool GetConfiguration(const std::string& json, SyncConfigInfo* config) {
   return true;
 }
 
-bool GetPassphrase(const std::string& json, std::string* passphrase) {
-  scoped_ptr<Value> parsed_value(base::JSONReader::Read(json));
-  if (!parsed_value.get() || !parsed_value->IsType(Value::TYPE_DICTIONARY))
-    return false;
-
-  DictionaryValue* result = static_cast<DictionaryValue*>(parsed_value.get());
-  return result->GetString("passphrase", passphrase);
-}
-
 string16 NormalizeUserName(const string16& user) {
   if (user.find_first_of(ASCIIToUTF16("@")) != string16::npos)
     return user;
@@ -185,9 +179,9 @@ bool AreUserNamesEqual(const string16& user1, const string16& user2) {
   return NormalizeUserName(user1) == NormalizeUserName(user2);
 }
 
-bool IsClientOAuthEnabled() {
+bool IsKeystoreEncryptionEnabled() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableClientOAuthSignin);
+      switches::kSyncKeystoreEncryption);
 }
 
 }  // namespace
@@ -236,6 +230,9 @@ void SyncSetupHandler::GetStaticLocalizedValues(
   localized_strings->SetString(
       "passphraseEncryptionMessage",
       GetStringFUTF16(IDS_SYNC_PASSPHRASE_ENCRYPTION_MESSAGE, product_name));
+  localized_strings->SetString(
+      "encryptionSectionMessage",
+      GetStringFUTF16(IDS_SYNC_ENCRYPTION_SECTION_MESSAGE, product_name));
   localized_strings->SetString(
       "passphraseRecover",
       GetStringFUTF16(IDS_SYNC_PASSPHRASE_RECOVER,
@@ -292,6 +289,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "emailLabel", IDS_SYNC_LOGIN_EMAIL_NEW_LINE },
     { "passwordLabel", IDS_SYNC_LOGIN_PASSWORD_NEW_LINE },
     { "invalidCredentials", IDS_SYNC_INVALID_USER_CREDENTIALS },
+    { "differentEmail", IDS_SYNC_DIFFERENT_EMAIL },
     { "signin", IDS_SYNC_SIGNIN },
     { "couldNotConnect", IDS_SYNC_LOGIN_COULD_NOT_CONNECT },
     { "unrecoverableError", IDS_SYNC_UNRECOVERABLE_ERROR },
@@ -359,6 +357,9 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "promoAdvanced", IDS_SYNC_PROMO_ADVANCED },
     { "promoLearnMore", IDS_LEARN_MORE },
     { "promoTitleShort", IDS_SYNC_PROMO_MESSAGE_TITLE_SHORT },
+    { "encryptionSectionTitle", IDS_SYNC_ENCRYPTION_SECTION_TITLE },
+    { "basicEncryptionOption", IDS_SYNC_BASIC_ENCRYPTION_DATA },
+    { "fullEncryptionOption", IDS_SYNC_FULL_ENCRYPTION_DATA },
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -418,11 +419,61 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
   args.SetBoolean("showSyncEverythingPage", !show_advanced);
   args.SetBoolean("syncAllDataTypes", sync_prefs.HasKeepEverythingSynced());
   args.SetBoolean("encryptAllData", service->EncryptEverythingEnabled());
-  args.SetBoolean("usePassphrase", service->IsUsingSecondaryPassphrase());
+
   // We call IsPassphraseRequired() here, instead of calling
   // IsPassphraseRequiredForDecryption(), because we want to show the passphrase
   // UI even if no encrypted data types are enabled.
   args.SetBoolean("showPassphrase", service->IsPassphraseRequired());
+  // Keystore encryption is behind a flag. Only show the new encryption settings
+  // if keystore encryption is enabled.
+  args.SetBoolean("keystoreEncryptionEnabled", IsKeystoreEncryptionEnabled());
+
+  // Set the proper encryption settings messages if keystore encryption is
+  // enabled.
+  if (IsKeystoreEncryptionEnabled()) {
+    // To distinguish between FROZEN_IMPLICIT_PASSPHRASE and CUSTOM_PASSPHRASE
+    // we only set usePassphrase for CUSTOM_PASSPHRASE.
+    args.SetBoolean("usePassphrase",
+                    service->GetPassphraseType() == syncer::CUSTOM_PASSPHRASE);
+    base::Time passphrase_time = service->GetExplicitPassphraseTime();
+    syncer::PassphraseType passphrase_type = service->GetPassphraseType();
+    if (!passphrase_time.is_null()) {
+      string16 passphrase_time_str = base::TimeFormatShortDate(passphrase_time);
+      args.SetString(
+          "enterPassphraseBody",
+          GetStringFUTF16(IDS_SYNC_ENTER_PASSPHRASE_BODY_WITH_DATE,
+                          passphrase_time_str));
+      args.SetString(
+          "enterGooglePassphraseBody",
+          GetStringFUTF16(IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_BODY_WITH_DATE,
+                          passphrase_time_str));
+      switch (passphrase_type) {
+        case syncer::FROZEN_IMPLICIT_PASSPHRASE:
+          args.SetString(
+              "fullEncryptionBody",
+              GetStringFUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_GOOGLE_WITH_DATE,
+                              passphrase_time_str));
+          break;
+        case syncer::CUSTOM_PASSPHRASE:
+          args.SetString(
+              "fullEncryptionBody",
+              GetStringFUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM_WITH_DATE,
+                              passphrase_time_str));
+          break;
+        default:
+          args.SetString(
+              "fullEncryptionBody",
+              GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
+          break;
+      }
+    } else if (passphrase_type == syncer::CUSTOM_PASSPHRASE) {
+      args.SetString(
+          "fullEncryptionBody",
+          GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
+    }
+  } else {
+    args.SetBoolean("usePassphrase", service->IsUsingSecondaryPassphrase());
+  }
 
   StringValue page("configure");
   web_ui()->CallJavascriptFunction(
@@ -551,9 +602,15 @@ void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
   // then we don't want to show username and password fields if ClientOAuth is
   // being used, since those fields are ignored by the endpoint on challenges.
   if (error == GoogleServiceAuthError::TWO_FACTOR)
-    args.SetBoolean("askForOtp", IsClientOAuthEnabled());
+    args.SetBoolean("askForOtp", false);
   else if (error == GoogleServiceAuthError::CAPTCHA_REQUIRED)
-    args.SetBoolean("hideEmailAndPassword", IsClientOAuthEnabled());
+    args.SetBoolean("hideEmailAndPassword", false);
+
+  // Tell the page the previous email address used for sync.  If the user
+  // enters a different email address, he will be shown a warning.
+  std::string last_email = GetProfile()->GetPrefs()->GetString(
+      prefs::kGoogleServicesLastUsername);
+  args.SetString("lastEmailAddress", last_email);
 
   args.SetBoolean("editableUser", editable_user);
   if (!local_error_message.empty())
@@ -677,15 +734,6 @@ void SyncSetupHandler::HandleSubmitAuth(const ListValue* args) {
   DCHECK(!otp.empty() || !captcha.empty() || !password.empty() ||
          !access_code.empty());
 
-  if (IsClientOAuthEnabled()) {
-    // Last error is two-factor implies otp should not be empty.
-    DCHECK((last_signin_error_.state() != GoogleServiceAuthError::TWO_FACTOR) ||
-        !otp.empty());
-    // Last error is captcha-required implies captcha should not be empty.
-    DCHECK((last_signin_error_.state() !=
-        GoogleServiceAuthError::CAPTCHA_REQUIRED) || !captcha.empty());
-  }
-
   const std::string& solution = captcha.empty() ?
       (otp.empty() ? EmptyString() : otp) : captcha;
   TryLogin(username, password, solution, access_code);
@@ -707,19 +755,12 @@ void SyncSetupHandler::TryLogin(const std::string& username,
   last_signin_error_ = GoogleServiceAuthError::None();
 
   SigninManager* signin = GetSignin();
-  if (IsClientOAuthEnabled()) {
-    if (!solution.empty()) {
-      signin->ProvideOAuthChallengeResponse(current_error.state(),
-                                            current_error.token(), solution);
-      return;
-    }
-  } else {
-    // If we're just being called to provide an ASP, then pass it to the
-    // SigninManager and wait for the next step.
-    if (!access_code.empty()) {
-      signin->ProvideSecondFactorAccessCode(access_code);
-      return;
-    }
+
+  // If we're just being called to provide an ASP, then pass it to the
+  // SigninManager and wait for the next step.
+  if (!access_code.empty()) {
+    signin->ProvideSecondFactorAccessCode(access_code);
+    return;
   }
 
   // The user has submitted credentials, which indicates they don't want to
@@ -728,12 +769,8 @@ void SyncSetupHandler::TryLogin(const std::string& username,
   GetSyncService()->UnsuppressAndStart();
 
   // Kick off a sign-in through the signin manager.
-  if (IsClientOAuthEnabled()) {
-    signin->StartSignInWithOAuth(username, password);
-  } else {
-    signin->StartSignIn(username, password, current_error.captcha().token,
-                        solution);
-  }
+  signin->StartSignIn(username, password, current_error.captcha().token,
+                      solution);
 }
 
 void SyncSetupHandler::GaiaCredentialsValid() {

@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/script_executor.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -49,11 +50,13 @@ class Extension;
 class ScriptBadgeController
     : public LocationBarController,
       public ScriptExecutor::Observer,
+      public TabHelper::ContentScriptObserver,
       public content::WebContentsObserver,
       public content::NotificationObserver {
  public:
   explicit ScriptBadgeController(content::WebContents* web_contents,
-                                 ScriptExecutor* script_executor);
+                                 ScriptExecutor* script_executor,
+                                 TabHelper* tab_helper);
   virtual ~ScriptBadgeController();
 
   // LocationBarController implementation.
@@ -71,9 +74,19 @@ class ScriptBadgeController
       const GURL& on_url,
       const base::ListValue& script_result) OVERRIDE;
 
+  // TabHelper::ContentScriptObserver implementation.
+  virtual void OnContentScriptsExecuting(
+      const content::WebContents* web_contents,
+      const ExecutingScriptsMap& extension_ids,
+      int32 on_page_id,
+      const GURL& on_url) OVERRIDE;
+
  private:
+  // Gets the Profile for |web_contents_|.
+  Profile* profile() const;
+
   // Gets the ExtensionService for |tab_contents_|.
-  ExtensionService* GetExtensionService();
+  ExtensionService* GetExtensionService() const;
 
   // Gets the current page ID, or -1 if no navigation entry has been committed.
   int32 GetPageID();
@@ -82,17 +95,11 @@ class ScriptBadgeController
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // IPC::Message handlers.
-  void OnContentScriptsExecuting(const std::set<std::string>& extension_ids,
-                                 int32 page_id,
-                                 const GURL& on_url);
 
   // Adds the extension's icon to the list of script badges.  Returns
   // the script badge ExtensionAction that was added, or NULL if
@@ -105,15 +112,8 @@ class ScriptBadgeController
   // Returns true if any change was made.
   bool MarkExtensionExecuting(const std::string& extension_id);
 
-  // Tries to erase an extension from the relevant collections, and returns
-  // whether any change was made.
-  bool EraseExtension(const Extension* extension);
-
-  // The current extension actions in the order they appeared.  These come from
-  // calls to ExecuteScript or getAttention on the current frame.
-  std::vector<ExtensionAction*> current_actions_;
-
-  // The extensions that have actions in current_actions_.
+  // The current extension actions.  These come from calls to ExecuteScript or
+  // getAttention on the current frame.
   std::set<std::string> extensions_in_current_actions_;
 
   // Listen to extension unloaded notifications.

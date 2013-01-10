@@ -54,7 +54,7 @@ int MockRenderProcessHost::GetNextRoutingID() {
 void MockRenderProcessHost::CancelResourceRequests(int render_widget_id) {
 }
 
-void MockRenderProcessHost::CrossSiteSwapOutACK(
+void MockRenderProcessHost::SimulateSwapOutACK(
     const ViewMsg_SwapOut_Params& params) {
 }
 
@@ -184,7 +184,7 @@ bool MockRenderProcessHost::SuddenTerminationAllowed() const {
   return true;
 }
 
-content::RenderWidgetHost* MockRenderProcessHost::GetRenderWidgetHostByID(
+RenderWidgetHost* MockRenderProcessHost::GetRenderWidgetHostByID(
     int routing_id) {
   return render_widget_hosts_.Lookup(routing_id);
 }

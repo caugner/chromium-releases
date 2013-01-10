@@ -96,6 +96,12 @@ UI_EXPORT void UnrefCustomXCursor(::Cursor cursor);
 // should be non-null. Caller owns the returned object.
 UI_EXPORT XcursorImage* SkBitmapToXcursorImage(const SkBitmap* bitmap,
                                                const gfx::Point& hotspot);
+
+// Coalesce all pending motion events (touch or mouse) that are at the top of
+// the queue, and return the number eliminated, storing the last one in
+// |last_event|.
+UI_EXPORT int CoalescePendingMotionEvents(const XEvent* xev,
+                                          XEvent* last_event);
 #endif
 
 // Hides the host cursor.
@@ -144,6 +150,9 @@ UI_EXPORT bool IsWindowVisible(XID window);
 
 // Returns the bounds of |window|.
 UI_EXPORT bool GetWindowRect(XID window, gfx::Rect* rect);
+
+// Returns true if |window| contains the point |screen_loc|.
+UI_EXPORT bool WindowContainsPoint(XID window, gfx::Point screen_loc);
 
 // Return true if |window| has any property with |property_name|.
 UI_EXPORT bool PropertyExists(XID window, const std::string& property_name);

@@ -19,6 +19,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_source.h"
+#include "ui/gfx/size_conversions.h"
 
 using std::max;
 using std::min;
@@ -182,7 +183,8 @@ class EmptyImageSource: public gfx::ImageSkiaSource {
 
   virtual gfx::ImageSkiaRep GetImageForScale(
       ui::ScaleFactor scale_factor) OVERRIDE {
-    gfx::Size pixel_size = size_.Scale(ui::GetScaleFactorScale(scale_factor));
+    gfx::Size pixel_size = gfx::ToFlooredSize(
+        size_.Scale(ui::GetScaleFactorScale(scale_factor)));
     SkBitmap empty_bitmap = GetEmptyBitmap(pixel_size);
     return gfx::ImageSkiaRep(empty_bitmap, scale_factor);
   }
@@ -447,10 +449,6 @@ void NetworkIcon::Update() {
       connected_network_ = cros->connected_network();
       dirty = true;
     }
-  } else {
-    // For non-VPN, check to see if the VPN connection state has changed.
-    if (SetOrClearVpnConnected(network))
-      dirty = true;
   }
 
   if (dirty) {
@@ -574,7 +572,7 @@ bool NetworkIcon::ShouldShowInTray() const {
   if (!Network::IsConnectedState(state_))
     return true;
   NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
-  if (crosnet->virtual_network() && crosnet->virtual_network()->connecting())
+  if (crosnet->virtual_network())
     return true;
   return false;
 }
@@ -653,6 +651,14 @@ bool NetworkMenuIcon::ShouldShowIconInTray() {
 
 const gfx::ImageSkia NetworkMenuIcon::GetIconAndText(string16* text) {
   SetIconAndText();
+  if (text)
+    *text = text_;
+  icon_->GenerateImage();
+  return icon_->GetImage();
+}
+
+const gfx::ImageSkia NetworkMenuIcon::GetVpnIconAndText(string16* text) {
+  SetVpnIconAndText();
   if (text)
     *text = text_;
   icon_->GenerateImage();
@@ -767,6 +773,27 @@ void NetworkMenuIcon::SetIconAndText() {
 
   // No connecting, connected, or active network.
   SetDisconnectedIconAndText();
+}
+
+void NetworkMenuIcon::SetVpnIconAndText() {
+  NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
+  DCHECK(cros);
+
+  icon_->ClearIconAndBadges();
+  const VirtualNetwork* vpn = cros->virtual_network();
+  if (!vpn) {
+    NOTREACHED();
+    SetDisconnectedIconAndText();
+    return;
+  }
+  if (vpn->connecting()) {
+    connecting_network_ = vpn;
+    SetConnectingIconAndText();
+    return;
+  }
+
+  // If not connecting to a network, show the active/connected VPN.
+  SetActiveNetworkIconAndText(vpn);
 }
 
 void NetworkMenuIcon::SetActiveNetworkIconAndText(const Network* network) {
@@ -921,6 +948,11 @@ const gfx::ImageSkia NetworkMenuIcon::GetDisconnectedImage(
 const gfx::ImageSkia NetworkMenuIcon::GetConnectedImage(ImageType type,
       ResourceColorTheme color) {
   return GetImage(type, NumImages(type) - 1, color);
+}
+
+gfx::ImageSkia* NetworkMenuIcon::GetVirtualNetworkImage() {
+  return ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+      IDR_STATUSBAR_VPN);
 }
 
 int NetworkMenuIcon::NumImages(ImageType type) {

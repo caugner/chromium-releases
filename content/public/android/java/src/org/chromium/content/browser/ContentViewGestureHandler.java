@@ -67,7 +67,7 @@ class ContentViewGestureHandler implements LongPressDelegate {
             new ArrayDeque<Pair<MotionEvent, Boolean>>();
 
     // Has WebKit told us the current page requires touch events.
-    private boolean mNeedTouchEvents = false;
+    private boolean mHasTouchHandlers = false;
 
     // Remember whether onShowPress() is called. If it is not, in onSingleTapConfirmed()
     // we will first show the press state, then trigger the click.
@@ -198,6 +198,11 @@ class ContentViewGestureHandler implements LongPressDelegate {
          * Show the zoom picker UI.
          */
         public void invokeZoomPicker();
+
+        /**
+         * @return Whether changing the page scale is not possible on the current page.
+         */
+        public boolean hasFixedPageScale();
     }
 
     ContentViewGestureHandler(
@@ -391,6 +396,18 @@ class ContentViewGestureHandler implements LongPressDelegate {
                             }
                             setClickXAndY((int) x, (int) y);
                             return true;
+                        } else if (mMotionEventDelegate.hasFixedPageScale()) {
+                            // If page is not user scalable, we don't need to wait
+                            // for double tap timeout.
+                            float x = e.getX();
+                            float y = e.getY();
+                            mExtraParamBundle.clear();
+                            mExtraParamBundle.putBoolean(SHOW_PRESS, mShowPressIsCalled);
+                            if (mMotionEventDelegate.sendGesture(GESTURE_SINGLE_TAP_CONFIRMED,
+                                    e.getEventTime(), (int) x, (int) y, mExtraParamBundle)) {
+                                mIgnoreSingleTap = true;
+                            }
+                            setClickXAndY((int) x, (int) y);
                         }
                         return false;
                     }
@@ -398,7 +415,7 @@ class ContentViewGestureHandler implements LongPressDelegate {
                     @Override
                     public boolean onSingleTapConfirmed(MotionEvent e) {
                         // Long taps in the edges of the screen have their events delayed by
-                        // ChromeViewHolder for tab swipe operations. As a consequence of the delay
+                        // ContentViewHolder for tab swipe operations. As a consequence of the delay
                         // this method might be called after receiving the up event.
                         // These corner cases should be ignored.
                         if (mLongPressDetector.isInLongPress() || mIgnoreSingleTap) return true;
@@ -582,43 +599,46 @@ class ContentViewGestureHandler implements LongPressDelegate {
      * @return Whether the event was handled.
      */
     boolean onTouchEvent(MotionEvent event) {
-        TraceEvent.begin("onTouchEvent");
-        mLongPressDetector.cancelLongPressIfNeeded(event);
-        // Notify native that scrolling has stopped whenever a down action is processed prior to
-        // passing the event to native as it will drop them as an optimization if scrolling is
-        // enabled.  Ending the fling ensures scrolling has stopped as well as terminating the
-        // current fling if applicable.
-        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            endFling(event.getEventTime());
-        }
+        try {
+            TraceEvent.begin("onTouchEvent");
+            mLongPressDetector.cancelLongPressIfNeeded(event);
+            // Notify native that scrolling has stopped whenever a down action is processed prior to
+            // passing the event to native as it will drop them as an optimization if scrolling is
+            // enabled.  Ending the fling ensures scrolling has stopped as well as terminating the
+            // current fling if applicable.
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                endFling(event.getEventTime());
+            }
 
-        if (offerTouchEventToJavaScript(event)) {
-            // offerTouchEventToJavaScript returns true to indicate the event was sent
-            // to the render process. If it is not subsequently handled, it will
-            // be returned via confirmTouchEvent(false) and eventually passed to
-            // processTouchEvent asynchronously.
+            if (offerTouchEventToJavaScript(event)) {
+                // offerTouchEventToJavaScript returns true to indicate the event was sent
+                // to the render process. If it is not subsequently handled, it will
+                // be returned via confirmTouchEvent(false) and eventually passed to
+                // processTouchEvent asynchronously.
+                return true;
+            }
+            return processTouchEvent(event);
+        } finally {
             TraceEvent.end("onTouchEvent");
-            return true;
         }
-        return processTouchEvent(event);
     }
 
     /**
      * Sets the flag indicating that the content has registered listeners for touch events.
      */
-    void didSetNeedTouchEvents(boolean needTouchEvents) {
-        mNeedTouchEvents = needTouchEvents;
+    void hasTouchEventHandlers(boolean hasTouchHandlers) {
+        mHasTouchHandlers = hasTouchHandlers;
         // When mainframe is loading, FrameLoader::transitionToCommitted will
-        // call this method to set mNeedTouchEvents to false. We use this as
+        // call this method to set mHasTouchHandlers to false. We use this as
         // an indicator to clear the pending motion events so that events from
         // the previous page will not be carried over to the new page.
-        if (!mNeedTouchEvents) mPendingMotionEvents.clear();
+        if (!mHasTouchHandlers) mPendingMotionEvents.clear();
     }
 
     private boolean offerTouchEventToJavaScript(MotionEvent event) {
         mLongPressDetector.onOfferTouchEventToJavaScript(event);
 
-        if (!mNeedTouchEvents) return false;
+        if (!mHasTouchHandlers) return false;
 
         if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
             // Only send move events if the move has exceeded the slop threshold.

@@ -9,8 +9,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/chrome_browser_main_posix.h"
+#include "chrome/browser/common/cancelable_request.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/version_loader.h"
@@ -22,6 +22,10 @@ class RemovableDeviceNotificationsLinux;
 }
 #endif
 
+namespace chrome {
+class MediaTransferProtocolDeviceObserverLinux;
+}
+
 class ChromeBrowserMainPartsLinux : public ChromeBrowserMainPartsPosix {
  public:
   explicit ChromeBrowserMainPartsLinux(
@@ -30,18 +34,20 @@ class ChromeBrowserMainPartsLinux : public ChromeBrowserMainPartsPosix {
 
   // ChromeBrowserMainParts overrides.
   virtual void PreProfileInit() OVERRIDE;
+  virtual void PostProfileInit() OVERRIDE;
   virtual void PostMainMessageLoopRun() OVERRIDE;
 
  private:
-#if !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+  chromeos::VersionLoader cros_version_loader_;
+  CancelableRequestConsumer cros_consumer_;
+#else
   scoped_refptr<chrome::RemovableDeviceNotificationsLinux>
       removable_device_notifications_linux_;
 #endif
 
-#if defined(OS_CHROMEOS)
-  chromeos::VersionLoader cros_version_loader_;
-  CancelableRequestConsumer cros_consumer_;
-#endif
+  scoped_ptr<chrome::MediaTransferProtocolDeviceObserverLinux>
+      media_transfer_protocol_device_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsLinux);
 };

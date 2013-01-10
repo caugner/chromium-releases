@@ -121,7 +121,7 @@ class RenderWidgetHostViewMacEditCommandHelper;
   // Contains edit commands received by the -doCommandBySelector: method when
   // handling a key down event, not including inserting commands, eg. insertTab,
   // etc.
-  EditCommands editCommands_;
+  content::EditCommands editCommands_;
 
   // The plugin that currently has focus (-1 if no plugin has focus).
   int focusedPluginIdentifier_;
@@ -142,9 +142,16 @@ class RenderWidgetHostViewMacEditCommandHelper;
 
   // The scale factor of the display this view is in.
   float deviceScaleFactor_;
+
+  // If true then escape key down events are suppressed until the first escape
+  // key up event. (The up event is suppressed as well). This is used by the
+  // flash fullscreen code to avoid sending a key up event without a matching
+  // key down event.
+  BOOL suppressNextEscapeKeyUp_;
 }
 
 @property(nonatomic, readonly) NSRange selectedRange;
+@property(nonatomic, readonly) BOOL suppressNextEscapeKeyUp;
 
 - (void)setCanBeKeyView:(BOOL)can;
 - (void)setTakesFocusOnlyOnMouseDown:(BOOL)b;
@@ -259,7 +266,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
       const base::Callback<void(bool)>& callback,
-      skia::PlatformCanvas* output) OVERRIDE;
+      skia::PlatformBitmap* output) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
 
   virtual void OnAccessibilityNotifications(
@@ -319,8 +326,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   // to be reloaded.
   void ForceTextureReload();
 
-  virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
-                               bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -423,6 +428,10 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
     return pepper_fullscreen_window_;
   }
 
+  RenderWidgetHostViewMac* fullscreen_parent_host_view() const {
+    return fullscreen_parent_host_view_;
+  }
+
  private:
   friend class RenderWidgetHostView;
 
@@ -465,6 +474,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   // The fullscreen window used for pepper flash.
   scoped_nsobject<NSWindow> pepper_fullscreen_window_;
   scoped_nsobject<FullscreenWindowManager> fullscreen_window_manager_;
+  // Our parent host view, if this is fullscreen.  NULL otherwise.
+  RenderWidgetHostViewMac* fullscreen_parent_host_view_;
 
   // List of pending swaps for deferred acking:
   //   pairs of (route_id, gpu_host_id).

@@ -6,18 +6,14 @@
 
 #include "webkit/media/android/webmediaplayer_android.h"
 
-// Threshold on the number of media players per renderer before we start
-// attempting to release inactive media players.
-static const int kMediaPlayerThreshold = 2;
-
 namespace webkit_media {
 
 WebMediaPlayerManagerAndroid::WebMediaPlayerManagerAndroid()
-    : next_media_player_id_(0) {
+    : next_media_player_id_(0),
+      fullscreen_frame_(NULL) {
 }
 
 WebMediaPlayerManagerAndroid::~WebMediaPlayerManagerAndroid() {
-  ReleaseMediaResources();
 }
 
 int WebMediaPlayerManagerAndroid::RegisterMediaPlayer(
@@ -27,35 +23,7 @@ int WebMediaPlayerManagerAndroid::RegisterMediaPlayer(
 }
 
 void WebMediaPlayerManagerAndroid::UnregisterMediaPlayer(int player_id) {
-  std::map<int32, WebMediaPlayerAndroid*>::iterator iter =
-      media_players_.find(player_id);
-  DCHECK(iter != media_players_.end());
-
   media_players_.erase(player_id);
-}
-
-void WebMediaPlayerManagerAndroid::RequestMediaResources(int player_id) {
-  std::map<int32, WebMediaPlayerAndroid*>::iterator iter =
-      media_players_.find(player_id);
-  DCHECK(iter != media_players_.end());
-
-  if ((iter->second)->IsInitialized())
-    return;
-
-  // Release active players that are paused. Because we only release paused
-  // players, the number of running players could go beyond the limit.
-  // TODO(qinmin): we should use LRU to release the oldest player if we are
-  // reaching hardware limit.
-  if (GetActivePlayerCount() < kMediaPlayerThreshold)
-    return;
-
-  std::map<int32, WebMediaPlayerAndroid*>::iterator player_it;
-  for (player_it = media_players_.begin();
-       player_it != media_players_.end(); ++player_it) {
-    WebMediaPlayerAndroid* player = player_it->second;
-    if (player->IsInitialized() && player->paused())
-      player->ReleaseMediaResources();
-  }
 }
 
 void WebMediaPlayerManagerAndroid::ReleaseMediaResources() {
@@ -66,16 +34,6 @@ void WebMediaPlayerManagerAndroid::ReleaseMediaResources() {
   }
 }
 
-int32 WebMediaPlayerManagerAndroid::GetActivePlayerCount() {
-  int32 count = 0;
-  std::map<int32, WebMediaPlayerAndroid*>::iterator iter;
-  for (iter = media_players_.begin(); iter != media_players_.end(); ++iter) {
-    if ((iter->second)->IsInitialized())
-      count++;
-  }
-  return count;
-}
-
 WebMediaPlayerAndroid* WebMediaPlayerManagerAndroid::GetMediaPlayer(
     int player_id) {
   std::map<int32, WebMediaPlayerAndroid*>::iterator iter =
@@ -83,6 +41,22 @@ WebMediaPlayerAndroid* WebMediaPlayerManagerAndroid::GetMediaPlayer(
   if (iter != media_players_.end())
     return iter->second;
   return NULL;
+}
+
+bool WebMediaPlayerManagerAndroid::CanEnterFullscreen(WebKit::WebFrame* frame) {
+  return !fullscreen_frame_ || IsInFullscreen(frame);
+}
+
+void WebMediaPlayerManagerAndroid::DidEnterFullscreen(WebKit::WebFrame* frame) {
+  fullscreen_frame_ = frame;
+}
+
+void WebMediaPlayerManagerAndroid::DidExitFullscreen() {
+  fullscreen_frame_ = NULL;
+}
+
+bool WebMediaPlayerManagerAndroid::IsInFullscreen(WebKit::WebFrame* frame) {
+  return fullscreen_frame_ == frame;
 }
 
 }  // namespace webkit_media

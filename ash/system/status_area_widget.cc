@@ -9,13 +9,13 @@
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/bluetooth/bluetooth_observer.h"
-#include "ash/system/network/network_observer.h"
 #include "ash/system/status_area_widget_delegate.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/web_notification/web_notification_tray.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/shelf_layout_manager.h"
+#include "ash/wm/window_properties.h"
 #include "base/i18n/time_formatting.h"
 #include "base/utf_string_conversions.h"
 #include "ui/aura/window.h"
@@ -86,7 +86,8 @@ class DummySystemTrayDelegate : public SystemTrayDelegate {
   }
 
   virtual user::LoginStatus GetUserLoginStatus() const OVERRIDE {
-    return user::LOGGED_IN_USER;
+    return Shell::GetInstance()->IsScreenLocked() ? user::LOGGED_IN_LOCKED :
+                                                    user::LOGGED_IN_USER;
   }
 
   virtual bool SystemShouldUpgrade() const OVERRIDE {
@@ -173,8 +174,14 @@ class DummySystemTrayDelegate : public SystemTrayDelegate {
                                           bool large) OVERRIDE {
   }
 
+  virtual void GetVirtualNetworkIcon(ash::NetworkIconInfo* info) OVERRIDE {
+  }
+
   virtual void GetAvailableNetworks(
       std::vector<NetworkIconInfo>* list) OVERRIDE {
+  }
+
+  virtual void GetVirtualNetworks(std::vector<NetworkIconInfo>* list) OVERRIDE {
   }
 
   virtual void ConnectToNetwork(const std::string& network_id) OVERRIDE {
@@ -199,33 +206,24 @@ class DummySystemTrayDelegate : public SystemTrayDelegate {
 
   virtual void ToggleWifi() OVERRIDE {
     wifi_enabled_ = !wifi_enabled_;
-    ash::NetworkObserver* observer =
-        ash::Shell::GetInstance()->system_tray()->network_observer();
-    if (observer) {
-      ash::NetworkIconInfo info;
-      observer->OnNetworkRefresh(info);
-    }
   }
 
   virtual void ToggleMobile() OVERRIDE {
     cellular_enabled_ = !cellular_enabled_;
-    ash::NetworkObserver* observer =
-        ash::Shell::GetInstance()->system_tray()->network_observer();
-    if (observer) {
-      ash::NetworkIconInfo info;
-      observer->OnNetworkRefresh(info);
-    }
   }
 
   virtual void ToggleBluetooth() OVERRIDE {
     bluetooth_enabled_ = !bluetooth_enabled_;
-    ash::BluetoothObserver* observer =
-        ash::Shell::GetInstance()->system_tray()->bluetooth_observer();
-    if (observer)
-      observer->OnBluetoothRefresh();
+  }
+
+  virtual bool IsBluetoothDiscovering() OVERRIDE {
+    return false;
   }
 
   virtual void ShowOtherWifi() OVERRIDE {
+  }
+
+  virtual void ShowOtherVPN() OVERRIDE {
   }
 
   virtual void ShowOtherCellular() OVERRIDE {
@@ -299,7 +297,7 @@ class DummySystemTrayDelegate : public SystemTrayDelegate {
 
 namespace internal {
 
-StatusAreaWidget::StatusAreaWidget()
+StatusAreaWidget::StatusAreaWidget(aura::Window* status_container)
     : status_area_widget_delegate_(new internal::StatusAreaWidgetDelegate),
       system_tray_(NULL),
       web_notification_tray_(NULL),
@@ -307,14 +305,13 @@ StatusAreaWidget::StatusAreaWidget()
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.delegate = status_area_widget_delegate_;
-  params.parent =
-      Shell::GetPrimaryRootWindowController()->GetContainer(
-          ash::internal::kShellWindowId_StatusContainer);
+  params.parent = status_container;
   params.transparent = true;
   Init(params);
   set_focus_on_creation(false);
   SetContentsView(status_area_widget_delegate_);
   GetNativeView()->SetName("StatusAreaWidget");
+  GetNativeView()->SetProperty(internal::kStayInSameRootWindowKey, true);
 }
 
 StatusAreaWidget::~StatusAreaWidget() {
@@ -343,12 +340,12 @@ void StatusAreaWidget::Shutdown() {
 }
 
 bool StatusAreaWidget::ShouldShowLauncher() const {
-  if ((system_tray_ && system_tray_->HasSystemBubble()) ||
+  if ((system_tray_ && system_tray_->ShouldShowLauncher()) ||
       (web_notification_tray_ &&
        web_notification_tray_->IsMessageCenterBubbleVisible()))
     return true;
 
-  if (!Shell::GetInstance()->shelf()->IsVisible())
+  if (!RootWindowController::ForLauncher(GetNativeView())->shelf()->IsVisible())
     return false;
 
   // If the launcher is currently visible, don't hide the launcher if the mouse

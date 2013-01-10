@@ -7,6 +7,7 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
@@ -78,9 +79,6 @@ const int kHeaderRowSpacing = 4;
 // the Omnibox's edge, inset the bubble's anchor rect by this amount of pixels.
 const int kLocationIconVerticalMargin = 5;
 
-// The max possible width of the popup.
-const int kMaxPopupWidth = 500;
-
 // The margins between the popup border and the popup content.
 const int kPopupMarginTop = 4;
 const int kPopupMarginLeft = 0;
@@ -88,11 +86,9 @@ const int kPopupMarginBottom = 10;
 const int kPopupMarginRight = 0;
 
 // Padding values for sections on the permissions tab.
-const int kPermissionsSectionContentMinWidth = 300;
 const int kPermissionsSectionPaddingBottom = 6;
 const int kPermissionsSectionPaddingLeft = 18;
 const int kPermissionsSectionPaddingTop = 16;
-
 // Space between the headline and the content of a section on the permissions
 // tab.
 const int kPermissionsSectionHeadlineMarginBottom = 10;
@@ -100,6 +96,9 @@ const int kPermissionsSectionHeadlineMarginBottom = 10;
 // section is structured in individual rows. |kPermissionsSectionRowSpacing|
 // is the space between these rows.
 const int kPermissionsSectionRowSpacing = 2;
+
+// The max width of the popup.
+const int kPopupWidth = 310;
 
 const int kSiteDataIconColumnWidth = 20;
 const int kSiteDataSectionRowSpacing = 11;
@@ -340,9 +339,13 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
   this->Show();
   SizeToContents();
 
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(tab_contents->web_contents());
+  InfoBarTabHelper* infobar_tab_helper =
+      InfoBarTabHelper::FromWebContents(tab_contents->web_contents());
   presenter_.reset(new WebsiteSettings(this, profile,
-                                       tab_contents->content_settings(),
-                                       tab_contents->infobar_tab_helper(),
+                                       content_settings,
+                                       infobar_tab_helper,
                                        url,
                                        ssl,
                                        content::CertStore::GetInstance()));
@@ -372,7 +375,7 @@ void WebsiteSettingsPopupView::LinkClicked(views::Link* source,
     // Count how often the Collected Cookies dialog is opened.
     content::RecordAction(
         content::UserMetricsAction("WebsiteSettings_CookiesDialogOpened"));
-    new CollectedCookiesViews(tab_contents_);
+    new CollectedCookiesViews(tab_contents_->web_contents());
   } else if (source == certificate_dialog_link_) {
     gfx::NativeWindow parent =
         anchor_view() ? anchor_view()->GetWidget()->GetNativeWindow() : NULL;
@@ -403,16 +406,7 @@ gfx::Size WebsiteSettingsPopupView::GetPreferredSize() {
     height += header_->GetPreferredSize().height();
   if (tabbed_pane_)
     height += tabbed_pane_->GetPreferredSize().height();
-
-  int width = kPermissionsSectionContentMinWidth;
-  if (site_data_content_)
-    width = std::max(width, site_data_content_->GetPreferredSize().width());
-  if (permissions_content_)
-    width = std::max(width, permissions_content_->GetPreferredSize().width());
-  width += kPermissionsSectionPaddingLeft;
-  width = std::min(width, kMaxPopupWidth);
-
-  return gfx::Size(width, height);
+  return gfx::Size(kPopupWidth, height);
 }
 
 void WebsiteSettingsPopupView::SetCookieInfo(

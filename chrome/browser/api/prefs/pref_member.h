@@ -25,13 +25,14 @@
 #define CHROME_BROWSER_API_PREFS_PREF_MEMBER_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop_proxy.h"
 #include "base/values.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 
 class PrefServiceBase;
@@ -47,13 +48,20 @@ class PrefMemberBase : public content::NotificationObserver {
     // Update the value, either by calling |UpdateValueInternal| directly
     // or by dispatching to the right thread.
     // Takes ownership of |value|.
-    virtual void UpdateValue(base::Value* value, bool is_managed) const;
+    void UpdateValue(base::Value* value,
+                     bool is_managed,
+                     bool is_user_modifiable) const;
 
-    void MoveToThread(content::BrowserThread::ID thread_id);
+    void MoveToThread(
+        const scoped_refptr<base::MessageLoopProxy>& message_loop);
 
     // See PrefMember<> for description.
     bool IsManaged() const {
       return is_managed_;
+    }
+
+    bool IsUserModifiable() const {
+      return is_user_modifiable_;
     }
 
    protected:
@@ -71,8 +79,9 @@ class PrefMemberBase : public content::NotificationObserver {
 
     bool IsOnCorrectThread() const;
 
-    content::BrowserThread::ID thread_id_;
+    scoped_refptr<base::MessageLoopProxy> thread_loop_;
     mutable bool is_managed_;
+    mutable bool is_user_modifiable_;
 
     DISALLOW_COPY_AND_ASSIGN(Internal);
   };
@@ -89,7 +98,7 @@ class PrefMemberBase : public content::NotificationObserver {
   // See PrefMember<> for description.
   void Destroy();
 
-  void MoveToThread(content::BrowserThread::ID thread_id);
+  void MoveToThread(const scoped_refptr<base::MessageLoopProxy>& message_loop);
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -103,7 +112,7 @@ class PrefMemberBase : public content::NotificationObserver {
   // This method is used to do the actual sync with the preference.
   // Note: it is logically const, because it doesn't modify the state
   // seen by the outside world. It is just doing a lazy load behind the scenes.
-  virtual void UpdateValueFromPref() const;
+  void UpdateValueFromPref() const;
 
   // Verifies the preference name, and lazily loads the preference value if
   // it hasn't been loaded yet.
@@ -124,6 +133,11 @@ class PrefMemberBase : public content::NotificationObserver {
  protected:
   bool setting_value_;
 };
+
+// This function implements StringListPrefMember::UpdateValue().
+// It is exposed here for testing purposes.
+bool PrefMemberVectorStringUpdate(const Value& value,
+                                  std::vector<std::string>* string_vector);
 
 }  // namespace subtle
 
@@ -155,8 +169,8 @@ class PrefMember : public subtle::PrefMemberBase {
   // via PostTask.
   // This method should only be used from the thread the PrefMember is currently
   // on, which is the UI thread by default.
-  void MoveToThread(content::BrowserThread::ID thread_id) {
-    subtle::PrefMemberBase::MoveToThread(thread_id);
+  void MoveToThread(const scoped_refptr<base::MessageLoopProxy>& message_loop) {
+    subtle::PrefMemberBase::MoveToThread(message_loop);
   }
 
   // Check whether the pref is managed, i.e. controlled externally through
@@ -167,6 +181,16 @@ class PrefMember : public subtle::PrefMemberBase {
   bool IsManaged() const {
     VerifyPref();
     return internal_->IsManaged();
+  }
+
+  // Checks whether the pref can be modified by the user. This returns false
+  // when the pref is managed by a policy or an extension, and when a command
+  // line flag overrides the pref.
+  // This method should only be used from the thread the PrefMember is currently
+  // on, which is the UI thread unless changed by |MoveToThread|.
+  bool IsUserModifiable() const {
+    VerifyPref();
+    return internal_->IsUserModifiable();
   }
 
   // Retrieve the value of the member variable.
@@ -191,14 +215,6 @@ class PrefMember : public subtle::PrefMemberBase {
     setting_value_ = false;
   }
 
-  // Set the value of the member variable if it is not managed.
-  // This method should only be called on the UI thread.
-  void SetValueIfNotManaged(const ValueType& value) {
-    if (!IsManaged()) {
-      SetValue(value);
-    }
-  }
-
   // Returns the pref name.
   const std::string& GetPrefName() const {
     return pref_name();
@@ -217,7 +233,7 @@ class PrefMember : public subtle::PrefMemberBase {
    protected:
     virtual ~Internal() {}
 
-    virtual bool UpdateValueInternal(const base::Value& value) const;
+    virtual bool UpdateValueInternal(const base::Value& value) const OVERRIDE;
 
     // We cache the value of the pref so we don't have to keep walking the pref
     // tree.
@@ -226,13 +242,13 @@ class PrefMember : public subtle::PrefMemberBase {
     DISALLOW_COPY_AND_ASSIGN(Internal);
   };
 
-  virtual Internal* internal() const { return internal_; }
-  virtual void CreateInternal() const {
+  virtual Internal* internal() const OVERRIDE { return internal_; }
+  virtual void CreateInternal() const OVERRIDE {
     internal_ = new Internal();
   }
 
   // This method is used to do the actual sync with pref of the specified type.
-  virtual void UpdatePref(const ValueType& value);
+  void UpdatePref(const ValueType& value);
 
   mutable scoped_refptr<Internal> internal_;
 
@@ -244,5 +260,7 @@ typedef PrefMember<int> IntegerPrefMember;
 typedef PrefMember<double> DoublePrefMember;
 typedef PrefMember<std::string> StringPrefMember;
 typedef PrefMember<FilePath> FilePathPrefMember;
+// This preference member is expensive for large string arrays.
+typedef PrefMember<std::vector<std::string> > StringListPrefMember;
 
 #endif  // CHROME_BROWSER_API_PREFS_PREF_MEMBER_H_

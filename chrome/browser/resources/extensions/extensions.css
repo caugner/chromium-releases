@@ -19,6 +19,10 @@ html.loading * {
   overflow: hidden;
 }
 
+#dev-controls button {
+  white-space: nowrap;
+}
+
 #extension-settings.dev-mode #dev-controls {
   -webkit-transition-duration: 250ms;
   height: 32px;
@@ -130,6 +134,7 @@ html[dir='rtl'] .extension-list-item {
 
 .extension-description,
 .extension-list-item-wrapper.inactive-extension .extension-details,
+.location-text,
 .enable-checkbox input:disabled + .enable-checkbox-text {
   color: rgb(151, 156, 160);
 }
@@ -165,7 +170,8 @@ html[dir='rtl'] .extension-list-item {
 }
 
 .terminated-reload-link {
-  -webkit-margin-end: 2em;
+  -webkit-margin-end: 2.5em;
+  padding-top: 7px;
 }
 
 .extension-list-item a {
@@ -229,6 +235,21 @@ html[dir='rtl'] .extension-list-item {
   margin: 1em;
 }
 
+/* Disabled extensions banner and related elements. */
+
+.page:not(.sideload-wipeout) #sideload-wipeout-banner {
+  display: none;
+}
+
+.extension-disable-reason {
+  padding-left: 12px;
+}
+
+.location-text {
+  display: block;
+  width: 100px;
+}
+
 /* Trash */
 
 #extension-settings .trash {
@@ -260,7 +281,7 @@ html[dir='rtl'] #extension-settings .trash {
 
 /* Managed mode */
 
-.page:not(.managed-mode) #managed-mode-banner {
+.page:not(.managed-mode) .managed-mode-banner {
   display: none;
 }
 

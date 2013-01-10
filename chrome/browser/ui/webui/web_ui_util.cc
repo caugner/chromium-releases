@@ -17,6 +17,8 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image_skia.h"
 
+#include "base/debug/trace_event.h"
+
 namespace {
 
 struct ScaleFactorMap {
@@ -33,9 +35,11 @@ const ScaleFactorMap kScaleFactorMap[] = {
 
 namespace web_ui_util {
 
-std::string GetImageDataUrl(const gfx::ImageSkia& image) {
+std::string GetBitmapDataUrl(const SkBitmap& bitmap) {
+  TRACE_EVENT2("oobe", "GetImageDataUrl",
+               "width", bitmap.width(), "height", bitmap.height());
   std::vector<unsigned char> output;
-  gfx::PNGCodec::EncodeBGRASkBitmap(*image.bitmap(), false, &output);
+  gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, false, &output);
   std::string str_url;
   str_url.insert(str_url.end(), output.begin(), output.end());
 
@@ -44,7 +48,7 @@ std::string GetImageDataUrl(const gfx::ImageSkia& image) {
   return str_url;
 }
 
-std::string GetImageDataUrlFromResource(int res) {
+std::string GetBitmapDataUrlFromResource(int res) {
   // Load resource icon and covert to base64 encoded data url
   base::RefCountedStaticMemory* icon_data =
       ResourceBundle::GetSharedInstance().LoadDataResourceBytes(res,

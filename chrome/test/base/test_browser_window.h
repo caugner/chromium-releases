@@ -8,6 +8,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "build/build_config.h"
+#include "chrome/browser/download/test_download_shelf.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/test/base/test_location_bar.h"
@@ -27,6 +28,7 @@ class TestBrowserWindow : public BrowserWindow {
   // BrowserWindow:
   virtual void Show() OVERRIDE {}
   virtual void ShowInactive() OVERRIDE {}
+  virtual void Hide() OVERRIDE {}
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE {}
   virtual void Close() OVERRIDE {}
   virtual void Activate() OVERRIDE {}
@@ -41,7 +43,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE {}
   virtual void UpdateDevTools() OVERRIDE {}
-  virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE {}
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE {}
   virtual void SetStarredState(bool is_starred) OVERRIDE {}
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE {}
@@ -129,13 +130,12 @@ class TestBrowserWindow : public BrowserWindow {
   virtual bool InPresentationMode() OVERRIDE;
 #endif
 
-  virtual void ShowInstant(TabContents* preview_contents) OVERRIDE {}
-  virtual void HideInstant() OVERRIDE {}
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual bool IsInstantTabShowing() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
+  virtual bool GetConstrainedWindowTopY(int* top_y) OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE {}
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE {}
@@ -144,6 +144,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void DestroyBrowser() OVERRIDE {}
 
  private:
+  TestDownloadShelf download_shelf_;
   TestLocationBar location_bar_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserWindow);

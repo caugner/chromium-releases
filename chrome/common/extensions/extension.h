@@ -21,7 +21,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "chrome/common/extensions/command.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
@@ -34,6 +33,7 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/gfx/size.h"
 
+class ExtensionAction;
 class ExtensionResource;
 class FileBrowserHandler;
 class SkBitmap;
@@ -42,6 +42,10 @@ class Version;
 namespace base {
 class DictionaryValue;
 class ListValue;
+}
+
+namespace gfx {
+class ImageSkia;
 }
 
 namespace webkit_glue {
@@ -112,7 +116,8 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     DISABLE_USER_ACTION = 1 << 0,
     DISABLE_PERMISSIONS_INCREASE = 1 << 1,
     DISABLE_RELOAD = 1 << 2,
-    DISABLE_UNSUPPORTED_REQUIREMENT = 1 << 3
+    DISABLE_UNSUPPORTED_REQUIREMENT = 1 << 3,
+    DISABLE_SIDELOAD_WIPEOUT = 1 << 4,
   };
 
   enum InstallType {
@@ -131,7 +136,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     TYPE_THEME,
     TYPE_USER_SCRIPT,
     TYPE_HOSTED_APP,
-    TYPE_PACKAGED_APP,
+    // This is marked legacy because platform apps are preferred. For
+    // backwards compatibility, we can't remove support for packaged apps
+    TYPE_LEGACY_PACKAGED_APP,
     TYPE_PLATFORM_APP
   };
 
@@ -208,6 +215,25 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     std::vector<std::string> scopes;
   };
 
+  struct ActionInfo {
+    explicit ActionInfo();
+    ~ActionInfo();
+
+    // The types of extension actions.
+    enum Type {
+      TYPE_BROWSER,
+      TYPE_PAGE,
+      TYPE_SCRIPT_BADGE,
+    };
+
+    // Empty implies the key wasn't present.
+    ExtensionIconSet default_icon;
+    std::string default_title;
+    GURL default_popup_url;
+    // action id -- only used with legacy page actions API.
+    std::string id;
+  };
+
   struct InstallWarning {
     enum Format {
       // IMPORTANT: Do not build HTML strings from user or developer-supplied
@@ -233,7 +259,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
     // Requires the extension to have an up-to-date manifest version.
     // Typically, we'll support multiple manifest versions during a version
-    // transition.  This flag signals that we want to require the most modern
+    // transition. This flag signals that we want to require the most modern
     // manifest version that Chrome understands.
     REQUIRE_MODERN_MANIFEST_VERSION = 1 << 1,
 
@@ -622,14 +648,19 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     return converted_from_user_script_;
   }
   const UserScriptList& content_scripts() const { return content_scripts_; }
-  ExtensionAction* script_badge() const { return script_badge_.get(); }
-  ExtensionAction* page_action() const { return page_action_.get(); }
-  ExtensionAction* browser_action() const { return browser_action_.get(); }
+  const ActionInfo* script_badge_info() const {
+    return script_badge_info_.get();
+  }
+  const ActionInfo* page_action_info() const { return page_action_info_.get(); }
+  const ActionInfo* browser_action_info() const {
+    return browser_action_info_.get();
+  }
   bool is_verbose_install_message() const {
     return !omnibox_keyword().empty() ||
-           browser_action() ||
-           (page_action() &&
-               (page_action_command() || page_action()->default_icon()));
+           browser_action_info() ||
+           (page_action_info() &&
+            (page_action_command() ||
+             !page_action_info()->default_icon.empty()));
   }
   const FileBrowserHandlerList* file_browser_handlers() const {
     return file_browser_handlers_.get();
@@ -723,11 +754,11 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // App-related.
   bool is_app() const {
-    return is_packaged_app() || is_hosted_app() || is_platform_app();
+    return is_legacy_packaged_app() || is_hosted_app() || is_platform_app();
   }
   bool is_platform_app() const;
   bool is_hosted_app() const;
-  bool is_packaged_app() const;
+  bool is_legacy_packaged_app() const;
   bool is_storage_isolated() const { return is_storage_isolated_; }
   const URLPatternSet& web_extent() const { return extent_; }
   const std::string& launch_local_path() const { return launch_local_path_; }
@@ -920,9 +951,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Helper method to load an ExtensionAction from the page_action or
   // browser_action entries in the manifest.
-  scoped_ptr<ExtensionAction> LoadExtensionActionHelper(
-      const base::DictionaryValue* extension_action,
-      ExtensionAction::Type action_type,
+  scoped_ptr<ActionInfo> LoadExtensionActionInfoHelper(
+      const base::DictionaryValue* manifest_section,
+      ActionInfo::Type action_type,
       string16* error);
 
   // Helper method that loads the OAuth2 info from the 'oauth2' manifest key.
@@ -1027,13 +1058,13 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   UserScriptList content_scripts_;
 
   // The extension's page action, if any.
-  scoped_ptr<ExtensionAction> page_action_;
+  scoped_ptr<ActionInfo> page_action_info_;
 
   // The extension's browser action, if any.
-  scoped_ptr<ExtensionAction> browser_action_;
+  scoped_ptr<ActionInfo> browser_action_info_;
 
   // The extension's script badge.  Never NULL.
-  scoped_ptr<ExtensionAction> script_badge_;
+  scoped_ptr<ActionInfo> script_badge_info_;
 
   // The extension's file browser actions, if any.
   scoped_ptr<FileBrowserHandlerList> file_browser_handlers_;
@@ -1143,6 +1174,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   int launch_width_;
   int launch_height_;
 
+  // Should this app be shown in a launcher.
+  bool display_in_launcher_;
+
   // The Omnibox keyword for this extension, or empty if there is none.
   std::string omnibox_keyword_;
 
@@ -1176,6 +1210,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
 typedef std::vector< scoped_refptr<const Extension> > ExtensionList;
 typedef std::set<std::string> ExtensionIdSet;
+typedef std::vector<std::string> ExtensionIdList;
 
 // Let gtest print InstallWarnings.
 void PrintTo(const Extension::InstallWarning&, ::std::ostream* os);

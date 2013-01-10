@@ -3,6 +3,24 @@
 // found in the LICENSE file.
 
 /**
+ * Updates the Drive related Flags section.
+ * @param {Array} flags List of dictionaries describing flags.
+ */
+function updateDriveRelatedFlags(flags) {
+  var ul = $('drive-related-flags');
+  updateKeyValueList(ul, flags);
+}
+
+/**
+ * Updates the Drive related Preferences section.
+ * @param {Array} preferences List of dictionaries describing preferences.
+ */
+function updateDriveRelatedPreferences(preferences) {
+  var ul = $('drive-related-preferences');
+  updateKeyValueList(ul, preferences);
+}
+
+/**
  * Updates the Authentication Status section.
  * @param {Object} authStatus Dictionary containing auth status.
  */
@@ -116,6 +134,37 @@ function updateInFlightOperations(inFlightOperations) {
 }
 
 /**
+ * Updates the summary about account metadata.
+ * @param {Object} accountMetadata Dictionary describing account metadata.
+ */
+function updateAccountMetadata(accountMetadata) {
+  var quotaTotalInMb = accountMetadata['account-quota-total'] / (1 << 20);
+  var quotaUsedInMb = accountMetadata['account-quota-used'] / (1 << 20);
+
+  $('account-quota-info').textContent =
+      quotaUsedInMb + ' / ' + quotaTotalInMb + ' (MB)';
+  $('account-largest-changestamp-remote').textContent =
+      accountMetadata['account-largest-changestamp-remote'];
+  $('account-largest-changestamp-local').textContent =
+      accountMetadata['account-largest-changestamp-local'];
+  $('account-metadata-origin').textContent =
+      accountMetadata['account-metadata-origin'];
+
+  var installedAppContainer = $('account-installed-apps');
+  for (var i = 0; i < accountMetadata['installed-apps'].length; i++) {
+    var app = accountMetadata['installed-apps'][i];
+    var tr = document.createElement('tr');
+    tr.className = 'installed-app';
+    tr.appendChild(createElementFromText('td', app.app_name));
+    tr.appendChild(createElementFromText('td', app.app_id));
+    tr.appendChild(createElementFromText('td', app.object_type));
+    tr.appendChild(createElementFromText('td', app.supports_create));
+
+    installedAppContainer.appendChild(tr);
+  }
+}
+
+/**
  * Creates an element named |elementName| containing the content |text|.
  * @param {string} elementName Name of the new element to be created.
  * @param {string} text Text to be contained in the new element.
@@ -127,8 +176,38 @@ function createElementFromText(elementName, text) {
   return element;
 }
 
+/**
+ * Updates <ul> element with the given key-value list.
+ * @param {HTMLElement} ul <ul> element to be modified.
+ * @param {Array} list List of dictionaries containing 'key' and 'value'.
+ */
+function updateKeyValueList(ul, list) {
+  for (var i = 0; i < list.length; i++) {
+    var flag = list[i];
+    var text = flag.key;
+    if (list.value != '')
+      text += ': ' + flag.value;
+
+    var li = createElementFromText('li', text);
+    ul.appendChild(li);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   chrome.send('pageLoaded');
+
+  // Update the table of contents.
+  var toc = $('toc');
+  var sections = document.getElementsByTagName('h2');
+  for (var i = 0; i < sections.length; i++) {
+    var section = sections[i];
+    var a = createElementFromText('a', section.textContent);
+    a.href = '#' + section.id;
+    var li = document.createElement('li');
+    li.appendChild(a);
+    toc.appendChild(li);
+  }
+
   window.setInterval(function() {
       chrome.send('periodicUpdate');
     }, 1000);

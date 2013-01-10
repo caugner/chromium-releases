@@ -39,6 +39,10 @@
 #include "base/basictypes.h"
 #include "base/logging.h"   // for RawFD
 
+#if defined(TYPE_PROFILING)
+#include <gperftools/type_profiler_map.h>
+#endif  // defined(TYPE_PROFILING)
+
 // Table to maintain a heap profile data inside,
 // i.e. the set of currently active heap memory allocations.
 // thread-unsafe and non-reentrant code:
@@ -168,6 +172,13 @@ class HeapProfileTable {
     alloc_address_map_->Iterate(MapArgsAllocIterator, callback);
   }
 
+  // Callback for iterating through addresses of all allocated objects. Accepts
+  // pointer to user data and object pointer.
+  typedef void (*AddressIterator)(void* data, const void* ptr);
+
+  // Iterate over the addresses of all allocated objects.
+  void IterateAllocationAddresses(AddressIterator, void* data);
+
   // Allocation context profile data iteration callback
   typedef void (*AllocContextIterator)(const AllocContextInfo& info);
 
@@ -237,6 +248,10 @@ class HeapProfileTable {
   // Note that this functionality cannot be used if the HeapProfileTable is
   // used for leak checking (using HeapLeakChecker).
   void DumpMarkedObjects(AllocationMark mark, const char* file_name);
+
+#if defined(TYPE_PROFILING)
+  void DumpTypeStatistics(const char* file_name) const;
+#endif  // defined(TYPE_PROFILING)
 
  private:
   friend class DeepHeapProfile;
@@ -321,6 +336,28 @@ class HeapProfileTable {
     MarkArgs(AllocationMark m, bool a) : mark(m), mark_all(a) { }
   };
 
+#if defined(TYPE_PROFILING)
+  struct TypeCount {
+    size_t bytes;
+    unsigned int objects;
+
+    TypeCount(size_t bytes_arg, unsigned int objects_arg)
+        : bytes(bytes_arg),
+          objects(objects_arg) {
+    }
+  };
+#endif  // defined(TYPE_PROFILING)
+
+  struct AllocationAddressIteratorArgs {
+    AddressIterator callback;
+    void* data;
+
+    AllocationAddressIteratorArgs(AddressIterator iterator, void* d)
+        : callback(iterator),
+          data(d) {
+    }
+  };
+
   // helpers ----------------------------
 
   // Unparse bucket b and print its portion of profile dump into buf.
@@ -365,6 +402,12 @@ class HeapProfileTable {
     callback(ptr, info);
   }
 
+  // Helper for IterateAllocationAddresses.
+  inline static void AllocationAddressesIterator(
+      const void* ptr,
+      AllocValue* v,
+      const AllocationAddressIteratorArgs& args);
+
   // Helper for MarkCurrentAllocations and MarkUnmarkedAllocations.
   inline static void MarkIterator(const void* ptr, AllocValue* v,
                                   const MarkArgs& args);
@@ -382,6 +425,16 @@ class HeapProfileTable {
   // Helper for filling size variables in buckets by zero.
   inline static void ZeroBucketCountsIterator(
       const void* ptr, AllocValue* v, HeapProfileTable* heap_profile);
+
+#if defined(TYPE_PROFILING)
+  inline static void TallyTypesItererator(const void* ptr,
+                                          AllocValue* value,
+                                          AddressMap<TypeCount>* type_size_map);
+
+  inline static void DumpTypesIterator(const void* ptr,
+                                       TypeCount* size,
+                                       const DumpArgs& args);
+#endif  // defined(TYPE_PROFILING)
 
   // Helper for IterateOrderedAllocContexts and FillOrderedProfile.
   // Creates a sorted list of Buckets whose length is num_alloc_buckets_ +

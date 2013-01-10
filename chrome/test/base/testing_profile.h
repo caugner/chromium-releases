@@ -197,7 +197,6 @@ class TestingProfile : public Profile {
       GetGeolocationPermissionContext() OVERRIDE;
   virtual content::SpeechRecognitionPreferences*
       GetSpeechRecognitionPreferences() OVERRIDE;
-  virtual bool DidLastSessionExitCleanly() OVERRIDE;
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
   virtual TestingProfile* AsTestingProfile() OVERRIDE;
@@ -210,11 +209,7 @@ class TestingProfile : public Profile {
   virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
   virtual bool HasOffTheRecordProfile() OVERRIDE;
   virtual Profile* GetOriginalProfile() OVERRIDE;
-  virtual VisitedLinkMaster* GetVisitedLinkMaster() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
-  virtual extensions::UserScriptMaster* GetUserScriptMaster() OVERRIDE;
-  virtual ExtensionProcessManager* GetExtensionProcessManager() OVERRIDE;
-  virtual extensions::EventRouter* GetExtensionEventRouter() OVERRIDE;
   void SetExtensionSpecialStoragePolicy(
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
   virtual ExtensionSpecialStoragePolicy*
@@ -225,6 +220,8 @@ class TestingProfile : public Profile {
   net::CookieMonster* GetCookieMonster();
 
   virtual policy::UserCloudPolicyManager* GetUserCloudPolicyManager() OVERRIDE;
+  virtual policy::ManagedModePolicyProvider*
+      GetManagedModePolicyProvider() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
   // Sets the profile's PrefService. If a pref service hasn't been explicitly
   // set GetPrefs creates one, so normally you need not invoke this. If you need
@@ -266,12 +263,13 @@ class TestingProfile : public Profile {
   virtual bool IsSameProfile(Profile *p) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
-  virtual void MarkAsCleanShutdown() OVERRIDE {}
   virtual void InitPromoResources() OVERRIDE {}
 
   virtual FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
   virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
+  virtual void SetExitType(ExitType exit_type) OVERRIDE {}
+  virtual ExitType GetLastSessionExitType() OVERRIDE;
 #if defined(OS_CHROMEOS)
   virtual void SetupChromeOSEnterpriseExtensionObserver() OVERRIDE {
   }

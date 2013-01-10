@@ -15,8 +15,6 @@
 
 using content::WebContents;
 
-namespace browser {
-
 namespace {
 
 // TODO(mad) eventually move this to host_desktop_type.h.
@@ -127,15 +125,30 @@ size_t GetBrowserCountImpl(Profile* profile,
 
 }  // namespace
 
-Browser* FindTabbedBrowser(Profile* profile, bool match_original_profiles) {
+namespace browser {
+
+Browser* FindTabbedBrowser(Profile* profile,
+                           bool match_original_profiles) {
+  return FindTabbedBrowser(profile, match_original_profiles,
+                           chrome::HOST_DESKTOP_TYPE_NATIVE);
+}
+
+Browser* FindTabbedBrowser(Profile* profile,
+                           bool match_original_profiles,
+                           chrome::HostDesktopType type) {
   return FindBrowserWithTabbedOrAnyType(profile,
-                                        kDefaultHostDesktopType,
+                                        type,
                                         true,
                                         match_original_profiles);
 }
 
 Browser* FindOrCreateTabbedBrowser(Profile* profile) {
-  Browser* browser = FindTabbedBrowser(profile, false);
+  return FindOrCreateTabbedBrowser(profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
+}
+
+Browser* FindOrCreateTabbedBrowser(Profile* profile,
+                                   chrome::HostDesktopType type) {
+  Browser* browser = FindTabbedBrowser(profile, false, type);
   if (!browser)
     browser = new Browser(Browser::CreateParams(profile));
   return browser;
@@ -197,6 +210,10 @@ Browser* FindLastActiveWithHostDesktopType(chrome::HostDesktopType type) {
   return NULL;
 }
 
+}  // namespace browser
+
+namespace chrome {
+
 size_t GetBrowserCount(Profile* profile) {
   return GetBrowserCountImpl(profile, kDefaultHostDesktopType, kMatchAny);
 }
@@ -205,4 +222,4 @@ size_t GetTabbedBrowserCount(Profile* profile) {
   return GetBrowserCountImpl(profile, kDefaultHostDesktopType, kMatchTabbed);
 }
 
-}  // namespace browser
+}  // namespace chrome

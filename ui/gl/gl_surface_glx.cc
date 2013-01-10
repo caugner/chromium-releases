@@ -36,6 +36,7 @@ class ScopedPtrXFree {
 Display* g_display;
 const char* g_glx_extensions = NULL;
 bool g_glx_create_context_robustness_supported = false;
+bool g_glx_texture_from_pixmap_supported = false;
 
 }  // namespace
 
@@ -66,6 +67,8 @@ bool GLSurfaceGLX::InitializeOneOff() {
   g_glx_extensions = glXQueryExtensionsString(g_display, 0);
   g_glx_create_context_robustness_supported =
       HasGLXExtension("GLX_ARB_create_context_robustness");
+  g_glx_texture_from_pixmap_supported =
+      HasGLXExtension("GLX_EXT_texture_from_pixmap");
 
   initialized = true;
   return true;
@@ -84,6 +87,11 @@ bool GLSurfaceGLX::HasGLXExtension(const char* name) {
 // static
 bool GLSurfaceGLX::IsCreateContextRobustnessSupported() {
   return g_glx_create_context_robustness_supported;
+}
+
+// static
+bool GLSurfaceGLX::IsTextureFromPixmapSupported() {
+  return g_glx_texture_from_pixmap_supported;
 }
 
 void* GLSurfaceGLX::GetDisplay() {
@@ -114,7 +122,7 @@ bool NativeViewGLSurfaceGLX::Resize(const gfx::Size& size) {
   // On Intel drivers, the frame buffer won't be resize until the next swap. If
   // we only do PostSubBuffer, then we're stuck in the old size. Force a swap
   // now.
-  if (gfx::g_GLX_MESA_copy_sub_buffer && size_ != size)
+  if (gfx::g_driver_glx.ext.b_GLX_MESA_copy_sub_buffer && size_ != size)
     SwapBuffers();
   size_ = size;
   return true;
@@ -141,7 +149,7 @@ void* NativeViewGLSurfaceGLX::GetHandle() {
 
 std::string NativeViewGLSurfaceGLX::GetExtensions() {
   std::string extensions = GLSurface::GetExtensions();
-  if (g_GLX_MESA_copy_sub_buffer) {
+  if (gfx::g_driver_glx.ext.b_GLX_MESA_copy_sub_buffer) {
     extensions += extensions.empty() ? "" : " ";
     extensions += "GL_CHROMIUM_post_sub_buffer";
   }
@@ -211,7 +219,7 @@ void* NativeViewGLSurfaceGLX::GetConfig() {
 
 bool NativeViewGLSurfaceGLX::PostSubBuffer(
     int x, int y, int width, int height) {
-  DCHECK(g_GLX_MESA_copy_sub_buffer);
+  DCHECK(gfx::g_driver_glx.ext.b_GLX_MESA_copy_sub_buffer);
   glXCopySubBufferMESA(g_display, window_, x, y, width, height);
   return true;
 }

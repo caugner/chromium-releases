@@ -22,7 +22,6 @@
 
 class GURL;
 class SkBitmap;
-class WebContentsImpl;
 class WebKeyboardEvent;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_DidFailProvisionalLoadWithError_Params;
@@ -59,6 +58,7 @@ class RenderViewHost;
 class RenderViewHostDelegateView;
 class SessionStorageNamespace;
 class WebContents;
+class WebContentsImpl;
 struct ContextMenuParams;
 struct FileChooserParams;
 struct GlobalRequestID;
@@ -152,6 +152,7 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   virtual void DidStartProvisionalLoadForFrame(
       RenderViewHost* render_view_host,
       int64 frame_id,
+      int64 parent_frame_id,
       bool main_frame,
       const GURL& opener_url,
       const GURL& url) {}

@@ -30,7 +30,6 @@ const char* kHandledSettings[] = {
   kSettingProxyEverywhere,
   kSignedDataRoamingEnabled,
   kStatsReportingPref,
-  kSystemTimezonePolicy,
   // Kiosk mode settings.
   kIdleLogoutTimeout,
   kIdleLogoutWarningDuration,

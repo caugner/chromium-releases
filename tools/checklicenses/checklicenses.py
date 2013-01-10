@@ -50,8 +50,6 @@ WHITELISTED_LICENSES = [
     'BSD-like MIT/X11 (BSD like)',
 
     'BSL (v1.0)',
-    # TODO(phajdan.jr): Make licensecheck not print the comma after 3.1.
-    'BSL (v1.0) GPL (v3.1,)',
     'GPL (v2 or later) with Bison parser exception',
     'GPL (v2 or later) with libtool exception',
     'GPL (v3 or later) with Bison parser exception',
@@ -80,9 +78,14 @@ WHITELISTED_LICENSES = [
     'MIT/X11 (BSD like)',
     'Ms-PL',
     'Public domain',
+    'Public domain BSD',
+    'Public domain BSD (3 clause)',
+    'Public domain BSD-like',
+    'Public domain LGPL (v2.1 or later)',
     'libpng',
     'zlib/libpng',
     'SGI Free Software License B',
+    'University of Illinois/NCSA Open Source License (BSD like)',
 ]
 
 
@@ -100,6 +103,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
 
     'chrome/common/extensions/docs/examples': [  # http://crbug.com/98092
+        'UNKNOWN',
+    ],
+    'chrome/test/data/gpu/vt': [
         'UNKNOWN',
     ],
     'chrome/test/data/layout_tests/LayoutTests': [
@@ -130,18 +136,12 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'BSD (2 clause) GPL (v2 or later)',
         'BSD (3 clause) GPL (v2 or later)',
         'BSL (v1.0) GPL',
+        'BSL (v1.0) GPL (v3.1)',
         'GPL',
         'GPL (unversioned/unknown version)',
         'GPL (v2)',
-
-        # TODO(phajdan.jr): Make licensecheck not print the comma after v2.
-        'GPL (v2,)',
-
         'GPL (v2 or later)',
-
-        # TODO(phajdan.jr): Make licensecheck not print the comma after 3.1.
-        'GPL (v3.1,)',
-
+        'GPL (v3.1)',
         'GPL (v3 or later)',
     ],
     'net/tools/spdyshark': [
@@ -189,6 +189,15 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/cld/encodings/compact_lang_det': [  # http://crbug.com/98120
         'UNKNOWN',
     ],
+    # Not used. http://crbug.com/156020
+    # Using third_party/cros_dbus_cplusplus/cros_dbus_cplusplus.gyp instead.
+    'third_party/cros_dbus_cplusplus/source/autogen.sh': [
+        'UNKNOWN',
+    ],
+    # Included in the source tree but not built. http://crbug.com/156020
+    'third_party/cros_dbus_cplusplus/source/examples': [
+        'UNKNOWN',
+    ],
     'third_party/devscripts': [
         'GPL (v2 or later)',
     ],
@@ -201,6 +210,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'GPL (v2 or later)',
         'UNKNOWN',  # http://crbug.com/98123
     ],
+    'third_party/findbugs/doc': [ # http://crbug.com/157206
+        'UNKNOWN',
+    ],
     'third_party/gles2_book': [  # http://crbug.com/98130
         'UNKNOWN',
     ],
@@ -211,6 +223,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'third_party/hunspell': [  # http://crbug.com/98134
+        'UNKNOWN',
+    ],
+    'third_party/hyphen/hyphen.tex': [ # http://crbug.com/157375
         'UNKNOWN',
     ],
     'third_party/iccjpeg': [  # http://crbug.com/98137
@@ -235,6 +250,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'third_party/libjingle/source/talk': [  # http://crbug.com/98310
+        'UNKNOWN',
+    ],
+    'third_party/libjingle/source_internal/talk': [  # http://crbug.com/98310
         'UNKNOWN',
     ],
     'third_party/libjpeg': [  # http://crbug.com/98313
@@ -299,7 +317,7 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/ots/tools/ttf-checksum.py': [  # http://code.google.com/p/ots/issues/detail?id=2
         'UNKNOWN',
     ],
-    'third_party/molokocacao/NSBezierPath+MCAdditions.h': [  # http://crbug.com/98453
+    'third_party/molokocacao': [  # http://crbug.com/98453
         'UNKNOWN',
     ],
     'third_party/npapi/npspy': [
@@ -308,7 +326,13 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/ocmock/OCMock': [  # http://crbug.com/98454
         'UNKNOWN',
     ],
+    'third_party/opus/src': [  # http://crbug.com/156738
+        'UNKNOWN',
+    ],
     'third_party/ply/__init__.py': [
+        'UNKNOWN',
+    ],
+    'third_party/pexpect': [ # http://crbug.com/156113
         'UNKNOWN',
     ],
     'third_party/protobuf': [  # http://crbug.com/98455

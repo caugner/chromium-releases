@@ -49,6 +49,7 @@
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
+#include "webkit/base/file_path_string_conversions.h"
 #include "webkit/fileapi/isolated_context.h"
 #include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/webkit_glue.h"
@@ -57,10 +58,13 @@
 #include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 #if defined(OS_ANDROID)
-#include "webkit/media/android/webmediaplayer_android.h"
+#include "webkit/media/android/media_player_bridge_manager_impl.h"
+#include "webkit/media/android/webmediaplayer_in_process_android.h"
 #include "webkit/media/android/webmediaplayer_manager_android.h"
 #endif
+#include "webkit/media/media_stream_client.h"
 #include "webkit/media/webmediaplayer_impl.h"
+#include "webkit/media/webmediaplayer_ms.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin_impl.h"
 #include "webkit/plugins/npapi/webplugin_page_delegate.h"
@@ -167,6 +171,10 @@ class TestEnvironment {
                                       shadow_platform_delegate));
 
 #if defined(OS_ANDROID)
+    // Make sure we have enough decoding resources for layout tests.
+    // The current maximum number of media elements in a layout test is 8.
+    media_bridge_manager_.reset(
+        new webkit_media::MediaPlayerBridgeManagerImpl(8));
     media_player_manager_.reset(
         new webkit_media::WebMediaPlayerManagerAndroid());
 #endif
@@ -207,6 +215,10 @@ class TestEnvironment {
   webkit_media::WebMediaPlayerManagerAndroid* media_player_manager() {
     return media_player_manager_.get();
   }
+
+  webkit_media::MediaPlayerBridgeManagerImpl* media_bridge_manager() {
+    return media_bridge_manager_.get();
+  }
 #endif
 
  private:
@@ -219,6 +231,7 @@ class TestEnvironment {
 #if defined(OS_ANDROID)
   FilePath mock_current_directory_;
   scoped_ptr<webkit_media::WebMediaPlayerManagerAndroid> media_player_manager_;
+  scoped_ptr<webkit_media::MediaPlayerBridgeManagerImpl> media_bridge_manager_;
 #endif
 };
 
@@ -388,18 +401,29 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebMediaPlayerClient* client,
     webkit_media::MediaStreamClient* media_stream_client) {
 #if defined(OS_ANDROID)
-  return new webkit_media::WebMediaPlayerAndroid(
+  return new webkit_media::WebMediaPlayerInProcessAndroid(
       frame,
       client,
       GetWebKitPlatformSupport()->cookieJar(),
       test_environment->media_player_manager(),
-      new webkit_support::TestStreamTextureFactory());
+      test_environment->media_bridge_manager(),
+      new webkit_support::TestStreamTextureFactory(),
+      true);
 #else
   scoped_ptr<media::MessageLoopFactory> message_loop_factory(
       new media::MessageLoopFactory());
 
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
+
+  if (media_stream_client && media_stream_client->IsMediaStream(url)) {
+    return new webkit_media::WebMediaPlayerMS(
+        frame,
+        client,
+        base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
+        media_stream_client,
+        new media::MediaLog());
+  }
 
   return new webkit_media::WebMediaPlayerImpl(
       frame,
@@ -818,7 +842,7 @@ WebKit::WebString RegisterIsolatedFileSystem(
     const WebKit::WebVector<WebKit::WebString>& filenames) {
   fileapi::IsolatedContext::FileInfoSet files;
   for (size_t i = 0; i < filenames.size(); ++i) {
-    FilePath path = webkit_glue::WebStringToFilePath(filenames[i]);
+    FilePath path = webkit_base::WebStringToFilePath(filenames[i]);
     files.AddPath(path, NULL);
   }
   std::string filesystemId =

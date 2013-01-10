@@ -17,6 +17,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/api/prefs/pref_member.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/common/content_settings_types.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
@@ -132,8 +132,8 @@ class LocationBarViewGtk : public OmniboxEditController,
 
   // LocationBar:
   virtual void ShowFirstRunBubble() OVERRIDE;
-  virtual void SetSuggestedText(const string16& text,
-                                InstantCompleteBehavior behavior) OVERRIDE;
+  virtual void SetInstantSuggestion(
+      const InstantSuggestion& suggestion) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
   virtual content::PageTransition GetPageTransition() const OVERRIDE;
@@ -157,6 +157,8 @@ class LocationBarViewGtk : public OmniboxEditController,
   virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
   virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
   virtual void TestPageActionPressed(size_t index) OVERRIDE;
+  virtual void TestActionBoxMenuItemSelected(int command_id) OVERRIDE;
+  virtual bool GetBookmarkStarVisibility() OVERRIDE;
 
   // content::NotificationObserver:
   virtual void Observe(int type,
@@ -412,9 +414,6 @@ class LocationBarViewGtk : public OmniboxEditController,
 
   // Update the star icon after it is toggled or the theme changes.
   void UpdateStarIcon();
-
-  // Update the Chrome To Mobile command state.
-  void UpdateChromeToMobileState();
 
   // Returns true if we should only show the URL and none of the extras like
   // the star button or page actions.

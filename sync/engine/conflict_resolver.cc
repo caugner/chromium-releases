@@ -4,43 +4,30 @@
 
 #include "sync/engine/conflict_resolver.h"
 
-#include <algorithm>
 #include <list>
-#include <map>
 #include <set>
+#include <string>
 
-#include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "sync/engine/conflict_util.h"
-#include "sync/engine/syncer.h"
 #include "sync/engine/syncer_util.h"
 #include "sync/sessions/status_controller.h"
 #include "sync/syncable/directory.h"
 #include "sync/syncable/mutable_entry.h"
-#include "sync/syncable/nigori_handler.h"
 #include "sync/syncable/write_transaction.h"
 #include "sync/util/cryptographer.h"
 
 using std::list;
-using std::map;
 using std::set;
 
 namespace syncer {
 
-using sessions::ConflictProgress;
 using sessions::StatusController;
-using syncable::BaseTransaction;
 using syncable::Directory;
 using syncable::Entry;
 using syncable::Id;
 using syncable::MutableEntry;
 using syncable::WriteTransaction;
-
-namespace {
-
-const int SYNC_CYCLES_BEFORE_ADMITTING_DEFEAT = 8;
-
-}  // namespace
 
 ConflictResolver::ConflictResolver() {
 }
@@ -48,11 +35,10 @@ ConflictResolver::ConflictResolver() {
 ConflictResolver::~ConflictResolver() {
 }
 
-ConflictResolver::ProcessSimpleConflictResult
-ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
-                                        const Id& id,
-                                        const Cryptographer* cryptographer,
-                                        StatusController* status) {
+void ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
+                                             const Id& id,
+                                             const Cryptographer* cryptographer,
+                                             StatusController* status) {
   MutableEntry entry(trans, syncable::GET_BY_ID, id);
   // Must be good as the entry won't have been cleaned up.
   CHECK(entry.good());
@@ -63,7 +49,7 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
       !entry.Get(syncable::IS_UNSYNCED)) {
     // This is very unusual, but it can happen in tests.  We may be able to
     // assert NOTREACHED() here when those tests are updated.
-    return NO_SYNC_PROGRESS;
+    return;
   }
 
   if (entry.Get(syncable::IS_DEL) && entry.Get(syncable::SERVER_IS_DEL)) {
@@ -73,7 +59,7 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
     entry.Put(syncable::IS_UNAPPLIED_UPDATE, false);
     // we've made changes, but they won't help syncing progress.
     // METRIC simple conflict resolved by merge.
-    return NO_SYNC_PROGRESS;
+    return;
   }
 
   // This logic determines "client wins" vs. "server wins" strategy picking.
@@ -206,7 +192,7 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
         !needs_reinsertion) {
       DVLOG(1) << "Resolving simple conflict, everything matches, ignoring "
                << "changes for: " << entry;
-      IgnoreConflict(&entry);
+      conflict_util::IgnoreConflict(&entry);
       UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
                                 CHANGES_MATCH,
                                 CONFLICT_RESOLUTION_SIZE);
@@ -214,12 +200,16 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
       DVLOG(1) << "Resolving simple conflict, ignoring server encryption "
                << " changes for: " << entry;
       status->increment_num_server_overwrites();
-      OverwriteServerChanges(&entry);
+      conflict_util::OverwriteServerChanges(&entry);
       UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
                                 IGNORE_ENCRYPTION,
                                 CONFLICT_RESOLUTION_SIZE);
     } else if (entry_deleted || !name_matches || !parent_matches) {
-      OverwriteServerChanges(&entry);
+      // NOTE: The update application logic assumes that conflict resolution
+      // will never result in changes to the local hierarchy.  The entry_deleted
+      // and !parent_matches cases here are critical to maintaining that
+      // assumption.
+      conflict_util::OverwriteServerChanges(&entry);
       status->increment_num_server_overwrites();
       DVLOG(1) << "Resolving simple conflict, overwriting server changes "
                << "for: " << entry;
@@ -229,7 +219,7 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
     } else {
       DVLOG(1) << "Resolving simple conflict, ignoring local changes for: "
                << entry;
-      IgnoreLocalChanges(&entry);
+      conflict_util::IgnoreLocalChanges(&entry);
       status->increment_num_local_overwrites();
       UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
                                 OVERWRITE_LOCAL,
@@ -238,69 +228,41 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
     // Now that we've resolved the conflict, clear the prev server
     // specifics.
     entry.Put(syncable::BASE_SERVER_SPECIFICS, sync_pb::EntitySpecifics());
-    return SYNC_PROGRESS;
   } else {  // SERVER_IS_DEL is true
-    // If a server deleted folder has local contents it should be a hierarchy
-    // conflict.  Hierarchy conflicts should not be processed by this function.
-    // We could end up here if a change was made since we last tried to detect
-    // conflicts, which was during update application.
     if (entry.Get(syncable::IS_DIR)) {
       Directory::ChildHandles children;
       trans->directory()->GetChildHandlesById(trans,
                                               entry.Get(syncable::ID),
                                               &children);
-      if (0 != children.size()) {
-        DVLOG(1) << "Entry is a server deleted directory with local contents, "
-                 << "should be a hierarchy conflict. (race condition).";
-        return NO_SYNC_PROGRESS;
-      }
+      // If a server deleted folder has local contents it should be a hierarchy
+      // conflict.  Hierarchy conflicts should not be processed by this
+      // function.
+      DCHECK(children.empty());
     }
 
     // The entry is deleted on the server but still exists locally.
-    if (!entry.Get(syncable::UNIQUE_CLIENT_TAG).empty()) {
-      // If we've got a client-unique tag, we can undelete while retaining
-      // our present ID.
-      DCHECK_EQ(entry.Get(syncable::SERVER_VERSION), 0) << "For the server to "
-          "know to re-create, client-tagged items should revert to version 0 "
-          "when server-deleted.";
-      OverwriteServerChanges(&entry);
-      status->increment_num_server_overwrites();
-      DVLOG(1) << "Resolving simple conflict, undeleting server entry: "
-               << entry;
-      UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
-                                OVERWRITE_SERVER,
-                                CONFLICT_RESOLUTION_SIZE);
-      // Clobber the versions, just in case the above DCHECK is violated.
-      entry.Put(syncable::SERVER_VERSION, 0);
-      entry.Put(syncable::BASE_VERSION, 0);
-    } else {
-      // Otherwise, we've got to undelete by creating a new locally
-      // uncommitted entry.
-      SplitServerInformationIntoNewEntry(trans, &entry);
-
-      MutableEntry server_update(trans, syncable::GET_BY_ID, id);
-      CHECK(server_update.good());
-      CHECK(server_update.Get(syncable::META_HANDLE) !=
-            entry.Get(syncable::META_HANDLE))
-          << server_update << entry;
-      UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
-                                UNDELETE,
-                                CONFLICT_RESOLUTION_SIZE);
-    }
-    return SYNC_PROGRESS;
+    // We undelete it by overwriting the server's tombstone with the local
+    // data.
+    conflict_util::OverwriteServerChanges(&entry);
+    status->increment_num_server_overwrites();
+    DVLOG(1) << "Resolving simple conflict, undeleting server entry: "
+             << entry;
+    UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
+                              UNDELETE,
+                              CONFLICT_RESOLUTION_SIZE);
   }
 }
 
-bool ConflictResolver::ResolveConflicts(syncable::WriteTransaction* trans,
-                                        const Cryptographer* cryptographer,
-                                        const ConflictProgress& progress,
-                                        sessions::StatusController* status) {
-  bool forward_progress = false;
+void ConflictResolver::ResolveConflicts(
+    syncable::WriteTransaction* trans,
+    const Cryptographer* cryptographer,
+    const std::set<syncable::Id>& simple_conflict_ids,
+    sessions::StatusController* status) {
   // Iterate over simple conflict items.
   set<Id>::const_iterator conflicting_item_it;
   set<Id> processed_items;
-  for (conflicting_item_it = progress.SimpleConflictingItemsBegin();
-       conflicting_item_it != progress.SimpleConflictingItemsEnd();
+  for (conflicting_item_it = simple_conflict_ids.begin();
+       conflicting_item_it != simple_conflict_ids.end();
        ++conflicting_item_it) {
     Id id = *conflicting_item_it;
     if (processed_items.count(id) > 0)
@@ -331,21 +293,15 @@ bool ConflictResolver::ResolveConflicts(syncable::WriteTransaction* trans,
         break;
       prev_id = new_prev_id;
     } while (processed_items.count(prev_id) == 0 &&
-             progress.HasSimpleConflictItem(prev_id));  // Excludes root.
+             simple_conflict_ids.count(prev_id) > 0);  // Excludes root.
     while (!predecessors.empty()) {
       id = predecessors.back();
       predecessors.pop_back();
-      switch (ProcessSimpleConflict(trans, id, cryptographer, status)) {
-        case NO_SYNC_PROGRESS:
-          break;
-        case SYNC_PROGRESS:
-          forward_progress = true;
-          break;
-      }
+      ProcessSimpleConflict(trans, id, cryptographer, status);
       processed_items.insert(id);
     }
   }
-  return forward_progress;
+  return;
 }
 
 }  // namespace syncer

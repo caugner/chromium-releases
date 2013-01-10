@@ -16,6 +16,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
+#include "remoting/host/clipboard.h"
 #include "remoting/proto/internal.pb.h"
 #include "third_party/skia/include/core/SkPoint.h"
 
@@ -31,6 +32,10 @@ using protocol::MouseEvent;
 #define USB_KEYMAP(usb, xkb, win, mac) {usb, xkb}
 #include "ui/base/keycodes/usb_keycode_map.h"
 #undef USB_KEYMAP
+
+// Pixel-to-wheel-ticks conversion ratio used by GTK.
+// From Source/WebKit/chromium/src/gtk/WebInputFactory.cc.
+const float kWheelTicksPerPixel = 3.0f / 160.0f;
 
 // A class to generate events on Linux.
 class EventExecutorLinux : public EventExecutor {
@@ -59,6 +64,8 @@ class EventExecutorLinux : public EventExecutor {
   // Left, Right, Middle, VScroll Up/Down, HScroll Left/Right.
   static const int kNumPointerButtons = 7;
 
+  void InitClipboard();
+
   // |mode| is one of the AutoRepeatModeOn, AutoRepeatModeOff,
   // AutoRepeatModeDefault constants defined by the XChangeKeyboardControl()
   // API.
@@ -74,6 +81,8 @@ class EventExecutorLinux : public EventExecutor {
 
   std::set<int> pressed_keys_;
   SkIPoint latest_mouse_position_;
+  float wheel_ticks_x_;
+  float wheel_ticks_y_;
 
   // X11 graphics context.
   Display* display_;
@@ -83,6 +92,9 @@ class EventExecutorLinux : public EventExecutor {
   int test_error_base_;
 
   int pointer_button_map_[kNumPointerButtons];
+
+  scoped_ptr<Clipboard> clipboard_;
+
   DISALLOW_COPY_AND_ASSIGN(EventExecutorLinux);
 };
 
@@ -90,8 +102,17 @@ EventExecutorLinux::EventExecutorLinux(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : task_runner_(task_runner),
       latest_mouse_position_(SkIPoint::Make(-1, -1)),
+      wheel_ticks_x_(0.0f),
+      wheel_ticks_y_(0.0f),
       display_(XOpenDisplay(NULL)),
       root_window_(BadValue) {
+#if defined(REMOTING_HOST_LINUX_CLIPBOARD)
+  if (!task_runner_->BelongsToCurrentThread()) {
+    task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorLinux::InitClipboard, base::Unretained(this)));
+  }
+#endif  // REMOTING_HOST_LINUX_CLIPBOARD
 }
 
 EventExecutorLinux::~EventExecutorLinux() {
@@ -120,7 +141,17 @@ bool EventExecutorLinux::Init() {
 }
 
 void EventExecutorLinux::InjectClipboardEvent(const ClipboardEvent& event) {
-  // TODO(simonmorris): Implement clipboard injection.
+#if defined(REMOTING_HOST_LINUX_CLIPBOARD)
+  if (!task_runner_->BelongsToCurrentThread()) {
+    task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorLinux::InjectClipboardEvent,
+                   base::Unretained(this), event));
+    return;
+  }
+
+  clipboard_->InjectClipboardEvent(event);
+#endif  // REMOTING_HOST_LINUX_CLIPBOARD
 }
 
 void EventExecutorLinux::InjectKeyEvent(const KeyEvent& event) {
@@ -168,6 +199,11 @@ void EventExecutorLinux::InjectKeyEvent(const KeyEvent& event) {
 
   XTestFakeKeyEvent(display_, keycode, event.pressed(), CurrentTime);
   XFlush(display_);
+}
+
+void EventExecutorLinux::InitClipboard() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  clipboard_ = Clipboard::Create();
 }
 
 void EventExecutorLinux::SetAutoRepeatForKey(int keycode, int mode) {
@@ -236,14 +272,30 @@ void EventExecutorLinux::InjectMouseEvent(const MouseEvent& event) {
                          CurrentTime);
   }
 
-  if (event.has_wheel_offset_y() && event.wheel_offset_y() != 0) {
-    int dy = event.wheel_offset_y();
-    InjectScrollWheelClicks(VerticalScrollWheelToX11ButtonNumber(dy), abs(dy));
+  int ticks_y = 0;
+  if (event.has_wheel_delta_y()) {
+    wheel_ticks_y_ += event.wheel_delta_y() * kWheelTicksPerPixel;
+    ticks_y = static_cast<int>(wheel_ticks_y_);
+    wheel_ticks_y_ -= ticks_y;
+  } else if (event.has_wheel_offset_y()) {
+    ticks_y = event.wheel_offset_y();
   }
-  if (event.has_wheel_offset_x() && event.wheel_offset_x() != 0) {
-    int dx = event.wheel_offset_x();
-    InjectScrollWheelClicks(HorizontalScrollWheelToX11ButtonNumber(dx),
-                            abs(dx));
+  if (ticks_y != 0) {
+    InjectScrollWheelClicks(VerticalScrollWheelToX11ButtonNumber(ticks_y),
+                            abs(ticks_y));
+  }
+
+  int ticks_x = 0;
+  if (event.has_wheel_delta_x()) {
+    wheel_ticks_x_ += event.wheel_delta_x() * kWheelTicksPerPixel;
+    ticks_x = static_cast<int>(wheel_ticks_x_);
+    wheel_ticks_x_ -= ticks_x;
+  } else if (event.has_wheel_offset_x()) {
+    ticks_x = event.wheel_offset_x();
+  }
+  if (ticks_x != 0) {
+    InjectScrollWheelClicks(HorizontalScrollWheelToX11ButtonNumber(ticks_x),
+                            abs(ticks_x));
   }
 
   XFlush(display_);
@@ -302,12 +354,16 @@ void EventExecutorLinux::InitMouseButtonMap() {
   }
   XFreeDeviceList(devices);
 
-  if (!device_found)
-    LOG(ERROR) << "Cannot find XTest device.";
+  if (!device_found) {
+    LOG(INFO) << "Cannot find XTest device.";
+    return;
+  }
 
   XDevice* device = XOpenDevice(display_, device_id);
-  if (!device)
+  if (!device) {
     LOG(ERROR) << "Cannot open XTest device.";
+    return;
+  }
 
   int num_device_buttons = XGetDeviceButtonMapping(display_, device, NULL, 0);
   scoped_array<unsigned char> button_mapping(new unsigned char[num_buttons]);
@@ -361,8 +417,11 @@ void EventExecutorLinux::Start(
                    base::Passed(&client_clipboard)));
     return;
   }
+
   InitMouseButtonMap();
-  return;
+#if defined(REMOTING_HOST_LINUX_CLIPBOARD)
+  clipboard_->Start(client_clipboard.Pass());
+#endif  // REMOTING_HOST_LINUX_CLIPBOARD
 }
 
 void EventExecutorLinux::StopAndDelete() {

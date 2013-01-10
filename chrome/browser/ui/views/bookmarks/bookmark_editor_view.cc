@@ -17,6 +17,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
@@ -240,7 +241,7 @@ void BookmarkEditorView::ExecuteCommand(int command_id) {
     if (node->value != 0) {
       const BookmarkNode* b_node = bb_model_->GetNodeByID(node->value);
       if (!b_node->empty() &&
-          !bookmark_utils::ConfirmDeleteBookmarkNode(b_node,
+          !chrome::ConfirmDeleteBookmarkNode(b_node,
             GetWidget()->GetNativeWindow())) {
         // The folder is not empty and the user didn't confirm.
         return;
@@ -249,7 +250,7 @@ void BookmarkEditorView::ExecuteCommand(int command_id) {
     }
     tree_model_->Remove(node->parent(), node);
   } else {
-    DCHECK(command_id == IDS_BOOKMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
+    DCHECK_EQ(IDS_BOOKMARK_EDITOR_NEW_FOLDER_MENU_ITEM, command_id);
     NewFolder();
   }
 }
@@ -273,7 +274,7 @@ void BookmarkEditorView::Close() {
 
 void BookmarkEditorView::ShowContextMenuForView(views::View* source,
                                                 const gfx::Point& point) {
-  DCHECK(source == tree_view_);
+  DCHECK_EQ(tree_view_, source);
   if (!tree_view_->GetSelectedNode())
     return;
   running_menu_for_root_ =
@@ -523,10 +524,10 @@ BookmarkEditorView::EditorNode* BookmarkEditorView::CreateRootNode() {
   const BookmarkNode* bb_root_node = bb_model_->root_node();
   CreateNodes(bb_root_node, root_node);
   DCHECK(root_node->child_count() >= 2 && root_node->child_count() <= 3);
-  DCHECK(bb_root_node->GetChild(0)->type() == BookmarkNode::BOOKMARK_BAR);
-  DCHECK(bb_root_node->GetChild(1)->type() == BookmarkNode::OTHER_NODE);
+  DCHECK_EQ(BookmarkNode::BOOKMARK_BAR, bb_root_node->GetChild(0)->type());
+  DCHECK_EQ(BookmarkNode::OTHER_NODE, bb_root_node->GetChild(1)->type());
   if (root_node->child_count() == 3)
-    DCHECK(bb_root_node->GetChild(2)->type() == BookmarkNode::MOBILE);
+    DCHECK_EQ(BookmarkNode::MOBILE, bb_root_node->GetChild(2)->type());
   return root_node;
 }
 

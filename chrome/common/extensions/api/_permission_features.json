@@ -35,13 +35,18 @@
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
   },
+  "bluetooth": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
+  },
+  "bookmarkManagerPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app"],
+    "location": "component"
+  },
   "bookmarks": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
-  },
-  "browserTag": {
-    "channel": "dev",
-    "extension_types": ["extension", "platform_app"]
   },
   "browsingData": {
     "channel": "stable",
@@ -128,6 +133,10 @@
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
+  "fileSystem.write": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
   "fontSettings": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
@@ -175,6 +184,14 @@
     "channel": "stable",
     "extension_types": [ "platform_app" ]
   },
+  "mediaGalleries.allAutoDetected": {
+    "channel": "stable",
+    "extension_types": [ "platform_app" ]
+  },
+  "mediaGalleries.read": {
+    "channel": "stable",
+    "extension_types": [ "platform_app" ]
+  },
   // TODO(thestig) Remove this as part of http:://crbug.com/144496
   "mediaGalleriesPrivate": {
     "channel": "stable",
@@ -192,8 +209,16 @@
   },
   "metricsPrivate": {
     "channel": "stable",
-    "extension_types": ["extension", "packaged_app"],
-    "location": "component"
+    "extension_types": ["extension", "packaged_app", "platform_app"],
+    "whitelist": [
+      // The file manager is a component extension, and it can currently use
+      // whitelisted interfaces without being on the corresponding whitelist.
+      // Adding it to this whitelist documents its dependency, however, and also
+      // doesn't hurt anything.
+      "hhaomjibdihmijegdhdafkllkbggdgoj",  // File manager
+      "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // Quickoffice
+      "ionpfmkccalenbmnddpbmocokhaknphg"   // Quickoffice dev
+    ]
   },
   "notifications": {
     "channel": "stable",
@@ -223,7 +248,7 @@
     "extension_types": ["extension", "packaged_app"]
   },
   "pushMessaging": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["extension", "platform_app"]
   },
   "rtcPrivate": {
@@ -248,7 +273,11 @@
     "extension_types": ["platform_app"]
   },
   "socket": {
-    "channel": "dev",
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
+  "syncFileSystem": {
+    "channel": "trunk",
     "extension_types": ["platform_app"]
   },
   "storage": {
@@ -263,6 +292,10 @@
   },
   "tabs": {
     "channel": "stable",
+    "extension_types": ["extension", "packaged_app"]
+  },
+  "tabCapture": {
+    "channel": "canary",
     "extension_types": ["extension", "packaged_app"]
   },
   "terminalPrivate": {
@@ -290,6 +323,10 @@
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
     ]
+  },
+  "usb": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
   },
   "videoCapture": {
     "channel": "stable",
@@ -330,5 +367,9 @@
   "webRequestBlocking": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
+  },
+  "webview": {
+    "channel": "dev",
+    "extension_types": ["platform_app"]
   }
 }

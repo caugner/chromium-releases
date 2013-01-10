@@ -25,7 +25,6 @@
 #include "content/browser/cert_store_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/cross_site_request_manager.h"
-#include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/download_resource_handler.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_file_resource_handler.h"
@@ -260,11 +259,13 @@ net::RequestPriority DetermineRequestPriority(ResourceType::Type type) {
   }
 }
 
-void OnSwapOutACKHelper(int render_process_id, int render_view_id) {
+void OnSwapOutACKHelper(int render_process_id,
+                        int render_view_id,
+                        bool timed_out) {
   RenderViewHostImpl* rvh = RenderViewHostImpl::FromID(render_process_id,
                                                        render_view_id);
   if (rvh)
-    rvh->OnSwapOutACK();
+    rvh->OnSwapOutACK(timed_out);
 }
 
 net::Error CallbackAndReturn(
@@ -274,7 +275,7 @@ net::Error CallbackAndReturn(
     return net_error;
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(started_cb, DownloadId::Invalid(), net_error));
+      base::Bind(started_cb, static_cast<DownloadItem*>(NULL), net_error));
 
   return net_error;
 }
@@ -349,8 +350,7 @@ ResourceDispatcherHost* ResourceDispatcherHost::Get() {
 }
 
 ResourceDispatcherHostImpl::ResourceDispatcherHostImpl()
-    : download_file_manager_(new DownloadFileManager(NULL)),
-      save_file_manager_(new SaveFileManager()),
+    : save_file_manager_(new SaveFileManager()),
       request_id_(-1),
       is_shutdown_(false),
       max_outstanding_requests_cost_per_process_(
@@ -497,7 +497,7 @@ net::Error ResourceDispatcherHostImpl::BeginDownload(
     int child_id,
     int route_id,
     bool prefer_cache,
-    const DownloadSaveInfo& save_info,
+    scoped_ptr<DownloadSaveInfo> save_info,
     const DownloadStartedCallback& started_callback) {
   if (is_shutdown_)
     return CallbackAndReturn(started_callback, net::ERR_INSUFFICIENT_RESOURCES);
@@ -550,7 +550,7 @@ net::Error ResourceDispatcherHostImpl::BeginDownload(
   // |started_callback|.
   scoped_ptr<ResourceHandler> handler(
       CreateResourceHandlerForDownload(request.get(), is_content_initiated,
-                                       save_info, started_callback));
+                                       save_info.Pass(), started_callback));
 
   BeginRequestInternal(request.Pass(), handler.Pass());
 
@@ -579,10 +579,10 @@ scoped_ptr<ResourceHandler>
 ResourceDispatcherHostImpl::CreateResourceHandlerForDownload(
     net::URLRequest* request,
     bool is_content_initiated,
-    const DownloadSaveInfo& save_info,
+    scoped_ptr<DownloadSaveInfo> save_info,
     const DownloadResourceHandler::OnStartedCallback& started_cb) {
   scoped_ptr<ResourceHandler> handler(
-      new DownloadResourceHandler(request, started_cb, save_info));
+      new DownloadResourceHandler(request, started_cb, save_info.Pass()));
   if (delegate_) {
     const ResourceRequestInfo* request_info(
         ResourceRequestInfo::ForRequest(request));
@@ -671,9 +671,8 @@ bool ResourceDispatcherHostImpl::HandleExternalProtocol(ResourceLoader* loader,
   if (job_factory->IsHandledURL(url))
     return false;
 
-  delegate_->HandleExternalProtocol(url, info->GetChildID(),
-                                    info->GetRouteID());
-  return true;
+  return delegate_->HandleExternalProtocol(url, info->GetChildID(),
+                                           info->GetRouteID());
 }
 
 void ResourceDispatcherHostImpl::DidStartRequest(ResourceLoader* loader) {
@@ -1172,8 +1171,20 @@ ResourceRequestInfoImpl* ResourceDispatcherHostImpl::CreateRequestInfo(
       context);
 }
 
+
 void ResourceDispatcherHostImpl::OnSwapOutACK(
+  const ViewMsg_SwapOut_Params& params) {
+  HandleSwapOutACK(params, false);
+}
+
+void ResourceDispatcherHostImpl::OnSimulateSwapOutACK(
     const ViewMsg_SwapOut_Params& params) {
+  // Call the real implementation with true, which means that we timed out.
+  HandleSwapOutACK(params, true);
+}
+
+void ResourceDispatcherHostImpl::HandleSwapOutACK(
+    const ViewMsg_SwapOut_Params& params, bool timed_out) {
   // Closes for cross-site transitions are handled such that the cross-site
   // transition continues.
   ResourceLoader* loader = GetLoader(params.new_render_process_host_id,
@@ -1191,7 +1202,8 @@ void ResourceDispatcherHostImpl::OnSwapOutACK(
       FROM_HERE,
       base::Bind(&OnSwapOutACKHelper,
                  params.closing_process_id,
-                 params.closing_route_id));
+                 params.closing_route_id,
+                 timed_out));
 }
 
 void ResourceDispatcherHostImpl::OnDidLoadResourceFromMemoryCache(

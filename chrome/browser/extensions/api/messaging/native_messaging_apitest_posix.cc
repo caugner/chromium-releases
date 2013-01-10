@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature.h"
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, NativeMessageBasic) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableNativeMessaging);
   // Override the user data dir to point to our native app.
   extensions::Feature::ScopedCurrentChannel
       current_channel(chrome::VersionInfo::CHANNEL_DEV);

@@ -27,6 +27,7 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/visitedlink/visitedlink_event_listener.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -150,7 +151,7 @@ class VisitedLinkMaster::TableBuilder
   void DisownMaster();
 
   // HistoryService::URLEnumerator
-  virtual void OnURL(const GURL& url);
+  virtual void OnURL(const history::URLRow& url_row);
   virtual void OnComplete(bool succeed);
 
  private:
@@ -177,9 +178,8 @@ class VisitedLinkMaster::TableBuilder
 
 // VisitedLinkMaster ----------------------------------------------------------
 
-VisitedLinkMaster::VisitedLinkMaster(Listener* listener,
-                                     Profile* profile) {
-  InitMembers(listener, profile);
+VisitedLinkMaster::VisitedLinkMaster(Profile* profile) {
+  InitMembers(new VisitedLinkEventListener(profile), profile);
 }
 
 VisitedLinkMaster::VisitedLinkMaster(Listener* listener,
@@ -956,7 +956,8 @@ void VisitedLinkMaster::TableBuilder::DisownMaster() {
   master_ = NULL;
 }
 
-void VisitedLinkMaster::TableBuilder::OnURL(const GURL& url) {
+void VisitedLinkMaster::TableBuilder::OnURL(const history::URLRow& url_row) {
+  const GURL& url(url_row.url());
   if (!url.is_empty()) {
     fingerprints_.push_back(VisitedLinkMaster::ComputeURLFingerprint(
         url.spec().data(), url.spec().length(), salt_));

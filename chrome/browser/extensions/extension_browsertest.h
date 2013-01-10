@@ -14,11 +14,14 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/feature_switch.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+
+class ExtensionProcessManager;
 
 // Base class for extension browser tests. Provides utilities for loading,
 // unloading, and installing extensions.
@@ -249,6 +252,10 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest,
 
   // Make the current channel "dev" for the duration of the test.
   extensions::Feature::ScopedCurrentChannel current_channel_;
+
+  // Disable external install UI.
+  extensions::FeatureSwitch::ScopedOverride
+      override_prompt_for_external_extensions_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_BROWSERTEST_H_

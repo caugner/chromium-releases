@@ -17,7 +17,6 @@
 #include <gdk/gdk.h>
 #endif
 
-class BrowserAccessibilityManager;
 class GURL;
 
 namespace gfx {
@@ -27,6 +26,7 @@ class Size;
 
 namespace content {
 
+class BrowserAccessibilityManager;
 class RenderWidgetHost;
 
 // RenderWidgetHostView is an interface implemented by an object that acts as
@@ -147,6 +147,7 @@ class CONTENT_EXPORT RenderWidgetHostView {
 
 #if defined(OS_ANDROID)
   virtual void StartContentIntent(const GURL& content_url) = 0;
+  virtual void SetCachedBackgroundColor(SkColor color) = 0;
 #endif
 
   // Subclasses should override this method to do what is appropriate to set

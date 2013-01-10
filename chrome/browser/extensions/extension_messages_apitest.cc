@@ -5,8 +5,10 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
@@ -35,7 +37,8 @@ class MessageSender : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
     extensions::EventRouter* event_router =
-        content::Source<Profile>(source).ptr()->GetExtensionEventRouter();
+        extensions::ExtensionSystem::Get(
+            content::Source<Profile>(source).ptr())->event_router();
 
     // Sends four messages to the extension. All but the third message sent
     // from the origin http://b.com/ are supposed to arrive.
@@ -89,4 +92,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingExternal) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingEventURL) {
   MessageSender sender;
   ASSERT_TRUE(RunExtensionTest("messaging/event_url")) << message_;
+}
+
+// Tests connecting from a panel to its extension.
+class PanelMessagingTest : public ExtensionApiTest {
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    ExtensionApiTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnablePanels);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(PanelMessagingTest, MessagingPanel) {
+  ASSERT_TRUE(RunExtensionTest("messaging/connect_panel")) << message_;
 }

@@ -38,8 +38,8 @@ class InvalidatorFactory {
  private:
   const notifier::NotifierOptions notifier_options_;
   const std::string client_info_;
-  const InvalidationVersionMap initial_max_invalidation_versions_;
-  const std::string initial_invalidation_state_;
+  const InvalidationStateMap initial_invalidation_state_map_;
+  const std::string invalidation_bootstrap_data_;
   const WeakHandle<InvalidationStateTracker>
       invalidation_state_tracker_;
 };

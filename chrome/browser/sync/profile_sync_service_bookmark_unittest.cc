@@ -18,11 +18,11 @@
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
 #include "chrome/browser/sync/glue/data_type_error_handler.h"
@@ -38,7 +38,6 @@
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/syncable/mutable_entry.h"  // TODO(tim): Remove. Bug 131130.
-#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -81,24 +80,19 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
       uber_root.InitByRootLookup();
 
       syncer::ReadNode root(&trans);
-      root_exists = root.InitByTagLookup(
-          ProfileSyncServiceTestHelper::GetTagForType(type)) ==
-              BaseNode::INIT_OK;
+      root_exists = (root.InitByTagLookup(syncer::ModelTypeToRootTag(type)) ==
+                     BaseNode::INIT_OK);
     }
 
     if (!root_exists) {
-      bool created = ProfileSyncServiceTestHelper::CreateRoot(
-          type,
-          user_share_,
-          &id_factory_);
-      if (!created)
+      if (!syncer::TestUserShare::CreateRoot(type, user_share_))
         return false;
     }
 
     syncer::WriteTransaction trans(FROM_HERE, user_share_);
     syncer::ReadNode root(&trans);
     EXPECT_EQ(BaseNode::INIT_OK, root.InitByTagLookup(
-        ProfileSyncServiceTestHelper::GetTagForType(type)));
+        syncer::ModelTypeToRootTag(type)));
 
     // First, try to find a node with the title among the root's children.
     // This will be the case if we are testing model persistence, and
@@ -136,7 +130,6 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
 
  private:
   syncer::UserShare* user_share_;
-  syncer::TestIdFactory id_factory_;
 };
 
 namespace {
@@ -255,10 +248,19 @@ class FakeServerChange {
     return old_parent_id;
   }
 
+  void ModifyCreationTime(int64 id, int64 creation_time_us) {
+    syncer::WriteNode node(trans_);
+    ASSERT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(id));
+    sync_pb::BookmarkSpecifics specifics = node.GetBookmarkSpecifics();
+    specifics.set_creation_time_us(creation_time_us);
+    node.SetBookmarkSpecifics(specifics);
+    SetModified(id);
+  }
+
   // Pass the fake change list to |service|.
   void ApplyPendingChanges(ChangeProcessor* processor) {
     processor->ApplyChangesFromSyncModel(
-        trans_, syncer::ImmutableChangeRecordList(&changes_));
+        trans_, 0, syncer::ImmutableChangeRecordList(&changes_));
   }
 
   const syncer::ChangeRecordList& changes() {
@@ -384,7 +386,6 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   }
 
   void StopSync() {
-    change_processor_->Stop();
     change_processor_.reset();
     syncer::SyncError error = model_associator_->DisassociateModels();
     EXPECT_FALSE(error.IsSet());
@@ -981,18 +982,30 @@ struct TestData {
 // duplication.
 class ProfileSyncServiceBookmarkTestWithData
     : public ProfileSyncServiceBookmarkTest {
+ public:
+  ProfileSyncServiceBookmarkTestWithData();
+
  protected:
   // Populates or compares children of the given bookmark node from/with the
-  // given test data array with the given size.
+  // given test data array with the given size. |running_count| is updated as
+  // urls are added. It is used to set the creation date (or test the creation
+  // date for CompareWithTestData()).
   void PopulateFromTestData(const BookmarkNode* node,
                             const TestData* data,
-                            int size);
+                            int size,
+                            int* running_count);
   void CompareWithTestData(const BookmarkNode* node,
                            const TestData* data,
-                           int size);
+                           int size,
+                           int* running_count);
 
   void ExpectBookmarkModelMatchesTestData();
   void WriteTestDataToBookmarkModel();
+
+ private:
+  const base::Time start_time_;
+
+  DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceBookmarkTestWithData);
 };
 
 namespace {
@@ -1101,15 +1114,27 @@ static TestData kF6Children[] = {
 
 }  // anonymous namespace.
 
+ProfileSyncServiceBookmarkTestWithData::
+ProfileSyncServiceBookmarkTestWithData()
+    : start_time_(base::Time::Now()) {
+}
+
 void ProfileSyncServiceBookmarkTestWithData::PopulateFromTestData(
-    const BookmarkNode* node, const TestData* data, int size) {
+    const BookmarkNode* node,
+    const TestData* data,
+    int size,
+    int* running_count) {
   DCHECK(node);
   DCHECK(data);
   DCHECK(node->is_folder());
   for (int i = 0; i < size; ++i) {
     const TestData& item = data[i];
     if (item.url) {
-      model_->AddURL(node, i, WideToUTF16Hack(item.title), GURL(item.url));
+      const base::Time add_time =
+          start_time_ + base::TimeDelta::FromMinutes(*running_count);
+      model_->AddURLWithCreationTime(node, i, WideToUTF16Hack(item.title),
+                                     GURL(item.url), add_time);
+      (*running_count)++;
     } else {
       model_->AddFolder(node, i, WideToUTF16Hack(item.title));
     }
@@ -1117,7 +1142,10 @@ void ProfileSyncServiceBookmarkTestWithData::PopulateFromTestData(
 }
 
 void ProfileSyncServiceBookmarkTestWithData::CompareWithTestData(
-    const BookmarkNode* node, const TestData* data, int size) {
+    const BookmarkNode* node,
+    const TestData* data,
+    int size,
+    int* running_count) {
   DCHECK(node);
   DCHECK(data);
   DCHECK(node->is_folder());
@@ -1133,6 +1161,11 @@ void ProfileSyncServiceBookmarkTestWithData::CompareWithTestData(
       EXPECT_FALSE(child_node->is_folder());
       EXPECT_TRUE(child_node->is_url());
       EXPECT_EQ(child_node->url(), test_node.url());
+      const base::Time expected_time =
+          start_time_ + base::TimeDelta::FromMinutes(*running_count);
+      EXPECT_EQ(expected_time.ToInternalValue(),
+                child_node->date_added().ToInternalValue());
+      (*running_count)++;
     } else {
       EXPECT_TRUE(child_node->is_folder());
       EXPECT_FALSE(child_node->is_url());
@@ -1144,41 +1177,47 @@ void ProfileSyncServiceBookmarkTestWithData::CompareWithTestData(
 // use the same seed to generate the same sequence.
 void ProfileSyncServiceBookmarkTestWithData::WriteTestDataToBookmarkModel() {
   const BookmarkNode* bookmarks_bar_node = model_->bookmark_bar_node();
+  int count = 0;
   PopulateFromTestData(bookmarks_bar_node,
                        kBookmarkBarChildren,
-                       arraysize(kBookmarkBarChildren));
+                       arraysize(kBookmarkBarChildren),
+                       &count);
 
   ASSERT_GE(bookmarks_bar_node->child_count(), 4);
   const BookmarkNode* f1_node = bookmarks_bar_node->GetChild(1);
-  PopulateFromTestData(f1_node, kF1Children, arraysize(kF1Children));
+  PopulateFromTestData(f1_node, kF1Children, arraysize(kF1Children), &count);
   const BookmarkNode* f2_node = bookmarks_bar_node->GetChild(3);
-  PopulateFromTestData(f2_node, kF2Children, arraysize(kF2Children));
+  PopulateFromTestData(f2_node, kF2Children, arraysize(kF2Children), &count);
 
   const BookmarkNode* other_bookmarks_node = model_->other_node();
   PopulateFromTestData(other_bookmarks_node,
                        kOtherBookmarkChildren,
-                       arraysize(kOtherBookmarkChildren));
+                       arraysize(kOtherBookmarkChildren),
+                       &count);
 
   ASSERT_GE(other_bookmarks_node->child_count(), 6);
   const BookmarkNode* f3_node = other_bookmarks_node->GetChild(0);
-  PopulateFromTestData(f3_node, kF3Children, arraysize(kF3Children));
+  PopulateFromTestData(f3_node, kF3Children, arraysize(kF3Children), &count);
   const BookmarkNode* f4_node = other_bookmarks_node->GetChild(3);
-  PopulateFromTestData(f4_node, kF4Children, arraysize(kF4Children));
+  PopulateFromTestData(f4_node, kF4Children, arraysize(kF4Children), &count);
   const BookmarkNode* dup_node = other_bookmarks_node->GetChild(4);
-  PopulateFromTestData(dup_node, kDup1Children, arraysize(kDup1Children));
+  PopulateFromTestData(dup_node, kDup1Children, arraysize(kDup1Children),
+                       &count);
   dup_node = other_bookmarks_node->GetChild(5);
-  PopulateFromTestData(dup_node, kDup2Children, arraysize(kDup2Children));
+  PopulateFromTestData(dup_node, kDup2Children, arraysize(kDup2Children),
+                       &count);
 
   const BookmarkNode* mobile_bookmarks_node = model_->mobile_node();
   PopulateFromTestData(mobile_bookmarks_node,
                        kMobileBookmarkChildren,
-                       arraysize(kMobileBookmarkChildren));
+                       arraysize(kMobileBookmarkChildren),
+                       &count);
 
   ASSERT_GE(mobile_bookmarks_node->child_count(), 3);
   const BookmarkNode* f5_node = mobile_bookmarks_node->GetChild(0);
-  PopulateFromTestData(f5_node, kF5Children, arraysize(kF5Children));
+  PopulateFromTestData(f5_node, kF5Children, arraysize(kF5Children), &count);
   const BookmarkNode* f6_node = mobile_bookmarks_node->GetChild(1);
-  PopulateFromTestData(f6_node, kF6Children, arraysize(kF6Children));
+  PopulateFromTestData(f6_node, kF6Children, arraysize(kF6Children), &count);
 
   ExpectBookmarkModelMatchesTestData();
 }
@@ -1186,41 +1225,47 @@ void ProfileSyncServiceBookmarkTestWithData::WriteTestDataToBookmarkModel() {
 void ProfileSyncServiceBookmarkTestWithData::
     ExpectBookmarkModelMatchesTestData() {
   const BookmarkNode* bookmark_bar_node = model_->bookmark_bar_node();
+  int count = 0;
   CompareWithTestData(bookmark_bar_node,
                       kBookmarkBarChildren,
-                      arraysize(kBookmarkBarChildren));
+                      arraysize(kBookmarkBarChildren),
+                      &count);
 
   ASSERT_GE(bookmark_bar_node->child_count(), 4);
   const BookmarkNode* f1_node = bookmark_bar_node->GetChild(1);
-  CompareWithTestData(f1_node, kF1Children, arraysize(kF1Children));
+  CompareWithTestData(f1_node, kF1Children, arraysize(kF1Children), &count);
   const BookmarkNode* f2_node = bookmark_bar_node->GetChild(3);
-  CompareWithTestData(f2_node, kF2Children, arraysize(kF2Children));
+  CompareWithTestData(f2_node, kF2Children, arraysize(kF2Children), &count);
 
   const BookmarkNode* other_bookmarks_node = model_->other_node();
   CompareWithTestData(other_bookmarks_node,
                       kOtherBookmarkChildren,
-                      arraysize(kOtherBookmarkChildren));
+                      arraysize(kOtherBookmarkChildren),
+                      &count);
 
   ASSERT_GE(other_bookmarks_node->child_count(), 6);
   const BookmarkNode* f3_node = other_bookmarks_node->GetChild(0);
-  CompareWithTestData(f3_node, kF3Children, arraysize(kF3Children));
+  CompareWithTestData(f3_node, kF3Children, arraysize(kF3Children), &count);
   const BookmarkNode* f4_node = other_bookmarks_node->GetChild(3);
-  CompareWithTestData(f4_node, kF4Children, arraysize(kF4Children));
+  CompareWithTestData(f4_node, kF4Children, arraysize(kF4Children), &count);
   const BookmarkNode* dup_node = other_bookmarks_node->GetChild(4);
-  CompareWithTestData(dup_node, kDup1Children, arraysize(kDup1Children));
+  CompareWithTestData(dup_node, kDup1Children, arraysize(kDup1Children),
+                      &count);
   dup_node = other_bookmarks_node->GetChild(5);
-  CompareWithTestData(dup_node, kDup2Children, arraysize(kDup2Children));
+  CompareWithTestData(dup_node, kDup2Children, arraysize(kDup2Children),
+                      &count);
 
   const BookmarkNode* mobile_bookmarks_node = model_->mobile_node();
   CompareWithTestData(mobile_bookmarks_node,
                       kMobileBookmarkChildren,
-                      arraysize(kMobileBookmarkChildren));
+                      arraysize(kMobileBookmarkChildren),
+                      &count);
 
   ASSERT_GE(mobile_bookmarks_node->child_count(), 3);
   const BookmarkNode* f5_node = mobile_bookmarks_node->GetChild(0);
-  CompareWithTestData(f5_node, kF5Children, arraysize(kF5Children));
+  CompareWithTestData(f5_node, kF5Children, arraysize(kF5Children), &count);
   const BookmarkNode* f6_node = mobile_bookmarks_node->GetChild(1);
-  CompareWithTestData(f6_node, kF6Children, arraysize(kF6Children));
+  CompareWithTestData(f6_node, kF6Children, arraysize(kF6Children), &count);
 
 }
 
@@ -1500,6 +1545,54 @@ TEST_F(ProfileSyncServiceBookmarkTest, AssociationState) {
   EXPECT_EQ(1, observer.get_completed());
 
   model_->RemoveObserver(&observer);
+}
+
+// Verify that the creation_time_us changes are applied in the local model at
+// association time and update time.
+TEST_F(ProfileSyncServiceBookmarkTestWithData, UpdateDateAdded) {
+  LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
+  WriteTestDataToBookmarkModel();
+
+  // Start and stop sync in order to create bookmark nodes in the sync db.
+  StartSync();
+  StopSync();
+
+  // Modify the date_added field of a bookmark so it doesn't match with
+  // the sync data.
+  const BookmarkNode* bookmark_bar_node = model_->bookmark_bar_node();
+  int remove_index = 2;
+  ASSERT_GT(bookmark_bar_node->child_count(), remove_index);
+  const BookmarkNode* child_node = bookmark_bar_node->GetChild(remove_index);
+  ASSERT_TRUE(child_node);
+  EXPECT_TRUE(child_node->is_url());
+  model_->SetDateAdded(child_node, base::Time::FromInternalValue(10));
+
+  StartSync();
+
+  // Everything should be back in sync after model association.
+  ExpectBookmarkModelMatchesTestData();
+  ExpectModelMatch();
+
+  // Now trigger a change while syncing. We add a new bookmark, sync it, then
+  // updates it's creation time.
+  syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  FakeServerChange adds(&trans);
+  const std::wstring kTitle = L"Some site";
+  const std::string kUrl = "http://www.whatwhat.yeah/";
+  const int kCreationTime = 30;
+  int64 id = adds.AddURL(kTitle, kUrl,
+                         bookmark_bar_id(), 0);
+  adds.ApplyPendingChanges(change_processor_.get());
+  FakeServerChange updates(&trans);
+  updates.ModifyCreationTime(id, kCreationTime);
+  updates.ApplyPendingChanges(change_processor_.get());
+
+  const BookmarkNode* node = model_->bookmark_bar_node()->GetChild(0);
+  ASSERT_TRUE(node);
+  EXPECT_TRUE(node->is_url());
+  EXPECT_EQ(WideToUTF16Hack(kTitle), node->GetTitle());
+  EXPECT_EQ(kUrl, node->url().possibly_invalid_spec());
+  EXPECT_EQ(node->date_added(), base::Time::FromInternalValue(30));
 }
 
 }  // namespace

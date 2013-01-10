@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/message_loop_proxy.h"
 #include "base/path_service.h"
+#include "base/prefs/testing_pref_store.h"
 #include "base/run_loop.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
@@ -26,6 +27,7 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
+#include "chrome/browser/geolocation/chrome_geolocation_permission_context_factory.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -37,7 +39,6 @@
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/policy/user_cloud_policy_manager.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/testing_pref_store.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/protector/protector_service_factory.h"
@@ -300,6 +301,11 @@ TestingProfile::~TestingProfile() {
 
   DestroyTopSites();
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  if (user_cloud_policy_manager_)
+    user_cloud_policy_manager_->Shutdown();
+#endif
+
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
 }
@@ -510,24 +516,8 @@ Profile* TestingProfile::GetOriginalProfile() {
   return this;
 }
 
-VisitedLinkMaster* TestingProfile::GetVisitedLinkMaster() {
-  return NULL;
-}
-
 ExtensionService* TestingProfile::GetExtensionService() {
   return extensions::ExtensionSystem::Get(this)->extension_service();
-}
-
-extensions::UserScriptMaster* TestingProfile::GetUserScriptMaster() {
-  return extensions::ExtensionSystem::Get(this)->user_script_master();
-}
-
-ExtensionProcessManager* TestingProfile::GetExtensionProcessManager() {
-  return extensions::ExtensionSystem::Get(this)->process_manager();
-}
-
-extensions::EventRouter* TestingProfile::GetExtensionEventRouter() {
-  return extensions::ExtensionSystem::Get(this)->event_router();
 }
 
 void TestingProfile::SetExtensionSpecialStoragePolicy(
@@ -551,6 +541,11 @@ net::CookieMonster* TestingProfile::GetCookieMonster() {
 
 policy::UserCloudPolicyManager* TestingProfile::GetUserCloudPolicyManager() {
   return user_cloud_policy_manager_.get();
+}
+
+policy::ManagedModePolicyProvider*
+TestingProfile::GetManagedModePolicyProvider() {
+  return NULL;
 }
 
 policy::PolicyService* TestingProfile::GetPolicyService() {
@@ -613,10 +608,10 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContextForRenderProcess(
   ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(this)->extension_service();
   if (extension_service) {
-    const extensions::Extension* installed_app = extension_service->
-        GetInstalledAppForRenderer(renderer_child_id);
-    if (installed_app != NULL && installed_app->is_storage_isolated())
-      return GetRequestContextForStoragePartition(installed_app->id());
+    const extensions::Extension* extension =
+        extension_service->GetIsolatedAppForRenderer(renderer_child_id);
+    if (extension)
+      return GetRequestContextForStoragePartition(extension->id());
   }
 
   content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
@@ -705,7 +700,7 @@ content::GeolocationPermissionContext*
 TestingProfile::GetGeolocationPermissionContext() {
   if (!geolocation_permission_context_.get()) {
     geolocation_permission_context_ =
-        new ChromeGeolocationPermissionContext(this);
+        ChromeGeolocationPermissionContextFactory::Create(this);
   }
   return geolocation_permission_context_.get();
 }
@@ -729,10 +724,6 @@ std::wstring TestingProfile::GetID() {
 
 void TestingProfile::SetID(const std::wstring& id) {
   id_ = id;
-}
-
-bool TestingProfile::DidLastSessionExitCleanly() {
-  return last_session_exited_cleanly_;
 }
 
 bool TestingProfile::IsSameProfile(Profile *p) {
@@ -796,6 +787,10 @@ quota::SpecialStoragePolicy* TestingProfile::GetSpecialStoragePolicy() {
 
 bool TestingProfile::WasCreatedByVersionOrLater(const std::string& version) {
   return true;
+}
+
+Profile::ExitType TestingProfile::GetLastSessionExitType() {
+  return last_session_exited_cleanly_ ? EXIT_NORMAL : EXIT_CRASHED;
 }
 
 base::Callback<ChromeURLDataManagerBackend*(void)>

@@ -39,8 +39,6 @@ chrome/app/chromium_strings.grd
 chrome/app/generated_resources.grd
 # String 'copyright' used in resources.
 chrome/app/google_chrome_strings.grd
-# String 'copyright' used in resources.
-chrome/app/theme/chromium/BRANDING
 # Copyright Netscape Communications Corporation; MPL, GPL v2 or LGPL v2
 # license. This third-party code is taken from Mozilla, the license for which
 # we already pick up from third_party/npapi/.
@@ -100,7 +98,7 @@ chrome/browser/resources/help/help.html
 # String 'copyright' used in code.
 chrome/browser/resources/shared/css/about_version.css
 # String 'copyright' used in code.
-chrome/browser/ui/webui/about_ui.cc
+chrome/browser/ui/webui/version_ui.cc
 # String 'copyright' used in code.
 chrome/browser/ui/webui/help/help_handler.cc
 # Copyright Google Inc; no license. Example code only.
@@ -113,11 +111,9 @@ chrome_frame/cfinstall/examples/simple.html
 # on Android.
 chrome_frame/CFInstance.js
 # String 'copyright' used in resources.
-chrome_frame/chrome_frame_helper_version.rc
+chrome_frame/chrome_frame_version.rc.version
 # String 'copyright' used in resources.
-chrome_frame/chrome_launcher_version.rc
-# String 'copyright' used in resources.
-chrome_frame/chrome_tab_version.rc
+chrome_frame/npchrome_frame_version.rc.version
 # Copyright Mark Mentovai; MPL, GPL v2 or LGPL v2 license. Not used on Android.
 chrome/installer/mac/pkg-dmg
 # String 'copyright' used in resources.
@@ -215,7 +211,7 @@ remoting/branding_Chromium
 # String 'copyright' used in project file.
 remoting/host/installer/mac/uninstaller/remoting_uninstaller-Info.plist
 # String 'copyright' used in project file.
-remoting/host/me2me_preference_pane-Info.plist
+remoting/host/mac/me2me_preference_pane-Info.plist
 # String 'copyright' used in project file.
 remoting/host/remoting_me2me_host-Info.plist
 # String 'copyright' used in file.

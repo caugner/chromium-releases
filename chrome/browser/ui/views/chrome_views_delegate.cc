@@ -17,7 +17,6 @@
 #include "chrome/common/pref_names.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
-#include "ui/views/views_switches.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget.h"
 
@@ -26,11 +25,8 @@
 #endif
 
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#include "ui/views/widget/native_widget_aura.h"
 #include "ui/views/widget/desktop_native_widget_aura.h"
-#endif
-
-#if defined(USE_AURA)
-#include "ui/views/widget/desktop_native_widget_helper_aura.h"
 #endif
 
 #if defined(USE_ASH)
@@ -78,8 +74,8 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetInteger("bottom", bounds.bottom());
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
-  gfx::Rect work_area(
-      gfx::Screen::GetDisplayMatching(bounds).work_area());
+  gfx::Rect work_area(gfx::Screen::GetScreenFor(window->GetNativeView())->
+      GetDisplayMatching(bounds).work_area());
   window_preferences->SetInteger("work_area_left", work_area.x());
   window_preferences->SetInteger("work_area_top", work_area.y());
   window_preferences->SetInteger("work_area_right", work_area.right());
@@ -145,8 +141,14 @@ views::NonClientFrameView* ChromeViewsDelegate::CreateDefaultNonClientFrameView(
 
 bool ChromeViewsDelegate::UseTransparentWindows() const {
 #if defined(USE_ASH)
-  // Ash uses transparent window frames above.
+  // TODO(scottmg): http://crbug.com/133312. This needs context to determine
+  // if it's desktop or ash.
+#if defined(OS_CHROMEOS)
   return true;
+#else
+  NOTIMPLEMENTED();
+  return false;
+#endif
 #else
   return false;
 #endif
@@ -164,20 +166,6 @@ int ChromeViewsDelegate::GetDispositionForEvent(int event_flags) {
   return chrome::DispositionFromEventFlags(event_flags);
 }
 
-#if defined(USE_AURA)
-views::NativeWidgetHelperAura* ChromeViewsDelegate::CreateNativeWidgetHelper(
-    views::NativeWidgetAura* native_widget) {
-  // TODO(beng): insufficient but currently necessary. http://crbug.com/133312
-#if defined(USE_ASH)
-  if (!chrome::ShouldOpenAshOnStartup())
-#endif
-    return new views::DesktopNativeWidgetHelperAura(native_widget);
-#if defined(USE_ASH)
-  return NULL;
-#endif
-}
-#endif
-
 content::WebContents* ChromeViewsDelegate::CreateWebContents(
     content::BrowserContext* browser_context,
     content::SiteInstance* site_instance) {
@@ -185,11 +173,14 @@ content::WebContents* ChromeViewsDelegate::CreateWebContents(
 }
 
 views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(
+    views::Widget::InitParams::Type type,
     views::internal::NativeWidgetDelegate* delegate,
     gfx::NativeView parent) {
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-        views::switches::kDesktopAura))
+  if (parent && type != views::Widget::InitParams::TYPE_MENU)
+    return new views::NativeWidgetAura(delegate);
+  if (chrome::GetHostDesktopTypeForNativeView(parent) ==
+      chrome::HOST_DESKTOP_TYPE_NATIVE)
     return new views::DesktopNativeWidgetAura(delegate);
 #endif
   return NULL;

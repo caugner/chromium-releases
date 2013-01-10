@@ -18,7 +18,10 @@ import base64
 import BaseHTTPServer
 import cgi
 import errno
+import hashlib
 import httplib
+import json
+import logging
 import minica
 import optparse
 import os
@@ -36,25 +39,20 @@ import urlparse
 import warnings
 import zlib
 
-# Ignore deprecation warnings, they make our output more cluttered.
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
 import echo_message
+
+# TODO(toyoshim): Some try bots for pyauto don't check out pywebsocket repos
+# unexpectedly. pyauto doesn't use WebSocket module, so just ignore
+# ImportError as a temporal workaround.
+# http://crbug.com/155918
+try:
+  from mod_pywebsocket.standalone import WebSocketServer
+except ImportError:
+  pass
+
 import pyftpdlib.ftpserver
 import tlslite
 import tlslite.api
-
-try:
-  import hashlib
-  _new_md5 = hashlib.md5
-except ImportError:
-  import md5
-  _new_md5 = md5.new
-
-try:
-  import json
-except ImportError:
-  import simplejson as json
 
 if sys.platform == 'win32':
   import msvcrt
@@ -65,12 +63,39 @@ SERVER_SYNC = 2
 SERVER_TCP_ECHO = 3
 SERVER_UDP_ECHO = 4
 SERVER_BASIC_AUTH_PROXY = 5
+SERVER_WEBSOCKET = 6
+
+# Default request queue size for WebSocketServer.
+_DEFAULT_REQUEST_QUEUE_SIZE = 128
 
 # Using debug() seems to cause hangs on XP: see http://crbug.com/64515 .
 debug_output = sys.stderr
-def debug(str):
-  debug_output.write(str + "\n")
+def debug(string):
+  debug_output.write(string + "\n")
   debug_output.flush()
+
+class WebSocketOptions:
+  """Holds options for WebSocketServer."""
+
+  def __init__(self, host, port, data_dir):
+    self.request_queue_size = _DEFAULT_REQUEST_QUEUE_SIZE
+    self.server_host = host
+    self.port = port
+    self.websock_handlers = data_dir
+    self.scan_dir = None
+    self.allow_handlers_outside_root_dir = False
+    self.websock_handlers_map_file = None
+    self.cgi_directories = []
+    self.is_executable_method = None
+    self.allow_draft75 = False
+    self.strict = True
+
+    self.use_tls = False
+    self.private_key = None
+    self.certificate = None
+    self.tls_client_auth = False
+    self.tls_client_ca = None
+    self.use_basic_auth = False
 
 class RecordingSSLSessionCache(object):
   """RecordingSSLSessionCache acts as a TLS session cache and maintains a log of
@@ -91,7 +116,7 @@ class ClientRestrictingServerMixIn:
   """Implements verify_request to limit connections to our configured IP
   address."""
 
-  def verify_request(self, request, client_address):
+  def verify_request(self, _request, client_address):
     return client_address[0] == self.server_address[0]
 
 
@@ -142,10 +167,10 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
     self.tls_intolerant = tls_intolerant
 
     for ca_file in ssl_client_cas:
-        s = open(ca_file).read()
-        x509 = tlslite.api.X509()
-        x509.parse(s)
-        self.ssl_client_cas.append(x509.subject)
+      s = open(ca_file).read()
+      x509 = tlslite.api.X509()
+      x509.parse(s)
+      self.ssl_client_cas.append(x509.subject)
     self.ssl_handshake_settings = tlslite.api.HandshakeSettings()
     if ssl_bulk_ciphers is not None:
       self.ssl_handshake_settings.cipherNames = ssl_bulk_ciphers
@@ -160,6 +185,7 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
 
   def handshake(self, tlsConnection):
     """Creates the SSL connection."""
+
     try:
       tlsConnection.handshakeServer(certChain=self.cert_chain,
                                     privateKey=self.private_key,
@@ -205,6 +231,7 @@ class SyncHTTPServer(ClientRestrictingServerMixIn, StoppableHTTPServer):
 
     Copied from SocketServer._handle_request_noblock().
     """
+
     try:
       request, client_address = self.get_request()
     except socket.error:
@@ -212,7 +239,7 @@ class SyncHTTPServer(ClientRestrictingServerMixIn, StoppableHTTPServer):
     if self.verify_request(request, client_address):
       try:
         self.process_request(request, client_address)
-      except:
+      except Exception:
         self.handle_error(request, client_address)
         self.close_request(request)
 
@@ -231,6 +258,7 @@ class SyncHTTPServer(ClientRestrictingServerMixIn, StoppableHTTPServer):
 
       Adapted from asyncore.read() et al.
       """
+
       xmpp_connection = socket_map.get(fd)
       # This could happen if a previous handler call caused fd to get
       # removed from socket_map.
@@ -294,6 +322,7 @@ class TCPEchoServer(ClientRestrictingServerMixIn, SocketServer.TCPServer):
 
   def server_bind(self):
     """Override server_bind to store the server name."""
+
     SocketServer.TCPServer.server_bind(self)
     host, port = self.socket.getsockname()[:2]
     self.server_name = socket.getfqdn(host)
@@ -312,6 +341,7 @@ class UDPEchoServer(ClientRestrictingServerMixIn, SocketServer.UDPServer):
 
   def server_bind(self):
     """Override server_bind to store the server name."""
+
     SocketServer.UDPServer.server_bind(self)
     host, port = self.socket.getsockname()[:2]
     self.server_name = socket.getfqdn(host)
@@ -457,7 +487,7 @@ class TestPageHandler(BasePageHandler):
     """Returns the mime type for the specified file_name. So far it only looks
     at the file extension."""
 
-    (shortname, extension) = os.path.splitext(file_name.split("?")[0])
+    (_shortname, extension) = os.path.splitext(file_name.split("?")[0])
     if len(extension) == 0:
       # no extension.
       return self._default_mime_type
@@ -692,15 +722,18 @@ class TestPageHandler(BasePageHandler):
 
   def EchoHeader(self):
     """This handler echoes back the value of a specific request header."""
+
     return self.EchoHeaderHelper("/echoheader")
 
-    """This function echoes back the value of a specific request header"""
-    """while allowing caching for 16 hours."""
   def EchoHeaderCache(self):
+    """This function echoes back the value of a specific request header while
+    allowing caching for 16 hours."""
+
     return self.EchoHeaderHelper("/echoheadercache")
 
   def EchoHeaderHelper(self, echo_header):
     """This function echoes back the value of the request header passed in."""
+
     if not self._ShouldHandleRequest(echo_header):
       return False
 
@@ -869,6 +902,7 @@ class TestPageHandler(BasePageHandler):
 
     If the parameters are not present, |data| is returned.
     """
+
     query_dict = cgi.parse_qs(query_parameters)
     replace_text_values = query_dict.get('replace_text', [])
     for replace_text_value in replace_text_values:
@@ -952,6 +986,7 @@ class TestPageHandler(BasePageHandler):
   def FileHandler(self):
     """This handler sends the contents of the requested file.  Wow, it's like
     a real webserver!"""
+
     prefix = self.server.file_root_url
     if not self.path.startswith(prefix):
       return False
@@ -959,6 +994,7 @@ class TestPageHandler(BasePageHandler):
 
   def PostOnlyFileHandler(self):
     """This handler sends the contents of the requested file on a POST."""
+
     prefix = urlparse.urljoin(self.server.file_root_url, 'post/')
     if not self.path.startswith(prefix):
       return False
@@ -1032,20 +1068,20 @@ class TestPageHandler(BasePageHandler):
       # Could be more generic once we support mime-type sniffing, but for
       # now we need to set it explicitly.
 
-      range = self.headers.get('Range')
-      if range and range.startswith('bytes='):
-        # Note this doesn't handle all valid byte range values (i.e. left
-        # open ended ones), just enough for what we needed so far.
-        range = range[6:].split('-')
-        start = int(range[0])
-        if range[1]:
-          end = int(range[1])
+      range_header = self.headers.get('Range')
+      if range_header and range_header.startswith('bytes='):
+        # Note this doesn't handle all valid byte range_header values (i.e.
+        # left open ended ones), just enough for what we needed so far.
+        range_header = range_header[6:].split('-')
+        start = int(range_header[0])
+        if range_header[1]:
+          end = int(range_header[1])
         else:
           end = len(data) - 1
 
         self.send_response(206)
-        content_range = 'bytes ' + str(start) + '-' + str(end) + '/' + \
-                        str(len(data))
+        content_range = ('bytes ' + str(start) + '-' + str(end) + '/' +
+                         str(len(data)))
         self.send_header('Content-Range', content_range)
         data = data[start: end + 1]
       else:
@@ -1097,7 +1133,7 @@ class TestPageHandler(BasePageHandler):
       num_cookies = 0
     self.send_response(200)
     self.send_header('', 'text/html')
-    for i in range(0, num_cookies):
+    for _i in range(0, num_cookies):
       self.send_header('Set-Cookie', 'a=')
     self.end_headers()
     self.wfile.write('%d cookies were sent' % num_cookies)
@@ -1254,6 +1290,7 @@ class TestPageHandler(BasePageHandler):
 
   def GDataAuthHandler(self):
     """This handler verifies the Authentication header for GData requests."""
+
     if not self.server.gdata_auth_token:
       # --auth-token is not specified, not the test case for GData.
       return False
@@ -1285,6 +1322,7 @@ class TestPageHandler(BasePageHandler):
   def GDataDocumentsFeedQueryHandler(self):
     """This handler verifies if required parameters are properly
     specified for the GData DocumentsFeed request."""
+
     if not self.server.gdata_auth_token:
       # --auth-token is not specified, not the test case for GData.
       return False
@@ -1292,7 +1330,7 @@ class TestPageHandler(BasePageHandler):
     if not self._ShouldHandleRequest('/files/chromeos/gdata/root_feed.json'):
       return False
 
-    (path, question, query_params) = self.path.partition('?')
+    (_path, _question, query_params) = self.path.partition('?')
     self.query_params = urlparse.parse_qs(query_params)
 
     if 'v' not in self.query_params:
@@ -1306,20 +1344,20 @@ class TestPageHandler(BasePageHandler):
     return False
 
   def GetNonce(self, force_reset=False):
-   """Returns a nonce that's stable per request path for the server's lifetime.
+    """Returns a nonce that's stable per request path for the server's lifetime.
+    This is a fake implementation. A real implementation would only use a given
+    nonce a single time (hence the name n-once). However, for the purposes of
+    unittesting, we don't care about the security of the nonce.
 
-   This is a fake implementation. A real implementation would only use a given
-   nonce a single time (hence the name n-once). However, for the purposes of
-   unittesting, we don't care about the security of the nonce.
+    Args:
+      force_reset: Iff set, the nonce will be changed. Useful for testing the
+          "stale" response.
+    """
 
-   Args:
-     force_reset: Iff set, the nonce will be changed. Useful for testing the
-         "stale" response.
-   """
-   if force_reset or not self.server.nonce_time:
-     self.server.nonce_time = time.time()
-   return _new_md5('privatekey%s%d' %
-                   (self.path, self.server.nonce_time)).hexdigest()
+    if force_reset or not self.server.nonce_time:
+      self.server.nonce_time = time.time()
+    return hashlib.md5('privatekey%s%d' %
+                       (self.path, self.server.nonce_time)).hexdigest()
 
   def AuthDigestHandler(self):
     """This handler tests 'Digest' authentication.
@@ -1328,12 +1366,13 @@ class TestPageHandler(BasePageHandler):
 
     A stale response is sent iff "stale" is present in the request path.
     """
+
     if not self._ShouldHandleRequest("/auth-digest"):
       return False
 
     stale = 'stale' in self.path
     nonce = self.GetNonce(force_reset=stale)
-    opaque = _new_md5('opaque').hexdigest()
+    opaque = hashlib.md5('opaque').hexdigest()
     password = 'secret'
     realm = 'testrealm'
 
@@ -1355,14 +1394,14 @@ class TestPageHandler(BasePageHandler):
 
       # Check the 'response' value and make sure it matches our magic hash.
       # See http://www.ietf.org/rfc/rfc2617.txt
-      hash_a1 = _new_md5(
+      hash_a1 = hashlib.md5(
           ':'.join([pairs['username'], realm, password])).hexdigest()
-      hash_a2 = _new_md5(':'.join([self.command, pairs['uri']])).hexdigest()
+      hash_a2 = hashlib.md5(':'.join([self.command, pairs['uri']])).hexdigest()
       if 'qop' in pairs and 'nc' in pairs and 'cnonce' in pairs:
-        response = _new_md5(':'.join([hash_a1, nonce, pairs['nc'],
+        response = hashlib.md5(':'.join([hash_a1, nonce, pairs['nc'],
             pairs['cnonce'], pairs['qop'], hash_a2])).hexdigest()
       else:
-        response = _new_md5(':'.join([hash_a1, nonce, hash_a2])).hexdigest()
+        response = hashlib.md5(':'.join([hash_a1, nonce, hash_a2])).hexdigest()
 
       if pairs['response'] != response:
         raise Exception('wrong password')
@@ -1407,6 +1446,7 @@ class TestPageHandler(BasePageHandler):
   def SlowServerHandler(self):
     """Wait for the user suggested time before responding. The syntax is
     /slow?0.5 to wait for half a second."""
+
     if not self._ShouldHandleRequest("/slow"):
       return False
     query_char = self.path.find('?')
@@ -1431,6 +1471,7 @@ class TestPageHandler(BasePageHandler):
      - chunksNumber - number of chunks
     Example: /chunked?waitBeforeHeaders=1000&chunkSize=5&chunksNumber=5
     waits one second, then sends headers and five chunks five bytes each."""
+
     if not self._ShouldHandleRequest("/chunked"):
       return False
     query_char = self.path.find('?')
@@ -1447,7 +1488,7 @@ class TestPageHandler(BasePageHandler):
             chunkedSettings[keyValue[0]] = int(keyValue[1])
           except ValueError:
             pass
-    time.sleep(0.001 * chunkedSettings['waitBeforeHeaders']);
+    time.sleep(0.001 * chunkedSettings['waitBeforeHeaders'])
     self.protocol_version = 'HTTP/1.1' # Needed for chunked encoding
     self.send_response(200)
     self.send_header('Content-Type', 'text/plain')
@@ -1460,7 +1501,7 @@ class TestPageHandler(BasePageHandler):
       if i > 0:
         time.sleep(0.001 * chunkedSettings['waitBetweenChunks'])
       self.sendChunkHelp('*' * chunkedSettings['chunkSize'])
-      self.wfile.flush(); # Keep in mind that we start flushing only after 1kb.
+      self.wfile.flush() # Keep in mind that we start flushing only after 1kb.
     self.sendChunkHelp('')
     return True
 
@@ -1468,6 +1509,7 @@ class TestPageHandler(BasePageHandler):
     """Returns a string of html with the given content type.  E.g.,
     /contenttype?text/css returns an html file with the Content-Type
     header set to text/css."""
+
     if not self._ShouldHandleRequest("/contenttype"):
       return False
     query_char = self.path.find('?')
@@ -1477,11 +1519,12 @@ class TestPageHandler(BasePageHandler):
     self.send_response(200)
     self.send_header('Content-Type', content_type)
     self.end_headers()
-    self.wfile.write("<html>\n<body>\n<p>HTML text</p>\n</body>\n</html>\n");
+    self.wfile.write("<html>\n<body>\n<p>HTML text</p>\n</body>\n</html>\n")
     return True
 
   def NoContentHandler(self):
     """Returns a 204 No Content response."""
+
     if not self._ShouldHandleRequest("/nocontent"):
       return False
     self.send_response(204)
@@ -1521,7 +1564,7 @@ class TestPageHandler(BasePageHandler):
     if not self._ShouldHandleRequest(test_name):
       return False
 
-    query_char = self.path.find('?');
+    query_char = self.path.find('?')
     if query_char < 0 or len(self.path) <= query_char + 1:
       self.sendRedirectHelp(test_name)
       return True
@@ -1538,6 +1581,7 @@ class TestPageHandler(BasePageHandler):
 
   def MultipartHandler(self):
     """Send a multipart response (10 text/html pages)."""
+
     test_name = '/multipart'
     if not self._ShouldHandleRequest(test_name):
       return False
@@ -1562,6 +1606,7 @@ class TestPageHandler(BasePageHandler):
     """Send a multipart response (3 text/html pages) with a slight delay
     between each page.  This is similar to how some pages show status using
     multipart."""
+
     test_name = '/multipart-slow'
     if not self._ShouldHandleRequest(test_name):
       return False
@@ -1598,7 +1643,7 @@ class TestPageHandler(BasePageHandler):
     try:
       for (action, sessionID) in self.server.session_cache.log:
         self.wfile.write('%s\t%s\n' % (action, sessionID.encode('hex')))
-    except AttributeError, e:
+    except AttributeError:
       self.wfile.write('Pass --https-record-resume in order to use' +
                        ' this request')
     return True
@@ -1674,6 +1719,7 @@ class TestPageHandler(BasePageHandler):
 
   def DeviceManagementHandler(self):
     """Delegates to the device management service used for cloud policy."""
+
     if not self._ShouldHandleRequest("/device_management"):
       return False
 
@@ -1743,6 +1789,7 @@ class SyncPageHandler(BasePageHandler):
 
     The syncer sometimes checks server reachability by examining /time.
     """
+
     test_name = "/chromiumsync/time"
     if not self._ShouldHandleRequest(test_name):
       return False
@@ -1750,7 +1797,7 @@ class SyncPageHandler(BasePageHandler):
     # Chrome hates it if we send a response before reading the request.
     if self.headers.getheader('content-length'):
       length = int(self.headers.getheader('content-length'))
-      raw_request = self.rfile.read(length)
+      _raw_request = self.rfile.read(length)
 
     self.send_response(200)
     self.send_header('Content-Type', 'text/plain')
@@ -1764,6 +1811,7 @@ class SyncPageHandler(BasePageHandler):
     This covers all sync protocol commands: authentication, getupdates, and
     commit.
     """
+
     test_name = "/chromiumsync/command"
     if not self._ShouldHandleRequest(test_name):
       return False
@@ -1813,7 +1861,7 @@ class SyncPageHandler(BasePageHandler):
         self.server.SetAuthenticated(True)
       else:
         self.server.SetAuthenticated(False)
-    except:
+    except Exception:
       self.server.SetAuthenticated(False)
 
     http_response = 200
@@ -1838,7 +1886,7 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
   def ChromiumSyncEnableNotificationsOpHandler(self):
     test_name = "/chromiumsync/enablenotifications"
@@ -1853,7 +1901,7 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
   def ChromiumSyncSendNotificationOpHandler(self):
     test_name = "/chromiumsync/sendnotification"
@@ -1878,7 +1926,7 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
   def ChromiumSyncBirthdayErrorOpHandler(self):
     test_name = "/chromiumsync/birthdayerror"
@@ -1890,7 +1938,7 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
   def ChromiumSyncTransientErrorOpHandler(self):
     test_name = "/chromiumsync/transienterror"
@@ -1902,7 +1950,7 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
   def ChromiumSyncErrorOpHandler(self):
     test_name = "/chromiumsync/error"
@@ -1915,7 +1963,7 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
   def ChromiumSyncSyncTabFaviconsOpHandler(self):
     test_name = "/chromiumsync/synctabfavicons"
@@ -1927,7 +1975,7 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
   def ChromiumSyncCreateSyncedBookmarksOpHandler(self):
     test_name = "/chromiumsync/createsyncedbookmarks"
@@ -1939,10 +1987,10 @@ class SyncPageHandler(BasePageHandler):
     self.send_header('Content-Length', len(raw_reply))
     self.end_headers()
     self.wfile.write(raw_reply)
-    return True;
+    return True
 
 
-def MakeDataDir():
+def MakeDataDir(options):
   if options.data_dir:
     if not os.path.isdir(options.data_dir):
       print 'specified data dir not found: ' + options.data_dir + ' exiting...'
@@ -2008,7 +2056,7 @@ class UDPEchoHandler(SocketServer.BaseRequestHandler):
     """Handles the request from the client and constructs a response."""
 
     data = self.request[0].strip()
-    socket = self.request[1]
+    request_socket = self.request[1]
     # Verify the "echo request" message received from the client. Send back
     # "echo response" message if "echo request" message is valid.
     try:
@@ -2017,7 +2065,7 @@ class UDPEchoHandler(SocketServer.BaseRequestHandler):
         return
     except ValueError:
       return
-    socket.sendto(return_data, self.client_address)
+    request_socket.sendto(return_data, self.client_address)
 
 
 class BasicAuthProxyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
@@ -2047,7 +2095,7 @@ class BasicAuthProxyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     self.request.setblocking(0)
     rlist = [self.request, sock]
     while True:
-      ready_sockets, unused, errors = select.select(rlist, [], [])
+      ready_sockets, _unused, errors = select.select(rlist, [], [])
       if errors:
         self.send_response(500)
         self.end_headers()
@@ -2095,7 +2143,7 @@ class BasicAuthProxyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         sock.send('%s\r\n' % header)
       sock.send('\r\n')
       self._start_read_write(sock)
-    except:
+    except Exception:
       self.send_response(500)
       self.end_headers()
     finally:
@@ -2107,7 +2155,7 @@ class BasicAuthProxyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       pos = self.path.rfind(':')
       host = self.path[:pos]
       port = int(self.path[pos+1:])
-    except:
+    except Exception:
       self.send_response(400)
       self.end_headers()
 
@@ -2116,7 +2164,7 @@ class BasicAuthProxyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.send_response(200, 'Connection established')
       self.end_headers()
       self._start_read_write(sock)
-    except:
+    except Exception:
       self.send_response(500)
       self.end_headers()
     finally:
@@ -2135,10 +2183,7 @@ class FileMultiplexer:
     self.__fd2 = fd2
 
   def __del__(self) :
-    if self.__fd1 != sys.stdout and self.__fd1 != sys.stderr:
-      self.__fd1.close()
-    if self.__fd2 != sys.stdout and self.__fd2 != sys.stderr:
-      self.__fd2.close()
+    self.close()
 
   def write(self, text) :
     self.__fd1.write(text)
@@ -2148,7 +2193,14 @@ class FileMultiplexer:
     self.__fd1.flush()
     self.__fd2.flush()
 
-def main(options, args):
+  def close(self):
+    if self.__fd1 != sys.stdout and self.__fd1 != sys.stderr:
+      self.__fd1.close()
+    if self.__fd2 != sys.stdout and self.__fd2 != sys.stderr:
+      self.__fd2.close()
+
+
+def main(options, _args):
   logfile = open('testserver.log', 'w')
   sys.stderr = FileMultiplexer(sys.stderr, logfile)
   if options.log_to_console:
@@ -2171,7 +2223,7 @@ def main(options, args):
         if not os.path.isfile(options.cert_and_key_file):
           print ('specified server cert file not found: ' +
                  options.cert_and_key_file + ' exiting...')
-          return
+          return 1
         pem_cert_and_key = file(options.cert_and_key_file, 'r').read()
       else:
         # generate a new certificate and run an OCSP server for it.
@@ -2194,22 +2246,20 @@ def main(options, args):
           ocsp_state = minica.OCSP_STATE_UNKNOWN
         else:
           print 'unknown OCSP status: ' + options.ocsp_status
-          return
+          return 1
 
-        (pem_cert_and_key, ocsp_der) = \
-            minica.GenerateCertKeyAndOCSP(
-                subject = "127.0.0.1",
-                ocsp_url = ("http://%s:%d/ocsp" %
-                    (host, ocsp_server.server_port)),
-                ocsp_state = ocsp_state)
+        (pem_cert_and_key, ocsp_der) = minica.GenerateCertKeyAndOCSP(
+            subject = "127.0.0.1",
+            ocsp_url = ("http://%s:%d/ocsp" % (host, ocsp_server.server_port)),
+            ocsp_state = ocsp_state)
 
         ocsp_server.ocsp_response = ocsp_der
 
       for ca_cert in options.ssl_client_ca:
         if not os.path.isfile(ca_cert):
-          print 'specified trusted client CA file not found: ' + ca_cert + \
-                ' exiting...'
-          return
+          print ('specified trusted client CA file not found: ' + ca_cert +
+                 ' exiting...')
+          return 1
       server = HTTPSServer((host, port), TestPageHandler, pem_cert_and_key,
                            options.ssl_client_auth, options.ssl_client_ca,
                            options.ssl_bulk_cipher, options.record_resume,
@@ -2219,13 +2269,38 @@ def main(options, args):
       server = HTTPServer((host, port), TestPageHandler)
       print 'HTTP server started on %s:%d...' % (host, server.server_port)
 
-    server.data_dir = MakeDataDir()
+    server.data_dir = MakeDataDir(options)
     server.file_root_url = options.file_root_url
     server_data['port'] = server.server_port
     server._device_management_handler = None
     server.policy_keys = options.policy_keys
     server.policy_user = options.policy_user
     server.gdata_auth_token = options.auth_token
+  elif options.server_type == SERVER_WEBSOCKET:
+    # Launch pywebsocket via WebSocketServer.
+    logger = logging.getLogger()
+    logger.addHandler(logging.StreamHandler())
+    # TODO(toyoshim): Remove following os.chdir. Currently this operation
+    # is required to work correctly. It should be fixed from pywebsocket side.
+    os.chdir(MakeDataDir(options))
+    websocket_options = WebSocketOptions(host, port, '.')
+    if options.cert_and_key_file:
+      websocket_options.use_tls = True
+      websocket_options.private_key = options.cert_and_key_file
+      websocket_options.certificate = options.cert_and_key_file
+    if options.ssl_client_auth:
+      websocket_options.tls_client_auth = True
+      if len(options.ssl_client_ca) != 1:
+        print 'one trusted client CA file should be specified'
+        return 1
+      if not os.path.isfile(options.ssl_client_ca[0]):
+        print ('specified trusted client CA file not found: ' +
+               options.ssl_client_ca[0] + ' exiting...')
+        return 1
+      websocket_options.tls_client_ca = options.ssl_client_ca[0]
+    server = WebSocketServer(websocket_options)
+    print 'WebSocket server started on %s:%d...' % (host, server.server_port)
+    server_data['port'] = server.server_port
   elif options.server_type == SERVER_SYNC:
     xmpp_port = options.xmpp_port
     server = SyncHTTPServer((host, port), xmpp_port, SyncPageHandler)
@@ -2253,7 +2328,7 @@ def main(options, args):
     server_data['port'] = server.server_port
   # means FTP Server
   else:
-    my_data_dir = MakeDataDir()
+    my_data_dir = MakeDataDir(options)
 
     # Instantiate a dummy authorizer for managing 'virtual' users
     authorizer = pyftpdlib.ftpserver.DummyAuthorizer()
@@ -2307,6 +2382,8 @@ def main(options, args):
       ocsp_server.stop_serving()
     server.stop = True
 
+  return 0
+
 if __name__ == '__main__':
   option_parser = optparse.OptionParser()
   option_parser.add_option("-f", '--ftp', action='store_const',
@@ -2330,6 +2407,10 @@ if __name__ == '__main__':
                            dest='server_type',
                            help='start up a proxy server which requires basic '
                            'authentication.')
+  option_parser.add_option('', '--websocket', action='store_const',
+                           const=SERVER_WEBSOCKET, default=SERVER_HTTP,
+                           dest='server_type',
+                           help='start up a WebSocket server.')
   option_parser.add_option('', '--log-to-console', action='store_const',
                            const=True, default=False,
                            dest='log_to_console',
@@ -2380,7 +2461,7 @@ if __name__ == '__main__':
                            'values are "aes256", "aes128", "3des", "rc4". If '
                            'omitted, all algorithms will be used. This '
                            'option may appear multiple times, indicating '
-                           'multiple algorithms should be enabled.');
+                           'multiple algorithms should be enabled.')
   option_parser.add_option('', '--file-root-url', default='/files/',
                            help='Specify a root URL for files served.')
   option_parser.add_option('', '--startup-pipe', type='int',
@@ -2409,6 +2490,7 @@ if __name__ == '__main__':
   option_parser.add_option('', '--auth-token', dest='auth_token',
                            help='Specify the auth token which should be used'
                            'in the authorization header for GData.')
-  options, args = option_parser.parse_args()
+  main_options, main_args = option_parser.parse_args()
 
-  sys.exit(main(options, args))
+  sys.exit(main(main_options, main_args))
+

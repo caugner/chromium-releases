@@ -26,10 +26,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/extensions/app_restore_service.h"
+#include "chrome/browser/extensions/app_restore_service_factory.h"
 #include "chrome/browser/extensions/extension_creator.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
@@ -43,6 +46,7 @@
 #include "chrome/browser/protector/protector_service.h"
 #include "chrome/browser/protector/protector_service_factory.h"
 #include "chrome/browser/protector/protector_utils.h"
+#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -387,25 +391,13 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
     // be an app tab.
     OpenApplicationTab(profile);
 
-    if (process_startup) {
-      if (browser_defaults::kOSSupportsOtherBrowsers &&
-          !command_line_.HasSwitch(switches::kNoDefaultBrowserCheck)) {
-        // Generally, the default browser prompt should not be shown on first
-        // run. However, when the set-as-default dialog has been suppressed, we
-        // need to allow it.
-        if ((!is_first_run_ ||
-             (browser_creator_ &&
-              browser_creator_->is_default_browser_dialog_suppressed())) &&
-            !chrome::ShowAutolaunchPrompt(profile)) {
-          chrome::ShowDefaultBrowserPrompt(profile);
-        }
-      }
 #if defined(OS_MACOSX)
+    if (process_startup) {
       // Check whether the auto-update system needs to be promoted from user
       // to system.
       KeystoneInfoBar::PromotionInfoBar(profile);
-#endif
     }
+#endif
   }
 
   // If we're recording or playing back, startup the EventRecorder now
@@ -441,7 +433,9 @@ void StartupBrowserCreatorImpl::ExtractOptionalAppWindowSize(
     std::string switch_value =
         command_line_.GetSwitchValueASCII(switches::kAppWindowSize);
     if (ParseCommaSeparatedIntegers(switch_value, &width, &height)) {
-      const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
+      // TODO(scottmg): NativeScreen might be wrong. http://crbug.com/133312
+      const gfx::Rect work_area =
+          gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().work_area();
       width = std::min(width, work_area.width());
       height = std::min(height, work_area.height());
       bounds->set_size(gfx::Size(width, height));
@@ -650,8 +644,14 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
   else if (pref.type == SessionStartupPref::DEFAULT)
     VLOG(1) << "Pref: default";
 
+  extensions::AppRestoreService* service =
+      extensions::AppRestoreServiceFactory::GetForProfile(profile_);
+  // NULL in incognito mode.
+  if (service)
+    service->HandleStartup(StartupBrowserCreator::WasRestarted());
+
   if (pref.type == SessionStartupPref::LAST) {
-    if (!profile_->DidLastSessionExitCleanly() &&
+    if (profile_->GetLastSessionExitType() == Profile::EXIT_CRASHED &&
         !command_line_.HasSwitch(switches::kRestoreLastSession)) {
       // The last session crashed. It's possible automatically loading the
       // page will trigger another crash, locking the user out of chrome.
@@ -851,6 +851,15 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
     params.tabstrip_index = index;
     params.tabstrip_add_types = add_types;
     params.extension_app_id = tabs[i].app_id;
+
+#if defined(ENABLE_RLZ)
+    if (process_startup &&
+        google_util::IsGoogleHomePageUrl(tabs[i].url.spec())) {
+      params.extra_headers = RLZTracker::GetAccessPointHttpHeader(
+          RLZTracker::CHROME_HOME_PAGE);
+    }
+#endif
+
     chrome::Navigate(&params);
 
     first_tab = false;
@@ -889,6 +898,20 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
   if (is_process_startup == chrome::startup::IS_PROCESS_STARTUP) {
     chrome::ShowBadFlagsPrompt(browser);
     chrome::ShowObsoleteOSPrompt(browser);
+
+    if (browser_defaults::kOSSupportsOtherBrowsers &&
+        !command_line_.HasSwitch(switches::kNoDefaultBrowserCheck)) {
+      // Generally, the default browser prompt should not be shown on first
+      // run. However, when the set-as-default dialog has been suppressed, we
+      // need to allow it.
+      if ((!is_first_run_ ||
+           (browser_creator_ &&
+            browser_creator_->is_default_browser_dialog_suppressed())) &&
+          !chrome::ShowAutolaunchPrompt(browser)) {
+        chrome::ShowDefaultBrowserPrompt(profile_,
+                                         browser->host_desktop_type());
+      }
+    }
   }
 }
 

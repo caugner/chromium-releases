@@ -23,6 +23,7 @@ static const char kGaiaOAuth2Url[] =
 struct OAuthClientInfo {
   std::string client_id;
   std::string client_secret;
+  std::string redirect_uri;
 };
 
 class GaiaOAuthClient {
@@ -36,6 +37,8 @@ class GaiaOAuthClient {
     // Invoked on a successful response to the RefreshToken request.
     virtual void OnRefreshTokenResponse(const std::string& access_token,
                                         int expires_in_seconds) = 0;
+    // Invoked on a successful response to the GetUserInfo request.
+    virtual void OnGetUserInfoResponse(const std::string& user_email) {};
     // Invoked when there is an OAuth error with one of the requests.
     virtual void OnOAuthError() = 0;
     // Invoked when there is a network error or upon receiving an invalid
@@ -62,6 +65,9 @@ class GaiaOAuthClient {
                     const std::string& refresh_token,
                     int max_retries,
                     Delegate* delegate);
+  void GetUserInfo(const std::string& oauth_access_token,
+                   int max_retries,
+                   Delegate* delegate);
 
  private:
   // The guts of the implementation live in this class.

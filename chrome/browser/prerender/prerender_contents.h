@@ -14,6 +14,7 @@
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
+#include "chrome/browser/prerender/prerender_origin.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -32,6 +33,10 @@ namespace content {
 class RenderViewHost;
 class SessionStorageNamespace;
 class WebContents;
+}
+
+namespace history {
+struct HistoryAddPageArgs;
 }
 
 namespace prerender {
@@ -168,6 +173,7 @@ class PrerenderContents : public content::NotificationObserver,
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
@@ -205,6 +211,11 @@ class PrerenderContents : public content::NotificationObserver,
   // PrerenderManager's pending deletes list.
   void Destroy(FinalStatus reason);
 
+  // Called by the history tab helper with the information that it woudl have
+  // added to the history service had this web contents not been used for
+  // prerendering.
+  void DidNavigate(const history::HistoryAddPageArgs& add_page_args);
+
   // Applies all the URL history encountered during prerendering to the
   // new tab.
   void CommitHistory(TabContents* tab);
@@ -220,6 +231,7 @@ class PrerenderContents : public content::NotificationObserver,
   // exists when this page is made visible, it will be launched.
   virtual void AddPendingPrerender(
       base::WeakPtr<PrerenderHandle> weak_prerender_handle,
+      Origin origin,
       const GURL& url,
       const content::Referrer& referrer,
       const gfx::Size& size);
@@ -236,12 +248,14 @@ class PrerenderContents : public content::NotificationObserver,
   struct PendingPrerenderInfo {
     PendingPrerenderInfo(
         base::WeakPtr<PrerenderHandle> weak_prerender_handle,
+        Origin origin,
         const GURL& url,
         const content::Referrer& referrer,
         const gfx::Size& size);
     ~PendingPrerenderInfo();
 
     base::WeakPtr<PrerenderHandle> weak_prerender_handle;
+    Origin origin;
     GURL url;
     content::Referrer referrer;
     gfx::Size size;
@@ -382,6 +396,11 @@ class PrerenderContents : public content::NotificationObserver,
 
   // The size of the WebView from the launching page.
   gfx::Size size_;
+
+  typedef std::vector<history::HistoryAddPageArgs> AddPageVector;
+
+  // Caches pages to be added to the history.
+  AddPageVector add_page_vector_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderContents);
 };

@@ -20,10 +20,11 @@ class SpellCheck;
 class SpellCheckProvider;
 class VisitedLinkSlave;
 
-struct ChromeViewHostMsg_GetPluginInfo_Status;
+struct ChromeViewHostMsg_GetPluginInfo_Output;
 
 namespace extensions {
 class Dispatcher;
+class Extension;
 }
 
 namespace media {
@@ -40,9 +41,10 @@ class PhishingClassifierFilter;
 
 namespace webkit {
 struct WebPluginInfo;
-namespace npapi {
-class PluginGroup;
 }
+
+namespace WebKit {
+class WebSecurityOrigin;
 }
 
 namespace chrome {
@@ -141,12 +143,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       content::RenderView* render_view,
       WebKit::WebFrame* frame,
       const WebKit::WebPluginParams& params,
-      const ChromeViewHostMsg_GetPluginInfo_Status& status,
-      const webkit::WebPluginInfo& plugin,
-      const std::string& actual_mime_type);
+      const ChromeViewHostMsg_GetPluginInfo_Output& output);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromeContentRendererClientTest, NaClRestriction);
+
+  const extensions::Extension* GetExtension(
+      const WebKit::WebSecurityOrigin& origin) const;
 
   // Returns true if the frame is navigating to an URL either into or out of an
   // extension app's extent.

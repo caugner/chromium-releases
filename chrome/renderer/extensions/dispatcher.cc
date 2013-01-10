@@ -26,7 +26,6 @@
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/context_menus_custom_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
-#include "chrome/renderer/extensions/experimental.usb_custom_bindings.h"
 #include "chrome/renderer/extensions/extension_custom_bindings.h"
 #include "chrome/renderer/extensions/extension_groups.h"
 #include "chrome/renderer/extensions/extension_helper.h"
@@ -44,6 +43,7 @@
 #include "chrome/renderer/extensions/runtime_custom_bindings.h"
 #include "chrome/renderer/extensions/send_request_natives.h"
 #include "chrome/renderer/extensions/set_icon_natives.h"
+#include "chrome/renderer/extensions/sync_file_system_custom_bindings.h"
 #include "chrome/renderer/extensions/tab_finder.h"
 #include "chrome/renderer/extensions/tabs_custom_bindings.h"
 #include "chrome/renderer/extensions/tts_custom_bindings.h"
@@ -176,12 +176,14 @@ class ProcessInfoNativeHandler : public ChromeV8Extension {
       const std::string& extension_id,
       const std::string& context_type,
       bool is_incognito_context,
-      int manifest_version)
+      int manifest_version,
+      bool send_request_disabled)
       : ChromeV8Extension(dispatcher),
         extension_id_(extension_id),
         context_type_(context_type),
         is_incognito_context_(is_incognito_context),
-        manifest_version_(manifest_version) {
+        manifest_version_(manifest_version),
+        send_request_disabled_(send_request_disabled) {
     RouteFunction("GetExtensionId",
         base::Bind(&ProcessInfoNativeHandler::GetExtensionId,
                    base::Unretained(this)));
@@ -193,6 +195,9 @@ class ProcessInfoNativeHandler : public ChromeV8Extension {
                    base::Unretained(this)));
     RouteFunction("GetManifestVersion",
         base::Bind(&ProcessInfoNativeHandler::GetManifestVersion,
+                   base::Unretained(this)));
+    RouteFunction("IsSendRequestDisabled",
+        base::Bind(&ProcessInfoNativeHandler::IsSendRequestDisabled,
                    base::Unretained(this)));
   }
 
@@ -212,11 +217,21 @@ class ProcessInfoNativeHandler : public ChromeV8Extension {
     return v8::Integer::New(manifest_version_);
   }
 
+  v8::Handle<v8::Value> IsSendRequestDisabled(const v8::Arguments& args) {
+    if (send_request_disabled_) {
+      return v8::String::New(
+          "sendRequest and onRequest are obsolete."
+          " Please use sendMessage and onMessage instead.");
+    }
+    return v8::Undefined();
+  }
+
  private:
   std::string extension_id_;
   std::string context_type_;
   bool is_incognito_context_;
   int manifest_version_;
+  bool send_request_disabled_;
 };
 
 class LoggingNativeHandler : public NativeHandler {
@@ -236,7 +251,7 @@ class LoggingNativeHandler : public NativeHandler {
 
     v8::Handle<v8::StackTrace> stack_trace =
         v8::StackTrace::CurrentStackTrace(10);
-    if (stack_trace.IsEmpty() || stack_trace->GetFrameCount() == 0) {
+    if (stack_trace.IsEmpty() || stack_trace->GetFrameCount() <= 0) {
       error_message += "\n    <no stack trace>";
     } else {
       for (size_t i = 0; i < (size_t) stack_trace->GetFrameCount(); ++i) {
@@ -466,8 +481,6 @@ void Dispatcher::OnDispatchOnDisconnect(int port_id, bool connection_error) {
 
 void Dispatcher::OnLoaded(
     const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions) {
-  std::vector<WebString> platform_app_patterns;
-
   std::vector<ExtensionMsg_Loaded_Params>::const_iterator i;
   for (i = loaded_extensions.begin(); i != loaded_extensions.end(); ++i) {
     scoped_refptr<const Extension> extension(i->ConvertToExtension());
@@ -480,30 +493,6 @@ void Dispatcher::OnLoaded(
     }
 
     extensions_.Insert(extension);
-
-    if (extension->is_platform_app()) {
-      platform_app_patterns.push_back(
-          WebString::fromUTF8(extension->url().spec() + "*"));
-    }
-  }
-
-  if (!platform_app_patterns.empty()) {
-    // We have collected a set of platform-app extensions, so let's tell WebKit
-    // about them so that it can provide a default stylesheet for them.
-    //
-    // TODO(miket): consider enhancing WebView to allow removing
-    // single stylesheets, or else to edit the pattern set associated
-    // with one.
-    RenderThread::Get()->EnsureWebKitInitialized();
-    WebVector<WebString> patterns;
-    patterns.assign(platform_app_patterns);
-    WebView::addUserStyleSheet(
-        WebString::fromUTF8(ResourceBundle::GetSharedInstance().
-            GetRawDataResource(IDR_PLATFORM_APP_CSS,
-                               ui::SCALE_FACTOR_NONE)),
-        patterns,
-        WebView::UserContentInjectInAllFrames,
-        WebView::UserStyleInjectInExistingDocuments);
   }
 }
 
@@ -593,8 +582,8 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
   module_system->RegisterNativeHandler("extension",
       scoped_ptr<NativeHandler>(
           new ExtensionCustomBindings(this)));
-  module_system->RegisterNativeHandler("experimental_usb",
-      scoped_ptr<NativeHandler>(new ExperimentalUsbCustomBindings()));
+  module_system->RegisterNativeHandler("sync_file_system",
+      scoped_ptr<NativeHandler>(new SyncFileSystemCustomBindings()));
   module_system->RegisterNativeHandler("file_browser_handler",
       scoped_ptr<NativeHandler>(new FileBrowserHandlerCustomBindings()));
   module_system->RegisterNativeHandler("file_browser_private",
@@ -640,6 +629,7 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("app", IDR_APP_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("app.runtime", IDR_APP_RUNTIME_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("app.window", IDR_APP_WINDOW_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("bluetooth", IDR_BLUETOOTH_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("browserAction",
                              IDR_BROWSER_ACTION_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("contentSettings",
@@ -649,15 +639,11 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("declarativeWebRequest",
                              IDR_DECLARATIVE_WEBREQUEST_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("devtools", IDR_DEVTOOLS_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("experimental.bluetooth",
-                             IDR_EXPERIMENTAL_BLUETOOTH_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource(
       "experimental.mediaGalleries",
       IDR_EXPERIMENTAL_MEDIA_GALLERIES_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("experimental.offscreen",
                              IDR_EXPERIMENTAL_OFFSCREENTABS_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("experimental.usb",
-                             IDR_EXPERIMENTAL_USB_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("extension", IDR_EXTENSION_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("fileBrowserHandler",
                              IDR_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_JS);
@@ -677,6 +663,9 @@ void Dispatcher::PopulateSourceMap() {
                              IDR_PAGE_CAPTURE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("runtime", IDR_RUNTIME_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("storage", IDR_STORAGE_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("syncFileSystem",
+                             IDR_SYNC_FILE_SYSTEM_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("tabCapture", IDR_TAB_CAPTURE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tabs", IDR_TABS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tts", IDR_TTS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("ttsEngine", IDR_TTS_ENGINE_CUSTOM_BINDINGS_JS);
@@ -687,7 +676,7 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 
   // Platform app sources that are not API-specific..
-  source_map_.RegisterSource("browserTag", IDR_BROWSER_TAG_JS);
+  source_map_.RegisterSource("webview", IDR_WEB_VIEW_JS);
   source_map_.RegisterSource("platformApp", IDR_PLATFORM_APP_JS);
   source_map_.RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
 }
@@ -698,8 +687,8 @@ void Dispatcher::PopulateLazyBindingsMap() {
 }
 
 void Dispatcher::InstallBindings(ModuleSystem* module_system,
-                                          v8::Handle<v8::Context> v8_context,
-                                          const std::string& api) {
+                                 v8::Handle<v8::Context> v8_context,
+                                 const std::string& api) {
   std::map<std::string, BindingInstaller>::const_iterator lazy_binding =
       lazy_bindings_map_.find(api);
   if (lazy_binding != lazy_bindings_map_.end()) {
@@ -764,12 +753,15 @@ void Dispatcher::DidCreateScriptContext(
       scoped_ptr<NativeHandler>(new LoggingNativeHandler()));
 
   int manifest_version = extension ? extension->manifest_version() : 1;
+  bool send_request_disabled =
+      (extension && extension->location() == Extension::LOAD &&
+       extension->has_lazy_background_page());
   module_system->RegisterNativeHandler("process",
       scoped_ptr<NativeHandler>(new ProcessInfoNativeHandler(
           this, context->GetExtensionID(),
           context->GetContextTypeDescription(),
           ChromeRenderProcessObserver::is_incognito_process(),
-          manifest_version)));
+          manifest_version, send_request_disabled)));
 
   GetOrCreateChrome(v8_context);
 
@@ -811,8 +803,8 @@ void Dispatcher::DidCreateScriptContext(
     module_system->Require("platformApp");
 
   if (context_type == Feature::BLESSED_EXTENSION_CONTEXT &&
-      extension->HasAPIPermission(APIPermission::kBrowserTag)) {
-    module_system->Require("browserTag");
+      extension->HasAPIPermission(APIPermission::kWebView)) {
+    module_system->Require("webview");
   }
 
   context->set_module_system(module_system.Pass());
@@ -824,8 +816,7 @@ void Dispatcher::DidCreateScriptContext(
   VLOG(1) << "Num tracked contexts: " << v8_context_set_.size();
 }
 
-std::string Dispatcher::GetExtensionID(const WebFrame* frame,
-                                                int world_id) {
+std::string Dispatcher::GetExtensionID(const WebFrame* frame, int world_id) {
   if (world_id != 0) {
     // Isolated worlds (content script).
     return user_script_slave_->GetExtensionIdForIsolatedWorld(world_id);
@@ -838,8 +829,12 @@ std::string Dispatcher::GetExtensionID(const WebFrame* frame,
 }
 
 bool Dispatcher::IsWithinPlatformApp(const WebFrame* frame) {
-  const Extension* extension =
-      extensions_.GetByID(GetExtensionID(frame->top(), 0));
+  // We intentionally don't use the origin parameter for ExtensionURLInfo since
+  // it would be empty (i.e. unique) for sandboxed resources and thus not match.
+  ExtensionURLInfo url_info(
+      UserScriptSlave::GetDataSourceURLForFrame(frame->top()));
+  const Extension* extension = extensions_.GetExtensionOrAppByURL(url_info);
+
   return extension && extension->is_platform_app();
 }
 
@@ -853,6 +848,19 @@ void Dispatcher::WillReleaseScriptContext(
 
   v8_context_set_.Remove(context);
   VLOG(1) << "Num tracked contexts: " << v8_context_set_.size();
+}
+
+void Dispatcher::DidCreateDocumentElement(WebKit::WebFrame* frame) {
+  if (IsWithinPlatformApp(frame)) {
+    // WebKit doesn't let us define an additional user agent stylesheet, so we
+    // insert the default platform app stylesheet into all documents that are
+    // loaded in each app.
+    frame->document().insertUserStyleSheet(
+        WebString::fromUTF8(ResourceBundle::GetSharedInstance().
+            GetRawDataResource(IDR_PLATFORM_APP_CSS,
+                               ui::SCALE_FACTOR_NONE)),
+        WebDocument::UserStyleUserLevel);
+  }
 }
 
 void Dispatcher::OnActivateExtension(const std::string& extension_id) {

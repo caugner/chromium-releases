@@ -9,18 +9,43 @@
   </head>
   <body>
     <h1>Drive Internals</h1>
-    <div>
-      <a href="#auth-status-section">Authentication Status</a> |
-      <a href="#gcache-contents-section">GCache Contents</a> |
-      <a href="#file-system-contents-section">File System Contents</a> |
-      <a href="#cache-contents-section">Cache Contents</a>
-    </div>
+    <ul id='toc'></ul>
+
+    <h2 id='drive-related-flags-section'>Drive related Flags</h2>
+    <ul id='drive-related-flags'>
+    </ul>
+
+    <h2 id='drive-related-preferences-section'>Drive related Preferences</h2>
+    <ul id='drive-related-preferences'>
+    </ul>
 
     <h2 id='auth-status-contents-section'>Authentication Status</h2>
     <ul>
       <li>Has refresh token: <span id='has-refresh-token'></span></li>
       <li>Has access token: <span id='has-access-token'></span></li>
     </ul>
+
+    <h2 id='account-metadata-contents-section'>Account Metadata</h2>
+    <ul>
+      <li>Quota Information: <span id='account-quota-info'></span></li>
+      <li>Largest Changestamp (remote):
+        <span id='account-largest-changestamp-remote'></span>
+      </li>
+      <li>Largest Changestamp (local):
+        <span id='account-largest-changestamp-local'></span>
+      </li>
+      <li>Origin: <span id='account-metadata-origin'></span></li>
+    </ul>
+    <table>
+      <tbody id='account-installed-apps'>
+        <tr>
+          <th>App Name</th>
+          <th>App ID</th>
+          <th>Object Type</th>
+          <th>Support Create</th>
+        </tr>
+      </tbody>
+    </table>
 
     <h2 id='in-flight-operations-section'>In-flight Operations</h2>
     <table>

@@ -35,6 +35,7 @@
 #include "ppapi/shared_impl/scoped_pp_resource.h"
 #include "ppapi/shared_impl/time_conversion.h"
 #include "ppapi/shared_impl/var.h"
+#include "ppapi/shared_impl/var_tracker.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_instance_api.h"
 #include "ppapi/thunk/ppb_url_request_info_api.h"
@@ -67,6 +68,8 @@ IPC::PlatformFileForTransit PlatformFileToPlatformFileForTransit(
 }
 
 void InvokePrinting(PP_Instance instance) {
+  ProxyAutoLock lock;
+
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
   if (dispatcher) {
     dispatcher->Send(new PpapiHostMsg_PPBFlash_InvokePrinting(
@@ -95,10 +98,8 @@ const PPB_Flash_Print_1_0* PPB_Flash_Proxy::GetFlashPrintInterface() {
 }
 
 bool PPB_Flash_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  // Prevent the dispatcher from going away during a call to Navigate.
-  // This must happen OUTSIDE of OnMsgNavigate since the handling code use
-  // the dispatcher upon return of the function (sending the reply message).
-  ScopedModuleReference death_grip(dispatcher());
+  if (!dispatcher()->permissions().HasPermission(PERMISSION_FLASH))
+    return false;
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Flash_Proxy, msg)
@@ -171,7 +172,7 @@ PP_Bool PPB_Flash_Proxy::DrawGlyphs(PP_Instance instance,
 
   PPBFlash_DrawGlyphs_Params params;
   params.image_data = image_data->host_resource();
-  params.font_desc.SetFromPPFontDescription(dispatcher(), *font_desc, true);
+  params.font_desc.SetFromPPFontDescription(*font_desc);
   params.color = color;
   params.position = *position;
   params.clip = *clip;
@@ -209,12 +210,17 @@ int32_t PPB_Flash_Proxy::Navigate(PP_Instance instance,
       request_info, true);
   if (enter.failed())
     return PP_ERROR_BADRESOURCE;
+  return Navigate(instance, enter.object()->GetData(), target,
+                  from_user_action);
+}
 
+int32_t PPB_Flash_Proxy::Navigate(PP_Instance instance,
+                                  const URLRequestInfoData& data,
+                                  const char* target,
+                                  PP_Bool from_user_action) {
   int32_t result = PP_ERROR_FAILED;
   dispatcher()->Send(new PpapiHostMsg_PPBFlash_Navigate(
-      API_ID_PPB_FLASH,
-      instance, enter.object()->GetData(), target, from_user_action,
-      &result));
+      API_ID_PPB_FLASH, instance, data, target, from_user_action, &result));
   return result;
 }
 
@@ -640,12 +646,12 @@ void PPB_Flash_Proxy::OnHostMsgDrawGlyphs(
   if (enter.failed())
     return;
 
-  PP_FontDescription_Dev font_desc;
-  params.font_desc.SetToPPFontDescription(dispatcher(), &font_desc, false);
-
   if (params.glyph_indices.size() != params.glyph_advances.size() ||
       params.glyph_indices.empty())
     return;
+
+  PP_FontDescription_Dev font_desc;
+  params.font_desc.SetToPPFontDescription(&font_desc);
 
   *result = enter.functions()->GetFlashAPI()->DrawGlyphs(
       0,  // Unused instance param.
@@ -656,6 +662,9 @@ void PPB_Flash_Proxy::OnHostMsgDrawGlyphs(
       static_cast<uint32_t>(params.glyph_indices.size()),
       const_cast<uint16_t*>(&params.glyph_indices[0]),
       const_cast<PP_Point*>(&params.glyph_advances[0]));
+
+  // SetToPPFontDescription() creates a var which is owned by the caller.
+  PpapiGlobals::Get()->GetVarTracker()->ReleaseVar(font_desc.face);
 }
 
 void PPB_Flash_Proxy::OnHostMsgGetProxyForURL(PP_Instance instance,
@@ -672,7 +681,7 @@ void PPB_Flash_Proxy::OnHostMsgGetProxyForURL(PP_Instance instance,
 }
 
 void PPB_Flash_Proxy::OnHostMsgNavigate(PP_Instance instance,
-                                        const PPB_URLRequestInfo_Data& data,
+                                        const URLRequestInfoData& data,
                                         const std::string& target,
                                         PP_Bool from_user_action,
                                         int32_t* result) {
@@ -698,19 +707,8 @@ void PPB_Flash_Proxy::OnHostMsgNavigate(PP_Instance instance,
   // It is safe, because it is essentially equivalent to NPN_GetURL, where Flash
   // would expect re-entrancy. When running in-process, it does re-enter here.
   host_dispatcher->set_allow_plugin_reentrancy();
-
-  // Make a temporary request resource.
-  thunk::EnterResourceCreation enter(instance);
-  if (enter.failed()) {
-    *result = PP_ERROR_FAILED;
-    return;
-  }
-  ScopedPPResource request_resource(
-      ScopedPPResource::PassRef(),
-      enter.functions()->CreateURLRequestInfo(instance, data));
-
   *result = enter_instance.functions()->GetFlashAPI()->Navigate(
-      instance, request_resource, target.c_str(), from_user_action);
+      instance, data, target.c_str(), from_user_action);
 }
 
 void PPB_Flash_Proxy::OnHostMsgRunMessageLoop(PP_Instance instance) {

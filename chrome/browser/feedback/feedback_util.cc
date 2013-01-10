@@ -26,6 +26,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -37,11 +38,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "unicode/locid.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/notifications/system_notification.h"
-#endif
-
 using content::WebContents;
+
+const char kSyncDataKey[] = "about_sync_data";
 
 namespace {
 
@@ -265,6 +264,10 @@ void FeedbackUtil::SendReport(
   userfeedback::CommonData* common_data = feedback_data.mutable_common_data();
   userfeedback::WebData* web_data = feedback_data.mutable_web_data();
 
+  // Set our user agent.
+  userfeedback::Navigator* navigator = web_data->mutable_navigator();
+  navigator->set_user_agent(content::GetUserAgent(GURL()));
+
   // Set GAIA id to 0. We're not using gaia id's for recording
   // use feedback - we're using the e-mail field, allows users to
   // submit feedback from incognito mode and specify any mail id
@@ -326,15 +329,13 @@ void FeedbackUtil::SendReport(
     // Add the product specific data
     for (chromeos::system::LogDictionaryType::const_iterator i =
              sys_info->begin(); i != sys_info->end(); ++i) {
-      if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kCompressSystemFeedback) || ValidFeedbackSize(i->second)) {
+      if (i->first == kSyncDataKey || ValidFeedbackSize(i->second)) {
         AddFeedbackData(&feedback_data, i->first, i->second);
       }
     }
 
     // If we have zipped logs, add them here
-    if (zipped_logs_data && CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kCompressSystemFeedback)) {
+    if (zipped_logs_data) {
       userfeedback::ProductSpecificBinaryData attachment;
       attachment.set_mime_type(kBZip2MimeType);
       attachment.set_name(kLogsAttachmentName);

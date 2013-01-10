@@ -5,10 +5,9 @@
 #include "chrome/browser/instant/instant_loader.h"
 
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/history/history_types.h"
-#include "chrome/browser/instant/instant_loader_delegate.h"
+#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/thumbnails/thumbnail_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
@@ -23,6 +22,24 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+
+namespace {
+
+int kUserDataKey;
+
+class InstantLoaderUserData : public base::SupportsUserData::Data {
+ public:
+  explicit InstantLoaderUserData(InstantLoader* loader) : loader_(loader) {}
+  virtual ~InstantLoaderUserData() {}
+
+  InstantLoader* loader() const { return loader_; }
+
+ private:
+  InstantLoader* loader_;
+  DISALLOW_COPY_AND_ASSIGN(InstantLoaderUserData);
+};
+
+}
 
 // WebContentsDelegateImpl -----------------------------------------------------
 
@@ -42,8 +59,8 @@ class InstantLoader::WebContentsDelegateImpl
   virtual bool ShouldFocusConstrainedWindow() OVERRIDE;
 
   // CoreTabHelperDelegate:
-  virtual void SwapTabContents(TabContents* old_tc,
-                               TabContents* new_tc) OVERRIDE;
+  virtual void SwapTabContents(content::WebContents* old_contents,
+                               content::WebContents* new_contents) OVERRIDE;
 
   // content::WebContentsDelegate:
   virtual bool ShouldSuppressDialogs() OVERRIDE;
@@ -53,15 +70,13 @@ class InstantLoader::WebContentsDelegateImpl
   virtual bool CanDownload(content::RenderViewHost* render_view_host,
                            int request_id,
                            const std::string& request_method) OVERRIDE;
+  virtual void HandleMouseDown() OVERRIDE;
   virtual void HandleMouseUp() OVERRIDE;
   virtual void HandlePointerActivate() OVERRIDE;
   virtual void HandleGestureBegin() OVERRIDE;
   virtual void HandleGestureEnd() OVERRIDE;
   virtual void DragEnded() OVERRIDE;
   virtual bool OnGoToEntryOffset(int offset) OVERRIDE;
-  virtual bool ShouldAddNavigationToHistory(
-      const history::HistoryAddPageArgs& add_page_args,
-      content::NavigationType navigation_type) OVERRIDE;
 
   // content::WebContentsObserver:
   virtual void DidFinishLoad(
@@ -78,6 +93,12 @@ class InstantLoader::WebContentsDelegateImpl
 
   // Message from the renderer determining whether it supports the Instant API.
   void OnInstantSupportDetermined(int page_id, bool result);
+
+  // Message from the renderer requesting the preview be shown.
+  void OnShowInstantPreview(int page_id,
+                            InstantShownReason reason,
+                            int height,
+                            InstantSizeUnits units);
 
   void CommitFromPointerReleaseIfNecessary();
   void MaybeSetAndNotifyInstantSupportDetermined(bool supports_instant);
@@ -105,11 +126,11 @@ bool InstantLoader::WebContentsDelegateImpl::ShouldFocusConstrainedWindow() {
 }
 
 void InstantLoader::WebContentsDelegateImpl::SwapTabContents(
-    TabContents* old_tc,
-    TabContents* new_tc) {
+    content::WebContents* old_contents,
+    content::WebContents* new_contents) {
   // If this is being called, something is swapping in to our
   // |preview_contents_| before we've added it to the tab strip.
-  loader_->ReplacePreviewContents(old_tc, new_tc);
+  loader_->ReplacePreviewContents(old_contents, new_contents);
 }
 
 bool InstantLoader::WebContentsDelegateImpl::ShouldSuppressDialogs() {
@@ -127,7 +148,7 @@ void InstantLoader::WebContentsDelegateImpl::LostCapture() {
 
 void InstantLoader::WebContentsDelegateImpl::WebContentsFocused(
     content::WebContents* contents) {
-  loader_->loader_delegate_->InstantLoaderContentsFocused(loader_);
+  loader_->controller_->InstantLoaderContentsFocused(loader_);
 }
 
 bool InstantLoader::WebContentsDelegateImpl::CanDownload(
@@ -136,6 +157,10 @@ bool InstantLoader::WebContentsDelegateImpl::CanDownload(
     const std::string& request_method) {
   // Downloads are disabled.
   return false;
+}
+
+void InstantLoader::WebContentsDelegateImpl::HandleMouseDown() {
+  is_pointer_down_from_activate_ = true;
 }
 
 void InstantLoader::WebContentsDelegateImpl::HandleMouseUp() {
@@ -164,13 +189,6 @@ bool InstantLoader::WebContentsDelegateImpl::OnGoToEntryOffset(int offset) {
   return false;
 }
 
-bool InstantLoader::WebContentsDelegateImpl::ShouldAddNavigationToHistory(
-    const history::HistoryAddPageArgs& add_page_args,
-    content::NavigationType navigation_type) {
-  loader_->last_navigation_ = add_page_args.Clone();
-  return false;
-}
-
 void InstantLoader::WebContentsDelegateImpl::DidFinishLoad(
     int64 frame_id,
     const GURL& validated_url,
@@ -179,7 +197,7 @@ void InstantLoader::WebContentsDelegateImpl::DidFinishLoad(
   if (is_main_frame) {
     if (!loader_->supports_instant_)
       Send(new ChromeViewMsg_DetermineIfPageSupportsInstant(routing_id()));
-    loader_->loader_delegate_->InstantLoaderPreviewLoaded(loader_);
+    loader_->controller_->InstantLoaderPreviewLoaded(loader_);
   }
 }
 
@@ -190,6 +208,8 @@ bool InstantLoader::WebContentsDelegateImpl::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SetSuggestions, OnSetSuggestions)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_InstantSupportDetermined,
                         OnInstantSupportDetermined)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ShowInstantPreview,
+                        OnShowInstantPreview);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -198,41 +218,47 @@ bool InstantLoader::WebContentsDelegateImpl::OnMessageReceived(
 void InstantLoader::WebContentsDelegateImpl::OnSetSuggestions(
     int page_id,
     const std::vector<InstantSuggestion>& suggestions) {
-  DCHECK(loader_->preview_contents() &&
-         loader_->preview_contents_->web_contents());
-  // TODO(sreeram): Remove this 'if' bandaid once bug 141875 is confirmed fixed.
-  if (!loader_->preview_contents() ||
-      !loader_->preview_contents_->web_contents())
-    return;
+  DCHECK(loader_->preview_contents());
+  DCHECK(loader_->preview_contents_->web_contents());
   content::NavigationEntry* entry = loader_->preview_contents_->web_contents()->
                                         GetController().GetActiveEntry();
   if (entry && page_id == entry->GetPageID()) {
     MaybeSetAndNotifyInstantSupportDetermined(true);
-    loader_->loader_delegate_->SetSuggestions(loader_, suggestions);
+    loader_->controller_->SetSuggestions(loader_, suggestions);
   }
 }
 
 void InstantLoader::WebContentsDelegateImpl::OnInstantSupportDetermined(
     int page_id,
     bool result) {
-  DCHECK(loader_->preview_contents() &&
-         loader_->preview_contents_->web_contents());
-  // TODO(sreeram): Remove this 'if' bandaid once bug 141875 is confirmed fixed.
-  if (!loader_->preview_contents() ||
-      !loader_->preview_contents_->web_contents())
-    return;
+  DCHECK(loader_->preview_contents());
+  DCHECK(loader_->preview_contents_->web_contents());
   content::NavigationEntry* entry = loader_->preview_contents_->web_contents()->
                                         GetController().GetActiveEntry();
   if (entry && page_id == entry->GetPageID())
     MaybeSetAndNotifyInstantSupportDetermined(result);
 }
 
+void InstantLoader::WebContentsDelegateImpl::OnShowInstantPreview(
+    int page_id,
+    InstantShownReason reason,
+    int height,
+    InstantSizeUnits units) {
+  DCHECK(loader_->preview_contents());
+  DCHECK(loader_->preview_contents_->web_contents());
+  content::NavigationEntry* entry = loader_->preview_contents_->web_contents()->
+                                        GetController().GetActiveEntry();
+  if (entry && page_id == entry->GetPageID()) {
+    MaybeSetAndNotifyInstantSupportDetermined(true);
+    loader_->controller_->ShowInstantPreview(loader_, reason, height, units);
+  }
+}
 
 void InstantLoader::WebContentsDelegateImpl
     ::CommitFromPointerReleaseIfNecessary() {
   if (is_pointer_down_from_activate_) {
     is_pointer_down_from_activate_ = false;
-    loader_->loader_delegate_->CommitInstantLoader(loader_);
+    loader_->controller_->CommitInstantLoader(loader_);
   }
 }
 
@@ -251,16 +277,23 @@ void InstantLoader::WebContentsDelegateImpl
   }
 
   loader_->supports_instant_ = supports_instant;
-  loader_->loader_delegate_->InstantSupportDetermined(loader_,
-                                                      supports_instant);
+  loader_->controller_->InstantSupportDetermined(loader_, supports_instant);
 }
 
 // InstantLoader ---------------------------------------------------------------
 
-InstantLoader::InstantLoader(InstantLoaderDelegate* delegate,
+// static
+InstantLoader* InstantLoader::FromWebContents(
+    content::WebContents* web_contents) {
+  InstantLoaderUserData* data = static_cast<InstantLoaderUserData*>(
+      web_contents->GetUserData(&kUserDataKey));
+  return data ? data->loader() : NULL;
+}
+
+InstantLoader::InstantLoader(InstantController* controller,
                              const std::string& instant_url,
                              const TabContents* tab_contents)
-    : loader_delegate_(delegate),
+    : controller_(controller),
       preview_contents_(
           TabContents::Factory::CreateTabContents(
               content::WebContents::CreateWithSessionStorage(
@@ -288,7 +321,7 @@ void InstantLoader::Init() {
 
 void InstantLoader::Update(const string16& user_text, bool verbatim) {
   // TODO: Support real cursor position.
-  last_navigation_ = NULL;
+  last_navigation_ = history::HistoryAddPageArgs();
   content::RenderViewHost* rvh =
       preview_contents_->web_contents()->GetRenderViewHost();
   rvh->Send(new ChromeViewMsg_SearchBoxChange(rvh->GetRoutingID(), user_text,
@@ -316,15 +349,40 @@ void InstantLoader::OnUpOrDownKeyPressed(int count) {
                                                           count));
 }
 
+void InstantLoader::OnAutocompleteGotFocus() {
+  content::RenderViewHost* rvh =
+      preview_contents_->web_contents()->GetRenderViewHost();
+  rvh->Send(new ChromeViewMsg_SearchBoxFocus(rvh->GetRoutingID()));
+}
+
+void InstantLoader::OnAutocompleteLostFocus() {
+  content::RenderViewHost* rvh =
+      preview_contents_->web_contents()->GetRenderViewHost();
+  rvh->Send(new ChromeViewMsg_SearchBoxBlur(rvh->GetRoutingID()));
+}
+
+void InstantLoader::OnActiveTabModeChanged(bool active_tab_is_ntp) {
+  content::RenderViewHost* rvh =
+      preview_contents_->web_contents()->GetRenderViewHost();
+  rvh->Send(new ChromeViewMsg_SearchBoxActiveTabModeChanged(
+      rvh->GetRoutingID(), active_tab_is_ntp));
+}
+
+void InstantLoader::DidNavigate(
+    const history::HistoryAddPageArgs& add_page_args) {
+  last_navigation_ = add_page_args;
+}
+
 TabContents* InstantLoader::ReleasePreviewContents(InstantCommitType type,
                                                    const string16& text) {
   content::RenderViewHost* rvh =
       preview_contents_->web_contents()->GetRenderViewHost();
-  if (type == INSTANT_COMMIT_PRESSED_ENTER)
-    rvh->Send(new ChromeViewMsg_SearchBoxSubmit(rvh->GetRoutingID(), text));
-  else
+  if (type == INSTANT_COMMIT_FOCUS_LOST)
     rvh->Send(new ChromeViewMsg_SearchBoxCancel(rvh->GetRoutingID(), text));
+  else
+    rvh->Send(new ChromeViewMsg_SearchBoxSubmit(rvh->GetRoutingID(), text));
   CleanupPreviewContents();
+  preview_contents_->web_contents()->RemoveUserData(&kUserDataKey);
   return preview_contents_.release();
 }
 
@@ -348,19 +406,24 @@ void InstantLoader::Observe(int type,
 
 void InstantLoader::SetupPreviewContents() {
   content::WebContents* new_contents = preview_contents_->web_contents();
+  new_contents->SetUserData(&kUserDataKey, new InstantLoaderUserData(this));
   preview_delegate_.reset(new WebContentsDelegateImpl(this));
   WebContentsDelegateImpl* new_delegate = preview_delegate_.get();
   new_contents->SetDelegate(new_delegate);
 
   // Disable popups and such (mainly to avoid losing focus and reverting the
   // preview prematurely).
-  preview_contents_->blocked_content_tab_helper()->SetAllContentsBlocked(true);
-  preview_contents_->constrained_window_tab_helper()->set_delegate(
-                                                          new_delegate);
-  preview_contents_->content_settings()->SetPopupsBlocked(true);
-  preview_contents_->core_tab_helper()->set_delegate(new_delegate);
-  if (ThumbnailGenerator* tg = preview_contents_->thumbnail_generator())
-    tg->set_enabled(false);
+  BlockedContentTabHelper::FromWebContents(new_contents)->
+      SetAllContentsBlocked(true);
+  ConstrainedWindowTabHelper::FromWebContents(new_contents)->
+      set_delegate(new_delegate);
+  TabSpecificContentSettings::FromWebContents(new_contents)->
+      SetPopupsBlocked(true);
+  CoreTabHelper::FromWebContents(new_contents)->set_delegate(new_delegate);
+  ThumbnailTabHelper* thumbnail_tab_helper =
+      ThumbnailTabHelper::FromWebContents(new_contents);
+  if (thumbnail_tab_helper)
+    thumbnail_tab_helper->set_enabled(false);
 
 #if defined(OS_MACOSX)
   // If |preview_contents_| does not currently have a RWHV, we will call
@@ -380,12 +443,16 @@ void InstantLoader::CleanupPreviewContents() {
   old_contents->SetDelegate(NULL);
   preview_delegate_.reset();
 
-  preview_contents_->blocked_content_tab_helper()->SetAllContentsBlocked(false);
-  preview_contents_->constrained_window_tab_helper()->set_delegate(NULL);
-  preview_contents_->content_settings()->SetPopupsBlocked(false);
-  preview_contents_->core_tab_helper()->set_delegate(NULL);
-  if (ThumbnailGenerator* tg = preview_contents_->thumbnail_generator())
-    tg->set_enabled(true);
+  BlockedContentTabHelper::FromWebContents(old_contents)->
+      SetAllContentsBlocked(false);
+  ConstrainedWindowTabHelper::FromWebContents(old_contents)->set_delegate(NULL);
+  TabSpecificContentSettings::FromWebContents(old_contents)->
+      SetPopupsBlocked(false);
+  CoreTabHelper::FromWebContents(old_contents)->set_delegate(NULL);
+  ThumbnailTabHelper* thumbnail_tab_helper =
+      ThumbnailTabHelper::FromWebContents(old_contents);
+  if (thumbnail_tab_helper)
+    thumbnail_tab_helper->set_enabled(true);
 
 #if defined(OS_MACOSX)
   if (content::RenderWidgetHostView* rwhv =
@@ -397,14 +464,14 @@ void InstantLoader::CleanupPreviewContents() {
 #endif
 }
 
-void InstantLoader::ReplacePreviewContents(TabContents* old_tc,
-                                           TabContents* new_tc) {
-  DCHECK(old_tc == preview_contents_);
+void InstantLoader::ReplacePreviewContents(content::WebContents* old_contents,
+                                           content::WebContents* new_contents) {
+  DCHECK_EQ(old_contents, preview_contents_->web_contents());
   CleanupPreviewContents();
   // We release here without deleting so that the caller still has the
   // responsibility for deleting the TabContents.
   ignore_result(preview_contents_.release());
-  preview_contents_.reset(new_tc);
+  preview_contents_.reset(TabContents::FromWebContents(new_contents));
   SetupPreviewContents();
-  loader_delegate_->SwappedTabContents(this);
+  controller_->SwappedTabContents(this);
 }

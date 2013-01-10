@@ -56,6 +56,10 @@ class ShellDelegateImpl : public ash::ShellDelegate {
   virtual void HandleMediaPlayPause() OVERRIDE;
   virtual void HandleMediaPrevTrack() OVERRIDE;
   virtual string16 GetTimeRemainingString(base::TimeDelta delta) OVERRIDE;
+  virtual void SaveScreenMagnifierScale(double scale) OVERRIDE;
+  virtual double GetSavedScreenMagnifierScale() OVERRIDE;
+  virtual ui::MenuModel* CreateContextMenu(
+      aura::RootWindow* root_window) OVERRIDE;
 
  private:
   // Used to update Launcher. Owned by main.

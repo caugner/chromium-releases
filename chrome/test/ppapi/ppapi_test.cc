@@ -32,10 +32,10 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
-#include "content/test/gpu/test_switches.h"
 #include "media/audio/audio_manager.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
+#include "ppapi/shared_impl/ppapi_switches.h"
 #include "ui/gl/gl_switches.h"
 #include "webkit/plugins/plugin_switches.h"
 
@@ -194,12 +194,11 @@ void PPAPITestBase::RunTestWithSSLServer(const std::string& test_case) {
 }
 
 void PPAPITestBase::RunTestWithWebSocketServer(const std::string& test_case) {
-  FilePath websocket_root_dir;
-  ASSERT_TRUE(
-      PathService::Get(content::DIR_LAYOUT_TESTS, &websocket_root_dir));
-  content::TestWebSocketServer server;
-  int port = server.UseRandomPort();
-  ASSERT_TRUE(server.Start(websocket_root_dir));
+  net::TestServer server(net::TestServer::TYPE_WS,
+                         net::TestServer::kLocalhost,
+                         FilePath(FILE_PATH_LITERAL("net/data/websocket")));
+  ASSERT_TRUE(server.Start());
+  uint16_t port = server.host_port_pair().port();
   FilePath http_document_root;
   ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&http_document_root));
   RunHTTPTestServer(http_document_root, test_case,

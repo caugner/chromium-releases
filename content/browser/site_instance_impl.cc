@@ -18,12 +18,7 @@
 #include "content/public/common/url_constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
-using content::BrowserContext;
-using content::RenderProcessHost;
-using content::RenderProcessHostImpl;
-using content::SiteInstance;
-using content::StoragePartitionImpl;
-using content::WebUIControllerFactory;
+namespace content {
 
 static bool IsURLSameAsAnySiteInstance(const GURL& url) {
   if (!url.is_valid())
@@ -50,12 +45,12 @@ SiteInstanceImpl::SiteInstanceImpl(BrowsingInstance* browsing_instance)
       has_site_(false) {
   DCHECK(browsing_instance);
 
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 content::NotificationService::AllBrowserContextsAndSources());
+  registrar_.Add(this, NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 SiteInstanceImpl::~SiteInstanceImpl() {
-  content::GetContentClient()->browser()->SiteInstanceDeleting(this);
+  GetContentClient()->browser()->SiteInstanceDeleting(this);
 
   // Now that no one is referencing us, we can safely remove ourselves from
   // the BrowsingInstance.  Any future visits to a page from this site
@@ -75,7 +70,7 @@ bool SiteInstanceImpl::HasProcess() const {
 
   // If we would use process-per-site for this site, also check if there is an
   // existing process that we would use if GetProcess() were called.
-  content::BrowserContext* browser_context =
+  BrowserContext* browser_context =
       browsing_instance_->browser_context();
   if (has_site_ &&
       RenderProcessHostImpl::ShouldUseProcessPerSite(browser_context, site_) &&
@@ -138,7 +133,7 @@ RenderProcessHost* SiteInstanceImpl::GetProcess() {
                                                         process_, site_);
     }
 
-    content::GetContentClient()->browser()->SiteInstanceGotProcess(this);
+    GetContentClient()->browser()->SiteInstanceGotProcess(this);
 
     if (has_site_)
       LockToOrigin();
@@ -180,7 +175,7 @@ void SiteInstanceImpl::SetSite(const GURL& url) {
   }
 }
 
-const GURL& SiteInstanceImpl::GetSite() const {
+const GURL& SiteInstanceImpl::GetSiteURL() const {
   return site_;
 }
 
@@ -201,12 +196,8 @@ bool SiteInstanceImpl::IsRelatedSiteInstance(const SiteInstance* instance) {
       static_cast<const SiteInstanceImpl*>(instance)->browsing_instance_;
 }
 
-bool SiteInstanceImpl::HasWrongProcessForURL(const GURL& url) {
+bool SiteInstanceImpl::HasWrongProcessForURL(const GURL& url) const {
   // Having no process isn't a problem, since we'll assign it correctly.
-  // Note that HasProcess() may return true if process_ is null, in
-  // process-per-site cases where there's an existing process available.
-  // We want to use such a process in the IsSuitableHost check, so we
-  // may end up assigning process_ in the GetProcess() call below.
   if (!HasProcess())
     return false;
 
@@ -219,7 +210,7 @@ bool SiteInstanceImpl::HasWrongProcessForURL(const GURL& url) {
   // process is not (or vice versa), make sure we notice and fix it.
   GURL site_url = GetSiteForURL(browsing_instance_->browser_context(), url);
   return !RenderProcessHostImpl::IsSuitableHost(
-      GetProcess(), browsing_instance_->browser_context(), site_url);
+      process_, browsing_instance_->browser_context(), site_url);
 }
 
 BrowserContext* SiteInstanceImpl::GetBrowserContext() const {
@@ -313,15 +304,15 @@ bool SiteInstance::IsSameWebSite(BrowserContext* browser_context,
 /*static*/
 GURL SiteInstanceImpl::GetEffectiveURL(BrowserContext* browser_context,
                                        const GURL& url) {
-  return content::GetContentClient()->browser()->
+  return GetContentClient()->browser()->
       GetEffectiveURL(browser_context, url);
 }
 
 void SiteInstanceImpl::Observe(int type,
-                               const content::NotificationSource& source,
-                               const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
-  RenderProcessHost* rph = content::Source<RenderProcessHost>(source).ptr();
+                               const NotificationSource& source,
+                               const NotificationDetails& details) {
+  DCHECK(type == NOTIFICATION_RENDERER_PROCESS_TERMINATED);
+  RenderProcessHost* rph = Source<RenderProcessHost>(source).ptr();
   if (rph == process_)
     process_ = NULL;
 }
@@ -334,3 +325,5 @@ void SiteInstanceImpl::LockToOrigin() {
     policy->LockToOrigin(process_->GetID(), site_);
   }
 }
+
+}  // namespace content

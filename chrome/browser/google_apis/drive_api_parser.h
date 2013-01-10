@@ -29,8 +29,7 @@ class RepeatedMessageConverter;
 }  // namespace internal
 }  // namespace base
 
-// TODO(kochi): Rename to namespace drive. http://crbug.com/136371
-namespace gdata {
+namespace google_apis {
 
 // About resource represents the account information about the current user.
 // https://developers.google.com/drive/v2/reference/about
@@ -48,7 +47,7 @@ class AboutResource {
 
   // Returns the largest change ID number.
   int64 largest_change_id() const { return largest_change_id_; }
-  // Returns total number of quta bytes.
+  // Returns total number of quota bytes.
   int64 quota_bytes_total() const { return quota_bytes_total_; }
   // Returns the number of quota bytes used.
   int64 quota_bytes_used() const { return quota_bytes_used_; }
@@ -388,6 +387,11 @@ class FileResource {
   // Returns modification time by the user.
   const base::Time& modified_by_me_date() const { return modified_by_me_date_; }
 
+  // Returns last access time by the user.
+  const base::Time& last_viewed_by_me_date() const {
+    return last_viewed_by_me_date_;
+  }
+
   // Returns the short-lived download URL for the file.  This field exists
   // only when the file content is stored in Drive.
   const GURL& download_url() const { return download_url_; }
@@ -436,6 +440,7 @@ class FileResource {
   FileLabels labels_;
   base::Time created_date_;
   base::Time modified_by_me_date_;
+  base::Time last_viewed_by_me_date_;
   GURL download_url_;
   std::string file_extension_;
   std::string md5_checksum_;
@@ -587,6 +592,6 @@ class ChangeList {
   DISALLOW_COPY_AND_ASSIGN(ChangeList);
 };
 
-}  // namespace gdata
+}  // namespace google_apis
 
 #endif  // CHROME_BROWSER_GOOGLE_APIS_DRIVE_API_PARSER_H_

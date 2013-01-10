@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/chromeos/proxy_cros_settings_parser.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/prefs/pref_set_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/ui_account_tweaks.h"
 #include "chrome/browser/ui/webui/options/chromeos/accounts_options_handler.h"
@@ -48,7 +48,7 @@ bool IsSettingOwnerOnly(const std::string& pref) {
 bool IsLoggedInOwner(const std::string& username) {
   UserManager* user_manager = UserManager::Get();
   return user_manager->IsCurrentUserOwner() &&
-      user_manager->GetLoggedInUser().email() == username;
+      user_manager->GetLoggedInUser()->email() == username;
 }
 
 // Creates a user info dictionary to be stored in the |ListValue| that is
@@ -102,8 +102,8 @@ CoreChromeOSOptionsHandler::~CoreChromeOSOptionsHandler() {
 void CoreChromeOSOptionsHandler::InitializeHandler() {
   CoreOptionsHandler::InitializeHandler();
 
-  proxy_prefs_.reset(PrefSetObserver::CreateProxyPrefSetObserver(
-    Profile::FromWebUI(web_ui())->GetPrefs(), this));
+  proxy_prefs_.Init(Profile::FromWebUI(web_ui())->GetPrefs());
+  proxy_prefs_.Add(prefs::kProxy, this);
   // Observe the chromeos::ProxyConfigServiceImpl for changes from the UI.
   PrefProxyConfigTracker* proxy_tracker =
       Profile::FromWebUI(web_ui())->GetProxyConfigTracker();
@@ -124,19 +124,9 @@ base::Value* CoreChromeOSOptionsHandler::FetchPref(
     return value;
   }
   if (!CrosSettings::IsCrosSettings(pref_name)) {
-    // Specially handle kUseSharedProxies because kProxy controls it to
-    // determine if it's managed by policy/extension.
-    if (pref_name == prefs::kUseSharedProxies) {
-      PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
-      const PrefService::Preference* pref =
-          pref_service->FindPreference(prefs::kUseSharedProxies);
-      if (!pref)
-        return base::Value::CreateNullValue();
-      const PrefService::Preference* controlling_pref =
-          pref_service->FindPreference(prefs::kProxy);
-      return CreateValueForPref(pref, controlling_pref);
-    }
-    return ::options::CoreOptionsHandler::FetchPref(pref_name);
+    std::string controlling_pref =
+        pref_name == prefs::kUseSharedProxies ? prefs::kProxy : std::string();
+    return CreateValueForPref(pref_name, controlling_pref);
   }
 
   const base::Value* pref_value = CrosSettings::Get()->GetPref(pref_name);
@@ -144,6 +134,7 @@ base::Value* CoreChromeOSOptionsHandler::FetchPref(
     return base::Value::CreateNullValue();
 
   // Decorate pref value as CoreOptionsHandler::CreateValueForPref() does.
+  // TODO(estade): seems that this should replicate CreateValueForPref less.
   DictionaryValue* dict = new DictionaryValue;
   if (pref_name == kAccountsPrefUsers)
     dict->Set("value", CreateUsersWhitelist(pref_value));
@@ -215,7 +206,7 @@ void CoreChromeOSOptionsHandler::Observe(
     const PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
     std::string* pref_name = content::Details<std::string>(details).ptr();
     if (content::Source<PrefService>(source).ptr() == pref_service &&
-        (proxy_prefs_->IsObserved(*pref_name) ||
+        (proxy_prefs_.IsObserved(*pref_name) ||
          *pref_name == prefs::kUseSharedProxies)) {
       NotifyPrefChanged(prefs::kUseSharedProxies, prefs::kProxy);
       return;

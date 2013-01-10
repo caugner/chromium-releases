@@ -31,16 +31,11 @@ void LocationBarContainer::PlatformInit() {
   // off when done.
 }
 
-// static
-SkColor LocationBarContainer::GetBackgroundColor() {
-  return instant_extended_api_enabled_ ?
-      SK_ColorWHITE :
-      LocationBarView::kOmniboxBackgroundColor;
-}
-
 void LocationBarContainer::StackAtTop() {
   // TODO: this is hack. The problem is NativeViewHostAura does an AddChild(),
   // which places its layer at the top of the stack.
-  if (layer())
+  // TODO(mad): verify if the check for a parent should be a DCHECK or if this
+  // runtime check is OK. Running with enable instant extended api crashes here.
+  if (layer() && layer()->parent())
     layer()->parent()->StackAtTop(layer());
 }

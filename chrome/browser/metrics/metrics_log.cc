@@ -26,7 +26,7 @@
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/plugin_prefs.h"
+#include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
@@ -44,6 +44,10 @@
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/screen.h"
 #include "webkit/plugins/webplugininfo.h"
+
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif
 
 #define OPEN_ELEMENT_FOR_SCOPE(name) ScopedElement scoped_element(this, name)
 
@@ -66,7 +70,7 @@ namespace {
 
 // Returns the date at which the current metrics client ID was created as
 // a string containing milliseconds since the epoch, or "0" if none was found.
-std::string GetInstallDate(PrefService* pref) {
+std::string GetMetricsEnabledDate(PrefService* pref) {
   if (!pref) {
     NOTREACHED();
     return "0";
@@ -123,6 +127,8 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
       return OmniboxEventProto::Suggestion::EXTENSION_APP;
     case AutocompleteMatch::CONTACT:
       return OmniboxEventProto::Suggestion::CONTACT;
+    case AutocompleteMatch::BOOKMARK_TITLE:
+      return OmniboxEventProto::Suggestion::BOOKMARK_TITLE;
     default:
       NOTREACHED();
       return OmniboxEventProto::Suggestion::UNKNOWN_RESULT_TYPE;
@@ -219,9 +225,9 @@ void WriteProfilerData(const ProcessDataSnapshot& profiler_data,
                                  &ignored, &birth_thread_name_hash);
     MetricsLogBase::CreateHashes(it->death_thread_name,
                                  &ignored, &exec_thread_name_hash);
-    MetricsLogBase::CreateHashes(it->birth.location.function_name,
-                                 &ignored, &source_file_name_hash);
     MetricsLogBase::CreateHashes(it->birth.location.file_name,
+                                 &ignored, &source_file_name_hash);
+    MetricsLogBase::CreateHashes(it->birth.location.function_name,
                                  &ignored, &source_function_name_hash);
 
     const tracked_objects::DeathDataSnapshot& death_data = it->death_data;
@@ -242,6 +248,7 @@ void WriteProfilerData(const ProcessDataSnapshot& profiler_data,
   }
 }
 
+#if defined(GOOGLE_CHROME_BUILD) && defined(OS_WIN)
 void ProductDataToProto(const GoogleUpdateSettings::ProductData& product_data,
                         ProductInfo* product_info) {
   product_info->set_version(product_data.version);
@@ -254,6 +261,7 @@ void ProductDataToProto(const GoogleUpdateSettings::ProductData& product_data,
         static_cast<ProductInfo::InstallResult>(product_data.last_result));
   }
 }
+#endif
 
 }  // namespace
 
@@ -342,15 +350,17 @@ PrefService* MetricsLog::GetPrefService() {
 }
 
 gfx::Size MetricsLog::GetScreenSize() const {
-  return gfx::Screen::GetPrimaryDisplay().GetSizeInPixel();
+  return gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().GetSizeInPixel();
 }
 
 float MetricsLog::GetScreenDeviceScaleFactor() const {
-  return gfx::Screen::GetPrimaryDisplay().device_scale_factor();
+  return gfx::Screen::GetNativeScreen()->
+      GetPrimaryDisplay().device_scale_factor();
 }
 
 int MetricsLog::GetScreenCount() const {
-  return gfx::Screen::GetNumDisplays();
+  // TODO(scottmg): NativeScreen maybe wrong. http://crbug.com/133312
+  return gfx::Screen::GetNativeScreen()->GetNumDisplays();
 }
 
 void MetricsLog::GetFieldTrialIds(
@@ -634,7 +644,7 @@ void MetricsLog::WriteInstallElement() {
   // Write the XML version.
   // We'll write the protobuf version in RecordEnvironmentProto().
   OPEN_ELEMENT_FOR_SCOPE("install");
-  WriteAttribute("installdate", GetInstallDate(GetPrefService()));
+  WriteAttribute("installdate", GetMetricsEnabledDate(GetPrefService()));
   WriteIntAttribute("buildid", 0);  // We're using appversion instead.
 }
 
@@ -662,7 +672,7 @@ void MetricsLog::RecordEnvironment(
     // Write the XML version.
     // We'll write the protobuf version in RecordEnvironmentProto().
     OPEN_ELEMENT_FOR_SCOPE("cpu");
-    WriteAttribute("arch", base::SysInfo::CPUArchitecture());
+    WriteAttribute("arch", base::SysInfo::OperatingSystemArchitecture());
   }
 
   {
@@ -747,17 +757,17 @@ void MetricsLog::RecordEnvironmentProto(
     const std::vector<webkit::WebPluginInfo>& plugin_list,
     const GoogleUpdateMetrics& google_update_metrics) {
   SystemProfileProto* system_profile = uma_proto()->mutable_system_profile();
-  int install_date;
-  bool success = base::StringToInt(GetInstallDate(GetPrefService()),
-                                   &install_date);
+  int enabled_date;
+  bool success = base::StringToInt(GetMetricsEnabledDate(GetPrefService()),
+                                   &enabled_date);
   DCHECK(success);
-  system_profile->set_install_date(install_date);
+  system_profile->set_uma_enabled_date(enabled_date);
 
   system_profile->set_application_locale(
       content::GetContentClient()->browser()->GetApplicationLocale());
 
   SystemProfileProto::Hardware* hardware = system_profile->mutable_hardware();
-  hardware->set_cpu_architecture(base::SysInfo::CPUArchitecture());
+  hardware->set_cpu_architecture(base::SysInfo::OperatingSystemArchitecture());
   hardware->set_system_ram_mb(base::SysInfo::AmountOfPhysicalMemoryMB());
 #if defined(OS_WIN)
   hardware->set_dll_base(reinterpret_cast<uint64>(&__ImageBase));
@@ -776,6 +786,10 @@ void MetricsLog::RecordEnvironmentProto(
 #endif
   os->set_name(os_name);
   os->set_version(base::SysInfo::OperatingSystemVersion());
+#if defined(OS_ANDROID)
+  os->set_fingerprint(
+      base::android::BuildInfo::GetInstance()->android_build_fp());
+#endif
 
   const content::GPUInfo& gpu_info =
       GpuDataManager::GetInstance()->GetGPUInfo();
@@ -854,7 +868,7 @@ void MetricsLog::WriteProfileMetrics(const std::string& profileidhash,
        i != profile_metrics.end_keys(); ++i) {
     const Value* value;
     if (profile_metrics.GetWithoutPathExpansion(*i, &value)) {
-      DCHECK(*i != "id");
+      DCHECK_NE(*i, "id");
       switch (value->GetType()) {
         case Value::TYPE_STRING: {
           std::string string_value;

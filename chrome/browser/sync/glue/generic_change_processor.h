@@ -49,6 +49,7 @@ class GenericChangeProcessor : public ChangeProcessor,
   // Build and store a list of all changes into |syncer_changes_|.
   virtual void ApplyChangesFromSyncModel(
       const syncer::BaseTransaction* trans,
+      int64 version,
       const syncer::ImmutableChangeRecordList& changes) OVERRIDE;
   // Passes |syncer_changes_|, built in ApplyChangesFromSyncModel, onto
   // |local_service_| by way of its ProcessSyncChanges method.
@@ -73,9 +74,6 @@ class GenericChangeProcessor : public ChangeProcessor,
  protected:
   // ChangeProcessor interface.
   virtual void StartImpl(Profile* profile) OVERRIDE;           // Does nothing.
-  // Called from UI thread (as part of deactivating datatype), but does
-  // nothing and is guaranteed to still be alive, so it's okay.
-  virtual void StopImpl() OVERRIDE;                            // Does nothing.
   virtual syncer::UserShare* share_handle() const OVERRIDE;
 
  private:

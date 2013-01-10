@@ -14,6 +14,7 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "cc/switches.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_content_client.h"
@@ -149,6 +150,41 @@ const Experiment::Choice kAsyncDnsChoices[] = {
     switches::kEnableAsyncDns, ""}
 };
 
+const Experiment::Choice kNaClDebugMaskChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  // Secure shell can be used on ChromeOS for forwarding the TCP port opened by
+  // debug stub to a remote machine. Since secure shell uses NaCl, we provide
+  // an option to switch off its debugging.
+  { IDS_NACL_DEBUG_MASK_CHOICE_EXCLUDE_UTILS,
+      switches::kNaClDebugMask, "!*://*/*ssh_client.nmf" },
+  { IDS_NACL_DEBUG_MASK_CHOICE_INCLUDE_DEBUG,
+      switches::kNaClDebugMask, "*://*/*debug.nmf" }
+};
+
+const Experiment::Choice kActionBoxChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    switches::kActionBox, "0"},
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+    switches::kActionBox, "1"}
+};
+
+const Experiment::Choice kScriptBubbleChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    switches::kScriptBubble, "0"},
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+    switches::kScriptBubble, "1"}
+};
+
+const Experiment::Choice kTabCaptureChoices[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
+    switches::kTabCapture, "0"},
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+    switches::kTabCapture, "1"}
+};
+
 #if defined(OS_CHROMEOS)
 const Experiment::Choice kAshBootAnimationFunction[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
@@ -171,14 +207,17 @@ const Experiment::Choice kAshBootAnimationFunction[] = {
 // the top of that file for details) to update the chromeactions.txt file, which
 // will enable UMA to record your feature flag.
 //
-// After your feature has shipped under a flag, you can locate the metrics
-// under the action name AboutFlags_internal-action-name. Actions are recorded
-// once per startup, so you should divide this number by AboutFlags_StartupTick
-// to get a sense of usage. Note that this will not be the same as number of
-// users with a given feature enabled because users can quit and relaunch
-// the application multiple times over a given time interval.
-// TODO(rsesek): See if there's a way to count per-user, rather than
-// per-startup.
+// After your feature has shipped under a flag, you can locate the metrics under
+// the action name AboutFlags_internal-action-name. Actions are recorded once
+// per startup, so you should divide this number by AboutFlags_StartupTick to
+// get a sense of usage. Note that this will not be the same as number of users
+// with a given feature enabled because users can quit and relaunch the
+// application multiple times over a given time interval. The dashboard also
+// shows you how many (metrics reporting) users have enabled the flag over the
+// last seven days. However, note that this is not the same as the number of
+// users who have the flag enabled, since enabling the flag happens once,
+// whereas running with the flag enabled happens until the user flips the flag
+// again.
 
 // To add a new experiment add to the end of kExperiments. There are two
 // distinct types of experiments:
@@ -283,7 +322,7 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_DISABLE_THREADED_ANIMATION_NAME,
     IDS_FLAGS_DISABLE_THREADED_ANIMATION_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDisableThreadedAnimation)
+    SINGLE_VALUE_TYPE(cc::switches::kDisableThreadedAnimation)
   },
   {
     "composited-layer-borders",
@@ -327,7 +366,7 @@ const Experiment kExperiments[] = {
     kOsAll,
     MULTI_VALUE_TYPE(kFixedPositionCreatesStackingContextChoices)
   },
-  // TODO(dspringer): When NaCl is on by default, remove this flag entry.
+  // TODO(bbudge): When NaCl is on by default, remove this flag entry.
   {
     "enable-nacl",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ENABLE_NACL_NAME,
@@ -352,11 +391,27 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableNaClDebug)
   },
   {
+    "nacl-debug-mask",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_NACL_DEBUG_MASK_NAME,
+    IDS_FLAGS_NACL_DEBUG_MASK_DESCRIPTION,
+    kOsAll,
+    MULTI_VALUE_TYPE(kNaClDebugMaskChoices)
+  },
+  {
     "enable-pnacl",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ENABLE_PNACL_NAME,
     IDS_FLAGS_ENABLE_PNACL_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnablePnacl)
+  },
+  // TODO(bbudge): When NaCl switches to the IPC-based proxy, remove this
+  // flag entry.
+  {
+    "enable-nacl-ipc-proxy",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_ENABLE_NACL_IPC_PROXY_NAME,
+    IDS_FLAGS_ENABLE_NACL_IPC_PROXY_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableNaClIPCProxy)
   },
   {
     "enable-scripted-speech",  // FLAGS:RECORD_UMA
@@ -377,14 +432,21 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ACTION_BOX_NAME,
     IDS_FLAGS_ACTION_BOX_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableActionBox),
+    MULTI_VALUE_TYPE(kActionBoxChoices),
   },
   {
     "script-badges",
     IDS_FLAGS_SCRIPT_BADGES_NAME,
     IDS_FLAGS_SCRIPT_BADGES_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableScriptBadges),
+    SINGLE_VALUE_TYPE(switches::kScriptBadges)
+  },
+  {
+    "script-bubble",
+    IDS_FLAGS_SCRIPT_BUBBLE_NAME,
+    IDS_FLAGS_SCRIPT_BUBBLE_DESCRIPTION,
+    kOsAll,
+    MULTI_VALUE_TYPE(kScriptBubbleChoices),
   },
   {
     "apps-new-install-bubble",
@@ -568,7 +630,7 @@ const Experiment kExperiments[] = {
 #else
     0,
 #endif
-    SINGLE_VALUE_TYPE(switches::kEnablePerTilePainting)
+    SINGLE_VALUE_TYPE(cc::switches::kEnablePerTilePainting)
   },
   {
     "enable-javascript-harmony",
@@ -654,21 +716,12 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableSuggestionsTabPage)
   },
   {
-    "enable-discovery-ntp",
-    IDS_FLAGS_ENABLE_NTP_DISCOVERY_NAME,
-    IDS_FLAGS_ENABLE_NTP_DISCOVERY_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableDiscoveryInNewTabPage)
-  },
-#if defined(GOOGLE_CHROME_BUILD)
-  {
-    "disable-asynchronous-spellchecking",
-    IDS_FLAGS_DISABLE_ASYNCHRONOUS_SPELLCHECKING,
-    IDS_FLAGS_DISABLE_ASYNCHRONOUS_SPELLCHECKING_DESCRIPTION,
+    "force-sync-spellcheck",
+    IDS_FLAGS_FORCE_SYNC_SPELLCHECK,
+    IDS_FLAGS_FORCE_SYNC_SPELLCHECK_DESCRIPTION,
     kOsWin | kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kDisableAsynchronousSpellChecking)
+    SINGLE_VALUE_TYPE(switches::kForceSyncSpellCheck)
   },
-#endif
   {
     "touch-optimized-ui",
     IDS_FLAGS_TOUCH_OPTIMIZED_UI_NAME,
@@ -687,8 +740,15 @@ const Experiment kExperiments[] = {
     "enable-touch-events",
     IDS_ENABLE_TOUCH_EVENTS_NAME,
     IDS_ENABLE_TOUCH_EVENTS_DESCRIPTION,
-    kOsAll,
+    kOsWin | kOsMac | kOsLinux,
     SINGLE_VALUE_TYPE(switches::kEnableTouchEvents)
+  },
+  {
+    "enable-tab-capture",
+    IDS_ENABLE_TAB_CAPTURE_NAME,
+    IDS_ENABLE_TAB_CAPTURE_DESCRIPTION,
+    kOsMac | kOsLinux,
+    MULTI_VALUE_TYPE(kTabCaptureChoices)
   },
 #if defined(OS_CHROMEOS)
   {
@@ -742,13 +802,20 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableTouchpadThreeFingerClick)
   },
+  {
+    "allow-touchpad-three-finger-swipe",
+    IDS_FLAGS_ALLOW_TOUCHPAD_THREE_FINGER_SWIPE_NAME,
+    IDS_FLAGS_ALLOW_TOUCHPAD_THREE_FINGER_SWIPE_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableTouchpadThreeFingerSwipe)
+  },
 #endif
   {
-    "enable-client-oauth-signin",
-    IDS_FLAGS_ENABLE_CLIENT_OAUTH_SIGNIN_NAME,
-    IDS_FLAGS_ENABLE_CLIENT_OAUTH_SIGNIN_DESCRIPTION,
+    "use-web-based-signin-flow",
+    IDS_FLAGS_USE_WEB_BASED_SIGNIN_FLOW_NAME,
+    IDS_FLAGS_USE_WEB_BASED_SIGNIN_FLOW_DESCRIPTION,
     kOsMac | kOsWin | kOsLinux,
-    SINGLE_VALUE_TYPE(switches::kEnableClientOAuthSignin)
+    SINGLE_VALUE_TYPE(switches::kUseWebBasedSigninFlow)
   },
 #if defined(USE_ASH)
   {
@@ -764,13 +831,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_SHOW_TOUCH_HUD_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(ash::switches::kAshTouchHud)
-  },
-  {
-    "ash-notify-disabled",
-    IDS_FLAGS_DISABLE_ASH_NOTIFY_NAME,
-    IDS_FLAGS_DISABLE_ASH_NOTIFY_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(ash::switches::kAshNotifyDisabled),
   },
   {
     "enable-pinch",
@@ -794,20 +854,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_DISABLE_NEW_WALLPAPER_UI_DESCRIPTION,
     kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kDisableNewWallpaperUI)
-  },
-  {
-    "enable-drive-v2-api",
-    IDS_FLAGS_ENABLE_DRIVE_V2_API,
-    IDS_FLAGS_ENABLE_DRIVE_V2_API_DESCRIPTION,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableDriveV2Api),
-  },
-  {
-    "use-leveldb-for-gdata",
-    IDS_FLAGS_USE_LEVELDB_FOR_GDATA_NAME,
-    IDS_FLAGS_USE_LEVELDB_FOR_GDATA_DESCRIPTION,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kUseLevelDBForGData),
   },
   {
     "disable-html5-camera",
@@ -852,11 +898,11 @@ const Experiment kExperiments[] = {
     MULTI_VALUE_TYPE(kAshBootAnimationFunction),
   },
   {
-    "disable-workspace2",
-    IDS_FLAGS_DISABLE_WORKSPACE2,
-    IDS_FLAGS_DISABLE_WORKSPACE2_DESCRIPTION,
+    "new-lock-animations",
+    IDS_FLAGS_ASH_NEW_LOCK_ANIMATIONS,
+    IDS_FLAGS_ASH_NEW_LOCK_ANIMATIONS_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(ash::switches::kAshDisableWorkspace2),
+    SINGLE_VALUE_TYPE(ash::switches::kAshNewLockAnimationsEnabled),
   },
 #endif
   {
@@ -880,15 +926,6 @@ const Experiment kExperiments[] = {
     kOsWin | kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableFramelessConstrainedDialogs),
   },
-#if defined(OS_CHROMEOS)
-  {
-    "enable-unsupported-bluetooth-devices",
-    IDS_FLAGS_UNSUPPORTED_BLUETOOTH_DEVICES_NAME,
-    IDS_FLAGS_UNSUPPORTED_BLUETOOTH_DEVICES_DESCRIPTION,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableUnsupportedBluetoothDevices)
-  },
-#endif
   { "disable-accelerated-video-decode",
     IDS_FLAGS_DISABLE_ACCELERATED_VIDEO_DECODE_NAME,
     IDS_FLAGS_DISABLE_ACCELERATED_VIDEO_DECODE_DESCRIPTION,
@@ -949,6 +986,59 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableRequestTabletSite)
   },
 #endif
+  {
+    "debug-packed-apps",
+    IDS_FLAGS_DEBUG_PACKED_APP_NAME,
+    IDS_FLAGS_DEBUG_PACKED_APP_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kDebugPackedApps)
+  },
+  {
+    "enable-password-generation",
+    IDS_FLAGS_ENABLE_PASSWORD_GENERATION_NAME,
+    IDS_FLAGS_ENABLE_PASSWORD_GENERATION_DESCRIPTION,
+    kOsWin | kOsLinux | kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnablePasswordGeneration)
+  },
+  {
+    "crash-on-gpu-hang",
+    IDS_FLAGS_CRASH_ON_GPU_HANG_NAME,
+    IDS_FLAGS_CRASH_ON_GPU_HANG_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kCrashOnGpuHang)
+  },
+  {
+    "enable-deferred-image-decoding",
+    IDS_FLAGS_ENABLE_DEFERRED_IMAGE_DECODING_NAME,
+    IDS_FLAGS_ENABLE_DEFERRED_IMAGE_DECODING_DESCRIPTION,
+#if defined(USE_SKIA)
+    kOsMac | kOsLinux | kOsCrOS,
+#else
+    0,
+#endif
+    SINGLE_VALUE_TYPE(switches::kEnableDeferredImageDecoding)
+  },
+  {
+    "performance-monitor-gathering",
+    IDS_FLAGS_PERFORMANCE_MONITOR_GATHERING_NAME,
+    IDS_FLAGS_PERFORMANCE_MONITOR_GATHERING_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kPerformanceMonitorGathering)
+  },
+  {
+    "enable-new-autofill-heuristics",
+    IDS_FLAGS_ENABLE_NEW_AUTOFILL_HEURISTICS_NAME,
+    IDS_FLAGS_ENABLE_NEW_AUTOFILL_HEURISTICS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableNewAutofillHeuristics)
+  },
+  {
+    "enable-web-intents-invocation",
+    IDS_FLAGS_WEB_INTENTS_INVOCATION_ENABLED_NAME,
+    IDS_FLAGS_WEB_INTENTS_INVOCATION_ENABLED_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kWebIntentsInvocationEnabled)
+  },
 };
 
 const Experiment* experiments = kExperiments;

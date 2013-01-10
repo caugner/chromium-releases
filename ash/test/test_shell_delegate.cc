@@ -19,7 +19,8 @@ namespace test {
 
 TestShellDelegate::TestShellDelegate()
     : locked_(false),
-      spoken_feedback_enabled_(false) {
+      spoken_feedback_enabled_(false),
+      num_exit_requests_(0) {
 }
 
 TestShellDelegate::~TestShellDelegate() {
@@ -53,6 +54,7 @@ void TestShellDelegate::Shutdown() {
 }
 
 void TestShellDelegate::Exit() {
+  num_exit_requests_++;
 }
 
 void TestShellDelegate::NewTab() {
@@ -145,6 +147,17 @@ void TestShellDelegate::HandleMediaPrevTrack() {
 
 string16 TestShellDelegate::GetTimeRemainingString(base::TimeDelta delta) {
   return string16();
+}
+
+void TestShellDelegate::SaveScreenMagnifierScale(double scale) {
+}
+
+ui::MenuModel* TestShellDelegate::CreateContextMenu(aura::RootWindow* root) {
+  return NULL;
+}
+
+double TestShellDelegate::GetSavedScreenMagnifierScale() {
+  return std::numeric_limits<double>::min();
 }
 
 }  // namespace test

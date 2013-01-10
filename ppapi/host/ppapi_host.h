@@ -29,7 +29,9 @@ class ResourceMessageReplyParams;
 namespace host {
 
 class HostFactory;
+struct HostMessageContext;
 class InstanceMessageFilter;
+struct ReplyMessageContext;
 class ResourceHost;
 
 // The host provides routing and tracking for resource message calls that
@@ -53,8 +55,11 @@ class PPAPI_HOST_EXPORT PpapiHost : public IPC::Sender, public IPC::Listener {
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // Sends the given reply message to the plugin.
-  void SendReply(const proxy::ResourceMessageReplyParams& params,
+  void SendReply(const ReplyMessageContext& context,
                  const IPC::Message& msg);
+
+  // Sends the given unsolicited reply message to the plugin.
+  void SendUnsolicitedReply(PP_Resource resource, const IPC::Message& msg);
 
   // Adds the given host factory filter to the host. The PpapiHost will take
   // ownership of the pointer.
@@ -67,9 +72,18 @@ class PPAPI_HOST_EXPORT PpapiHost : public IPC::Sender, public IPC::Listener {
  private:
   friend class InstanceMessageFilter;
 
+  void HandleResourceCall(
+      const proxy::ResourceMessageCallParams& params,
+      const IPC::Message& nested_msg,
+      HostMessageContext* context);
+
   // Message handlers.
   void OnHostMsgResourceCall(const proxy::ResourceMessageCallParams& params,
                              const IPC::Message& nested_msg);
+  void OnHostMsgResourceSyncCall(
+      const proxy::ResourceMessageCallParams& params,
+      const IPC::Message& nested_msg,
+      IPC::Message* reply_msg);
   void OnHostMsgResourceCreated(const proxy::ResourceMessageCallParams& param,
                                 PP_Instance instance,
                                 const IPC::Message& nested_msg);

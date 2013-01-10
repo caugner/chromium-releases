@@ -16,6 +16,7 @@
 #include "ui/gl/gl_surface_cgl.h"
 #include "ui/surface/io_surface_support_mac.h"
 
+namespace content {
 namespace {
 
 // IOSurface dimensions will be rounded up to a multiple of this value in order
@@ -56,7 +57,8 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
 
  protected:
   // ImageTransportSurface implementation
-  virtual void OnBufferPresented(uint32 sync_point) OVERRIDE;
+  virtual void OnBufferPresented(bool presented,
+                                 uint32 sync_point) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
 
@@ -272,7 +274,8 @@ gfx::Size IOSurfaceImageTransportSurface::GetSize() {
   return size_;
 }
 
-void IOSurfaceImageTransportSurface::OnBufferPresented(uint32 sync_point) {
+void IOSurfaceImageTransportSurface::OnBufferPresented(bool presented,
+                                                       uint32 sync_point) {
   DCHECK(is_swap_buffers_pending_);
   is_swap_buffers_pending_ = false;
   if (did_unschedule_) {
@@ -437,5 +440,7 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
   else
     return NULL;
 }
+
+}  // namespace content
 
 #endif  // defined(USE_GPU)

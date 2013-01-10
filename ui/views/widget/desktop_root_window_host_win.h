@@ -6,32 +6,43 @@
 #define UI_VIEWS_WIDGET_DESKTOP_ROOT_WINDOW_HOST_WIN_H_
 
 #include "ui/aura/root_window_host.h"
+#include "ui/views/views_export.h"
 #include "ui/views/widget/desktop_root_window_host.h"
 #include "ui/views/win/hwnd_message_handler_delegate.h"
 
 namespace aura {
 class DesktopActivationClient;
+class DesktopCursorClient;
 class DesktopDispatcherClient;
 class FocusManager;
+namespace client {
+class ScreenPositionClient;
+}
+namespace shared {
+class CompoundEventFilter;
+class InputMethodEventFilter;
+}
 }
 
 namespace views {
 class DesktopCaptureClient;
 class HWNDMessageHandler;
 
-class DesktopRootWindowHostWin : public DesktopRootWindowHost,
-                                 public aura::RootWindowHost,
-                                 public HWNDMessageHandlerDelegate {
+class VIEWS_EXPORT DesktopRootWindowHostWin
+    : public DesktopRootWindowHost,
+      public aura::RootWindowHost,
+      public HWNDMessageHandlerDelegate {
  public:
   DesktopRootWindowHostWin(
       internal::NativeWidgetDelegate* native_widget_delegate,
+      DesktopNativeWidgetAura* desktop_native_widget_aura,
       const gfx::Rect& initial_bounds);
   virtual ~DesktopRootWindowHostWin();
 
- private:
+ protected:
   // Overridden from DesktopRootWindowHost:
-  virtual void Init(aura::Window* content_window,
-                    const Widget::InitParams& params) OVERRIDE;
+  virtual aura::RootWindow* Init(aura::Window* content_window,
+                                 const Widget::InitParams& params) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void CloseNow() OVERRIDE;
   virtual aura::RootWindowHost* AsRootWindowHost() OVERRIDE;
@@ -47,8 +58,8 @@ class DesktopRootWindowHostWin : public DesktopRootWindowHost,
   virtual gfx::Rect GetWindowBoundsInScreen() const OVERRIDE;
   virtual gfx::Rect GetClientAreaBoundsInScreen() const OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
+  virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
   virtual void SetShape(gfx::NativeRegion native_region) OVERRIDE;
-  virtual bool ShouldUseNativeFrame() OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
   virtual bool IsActive() const OVERRIDE;
@@ -62,8 +73,29 @@ class DesktopRootWindowHostWin : public DesktopRootWindowHost,
   virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual internal::InputMethodDelegate* GetInputMethodDelegate() OVERRIDE;
   virtual void SetWindowTitle(const string16& title) OVERRIDE;
+  virtual void ClearNativeFocus() OVERRIDE;
+  virtual Widget::MoveLoopResult RunMoveLoop(
+      const gfx::Point& drag_offset) OVERRIDE;
+  virtual void EndMoveLoop() OVERRIDE;
+  virtual void SetVisibilityChangedAnimationsEnabled(bool value) OVERRIDE;
+  virtual bool ShouldUseNativeFrame() OVERRIDE;
+  virtual void FrameTypeChanged() OVERRIDE;
+  virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
+  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
+  virtual bool IsFullscreen() const OVERRIDE;
+  virtual void SetOpacity(unsigned char opacity) OVERRIDE;
+  virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
+                              const gfx::ImageSkia& app_icon) OVERRIDE;
+  virtual void SetAccessibleName(const string16& name) OVERRIDE;
+  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
+  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
+  virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
+  virtual void FlashFrame(bool flash_frame) OVERRIDE;
+  virtual void OnNativeWidgetFocus() OVERRIDE;
+  virtual void OnNativeWidgetBlur() OVERRIDE;
 
   // Overridden from aura::RootWindowHost:
+  virtual void SetDelegate(aura::RootWindowHostDelegate* delegate) OVERRIDE;
   virtual aura::RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -75,12 +107,14 @@ class DesktopRootWindowHostWin : public DesktopRootWindowHost,
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
-  virtual void ShowCursor(bool show) OVERRIDE;
   virtual bool QueryMouseLocation(gfx::Point* location_return) OVERRIDE;
   virtual bool ConfineCursorToRootWindow() OVERRIDE;
   virtual void UnConfineCursor() OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
   virtual void SetFocusWhenShown(bool focus_when_shown) OVERRIDE;
+  virtual bool CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
+                                  const gfx::Point& dest_offset,
+                                  SkCanvas* canvas) OVERRIDE;
   virtual bool GrabSnapshot(
       const gfx::Rect& snapshot_bounds,
       std::vector<unsigned char>* png_representation) OVERRIDE;
@@ -164,20 +198,38 @@ class DesktopRootWindowHostWin : public DesktopRootWindowHost,
 
   Widget* GetWidget();
   const Widget* GetWidget() const;
+  HWND GetHWND() const;
 
-  scoped_ptr<aura::RootWindow> root_window_;
+ private:
+  // We are owned by the RootWindow, but we have to have a back pointer to it.
+  aura::RootWindow* root_window_;
+
   scoped_ptr<HWNDMessageHandler> message_handler_;
   scoped_ptr<DesktopCaptureClient> capture_client_;
-  scoped_ptr<aura::DesktopActivationClient> activation_client_;
   scoped_ptr<aura::DesktopDispatcherClient> dispatcher_client_;
   scoped_ptr<aura::FocusManager> focus_manager_;
+  // Depends on focus_manager_.
+  scoped_ptr<aura::DesktopActivationClient> activation_client_;
+  scoped_ptr<aura::shared::InputMethodEventFilter> input_method_filter_;
 
   // TODO(beng): Consider providing an interface to DesktopNativeWidgetAura
   //             instead of providing this route back to Widget.
   internal::NativeWidgetDelegate* native_widget_delegate_;
 
+  DesktopNativeWidgetAura* desktop_native_widget_aura_;
+
   aura::RootWindowHostDelegate* root_window_host_delegate_;
   aura::Window* content_window_;
+
+  // In some cases, we set a screen position client on |root_window_|. If we
+  // do, we're responsible for the lifetime.
+  scoped_ptr<aura::client::ScreenPositionClient> position_client_;
+
+  // A simple cursor client which just forwards events to the RootWindow.
+  scoped_ptr<aura::DesktopCursorClient> cursor_client_;
+
+  // The RootWindow's CompoundEventFilter.
+  aura::shared::CompoundEventFilter* root_window_event_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopRootWindowHostWin);
 };

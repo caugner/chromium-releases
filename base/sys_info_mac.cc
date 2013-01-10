@@ -12,6 +12,7 @@
 #include <sys/types.h>
 
 #include "base/logging.h"
+#include "base/mac/scoped_mach_port.h"
 #include "base/stringprintf.h"
 
 namespace base {
@@ -44,7 +45,8 @@ void SysInfo::OperatingSystemVersionNumbers(int32* major_version,
 int64 SysInfo::AmountOfPhysicalMemory() {
   struct host_basic_info hostinfo;
   mach_msg_type_number_t count = HOST_BASIC_INFO_COUNT;
-  int result = host_info(mach_host_self(),
+  base::mac::ScopedMachPort host(mach_host_self());
+  int result = host_info(host,
                          HOST_BASIC_INFO,
                          reinterpret_cast<host_info_t>(&hostinfo),
                          &count);
@@ -54,6 +56,12 @@ int64 SysInfo::AmountOfPhysicalMemory() {
   }
   DCHECK_EQ(HOST_BASIC_INFO_COUNT, count);
   return static_cast<int64>(hostinfo.max_mem);
+}
+
+// static
+int64 SysInfo::AmountOfAvailablePhysicalMemory() {
+  // TODO(hongbo): Add implementation for Mac.
+  return 0;
 }
 
 // static

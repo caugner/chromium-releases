@@ -33,6 +33,7 @@ namespace extension_manifest_keys {
   extern const char kDefaultLocale[];
   extern const char kDescription[];
   extern const char kDevToolsPage[];
+  extern const char kDisplayInLauncher[];
   extern const char kEventName[];
   extern const char kExcludeGlobs[];
   extern const char kExcludeMatches[];
@@ -95,6 +96,7 @@ namespace extension_manifest_keys {
   extern const char kPlatformAppBackground[];
   extern const char kPlatformAppBackgroundPage[];
   extern const char kPlatformAppBackgroundScripts[];
+  extern const char kPlatformAppContentSecurityPolicy[];
   extern const char kPlugins[];
   extern const char kPluginsPath[];
   extern const char kPluginsPublic[];
@@ -197,6 +199,7 @@ namespace extension_manifest_errors {
   extern const char kInvalidDefaultLocale[];
   extern const char kInvalidDescription[];
   extern const char kInvalidDevToolsPage[];
+  extern const char kInvalidDisplayInLauncher[];
   extern const char kInvalidExcludeMatch[];
   extern const char kInvalidExcludeMatches[];
   extern const char kInvalidFileAccessList[];
@@ -210,6 +213,7 @@ namespace extension_manifest_errors {
   extern const char kInvalidIconPath[];
   extern const char kInvalidIcons[];
   extern const char kInvalidIncognitoBehavior[];
+  extern const char kInvalidIncognitoModeForPlatformApp[];
   extern const char kInvalidInputComponents[];
   extern const char kInvalidInputComponentDescription[];
   extern const char kInvalidInputComponentLayoutName[];

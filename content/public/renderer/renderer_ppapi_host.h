@@ -5,11 +5,31 @@
 #ifndef CONTENT_PUBLIC_RENDERER_RENDERER_PPAPI_HOST_H_
 #define CONTENT_PUBLIC_RENDERER_RENDERER_PPAPI_HOST_H_
 
+#include "base/memory/ref_counted.h"
+#include "content/common/content_export.h"
 #include "ppapi/c/pp_instance.h"
 
+class FilePath;
+
+namespace IPC {
+struct ChannelHandle;
+}
+
 namespace ppapi {
+class PpapiPermissions;
 namespace host {
 class PpapiHost;
+}
+}
+
+namespace WebKit {
+class WebPluginContainer;
+}
+
+namespace webkit {
+namespace ppapi {
+class PluginInstance;
+class PluginModule;
 }
 }
 
@@ -23,6 +43,19 @@ class RenderView;
 // There will be one of these objects in the renderer per plugin module.
 class RendererPpapiHost {
  public:
+  // Creates a host and sets up an out-of-process proxy for an external plugin
+  // module. |file_path| should identify the module. It is only used to report
+  // failures to the renderer.
+  // Returns a host if the external module is proxied successfully, otherwise
+  // returns NULL.
+  CONTENT_EXPORT static RendererPpapiHost* CreateExternalPluginModule(
+      scoped_refptr<webkit::ppapi::PluginModule> plugin_module,
+      webkit::ppapi::PluginInstance* plugin_instance,
+      const FilePath& file_path,
+      ppapi::PpapiPermissions permissions,
+      const IPC::ChannelHandle& channel_handle,
+      int plugin_child_id);
+
   // Returns the PpapiHost object.
   virtual ppapi::host::PpapiHost* GetPpapiHost() = 0;
 
@@ -33,6 +66,11 @@ class RendererPpapiHost {
   // Returns the RenderView for the given plugin instance, or NULL if the
   // instance is invalid.
   virtual RenderView* GetRenderViewForInstance(PP_Instance instance) const = 0;
+
+  // Returns the WebPluginContainer for the given plugin instance, or NULL if
+  // the instance is invalid.
+  virtual WebKit::WebPluginContainer* GetContainerForInstance(
+      PP_Instance instance) const = 0;
 
   // Returns true if the given instance is considered to be currently
   // processing a user gesture or the plugin module has the "override user

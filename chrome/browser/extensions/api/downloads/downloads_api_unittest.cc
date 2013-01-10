@@ -45,8 +45,8 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
-#include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_job_factory.h"
+#include "net/url_request/url_request_job_factory_impl.h"
 #include "webkit/blob/blob_data.h"
 #include "webkit/blob/blob_storage_controller.h"
 #include "webkit/blob/blob_url_request_job.h"
@@ -59,6 +59,7 @@ using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::DownloadPersistentStoreInfo;
+using content::URLRequestSlowDownloadJob;
 
 namespace events = extensions::event_names;
 
@@ -622,8 +623,10 @@ class ScopedItemVectorCanceller {
 class TestProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
  public:
   explicit TestProtocolHandler(
-      webkit_blob::BlobStorageController* blob_storage_controller)
-      : blob_storage_controller_(blob_storage_controller) {}
+      webkit_blob::BlobStorageController* blob_storage_controller,
+      fileapi::FileSystemContext* file_system_context)
+      : blob_storage_controller_(blob_storage_controller),
+        file_system_context_(file_system_context) {}
 
   virtual ~TestProtocolHandler() {}
 
@@ -634,22 +637,26 @@ class TestProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
         request,
         network_delegate,
         blob_storage_controller_->GetBlobDataFromUrl(request->url()),
+        file_system_context_,
         base::MessageLoopProxy::current());
   }
 
  private:
   webkit_blob::BlobStorageController* const blob_storage_controller_;
+  fileapi::FileSystemContext* const file_system_context_;
 
   DISALLOW_COPY_AND_ASSIGN(TestProtocolHandler);
 };
 
 class TestURLRequestContext : public net::URLRequestContext {
  public:
-  TestURLRequestContext()
+  explicit TestURLRequestContext(
+      fileapi::FileSystemContext* file_system_context)
       : blob_storage_controller_(new webkit_blob::BlobStorageController) {
     // Job factory owns the protocol handler.
     job_factory_.SetProtocolHandler(
-        "blob", new TestProtocolHandler(blob_storage_controller_.get()));
+        "blob", new TestProtocolHandler(blob_storage_controller_.get(),
+                                        file_system_context));
     set_job_factory(&job_factory_);
   }
 
@@ -739,7 +746,7 @@ class HTML5FileWriter {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     CHECK_EQ(base::PLATFORM_FILE_OK, result);
     blob_data_->AppendData(payload_);
-    url_request_context_.reset(new TestURLRequestContext());
+    url_request_context_.reset(new TestURLRequestContext(fs_));
     url_request_context_->blob_storage_controller()->AddFinishedBlob(
         blob_url(), blob_data_);
     operation()->Write(
@@ -813,8 +820,8 @@ const char HTML5FileWriter::kURLRequestContextToreDown[] =
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(
-    DownloadExtensionTest, DownloadExtensionTest_PauseResumeCancel) {
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadExtensionTest_PauseResumeCancel) {
   DownloadItem* download_item = CreateSlowTestDownload();
   ASSERT_TRUE(download_item);
 
@@ -890,6 +897,10 @@ UIThreadExtensionFunction* MockedGetFileIconFunction(
   return function.release();
 }
 
+bool WaitForPersisted(DownloadItem* item) {
+  return item->IsPersisted();
+}
+
 // Test downloads.getFileIcon() on in-progress, finished, cancelled and deleted
 // download items.
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
@@ -935,6 +946,11 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   args32 = base::StringPrintf("[%d, {\"size\": 32}]", download_item->GetId());
   ASSERT_TRUE(download_item);
 
+  // http://crbug.com/154995
+  content::DownloadUpdatedObserver persisted(
+      download_item, base::Bind(&WaitForPersisted));
+  persisted.WaitForEvent();
+
   // Cancel the download. As long as the download has a target path, we should
   // be able to query the file icon.
   download_item->Cancel(true);
@@ -951,12 +967,14 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   std::string error = RunFunctionAndReturnError(MockedGetFileIconFunction(
         download_item->GetTargetFilePath(), IconLoader::NORMAL, ""),
       args32);
-  EXPECT_STREQ(download_extension_errors::kIconNotFoundError,
-               error.c_str());
+  EXPECT_STREQ(download_extension_errors::kIconNotFoundError, error.c_str());
 
   // Once the download item is deleted, we should return kInvalidOperationError.
+  int id = download_item->GetId();
   download_item->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
   download_item = NULL;
+  EXPECT_EQ(static_cast<DownloadItem*>(NULL),
+            GetCurrentManager()->GetDownload(id));
   error = RunFunctionAndReturnError(new DownloadsGetFileIconFunction(), args32);
   EXPECT_STREQ(download_extension_errors::kInvalidOperationError,
                error.c_str());
@@ -1005,7 +1023,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 
 // Test passing the empty query to search().
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-    DownloadExtensionTest_SearchEmptyQuery) {
+                       DownloadExtensionTest_SearchEmptyQuery) {
   ScopedCancellingItem item(CreateSlowTestDownload());
   ASSERT_TRUE(item.get());
 
@@ -1186,7 +1204,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 
 // Test the |limit| option for search().
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-    DownloadExtensionTest_SearchLimit) {
+                       DownloadExtensionTest_SearchLimit) {
   DownloadManager::DownloadVector items;
   CreateSlowTestDownloads(2, &items);
   ScopedItemVectorCanceller delete_items(&items);
@@ -1205,14 +1223,6 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   std::string error = RunFunctionAndReturnError(
       new DownloadsSearchFunction(), "[{\"filenameRegex\": \"(\"}]");
   EXPECT_STREQ(download_extension_errors::kInvalidFilterError,
-      error.c_str());
-  error = RunFunctionAndReturnError(
-      new DownloadsSearchFunction(), "[{\"danger\": \"goat\"}]");
-  EXPECT_STREQ(download_extension_errors::kInvalidDangerTypeError,
-      error.c_str());
-  error = RunFunctionAndReturnError(
-      new DownloadsSearchFunction(), "[{\"state\": \"goat\"}]");
-  EXPECT_STREQ(download_extension_errors::kInvalidStateError,
       error.c_str());
   error = RunFunctionAndReturnError(
       new DownloadsSearchFunction(), "[{\"orderBy\": \"goat\"}]");
@@ -1411,8 +1421,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1452,8 +1461,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1606,8 +1614,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1647,8 +1654,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1691,8 +1697,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1736,8 +1741,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1771,8 +1775,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1819,8 +1822,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1857,8 +1859,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1896,8 +1897,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1943,8 +1943,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -1982,8 +1981,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -2017,8 +2015,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result.get());
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
@@ -2066,8 +2063,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   int result_id = -1;
   ASSERT_TRUE(result->GetAsInteger(&result_id));
 
-  DownloadItem* item = GetCurrentManager()->GetActiveDownloadItem(result_id);
-  if (!item) item = GetCurrentManager()->GetDownloadItem(result_id);
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());

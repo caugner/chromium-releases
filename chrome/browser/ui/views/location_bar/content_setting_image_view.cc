@@ -72,8 +72,10 @@ void ContentSettingImageView::Update(TabContents* tab_contents) {
   SetVisible(true);
 
   TabSpecificContentSettings* content_settings = NULL;
-  if (tab_contents)
-    content_settings = tab_contents->content_settings();
+  if (tab_contents) {
+    content_settings = TabSpecificContentSettings::FromWebContents(
+          tab_contents->web_contents());
+  }
 
   if (!content_settings || content_settings->IsBlockageIndicated(
       content_setting_image_model_->get_content_settings_type()))
@@ -128,7 +130,7 @@ void ContentSettingImageView::OnClick(LocationBarView* parent) {
   ContentSettingBubbleContents* bubble = new ContentSettingBubbleContents(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
           parent->delegate()->GetContentSettingBubbleModelDelegate(),
-          tab_contents,
+          tab_contents->web_contents(),
           profile,
           content_setting_image_model_->get_content_settings_type()),
       tab_contents->web_contents(),

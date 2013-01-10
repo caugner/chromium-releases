@@ -6,6 +6,7 @@
 
 #include "ash/wm/image_grid.h"
 #include "grit/ash_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 
@@ -17,7 +18,7 @@ const float kInactiveShadowOpacity = 0.2f;
 const float kSmallShadowOpacity = 1.0f;
 
 // Duration for opacity animation in milliseconds.
-const int64 kAnimationDurationMs = 200;
+const int kAnimationDurationMs = 120;
 
 float GetOpacityForStyle(ash::internal::Shadow::Style style) {
   switch (style) {
@@ -147,15 +148,15 @@ void Shadow::UpdateImagesForStyle() {
       break;
     case STYLE_SMALL:
       image_grid_->SetImages(
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_TOP_LEFT),
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_TOP),
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_TOP_RIGHT),
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_LEFT),
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_TOP_LEFT),
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_TOP),
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_TOP_RIGHT),
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_LEFT),
           NULL,
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_RIGHT),
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_BOTTOM_LEFT),
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_BOTTOM),
-          &res.GetImageNamed(IDR_AURA_SHADOW_SMALL_BOTTOM_RIGHT));
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_RIGHT),
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_BOTTOM_LEFT),
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_BOTTOM),
+          &res.GetImageNamed(IDR_WINDOW_BUBBLE_SHADOW_SMALL_BOTTOM_RIGHT));
       break;
     default:
       NOTREACHED() << "Unhandled style " << style_;

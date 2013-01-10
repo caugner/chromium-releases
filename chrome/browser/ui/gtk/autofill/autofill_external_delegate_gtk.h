@@ -16,7 +16,7 @@ class AutofillPopupViewGtk;
 
 class AutofillExternalDelegateGtk : public AutofillExternalDelegate {
  public:
-  AutofillExternalDelegateGtk(TabContents* tab_contents,
+  AutofillExternalDelegateGtk(content::WebContents* web_contents,
                               AutofillManager* autofill_manager);
 
   virtual ~AutofillExternalDelegateGtk();
@@ -24,11 +24,6 @@ class AutofillExternalDelegateGtk : public AutofillExternalDelegate {
  protected:
   // AutofillExternalDelegate implementations.
   virtual void HideAutofillPopupInternal() OVERRIDE;
-  virtual void OnQueryPlatformSpecific(
-      int query_id,
-      const webkit::forms::FormData& form,
-      const webkit::forms::FormField& field,
-      const gfx::Rect& bounds) OVERRIDE;
   virtual void ApplyAutofillSuggestions(
       const std::vector<string16>& autofill_values,
       const std::vector<string16>& autofill_labels,

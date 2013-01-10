@@ -9,8 +9,8 @@
 #include "base/message_loop.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
-#include "chrome/browser/plugin_prefs.h"
-#include "chrome/browser/plugin_prefs_factory.h"
+#include "chrome/browser/plugins/plugin_prefs.h"
+#include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
@@ -98,8 +98,7 @@ class GViewRequestInterceptorTest : public testing::Test {
   GViewRequestInterceptorTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_),
-        io_thread_(BrowserThread::IO, &message_loop_),
-        plugin_list_(NULL, 0) {}
+        io_thread_(BrowserThread::IO, &message_loop_) {}
 
   virtual void SetUp() {
     net::URLRequestContext* request_context =
@@ -135,6 +134,8 @@ class GViewRequestInterceptorTest : public testing::Test {
   void RegisterPDFPlugin() {
     webkit::WebPluginInfo info;
     info.path = pdf_path_;
+    info.mime_types.push_back(webkit::WebPluginMimeType(
+        "application/pdf", ".test", "Test Plugin"));
     plugin_list_.AddPluginToLoad(info);
     plugin_list_.RefreshPlugins();
   }

@@ -524,12 +524,12 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 
   if (window_->ShouldDrawContentDropShadow()) {
     // Leave room to draw rounded corners.
-    area = area.Subtract(right).Subtract(left);
+    area.Subtract(right);
+    area.Subtract(left);
   }
 
-  const gfx::Image* background =
-      theme_service_->GetImageNamed(IDR_THEME_TOOLBAR);
-  background->ToCairo()->SetSource(
+  gfx::Image background = theme_service_->GetImageNamed(IDR_THEME_TOOLBAR);
+  background.ToCairo()->SetSource(
       cr, widget, tabstrip_origin.x(), tabstrip_origin.y());
   cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
   cairo_rectangle(cr, area.x(), area.y(), area.width(), area.height());
@@ -573,7 +573,7 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 
     // Draw the background. CAIRO_OPERATOR_IN uses the existing pixel data as
     // an alpha mask.
-    background->ToCairo()->SetSource(copy_cr, widget,
+    background.ToCairo()->SetSource(copy_cr, widget,
                                      tabstrip_origin.x(), tabstrip_origin.y());
     cairo_set_operator(copy_cr, CAIRO_OPERATOR_IN);
     cairo_pattern_set_extend(cairo_get_source(copy_cr), CAIRO_EXTEND_REPEAT);
@@ -695,7 +695,7 @@ gboolean BrowserToolbarGtk::OnWrenchMenuButtonExpose(GtkWidget* sender,
   gtk_widget_get_allocation(sender, &allocation);
 
   // Draw the chrome app menu icon onto the canvas.
-  const SkBitmap* badge = theme_service_->GetBitmapNamed(resource_id);
+  const gfx::ImageSkia* badge = theme_service_->GetImageSkiaNamed(resource_id);
   gfx::CanvasSkiaPaint canvas(expose, false);
   int x_offset = base::i18n::IsRTL() ? 0 : allocation.width - badge->width();
   int y_offset = 0;

@@ -13,6 +13,7 @@
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/history/history.h"
@@ -35,18 +36,23 @@
 
 namespace {
 
-// Ensures that |matches| contains an entry for |info|, which may mean adding a
-// new such entry (using |input_location| and |match_in_scheme|).
+// If |create_if_necessary| is true, ensures that |matches| contains an
+// entry for |info|, creating a new such entry if necessary (using
+// |input_location| and |match_in_scheme|).
 //
 // If |promote| is true, this also ensures the entry is the first element in
 // |matches|, moving or adding it to the front as appropriate.  When |promote|
 // is false, existing matches are left in place, and newly added matches are
 // placed at the back.
-void EnsureMatchPresent(const history::URLRow& info,
-                        size_t input_location,
-                        bool match_in_scheme,
-                        history::HistoryMatches* matches,
-                        bool promote) {
+//
+// It's OK to call this function with both |create_if_necessary| and
+// |promote| false, in which case we'll do nothing.
+void CreateOrPromoteMatch(const history::URLRow& info,
+                          size_t input_location,
+                          bool match_in_scheme,
+                          history::HistoryMatches* matches,
+                          bool create_if_necessary,
+                          bool promote) {
   // |matches| may already have an entry for this.
   for (history::HistoryMatches::iterator i(matches->begin());
        i != matches->end(); ++i) {
@@ -57,6 +63,9 @@ void EnsureMatchPresent(const history::URLRow& info,
       return;
     }
   }
+
+  if (!create_if_necessary)
+    return;
 
   // No entry, so create one.
   history::HistoryMatch match(info, input_location, match_in_scheme, true);
@@ -231,7 +240,15 @@ HistoryURLProvider::HistoryURLProvider(AutocompleteProviderListener* listener,
                                        Profile* profile)
     : HistoryProvider(listener, profile,
           AutocompleteProvider::TYPE_HISTORY_URL),
-      params_(NULL) {
+      params_(NULL),
+      cull_redirects_(
+          !AutocompleteFieldTrial::InHUPCullRedirectsFieldTrial() ||
+          !AutocompleteFieldTrial::
+              InHUPCullRedirectsFieldTrialExperimentGroup()),
+      create_shorter_match_(
+          !AutocompleteFieldTrial::InHUPCreateShorterMatchFieldTrial() ||
+          !AutocompleteFieldTrial::
+              InHUPCreateShorterMatchFieldTrialExperimentGroup()) {
 }
 
 // static
@@ -426,10 +443,16 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
     relevance = std::max(relevance, it->relevance);
   }
 
-  // Remove redirects and trim list to size.  We want to provide up to
-  // kMaxMatches results plus the What You Typed result, if it was added to
-  // |history_matches| above.
-  CullRedirects(backend, &history_matches, kMaxMatches + exact_suggestion);
+  if (cull_redirects_) {
+    // Remove redirects and trim list to size.  We want to provide up to
+    // kMaxMatches results plus the What You Typed result, if it was added to
+    // |history_matches| above.
+    CullRedirects(backend, &history_matches, kMaxMatches + exact_suggestion);
+  } else {
+    // Simply trim the list to size.
+    if (history_matches.size() > kMaxMatches + exact_suggestion)
+      history_matches.resize(kMaxMatches + exact_suggestion);
+  }
 
   // Convert the history matches to autocomplete matches.
   for (size_t i = first_match; i < history_matches.size(); ++i) {
@@ -631,8 +654,8 @@ bool HistoryURLProvider::FixupExactSuggestion(
   }
 
   // Put it on the front of the HistoryMatches for redirect culling.
-  EnsureMatchPresent(classifier.url_row(), string16::npos, false, matches,
-                     true);
+  CreateOrPromoteMatch(classifier.url_row(), string16::npos, false, matches,
+                       true, true);
   return true;
 }
 
@@ -753,8 +776,8 @@ void HistoryURLProvider::PromoteOrCreateShorterSuggestion(
   // Promote or add the desired URL to the list of matches.
   bool ensure_can_inline =
       promote && PromoteMatchForInlineAutocomplete(NULL, match);
-  EnsureMatchPresent(info, match.input_location, match.match_in_scheme,
-                     matches, promote);
+  CreateOrPromoteMatch(info, match.input_location, match.match_in_scheme,
+                       matches, create_shorter_match_, promote);
   if (ensure_can_inline) {
     // If |match| was inline-autocompletable and we're promoting something to
     // replace it, make sure the promoted item is also inline-autocompletable.

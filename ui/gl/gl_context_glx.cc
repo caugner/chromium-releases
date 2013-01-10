@@ -219,12 +219,14 @@ void* GLContextGLX::GetHandle() {
 
 void GLContextGLX::SetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
-  if (HasExtension("GLX_EXT_swap_control") && glXSwapIntervalEXT) {
+  if (HasExtension("GLX_EXT_swap_control") &&
+      g_driver_glx.fn.glXSwapIntervalEXTFn) {
     glXSwapIntervalEXT(
         display_,
         glXGetCurrentDrawable(),
         interval);
-  } else if (HasExtension("GLX_MESA_swap_control") && glXSwapIntervalMESA) {
+  } else if (HasExtension("GLX_MESA_swap_control") &&
+             g_driver_glx.fn.glXSwapIntervalMESAFn) {
     glXSwapIntervalMESA(interval);
   } else {
     if(interval == 0)
@@ -242,6 +244,18 @@ std::string GLContextGLX::GetExtensions() {
   }
 
   return GLContext::GetExtensions();
+}
+
+bool GLContextGLX::GetTotalGpuMemory(size_t* bytes) {
+  DCHECK(bytes);
+  *bytes = 0;
+  if (HasExtension("GL_NVX_gpu_memory_info")) {
+    GLint kbytes = 0;
+    glGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &kbytes);
+    *bytes = 1024*kbytes;
+    return true;
+  }
+  return false;
 }
 
 bool GLContextGLX::WasAllocatedUsingRobustnessExtension() {

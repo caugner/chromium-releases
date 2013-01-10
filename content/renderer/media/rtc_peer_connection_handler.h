@@ -11,6 +11,12 @@
 #include "content/renderer/media/peer_connection_handler_base.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRTCPeerConnectionHandler.h"
 
+namespace WebKit {
+class WebFrame;
+}
+
+namespace content {
+
 // RTCPeerConnectionHandler is a delegate for the RTC PeerConnection API
 // messages going between WebKit and native PeerConnection in libjingle. It's
 // owned by WebKit.
@@ -25,6 +31,13 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
       WebKit::WebRTCPeerConnectionHandlerClient* client,
       MediaStreamDependencyFactory* dependency_factory);
   virtual ~RTCPeerConnectionHandler();
+
+  void associateWithFrame(WebKit::WebFrame* frame);
+
+  // Initialize method only used for unit test.
+  bool InitializeForTest(
+      const WebKit::WebRTCConfiguration& server_configuration,
+      const WebKit::WebMediaConstraints& options);
 
   // WebKit::WebRTCPeerConnectionHandler implementation
   virtual bool initialize(
@@ -80,7 +93,11 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
   // |client_| is a weak pointer, and is valid until stop() has returned.
   WebKit::WebRTCPeerConnectionHandlerClient* client_;
 
+  WebKit::WebFrame* frame_;
+
   DISALLOW_COPY_AND_ASSIGN(RTCPeerConnectionHandler);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_RTC_PEER_CONNECTION_HANDLER_H_

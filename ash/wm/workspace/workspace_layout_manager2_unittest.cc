@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/wm/workspace/workspace_layout_manager.h"
+#include "ash/wm/workspace/workspace_layout_manager2.h"
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/property_util.h"
@@ -12,7 +13,9 @@
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/insets.h"
+#include "ui/gfx/screen.h"
 
 namespace ash {
 
@@ -65,7 +68,8 @@ class DontClobberRestoreBoundsWindowObserver : public aura::WindowObserver {
       aura::Window* w = window_;
       window_ = NULL;
 
-      gfx::Rect shelf_bounds(Shell::GetInstance()->shelf()->GetIdealBounds());
+      gfx::Rect shelf_bounds(
+          Shell::GetPrimaryRootWindowController()->shelf()->GetIdealBounds());
       const gfx::Rect& window_bounds(w->bounds());
       w->SetBounds(gfx::Rect(window_bounds.x(), shelf_bounds.y() - 1,
                              window_bounds.width(), window_bounds.height()));
@@ -132,6 +136,24 @@ TEST_F(WorkspaceLayoutManager2Test, WindowShouldBeOnScreenWhenAdded) {
   scoped_ptr<aura::Window> out_window(CreateTestWindow(window_bounds));
   EXPECT_EQ(window_bounds.size(), out_window->bounds().size());
   EXPECT_TRUE(out_window->bounds().Intersects(root_window_bounds));
+}
+
+// Verifies the size of a window is enforced to be smaller than the work area.
+TEST_F(WorkspaceLayoutManager2Test, SizeToWorkArea) {
+  // Normal window bounds shouldn't be changed.
+  gfx::Size work_area(
+      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().work_area().size());
+  const gfx::Rect window_bounds(
+      100, 101, work_area.width() + 1, work_area.height() + 2);
+  scoped_ptr<aura::Window> window(CreateTestWindow(window_bounds));
+  EXPECT_EQ(gfx::Rect(gfx::Point(100, 101), work_area).ToString(),
+            window->bounds().ToString());
+
+  // Directly setting the bounds triggers a slightly different code path. Verify
+  // that too.
+  window->SetBounds(window_bounds);
+  EXPECT_EQ(gfx::Rect(gfx::Point(100, 101), work_area).ToString(),
+            window->bounds().ToString());
 }
 
 }  // namespace

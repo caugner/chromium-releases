@@ -36,12 +36,6 @@
 
 namespace content {
 
-// How long a smooth scroll gesture should run when it is a near scroll.
-static const int64 kDurationOfNearScrollGestureMs = 150;
-
-// How long a smooth scroll gesture should run when it is a far scroll.
-static const int64 kDurationOfFarScrollGestureMs = 500;
-
 // static
 RenderWidgetHostViewPort* RenderWidgetHostViewPort::FromRWHV(
     RenderWidgetHostView* rwhv) {
@@ -50,7 +44,7 @@ RenderWidgetHostViewPort* RenderWidgetHostViewPort::FromRWHV(
 
 // static
 RenderWidgetHostViewPort* RenderWidgetHostViewPort::CreateViewForWidget(
-    content::RenderWidgetHost* widget) {
+    RenderWidgetHost* widget) {
   return FromRWHV(RenderWidgetHostView::CreateViewForWidget(widget));
 }
 
@@ -147,16 +141,6 @@ HWND ReparentWindow(HWND window) {
       WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
       0, 0, 0, 0, orig_parent, 0, instance, 0);
   ui::CheckWindowCreated(parent);
-  // If UIPI is enabled we need to add message filters for parents with
-  // children that cross process boundaries.
-  if (::GetPropW(orig_parent, webkit::npapi::kNativeWindowClassFilterProp)) {
-    // Process-wide message filters required on Vista must be added to:
-    // chrome_content_client.cc ChromeContentClient::SandboxPlugin
-    ChangeWindowMessageFilterEx(parent, WM_MOUSEWHEEL, MSGFLT_ALLOW, NULL);
-    ChangeWindowMessageFilterEx(parent, WM_GESTURE, MSGFLT_ALLOW, NULL);
-    ChangeWindowMessageFilterEx(parent, WM_APPCOMMAND, MSGFLT_ALLOW, NULL);
-    ::RemovePropW(orig_parent, webkit::npapi::kNativeWindowClassFilterProp);
-  }
   ::SetParent(window, parent);
   // How many times we try to find a PluginProcessHost whose process matches
   // the HWND.
@@ -186,16 +170,21 @@ BOOL CALLBACK PainEnumChildProc(HWND hwnd, LPARAM lparam) {
 }
 
 // Windows callback for OnDestroy to detach the plugin windows.
-BOOL CALLBACK DetachPluginWindowsCallback(HWND window, LPARAM param) {
+BOOL CALLBACK DetachPluginWindowsCallbackInternal(HWND window, LPARAM param) {
+  RenderWidgetHostViewBase::DetachPluginWindowsCallback(window);
+  return TRUE;
+}
+
+}  // namespace
+
+// static
+void RenderWidgetHostViewBase::DetachPluginWindowsCallback(HWND window) {
   if (webkit::npapi::WebPluginDelegateImpl::IsPluginDelegateWindow(window) &&
       !IsHungAppWindow(window)) {
     ::ShowWindow(window, SW_HIDE);
     SetParent(window, NULL);
   }
-  return TRUE;
 }
-
-}  // namespace
 
 // static
 void RenderWidgetHostViewBase::MovePluginWindowsHelper(
@@ -331,7 +320,7 @@ void RenderWidgetHostViewBase::DetachPluginsHelper(HWND parent) {
   // away. This will prevent the plugin windows from getting destroyed
   // automatically. The detached plugin windows will get cleaned up in proper
   // sequence as part of the usual cleanup when the plugin instance goes away.
-  EnumChildWindows(parent, DetachPluginWindowsCallback, NULL);
+  EnumChildWindows(parent, DetachPluginWindowsCallbackInternal, NULL);
 }
 
 #endif  // OS_WIN
@@ -402,9 +391,10 @@ void RenderWidgetHostViewBase::SetBrowserAccessibilityManager(
   browser_accessibility_manager_.reset(manager);
 }
 
-void RenderWidgetHostViewBase::UpdateScreenInfo() {
-  gfx::Display display = gfx::Screen::GetDisplayNearestPoint(
-      GetViewBounds().origin());
+void RenderWidgetHostViewBase::UpdateScreenInfo(gfx::NativeView view) {
+  gfx::Display display =
+      gfx::Screen::GetScreenFor(view)->GetDisplayNearestPoint(
+          GetViewBounds().origin());
   if (current_display_area_ == display.bounds() &&
       current_device_scale_factor_ == display.device_scale_factor())
     return;
@@ -420,50 +410,60 @@ void RenderWidgetHostViewBase::UpdateScreenInfo() {
 class BasicMouseWheelSmoothScrollGesture
     : public SmoothScrollGesture {
  public:
-  BasicMouseWheelSmoothScrollGesture(bool scroll_down, bool scroll_far)
-      : start_time_(base::TimeTicks::HighResNow()),
-        scroll_down_(scroll_down),
-        scroll_far_(scroll_far) { }
+  BasicMouseWheelSmoothScrollGesture(bool scroll_down, int pixels_to_scroll,
+                                     int mouse_event_x, int mouse_event_y)
+      : scroll_down_(scroll_down),
+        pixels_scrolled_(0),
+        pixels_to_scroll_(pixels_to_scroll),
+        mouse_event_x_(mouse_event_x),
+        mouse_event_y_(mouse_event_y) { }
 
   virtual bool ForwardInputEvents(base::TimeTicks now,
                                   RenderWidgetHost* host) OVERRIDE {
-    int64 duration_in_ms;
-    if (scroll_far_)
-      duration_in_ms = kDurationOfFarScrollGestureMs;
-    else
-      duration_in_ms = kDurationOfNearScrollGestureMs;
 
-    if (now - start_time_ > base::TimeDelta::FromMilliseconds(duration_in_ms))
+    if (pixels_scrolled_ >= pixels_to_scroll_)
       return false;
 
     WebKit::WebMouseWheelEvent event;
     event.type = WebKit::WebInputEvent::MouseWheel;
     // TODO(nduca): Figure out plausible value.
     event.deltaY = scroll_down_ ? -10 : 10;
-    event.wheelTicksY = scroll_down_ ? 1 : -1;
+    event.wheelTicksY = (scroll_down_ ? 1 : -1);
     event.modifiers = 0;
 
     // TODO(nduca): Figure out plausible x and y values.
     event.globalX = 0;
     event.globalY = 0;
-    event.x = 0;
-    event.y = 0;
+    event.x = mouse_event_x_;
+    event.y = mouse_event_y_;
     event.windowX = event.x;
     event.windowY = event.y;
     host->ForwardWheelEvent(event);
+
+    pixels_scrolled_ += abs(event.deltaY);
+
     return true;
   }
 
  private:
   virtual ~BasicMouseWheelSmoothScrollGesture() { }
-  base::TimeTicks start_time_;
   bool scroll_down_;
-  bool scroll_far_;
+  int pixels_scrolled_;
+  int pixels_to_scroll_;
+  int mouse_event_x_;
+  int mouse_event_y_;
 };
 
 SmoothScrollGesture* RenderWidgetHostViewBase::CreateSmoothScrollGesture(
-    bool scroll_down, bool scroll_far) {
-  return new BasicMouseWheelSmoothScrollGesture(scroll_down, scroll_far);
+    bool scroll_down, int pixels_to_scroll, int mouse_event_x,
+    int mouse_event_y) {
+  return new BasicMouseWheelSmoothScrollGesture(scroll_down, pixels_to_scroll,
+                                                mouse_event_x, mouse_event_y);
+}
+
+void RenderWidgetHostViewBase::ProcessAckedTouchEvent(
+    const WebKit::WebTouchEvent& touch,
+    bool processed) {
 }
 
 }  // namespace content

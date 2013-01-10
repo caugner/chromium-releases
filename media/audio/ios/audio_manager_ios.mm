@@ -5,6 +5,7 @@
 #include "media/audio/ios/audio_manager_ios.h"
 
 #import <AudioToolbox/AudioToolbox.h>
+#import <AVFoundation/AVFoundation.h>
 
 #include "base/sys_info.h"
 #include "media/audio/fake_audio_input_stream.h"
@@ -20,6 +21,10 @@ enum { kMaxInputChannels = 2 };
 static bool InitAudioSessionInternal() {
   OSStatus error = AudioSessionInitialize(NULL, NULL, NULL, NULL);
   DCHECK(error != kAudioSessionAlreadyInitialized);
+  AVAudioSession* audioSession = [AVAudioSession sharedInstance];
+  BOOL result = [audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
+                                    error:nil];
+  DCHECK(result);
   return error == kAudioSessionNoError;
 }
 
@@ -66,7 +71,7 @@ AudioInputStream* AudioManagerIOS::MakeAudioInputStream(
   if (!params.IsValid() || (params.channels() > kMaxInputChannels))
     return NULL;
 
-  if (params.format() == AudioParameters::AUDIO_MOCK)
+  if (params.format() == AudioParameters::AUDIO_FAKE)
     return FakeAudioInputStream::MakeFakeStream(this, params);
   else if (params.format() == AudioParameters::AUDIO_PCM_LINEAR)
     return new PCMQueueInAudioInputStream(this, params);

@@ -18,7 +18,6 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFloatPoint.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFloatRect.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSolidColorLayer.h"
 #include "ui/base/animation/animation.h"
 #include "ui/compositor/compositor_switches.h"
@@ -28,6 +27,7 @@
 #include "ui/gfx/display.h"
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/point3.h"
+#include "ui/gfx/size_conversions.h"
 
 namespace {
 
@@ -185,11 +185,11 @@ LayerAnimator* Layer::GetAnimator() {
   return animator_.get();
 }
 
-void Layer::SetTransform(const ui::Transform& transform) {
+void Layer::SetTransform(const gfx::Transform& transform) {
   GetAnimator()->SetTransform(transform);
 }
 
-Transform Layer::GetTargetTransform() const {
+gfx::Transform Layer::GetTargetTransform() const {
   if (animator_.get() && animator_->IsAnimatingProperty(
       LayerAnimationElement::TRANSFORM)) {
     return animator_->GetTargetTransform();
@@ -424,10 +424,7 @@ void Layer::SetExternalTexture(Texture* texture) {
 }
 
 void Layer::SetColor(SkColor color) {
-  DCHECK_EQ(type_, LAYER_SOLID_COLOR);
-  // WebColor is equivalent to SkColor, per WebColor.h.
-  solid_color_layer_->setBackgroundColor(static_cast<WebKit::WebColor>(color));
-  SetFillsBoundsOpaquely(SkColorGetA(color) == 0xFF);
+  GetAnimator()->SetColor(color);
 }
 
 bool Layer::SchedulePaint(const gfx::Rect& invalid_rect) {
@@ -497,6 +494,9 @@ void Layer::OnDeviceScaleFactorChanged(float device_scale_factor) {
 
 void Layer::paintContents(WebKit::WebCanvas* web_canvas,
                           const WebKit::WebRect& clip,
+#if WEBCONTENTLAYERCLIENT_HAS_CANPAINTLCDTEXT
+                          bool can_paint_lcd_text,
+#endif  // WEBCONTENTLAYERCLIENT_HAS_CANPAINTLCDTEXT
                           WebKit::WebFloatRect& opaque) {
   TRACE_EVENT0("ui", "Layer::paintContents");
   scoped_ptr<gfx::Canvas> canvas(gfx::Canvas::CreateCanvasWithoutScaling(
@@ -517,7 +517,7 @@ void Layer::paintContents(WebKit::WebCanvas* web_canvas,
 
 unsigned Layer::prepareTexture(WebKit::WebTextureUpdater& /* updater */) {
   DCHECK(layer_updated_externally_);
-  return texture_->texture_id();
+  return texture_->PrepareTexture();
 }
 
 WebKit::WebGraphicsContext3D* Layer::context() {
@@ -558,7 +558,7 @@ void Layer::StackRelativeTo(Layer* child, Layer* other, bool above) {
 
 bool Layer::ConvertPointForAncestor(const Layer* ancestor,
                                     gfx::Point* point) const {
-  ui::Transform transform;
+  gfx::Transform transform;
   bool result = GetTransformRelativeTo(ancestor, &transform);
   gfx::Point3f p(*point);
   transform.TransformPoint(p);
@@ -568,7 +568,7 @@ bool Layer::ConvertPointForAncestor(const Layer* ancestor,
 
 bool Layer::ConvertPointFromAncestor(const Layer* ancestor,
                                      gfx::Point* point) const {
-  ui::Transform transform;
+  gfx::Transform transform;
   bool result = GetTransformRelativeTo(ancestor, &transform);
   gfx::Point3f p(*point);
   transform.TransformPointReverse(p);
@@ -577,7 +577,7 @@ bool Layer::ConvertPointFromAncestor(const Layer* ancestor,
 }
 
 bool Layer::GetTransformRelativeTo(const Layer* ancestor,
-                                   ui::Transform* transform) const {
+                                   gfx::Transform* transform) const {
   const Layer* p = this;
   for (; p && p != ancestor; p = p->parent()) {
     if (p->transform().HasChange())
@@ -614,7 +614,7 @@ void Layer::SetBoundsImmediately(const gfx::Rect& bounds) {
   }
 }
 
-void Layer::SetTransformImmediately(const ui::Transform& transform) {
+void Layer::SetTransformImmediately(const gfx::Transform& transform) {
   transform_ = transform;
 
   RecomputeTransform();
@@ -650,11 +650,18 @@ void Layer::SetGrayscaleImmediately(float grayscale) {
   SetLayerFilters();
 }
 
+void Layer::SetColorImmediately(SkColor color) {
+  DCHECK_EQ(type_, LAYER_SOLID_COLOR);
+  // WebColor is equivalent to SkColor, per WebColor.h.
+  solid_color_layer_->setBackgroundColor(static_cast<WebKit::WebColor>(color));
+  SetFillsBoundsOpaquely(SkColorGetA(color) == 0xFF);
+}
+
 void Layer::SetBoundsFromAnimation(const gfx::Rect& bounds) {
   SetBoundsImmediately(bounds);
 }
 
-void Layer::SetTransformFromAnimation(const Transform& transform) {
+void Layer::SetTransformFromAnimation(const gfx::Transform& transform) {
   SetTransformImmediately(transform);
 }
 
@@ -669,8 +676,13 @@ void Layer::SetVisibilityFromAnimation(bool visibility) {
 void Layer::SetBrightnessFromAnimation(float brightness) {
   SetBrightnessImmediately(brightness);
 }
+
 void Layer::SetGrayscaleFromAnimation(float grayscale) {
   SetGrayscaleImmediately(grayscale);
+}
+
+void Layer::SetColorFromAnimation(SkColor color) {
+  SetColorImmediately(color);
 }
 
 void Layer::ScheduleDrawForAnimation() {
@@ -681,7 +693,7 @@ const gfx::Rect& Layer::GetBoundsForAnimation() const {
   return bounds();
 }
 
-const Transform& Layer::GetTransformForAnimation() const {
+const gfx::Transform& Layer::GetTransformForAnimation() const {
   return transform();
 }
 
@@ -699,6 +711,14 @@ float Layer::GetBrightnessForAnimation() const {
 
 float Layer::GetGrayscaleForAnimation() const {
   return layer_grayscale();
+}
+
+SkColor Layer::GetColorForAnimation() const {
+  // WebColor is equivalent to SkColor, per WebColor.h.
+  // The NULL check is here since this is invoked regardless of whether we have
+  // been configured as LAYER_SOLID_COLOR.
+  return solid_color_layer_.get() ?
+      solid_color_layer_->layer()->backgroundColor() : SK_ColorBLACK;
 }
 
 void Layer::CreateWebLayer() {
@@ -720,12 +740,12 @@ void Layer::CreateWebLayer() {
 }
 
 void Layer::RecomputeTransform() {
-  ui::Transform scale_translate;
+  gfx::Transform scale_translate;
   scale_translate.matrix().set3x3(device_scale_factor_, 0, 0,
                                   0, device_scale_factor_, 0,
                                   0, 0, 1);
   // Start with the inverse matrix of above.
-  Transform transform;
+  gfx::Transform transform;
   transform.matrix().set3x3(1.0f / device_scale_factor_, 0, 0,
                             0, 1.0f / device_scale_factor_, 0,
                             0, 0, 1);
@@ -746,7 +766,8 @@ void Layer::RecomputeDrawsContentAndUVRect() {
   } else {
     DCHECK(texture_);
 
-    gfx::Size texture_size = ConvertSizeToDIP(this, texture_->size());
+    gfx::Size texture_size = gfx::ToFlooredSize(
+          texture_->size().Scale(1.0f / texture_->device_scale_factor()));
 
     gfx::Size size(std::min(bounds().width(), texture_size.width()),
                    std::min(bounds().height(), texture_size.height()));

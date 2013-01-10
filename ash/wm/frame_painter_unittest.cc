@@ -8,10 +8,13 @@
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/property_util.h"
+#include "ash/wm/window_properties.h"
+#include "ash/wm/window_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "grit/ash_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/window_observer.h"
 #include "ui/base/hit_test.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/button/image_button.h"
@@ -34,11 +37,44 @@ class ResizableWidgetDelegate : public views::WidgetDelegate {
   // Implementations of the widget class.
   virtual views::Widget* GetWidget() OVERRIDE { return widget_; }
   virtual const views::Widget* GetWidget() const OVERRIDE { return widget_; }
+  virtual void DeleteDelegate() OVERRIDE {
+    delete this;
+  }
 
  private:
   views::Widget* widget_;
 
   DISALLOW_COPY_AND_ASSIGN(ResizableWidgetDelegate);
+};
+
+class WindowRepaintChecker : public aura::WindowObserver {
+ public:
+  explicit WindowRepaintChecker(aura::Window* window)
+      : is_paint_scheduled_(false) {
+    window->AddObserver(this);
+  }
+  virtual ~WindowRepaintChecker() {
+  }
+
+  bool IsPaintScheduledAndReset() {
+    bool result = is_paint_scheduled_;
+    is_paint_scheduled_ = false;
+    return result;
+  }
+
+ private:
+  // aura::WindowObserver overrides:
+  virtual void OnWindowPaintScheduled(aura::Window* window,
+                                      const gfx::Rect& region) OVERRIDE {
+    is_paint_scheduled_ = true;
+  }
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+    window->RemoveObserver(this);
+  }
+
+  bool is_paint_scheduled_;
+
+  DISALLOW_COPY_AND_ASSIGN(WindowRepaintChecker);
 };
 
 // Creates a test widget that owns its native widget.
@@ -91,10 +127,41 @@ TEST_F(FramePainterTest, Basics) {
   EXPECT_EQ(0u, FramePainter::instances_->size());
 }
 
-TEST_F(FramePainterTest, UseSoloWindowHeader) {
-  // No windows, no solo window mode.
-  EXPECT_FALSE(FramePainter::UseSoloWindowHeader());
+TEST_F(FramePainterTest, CreateAndDeleteSingleWindow) {
+  // Ensure that creating/deleting a window works well and doesn't cause
+  // crashes.  See crbug.com/155634
+  aura::RootWindow* root = Shell::GetActiveRootWindow();
 
+  scoped_ptr<Widget> widget(CreateTestWidget());
+  scoped_ptr<FramePainter> painter(new FramePainter);
+  ImageButton size(NULL);
+  ImageButton close(NULL);
+  painter->Init(
+      widget.get(), NULL, &size, &close, FramePainter::SIZE_BUTTON_MAXIMIZES);
+  widget->Show();
+
+  // We only have one window, so it should use a solo header.
+  EXPECT_TRUE(painter->UseSoloWindowHeader());
+  EXPECT_EQ(painter.get(),
+            root->GetProperty(internal::kSoloWindowFramePainterKey));
+
+  // Close the window.
+  widget.reset();
+  EXPECT_EQ(NULL, root->GetProperty(internal::kSoloWindowFramePainterKey));
+
+  // Recreate another window again.
+  painter.reset(new FramePainter);
+  widget.reset(CreateTestWidget());
+
+  painter->Init(
+      widget.get(), NULL, &size, &close, FramePainter::SIZE_BUTTON_MAXIMIZES);
+  widget->Show();
+  EXPECT_TRUE(painter->UseSoloWindowHeader());
+  EXPECT_EQ(painter.get(),
+            root->GetProperty(internal::kSoloWindowFramePainterKey));
+}
+
+TEST_F(FramePainterTest, UseSoloWindowHeader) {
   // Create a widget and a painter for it.
   scoped_ptr<Widget> w1(CreateTestWidget());
   FramePainter p1;
@@ -104,7 +171,7 @@ TEST_F(FramePainterTest, UseSoloWindowHeader) {
   w1->Show();
 
   // We only have one window, so it should use a solo header.
-  EXPECT_TRUE(FramePainter::UseSoloWindowHeader());
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
 
   // Create a second widget and painter.
   scoped_ptr<Widget> w2(CreateTestWidget());
@@ -115,23 +182,25 @@ TEST_F(FramePainterTest, UseSoloWindowHeader) {
   w2->Show();
 
   // Now there are two windows, so we should not use solo headers.
-  EXPECT_FALSE(FramePainter::UseSoloWindowHeader());
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
 
   // Hide one window.  Solo should be enabled.
   w2->Hide();
-  EXPECT_TRUE(FramePainter::UseSoloWindowHeader());
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
 
   // Show that window.  Solo should be disabled.
   w2->Show();
-  EXPECT_FALSE(FramePainter::UseSoloWindowHeader());
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
 
   // Minimize the window.  Solo should be enabled.
   w2->Minimize();
-  EXPECT_TRUE(FramePainter::UseSoloWindowHeader());
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
 
   // Close the minimized window.
   w2.reset();
-  EXPECT_TRUE(FramePainter::UseSoloWindowHeader());
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
 
   // Open an always-on-top widget (which lives in a different container).
   scoped_ptr<Widget> w3(CreateAlwaysOnTopWidget());
@@ -140,15 +209,115 @@ TEST_F(FramePainterTest, UseSoloWindowHeader) {
   ImageButton close3(NULL);
   p3.Init(w3.get(), NULL, &size3, &close3, FramePainter::SIZE_BUTTON_MAXIMIZES);
   w3->Show();
-  EXPECT_FALSE(FramePainter::UseSoloWindowHeader());
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p3.UseSoloWindowHeader());
 
   // Close the always-on-top widget.
   w3.reset();
-  EXPECT_TRUE(FramePainter::UseSoloWindowHeader());
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
+}
 
-  // Close the first window.
-  w1.reset();
-  EXPECT_FALSE(FramePainter::UseSoloWindowHeader());
+TEST_F(FramePainterTest, UseSoloWindowHeaderMultiDisplay) {
+  UpdateDisplay("1000x600,600x400");
+
+  // Create two widgets and painters for them.
+  scoped_ptr<Widget> w1(CreateTestWidget());
+  FramePainter p1;
+  ImageButton size1(NULL);
+  ImageButton close1(NULL);
+  p1.Init(w1.get(), NULL, &size1, &close1, FramePainter::SIZE_BUTTON_MAXIMIZES);
+  w1->SetBounds(gfx::Rect(0, 0, 100, 100));
+  w1->Show();
+  WindowRepaintChecker checker1(w1->GetNativeWindow());
+  scoped_ptr<Widget> w2(CreateTestWidget());
+  FramePainter p2;
+  ImageButton size2(NULL);
+  ImageButton close2(NULL);
+  p2.Init(w2.get(), NULL, &size2, &close2, FramePainter::SIZE_BUTTON_MAXIMIZES);
+  w2->SetBounds(gfx::Rect(0, 0, 100, 100));
+  w2->Show();
+  WindowRepaintChecker checker2(w2->GetNativeWindow());
+
+  // Now there are two windows in the same display, so we should not use solo
+  // headers.
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
+  EXPECT_TRUE(checker1.IsPaintScheduledAndReset());
+
+  // Moves the second window to the secondary display.  Both w1/w2 should be
+  // solo.
+  w2->SetBounds(gfx::Rect(1200, 0, 100, 100));
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
+  EXPECT_TRUE(p2.UseSoloWindowHeader());
+  EXPECT_TRUE(checker1.IsPaintScheduledAndReset());
+  EXPECT_TRUE(checker2.IsPaintScheduledAndReset());
+
+  // Open two more windows in the primary display.
+  scoped_ptr<Widget> w3(CreateTestWidget());
+  FramePainter p3;
+  ImageButton size3(NULL);
+  ImageButton close3(NULL);
+  p3.Init(w3.get(), NULL, &size3, &close3, FramePainter::SIZE_BUTTON_MAXIMIZES);
+  w3->SetBounds(gfx::Rect(0, 0, 100, 100));
+  w3->Show();
+  scoped_ptr<Widget> w4(CreateTestWidget());
+  FramePainter p4;
+  ImageButton size4(NULL);
+  ImageButton close4(NULL);
+  p4.Init(w4.get(), NULL, &size4, &close4, FramePainter::SIZE_BUTTON_MAXIMIZES);
+  w4->SetBounds(gfx::Rect(0, 0, 100, 100));
+  w4->Show();
+
+  // Because the primary display has two windows w1 and w3, they shouldn't be
+  // solo.  w2 should be solo.
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_TRUE(p2.UseSoloWindowHeader());
+  EXPECT_FALSE(p3.UseSoloWindowHeader());
+  EXPECT_FALSE(p4.UseSoloWindowHeader());
+  EXPECT_TRUE(checker1.IsPaintScheduledAndReset());
+
+  // Moves the w4 to the secondary display.  Now the w2 shouldn't be solo
+  // anymore.
+  w4->SetBounds(gfx::Rect(1200, 0, 100, 100));
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
+  EXPECT_FALSE(p3.UseSoloWindowHeader());
+  EXPECT_FALSE(p4.UseSoloWindowHeader());
+  EXPECT_TRUE(checker2.IsPaintScheduledAndReset());
+
+  // Moves the w3 to the secondary display too.  Now w1 should be solo again.
+  w3->SetBounds(gfx::Rect(1200, 0, 100, 100));
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
+  EXPECT_FALSE(p3.UseSoloWindowHeader());
+  EXPECT_FALSE(p4.UseSoloWindowHeader());
+  EXPECT_TRUE(checker1.IsPaintScheduledAndReset());
+
+  // Change the w3 state to maximize.  Doesn't affect to w1.
+  wm::MaximizeWindow(w3->GetNativeWindow());
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
+  EXPECT_FALSE(p3.UseSoloWindowHeader());
+  EXPECT_FALSE(p4.UseSoloWindowHeader());
+
+  // Close the w3 and w4.
+  w3.reset();
+  w4.reset();
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
+  EXPECT_TRUE(p2.UseSoloWindowHeader());
+  EXPECT_TRUE(checker2.IsPaintScheduledAndReset());
+
+  // Move w2 back to the primary display.
+  w2->SetBounds(gfx::Rect(0, 0, 100, 100));
+  EXPECT_FALSE(p1.UseSoloWindowHeader());
+  EXPECT_FALSE(p2.UseSoloWindowHeader());
+  EXPECT_TRUE(checker1.IsPaintScheduledAndReset());
+  EXPECT_TRUE(checker2.IsPaintScheduledAndReset());
+
+  // Close w2.
+  w2.reset();
+  EXPECT_TRUE(p1.UseSoloWindowHeader());
+  EXPECT_TRUE(checker1.IsPaintScheduledAndReset());
 }
 
 TEST_F(FramePainterTest, GetHeaderOpacity) {
@@ -205,7 +374,8 @@ TEST_F(FramePainterTest, HitTestSpecialMaximizedModes) {
   views::NonClientFrameView* frame = w1->non_client_view()->frame_view();
   w1->Show();
   gfx::Rect any_rect = gfx::Rect(0, 0, 100, 100);
-  gfx::Rect screen = gfx::Screen::GetDisplayMatching(any_rect).work_area();
+  gfx::Rect screen = Shell::GetScreen()->GetDisplayMatching(
+      any_rect).work_area();
   w1->SetBounds(any_rect);
   EXPECT_EQ(HTTOPLEFT, p1.NonClientHitTest(frame, gfx::Point(0, 15)));
   w1->SetBounds(gfx::Rect(

@@ -13,6 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "build/build_config.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/infobars/infobar_container.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -45,8 +46,10 @@ class ContentsContainer;
 class DownloadShelfView;
 class FullscreenExitBubbleViews;
 class InfoBarContainerView;
+class InstantPreviewControllerViews;
 class LocationBarView;
 class StatusBubbleViews;
+class SearchViewController;
 class TabStrip;
 class TabStripModel;
 class ToolbarView;
@@ -57,7 +60,6 @@ class JumpList;
 
 #if defined(USE_AURA)
 class BrowserLauncherItemController;
-class SearchViewController;
 #endif
 
 namespace autofill {
@@ -219,11 +221,10 @@ class BrowserView : public BrowserWindow,
   // animations.
   void ToolbarSizeChanged(bool is_animating);
 
-  // Returns the toolbar background color.
-  SkColor GetToolbarBackgroundColor(chrome::search::Mode::Type mode);
-
-  // Returns the toolbar background image.
-  gfx::ImageSkia* GetToolbarBackgroundImage(chrome::search::Mode::Type mode);
+  // For instant extended API, returns the size that the NTP theme background
+  // image should fill up in this view, which is from top of tab to bottom of
+  // content view; returns empty size otherwise.
+  gfx::Size GetNTPBackgroundFillSize() const;
 
 #if defined(USE_ASH)
   // Test support.
@@ -232,16 +233,18 @@ class BrowserView : public BrowserWindow,
   }
 #endif
 
-#if defined(USE_AURA)
-  // Test support.
   SearchViewController* search_view_controller() const {
     return search_view_controller_.get();
   }
-#endif
+
+  BookmarkBarView* bookmark_bar() const {
+    return bookmark_bar_view_.get();
+  }
 
   // Overridden from BrowserWindow:
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
+  virtual void Hide() OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void Activate() OVERRIDE;
@@ -256,7 +259,6 @@ class BrowserView : public BrowserWindow,
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE;
   virtual void UpdateDevTools() OVERRIDE;
-  virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE;
@@ -336,19 +338,18 @@ class BrowserView : public BrowserWindow,
   virtual void Cut() OVERRIDE;
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
-  virtual void ShowInstant(TabContents* preview) OVERRIDE;
-  virtual void HideInstant() OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual bool IsInstantTabShowing() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
+  virtual bool GetConstrainedWindowTopY(int* top_y) OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
-      const webkit::forms::PasswordForm& form,
+      const content::PasswordForm& form,
       autofill::PasswordGenerator* password_generator) OVERRIDE;
 
   // Overridden from BrowserWindowTesting:
@@ -364,10 +365,6 @@ class BrowserView : public BrowserWindow,
                                 TabContents* new_contents,
                                 int index,
                                 bool user_gesture) OVERRIDE;
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             TabContents* old_contents,
-                             TabContents* new_contents,
-                             int index) OVERRIDE;
   virtual void TabStripEmpty() OVERRIDE;
 
   // Overridden from ui::AcceleratorProvider:
@@ -422,6 +419,12 @@ class BrowserView : public BrowserWindow,
   // Returns the resource ID to use for the OTR icon, which depends on
   // which layout is being shown and whether we are full-screen.
   int GetOTRIconResourceID() const;
+
+  // Forces the LocationBarContainer to the top of the native window stacking
+  // order. This is needed for the Instant extended API when the location bar
+  // can be placed over web contents.
+  // Used by |InstantPreviewControllerViews| which manages the instant preview.
+  void RestackLocationBarContainer();
 
  protected:
   // Appends to |toolbars| a pointer to each AccessiblePaneView that
@@ -496,14 +499,21 @@ class BrowserView : public BrowserWindow,
   // |contents| can be NULL.
   bool MaybeShowInfoBar(TabContents* contents);
 
+  // Updates devtools window for given contents. This method will show docked
+  // devtools window for inspected |tab_contents| that has docked devtools
+  // and hide it for NULL or not inspected |tab_contents|. It will also make
+  // sure devtools window size and position are restored for given tab.
+  void UpdateDevToolsForContents(TabContents* tab_contents);
+
   // Shows docked devtools.
   void ShowDevToolsContainer();
 
   // Hides docked devtools.
   void HideDevToolsContainer();
 
-  // Updated devtools window for given contents.
-  void UpdateDevToolsForContents(TabContents* tab_contents);
+  // Reads split position from the current tab's devtools window and applies
+  // it to the devtools split.
+  void UpdateDevToolsSplitPosition();
 
   // Updates various optional child Views, e.g. Bookmarks Bar, Info Bar or the
   // Download Shelf in response to a change notification from the specified
@@ -548,20 +558,11 @@ class BrowserView : public BrowserWindow,
   void UpdateAcceleratorMetrics(const ui::Accelerator& accelerator,
                                 int command_id);
 
-  // Invoked from ActiveTabChanged or when instant is made active.
-  // |new_contents| must not be NULL.
-  void ProcessTabSelected(TabContents* new_contents);
-
   // Exposes resize corner size to BrowserViewLayout.
   gfx::Size GetResizeCornerSize() const;
 
   // Create an icon for this window in the launcher (currently only for Ash).
   void CreateLauncherIcon();
-
-  // Forces the LocationBarContainer to the top of the native window stacking
-  // order. This is needed for the Instant extended API when the location bar
-  // can be placed over web contents.
-  void RestackLocationBarContainer();
 
   // Calls |method| which is either RenderWidgetHost::Cut, ::Copy, or ::Paste
   // and returns true if the focus is currently on a WebContent.
@@ -594,7 +595,7 @@ class BrowserView : public BrowserWindow,
   // |Page content (contents_)                                     ||
   // |-------------------------------------------------------------||
   // || contents_container_ and/or                                |||
-  // || preview_container_                                        |||
+  // || preview_controller_->preview_container_                   |||
   // ||                                                           |||
   // ||                                                           |||
   // ||                                                           |||
@@ -617,7 +618,8 @@ class BrowserView : public BrowserWindow,
   // * - The bookmark bar and info bar are swapped when on the new tab page.
   //     Additionally contents_ is positioned on top of the bookmark bar when
   //     the bookmark bar is detached. This is done to allow the
-  //     preview_container_ to appear over the bookmark bar.
+  //     preview_controller_->preview_container_ to appear over the bookmark
+  //     bar.
 
   // Tool/Info bars that we are currently showing. Used for layout.
   // active_bookmark_bar_ is either NULL, if the bookmark bar isn't showing,
@@ -650,17 +652,19 @@ class BrowserView : public BrowserWindow,
   // The view that contains devtools window for the selected WebContents.
   views::WebView* devtools_container_;
 
-  // The view that contains instant's WebContents.
-  views::WebView* preview_container_;
-
-  // The view managing both the contents_container_ and preview_container_.
+  // The view managing both the contents_container_ and
+  // preview_controller_->preview_container_.
   ContentsContainer* contents_;
 
   // Split view containing the contents container and devtools container.
   views::SingleSplitView* contents_split_;
 
-  // Side to dock devtools to
+  // Side to dock devtools to.
   DevToolsDockSide devtools_dock_side_;
+
+  // Docked devtools window instance. NULL when current tab is not inspected
+  // or is inspected with undocked version of DevToolsWindow.
+  DevToolsWindow* devtools_window_;
 
   // Tracks and stores the last focused view which is not the
   // devtools_container_ or any of its children. Used to restore focus once
@@ -720,9 +724,9 @@ class BrowserView : public BrowserWindow,
 
   gfx::ScopedSysColorChangeListener color_change_listener_;
 
-#if defined(USE_AURA)
   scoped_ptr<SearchViewController> search_view_controller_;
-#endif
+
+  scoped_ptr<InstantPreviewControllerViews> preview_controller_;
 
   mutable base::WeakPtrFactory<BrowserView> activate_modal_dialog_factory_;
 

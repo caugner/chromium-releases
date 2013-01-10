@@ -38,6 +38,7 @@ BrowserLauncherItemController::BrowserLauncherItemController(
       tab_model_(tab_model),
       is_incognito_(tab_model->profile()->GetOriginalProfile() !=
                     tab_model->profile() && !Profile::IsGuestSession()) {
+  DCHECK(window_);
   window_->AddObserver(this);
 }
 
@@ -76,8 +77,7 @@ BrowserLauncherItemController* BrowserLauncherItemController::Create(
 
   Type type;
   std::string app_id;
-  if (browser->type() == Browser::TYPE_TABBED ||
-      browser->type() == Browser::TYPE_POPUP) {
+  if (browser->is_type_tabbed() || browser->is_type_popup()) {
     type = TYPE_TABBED;
   } else if (browser->is_app()) {
     if (browser->is_type_panel()) {
@@ -125,10 +125,15 @@ bool BrowserLauncherItemController::HasWindow(aura::Window* window) const {
 }
 
 bool BrowserLauncherItemController::IsOpen() const {
-  return window_ != NULL;
+  return true;
 }
 
-void BrowserLauncherItemController::Open(int event_flags) {
+void BrowserLauncherItemController::Launch(int event_flags) {
+  DCHECK(!app_id().empty());
+  launcher_controller()->LaunchApp(app_id(), event_flags);
+}
+
+void BrowserLauncherItemController::Activate() {
   window_->Show();
   ash::wm::ActivateWindow(window_);
 }
@@ -142,10 +147,11 @@ void BrowserLauncherItemController::Close() {
 void BrowserLauncherItemController::Clicked() {
   views::Widget* widget =
       views::Widget::GetWidgetForNativeView(window_);
-  if (widget && widget->IsActive())
+  if (widget && widget->IsActive()) {
     widget->Minimize();
-  else
-    Open(ui::EF_NONE);
+  } else {
+    Activate();
+  }
 }
 
 void BrowserLauncherItemController::OnRemoved() {
@@ -156,7 +162,7 @@ void BrowserLauncherItemController::LauncherItemChanged(
     const ash::LauncherItem& old_item) {
   if (launcher_model()->items()[index].status == ash::STATUS_ACTIVE &&
       old_item.status == ash::STATUS_RUNNING) {
-    Open(ui::EF_NONE);
+    Activate();
   }
 }
 
@@ -195,8 +201,10 @@ void BrowserLauncherItemController::TabChangedAt(
     return;
   }
 
-  if (tab->favicon_tab_helper()->FaviconIsValid() ||
-      !tab->favicon_tab_helper()->ShouldDisplayFavicon()) {
+  FaviconTabHelper* favicon_tab_helper =
+      FaviconTabHelper::FromWebContents(tab->web_contents());
+  if (favicon_tab_helper->FaviconIsValid() ||
+      !favicon_tab_helper->ShouldDisplayFavicon()) {
     // We have the favicon, update immediately.
     UpdateLauncher(tab);
   } else {
@@ -204,7 +212,7 @@ void BrowserLauncherItemController::TabChangedAt(
     if (item_index == -1)
       return;
     ash::LauncherItem item = launcher_model()->items()[item_index];
-    item.image = SkBitmap();
+    item.image = gfx::ImageSkia();
     launcher_model()->Set(item_index, item);
   }
 }
@@ -267,9 +275,9 @@ void BrowserLauncherItemController::UpdateLauncher(TabContents* tab) {
     // Update the icon for extension panels.
     extensions::TabHelper* extensions_tab_helper =
         extensions::TabHelper::FromWebContents(tab->web_contents());
-    SkBitmap new_image = favicon_loader_->GetFavicon();
+    gfx::ImageSkia new_image = gfx::ImageSkia(favicon_loader_->GetFavicon());
     if (new_image.isNull() && extensions_tab_helper->GetExtensionAppIcon())
-      new_image = *extensions_tab_helper->GetExtensionAppIcon();
+      new_image = gfx::ImageSkia(*extensions_tab_helper->GetExtensionAppIcon());
     // Only update the icon if we have a new image, or none has been set yet.
     // This avoids flickering to an empty image when a pinned app is opened.
     if (!new_image.isNull())
@@ -279,8 +287,10 @@ void BrowserLauncherItemController::UpdateLauncher(TabContents* tab) {
   } else {
     DCHECK_EQ(TYPE_TABBED, type());
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    if (tab->favicon_tab_helper()->ShouldDisplayFavicon()) {
-      item.image = tab->favicon_tab_helper()->GetFavicon().AsImageSkia();
+    FaviconTabHelper* favicon_tab_helper =
+        FaviconTabHelper::FromWebContents(tab->web_contents());
+    if (favicon_tab_helper->ShouldDisplayFavicon()) {
+      item.image = favicon_tab_helper->GetFavicon().AsImageSkia();
       if (item.image.isNull()) {
         item.image = *rb.GetImageSkiaNamed(IDR_DEFAULT_FAVICON);
       }

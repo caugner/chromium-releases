@@ -23,7 +23,6 @@
 
 class FilePath;
 class GURL;
-class WebContentsImpl;
 
 namespace base {
 class ListValue;
@@ -36,6 +35,7 @@ class DownloadItem;
 class JavaScriptDialogCreator;
 class RenderViewHost;
 class WebContents;
+class WebContentsImpl;
 class WebIntentsDispatcher;
 struct ContextMenuParams;
 struct FileChooserParams;
@@ -47,10 +47,6 @@ namespace gfx {
 class Point;
 class Rect;
 class Size;
-}
-
-namespace history {
-class HistoryAddPageArgs;
 }
 
 namespace webkit_glue {
@@ -121,13 +117,13 @@ class CONTENT_EXPORT WebContentsDelegate {
   // loading feedback. See WebContents::IsLoading()
   virtual void LoadingStateChanged(WebContents* source) {}
 
+#if defined(OS_ANDROID)
   // Notifies the delegate that the page has made some progress loading.
   // |progress| is a value between 0.0 (nothing loaded) to 1.0 (page fully
   // loaded).
-  // Note that to receive this notification, you must have called
-  // SetReportLoadProgressEnabled(true) in the render view.
   virtual void LoadProgressChanged(WebContents* source,
                                    double progress) {}
+#endif
 
   // Request the delegate to close this web contents, and do whatever cleanup
   // it needs to do.
@@ -159,10 +155,6 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Request the delegate to change the zoom level of the current tab.
   virtual void ContentsZoomChange(bool zoom_in) {}
-
-  // Check whether this contents is inside a window dedicated to running a web
-  // application.
-  virtual bool IsApplication() const;
 
   // Check whether this contents is permitted to load data URLs in WebUI mode.
   // This is normally disallowed for security.
@@ -239,9 +231,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Returns true if the context menu operation was handled by the delegate.
   virtual bool HandleContextMenu(const content::ContextMenuParams& params);
 
-  // Returns true if the context menu command was handled
-  virtual bool ExecuteContextMenuCommand(int command);
-
   // Opens source view for given WebContents that is navigated to the given
   // page url.
   virtual void ViewSourceForTab(WebContents* source, const GURL& page_url);
@@ -283,15 +272,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Allows delegate to override navigation to the history entries.
   // Returns true to allow WebContents to continue with the default processing.
   virtual bool OnGoToEntryOffset(int offset);
-
-  // Returns whether this WebContents should add the specified navigation to
-  // history.
-  virtual bool ShouldAddNavigationToHistory(
-      const history::HistoryAddPageArgs& add_page_args,
-      NavigationType navigation_type);
-
-  // Returns the native window framing the view containing the WebContents.
-  virtual gfx::NativeWindow GetFrameNativeWindow();
 
   // Allows delegate to control whether a WebContents will be created. Returns
   // true to allow the creation. Default is to allow it. In cases where the
@@ -439,10 +419,6 @@ class CONTENT_EXPORT WebContentsDelegate {
       const MediaResponseCallback& callback) {}
 
 #if defined(OS_ANDROID)
-  // Returns true if the delegate wants to handle the url instead. Default
-  // returns false.
-  virtual bool ShouldOverrideLoading(const GURL& url);
-
   // Called when a compositing layer becomes available for this web contents
   // so the delegate can add it to the layer tree.
   virtual void AttachLayer(WebContents* web_contents,
@@ -458,7 +434,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual ~WebContentsDelegate();
 
  private:
-  friend class ::WebContentsImpl;
+  friend class WebContentsImpl;
 
   // Called when |this| becomes the WebContentsDelegate for |source|.
   void Attach(WebContents* source);

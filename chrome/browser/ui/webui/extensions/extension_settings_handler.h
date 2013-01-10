@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/extension_warning_set.h"
@@ -169,14 +169,15 @@ class ExtensionSettingsHandler
       const extensions::Extension* extension, bool extension_is_enabled);
   void GetInspectablePagesForExtensionProcess(
       const std::set<content::RenderViewHost*>& views,
-      std::vector<ExtensionPage> *result);
+      std::vector<ExtensionPage>* result);
+  void GetShellWindowPagesForExtensionProfile(
+      const extensions::Extension* extension,
+      Profile* profile,
+      std::vector<ExtensionPage>* result);
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.
   ExtensionUninstallDialog* GetExtensionUninstallDialog();
-
-  // Helper to inspect an ExtensionHost after it has been loaded.
-  void InspectExtensionHost(extensions::ExtensionHost* host);
 
   // Callback for RequirementsChecker.
   void OnRequirementsChecked(std::string extension_id,

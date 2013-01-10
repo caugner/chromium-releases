@@ -221,6 +221,10 @@ void BufferedResourceHandler::CancelAndIgnore() {
   controller()->CancelAndIgnore();
 }
 
+void BufferedResourceHandler::CancelWithError(int error_code) {
+  controller()->CancelWithError(error_code);
+}
+
 bool BufferedResourceHandler::ProcessResponse(bool* defer) {
   DCHECK_EQ(STATE_PROCESSING, state_);
 
@@ -335,7 +339,7 @@ bool BufferedResourceHandler::SelectNextHandler(bool* defer) {
       host_->CreateResourceHandlerForDownload(
           request_,
           true,  // is_content_initiated
-          DownloadSaveInfo(),
+          scoped_ptr<DownloadSaveInfo>(new DownloadSaveInfo()),
           DownloadResourceHandler::OnStartedCallback()));
   return UseAlternateNextHandler(handler.Pass());
 }

@@ -56,4 +56,28 @@ bool AppCurrentWindowInternalRestoreFunction::RunWithWindow(
   return true;
 }
 
+bool AppCurrentWindowInternalDrawAttentionFunction::RunWithWindow(
+    ShellWindow* window) {
+  window->GetBaseWindow()->FlashFrame(true);
+  return true;
+}
+
+bool AppCurrentWindowInternalClearAttentionFunction::RunWithWindow(
+    ShellWindow* window) {
+  window->GetBaseWindow()->FlashFrame(false);
+  return true;
+}
+
+bool AppCurrentWindowInternalShowFunction::RunWithWindow(
+    ShellWindow* window) {
+  window->GetBaseWindow()->Show();
+  return true;
+}
+
+bool AppCurrentWindowInternalHideFunction::RunWithWindow(
+    ShellWindow* window) {
+  window->GetBaseWindow()->Hide();
+  return true;
+}
+
 }  // namespace extensions

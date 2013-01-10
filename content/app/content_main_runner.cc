@@ -35,9 +35,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/sandbox_init.h"
-#include "content/public/plugin/content_plugin_client.h"
-#include "content/public/renderer/content_renderer_client.h"
-#include "content/public/utility/content_utility_client.h"
 #include "crypto/nss_util.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media.h"
@@ -49,6 +46,16 @@
 
 #if defined(USE_TCMALLOC)
 #include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
+#if defined(TYPE_PROFILING)
+#include "base/allocator/type_profiler.h"
+#include "base/allocator/type_profiler_tcmalloc.h"
+#endif
+#endif
+
+#if !defined(OS_IOS)
+#include "content/public/plugin/content_plugin_client.h"
+#include "content/public/renderer/content_renderer_client.h"
+#include "content/public/utility/content_utility_client.h"
 #endif
 
 #if defined(OS_WIN)
@@ -84,19 +91,19 @@ int tc_set_new_mode(int mode);
 }
 #endif
 
+namespace content {
 extern int GpuMain(const content::MainFunctionParams&);
 extern int PluginMain(const content::MainFunctionParams&);
-extern int PpapiPluginMain(const content::MainFunctionParams&);
-extern int PpapiBrokerMain(const content::MainFunctionParams&);
+extern int PpapiPluginMain(const MainFunctionParams&);
+extern int PpapiBrokerMain(const MainFunctionParams&);
 extern int RendererMain(const content::MainFunctionParams&);
-extern int WorkerMain(const content::MainFunctionParams&);
-extern int UtilityMain(const content::MainFunctionParams&);
+extern int UtilityMain(const MainFunctionParams&);
+extern int WorkerMain(const MainFunctionParams&);
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-namespace content {
 extern int ZygoteMain(const MainFunctionParams&,
                       ZygoteForkDelegate* forkdelegate);
-}  // namespace content
 #endif
+}  // namespace content
 
 namespace {
 #if defined(OS_WIN)
@@ -154,12 +161,14 @@ namespace content {
 
 base::LazyInstance<ContentBrowserClient>
     g_empty_content_browser_client = LAZY_INSTANCE_INITIALIZER;
+#if !defined(OS_IOS)
 base::LazyInstance<ContentPluginClient>
     g_empty_content_plugin_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ContentRendererClient>
     g_empty_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ContentUtilityClient>
     g_empty_content_utility_client = LAZY_INSTANCE_INITIALIZER;
+#endif  // !OS_IOS
 
 #if defined(OS_WIN)
 
@@ -192,7 +201,7 @@ void SendTaskPortToParentProcess() {
 
 #endif  // defined(OS_WIN)
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_IOS)
 
 // Setup signal-handling state: resanitize most signals, ignore SIGPIPE.
 void SetupSignalHandlers() {
@@ -216,7 +225,7 @@ void SetupSignalHandlers() {
   CHECK(signal(SIGPIPE, SIG_IGN) != SIG_ERR);
 }
 
-#endif  // OS_POSIX
+#endif  // OS_POSIX && !OS_IOS
 
 void CommonSubprocessInit(const std::string& process_type) {
 #if defined(OS_WIN)
@@ -304,6 +313,7 @@ class ContentClientInitializer {
         content_client->browser_ = &g_empty_content_browser_client.Get();
     }
 
+#if !defined(OS_IOS)
     if (process_type == switches::kPluginProcess ||
         process_type == switches::kPpapiPluginProcess) {
       if (delegate)
@@ -323,6 +333,7 @@ class ContentClientInitializer {
       if (!content_client->utility_)
         content_client->utility_ = &g_empty_content_utility_client.Get();
     }
+#endif  // !OS_IOS
   }
 };
 
@@ -503,13 +514,20 @@ static void ReleaseFreeMemoryThunk() {
                          const char** argv,
                          ContentMainDelegate* delegate) OVERRIDE {
 
-    // NOTE(willchan): One might ask why this call is done here rather than in
-    // process_util_linux.cc with the definition of
+    // NOTE(willchan): One might ask why these TCMalloc-related calls are done
+    // here rather than in process_util_linux.cc with the definition of
     // EnableTerminationOnOutOfMemory().  That's because base shouldn't have a
     // dependency on TCMalloc.  Really, we ought to have our allocator shim code
     // implement this EnableTerminationOnOutOfMemory() function.  Whateverz.
     // This works for now.
 #if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
+
+#if defined(TYPE_PROFILING)
+    base::type_profiler::InterceptFunctions::SetFunctions(
+        base::type_profiler::NewInterceptForTCMalloc,
+        base::type_profiler::DeleteInterceptForTCMalloc);
+#endif
+
     // For tcmalloc, we need to tell it to behave like new.
     tc_set_new_mode(1);
 

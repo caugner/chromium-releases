@@ -6,10 +6,10 @@
 
 #include <string>
 
+#include "base/prefs/overlay_user_pref_store.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/overlay_user_pref_store.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
@@ -32,6 +32,8 @@
 
 using content::WebContents;
 using webkit_glue::WebPreferences;
+
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(PrefsTabHelper)
 
 namespace {
 
@@ -101,6 +103,10 @@ const char* kPrefsToObserve[] = {
   prefs::kWebKitAllowRunningInsecureContent,
   prefs::kWebKitDefaultFixedFontSize,
   prefs::kWebKitDefaultFontSize,
+#if defined(OS_ANDROID)
+  prefs::kWebKitFontScaleFactor,
+  prefs::kWebKitForceEnableZoom,
+#endif
   prefs::kWebKitJavascriptEnabled,
   prefs::kWebKitJavaEnabled,
   prefs::kWebKitLoadsImagesAutomatically,
@@ -153,6 +159,7 @@ const FontDefault kFontDefaults[] = {
   { prefs::kWebKitSansSerifFontFamily, IDS_SANS_SERIF_FONT_FAMILY },
   { prefs::kWebKitCursiveFontFamily, IDS_CURSIVE_FONT_FAMILY },
   { prefs::kWebKitFantasyFontFamily, IDS_FANTASY_FONT_FAMILY },
+  { prefs::kWebKitPictographFontFamily, IDS_PICTOGRAPH_FONT_FAMILY },
 #if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN)
   { prefs::kWebKitStandardFontFamilyJapanese,
     IDS_STANDARD_FONT_FAMILY_JAPANESE },
@@ -361,6 +368,8 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
                                   prefs::kWebKitCursiveFontFamilyMap, this);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
                                   prefs::kWebKitFantasyFontFamilyMap, this);
+    RegisterFontFamilyMapObserver(&pref_change_registrar_,
+                                  prefs::kWebKitPictographFontFamilyMap, this);
   }
 
   renderer_preferences_util::UpdateFromSystemSettings(
@@ -385,6 +394,9 @@ void PrefsTabHelper::InitIncognitoUserPrefStore(
   // profile.  All preferences that store information about the browsing history
   // or behavior of the user should have this property.
   pref_store->RegisterOverlayPref(prefs::kBrowserWindowPlacement);
+#if defined(OS_ANDROID)
+  pref_store->RegisterOverlayPref(prefs::kProxy);
+#endif
 }
 
 // static
@@ -432,6 +444,14 @@ void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kEnableReferrers,
                              true,
                              PrefService::UNSYNCABLE_PREF);
+#if defined(OS_ANDROID)
+  prefs->RegisterDoublePref(prefs::kWebKitFontScaleFactor,
+                            pref_defaults.font_scale_factor,
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kWebKitForceEnableZoom,
+                             pref_defaults.force_enable_zoom,
+                             PrefService::UNSYNCABLE_PREF);
+#endif
 
 #if !defined(OS_MACOSX)
   prefs->RegisterLocalizedStringPref(prefs::kAcceptLanguages,
@@ -479,6 +499,7 @@ void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
   RegisterFontFamilyMap(prefs, prefs::kWebKitSansSerifFontFamilyMap);
   RegisterFontFamilyMap(prefs, prefs::kWebKitCursiveFontFamilyMap);
   RegisterFontFamilyMap(prefs, prefs::kWebKitFantasyFontFamilyMap);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitPictographFontFamilyMap);
 
   prefs->RegisterLocalizedIntegerPref(prefs::kWebKitDefaultFontSize,
                                       IDS_DEFAULT_FONT_SIZE,

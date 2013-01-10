@@ -7,7 +7,6 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_bubble.h"
-#include "ash/system/tray/tray_bubble_view.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
 #include "ui/compositor/layer.h"
@@ -24,7 +23,7 @@ TrayGestureHandler::TrayGestureHandler()
       gesture_drag_amount_(0) {
   SystemTray* tray = Shell::GetInstance()->system_tray();
   tray->ShowDefaultView(BUBBLE_CREATE_NEW);
-  SystemTrayBubble* bubble = tray->bubble_.get();
+  SystemTrayBubble* bubble = tray->GetSystemBubble();
   if (!bubble)
     return;
   bubble->bubble_view()->set_gesture_dragging(true);
@@ -94,7 +93,7 @@ void TrayGestureHandler::CompleteGestureDrag(const ui::GestureEvent& event) {
     widget_->Close();
   } else {
     SystemTrayBubble* bubble =
-        Shell::GetInstance()->system_tray()->bubble_.get();
+        Shell::GetInstance()->system_tray()->GetSystemBubble();
     if (bubble)
       bubble->bubble_view()->set_gesture_dragging(false);
   }

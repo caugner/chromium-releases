@@ -72,8 +72,8 @@ class NullInvalidationStateTracker
   NullInvalidationStateTracker() {}
   virtual ~NullInvalidationStateTracker() {}
 
-  virtual InvalidationVersionMap GetAllMaxVersions() const OVERRIDE {
-    return InvalidationVersionMap();
+  virtual InvalidationStateMap GetAllInvalidationStates() const OVERRIDE {
+    return InvalidationStateMap();
   }
 
   virtual void SetMaxVersion(
@@ -89,14 +89,14 @@ class NullInvalidationStateTracker
     }
   }
 
-  virtual std::string GetInvalidationState() const OVERRIDE {
+  virtual std::string GetBootstrapData() const OVERRIDE {
     return std::string();
   }
 
-  virtual void SetInvalidationState(const std::string& state) OVERRIDE {
-    std::string base64_state;
-    CHECK(base::Base64Encode(state, &base64_state));
-    VLOG(1) << "Setting invalidation state to: " << base64_state;
+  virtual void SetBootstrapData(const std::string& data) OVERRIDE {
+    std::string base64_data;
+    CHECK(base::Base64Encode(data, &base64_data));
+    VLOG(1) << "Setting bootstrap data to: " << base64_data;
   }
 };
 
@@ -105,10 +105,7 @@ class MyTestURLRequestContext : public TestURLRequestContext {
  public:
   MyTestURLRequestContext() : TestURLRequestContext(true) {
     context_storage_.set_host_resolver(
-        net::CreateSystemHostResolver(
-            net::HostResolver::kDefaultParallelism,
-            net::HostResolver::kDefaultRetryAttempts,
-            NULL));
+        net::HostResolver::CreateDefaultResolver(NULL));
     context_storage_.set_transport_security_state(
         new net::TransportSecurityState());
     Init();
@@ -167,6 +164,7 @@ class LoggingChangeDelegate : public SyncManager::ChangeDelegate {
 
   virtual void OnChangesApplied(
       ModelType model_type,
+      int64 model_version,
       const BaseTransaction* trans,
       const ImmutableChangeRecordList& changes) OVERRIDE {
     LOG(INFO) << "Changes applied for "

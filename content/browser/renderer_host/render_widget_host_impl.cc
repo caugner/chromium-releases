@@ -28,16 +28,17 @@
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/tap_suppression_controller.h"
+#include "content/browser/renderer_host/touch_event_queue.h"
 #include "content/common/accessibility_messages.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/port/browser/smooth_scroll_gesture.h"
+#include "content/public/browser/compositor_util.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
-#include "content/public/common/compositor_util.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
@@ -47,7 +48,9 @@
 #if defined(OS_WIN)
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebScreenInfoFactory.h"
 #endif
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/webpreferences.h"
@@ -146,6 +149,8 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
       allow_privileged_mouse_lock_(false),
       has_touch_handler_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      tick_active_smooth_scroll_gestures_task_posted_(false),
+      touch_event_queue_(new TouchEventQueue(this)),
       gesture_event_filter_(new GestureEventFilter(this)) {
   CHECK(delegate_);
   if (routing_id_ == MSG_ROUTING_NONE) {
@@ -238,6 +243,12 @@ void RenderWidgetHostImpl::CompositingSurfaceUpdated() {
   process_->SurfaceUpdated(surface_id_);
 }
 
+void RenderWidgetHostImpl::ResetSizeAndRepaintPendingFlags() {
+  resize_ack_pending_ = false;
+  repaint_ack_pending_ = false;
+  in_flight_size_.SetSize(0, 0);
+}
+
 void RenderWidgetHostImpl::Init() {
   DCHECK(process_->HasConnection());
 
@@ -305,6 +316,8 @@ bool RenderWidgetHostImpl::OnMessageReceived(const IPC::Message &msg) {
                         OnMsgDidActivateAcceleratedCompositing)
     IPC_MESSAGE_HANDLER(ViewHostMsg_LockMouse, OnMsgLockMouse)
     IPC_MESSAGE_HANDLER(ViewHostMsg_UnlockMouse, OnMsgUnlockMouse)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ShowDisambiguationPopup,
+                        OnMsgShowDisambiguationPopup)
 #if defined(OS_POSIX) || defined(USE_AURA)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnMsgGetWindowRect)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnMsgGetRootWindowRect)
@@ -502,7 +515,7 @@ void RenderWidgetHostImpl::CopyFromBackingStore(
     const gfx::Rect& src_subrect,
     const gfx::Size& accelerated_dst_size,
     const base::Callback<void(bool)>& callback,
-    skia::PlatformCanvas* output) {
+    skia::PlatformBitmap* output) {
   if (view_ && is_accelerated_compositing_active_) {
     TRACE_EVENT0("browser",
         "RenderWidgetHostImpl::CopyFromBackingStore::FromCompositingSurface");
@@ -931,6 +944,15 @@ void RenderWidgetHostImpl::ForwardGestureEvent(
   ForwardInputEvent(gesture_event, sizeof(WebGestureEvent), false);
 }
 
+void RenderWidgetHostImpl::ForwardTouchEventImmediately(
+    const WebKit::WebTouchEvent& touch_event) {
+  TRACE_EVENT0("renderer_host", "RenderWidgetHostImpl::ForwardTouchEvent");
+  if (ignore_input_events_ || process_->IgnoreInputEvents())
+    return;
+
+  ForwardInputEvent(touch_event, sizeof(WebKit::WebTouchEvent), false);
+}
+
 void RenderWidgetHostImpl::ForwardGestureEventImmediately(
     const WebKit::WebGestureEvent& gesture_event) {
   if (ignore_input_events_ || process_->IgnoreInputEvents())
@@ -1038,12 +1060,7 @@ void RenderWidgetHostImpl::ForwardInputEvent(const WebInputEvent& input_event,
 
 void RenderWidgetHostImpl::ForwardTouchEvent(
     const WebKit::WebTouchEvent& touch_event) {
-  TRACE_EVENT0("renderer_host", "RenderWidgetHostImpl::ForwardTouchEvent");
-  if (ignore_input_events_ || process_->IgnoreInputEvents())
-    return;
-
-  // TODO(sad): Do touch-event coalescing when appropriate.
-  ForwardInputEvent(touch_event, sizeof(WebKit::WebTouchEvent), false);
+  touch_event_queue_->QueueEvent(touch_event);
 }
 
 #if defined(TOOLKIT_GTK)
@@ -1060,6 +1077,21 @@ bool RenderWidgetHostImpl::KeyPressListenersHandleEvent(GdkEventKey* event) {
   return false;
 }
 #endif  // defined(TOOLKIT_GTK)
+
+#if defined(TOOLKIT_VIEWS)
+bool RenderWidgetHostImpl::KeyPressListenersHandleEvent(ui::KeyEvent* event) {
+  if (event->type() != ui::ET_KEY_PRESSED)
+    return false;
+
+  for (std::list<KeyboardListener*>::iterator it = keyboard_listeners_.begin();
+       it != keyboard_listeners_.end(); ++it) {
+    if ((*it)->HandleKeyPressEvent(event))
+      return true;
+  }
+
+  return false;
+}
+#endif  // defined(TOOLKIT_VIEWS)
 
 void RenderWidgetHostImpl::AddKeyboardListener(KeyboardListener* listener) {
   keyboard_listeners_.push_back(listener);
@@ -1109,6 +1141,8 @@ void RenderWidgetHostImpl::RendererExited(base::TerminationStatus status,
   select_range_pending_ = false;
   next_selection_range_.reset();
 
+  touch_event_queue_->Reset();
+
   // Must reset these to ensure that gesture events work with a new renderer.
   gesture_event_filter_->Reset();
 
@@ -1117,10 +1151,7 @@ void RenderWidgetHostImpl::RendererExited(base::TerminationStatus status,
   suppress_next_char_events_ = false;
 
   // Reset some fields in preparation for recovering from a crash.
-  resize_ack_pending_ = false;
-  repaint_ack_pending_ = false;
-
-  in_flight_size_.SetSize(0, 0);
+  ResetSizeAndRepaintPendingFlags();
   current_size_.SetSize(0, 0);
   is_hidden_ = false;
   is_accelerated_compositing_active_ = false;
@@ -1359,6 +1390,7 @@ void RenderWidgetHostImpl::OnCompositorSurfaceBuffersSwapped(
   if (!view_) {
     RenderWidgetHostImpl::AcknowledgeBufferPresent(route_id,
                                                    gpu_process_host_id,
+                                                   false,
                                                    0);
     return;
   }
@@ -1417,7 +1449,8 @@ void RenderWidgetHostImpl::OnMsgUpdateRect(
   // and backing store is never used.
   if (dib) {
     DCHECK(!params.bitmap_rect.IsEmpty());
-    gfx::Size pixel_size = params.bitmap_rect.size().Scale(params.scale_factor);
+    gfx::Size pixel_size = gfx::ToFlooredSize(
+        params.bitmap_rect.size().Scale(params.scale_factor));
     const size_t size = pixel_size.height() * pixel_size.width() * 4;
     if (dib->size() < size) {
       DLOG(WARNING) << "Transport DIB too small for given rectangle";
@@ -1558,6 +1591,12 @@ void RenderWidgetHostImpl::OnMsgInputEventAck(WebInputEvent::Type event_type,
   if (decrement_in_flight_event_count() == 0)
     StopHangMonitorTimeout();
 
+  // If an input ack is pending, then hold off ticking the gesture
+  // until we get an input ack.
+  if (in_process_event_types_.empty() &&
+      !active_smooth_scroll_gestures_.empty())
+    TickActiveSmoothScrollGesture();
+
   int type = static_cast<int>(event_type);
   if (type < WebInputEvent::Undefined) {
     RecordAction(UserMetricsAction("BadMessageTerminate_RWH2"));
@@ -1575,10 +1614,12 @@ void RenderWidgetHostImpl::OnMsgInputEventAck(WebInputEvent::Type event_type,
   } else if (type == WebInputEvent::MouseWheel) {
     ProcessWheelAck(processed);
   } else if (WebInputEvent::isTouchEventType(type)) {
-    ProcessTouchAck(event_type, processed);
+    ProcessTouchAck(processed);
   } else if (WebInputEvent::isGestureEventType(type)) {
     ProcessGestureAck(processed, type);
   }
+
+  // WARNING: |this| may be deleted at this point.
 
   // This is used only for testing, and the other end does not use the
   // source object.  On linux, specifying
@@ -1594,28 +1635,53 @@ void RenderWidgetHostImpl::OnMsgInputEventAck(WebInputEvent::Type event_type,
 }
 
 void RenderWidgetHostImpl::OnMsgBeginSmoothScroll(
-    int gesture_id, bool scroll_down, bool scroll_far) {
+    int gesture_id, const ViewHostMsg_BeginSmoothScroll_Params &params) {
   if (!view_)
     return;
   active_smooth_scroll_gestures_.insert(
       std::make_pair(gesture_id,
                      view_->CreateSmoothScrollGesture(
-                         scroll_down, scroll_far)));
+                         params.scroll_down, params.pixels_to_scroll,
+                         params.mouse_event_x, params.mouse_event_y)));
+
+  // If an input ack is pending, then hold off ticking the gesture
+  // until we get an input ack.
+  if (!in_process_event_types_.empty())
+    return;
+  if (tick_active_smooth_scroll_gestures_task_posted_)
+    return;
   TickActiveSmoothScrollGesture();
 }
 
 void RenderWidgetHostImpl::TickActiveSmoothScrollGesture() {
-  if (active_smooth_scroll_gestures_.size() == 0)
+  TRACE_EVENT0("input", "RenderWidgetHostImpl::TickActiveSmoothScrollGesture");
+  tick_active_smooth_scroll_gestures_task_posted_ = false;
+  if (active_smooth_scroll_gestures_.empty()) {
+    TRACE_EVENT_INSTANT0("input", "EarlyOut_NoActiveScrollGesture");
     return;
+  }
 
-  TimeTicks now = TimeTicks::HighResNow();
+  base::TimeTicks now = TimeTicks::HighResNow();
+  base::TimeDelta preferred_interval =
+      base::TimeDelta::FromMilliseconds(kSyntheticScrollMessageIntervalMs);
+  base::TimeDelta time_until_next_ideal_interval =
+      (last_smooth_scroll_gestures_tick_time_ + preferred_interval) -
+      now;
+  if (time_until_next_ideal_interval.InMilliseconds() > 0) {
+    TRACE_EVENT_INSTANT1(
+        "input", "EarlyOut_TickedTooRecently",
+        "delay", time_until_next_ideal_interval.InMilliseconds());
+    // Post a task.
+    tick_active_smooth_scroll_gestures_task_posted_ = true;
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&RenderWidgetHostImpl::TickActiveSmoothScrollGesture,
+                   weak_factory_.GetWeakPtr()),
+        time_until_next_ideal_interval);
+    return;
+  }
 
-  // Post the next tick right away so it is regular.
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&RenderWidgetHostImpl::TickActiveSmoothScrollGesture,
-                 weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kSyntheticScrollMessageIntervalMs));
+  last_smooth_scroll_gestures_tick_time_ = now;
 
   // Separate ticking of gestures from sending their completion messages.
   std::vector<int> ids_that_are_done;
@@ -1639,6 +1705,19 @@ void RenderWidgetHostImpl::TickActiveSmoothScrollGesture() {
 
     Send(new ViewMsg_SmoothScrollCompleted(routing_id_, id));
   }
+
+  // No need to post the next tick if an input is in flight.
+  if (!in_process_event_types_.empty())
+    return;
+
+  TRACE_EVENT_INSTANT1("input", "PostTickTask",
+                       "delay", preferred_interval.InMilliseconds());
+  tick_active_smooth_scroll_gestures_task_posted_ = true;
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&RenderWidgetHostImpl::TickActiveSmoothScrollGesture,
+                 weak_factory_.GetWeakPtr()),
+      preferred_interval);
 }
 
 void RenderWidgetHostImpl::OnMsgSelectRangeAck() {
@@ -1668,10 +1747,8 @@ void RenderWidgetHostImpl::ProcessGestureAck(bool processed, int type) {
   gesture_event_filter_->ProcessGestureAck(processed, type);
 }
 
-void RenderWidgetHostImpl::ProcessTouchAck(
-    WebInputEvent::Type type, bool processed) {
-  if (view_)
-    view_->ProcessTouchAck(type, processed);
+void RenderWidgetHostImpl::ProcessTouchAck(bool processed) {
+  touch_event_queue_->ProcessTouchAck(processed);
 }
 
 void RenderWidgetHostImpl::OnMsgFocus() {
@@ -1687,7 +1764,15 @@ void RenderWidgetHostImpl::OnMsgBlur() {
 }
 
 void RenderWidgetHostImpl::OnMsgHasTouchEventHandlers(bool has_handlers) {
+  if (has_touch_handler_ == has_handlers)
+    return;
   has_touch_handler_ = has_handlers;
+  if (!has_touch_handler_)
+    touch_event_queue_->FlushQueue();
+#if defined(OS_ANDROID)
+  if (view_)
+    view_->HasTouchEventHandlers(has_touch_handler_);
+#endif
 }
 
 void RenderWidgetHostImpl::OnMsgSetCursor(const WebCursor& cursor) {
@@ -1748,6 +1833,19 @@ void RenderWidgetHostImpl::OnMsgLockMouse(bool user_gesture,
 
 void RenderWidgetHostImpl::OnMsgUnlockMouse() {
   RejectMouseLockOrUnlockIfNecessary();
+}
+
+void RenderWidgetHostImpl::OnMsgShowDisambiguationPopup(
+    const gfx::Rect& rect,
+    const gfx::Size& size,
+    const TransportDIB::Id& id) {
+  TransportDIB* dib = process_->GetTransportDIB(id);
+
+  // TODO(trchen): implement the platform-specific disambiguation popup
+  NOTIMPLEMENTED();
+
+  Send(new ViewMsg_ReleaseDisambiguationPopupDIB(GetRoutingID(),
+                                                 dib->handle()));
 }
 
 #if defined(OS_POSIX) || defined(USE_AURA)
@@ -1879,6 +1977,14 @@ void RenderWidgetHostImpl::ActivateDeferredPluginHandles() {
 
 const gfx::Point& RenderWidgetHostImpl::GetLastScrollOffset() const {
   return last_scroll_offset_;
+}
+
+bool RenderWidgetHostImpl::ShouldForwardTouchEvent() const {
+  // Always send a touch event if the renderer has a touch-event handler. It is
+  // possible that a renderer stops listening to touch-events while there are
+  // still events in the touch-queue. In such cases, the new events should still
+  // get into the queue.
+  return has_touch_handler_ || !touch_event_queue_->empty();
 }
 
 void RenderWidgetHostImpl::StartUserGesture() {
@@ -2024,10 +2130,11 @@ bool RenderWidgetHostImpl::GotResponseToLockMouseRequest(bool allowed) {
 
 // static
 void RenderWidgetHostImpl::AcknowledgeBufferPresent(
-    int32 route_id, int gpu_host_id, uint32 sync_point) {
+    int32 route_id, int gpu_host_id, bool presented, uint32 sync_point) {
   GpuProcessHostUIShim* ui_shim = GpuProcessHostUIShim::FromID(gpu_host_id);
   if (ui_shim)
     ui_shim->Send(new AcceleratedSurfaceMsg_BufferPresented(route_id,
+                                                            presented,
                                                             sync_point));
 }
 

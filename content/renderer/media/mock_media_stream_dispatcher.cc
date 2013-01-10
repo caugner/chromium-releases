@@ -6,10 +6,14 @@
 
 #include "base/stringprintf.h"
 #include "content/public/common/media_stream_request.h"
+#include "testing/gtest/include/gtest/gtest.h"
+
+namespace content {
 
 MockMediaStreamDispatcher::MockMediaStreamDispatcher()
     : MediaStreamDispatcher(NULL),
       request_id_(-1),
+      request_stream_counter_(0),
       stop_stream_counter_(0) {
 }
 
@@ -17,61 +21,36 @@ MockMediaStreamDispatcher::~MockMediaStreamDispatcher() {}
 
 void MockMediaStreamDispatcher::GenerateStream(
     int request_id,
-    const base::WeakPtr<MediaStreamDispatcherEventHandler>&,
-    media_stream::StreamOptions components,
-    const GURL&) {
+    const base::WeakPtr<MediaStreamDispatcherEventHandler>& event_handler,
+    const StreamOptions& components,
+    const GURL& url) {
   request_id_ = request_id;
 
   stream_label_ = StringPrintf("%s%d","local_stream",request_id);
   audio_array_.clear();
   video_array_.clear();
 
-  if (content::IsAudioMediaType(components.audio_type)) {
-    media_stream::StreamDeviceInfo audio;
+  if (IsAudioMediaType(components.audio_type)) {
+    StreamDeviceInfo audio;
     audio.device_id = "audio_device_id";
     audio.name = "microphone";
     audio.stream_type = components.audio_type;
     audio.session_id = request_id;
     audio_array_.push_back(audio);
   }
-  if (content::IsVideoMediaType(components.video_type)) {
-    media_stream::StreamDeviceInfo video;
+  if (IsVideoMediaType(components.video_type)) {
+    StreamDeviceInfo video;
     video.device_id = "video_device_id";
     video.name = "usb video camera";
     video.stream_type = components.video_type;
     video.session_id = request_id;
     video_array_.push_back(video);
   }
+  ++request_stream_counter_;
 }
 
-void MockMediaStreamDispatcher::GenerateStreamForDevice(
-    int request_id,
-    const base::WeakPtr<MediaStreamDispatcherEventHandler>&,
-    media_stream::StreamOptions components,
-    const std::string& device_id,
-    const GURL&) {
-  request_id_ = request_id;
-
-  stream_label_ = StringPrintf("%s%d","local_stream",request_id);
-  audio_array_.clear();
-  video_array_.clear();
-
-  if (content::IsAudioMediaType(components.audio_type)) {
-    media_stream::StreamDeviceInfo audio;
-    audio.device_id = device_id;
-    audio.name = "Tab Audio Capture";
-    audio.stream_type = components.audio_type;
-    audio.session_id = request_id;
-    audio_array_.push_back(audio);
-  }
-  if (content::IsVideoMediaType(components.video_type)) {
-    media_stream::StreamDeviceInfo video;
-    video.device_id = device_id;
-    video.name = "Tab Video Capture";
-    video.stream_type = components.video_type;
-    video.session_id = request_id;
-    video_array_.push_back(video);
-  }
+void MockMediaStreamDispatcher::CancelGenerateStream(int request_id) {
+  EXPECT_EQ(request_id, request_id_);
 }
 
 void MockMediaStreamDispatcher::StopStream(const std::string& label) {
@@ -91,3 +70,5 @@ int MockMediaStreamDispatcher::audio_session_id(const std::string& label,
                                                 int index) {
   return -1;
 }
+
+}  // namespace content

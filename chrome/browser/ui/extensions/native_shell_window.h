@@ -19,7 +19,7 @@ class NativeShellWindow : public BaseWindow {
 
   // Called when the draggable regions are changed.
   virtual void UpdateDraggableRegions(
-      const std::vector<extensions::DraggableRegion>& regions) {}
+      const std::vector<extensions::DraggableRegion>& regions) = 0;
 
   virtual void SetFullscreen(bool fullscreen) = 0;
   virtual bool IsFullscreenOrPending() const = 0;
@@ -34,6 +34,10 @@ class NativeShellWindow : public BaseWindow {
   // the renderer.
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) = 0;
+
+  // TODO(jianli): once http://crbug.com/123007 is fixed, we'll no longer need
+  // this.
+  virtual void RenderViewHostChanged() = 0;
 
   virtual ~NativeShellWindow() {}
 };

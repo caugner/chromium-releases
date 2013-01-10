@@ -4,24 +4,29 @@
 
 #include "chrome/browser/ui/gtk/autofill/autofill_external_delegate_gtk.h"
 
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/gtk/autofill/autofill_popup_view_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 
-AutofillExternalDelegate* AutofillExternalDelegate::Create(
-    TabContents* tab_contents,
+void AutofillExternalDelegate::CreateForWebContentsAndManager(
+    content::WebContents* web_contents,
     AutofillManager* autofill_manager) {
-  return new AutofillExternalDelegateGtk(tab_contents, autofill_manager);
+  if (FromWebContents(web_contents))
+    return;
+
+  web_contents->SetUserData(
+      UserDataKey(),
+      new AutofillExternalDelegateGtk(web_contents, autofill_manager));
 }
 
 AutofillExternalDelegateGtk::AutofillExternalDelegateGtk(
-    TabContents* tab_contents,
+    content::WebContents* web_contents,
     AutofillManager* autofill_manager)
-    : AutofillExternalDelegate(tab_contents, autofill_manager),
+    : AutofillExternalDelegate(web_contents, autofill_manager),
       event_handler_id_(0) {
-  tab_native_view_ = web_contents()->GetView()->GetNativeView();
+  tab_native_view_ = web_contents->GetView()->GetNativeView();
 }
 
 AutofillExternalDelegateGtk::~AutofillExternalDelegateGtk() {
@@ -36,15 +41,6 @@ void AutofillExternalDelegateGtk::HideAutofillPopupInternal() {
 
   GtkWidget* toplevel = gtk_widget_get_toplevel(tab_native_view_);
   g_signal_handler_disconnect(toplevel, event_handler_id_);
-}
-
-void AutofillExternalDelegateGtk::OnQueryPlatformSpecific(
-    int query_id,
-    const webkit::forms::FormData& form,
-    const webkit::forms::FormField& field,
-    const gfx::Rect& bounds) {
-  CreateViewIfNeeded();
-  view_->set_element_bounds(bounds);
 }
 
 void AutofillExternalDelegateGtk::ApplyAutofillSuggestions(
@@ -67,8 +63,10 @@ void AutofillExternalDelegateGtk::CreateViewIfNeeded() {
   if (view_.get())
     return;
 
-  view_.reset(new AutofillPopupViewGtk(web_contents(),
-                                       GtkThemeService::GetFrom(profile()),
+  content::WebContents* contents = web_contents();
+  Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
+  view_.reset(new AutofillPopupViewGtk(contents,
+                                       GtkThemeService::GetFrom(profile),
                                        this,
                                        tab_native_view_));
 

@@ -274,7 +274,8 @@ void FileAccessProvider::DoWrite(
 //  CertificateManagerHandler
 
 CertificateManagerHandler::CertificateManagerHandler()
-    : file_access_provider_(new FileAccessProvider()),
+    : use_hardware_backed_(false),
+      file_access_provider_(new FileAccessProvider()),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
       cert_id_map_(new CertIdMap) {
   certificate_manager_model_.reset(new CertificateManagerModel(this));
@@ -619,9 +620,9 @@ void CertificateManagerHandler::ExportPersonalPasswordSelected(
   DCHECK_EQ(selected_cert_list_.size(), 1U);
 
   // TODO(mattm): do something smarter about non-extractable keys
-  browser::UnlockCertSlotIfNecessary(
+  chrome::UnlockCertSlotIfNecessary(
       selected_cert_list_[0].get(),
-      browser::kCryptoModulePasswordCertExport,
+      chrome::kCryptoModulePasswordCertExport,
       "",  // unused.
       base::Bind(&CertificateManagerHandler::ExportPersonalSlotsUnlocked,
                  base::Unretained(this)));
@@ -727,9 +728,9 @@ void CertificateManagerHandler::ImportPersonalFileRead(
 
   net::CryptoModuleList modules;
   modules.push_back(module_);
-  browser::UnlockSlotsIfNecessary(
+  chrome::UnlockSlotsIfNecessary(
       modules,
-      browser::kCryptoModulePasswordCertImport,
+      chrome::kCryptoModulePasswordCertImport,
       "",  // unused.
       base::Bind(&CertificateManagerHandler::ImportPersonalSlotUnlocked,
                  base::Unretained(this)));

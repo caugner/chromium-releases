@@ -32,7 +32,7 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/options/take_photo_dialog.h"
 #endif  // defined(OS_CHROMEOS)
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/importer/importer_data_types.h"
@@ -1187,7 +1187,7 @@ class AutomationProviderGetPasswordsObserver : public PasswordStoreConsumer {
 
   virtual void OnPasswordStoreRequestDone(
       CancelableRequestProvider::Handle handle,
-      const std::vector<webkit::forms::PasswordForm*>& result) OVERRIDE;
+      const std::vector<content::PasswordForm*>& result) OVERRIDE;
 
  private:
   base::WeakPtr<AutomationProvider> provider_;

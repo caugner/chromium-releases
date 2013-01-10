@@ -32,7 +32,6 @@
 #include "webkit/fileapi/file_system_url_request_job_factory.h"
 
 using appcache::AppCacheService;
-using content::BrowserThread;
 using fileapi::FileSystemContext;
 using webkit_blob::BlobStorageController;
 
@@ -44,8 +43,10 @@ class BlobProtocolHandler : public webkit_blob::BlobProtocolHandler {
  public:
   BlobProtocolHandler(
       webkit_blob::BlobStorageController* blob_storage_controller,
+      fileapi::FileSystemContext* file_system_context,
       base::MessageLoopProxy* loop_proxy)
       : webkit_blob::BlobProtocolHandler(blob_storage_controller,
+                                         file_system_context,
                                          loop_proxy) {}
 
   virtual ~BlobProtocolHandler() {}
@@ -167,6 +168,7 @@ void InitializeURLRequestContext(
       chrome::kBlobScheme,
       new BlobProtocolHandler(
           blob_storage_context->controller(),
+          file_system_context,
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
   DCHECK(set_protocol);
   set_protocol = job_factory->SetProtocolHandler(
@@ -266,15 +268,12 @@ void StoragePartitionImplMap::PostCreateInitialization(
             make_scoped_refptr(partition->GetFileSystemContext()),
             make_scoped_refptr(
                 ChromeBlobStorageContext::GetFor(browser_context_))));
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(
-            &InitializeURLRequestContext,
-            make_scoped_refptr(partition->GetMediaURLRequestContext()),
-            make_scoped_refptr(partition->GetAppCacheService()),
-            make_scoped_refptr(partition->GetFileSystemContext()),
-            make_scoped_refptr(
-                ChromeBlobStorageContext::GetFor(browser_context_))));
+
+    // We do not call InitializeURLRequestContext() for media contexts because,
+    // other than the HTTP cache, the media contexts share the same backing
+    // objects as their associated "normal" request context.  Thus, the previous
+    // call serves to initialize the media request context for this storage
+    // partition as well.
   }
 }
 

@@ -16,7 +16,6 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_switch_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_pref_service.h"
@@ -31,16 +30,17 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::DownloadItem;
-using safe_browsing::DownloadProtectionService;
 using ::testing::AtMost;
 using ::testing::Invoke;
 using ::testing::Return;
 using ::testing::ReturnPointee;
 using ::testing::ReturnRef;
 using ::testing::ReturnRefOfCopy;
+using ::testing::SetArgPointee;
 using ::testing::WithArg;
 using ::testing::_;
+using content::DownloadItem;
+using safe_browsing::DownloadProtectionService;
 
 namespace {
 
@@ -293,6 +293,9 @@ ChromeDownloadManagerDelegateTest::ChromeDownloadManagerDelegateTest()
       ui_thread_(content::BrowserThread::UI, &message_loop_),
       file_thread_(content::BrowserThread::FILE, &message_loop_),
       download_manager_(new content::MockDownloadManager) {
+  EXPECT_CALL(*download_manager_, GetAllDownloads(_)).WillRepeatedly(Return());
+  EXPECT_CALL(*download_manager_, AddObserver(_)).WillRepeatedly(Return());
+  EXPECT_CALL(*download_manager_, RemoveObserver(_)).WillRepeatedly(Return());
 }
 
 void ChromeDownloadManagerDelegateTest::SetUp() {
@@ -302,7 +305,7 @@ void ChromeDownloadManagerDelegateTest::SetUp() {
   delegate_ = new TestChromeDownloadManagerDelegate(profile());
   delegate_->SetDownloadManager(download_manager_.get());
   pref_service_ = profile()->GetTestingPrefService();
-  contents()->SetDelegate(&web_contents_delegate_);
+  web_contents()->SetDelegate(&web_contents_delegate_);
 
   ASSERT_TRUE(test_download_dir_.CreateUniqueTempDir());
   SetDefaultDownloadPath(test_download_dir_.path());
@@ -317,6 +320,9 @@ void ChromeDownloadManagerDelegateTest::TearDown() {
 void ChromeDownloadManagerDelegateTest::VerifyAndClearExpectations() {
   ::testing::Mock::VerifyAndClearExpectations(delegate_);
   ::testing::Mock::VerifyAndClearExpectations(download_manager_);
+  EXPECT_CALL(*download_manager_, RemoveObserver(_)).WillRepeatedly(Return());
+  EXPECT_CALL(*download_manager_, GetAllDownloads(_))
+      .WillRepeatedly(Return());
 }
 
 content::MockDownloadItem*
@@ -338,10 +344,14 @@ content::MockDownloadItem*
   ON_CALL(*item, IsTemporary())
       .WillByDefault(Return(false));
   ON_CALL(*item, GetWebContents())
-      .WillByDefault(Return(contents()));
+      .WillByDefault(Return(web_contents()));
   EXPECT_CALL(*item, GetId())
       .WillRepeatedly(Return(id));
-  EXPECT_CALL(*download_manager_, GetActiveDownloadItem(id))
+  EXPECT_CALL(*item, GetState())
+      .WillRepeatedly(Return(DownloadItem::IN_PROGRESS));
+  EXPECT_CALL(*item, AddObserver(_)).WillRepeatedly(Return());
+  EXPECT_CALL(*item, RemoveObserver(_)).WillRepeatedly(Return());
+  EXPECT_CALL(*download_manager_, GetDownload(id))
       .WillRepeatedly(Return(item));
   return item;
 }
@@ -376,6 +386,10 @@ void ChromeDownloadManagerDelegateTest::RunTestCaseWithDownloadItem(
       .WillRepeatedly(ReturnRef(forced_file_path));
   EXPECT_CALL(*item, GetMimeType())
       .WillRepeatedly(Return(test_case.mime_type));
+  std::vector<DownloadItem*> items;
+  items.push_back(item);
+  EXPECT_CALL(*download_manager_, GetAllDownloads(_))
+      .WillRepeatedly(SetArgPointee<0>(items));
 
 #if defined(ENABLE_SAFE_BROWSING)
   // Results of SafeBrowsing URL check.
@@ -895,6 +909,44 @@ TEST_F(ChromeDownloadManagerDelegateTest, StartDownload_LastSavePath) {
   // this test case should behave identically to the first time it was run.
   RunTestCases(kLastSavePathTestCases, 1);
 }
+
+#if defined(OS_CHROMEOS)
+TEST_F(ChromeDownloadManagerDelegateTest, StartDownload_WebIntents) {
+  const DownloadTestCase kWebIntentsTestCases[] = {
+    {
+      // 1: A file which would be dangerous, but is handled by web intents.
+      // The name will be unaltered (the actual save name will have the
+      // .webintents extension).
+      AUTOMATIC,
+      content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+      "http://example.com/feed.exe", "application/msword",
+      FILE_PATH_LITERAL(""),
+
+      FILE_PATH_LITERAL("feed.exe.webintents"),
+      FILE_PATH_LITERAL(""),
+      DownloadItem::TARGET_DISPOSITION_OVERWRITE,
+
+      EXPECT_CRDOWNLOAD
+    },
+
+    {
+      // 2: A download with a forced path won't be handled by web intents.
+      FORCED,
+      content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+      "http://example.com/feed.exe", "application/msword",
+      FILE_PATH_LITERAL("forced.feed.exe"),
+
+      FILE_PATH_LITERAL("forced.feed.exe"),
+      FILE_PATH_LITERAL(""),
+      DownloadItem::TARGET_DISPOSITION_OVERWRITE,
+
+      EXPECT_CRDOWNLOAD
+    },
+  };
+
+  RunTestCases(kWebIntentsTestCases, arraysize(kWebIntentsTestCases));
+}
+#endif
 
 // TODO(asanka): Add more tests.
 // * Default download path is not writable.

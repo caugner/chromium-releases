@@ -6,18 +6,27 @@
 
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRegion.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/desktop/desktop_activation_client.h"
+#include "ui/aura/desktop/desktop_cursor_client.h"
 #include "ui/aura/desktop/desktop_dispatcher_client.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/shared/compound_event_filter.h"
+#include "ui/aura/shared/input_method_event_filter.h"
+#include "ui/base/cursor/cursor_loader_win.h"
 #include "ui/base/win/shell.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/path_win.h"
 #include "ui/views/ime/input_method_win.h"
 #include "ui/views/widget/desktop_capture_client.h"
+#include "ui/views/widget/desktop_native_widget_aura.h"
+#include "ui/views/widget/desktop_screen_position_client.h"
 #include "ui/views/widget/widget_delegate.h"
+#include "ui/views/widget/widget_hwnd_utils.h"
+#include "ui/views/win/fullscreen_handler.h"
 #include "ui/views/win/hwnd_message_handler.h"
+#include "ui/views/window/native_frame_view.h"
 
 namespace views {
 
@@ -26,10 +35,12 @@ namespace views {
 
 DesktopRootWindowHostWin::DesktopRootWindowHostWin(
     internal::NativeWidgetDelegate* native_widget_delegate,
+    DesktopNativeWidgetAura* desktop_native_widget_aura,
     const gfx::Rect& initial_bounds)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
           message_handler_(new HWNDMessageHandler(this))),
       native_widget_delegate_(native_widget_delegate),
+      desktop_native_widget_aura_(desktop_native_widget_aura),
       root_window_host_delegate_(NULL),
       content_window_(NULL) {
 }
@@ -40,42 +51,71 @@ DesktopRootWindowHostWin::~DesktopRootWindowHostWin() {
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHostWin, DesktopRootWindowHost implementation:
 
-void DesktopRootWindowHostWin::Init(aura::Window* content_window,
-                                    const Widget::InitParams& params) {
+aura::RootWindow* DesktopRootWindowHostWin::Init(
+    aura::Window* content_window,
+    const Widget::InitParams& params) {
   // TODO(beng): SetInitParams().
   content_window_ = content_window;
+
+  ConfigureWindowStyles(message_handler_.get(), params,
+                        GetWidget()->widget_delegate(),
+                        native_widget_delegate_);
+
   message_handler_->Init(NULL, params.bounds);
 
   message_handler_->set_remove_standard_frame(!ShouldUseNativeFrame());
 
   aura::RootWindow::CreateParams rw_params(params.bounds);
   rw_params.host = this;
-  root_window_.reset(new aura::RootWindow(rw_params));
+  root_window_ = new aura::RootWindow(rw_params);
+
+  // TODO(beng): We probably need to move these two calls to some function that
+  //             can change depending on the native-ness of the frame. For right
+  //             now in the hack-n-slash days of win-aura, we can just
+  //             unilaterally turn this on.
+  root_window_->compositor()->SetHostHasTransparentBackground(true);
+  root_window_->SetTransparent(true);
+
   root_window_->Init();
   root_window_->AddChild(content_window_);
-  root_window_host_delegate_ = root_window_.get();
 
   native_widget_delegate_->OnNativeWidgetCreated();
 
   capture_client_.reset(new DesktopCaptureClient);
-  aura::client::SetCaptureClient(root_window_.get(), capture_client_.get());
+  aura::client::SetCaptureClient(root_window_, capture_client_.get());
 
   focus_manager_.reset(new aura::FocusManager);
   root_window_->set_focus_manager(focus_manager_.get());
 
   activation_client_.reset(
       new aura::DesktopActivationClient(root_window_->GetFocusManager()));
-  aura::client::SetActivationClient(root_window_.get(),
+  aura::client::SetActivationClient(root_window_,
                                     activation_client_.get());
 
   dispatcher_client_.reset(new aura::DesktopDispatcherClient);
-  aura::client::SetDispatcherClient(root_window_.get(),
+  aura::client::SetDispatcherClient(root_window_,
                                     dispatcher_client_.get());
+
+  cursor_client_.reset(new aura::DesktopCursorClient(root_window_));
+  aura::client::SetCursorClient(root_window_, cursor_client_.get());
+
+
+  position_client_.reset(new DesktopScreenPositionClient());
+  aura::client::SetScreenPositionClient(root_window_,
+                                        position_client_.get());
 
   // CEF sets focus to the window the user clicks down on.
   // TODO(beng): see if we can't do this some other way. CEF seems a heavy-
   //             handed way of accomplishing focus.
-  root_window_->SetEventFilter(new aura::shared::CompoundEventFilter);
+  root_window_event_filter_ = new aura::shared::CompoundEventFilter;
+  root_window_->SetEventFilter(root_window_event_filter_);
+
+  input_method_filter_.reset(new aura::shared::InputMethodEventFilter);
+  input_method_filter_->SetInputMethodPropertyInRootWindow(root_window_);
+  root_window_event_filter_->AddFilter(input_method_filter_.get());
+
+  focus_manager_->SetFocusedWindow(content_window_, NULL);
+  return root_window_;
 }
 
 void DesktopRootWindowHostWin::Close() {
@@ -130,16 +170,19 @@ gfx::Rect DesktopRootWindowHostWin::GetRestoredBounds() const {
   return message_handler_->GetRestoredBounds();
 }
 
+gfx::Rect DesktopRootWindowHostWin::GetWorkAreaBoundsInScreen() const {
+  MONITORINFO monitor_info;
+  monitor_info.cbSize = sizeof(monitor_info);
+  GetMonitorInfo(MonitorFromWindow(message_handler_->hwnd(),
+                                   MONITOR_DEFAULTTONEAREST),
+                 &monitor_info);
+  return gfx::Rect(monitor_info.rcWork);
+}
+
 void DesktopRootWindowHostWin::SetShape(gfx::NativeRegion native_region) {
   SkPath path;
   native_region->getBoundaryPath(&path);
   message_handler_->SetRegion(gfx::CreateHRGNFromSkPath(path));
-}
-
-bool DesktopRootWindowHostWin::ShouldUseNativeFrame() {
-  return false;
-  // TODO(scottmg): Should be:
-  //return ui::win::IsAeroGlassEnabled();
 }
 
 void DesktopRootWindowHostWin::Activate() {
@@ -183,7 +226,17 @@ void DesktopRootWindowHostWin::SetAlwaysOnTop(bool always_on_top) {
 }
 
 InputMethod* DesktopRootWindowHostWin::CreateInputMethod() {
-  return new InputMethodWin(message_handler_.get(), message_handler_->hwnd());
+  // TODO(ime): This is wrong. We need to hook up the native win32 IME on the
+  // InputMethodEventFilter, and instead create an InputMethodBridge
+  // per-NativeWidget implementation. Once we achieve that we can get rid of
+  // this function on this object and DesktopRootWindowHostLinux and just
+  // create the InputMethodBridge directly in DesktopNativeWidgetAura. Also
+  // at that time DNWA can become the InputMethodDelegate.
+  ui::InputMethod* host =
+      root_window_->GetProperty(aura::client::kRootWindowInputMethodKey);
+  return new InputMethodWin(message_handler_.get(),
+                            message_handler_->hwnd(),
+                            host);
 }
 
 internal::InputMethodDelegate*
@@ -195,11 +248,96 @@ void DesktopRootWindowHostWin::SetWindowTitle(const string16& title) {
   message_handler_->SetTitle(title);
 }
 
+void DesktopRootWindowHostWin::ClearNativeFocus() {
+  message_handler_->ClearNativeFocus();
+}
+
+Widget::MoveLoopResult DesktopRootWindowHostWin::RunMoveLoop(
+    const gfx::Point& drag_offset) {
+  return message_handler_->RunMoveLoop(drag_offset) ?
+      Widget::MOVE_LOOP_SUCCESSFUL : Widget::MOVE_LOOP_CANCELED;
+}
+
+void DesktopRootWindowHostWin::EndMoveLoop() {
+  message_handler_->EndMoveLoop();
+}
+
+void DesktopRootWindowHostWin::SetVisibilityChangedAnimationsEnabled(
+    bool value) {
+  message_handler_->SetVisibilityChangedAnimationsEnabled(value);
+}
+
+bool DesktopRootWindowHostWin::ShouldUseNativeFrame() {
+  return ui::win::IsAeroGlassEnabled();
+}
+
+void DesktopRootWindowHostWin::FrameTypeChanged() {
+  message_handler_->FrameTypeChanged();
+}
+
+NonClientFrameView* DesktopRootWindowHostWin::CreateNonClientFrameView() {
+  return GetWidget()->ShouldUseNativeFrame() ?
+      new NativeFrameView(GetWidget()) : NULL;
+}
+
+void DesktopRootWindowHostWin::SetFullscreen(bool fullscreen) {
+  message_handler_->fullscreen_handler()->SetFullscreen(fullscreen);
+}
+
+bool DesktopRootWindowHostWin::IsFullscreen() const {
+  return message_handler_->fullscreen_handler()->fullscreen();
+}
+
+void DesktopRootWindowHostWin::SetOpacity(unsigned char opacity) {
+  message_handler_->SetOpacity(static_cast<BYTE>(opacity));
+  GetWidget()->GetRootView()->SchedulePaint();
+}
+
+void DesktopRootWindowHostWin::SetWindowIcons(
+    const gfx::ImageSkia& window_icon, const gfx::ImageSkia& app_icon) {
+  message_handler_->SetWindowIcons(window_icon, app_icon);
+}
+
+void DesktopRootWindowHostWin::SetAccessibleName(const string16& name) {
+  message_handler_->SetAccessibleName(name);
+}
+
+void DesktopRootWindowHostWin::SetAccessibleRole(
+    ui::AccessibilityTypes::Role role) {
+  message_handler_->SetAccessibleRole(role);
+}
+
+void DesktopRootWindowHostWin::SetAccessibleState(
+    ui::AccessibilityTypes::State state) {
+  message_handler_->SetAccessibleState(state);
+}
+
+void DesktopRootWindowHostWin::InitModalType(ui::ModalType modal_type) {
+  message_handler_->InitModalType(modal_type);
+}
+
+void DesktopRootWindowHostWin::FlashFrame(bool flash_frame) {
+  message_handler_->FlashFrame(flash_frame);
+}
+
+void DesktopRootWindowHostWin::OnNativeWidgetFocus() {
+  // HWNDMessageHandler will perform the proper updating on its own.
+}
+
+void DesktopRootWindowHostWin::OnNativeWidgetBlur() {
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHostWin, RootWindowHost implementation:
 
+
+void DesktopRootWindowHostWin::SetDelegate(
+    aura::RootWindowHostDelegate* delegate) {
+  root_window_host_delegate_ = delegate;
+}
+
 aura::RootWindow* DesktopRootWindowHostWin::GetRootWindow() {
-  return root_window_.get();
+  return root_window_;
 }
 
 gfx::AcceleratedWidget DesktopRootWindowHostWin::GetAcceleratedWidget() {
@@ -218,8 +356,7 @@ void DesktopRootWindowHostWin::ToggleFullScreen() {
 }
 
 gfx::Rect DesktopRootWindowHostWin::GetBounds() const {
-  // TODO(beng): Should be an ash-only method??
-  return GetWindowBoundsInScreen();
+  return GetClientAreaBoundsInScreen();
 }
 
 void DesktopRootWindowHostWin::SetBounds(const gfx::Rect& bounds) {
@@ -239,9 +376,13 @@ void DesktopRootWindowHostWin::ReleaseCapture() {
 }
 
 void DesktopRootWindowHostWin::SetCursor(gfx::NativeCursor cursor) {
-}
+  // Custom web cursors are handled directly.
+  if (cursor == ui::kCursorCustom)
+    return;
+  ui::CursorLoaderWin cursor_loader;
+  cursor_loader.SetPlatformCursor(&cursor);
 
-void DesktopRootWindowHostWin::ShowCursor(bool show) {
+  message_handler_->SetCursor(cursor.platform());
 }
 
 bool DesktopRootWindowHostWin::QueryMouseLocation(gfx::Point* location_return) {
@@ -261,9 +402,18 @@ void DesktopRootWindowHostWin::MoveCursorTo(const gfx::Point& location) {
 void DesktopRootWindowHostWin::SetFocusWhenShown(bool focus_when_shown) {
 }
 
+bool DesktopRootWindowHostWin::CopyAreaToSkCanvas(
+    const gfx::Rect& source_bounds,
+    const gfx::Point& dest_offset,
+    SkCanvas* canvas) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 bool DesktopRootWindowHostWin::GrabSnapshot(
       const gfx::Rect& snapshot_bounds,
       std::vector<unsigned char>* png_representation) {
+  NOTIMPLEMENTED();
   return false;
 }
 
@@ -423,6 +573,8 @@ void DesktopRootWindowHostWin::HandleCreate() {
   // TODO(beng): moar
   NOTIMPLEMENTED();
 
+  native_widget_delegate_->OnNativeWidgetCreated();
+
   // 1. Window property association
   // 2. MouseWheel.
   // 3. Drop target.
@@ -434,6 +586,8 @@ void DesktopRootWindowHostWin::HandleDestroying() {
 }
 
 void DesktopRootWindowHostWin::HandleDestroyed() {
+  root_window_event_filter_->RemoveFilter(input_method_filter_.get());
+  desktop_native_widget_aura_->OnHostClosed();
 }
 
 bool DesktopRootWindowHostWin::HandleInitialFocus() {
@@ -492,6 +646,8 @@ void DesktopRootWindowHostWin::HandleNativeBlur(HWND focused_window) {
 }
 
 bool DesktopRootWindowHostWin::HandleMouseEvent(const ui::MouseEvent& event) {
+  if (event.flags() & ui::EF_IS_NON_CLIENT)
+    return false;
   return root_window_host_delegate_->OnHostMouseEvent(
       const_cast<ui::MouseEvent*>(&event));
 }
@@ -581,14 +737,21 @@ const Widget* DesktopRootWindowHostWin::GetWidget() const {
   return native_widget_delegate_->AsWidget();
 }
 
+HWND DesktopRootWindowHostWin::GetHWND() const {
+  return message_handler_->hwnd();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopRootWindowHost, public:
 
 // static
 DesktopRootWindowHost* DesktopRootWindowHost::Create(
     internal::NativeWidgetDelegate* native_widget_delegate,
+    DesktopNativeWidgetAura* desktop_native_widget_aura,
     const gfx::Rect& initial_bounds) {
-  return new DesktopRootWindowHostWin(native_widget_delegate, initial_bounds);
+  return new DesktopRootWindowHostWin(native_widget_delegate,
+                                      desktop_native_widget_aura,
+                                      initial_bounds);
 }
 
 }  // namespace views

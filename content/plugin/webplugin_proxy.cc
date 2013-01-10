@@ -46,6 +46,7 @@ using webkit::npapi::WebPluginResourceClient;
 using webkit::npapi::WebPluginAcceleratedSurface;
 #endif
 
+namespace content {
 
 WebPluginProxy::SharedTransportDIB::SharedTransportDIB(TransportDIB* dib)
     : dib_(dib) {
@@ -141,22 +142,12 @@ void WebPluginProxy::WillDestroyWindow(gfx::PluginWindowHandle window) {
 #if defined(OS_WIN)
 void WebPluginProxy::SetWindowlessPumpEvent(HANDLE pump_messages_event) {
   HANDLE pump_messages_event_for_renderer = NULL;
-  content::BrokerDuplicateHandle(pump_messages_event, channel_->peer_pid(),
+  BrokerDuplicateHandle(pump_messages_event, channel_->peer_pid(),
                                  &pump_messages_event_for_renderer,
                                  SYNCHRONIZE | EVENT_MODIFY_STATE, 0);
   DCHECK(pump_messages_event_for_renderer != NULL);
   Send(new PluginHostMsg_SetWindowlessPumpEvent(
       route_id_, pump_messages_event_for_renderer));
-}
-
-void WebPluginProxy::ReparentPluginWindow(HWND window, HWND parent) {
-  PluginThread::current()->Send(
-      new PluginProcessHostMsg_ReparentPluginWindow(window, parent));
-}
-
-void WebPluginProxy::ReportExecutableMemory(size_t size) {
-  PluginThread::current()->Send(
-      new PluginProcessHostMsg_ReportExecutableMemory(size));
 }
 #endif
 
@@ -185,11 +176,12 @@ void WebPluginProxy::InvalidateRect(const gfx::Rect& rect) {
   // offscreen, so constrain invalidates to the plugin rect.
   gfx::Rect plugin_rect = delegate_->GetRect();
   plugin_rect.set_origin(gfx::Point(0, 0));
-  const gfx::Rect invalidate_rect(rect.Intersect(plugin_rect));
+  plugin_rect.Intersect(rect);
+  const gfx::Rect invalidate_rect(plugin_rect);
 #else
   const gfx::Rect invalidate_rect(rect);
 #endif
-  damaged_rect_ = damaged_rect_.Union(invalidate_rect);
+  damaged_rect_.Union(invalidate_rect);
   // Ignore NPN_InvalidateRect calls with empty rects.  Also don't send an
   // invalidate if it's outside the clipping region, since if we did it won't
   // lead to a paint and we'll be stuck waiting forever for a DidPaint response.
@@ -756,7 +748,7 @@ void WebPluginProxy::AcceleratedPluginSwappedIOSurface() {
 #endif
 
 void WebPluginProxy::OnPaint(const gfx::Rect& damaged_rect) {
-  content::GetContentClient()->SetActiveURL(page_url_);
+  GetContentClient()->SetActiveURL(page_url_);
 
   Paint(damaged_rect);
   Send(new PluginHostMsg_InvalidateRect(route_id_, damaged_rect));
@@ -796,3 +788,5 @@ void WebPluginProxy::UpdateIMEStatus() {
   Send(new PluginHostMsg_NotifyIMEStatus(route_id_, input_type, caret_rect));
 }
 #endif
+
+}  // namespace content

@@ -25,13 +25,13 @@
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
-#include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -42,12 +42,12 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/bookmark_load_observer.h"
 #include "content/public/browser/browser_thread.h"
@@ -101,8 +101,9 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
       : parent_tab_(parent_tab),
         active_match_ordinal_(-1),
         number_of_matches_(0) {
-    current_find_request_id_ =
-        parent_tab->find_tab_helper()->current_find_request_id();
+    FindTabHelper* find_tab_helper =
+        FindTabHelper::FromWebContents(parent_tab->web_contents());
+    current_find_request_id_ = find_tab_helper->current_find_request_id();
     registrar_.Add(this, chrome::NOTIFICATION_FIND_RESULT_AVAILABLE,
                    content::Source<WebContents>(parent_tab_->web_contents()));
     message_loop_runner_ = new content::MessageLoopRunner;
@@ -195,9 +196,11 @@ Browser* WaitForBrowserNotInSet(std::set<Browser*> excluded_browsers) {
 }
 
 Browser* OpenURLOffTheRecord(Profile* profile, const GURL& url) {
-  chrome::OpenURLOffTheRecord(profile, url);
+  chrome::OpenURLOffTheRecord(profile, url, chrome::HOST_DESKTOP_TYPE_NATIVE);
   Browser* browser = browser::FindTabbedBrowser(
-      profile->GetOffTheRecordProfile(), false);
+      profile->GetOffTheRecordProfile(),
+      false,
+      chrome::HOST_DESKTOP_TYPE_NATIVE);
   WaitForNavigations(&chrome::GetActiveWebContents(browser)->GetController(),
                      1);
   return browser;
@@ -377,20 +380,15 @@ AppModalDialog* WaitForAppModalDialog() {
 int FindInPage(TabContents* tab_contents, const string16& search_string,
                bool forward, bool match_case, int* ordinal,
                gfx::Rect* selection_rect) {
-  tab_contents->
-      find_tab_helper()->StartFinding(search_string, forward, match_case);
+  FindTabHelper* find_tab_helper =
+      FindTabHelper::FromWebContents(tab_contents->web_contents());
+  find_tab_helper->StartFinding(search_string, forward, match_case);
   FindInPageNotificationObserver observer(tab_contents);
   if (ordinal)
     *ordinal = observer.active_match_ordinal();
   if (selection_rect)
     *selection_rect = observer.selection_rect();
   return observer.number_of_matches();
-}
-
-void CloseAllInfoBars(TabContents* tab) {
-  InfoBarTabHelper* infobar_helper = tab->infobar_tab_helper();
-  while (infobar_helper->GetInfoBarCount() > 0)
-    infobar_helper->RemoveInfoBar(infobar_helper->GetInfoBarDelegateAt(0));
 }
 
 void RegisterAndWait(content::NotificationObserver* observer,
@@ -609,44 +607,6 @@ Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
   return GetBrowserNotInSet(original_browsers_);
 }
 
-DOMMessageQueue::DOMMessageQueue() : waiting_for_message_(false) {
-  registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
-                 content::NotificationService::AllSources());
-}
-
-DOMMessageQueue::~DOMMessageQueue() {}
-
-void DOMMessageQueue::Observe(int type,
-                              const content::NotificationSource& source,
-                              const content::NotificationDetails& details) {
-  content::Details<DomOperationNotificationDetails> dom_op_details(details);
-  content::Source<RenderViewHost> sender(source);
-  message_queue_.push(dom_op_details->json);
-  if (waiting_for_message_) {
-    waiting_for_message_ = false;
-    message_loop_runner_->Quit();
-  }
-}
-
-void DOMMessageQueue::ClearQueue() {
-  message_queue_ = std::queue<std::string>();
-}
-
-bool DOMMessageQueue::WaitForMessage(std::string* message) {
-  if (message_queue_.empty()) {
-    waiting_for_message_ = true;
-    // This will be quit when a new message comes in.
-    message_loop_runner_ = new content::MessageLoopRunner;
-    message_loop_runner_->Run();
-  }
-  // The queue should not be empty, unless we were quit because of a timeout.
-  if (message_queue_.empty())
-    return false;
-  if (message)
-    *message = message_queue_.front();
-  return true;
-}
-
 // Coordinates taking snapshots of a |RenderWidget|.
 class SnapshotTaker {
  public:
@@ -657,10 +617,8 @@ class SnapshotTaker {
                                 const gfx::Size& desired_size,
                                 SkBitmap* bitmap) WARN_UNUSED_RESULT {
     bitmap_ = bitmap;
-    ThumbnailGenerator* generator = g_browser_process->GetThumbnailGenerator();
-    generator->MonitorRenderer(rwh, true);
     snapshot_taken_ = false;
-    generator->AskForSnapshot(
+    g_browser_process->GetRenderWidgetSnapshotTaker()->AskForSnapshot(
         rwh,
         base::Bind(&SnapshotTaker::OnSnapshotTaken, base::Unretained(this)),
         page_size,
@@ -696,7 +654,7 @@ class SnapshotTaker {
   }
 
  private:
-  // Called when the ThumbnailGenerator has taken the snapshot.
+  // Called when the RenderWidgetSnapshotTaker has taken the snapshot.
   void OnSnapshotTaken(const SkBitmap& bitmap) {
     *bitmap_ = bitmap;
     snapshot_taken_ = true;

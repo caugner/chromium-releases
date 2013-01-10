@@ -22,6 +22,7 @@
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -37,6 +38,7 @@
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/password_form.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
@@ -46,10 +48,8 @@
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/forms/password_form.h"
-#include "webkit/forms/password_form_dom_manager.h"
 
-int OneClickSigninHelper::kUserDataKey;
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(OneClickSigninHelper)
 
 namespace {
 
@@ -317,6 +317,21 @@ bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
           return false;
       }
     }
+
+    // If we're about to show a one-click infobar but the user has started
+    // a concurrent signin flow (perhaps via the promo), we may not have yet
+    // established an authenticated username but we still shouldn't move
+    // forward with two simultaneous signin processes.  This is a bit
+    // contentious as the one-click flow is a much smoother flow from the user
+    // perspective, but it's much more difficult to hijack the other flow from
+    // here as it is to bail.
+    ProfileSyncService* service =
+        ProfileSyncServiceFactory::GetForProfile(profile);
+    if (!service)
+      return false;
+
+    if (service->FirstSetupInProgress())
+      return false;
   }
 
   return true;
@@ -405,7 +420,7 @@ void OneClickSigninHelper::DidNavigateAnyFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
   // We only need to scrape the password for Gaia logins.
-  const webkit::forms::PasswordForm& form = params.password_form;
+  const content::PasswordForm& form = params.password_form;
   if (form.origin.is_valid() && IsGaiaSignonRealm(GURL(form.signon_realm)))
     SavePassword(UTF16ToUTF8(params.password_form.password_value));
 }
@@ -415,10 +430,11 @@ void OneClickSigninHelper::DidStopLoading(
   if (email_.empty() || password_.empty())
     return;
 
-  TabContents* tab_contents = TabContents::FromWebContents(web_contents());
+  InfoBarTabHelper* infobar_tab_helper =
+      InfoBarTabHelper::FromWebContents(web_contents());
 
-  tab_contents->infobar_tab_helper()->AddInfoBar(
-      new OneClickInfoBarDelegateImpl(tab_contents->infobar_tab_helper(),
+  infobar_tab_helper->AddInfoBar(
+      new OneClickInfoBarDelegateImpl(infobar_tab_helper,
                                       session_index_, email_, password_));
 
   email_.clear();

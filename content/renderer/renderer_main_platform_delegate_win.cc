@@ -17,11 +17,12 @@
 #include "skia/ext/skia_sandbox_support_win.h"
 #include "unicode/timezone.h"
 
+namespace content {
 namespace {
 
 // Windows-only skia sandbox support
 void SkiaPreCacheFont(const LOGFONT& logfont) {
-  content::RenderThread* render_thread = content::RenderThread::Get();
+  RenderThread* render_thread = RenderThread::Get();
   if (render_thread) {
     render_thread->PreCacheFont(logfont);
   }
@@ -52,7 +53,7 @@ void InitExitInterceptions() {
 }  // namespace
 
 RendererMainPlatformDelegate::RendererMainPlatformDelegate(
-    const content::MainFunctionParams& parameters)
+    const MainFunctionParams& parameters)
         : parameters_(parameters),
           sandbox_test_module_(NULL) {
 }
@@ -126,7 +127,7 @@ bool RendererMainPlatformDelegate::EnableSandbox() {
   return false;
 }
 
-void RendererMainPlatformDelegate::RunSandboxTests() {
+void RendererMainPlatformDelegate::RunSandboxTests(bool no_sandbox) {
   if (sandbox_test_module_) {
     RunRendererTests run_security_tests =
         reinterpret_cast<RunRendererTests>(GetProcAddress(sandbox_test_module_,
@@ -140,3 +141,5 @@ void RendererMainPlatformDelegate::RunSandboxTests() {
     }
   }
 }
+
+}  // namespace content

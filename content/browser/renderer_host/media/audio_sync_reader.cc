@@ -19,23 +19,26 @@ const int kMinIntervalBetweenReadCallsInMs = 10;
 
 using media::AudioBus;
 
+namespace content {
+
 AudioSyncReader::AudioSyncReader(base::SharedMemory* shared_memory,
                                  const media::AudioParameters& params,
                                  int input_channels)
     : shared_memory_(shared_memory),
       input_channels_(input_channels) {
   packet_size_ = media::PacketSizeInBytes(shared_memory_->created_size());
-  DCHECK_EQ(packet_size_, AudioBus::CalculateMemorySize(params));
-  output_bus_ = AudioBus::WrapMemory(params, shared_memory->memory());
-
+  int input_memory_size = 0;
+  int output_memory_size = AudioBus::CalculateMemorySize(params);
   if (input_channels_ > 0) {
     // The input storage is after the output storage.
-    int output_memory_size = AudioBus::CalculateMemorySize(params);
     int frames = params.frames_per_buffer();
+    input_memory_size = AudioBus::CalculateMemorySize(input_channels_, frames);
     char* input_data =
         static_cast<char*>(shared_memory_->memory()) + output_memory_size;
     input_bus_ = AudioBus::WrapMemory(input_channels_, frames, input_data);
   }
+  DCHECK_EQ(packet_size_, output_memory_size + input_memory_size);
+  output_bus_ = AudioBus::WrapMemory(params, shared_memory->memory());
 }
 
 AudioSyncReader::~AudioSyncReader() {
@@ -155,3 +158,5 @@ bool AudioSyncReader::PrepareForeignSocketHandle(
   return false;
 }
 #endif
+
+}  // namespace content

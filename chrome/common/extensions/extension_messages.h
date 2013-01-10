@@ -9,8 +9,6 @@
 #include "base/values.h"
 #include "chrome/common/extensions/draggable_region.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/permissions/filesystem_permission.h"
-#include "chrome/common/extensions/permissions/media_galleries_permission.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/socket_permission_data.h"
 #include "chrome/common/extensions/url_pattern.h"
@@ -101,9 +99,8 @@ IPC_STRUCT_TRAITS_BEGIN(WebApplicationInfo)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(extensions::DraggableRegion)
-  IPC_STRUCT_TRAITS_MEMBER(label)
+  IPC_STRUCT_TRAITS_MEMBER(draggable)
   IPC_STRUCT_TRAITS_MEMBER(bounds)
-  IPC_STRUCT_TRAITS_MEMBER(clip)
 IPC_STRUCT_TRAITS_END()
 
 // Singly-included section for custom IPC traits.
@@ -114,6 +111,9 @@ IPC_STRUCT_TRAITS_END()
 // to typedef it to avoid that.
 // Substitution map for l10n messages.
 typedef std::map<std::string, std::string> SubstitutionMap;
+
+// Map of extensions IDs to the executing script paths.
+typedef std::map<std::string, std::set<std::string> > ExecutingScriptsMap;
 
 struct ExtensionMsg_Loaded_Params {
   ExtensionMsg_Loaded_Params();
@@ -188,22 +188,6 @@ struct ParamTraits<extensions::APIPermissionSet> {
 template <>
 struct ParamTraits<extensions::SocketPermissionData> {
   typedef extensions::SocketPermissionData param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<extensions::MediaGalleriesPermission::PermissionTypes> {
-  typedef extensions::MediaGalleriesPermission::PermissionTypes param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<extensions::FileSystemPermission::PermissionTypes> {
-  typedef extensions::FileSystemPermission::PermissionTypes param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
@@ -385,6 +369,9 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_AddMessageToConsole,
                     content::ConsoleMessageLevel /* level */,
                     std::string /* message */)
 
+// Notify the renderer that its window has closed.
+IPC_MESSAGE_ROUTED0(ExtensionMsg_AppWindowClosed)
+
 // Messages sent from the renderer to the browser.
 
 // A renderer sends this message when an extension process starts an API
@@ -451,6 +438,14 @@ IPC_SYNC_MESSAGE_CONTROL4_1(ExtensionHostMsg_OpenChannelToExtension,
                             std::string /* channel_name */,
                             int /* port_id */)
 
+IPC_SYNC_MESSAGE_CONTROL5_1(ExtensionHostMsg_OpenChannelToNativeApp,
+                            int /* routing_id */,
+                            std::string /* source_extension_id */,
+                            std::string /* native_app_name */,
+                            std::string /* channel_name */,
+                            std::string /* connection_message */,
+                            int /* port_id */)
+
 // Get a port handle to the given tab.  The handle can be used for sending
 // messages to the extension.
 IPC_SYNC_MESSAGE_CONTROL4_1(ExtensionHostMsg_OpenChannelToTab,
@@ -491,7 +486,7 @@ IPC_MESSAGE_ROUTED5(ExtensionHostMsg_ExecuteCodeFinished,
 // frame (e.g. if executing in an iframe this is the page ID of the parent,
 // unless the parent is an iframe... etc).
 IPC_MESSAGE_ROUTED3(ExtensionHostMsg_ContentScriptsExecuting,
-                    std::set<std::string> /* extensions that have scripts */,
+                    ExecutingScriptsMap,
                     int32 /* page_id of the _topmost_ frame */,
                     GURL /* url of the _topmost_ frame */)
 

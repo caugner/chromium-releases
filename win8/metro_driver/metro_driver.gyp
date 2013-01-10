@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 {
   'conditions': [
-    ['OS=="win" and (MSVS_VERSION=="2010" or MSVS_VERSION=="2010e")', {
+    ['OS=="win"', {
       'variables': {
         'chromium_code': 1,
       },
@@ -11,11 +11,6 @@
         '../../build/win_precompile.gypi',
       ],
       'target_defaults': {
-        'defines': [
-          # This define is required to pull in the new Win8 interfaces from
-          # system headers like ShObjIdl.h
-          'NTDDI_VERSION=0x06020000',
-        ],
         'msvs_settings': {
             'VCLinkerTool': {
                 'AdditionalDependencies': [
@@ -31,39 +26,55 @@
           'type': 'shared_library',
           'dependencies': [
             '../../base/base.gyp:base',
-	    '../../build/temp_gyp/googleurl.gyp:googleurl',
+            '../../build/temp_gyp/googleurl.gyp:googleurl',
             '../../crypto/crypto.gyp:crypto',
-            '../../sandbox/sandbox.gyp:sandbox',
             '../../google_update/google_update.gyp:google_update',
+            '../../ipc/ipc.gyp:ipc',
+            '../../sandbox/sandbox.gyp:sandbox',
+            '../../ui/metro_viewer/metro_viewer.gyp:metro_viewer',
             '../win8.gyp:check_sdk_patch',
           ],
           'sources': [
-            'chrome_app_view.cc',
-            'chrome_app_view.h',
-            'chrome_url_launch_handler.cc',
-            'chrome_url_launch_handler.h',
-            '../delegate_execute/chrome_util.cc',
-            '../delegate_execute/chrome_util.h',
-            'devices_handler.cc',
-            'devices_handler.h',
-            'file_picker.h',
-            'file_picker.cc',
-            'metro_dialog_box.cc',
-            'metro_dialog_box.h',
             'metro_driver.cc',
-            'print_handler.cc',
-            'print_handler.h',
-            'print_document_source.cc',
-            'print_document_source.h',
-            'secondary_tile.h',
-            'secondary_tile.cc',
-            'settings_handler.cc',
-            'settings_handler.h',
+            'metro_driver.h',
             'stdafx.h',
-            'toast_notification_handler.cc',
-            'toast_notification_handler.h',
             'winrt_utils.cc',
             'winrt_utils.h',
+          ],
+          'conditions': [          
+            ['use_aura==1', {
+              'sources': [
+                'chrome_app_view_ash.cc',
+                'chrome_app_view_ash.h',
+                'direct3d_helper.cc',
+                'direct3d_helper.h',
+              ],
+            }, {  # use_aura!=1
+              'sources': [
+                'chrome_app_view.cc',
+                'chrome_app_view.h',
+                'chrome_url_launch_handler.cc',
+                'chrome_url_launch_handler.h',
+                '../delegate_execute/chrome_util.cc',
+                '../delegate_execute/chrome_util.h',
+                'devices_handler.cc',
+                'devices_handler.h',
+                'file_picker.h',
+                'file_picker.cc',
+                'metro_dialog_box.cc',
+                'metro_dialog_box.h',
+                'print_handler.cc',
+                'print_handler.h',
+                'print_document_source.cc',
+                'print_document_source.h',
+                'secondary_tile.h',
+                'secondary_tile.cc',
+                'settings_handler.cc',
+                'settings_handler.h',
+                'toast_notification_handler.cc',
+                'toast_notification_handler.h',
+              ],
+            }],
           ],
           'copies': [
             {

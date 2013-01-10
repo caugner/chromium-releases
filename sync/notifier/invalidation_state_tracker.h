@@ -16,14 +16,18 @@
 
 namespace syncer {
 
-typedef std::map<invalidation::ObjectId, int64, ObjectIdLessThan>
-    InvalidationVersionMap;
+struct InvalidationState {
+  int64 version;
+};
+
+typedef std::map<invalidation::ObjectId, InvalidationState, ObjectIdLessThan>
+    InvalidationStateMap;
 
 class InvalidationStateTracker {
  public:
   InvalidationStateTracker() {}
 
-  virtual InvalidationVersionMap GetAllMaxVersions() const = 0;
+  virtual InvalidationStateMap GetAllInvalidationStates() const = 0;
 
   // |max_version| should be strictly greater than any existing max
   // version for |model_type|.
@@ -32,12 +36,12 @@ class InvalidationStateTracker {
   // Removes all state tracked for |ids|.
   virtual void Forget(const ObjectIdSet& ids) = 0;
 
-  // Used by InvalidationClient for persistence. |state| is opaque data we can
-  // present back to the client (e.g. after a restart) for it to bootstrap
-  // itself.
-  // |state| is plain old data (not valid UTF8, embedded nulls, etc).
-  virtual void SetInvalidationState(const std::string& state) = 0;
-  virtual std::string GetInvalidationState() const = 0;
+  // Used by invalidation::InvalidationClient for persistence. |data| is an
+  // opaque blob that an invalidation client can use after a restart to
+  // bootstrap itself. |data| is binary data (not valid UTF8, embedded nulls,
+  // etc).
+  virtual void SetBootstrapData(const std::string& data) = 0;
+  virtual std::string GetBootstrapData() const = 0;
 
  protected:
   virtual ~InvalidationStateTracker() {}

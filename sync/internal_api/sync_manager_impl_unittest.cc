@@ -94,8 +94,6 @@ namespace {
 
 const char kTestChromeVersion[] = "test chrome version";
 
-void DoNothing() {}
-
 void ExpectInt64Value(int64 expected_value,
                       const DictionaryValue& value, const std::string& key) {
   std::string int64_str;
@@ -699,7 +697,8 @@ class SyncEncryptionHandlerObserverMock
                void(ModelTypeSet, bool));  // NOLINT
   MOCK_METHOD0(OnEncryptionComplete, void());  // NOLINT
   MOCK_METHOD1(OnCryptographerStateChanged, void(Cryptographer*));  // NOLINT
-  MOCK_METHOD1(OnPassphraseTypeChanged, void(PassphraseType));  // NOLINT
+  MOCK_METHOD2(OnPassphraseTypeChanged, void(PassphraseType,
+                                             base::Time));  // NOLINT
 };
 
 }  // namespace
@@ -791,6 +790,8 @@ class SyncManagerTest : public testing::Test,
 
   void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
     (*out)[NIGORI] = GROUP_PASSIVE;
+    (*out)[DEVICE_INFO] = GROUP_PASSIVE;
+    (*out)[EXPERIMENTS] = GROUP_PASSIVE;
     (*out)[BOOKMARKS] = GROUP_PASSIVE;
     (*out)[THEMES] = GROUP_PASSIVE;
     (*out)[SESSIONS] = GROUP_PASSIVE;
@@ -800,6 +801,7 @@ class SyncManagerTest : public testing::Test,
 
   virtual void OnChangesApplied(
       ModelType model_type,
+      int64 model_version,
       const BaseTransaction* trans,
       const ImmutableChangeRecordList& changes) OVERRIDE {}
 
@@ -913,10 +915,11 @@ class SyncManagerTest : public testing::Test,
 
   void TriggerOnIncomingNotificationForTest(ModelTypeSet model_types) {
     DCHECK(sync_manager_.thread_checker_.CalledOnValidThread());
-    ModelTypeStateMap type_state_map =
-        ModelTypeSetToStateMap(model_types, std::string());
+    ModelTypeInvalidationMap invalidation_map =
+        ModelTypeSetToInvalidationMap(model_types, std::string());
     sync_manager_.OnIncomingInvalidation(
-        ModelTypeStateMapToObjectIdStateMap(type_state_map),
+        ModelTypeInvalidationMapToObjectIdInvalidationMap(
+            invalidation_map),
         REMOTE_INVALIDATION);
   }
 
@@ -1183,7 +1186,7 @@ TEST_F(SyncManagerTest, GetChildNodeIds) {
   const ListValue* nodes = NULL;
   ASSERT_TRUE(return_args.Get().GetList(0, &nodes));
   ASSERT_TRUE(nodes);
-  EXPECT_EQ(6u, nodes->GetSize());
+  EXPECT_EQ(8u, nodes->GetSize());
 }
 
 TEST_F(SyncManagerTest, GetChildNodeIdsFailure) {
@@ -1418,7 +1421,7 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithNoData) {
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
   EXPECT_CALL(encryption_observer_,
               OnEncryptedTypesChanged(
-                  HasModelTypes(UserTypes()), true));
+                  HasModelTypes(EncryptableUserTypes()), true));
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   sync_manager_.GetEncryptionHandler()->EnableEncryptEverything();
   EXPECT_TRUE(EncryptEverythingEnabledForTest());
@@ -1472,14 +1475,14 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
 
   EXPECT_CALL(encryption_observer_,
               OnEncryptedTypesChanged(
-                  HasModelTypes(UserTypes()), true));
+                  HasModelTypes(EncryptableUserTypes()), true));
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   sync_manager_.GetEncryptionHandler()->EnableEncryptEverything();
   EXPECT_TRUE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     EXPECT_TRUE(GetEncryptedTypesWithTrans(&trans).Equals(
-        UserTypes()));
+        EncryptableUserTypes()));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryptionForTest(
         trans.GetWrappedTrans(),
         BOOKMARKS,
@@ -1502,13 +1505,14 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
   EXPECT_CALL(encryption_observer_,
-              OnPassphraseTypeChanged(CUSTOM_PASSPHRASE));
+              OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
   sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
       "new_passphrase", true);
   EXPECT_TRUE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
-    EXPECT_TRUE(GetEncryptedTypesWithTrans(&trans).Equals(UserTypes()));
+    EXPECT_TRUE(GetEncryptedTypesWithTrans(&trans).Equals(
+        EncryptableUserTypes()));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryptionForTest(
         trans.GetWrappedTrans(),
         BOOKMARKS,
@@ -1626,7 +1630,7 @@ TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
   EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE));
+      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
   sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
       "new_passphrase",
       true);
@@ -1812,7 +1816,7 @@ TEST_F(SyncManagerTest, SupplyPendingExplicitPass) {
   }
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
   EXPECT_CALL(encryption_observer_,
-              OnPassphraseTypeChanged(CUSTOM_PASSPHRASE));
+              OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
   EXPECT_CALL(encryption_observer_, OnPassphraseRequired(_, _));
   EXPECT_CALL(encryption_observer_, OnEncryptedTypesChanged(_, false));
   sync_manager_.GetEncryptionHandler()->Init();
@@ -1897,7 +1901,7 @@ TEST_F(SyncManagerTest, SetPassphraseWithEmptyPasswordNode) {
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
   EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE));
+      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
   sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
       "new_passphrase",
       true);
@@ -2005,14 +2009,15 @@ TEST_F(SyncManagerTest, EncryptBookmarksWithLegacyData) {
 
   EXPECT_CALL(encryption_observer_,
               OnEncryptedTypesChanged(
-                  HasModelTypes(UserTypes()), true));
+                  HasModelTypes(EncryptableUserTypes()), true));
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   sync_manager_.GetEncryptionHandler()->EnableEncryptEverything();
   EXPECT_TRUE(EncryptEverythingEnabledForTest());
 
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
-    EXPECT_TRUE(GetEncryptedTypesWithTrans(&trans).Equals(UserTypes()));
+    EXPECT_TRUE(GetEncryptedTypesWithTrans(&trans).Equals(
+        EncryptableUserTypes()));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryptionForTest(
         trans.GetWrappedTrans(),
         BOOKMARKS,
@@ -2092,7 +2097,7 @@ TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
   // Encrypt the datatatype, should set is_unsynced.
   EXPECT_CALL(encryption_observer_,
               OnEncryptedTypesChanged(
-                  HasModelTypes(UserTypes()), true));
+                  HasModelTypes(EncryptableUserTypes()), true));
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, FULL_ENCRYPTION));
 
@@ -2124,7 +2129,7 @@ TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
   EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE));
+      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
   sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
       "new_passphrase",
       true);
@@ -2323,7 +2328,7 @@ TEST_F(SyncManagerTest, UpdatePasswordNewPassphrase) {
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
   EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE));
+      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
   sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
       "new_passphrase",
       true);
@@ -2417,7 +2422,7 @@ TEST_F(SyncManagerTest, SetBookmarkTitleWithEncryption) {
   // Encrypt the datatatype, should set is_unsynced.
   EXPECT_CALL(encryption_observer_,
               OnEncryptedTypesChanged(
-                  HasModelTypes(UserTypes()), true));
+                  HasModelTypes(EncryptableUserTypes()), true));
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, FULL_ENCRYPTION));
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
@@ -2514,7 +2519,7 @@ TEST_F(SyncManagerTest, SetNonBookmarkTitleWithEncryption) {
   // Encrypt the datatatype, should set is_unsynced.
   EXPECT_CALL(encryption_observer_,
               OnEncryptedTypesChanged(
-                  HasModelTypes(UserTypes()), true));
+                  HasModelTypes(EncryptableUserTypes()), true));
   EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
   EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, FULL_ENCRYPTION));
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
@@ -2611,6 +2616,45 @@ TEST_F(SyncManagerTest, SetPreviouslyEncryptedSpecifics) {
     EXPECT_EQ(kEncryptedString, node_entry->Get(NON_UNIQUE_NAME));
     const sync_pb::EntitySpecifics& specifics = node_entry->Get(SPECIFICS);
     EXPECT_TRUE(specifics.has_encrypted());
+  }
+}
+
+// Verify transaction version of a model type is incremented when node of
+// that type is updated.
+TEST_F(SyncManagerTest, IncrementTransactionVersion) {
+  ModelSafeRoutingInfo routing_info;
+  GetModelSafeRoutingInfo(&routing_info);
+
+  {
+    ReadTransaction read_trans(FROM_HERE, sync_manager_.GetUserShare());
+    for (ModelSafeRoutingInfo::iterator i = routing_info.begin();
+         i != routing_info.end(); ++i) {
+      // Transaction version is incremented when SyncManagerTest::SetUp()
+      // creates a node of each type.
+      EXPECT_EQ(1,
+                sync_manager_.GetUserShare()->directory->
+                    GetTransactionVersion(i->first));
+    }
+  }
+
+  // Create bookmark node to increment transaction version of bookmark model.
+  std::string client_tag = "title";
+  sync_pb::EntitySpecifics entity_specifics;
+  entity_specifics.mutable_bookmark()->set_url("url");
+  entity_specifics.mutable_bookmark()->set_title("title");
+  MakeServerNode(sync_manager_.GetUserShare(), BOOKMARKS, client_tag,
+                 BaseNode::GenerateSyncableHash(BOOKMARKS,
+                                                client_tag),
+                 entity_specifics);
+
+  {
+    ReadTransaction read_trans(FROM_HERE, sync_manager_.GetUserShare());
+    for (ModelSafeRoutingInfo::iterator i = routing_info.begin();
+         i != routing_info.end(); ++i) {
+      EXPECT_EQ(i->first == BOOKMARKS ? 2 : 1,
+                sync_manager_.GetUserShare()->directory->
+                    GetTransactionVersion(i->first));
+    }
   }
 }
 

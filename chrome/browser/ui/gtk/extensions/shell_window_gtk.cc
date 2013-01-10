@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/gtk_window_util.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/extensions/draggable_region.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -31,8 +30,9 @@ const int kDebounceTimeoutMilliseconds = 100;
 ShellWindowGtk::ShellWindowGtk(ShellWindow* shell_window,
                                const ShellWindow::CreateParams& params)
     : shell_window_(shell_window),
+      window_(NULL),
       state_(GDK_WINDOW_STATE_WITHDRAWN),
-      is_active_(!ui::ActiveWindowWatcherX::WMSupportsActivation()),
+      is_active_(false),
       content_thinks_its_fullscreen_(false),
       frameless_(params.frame == ShellWindow::CreateParams::FRAME_NONE) {
   window_ = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
@@ -114,9 +114,11 @@ ShellWindowGtk::ShellWindowGtk(ShellWindow* shell_window,
   }
 
   // Add the keybinding registry.
-  extension_keybinding_registry_.reset(
-      new ExtensionKeybindingRegistryGtk(shell_window_->profile(), window_,
-          extensions::ExtensionKeybindingRegistry::PLATFORM_APPS_ONLY));
+  extension_keybinding_registry_.reset(new ExtensionKeybindingRegistryGtk(
+      shell_window_->profile(),
+      window_,
+      extensions::ExtensionKeybindingRegistry::PLATFORM_APPS_ONLY,
+      shell_window_));
 
   ui::ActiveWindowWatcherX::AddObserver(this);
 }
@@ -126,7 +128,11 @@ ShellWindowGtk::~ShellWindowGtk() {
 }
 
 bool ShellWindowGtk::IsActive() const {
-  return is_active_;
+  if (ui::ActiveWindowWatcherX::WMSupportsActivation())
+    return is_active_;
+
+  // This still works even though we don't get the activation notification.
+  return gtk_window_is_active(window_);
 }
 
 bool ShellWindowGtk::IsMaximized() const {
@@ -160,6 +166,10 @@ void ShellWindowGtk::Show() {
 void ShellWindowGtk::ShowInactive() {
   gtk_window_set_focus_on_map(window_, false);
   gtk_widget_show(GTK_WIDGET(window_));
+}
+
+void ShellWindowGtk::Hide() {
+  gtk_widget_hide(GTK_WIDGET(window_));
 }
 
 void ShellWindowGtk::Close() {
@@ -285,8 +295,7 @@ gboolean ShellWindowGtk::OnWindowState(GtkWidget* sender,
 
 gboolean ShellWindowGtk::OnButtonPress(GtkWidget* widget,
                                        GdkEventButton* event) {
-  if (!draggable_region_.isEmpty() &&
-      draggable_region_.contains(event->x, event->y)) {
+  if (draggable_region_ && draggable_region_->contains(event->x, event->y)) {
     if (event->button == 1) {
       if (GDK_BUTTON_PRESS == event->type) {
         if (!suppress_window_raise_)
@@ -351,26 +360,7 @@ void ShellWindowGtk::UpdateDraggableRegions(
   if (!frameless_)
     return;
 
-  SkRegion draggable_region;
-
-  // By default, the whole window is draggable.
-  gfx::Rect bounds = GetBounds();
-  draggable_region.op(0, 0, bounds.right(), bounds.bottom(),
-                      SkRegion::kUnion_Op);
-
-  // Exclude those designated as non-draggable.
-  for (std::vector<extensions::DraggableRegion>::const_iterator iter =
-           regions.begin();
-       iter != regions.end(); ++iter) {
-    const extensions::DraggableRegion& region = *iter;
-    draggable_region.op(region.bounds.x(),
-                        region.bounds.y(),
-                        region.bounds.right(),
-                        region.bounds.bottom(),
-                        SkRegion::kDifference_Op);
-  }
-
-  draggable_region_ = draggable_region;
+  draggable_region_.reset(ShellWindow::RawDraggableRegionsToSkRegion(regions));
 }
 
 // static

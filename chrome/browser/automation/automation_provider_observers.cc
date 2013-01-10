@@ -52,7 +52,6 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -1169,9 +1168,10 @@ void DomOperationObserver::Observe(
     DCHECK_EQ(chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED, type);
     WebContents* web_contents = content::Source<WebContents>(source).ptr();
     if (web_contents) {
-      TabContents* tab_contents = TabContents::FromWebContents(web_contents);
-      if (tab_contents && tab_contents->content_settings() &&
-          tab_contents->content_settings()->IsContentBlocked(
+      TabSpecificContentSettings* tab_content_settings =
+          TabSpecificContentSettings::FromWebContents(web_contents);
+      if (tab_content_settings &&
+          tab_content_settings->IsContentBlocked(
               CONTENT_SETTINGS_TYPE_JAVASCRIPT))
         OnJavascriptBlocked();
     }
@@ -1259,7 +1259,8 @@ InfoBarCountObserver::InfoBarCountObserver(AutomationProvider* automation,
       reply_message_(reply_message),
       tab_contents_(tab_contents),
       target_count_(target_count) {
-  content::Source<InfoBarTabHelper> source(tab_contents->infobar_tab_helper());
+  content::Source<InfoBarTabHelper> source(
+      InfoBarTabHelper::FromWebContents(tab_contents->web_contents()));
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
                  source);
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
@@ -1279,7 +1280,9 @@ void InfoBarCountObserver::Observe(
 }
 
 void InfoBarCountObserver::CheckCount() {
-  if (tab_contents_->infobar_tab_helper()->GetInfoBarCount() != target_count_)
+  InfoBarTabHelper* infobar_tab_helper =
+      InfoBarTabHelper::FromWebContents(tab_contents_->web_contents());
+  if (infobar_tab_helper->GetInfoBarCount() != target_count_)
     return;
 
   if (automation_) {
@@ -1588,7 +1591,7 @@ AutomationProviderGetPasswordsObserver::
 
 void AutomationProviderGetPasswordsObserver::OnPasswordStoreRequestDone(
     CancelableRequestProvider::Handle handle,
-    const std::vector<webkit::forms::PasswordForm*>& result) {
+    const std::vector<content::PasswordForm*>& result) {
   if (!provider_) {
     delete this;
     return;
@@ -1597,10 +1600,10 @@ void AutomationProviderGetPasswordsObserver::OnPasswordStoreRequestDone(
   scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
 
   ListValue* passwords = new ListValue;
-  for (std::vector<webkit::forms::PasswordForm*>::const_iterator it =
+  for (std::vector<content::PasswordForm*>::const_iterator it =
            result.begin(); it != result.end(); ++it) {
     DictionaryValue* password_val = new DictionaryValue;
-    webkit::forms::PasswordForm* password_form = *it;
+    content::PasswordForm* password_form = *it;
     password_val->SetString("username_value", password_form->username_value);
     password_val->SetString("password_value", password_form->password_value);
     password_val->SetString("signon_realm", password_form->signon_realm);
@@ -1785,8 +1788,10 @@ PageSnapshotTaker::PageSnapshotTaker(AutomationProvider* automation,
 PageSnapshotTaker::~PageSnapshotTaker() {}
 
 void PageSnapshotTaker::Start() {
-  StartObserving(tab_contents_->automation_tab_helper());
-  tab_contents_->automation_tab_helper()->SnapshotEntirePage();
+  AutomationTabHelper* automation_tab_helper =
+      AutomationTabHelper::FromWebContents(tab_contents_->web_contents());
+  StartObserving(automation_tab_helper);
+  automation_tab_helper->SnapshotEntirePage();
 }
 
 void PageSnapshotTaker::OnSnapshotEntirePageACK(
@@ -2361,10 +2366,12 @@ AllViewsStoppedLoadingObserver::AllViewsStoppedLoadingObserver(
        ++iter) {
     Browser* browser = *iter;
     for (int i = 0; i < browser->tab_count(); ++i) {
-      TabContents* tab_contents = chrome::GetTabContentsAt(browser, i);
-      StartObserving(tab_contents->automation_tab_helper());
-      if (tab_contents->automation_tab_helper()->has_pending_loads())
-        pending_tabs_.insert(tab_contents->web_contents());
+      WebContents* web_contents = chrome::GetWebContentsAt(browser, i);
+      AutomationTabHelper* automation_tab_helper =
+          AutomationTabHelper::FromWebContents(web_contents);
+      StartObserving(automation_tab_helper);
+      if (automation_tab_helper->has_pending_loads())
+        pending_tabs_.insert(web_contents);
     }
   }
   CheckIfNoMorePendingLoads();

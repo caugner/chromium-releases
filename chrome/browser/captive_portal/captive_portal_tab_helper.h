@@ -13,10 +13,15 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "webkit/glue/resource_type.h"
 
 class GURL;
 class Profile;
+
+namespace content {
+  class WebContents;
+}
 
 namespace net {
 class SSLInfo;
@@ -51,17 +56,18 @@ class CaptivePortalTabReloader;
 //
 // For the design doc, see:
 // https://docs.google.com/document/d/1k-gP2sswzYNvryu9NcgN7q5XrsMlUdlUdoW9WRaEmfM/edit
-class CaptivePortalTabHelper : public content::WebContentsObserver,
-                               public content::NotificationObserver,
-                               public base::NonThreadSafe {
+class CaptivePortalTabHelper
+    : public content::WebContentsObserver,
+      public content::NotificationObserver,
+      public base::NonThreadSafe,
+      public content::WebContentsUserData<CaptivePortalTabHelper> {
  public:
-  CaptivePortalTabHelper(Profile* profile,
-                         content::WebContents* web_contents);
   virtual ~CaptivePortalTabHelper();
 
   // content::WebContentsObserver:
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
@@ -102,6 +108,9 @@ class CaptivePortalTabHelper : public content::WebContentsObserver,
   friend class CaptivePortalBrowserTest;
   friend class CaptivePortalTabHelperTest;
 
+  friend class content::WebContentsUserData<CaptivePortalTabHelper>;
+  explicit CaptivePortalTabHelper(content::WebContents* web_contents);
+
   // Called by Observe in response to the corresponding event.
   void OnRedirect(int child_id,
                   ResourceType::Type resource_type,
@@ -128,11 +137,13 @@ class CaptivePortalTabHelper : public content::WebContentsObserver,
   // Opens a login tab if the profile's active window doesn't have one already.
   void OpenLoginTab();
 
+  Profile* profile_;
+
   // Neither of these will ever be NULL.
   scoped_ptr<CaptivePortalTabReloader> tab_reloader_;
   scoped_ptr<CaptivePortalLoginDetector> login_detector_;
 
-  Profile* profile_;
+  content::WebContents* web_contents_;
 
   // If a provisional load has failed, and the tab is loading an error page, the
   // error code associated with the error page we're loading.

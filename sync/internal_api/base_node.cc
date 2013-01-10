@@ -181,7 +181,7 @@ int64 BaseNode::GetId() const {
   return GetEntry()->Get(syncable::META_HANDLE);
 }
 
-const base::Time& BaseNode::GetModificationTime() const {
+base::Time BaseNode::GetModificationTime() const {
   return GetEntry()->Get(syncable::MTIME);
 }
 
@@ -330,6 +330,16 @@ const sync_pb::ExtensionSpecifics& BaseNode::GetExtensionSpecifics() const {
 const sync_pb::SessionSpecifics& BaseNode::GetSessionSpecifics() const {
   DCHECK_EQ(GetModelType(), SESSIONS);
   return GetEntitySpecifics().session();
+}
+
+const sync_pb::DeviceInfoSpecifics& BaseNode::GetDeviceInfoSpecifics() const {
+  DCHECK_EQ(GetModelType(), DEVICE_INFO);
+  return GetEntitySpecifics().device_info();
+}
+
+const sync_pb::ExperimentsSpecifics& BaseNode::GetExperimentsSpecifics() const {
+  DCHECK_EQ(GetModelType(), EXPERIMENTS);
+  return GetEntitySpecifics().experiments();
 }
 
 const sync_pb::EntitySpecifics& BaseNode::GetEntitySpecifics() const {

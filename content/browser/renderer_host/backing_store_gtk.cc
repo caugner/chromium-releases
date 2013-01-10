@@ -83,7 +83,10 @@ class XSyncHandler {
     return loaded_extension_;
   }
 
-  void PushPaintCounter(Display* display, Picture picture, Pixmap pixmap,
+  void PushPaintCounter(TransportDIB* dib,
+                        Display* display,
+                        Picture picture,
+                        Pixmap pixmap,
                         const base::Closure& completion_callback);
 
  private:
@@ -92,13 +95,17 @@ class XSyncHandler {
   // A struct that has cleanup and callback tasks that were queued into the
   // future and are run on |g_backing_store_sync_alarm| firing.
   struct BackingStoreEvents {
-    BackingStoreEvents(Display* d, Picture pic, Pixmap pix,
+    BackingStoreEvents(TransportDIB* dib, Display* d, Picture pic, Pixmap pix,
                        const base::Closure& c)
-        : display(d),
+        : dib(dib),
+          display(d),
           picture(pic),
           pixmap(pix),
           closure(c) {
+      dib->IncreaseInFlightCounter();
     }
+
+    TransportDIB* dib;
 
     // The display we're running on.
     Display* display;
@@ -133,12 +140,13 @@ class XSyncHandler {
   std::queue<BackingStoreEvents*> backing_store_events_;
 };
 
-void XSyncHandler::PushPaintCounter(Display* display,
+void XSyncHandler::PushPaintCounter(TransportDIB* dib,
+                                    Display* display,
                                     Picture picture,
                                     Pixmap pixmap,
                                     const base::Closure& completion_callback) {
-  backing_store_events_.push(
-      new BackingStoreEvents(display, picture, pixmap, completion_callback));
+  backing_store_events_.push(new BackingStoreEvents(
+        dib, display, picture, pixmap, completion_callback));
 
   // Push a change counter event into the X11 event queue that will trigger our
   // alarm when it is processed.
@@ -182,6 +190,7 @@ XSyncHandler::~XSyncHandler() {
   if (loaded_extension_)
     gdk_window_remove_filter(NULL, &OnEventThunk, this);
 
+  XSync(ui::GetXDisplay(), False);
   while (!backing_store_events_.empty()) {
     // We delete the X11 resources we're holding onto. We don't run the
     // callbacks because we are shutting down.
@@ -189,6 +198,7 @@ XSyncHandler::~XSyncHandler() {
     backing_store_events_.pop();
     XRenderFreePicture(data->display, data->picture);
     XFreePixmap(data->display, data->pixmap);
+    data->dib->DecreaseInFlightCounter();
     delete data;
   }
 }
@@ -219,6 +229,8 @@ GdkFilterReturn XSyncHandler::OnEvent(GdkXEvent* gdkxevent,
 
       // Dispatch the closure we were given.
       data->closure.Run();
+
+      data->dib->DecreaseInFlightCounter();
       delete data;
 
       return GDK_FILTER_REMOVE;
@@ -472,7 +484,8 @@ void BackingStoreGtk::PaintToBackingStore(
     XSyncHandler* handler = XSyncHandler::GetInstance();
     if (handler->Enabled()) {
       *scheduled_completion_callback = true;
-      handler->PushPaintCounter(display_, picture, pixmap, completion_callback);
+      handler->PushPaintCounter(
+          dib, display_, picture, pixmap, completion_callback);
     } else {
       XSync(display_, False);
     }
@@ -486,7 +499,7 @@ void BackingStoreGtk::PaintToBackingStore(
 }
 
 bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
-                                           skia::PlatformCanvas* output) {
+                                           skia::PlatformBitmap* output) {
   base::TimeTicks begin_time = base::TimeTicks::Now();
 
   if (visual_depth_ < 24) {
@@ -519,10 +532,14 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
       return false;
     }
     shminfo.shmid = shmget(IPC_PRIVATE, image->bytes_per_line * image->height,
-                           IPC_CREAT|0666);
+                           IPC_CREAT|0600);
     if (shminfo.shmid == -1) {
       XDestroyImage(image);
+      LOG(WARNING) << "Failed to get shared memory segment. "
+                      "Performance may be degraded.";
       return false;
+    } else {
+      VLOG(1) << "Got shared memory segment " << shminfo.shmid;
     }
 
     void* mapped_memory = shmat(shminfo.shmid, NULL, SHM_RDONLY);
@@ -537,9 +554,14 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
         !XShmGetImage(display_, pixmap_, image, rect.x(), rect.y(),
                       AllPlanes)) {
       DestroySharedImage(display_, image, &shminfo);
+      LOG(WARNING) << "X failed to get shared memory segment. "
+                      "Performance may be degraded.";
       return false;
     }
+
+    VLOG(1) << "Using X shared memory segment " << shminfo.shmid;
   } else {
+    LOG(WARNING) << "Not using X shared memory.";
     // Non-shared memory case just copy the image from the server.
     image = XGetImage(display_, pixmap_,
                       rect.x(), rect.y(), width, height,
@@ -549,7 +571,7 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
   // TODO(jhawkins): Need to convert the image data if the image bits per pixel
   // is not 32.
   // Note that this also initializes the output bitmap as opaque.
-  if (!output->initialize(width, height, true) ||
+  if (!output->Allocate(width, height, true) ||
       image->bits_per_pixel != 32) {
     if (shared_memory_support_ != ui::SHARED_MEMORY_NONE)
       DestroySharedImage(display_, image, &shminfo);
@@ -562,7 +584,7 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
   // it and copy each row out, only up to the pixels we're actually
   // using.  This code assumes a visual mode where a pixel is
   // represented using a 32-bit unsigned int, with a byte per component.
-  SkBitmap bitmap = skia::GetTopDevice(*output)->accessBitmap(true);
+  const SkBitmap& bitmap = output->GetBitmap();
   SkAutoLockPixels alp(bitmap);
 
   for (int y = 0; y < height; y++) {

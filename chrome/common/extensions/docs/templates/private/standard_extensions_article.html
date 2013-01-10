@@ -7,14 +7,14 @@
   <body>
     {{+partials.header_body title:extensions_title}}
     <div id="gc-container">
-      {{+partials.sidenav items:sidenavs.extensions}}
+      {{+partials.extensions_sidenav}}
       <div id="gc-pagecontent">
         <h1 class="page_title">{{article.title}}</h1>
-        {{?article.extensions_toc}}
-        {{+partials.table_of_contents toc_items:article.extensions_toc
+        {{?article.toc}}
+        {{+partials.table_of_contents toc_items:article.toc
                                       has_toc:true
                                       title:extensions_title}}
-        {{/article.extensions_toc}}
+        {{/article.toc}}
 {{- This may contain <pre> tags so it is not indented -}}
 {{+article.intro is_apps:false}}
       </div>
