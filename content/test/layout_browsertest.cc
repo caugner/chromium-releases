@@ -9,20 +9,19 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/scoped_temp_dir.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_paths.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_switches.h"
-#include "content/shell/webkit_test_runner_host.h"
+#include "content/shell/webkit_test_controller.h"
 #include "content/test/content_browser_test_utils.h"
 #include "content/test/layout_test_http_server.h"
 #include "net/base/net_util.h"
@@ -121,7 +120,6 @@ void InProcessBrowserLayoutTest::SetUpInProcessBrowserTestFixture() {
 
 void InProcessBrowserLayoutTest::SetUpCommandLine(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kDumpRenderTree);
-  command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
 }
 
 void InProcessBrowserLayoutTest::SetUpOnMainThread() {
@@ -153,7 +151,8 @@ void InProcessBrowserLayoutTest::RunLayoutTestInternal(
   test_controller_->set_printer(printer.release());
 
   LOG(INFO) << "Navigating to URL " << url << " and blocking.";
-  ASSERT_TRUE(test_controller_->PrepareForLayoutTest(url, false, ""));
+  ASSERT_TRUE(
+      test_controller_->PrepareForLayoutTest(url, FilePath(), false, ""));
   base::RunLoop run_loop;
   run_loop.Run();
   LOG(INFO) << "Navigation completed.";

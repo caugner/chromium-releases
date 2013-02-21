@@ -12,12 +12,12 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/test/values_test_util.h"
@@ -32,6 +32,7 @@
 #include "sync/internal_api/public/http_post_provider_interface.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/test/test_entry_factory.h"
 #include "sync/internal_api/public/test/test_internal_components_factory.h"
 #include "sync/internal_api/public/test/test_user_share.h"
 #include "sync/internal_api/public/write_node.h"
@@ -60,6 +61,7 @@
 #include "sync/syncable/entry.h"
 #include "sync/syncable/mutable_entry.h"
 #include "sync/syncable/nigori_util.h"
+#include "sync/syncable/read_transaction.h"
 #include "sync/syncable/syncable_id.h"
 #include "sync/syncable/write_transaction.h"
 #include "sync/test/callback_counter.h"
@@ -84,11 +86,12 @@ using testing::StrictMock;
 namespace syncer {
 
 using sessions::SyncSessionSnapshot;
+using syncable::GET_BY_HANDLE;
 using syncable::IS_DEL;
 using syncable::IS_UNSYNCED;
-using syncable::kEncryptedString;
 using syncable::NON_UNIQUE_NAME;
 using syncable::SPECIFICS;
+using syncable::kEncryptedString;
 
 namespace {
 
@@ -581,7 +584,8 @@ void CheckNodeValue(const BaseNode& node, const DictionaryValue& value,
     ExpectInt64Value(node.GetSuccessorId(), value, "successorId");
     ExpectInt64Value(node.GetFirstChildId(), value, "firstChildId");
     {
-      scoped_ptr<DictionaryValue> expected_entry(node.GetEntry()->ToValue());
+      scoped_ptr<DictionaryValue> expected_entry(
+          node.GetEntry()->ToValue(NULL));
       const Value* entry = NULL;
       EXPECT_TRUE(value.Get("entry", &entry));
       EXPECT_TRUE(Value::Equals(entry, expected_entry.get()));
@@ -631,6 +635,82 @@ TEST_F(SyncApiTest, EmptyTags) {
             node.InitByTagLookup(empty_tag));
 }
 
+// Test counting nodes when the type's root node has no children.
+TEST_F(SyncApiTest, GetTotalNodeCountEmpty) {
+  int64 type_root = MakeServerNodeForType(test_user_share_.user_share(),
+                                          BOOKMARKS);
+  {
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadNode type_root_node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK,
+              type_root_node.InitByIdLookup(type_root));
+    EXPECT_EQ(1, type_root_node.GetTotalNodeCount());
+  }
+}
+
+// Test counting nodes when there is one child beneath the type's root.
+TEST_F(SyncApiTest, GetTotalNodeCountOneChild) {
+  int64 type_root = MakeServerNodeForType(test_user_share_.user_share(),
+                                          BOOKMARKS);
+  int64 parent = MakeFolderWithParent(test_user_share_.user_share(),
+                                      BOOKMARKS,
+                                      type_root,
+                                      NULL);
+  {
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadNode type_root_node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK,
+              type_root_node.InitByIdLookup(type_root));
+    EXPECT_EQ(2, type_root_node.GetTotalNodeCount());
+    ReadNode parent_node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK,
+              parent_node.InitByIdLookup(parent));
+    EXPECT_EQ(1, parent_node.GetTotalNodeCount());
+  }
+}
+
+// Test counting nodes when there are multiple children beneath the type root,
+// and one of those children has children of its own.
+TEST_F(SyncApiTest, GetTotalNodeCountMultipleChildren) {
+  int64 type_root = MakeServerNodeForType(test_user_share_.user_share(),
+                                          BOOKMARKS);
+  int64 parent = MakeFolderWithParent(test_user_share_.user_share(),
+                                      BOOKMARKS,
+                                      type_root,
+                                      NULL);
+  ignore_result(MakeFolderWithParent(test_user_share_.user_share(),
+                                     BOOKMARKS,
+                                     type_root,
+                                     NULL));
+  int64 child1 = MakeFolderWithParent(
+      test_user_share_.user_share(),
+      BOOKMARKS,
+      parent,
+      NULL);
+  ignore_result(MakeNodeWithParent(
+      test_user_share_.user_share(),
+      BOOKMARKS,
+      "c2",
+      parent));
+  ignore_result(MakeNodeWithParent(
+      test_user_share_.user_share(),
+      BOOKMARKS,
+      "c1c1",
+      child1));
+
+  {
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+    ReadNode type_root_node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK,
+              type_root_node.InitByIdLookup(type_root));
+    EXPECT_EQ(6, type_root_node.GetTotalNodeCount());
+    ReadNode node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK,
+              node.InitByIdLookup(parent));
+    EXPECT_EQ(4, node.GetTotalNodeCount());
+  }
+}
+
 namespace {
 
 class TestHttpPostProviderInterface : public HttpPostProviderInterface {
@@ -674,8 +754,10 @@ class SyncManagerObserverMock : public SyncManager::Observer {
  public:
   MOCK_METHOD1(OnSyncCycleCompleted,
                void(const SyncSessionSnapshot&));  // NOLINT
-  MOCK_METHOD3(OnInitializationComplete,
-               void(const WeakHandle<JsBackend>&, bool,
+  MOCK_METHOD4(OnInitializationComplete,
+               void(const WeakHandle<JsBackend>&,
+                    const WeakHandle<DataTypeDebugInfoListener>&,
+                    bool,
                     syncer::ModelTypeSet));  // NOLINT
   MOCK_METHOD1(OnConnectionStatusChange, void(ConnectionStatus));  // NOLINT
   MOCK_METHOD0(OnStopSyncingPermanently, void());  // NOLINT
@@ -739,7 +821,7 @@ class SyncManagerTest : public testing::Test,
     fake_invalidator_ = new FakeInvalidator();
 
     sync_manager_.AddObserver(&manager_observer_);
-    EXPECT_CALL(manager_observer_, OnInitializationComplete(_, _, _)).
+    EXPECT_CALL(manager_observer_, OnInitializationComplete(_, _, _, _)).
         WillOnce(SaveArg<0>(&js_backend_));
 
     EXPECT_FALSE(js_backend_.IsInitialized());
@@ -752,7 +834,6 @@ class SyncManagerTest : public testing::Test,
     sync_manager_.Init(temp_dir_.path(),
                        WeakHandle<JsEventHandler>(),
                        "bogus", 0, false,
-                       base::MessageLoopProxy::current(),
                        scoped_ptr<HttpPostProviderFactory>(
                            new TestHttpPostProviderFactory()),
                        workers, &extensions_activity_monitor_, this,
@@ -811,7 +892,6 @@ class SyncManagerTest : public testing::Test,
   bool SetUpEncryption(NigoriStatus nigori_status,
                        EncryptionStatus encryption_status) {
     UserShare* share = sync_manager_.GetUserShare();
-    share->directory->set_initial_sync_ended_for_type(NIGORI, true);
 
     // We need to create the nigori node as if it were an applied server update.
     int64 nigori_id = GetIdForDataType(NIGORI);
@@ -852,7 +932,7 @@ class SyncManagerTest : public testing::Test,
   }
 
   void PumpLoop() {
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
   }
 
   void SendJsMessage(const std::string& name, const JsArgList& args,
@@ -935,10 +1015,6 @@ class SyncManagerTest : public testing::Test,
     }
   }
 
-  void SetInitialSyncEndedForType(ModelType type, bool value) {
-    sync_manager_.directory()->set_initial_sync_ended_for_type(type, value);
-  }
-
   InternalComponentsFactory::Switches GetSwitches() const {
     return switches_;
   }
@@ -947,7 +1023,7 @@ class SyncManagerTest : public testing::Test,
   // Needed by |sync_manager_|.
   MessageLoop message_loop_;
   // Needed by |sync_manager_|.
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   // Sync Id's for the roots of the enabled datatypes.
   std::map<ModelType, int64> type_roots_;
   FakeExtensionsActivityMonitor extensions_activity_monitor_;
@@ -1276,32 +1352,71 @@ TEST_F(SyncManagerTest, GetAllNodesTest) {
   EXPECT_TRUE(first_result->HasKey("NON_UNIQUE_NAME"));
 }
 
-TEST_F(SyncManagerTest, OnNotificationStateChange) {
-  InSequence dummy;
+// Simulate various invalidator state changes.  Those should propagate
+// JS events.
+TEST_F(SyncManagerTest, OnInvalidatorStateChangeJsEvents) {
   StrictMock<MockJsEventHandler> event_handler;
 
   DictionaryValue enabled_details;
   enabled_details.SetString("state", "INVALIDATIONS_ENABLED");
-  DictionaryValue disabled_details;
-  disabled_details.SetString("state", "TRANSIENT_INVALIDATION_ERROR");
+  DictionaryValue credentials_rejected_details;
+  credentials_rejected_details.SetString(
+      "state", "INVALIDATION_CREDENTIALS_REJECTED");
+  DictionaryValue transient_error_details;
+  transient_error_details.SetString("state", "TRANSIENT_INVALIDATION_ERROR");
+  DictionaryValue auth_error_details;
+  auth_error_details.SetString("status", "CONNECTION_AUTH_ERROR");
+
+  EXPECT_CALL(manager_observer_,
+              OnConnectionStatusChange(CONNECTION_AUTH_ERROR)).Times(3);
+
+  EXPECT_CALL(
+      event_handler,
+      HandleJsEvent("onConnectionStatusChange",
+                    HasDetailsAsDictionary(auth_error_details)));
 
   EXPECT_CALL(event_handler,
               HandleJsEvent("onNotificationStateChange",
                             HasDetailsAsDictionary(enabled_details)));
+
+  EXPECT_CALL(
+      event_handler,
+      HandleJsEvent("onNotificationStateChange",
+                    HasDetailsAsDictionary(credentials_rejected_details)));
+
   EXPECT_CALL(event_handler,
               HandleJsEvent("onNotificationStateChange",
-                            HasDetailsAsDictionary(disabled_details)));
+                            HasDetailsAsDictionary(transient_error_details)));
 
   SimulateInvalidatorStateChangeForTest(INVALIDATIONS_ENABLED);
+  SimulateInvalidatorStateChangeForTest(INVALIDATION_CREDENTIALS_REJECTED);
   SimulateInvalidatorStateChangeForTest(TRANSIENT_INVALIDATION_ERROR);
 
   SetJsEventHandler(event_handler.AsWeakHandle());
   SimulateInvalidatorStateChangeForTest(INVALIDATIONS_ENABLED);
+  SimulateInvalidatorStateChangeForTest(INVALIDATION_CREDENTIALS_REJECTED);
   SimulateInvalidatorStateChangeForTest(TRANSIENT_INVALIDATION_ERROR);
   SetJsEventHandler(WeakHandle<JsEventHandler>());
 
   SimulateInvalidatorStateChangeForTest(INVALIDATIONS_ENABLED);
+  SimulateInvalidatorStateChangeForTest(INVALIDATION_CREDENTIALS_REJECTED);
   SimulateInvalidatorStateChangeForTest(TRANSIENT_INVALIDATION_ERROR);
+
+  // Should trigger the replies.
+  PumpLoop();
+}
+
+// Simulate the invalidator's credentials being rejected.  That should
+// also clear the sync token.
+TEST_F(SyncManagerTest, OnInvalidatorStateChangeCredentialsRejected) {
+  EXPECT_CALL(manager_observer_,
+              OnConnectionStatusChange(CONNECTION_AUTH_ERROR));
+
+  EXPECT_FALSE(sync_manager_.GetHasInvalidAuthTokenForTest());
+
+  SimulateInvalidatorStateChangeForTest(INVALIDATION_CREDENTIALS_REJECTED);
+
+  EXPECT_TRUE(sync_manager_.GetHasInvalidAuthTokenForTest());
 
   // Should trigger the replies.
   PumpLoop();
@@ -2046,7 +2161,7 @@ TEST_F(SyncManagerTest, EncryptBookmarksWithLegacyData) {
 // See BookmarkChangeProcessor::PlaceSyncNode(..).
 TEST_F(SyncManagerTest, CreateLocalBookmark) {
   std::string title = "title";
-  GURL url("url");
+  std::string url = "url";
   {
     WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode root_node(&trans);
@@ -2055,7 +2170,10 @@ TEST_F(SyncManagerTest, CreateLocalBookmark) {
     ASSERT_TRUE(node.InitByCreation(BOOKMARKS, root_node, NULL));
     node.SetIsFolder(false);
     node.SetTitle(UTF8ToWide(title));
-    node.SetURL(url);
+
+    sync_pb::BookmarkSpecifics bookmark_specifics(node.GetBookmarkSpecifics());
+    bookmark_specifics.set_url(url);
+    node.SetBookmarkSpecifics(bookmark_specifics);
   }
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -2067,7 +2185,7 @@ TEST_F(SyncManagerTest, CreateLocalBookmark) {
     ASSERT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(child_id));
     EXPECT_FALSE(node.GetIsFolder());
     EXPECT_EQ(title, node.GetTitle());
-    EXPECT_EQ(url, node.GetURL());
+    EXPECT_EQ(url, node.GetBookmarkSpecifics().url());
   }
 }
 
@@ -2592,7 +2710,7 @@ TEST_F(SyncManagerTest, SetPreviouslyEncryptedSpecifics) {
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, client_tag));
     EXPECT_EQ(title, node.GetTitle());
-    EXPECT_EQ(GURL(url), node.GetURL());
+    EXPECT_EQ(url, node.GetBookmarkSpecifics().url());
   }
 
   {
@@ -2601,7 +2719,10 @@ TEST_F(SyncManagerTest, SetPreviouslyEncryptedSpecifics) {
     WriteNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, client_tag));
-    node.SetURL(GURL(url2));
+
+    sync_pb::BookmarkSpecifics bookmark_specifics(node.GetBookmarkSpecifics());
+    bookmark_specifics.set_url(url2);
+    node.SetBookmarkSpecifics(bookmark_specifics);
   }
 
   {
@@ -2611,7 +2732,7 @@ TEST_F(SyncManagerTest, SetPreviouslyEncryptedSpecifics) {
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, client_tag));
     EXPECT_EQ(title, node.GetTitle());
-    EXPECT_EQ(GURL(url2), node.GetURL());
+    EXPECT_EQ(url2, node.GetBookmarkSpecifics().url());
     const syncable::Entry* node_entry = node.GetEntry();
     EXPECT_EQ(kEncryptedString, node_entry->Get(NON_UNIQUE_NAME));
     const sync_pb::EntitySpecifics& specifics = node_entry->Get(SPECIFICS);
@@ -2733,7 +2854,6 @@ TEST_F(SyncManagerTestWithMockScheduler, MAYBE_BasicConfiguration) {
   for (ModelTypeSet::Iterator iter = ModelTypeSet::All().First(); iter.Good();
        iter.Inc()) {
     SetProgressMarkerForType(iter.Get(), true);
-    SetInitialSyncEndedForType(iter.Get(), true);
   }
 
   CallbackCounter ready_task_counter, retry_task_counter;
@@ -2784,10 +2904,8 @@ TEST_F(SyncManagerTestWithMockScheduler, ReConfiguration) {
        iter.Inc()) {
     if (!disabled_types.Has(iter.Get())) {
       SetProgressMarkerForType(iter.Get(), true);
-      SetInitialSyncEndedForType(iter.Get(), true);
     } else {
       SetProgressMarkerForType(iter.Get(), false);
-      SetInitialSyncEndedForType(iter.Get(), false);
     }
   }
 
@@ -2811,8 +2929,6 @@ TEST_F(SyncManagerTestWithMockScheduler, ReConfiguration) {
   EXPECT_EQ(new_routing_info, params.routing_info);
 
   // Verify only the recently disabled types were purged.
-  EXPECT_TRUE(sync_manager_.InitialSyncEndedTypes().Equals(
-      Difference(ModelTypeSet::All(), disabled_types)));
   EXPECT_TRUE(sync_manager_.GetTypesWithEmptyProgressMarkerToken(
       ModelTypeSet::All()).Equals(disabled_types));
 }
@@ -2846,51 +2962,81 @@ TEST_F(SyncManagerTestWithMockScheduler, ConfigurationRetry) {
   EXPECT_EQ(new_routing_info, params.routing_info);
 }
 
-// Test that PurgePartiallySyncedTypes purges only those types that don't
-// have empty progress marker and don't have initial sync ended set.
+// Test that PurgePartiallySyncedTypes purges only those types that have not
+// fully completed their initial download and apply.
 TEST_F(SyncManagerTest, PurgePartiallySyncedTypes) {
+  ModelSafeRoutingInfo routing_info;
+  GetModelSafeRoutingInfo(&routing_info);
+  ModelTypeSet enabled_types = GetRoutingInfoTypes(routing_info);
+
   UserShare* share = sync_manager_.GetUserShare();
 
-  // Set Nigori and Bookmarks to be partial types.
-  sync_pb::DataTypeProgressMarker nigori_marker;
-  nigori_marker.set_data_type_id(
-      GetSpecificsFieldNumberFromModelType(NIGORI));
-  nigori_marker.set_token("token");
-  sync_pb::DataTypeProgressMarker bookmark_marker;
-  bookmark_marker.set_data_type_id(
-      GetSpecificsFieldNumberFromModelType(BOOKMARKS));
-  bookmark_marker.set_token("token");
-  share->directory->SetDownloadProgress(NIGORI, nigori_marker);
-  share->directory->SetDownloadProgress(BOOKMARKS, bookmark_marker);
+  // The test harness automatically initializes all types in the routing info.
+  // Check that autofill is not among them.
+  ASSERT_FALSE(enabled_types.Has(AUTOFILL));
 
-  // Set Preferences to be a full type.
-  sync_pb::DataTypeProgressMarker pref_marker;
-  pref_marker.set_data_type_id(
+  // Further ensure that the test harness did not create its root node.
+  {
+    syncable::ReadTransaction trans(FROM_HERE, share->directory.get());
+    syncable::Entry autofill_root_node(&trans, syncable::GET_BY_SERVER_TAG,
+                                       ModelTypeToRootTag(AUTOFILL));
+    ASSERT_FALSE(autofill_root_node.good());
+  }
+
+  // One more redundant check.
+  ASSERT_FALSE(sync_manager_.InitialSyncEndedTypes().Has(AUTOFILL));
+
+  // Give autofill a progress marker.
+  sync_pb::DataTypeProgressMarker autofill_marker;
+  autofill_marker.set_data_type_id(
+      GetSpecificsFieldNumberFromModelType(AUTOFILL));
+  autofill_marker.set_token("token");
+  share->directory->SetDownloadProgress(AUTOFILL, autofill_marker);
+
+  // Also add a pending autofill root node update from the server.
+  TestEntryFactory factory_(share->directory.get());
+  int autofill_meta = factory_.CreateUnappliedRootNode(AUTOFILL);
+
+  // Preferences is an enabled type.  Check that the harness initialized it.
+  ASSERT_TRUE(enabled_types.Has(PREFERENCES));
+  ASSERT_TRUE(sync_manager_.InitialSyncEndedTypes().Has(PREFERENCES));
+
+  // Give preferencse a progress marker.
+  sync_pb::DataTypeProgressMarker prefs_marker;
+  prefs_marker.set_data_type_id(
       GetSpecificsFieldNumberFromModelType(PREFERENCES));
-  pref_marker.set_token("token");
-  share->directory->SetDownloadProgress(PREFERENCES, pref_marker);
-  share->directory->set_initial_sync_ended_for_type(PREFERENCES, true);
+  prefs_marker.set_token("token");
+  share->directory->SetDownloadProgress(PREFERENCES, prefs_marker);
 
-  ModelTypeSet partial_types =
-      sync_manager_.GetTypesWithEmptyProgressMarkerToken(ModelTypeSet::All());
-  EXPECT_FALSE(partial_types.Has(NIGORI));
-  EXPECT_FALSE(partial_types.Has(BOOKMARKS));
-  EXPECT_FALSE(partial_types.Has(PREFERENCES));
+  // Add a fully synced preferences node under the root.
+  std::string pref_client_tag = "prefABC";
+  std::string pref_hashed_tag = "hashXYZ";
+  sync_pb::EntitySpecifics pref_specifics;
+  AddDefaultFieldValue(PREFERENCES, &pref_specifics);
+  int pref_meta = MakeServerNode(
+      share, PREFERENCES, pref_client_tag, pref_hashed_tag, pref_specifics);
 
+  // And now, the purge.
   EXPECT_TRUE(sync_manager_.PurgePartiallySyncedTypes());
 
-  // Ensure only bookmarks and nigori lost their progress marker. Preferences
-  // should still have it.
-  partial_types =
+  // Ensure that autofill lost its progress marker, but preferences did not.
+  ModelTypeSet empty_tokens =
       sync_manager_.GetTypesWithEmptyProgressMarkerToken(ModelTypeSet::All());
-  EXPECT_TRUE(partial_types.Has(NIGORI));
-  EXPECT_TRUE(partial_types.Has(BOOKMARKS));
-  EXPECT_FALSE(partial_types.Has(PREFERENCES));
+  EXPECT_TRUE(empty_tokens.Has(AUTOFILL));
+  EXPECT_FALSE(empty_tokens.Has(PREFERENCES));
+
+  // Ensure that autofill lots its node, but preferences did not.
+  {
+    syncable::ReadTransaction trans(FROM_HERE, share->directory.get());
+    syncable::Entry autofill_node(&trans, GET_BY_HANDLE, autofill_meta);
+    syncable::Entry pref_node(&trans, GET_BY_HANDLE, pref_meta);
+    EXPECT_FALSE(autofill_node.good());
+    EXPECT_TRUE(pref_node.good());
+  }
 }
 
-// Test CleanipDisabledTypes properly purges all disabled types as specified
-// by the previous and current enabled params. Enabled partial types should not
-// be purged.
+// Test CleanupDisabledTypes properly purges all disabled types as specified
+// by the previous and current enabled params.
 // Fails on Windows: crbug.com/139726
 #if defined(OS_WIN)
 #define MAYBE_PurgeDisabledTypes DISABLED_PurgeDisabledTypes
@@ -2902,21 +3048,20 @@ TEST_F(SyncManagerTest, MAYBE_PurgeDisabledTypes) {
   GetModelSafeRoutingInfo(&routing_info);
   ModelTypeSet enabled_types = GetRoutingInfoTypes(routing_info);
   ModelTypeSet disabled_types = Difference(ModelTypeSet::All(), enabled_types);
-  ModelTypeSet partial_enabled_types(PASSWORDS);
 
-  // Set data for all non-partial types.
+  // The harness should have initialized the enabled_types for us.
+  EXPECT_TRUE(enabled_types.Equals(sync_manager_.InitialSyncEndedTypes()));
+
+  // Set progress markers for all types.
   for (ModelTypeSet::Iterator iter = ModelTypeSet::All().First(); iter.Good();
        iter.Inc()) {
     SetProgressMarkerForType(iter.Get(), true);
-    if (!partial_enabled_types.Has(iter.Get()))
-      SetInitialSyncEndedForType(iter.Get(), true);
   }
 
   // Verify all the enabled types remain after cleanup, and all the disabled
   // types were purged.
   sync_manager_.PurgeDisabledTypes(ModelTypeSet::All(), enabled_types);
-  EXPECT_TRUE(enabled_types.Equals(
-      Union(sync_manager_.InitialSyncEndedTypes(), partial_enabled_types)));
+  EXPECT_TRUE(enabled_types.Equals(sync_manager_.InitialSyncEndedTypes()));
   EXPECT_TRUE(disabled_types.Equals(
       sync_manager_.GetTypesWithEmptyProgressMarkerToken(ModelTypeSet::All())));
 
@@ -2928,8 +3073,7 @@ TEST_F(SyncManagerTest, MAYBE_PurgeDisabledTypes) {
 
   // Verify only the non-disabled types remain after cleanup.
   sync_manager_.PurgeDisabledTypes(enabled_types, new_enabled_types);
-  EXPECT_TRUE(new_enabled_types.Equals(
-      Union(sync_manager_.InitialSyncEndedTypes(), partial_enabled_types)));
+  EXPECT_TRUE(new_enabled_types.Equals(sync_manager_.InitialSyncEndedTypes()));
   EXPECT_TRUE(disabled_types.Equals(
       sync_manager_.GetTypesWithEmptyProgressMarkerToken(ModelTypeSet::All())));
 }

@@ -41,11 +41,15 @@ namespace content {
 class ContextMenuClient;
 class RenderViewVisitor;
 struct ContextMenuParams;
+struct SSLStatus;
 
 class CONTENT_EXPORT RenderView : public IPC::Sender {
  public:
   // Returns the RenderView containing the given WebView.
   static RenderView* FromWebView(WebKit::WebView* webview);
+
+  // Returns the RenderView for the given routing ID.
+  static RenderView* FromRoutingID(int routing_id);
 
   // Visit all RenderViews with a live WebView (i.e., RenderViews that have
   // been closed but not yet destroyed are excluded).
@@ -67,6 +71,11 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
 
   // Gets WebKit related preferences associated with this view.
   virtual webkit_glue::WebPreferences& GetWebkitPreferences() = 0;
+
+  // Overrides the WebKit related preferences associated with this view. Note
+  // that the browser process may update the preferences at any time.
+  virtual void SetWebkitPreferences(
+      const webkit_glue::WebPreferences& preferences) = 0;
 
   // Returns the associated WebView. May return NULL when the view is closing.
   virtual WebKit::WebView* GetWebView() = 0;
@@ -145,6 +154,14 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   // Notifies the renderer that a paint is to be generated for the size
   // passed in.
   virtual void Repaint(const gfx::Size& size) = 0;
+
+  // Inject edit commands to be used for the next keyboard event.
+  virtual void SetEditCommandForNextKeyEvent(const std::string& name,
+                                             const std::string& value) = 0;
+  virtual void ClearEditCommands() = 0;
+
+  // Returns a collection of security info about |frame|.
+  virtual SSLStatus GetSSLStatusOfFrame(WebKit::WebFrame* frame) const = 0;
 
  protected:
   virtual ~RenderView() {}

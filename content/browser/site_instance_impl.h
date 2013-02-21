@@ -42,7 +42,7 @@ class CONTENT_EXPORT SiteInstanceImpl : public SiteInstance,
   // Returns whether this SiteInstance has a process that is the wrong type for
   // the given URL.  If so, the browser should force a process swap when
   // navigating to the URL.
-  bool HasWrongProcessForURL(const GURL& url) const;
+  bool HasWrongProcessForURL(const GURL& url);
 
   // Sets the factory used to create new RenderProcessHosts. This will also be
   // passed on to SiteInstances spawned by this one.
@@ -52,10 +52,6 @@ class CONTENT_EXPORT SiteInstanceImpl : public SiteInstance,
   void set_render_process_host_factory(RenderProcessHostFactory* rph_factory) {
     render_process_host_factory_ = rph_factory;
   }
-
-  // Returns the site for the given URL, which includes only the scheme and
-  // registered domain.  Returns an empty GURL if the URL has no host.
-  static GURL GetSiteForURL(BrowserContext* context, const GURL& url);
 
  protected:
   friend class BrowsingInstance;

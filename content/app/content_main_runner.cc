@@ -76,7 +76,7 @@
 #if defined(OS_POSIX)
 #include <signal.h>
 
-#include "base/global_descriptors_posix.h"
+#include "base/posix/global_descriptors.h"
 #include "content/public/common/content_descriptors.h"
 
 #if !defined(OS_MACOSX)
@@ -421,10 +421,12 @@ int RunNamedProcessTypeMain(
   static const MainFunction kMainFunctions[] = {
     { "",                            BrowserMain },
     { switches::kRendererProcess,    RendererMain },
+#if defined(ENABLE_PLUGINS)
     { switches::kPluginProcess,      PluginMain },
     { switches::kWorkerProcess,      WorkerMain },
     { switches::kPpapiPluginProcess, PpapiPluginMain },
     { switches::kPpapiBrokerProcess, PpapiBrokerMain },
+#endif
     { switches::kUtilityProcess,     UtilityMain },
     { switches::kGpuProcess,         GpuMain },
   };
@@ -483,8 +485,19 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   }
 
 #if defined(USE_TCMALLOC)
-static bool GetPropertyThunk(const char* name, size_t* value) {
-  return MallocExtension::instance()->GetNumericProperty(name, value);
+static bool GetAllocatorWasteSizeThunk(size_t* size) {
+  size_t heap_size, allocated_bytes, unmapped_bytes;
+  MallocExtension* ext = MallocExtension::instance();
+  if (ext->GetNumericProperty("generic.heap_size", &heap_size) &&
+      ext->GetNumericProperty("generic.current_allocated_bytes",
+                              &allocated_bytes) &&
+      ext->GetNumericProperty("tcmalloc.pageheap_unmapped_bytes",
+                              &unmapped_bytes)) {
+    *size = heap_size - allocated_bytes - unmapped_bytes;
+    return true;
+  }
+  DCHECK(false);
+  return false;
 }
 
 static void GetStatsThunk(char* buffer, int buffer_length) {
@@ -532,7 +545,8 @@ static void ReleaseFreeMemoryThunk() {
     tc_set_new_mode(1);
 
     // On windows, we've already set these thunks up in _heap_init()
-    base::allocator::SetGetPropertyFunction(GetPropertyThunk);
+    base::allocator::SetGetAllocatorWasteSizeFunction(
+        GetAllocatorWasteSizeThunk);
     base::allocator::SetGetStatsFunction(GetStatsThunk);
     base::allocator::SetReleaseFreeMemoryFunction(ReleaseFreeMemoryThunk);
 

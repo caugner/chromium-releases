@@ -161,7 +161,7 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
     textfield_ = new TestTextfield(style);
     textfield_->SetController(this);
     widget_ = new Widget;
-    Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+    Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
     params.bounds = gfx::Rect(100, 100, 100, 100);
     widget_->Init(params);
     View* container = new View();
@@ -207,7 +207,7 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
     int flags = (shift ? ui::EF_SHIFT_DOWN : 0) |
         (control ? ui::EF_CONTROL_DOWN : 0) |
         (caps_lock ? ui::EF_CAPS_LOCK_DOWN : 0);
-    ui::KeyEvent event(ui::ET_KEY_PRESSED, key_code, flags);
+    ui::KeyEvent event(ui::ET_KEY_PRESSED, key_code, flags, false);
     input_method_->DispatchKeyEvent(event);
   }
 
@@ -226,7 +226,7 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
           static_cast<ui::KeyboardCode>(ui::VKEY_A + ch - 'a');
       SendKeyEvent(code);
     } else {
-      ui::KeyEvent event(ui::ET_KEY_PRESSED, ui::VKEY_UNKNOWN, 0);
+      ui::KeyEvent event(ui::ET_KEY_PRESSED, ui::VKEY_UNKNOWN, 0, false);
       event.set_character(ch);
       input_method_->DispatchKeyEvent(event);
     }
@@ -873,11 +873,7 @@ TEST_F(NativeTextfieldViewsTest, DragAndDrop_AcceptDrop) {
   ui::OSExchangeData bad_data;
   bad_data.SetFilename(FilePath(FILE_PATH_LITERAL("x")));
 #if defined(OS_WIN)
-#if defined(USE_AURA)
-  ui::OSExchangeData::CustomFormat fmt = ui::Clipboard::GetBitmapFormatType();
-#else
   ui::OSExchangeData::CustomFormat fmt = CF_BITMAP;
-#endif
   bad_data.SetPickledData(fmt, Pickle());
   bad_data.SetFileContents(FilePath(L"x"), "x");
   bad_data.SetHtml(string16(ASCIIToUTF16("x")), GURL("x.org"));

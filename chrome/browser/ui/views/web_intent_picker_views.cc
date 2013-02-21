@@ -13,18 +13,16 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/constrained_window_constants.h"
+#include "chrome/browser/ui/chrome_style.h"
 #include "chrome/browser/ui/intents/web_intent_inline_disposition_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model_observer.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -104,11 +102,11 @@ void EnableChildViews(views::View* view, bool enabled) {
 views::ImageButton* CreateCloseButton(views::ButtonListener* listener) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   views::ImageButton* close_button = new views::ImageButton(listener);
-  close_button->SetImage(views::CustomButton::BS_NORMAL,
+  close_button->SetImage(views::CustomButton::STATE_NORMAL,
                          rb.GetImageSkiaNamed(IDR_WEB_UI_CLOSE));
-  close_button->SetImage(views::CustomButton::BS_HOT,
+  close_button->SetImage(views::CustomButton::STATE_HOVERED,
                          rb.GetImageSkiaNamed(IDR_WEB_UI_CLOSE_HOVER));
-  close_button->SetImage(views::CustomButton::BS_PUSHED,
+  close_button->SetImage(views::CustomButton::STATE_PRESSED,
                          rb.GetImageSkiaNamed(IDR_WEB_UI_CLOSE_PRESSED));
   return close_button;
 }
@@ -117,7 +115,7 @@ views::ImageButton* CreateCloseButton(views::ButtonListener* listener) {
 views::Label* CreateLabel() {
   views::Label* label = new views::Label();
   label->SetEnabledColor(kEnabledLabelColor);
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   return label;
 }
 
@@ -129,7 +127,7 @@ views::Label* CreateTitleLabel() {
   const int kLabelBuiltinTopPadding = 5;
   label->set_border(views::Border::CreateEmptyBorder(
       WebIntentPicker::kContentAreaBorder -
-          ConstrainedWindowConstants::kCloseButtonPadding -
+          chrome_style::kCloseButtonPadding -
           kLabelBuiltinTopPadding,
       0, 0, 0));
   return label;
@@ -140,7 +138,7 @@ views::Link* CreateLink() {
   views::Link* link = new views::Link();
   link->SetEnabledColor(kEnabledLinkColor);
   link->SetDisabledColor(kDisabledLinkColor);
-  link->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  link->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   return link;
 }
 
@@ -154,7 +152,7 @@ views::View* CreateInlineDispositionHeader(
   const int kIconBuiltinTopPadding = 6;
   grid_layout->SetInsets(
       WebIntentPicker::kContentAreaBorder -
-          ConstrainedWindowConstants::kCloseButtonPadding -
+          chrome_style::kCloseButtonPadding -
           kIconBuiltinTopPadding,
       0, 0, 0);
   header->SetLayoutManager(grid_layout);
@@ -460,7 +458,7 @@ WaitingView::WaitingView(views::ButtonListener* listener,
   views::GridLayout* layout = new views::GridLayout(this);
   layout->set_minimum_size(gfx::Size(WebIntentPicker::kWindowMinWidth, 0));
   const int kMessageBuiltinBottomPadding = 3;
-  layout->SetInsets(ConstrainedWindowConstants::kCloseButtonPadding,
+  layout->SetInsets(chrome_style::kCloseButtonPadding,
                     0,
                     kWaitingViewVerticalPadding - kMessageBuiltinBottomPadding,
                     0);
@@ -475,7 +473,7 @@ WaitingView::WaitingView(views::ButtonListener* listener,
   header_cs->AddColumn(GridLayout::TRAILING, GridLayout::LEADING, 0,
                        GridLayout::USE_PREF, 0, 0);
   header_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kCloseButtonPadding);
+      0, chrome_style::kCloseButtonPadding);
 
   views::ColumnSet* content_cs = layout->AddColumnSet(CONTENT_ROW);
   content_cs->AddPaddingColumn(0, views::kPanelHorizIndentation);
@@ -492,7 +490,7 @@ WaitingView::WaitingView(views::ButtonListener* listener,
   // Throbber
   layout->AddPaddingRow(0,
                         kWaitingViewVerticalPadding -
-                            ConstrainedWindowConstants::kCloseButtonPadding -
+                            chrome_style::kCloseButtonPadding -
                             close_button->GetPreferredSize().height());
   layout->StartRow(0, CONTENT_ROW);
   SpinnerProgressIndicator* throbber = new SpinnerProgressIndicator();
@@ -501,11 +499,11 @@ WaitingView::WaitingView(views::ButtonListener* listener,
   // Message
   const int kMessageBuiltinTopPadding = 5;
   layout->AddPaddingRow(0,
-                        ConstrainedWindowConstants::kRowPadding -
+                        chrome_style::kRowPadding -
                             kMessageBuiltinTopPadding);
   layout->StartRow(0, CONTENT_ROW);
   views::Label* label = CreateLabel();
-  label->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
+  label->SetHorizontalAlignment(gfx::ALIGN_CENTER);
   label->SetText(l10n_util::GetStringUTF16(IDS_INTENT_PICKER_WAIT_FOR_CWS));
   layout->AddView(label);
 
@@ -901,7 +899,7 @@ class WebIntentPickerViews : public views::ButtonListener,
                              public WebIntentPickerModelObserver,
                              public IntentRowView::Delegate {
  public:
-  WebIntentPickerViews(TabContents* tab_contents,
+  WebIntentPickerViews(WebContents* web_contents,
                        WebIntentPickerDelegate* delegate,
                        WebIntentPickerModel* model);
   virtual ~WebIntentPickerViews();
@@ -1014,8 +1012,8 @@ class WebIntentPickerViews : public views::ButtonListener,
   // Delegate for inline disposition tab contents.
   scoped_ptr<WebIntentInlineDispositionDelegate> inline_disposition_delegate_;
 
-  // A weak pointer to the TabContents this picker is in.
-  TabContents* tab_contents_;
+  // A weak pointer to the WebContents this picker is in.
+  WebContents* web_contents_;
 
   // A weak pointer to the WebView that hosts the WebContents being displayed.
   // Created locally, owned by Views.
@@ -1064,11 +1062,10 @@ class WebIntentPickerViews : public views::ButtonListener,
 WebIntentPicker* WebIntentPicker::Create(content::WebContents* web_contents,
                                          WebIntentPickerDelegate* delegate,
                                          WebIntentPickerModel* model) {
-  TabContents* tab_contents = TabContents::FromWebContents(web_contents);
-  return new WebIntentPickerViews(tab_contents, delegate, model);
+  return new WebIntentPickerViews(web_contents, delegate, model);
 }
 
-WebIntentPickerViews::WebIntentPickerViews(TabContents* tab_contents,
+WebIntentPickerViews::WebIntentPickerViews(WebContents* web_contents,
                                            WebIntentPickerDelegate* delegate,
                                            WebIntentPickerModel* model)
     : state_(INITIAL),
@@ -1076,26 +1073,24 @@ WebIntentPickerViews::WebIntentPickerViews(TabContents* tab_contents,
       model_(model),
       action_label_(NULL),
       extensions_(NULL),
-      tab_contents_(tab_contents),
-      webview_(new views::WebView(tab_contents->profile())),
+      web_contents_(web_contents),
+      webview_(new views::WebView(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()))),
       window_(NULL),
       more_suggestions_link_(NULL),
       inline_service_icon_(NULL),
       choose_another_service_link_(NULL),
       waiting_view_(NULL),
       can_close_(true) {
-  bool enable_chrome_style = chrome::IsFramelessConstrainedDialogEnabled();
-  use_close_button_ = enable_chrome_style;
+  use_close_button_ = false;
 
   model_->set_observer(this);
   contents_ = new views::View();
   contents_->set_background(views::Background::CreateSolidBackground(
-      ConstrainedWindow::GetBackgroundColor()));
+      chrome_style::GetBackgroundColor()));
 
   // Show the dialog.
-  window_ = new ConstrainedWindowViews(tab_contents->web_contents(), this,
-                                       enable_chrome_style,
-                                       ConstrainedWindowViews::NO_INSETS);
+  window_ = new ConstrainedWindowViews(web_contents, this);
   if (model_->IsInlineDisposition())
     OnInlineDisposition(string16(), model_->inline_disposition_url());
   else
@@ -1199,9 +1194,9 @@ void WebIntentPickerViews::ShowNoServicesMessage() {
   views::GridLayout* layout = new views::GridLayout(contents_);
   layout->set_minimum_size(gfx::Size(WebIntentPicker::kWindowMinWidth, 0));
   const int kContentBuiltinBottomPadding = 3;
-  layout->SetInsets(ConstrainedWindowConstants::kCloseButtonPadding,
+  layout->SetInsets(chrome_style::kCloseButtonPadding,
                     0,
-                    ConstrainedWindowConstants::kClientBottomPadding -
+                    chrome_style::kClientBottomPadding -
                         kContentBuiltinBottomPadding,
                     0);
   contents_->SetLayoutManager(layout);
@@ -1212,21 +1207,21 @@ void WebIntentPickerViews::ShowNoServicesMessage() {
   };
   views::ColumnSet* header_cs = layout->AddColumnSet(HEADER_ROW);
   header_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kHorizontalPadding);
+      0, chrome_style::kHorizontalPadding);
   header_cs->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
                        GridLayout::USE_PREF, 0, 0); // Title
   header_cs->AddColumn(GridLayout::TRAILING, GridLayout::LEADING, 0,
                        GridLayout::USE_PREF, 0, 0); // Close button
   header_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kCloseButtonPadding);
+      0, chrome_style::kCloseButtonPadding);
 
   views::ColumnSet* content_cs = layout->AddColumnSet(CONTENT_ROW);
   content_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kHorizontalPadding);
+      0, chrome_style::kHorizontalPadding);
   content_cs->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0); // Body
   content_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kHorizontalPadding);
+      0, chrome_style::kHorizontalPadding);
 
   // Header
   layout->StartRow(0, HEADER_ROW);
@@ -1243,7 +1238,7 @@ void WebIntentPickerViews::ShowNoServicesMessage() {
   const int kHeaderBuiltinBottomPadding = 4;
   const int kContentBuiltinTopPadding = 5;
   layout->AddPaddingRow(0,
-                        ConstrainedWindowConstants::kRowPadding -
+                        chrome_style::kRowPadding -
                             kHeaderBuiltinBottomPadding -
                             kContentBuiltinTopPadding);
   layout->StartRow(0, CONTENT_ROW);
@@ -1267,8 +1262,8 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
   ClearContents();
   views::GridLayout* grid_layout = new views::GridLayout(contents_);
   grid_layout->set_minimum_size(gfx::Size(WebIntentPicker::kWindowMinWidth, 0));
-  grid_layout->SetInsets(ConstrainedWindowConstants::kCloseButtonPadding, 0,
-                         ConstrainedWindowConstants::kClientBottomPadding, 0);
+  grid_layout->SetInsets(chrome_style::kCloseButtonPadding, 0,
+                         chrome_style::kClientBottomPadding, 0);
   contents_->SetLayoutManager(grid_layout);
 
   enum GridLayoutColumnSets {
@@ -1278,14 +1273,14 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
   };
   views::ColumnSet* header_cs = grid_layout->AddColumnSet(HEADER_ROW);
   header_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kHorizontalPadding);
+      0, chrome_style::kHorizontalPadding);
   header_cs->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                        GridLayout::USE_PREF, 0, 0); // Icon, title, link.
   header_cs->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   header_cs->AddColumn(GridLayout::TRAILING, GridLayout::LEADING, 0,
                        GridLayout::USE_PREF, 0, 0); // Close button.
   header_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kCloseButtonPadding);
+      0, chrome_style::kCloseButtonPadding);
 
   views::ColumnSet* sep_cs = grid_layout->AddColumnSet(SEPARATOR_ROW);
   sep_cs->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
@@ -1328,7 +1323,7 @@ void WebIntentPickerViews::OnInlineDispositionWebContentsLoaded(
   // Separator.
   const int kHeaderBuiltinBottomPadding = 4;
   grid_layout->AddPaddingRow(0,
-                             ConstrainedWindowConstants::kRowPadding -
+                             chrome_style::kRowPadding -
                                  kHeaderBuiltinBottomPadding);
   grid_layout->StartRow(0, SEPARATOR_ROW);
   grid_layout->AddView(new views::Separator());
@@ -1375,17 +1370,18 @@ void WebIntentPickerViews::OnExtensionIconChanged(
 void WebIntentPickerViews::OnInlineDisposition(
     const string16&, const GURL& url) {
   DCHECK(delegate_);
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
   if (!webview_)
-    webview_ = new views::WebView(tab_contents_->profile());
+    webview_ = new views::WebView(profile);
 
-  inline_web_contents_.reset(delegate_->CreateWebContentsForInlineDisposition(
-      tab_contents_->profile(), url));
+  inline_web_contents_.reset(
+      delegate_->CreateWebContentsForInlineDisposition(profile, url));
 
   // Does not take ownership, so we keep a scoped_ptr
   // for the WebContents locally.
   webview_->SetWebContents(inline_web_contents_.get());
-  Browser* browser = browser::FindBrowserWithWebContents(
-      tab_contents_->web_contents());
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
   inline_disposition_delegate_.reset(
       new WebIntentInlineDispositionDelegate(this, inline_web_contents_.get(),
                                              browser));
@@ -1475,9 +1471,9 @@ void WebIntentPickerViews::ShowAvailableServices() {
   views::GridLayout* grid_layout = new views::GridLayout(contents_);
   grid_layout->set_minimum_size(min_size);
   const int kIconBuiltinBottomPadding = 4;
-  grid_layout->SetInsets(ConstrainedWindowConstants::kCloseButtonPadding,
+  grid_layout->SetInsets(chrome_style::kCloseButtonPadding,
                          0,
-                         ConstrainedWindowConstants::kClientBottomPadding -
+                         chrome_style::kClientBottomPadding -
                              kIconBuiltinBottomPadding,
                          0);
   contents_->SetLayoutManager(grid_layout);
@@ -1488,21 +1484,21 @@ void WebIntentPickerViews::ShowAvailableServices() {
   };
   views::ColumnSet* header_cs = grid_layout->AddColumnSet(HEADER_ROW);
   header_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kHorizontalPadding);
+      0, chrome_style::kHorizontalPadding);
   header_cs->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
                        GridLayout::USE_PREF, 0, 0); // Action title
   header_cs->AddColumn(GridLayout::TRAILING, GridLayout::LEADING, 0,
                        GridLayout::USE_PREF, 0, 0); // Close button
   header_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kCloseButtonPadding);
+      0, chrome_style::kCloseButtonPadding);
 
   views::ColumnSet* content_cs = grid_layout->AddColumnSet(CONTENT_ROW);
   content_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kHorizontalPadding);
+      0, chrome_style::kHorizontalPadding);
   content_cs->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0); // Content.
   content_cs->AddPaddingColumn(
-      0, ConstrainedWindowConstants::kHorizontalPadding);
+      0, chrome_style::kHorizontalPadding);
 
   // Header.
   grid_layout->StartRow(0, HEADER_ROW);
@@ -1518,7 +1514,7 @@ void WebIntentPickerViews::ShowAvailableServices() {
   // Extensions.
   const int kHeaderBuiltinBottomPadding = 4;
   grid_layout->AddPaddingRow(0,
-                             ConstrainedWindowConstants::kRowPadding -
+                             chrome_style::kRowPadding -
                                  kHeaderBuiltinBottomPadding);
   grid_layout->StartRow(0, CONTENT_ROW);
   grid_layout->AddView(extensions_);
@@ -1527,7 +1523,7 @@ void WebIntentPickerViews::ShowAvailableServices() {
   // Row with "more suggestions" link.
   const int kIconBuiltinTopPadding = 6;
   grid_layout->AddPaddingRow(0,
-                             ConstrainedWindowConstants::kRowPadding -
+                             chrome_style::kRowPadding -
                                  kIconBuiltinTopPadding);
   grid_layout->StartRow(0, CONTENT_ROW);
   views::View* more_view = new views::View();

@@ -5,14 +5,15 @@
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_BACKEND_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_BACKEND_H_
 
+#include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "base/containers/mru_cache.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/mru_cache.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -29,17 +30,15 @@ class BookmarkService;
 class TestingProfile;
 struct ThumbnailScore;
 
-namespace content {
-struct DownloadPersistentStoreInfo;
-}
-
 namespace history {
 #if defined(OS_ANDROID)
 class AndroidProviderBackend;
 #endif
+
 class CommitLaterTask;
 class HistoryPublisher;
 class VisitFilter;
+struct DownloadRow;
 
 // The maximum number of icons URLs per page which can be stored in the
 // thumbnail database.
@@ -258,34 +257,44 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Favicon -------------------------------------------------------------------
 
-  void GetFavicons(scoped_refptr<GetFaviconRequest> request,
-                   const std::vector<GURL>& icon_urls,
-                   int icon_types,
-                   int desired_size_in_dip,
-                   const std::vector<ui::ScaleFactor>& desired_scale_factors);
+  struct FaviconResults {
+    FaviconResults();
+    ~FaviconResults();
+    void Clear();
+
+    std::vector<history::FaviconBitmapResult> bitmap_results;
+    IconURLSizesMap size_map;
+  };
+
+  void GetFavicons(const std::vector<GURL>& icon_urls,
+                    int icon_types,
+                    int desired_size_in_dip,
+                    const std::vector<ui::ScaleFactor>& desired_scale_factors,
+                    FaviconResults* results);
 
   void GetFaviconsForURL(
-      scoped_refptr<GetFaviconRequest> request,
       const GURL& page_url,
       int icon_types,
       int desired_size_in_dip,
-      const std::vector<ui::ScaleFactor>& desired_scale_factors);
+      const std::vector<ui::ScaleFactor>& desired_scale_factors,
+      FaviconResults* results);
 
   void GetFaviconForID(
-      scoped_refptr<GetFaviconRequest> request,
       FaviconID favicon_id,
       int desired_size_in_dip,
-      ui::ScaleFactor desired_scale_factor);
+      ui::ScaleFactor desired_scale_factor,
+      FaviconResults* results);
 
   void UpdateFaviconMappingsAndFetch(
-      scoped_refptr<GetFaviconRequest> request,
       const GURL& page_url,
       const std::vector<GURL>& icon_urls,
       int icon_types,
       int desired_size_in_dip,
-      const std::vector<ui::ScaleFactor>& desired_scale_factors);
+      const std::vector<ui::ScaleFactor>& desired_scale_factors,
+      FaviconResults* results);
 
   void MergeFavicon(const GURL& page_url,
+                    const GURL& icon_url,
                     IconType icon_type,
                     scoped_refptr<base::RefCountedMemory> bitmap_data,
                     const gfx::Size& pixel_size);
@@ -305,18 +314,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Downloads -----------------------------------------------------------------
 
-  void GetNextDownloadId(scoped_refptr<DownloadNextIdRequest> request);
-  void QueryDownloads(scoped_refptr<DownloadQueryRequest> request);
+  void GetNextDownloadId(int* id);
+  void QueryDownloads(std::vector<DownloadRow>* rows);
   void CleanUpInProgressEntries();
-  void UpdateDownload(const content::DownloadPersistentStoreInfo& data);
-  void UpdateDownloadPath(const FilePath& path, int64 db_handle);
-  void CreateDownload(scoped_refptr<DownloadCreateRequest> request,
-                      int32 id,
-                      const content::DownloadPersistentStoreInfo& info);
-  void RemoveDownload(int64 db_handle);
-  void RemoveDownloadsBetween(const base::Time remove_begin,
-                              const base::Time remove_end);
-  void RemoveDownloads(const base::Time remove_end);
+  void UpdateDownload(const DownloadRow& data);
+  void CreateDownload(const history::DownloadRow& history_info,
+                      int64* db_handle);
+  void RemoveDownloads(const std::set<int64>& db_handles);
 
   // Segment usage -------------------------------------------------------------
 
@@ -435,10 +439,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Calls ExpireHistoryBackend::ExpireHistoryBetween and commits the change.
   void ExpireHistoryBetween(
-      scoped_refptr<CancelableRequest<base::Closure> > request,
       const std::set<GURL>& restrict_urls,
       base::Time begin_time,
       base::Time end_time);
+
+  // Calls ExpireHistoryBackend::ExpireHistoryForTimes and commits the change.
+  void ExpireHistoryForTimes(const std::vector<base::Time>& times);
 
   // Bookmarks -----------------------------------------------------------------
 
@@ -479,6 +485,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // code to avoid syncing visits that would immediately be expired).
   virtual bool IsExpiredVisitTime(const base::Time& time);
 
+  base::Time GetFirstRecordedTimeForTest() {
+    return first_recorded_time_;
+  }
+
  protected:
   virtual ~HistoryBackend();
 
@@ -486,7 +496,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class base::RefCountedThreadSafe<HistoryBackend>;
   friend class CommitLaterTask;  // The commit task needs to call Commit().
   friend class HistoryBackendTest;
-  friend class HistoryTest;  // So the unit tests can poke our innards.
+  friend class HistoryBackendDBTest;  // So the unit tests can poke our innards.
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAllThenAddData);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ImportedFaviconsTest);
@@ -516,6 +526,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconPageURLInDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconMaxFaviconsPerPage);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           MergeFaviconIconURLMappedToDifferentPageURL);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            MergeFaviconMaxFaviconBitmapsPerIconURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            UpdateFaviconMappingsAndFetchMultipleIconTypes);
@@ -527,7 +539,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBSingleIconURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBIconType);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBExpired);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsNoDB);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           UpdateFaviconMappingsAndFetchNoDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            CloneFaviconIsRestrictedToSameDomain);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, QueryFilteredURLs);
@@ -652,12 +665,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // If multiple icon types are specified, |page_url| will be mapped to the
   // icon URLs of the largest type available in the database.
   void UpdateFaviconMappingsAndFetchImpl(
-      scoped_refptr<GetFaviconRequest> request,
       const GURL* page_url,
       const std::vector<GURL>& icon_urls,
       int icon_types,
       int desired_size_in_dip,
-      const std::vector<ui::ScaleFactor>& desired_scale_factors);
+      const std::vector<ui::ScaleFactor>& desired_scale_factors,
+      FaviconResults* results);
 
   // Set the favicon bitmaps for |icon_id|.
   // For each entry in |favicon_bitmap_data|, if a favicon bitmap already
@@ -689,6 +702,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // sizes are not contained in |favicon_sizes|.
   void SetFaviconSizes(FaviconID icon_id,
                        const FaviconSizes& favicon_sizes);
+
+  // Returns true if the bitmap data at |bitmap_id| equals |new_bitmap_data|.
+  bool IsFaviconBitmapDataEqual(
+      FaviconBitmapID bitmap_id,
+      const scoped_refptr<base::RefCountedMemory>& new_bitmap_data);
 
   // Returns true if there are favicons for |page_url| and one of the types in
   // |icon_types|.

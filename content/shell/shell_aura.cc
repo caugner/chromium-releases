@@ -6,11 +6,9 @@
 
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
-#include "ui/aura/desktop/desktop_screen.h"
-#include "ui/aura/display_manager.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/single_display_manager.h"
 #include "ui/aura/window.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -25,14 +23,16 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/test/desktop_test_views_delegate.h"
+#include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/shell/shell_stacking_client_ash.h"
+#include "ui/aura/test/test_screen.h"
 #else
-#include "ui/aura/desktop/desktop_stacking_client.h"
+#include "ui/views/widget/desktop_aura/desktop_stacking_client.h"
 #endif
 
 // ViewDelegate implementation for aura content shell
@@ -96,14 +96,14 @@ class ShellWindowDelegateView : public WidgetDelegateView,
   void SetWindowTitle(const string16& title) { title_ = title; }
   void EnableUIControl(UIControl control, bool is_enabled) {
     if (control == BACK_BUTTON) {
-      back_button_->SetState(is_enabled ? CustomButton::BS_NORMAL
-          : CustomButton::BS_DISABLED);
+      back_button_->SetState(is_enabled ? CustomButton::STATE_NORMAL
+          : CustomButton::STATE_DISABLED);
     } else if (control == FORWARD_BUTTON) {
-      forward_button_->SetState(is_enabled ? CustomButton::BS_NORMAL
-          : CustomButton::BS_DISABLED);
+      forward_button_->SetState(is_enabled ? CustomButton::STATE_NORMAL
+          : CustomButton::STATE_DISABLED);
     } else if (control == STOP_BUTTON) {
-      stop_button_->SetState(is_enabled ? CustomButton::BS_NORMAL
-          : CustomButton::BS_DISABLED);
+      stop_button_->SetState(is_enabled ? CustomButton::STATE_NORMAL
+          : CustomButton::STATE_DISABLED);
     }
   }
 
@@ -192,7 +192,7 @@ class ShellWindowDelegateView : public WidgetDelegateView,
 
     layout->AddPaddingRow(0, 5);
   }
-  // Overriden from TextfieldController
+  // Overridden from TextfieldController
   virtual void ContentsChanged(Textfield* sender,
                                const string16& new_contents) OVERRIDE {
   }
@@ -211,7 +211,7 @@ class ShellWindowDelegateView : public WidgetDelegateView,
    return false;
   }
 
-  // Overriden from ButtonListener
+  // Overridden from ButtonListener
   virtual void ButtonPressed(Button* sender, const ui::Event& event) OVERRIDE {
     if (sender == back_button_)
       shell_->GoBackOrForward(-1);
@@ -223,7 +223,7 @@ class ShellWindowDelegateView : public WidgetDelegateView,
       shell_->Stop();
   }
 
-  // Overriden from WidgetDelegateView
+  // Overridden from WidgetDelegateView
   virtual bool CanResize() const OVERRIDE { return true; }
   virtual bool CanMaximize() const OVERRIDE { return true; }
   virtual string16 GetWindowTitle() const OVERRIDE {
@@ -237,7 +237,7 @@ class ShellWindowDelegateView : public WidgetDelegateView,
   }
   virtual View* GetContentsView() OVERRIDE { return this; }
 
-  // Overriden from View
+  // Overridden from View
   virtual void ViewHierarchyChanged(bool is_add,
                                     View* parent,
                                     View* child) OVERRIDE {
@@ -282,14 +282,16 @@ void Shell::PlatformInitialize() {
 #if defined(OS_CHROMEOS)
   chromeos::DBusThreadManager::Initialize();
 #endif
-  aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
 #if defined(OS_CHROMEOS)
   stacking_client_ = new content::ShellStackingClientAsh();
-#else
-  stacking_client_ = new aura::DesktopStackingClient();
-#endif
   gfx::Screen::SetScreenInstance(
-      gfx::SCREEN_TYPE_NATIVE, aura::CreateDesktopScreen());
+      gfx::SCREEN_TYPE_NATIVE, new aura::TestScreen);
+#else
+  stacking_client_ = new views::DesktopStackingClient();
+  gfx::Screen::SetScreenInstance(
+      gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
+#endif
+  aura::client::SetStackingClient(stacking_client_);
   views_delegate_ = new ShellViewsDelegateAura();
 }
 

@@ -32,7 +32,6 @@ var remoting = remoting || {};
  *     authentication methods the client should attempt to use.
  * @param {string} authenticationTag A host-specific tag to mix into
  *     authentication hashes.
- * @param {string} email The username for the talk network.
  * @param {remoting.ClientSession.Mode} mode The mode of this connection.
  * @param {function(remoting.ClientSession.State,
                     remoting.ClientSession.State):void} onStateChange
@@ -41,7 +40,7 @@ var remoting = remoting || {};
  */
 remoting.ClientSession = function(hostJid, hostPublicKey, sharedSecret,
                                   authenticationMethods, authenticationTag,
-                                  email, mode, onStateChange) {
+                                  mode, onStateChange) {
   this.state = remoting.ClientSession.State.CREATED;
 
   this.hostJid = hostJid;
@@ -49,7 +48,6 @@ remoting.ClientSession = function(hostJid, hostPublicKey, sharedSecret,
   this.sharedSecret = sharedSecret;
   this.authenticationMethods = authenticationMethods;
   this.authenticationTag = authenticationTag;
-  this.email = email;
   this.mode = mode;
   this.clientJid = '';
   this.sessionId = '';
@@ -109,6 +107,7 @@ remoting.ClientSession = function(hostJid, hostPublicKey, sharedSecret,
 // no corresponding plugin state transition.
 /** @enum {number} */
 remoting.ClientSession.State = {
+  CONNECTION_DROPPED: -4,  // Succeeded, but subsequently closed with an error.
   CREATED: -3,
   BAD_PLUGIN_VERSION: -2,
   UNKNOWN_PLUGIN_ERROR: -1,
@@ -242,17 +241,15 @@ remoting.ClientSession.prototype.pluginLostFocus_ = function() {
  * Adds <embed> element to |container| and readies the sesion object.
  *
  * @param {Element} container The element to add the plugin to.
- * @param {string} oauth2AccessToken A valid OAuth2 access token.
  */
 remoting.ClientSession.prototype.createPluginAndConnect =
-    function(container, oauth2AccessToken) {
+    function(container) {
   this.plugin = this.createClientPlugin_(container, this.PLUGIN_ID);
 
   this.plugin.element().focus();
 
   /** @param {boolean} result */
-  this.plugin.initialize(
-      this.onPluginInitialized_.bind(this, oauth2AccessToken));
+  this.plugin.initialize(this.onPluginInitialized_.bind(this));
   this.plugin.element().addEventListener(
       'focus', this.callPluginGotFocus_, false);
   this.plugin.element().addEventListener(
@@ -260,11 +257,9 @@ remoting.ClientSession.prototype.createPluginAndConnect =
 };
 
 /**
- * @param {string} oauth2AccessToken
  * @param {boolean} initialized
  */
-remoting.ClientSession.prototype.onPluginInitialized_ =
-    function(oauth2AccessToken, initialized) {
+remoting.ClientSession.prototype.onPluginInitialized_ = function(initialized) {
   if (!initialized) {
     console.error('ERROR: remoting plugin not loaded');
     this.plugin.cleanup();
@@ -316,7 +311,7 @@ remoting.ClientSession.prototype.onPluginInitialized_ =
   this.plugin.onDesktopSizeUpdateHandler =
       this.onDesktopSizeChanged_.bind(this);
 
-  this.connectPluginToWcs_(oauth2AccessToken);
+  this.connectPluginToWcs_();
 };
 
 /**
@@ -456,7 +451,6 @@ remoting.ClientSession.prototype.hasReceivedFrame = function() {
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.sendIq_ = function(msg) {
-  console.log(remoting.timestamp(), remoting.formatIq.prettifySendIq(msg));
   // Extract the session id, so we can close the session later.
   var parser = new DOMParser();
   var iqNode = parser.parseFromString(msg, 'text/xml').firstChild;
@@ -467,6 +461,19 @@ remoting.ClientSession.prototype.sendIq_ = function(msg) {
       this.sessionId = jingleNode.getAttribute('sid');
     }
   }
+
+  // HACK: Add 'x' prefix to the IDs of the outgoing messages to make sure that
+  // stanza IDs used by host and client do not match. This is necessary to
+  // workaround bug in the signaling endpoint used by chromoting.
+  // TODO(sergeyu): Remove this hack once the server-side bug is fixed.
+  var type = iqNode.getAttribute('type');
+  if (type == 'set') {
+    var id = iqNode.getAttribute('id');
+    iqNode.setAttribute('id', 'x' + id);
+    msg = (new XMLSerializer()).serializeToString(iqNode);
+  }
+
+  console.log(remoting.timestamp(), remoting.formatIq.prettifySendIq(msg));
 
   // Send the stanza.
   if (remoting.wcs) {
@@ -481,11 +488,9 @@ remoting.ClientSession.prototype.sendIq_ = function(msg) {
  * Connects the plugin to WCS.
  *
  * @private
- * @param {string} oauth2AccessToken A valid OAuth2 access token.
  * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.connectPluginToWcs_ =
-    function(oauth2AccessToken) {
+remoting.ClientSession.prototype.connectPluginToWcs_ = function() {
   this.clientJid = remoting.wcs.getJid();
   if (this.clientJid == '') {
     console.error('Tried to connect without a full JID.');
@@ -495,6 +500,20 @@ remoting.ClientSession.prototype.connectPluginToWcs_ =
   var forwardIq = plugin.onIncomingIq.bind(plugin);
   /** @param {string} stanza The IQ stanza received. */
   var onIncomingIq = function(stanza) {
+    // HACK: Remove 'x' prefix added to the id in sendIq_().
+    try {
+      var parser = new DOMParser();
+      var iqNode = parser.parseFromString(stanza, 'text/xml').firstChild;
+      var type = iqNode.getAttribute('type');
+      var id = iqNode.getAttribute('id');
+      if (type != 'set' && id.charAt(0) == 'x') {
+        iqNode.setAttribute('id', id.substr(1));
+        stanza = (new XMLSerializer()).serializeToString(iqNode);
+      }
+    } catch (err) {
+      // Pass message as is when it is malformed.
+    }
+
     console.log(remoting.timestamp(),
                 remoting.formatIq.prettifyReceiveIq(stanza));
     forwardIq(stanza);
@@ -553,10 +572,14 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
   // If connection errors are being suppressed from the logs, translate
   // FAILED to CLOSED here. This ensures that the duration is still logged.
   var state = this.state;
-  if (this.state == remoting.ClientSession.State.FAILED &&
-      !this.logErrors_) {
-    console.log('Suppressing error.');
-    state = remoting.ClientSession.State.CLOSED;
+  if (this.state == remoting.ClientSession.State.FAILED) {
+    if (oldState == remoting.ClientSession.State.CONNECTING &&
+        !this.logErrors_) {
+      console.log('Suppressing error.');
+      state = remoting.ClientSession.State.CLOSED;
+    } else if (oldState == remoting.ClientSession.State.CONNECTED) {
+      state = remoting.ClientSession.State.CONNECTION_DROPPED;
+    }
   }
   this.logToServer.logClientSessionStateChange(state, this.error, this.mode);
 };
@@ -641,33 +664,58 @@ remoting.ClientSession.prototype.updateDimensions = function() {
 
   var windowWidth = window.innerWidth;
   var windowHeight = window.innerHeight;
+  var desktopWidth = this.plugin.desktopWidth;
+  var desktopHeight = this.plugin.desktopHeight;
   var scale = 1.0;
 
   if (this.getScaleToFit()) {
-    var scaleFitWidth = 1.0 * windowWidth / this.plugin.desktopWidth;
-    var scaleFitHeight = 1.0 * windowHeight / this.plugin.desktopHeight;
-    scale = Math.min(1.0, scaleFitHeight, scaleFitWidth);
+    // Scale to fit the entire desktop in the client window.
+    var scaleFitWidth = Math.min(1.0, 1.0 * windowWidth / desktopWidth);
+    var scaleFitHeight = Math.min(1.0, 1.0 * windowHeight / desktopHeight);
+    scale = Math.min(scaleFitHeight, scaleFitWidth);
+
+    // If we're running full-screen then try to handle common side-by-side
+    // multi-monitor combinations more intelligently.
+    if (document.webkitIsFullScreen) {
+      // If the host has two monitors each the same size as the client then
+      // scale-to-fit will have the desktop occupy only 50% of the client area,
+      // in which case it would be preferable to down-scale less and let the
+      // user bump-scroll around ("scale-and-pan").
+      // Triggering scale-and-pan if less than 65% of the client area would be
+      // used adds enough fuzz to cope with e.g. 1280x800 client connecting to
+      // a (2x1280)x1024 host nicely.
+      // Note that we don't need to account for scrollbars while fullscreen.
+      if (scale <= scaleFitHeight * 0.65) {
+        scale = scaleFitHeight;
+      }
+      if (scale <= scaleFitWidth * 0.65) {
+        scale = scaleFitWidth;
+      }
+    }
   }
 
-  var width = this.plugin.desktopWidth * scale;
-  var height = this.plugin.desktopHeight * scale;
+  var pluginWidth = desktopWidth * scale;
+  var pluginHeight = desktopHeight * scale;
 
   // Resize the plugin if necessary.
-  this.plugin.element().width = width;
-  this.plugin.element().height = height;
+  // TODO(wez): Handle high-DPI to high-DPI properly (crbug.com/135089).
+  this.plugin.element().width = pluginWidth;
+  this.plugin.element().height = pluginHeight;
 
   // Position the container.
-  // TODO(wez): We should take into account scrollbars when positioning.
+  // Note that clientWidth/Height take into account scrollbars.
+  var clientWidth = document.documentElement.clientWidth;
+  var clientHeight = document.documentElement.clientHeight;
   var parentNode = this.plugin.element().parentNode;
 
-  if (width < windowWidth) {
-    parentNode.style.left = (windowWidth - width) / 2 + 'px';
+  if (pluginWidth < clientWidth) {
+    parentNode.style.left = (clientWidth - pluginWidth) / 2 + 'px';
   } else {
     parentNode.style.left = '0';
   }
 
-  if (height < windowHeight) {
-    parentNode.style.top = (windowHeight - height) / 2 + 'px';
+  if (pluginHeight < clientHeight) {
+    parentNode.style.top = (clientHeight - pluginHeight) / 2 + 'px';
   } else {
     parentNode.style.top = '0';
   }
@@ -675,7 +723,7 @@ remoting.ClientSession.prototype.updateDimensions = function() {
   console.log('plugin dimensions: ' +
               parentNode.style.left + ',' +
               parentNode.style.top + '-' +
-              width + 'x' + height + '.');
+              pluginWidth + 'x' + pluginHeight + '.');
 };
 
 /**

@@ -12,17 +12,16 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_observer.h"
 #include "chrome/browser/chromeos/drive/drive_sync_client_observer.h"
-#include "chrome/browser/google_apis/gdata_errorcode.h"
 
 class FilePath;
 
 namespace drive {
 
-class DriveEntryProto;
-class DriveFileSystemInterface;
+class EventLogger;
 
 // The parameters for DrivePrefetcher construction.
 struct DrivePrefetcherOptions {
@@ -40,6 +39,7 @@ class DrivePrefetcher : public DriveFileSystemObserver,
                         public DriveSyncClientObserver {
  public:
   DrivePrefetcher(DriveFileSystemInterface* file_system,
+                  EventLogger* event_logger,
                   const DrivePrefetcherOptions& options);
   virtual ~DrivePrefetcher();
 
@@ -61,7 +61,8 @@ class DrivePrefetcher : public DriveFileSystemObserver,
   void DoPrefetch();
 
   // Called when DoPrefetch is done.
-  void OnPrefetchFinished(DriveFileError error,
+  void OnPrefetchFinished(const std::string& resource_id,
+                          DriveFileError error,
                           const FilePath& file_path,
                           const std::string& mime_type,
                           DriveFileType file_type);
@@ -79,7 +80,9 @@ class DrivePrefetcher : public DriveFileSystemObserver,
   void OnReadDirectoryFinished();
 
   // Keeps the kNumberOfLatestFilesToKeepInCache latest files in the filesystem.
-  typedef std::set<std::pair<int64, std::string> > LatestFileSet;
+  typedef bool (*PrefetchPriorityComparator)(const DriveEntryProto&,
+                                             const DriveEntryProto&);
+  typedef std::set<DriveEntryProto, PrefetchPriorityComparator> LatestFileSet;
   LatestFileSet latest_files_;
 
   // The queue of files to fetch. Files with higher priority comes front.
@@ -104,6 +107,9 @@ class DrivePrefetcher : public DriveFileSystemObserver,
 
   // File system is owned by DriveSystemService.
   DriveFileSystemInterface* file_system_;
+
+  // Event logger is owned by DriveSystemService.
+  EventLogger* event_logger_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

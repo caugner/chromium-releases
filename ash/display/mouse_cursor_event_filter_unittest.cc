@@ -32,9 +32,16 @@ gfx::Display GetSecondaryDisplay() {
 
 typedef test::AshTestBase MouseCursorEventFilterTest;
 
+#if defined(OS_WIN)
+// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
+#define MAYBE_WarpMouse DISABLED_WarpMouse
+#else
+#define MAYBE_WarpMouse WarpMouse
+#endif
+
 // Verifies if the mouse pointer correctly moves to another display when there
 // are two displays.
-TEST_F(MouseCursorEventFilterTest, WarpMouse) {
+TEST_F(MouseCursorEventFilterTest, MAYBE_WarpMouse) {
   UpdateDisplay("500x500,500x500");
 
   MouseCursorEventFilter* event_filter =
@@ -92,9 +99,18 @@ TEST_F(MouseCursorEventFilterTest, WarpMouse) {
   EXPECT_FALSE(is_warped);
 }
 
+
+#if defined(OS_WIN)
+// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
+#define MAYBE_WarpMouseDifferentSizeDisplays \
+        DISABLED_WarpMouseDifferentSizeDisplays
+#else
+#define MAYBE_WarpMouseDifferentSizeDisplays WarpMouseDifferentSizeDisplays
+#endif
+
 // Verifies if the mouse pointer correctly moves to another display even when
 // two displays are not the same size.
-TEST_F(MouseCursorEventFilterTest, WarpMouseDifferentSizeDisplays) {
+TEST_F(MouseCursorEventFilterTest, MAYBE_WarpMouseDifferentSizeDisplays) {
   UpdateDisplay("500x500,600x600");  // the second one is larger.
 
   MouseCursorEventFilter* event_filter =
@@ -105,13 +121,12 @@ TEST_F(MouseCursorEventFilterTest, WarpMouseDifferentSizeDisplays) {
           display_controller()->default_display_layout().position);
 
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
-  aura::Env::GetInstance()->SetLastMouseLocation(*root_windows[1],
-                                                 gfx::Point(123, 123));
+  aura::Env::GetInstance()->set_last_mouse_location(gfx::Point(623, 123));
 
   // Touch the left edge of the secondary root window. Pointer should NOT warp
   // because 1px left of (0, 500) is outside the primary root window.
   bool is_warped = event_filter->WarpMouseCursorIfNecessary(root_windows[1],
-                                                          gfx::Point(0, 500));
+                                                            gfx::Point(0, 500));
   EXPECT_FALSE(is_warped);
   EXPECT_EQ("623,123",  // by 2px.
             aura::Env::GetInstance()->last_mouse_location().ToString());
@@ -125,16 +140,64 @@ TEST_F(MouseCursorEventFilterTest, WarpMouseDifferentSizeDisplays) {
             aura::Env::GetInstance()->last_mouse_location().ToString());
 }
 
+#if defined(OS_WIN)
+// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
+#define MAYBE_WarpMouseDifferentScaleDisplays \
+        DISABLED_WarpMouseDifferentScaleDisplays
+#else
+#define MAYBE_WarpMouseDifferentScaleDisplays WarpMouseDifferentScaleDisplays
+#endif
+
+// Verifies if the mouse pointer correctly moves between displays with
+// different scale factors.
+TEST_F(MouseCursorEventFilterTest, MAYBE_WarpMouseDifferentScaleDisplays) {
+  UpdateDisplay("500x500,600x600*2");
+
+  MouseCursorEventFilter* event_filter =
+      Shell::GetInstance()->mouse_cursor_filter();
+  ASSERT_EQ(
+      DisplayLayout::RIGHT,
+      Shell::GetInstance()->
+          display_controller()->default_display_layout().position);
+
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  aura::Env::GetInstance()->set_last_mouse_location(gfx::Point(900, 123));
+
+  // This emulates the dragging back to the 2nd display, which has
+  // higher scale factor, by having 2nd display's root as target
+  // but have the edge of 1st display.
+  bool is_warped =
+      event_filter->WarpMouseCursorIfNecessary(root_windows[1],
+                                               gfx::Point(498, 123));
+  EXPECT_TRUE(is_warped);
+  EXPECT_EQ("502,123",
+            aura::Env::GetInstance()->last_mouse_location().ToString());
+
+  // Touch the edge of 2nd display again and make sure it warps to
+  // 1st dislay.
+  is_warped = event_filter->WarpMouseCursorIfNecessary(root_windows[1],
+                                                       gfx::Point(500, 123));
+  EXPECT_TRUE(is_warped);
+  EXPECT_EQ("496,123",
+            aura::Env::GetInstance()->last_mouse_location().ToString());
+}
+
+#if defined(OS_WIN)
+// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
+#define MAYBE_SetMouseWarpModeFlag DISABLED_SetMouseWarpModeFlag
+#else
+#define MAYBE_SetMouseWarpModeFlag SetMouseWarpModeFlag
+#endif
+
 // Verifies if MouseCursorEventFilter::set_mouse_warp_mode() works as expected.
-TEST_F(MouseCursorEventFilterTest, SetMouseWarpModeFlag) {
+TEST_F(MouseCursorEventFilterTest, MAYBE_SetMouseWarpModeFlag) {
   UpdateDisplay("500x500,500x500");
 
   MouseCursorEventFilter* event_filter =
       Shell::GetInstance()->mouse_cursor_filter();
 
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
-  aura::Env::GetInstance()->SetLastMouseLocation(*root_windows[0],
-                                                 gfx::Point(1, 1));
+  aura::Env::GetInstance()->set_last_mouse_location(gfx::Point(1, 1));
 
   event_filter->set_mouse_warp_mode(MouseCursorEventFilter::WARP_NONE);
   bool is_warped = event_filter->WarpMouseCursorIfNecessary(root_windows[0],
@@ -224,14 +287,14 @@ TEST_F(MouseCursorEventFilterTest, IndicatorBoundsTestOnLeft) {
   EXPECT_EQ("-1,16 1x344", event_filter->src_indicator_bounds_.ToString());
   EXPECT_EQ("0,0 1x360", event_filter->dst_indicator_bounds_.ToString());
 
-  default_layout.offset = 300;
+  default_layout.offset = 250;
   controller->SetDefaultDisplayLayout(default_layout);
   event_filter->ShowSharedEdgeIndicator(root_windows[0] /* primary */);
-  EXPECT_EQ("0,300 1x60", event_filter->src_indicator_bounds_.ToString());
-  EXPECT_EQ("-1,300 1x60", event_filter->dst_indicator_bounds_.ToString());
+  EXPECT_EQ("0,250 1x110", event_filter->src_indicator_bounds_.ToString());
+  EXPECT_EQ("-1,250 1x110", event_filter->dst_indicator_bounds_.ToString());
   event_filter->ShowSharedEdgeIndicator(root_windows[1] /* secondary */);
-  EXPECT_EQ("-1,300 1x60", event_filter->src_indicator_bounds_.ToString());
-  EXPECT_EQ("0,300 1x60", event_filter->dst_indicator_bounds_.ToString());
+  EXPECT_EQ("-1,250 1x110", event_filter->src_indicator_bounds_.ToString());
+  EXPECT_EQ("0,250 1x110", event_filter->dst_indicator_bounds_.ToString());
   event_filter->HideSharedEdgeIndicator();
 }
 
@@ -252,14 +315,14 @@ TEST_F(MouseCursorEventFilterTest, IndicatorBoundsTestOnTopBottom) {
   EXPECT_EQ("0,-1 360x1", event_filter->src_indicator_bounds_.ToString());
   EXPECT_EQ("0,0 360x1", event_filter->dst_indicator_bounds_.ToString());
 
-  default_layout.offset = 300;
+  default_layout.offset = 250;
   controller->SetDefaultDisplayLayout(default_layout);
   event_filter->ShowSharedEdgeIndicator(root_windows[0] /* primary */);
-  EXPECT_EQ("300,0 60x1", event_filter->src_indicator_bounds_.ToString());
-  EXPECT_EQ("300,-1 60x1", event_filter->dst_indicator_bounds_.ToString());
+  EXPECT_EQ("250,0 110x1", event_filter->src_indicator_bounds_.ToString());
+  EXPECT_EQ("250,-1 110x1", event_filter->dst_indicator_bounds_.ToString());
   event_filter->ShowSharedEdgeIndicator(root_windows[1] /* secondary */);
-  EXPECT_EQ("300,-1 60x1", event_filter->src_indicator_bounds_.ToString());
-  EXPECT_EQ("300,0 60x1", event_filter->dst_indicator_bounds_.ToString());
+  EXPECT_EQ("250,-1 110x1", event_filter->src_indicator_bounds_.ToString());
+  EXPECT_EQ("250,0 110x1", event_filter->dst_indicator_bounds_.ToString());
 
   default_layout.position = DisplayLayout::BOTTOM;
   default_layout.offset = 0;
@@ -274,10 +337,18 @@ TEST_F(MouseCursorEventFilterTest, IndicatorBoundsTestOnTopBottom) {
   event_filter->HideSharedEdgeIndicator();
 }
 
+
+#if defined(OS_WIN)
+// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
+#define MAYBE_CursorDeviceScaleFactor DISABLED_CursorDeviceScaleFactor
+#else
+#define MAYBE_CursorDeviceScaleFactor CursorDeviceScaleFactor
+#endif
+
 // Verifies cursor's device scale factor is updated when a cursor has moved
 // across root windows with different device scale factors
 // (http://crbug.com/154183).
-TEST_F(MouseCursorEventFilterTest, CursorDeviceScaleFactor) {
+TEST_F(MouseCursorEventFilterTest, MAYBE_CursorDeviceScaleFactor) {
   UpdateDisplay("400x400,800x800*2");
   DisplayController* controller =
       Shell::GetInstance()->display_controller();

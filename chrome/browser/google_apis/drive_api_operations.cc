@@ -25,9 +25,13 @@ const char kDriveV2FileURLFormat[] =
 
 //============================== GetAboutOperation =============================
 
-GetAboutOperation::GetAboutOperation(OperationRegistry* registry,
-                                     const GetDataCallback& callback)
-    : GetDataOperation(registry, callback) {}
+GetAboutOperation::GetAboutOperation(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const GetDataCallback& callback)
+    : GetDataOperation(registry, url_request_context_getter, callback) {
+  DCHECK(!callback.is_null());
+}
 
 GetAboutOperation::~GetAboutOperation() {}
 
@@ -37,9 +41,13 @@ GURL GetAboutOperation::GetURL() const {
 
 //============================== GetApplistOperation ===========================
 
-GetApplistOperation::GetApplistOperation(OperationRegistry* registry,
-                                         const GetDataCallback& callback)
-    : GetDataOperation(registry, callback) {}
+GetApplistOperation::GetApplistOperation(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const GetDataCallback& callback)
+    : GetDataOperation(registry, url_request_context_getter, callback) {
+  DCHECK(!callback.is_null());
+}
 
 GetApplistOperation::~GetApplistOperation() {}
 
@@ -51,12 +59,14 @@ GURL GetApplistOperation::GetURL() const {
 
 GetChangelistOperation::GetChangelistOperation(
     OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
     const GURL& url,
     int64 start_changestamp,
     const GetDataCallback& callback)
-    : GetDataOperation(registry, callback),
+    : GetDataOperation(registry, url_request_context_getter, callback),
       url_(kDriveV2ChangelistURL),
       start_changestamp_(start_changestamp) {
+  DCHECK(!callback.is_null());
   if (!url.is_empty())
     url_ = url;
 }
@@ -74,12 +84,14 @@ GURL GetChangelistOperation::GetURL() const {
 
 GetFilelistOperation::GetFilelistOperation(
     OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
     const GURL& url,
     const std::string& search_string,
     const GetDataCallback& callback)
-    : GetDataOperation(registry, callback),
+    : GetDataOperation(registry, url_request_context_getter, callback),
       url_(kDriveV2FilelistURL),
       search_string_(search_string) {
+  DCHECK(!callback.is_null());
   if (!url.is_empty())
     url_ = url;
 }
@@ -98,10 +110,13 @@ GURL GetFilelistOperation::GetURL() const {
 
 GetFileOperation::GetFileOperation(
     OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
     const std::string& file_id,
     const GetDataCallback& callback)
-    : GetDataOperation(registry, callback),
-      file_id_(file_id) {}
+    : GetDataOperation(registry, url_request_context_getter, callback),
+      file_id_(file_id) {
+  DCHECK(!callback.is_null());
+}
 
 GetFileOperation::~GetFileOperation() {}
 

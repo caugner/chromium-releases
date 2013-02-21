@@ -52,7 +52,7 @@ ExampleNativeThemeButton::ExampleNativeThemeButton(
   cb_part_->set_listener(this);
   cb_state_->set_listener(this);
 
-  painter_.reset(new NativeThemePainter(this));
+  painter_.reset(new NativeThemePainter(this, this));
   set_background(Background::CreateBackgroundPainter(
       false, painter_.get()));
 }
@@ -115,9 +115,9 @@ ui::NativeTheme::Part ExampleNativeThemeButton::GetThemePart() const {
 gfx::Rect ExampleNativeThemeButton::GetThemePaintRect() const {
   ui::NativeTheme::ExtraParams extra;
   ui::NativeTheme::State state = GetThemeState(&extra);
-  gfx::Size size(ui::NativeTheme::instance()->GetPartSize(GetThemePart(),
-                                                           state,
-                                                           extra));
+  gfx::Size size(GetNativeTheme()->GetPartSize(GetThemePart(),
+                                               state,
+                                               extra));
   gfx::Rect rect(size);
   rect.set_x(GetMirroredXForRect(rect));
   return rect;
@@ -130,13 +130,13 @@ ui::NativeTheme::State ExampleNativeThemeButton::GetThemeState(
   int selected = cb_state_->selected_index();
   if (selected > 3) {
     switch (state()) {
-      case BS_DISABLED:
+      case STATE_DISABLED:
         return ui::NativeTheme::kDisabled;
-      case BS_NORMAL:
+      case STATE_NORMAL:
         return ui::NativeTheme::kNormal;
-      case BS_HOT:
+      case STATE_HOVERED:
         return ui::NativeTheme::kHovered;
-      case BS_PUSHED:
+      case STATE_PRESSED:
         return ui::NativeTheme::kPressed;
       default:
         NOTREACHED();

@@ -2,19 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/layer_sorter.h"
 
 #include "cc/layer_impl.h"
 #include "cc/math_util.h"
 #include "cc/single_thread_proxy.h"
+#include "cc/test/fake_impl_proxy.h"
+#include "cc/test/fake_layer_tree_host_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <public/WebTransformationMatrix.h>
+#include "ui/gfx/transform.h"
 
-using namespace cc;
-using WebKit::WebTransformationMatrix;
-
+namespace cc {
 namespace {
 
 // Note: In the following overlap tests, the "camera" is looking down the negative Z axis,
@@ -28,12 +26,12 @@ TEST(LayerSorterTest, BasicOverlap)
     float weight = 0;
 
     // Trivial test, with one layer directly obscuring the other.
-    WebTransformationMatrix neg4Translate;
-    neg4Translate.translate3d(0, 0, -4);
+    gfx::Transform neg4Translate;
+    neg4Translate.Translate3d(0, 0, -4);
     LayerShape front(2, 2, neg4Translate);
 
-    WebTransformationMatrix neg5Translate;
-    neg5Translate.translate3d(0, 0, -5);
+    gfx::Transform neg5Translate;
+    neg5Translate.Translate3d(0, 0, -5);
     LayerShape back(2, 2, neg5Translate);
 
     overlapResult = LayerSorter::checkOverlap(&front, &back, zThreshold, weight);
@@ -45,8 +43,8 @@ TEST(LayerSorterTest, BasicOverlap)
     EXPECT_EQ(1, weight);
 
     // One layer translated off to the right. No overlap should be detected.
-    WebTransformationMatrix rightTranslate;
-    rightTranslate.translate3d(10, 0, -5);
+    gfx::Transform rightTranslate;
+    rightTranslate.Translate3d(10, 0, -5);
     LayerShape backRight(2, 2, rightTranslate);
     overlapResult = LayerSorter::checkOverlap(&front, &backRight, zThreshold, weight);
     EXPECT_EQ(LayerSorter::None, overlapResult);
@@ -62,18 +60,18 @@ TEST(LayerSorterTest, RightAngleOverlap)
     const float zThreshold = 0.1f;
     float weight = 0;
 
-    WebTransformationMatrix perspectiveMatrix;
-    perspectiveMatrix.applyPerspective(1000);
+    gfx::Transform perspectiveMatrix;
+    perspectiveMatrix.ApplyPerspectiveDepth(1000);
 
     // Two layers forming a right angle with a perspective viewing transform.
-    WebTransformationMatrix leftFaceMatrix;
-    leftFaceMatrix.rotate3d(0, 1, 0, -90);
-    leftFaceMatrix.translateRight3d(-1, 0, -5);
-    leftFaceMatrix.translate(-1, -1);
+    gfx::Transform leftFaceMatrix;
+    leftFaceMatrix.Translate3d(-1, 0, -5);
+    leftFaceMatrix.RotateAboutYAxis(-90);
+    leftFaceMatrix.Translate(-1, -1);
     LayerShape leftFace(2, 2, perspectiveMatrix * leftFaceMatrix);
-    WebTransformationMatrix frontFaceMatrix;
-    frontFaceMatrix.translate3d(0, 0, -4);
-    frontFaceMatrix.translate(-1, -1);
+    gfx::Transform frontFaceMatrix;
+    frontFaceMatrix.Translate3d(0, 0, -4);
+    frontFaceMatrix.Translate(-1, -1);
     LayerShape frontFace(2, 2, perspectiveMatrix * frontFaceMatrix);
 
     overlapResult = LayerSorter::checkOverlap(&frontFace, &leftFace, zThreshold, weight);
@@ -86,20 +84,20 @@ TEST(LayerSorterTest, IntersectingLayerOverlap)
     const float zThreshold = 0.1f;
     float weight = 0;
 
-    WebTransformationMatrix perspectiveMatrix;
-    perspectiveMatrix.applyPerspective(1000);
+    gfx::Transform perspectiveMatrix;
+    perspectiveMatrix.ApplyPerspectiveDepth(1000);
 
     // Intersecting layers. An explicit order will be returned based on relative z
     // values at the overlapping features but the weight returned should be zero.
-    WebTransformationMatrix frontFaceMatrix;
-    frontFaceMatrix.translate3d(0, 0, -4);
-    frontFaceMatrix.translate(-1, -1);
+    gfx::Transform frontFaceMatrix;
+    frontFaceMatrix.Translate3d(0, 0, -4);
+    frontFaceMatrix.Translate(-1, -1);
     LayerShape frontFace(2, 2, perspectiveMatrix * frontFaceMatrix);
 
-    WebTransformationMatrix throughMatrix;
-    throughMatrix.rotate3d(0, 1, 0, 45);
-    throughMatrix.translateRight3d(0, 0, -4);
-    throughMatrix.translate(-1, -1);
+    gfx::Transform throughMatrix;
+    throughMatrix.Translate3d(0, 0, -4);
+    throughMatrix.RotateAboutYAxis(45);
+    throughMatrix.Translate(-1, -1);
     LayerShape rotatedFace(2, 2, perspectiveMatrix * throughMatrix);
     overlapResult = LayerSorter::checkOverlap(&frontFace, &rotatedFace, zThreshold, weight);
     EXPECT_NE(LayerSorter::None, overlapResult);
@@ -124,19 +122,19 @@ TEST(LayerSorterTest, LayersAtAngleOverlap)
     // C is in front of A and behind B (not what you'd expect by comparing centers).
     // A and B don't overlap, so they're incomparable.
 
-    WebTransformationMatrix transformA;
-    transformA.translate3d(-6, 0, 1);
-    transformA.translate(-4, -10);
+    gfx::Transform transformA;
+    transformA.Translate3d(-6, 0, 1);
+    transformA.Translate(-4, -10);
     LayerShape layerA(8, 20, transformA);
 
-    WebTransformationMatrix transformB;
-    transformB.translate3d(6, 0, -1);
-    transformB.translate(-4, -10);
+    gfx::Transform transformB;
+    transformB.Translate3d(6, 0, -1);
+    transformB.Translate(-4, -10);
     LayerShape layerB(8, 20, transformB);
 
-    WebTransformationMatrix transformC;
-    transformC.rotate3d(0, 1, 0, 40);
-    transformC.translate(-4, -10);
+    gfx::Transform transformC;
+    transformC.RotateAboutYAxis(40);
+    transformC.Translate(-4, -10);
     LayerShape layerC(8, 20, transformC);
 
     overlapResult = LayerSorter::checkOverlap(&layerA, &layerC, zThreshold, weight);
@@ -158,27 +156,27 @@ TEST(LayerSorterTest, LayersUnderPathologicalPerspectiveTransform)
     // where w < 0. If the code uses the invalid value, it will think that a layer has
     // different bounds than it really does, which can cause things to sort incorrectly.
 
-    WebTransformationMatrix perspectiveMatrix;
-    perspectiveMatrix.applyPerspective(1);
+    gfx::Transform perspectiveMatrix;
+    perspectiveMatrix.ApplyPerspectiveDepth(1);
 
-    WebTransformationMatrix transformA;
-    transformA.translate3d(-15, 0, -2);
-    transformA.translate(-5, -5);
+    gfx::Transform transformA;
+    transformA.Translate3d(-15, 0, -2);
+    transformA.Translate(-5, -5);
     LayerShape layerA(10, 10, perspectiveMatrix * transformA);
 
     // With this sequence of transforms, when layer B is correctly clipped, it will be
     // visible on the left half of the projection plane, in front of layerA. When it is
     // not clipped, its bounds will actually incorrectly appear much smaller and the
     // correct sorting dependency will not be found.
-    WebTransformationMatrix transformB;
-    transformB.translate3d(0, 0, 0.7);
-    transformB.rotate3d(0, 45, 0);
-    transformB.translate(-5, -5);
+    gfx::Transform transformB;
+    transformB.Translate3d(0, 0, 0.7);
+    MathUtil::rotateEulerAngles(&transformB, 0, 45, 0);
+    transformB.Translate(-5, -5);
     LayerShape layerB(10, 10, perspectiveMatrix * transformB);
 
     // Sanity check that the test case actually covers the intended scenario, where part
     // of layer B go behind the w = 0 plane.
-    FloatQuad testQuad = FloatQuad(FloatRect(FloatPoint(-0.5, -0.5), FloatSize(1, 1)));
+    gfx::QuadF testQuad = gfx::QuadF(gfx::RectF(-0.5, -0.5, 1, 1));
     bool clipped = false;
     MathUtil::mapQuad(perspectiveMatrix * transformB, testQuad, clipped);
     ASSERT_TRUE(clipped);
@@ -189,8 +187,6 @@ TEST(LayerSorterTest, LayersUnderPathologicalPerspectiveTransform)
 
 TEST(LayerSorterTest, verifyExistingOrderingPreservedWhenNoZDiff)
 {
-    DebugScopedSetImplThread thisScopeIsOnImplThread;
-
     // If there is no reason to re-sort the layers (i.e. no 3d z difference), then the
     // existing ordering provided on input should be retained. This test covers the fix in
     // https://bugs.webkit.org/show_bug.cgi?id=75046. Before this fix, ordering was
@@ -203,40 +199,43 @@ TEST(LayerSorterTest, verifyExistingOrderingPreservedWhenNoZDiff)
     //    - 3 and 4 do not have a 3d z difference, and therefore their relative ordering should be retained.
     //    - 3 and 4 should be re-sorted so they are in front of 1, 2, and 5.
 
-    scoped_ptr<LayerImpl> layer1 = LayerImpl::create(1);
-    scoped_ptr<LayerImpl> layer2 = LayerImpl::create(2);
-    scoped_ptr<LayerImpl> layer3 = LayerImpl::create(3);
-    scoped_ptr<LayerImpl> layer4 = LayerImpl::create(4);
-    scoped_ptr<LayerImpl> layer5 = LayerImpl::create(5);
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
 
-    WebTransformationMatrix BehindMatrix;
-    BehindMatrix.translate3d(0, 0, 2);
-    WebTransformationMatrix FrontMatrix;
-    FrontMatrix.translate3d(0, 0, 1);
+    scoped_ptr<LayerImpl> layer1 = LayerImpl::create(hostImpl.activeTree(), 1);
+    scoped_ptr<LayerImpl> layer2 = LayerImpl::create(hostImpl.activeTree(), 2);
+    scoped_ptr<LayerImpl> layer3 = LayerImpl::create(hostImpl.activeTree(), 3);
+    scoped_ptr<LayerImpl> layer4 = LayerImpl::create(hostImpl.activeTree(), 4);
+    scoped_ptr<LayerImpl> layer5 = LayerImpl::create(hostImpl.activeTree(), 5);
 
-    layer1->setBounds(IntSize(10, 10));
-    layer1->setContentBounds(IntSize(10, 10));
-    layer1->setDrawTransform(BehindMatrix);
+    gfx::Transform BehindMatrix;
+    BehindMatrix.Translate3d(0, 0, 2);
+    gfx::Transform FrontMatrix;
+    FrontMatrix.Translate3d(0, 0, 1);
+
+    layer1->setBounds(gfx::Size(10, 10));
+    layer1->setContentBounds(gfx::Size(10, 10));
+    layer1->drawProperties().target_space_transform = BehindMatrix;
     layer1->setDrawsContent(true);
 
-    layer2->setBounds(IntSize(20, 20));
-    layer2->setContentBounds(IntSize(20, 20));
-    layer2->setDrawTransform(BehindMatrix);
+    layer2->setBounds(gfx::Size(20, 20));
+    layer2->setContentBounds(gfx::Size(20, 20));
+    layer2->drawProperties().target_space_transform = BehindMatrix;
     layer2->setDrawsContent(true);
 
-    layer3->setBounds(IntSize(30, 30));
-    layer3->setContentBounds(IntSize(30, 30));
-    layer3->setDrawTransform(FrontMatrix);
+    layer3->setBounds(gfx::Size(30, 30));
+    layer3->setContentBounds(gfx::Size(30, 30));
+    layer3->drawProperties().target_space_transform = FrontMatrix;
     layer3->setDrawsContent(true);
 
-    layer4->setBounds(IntSize(40, 40));
-    layer4->setContentBounds(IntSize(40, 40));
-    layer4->setDrawTransform(FrontMatrix);
+    layer4->setBounds(gfx::Size(40, 40));
+    layer4->setContentBounds(gfx::Size(40, 40));
+    layer4->drawProperties().target_space_transform = FrontMatrix;
     layer4->setDrawsContent(true);
 
-    layer5->setBounds(IntSize(50, 50));
-    layer5->setContentBounds(IntSize(50, 50));
-    layer5->setDrawTransform(BehindMatrix);
+    layer5->setBounds(gfx::Size(50, 50));
+    layer5->setContentBounds(gfx::Size(50, 50));
+    layer5->drawProperties().target_space_transform = BehindMatrix;
     layer5->setDrawsContent(true);
 
     std::vector<LayerImpl*> layerList;
@@ -264,4 +263,5 @@ TEST(LayerSorterTest, verifyExistingOrderingPreservedWhenNoZDiff)
     EXPECT_EQ(5, layerList[4]->id());
 }
 
-} // namespace
+}  // namespace
+}  // namespace cc

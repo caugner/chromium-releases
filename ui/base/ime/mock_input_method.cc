@@ -8,6 +8,7 @@
 #include "base/string16.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/base/ime/text_input_client.h"
@@ -90,14 +91,6 @@ void MockInputMethod::DispatchKeyEvent(const base::NativeEvent& native_event) {
 #else
   // TODO(yusukes): Support other platforms. Call InsertChar() when necessary.
   delegate_->DispatchKeyEventPostIME(native_event);
-#endif
-}
-
-void MockInputMethod::DispatchFabricatedKeyEvent(const ui::KeyEvent& event) {
-#if defined(OS_WIN)
-  delegate_->DispatchFabricatedKeyEventPostIME(event.type(),
-                                               event.key_code(),
-                                               event.flags());
 #endif
 }
 

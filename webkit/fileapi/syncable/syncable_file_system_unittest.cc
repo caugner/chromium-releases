@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/isolated_context.h"
 #include "webkit/fileapi/local_file_system_operation.h"
+#include "webkit/fileapi/local_file_system_test_helper.h"
 #include "webkit/fileapi/syncable/canned_syncable_file_system.h"
 #include "webkit/fileapi/syncable/local_file_change_tracker.h"
 #include "webkit/fileapi/syncable/local_file_sync_context.h"
@@ -62,10 +64,10 @@ class SyncableFileSystemTest : public testing::Test {
     ASSERT_EQ(1U, changes.size());
     SCOPED_TRACE(testing::Message() << url.DebugString() <<
                  " actual:" << changes.DebugString());
-    EXPECT_EQ(expected_change, changes.list()[0]);
+    EXPECT_EQ(expected_change, changes.front());
 
     // Clear the URL from the change tracker.
-    change_tracker()->FinalizeSyncForURL(url);
+    change_tracker()->ClearChangesForURL(url);
   }
 
   FileSystemURL URL(const std::string& path) {
@@ -80,7 +82,7 @@ class SyncableFileSystemTest : public testing::Test {
     return file_system_context()->change_tracker();
   }
 
-  ScopedTempDir data_dir_;
+  base::ScopedTempDir data_dir_;
   MessageLoop message_loop_;
 
   CannedSyncableFileSystem file_system_;
@@ -175,15 +177,13 @@ TEST_F(SyncableFileSystemTest, ChangeTrackerSimple) {
   EXPECT_EQ(base::PLATFORM_FILE_OK,
             file_system_.TruncateFile(URL(kPath2), 2));  // Modifies it again.
 
-  std::vector<FileSystemURL> urls;
-  change_tracker()->GetChangedURLs(&urls);
-  std::set<FileSystemURL, FileSystemURL::Comparator> urlset;
-  urlset.insert(urls.begin(), urls.end());
+  FileSystemURLSet urls;
+  file_system_.GetChangedURLsInTracker(&urls);
 
-  EXPECT_EQ(3U, urlset.size());
-  EXPECT_TRUE(urlset.find(URL(kPath0)) != urlset.end());
-  EXPECT_TRUE(urlset.find(URL(kPath1)) != urlset.end());
-  EXPECT_TRUE(urlset.find(URL(kPath2)) != urlset.end());
+  EXPECT_EQ(3U, urls.size());
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath0)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath1)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath2)));
 
   VerifyAndClearChange(URL(kPath0),
                        FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
@@ -203,7 +203,7 @@ TEST_F(SyncableFileSystemTest, ChangeTrackerSimple) {
 
   // The changes will be offset.
   urls.clear();
-  change_tracker()->GetChangedURLs(&urls);
+  file_system_.GetChangedURLsInTracker(&urls);
   EXPECT_TRUE(urls.empty());
 
   // Recursively removes the kPath0 directory.
@@ -211,15 +211,13 @@ TEST_F(SyncableFileSystemTest, ChangeTrackerSimple) {
             file_system_.Remove(URL(kPath0), true /* recursive */));
 
   urls.clear();
-  urlset.clear();
-  change_tracker()->GetChangedURLs(&urls);
-  urlset.insert(urls.begin(), urls.end());
+  file_system_.GetChangedURLsInTracker(&urls);
 
   // kPath0 and its all chidren (kPath1 and kPath2) must have been deleted.
-  EXPECT_EQ(3U, urlset.size());
-  EXPECT_TRUE(urlset.find(URL(kPath0)) != urlset.end());
-  EXPECT_TRUE(urlset.find(URL(kPath1)) != urlset.end());
-  EXPECT_TRUE(urlset.find(URL(kPath2)) != urlset.end());
+  EXPECT_EQ(3U, urls.size());
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath0)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath1)));
+  EXPECT_TRUE(ContainsKey(urls, URL(kPath2)));
 
   VerifyAndClearChange(URL(kPath0),
                        FileChange(FileChange::FILE_CHANGE_DELETE,
@@ -230,6 +228,50 @@ TEST_F(SyncableFileSystemTest, ChangeTrackerSimple) {
   VerifyAndClearChange(URL(kPath2),
                        FileChange(FileChange::FILE_CHANGE_DELETE,
                                   SYNC_FILE_TYPE_FILE));
+}
+
+// Make sure directory operation is disabled (when it's configured so).
+TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
+  file_system_.EnableDirectoryOperations(false);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            file_system_.OpenFileSystem());
+
+  // Try some directory operations (which should fail).
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION,
+            file_system_.CreateDirectory(URL("dir")));
+
+  // Set up another (non-syncable) local file system.
+  LocalFileSystemTestOriginHelper other_file_system_(GURL("http://foo.com/"),
+                                                     kFileSystemTypeTemporary);
+  other_file_system_.SetUp(file_system_.file_system_context(), NULL);
+
+  // Create directory '/a' and file '/a/b' in the other file system.
+  const FileSystemURL kSrcDir = other_file_system_.CreateURLFromUTF8("/a");
+  const FileSystemURL kSrcChild = other_file_system_.CreateURLFromUTF8("/a/b");
+
+  bool created = false;
+  scoped_ptr<FileSystemOperationContext> operation_context;
+
+  operation_context.reset(other_file_system_.NewOperationContext());
+  operation_context->set_allowed_bytes_growth(1024);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            other_file_system_.file_util()->CreateDirectory(
+                operation_context.get(),
+                kSrcDir, false /* exclusive */, false /* recursive */));
+
+  operation_context.reset(other_file_system_.NewOperationContext());
+  operation_context->set_allowed_bytes_growth(1024);
+  EXPECT_EQ(base::PLATFORM_FILE_OK,
+            other_file_system_.file_util()->EnsureFileExists(
+                operation_context.get(), kSrcChild, &created));
+  EXPECT_TRUE(created);
+
+  // Now try copying the directory into the syncable file system, which should
+  // fail if directory operation is disabled. (http://crbug.com/161442)
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION,
+            file_system_.Copy(kSrcDir, URL("dest")));
+
+  other_file_system_.TearDown();
 }
 
 }  // namespace fileapi

@@ -31,7 +31,6 @@
 #include "chrome/browser/ui/gtk/tab_contents_container_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_source.h"
@@ -62,9 +61,10 @@ const GdkColor kFindFailureBackgroundColor = GDK_COLOR_RGB(255, 102, 102);
 const GdkColor kFindSuccessTextColor = GDK_COLOR_RGB(178, 178, 178);
 
 // Padding around the container.
-const int kBarPaddingTopBottom = 4;
+const int kBarPaddingTop = 2;
+const int kBarPaddingBottom = 3;
 const int kEntryPaddingLeft = 6;
-const int kCloseButtonPaddingLeft = 3;
+const int kCloseButtonPadding = 3;
 const int kBarPaddingRight = 4;
 
 // The height of the findbar dialog, as dictated by the size of the background
@@ -230,9 +230,9 @@ void FindBarGtk::InitWidgets() {
   // the slide effect.
   GtkWidget* hbox = gtk_hbox_new(false, 0);
   container_ = gtk_util::CreateGtkBorderBin(hbox, NULL,
-      kBarPaddingTopBottom, kBarPaddingTopBottom,
+      kBarPaddingTop, kBarPaddingBottom,
       kEntryPaddingLeft, kBarPaddingRight);
-  gtk_widget_set_size_request(container_, kFindBarWidth, -1);
+  gtk_widget_set_size_request(container_, kFindBarWidth, kFindBarHeight);
   ViewIDUtil::SetID(container_, VIEW_ID_FIND_IN_PAGE);
   gtk_widget_set_app_paintable(container_, TRUE);
 
@@ -240,9 +240,14 @@ void FindBarGtk::InitWidgets() {
                                            SlideAnimatorGtk::DOWN,
                                            0, false, true, NULL));
 
-  close_button_.reset(CustomDrawButton::CloseButton(theme_service_));
-  gtk_util::CenterWidgetInHBox(hbox, close_button_->widget(), true,
-                               kCloseButtonPaddingLeft);
+  GtkWidget* close_alignment = gtk_alignment_new(0, 0.6, 1, 0);
+  close_button_.reset(new CustomDrawButton(
+      theme_service_, IDR_TAB_CLOSE,
+      IDR_TAB_CLOSE_P, IDR_TAB_CLOSE_H, IDR_TAB_CLOSE,
+      GTK_STOCK_CLOSE, GTK_ICON_SIZE_MENU));
+  gtk_container_add(GTK_CONTAINER(close_alignment), close_button_->widget());
+  gtk_box_pack_end(GTK_BOX(hbox), close_alignment, FALSE, FALSE,
+                   kCloseButtonPadding);
   g_signal_connect(close_button_->widget(), "clicked",
                    G_CALLBACK(OnClickedThunk), this);
   gtk_widget_set_tooltip_text(close_button_->widget(),
@@ -459,7 +464,7 @@ void FindBarGtk::RestoreSavedFocus() {
   if (focus_store_.widget())
     gtk_widget_grab_focus(focus_store_.widget());
   else
-    find_bar_controller_->tab_contents()->web_contents()->Focus();
+    find_bar_controller_->web_contents()->Focus();
 }
 
 FindBarTesting* FindBarGtk::GetFindBarTesting() {
@@ -538,11 +543,12 @@ void FindBarGtk::Observe(int type,
 
     gtk_misc_set_alignment(GTK_MISC(match_count_label_), 0.5, 1.0);
 
+    // This is necessary to make the close button dark enough.
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button_->SetBackground(
         theme_service_->GetColor(ThemeService::COLOR_TAB_TEXT),
-        rb.GetImageNamed(IDR_CLOSE_BAR).AsBitmap(),
-        rb.GetImageNamed(IDR_CLOSE_BAR_MASK).AsBitmap());
+        rb.GetImageNamed(IDR_TAB_CLOSE).AsBitmap(),
+        rb.GetImageNamed(IDR_TAB_CLOSE).AsBitmap());
   }
 
   UpdateMatchLabelAppearance(match_label_failure_);
@@ -588,11 +594,10 @@ int FindBarGtk::GetWidth() {
 }
 
 void FindBarGtk::FindEntryTextInContents(bool forward_search) {
-  TabContents* tab_contents = find_bar_controller_->tab_contents();
-  if (!tab_contents)
+  content::WebContents* web_contents = find_bar_controller_->web_contents();
+  if (!web_contents)
     return;
-  FindTabHelper* find_tab_helper =
-      FindTabHelper::FromWebContents(tab_contents->web_contents());
+  FindTabHelper* find_tab_helper = FindTabHelper::FromWebContents(web_contents);
 
   std::string new_contents(gtk_entry_get_text(GTK_ENTRY(text_entry_)));
 
@@ -674,12 +679,11 @@ bool FindBarGtk::MaybeForwardKeyEventToRenderer(GdkEventKey* event) {
       return false;
   }
 
-  TabContents* contents = find_bar_controller_->tab_contents();
+  content::WebContents* contents = find_bar_controller_->web_contents();
   if (!contents)
     return false;
 
-  content::RenderViewHost* render_view_host =
-      contents->web_contents()->GetRenderViewHost();
+  content::RenderViewHost* render_view_host = contents->GetRenderViewHost();
 
   // Make sure we don't have a text field element interfering with keyboard
   // input. Otherwise Up and Down arrow key strokes get eaten. "Nom Nom Nom".
@@ -798,6 +802,17 @@ gboolean FindBarGtk::OnKeyPressEvent(GtkWidget* widget, GdkEventKey* event,
       return TRUE;
     }
 
+    bool forward = (event->state & gtk_accelerator_get_default_mod_mask()) !=
+                   GDK_SHIFT_MASK;
+    find_bar->FindEntryTextInContents(forward);
+    return TRUE;
+  } else if (GDK_F3 == event->keyval) {
+    // There is a bug in GTK+ version available with Ubuntu 12.04 which causes
+    // Shift+Fn key combination getting registered as Fn when used with
+    // GTK accelerators. And this broke the search backward functionality with
+    // Shift+F3. This is a workaround to fix the search functionality till we
+    // have the GTK+ fix available. The GTK+ issue is being tracked under
+    // https://bugzilla.gnome.org/show_bug.cgi?id=661973
     bool forward = (event->state & gtk_accelerator_get_default_mod_mask()) !=
                    GDK_SHIFT_MASK;
     find_bar->FindEntryTextInContents(forward);

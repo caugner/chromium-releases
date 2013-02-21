@@ -67,38 +67,27 @@ AcceleratorFilter::~AcceleratorFilter() {
 ////////////////////////////////////////////////////////////////////////////////
 // AcceleratorFilter, EventFilter implementation:
 
-bool AcceleratorFilter::PreHandleKeyEvent(aura::Window* target,
-                                          ui::KeyEvent* event) {
+void AcceleratorFilter::OnKeyEvent(ui::KeyEvent* event) {
   const ui::EventType type = event->type();
   if (type != ui::ET_KEY_PRESSED && type != ui::ET_KEY_RELEASED)
-    return false;
+    return;
   if (event->is_char())
-    return false;
+    return;
 
   ui::Accelerator accelerator(event->key_code(),
                               event->flags() & kModifierFlagMask);
   accelerator.set_type(type);
 
+  // Fill out context object so AcceleratorController will know what
+  // was the previous accelerator or if the current accelerator is repeated.
+  Shell::GetInstance()->accelerator_controller()->context()->
+      UpdateContext(accelerator);
+
+  aura::Window* target = static_cast<aura::Window*>(event->target());
   if (!ShouldProcessAcceleratorsNow(accelerator, target))
-    return false;
-  return Shell::GetInstance()->accelerator_controller()->Process(accelerator);
-}
-
-bool AcceleratorFilter::PreHandleMouseEvent(aura::Window* target,
-                                            ui::MouseEvent* event) {
-  return false;
-}
-
-ui::TouchStatus AcceleratorFilter::PreHandleTouchEvent(
-    aura::Window* target,
-    ui::TouchEvent* event) {
-  return ui::TOUCH_STATUS_UNKNOWN;
-}
-
-ui::EventResult AcceleratorFilter::PreHandleGestureEvent(
-    aura::Window* target,
-    ui::GestureEvent* event) {
-  return ui::ER_UNHANDLED;
+    return;
+  if (Shell::GetInstance()->accelerator_controller()->Process(accelerator))
+    event->StopPropagation();
 }
 
 }  // namespace internal

@@ -8,7 +8,6 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
-import android.graphics.drawable.ColorDrawable;
 import android.os.SystemClock;
 import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
@@ -43,6 +42,12 @@ public class PopupZoomerTest extends InstrumentationTestCase {
             super.onDraw(c);
         }
 
+        // Test doesn't attach PopupZoomer to the view hierarchy,
+        // but onDraw() should still go on.
+        protected boolean acceptZeroSizeView() {
+            return true;
+        }
+
         public void finishPendingDraws() {
             // Finish all pending draw calls. A draw call may change mPendingDraws.
             while (mPendingDraws > 0) {
@@ -67,7 +72,6 @@ public class PopupZoomerTest extends InstrumentationTestCase {
 
     @Override
     public void setUp() {
-        PopupZoomer.injectOverlayDrawable(new ColorDrawable());
         mPopupZoomer = createPopupZoomerForTest(getInstrumentation().getTargetContext());
     }
 

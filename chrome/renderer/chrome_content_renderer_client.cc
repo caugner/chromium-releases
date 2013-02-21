@@ -68,11 +68,16 @@
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_view_visitor.h"
+#include "extensions/common/constants.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/renderer_resources.h"
 #include "ipc/ipc_sync_channel.h"
 #include "net/base/net_errors.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
@@ -80,9 +85,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -142,6 +144,24 @@ static void AppendParams(const std::vector<string16>& additional_names,
   existing_values->swap(values);
 }
 
+class SpellCheckReplacer : public content::RenderViewVisitor {
+ public:
+  explicit SpellCheckReplacer(SpellCheck* spellcheck)
+      : spellcheck_(spellcheck) {}
+  virtual bool Visit(content::RenderView* render_view) OVERRIDE;
+
+ private:
+  SpellCheck* spellcheck_;  // New shared spellcheck for all views. Weak Ptr.
+  DISALLOW_COPY_AND_ASSIGN(SpellCheckReplacer);
+};
+
+bool SpellCheckReplacer::Visit(content::RenderView* render_view) {
+  SpellCheckProvider* provider = SpellCheckProvider::Get(render_view);
+  DCHECK(provider);
+  provider->set_spellcheck(spellcheck_);
+  return true;
+}
+
 }  // namespace
 
 namespace chrome {
@@ -158,7 +178,7 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   net_predictor_.reset(new RendererNetPredictor());
   spellcheck_.reset(new SpellCheck());
   visited_link_slave_.reset(new VisitedLinkSlave());
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING)
   phishing_classifier_.reset(safe_browsing::PhishingClassifierFilter::Create());
 #endif
   prerender_dispatcher_.reset(new prerender::PrerenderDispatcher());
@@ -167,7 +187,7 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   thread->AddObserver(chrome_observer_.get());
   thread->AddObserver(extension_dispatcher_.get());
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING)
   thread->AddObserver(phishing_classifier_.get());
 #endif
   thread->AddObserver(spellcheck_.get());
@@ -218,7 +238,7 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   // content warnings.
   WebSecurityPolicy::registerURLSchemeAsSecure(chrome_ui_scheme);
 
-  WebString extension_scheme(ASCIIToUTF16(chrome::kExtensionScheme));
+  WebString extension_scheme(ASCIIToUTF16(extensions::kExtensionScheme));
   WebSecurityPolicy::registerURLSchemeAsSecure(extension_scheme);
 
   // chrome-extension: resources should be allowed to receive CORS requests.
@@ -254,9 +274,9 @@ void ChromeContentRendererClient::RenderViewCreated(
   new PrintWebViewHelper(render_view);
 #endif
   new SearchBox(render_view);
-  new SpellCheckProvider(render_view, this);
+  new SpellCheckProvider(render_view, spellcheck_.get());
   new prerender::PrerendererClient(render_view);
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING)
   safe_browsing::MalwareDOMDetails::Create(render_view);
 #endif
 
@@ -280,7 +300,9 @@ void ChromeContentRendererClient::RenderViewCreated(
       render_view, content_settings, chrome_observer_.get(),
       extension_dispatcher_.get(), translate);
 
+#if defined(ENABLE_PLUGINS)
   new PepperHelper(render_view);
+#endif
 
   // Used only for testing/automation.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -298,13 +320,18 @@ SkBitmap* ChromeContentRendererClient::GetSadPluginBitmap() {
       GetImageNamed(IDR_SAD_PLUGIN).ToSkBitmap());
 }
 
+SkBitmap* ChromeContentRendererClient::GetSadWebViewBitmap() {
+  return const_cast<SkBitmap*>(ResourceBundle::GetSharedInstance().
+      GetImageNamed(IDR_SAD_WEBVIEW).ToSkBitmap());
+}
+
 std::string ChromeContentRendererClient::GetDefaultEncoding() {
   return l10n_util::GetStringUTF8(IDS_DEFAULT_ENCODING);
 }
 
 const extensions::Extension* ChromeContentRendererClient::GetExtension(
     const WebSecurityOrigin& origin) const {
-  if (!EqualsASCII(origin.protocol(), chrome::kExtensionScheme))
+  if (!EqualsASCII(origin.protocol(), extensions::kExtensionScheme))
     return NULL;
 
   const std::string extension_id = origin.host().utf8().data();
@@ -523,7 +550,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         placeholder = PluginPlaceholder::CreateBlockedPlugin(
             render_view, frame, params, plugin, identifier, group_name,
             IDR_BLOCKED_PLUGIN_HTML,
-            l10n_util::GetStringUTF16(IDS_PLUGIN_NOT_SUPPORTED));
+            l10n_util::GetStringUTF16(IDS_PLUGIN_NOT_SUPPORTED_METRO));
         render_view->Send(new ChromeViewHostMsg_NPAPINotSupported(
             render_view->GetRoutingID(), identifier));
         break;
@@ -628,10 +655,10 @@ bool ChromeContentRendererClient::IsNaClAllowed(
   // Temporarily allow these URLs to run NaCl apps. We should remove this
   // code when PNaCl ships.
   bool is_whitelisted_url =
-      ((top_url.SchemeIs("http") || top_url.SchemeIs("https")) &&
+      top_url.SchemeIs("https") &&
       (top_url.host() == "plus.google.com" ||
           top_url.host() == "plus.sandbox.google.com") &&
-      top_url.path().find("/games") == 0);
+      top_url.path().find("/games") == 0;
 
   // Allow Chrome Web Store extensions, built-in extensions, extensions
   // under development, invocations from whitelisted URLs, and all invocations
@@ -697,7 +724,8 @@ void ChromeContentRendererClient::GetNavigationErrorStrings(
       error.domain == WebString::fromUTF8(net::kErrorDomain) &&
       EqualsASCII(failed_request.httpMethod(), "POST");
 
-  if (failed_url.is_valid() && !failed_url.SchemeIs(chrome::kExtensionScheme)) {
+  if (failed_url.is_valid() &&
+      !failed_url.SchemeIs(extensions::kExtensionScheme)) {
     extension = extension_dispatcher_->extensions()->GetExtensionOrAppByURL(
         ExtensionURLInfo(failed_url));
   }
@@ -725,7 +753,7 @@ void ChromeContentRendererClient::GetNavigationErrorStrings(
 
     const base::StringPiece template_html(
         ResourceBundle::GetSharedInstance().GetRawDataResource(
-            resource_id, ui::SCALE_FACTOR_NONE));
+            resource_id));
     if (template_html.empty()) {
       NOTREACHED() << "unable to load template. ID: " << resource_id;
     } else {
@@ -745,7 +773,7 @@ bool ChromeContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
   return !extension_dispatcher_->is_extension_process();
 }
 
-bool ChromeContentRendererClient::AllowPopup(const GURL& creator) {
+bool ChromeContentRendererClient::AllowPopup() {
   extensions::ChromeV8Context* current_context =
       extension_dispatcher_->v8_context_set().GetCurrent();
   return current_context && current_context->extension() &&
@@ -811,13 +839,15 @@ bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
   return false;
 }
 
-bool ChromeContentRendererClient::WillSendRequest(WebKit::WebFrame* frame,
+bool ChromeContentRendererClient::WillSendRequest(
+    WebKit::WebFrame* frame,
     content::PageTransition transition_type,
     const GURL& url,
+    const GURL& first_party_for_cookies,
     GURL* new_url) {
   // Check whether the request should be allowed. If not allowed, we reset the
   // URL to something invalid to prevent the request and cause an error.
-  if (url.SchemeIs(chrome::kExtensionScheme) &&
+  if (url.SchemeIs(extensions::kExtensionScheme) &&
       !extensions::ResourceRequestPolicy::CanRequestResource(
           url,
           frame,
@@ -956,13 +986,20 @@ bool ChromeContentRendererClient::CrossesExtensionExtents(
       should_consider_workaround);
 }
 
+void ChromeContentRendererClient::SetSpellcheck(SpellCheck* spellcheck) {
+  RenderThread* thread = RenderThread::Get();
+  if (spellcheck_.get() && thread)
+    thread->RemoveObserver(spellcheck_.get());
+  spellcheck_.reset(spellcheck);
+  SpellCheckReplacer replacer(spellcheck_.get());
+  content::RenderView::ForEach(&replacer);
+  if (thread)
+    thread->AddObserver(spellcheck_.get());
+}
+
 void ChromeContentRendererClient::OnPurgeMemory() {
   DVLOG(1) << "Resetting spellcheck in renderer client";
-  RenderThread* thread = RenderThread::Get();
-  if (spellcheck_.get())
-    thread->RemoveObserver(spellcheck_.get());
-  spellcheck_.reset(new SpellCheck());
-  thread->AddObserver(spellcheck_.get());
+  SetSpellcheck(new SpellCheck());
 }
 
 bool ChromeContentRendererClient::IsAdblockInstalled() {
@@ -989,7 +1026,9 @@ bool ChromeContentRendererClient::IsOtherExtensionWithWebRequestInstalled() {
 
 void ChromeContentRendererClient::RegisterPPAPIInterfaceFactories(
     webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) {
+#if defined(ENABLE_PLUGINS)
   factory_manager->RegisterFactory(ChromePPAPIInterfaceFactory);
+#endif
 }
 
 }  // namespace chrome

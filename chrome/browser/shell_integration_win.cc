@@ -41,6 +41,12 @@ using content::BrowserThread;
 
 namespace {
 
+#if defined(GOOGLE_CHROME_BUILD)
+const wchar_t kAppListAppName[] = L"ChromeAppList";
+#else
+const wchar_t kAppListAppName[] = L"ChromiumAppList";
+#endif
+
 // Helper function for ShellIntegration::GetAppId to generates profile id
 // from profile path. "profile_id" is composed of sanitized basenames of
 // user data dir and profile dir joined by a ".".
@@ -139,6 +145,8 @@ bool GetExpectedAppId(const FilePath& chrome_exe,
   } else if (command_line.HasSwitch(switches::kAppId)) {
     app_name = UTF8ToUTF16(web_app::GenerateApplicationNameFromExtensionId(
         command_line.GetSwitchValueASCII(switches::kAppId)));
+  } else if (command_line.HasSwitch(switches::kShowAppList)) {
+    app_name = kAppListAppName;
   } else {
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
     app_name = ShellUtil::GetBrowserModelId(
@@ -209,8 +217,8 @@ void MigrateChromiumShortcutsCallback() {
     const wchar_t* sub_dir;
   } kLocations[] = {
     {
-      base::DIR_APP_DATA,
-      L"Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar"
+      base::DIR_TASKBAR_PINS,
+      NULL
     }, {
       base::DIR_USER_DESKTOP,
       NULL
@@ -242,12 +250,12 @@ ShellIntegration::DefaultWebClientState
         ShellUtil::DefaultState default_state) {
   switch (default_state) {
     case ShellUtil::NOT_DEFAULT:
-      return ShellIntegration::NOT_DEFAULT_WEB_CLIENT;
+      return ShellIntegration::NOT_DEFAULT;
     case ShellUtil::IS_DEFAULT:
-      return ShellIntegration::IS_DEFAULT_WEB_CLIENT;
+      return ShellIntegration::IS_DEFAULT;
     default:
       DCHECK_EQ(ShellUtil::UNKNOWN_DEFAULT, default_state);
-      return ShellIntegration::UNKNOWN_DEFAULT_WEB_CLIENT;
+      return ShellIntegration::UNKNOWN_DEFAULT;
   }
 }
 
@@ -343,7 +351,7 @@ bool ShellIntegration::SetAsDefaultProtocolClientInteractive(
   return true;
 }
 
-ShellIntegration::DefaultWebClientState ShellIntegration::IsDefaultBrowser() {
+ShellIntegration::DefaultWebClientState ShellIntegration::GetDefaultBrowser() {
   return GetDefaultWebClientStateFromShellUtilDefaultState(
       ShellUtil::GetChromeDefaultState());
 }
@@ -411,29 +419,38 @@ string16 ShellIntegration::GetChromiumModelIdForProfile(
       profile_path);
 }
 
-string16 ShellIntegration::GetChromiumIconPath() {
-  // Determine the app path. If we can't determine what that is, we have
-  // bigger fish to fry...
-  FilePath app_path;
-  if (!PathService::Get(base::FILE_EXE, &app_path)) {
+string16 ShellIntegration::GetAppListAppModelIdForProfile(
+    const FilePath& profile_path) {
+  return ShellIntegration::GetAppModelIdForProfile(kAppListAppName,
+                                                   profile_path);
+}
+
+string16 ShellIntegration::GetChromiumIconLocation() {
+  // Determine the path to chrome.exe. If we can't determine what that is,
+  // we have bigger fish to fry...
+  FilePath chrome_exe;
+  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
     NOTREACHED();
     return string16();
   }
 
-  string16 icon_path(app_path.value());
-  icon_path.push_back(',');
-  icon_path += base::IntToString16(
+  return ShellUtil::FormatIconLocation(
+      chrome_exe.value(),
       BrowserDistribution::GetDistribution()->GetIconIndex());
-  return icon_path;
 }
 
 void ShellIntegration::MigrateChromiumShortcuts() {
   if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
 
-  BrowserThread::PostTask(
+  // This needs to happen eventually (e.g. so that the appid is fixed and the
+  // run-time Chrome icon is merged with the taskbar shortcut), but this is not
+  // urgent and shouldn't delay Chrome startup.
+  static const int64 kMigrateChromiumShortcutsDelaySeconds = 15;
+  BrowserThread::PostDelayedTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&MigrateChromiumShortcutsCallback));
+      base::Bind(&MigrateChromiumShortcutsCallback),
+      base::TimeDelta::FromSeconds(kMigrateChromiumShortcutsDelaySeconds));
 }
 
 FilePath ShellIntegration::GetStartMenuShortcut(const FilePath& chrome_exe) {

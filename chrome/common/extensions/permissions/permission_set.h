@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
 #include "chrome/common/extensions/permissions/permission_message.h"
-#include "chrome/common/extensions/url_pattern_set.h"
+#include "extensions/common/url_pattern_set.h"
 
 namespace extensions {
 
@@ -59,6 +59,11 @@ class PermissionSet
   static PermissionSet* CreateUnion(
       const PermissionSet* set1, const PermissionSet* set2);
 
+  // Creates a new permission set that only contains permissions that must be
+  // in the manifest.  Passes ownership of the new set to the caller.
+  static PermissionSet* ExcludeNotInManifestPermissions(
+      const PermissionSet* set);
+
   bool operator==(const PermissionSet& rhs) const;
 
   // Returns true if |set| is a subset of this.
@@ -98,8 +103,11 @@ class PermissionSet
       const APIPermission::CheckParam* param) const;
 
   // Returns true if the permissions in this set grant access to the specified
-  // |function_name|.
-  bool HasAccessToFunction(const std::string& function_name) const;
+  // |function_name|. The |allow_implicit| flag controls whether we
+  // want to strictly check against just the explicit permissions, or also
+  // include implicit "no permission needed" namespaces/functions.
+  bool HasAccessToFunction(const std::string& function_name,
+                           bool allow_implicit) const;
 
   // Returns true if this includes permission to access |origin|.
   bool HasExplicitAccessToOrigin(const GURL& origin) const;

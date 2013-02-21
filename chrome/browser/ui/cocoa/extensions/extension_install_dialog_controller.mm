@@ -8,9 +8,9 @@
 #include "base/message_loop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
 #include "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_install_view_controller.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
 
@@ -41,8 +41,11 @@ ExtensionInstallDialogController::ExtensionInstallDialogController(
       initWithContentRect:[[view_controller_ view] bounds]]);
   [[window contentView] addSubview:[view_controller_ view]];
 
-  constrained_window_.reset(new ConstrainedWindowMac2(
-      this, web_contents, window));
+  scoped_nsobject<CustomConstrainedWindowSheet> sheet(
+      [[CustomConstrainedWindowSheet alloc]
+          initWithCustomWindow:window]);
+  constrained_window_.reset(new ConstrainedWindowMac(
+      this, web_contents, sheet));
 }
 
 ExtensionInstallDialogController::~ExtensionInstallDialogController() {
@@ -61,7 +64,7 @@ void ExtensionInstallDialogController::InstallUIAbort(bool user_initiated) {
 }
 
 void ExtensionInstallDialogController::OnConstrainedWindowClosed(
-    ConstrainedWindowMac2* window) {
+    ConstrainedWindowMac* window) {
   if (delegate_)
     delegate_->InstallUIAbort(false);
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);

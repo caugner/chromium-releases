@@ -6,8 +6,8 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
-#include "base/scoped_temp_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
@@ -146,7 +146,7 @@ class NativeMediaFileUtilTest : public testing::Test {
  private:
   MessageLoop message_loop_;
 
-  ScopedTempDir data_dir_;
+  base::ScopedTempDir data_dir_;
   scoped_refptr<FileSystemContext> file_system_context_;
 
   FileSystemFileUtil* file_util_;
@@ -174,7 +174,7 @@ TEST_F(NativeMediaFileUtilTest, DirectoryExistsAndFileExistsFiltering) {
       operation->DirectoryExists(url, base::Bind(&ExpectEqHelper, expectation));
     else
       operation->FileExists(url, base::Bind(&ExpectEqHelper, expectation));
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
   }
 }
 
@@ -188,7 +188,7 @@ TEST_F(NativeMediaFileUtilTest, ReadDirectoryFiltering) {
   bool completed = false;
   NewOperation(url)->ReadDirectory(
       url, base::Bind(&DidReadDirectory, &content, &completed));
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   EXPECT_TRUE(completed);
   EXPECT_EQ(5u, content.size());
 

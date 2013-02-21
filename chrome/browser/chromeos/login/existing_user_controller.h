@@ -63,23 +63,24 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Tells the controller to resume a pending login.
   void ResumeLogin();
 
-  // Returns Getting Started Guide URL with parameters.
-  std::string GetGettingStartedGuideURL() const;
-
   // LoginDisplay::Delegate: implementation
+  virtual void CancelPasswordChangedFlow() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
-  virtual string16 GetConnectedNetworkName() OVERRIDE;
-  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
   virtual void CompleteLogin(const std::string& username,
                              const std::string& password) OVERRIDE;
+  virtual string16 GetConnectedNetworkName() OVERRIDE;
   virtual void Login(const std::string& username,
                      const std::string& password) OVERRIDE;
-  virtual void Signout() OVERRIDE;
-  virtual void LoginAsDemoUser() OVERRIDE;
+  virtual void MigrateUserData(const std::string& old_password) OVERRIDE;
+  virtual void LoginAsRetailModeUser() OVERRIDE;
   virtual void LoginAsGuest() OVERRIDE;
+  virtual void LoginAsPublicAccount(const std::string& username) OVERRIDE;
   virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
   virtual void OnStartDeviceReset() OVERRIDE;
+  virtual void ResyncUserData() OVERRIDE;
+  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
+  virtual void Signout() OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -162,6 +163,12 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Shows "reset device" screen.
   void ShowResetScreen();
+
+  // Shows "critical TPM error" screen and starts reboot timer.
+  void ShowTPMErrorAndScheduleReboot();
+
+  // Reboot timer handler.
+  void OnRebootTimeElapsed();
 
   // Invoked to complete login. Login might be suspended if auto-enrollment
   // has to be performed, and will resume once auto-enrollment completes.
@@ -256,6 +263,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Time when the signin screen was first displayed. Used to measure the time
   // from showing the screen until a successful login is performed.
   base::Time time_init_;
+
+  // Timer for the interval to wait for the reboot after TPM error UI was shown.
+  base::OneShotTimer<ExistingUserController> reboot_timer_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
 

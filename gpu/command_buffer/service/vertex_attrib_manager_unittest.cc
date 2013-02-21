@@ -5,10 +5,10 @@
 #include "gpu/command_buffer/service/vertex_attrib_manager.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/gl_mock.h"
 
 using ::testing::Pointee;
 using ::testing::_;
@@ -77,10 +77,6 @@ TEST_F(VertexAttribManagerTest, Basic) {
     EXPECT_EQ(GL_FALSE, info->normalized());
     EXPECT_EQ(0, info->gl_stride());
     EXPECT_FALSE(info->enabled());
-    EXPECT_EQ(0.0f, info->value().v[0]);
-    EXPECT_EQ(0.0f, info->value().v[1]);
-    EXPECT_EQ(0.0f, info->value().v[2]);
-    EXPECT_EQ(1.0f, info->value().v[3]);
     manager_->Enable(ii, true);
     EXPECT_TRUE(info->enabled());
   }

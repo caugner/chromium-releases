@@ -40,7 +40,7 @@ class JsSyncManagerObserverTest : public testing::Test {
   JsSyncManagerObserver js_sync_manager_observer_;
 
   void PumpLoop() {
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
   }
 };
 
@@ -67,32 +67,34 @@ TEST_F(JsSyncManagerObserverTest, OnInitializationComplete) {
                             HasDetailsAsDictionary(expected_details)));
 
   js_sync_manager_observer_.OnInitializationComplete(
-      WeakHandle<JsBackend>(), true, restored_types);
+      WeakHandle<JsBackend>(),
+      WeakHandle<DataTypeDebugInfoListener>(),
+      true,
+      restored_types);
   PumpLoop();
 }
 
 TEST_F(JsSyncManagerObserverTest, OnSyncCycleCompleted) {
-  sessions::SyncSessionSnapshot snapshot(sessions::ModelNeutralState(),
-                                         false,
-                                         ModelTypeSet(),
-                                         ProgressMarkerMap(),
-                                         false,
-                                         true,
-                                         8,
-                                         5,
-                                         2,
-                                         7,
-                                         sessions::SyncSourceInfo(),
-                                         false,
-                                         0,
-                                         base::Time::Now(),
-                                         false);
+  sessions::SyncSessionSnapshot snapshot(
+      sessions::ModelNeutralState(),
+      ProgressMarkerMap(),
+      false,
+      5,
+      2,
+      7,
+      sessions::SyncSourceInfo(),
+      std::vector<sessions::SyncSourceInfo>(),
+      false,
+      0,
+      base::Time::Now(),
+      std::vector<int>(MODEL_TYPE_COUNT, 0),
+      std::vector<int>(MODEL_TYPE_COUNT, 0));
   DictionaryValue expected_details;
   expected_details.Set("snapshot", snapshot.ToValue());
 
   EXPECT_CALL(mock_js_event_handler_,
               HandleJsEvent("onSyncCycleCompleted",
-                           HasDetailsAsDictionary(expected_details)));
+                            HasDetailsAsDictionary(expected_details)));
 
   js_sync_manager_observer_.OnSyncCycleCompleted(snapshot);
   PumpLoop();

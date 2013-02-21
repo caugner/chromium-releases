@@ -50,14 +50,24 @@ enum WindowPersistsAcrossAllWorkspacesType {
 // Sets whether |window| is ignored when determining whether the shelf should
 // be darkened when overlapped.
 ASH_EXPORT void SetIgnoredByShelf(aura::Window* window, bool value);
-ASH_EXPORT bool GetIgnoredByShelf(aura::Window* window);
+ASH_EXPORT bool GetIgnoredByShelf(const aura::Window* window);
+
+// Sets whether |window| should always be restored to the restore bounds
+// (sometimes the workspace layout manager restores the window to its original
+// bounds instead of the restore bounds. Setting this key overrides that
+// behaviour). The flag is reset to the default value after the window is
+// restored.
+ASH_EXPORT void SetWindowAlwaysRestoresToRestoreBounds(aura::Window* window,
+                                                       bool value);
+ASH_EXPORT bool GetWindowAlwaysRestoresToRestoreBounds(
+    const aura::Window* window);
 
 // Sets whether the specified window is tracked by workspace code. Default is
 // true. If set to false the workspace does not switch the current workspace,
 // nor does it attempt to impose constraints on the bounds of the window. This
 // is intended for tab dragging.
 ASH_EXPORT void SetTrackedByWorkspace(aura::Window* window, bool value);
-ASH_EXPORT bool GetTrackedByWorkspace(aura::Window* window);
+ASH_EXPORT bool GetTrackedByWorkspace(const aura::Window* window);
 
 // Makes |window| persist across all workspaces. The default is controlled
 // by SetDefaultPersistsAcrossAllWorkspaces().

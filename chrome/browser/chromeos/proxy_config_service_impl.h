@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/values.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
 
@@ -193,6 +193,11 @@ class ProxyConfigServiceImpl
   virtual void OnNetworkChanged(NetworkLibrary* cros,
                                 const Network* network) OVERRIDE;
 
+  // Parse |network| proxy config and store result in |proxy_config|.
+  // Returns true if proxy config was successfully parsed.
+  static bool ParseProxyConfig(const Network* network,
+                               net::ProxyConfig* proxy_config);
+
   // Register UseShardProxies preference.
   static void RegisterPrefs(PrefService* pref_service);
 
@@ -208,10 +213,8 @@ class ProxyConfigServiceImpl
 #endif  // defined(UNIT_TEST)
 
  private:
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // Called when the kUseSharedProxies preference changes.
+  void OnUseSharedProxiesChanged();
 
   // Called from the various UISetProxyConfigTo*.
   void OnUISetProxyConfig();

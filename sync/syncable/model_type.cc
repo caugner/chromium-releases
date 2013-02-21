@@ -93,7 +93,6 @@ ModelType GetModelTypeFromSpecificsFieldNumber(int field_number) {
     if (GetSpecificsFieldNumberFromModelType(model_type) == field_number)
       return model_type;
   }
-  NOTREACHED();
   return UNSPECIFIED;
 }
 
@@ -280,12 +279,6 @@ ModelTypeSet ControlTypes() {
   for (int i = FIRST_CONTROL_MODEL_TYPE; i <= LAST_CONTROL_MODEL_TYPE; ++i) {
     set.Put(ModelTypeFromInt(i));
   }
-
-  // TODO(rlarocque): Re-enable this when the server supports it.
-  set.Remove(DEVICE_INFO);
-
-  // TODO(rlarocque): Re-enable this when the server supports it.
-  set.Remove(EXPERIMENTS);
 
   return set;
 }

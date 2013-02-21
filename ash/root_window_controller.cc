@@ -9,8 +9,9 @@
 #include "ash/ash_switches.h"
 #include "ash/desktop_background/desktop_background_widget_controller.h"
 #include "ash/display/display_controller.h"
-#include "ash/display/multi_display_manager.h"
+#include "ash/display/display_manager.h"
 #include "ash/focus_cycler.h"
+#include "ash/shelf_types.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_factory.h"
@@ -18,26 +19,26 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/wm/base_layout_manager.h"
+#include "ash/wm/boot_splash_screen.h"
 #include "ash/wm/panel_layout_manager.h"
 #include "ash/wm/panel_window_event_filter.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/root_window_layout_manager.h"
 #include "ash/wm/screen_dimmer.h"
 #include "ash/wm/shelf_layout_manager.h"
-#include "ash/wm/shelf_types.h"
 #include "ash/wm/status_area_layout_manager.h"
 #include "ash/wm/system_background_controller.h"
 #include "ash/wm/system_modal_container_layout_manager.h"
 #include "ash/wm/toplevel_window_event_handler.h"
-#include "ash/wm/visibility_controller.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/command_line.h"
+#include "base/time.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/tooltip_client.h"
-#include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -47,11 +48,23 @@
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/corewm/visibility_controller.h"
 #include "ui/views/view_model.h"
 #include "ui/views/view_model_utils.h"
 
 namespace ash {
 namespace {
+
+#if defined(OS_CHROMEOS)
+// Background color used for the Chrome OS boot splash screen.
+const SkColor kChromeOsBootColor = SkColorSetARGB(0xff, 0xfe, 0xfe, 0xfe);
+#endif
+
+// Duration for the animation that hides the boot splash screen, in
+// milliseconds.  This should be short enough in relation to
+// wm/window_animation.cc's brightness/grayscale fade animation that the login
+// background image animation isn't hidden by the splash screen animation.
+const int kBootSplashScreenHideDurationMs = 500;
 
 // Creates a new window for use as a container.
 aura::Window* CreateContainer(int window_id,
@@ -105,9 +118,10 @@ void ReparentAllWindows(aura::RootWindow* src, aura::RootWindow* dst) {
     internal::kShellWindowId_SystemModalContainer,
     internal::kShellWindowId_LockSystemModalContainer,
     internal::kShellWindowId_InputMethodContainer,
+    internal::kShellWindowId_UnparentedControlContainer,
   };
-  // For Workspace2 we need to manually reparent the windows. This way
-  // Workspace2 can move the windows to the appropriate workspace.
+  // For workspace windows we need to manually reparent the windows. This way
+  // workspace can move the windows to the appropriate workspace.
   std::vector<aura::Window*> windows(GetWorkspaceWindows(src));
   internal::WorkspaceController* workspace_controller =
       GetRootWindowController(dst)->workspace_controller();
@@ -163,12 +177,21 @@ RootWindowController::~RootWindowController() {
 }
 
 // static
-internal::RootWindowController*
-RootWindowController::ForLauncher(aura::Window* window) {
+RootWindowController* RootWindowController::ForLauncher(aura::Window* window) {
   if (Shell::IsLauncherPerDisplayEnabled())
     return GetRootWindowController(window->GetRootWindow());
   else
     return Shell::GetPrimaryRootWindowController();
+}
+
+// static
+RootWindowController* RootWindowController::ForWindow(aura::Window* window) {
+  return GetRootWindowController(window->GetRootWindow());
+}
+
+// static
+RootWindowController* RootWindowController::ForActiveRootWindow() {
+  return GetRootWindowController(Shell::GetActiveRootWindow());
 }
 
 void RootWindowController::Shutdown() {
@@ -201,13 +224,15 @@ SystemModalContainerLayoutManager*
 RootWindowController::GetSystemModalLayoutManager(aura::Window* window) {
   aura::Window* container = NULL;
   if (window) {
-    container = GetContainer(
-        kShellWindowId_LockSystemModalContainer);
-    if (!container->Contains(window))
+    if (window->parent() &&
+        window->parent()->id() >= kShellWindowId_LockScreenContainer) {
+      container = GetContainer(kShellWindowId_LockSystemModalContainer);
+    } else {
       container = GetContainer(kShellWindowId_SystemModalContainer);
+    }
   } else {
-    user::LoginStatus login = Shell::GetInstance()->tray_delegate() ?
-        Shell::GetInstance()->tray_delegate()->GetUserLoginStatus() :
+    user::LoginStatus login = Shell::GetInstance()->system_tray_delegate() ?
+        Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus() :
         user::LOGGED_IN_NONE;
     int modal_window_id = (login == user::LOGGED_IN_LOCKED ||
                            login == user::LOGGED_IN_NONE) ?
@@ -243,14 +268,14 @@ void RootWindowController::InitLayoutManagers() {
 
 void RootWindowController::InitForPrimaryDisplay() {
   DCHECK(!status_area_widget_);
-  ShellDelegate* delegate = Shell::GetInstance()->delegate();
   aura::Window* status_container =
       GetContainer(ash::internal::kShellWindowId_StatusContainer);
   // Initialize Primary RootWindow specific items.
   status_area_widget_ = new internal::StatusAreaWidget(status_container);
-  status_area_widget_->CreateTrayViews(delegate);
+  status_area_widget_->CreateTrayViews();
   // Login screen manages status area visibility by itself.
-  if (delegate && delegate->IsSessionStarted())
+  ShellDelegate* shell_delegate = Shell::GetInstance()->delegate();
+  if (shell_delegate->IsSessionStarted())
     status_area_widget_->Show();
 
   Shell::GetInstance()->focus_cycler()->AddWidget(status_area_widget_);
@@ -271,17 +296,21 @@ void RootWindowController::InitForPrimaryDisplay() {
 
   workspace_controller()->SetShelf(shelf_);
 
-  // Create Panel layout manager
-  aura::Window* panel_container = GetContainer(
-      internal::kShellWindowId_PanelContainer);
-  panel_layout_manager_ =
-      new internal::PanelLayoutManager(panel_container);
-  panel_container->SetEventFilter(
-      new internal::PanelWindowEventFilter(
-          panel_container, panel_layout_manager_));
-  panel_container->SetLayoutManager(panel_layout_manager_);
+  // TODO(oshima): Disable panels on non primary display for now.
+  // crbug.com/166195.
+  if (root_window_ == Shell::GetPrimaryRootWindow()) {
+    // Create Panel layout manager
+    aura::Window* panel_container = GetContainer(
+        internal::kShellWindowId_PanelContainer);
+    panel_layout_manager_ =
+        new internal::PanelLayoutManager(panel_container);
+    panel_container->AddPreTargetHandler(
+        new internal::PanelWindowEventFilter(
+            panel_container, panel_layout_manager_));
+    panel_container->SetLayoutManager(panel_layout_manager_);
+  }
 
-  if (!delegate || delegate->IsUserLoggedIn())
+  if (shell_delegate->IsUserLoggedIn())
     CreateLauncher();
 }
 
@@ -291,21 +320,24 @@ void RootWindowController::CreateContainers() {
 
 void RootWindowController::CreateSystemBackground(
     bool is_first_run_after_boot) {
-  SystemBackgroundController::Content initial_content =
-      SystemBackgroundController::CONTENT_BLACK;
+  SkColor color = SK_ColorBLACK;
 #if defined(OS_CHROMEOS)
-  if (is_first_run_after_boot) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kAshCopyHostBackgroundAtBoot)) {
-      initial_content = SystemBackgroundController::CONTENT_COPY_FROM_HOST;
-    } else {
-      initial_content =
-          SystemBackgroundController::CONTENT_CHROME_OS_BOOT_COLOR;
-    }
-  }
+  if (is_first_run_after_boot)
+    color = kChromeOsBootColor;
 #endif
   system_background_.reset(
-      new SystemBackgroundController(root_window_.get(), initial_content));
+      new SystemBackgroundController(root_window_.get(), color));
+
+#if defined(OS_CHROMEOS)
+  // Make a copy of the system's boot splash screen so we can composite it
+  // onscreen until the desktop background is ready.
+  if (is_first_run_after_boot &&
+      (CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kAshCopyHostBackgroundAtBoot) ||
+       CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kAshAnimateFromBootSplashScreen)))
+    boot_splash_screen_.reset(new BootSplashScreen(root_window_.get()));
+#endif
 }
 
 void RootWindowController::CreateLauncher() {
@@ -314,7 +346,13 @@ void RootWindowController::CreateLauncher() {
 
   aura::Window* default_container =
       GetContainer(internal::kShellWindowId_DefaultContainer);
-  launcher_.reset(new Launcher(default_container, shelf_));
+  // Get the delegate first to make sure the launcher model is created.
+  LauncherDelegate* launcher_delegate =
+      Shell::GetInstance()->GetLauncherDelegate();
+  launcher_.reset(new Launcher(Shell::GetInstance()->launcher_model(),
+                               launcher_delegate,
+                               default_container,
+                               shelf_));
 
   launcher_->SetFocusCycler(Shell::GetInstance()->focus_cycler());
   shelf_->SetLauncher(launcher_.get());
@@ -332,6 +370,7 @@ void RootWindowController::ShowLauncher() {
   if (!launcher_.get())
     return;
   launcher_->SetVisible(true);
+  status_area_widget_->Show();
 }
 
 void RootWindowController::OnLoginStateChanged(user::LoginStatus status) {
@@ -347,8 +386,20 @@ void RootWindowController::UpdateAfterLoginStatusChange(
     status_area_widget_->UpdateAfterLoginStatusChange(status);
 }
 
+void RootWindowController::HandleInitialDesktopBackgroundAnimationStarted() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshAnimateFromBootSplashScreen) &&
+      boot_splash_screen_.get()) {
+    // Make the splash screen fade out so it doesn't obscure the desktop
+    // wallpaper's brightness/grayscale animation.
+    boot_splash_screen_->StartHideAnimation(
+        base::TimeDelta::FromMilliseconds(kBootSplashScreenHideDurationMs));
+  }
+}
+
 void RootWindowController::HandleDesktopBackgroundVisible() {
-  system_background_->SetContent(SystemBackgroundController::CONTENT_BLACK);
+  system_background_->SetColor(SK_ColorBLACK);
+  boot_splash_screen_.reset();
 }
 
 void RootWindowController::CloseChildWindows() {
@@ -375,13 +426,13 @@ void RootWindowController::CloseChildWindows() {
     aura::Window* child = root_window_->children()[0];
     delete child;
   }
-
+  launcher_.reset();
   // All containers are deleted, so reset shelf_.
   shelf_ = NULL;
 }
 
 void RootWindowController::MoveWindowsTo(aura::RootWindow* dst) {
-  aura::Window* focused = dst->GetFocusManager()->GetFocusedWindow();
+  aura::Window* focused = aura::client::GetFocusClient(dst)->GetFocusedWindow();
   aura::WindowTracker tracker;
   if (focused)
     tracker.Add(focused);
@@ -399,16 +450,24 @@ void RootWindowController::MoveWindowsTo(aura::RootWindow* dst) {
   // window may be deleted when losing focus (fullscreen flash for
   // example).  If the focused window is still alive after move, it'll
   // be re-focused below.
-  dst->GetFocusManager()->SetFocusedWindow(NULL, NULL);
+  aura::client::GetFocusClient(dst)->FocusWindow(NULL, NULL);
 
   ReparentAllWindows(root_window_.get(), dst);
 
   // Restore focused or active window if it's still alive.
   if (focused && tracker.Contains(focused) && dst->Contains(focused)) {
-    dst->GetFocusManager()->SetFocusedWindow(focused, NULL);
+    aura::client::GetFocusClient(dst)->FocusWindow(focused, NULL);
   } else if (active && tracker.Contains(active) && dst->Contains(active)) {
     activation_client->ActivateWindow(active);
   }
+}
+
+SystemTray* RootWindowController::GetSystemTray() {
+  // We assume in throughout the code that this will not return NULL. If code
+  // triggers this for valid reasons, it should test status_area_widget first.
+  internal::StatusAreaWidget* status_area = status_area_widget();
+  CHECK(status_area);
+  return status_area->system_tray();
 }
 
 void RootWindowController::ShowContextMenu(
@@ -451,18 +510,7 @@ bool RootWindowController::SetShelfAlignment(ShelfAlignment alignment) {
 }
 
 ShelfAlignment RootWindowController::GetShelfAlignment() {
-  return shelf_->alignment();
-}
-
-bool RootWindowController::IsShelfAutoHideMenuHideChecked() {
-  return GetShelfAutoHideBehavior() == ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS;
-}
-
-ShelfAutoHideBehavior
-RootWindowController::GetToggledShelfAutoHideBehavior() {
-  return IsShelfAutoHideMenuHideChecked() ?
-      ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER :
-      ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS;
+  return shelf_->GetAlignment();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -484,7 +532,8 @@ void RootWindowController::CreateContainersInRootWindow(
       kShellWindowId_DesktopBackgroundContainer,
       "DesktopBackgroundContainer",
       root_window);
-  SetChildWindowVisibilityChangesAnimated(desktop_background_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(
+      desktop_background_container);
 
   aura::Window* non_lock_screen_containers = CreateContainer(
       kShellWindowId_NonLockScreenContainersContainer,
@@ -495,7 +544,8 @@ void RootWindowController::CreateContainersInRootWindow(
       kShellWindowId_LockScreenBackgroundContainer,
       "LockScreenBackgroundContainer",
       root_window);
-  SetChildWindowVisibilityChangesAnimated(lock_background_containers);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(
+      lock_background_containers);
 
   aura::Window* lock_screen_containers = CreateContainer(
       kShellWindowId_LockScreenContainersContainer,
@@ -514,7 +564,7 @@ void RootWindowController::CreateContainersInRootWindow(
       kShellWindowId_DefaultContainer,
       "DefaultContainer",
       non_lock_screen_containers);
-  SetChildWindowVisibilityChangesAnimated(default_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(default_container);
   SetUsesScreenCoordinates(default_container);
 
   aura::Window* always_on_top_container = CreateContainer(
@@ -523,7 +573,8 @@ void RootWindowController::CreateContainersInRootWindow(
       non_lock_screen_containers);
   always_on_top_container_handler_.reset(
       new ToplevelWindowEventHandler(always_on_top_container));
-  SetChildWindowVisibilityChangesAnimated(always_on_top_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(
+      always_on_top_container);
   SetUsesScreenCoordinates(always_on_top_container);
 
   aura::Window* panel_container = CreateContainer(
@@ -552,7 +603,7 @@ void RootWindowController::CreateContainersInRootWindow(
       new ToplevelWindowEventHandler(modal_container));
   modal_container->SetLayoutManager(
       new SystemModalContainerLayoutManager(modal_container));
-  SetChildWindowVisibilityChangesAnimated(modal_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(modal_container);
   SetUsesScreenCoordinates(modal_container);
 
   aura::Window* input_method_container = CreateContainer(
@@ -580,7 +631,7 @@ void RootWindowController::CreateContainersInRootWindow(
       new ToplevelWindowEventHandler(lock_modal_container));
   lock_modal_container->SetLayoutManager(
       new SystemModalContainerLayoutManager(lock_modal_container));
-  SetChildWindowVisibilityChangesAnimated(lock_modal_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(lock_modal_container);
   SetUsesScreenCoordinates(lock_modal_container);
 
   aura::Window* status_container =
@@ -593,21 +644,22 @@ void RootWindowController::CreateContainersInRootWindow(
       kShellWindowId_SettingBubbleContainer,
       "SettingBubbleContainer",
       lock_screen_related_containers);
-  SetChildWindowVisibilityChangesAnimated(settings_bubble_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(
+      settings_bubble_container);
   SetUsesScreenCoordinates(settings_bubble_container);
 
   aura::Window* menu_container = CreateContainer(
       kShellWindowId_MenuContainer,
       "MenuContainer",
       lock_screen_related_containers);
-  SetChildWindowVisibilityChangesAnimated(menu_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(menu_container);
   SetUsesScreenCoordinates(menu_container);
 
   aura::Window* drag_drop_container = CreateContainer(
       kShellWindowId_DragImageAndTooltipContainer,
       "DragImageAndTooltipContainer",
       lock_screen_related_containers);
-  SetChildWindowVisibilityChangesAnimated(drag_drop_container);
+  views::corewm::SetChildWindowVisibilityChangesAnimated(drag_drop_container);
   SetUsesScreenCoordinates(drag_drop_container);
 
   aura::Window* overlay_container = CreateContainer(

@@ -516,6 +516,22 @@ TEST_F(BookmarkModelTest, Move) {
   EXPECT_EQ(0, root->child_count());
 }
 
+TEST_F(BookmarkModelTest, NonMovingMoveCall) {
+  const BookmarkNode* root = model_.bookmark_bar_node();
+  const string16 title(ASCIIToUTF16("foo"));
+  const GURL url("http://foo.com");
+  const base::Time old_date(base::Time::Now() - base::TimeDelta::FromDays(1));
+
+  const BookmarkNode* node = model_.AddURL(root, 0, title, url);
+  model_.SetDateFolderModified(root, old_date);
+
+  // Since |node| is already at the index 0 of |root|, this is no-op.
+  model_.Move(node, root, 0);
+
+  // Check that the modification date is kept untouched.
+  EXPECT_EQ(old_date, root->date_folder_modified());
+}
+
 TEST_F(BookmarkModelTest, Copy) {
   const BookmarkNode* root = model_.bookmark_bar_node();
   static const std::string model_string("a 1:[ b c ] d 2:[ e f g ] h ");
@@ -705,80 +721,6 @@ TEST_F(BookmarkModelTest, HasBookmarks) {
   model_.AddURL(model_.bookmark_bar_node(), 0, ASCIIToUTF16("bar"), url);
 
   EXPECT_TRUE(model_.HasBookmarks());
-}
-
-// content::NotificationObserver implementation used in verifying we've received
-// the NOTIFY_URLS_STARRED method correctly.
-class StarredListener : public content::NotificationObserver {
- public:
-  StarredListener() : notification_count_(0), details_(false) {
-    registrar_.Add(this, chrome::NOTIFICATION_URLS_STARRED,
-                   content::Source<Profile>(NULL));
-  }
-
-  // NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
-    if (type == chrome::NOTIFICATION_URLS_STARRED) {
-      notification_count_++;
-      details_ =
-          *(content::Details<history::URLsStarredDetails>(details).ptr());
-    }
-  }
-
-  // Number of times NOTIFY_URLS_STARRED has been observed.
-  int notification_count_;
-
-  // Details from the last NOTIFY_URLS_STARRED.
-  history::URLsStarredDetails details_;
-
- private:
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(StarredListener);
-};
-
-// Makes sure NOTIFY_URLS_STARRED is sent correctly.
-TEST_F(BookmarkModelTest, NotifyURLsStarred) {
-  StarredListener listener;
-  const GURL url("http://foo.com/0");
-  const BookmarkNode* n1 = model_.AddURL(
-      model_.bookmark_bar_node(), 0, ASCIIToUTF16("blah"), url);
-
-  // Starred notification should be sent.
-  EXPECT_EQ(1, listener.notification_count_);
-  ASSERT_TRUE(listener.details_.starred);
-  ASSERT_EQ(1U, listener.details_.changed_urls.size());
-  EXPECT_TRUE(url == *(listener.details_.changed_urls.begin()));
-  listener.notification_count_ = 0;
-  listener.details_.changed_urls.clear();
-
-  // Add another bookmark for the same URL. This should not send any
-  // notification.
-  const BookmarkNode* n2 = model_.AddURL(
-      model_.bookmark_bar_node(), 1, ASCIIToUTF16("blah"), url);
-
-  EXPECT_EQ(0, listener.notification_count_);
-
-  // Remove n2.
-  model_.Remove(n2->parent(), 1);
-  n2 = NULL;
-
-  // Shouldn't have received any notification as n1 still exists with the same
-  // URL.
-  EXPECT_EQ(0, listener.notification_count_);
-
-  EXPECT_TRUE(model_.GetMostRecentlyAddedNodeForURL(url) == n1);
-
-  // Remove n1.
-  model_.Remove(n1->parent(), 0);
-
-  // Now we should get the notification.
-  EXPECT_EQ(1, listener.notification_count_);
-  ASSERT_FALSE(listener.details_.starred);
-  ASSERT_EQ(1U, listener.details_.changed_urls.size());
-  EXPECT_TRUE(url == *(listener.details_.changed_urls.begin()));
 }
 
 // See comment in PopulateNodeFromString.

@@ -142,6 +142,11 @@ class ThumbnailDatabase {
                         scoped_refptr<base::RefCountedMemory> bitmap_data,
                         base::Time time);
 
+  // Sets the last updated time for the favicon bitmap at |bitmap_id|.
+  // Returns true if successful.
+  bool SetFaviconBitmapLastUpdateTime(FaviconBitmapID bitmap_id,
+                                      base::Time time);
+
   // Deletes the favicon bitmaps for the favicon with with |icon_id|.
   // Returns true if successful.
   bool DeleteFaviconBitmapsForFavicon(FaviconID icon_id);
@@ -375,6 +380,14 @@ class ThumbnailDatabase {
   // over the newly-renamed icon_mapping table (formerly the temporary table
   // with no index).
   bool InitIconMappingIndex();
+
+  // For the purpose of determining how widespread crbug.com/151841 is, log in a
+  // UMA histogram if the |favicons| database is missing a column. This is
+  // important because the SQLite error code from running SQL statements against
+  // a database with missing columns is SQLITE_ERROR which is not unique enough
+  // to act upon.
+  // TODO(pkotwicz): remove this function once crbug.com/151841 is resolved.
+  void LogIfFaviconDBStructureIncorrect();
 
   // Adds a mapping between the given page_url and icon_id; The mapping will be
   // added to temp_icon_mapping table if is_temporary is true.

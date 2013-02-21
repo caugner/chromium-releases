@@ -27,7 +27,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/path.h"
 #include "ui/views/bubble/bubble_border.h"
@@ -39,7 +38,6 @@
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/native/native_view_host.h"
-#include "ui/views/painter.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
@@ -119,7 +117,7 @@ BalloonViewImpl::~BalloonViewImpl() {
 void BalloonViewImpl::Close(bool by_user) {
   animation_->Stop();
   html_contents_->Shutdown();
-  // Detach contents from widget before then close.
+  // Detach contents from the widget before they close.
   // This is necessary because a widget may be deleted
   // after this when chrome is shutting down.
   html_container_->GetRootView()->RemoveAllChildViews(true);
@@ -225,8 +223,11 @@ void BalloonViewImpl::RepositionToBalloon() {
 }
 
 void BalloonViewImpl::Update() {
-  DCHECK(html_contents_.get()) << "BalloonView::Update called before Show";
-  if (!html_contents_->web_contents())
+  // Tls might get called before html_contents_ is set in Show() if more than
+  // one update with the same replace_id occurs, or if an update occurs after
+  // the ballon has been closed (e.g. during shutdown) but before this has been
+  // destroyed.
+  if (!html_contents_.get() || !html_contents_->web_contents())
     return;
   html_contents_->web_contents()->GetController().LoadURL(
       balloon_->notification().content_url(), content::Referrer(),
@@ -357,11 +358,11 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   html_container_->SetAlwaysOnTop(true);
   frame_container_->SetAlwaysOnTop(true);
 
-  close_button_->SetImage(views::CustomButton::BS_NORMAL,
+  close_button_->SetImage(views::CustomButton::STATE_NORMAL,
                           rb.GetImageSkiaNamed(IDR_TAB_CLOSE));
-  close_button_->SetImage(views::CustomButton::BS_HOT,
+  close_button_->SetImage(views::CustomButton::STATE_HOVERED,
                           rb.GetImageSkiaNamed(IDR_TAB_CLOSE_H));
-  close_button_->SetImage(views::CustomButton::BS_PUSHED,
+  close_button_->SetImage(views::CustomButton::STATE_PRESSED,
                           rb.GetImageSkiaNamed(IDR_TAB_CLOSE_P));
   close_button_->SetBoundsRect(GetCloseButtonBounds());
   close_button_->SetBackground(SK_ColorBLACK,
@@ -380,7 +381,7 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   source_label_->SetFont(rb.GetFont(ui::ResourceBundle::SmallFont));
   source_label_->SetBackgroundColor(kControlBarBackgroundColor);
   source_label_->SetEnabledColor(kControlBarTextColor);
-  source_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  source_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   source_label_->SetElideBehavior(views::Label::ELIDE_AT_END);
   source_label_->SetBoundsRect(GetLabelBounds());
 

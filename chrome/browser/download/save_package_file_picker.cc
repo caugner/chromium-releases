@@ -6,8 +6,8 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/platform_util.h"
@@ -207,7 +207,7 @@ void SavePackageFilePicker::FileSelected(const FilePath& path,
                               content::SAVE_PAGE_TYPE_MAX);
 
     StringPrefMember save_file_path;
-    save_file_path.Init(prefs::kSaveFileDefaultDirectory, prefs, NULL);
+    save_file_path.Init(prefs::kSaveFileDefaultDirectory, prefs);
 #if defined(OS_POSIX)
     std::string path_string = path.DirName().value();
 #elif defined(OS_WIN)

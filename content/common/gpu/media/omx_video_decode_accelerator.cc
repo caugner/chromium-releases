@@ -157,7 +157,7 @@ OmxVideoDecodeAccelerator::OmxVideoDecodeAccelerator(
       client_(client),
       codec_(UNKNOWN),
       h264_profile_(OMX_VIDEO_AVCProfileMax),
-      component_name_is_nvidia_h264ext_(false) {
+      component_name_is_nvidia_(false) {
   static bool omx_functions_initialized = PostSandboxInitialization();
   RETURN_ON_FAILURE(omx_functions_initialized,
                     "Failed to load openmax library", PLATFORM_FAILURE,);
@@ -236,8 +236,8 @@ bool OmxVideoDecodeAccelerator::CreateComponent() {
                         PLATFORM_FAILURE, false);
   RETURN_ON_FAILURE(num_components == 1, "No components for: " << role_name,
                     PLATFORM_FAILURE, false);
-  component_name_is_nvidia_h264ext_ = StartsWithASCII(
-      component, "OMX.Nvidia.h264ext.decode", true);
+  component_name_is_nvidia_ = StartsWithASCII(
+      component, "OMX.Nvidia", true);
 
   // Get the handle to the component.
   result = omx_gethandle(
@@ -308,7 +308,6 @@ bool OmxVideoDecodeAccelerator::CreateComponent() {
 
   // Set output port parameters.
   port_format.nBufferCountActual = kNumPictureBuffers;
-  port_format.nBufferCountMin = kNumPictureBuffers;
   // Force an OMX_EventPortSettingsChanged event to be sent once we know the
   // stream's real dimensions (which can only happen once some Decode() work has
   // been done).
@@ -586,7 +585,7 @@ void OmxVideoDecodeAccelerator::OnReachedIdleInInitializing() {
   DCHECK_EQ(client_state_, OMX_StateLoaded);
   client_state_ = OMX_StateIdle;
   // Query the resources with the component.
-  if (component_name_is_nvidia_h264ext_) {
+  if (component_name_is_nvidia_) {
     OMX_INDEXTYPE extension_index;
     OMX_ERRORTYPE result = OMX_GetExtensionIndex(
         component_handle_,
@@ -875,7 +874,7 @@ void OmxVideoDecodeAccelerator::OnOutputPortDisabled() {
   OMX_ERRORTYPE result = OMX_GetParameter(
       component_handle_, OMX_IndexParamPortDefinition, &port_format);
   RETURN_ON_OMX_FAILURE(result, "OMX_GetParameter", PLATFORM_FAILURE,);
-  DCHECK_EQ(port_format.nBufferCountMin, kNumPictureBuffers);
+  DCHECK_LE(port_format.nBufferCountMin, kNumPictureBuffers);
 
   // TODO(fischman): to support mid-stream resize, need to free/dismiss any
   // |pictures_| we already have.  Make sure that the shutdown-path agrees with

@@ -25,8 +25,10 @@ from intro_data_source import IntroDataSource
 from known_issues_data_source import KnownIssuesDataSource
 from local_file_system import LocalFileSystem
 from memcache_file_system import MemcacheFileSystem
+from reference_resolver import ReferenceResolver
 from samples_data_source import SamplesDataSource
 from server_instance import ServerInstance
+from sidenav_data_source import SidenavDataSource
 from subversion_file_system import SubversionFileSystem
 from template_data_source import TemplateDataSource
 from third_party.json_schema_compiler.model import UnixName
@@ -39,6 +41,10 @@ import url_constants
 DEFAULT_BRANCHES = { 'extensions': 'stable', 'apps': 'trunk' }
 # Dev settings:
 # DEFAULT_BRANCHES = { 'extensions': 'local', 'apps': 'local' }
+
+# Increment this version to force the server to reload all pages in the first
+# cron job that is run.
+_VERSION = 1
 
 BRANCH_UTILITY_MEMCACHE = InMemoryObjectStore('branch_utility')
 BRANCH_UTILITY = BranchUtility(url_constants.OMAHA_PROXY_URL,
@@ -63,6 +69,7 @@ ARTICLE_PATH = TEMPLATE_PATH + '/articles'
 PUBLIC_TEMPLATE_PATH = TEMPLATE_PATH + '/public'
 PRIVATE_TEMPLATE_PATH = TEMPLATE_PATH + '/private'
 EXAMPLES_PATH = DOCS_PATH + '/examples'
+JSON_PATH = TEMPLATE_PATH + '/json'
 
 # Global cache of instances because Handler is recreated for every request.
 SERVER_INSTANCES = {}
@@ -128,20 +135,33 @@ def _GetInstanceForBranch(channel_name, local_path):
                                                            file_system,
                                                            API_PATH,
                                                            PUBLIC_TEMPLATE_PATH)
-  intro_data_source_factory = IntroDataSource.Factory(
+  api_data_source_factory = APIDataSource.Factory(
       cache_factory,
-      [INTRO_PATH, ARTICLE_PATH])
+      API_PATH)
+
+  # Give the ReferenceResolver a memcache, to speed up the lookup of
+  # duplicate $refs.
+  ref_resolver_factory = ReferenceResolver.Factory(
+      api_data_source_factory,
+      api_list_data_source_factory,
+      branch_memcache)
+  api_data_source_factory.SetReferenceResolverFactory(ref_resolver_factory)
   samples_data_source_factory = SamplesDataSource.Factory(
       channel_name,
       file_system,
       GITHUB_FILE_SYSTEM,
       cache_factory,
       GITHUB_COMPILED_FILE_SYSTEM,
-      api_list_data_source_factory,
+      ref_resolver_factory,
       EXAMPLES_PATH)
-  api_data_source_factory = APIDataSource.Factory(cache_factory,
-                                                  API_PATH,
-                                                  samples_data_source_factory)
+  api_data_source_factory.SetSamplesDataSourceFactory(
+      samples_data_source_factory)
+  intro_data_source_factory = IntroDataSource.Factory(
+      cache_factory,
+      ref_resolver_factory,
+      [INTRO_PATH, ARTICLE_PATH])
+  sidenav_data_source_factory = SidenavDataSource.Factory(cache_factory,
+                                                          JSON_PATH)
   template_data_source_factory = TemplateDataSource.Factory(
       channel_name,
       api_data_source_factory,
@@ -149,6 +169,7 @@ def _GetInstanceForBranch(channel_name, local_path):
       intro_data_source_factory,
       samples_data_source_factory,
       KNOWN_ISSUES_DATA_SOURCE,
+      sidenav_data_source_factory,
       cache_factory,
       PUBLIC_TEMPLATE_PATH,
       PRIVATE_TEMPLATE_PATH)
@@ -244,8 +265,8 @@ class Handler(webapp.RequestHandler):
     #
     # Instead, let the CompiledFileSystem give us clues when to re-render: we
     # use the CFS to check whether the templates, examples, or API folders have
-    # been changed. If there has been a change, I will call the compilation
-    # function. The same is then done separately with the apps samples page,
+    # been changed. If there has been a change, the compilation function will
+    # be called. The same is then done separately with the apps samples page,
     # since it pulls its data from Github.
     channel = path.split('/')[-1]
     branch = BRANCH_UTILITY.GetBranchNumberForChannelName(channel)
@@ -256,7 +277,8 @@ class Handler(webapp.RequestHandler):
 
     needs_render = self._ValueHolder(False)
     invalidation_cache = factory.Create(lambda _: needs_render.Set(True),
-                                        compiled_fs.CRON_INVALIDATION)
+                                        compiled_fs.CRON_INVALIDATION,
+                                        version=_VERSION)
     for path in [TEMPLATE_PATH, EXAMPLES_PATH, API_PATH]:
       invalidation_cache.GetFromFile(path + '/')
 
@@ -273,6 +295,10 @@ class Handler(webapp.RequestHandler):
           compiled_fs.CRON_GITHUB_INVALIDATION)
       if needs_render.Get():
         self._Render([PUBLIC_TEMPLATE_PATH + '/apps/samples.html'], channel)
+
+      # It's good to keep the extensions samples page fresh, because if it
+      # gets dropped from the cache ALL the extensions pages time out.
+      self._Render([PUBLIC_TEMPLATE_PATH + '/extensions/samples.html'], channel)
 
     self.response.out.write('Success')
 

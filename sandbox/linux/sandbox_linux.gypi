@@ -13,6 +13,7 @@
       'type': 'none',
       'dependencies': [
         'suid_sandbox_client',
+        'sandbox_services',
       ],
       'conditions': [
         # Only compile in the seccomp mode 1 code for the flag combination
@@ -45,6 +46,7 @@
         'tests/unit_tests.cc',
         'tests/unit_tests.h',
         'suid/client/setuid_sandbox_client_unittest.cc',
+        'services/broker_process_unittest.cc',
       ],
       'include_dirs': [
         '../..',
@@ -53,12 +55,12 @@
         [ 'OS=="linux" and (target_arch=="ia32" or target_arch=="x64" '
                            'or target_arch=="arm")', {
           'sources': [
-            'seccomp-bpf/bpf_tests.cc',
             'seccomp-bpf/bpf_tests.h',
             'seccomp-bpf/codegen_unittest.cc',
             'seccomp-bpf/errorcode_unittest.cc',
             'seccomp-bpf/sandbox_bpf_unittest.cc',
             'seccomp-bpf/syscall_iterator_unittest.cc',
+            'seccomp-bpf/syscall_unittest.cc',
           ],
         }],
       ],
@@ -78,6 +80,8 @@
         'seccomp-bpf/instruction.h',
         'seccomp-bpf/sandbox_bpf.cc',
         'seccomp-bpf/sandbox_bpf.h',
+        'seccomp-bpf/syscall.cc',
+        'seccomp-bpf/syscall.h',
         'seccomp-bpf/syscall_iterator.cc',
         'seccomp-bpf/syscall_iterator.h',
         'seccomp-bpf/verifier.cc',
@@ -111,7 +115,22 @@
         '../..',
       ],
     },
+    { 'target_name': 'sandbox_services',
+      'type': 'static_library',
+      'sources': [
+        'services/broker_process.cc',
+        'services/broker_process.h',
+      ],
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+    },
     {
+      # We make this its own target so that it does not interfere
+      # with our tests.
       'target_name': 'libc_urandom_override',
       'type': 'static_library',
       'sources': [

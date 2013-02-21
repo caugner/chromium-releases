@@ -9,9 +9,13 @@
 #include "base/string_util.h"
 #include "content/renderer/media/audio_device_factory.h"
 #include "content/renderer/media/audio_hardware.h"
+#include "content/renderer/media/renderer_audio_output_device.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "media/audio/audio_util.h"
 #include "media/audio/sample_rates.h"
+#if defined(OS_WIN)
+#include "media/audio/win/core_audio_util_win.h"
+#endif
 
 namespace content {
 
@@ -26,6 +30,11 @@ namespace {
 int kValidOutputRates[] = {96000, 48000, 44100};
 #elif defined(OS_LINUX) || defined(OS_OPENBSD)
 int kValidOutputRates[] = {48000, 44100};
+#elif defined(OS_ANDROID)
+// On Android, the most popular sampling rate is 16000.
+int kValidOutputRates[] = {48000, 44100, 16000};
+#else
+int kValidOutputRates[] = {44100};
 #endif
 
 // TODO(xians): Merge the following code to WebRtcAudioCapturer, or remove.
@@ -72,9 +81,11 @@ void AddHistogramFramesPerBuffer(int param) {
 
 }  // namespace
 
-WebRtcAudioRenderer::WebRtcAudioRenderer()
+WebRtcAudioRenderer::WebRtcAudioRenderer(int source_render_view_id)
     : state_(UNINITIALIZED),
-      source_(NULL) {
+      source_render_view_id_(source_render_view_id),
+      source_(NULL),
+      play_ref_count_(0) {
 }
 
 WebRtcAudioRenderer::~WebRtcAudioRenderer() {
@@ -136,7 +147,7 @@ bool WebRtcAudioRenderer::Initialize(WebRtcAudioRendererSource* source) {
 
   // Windows XP and lower can't cope with 10 ms output buffer size.
   // It must be extended to 30 ms (60 ms will be used internally by WaveOut).
-  if (!media::IsWASAPISupported()) {
+  if (!media::CoreAudioUtil::IsSupported()) {
     buffer_size = 3 * buffer_size;
     DLOG(WARNING) << "Extending the output buffer size by a factor of three "
                   << "since Windows XP has been detected.";
@@ -146,11 +157,11 @@ bool WebRtcAudioRenderer::Initialize(WebRtcAudioRendererSource* source) {
 
   // Render side: AUDIO_PCM_LOW_LATENCY on Mac OS X is based on a callback-
   // driven Core Audio implementation. Tests have shown that 10ms is a suitable
-  // frame size to use, both for 48kHz and 44.1kHz.
+  // frame size to use for 96kHz, 48kHz and 44.1kHz.
 
   // Use different buffer sizes depending on the current hardware sample rate.
-  if (sample_rate == 48000) {
-    buffer_size = 480;
+  if (sample_rate == 96000 || sample_rate == 48000) {
+    buffer_size = (sample_rate / 100);
   } else {
     // We do run at 44.1kHz at the actual audio layer, but ask for frames
     // at 44.0kHz to ensure that we can feed them to the webrtc::VoiceEngine.
@@ -183,7 +194,7 @@ bool WebRtcAudioRenderer::Initialize(WebRtcAudioRendererSource* source) {
 
   // Configure the audio rendering client and start the rendering.
   sink_->Initialize(params_, this);
-
+  sink_->SetSourceRenderView(source_render_view_id_);
   sink_->Start();
 
   state_ = PAUSED;
@@ -197,11 +208,18 @@ bool WebRtcAudioRenderer::Initialize(WebRtcAudioRendererSource* source) {
   return true;
 }
 
+void WebRtcAudioRenderer::Start() {
+  // TODO(xians): refactor to make usage of Start/Stop more symmetric.
+  NOTIMPLEMENTED();
+}
+
 void WebRtcAudioRenderer::Play() {
   base::AutoLock auto_lock(lock_);
   if (state_ == UNINITIALIZED)
     return;
 
+  DCHECK(play_ref_count_ == 0 || state_ == PLAYING);
+  ++play_ref_count_;
   state_ = PLAYING;
 }
 
@@ -210,7 +228,10 @@ void WebRtcAudioRenderer::Pause() {
   if (state_ == UNINITIALIZED)
     return;
 
-  state_ = PAUSED;
+  DCHECK_EQ(state_, PLAYING);
+  DCHECK_GT(play_ref_count_, 0);
+  if (!--play_ref_count_)
+    state_ = PAUSED;
 }
 
 void WebRtcAudioRenderer::Stop() {
@@ -232,19 +253,29 @@ void WebRtcAudioRenderer::SetVolume(float volume) {
   sink_->SetVolume(volume);
 }
 
+base::TimeDelta WebRtcAudioRenderer::GetCurrentRenderTime() const {
+  return base::TimeDelta();
+}
+
+bool WebRtcAudioRenderer::IsLocalRenderer() const {
+  return false;
+}
+
 int WebRtcAudioRenderer::Render(media::AudioBus* audio_bus,
                                 int audio_delay_milliseconds) {
   {
     base::AutoLock auto_lock(lock_);
-    // Return 0 frames to play out zero if it is not in PLAYING state.
-    if (state_ != PLAYING)
+    if (!source_)
       return 0;
-
     // We need to keep render data for the |source_| reglardless of |state_|,
     // otherwise the data will be buffered up inside |source_|.
     source_->RenderData(reinterpret_cast<uint8*>(buffer_.get()),
                         audio_bus->channels(), audio_bus->frames(),
                         audio_delay_milliseconds);
+
+    // Return 0 frames to play out silence if |state_| is not PLAYING.
+    if (state_ != PLAYING)
+      return 0;
   }
 
   // Deinterleave each channel and convert to 32-bit floating-point

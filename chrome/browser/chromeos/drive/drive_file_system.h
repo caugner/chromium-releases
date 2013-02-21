@@ -12,15 +12,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_feed_loader_observer.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system/drive_operations.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
-#include "content/public/browser/notification_observer.h"
 
 class PrefChangeRegistrar;
+class Profile;
 
 namespace base {
 struct PlatformFileInfo;
@@ -28,20 +27,22 @@ class SequencedTaskRunner;
 }
 
 namespace google_apis {
-class DocumentFeed;
+class ResourceEntry;
+class AccountMetadataFeed;
+class ResourceList;
 class DriveServiceInterface;
 class DriveUploaderInterface;
 }
 
 namespace drive {
 
+class DriveCacheEntry;
 class DriveFileSystemObserver;
 class DriveFunctionRemove;
 class DriveResourceMetadata;
 class DriveScheduler;
-class DriveWebAppsRegistryInterface;
+class DriveWebAppsRegistry;
 class DriveFeedLoader;
-struct LoadFeedParams;
 
 namespace file_system {
 class CopyOperation;
@@ -52,14 +53,13 @@ class RemoveOperation;
 // The production implementation of DriveFileSystemInterface.
 class DriveFileSystem : public DriveFileSystemInterface,
                         public DriveFeedLoaderObserver,
-                        public file_system::OperationObserver,
-                        public content::NotificationObserver {
+                        public file_system::OperationObserver {
  public:
   DriveFileSystem(Profile* profile,
                   DriveCache* cache,
                   google_apis::DriveServiceInterface* drive_service,
                   google_apis::DriveUploaderInterface* uploader,
-                  DriveWebAppsRegistryInterface* webapps_registry,
+                  DriveWebAppsRegistry* webapps_registry,
                   base::SequencedTaskRunner* blocking_task_runner);
   virtual ~DriveFileSystem();
 
@@ -78,6 +78,7 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const std::string& resource_id,
       const GetEntryInfoWithFilePathCallback& callback) OVERRIDE;
   virtual void Search(const std::string& search_query,
+                      bool shared_with_me,
                       const GURL& next_feed,
                       const SearchCallback& callback) OVERRIDE;
   virtual void TransferFileFromRemoteToLocal(
@@ -129,24 +130,12 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const FilePath& directory_path) OVERRIDE;
   virtual void GetAvailableSpace(
       const GetAvailableSpaceCallback& callback) OVERRIDE;
-  virtual void AddUploadedFile(google_apis::UploadMode upload_mode,
-                               const FilePath& directory_path,
-                               scoped_ptr<google_apis::DocumentEntry> doc_entry,
+  virtual void AddUploadedFile(const FilePath& directory_path,
+                               scoped_ptr<google_apis::ResourceEntry> doc_entry,
                                const FilePath& file_content_path,
-                               DriveCache::FileOperationType cache_operation,
-                               const base::Closure& callback) OVERRIDE;
-  virtual void UpdateEntryData(const std::string& resource_id,
-                               const std::string& md5,
-                               scoped_ptr<google_apis::DocumentEntry> entry,
-                               const FilePath& file_content_path,
-                               const base::Closure& callback) OVERRIDE;
+                               const FileOperationCallback& callback) OVERRIDE;
   virtual DriveFileSystemMetadata GetMetadata() const OVERRIDE;
   virtual void Reload() OVERRIDE;
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
   // file_system::OperationObserver overrides.
   virtual void OnDirectoryChangedByOperation(
@@ -155,7 +144,7 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // DriveFeedLoader::Observer overrides.
   // Used to propagate events from DriveFeedLoader.
   virtual void OnDirectoryChanged(const FilePath& directory_path) OVERRIDE;
-  virtual void OnDocumentFeedFetched(int num_accumulated_entries) OVERRIDE;
+  virtual void OnResourceListFetched(int num_accumulated_entries) OVERRIDE;
   virtual void OnFeedFromServerLoaded() OVERRIDE;
 
   // Used in tests to load the root feed from the cache.
@@ -240,33 +229,33 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // Struct used for AddUploadedFile.
   struct AddUploadedFileParams;
 
-  // Struct used by UpdateEntryData.
-  struct UpdateEntryParams;
+  // Initializes DriveResourceMetadata and related instances (DriveFeedLoader
+  // and DriveOperations). This is a part of the initialization.
+  void ResetResourceMetadata();
 
-  // Initializes DriveResourceMetadata and DriveFeedLoader instances. This is a
-  // part of the initialization.
-  void InitializeResourceMetadataAndFeedLoader();
+  // Called on preference change.
+  void OnDisableDriveHostedFilesChanged();
 
-  // Callback passed to |LoadFeedFromServer| from |Search| method.
-  // |callback| is that should be run with data received from
-  // |LoadFeedFromServer|. |callback| must not be null.
-  // |params| params used for getting document feed for content search.
-  // |error| error code returned by |LoadFeedFromServer|.
-  void OnSearch(const SearchCallback& callback,
-                scoped_ptr<LoadFeedParams> params,
+  // Callback passed to DriveFeedLoader from |Search| method.
+  // |callback| is that should be run with data received. It must not be null.
+  // |feed_list| is the document feed for content search.
+  // |error| is the error code returned by DriveFeedLoader.
+  void OnSearch(bool shared_with_me,
+                const SearchCallback& callback,
+                const ScopedVector<google_apis::ResourceList>& feed_list,
                 DriveFileError error);
 
-  // Callback for DriveResourceMetadata::RefreshFile, from OnSearch.
+  // Callback for DriveResourceMetadata::RefreshEntry, from OnSearch.
   // Adds |drive_file_path| to |results|. When |entry_proto| is not present in
   // the local file system snapshot, it is not added to |results|. Instead,
-  // CheckForUpdates is called. Runs |callback| with |results|.
-  // |callback| may be null.
-  void AddToSearchResults(
-      std::vector<SearchResultInfo>* results,
-      const base::Closure& callback,
-      DriveFileError error,
-      const FilePath& drive_file_path,
-      scoped_ptr<DriveEntryProto> entry_proto);
+  // CheckForUpdates is called. Runs |callback| with |results| if
+  // |should_run_callback| is true.
+  void AddToSearchResults(std::vector<SearchResultInfo>* results,
+                          bool should_run_callback,
+                          const base::Closure& callback,
+                          DriveFileError error,
+                          const FilePath& drive_file_path,
+                          scoped_ptr<DriveEntryProto> entry_proto);
 
   // Invoked during the process of CreateFile.
   // First, FindEntryByPathAsyncOnUIThread is called and the result is returned
@@ -326,11 +315,6 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const FileOperationCallback& callback,
       DriveFileError error,
       scoped_ptr<DriveEntryProto> entry_proto);
-  void CloseFileOnUIThreadAfterCommitDirtyInCache(
-      const FileOperationCallback& callback,
-      DriveFileError error,
-      const std::string& resource_id,
-      const std::string& md5);
   void CloseFileOnUIThreadFinalize(const FilePath& file_path,
                                    const FileOperationCallback& callback,
                                    DriveFileError result);
@@ -341,50 +325,38 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // |file_info.md5|.
   //
   // Can be called from UI thread. |callback| is run on the calling thread.
-  void OnGetFileCompleteForOpenFile(
-      const OpenFileCallback& callback,
-      const GetFileCompleteForOpenParams& file_info,
-      DriveFileError error,
-      const FilePath& file_path,
-      const std::string& mime_type,
-      DriveFileType file_type);
+  void OnGetFileCompleteForOpenFile(const GetFileCompleteForOpenParams& params,
+                                    DriveFileError error,
+                                    const FilePath& file_path,
+                                    const std::string& mime_type,
+                                    DriveFileType file_type);
 
-  // Invoked upon completion of MarkDirtyInCache initiated by OpenFile. Invokes
-  // |callback| with |cache_file_path|, which is the path of the cache file
-  // ready for modification.
-  //
-  // Must be called on UI thread.
-  void OnMarkDirtyInCacheCompleteForOpenFile(const OpenFileCallback& callback,
-                                             DriveFileError error,
-                                             const FilePath& cache_file_path);
+  // Invoked upon completion of MarkDirtyInCache initiated by OpenFile.
+  void OnMarkDirtyInCacheCompleteForOpenFile(
+      const GetFileCompleteForOpenParams& params,
+      DriveFileError error);
 
   // Callback for handling account metadata fetch.
-  void OnGetAvailableSpace(const GetAvailableSpaceCallback& callback,
-                           google_apis::GDataErrorCode status,
-                           scoped_ptr<base::Value> data);
-
-  // Callback for handling Drive V2 about resource fetch.
-  void OnGetAboutResource(const GetAvailableSpaceCallback& callback,
-                          google_apis::GDataErrorCode status,
-                          scoped_ptr<base::Value> data);
+  void OnGetAccountMetadata(
+      const GetAvailableSpaceCallback& callback,
+      google_apis::GDataErrorCode status,
+      scoped_ptr<google_apis::AccountMetadataFeed> account_metadata);
 
   // Callback for handling directory create requests. Adds the directory
-  // represented by |created_entry| to the local filesystem.
+  // represented by |entry| to the local filesystem.
   void AddNewDirectory(const CreateDirectoryParams& params,
                        google_apis::GDataErrorCode status,
-                       scoped_ptr<base::Value> created_entry);
+                       scoped_ptr<google_apis::ResourceEntry> entry);
 
   // Callback for DriveResourceMetadata::AddEntryToDirectory. Continues the
   // recursive creation of a directory path by calling CreateDirectory again.
-  void ContinueCreateDirectory(
-      const CreateDirectoryParams& params,
-      DriveFileError error,
-      const FilePath& moved_directory_path);
+  void ContinueCreateDirectory(const CreateDirectoryParams& params,
+                               DriveFileError error,
+                               const FilePath& moved_directory_path);
 
   // Callback for handling file downloading requests.
   void OnFileDownloaded(const GetFileFromCacheParams& params,
                         google_apis::GDataErrorCode status,
-                        const GURL& content_url,
                         const FilePath& downloaded_file_path);
 
   // Unpins file if cache entry is pinned.
@@ -397,30 +369,15 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // an error in case we don't have enough disk space.
   void OnFileDownloadedAndSpaceChecked(const GetFileFromCacheParams& params,
                                        google_apis::GDataErrorCode status,
-                                       const GURL& content_url,
                                        const FilePath& downloaded_file_path,
-                                       bool* has_enough_space);
+                                       bool has_enough_space);
 
-  // Callback for handling internal StoreToCache() calls after downloading
-  // file content.
-  void OnDownloadStoredToCache(DriveFileError error,
-                               const std::string& resource_id,
-                               const std::string& md5);
-
-  // FileMoveCallback for directory changes. Notifies of directory changes,
-  // and runs |callback| with |error|. |callback| may be null.
-  void OnDirectoryChangeFileMoveCallback(
-      const FileOperationCallback& callback,
-      DriveFileError error,
-      const FilePath& directory_path);
-
-  // Continues to add an uploaded file after existing entry has been deleted.
-  void ContinueAddUploadedFile(scoped_ptr<AddUploadedFileParams> params,
-                               DriveFileError error,
-                               const FilePath& file_path);
+  // FileMoveCallback for directory changes. Notifies of directory changes.
+  void OnDirectoryChangeFileMoveCallback(DriveFileError error,
+                                         const FilePath& directory_path);
 
   // Adds the uploaded file to the cache.
-  void AddUploadedFileToCache(scoped_ptr<AddUploadedFileParams> params,
+  void AddUploadedFileToCache(const AddUploadedFileParams& params,
                               DriveFileError error,
                               const FilePath& file_path);
 
@@ -468,16 +425,16 @@ class DriveFileSystem : public DriveFileSystemInterface,
                           DriveFileError error,
                           const FilePath& cache_file_path);
 
-  // Callback for |drive_service_->GetDocumentEntry|.
-  // It is called before file download. If GetDocumentEntry was successful,
+  // Callback for |drive_service_->GetResourceEntry|.
+  // It is called before file download. If GetResourceEntry was successful,
   // file download procedure is started for the file. The file is downloaded
   // from the content url extracted from the fetched metadata.
-  void OnGetDocumentEntry(const GetFileFromCacheParams& params,
+  void OnGetResourceEntry(const GetFileFromCacheParams& params,
                           google_apis::GDataErrorCode status,
-                          scoped_ptr<base::Value> data);
+                          scoped_ptr<google_apis::ResourceEntry> entry);
 
   // Check available space using file size from the fetched metadata. Called
-  // from OnGetDocumentEntry after RefreshFile is complete.
+  // from OnGetResourceEntry after RefreshEntry is complete.
   void CheckForSpaceBeforeDownload(
       const GetFileFromCacheParams& params,
       int64 file_size,
@@ -491,7 +448,7 @@ class DriveFileSystem : public DriveFileSystemInterface,
   void StartDownloadFileIfEnoughSpace(const GetFileFromCacheParams& params,
                                       const GURL& content_url,
                                       const FilePath& cache_file_path,
-                                      bool* has_enough_space);
+                                      bool has_enough_space);
 
   // Changes state of hosted documents visibility, triggers directory refresh.
   void SetHideHostedDocuments(bool hide);
@@ -541,50 +498,10 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const google_apis::GetContentCallback& get_content_callback,
       scoped_ptr<DriveEntryProto> entry_proto);
 
-  // Part of UpdateFileByResourceId(). Called when
-  // DriveDirectory::GetEntryInfoByResourceId() is complete.
-  // |callback| must not be null.
-  void UpdateFileByEntryInfo(
-      const FileOperationCallback& callback,
-      DriveFileError error,
-      const FilePath& drive_file_path,
-      scoped_ptr<DriveEntryProto> entry_proto);
-
-  // Part of UpdateFileByResourceId().
-  // Called when DriveCache::GetFileOnUIThread() is completed for
-  // UpdateFileByResourceId().
-  // |callback| must not be null.
-  void OnGetFileCompleteForUpdateFile(const FileOperationCallback& callback,
-                                      const FilePath& drive_file_path,
-                                      scoped_ptr<DriveEntryProto> entry_proto,
-                                      DriveFileError error,
-                                      const FilePath& cache_file_path);
-
-  // Part of UpdateFileByResourceId().
-  // Callback for getting the size of the cache file in the blocking pool.
-  // |callback| must not be null.
-  void OnGetFileSizeCompleteForUpdateFile(
-      const FileOperationCallback& callback,
-      const FilePath& drive_file_path,
-      scoped_ptr<DriveEntryProto> entry_proto,
-      const FilePath& cache_file_path,
-      DriveFileError* error,
-      int64* file_size);
-
-  // Part of UpdateFileByResourceId().
-  // Called when DriveUploader::UploadUpdatedFile() is completed for
-  // UpdateFileByResourceId().
-  // |callback| must not be null.
-  void OnUpdatedFileUploaded(
-      const FileOperationCallback& callback,
-      google_apis::DriveUploadError error,
-      const FilePath& gdata_path,
-      const FilePath& file_path,
-      scoped_ptr<google_apis::DocumentEntry> document_entry);
-
   // The following functions are used to forward calls to asynchronous public
   // member functions to UI thread.
   void SearchAsyncOnUIThread(const std::string& search_query,
+                             bool shared_with_me,
                              const GURL& next_feed,
                              const SearchCallback& callback);
   void OpenFileOnUIThread(const FilePath& file_path,
@@ -626,19 +543,12 @@ class DriveFileSystem : public DriveFileSystemInterface,
       const FilePath& file_path,
       const ReadDirectoryWithSettingCallback& callback);
   void RequestDirectoryRefreshOnUIThread(const FilePath& file_path);
-  void OnRequestDirectoryRefresh(const FilePath& directory_path,
-                                 scoped_ptr<LoadFeedParams> params,
-                                 DriveFileError error);
-  void GetAvailableSpaceOnUIThread(const GetAvailableSpaceCallback& callback);
-  void AddUploadedFileOnUIThread(
-      google_apis::UploadMode upload_mode,
+  void OnRequestDirectoryRefresh(
+      const std::string& directory_resource_id,
       const FilePath& directory_path,
-      scoped_ptr<google_apis::DocumentEntry> doc_entry,
-      const FilePath& file_content_path,
-      DriveCache::FileOperationType cache_operation,
-      const base::Closure& callback);
-  void UpdateEntryDataOnUIThread(const UpdateEntryParams& params,
-                                 scoped_ptr<google_apis::DocumentEntry> entry);
+      const ScopedVector<google_apis::ResourceList>& feed_list,
+      DriveFileError error);
+  void GetAvailableSpaceOnUIThread(const GetAvailableSpaceCallback& callback);
 
   // Part of CreateDirectory(). Called after
   // FindFirstMissingParentDirectory() is complete.
@@ -677,13 +587,6 @@ class DriveFileSystem : public DriveFileSystemInterface,
       DriveFileError error,
       scoped_ptr<DriveEntryProto> entry_proto);
 
-  // Part of UpdateEntryDataOnUIThread(). Called after RefreshFile is complete.
-  void UpdateCacheEntryOnUIThread(
-      const UpdateEntryParams& params,
-      DriveFileError error,
-      const FilePath& drive_file_path,
-      scoped_ptr<DriveEntryProto> entry_proto);
-
   // Part of GetEntryByResourceId and GetEntryByPath. Checks whether there is a
   // local dirty cache for the entry, and if there is, replace the
   // PlatformFileInfo part of the |entry_proto| with the locally modified info.
@@ -704,7 +607,7 @@ class DriveFileSystem : public DriveFileSystemInterface,
       scoped_ptr<DriveEntryProto> entry_proto,
       const GetEntryInfoCallback& callback,
       base::PlatformFileInfo* file_info,
-      bool* get_file_info_result);
+      bool get_file_info_result);
 
   // All members should be accessed only on UI thread. Do not post tasks to
   // other threads with base::Unretained(this).
@@ -723,10 +626,16 @@ class DriveFileSystem : public DriveFileSystemInterface,
   google_apis::DriveServiceInterface* drive_service_;
 
   // The webapps registry owned by DriveSystemService.
-  DriveWebAppsRegistryInterface* webapps_registry_;
+  DriveWebAppsRegistry* webapps_registry_;
 
   // Periodic timer for checking updates.
   base::Timer update_timer_;
+
+  // Time of the last update check.
+  base::Time last_update_check_time_;
+
+  // Error of the last update check.
+  DriveFileError last_update_check_error_;
 
   // True if hosted documents should be hidden.
   bool hide_hosted_docs_;
@@ -747,6 +656,12 @@ class DriveFileSystem : public DriveFileSystemInterface,
 
   scoped_ptr<DriveScheduler> scheduler_;
 
+  // Polling interval for checking updates in seconds.
+  int polling_interval_sec_;
+
+  // True if push notification is enabled.
+  bool push_notification_enabled_;
+
   // WeakPtrFactory and WeakPtr bound to the UI thread.
   // Note: These should remain the last member so they'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.
@@ -754,9 +669,6 @@ class DriveFileSystem : public DriveFileSystemInterface,
   // Unlike other classes, we need this as we need this to redirect a task
   // from IO thread to UI thread.
   base::WeakPtr<DriveFileSystem> ui_weak_ptr_;
-
-  // Polling interval for checking updates in seconds.
-  int polling_interval_sec_;
 };
 
 }  // namespace drive

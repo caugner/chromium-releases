@@ -177,7 +177,7 @@ void VariationsService::DoActualFetch() {
                                       net::LOAD_DO_NOT_SAVE_COOKIES);
   pending_seed_request_->SetRequestContext(
       g_browser_process->system_request_context());
-  pending_seed_request_->SetMaxRetries(kMaxRetrySeedFetch);
+  pending_seed_request_->SetMaxRetriesOn5xx(kMaxRetrySeedFetch);
   if (!variations_serial_number_.empty()) {
     pending_seed_request_->AddExtraRequestHeader("If-Match:" +
                                                  variations_serial_number_);
@@ -505,21 +505,15 @@ void VariationsService::CreateTrialFromStudy(const Study& study,
     if (experiment.has_experiment_id()) {
       const VariationID variation_id =
           static_cast<VariationID>(experiment.experiment_id());
-      AssociateGoogleVariationIDForce(study.name(),
+      AssociateGoogleVariationIDForce(GOOGLE_WEB_PROPERTIES,
+                                      study.name(),
                                       experiment.name(),
                                       variation_id);
     }
   }
 
   trial->SetForced();
-  bool study_expired = IsStudyExpired(study, reference_date);
-  // This metric is used to help track down a specific problem with the
-  // uniformity trials. It can be removed when that investigation is complete.
-  if (study.name() == "UMA-Uniformity-Trial-1-Percent") {
-    UMA_HISTOGRAM_BOOLEAN("Variations.ServerStudyExpiredUniformity1Percent",
-                          study_expired);
-  }
-  if (study_expired)
+  if (IsStudyExpired(study, reference_date))
     trial->Disable();
 }
 

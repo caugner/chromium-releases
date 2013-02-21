@@ -18,7 +18,12 @@ namespace {
 
 // Default maximum time between the GestureRecognizer generating a
 // GestureTapDown and when it is forwarded to the renderer.
+#if !defined(OS_ANDROID)
 static const int kTapDownDeferralTimeMs = 150;
+#else
+// Android OS sends this gesture with a delay already.
+static const int kTapDownDeferralTimeMs = 0;
+#endif
 
 // Default debouncing interval duration: if a scroll is in progress, non-scroll
 // events during this interval are deferred to either its end or discarded on
@@ -114,6 +119,14 @@ bool GestureEventFilter::ShouldForwardForBounceReduction(
 
 // NOTE: The filters are applied successively. This simplifies the change.
 bool GestureEventFilter::ShouldForward(const WebGestureEvent& gesture_event) {
+  // Discard a zero-velocity fling start from the trackpad.
+  if (gesture_event.type == WebInputEvent::GestureFlingStart &&
+      gesture_event.data.flingStart.sourceDevice == WebGestureEvent::Touchpad &&
+      gesture_event.data.flingStart.velocityX == 0 &&
+      gesture_event.data.flingStart.velocityY == 0) {
+    return false;
+  }
+
   if (debounce_interval_time_ms_ ==  0 ||
       ShouldForwardForBounceReduction(gesture_event))
     return ShouldForwardForTapDeferral(gesture_event);
@@ -128,16 +141,14 @@ bool GestureEventFilter::ShouldForwardForTapDeferral(
       if (!ShouldDiscardFlingCancelEvent(gesture_event)) {
         coalesced_gesture_events_.push_back(gesture_event);
         fling_in_progress_ = false;
+        tap_suppression_controller_->GestureFlingCancel(
+            gesture_event.timeStampSeconds);
         return ShouldHandleEventNow();
       }
       return false;
-    case WebInputEvent::GestureFlingStart:
-      fling_in_progress_ = true;
-      coalesced_gesture_events_.push_back(gesture_event);
-      return ShouldHandleEventNow();
     case WebInputEvent::GestureTapDown:
-      // GestureTapDown is always paired with either a Tap or TapCancel, so
-      // it should be impossible to have more than one outstanding at a time.
+      // GestureTapDown is always paired with either a Tap, or TapCancel, so it
+      // should be impossible to have more than one outstanding at a time.
       DCHECK_EQ(deferred_tap_down_event_.type, WebInputEvent::Undefined);
       deferred_tap_down_event_ = gesture_event;
       send_gtd_timer_.Start(FROM_HERE,
@@ -169,6 +180,8 @@ bool GestureEventFilter::ShouldForwardForTapDeferral(
       }
       coalesced_gesture_events_.push_back(gesture_event);
       return ShouldHandleEventNow();
+    case WebInputEvent::GestureFlingStart:
+      fling_in_progress_ = true;
     case WebInputEvent::GestureScrollBegin:
     case WebInputEvent::GesturePinchBegin:
       send_gtd_timer_.Stop();
@@ -199,8 +212,14 @@ void GestureEventFilter::Reset() {
 }
 
 void GestureEventFilter::ProcessGestureAck(bool processed, int type) {
+  if (coalesced_gesture_events_.empty()) {
+    DLOG(ERROR) << "Received unexpected ACK for event type " << type;
+    return;
+  }
   DCHECK_EQ(coalesced_gesture_events_.front().type, type);
   coalesced_gesture_events_.pop_front();
+  if (type == WebInputEvent::GestureFlingCancel)
+    tap_suppression_controller_->GestureFlingCancelAck(processed);
   if (!coalesced_gesture_events_.empty()) {
     WebGestureEvent next_gesture_event = coalesced_gesture_events_.front();
     render_widget_host_->ForwardGestureEventImmediately(next_gesture_event);
@@ -209,6 +228,16 @@ void GestureEventFilter::ProcessGestureAck(bool processed, int type) {
 
 TapSuppressionController*  GestureEventFilter::GetTapSuppressionController() {
   return tap_suppression_controller_.get();
+}
+
+bool GestureEventFilter::HasQueuedGestureEvents() const {
+  return !coalesced_gesture_events_.empty();
+}
+
+const WebKit::WebInputEvent&
+GestureEventFilter::GetGestureEventAwaitingAck() const {
+  DCHECK(!coalesced_gesture_events_.empty());
+  return coalesced_gesture_events_.front();
 }
 
 void GestureEventFilter::FlingHasBeenHalted() {

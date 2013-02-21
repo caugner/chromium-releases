@@ -9,6 +9,30 @@ var syncFileSystemNatives = requireNative('sync_file_system');
 
 chromeHidden.registerCustomHook('syncFileSystem', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
+
+  // Functions which take in an [instanceOf=FileEntry].
+  function bindFileEntryFunction(functionName) {
+    apiFunctions.setUpdateArgumentsPostValidate(
+        functionName, function(entry, callback) {
+      var fileSystemUrl = entry.toURL();
+      return [fileSystemUrl, callback];
+    });
+  }
+  ['getFileSyncStatus']
+      .forEach(bindFileEntryFunction);
+
+  // Functions which take in an [instanceOf=DOMFileSystem].
+  function bindFileSystemFunction(functionName) {
+    apiFunctions.setUpdateArgumentsPostValidate(
+        functionName, function(filesystem, callback) {
+      var fileSystemUrl = filesystem.root.toURL();
+      return [fileSystemUrl, callback];
+    });
+  }
+  ['deleteFileSystem', 'getUsageAndQuota']
+      .forEach(bindFileSystemFunction);
+
+  // Functions which return an [instanceOf=DOMFileSystem].
   apiFunctions.setCustomCallback('requestFileSystem',
                                  function(name, request, response) {
     var result = null;

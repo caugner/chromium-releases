@@ -72,19 +72,7 @@ SlideMode.prototype.getName = function() { return 'slide' };
  * @private
  */
 SlideMode.prototype.initListeners_ = function() {
-  var win = this.document_.defaultView;
-
-  this.onBeforeUnloadBound_ = this.onBeforeUnload_.bind(this);
-  win.top.addEventListener('beforeunload', this.onBeforeUnloadBound_);
-
-  win.addEventListener('unload', this.onUnload_.bind(this));
-
-  // We need to listen to the top window 'unload' and 'beforeunload' because
-  // the Gallery iframe does not get notified if the tab is closed.
-  this.onTopUnloadBound_ = this.onTopUnload_.bind(this);
-  win.top.addEventListener('unload', this.onTopUnloadBound_);
-
-  win.addEventListener('resize', this.onResize_.bind(this), false);
+  window.addEventListener('resize', this.onResize_.bind(this), false);
 };
 
 /**
@@ -111,7 +99,11 @@ SlideMode.prototype.initDom_ = function() {
       overwriteOriginalBox, 'common white', 'input');
   this.overwriteOriginal_.type = 'checkbox';
   this.overwriteOriginal_.id = 'overwrite-checkbox';
-  this.overwriteOriginal_.checked = this.shouldOverwriteOriginal_();
+  util.platform.getPreference(SlideMode.OVERWRITE_KEY, function(value) {
+    // Out-of-the box default is 'true'
+    this.overwriteOriginal_.checked =
+        (typeof value != 'string' || value == 'true');
+  }.bind(this));
   this.overwriteOriginal_.addEventListener('click',
       this.onOverwriteOriginalClick_.bind(this));
 
@@ -172,10 +164,11 @@ SlideMode.prototype.initDom_ = function() {
 
   util.createChild(this.container_, 'spinner');
 
-  var slideShowButton = util.createChild(this.toolbar_, 'button slideshow');
+  var slideShowButton = util.createChild(this.toolbar_,
+      'button slideshow', 'button');
   slideShowButton.title = this.displayStringFunction_('slideshow');
   slideShowButton.addEventListener('click',
-      this.toggleSlideshow_.bind(this, SlideMode.SLIDESHOW_INTERVAL_FIRST));
+      this.startSlideshow.bind(this, SlideMode.SLIDESHOW_INTERVAL_FIRST));
 
   var slideShowToolbar =
       util.createChild(this.container_, 'tool slideshow-toolbar');
@@ -186,9 +179,9 @@ SlideMode.prototype.initDom_ = function() {
 
   // Editor.
 
-  this.editButton_ = util.createChild(this.toolbar_, 'button edit');
-  this.editButton_.title = this.displayStringFunction_('edit');
-  this.editButton_.addEventListener('click', this.toggleEditor_.bind(this));
+  var editButton_ = util.createChild(this.toolbar_, 'button edit', 'button');
+  editButton_.title = this.displayStringFunction_('edit');
+  editButton_.addEventListener('click', this.toggleEditor.bind(this));
 
   this.editBar_ = util.createChild(this.toolbar_, 'edit-bar');
   this.editBarMain_ = util.createChild(this.editBar_, 'edit-main');
@@ -239,6 +232,7 @@ SlideMode.prototype.enter = function(
 
     this.selectionModel_.addEventListener('change', this.onSelectionBound_);
     this.dataModel_.addEventListener('splice', this.onSpliceBound_);
+    this.dataModel_.addEventListener('content', this.onContentBound_);
 
     ImageUtil.setAttribute(this.arrowBox_, 'active', this.getItemCount_() > 1);
     this.ribbon_.enable();
@@ -299,6 +293,7 @@ SlideMode.prototype.leave = function(zoomToRect, callback) {
       this.selectionModel_.removeEventListener(
           'change', this.onSelectionBound_);
       this.dataModel_.removeEventListener('splice', this.onSpliceBound_);
+      this.dataModel_.removeEventListener('content', this.onContentBound_);
       this.ribbon_.disable();
       this.active_ = false;
       if (this.savedSelection_)
@@ -659,14 +654,17 @@ SlideMode.prototype.loadItem_ = function(
     ImageUtil.setAttribute(this.options_, 'saved',
         !this.getSelectedItem().isOriginal());
 
-    var times = SlideMode.OVERWRITE_BUBBLE_KEY in localStorage ?
-        parseInt(localStorage[SlideMode.OVERWRITE_BUBBLE_KEY], 10) : 0;
-    if (times < SlideMode.OVERWRITE_BUBBLE_MAX_TIMES) {
-      this.bubble_.hidden = false;
-      if (this.isEditing()) {
-        localStorage[SlideMode.OVERWRITE_BUBBLE_KEY] = times + 1;
-      }
-    }
+    util.platform.getPreference(SlideMode.OVERWRITE_BUBBLE_KEY,
+        function(value) {
+          var times = typeof value == 'string' ? parseInt(value, 10) : 0;
+          if (times < SlideMode.OVERWRITE_BUBBLE_MAX_TIMES) {
+            this.bubble_.hidden = false;
+            if (this.isEditing()) {
+              util.platform.setPreference(
+                  SlideMode.OVERWRITE_BUBBLE_KEY, times + 1);
+            }
+          }
+        }.bind(this));
 
     loadCallback(loadType, delay);
   }.bind(this);
@@ -710,29 +708,20 @@ SlideMode.prototype.requestPrefetch = function(direction, delay) {
 // Event handlers.
 
 /**
- * Unload handler.
- * @private
+ * Unload handler, to be called from the top frame.
+ * @param {boolean} exiting True if the app is exiting.
  */
-SlideMode.prototype.onUnload_ = function() {
-  this.saveVideoPosition_();
-  window.top.removeEventListener('beforeunload', this.onBeforeUnloadBound_);
-  window.top.removeEventListener('unload', this.onTopUnloadBound_);
+SlideMode.prototype.onUnload = function(exiting) {
+  if (this.isShowingVideo_() && this.mediaControls_.isPlaying()) {
+    this.mediaControls_.savePosition(exiting);
+  }
 };
 
 /**
- * Top window unload handler.
- * @private
- */
-SlideMode.prototype.onTopUnload_ = function() {
-  this.saveVideoPosition_();
-};
-
-/**
- * Top window beforeunload handler.
+ * beforeunload handler, to be called from the top frame.
  * @return {string} Message to show if there are unsaved changes.
- * @private
  */
-SlideMode.prototype.onBeforeUnload_ = function() {
+SlideMode.prototype.onBeforeUnload = function() {
   if (this.editor_.isBusy())
     return this.displayStringFunction_('unsaved_changes');
   return null;
@@ -787,13 +776,13 @@ SlideMode.prototype.onKeyDown = function(event) {
       break;
 
     case 'U+0045':  // 'e' toggles the editor
-      this.toggleEditor_(event);
+      this.toggleEditor(event);
       break;
 
     case 'U+001B':  // Escape
       if (!this.isEditing())
         return false;  // Not handled.
-      this.toggleEditor_(event);
+      this.toggleEditor(event);
       break;
 
     case 'Home':
@@ -870,9 +859,13 @@ SlideMode.prototype.saveCurrentImage_ = function(callback) {
         e.metadata = this.selectedImageMetadata_;
         this.dataModel_.dispatchEvent(e);
 
+        // Allow changing the 'Overwrite original' setting only if the user
+        // used Undo to restore the original image AND it is not a copy.
+        // Otherwise lock the setting in its current state.
+        var mayChangeOverwrite = !this.editor_.canUndo() && item.isOriginal();
+        ImageUtil.setAttribute(this.options_, 'saved', !mayChangeOverwrite);
+
         if (this.imageView_.getContentRevision() == 1) {  // First edit.
-          // Lock the 'Overwrite original' checkbox for this item.
-          ImageUtil.setAttribute(this.options_, 'saved', true);
           ImageUtil.metrics.recordUserAction(ImageUtil.getMetricName('Edit'));
         }
 
@@ -899,9 +892,9 @@ SlideMode.prototype.saveCurrentImage_ = function(callback) {
 SlideMode.prototype.onContentChange_ = function(event) {
   var newUrl = event.item.getUrl();
   if (newUrl != event.oldUrl) {
-    this.metadataCache_.clear(event.oldUrl, Gallery.METADATA_TYPE);
     this.imageView_.changeUrl(newUrl);
   }
+  this.metadataCache_.clear(event.oldUrl, Gallery.METADATA_TYPE);
 };
 
 /**
@@ -939,10 +932,7 @@ SlideMode.OVERWRITE_BUBBLE_MAX_TIMES = 5;
  * @private
  */
 SlideMode.prototype.shouldOverwriteOriginal_ = function() {
-  if (!(SlideMode.OVERWRITE_KEY in localStorage))
-    return true;  // Out-of-the box default is 'true'.
-
-  return localStorage[SlideMode.OVERWRITE_KEY] == 'true';
+   return this.overwriteOriginal_.checked;
 };
 
 /**
@@ -951,7 +941,7 @@ SlideMode.prototype.shouldOverwriteOriginal_ = function() {
  * @private
  */
 SlideMode.prototype.onOverwriteOriginalClick_ = function(event) {
-  localStorage[SlideMode.OVERWRITE_KEY] = event.target.checked;
+  util.platform.setPreference(SlideMode.OVERWRITE_KEY, event.target.checked);
 };
 
 /**
@@ -960,8 +950,8 @@ SlideMode.prototype.onOverwriteOriginalClick_ = function(event) {
  */
 SlideMode.prototype.onCloseBubble_ = function() {
   this.bubble_.hidden = true;
-  localStorage[SlideMode.OVERWRITE_BUBBLE_KEY] =
-      SlideMode.OVERWRITE_BUBBLE_MAX_TIMES;
+  util.platform.setPreference(SlideMode.OVERWRITE_BUBBLE_KEY,
+      SlideMode.OVERWRITE_BUBBLE_MAX_TIMES);
 };
 
 // Slideshow
@@ -991,21 +981,6 @@ SlideMode.prototype.isSlideshowOn_ = function() {
 };
 
 /**
- * Start/stop the slideshow.
- *
- * @param {number} opt_interval First interval in ms.
- * @param {Event} opt_event Event.
- * @private
- */
-SlideMode.prototype.toggleSlideshow_ = function(opt_interval, opt_event) {
-  if (this.isSlideshowOn_()) {
-    this.stopSlideshow_(opt_event);
-  } else {
-    this.startSlideshow(opt_interval);
-  }
-};
-
-/**
  * Start the slideshow.
  * @param {number} opt_interval First interval in ms.
  * @param {Event} opt_event Event.
@@ -1029,7 +1004,7 @@ SlideMode.prototype.startSlideshow = function(opt_interval, opt_event) {
     cr.dispatchSimpleEvent(this, 'useraction');
 
   this.fullscreenBeforeSlideshow_ = false;
-  chrome.windows.getCurrent(function(info) {
+  util.platform.getWindowStatus(function(info) {
     if (info.state == 'maximized') {
       this.resumeSlideshow_(opt_interval);
       return;  // Do not go fullscreen if already maximized.
@@ -1150,20 +1125,19 @@ SlideMode.prototype.isEditing = function() {
  */
 SlideMode.prototype.stopEditing_ = function() {
   if (this.isEditing())
-    this.toggleEditor_();
+    this.toggleEditor();
 };
 
 /**
  * Activate/deactivate editor.
  * @param {Event} opt_event Event.
- * @private
  */
-SlideMode.prototype.toggleEditor_ = function(opt_event) {
+SlideMode.prototype.toggleEditor = function(opt_event) {
   if (opt_event)  // Caused by user action, notify the Gallery.
     cr.dispatchSimpleEvent(this, 'useraction');
 
   if (!this.active_) {
-    this.toggleMode_(this.toggleEditor_.bind(this));
+    this.toggleMode_(this.toggleEditor.bind(this));
     return;
   }
 
@@ -1173,16 +1147,15 @@ SlideMode.prototype.toggleEditor_ = function(opt_event) {
 
   ImageUtil.setAttribute(this.container_, 'editing', !this.isEditing());
 
-  if (this.isEditing()) { // isEditing_ has just been flipped to a new value.
+  if (this.isEditing()) { // isEditing has just been flipped to a new value.
     if (this.context_.readonlyDirName) {
       this.editor_.getPrompt().showAt(
           'top', 'readonly_warning', 0, this.context_.readonlyDirName);
     }
   } else {
     this.editor_.getPrompt().hide();
+    this.editor_.leaveModeGently();
   }
-
-  ImageUtil.setAttribute(this.editButton_, 'pressed', this.isEditing());
 };
 
 /**
@@ -1225,16 +1198,6 @@ SlideMode.prototype.showSpinner_ = function(on) {
  */
 SlideMode.prototype.isShowingVideo_ = function() {
   return !!this.imageView_.getVideo();
-};
-
-/**
- * Save the current video position.
- * @private
- */
-SlideMode.prototype.saveVideoPosition_ = function() {
-  if (this.isShowingVideo_() && this.mediaControls_.isPlaying()) {
-    this.mediaControls_.savePosition();
-  }
 };
 
 /**

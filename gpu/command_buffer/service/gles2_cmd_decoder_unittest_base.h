@@ -5,7 +5,6 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_BASE_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_BASE_H_
 
-#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
@@ -23,6 +22,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_context_stub.h"
 #include "ui/gl/gl_surface_stub.h"
+#include "ui/gl/gl_mock.h"
 
 namespace gpu {
 namespace gles2 {
@@ -183,7 +183,7 @@ class GLES2DecoderTestBase : public testing::Test {
   void ExpectEnableDisable(GLenum cap, bool enable);
 
   // Setups up a shader for testing glUniform.
-  void SetupShaderForUniform();
+  void SetupShaderForUniform(GLenum uniform_type);
   void SetupDefaultProgram();
   void SetupCubemapProgram();
   void SetupTexture();
@@ -466,6 +466,7 @@ class GLES2DecoderTestBase : public testing::Test {
   scoped_ptr< ::testing::StrictMock< ::gfx::MockGLInterface> > gl_;
   scoped_refptr<gfx::GLSurfaceStub> surface_;
   scoped_refptr<gfx::GLContextStub> context_;
+  scoped_ptr<GLES2Decoder> mock_decoder_;
   scoped_ptr<GLES2Decoder> decoder_;
 
   GLuint client_buffer_id_;

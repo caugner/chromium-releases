@@ -2,18 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
 #include <set>
 #include <string>
 
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
-#include "base/scoped_temp_dir.h"
-#include "base/sys_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation_context.h"
@@ -217,7 +215,7 @@ class ObfuscatedFileUtilTest : public testing::Test {
       origin(), test_helper_.storage_type(),
       base::Bind(&ObfuscatedFileUtilTest::OnGetUsage,
                  weak_factory_.GetWeakPtr()));
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
     EXPECT_EQ(quota::kQuotaStatusOk, quota_status_);
   }
 
@@ -495,7 +493,7 @@ class ObfuscatedFileUtilTest : public testing::Test {
   }
 
   void TestCopyInForeignFileHelper(bool overwrite) {
-    ScopedTempDir source_dir;
+    base::ScopedTempDir source_dir;
     ASSERT_TRUE(source_dir.CreateUniqueTempDir());
     FilePath root_file_path = source_dir.path();
     FilePath src_file_path = root_file_path.AppendASCII("file_name");
@@ -634,7 +632,7 @@ class ObfuscatedFileUtilTest : public testing::Test {
   }
 
  private:
-  ScopedTempDir data_dir_;
+  base::ScopedTempDir data_dir_;
   MessageLoop message_loop_;
   ObfuscatedFileUtil* obfuscated_file_util_;
   scoped_refptr<quota::QuotaManager> quota_manager_;
@@ -1411,49 +1409,6 @@ TEST_F(ObfuscatedFileUtilTest, TestEnumerator) {
   EXPECT_FALSE(DirectoryExists(dest_url));
 }
 
-TEST_F(ObfuscatedFileUtilTest, TestMigration) {
-  ScopedTempDir source_dir;
-  ASSERT_TRUE(source_dir.CreateUniqueTempDir());
-  FilePath root_path = source_dir.path().AppendASCII("chrome-pLmnMWXE7NzTFRsn");
-  ASSERT_TRUE(file_util::CreateDirectory(root_path));
-
-  test::SetUpRegularTestCases(root_path);
-
-  EXPECT_TRUE(ofu()->MigrateFromOldSandbox(origin(), type(), root_path));
-
-  FilePath new_root =
-    test_directory().AppendASCII("File System").AppendASCII("000").Append(
-        ofu()->GetDirectoryNameForType(type())).AppendASCII("Legacy");
-  for (size_t i = 0; i < test::kRegularTestCaseSize; ++i) {
-    SCOPED_TRACE(testing::Message() << "Validating kMigrationTestPath " << i);
-    const test::TestCaseRecord& test_case = test::kRegularTestCases[i];
-    FilePath local_data_path = new_root.Append(test_case.path);
-    local_data_path = local_data_path.NormalizePathSeparators();
-    scoped_ptr<FileSystemOperationContext> context(NewContext(NULL));
-    base::PlatformFileInfo ofu_file_info;
-    FilePath data_path;
-    SCOPED_TRACE(testing::Message() << "Path is " << test_case.path);
-    EXPECT_EQ(base::PLATFORM_FILE_OK,
-        ofu()->GetFileInfo(context.get(), CreateURL(FilePath(test_case.path)),
-            &ofu_file_info, &data_path));
-    if (test_case.is_directory) {
-      EXPECT_TRUE(ofu_file_info.is_directory);
-    } else {
-      base::PlatformFileInfo platform_file_info;
-      SCOPED_TRACE(testing::Message() << "local_data_path is " <<
-          local_data_path.value());
-      SCOPED_TRACE(testing::Message() << "data_path is " << data_path.value());
-      ASSERT_TRUE(file_util::GetFileInfo(local_data_path, &platform_file_info));
-      EXPECT_EQ(test_case.data_file_size, platform_file_info.size);
-      EXPECT_FALSE(platform_file_info.is_directory);
-      scoped_ptr<FileSystemOperationContext> context(NewContext(NULL));
-      EXPECT_EQ(local_data_path, data_path);
-      EXPECT_EQ(platform_file_info.size, ofu_file_info.size);
-      EXPECT_FALSE(ofu_file_info.is_directory);
-    }
-  }
-}
-
 TEST_F(ObfuscatedFileUtilTest, TestOriginEnumerator) {
   scoped_ptr<ObfuscatedFileUtil::AbstractOriginEnumerator>
       enumerator(ofu()->CreateOriginEnumerator());
@@ -1546,7 +1501,7 @@ TEST_F(ObfuscatedFileUtilTest, TestRevokeUsageCache) {
   int64 expected_quota = 0;
 
   for (size_t i = 0; i < test::kRegularTestCaseSize; ++i) {
-    SCOPED_TRACE(testing::Message() << "Creating kMigrationTestPath " << i);
+    SCOPED_TRACE(testing::Message() << "Creating kRegularTestCase " << i);
     const test::TestCaseRecord& test_case = test::kRegularTestCases[i];
     FilePath file_path(test_case.path);
     expected_quota += ObfuscatedFileUtil::ComputeFilePathCost(file_path);

@@ -13,9 +13,13 @@
 #include "chrome/common/form_field_data.h"
 #include "chrome/common/form_field_data_predictions.h"
 #include "chrome/common/password_form_fill_data.h"
+#include "content/public/common/common_param_traits_macros.h"
 #include "content/public/common/password_form.h"
+#include "content/public/common/ssl_status.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFormElement.h"
 #include "ui/gfx/rect.h"
 
 #define IPC_MESSAGE_START AutofillMsgStart
@@ -63,6 +67,8 @@ IPC_STRUCT_TRAITS_BEGIN(PasswordFormFillData)
   IPC_STRUCT_TRAITS_MEMBER(additional_logins)
   IPC_STRUCT_TRAITS_MEMBER(wait_for_username)
 IPC_STRUCT_TRAITS_END()
+
+IPC_ENUM_TRAITS(WebKit::WebFormElement::AutocompleteResult)
 
 // Autofill messages sent from the browser to the renderer.
 
@@ -131,7 +137,21 @@ IPC_MESSAGE_ROUTED1(AutofillMsg_AcceptPasswordAutofillSuggestion,
 IPC_MESSAGE_ROUTED1(AutofillMsg_FormNotBlacklisted,
                     content::PasswordForm /* form checked */)
 
+// Sent when requestAutocomplete() succeeds. Tells the renderer to Autofill the
+// form that requested autocomplete with the |form_data| values input by the
+// user.
+IPC_MESSAGE_ROUTED1(AutofillMsg_RequestAutocompleteSuccess,
+                    FormData /* form_data */)
+
+// Sent when requestAutocomplete() fails. Currently, this happens when a form is
+// requested to be autocompleted with no input or select tags with autocomplete
+// attributes.
+IPC_MESSAGE_ROUTED0(AutofillMsg_RequestAutocompleteError)
+
 // Autofill messages sent from the renderer to the browser.
+
+// TODO(creis): check in the browser that the renderer actually has permission
+// for the URL to avoid compromised renderers talking to the browser.
 
 // Notification that forms have been seen that are candidates for
 // filling/submitting by the AutofillManager.
@@ -186,6 +206,12 @@ IPC_MESSAGE_ROUTED0(AutofillHostMsg_DidPreviewAutofillFormData)
 // Sent when a form is filled with Autofill suggestions.
 IPC_MESSAGE_ROUTED1(AutofillHostMsg_DidFillAutofillFormData,
                     base::TimeTicks /* timestamp */)
+
+// Sent when a form receives a request to do interactive autocomplete.
+IPC_MESSAGE_ROUTED3(AutofillHostMsg_RequestAutocomplete,
+                    FormData /* form_data */,
+                    GURL /* frame_url */,
+                    content::SSLStatus /* ssl_status */)
 
 // Instructs the browser to remove the specified Autocomplete entry from the
 // database.

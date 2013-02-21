@@ -12,6 +12,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_source.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/size_conversions.h"
@@ -142,7 +143,10 @@ IconImage::IconImage(
       resource_size_in_dip_(resource_size_in_dip),
       observer_(observer),
       source_(NULL),
-      default_icon_(default_icon),
+      default_icon_(gfx::ImageSkiaOperations::CreateResizedImage(
+          default_icon,
+          skia::ImageOperations::RESIZE_BEST,
+          gfx::Size(resource_size_in_dip, resource_size_in_dip))),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
   gfx::Size resource_size(resource_size_in_dip, resource_size_in_dip);
   source_ = new Source(this, resource_size);
@@ -193,8 +197,8 @@ gfx::ImageSkiaRep IconImage::LoadImageForScaleFactor(
   info_list.push_back(ImageLoadingTracker::ImageRepresentation(
       resource,
       ImageLoadingTracker::ImageRepresentation::ALWAYS_RESIZE,
-      gfx::ToFlooredSize(
-          gfx::Size(resource_size_in_dip_, resource_size_in_dip_).Scale(scale)),
+      gfx::ToFlooredSize(gfx::ScaleSize(
+          gfx::Size(resource_size_in_dip_, resource_size_in_dip_), scale)),
       scale_factor));
   tracker_.LoadImages(extension_, info_list, ImageLoadingTracker::DONT_CACHE);
 

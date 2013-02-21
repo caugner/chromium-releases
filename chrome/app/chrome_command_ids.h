@@ -81,6 +81,7 @@
 #define IDC_ADVANCED_PRINT              35007
 #define IDC_CHROME_TO_MOBILE_PAGE       35008
 #define IDC_PRINT_TO_DESTINATION        35009
+#define IDC_BOOKMARK_PAGE_FROM_STAR     35010
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -192,6 +193,8 @@
 #define IDC_TOGGLE_REQUEST_TABLET_SITE  40236
 #define IDC_DEV_TOOLS_TOGGLE            40237
 #define IDC_EXTERNAL_EXTENSION_ALERT    40238
+#define IDC_RECENT_TABS_MENU            40239
+#define IDC_RECENT_TABS_NO_DEVICE_TABS  40240
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.

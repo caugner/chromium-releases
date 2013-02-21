@@ -106,37 +106,30 @@ remoting.onEmail = function(email) {
 // also if the user cancels pin entry or the connection in session mode.
 remoting.initDaemonUi = function () {
   remoting.hostController = new remoting.HostController();
-  remoting.hostController.updateDom();
+  document.getElementById('share-button').disabled =
+      !remoting.hostController.isPluginSupported();
   remoting.setMode(getAppStartupMode_());
   remoting.hostSetupDialog =
       new remoting.HostSetupDialog(remoting.hostController);
   // Display the cached host list, then asynchronously update and re-display it.
-  remoting.extractThisHostAndDisplay(true);
-  remoting.hostList.refresh(remoting.extractThisHostAndDisplay);
+  remoting.updateLocalHostState();
+  remoting.hostList.refresh(remoting.updateLocalHostState);
 };
 
 /**
- * Extract the remoting.Host object corresponding to this host (if any) and
- * display the list.
- *
- * @param {boolean} success True if the host list refresh was successful.
- * @return {void} Nothing.
+ * Fetches local host state and updates host list accordingly.
  */
-remoting.extractThisHostAndDisplay = function(success) {
-  if (success) {
-    var display = function() {
-      var hostId = null;
-      if (remoting.hostController.localHost) {
-        hostId = remoting.hostController.localHost.hostId;
-      }
-      remoting.hostList.display(hostId);
-    };
-    remoting.hostController.onHostListRefresh(remoting.hostList, display);
-  } else {
-    remoting.hostController.setHost(null);
-    remoting.hostList.display(null);
-  }
-};
+remoting.updateLocalHostState = function() {
+  /**
+   * @param {remoting.HostController.State} state Host state.
+   * @param {string?} localHostId
+   */
+  var onHostState = function(state, localHostId) {
+    remoting.hostList.setLocalHostStateAndId(state, localHostId);
+    remoting.hostList.display();
+  };
+  remoting.hostController.getLocalHostStateAndId(onHostState);
+}
 
 /**
  * Log information about the current extension.
@@ -161,19 +154,23 @@ remoting.logExtensionInfoAsync_ = function() {
 };
 
 /**
- * If the client is connected, or the host is shared, prompt before closing.
+ * If an It2Me client or host is active then prompt the user before closing.
+ * If a Me2Me client is active then don't bother, since closing the window is
+ * the more intuitive way to end a Me2Me session, and re-connecting is easy.
  *
  * @return {?string} The prompt string if a connection is active.
  */
 remoting.promptClose = function() {
+  if (remoting.currentConnectionType == remoting.ClientSession.Mode.ME2ME) {
+    return null;
+  }
   switch (remoting.currentMode) {
     case remoting.AppMode.CLIENT_CONNECTING:
     case remoting.AppMode.HOST_WAITING_FOR_CODE:
     case remoting.AppMode.HOST_WAITING_FOR_CONNECTION:
     case remoting.AppMode.HOST_SHARED:
     case remoting.AppMode.IN_SESSION:
-      var result = chrome.i18n.getMessage(/*i18n-content*/'CLOSE_PROMPT');
-      return result;
+      return chrome.i18n.getMessage(/*i18n-content*/'CLOSE_PROMPT');
     default:
       return null;
   }

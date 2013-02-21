@@ -46,13 +46,17 @@ class TestGlobals : public PpapiGlobals {
   virtual void PreCacheFontForFlash(const void* logfontw) OVERRIDE;
   virtual base::Lock* GetProxyLock() OVERRIDE;
   virtual void LogWithSource(PP_Instance instance,
-                             PP_LogLevel_Dev level,
+                             PP_LogLevel level,
                              const std::string& source,
                              const std::string& value) OVERRIDE;
   virtual void BroadcastLogWithSource(PP_Module module,
-                                      PP_LogLevel_Dev level,
+                                      PP_LogLevel level,
                                       const std::string& source,
                                       const std::string& value) OVERRIDE;
+  virtual MessageLoopShared* GetCurrentMessageLoop() OVERRIDE;
+
+  // PpapiGlobals overrides:
+  virtual bool IsHostGlobals() const OVERRIDE;
 
  private:
   ResourceTracker resource_tracker_;

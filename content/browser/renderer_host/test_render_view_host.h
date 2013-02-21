@@ -88,7 +88,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void WasShown() OVERRIDE {}
   virtual void WasHidden() OVERRIDE {}
   virtual void MovePluginWindows(
-      const gfx::Point& scroll_offset,
+      const gfx::Vector2d& scroll_offset,
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE {}
   virtual void Focus() OVERRIDE {}
   virtual void Blur() OVERRIDE {}
@@ -98,7 +98,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       const ViewHostMsg_TextInputState_Params& params) OVERRIDE {}
   virtual void ImeCancelComposition() OVERRIDE {}
   virtual void DidUpdateBackingStore(
-      const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+      const gfx::Rect& scroll_rect,
+      const gfx::Vector2d& scroll_delta,
       const std::vector<gfx::Rect>& rects) OVERRIDE {}
   virtual void RenderViewGone(base::TerminationStatus status,
                               int error_code) OVERRIDE;
@@ -142,11 +143,16 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       TransportDIB::Handle transport_dib) OVERRIDE;
 #elif defined(OS_ANDROID)
   virtual void StartContentIntent(const GURL&) OVERRIDE;
+  virtual void ShowDisambiguationPopup(
+      const gfx::Rect& target_rect,
+      const SkBitmap& zoomed_bitmap) OVERRIDE {}
   virtual void SetCachedBackgroundColor(SkColor color) OVERRIDE {}
   virtual void SetCachedPageScaleFactorLimits(float minimum_scale,
                                               float maximum_scale) OVERRIDE {}
-  virtual void UpdateFrameInfo(const gfx::Point& scroll_offset,
+  virtual void UpdateFrameInfo(const gfx::Vector2d& scroll_offset,
                                float page_scale_factor,
+                               float min_page_scale_factor,
+                               float max_page_scale_factor,
                                const gfx::Size& content_size) OVERRIDE {}
   virtual void HasTouchEventHandlers(bool need_touch_events) OVERRIDE {}
 #elif defined(OS_WIN) && !defined(USE_AURA)
@@ -154,18 +160,12 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 #endif
 #if defined(OS_POSIX) || defined(USE_AURA)
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE {}
-  virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
 #endif
+  virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE { }
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE { }
-
-#if defined(USE_AURA)
-  virtual void AcceleratedSurfaceNew(
-      int32 width, int32 height, uint64 surface_id) OVERRIDE { }
-  virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE { }
-#endif
 
 #if defined(TOOLKIT_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) OVERRIDE { }

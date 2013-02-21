@@ -20,7 +20,6 @@
 
 class Browser;
 class LauncherFaviconLoader;
-class TabContents;
 
 namespace ash {
 class LauncherModel;
@@ -83,21 +82,22 @@ class BrowserLauncherItemController : public LauncherItemController,
                                    const ash::LauncherItem& old_item) OVERRIDE;
 
   // TabStripModel overrides:
-  virtual void ActiveTabChanged(TabContents* old_contents,
-                                TabContents* new_contents,
+  virtual void ActiveTabChanged(content::WebContents* old_contents,
+                                content::WebContents* new_contents,
                                 int index,
                                 bool user_gesture) OVERRIDE;
-  virtual void TabInsertedAt(TabContents* contents,
+  virtual void TabInsertedAt(content::WebContents* contents,
                              int index,
                              bool foreground) OVERRIDE;
-  virtual void TabDetachedAt(TabContents* contents, int index) OVERRIDE;
+  virtual void TabDetachedAt(content::WebContents* contents,
+                             int index) OVERRIDE;
   virtual void TabChangedAt(
-      TabContents* tab,
+      content::WebContents* contents,
       int index,
       TabStripModelObserver::TabChangeType change_type) OVERRIDE;
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             TabContents* old_contents,
-                             TabContents* new_contents,
+                             content::WebContents* old_contents,
+                             content::WebContents* new_contents,
                              int index) OVERRIDE;
 
   // LauncherFaviconLoader::Delegate overrides:
@@ -123,9 +123,9 @@ class BrowserLauncherItemController : public LauncherItemController,
   void UpdateItemStatus();
 
   // Updates the launcher from |tab|.
-  void UpdateLauncher(TabContents* tab);
+  void UpdateLauncher(content::WebContents* tab);
 
-  void UpdateAppState(TabContents* tab);
+  void UpdateAppState(content::WebContents* tab);
 
   ash::LauncherModel* launcher_model();
 

@@ -7,11 +7,9 @@
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ui/base/ui_base_types.h"
 
 class Browser;
@@ -32,7 +30,6 @@ class Extension;
 
 class BrowserWindowCocoa :
     public BrowserWindow,
-    public content::NotificationObserver,
     public extensions::ExtensionKeybindingRegistry::Delegate {
  public:
   BrowserWindowCocoa(Browser* browser,
@@ -78,7 +75,7 @@ class BrowserWindowCocoa :
   virtual LocationBar* GetLocationBar() const OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual void UpdateReloadStopState(bool is_loading, bool force) OVERRIDE;
-  virtual void UpdateToolbar(TabContents* contents,
+  virtual void UpdateToolbar(content::WebContents* contents,
                              bool should_restore_state) OVERRIDE;
   virtual void FocusToolbar() OVERRIDE;
   virtual void FocusAppMenu() OVERRIDE;
@@ -114,7 +111,7 @@ class BrowserWindowCocoa :
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
   virtual void ShowWebsiteSettings(Profile* profile,
-                                   TabContents* tab_contents,
+                                   content::WebContents* web_contents,
                                    const GURL& url,
                                    const content::SSLStatus& ssl,
                                    bool show_history) OVERRIDE;
@@ -145,11 +142,10 @@ class BrowserWindowCocoa :
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
-
-  // Overridden from NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  virtual void ShowPasswordGenerationBubble(
+      const gfx::Rect& rect,
+      const content::PasswordForm& form,
+      autofill::PasswordGenerator* password_generator) OVERRIDE;
 
   // Overridden from ExtensionKeybindingRegistry::Delegate:
   virtual extensions::ActiveTabPermissionGranter*
@@ -167,8 +163,6 @@ class BrowserWindowCocoa :
  private:
   NSWindow* window() const;  // Accessor for the (current) |NSWindow|.
 
-  content::NotificationRegistrar registrar_;
-  PrefChangeRegistrar pref_change_registrar_;
   Browser* browser_;  // weak, owned by controller
   BrowserWindowController* controller_;  // weak, owns us
   base::WeakPtrFactory<Browser> confirm_close_factory_;

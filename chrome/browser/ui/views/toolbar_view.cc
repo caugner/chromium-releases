@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,20 +23,13 @@
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/search.h"
-#include "chrome/browser/ui/search/search_model.h"
-#include "chrome/browser/ui/search/search_tab_helper.h"
-#include "chrome/browser/ui/search/search_types.h"
-#include "chrome/browser/ui/search/search_ui.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/extensions/disabled_extensions_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/location_bar/location_bar_container.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
-#include "chrome/browser/ui/views/search/search_view_controller.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
@@ -76,6 +69,7 @@
 #if defined(USE_AURA)
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
+#include "ui/native_theme/native_theme_aura.h"
 #endif
 
 using content::UserMetricsAction;
@@ -106,14 +100,6 @@ const int kPopupBottomSpacingGlass = 1;
 // Top margin for the wrench menu badges (badge is placed in the upper right
 // corner of the wrench menu).
 const int kBadgeTopMargin = 2;
-
-// Added padding for search toolbar.
-const int kSearchTopButtonSpacing = 3;
-const int kSearchTopLocationBarSpacing = 2;
-const int kSearchToolbarSpacing = 5;
-
-// How often to show the disabled extension (sideload wipeout) bubble.
-const int kShowSideloadWipeoutBubbleMax = 3;
 
 gfx::ImageSkia* kPopupBackgroundEdge = NULL;
 
@@ -182,11 +168,9 @@ ToolbarView::ToolbarView(Browser* browser)
       reload_(NULL),
       home_(NULL),
       location_bar_(NULL),
-      location_bar_container_(NULL),
       browser_actions_(NULL),
       app_menu_(NULL),
-      browser_(browser),
-      profiles_menu_contents_(NULL) {
+      browser_(browser) {
   set_id(VIEW_ID_TOOLBAR);
 
   chrome::AddCommandObserver(browser_, IDC_BACK, this);
@@ -214,19 +198,17 @@ ToolbarView::ToolbarView(Browser* browser)
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
                  content::Source<Profile>(browser_->profile()));
-  browser_->search_model()->AddObserver(this);
 }
 
 ToolbarView::~ToolbarView() {
   // NOTE: Don't remove the command observers here.  This object gets destroyed
   // after the Browser (which owns the CommandUpdater), so the CommandUpdater is
   // already gone.
-
-  // TODO(kuan): Reset the search model observer in ~BrowserView before we lose
-  // browser.
 }
 
-void ToolbarView::Init(views::View* location_bar_parent) {
+void ToolbarView::Init() {
+  GetWidget()->AddObserver(this);
+
   back_ = new views::ButtonDropDown(this, new BackForwardMenuModel(
       browser_, BackForwardMenuModel::BACKWARD_MENU));
   back_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
@@ -248,23 +230,14 @@ void ToolbarView::Init(views::View* location_bar_parent) {
   forward_->set_id(VIEW_ID_FORWARD_BUTTON);
 
   // Have to create this before |reload_| as |reload_|'s constructor needs it.
-  location_bar_container_ = new LocationBarContainer(
-      location_bar_parent,
-      this,
-      chrome::search::IsInstantExtendedAPIEnabled(browser_->profile()));
   location_bar_ = new LocationBarView(
       browser_,
       browser_->profile(),
       browser_->command_controller()->command_updater(),
       model_,
       this,
-      browser_->search_model(),
       (display_mode_ == DISPLAYMODE_LOCATION) ?
           LocationBarView::POPUP : LocationBarView::NORMAL);
-  // TODO(sky): if we want this to work on windows we need to make sure the
-  // LocationBarContainer gets focus. This will involve tweaking view_ids.
-  // location_bar_->set_view_to_focus(location_bar_container_);
-  location_bar_container_->SetLocationBarView(location_bar_);
 
   reload_ = new ReloadButton(location_bar_,
                              browser_->command_controller()->command_updater());
@@ -307,15 +280,15 @@ void ToolbarView::Init(views::View* location_bar_parent) {
   AddChildView(forward_);
   AddChildView(reload_);
   AddChildView(home_);
+  AddChildView(location_bar_);
   AddChildView(browser_actions_);
   AddChildView(app_menu_);
 
   location_bar_->Init();
   show_home_button_.Init(prefs::kShowHomeButton,
-                         browser_->profile()->GetPrefs(), this);
-  sideload_wipeout_bubble_shown_.Init(
-      prefs::kExtensionsSideloadWipeoutBubbleShown,
-      browser_->profile()->GetPrefs(), NULL);
+                         browser_->profile()->GetPrefs(),
+                         base::Bind(&ToolbarView::OnShowHomeButtonChanged,
+                                    base::Unretained(this)));
 
   browser_actions_->Init();
 
@@ -327,11 +300,6 @@ void ToolbarView::Init(views::View* location_bar_parent) {
     forward_->SetTooltipText(
         l10n_util::GetStringUTF16(IDS_ACCNAME_TOOLTIP_FORWARD));
   }
-
-  int bubble_shown_count = sideload_wipeout_bubble_shown_.GetValue();
-  if (bubble_shown_count < kShowSideloadWipeoutBubbleMax &&
-      DisabledExtensionsView::MaybeShow(browser_, app_menu_))
-    sideload_wipeout_bubble_shown_.SetValue(++bubble_shown_count);
 }
 
 void ToolbarView::Update(WebContents* tab, bool should_restore_state) {
@@ -367,10 +335,10 @@ gfx::ImageSkia ToolbarView::GetAppMenuIcon(
 
   int id = 0;
   switch (state) {
-    case views::CustomButton::BS_NORMAL: id = IDR_TOOLS;   break;
-    case views::CustomButton::BS_HOT:    id = IDR_TOOLS_H; break;
-    case views::CustomButton::BS_PUSHED: id = IDR_TOOLS_P; break;
-    default:                             NOTREACHED();     break;
+    case views::CustomButton::STATE_NORMAL:  id = IDR_TOOLS;   break;
+    case views::CustomButton::STATE_HOVERED: id = IDR_TOOLS_H; break;
+    case views::CustomButton::STATE_PRESSED: id = IDR_TOOLS_P; break;
+    default:                                 NOTREACHED();     break;
   }
   gfx::ImageSkia icon = *tp->GetImageSkiaNamed(id);
 
@@ -418,39 +386,6 @@ gfx::ImageSkia ToolbarView::GetAppMenuIcon(
   return gfx::ImageSkia(source, source->size());
 }
 
-void ToolbarView::LayoutForSearch() {
-  if (!(chrome::search::IsInstantExtendedAPIEnabled(browser_->profile()) &&
-        browser_->search_model()->mode().is_ntp()))
-    return;
-
-  const BrowserView* browser_view =
-      static_cast<BrowserView*>(browser_->window());
-  if (!browser_view)
-    return;
-
-  gfx::Rect location_container_bounds =
-      browser_view->search_view_controller()->GetNTPOmniboxBounds(
-          location_bar_container_->parent());
-  if (location_container_bounds.width() == 0)
-    return;
-
-  location_bar_container_->SetInToolbar(false);
-  location_container_bounds.set_height(
-      location_bar_container_->GetPreferredSize().height());
-
-  // If bounds of |location_bar_container_| is not contained within its
-  // parent's, adjust the former's to within the latter's.  This will clip its
-  // child |location_bar_view_| within its bounds without resizing it.
-  // Note that parent of |location_bar_container_| i.e. BrowserView can't clip
-  // its children, else it loses the 3D shadows.
-  gfx::Rect parent_rect = location_bar_container_->parent()->GetLocalBounds();
-  gfx::Rect intersect_rect =
-      gfx::IntersectRects(parent_rect, location_container_bounds);
-  // If the two bounds don't intersect, set bounds of |location_bar_container_|
-  // to 0.
-  location_bar_container_->SetBoundsRect(intersect_rect);
-}
-
 views::View* ToolbarView::GetBookmarkBubbleAnchor() {
   views::View* star_view = location_bar()->star_view();
   if (star_view && star_view->visible())
@@ -464,14 +399,6 @@ views::View* ToolbarView::GetBookmarkBubbleAnchor() {
 bool ToolbarView::SetPaneFocus(views::View* initial_focus) {
   if (!AccessiblePaneView::SetPaneFocus(initial_focus))
     return false;
-
-  // Put the location bar container between the home button and browser
-  // actions when doing a focus search. This needs to be done here rather
-  // than during initialization, because the location bar container might
-  // get siblings added to it after initialization of this view, which
-  // breaks our override.
-  home_->SetNextFocusableView(location_bar_container_);
-  location_bar_container_->SetNextFocusableView(browser_actions_);
 
   location_bar_->SetShowFocusRect(true);
   return true;
@@ -496,8 +423,22 @@ void ToolbarView::OnMenuButtonClicked(views::View* source,
                                       const gfx::Point& point) {
   DCHECK_EQ(VIEW_ID_APP_MENU, source->id());
 
-  wrench_menu_.reset(new WrenchMenu(browser_));
-  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_));
+  bool use_new_menu = false;
+  bool supports_new_separators = false;
+  // TODO: remove this.
+#if defined(USE_AURA)
+  supports_new_separators =
+      GetNativeTheme() == ui::NativeThemeAura::instance();
+  use_new_menu = supports_new_separators;
+#endif
+#if defined(OS_WIN)
+  use_new_menu = use_new_menu || ui::GetDisplayLayout() == ui::LAYOUT_TOUCH;
+#endif
+
+  wrench_menu_.reset(new WrenchMenu(browser_, use_new_menu,
+                                    supports_new_separators));
+  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_, use_new_menu,
+                                               supports_new_separators));
   wrench_menu_->Init(wrench_menu_model_.get());
 
   FOR_EACH_OBSERVER(views::MenuListener, menu_listeners_, OnMenuOpened());
@@ -508,12 +449,13 @@ void ToolbarView::OnMenuButtonClicked(views::View* source,
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, LocationBarView::Delegate implementation:
 
-TabContents* ToolbarView::GetTabContents() const {
-  return chrome::GetActiveTabContents(browser_);
+WebContents* ToolbarView::GetWebContents() const {
+  return browser_->tab_strip_model()->GetActiveWebContents();
 }
 
 InstantController* ToolbarView::GetInstant() {
-  return browser_->instant_controller()->instant();
+  return browser_->instant_controller() ?
+      browser_->instant_controller()->instant() : NULL;
 }
 
 ContentSettingBubbleModelDelegate*
@@ -547,20 +489,6 @@ void ToolbarView::OnInputInProgress(bool in_progress) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ToolbarView, chrome::search::SearchModelObserver implementation:
-void ToolbarView::ModeChanged(const chrome::search::Mode& old_mode,
-                              const chrome::search::Mode& new_mode) {
-  // Layout location bar to determine the visibility of each of its child
-  // view based on toolbar mode change.
-  if (new_mode.is_ntp())
-    location_bar_->Layout();
-
-  Layout();
-  LayoutForSearch();
-  SchedulePaint();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, CommandObserver implementation:
 
 void ToolbarView::EnabledStateChangedForCommand(int id, bool enabled) {
@@ -590,7 +518,7 @@ void ToolbarView::ButtonPressed(views::Button* sender,
                                 const ui::Event& event) {
   int command = sender->tag();
   WindowOpenDisposition disposition =
-      chrome::DispositionFromEventFlags(sender->mouse_event_flags());
+      chrome::DispositionFromEventFlags(event.flags());
   if ((disposition == CURRENT_TAB) &&
       ((command == IDC_BACK) || (command == IDC_FORWARD))) {
     // Forcibly reset the location bar, since otherwise it won't discard any
@@ -601,6 +529,14 @@ void ToolbarView::ButtonPressed(views::Button* sender,
   chrome::ExecuteCommandWithDisposition(browser_, command, disposition);
 }
 
+void ToolbarView::OnWidgetVisibilityChanged(views::Widget* widget,
+                                            bool visible) {
+  if (visible) {
+    DisabledExtensionsView::MaybeShow(browser_, app_menu_);
+    GetWidget()->RemoveObserver(this);
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, content::NotificationObserver implementation:
 
@@ -608,14 +544,6 @@ void ToolbarView::Observe(int type,
                           const content::NotificationSource& source,
                           const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      std::string* pref_name = content::Details<std::string>(details).ptr();
-      if (*pref_name == prefs::kShowHomeButton) {
-        Layout();
-        SchedulePaint();
-      }
-      break;
-    }
     case chrome::NOTIFICATION_UPGRADE_RECOMMENDED:
     case chrome::NOTIFICATION_MODULE_INCOMPATIBILITY_BADGE_CHANGE:
     case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
@@ -686,7 +614,7 @@ gfx::Size ToolbarView::GetPreferredSize() {
         reload_->GetPreferredSize().width() + kStandardSpacing +
         (show_home_button_.GetValue() ?
             (home_->GetPreferredSize().width() + kButtonSpacing) : 0) +
-        location_bar_container_->GetPreferredSize().width() +
+        location_bar_->GetPreferredSize().width() +
         browser_actions_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kRightEdgeSpacing;
 
@@ -696,16 +624,14 @@ gfx::Size ToolbarView::GetPreferredSize() {
       normal_background = *rb.GetImageSkiaNamed(IDR_CONTENT_TOP_CENTER);
     }
 
-    int delta = !chrome::search::IsInstantExtendedAPIEnabled(
-        browser_->profile()) ? 0 : kSearchToolbarSpacing;
     return gfx::Size(min_width,
-                     normal_background.height() - kContentShadowHeight + delta);
+                     normal_background.height() - kContentShadowHeight);
   }
 
   int vertical_spacing = PopupTopSpacing() +
       (GetWidget()->ShouldUseNativeFrame() ?
           kPopupBottomSpacingGlass : kPopupBottomSpacingNonGlass);
-  return gfx::Size(0, location_bar_container_->GetPreferredSize().height() +
+  return gfx::Size(0, location_bar_->GetPreferredSize().height() +
       vertical_spacing);
 }
 
@@ -718,14 +644,10 @@ void ToolbarView::Layout() {
   if (!is_display_mode_normal()) {
     int edge_width = maximized ?
         0 : kPopupBackgroundEdge->width();  // See OnPaint().
-    SetLocationBarContainerBounds(gfx::Rect(edge_width, PopupTopSpacing(),
-        std::max(0, width() - (edge_width * 2)),
-        location_bar_container_->GetPreferredSize().height()));
+    location_bar_->SetBounds(edge_width, PopupTopSpacing(),
+        width() - (edge_width * 2), location_bar_->GetPreferredSize().height());
     return;
   }
-
-  int delta = !chrome::search::IsInstantExtendedAPIEnabled(
-      browser_->profile()) ? 0 : kSearchTopButtonSpacing;
 
   // We assume all child elements are the same height.
   int child_height =
@@ -735,7 +657,7 @@ void ToolbarView::Layout() {
   // the behaviour on non-touch UIs, round-up by taking
   // ceil((height() - child_height) / 2) + delta
   // which is equivalent to the below.
-  int child_y = (1 + ((height() - child_height - 1) / 2)) + delta;
+  int child_y = (1 + ((height() - child_height - 1) / 2));
 
   // If the window is maximized, we extend the back button to the left so that
   // clicking on the left-most pixel will activate the back button.
@@ -765,54 +687,18 @@ void ToolbarView::Layout() {
     home_->SetBounds(reload_->x() + reload_->width(), child_y, 0, child_height);
   }
 
-  int top_delta = !chrome::search::IsInstantExtendedAPIEnabled(
-      browser_->profile()) ? 0 : kSearchTopLocationBarSpacing;
-
   int browser_actions_width = browser_actions_->GetPreferredSize().width();
   int app_menu_width = app_menu_->GetPreferredSize().width();
   int location_x = home_->x() + home_->width() + kStandardSpacing;
   int available_width = std::max(0, width() - kRightEdgeSpacing -
       app_menu_width - browser_actions_width - location_x);
 
-  int location_y =
-      top_delta + 1 + ((height() -
-          location_bar_container_->GetPreferredSize().height() - 1) / 2);
+  int location_y = std::min(location_bar_vert_spacing(), height());
+  int location_bar_height = location_bar_->GetPreferredSize().height();
+  location_bar_->SetBounds(location_x, location_y, std::max(available_width, 0),
+                           location_bar_height);
 
-  int available_height = location_bar_->GetPreferredSize().height();
-  const gfx::Rect location_bar_bounds(location_x, location_y,
-                                      available_width, available_height);
-
-  // In NTP mode, the location bar needs content area's bounds to layout within
-  // it, so we skip doing that here. When the browser view finished setting the
-  // tab content bounds, we then layout the NTP location bar over it.
-  const chrome::search::Mode& si_mode(browser_->search_model()->mode());
-  if (si_mode.is_ntp()) {
-    // Force the reload button to go into disabled mode to display the grey
-    // circle and not the grey cross. The disabled reload state only exists for
-    // ntp pages.
-    chrome::UpdateCommandEnabled(browser_, IDC_RELOAD, false);
-    // Disable zooming for NTP mode.
-    chrome::UpdateCommandEnabled(browser_, IDC_ZOOM_MINUS, false);
-    chrome::UpdateCommandEnabled(browser_, IDC_ZOOM_PLUS, false);
-  } else {
-    // Start the location bar animation.
-    if (si_mode.animate && si_mode.is_search() &&
-        !location_bar_container_->IsAnimating()) {
-      gfx::Point location_bar_origin(location_bar_bounds.origin());
-      views::View::ConvertPointToTarget(this, location_bar_container_->parent(),
-                                      &location_bar_origin);
-      location_bar_container_->AnimateTo(
-          gfx::Rect(location_bar_origin, location_bar_bounds.size()));
-    } else {
-      SetLocationBarContainerBounds(location_bar_bounds);
-    }
-    // Enable reload and zooming for non-NTP modes.
-    chrome::UpdateCommandEnabled(browser_, IDC_RELOAD, true);
-    chrome::UpdateCommandEnabled(browser_, IDC_ZOOM_MINUS, true);
-    chrome::UpdateCommandEnabled(browser_, IDC_ZOOM_PLUS, true);
-  }
-
-  browser_actions_->SetBounds(location_bar_bounds.right(), 0,
+  browser_actions_->SetBounds(location_bar_->x() + location_bar_->width(), 0,
                               browser_actions_width, height());
   // The browser actions need to do a layout explicitly, because when an
   // extension is loaded/unloaded/changed, BrowserActionContainer removes and
@@ -842,20 +728,6 @@ bool ToolbarView::HitTestRect(const gfx::Rect& rect) const {
 
 void ToolbarView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
-
-  TabContents* tab_contents = GetTabContents();
-  if (tab_contents) {
-    InfoBarTabHelper* infobar_tab_helper =
-        InfoBarTabHelper::FromWebContents(tab_contents->web_contents());
-    int num_infobars = infobar_tab_helper->GetInfoBarCount();
-    const chrome::search::Mode& mode(browser_->search_model()->mode());
-    if ((mode.is_ntp() || mode.is_search_results()) && num_infobars > 0) {
-      canvas->FillRect(gfx::Rect(0, height() - 1, width(), 1),
-                       ThemeService::GetDefaultColor(
-                           ThemeService::COLOR_SEARCH_SEPARATOR_LINE));
-      return;
-    }
-  }
 
   if (is_display_mode_normal())
     return;
@@ -948,21 +820,6 @@ void ToolbarView::RemovePaneFocus() {
   location_bar_->SetShowFocusRect(false);
 }
 
-views::View* ToolbarView::GetParentForFocusSearch(views::View* v) {
-  if (v == location_bar_container_)
-    return this;
-
-  return AccessiblePaneView::GetParentForFocusSearch(v);
-}
-
-bool ToolbarView::ContainsForFocusSearch(views::View* root,
-                                         const views::View* v) {
-  if (Contains(root) && location_bar_container_->Contains(v))
-    return true;
-
-  return AccessiblePaneView::ContainsForFocusSearch(root, v);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, private:
 
@@ -992,36 +849,36 @@ int ToolbarView::PopupTopSpacing() const {
 void ToolbarView::LoadImages() {
   ui::ThemeProvider* tp = GetThemeProvider();
 
-  back_->SetImage(views::CustomButton::BS_NORMAL,
+  back_->SetImage(views::CustomButton::STATE_NORMAL,
       tp->GetImageSkiaNamed(IDR_BACK));
-  back_->SetImage(views::CustomButton::BS_HOT,
+  back_->SetImage(views::CustomButton::STATE_HOVERED,
       tp->GetImageSkiaNamed(IDR_BACK_H));
-  back_->SetImage(views::CustomButton::BS_PUSHED,
+  back_->SetImage(views::CustomButton::STATE_PRESSED,
       tp->GetImageSkiaNamed(IDR_BACK_P));
-  back_->SetImage(views::CustomButton::BS_DISABLED,
+  back_->SetImage(views::CustomButton::STATE_DISABLED,
       tp->GetImageSkiaNamed(IDR_BACK_D));
 
-  forward_->SetImage(views::CustomButton::BS_NORMAL,
+  forward_->SetImage(views::CustomButton::STATE_NORMAL,
       tp->GetImageSkiaNamed(IDR_FORWARD));
-  forward_->SetImage(views::CustomButton::BS_HOT,
+  forward_->SetImage(views::CustomButton::STATE_HOVERED,
       tp->GetImageSkiaNamed(IDR_FORWARD_H));
-  forward_->SetImage(views::CustomButton::BS_PUSHED,
+  forward_->SetImage(views::CustomButton::STATE_PRESSED,
       tp->GetImageSkiaNamed(IDR_FORWARD_P));
-  forward_->SetImage(views::CustomButton::BS_DISABLED,
+  forward_->SetImage(views::CustomButton::STATE_DISABLED,
       tp->GetImageSkiaNamed(IDR_FORWARD_D));
 
   reload_->LoadImages(tp);
 
-  home_->SetImage(views::CustomButton::BS_NORMAL,
+  home_->SetImage(views::CustomButton::STATE_NORMAL,
       tp->GetImageSkiaNamed(IDR_HOME));
-  home_->SetImage(views::CustomButton::BS_HOT,
+  home_->SetImage(views::CustomButton::STATE_HOVERED,
       tp->GetImageSkiaNamed(IDR_HOME_H));
-  home_->SetImage(views::CustomButton::BS_PUSHED,
+  home_->SetImage(views::CustomButton::STATE_PRESSED,
       tp->GetImageSkiaNamed(IDR_HOME_P));
 
-  app_menu_->SetIcon(GetAppMenuIcon(views::CustomButton::BS_NORMAL));
-  app_menu_->SetHoverIcon(GetAppMenuIcon(views::CustomButton::BS_HOT));
-  app_menu_->SetPushedIcon(GetAppMenuIcon(views::CustomButton::BS_PUSHED));
+  app_menu_->SetIcon(GetAppMenuIcon(views::CustomButton::STATE_NORMAL));
+  app_menu_->SetHoverIcon(GetAppMenuIcon(views::CustomButton::STATE_HOVERED));
+  app_menu_->SetPushedIcon(GetAppMenuIcon(views::CustomButton::STATE_PRESSED));
 }
 
 void ToolbarView::ShowCriticalNotification() {
@@ -1041,24 +898,13 @@ void ToolbarView::UpdateAppMenuState() {
   }
   app_menu_->SetAccessibleName(accname_app);
 
-  app_menu_->SetIcon(GetAppMenuIcon(views::CustomButton::BS_NORMAL));
-  app_menu_->SetHoverIcon(GetAppMenuIcon(views::CustomButton::BS_HOT));
-  app_menu_->SetPushedIcon(GetAppMenuIcon(views::CustomButton::BS_PUSHED));
+  app_menu_->SetIcon(GetAppMenuIcon(views::CustomButton::STATE_NORMAL));
+  app_menu_->SetHoverIcon(GetAppMenuIcon(views::CustomButton::STATE_HOVERED));
+  app_menu_->SetPushedIcon(GetAppMenuIcon(views::CustomButton::STATE_PRESSED));
   SchedulePaint();
 }
 
-void ToolbarView::SetLocationBarContainerBounds(
-    const gfx::Rect& bounds) {
-  if (location_bar_container_->IsAnimating())
-    return;
-
-  // LocationBarContainer is not a child of the ToolbarView.
-  gfx::Point origin(bounds.origin());
-  views::View::ConvertPointToTarget(this, location_bar_container_->parent(),
-                                    &origin);
-  gfx::Rect target_bounds(origin, bounds.size());
-  if (location_bar_container_->GetTargetBounds() != target_bounds) {
-    location_bar_container_->SetInToolbar(true);
-    location_bar_container_->SetBoundsRect(target_bounds);
-  }
+void ToolbarView::OnShowHomeButtonChanged() {
+  Layout();
+  SchedulePaint();
 }

@@ -5,11 +5,13 @@
 #include "chrome/browser/history/history_backend.h"
 
 #include <algorithm>
+#include <functional>
 #include <list>
 #include <map>
 #include <set>
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
@@ -22,7 +24,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/common/cancelable_request.h"
+#include "chrome/browser/history/download_row.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
@@ -33,7 +35,6 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/download_persistent_store_info.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -1260,72 +1261,66 @@ void HistoryBackend::GetMostRecentKeywordSearchTerms(
 
 // Downloads -------------------------------------------------------------------
 
-void HistoryBackend::GetNextDownloadId(
-    scoped_refptr<DownloadNextIdRequest> request) {
-  if (request->canceled()) return;
-  if (db_.get()) {
-    request->value = db_->next_download_id();
-  } else {
-    request->value = 0;
-  }
-  request->ForwardResult(request->value);
+void HistoryBackend::GetNextDownloadId(int* id) {
+  if (db_.get())
+    *id = db_->next_download_id();
 }
 
 // Get all the download entries from the database.
-void HistoryBackend::QueryDownloads(
-    scoped_refptr<DownloadQueryRequest> request) {
-  if (request->canceled())
-    return;
+void HistoryBackend::QueryDownloads(std::vector<DownloadRow>* rows) {
   if (db_.get())
-    db_->QueryDownloads(&request->value);
-  request->ForwardResult(&request->value);
+    db_->QueryDownloads(rows);
 }
 
 // Clean up entries that has been corrupted (because of the crash, for example).
 void HistoryBackend::CleanUpInProgressEntries() {
-  if (db_.get()) {
-    // If some "in progress" entries were not updated when Chrome exited, they
-    // need to be cleaned up.
+  // If some "in progress" entries were not updated when Chrome exited, they
+  // need to be cleaned up.
+  if (db_.get())
     db_->CleanUpInProgressEntries();
-  }
 }
 
 // Update a particular download entry.
-void HistoryBackend::UpdateDownload(
-    const content::DownloadPersistentStoreInfo& data) {
+void HistoryBackend::UpdateDownload(const history::DownloadRow& data) {
   if (db_.get())
     db_->UpdateDownload(data);
 }
 
-// Update the path of a particular download entry.
-void HistoryBackend::UpdateDownloadPath(const FilePath& path,
-                                        int64 db_handle) {
+void HistoryBackend::CreateDownload(const history::DownloadRow& history_info,
+                                    int64* db_handle) {
   if (db_.get())
-    db_->UpdateDownloadPath(path, db_handle);
+    *db_handle = db_->CreateDownload(history_info);
 }
 
-// Create a new download entry and pass back the db_handle to it.
-void HistoryBackend::CreateDownload(
-    scoped_refptr<DownloadCreateRequest> request,
-    int32 id,
-    const content::DownloadPersistentStoreInfo& history_info) {
-  int64 db_handle = 0;
-  if (!request->canceled()) {
-    if (db_.get())
-      db_handle = db_->CreateDownload(history_info);
-    request->ForwardResult(id, db_handle);
+void HistoryBackend::RemoveDownloads(const std::set<int64>& handles) {
+  if (!db_.get())
+    return;
+  int downloads_count_before = db_->CountDownloads();
+  base::TimeTicks started_removing = base::TimeTicks::Now();
+  // HistoryBackend uses a long-running Transaction that is committed
+  // periodically, so this loop doesn't actually hit the disk too hard.
+  for (std::set<int64>::const_iterator it = handles.begin();
+       it != handles.end(); ++it) {
+    db_->RemoveDownload(*it);
   }
-}
-
-void HistoryBackend::RemoveDownload(int64 db_handle) {
-  if (db_.get())
-    db_->RemoveDownload(db_handle);
-}
-
-void HistoryBackend::RemoveDownloadsBetween(const Time remove_begin,
-                                            const Time remove_end) {
-  if (db_.get())
-    db_->RemoveDownloadsBetween(remove_begin, remove_end);
+  base::TimeTicks finished_removing = base::TimeTicks::Now();
+  int downloads_count_after = db_->CountDownloads();
+  int num_downloads_deleted = downloads_count_before - downloads_count_after;
+  if (num_downloads_deleted >= 0) {
+    UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCount",
+                         num_downloads_deleted);
+    base::TimeDelta micros = (1000 * (finished_removing - started_removing));
+    UMA_HISTOGRAM_TIMES("Download.DatabaseRemoveDownloadsTime", micros);
+    if (num_downloads_deleted > 0) {
+      UMA_HISTOGRAM_TIMES("Download.DatabaseRemoveDownloadsTimePerRecord",
+                          (1000 * micros) / num_downloads_deleted);
+    }
+  }
+  int num_downloads_not_deleted = handles.size() - num_downloads_deleted;
+  if (num_downloads_not_deleted >= 0) {
+    UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCountNotRemoved",
+                         num_downloads_not_deleted);
+  }
 }
 
 void HistoryBackend::QueryHistory(scoped_refptr<QueryHistoryRequest> request,
@@ -1367,13 +1362,12 @@ void HistoryBackend::QueryHistoryBasic(URLDatabase* url_db,
                                        QueryResults* result) {
   // First get all visits.
   VisitVector visits;
-  visit_db->GetVisibleVisitsInRange(options.begin_time, options.end_time,
-                                    options.max_count, &visits);
-  DCHECK(options.max_count == 0 ||
-         static_cast<int>(visits.size()) <= options.max_count);
+  bool has_more_results = visit_db->GetVisibleVisitsInRange(options, &visits);
+  DCHECK(static_cast<int>(visits.size()) <= options.EffectiveMaxCount());
 
   // Now add them and the URL rows to the results.
   URLResult url_result;
+  QueryCursor cursor;
   for (size_t i = 0; i < visits.size(); i++) {
     const VisitRow visit = visits[i];
 
@@ -1406,9 +1400,13 @@ void HistoryBackend::QueryHistoryBasic(URLDatabase* url_db,
     // We don't set any of the query-specific parts of the URLResult, since
     // snippets and stuff don't apply to basic querying.
     result->AppendURLBySwapping(&url_result);
-  }
 
-  if (options.begin_time <= first_recorded_time_)
+    cursor.rowid_ = visit.visit_id;
+    cursor.time_ = visit.visit_time;
+  }
+  result->set_cursor(cursor);
+
+  if (!has_more_results && options.begin_time <= first_recorded_time_)
     result->set_reached_beginning(true);
 }
 
@@ -1428,6 +1426,7 @@ void HistoryBackend::QueryHistoryFTS(const string16& text_query,
 
   // Now get the row and visit information for each one.
   URLResult url_result;  // Declare outside loop to prevent re-construction.
+  QueryCursor cursor;
   for (size_t i = 0; i < fts_matches.size(); i++) {
     if (options.max_count != 0 &&
         static_cast<int>(result->size()) >= options.max_count)
@@ -1459,9 +1458,13 @@ void HistoryBackend::QueryHistoryFTS(const string16& text_query,
     // Add it to the vector, this will clear our |url_row| object as a
     // result of the swap.
     result->AppendURLBySwapping(&url_result);
-  }
 
-  if (options.begin_time <= first_recorded_time_)
+    cursor.rowid_ = fts_matches[i].rowid;
+    cursor.time_ = fts_matches[i].time;
+  }
+  result->set_cursor(cursor);
+
+  if (first_time_searched <= first_recorded_time_)
     result->set_reached_beginning(true);
 }
 
@@ -1581,10 +1584,8 @@ void HistoryBackend::QueryFilteredURLs(
 
   // Limit to the top |result_count| results.
   std::sort(data.begin(), data.end(), PageUsageData::Predicate);
-  if (result_count && static_cast<int>(data.size()) > result_count) {
-    STLDeleteContainerPointers(data.begin() + result_count, data.end());
+  if (result_count && implicit_cast<int>(data.size()) > result_count)
     data.resize(result_count);
-  }
 
   for (size_t i = 0; i < data.size(); ++i) {
     URLRow info;
@@ -1848,153 +1849,211 @@ bool HistoryBackend::GetThumbnailFromOlderRedirect(
   return success;
 }
 
+HistoryBackend::FaviconResults::FaviconResults() {}
+HistoryBackend::FaviconResults::~FaviconResults() {}
+
+void HistoryBackend::FaviconResults::Clear() {
+  bitmap_results.clear();
+  size_map.clear();
+}
+
 void HistoryBackend::GetFavicons(
-    scoped_refptr<GetFaviconRequest> request,
     const std::vector<GURL>& icon_urls,
     int icon_types,
     int desired_size_in_dip,
-    const std::vector<ui::ScaleFactor>& desired_scale_factors) {
-  UpdateFaviconMappingsAndFetchImpl(request, NULL, icon_urls, icon_types,
-      desired_size_in_dip, desired_scale_factors);
+    const std::vector<ui::ScaleFactor>& desired_scale_factors,
+    FaviconResults* results) {
+  UpdateFaviconMappingsAndFetchImpl(NULL, icon_urls, icon_types,
+                                     desired_size_in_dip, desired_scale_factors,
+                                     results);
 }
 
 void HistoryBackend::GetFaviconsForURL(
-    scoped_refptr<GetFaviconRequest> request,
     const GURL& page_url,
     int icon_types,
     int desired_size_in_dip,
-    const std::vector<ui::ScaleFactor>& desired_scale_factors) {
-  if (request->canceled())
-    return;
-
-  std::vector<FaviconBitmapResult> favicon_bitmap_results;
-  IconURLSizesMap icon_url_sizes;
-
-  // Get results from DB.
+    const std::vector<ui::ScaleFactor>& desired_scale_factors,
+    FaviconResults* results) {
+  DCHECK(results);
   GetFaviconsFromDB(page_url, icon_types, desired_size_in_dip,
-      desired_scale_factors, &favicon_bitmap_results, &icon_url_sizes);
-
-  request->ForwardResult(request->handle(), favicon_bitmap_results,
-                         icon_url_sizes);
+                    desired_scale_factors, &results->bitmap_results,
+                    &results->size_map);
 }
 
-void HistoryBackend::GetFaviconForID(scoped_refptr<GetFaviconRequest> request,
-                                     FaviconID favicon_id,
-                                     int desired_size_in_dip,
-                                     ui::ScaleFactor desired_scale_factor) {
-  if (request->canceled())
-    return;
-
+void HistoryBackend::GetFaviconForID(
+    FaviconID favicon_id,
+    int desired_size_in_dip,
+    ui::ScaleFactor desired_scale_factor,
+    FaviconResults* results) {
   std::vector<FaviconID> favicon_ids;
   favicon_ids.push_back(favicon_id);
   std::vector<ui::ScaleFactor> desired_scale_factors;
   desired_scale_factors.push_back(desired_scale_factor);
 
   // Get results from DB.
-  std::vector<FaviconBitmapResult> favicon_bitmap_results;
-  GetFaviconBitmapResultsForBestMatch(favicon_ids, desired_size_in_dip,
-      desired_scale_factors, &favicon_bitmap_results);
-
-  IconURLSizesMap icon_url_sizes;
-  BuildIconURLSizesMap(favicon_ids, &icon_url_sizes);
-
-  request->ForwardResult(request->handle(), favicon_bitmap_results,
-                         icon_url_sizes);
+  GetFaviconBitmapResultsForBestMatch(favicon_ids,
+                                      desired_size_in_dip,
+                                      desired_scale_factors,
+                                      &results->bitmap_results);
+  BuildIconURLSizesMap(favicon_ids, &results->size_map);
 }
 
 void HistoryBackend::UpdateFaviconMappingsAndFetch(
-    scoped_refptr<GetFaviconRequest> request,
     const GURL& page_url,
     const std::vector<GURL>& icon_urls,
     int icon_types,
     int desired_size_in_dip,
-    const std::vector<ui::ScaleFactor>& desired_scale_factors) {
-  UpdateFaviconMappingsAndFetchImpl(request, &page_url, icon_urls, icon_types,
-      desired_size_in_dip, desired_scale_factors);
+    const std::vector<ui::ScaleFactor>& desired_scale_factors,
+    FaviconResults* results) {
+  UpdateFaviconMappingsAndFetchImpl(&page_url, icon_urls, icon_types,
+                                     desired_size_in_dip, desired_scale_factors,
+                                     results);
 }
 
 void HistoryBackend::MergeFavicon(
     const GURL& page_url,
+    const GURL& icon_url,
     history::IconType icon_type,
     scoped_refptr<base::RefCountedMemory> bitmap_data,
     const gfx::Size& pixel_size) {
   if (!thumbnail_db_.get() || !db_.get())
     return;
 
-  std::vector<IconMapping> icon_mappings;
-  thumbnail_db_->GetIconMappingsForPageURL(page_url, icon_type, &icon_mappings);
+  FaviconID favicon_id = thumbnail_db_->GetFaviconIDForFaviconURL(icon_url,
+      icon_type, NULL);
 
-  for (size_t i = 0; i < icon_mappings.size(); ++i) {
-    std::vector<FaviconBitmapIDSize> bitmap_id_sizes;
-    thumbnail_db_->GetFaviconBitmapIDSizes(icon_mappings[i].icon_id,
-                                           &bitmap_id_sizes);
+  if (!favicon_id) {
+    // There is no favicon at |icon_url|, create it.
+    favicon_id = thumbnail_db_->AddFavicon(icon_url, icon_type,
+                                           GetDefaultFaviconSizes());
+  }
 
-    for (size_t j = 0; j < bitmap_id_sizes.size(); ++j) {
-      if (bitmap_id_sizes[j].pixel_size == pixel_size) {
-        // There is a favicon bitmap of |pixel_size| already mapped to
-        // |page_url|, replace it.
-        thumbnail_db_->SetFaviconBitmap(bitmap_id_sizes[j].bitmap_id,
-            bitmap_data, base::Time::Now());
+  std::vector<FaviconBitmapIDSize> bitmap_id_sizes;
+  thumbnail_db_->GetFaviconBitmapIDSizes(favicon_id, &bitmap_id_sizes);
 
-        // Send notification to the UI that the favicon bitmap was updated.
-        SendFaviconChangedNotificationForPageAndRedirects(page_url);
+  // If there is already a favicon bitmap of |pixel_size| at |icon_url|,
+  // replace it.
+  bool replaced_bitmap = false;
+  for (size_t i = 0; i < bitmap_id_sizes.size(); ++i) {
+    if (bitmap_id_sizes[i].pixel_size == pixel_size) {
+      if (IsFaviconBitmapDataEqual(bitmap_id_sizes[i].bitmap_id, bitmap_data)) {
+        thumbnail_db_->SetFaviconBitmapLastUpdateTime(
+            bitmap_id_sizes[i].bitmap_id, base::Time::Now());
+        // Return early as merging did not alter the bitmap data.
         ScheduleCommit();
         return;
       }
+      thumbnail_db_->SetFaviconBitmap(bitmap_id_sizes[i].bitmap_id, bitmap_data,
+          base::Time::Now());
+      replaced_bitmap = true;
+      break;
     }
   }
 
-  // There is no exact match for |pixel_size|. Create a new favicon with a fake
-  // icon URL. Use |page_url| as the fake icon URL as it is guaranteed to be
-  // unique.
-  const GURL& fake_icon_url = page_url;
+  // Create a vector of the pixel sizes of the favicon bitmaps currently at
+  // |icon_url|.
+  std::vector<gfx::Size> favicon_sizes;
+  for (size_t i = 0; i < bitmap_id_sizes.size(); ++i)
+    favicon_sizes.push_back(bitmap_id_sizes[i].pixel_size);
 
-  // There may already be a favicon with |fake_icon_url| mapped to |page_url|.
-  // This will be the case if MergeFavicon() was previously called for
-  // |page_url| with a different pixel size. Reuse the favicon if it exists.
-  FaviconID fake_icon_id = 0;
+  if (!replaced_bitmap) {
+    // Delete an arbitrary favicon bitmap to avoid going over the limit of
+    // |kMaxFaviconBitmapsPerIconURL|.
+    if (bitmap_id_sizes.size() >= kMaxFaviconBitmapsPerIconURL) {
+      thumbnail_db_->DeleteFaviconBitmap(bitmap_id_sizes[0].bitmap_id);
+      favicon_sizes.erase(favicon_sizes.begin());
+    }
+    thumbnail_db_->AddFaviconBitmap(favicon_id, bitmap_data, base::Time::Now(),
+                                    pixel_size);
+    favicon_sizes.push_back(pixel_size);
+  }
+
+  // A site may have changed the favicons that it uses for |page_url|.
+  // Example Scenario:
+  //   page_url = news.google.com
+  //   Intial State: www.google.com/favicon.ico 16x16, 32x32
+  //   MergeFavicon(news.google.com, news.google.com/news_specific.ico, ...,
+  //                ..., 16x16)
+  //
+  // Difficulties:
+  // 1. Sync requires that a call to GetFaviconsForURL() returns the
+  //    |bitmap_data| passed into MergeFavicon().
+  //    - It is invalid for the 16x16 bitmap for www.google.com/favicon.ico to
+  //      stay mapped to news.google.com because it would be unclear which 16x16
+  //      bitmap should be returned via GetFaviconsForURL().
+  //
+  // 2. www.google.com/favicon.ico may be mapped to more than just
+  //    news.google.com (eg www.google.com).
+  //    - The 16x16 bitmap cannot be deleted from www.google.com/favicon.ico
+  //
+  // To resolve these problems, we copy all of the favicon bitmaps previously
+  // mapped to news.google.com (|page_url|) and add them to the favicon at
+  // news.google.com/news_specific.ico (|icon_url|). The favicon sizes for
+  // |icon_url| are set to default to indicate that |icon_url| has incomplete
+  // / incorrect data.
+  // Difficlty 1: All but news.google.com/news_specific.ico are unmapped from
+  //              news.google.com
+  // Difficulty 2: The favicon bitmaps for www.google.com/favicon.ico are not
+  //               modified.
+
+  std::vector<IconMapping> icon_mappings;
+  thumbnail_db_->GetIconMappingsForPageURL(page_url, icon_type, &icon_mappings);
+
+  // Copy the favicon bitmaps mapped to |page_url| to the favicon at |icon_url|
+  // till the limit of |kMaxFaviconBitmapsPerIconURL| is reached.
+  bool migrated_bitmaps = false;
   for (size_t i = 0; i < icon_mappings.size(); ++i) {
-    if (icon_mappings[i].icon_url == fake_icon_url)
-      fake_icon_id = icon_mappings[i].icon_id;
+    if (favicon_sizes.size() >= kMaxFaviconBitmapsPerIconURL)
+      break;
+
+    if (icon_mappings[i].icon_url == icon_url)
+      continue;
+
+    std::vector<FaviconBitmap> bitmaps_to_copy;
+    thumbnail_db_->GetFaviconBitmaps(icon_mappings[i].icon_id,
+                                     &bitmaps_to_copy);
+    for (size_t j = 0; j < bitmaps_to_copy.size(); ++j) {
+      // Do not add a favicon bitmap at a pixel size for which there is already
+      // a favicon bitmap mapped to |icon_url|. The one there is more correct
+      // and having multiple equally sized favicon bitmaps for |page_url| is
+      // ambiguous in terms of GetFaviconsForURL().
+      std::vector<gfx::Size>::iterator it = std::find(favicon_sizes.begin(),
+          favicon_sizes.end(), bitmaps_to_copy[j].pixel_size);
+      if (it != favicon_sizes.end())
+        continue;
+
+      migrated_bitmaps = true;
+      thumbnail_db_->AddFaviconBitmap(favicon_id,
+          bitmaps_to_copy[j].bitmap_data, base::Time::Now(),
+          bitmaps_to_copy[j].pixel_size);
+      favicon_sizes.push_back(bitmaps_to_copy[j].pixel_size);
+
+      if (favicon_sizes.size() >= kMaxFaviconBitmapsPerIconURL)
+        break;
+    }
   }
 
-  bool update_mappings = false;
-  if (!fake_icon_id) {
-    fake_icon_id = thumbnail_db_->AddFavicon(fake_icon_url, icon_type,
-                                             GetDefaultFaviconSizes());
-
-    // The favicon mappings need to be updated to include the new favicon.
-    update_mappings = true;
+  if (migrated_bitmaps || !replaced_bitmap) {
+    // Set the favicon sizes to default to indicate that at least some of the
+    // favicon bitmaps for the favicon at |icon_url| are missing or stale.
+    thumbnail_db_->SetFaviconSizes(favicon_id, GetDefaultFaviconSizes());
   }
 
-  // Remove an arbitrary favicon bitmap to avoid going over the limit of
-  // |kMaxFaviconBitmapsPerIconURL|.
-  std::vector<FaviconBitmapIDSize> bitmap_id_sizes;
-  thumbnail_db_->GetFaviconBitmapIDSizes(fake_icon_id, &bitmap_id_sizes);
-  if (bitmap_id_sizes.size() == kMaxFaviconBitmapsPerIconURL)
-    thumbnail_db_->DeleteFaviconBitmap(bitmap_id_sizes[0].bitmap_id);
-
-  thumbnail_db_->AddFaviconBitmap(fake_icon_id, bitmap_data, base::Time::Now(),
-                                  pixel_size);
-
-  if (update_mappings) {
-    // FaviconIDs which should be mapped to |page_url| for |icon_type|.
+  // Update the favicon mappings such that only |icon_url| is mapped to
+  // |page_url|.
+  if (icon_mappings.size() != 1 || icon_mappings[0].icon_url != icon_url) {
     std::vector<FaviconID> favicon_ids;
-    for (size_t i = 0; i < icon_mappings.size(); ++i)
-      favicon_ids.push_back(icon_mappings[i].icon_id);
-
-    // Remove an arbitrary favicon to avoid going over the limit of
-    // |kMaxFaviconsPerPage|.
-    if (favicon_ids.size() == kMaxFaviconsPerPage)
-      favicon_ids.pop_back();
-
-    // Add mapping to |fake_icon_id|.
-    favicon_ids.push_back(fake_icon_id);
+    favicon_ids.push_back(favicon_id);
     SetFaviconMappingsForPageAndRedirects(page_url, icon_type, favicon_ids);
   }
 
-  // Send notification to the UI as at least a favicon bitmap was added.
-  SendFaviconChangedNotificationForPageAndRedirects(page_url);
+  // Sync currently does not properly deal with notifications as a result of
+  // replacing a favicon bitmap. For M25, do not send any notifications if a
+  // bitmap was replaced and no bitmaps were added or deleted. This is a
+  // temporary fix for http://crbug.com/169460.
+  if (migrated_bitmaps || !replaced_bitmap)
+    SendFaviconChangedNotificationForPageAndRedirects(page_url);
+
   ScheduleCommit();
 }
 
@@ -2140,12 +2199,12 @@ void HistoryBackend::SetImportedFavicons(
 }
 
 void HistoryBackend::UpdateFaviconMappingsAndFetchImpl(
-    scoped_refptr<GetFaviconRequest> request,
     const GURL* page_url,
     const std::vector<GURL>& icon_urls,
     int icon_types,
     int desired_size_in_dip,
-    const std::vector<ui::ScaleFactor>& desired_scale_factors) {
+    const std::vector<ui::ScaleFactor>& desired_scale_factors,
+    FaviconResults* results) {
   // If |page_url| is specified, |icon_types| must be either a single icon
   // type or icon types which are equivalent.
   DCHECK(!page_url ||
@@ -2153,16 +2212,9 @@ void HistoryBackend::UpdateFaviconMappingsAndFetchImpl(
          icon_types == TOUCH_ICON ||
          icon_types == TOUCH_PRECOMPOSED_ICON ||
          icon_types == (TOUCH_ICON | TOUCH_PRECOMPOSED_ICON));
-
-  if (request->canceled())
-    return;
+  results->Clear();
 
   if (!thumbnail_db_.get()) {
-    // The thumbnail database is not valid. Send response to the UI as it still
-    // expects one.
-    request->ForwardResult(request->handle(),
-                           std::vector<history::FaviconBitmapResult>(),
-                           history::IconURLSizesMap());
     return;
   }
 
@@ -2201,14 +2253,9 @@ void HistoryBackend::UpdateFaviconMappingsAndFetchImpl(
     }
   }
 
-  std::vector<FaviconBitmapResult> favicon_bitmap_results;
   GetFaviconBitmapResultsForBestMatch(favicon_ids, desired_size_in_dip,
-      desired_scale_factors, &favicon_bitmap_results);
-  IconURLSizesMap icon_url_sizes;
-  BuildIconURLSizesMap(favicon_ids, &icon_url_sizes);
-
-  request->ForwardResult(request->handle(), favicon_bitmap_results,
-                         icon_url_sizes);
+      desired_scale_factors, &results->bitmap_results);
+  BuildIconURLSizesMap(favicon_ids, &results->size_map);
 }
 
 void HistoryBackend::SetFaviconBitmaps(
@@ -2285,6 +2332,20 @@ void HistoryBackend::SetFaviconSizes(FaviconID icon_id,
   thumbnail_db_->SetFaviconSizes(icon_id, favicon_sizes);
 }
 
+bool HistoryBackend::IsFaviconBitmapDataEqual(
+    FaviconBitmapID bitmap_id,
+    const scoped_refptr<base::RefCountedMemory>& new_bitmap_data) {
+  if (!new_bitmap_data.get())
+    return false;
+
+  scoped_refptr<base::RefCountedMemory> original_bitmap_data;
+  thumbnail_db_->GetFaviconBitmap(bitmap_id,
+                                  NULL,
+                                  &original_bitmap_data,
+                                  NULL);
+  return new_bitmap_data->Equals(original_bitmap_data);
+}
+
 bool HistoryBackend::GetFaviconsFromDB(
     const GURL& page_url,
     int icon_types,
@@ -2294,6 +2355,8 @@ bool HistoryBackend::GetFaviconsFromDB(
     IconURLSizesMap* icon_url_sizes) {
   DCHECK(favicon_bitmap_results);
   DCHECK(icon_url_sizes);
+  favicon_bitmap_results->clear();
+  icon_url_sizes->clear();
 
   if (!db_.get() || !thumbnail_db_.get())
     return false;
@@ -2632,13 +2695,9 @@ void HistoryBackend::DeleteURL(const GURL& url) {
 }
 
 void HistoryBackend::ExpireHistoryBetween(
-    scoped_refptr<CancelableRequest<base::Closure> > request,
     const std::set<GURL>& restrict_urls,
     Time begin_time,
     Time end_time) {
-  if (request->canceled())
-    return;
-
   if (db_.get()) {
     if (begin_time.is_null() && end_time.is_null() && restrict_urls.empty()) {
       // Special case deleting all history so it can be faster and to reduce the
@@ -2656,11 +2715,33 @@ void HistoryBackend::ExpireHistoryBetween(
 
   if (begin_time <= first_recorded_time_)
     db_->GetStartDate(&first_recorded_time_);
+}
 
-  request->ForwardResult();
+void HistoryBackend::ExpireHistoryForTimes(
+    const std::vector<base::Time>& times) {
+  // Put the times in reverse chronological order and remove
+  // duplicates (for expirer_.ExpireHistoryForTimes()).
+  std::vector<base::Time> sorted_times = times;
+  std::sort(sorted_times.begin(), sorted_times.end(),
+            std::greater<base::Time>());
+  sorted_times.erase(
+      std::unique(sorted_times.begin(), sorted_times.end()),
+      sorted_times.end());
 
-  if (history_publisher_.get() && restrict_urls.empty())
-    history_publisher_->DeleteUserHistoryBetween(begin_time, end_time);
+  if (sorted_times.empty())
+    return;
+
+  if (db_.get()) {
+    expirer_.ExpireHistoryForTimes(sorted_times);
+    // Force a commit, if the user is deleting something for privacy reasons,
+    // we want to get it on disk ASAP.
+    Commit();
+  }
+
+  // Update the first recorded time if we've expired it.
+  if (std::binary_search(sorted_times.begin(), sorted_times.end(),
+                         first_recorded_time_, std::greater<base::Time>()))
+    db_->GetStartDate(&first_recorded_time_);
 }
 
 void HistoryBackend::URLsNoLongerBookmarked(const std::set<GURL>& urls) {

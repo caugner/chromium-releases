@@ -23,6 +23,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
+#include "content/public/common/three_d_api_types.h"
 #include "net/base/load_states.h"
 #include "ui/gfx/rect_f.h"
 #include "ui/gfx/size.h"
@@ -32,6 +33,7 @@
 #include "base/win/scoped_handle.h"
 #endif
 
+struct BrowserPluginHostMsg_CreateGuest_Params;
 struct BrowserPluginHostMsg_ResizeGuest_Params;
 struct ViewMsg_PostMessage_Params;
 
@@ -60,6 +62,7 @@ class WebContentsImpl;
 class WebContentsObserver;
 class WebContentsView;
 class WebContentsViewDelegate;
+struct FaviconURL;
 struct LoadNotificationDetails;
 
 // Factory function for the implementations that content knows about. Takes
@@ -78,25 +81,16 @@ class CONTENT_EXPORT WebContentsImpl
  public:
   virtual ~WebContentsImpl();
 
-  static WebContentsImpl* Create(
-      BrowserContext* browser_context,
-      SiteInstance* site_instance,
-      int routing_id,
-      const WebContentsImpl* base_web_contents);
-
   static WebContentsImpl* CreateWithOpener(
-      BrowserContext* browser_context,
-      SiteInstance* site_instance,
-      int routing_id,
-      const WebContentsImpl* base_web_contents,
+      const WebContents::CreateParams& params,
       WebContentsImpl* opener);
 
   // Creates a WebContents to be used as a browser plugin guest.
-  static WebContentsImpl* CreateGuest(BrowserContext* browser_context,
-                                      const std::string& host,
-                                      int guest_instance_id,
-                                      bool focused,
-                                      bool visible);
+  static WebContentsImpl* CreateGuest(
+      BrowserContext* browser_context,
+      content::SiteInstance* site_instance,
+      int guest_instance_id,
+      const BrowserPluginHostMsg_CreateGuest_Params& params);
 
   // Returns the content specific prefs for the given RVH.
   static webkit_glue::WebPreferences GetWebkitPrefs(
@@ -110,10 +104,7 @@ class CONTENT_EXPORT WebContentsImpl
 
   // Complex initialization here. Specifically needed to avoid having
   // members call back into our virtual functions in the constructor.
-  virtual void Init(BrowserContext* browser_context,
-                    SiteInstance* site_instance,
-                    int routing_id,
-                    const WebContents* base_web_contents);
+  virtual void Init(const WebContents::CreateParams& params);
 
   // Returns the SavePackage which manages the page saving job. May be NULL.
   SavePackage* save_package() const { return save_package_.get(); }
@@ -178,6 +169,8 @@ class CONTENT_EXPORT WebContentsImpl
   // an embedder.
   BrowserPluginEmbedder* GetBrowserPluginEmbedder();
 
+  void DidBlock3DAPIs(const GURL& url, ThreeDAPIType requester);
+
   // WebContents ------------------------------------------------------
   virtual WebContentsDelegate* GetDelegate() OVERRIDE;
   virtual void SetDelegate(WebContentsDelegate* delegate) OVERRIDE;
@@ -186,6 +179,10 @@ class CONTENT_EXPORT WebContentsImpl
   virtual BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual RenderProcessHost* GetRenderProcessHost() const OVERRIDE;
   virtual RenderViewHost* GetRenderViewHost() const OVERRIDE;
+  virtual void GetRenderViewHostAtPosition(
+      int x,
+      int y,
+      const GetRenderViewHostCallback& callback) OVERRIDE;
   virtual int GetRoutingID() const OVERRIDE;
   virtual RenderWidgetHostView* GetRenderWidgetHostView() const OVERRIDE;
   virtual WebContentsView* GetView() const OVERRIDE;
@@ -269,6 +266,8 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void DidChooseColorInColorChooser(int color_chooser_id,
                                             SkColor color) OVERRIDE;
   virtual void DidEndColorChooser(int color_chooser_id) OVERRIDE;
+  virtual int DownloadFavicon(const GURL& url, int image_size,
+                              const FaviconDownloadCallback& callback) OVERRIDE;
 
   // Implementation of PageNavigator.
   virtual WebContents* OpenURL(const OpenURLParams& params) OVERRIDE;
@@ -297,12 +296,10 @@ class CONTENT_EXPORT WebContentsImpl
       int64 frame_id,
       int64 parent_frame_id,
       bool main_frame,
-      const GURL& opener_url,
       const GURL& url) OVERRIDE;
   virtual void DidRedirectProvisionalLoad(
       RenderViewHost* render_view_host,
       int32 page_id,
-      const GURL& opener_url,
       const GURL& source_url,
       const GURL& target_url) OVERRIDE;
   virtual void DidFailProvisionalLoadWithError(
@@ -329,6 +326,7 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void DidStopLoading(RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidCancelLoading() OVERRIDE;
   virtual void DidChangeLoadProgress(double progress) OVERRIDE;
+  virtual void DidDisownOpener(RenderViewHost* rvh) OVERRIDE;
   virtual void DidUpdateFrameTree(RenderViewHost* rvh) OVERRIDE;
   virtual void DocumentAvailableInMainFrame(
       RenderViewHost* render_view_host) OVERRIDE;
@@ -339,13 +337,15 @@ class CONTENT_EXPORT WebContentsImpl
                               const GURL& url,
                               const Referrer& referrer,
                               WindowOpenDisposition disposition,
-                              int64 source_frame_id) OVERRIDE;
+                              int64 source_frame_id,
+                              bool is_cross_site_redirect) OVERRIDE;
   virtual void RequestTransferURL(
       const GURL& url,
       const Referrer& referrer,
       WindowOpenDisposition disposition,
       int64 source_frame_id,
-      const GlobalRequestID& transferred_global_request_id) OVERRIDE;
+      const GlobalRequestID& transferred_global_request_id,
+      bool is_cross_site_redirect) OVERRIDE;
   virtual void RouteCloseEvent(RenderViewHost* rvh) OVERRIDE;
   virtual void RouteMessageEvent(
       RenderViewHost* rvh,
@@ -417,11 +417,6 @@ class CONTENT_EXPORT WebContentsImpl
       const MediaStreamRequest* request,
       const MediaResponseCallback& callback) OVERRIDE;
 
-#if defined(OS_ANDROID)
-  virtual void AttachLayer(WebKit::WebLayer* layer) OVERRIDE;
-  virtual void RemoveLayer(WebKit::WebLayer* layer) OVERRIDE;
-#endif
-
   // RenderWidgetHostDelegate --------------------------------------------------
 
   virtual void RenderWidgetDeleted(
@@ -442,7 +437,8 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void RenderViewGoneFromRenderManager(
       RenderViewHost* render_view_host) OVERRIDE;
   virtual void UpdateRenderViewSizeForRenderManager() OVERRIDE;
-  virtual void NotifySwappedFromRenderManager() OVERRIDE;
+  virtual void NotifySwappedFromRenderManager(
+      RenderViewHost* old_render_view_host) OVERRIDE;
   virtual int CreateOpenerRenderViewsForRenderManager(
       SiteInstance* instance) OVERRIDE;
   virtual NavigationControllerImpl&
@@ -563,11 +559,16 @@ class CONTENT_EXPORT WebContentsImpl
   void OnRequestPpapiBrokerPermission(int request_id,
                                       const GURL& url,
                                       const FilePath& plugin_path);
-  void OnBrowserPluginCreateGuest(int instance_id,
-                                  const std::string& storage_partition_id,
-                                  bool persist_storage,
-                                  bool focused,
-                                  bool visible);
+  void OnBrowserPluginCreateGuest(
+      int instance_id,
+      const BrowserPluginHostMsg_CreateGuest_Params& params);
+  void OnDidDownloadFavicon(int id,
+                            const GURL& image_url,
+                            bool errored,
+                            int requested_size,
+                            const std::vector<SkBitmap>& bitmaps);
+  void OnUpdateFaviconURL(int32 page_id,
+                          const std::vector<FaviconURL>& candidates);
 
   // Changes the IsLoading state and notifies delegate as needed
   // |details| is used to provide details on the load that just finished
@@ -656,7 +657,7 @@ class CONTENT_EXPORT WebContentsImpl
   // Misc non-view stuff -------------------------------------------------------
 
   // Helper functions for sending notifications.
-  void NotifySwapped();
+  void NotifySwapped(RenderViewHost* old_render_view_host);
   void NotifyConnected();
   void NotifyDisconnected();
 
@@ -854,6 +855,10 @@ class CONTENT_EXPORT WebContentsImpl
   // All live RenderWidgetHostImpls that are created by this object and may
   // outlive it.
   std::set<RenderWidgetHostImpl*> created_widgets_;
+
+  // Maps the ids of pending favicon downloads to their callbacks
+  typedef std::map<int, FaviconDownloadCallback> FaviconDownloadMap;
+  FaviconDownloadMap favicon_download_map_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsImpl);
 };

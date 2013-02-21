@@ -69,6 +69,8 @@ using content::UserMetricsAction;
 
 namespace {
 
+static bool did_perform_profile_import = false;
+
 // Profiles that should be deleted on shutdown.
 std::vector<FilePath>& ProfilesToDelete() {
   CR_DEFINE_STATIC_LOCAL(std::vector<FilePath>, profiles_to_delete, ());
@@ -372,6 +374,12 @@ Profile* ProfileManager::GetDefaultProfile(const FilePath& user_data_dir) {
       return profile->GetOffTheRecordProfile();
     return profile;
   }
+
+  ProfileInfo* profile_info = GetProfileInfoByPath(default_profile_dir);
+  // Fallback to default off-the-record profile, if user profile has not fully
+  // loaded yet.
+  if (profile_info && !profile_info->created)
+    default_profile_dir = GetDefaultProfileDir(user_data_dir);
 #endif
   return GetProfile(default_profile_dir);
 }
@@ -497,9 +505,15 @@ ProfileManager::ProfileInfo* ProfileManager::RegisterProfile(
   return info;
 }
 
-Profile* ProfileManager::GetProfileByPath(const FilePath& path) const {
+ProfileManager::ProfileInfo* ProfileManager::GetProfileInfoByPath(
+    const FilePath& path) const {
   ProfilesInfoMap::const_iterator iter = profiles_info_.find(path);
-  return (iter == profiles_info_.end()) ? NULL : iter->second->profile.get();
+  return (iter == profiles_info_.end()) ? NULL : iter->second.get();
+}
+
+Profile* ProfileManager::GetProfileByPath(const FilePath& path) const {
+  ProfileInfo* profile_info = GetProfileInfoByPath(path);
+  return profile_info ? profile_info->profile.get() : NULL;
 }
 
 // static
@@ -631,12 +645,24 @@ void ProfileManager::Observe(
   }
 }
 
+// static
+bool ProfileManager::IsImportProcess(const CommandLine& command_line) {
+  return (command_line.HasSwitch(switches::kImport) ||
+          command_line.HasSwitch(switches::kImportFromFile));
+}
+
+// static
+bool ProfileManager::DidPerformProfileImport() {
+  return did_perform_profile_import;
+}
+
 void ProfileManager::SetWillImport() {
   will_import_ = true;
 }
 
 void ProfileManager::OnImportFinished(Profile* profile) {
   will_import_ = false;
+  did_perform_profile_import = true;
   DCHECK(profile);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_IMPORT_FINISHED,
@@ -700,13 +726,15 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
                                             bool go_off_the_record) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 #if defined(ENABLE_EXTENSIONS)
-  extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
-      !go_off_the_record);
-  // During tests, when |profile| is an instance of TestingProfile,
-  // ExtensionSystem might not create an ExtensionService.
-  if (extensions::ExtensionSystem::Get(profile)->extension_service()) {
-    profile->GetHostContentSettingsMap()->RegisterExtensionService(
-        extensions::ExtensionSystem::Get(profile)->extension_service());
+  if (!IsImportProcess(command_line)) {
+    extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
+        !go_off_the_record);
+    // During tests, when |profile| is an instance of TestingProfile,
+    // ExtensionSystem might not create an ExtensionService.
+    if (extensions::ExtensionSystem::Get(profile)->extension_service()) {
+      profile->GetHostContentSettingsMap()->RegisterExtensionService(
+          extensions::ExtensionSystem::Get(profile)->extension_service());
+    }
   }
 #endif
   if (!command_line.HasSwitch(switches::kDisableWebResources))
@@ -999,6 +1027,14 @@ bool ProfileManager::IsMultipleProfilesEnabled() {
 }
 
 void ProfileManager::AutoloadProfiles() {
+  // If running in the background is disabled for the browser, do not autoload
+  // any profiles.
+  PrefService* local_state = g_browser_process->local_state();
+  if (!local_state->HasPrefPath(prefs::kBackgroundModeEnabled) ||
+      !local_state->GetBoolean(prefs::kBackgroundModeEnabled)) {
+    return;
+  }
+
   ProfileInfoCache& cache = GetProfileInfoCache();
   size_t number_of_profiles = cache.GetNumberOfProfiles();
   for (size_t p = 0; p < number_of_profiles; ++p) {

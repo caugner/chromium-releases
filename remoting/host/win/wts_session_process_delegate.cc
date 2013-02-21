@@ -24,13 +24,16 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
 #include "remoting/host/host_exit_codes.h"
-#include "remoting/host/ipc_consts.h"
+#include "remoting/host/ipc_constants.h"
 #include "remoting/host/win/launch_process_with_token.h"
 #include "remoting/host/win/worker_process_launcher.h"
 #include "remoting/host/win/wts_console_monitor.h"
 #include "remoting/host/worker_process_ipc_delegate.h"
 
 using base::win::ScopedHandle;
+
+// Name of the default session desktop.
+const char kDefaultDesktopName[] = "winsta0\\default";
 
 const char kElevateSwitchName[] = "elevate";
 
@@ -287,8 +290,11 @@ bool WtsSessionProcessDelegate::Core::LaunchProcess(
   if (!LaunchProcessWithToken(command_line.GetProgram(),
                               command_line.GetCommandLineString(),
                               session_token_,
+                              NULL,
+                              NULL,
                               false,
                               CREATE_SUSPENDED | CREATE_BREAKAWAY_FROM_JOB,
+                              UTF8ToUTF16(kDefaultDesktopName).c_str(),
                               &worker_process,
                               &worker_thread)) {
     return false;
@@ -337,7 +343,7 @@ bool WtsSessionProcessDelegate::Core::LaunchProcess(
 }
 
 bool WtsSessionProcessDelegate::Core::Initialize(uint32 session_id) {
-  if (base::win::GetVersion() == base::win::VERSION_XP)
+  if (base::win::GetVersion() < base::win::VERSION_VISTA)
     launch_elevated_ = false;
 
   if (launch_elevated_) {

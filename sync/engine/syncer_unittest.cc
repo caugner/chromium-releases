@@ -186,24 +186,24 @@ class SyncerTest : public testing::Test,
         info, workers);
   }
 
-  void SyncShareAsDelegate(
-      SyncSchedulerImpl::SyncSessionJob::SyncSessionJobPurpose purpose) {
+
+  void SyncShareAsDelegate(SyncSessionJob::Purpose purpose) {
     SyncerStep start;
     SyncerStep end;
-    SyncSchedulerImpl::SetSyncerStepsForPurpose(purpose, &start, &end);
+    SyncSessionJob::GetSyncerStepsForPurpose(purpose, &start, &end);
 
     session_.reset(MakeSession());
-    syncer_->SyncShare(session_.get(), start, end);
+    EXPECT_TRUE(syncer_->SyncShare(session_.get(), start, end));
   }
 
   void SyncShareNudge() {
     session_.reset(MakeSession());
-    SyncShareAsDelegate(SyncSchedulerImpl::SyncSessionJob::NUDGE);
+    SyncShareAsDelegate(SyncSessionJob::NUDGE);
   }
 
   void SyncShareConfigure() {
     session_.reset(MakeSession());
-    SyncShareAsDelegate(SyncSchedulerImpl::SyncSessionJob::CONFIGURATION);
+    SyncShareAsDelegate(SyncSessionJob::CONFIGURATION);
   }
 
   virtual void SetUp() {
@@ -232,7 +232,6 @@ class SyncerTest : public testing::Test,
             listeners, NULL, &traffic_recorder_,
             true  /* enable keystore encryption */));
     context_->set_routing_info(routing_info);
-    ASSERT_FALSE(context_->resolver());
     syncer_ = new Syncer();
     session_.reset(MakeSession());
 
@@ -296,10 +295,6 @@ class SyncerTest : public testing::Test,
     // Our request should have neither confirmed nor denied hierarchy conflicts.
     const sync_pb::ClientStatus& client_status = message.client_status();
     EXPECT_FALSE(client_status.has_hierarchy_conflict_detected());
-  }
-
-  bool initial_sync_ended_for_type(ModelType type) {
-    return directory()->initial_sync_ended_for_type(type);
   }
 
   void SyncRepeatedlyToTriggerConflictResolution(SyncSession* session) {
@@ -2538,7 +2533,6 @@ TEST_F(SyncerTest, CommitManyItemsInOneGo_PostBufferFail) {
   SyncShareNudge();
 
   EXPECT_EQ(1U, mock_server_->commit_messages().size());
-  EXPECT_FALSE(session_->Succeeded());
   EXPECT_EQ(SYNC_SERVER_ERROR,
             session_->status_controller().model_neutral_state().commit_result);
   EXPECT_EQ(items_to_commit - kDefaultMaxCommitBatchSize,
@@ -2569,7 +2563,6 @@ TEST_F(SyncerTest, CommitManyItemsInOneGo_CommitConflict) {
 
   // We should stop looping at the first sign of trouble.
   EXPECT_EQ(1U, mock_server_->commit_messages().size());
-  EXPECT_FALSE(session_->Succeeded());
   EXPECT_EQ(items_to_commit - (kDefaultMaxCommitBatchSize - 1),
             directory()->unsynced_entity_count());
 }
@@ -3955,8 +3948,6 @@ TEST_F(SyncerTest, UpdateFailsThenDontCommit) {
 // Downloads two updates and applies them successfully.
 // This is the "happy path" alternative to ConfigureFailsDontApplyUpdates.
 TEST_F(SyncerTest, ConfigureDownloadsTwoBatchesSuccess) {
-  EXPECT_FALSE(initial_sync_ended_for_type(BOOKMARKS));
-
   syncable::Id node1 = ids_.NewServerId();
   syncable::Id node2 = ids_.NewServerId();
 
@@ -3980,14 +3971,10 @@ TEST_F(SyncerTest, ConfigureDownloadsTwoBatchesSuccess) {
   Entry n2(&trans, GET_BY_ID, node2);
   ASSERT_TRUE(n2.good());
   EXPECT_FALSE(n2.Get(IS_UNAPPLIED_UPDATE));
-
-  EXPECT_TRUE(initial_sync_ended_for_type(BOOKMARKS));
 }
 
 // Same as the above case, but this time the second batch fails to download.
 TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
-  EXPECT_FALSE(initial_sync_ended_for_type(BOOKMARKS));
-
   syncable::Id node1 = ids_.NewServerId();
   syncable::Id node2 = ids_.NewServerId();
 
@@ -4020,8 +4007,6 @@ TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
 
   // One update remains undownloaded.
   mock_server_->ClearUpdatesQueue();
-
-  EXPECT_FALSE(initial_sync_ended_for_type(BOOKMARKS));
 }
 
 TEST_F(SyncerTest, GetKeySuccess) {

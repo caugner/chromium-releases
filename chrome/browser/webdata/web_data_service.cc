@@ -72,9 +72,7 @@ WDAppImagesResult::~WDAppImagesResult() {}
 
 WDKeywordsResult::WDKeywordsResult()
   : default_search_provider_id(0),
-    builtin_keyword_version(0),
-    backup_valid(false),
-    did_default_search_provider_change(false) {
+    builtin_keyword_version(0) {
 }
 
 WDKeywordsResult::~WDKeywordsResult() {}
@@ -278,7 +276,7 @@ void WebDataService::RemoveWebIntentService(
                                this, request));
 }
 
-WebDataService::Handle WebDataService::GetWebIntentServices(
+WebDataService::Handle WebDataService::GetWebIntentServicesForAction(
     const string16& action,
     WebDataServiceConsumer* consumer) {
   DCHECK(consumer);
@@ -800,11 +798,6 @@ void WebDataService::GetKeywordsImpl(WebDataRequest* request) {
         db_->GetKeywordTable()->GetDefaultSearchProviderID();
     result.builtin_keyword_version =
         db_->GetKeywordTable()->GetBuiltinKeywordVersion();
-    result.did_default_search_provider_change =
-        db_->GetKeywordTable()->DidDefaultSearchProviderChange();
-    result.backup_valid = result.did_default_search_provider_change &&
-        db_->GetKeywordTable()->GetDefaultSearchProviderBackup(
-            &result.default_search_provider_backup);
     request->SetResult(
         new WDResult<WDKeywordsResult>(KEYWORDS_RESULT, result));
   }
@@ -921,10 +914,10 @@ void WebDataService::GetWebIntentServicesImpl(
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled(NULL)) {
     std::vector<WebIntentServiceData> result;
-    db_->GetWebIntentsTable()->GetWebIntentServices(request->arg(), &result);
-    request->SetResult(
-        new WDResult<std::vector<WebIntentServiceData> >(
-            WEB_INTENTS_RESULT, result));
+    db_->GetWebIntentsTable()->GetWebIntentServicesForAction(request->arg(),
+                                                             &result);
+    request->SetResult(new WDResult<std::vector<WebIntentServiceData> >(
+        WEB_INTENTS_RESULT, result));
   }
   request->RequestComplete();
 }

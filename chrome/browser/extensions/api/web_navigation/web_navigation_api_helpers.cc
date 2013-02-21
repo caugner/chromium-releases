@@ -44,9 +44,10 @@ void DispatchEvent(content::BrowserContext* browser_context,
 
   Profile* profile = Profile::FromBrowserContext(browser_context);
   if (profile && extensions::ExtensionSystem::Get(profile)->event_router()) {
-    extensions::ExtensionSystem::Get(profile)->event_router()->
-        DispatchEventToRenderers(event_name, args.Pass(), profile, GURL(),
-                                 info);
+    scoped_ptr<Event> event(new Event(event_name, args.Pass()));
+    event->restrict_to_profile = profile;
+    event->filter_info = info;
+    ExtensionSystem::Get(profile)->event_router()->BroadcastEvent(event.Pass());
   }
 }
 
@@ -96,9 +97,15 @@ void DispatchOnCommitted(const char* event_name,
   dict->SetInteger(keys::kProcessIdKey,
                    web_contents->GetRenderViewHost()->GetProcess()->GetID());
   dict->SetInteger(keys::kFrameIdKey, GetFrameId(is_main_frame, frame_id));
+  const char *transition_type_as_string =
+      content::PageTransitionGetCoreTransitionString(transition_type);
+  // See http://crbug.com/166166. If you trigger this, please add repro steps
+  // to the bug (or at least report what transition_type you saw).
+  DCHECK(transition_type_as_string)
+      << "Navigation with invalid transition type " << transition_type;
   dict->SetString(
       keys::kTransitionTypeKey,
-      content::PageTransitionGetCoreTransitionString(transition_type));
+      transition_type_as_string ? transition_type_as_string : "unknown");
   ListValue* qualifiers = new ListValue();
   if (transition_type & content::PAGE_TRANSITION_CLIENT_REDIRECT)
     qualifiers->Append(Value::CreateStringValue("client_redirect"));

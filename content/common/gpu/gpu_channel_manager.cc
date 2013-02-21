@@ -37,7 +37,8 @@ GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
       io_message_loop_(io_message_loop),
       shutdown_event_(shutdown_event),
       gpu_child_thread_(gpu_child_thread),
-      ALLOW_THIS_IN_INITIALIZER_LIST(gpu_memory_manager_(this,
+      ALLOW_THIS_IN_INITIALIZER_LIST(gpu_memory_manager_(
+          this,
           GpuMemoryManager::kDefaultMaxSurfacesWithFrontbufferSoftLimit)),
       watchdog_(watchdog),
       sync_point_manager_(new SyncPointManager),
@@ -90,14 +91,6 @@ GpuChannel* GpuChannelManager::LookupChannel(int32 client_id) {
     return NULL;
   else
     return iter->second;
-}
-
-void GpuChannelManager::AppendAllCommandBufferStubs(
-    std::vector<GpuCommandBufferStubBase*>& stubs) {
-  for (GpuChannelMap::const_iterator it = gpu_channels_.begin();
-      it != gpu_channels_.end(); ++it ) {
-    it->second->AppendAllCommandBufferStubs(stubs);
-  }
 }
 
 bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {

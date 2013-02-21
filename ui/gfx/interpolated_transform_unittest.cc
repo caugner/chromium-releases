@@ -38,7 +38,7 @@ TEST(InterpolatedTransformTest, InterpolatedRotation) {
 
   for (int i = 0; i <= 100; ++i) {
     gfx::Transform rotation;
-    rotation.SetRotate(i);
+    rotation.Rotate(i);
     gfx::Transform interpolated = interpolated_rotation.Interpolate(i / 100.0f);
     CheckApproximatelyEqual(rotation, interpolated);
     interpolated = interpolated_rotation_diff_start_end.Interpolate(i + 100);
@@ -47,14 +47,14 @@ TEST(InterpolatedTransformTest, InterpolatedRotation) {
 }
 
 TEST(InterpolatedTransformTest, InterpolatedScale) {
-  ui::InterpolatedScale interpolated_scale(gfx::Point3f(0, 0, 0),
-                                           gfx::Point3f(100, 100, 100));
+  ui::InterpolatedScale interpolated_scale(gfx::Point3F(0, 0, 0),
+                                           gfx::Point3F(100, 100, 100));
   ui::InterpolatedScale interpolated_scale_diff_start_end(
-      gfx::Point3f(0, 0, 0), gfx::Point3f(100, 100, 100), 100, 200);
+      gfx::Point3F(0, 0, 0), gfx::Point3F(100, 100, 100), 100, 200);
 
   for (int i = 0; i <= 100; ++i) {
     gfx::Transform scale;
-    scale.SetScale(i, i);
+    scale.Scale(i, i);
     gfx::Transform interpolated = interpolated_scale.Interpolate(i / 100.0f);
     CheckApproximatelyEqual(scale, interpolated);
     interpolated = interpolated_scale_diff_start_end.Interpolate(i + 100);
@@ -71,7 +71,7 @@ TEST(InterpolatedTransformTest, InterpolatedTranslate) {
 
   for (int i = 0; i <= 100; ++i) {
     gfx::Transform xform;
-    xform.SetTranslate(i, i);
+    xform.Translate(i, i);
     gfx::Transform interpolated = interpolated_xform.Interpolate(i / 100.0f);
     CheckApproximatelyEqual(xform, interpolated);
     interpolated = interpolated_xform_diff_start_end.Interpolate(i + 100);
@@ -102,7 +102,7 @@ TEST(InterpolatedTransformTest, InterpolatedScaleAboutPivot) {
   gfx::Point above_pivot(100, 200);
   ui::InterpolatedTransformAboutPivot interpolated_xform(
       pivot,
-      new ui::InterpolatedScale(gfx::Point3f(1, 1, 1), gfx::Point3f(2, 2, 2)));
+      new ui::InterpolatedScale(gfx::Point3F(1, 1, 1), gfx::Point3F(2, 2, 2)));
   gfx::Transform result = interpolated_xform.Interpolate(0.0f);
   CheckApproximatelyEqual(gfx::Transform(), result);
   result = interpolated_xform.Interpolate(1.0f);
@@ -112,31 +112,6 @@ TEST(InterpolatedTransformTest, InterpolatedScaleAboutPivot) {
   expected_result = gfx::Point(100, 300);
   result.TransformPoint(above_pivot);
   EXPECT_EQ(expected_result, above_pivot);
-}
-
-TEST(InterpolatedTransformTest, FactorTRS) {
-  for (int degrees = 0; degrees < 360; ++degrees) {
-    // build a transformation matrix.
-    gfx::Transform transform;
-    transform.SetScale(degrees + 1, 2 * degrees + 1);
-    transform.ConcatRotate(degrees);
-    transform.ConcatTranslate(degrees * 2, -degrees * 3);
-
-    // factor the matrix
-    gfx::Point translation;
-    float rotation;
-    gfx::Point3f scale;
-    bool success = ui::InterpolatedTransform::FactorTRS(transform,
-                                                        &translation,
-                                                        &rotation,
-                                                        &scale);
-    EXPECT_TRUE(success);
-    EXPECT_FLOAT_EQ(translation.x(), degrees * 2);
-    EXPECT_FLOAT_EQ(translation.y(), -degrees * 3);
-    EXPECT_FLOAT_EQ(NormalizeAngle(rotation), degrees);
-    EXPECT_FLOAT_EQ(scale.x(), degrees + 1);
-    EXPECT_FLOAT_EQ(scale.y(), 2 * degrees + 1);
-  }
 }
 
 ui::InterpolatedTransform* GetScreenRotation(int degrees, bool reversed) {
@@ -219,8 +194,8 @@ ui::InterpolatedTransform* GetMaximize() {
       target_bounds.width()) / initial_bounds.height();
 
   scoped_ptr<ui::InterpolatedTransform> scale(
-      new ui::InterpolatedScale(gfx::Point3f(1, 1, 1),
-                                gfx::Point3f(scale_x, scale_y, 1)));
+      new ui::InterpolatedScale(gfx::Point3F(1, 1, 1),
+                                gfx::Point3F(scale_x, scale_y, 1)));
 
   scoped_ptr<ui::InterpolatedTransform> translation(
       new ui::InterpolatedTranslation(
@@ -257,4 +232,3 @@ TEST(InterpolatedTransformTest, MaximizeEndsCleanly) {
     }
   }
 }
-

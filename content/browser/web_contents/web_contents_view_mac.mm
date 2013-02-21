@@ -79,7 +79,8 @@ WebContentsView* CreateWebContentsView(
 WebContentsViewMac::WebContentsViewMac(WebContentsImpl* web_contents,
                                        WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
-      delegate_(delegate) {
+      delegate_(delegate),
+      allow_overlapping_views_(false) {
 }
 
 WebContentsViewMac::~WebContentsViewMac() {
@@ -91,7 +92,8 @@ WebContentsViewMac::~WebContentsViewMac() {
   [cocoa_view_ clearWebContentsView];
 }
 
-void WebContentsViewMac::CreateView(const gfx::Size& initial_size) {
+void WebContentsViewMac::CreateView(
+    const gfx::Size& initial_size, gfx::NativeView context) {
   WebContentsViewCocoa* view =
       [[WebContentsViewCocoa alloc] initWithWebContentsViewMac:this];
   cocoa_view_.reset(view);
@@ -116,6 +118,7 @@ RenderWidgetHostView* WebContentsViewMac::CreateViewForWidget(
         delegate()->CreateRenderWidgetHostViewDelegate(render_widget_host);
     view->SetDelegate(rw_delegate);
   }
+  view->SetAllowOverlappingViews(allow_overlapping_views_);
 
   // Fancy layout comes later; for now just make it our size and resize it
   // with us. In case there are other siblings of the content area, we want
@@ -174,7 +177,8 @@ void WebContentsViewMac::StartDragging(
     const WebDropData& drop_data,
     WebDragOperationsMask allowed_operations,
     const gfx::ImageSkia& image,
-    const gfx::Point& image_offset) {
+    const gfx::Vector2d& image_offset,
+    const DragEventSourceInfo& event_info) {
   // By allowing nested tasks, the code below also allows Close(),
   // which would deallocate |this|.  The same problem can occur while
   // processing -sendEvent:, so Close() is deferred in that case.
@@ -186,7 +190,8 @@ void WebContentsViewMac::StartDragging(
   // processing events.
   MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
   NSDragOperation mask = static_cast<NSDragOperation>(allowed_operations);
-  NSPoint offset = NSPointFromCGPoint(image_offset.ToCGPoint());
+  NSPoint offset = NSPointFromCGPoint(
+      gfx::PointAtOffsetFromOrigin(image_offset).ToCGPoint());
   [cocoa_view_ startDragWithDropData:drop_data
                    dragOperationMask:mask
                                image:gfx::NSImageFromImageSkia(image)
@@ -327,6 +332,17 @@ gfx::Rect WebContentsViewMac::GetViewBounds() const {
   // This method is not currently used on mac.
   NOTIMPLEMENTED();
   return gfx::Rect();
+}
+
+void WebContentsViewMac::SetAllowOverlappingViews(bool overlapping) {
+  if (allow_overlapping_views_ == overlapping)
+    return;
+
+  allow_overlapping_views_ = overlapping;
+  RenderWidgetHostViewMac* view = static_cast<RenderWidgetHostViewMac*>(
+      web_contents_->GetRenderWidgetHostView());
+  if (view)
+    view->SetAllowOverlappingViews(allow_overlapping_views_);
 }
 
 void WebContentsViewMac::CloseTab() {

@@ -19,6 +19,7 @@
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/shared_memory.h"
+#include "base/string16.h"
 #include "base/string_number_conversions.h"  // Temporary
 #include "base/threading/thread_local.h"
 #include "base/utf_string_conversions.h"
@@ -72,6 +73,7 @@
 #include "ipc/ipc_forwarding_message_filter.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/base/media.h"
+#include "media/base/media_switches.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
@@ -87,6 +89,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorkerRepository.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/layout.h"
 #include "ui/base/ui_base_switches.h"
@@ -213,6 +216,10 @@ RenderThreadImpl::HistogramCustomizer::~HistogramCustomizer() {}
 
 void RenderThreadImpl::HistogramCustomizer::RenderViewNavigatedToHost(
     const std::string& host, size_t view_count) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableHistogramCustomizer)) {
+    return;
+  }
   // Check if all RenderViews are displaying a page from the same host. If there
   // is only one RenderView, the common host is this view's host. If there are
   // many, check if this one shares the common host of the other
@@ -419,7 +426,7 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
   bool notify_webkit_of_modal_loop = true;  // default value
   std::swap(notify_webkit_of_modal_loop, notify_webkit_of_modal_loop_);
 
-  gfx::NativeViewId host_window = 0;
+  int render_view_id = MSG_ROUTING_NONE;
 
   if (pumping_events) {
     if (suspend_webkit_shared_timer)
@@ -431,18 +438,18 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
     RenderWidget* widget =
         static_cast<RenderWidget*>(ResolveRoute(msg->routing_id()));
     if (widget) {
-      host_window = widget->host_window();
+      render_view_id = widget->routing_id();
       PluginChannelHost::Broadcast(
-          new PluginMsg_SignalModalDialogEvent(host_window));
+          new PluginMsg_SignalModalDialogEvent(render_view_id));
     }
   }
 
   bool rv = ChildThread::Send(msg);
 
   if (pumping_events) {
-    if (host_window) {
+    if (render_view_id != MSG_ROUTING_NONE) {
       PluginChannelHost::Broadcast(
-          new PluginMsg_ResetModalDialogEvent(host_window));
+          new PluginMsg_ResetModalDialogEvent(render_view_id));
     }
 
     if (notify_webkit_of_modal_loop)
@@ -551,6 +558,8 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   webkit_platform_support_.reset(new RendererWebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
+  WebKit::setSharedWorkerRepository(
+      webkit_platform_support_.get()->sharedWorkerRepository());
 
   WebKit::WebCompositorSupport* compositor_support =
       WebKit::Platform::current()->compositorSupport();
@@ -634,13 +643,9 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   WebKit::WebRuntimeFeatures::enableMediaStream(true);
   WebKit::WebRuntimeFeatures::enablePeerConnection(true);
-  WebKit::WebRuntimeFeatures::enableDeprecatedPeerConnection(
-      command_line.HasSwitch(switches::kEnableDeprecatedPeerConnection));
 
   WebKit::WebRuntimeFeatures::enableFullScreenAPI(
       !command_line.HasSwitch(switches::kDisableFullScreen));
-
-  WebKit::WebRuntimeFeatures::enablePointerLock(true);
 
   WebKit::WebRuntimeFeatures::enableEncryptedMedia(
       command_line.HasSwitch(switches::kEnableEncryptedMedia));
@@ -655,13 +660,6 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
       media::IsMediaLibraryInitialized());
 #endif
 
-#if defined(OS_CHROMEOS)
-  WebRuntimeFeatures::enableTouch(true);
-#else
-  WebRuntimeFeatures::enableTouch(
-      command_line.HasSwitch(switches::kEnableTouchEvents));
-#endif
-
   WebRuntimeFeatures::enableDeviceMotion(
       command_line.HasSwitch(switches::kEnableDeviceMotion));
 
@@ -671,8 +669,12 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableSpeechInput(
       !command_line.HasSwitch(switches::kDisableSpeechInput));
 
-  WebRuntimeFeatures::enableScriptedSpeech(
-      command_line.HasSwitch(switches::kEnableScriptedSpeech));
+#if defined(OS_ANDROID)
+  // Web Speech API Speech recognition is not implemented on Android yet.
+  WebRuntimeFeatures::enableScriptedSpeech(false);
+#else
+  WebRuntimeFeatures::enableScriptedSpeech(true);
+#endif
 
   WebRuntimeFeatures::enableFileSystem(
       !command_line.HasSwitch(switches::kDisableFileSystem));
@@ -690,6 +692,18 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
       command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
 
   WebRuntimeFeatures::enableCSSExclusions(
+      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
+
+  WebRuntimeFeatures::enableExperimentalContentSecurityPolicyFeatures(
+      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
+
+  WebRuntimeFeatures::enableWebIntents(
+      command_line.HasSwitch(switches::kWebIntentsInvocationEnabled));
+
+  WebRuntimeFeatures::enableCSSRegions(
+      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
+
+  WebRuntimeFeatures::enableDialogElement(
       command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
 
   FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
@@ -713,12 +727,40 @@ void RenderThreadImpl::RecordUserMetrics(const std::string& action) {
   Send(new ViewHostMsg_UserMetricsRecordAction(action));
 }
 
-base::SharedMemoryHandle RenderThreadImpl::HostAllocateSharedMemoryBuffer(
-    uint32 buffer_size) {
-  base::SharedMemoryHandle mem_handle = base::SharedMemoryHandle();
-  Send(new ChildProcessHostMsg_SyncAllocateSharedMemory(
-                buffer_size, &mem_handle));
-  return mem_handle;
+scoped_ptr<base::SharedMemory>
+    RenderThreadImpl::HostAllocateSharedMemoryBuffer(size_t size) {
+  if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
+    return scoped_ptr<base::SharedMemory>();
+
+  //if (!size)
+  //  return scoped_ptr<base::SharedMemory>();
+
+//#if defined(OS_WIN)
+//  scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory);
+//  if (!shared_memory->CreateAnonymous(size))
+//    return scoped_ptr<base::SharedMemory>();
+//
+//  return scoped_ptr<base::SharedMemory>(shared_memory.release());
+//#else
+  base::SharedMemoryHandle handle;
+  bool success;
+  IPC::Message* message =
+      new ChildProcessHostMsg_SyncAllocateSharedMemory(size, &handle);
+
+  // Allow calling this from the compositor thread.
+  if (MessageLoop::current() == message_loop())
+    success = ChildThread::Send(message);
+  else
+    success = sync_message_filter()->Send(message);
+
+  if (!success)
+    return scoped_ptr<base::SharedMemory>();
+
+  if (!base::SharedMemory::IsHandleValid(handle))
+    return scoped_ptr<base::SharedMemory>();
+
+  return scoped_ptr<base::SharedMemory>(new base::SharedMemory(handle, false));
+//#endif  // defined(OS_WIN)
 }
 
 void RenderThreadImpl::RegisterExtension(v8::Extension* extension) {
@@ -856,6 +898,11 @@ AudioRendererMixerManager* RenderThreadImpl::GetAudioRendererMixerManager() {
 }
 
 #if defined(OS_WIN)
+void RenderThreadImpl::PreCacheFontCharacters(const LOGFONT& log_font,
+                                              const string16& str) {
+  Send(new ViewHostMsg_PreCacheFontCharacters(log_font, str));
+}
+
 void RenderThreadImpl::PreCacheFont(const LOGFONT& log_font) {
   Send(new ChildProcessHostMsg_PreCacheFont(log_font));
 }
@@ -898,24 +945,9 @@ base::WaitableEvent* RenderThreadImpl::GetShutDownEvent() {
 }
 
 scoped_ptr<base::SharedMemory> RenderThreadImpl::AllocateSharedMemory(
-    uint32 size) {
-  base::SharedMemoryHandle handle;
-  bool success;
-  IPC::Message* message =
-      new ChildProcessHostMsg_SyncAllocateSharedMemory(size, &handle);
-
-  // Allow calling this from the compositor thread.
-  if (MessageLoop::current() == message_loop())
-    success = ChildThread::Send(message);
-  else
-    success = sync_message_filter()->Send(message);
-
-  if (!success)
-    return scoped_ptr<base::SharedMemory>();
-
-  if (!base::SharedMemory::IsHandleValid(handle))
-    return scoped_ptr<base::SharedMemory>();
-  return scoped_ptr<base::SharedMemory>(new base::SharedMemory(handle, false));
+    size_t size) {
+  return scoped_ptr<base::SharedMemory>(
+      HostAllocateSharedMemoryBuffer(size));
 }
 
 int32 RenderThreadImpl::CreateViewCommandBuffer(
@@ -998,7 +1030,6 @@ void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
   EnsureWebKitInitialized();
   // When bringing in render_view, also bring in webkit's glue and jsbindings.
   RenderViewImpl::Create(
-      params.parent_window,
       params.opener_route_id,
       params.renderer_preferences,
       params.web_preferences,

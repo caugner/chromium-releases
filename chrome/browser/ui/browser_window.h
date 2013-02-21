@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "chrome/common/content_settings_types.h"
-#include "chrome/common/instant_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -24,7 +23,6 @@ class GURL;
 class LocationBar;
 class Profile;
 class StatusBubble;
-class TabContents;
 class TemplateURL;
 #if !defined(OS_MACOSX)
 class ToolbarView;
@@ -144,7 +142,7 @@ class BrowserWindow : public BaseWindow {
   virtual void UpdateReloadStopState(bool is_loading, bool force) = 0;
 
   // Updates the toolbar with the state for the specified |contents|.
-  virtual void UpdateToolbar(TabContents* contents,
+  virtual void UpdateToolbar(content::WebContents* contents,
                              bool should_restore_state) = 0;
 
   // Focuses the toolbar (for accessibility).
@@ -211,6 +209,10 @@ class BrowserWindow : public BaseWindow {
   // |already_bookmarked| is true if the url is already bookmarked.
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) = 0;
 
+  // Shows the bookmark prompt.
+  // TODO(yosin): Make ShowBookmarkPrompt pure virtual.
+  virtual void ShowBookmarkPrompt() {}
+
   // Shows the Chrome To Mobile bubble.
   virtual void ShowChromeToMobileBubble() = 0;
 
@@ -266,7 +268,7 @@ class BrowserWindow : public BaseWindow {
   // that page/frame.  If |show_history| is true, a section showing how many
   // times that URL has been visited is added to the page info.
   virtual void ShowWebsiteSettings(Profile* profile,
-                                   TabContents* tab_contents,
+                                   content::WebContents* web_contents,
                                    const GURL& url,
                                    const content::SSLStatus& ssl,
                                    bool show_history) = 0;
@@ -310,12 +312,12 @@ class BrowserWindow : public BaseWindow {
   virtual bool InPresentationMode() = 0;
 #endif
 
-  // Returns the desired bounds for instant in screen coordinates. Note that if
-  // instant isn't currently visible this returns the bounds instant would be
+  // Returns the desired bounds for Instant in screen coordinates. Note that if
+  // Instant isn't currently visible this returns the bounds Instant would be
   // placed at.
   virtual gfx::Rect GetInstantBounds() = 0;
 
-  // Checks if an instant's tab contents is being shown.
+  // Checks if an Instant's tab contents is being shown.
   virtual bool IsInstantTabShowing() = 0;
 
   // Return the correct disposition for a popup window based on |bounds|.
@@ -357,13 +359,11 @@ class BrowserWindow : public BaseWindow {
   // Show bubble for password generation positioned relative to |rect|. The
   // subclasses implementing this interface do not own the |password_generator|
   // object which is passed to generate the password. |form| is the form that
-  // contains the password field that the bubble will be associated with. A
-  // stub implementation is provided since this feature is currently not
-  // available on mac.
+  // contains the password field that the bubble will be associated with.
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
       const content::PasswordForm& form,
-      autofill::PasswordGenerator* password_generator) {}
+      autofill::PasswordGenerator* password_generator) = 0;
 
  protected:
   friend void browser::CloseAllBrowsers();

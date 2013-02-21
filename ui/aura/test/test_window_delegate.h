@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/rect.h"
 
 namespace aura {
@@ -29,12 +30,19 @@ class TestWindowDelegate : public WindowDelegate {
     window_component_ = window_component;
   }
 
+  void set_minimum_size(const gfx::Size& minimum_size) {
+    minimum_size_ = minimum_size;
+  }
+
+  void set_maximum_size(const gfx::Size& maximum_size) {
+    maximum_size_ = maximum_size;
+  }
+
   // Overridden from WindowDelegate:
   virtual gfx::Size GetMinimumSize() const OVERRIDE;
+  virtual gfx::Size GetMaximumSize() const OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnFocus(Window* old_focused_window) OVERRIDE;
-  virtual void OnBlur() OVERRIDE;
   virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
   virtual bool ShouldDescendIntoChildForEventHandling(
@@ -51,15 +59,11 @@ class TestWindowDelegate : public WindowDelegate {
   virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
   virtual scoped_refptr<ui::Texture> CopyTexture() OVERRIDE;
 
-  // Overridden from ui::EventHandler:
-  virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual ui::EventResult OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
-
  private:
   int window_component_;
   bool delete_on_destroyed_;
+  gfx::Size minimum_size_;
+  gfx::Size maximum_size_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
 };
@@ -74,7 +78,7 @@ class ColorTestWindowDelegate : public TestWindowDelegate {
   ui::KeyboardCode last_key_code() const { return last_key_code_; }
 
   // Overridden from TestWindowDelegate:
-  virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
@@ -106,8 +110,8 @@ class EventCountDelegate : public TestWindowDelegate {
   EventCountDelegate();
 
   // Overridden from TestWindowDelegate:
-  virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
 
   // Returns the counts of mouse motion events in the
   // form of "<enter> <move> <leave>".

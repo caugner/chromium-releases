@@ -65,16 +65,8 @@ void GpuScheduler::PutChanged() {
   base::TimeTicks begin_time(base::TimeTicks::HighResNow());
   error::Error error = error::kNoError;
   while (!parser_->IsEmpty()) {
-    if (preempt_by_counter_.get() &&
-        !was_preempted_ &&
-        !preempt_by_counter_->IsZero()) {
-      TRACE_COUNTER_ID1("gpu","GpuScheduler::Preempted", this, 1);
-      was_preempted_ = true;
+    if (IsPreempted())
       break;
-    } else if (was_preempted_) {
-      TRACE_COUNTER_ID1("gpu","GpuScheduler::Preempted", this, 0);
-      was_preempted_ = false;
-    }
 
     DCHECK(IsScheduled());
     DCHECK(unschedule_fences_.empty());
@@ -106,9 +98,14 @@ void GpuScheduler::PutChanged() {
       break;
   }
 
-  if (decoder_)
+  if (decoder_) {
+    if (!error::IsError(error) && decoder_->WasContextLost()) {
+      command_buffer_->SetContextLostReason(decoder_->GetContextLostReason());
+      command_buffer_->SetParseError(error::kLostContext);
+    }
     decoder_->AddProcessingCommandsTime(
         base::TimeTicks::HighResNow() - begin_time);
+  }
 }
 
 void GpuScheduler::SetScheduled(bool scheduled) {
@@ -248,6 +245,21 @@ bool GpuScheduler::PollUnscheduleFences() {
   }
 
   return true;
+}
+
+bool GpuScheduler::IsPreempted() {
+  if (!preemption_flag_.get())
+    return false;
+
+  if (!was_preempted_ && !preemption_flag_->IsSet()) {
+    TRACE_COUNTER_ID1("gpu", "GpuScheduler::Preempted", this, 1);
+    was_preempted_ = true;
+  } else if (was_preempted_) {
+    TRACE_COUNTER_ID1("gpu", "GpuScheduler::Preempted", this, 0);
+    was_preempted_ = false;
+  }
+
+  return !preemption_flag_->IsSet();
 }
 
 void GpuScheduler::RescheduleTimeOut() {

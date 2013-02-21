@@ -33,6 +33,7 @@
 #include "base/stringprintf.h"
 #include "base/sys_byteorder.h"
 #include "base/threading/thread.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/x/valuators.h"
@@ -433,12 +434,6 @@ int GetDefaultScreen(Display* display) {
 
 ::Cursor GetXCursor(int cursor_shape) {
   CR_DEFINE_STATIC_LOCAL(XCursorCache, cache, ());
-
-  if (cursor_shape == kCursorClearXCursorCache) {
-    cache.Clear();
-    return 0;
-  }
-
   return cache.GetCursor(cursor_shape);
 }
 
@@ -476,7 +471,7 @@ XcursorImage* SkBitmapToXcursorImage(const SkBitmap* cursor_image,
         skia::ImageOperations::RESIZE_BETTER,
         static_cast<int>(cursor_image->width() * scale),
         static_cast<int>(cursor_image->height() * scale));
-    hotspot_point = gfx::ToFlooredPoint(hotspot.Scale(scale));
+    hotspot_point = gfx::ToFlooredPoint(gfx::ScalePoint(hotspot, scale));
     needs_scale = true;
   }
 
@@ -534,7 +529,7 @@ int CoalescePendingMotionEvents(const XEvent* xev,
 
     if (next_event.type == GenericEvent &&
         next_event.xgeneric.evtype == event_type &&
-        !ui::GetScrollOffsets(&next_event, NULL, NULL)) {
+        !ui::GetScrollOffsets(&next_event, NULL, NULL, NULL)) {
       XIDeviceEvent* next_xievent =
           static_cast<XIDeviceEvent*>(next_event.xcookie.data);
 #if defined(USE_XI2_MT)
@@ -650,6 +645,26 @@ void SetHideTitlebarWhenMaximizedProperty(XID window,
       PropModeReplace,
       reinterpret_cast<unsigned char*>(&hide),
       1);
+}
+
+void ClearX11DefaultRootWindow() {
+  Display* display = GetXDisplay();
+  XID root_window = GetX11RootWindow();
+  gfx::Rect root_bounds;
+  if (!GetWindowRect(root_window, &root_bounds)) {
+    LOG(ERROR) << "Failed to get the bounds of the X11 root window";
+    return;
+  }
+
+  XGCValues gc_values = {0};
+  gc_values.foreground = BlackPixel(display, DefaultScreen(display));
+  GC gc = XCreateGC(display, root_window, GCForeground, &gc_values);
+  XFillRectangle(display, root_window, gc,
+                 root_bounds.x(),
+                 root_bounds.y(),
+                 root_bounds.width(),
+                 root_bounds.height());
+  XFreeGC(display, gc);
 }
 
 int BitsPerPixelForPixmapDepth(Display* dpy, int depth) {
@@ -925,6 +940,12 @@ XID GetHighestAncestorWindow(XID window, XID root) {
 
 bool GetWindowDesktop(XID window, int* desktop) {
   return GetIntProperty(window, "_NET_WM_DESKTOP", desktop);
+}
+
+std::string GetX11ErrorString(Display* display, int err) {
+  char buffer[256];
+  XGetErrorText(display, err, buffer, arraysize(buffer));
+  return buffer;
 }
 
 // Returns true if |window| is a named window.
@@ -1225,7 +1246,7 @@ bool GetOutputDeviceHandles(std::vector<XID>* outputs) {
 
 bool GetOutputDeviceData(XID output,
                          uint16* manufacturer_id,
-                         uint32* serial_number,
+                         uint16* product_code,
                          std::string* human_readable_name) {
   if (!IsRandRAvailable())
     return false;
@@ -1271,13 +1292,13 @@ bool GetOutputDeviceData(XID output,
   // See http://en.wikipedia.org/wiki/Extended_display_identification_data
   // for the details of EDID data format.  We use the following data:
   //   bytes 8-9: manufacturer EISA ID, in big-endian
-  //   bytes 12-15: represents serial number, in little-endian
+  //   bytes 10-11: represents product code, in little-endian
   //   bytes 54-125: four descriptors (18-bytes each) which may contain
   //     the display name.
   const unsigned int kManufacturerOffset = 8;
   const unsigned int kManufacturerLength = 2;
-  const unsigned int kSerialNumberOffset = 12;
-  const unsigned int kSerialNumberLength = 4;
+  const unsigned int kProductCodeOffset = 10;
+  const unsigned int kProductCodeLength = 2;
   const unsigned int kDescriptorOffset = 54;
   const unsigned int kNumDescriptors = 4;
   const unsigned int kDescriptorLength = 18;
@@ -1295,13 +1316,13 @@ bool GetOutputDeviceData(XID output,
 #endif
   }
 
-  if (serial_number) {
-    if (nitems < kSerialNumberOffset + kSerialNumberLength) {
+  if (product_code) {
+    if (nitems < kProductCodeOffset + kProductCodeLength) {
       XFree(prop);
       return false;
     }
-    *serial_number = base::ByteSwapToLE32(
-        *reinterpret_cast<uint32*>(prop + kSerialNumberOffset));
+    *product_code = base::ByteSwapToLE16(
+        *reinterpret_cast<const uint16*>(prop + kProductCodeOffset));
   }
 
   if (!human_readable_name) {

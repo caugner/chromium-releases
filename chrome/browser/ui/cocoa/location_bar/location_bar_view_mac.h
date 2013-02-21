@@ -13,7 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/api/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
@@ -129,9 +129,6 @@ class LocationBarViewMac : public LocationBar,
   // Re-draws |decoration| if it's already being displayed.
   void RedrawDecoration(LocationBarDecoration* decoration);
 
-  // Returns the current WebContents.
-  content::WebContents* GetWebContents() const;
-
   // Sets preview_enabled_ for the PageActionImageView associated with this
   // |page_action|. If |preview_enabled|, the location bar will display the
   // PageAction icon even if it has not been activated by the extension.
@@ -169,7 +166,7 @@ class LocationBarViewMac : public LocationBar,
   virtual gfx::Image GetFavicon() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
-  virtual TabContents* GetTabContents() const OVERRIDE;
+  virtual content::WebContents* GetWebContents() const OVERRIDE;
 
   NSImage* GetKeywordImage(const string16& keyword);
 
@@ -192,6 +189,8 @@ class LocationBarViewMac : public LocationBar,
 
   // Clear the page-action decorations.
   void DeletePageActionDecorations();
+
+  void OnEditBookmarksEnabledChanged();
 
   // Re-generate the page-action decorations from the profile's
   // extension service.

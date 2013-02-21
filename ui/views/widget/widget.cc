@@ -55,11 +55,12 @@ void BuildRootLayers(View* view, std::vector<ui::Layer*>* layers) {
 NativeWidget* CreateNativeWidget(NativeWidget* native_widget,
                                  internal::NativeWidgetDelegate* delegate,
                                  Widget::InitParams::Type type,
-                                 gfx::NativeView parent) {
+                                 gfx::NativeView parent,
+                                 gfx::NativeView context) {
   if (!native_widget) {
     if (ViewsDelegate::views_delegate) {
       native_widget = ViewsDelegate::views_delegate->CreateNativeWidget(
-          type, delegate, parent);
+          type, delegate, parent, context);
     }
     if (!native_widget) {
       native_widget =
@@ -155,11 +156,11 @@ Widget::InitParams::InitParams()
       show_state(ui::SHOW_STATE_DEFAULT),
       double_buffer(false),
       parent(NULL),
-      parent_widget(NULL),
       native_widget(NULL),
       desktop_root_window_host(NULL),
       top_level(false),
-      layer_type(ui::LAYER_TEXTURED) {
+      layer_type(ui::LAYER_TEXTURED),
+      context(NULL) {
 }
 
 Widget::InitParams::InitParams(Type type)
@@ -180,15 +181,11 @@ Widget::InitParams::InitParams(Type type)
       show_state(ui::SHOW_STATE_DEFAULT),
       double_buffer(false),
       parent(NULL),
-      parent_widget(NULL),
       native_widget(NULL),
       desktop_root_window_host(NULL),
       top_level(false),
-      layer_type(ui::LAYER_TEXTURED) {
-}
-
-gfx::NativeView Widget::InitParams::GetParent() const {
-  return parent_widget ? parent_widget->GetNativeView() : parent;
+      layer_type(ui::LAYER_TEXTURED),
+      context(NULL) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -256,9 +253,26 @@ Widget* Widget::CreateWindowWithParentAndBounds(WidgetDelegate* delegate,
   Widget* widget = new Widget;
   Widget::InitParams params;
   params.delegate = delegate;
-#if defined(OS_WIN) || defined(USE_AURA)
   params.parent = parent;
-#endif
+  params.bounds = bounds;
+  widget->Init(params);
+  return widget;
+}
+
+// static
+Widget* Widget::CreateWindowWithContext(WidgetDelegate* delegate,
+                                        gfx::NativeView context) {
+  return CreateWindowWithContextAndBounds(delegate, context, gfx::Rect());
+}
+
+// static
+Widget* Widget::CreateWindowWithContextAndBounds(WidgetDelegate* delegate,
+                                                 gfx::NativeView context,
+                                                 const gfx::Rect& bounds) {
+  Widget* widget = new Widget;
+  Widget::InitParams params;
+  params.delegate = delegate;
+  params.context = context;
   params.bounds = bounds;
   widget->Init(params);
   return widget;
@@ -334,7 +348,7 @@ void Widget::Init(const InitParams& params) {
       params.delegate : new DefaultWidgetDelegate(this, params);
   ownership_ = params.ownership;
   native_widget_ = CreateNativeWidget(
-      params.native_widget, this, params.type, params.GetParent())->
+      params.native_widget, this, params.type, params.parent, params.context)->
           AsNativeWidgetPrivate();
   GetRootView();
   default_theme_provider_.reset(new DefaultThemeProvider);
@@ -483,7 +497,7 @@ void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
   native_widget_->SetVisibilityChangedAnimationsEnabled(value);
 }
 
-Widget::MoveLoopResult Widget::RunMoveLoop(const gfx::Point& drag_offset) {
+Widget::MoveLoopResult Widget::RunMoveLoop(const gfx::Vector2d& drag_offset) {
   return native_widget_->RunMoveLoop(drag_offset);
 }
 
@@ -672,6 +686,10 @@ ui::ThemeProvider* Widget::GetThemeProvider() const {
   return default_theme_provider_.get();
 }
 
+const ui::NativeTheme* Widget::GetNativeTheme() const {
+  return native_widget_->GetNativeTheme();
+}
+
 FocusManager* Widget::GetFocusManager() {
   Widget* toplevel_widget = GetTopLevelWidget();
   return toplevel_widget ? toplevel_widget->focus_manager_.get() : NULL;
@@ -704,9 +722,10 @@ InputMethod* Widget::GetInputMethod() {
 void Widget::RunShellDrag(View* view,
                           const ui::OSExchangeData& data,
                           const gfx::Point& location,
-                          int operation) {
+                          int operation,
+                          ui::DragDropTypes::DragEventSource source) {
   dragged_view_ = view;
-  native_widget_->RunShellDrag(view, data, location, operation);
+  native_widget_->RunShellDrag(view, data, location, operation, source);
   // If the view is removed during the drag operation, dragged_view_ is set to
   // NULL.
   if (view && dragged_view_ == view) {
@@ -833,15 +852,14 @@ ui::Compositor* Widget::GetCompositor() {
   return native_widget_->GetCompositor();
 }
 
-void Widget::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                ui::Layer** layer_parent) {
-  native_widget_->CalculateOffsetToAncestorWithLayer(offset, layer_parent);
+gfx::Vector2d Widget::CalculateOffsetToAncestorWithLayer(
+    ui::Layer** layer_parent) {
+  return native_widget_->CalculateOffsetToAncestorWithLayer(layer_parent);
 }
 
 void Widget::ReorderLayers() {
-  gfx::Point point;
   ui::Layer* layer = NULL;
-  CalculateOffsetToAncestorWithLayer(&point, &layer);
+  CalculateOffsetToAncestorWithLayer(&layer);
   if (layer)
     root_view_->ReorderChildLayers(layer);
 }
@@ -1011,7 +1029,9 @@ gfx::Size Widget::GetMaximumSize() {
 
 void Widget::OnNativeWidgetMove() {
   widget_delegate_->OnWidgetMove();
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetMoved(this));
+  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetBoundsChanged(
+    this,
+    GetWindowBoundsInScreen()));
 }
 
 void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
@@ -1022,6 +1042,10 @@ void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
   // startup procedures.
   if (native_widget_initialized_)
     SaveWindowPlacement();
+
+  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetBoundsChanged(
+    this,
+    GetWindowBoundsInScreen()));
 }
 
 void Widget::OnNativeWidgetBeginUserBoundsChange() {
@@ -1056,7 +1080,7 @@ bool Widget::OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) {
       force_clear = true;
     } else {
       // Determine if the layer fills the client area.
-      gfx::Rect layer_bounds = GetRootView()->layer()->bounds();
+      gfx::RectF layer_bounds = GetRootView()->layer()->bounds();
       layer_transform.TransformRect(&layer_bounds);
       gfx::Rect client_bounds = GetClientAreaBoundsInScreen();
       // Translate bounds to origin (client area bounds are offset to account
@@ -1075,6 +1099,9 @@ bool Widget::OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) {
 }
 
 void Widget::OnNativeWidgetPaint(gfx::Canvas* canvas) {
+  // On Linux Aura, we can get here during Init() because of the
+  // SetInitialBounds call.
+  if (native_widget_initialized_)
   GetRootView()->Paint(canvas);
 }
 
@@ -1084,25 +1111,26 @@ int Widget::GetNonClientComponent(const gfx::Point& point) {
       HTNOWHERE;
 }
 
-bool Widget::OnKeyEvent(const ui::KeyEvent& event) {
-  ScopedEvent scoped(this, event);
-  return static_cast<internal::RootView*>(GetRootView())->OnKeyEvent(event);
+void Widget::OnKeyEvent(ui::KeyEvent* event) {
+  ScopedEvent scoped(this, *event);
+  static_cast<internal::RootView*>(GetRootView())->
+      DispatchKeyEvent(event);
 }
 
-bool Widget::OnMouseEvent(const ui::MouseEvent& event) {
-  ScopedEvent scoped(this, event);
-  switch (event.type()) {
+void Widget::OnMouseEvent(ui::MouseEvent* event) {
+  ScopedEvent scoped(this, *event);
+  switch (event->type()) {
     case ui::ET_MOUSE_PRESSED:
       last_mouse_event_was_move_ = false;
       // Make sure we're still visible before we attempt capture as the mouse
       // press processing may have made the window hide (as happens with menus).
-      if (GetRootView()->OnMousePressed(event) && IsVisible()) {
+      if (GetRootView()->OnMousePressed(*event) && IsVisible()) {
         is_mouse_button_pressed_ = true;
         if (!native_widget_->HasCapture())
           native_widget_->SetCapture();
-        return true;
+        event->SetHandled();
       }
-      return false;
+      return;
     case ui::ET_MOUSE_RELEASED:
       last_mouse_event_was_move_ = false;
       is_mouse_button_pressed_ = false;
@@ -1111,34 +1139,35 @@ bool Widget::OnMouseEvent(const ui::MouseEvent& event) {
           ShouldReleaseCaptureOnMouseReleased()) {
         native_widget_->ReleaseCapture();
       }
-      GetRootView()->OnMouseReleased(event);
-      return ((event.flags() & ui::EF_IS_NON_CLIENT) == 0);
+      GetRootView()->OnMouseReleased(*event);
+      if ((event->flags() & ui::EF_IS_NON_CLIENT) == 0)
+        event->SetHandled();
+      return;
     case ui::ET_MOUSE_MOVED:
     case ui::ET_MOUSE_DRAGGED:
       if (native_widget_->HasCapture() && is_mouse_button_pressed_) {
         last_mouse_event_was_move_ = false;
-        GetRootView()->OnMouseDragged(event);
+        GetRootView()->OnMouseDragged(*event);
       } else if (!last_mouse_event_was_move_ ||
-                 last_mouse_event_position_ != event.location()) {
-        last_mouse_event_position_ = event.location();
+                 last_mouse_event_position_ != event->location()) {
+        last_mouse_event_position_ = event->location();
         last_mouse_event_was_move_ = true;
-        GetRootView()->OnMouseMoved(event);
+        GetRootView()->OnMouseMoved(*event);
       }
-      return false;
+      return;
     case ui::ET_MOUSE_EXITED:
       last_mouse_event_was_move_ = false;
-      GetRootView()->OnMouseExited(event);
-      return false;
+      GetRootView()->OnMouseExited(*event);
+      return;
     case ui::ET_MOUSEWHEEL:
-      return GetRootView()->OnMouseWheel(
-          reinterpret_cast<const ui::MouseWheelEvent&>(event));
-    case ui::ET_SCROLL:
-      return GetRootView()->OnScrollEvent(
-          reinterpret_cast<const ui::ScrollEvent&>(event));
+      if (GetRootView()->OnMouseWheel(
+          reinterpret_cast<const ui::MouseWheelEvent&>(*event)))
+        event->SetHandled();
+      return;
     default:
-      return false;
+      return;
   }
-  return true;
+  event->SetHandled();
 }
 
 void Widget::OnMouseCaptureLost() {
@@ -1148,14 +1177,21 @@ void Widget::OnMouseCaptureLost() {
   is_mouse_button_pressed_ = false;
 }
 
-ui::TouchStatus Widget::OnTouchEvent(const ui::TouchEvent& event) {
-  ScopedEvent scoped(this, event);
-  return GetRootView()->OnTouchEvent(event);
+void Widget::OnTouchEvent(ui::TouchEvent* event) {
+  ScopedEvent scoped(this, *event);
+  static_cast<internal::RootView*>(GetRootView())->
+      DispatchTouchEvent(event);
 }
 
-ui::EventResult Widget::OnGestureEvent(const ui::GestureEvent& event) {
-  ScopedEvent scoped(this, event);
-  switch (event.type()) {
+void Widget::OnScrollEvent(ui::ScrollEvent* event) {
+  ScopedEvent scoped(this, *event);
+  static_cast<internal::RootView*>(GetRootView())->
+      DispatchScrollEvent(event);
+}
+
+void Widget::OnGestureEvent(ui::GestureEvent* event) {
+  ScopedEvent scoped(this, *event);
+  switch (event->type()) {
     case ui::ET_GESTURE_TAP_DOWN:
       is_touch_down_ = true;
       // We explicitly don't capture here. Not capturing enables multiple
@@ -1164,7 +1200,7 @@ ui::EventResult Widget::OnGestureEvent(const ui::GestureEvent& event) {
       break;
 
     case ui::ET_GESTURE_END:
-      if (event.details().touch_points() == 1) {
+      if (event->details().touch_points() == 1) {
         is_touch_down_ = false;
         if (ShouldReleaseCaptureOnMouseReleased())
           ReleaseCapture();
@@ -1174,7 +1210,7 @@ ui::EventResult Widget::OnGestureEvent(const ui::GestureEvent& event) {
     default:
       break;
   }
-  return GetRootView()->OnGestureEvent(event);
+  static_cast<internal::RootView*>(GetRootView())->DispatchGestureEvent(event);
 }
 
 bool Widget::ExecuteCommand(int command_id) {
@@ -1254,10 +1290,10 @@ bool Widget::ShouldReleaseCaptureOnMouseReleased() const {
 }
 
 void Widget::SetInactiveRenderingDisabled(bool value) {
+  if (value == disable_inactive_rendering_)
+    return;
+
   disable_inactive_rendering_ = value;
-  // We need to always notify the NonClientView so that it can trigger a paint.
-  // TODO: what's really needed is a way to know when either the active state
-  // changes or |disable_inactive_rendering_| changes.
   if (non_client_view_)
     non_client_view_->SetInactiveRenderingDisabled(value);
   native_widget_->SetInactiveRenderingDisabled(value);

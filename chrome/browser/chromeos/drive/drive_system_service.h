@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
@@ -29,9 +30,10 @@ class DriveCache;
 class DriveDownloadObserver;
 class DriveFileSystemInterface;
 class DriveWebAppsRegistry;
-class FileWriteHelper;
 class DriveSyncClient;
 class DrivePrefetcher;
+class EventLogger;
+class FileWriteHelper;
 class StaleCacheFilesRemover;
 
 // DriveSystemService runs the Drive system, including the Drive file system
@@ -43,26 +45,42 @@ class StaleCacheFilesRemover;
 class DriveSystemService : public ProfileKeyedService,
                            public syncer::InvalidationHandler {
  public:
+  // test_drive_service, test_cache_root and test_file_system are used by tests
+  // to inject customized instances.
+  // Pass NULL or the empty value when not interested.
+  DriveSystemService(Profile* profile,
+                     google_apis::DriveServiceInterface* test_drive_service,
+                     const FilePath& test_cache_root,
+                     DriveFileSystemInterface* test_file_system);
+  virtual ~DriveSystemService();
+
+  // Initializes the object. This function should be called before any
+  // other functions.
+  void Initialize();
+
+  // ProfileKeyedService override:
+  virtual void Shutdown() OVERRIDE;
+
   google_apis::DriveServiceInterface* drive_service() {
     return drive_service_.get();
   }
 
-  DriveCache* cache() { return cache_; }
+  DriveCache* cache() { return cache_.get(); }
   DriveFileSystemInterface* file_system() { return file_system_.get(); }
   FileWriteHelper* file_write_helper() { return file_write_helper_.get(); }
   google_apis::DriveUploader* uploader() { return uploader_.get(); }
   DriveWebAppsRegistry* webapps_registry() { return webapps_registry_.get(); }
+  EventLogger* event_logger() { return event_logger_.get(); }
 
-  // Clears all the local cache files and in-memory data, and remounts the file
-  // system.
+  // Clears all the local cache files and in-memory data, and remounts the
+  // file system. |callback| is called with true when this operation is done
+  // successfully. Otherwise, |callback| is called with false.
+  // |callback| must not be null.
   void ClearCacheAndRemountFileSystem(
       const base::Callback<void(bool)>& callback);
 
   // Reloads and remounts the file system.
   void ReloadAndRemountFileSystem();
-
-  // ProfileKeyedService override:
-  virtual void Shutdown() OVERRIDE;
 
   // syncer::InvalidationHandler implementation.
   virtual void OnInvalidatorStateChange(
@@ -72,17 +90,15 @@ class DriveSystemService : public ProfileKeyedService,
       syncer::IncomingInvalidationSource source) OVERRIDE;
 
  private:
-  explicit DriveSystemService(Profile* profile);
-  virtual ~DriveSystemService();
+  // Used to destroy DriveCache with scoped_ptr_malloc_free.
+  struct ScopedPtrMallocDestroyCache {
+   public:
+    void operator()(DriveCache* cache) const;
+  };
 
   // Returns true if Drive is enabled.
   // Must be called on UI thread.
   bool IsDriveEnabled();
-
-  // Initializes the object. This function should be called before any
-  // other functions.
-  void Initialize(google_apis::DriveServiceInterface* drive_service,
-                  const FilePath& cache_root);
 
   // Registers remote file system proxy for drive mount point.
   void AddDriveMountPoint();
@@ -91,8 +107,7 @@ class DriveSystemService : public ProfileKeyedService,
 
   // Adds back the drive mount point. Used to implement ClearCache().
   void AddBackDriveMountPoint(const base::Callback<void(bool)>& callback,
-                              DriveFileError error,
-                              const FilePath& file_path);
+                              bool success);
 
   // Called when cache initialization is done. Continues initialization if
   // the cache initialization is successful.
@@ -113,7 +128,8 @@ class DriveSystemService : public ProfileKeyedService,
   bool push_notification_registered_;
 
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
-  DriveCache* cache_;
+  scoped_ptr<EventLogger> event_logger_;
+  scoped_ptr_malloc<DriveCache, ScopedPtrMallocDestroyCache> cache_;
   scoped_ptr<google_apis::DriveServiceInterface> drive_service_;
   scoped_ptr<google_apis::DriveUploader> uploader_;
   scoped_ptr<DriveWebAppsRegistry> webapps_registry_;
@@ -134,6 +150,9 @@ class DriveSystemService : public ProfileKeyedService,
 // Profiles.
 class DriveSystemServiceFactory : public ProfileKeyedServiceFactory {
  public:
+  // Factory function used by tests.
+  typedef base::Callback<DriveSystemService*(Profile* profile)> FactoryCallback;
+
   // Returns the DriveSystemService for |profile|, creating it if it is not
   // yet created.
   //
@@ -143,6 +162,10 @@ class DriveSystemServiceFactory : public ProfileKeyedServiceFactory {
   // object.
   static DriveSystemService* GetForProfile(Profile* profile);
 
+  // Similar to GetForProfile(), but returns the instance regardless of if Drive
+  // is enabled/disabled.
+  static DriveSystemService* GetForProfileRegardlessOfStates(Profile* profile);
+
   // Returns the DriveSystemService that is already associated with |profile|,
   // if it is not yet created it will return NULL.
   //
@@ -150,22 +173,15 @@ class DriveSystemServiceFactory : public ProfileKeyedServiceFactory {
   // comment at GetForProfile().
   static DriveSystemService* FindForProfile(Profile* profile);
 
+  // Similar to FindForProfile(), but returns the instance regardless of if
+  // Drive is enabled/disabled.
+  static DriveSystemService* FindForProfileRegardlessOfStates(Profile* profile);
+
   // Returns the DriveSystemServiceFactory instance.
   static DriveSystemServiceFactory* GetInstance();
 
-  // Sets drive service that should be used to initialize file system in test.
-  // Should be called before the service is created.
-  // Please, make sure |drive_service| gets deleted if no system service is
-  // created (e.g. by calling this method with NULL).
-  static void set_drive_service_for_test(
-      google_apis::DriveServiceInterface* drive_service);
-
-  // Sets root path for the cache used in test. Should be called before the
-  // service is created.
-  // If |cache_root| is not empty, new string object will be created. Please,
-  // make sure it gets deleted if no system service is created (e.g. by calling
-  // this method with empty string).
-  static void set_cache_root_for_test(const std::string& cache_root);
+  // Sets a factory function for tests.
+  static void SetFactoryForTest(const FactoryCallback& factory_for_test);
 
  private:
   friend struct DefaultSingletonTraits<DriveSystemServiceFactory>;
@@ -176,6 +192,8 @@ class DriveSystemServiceFactory : public ProfileKeyedServiceFactory {
   // ProfileKeyedServiceFactory:
   virtual ProfileKeyedService* BuildServiceInstanceFor(
       Profile* profile) const OVERRIDE;
+
+  FactoryCallback factory_for_test_;
 };
 
 }  // namespace drive

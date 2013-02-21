@@ -25,7 +25,11 @@ AlternateErrorPageTabObserver::AlternateErrorPageTabObserver(
   PrefService* prefs = profile_->GetPrefs();
   if (prefs) {
     pref_change_registrar_.Init(prefs);
-    pref_change_registrar_.Add(prefs::kAlternateErrorPagesEnabled, this);
+    pref_change_registrar_.Add(
+        prefs::kAlternateErrorPagesEnabled,
+        base::Bind(&AlternateErrorPageTabObserver::
+                       OnAlternateErrorPagesEnabledChanged,
+                   base::Unretained(this)));
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
@@ -56,13 +60,7 @@ void AlternateErrorPageTabObserver::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    DCHECK_EQ(profile_->GetPrefs(), content::Source<PrefService>(source).ptr());
-    DCHECK_EQ(std::string(prefs::kAlternateErrorPagesEnabled),
-              *content::Details<std::string>(details).ptr());
-  } else {
-    DCHECK_EQ(chrome::NOTIFICATION_GOOGLE_URL_UPDATED, type);
-  }
+  DCHECK_EQ(chrome::NOTIFICATION_GOOGLE_URL_UPDATED, type);
   UpdateAlternateErrorPageURL(web_contents()->GetRenderViewHost());
 }
 
@@ -83,6 +81,10 @@ GURL AlternateErrorPageTabObserver::GetAlternateErrorPageURL() const {
     url = google_util::AppendGoogleTLDParam(profile_, url);
   }
   return url;
+}
+
+void AlternateErrorPageTabObserver::OnAlternateErrorPagesEnabledChanged() {
+  UpdateAlternateErrorPageURL(web_contents()->GetRenderViewHost());
 }
 
 void AlternateErrorPageTabObserver::UpdateAlternateErrorPageURL(

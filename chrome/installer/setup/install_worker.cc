@@ -162,32 +162,51 @@ void AddInstallerCopyTasks(const InstallerState& installer_state,
   install_list->AddCreateDirWorkItem(installer_dir);
 
   FilePath exe_dst(installer_dir.Append(setup_path.BaseName()));
-  FilePath archive_dst(installer_dir.Append(archive_path.BaseName()));
 
   if (exe_dst != setup_path) {
     install_list->AddCopyTreeWorkItem(setup_path.value(), exe_dst.value(),
                                       temp_path.value(), WorkItem::ALWAYS);
   }
 
-  if (archive_path != archive_dst) {
-    // In the past, we copied rather than moved for system level installs so
-    // that the permissions of %ProgramFiles% would be picked up.  Now that
-    // |temp_path| is in %ProgramFiles% for system level installs (and in
-    // %LOCALAPPDATA% otherwise), there is no need to do this for the archive.
-    // Setup.exe, on the other hand, is created elsewhere so it must always be
-    // copied.
+  if (installer_state.RequiresActiveSetup()) {
+    // Make a copy of setup.exe with a different name so that Active Setup
+    // doesn't require an admin on XP thanks to Application Compatibility.
+    FilePath active_setup_exe(installer_dir.Append(kActiveSetupExe));
+    install_list->AddCopyTreeWorkItem(
+        setup_path.value(), active_setup_exe.value(), temp_path.value(),
+        WorkItem::ALWAYS);
+  }
+
+  // If only the App Host (not even the Chrome Binaries) is being installed,
+  // this must be a user-level App Host piggybacking on system-level Chrome
+  // Binaries. Only setup.exe is required, and only for uninstall.
+  if (installer_state.products().size() != 1 ||
+      !installer_state.FindProduct(BrowserDistribution::CHROME_APP_HOST)) {
+    FilePath archive_dst(installer_dir.Append(archive_path.BaseName()));
+    if (archive_path != archive_dst) {
+      // In the past, we copied rather than moved for system level installs so
+      // that the permissions of %ProgramFiles% would be picked up.  Now that
+      // |temp_path| is in %ProgramFiles% for system level installs (and in
+      // %LOCALAPPDATA% otherwise), there is no need to do this for the archive.
+      // Setup.exe, on the other hand, is created elsewhere so it must always be
+      // copied.
 #if !defined(COMPONENT_BUILD)
-    install_list->AddMoveTreeWorkItem(archive_path.value(), archive_dst.value(),
-                                      temp_path.value(), WorkItem::ALWAYS_MOVE);
+      install_list->AddMoveTreeWorkItem(archive_path.value(),
+                                        archive_dst.value(),
+                                        temp_path.value(),
+                                        WorkItem::ALWAYS_MOVE);
 #else  // COMPONENT_BUILD
-    // The archive is usually extracted in |temp_path| in which case we want to
-    // move it as mentioned above; however in the component build, setup.exe
-    // uses chrome.7z directly from the build output, moving it means that
-    // setup.exe cannot be run again without regenerating the archive, so copy
-    // it instead in this case to save developer time.
-    install_list->AddCopyTreeWorkItem(archive_path.value(), archive_dst.value(),
-                                      temp_path.value(), WorkItem::ALWAYS);
+      // The archive is usually extracted in |temp_path| in which case we want
+      // to move it as mentioned above; however in the component build,
+      // setup.exe uses chrome.7z directly from the build output, moving it
+      // means that setup.exe cannot be run again without regenerating the
+      // archive, so copy it instead in this case to save developer time.
+      install_list->AddCopyTreeWorkItem(archive_path.value(),
+                                        archive_dst.value(),
+                                        temp_path.value(),
+                                        WorkItem::ALWAYS);
 #endif  // COMPONENT_BUILD
+    }
   }
 }
 
@@ -409,11 +428,6 @@ void AddChromeWorkItems(const InstallationState& original_state,
   install_list->AddDeleteTreeWorkItem(
       target_path.Append(installer::kChromeOldExe), temp_path)->
           set_ignore_failure(true);
-
-  // Copy installer in install directory and
-  // add shortcut in Control Panel->Add/Remove Programs.
-  AddInstallerCopyTasks(installer_state, setup_path, archive_path, temp_path,
-                        new_version, install_list);
 }
 
 // Probes COM machinery to get an instance of delegate_execute.exe's
@@ -621,10 +635,10 @@ void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
                                          install_path.value(),
                                          true);
 
-    // DisplayIcon, NoModify and NoRepair
-    string16 chrome_icon = ShellUtil::GetChromeIcon(
-        product.distribution(),
-        install_path.Append(installer::kChromeExe).value());
+    BrowserDistribution* dist = product.distribution();
+    string16 chrome_icon = ShellUtil::FormatIconLocation(
+        install_path.Append(dist->GetIconFilename()).value(),
+        dist->GetIconIndex());
     install_list->AddSetRegValueWorkItem(reg_root, uninstall_reg,
                                          L"DisplayIcon", chrome_icon, true);
     install_list->AddSetRegValueWorkItem(reg_root, uninstall_reg,
@@ -1083,6 +1097,10 @@ void AddInstallWorkItems(const InstallationState& original_state,
         L"");
   }
 
+  // Copy installer in install directory
+  AddInstallerCopyTasks(installer_state, setup_path, archive_path, temp_path,
+                        new_version, install_list);
+
   const HKEY root = installer_state.root_key();
   // Only set "lang" for user-level installs since for system-level, the install
   // language may not be related to a given user's runtime language.
@@ -1099,7 +1117,7 @@ void AddInstallWorkItems(const InstallationState& original_state,
     AddVersionKeyWorkItems(root, product.distribution(), new_version,
                            add_language_identifier, install_list);
 
-    AddDelegateExecuteWorkItems(installer_state, src_path, new_version,
+    AddDelegateExecuteWorkItems(installer_state, target_path, new_version,
                                 product, install_list);
 
     AddActiveSetupWorkItems(installer_state, setup_path, new_version, product,
@@ -1114,9 +1132,9 @@ void AddInstallWorkItems(const InstallationState& original_state,
   // Copy over brand, usagestats, and other values.
   AddGoogleUpdateWorkItems(original_state, installer_state, install_list);
 
-  AddQuickEnableApplicationHostWorkItems(installer_state, original_state,
-                                         setup_path, new_version,
-                                         install_list);
+  AddQuickEnableApplicationLauncherWorkItems(installer_state, original_state,
+                                             setup_path, new_version,
+                                             install_list);
 
   AddQuickEnableChromeFrameWorkItems(installer_state, original_state,
                                      setup_path, new_version, install_list);
@@ -1303,7 +1321,7 @@ void AddChromeFrameWorkItems(const InstallationState& original_state,
 }
 
 void AddDelegateExecuteWorkItems(const InstallerState& installer_state,
-                                 const FilePath& src_path,
+                                 const FilePath& target_path,
                                  const Version& new_version,
                                  const Product& product,
                                  WorkItemList* list) {
@@ -1342,12 +1360,8 @@ void AddDelegateExecuteWorkItems(const InstallerState& installer_state,
                                 );
 
   // Add work items to register the handler iff it is present.
-  // TODO(grt): Remove the extra check for the .exe when it is no longer
-  // possible to build Chrome without the DelegateExecute verb handler.
   // See also shell_util.cc's GetProgIdEntries.
-  if (installer_state.operation() != InstallerState::UNINSTALL &&
-      file_util::PathExists(src_path.AppendASCII(new_version.GetString())
-          .Append(kDelegateExecuteExe))) {
+  if (installer_state.operation() != InstallerState::UNINSTALL) {
     VLOG(1) << "Adding registration items for DelegateExecute verb handler.";
 
     // Force COM to flush its cache containing the path to the old handler.
@@ -1355,8 +1369,9 @@ void AddDelegateExecuteWorkItems(const InstallerState& installer_state,
                                          handler_class_uuid));
 
     // The path to the exe (in the version directory).
-    FilePath delegate_execute(
-        installer_state.target_path().AppendASCII(new_version.GetString()));
+    FilePath delegate_execute(target_path);
+    if (new_version.IsValid())
+      delegate_execute = delegate_execute.AppendASCII(new_version.GetString());
     delegate_execute = delegate_execute.Append(kDelegateExecuteExe);
 
     // Command-line featuring the quoted path to the exe.
@@ -1394,6 +1409,7 @@ void AddActiveSetupWorkItems(const InstallerState& installer_state,
             << "-level " << distribution->GetAppShortCutName();
     return;
   }
+  DCHECK(installer_state.RequiresActiveSetup());
 
   const HKEY root = HKEY_LOCAL_MACHINE;
   const string16 active_setup_path(
@@ -1404,8 +1420,9 @@ void AddActiveSetupWorkItems(const InstallerState& installer_state,
   list->AddSetRegValueWorkItem(root, active_setup_path, L"",
                                distribution->GetAppShortCutName(), true);
 
-  CommandLine cmd(installer_state.GetInstallerDirectory(new_version).
-      Append(setup_path.BaseName()));
+  FilePath active_setup_exe(installer_state.GetInstallerDirectory(new_version)
+      .Append(kActiveSetupExe));
+  CommandLine cmd(active_setup_exe);
   cmd.AppendSwitch(installer::switches::kConfigureUserSettings);
   cmd.AppendSwitch(installer::switches::kVerboseLogging);
   cmd.AppendSwitch(installer::switches::kSystemLevel);
@@ -1556,7 +1573,7 @@ void AddQuickEnableChromeFrameWorkItems(const InstallerState& installer_state,
                                  work_item_list);
 }
 
-void AddQuickEnableApplicationHostWorkItems(
+void AddQuickEnableApplicationLauncherWorkItems(
     const InstallerState& installer_state,
     const InstallationState& machine_state,
     const FilePath& setup_path,
@@ -1566,11 +1583,11 @@ void AddQuickEnableApplicationHostWorkItems(
 
   CommandLine cmd_line(CommandLine::NO_PROGRAM);
   cmd_line.AppendSwitch(switches::kMultiInstall);
-  cmd_line.AppendSwitch(switches::kChromeAppHost);
+  cmd_line.AppendSwitch(switches::kChromeAppLauncher);
   cmd_line.AppendSwitch(switches::kEnsureGoogleUpdatePresent);
 
   // For system-level binaries there is no way to keep the command state in sync
-  // with the installation/uninstallation of the Application Host (which is
+  // with the installation/uninstallation of the Application Launcher (which is
   // always at user-level).
   // So we pass false for 'have_child_product' to cause this command to always
   // be installed if the Chrome Binaries are installed.

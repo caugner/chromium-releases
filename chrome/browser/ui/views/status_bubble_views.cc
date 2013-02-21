@@ -27,6 +27,7 @@
 #include "ui/gfx/point.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/scrollbar/native_scroll_bar.h"
 #include "ui/views/widget/root_view.h"
@@ -573,7 +574,8 @@ void StatusBubbleViews::Init() {
     params.transparent = true;
     params.accept_events = false;
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-    params.parent_widget = frame;
+    params.parent = frame->GetNativeView();
+    params.context = frame->GetNativeView();
     popup_->Init(params);
     // We do our own animation and don't want any from the system.
     popup_->SetVisibilityChangedAnimationsEnabled(false);
@@ -832,9 +834,10 @@ int StatusBubbleViews::GetStandardStatusBubbleWidth() {
 }
 
 int StatusBubbleViews::GetMaxStatusBubbleWidth() {
+  const ui::NativeTheme* theme = base_view_->GetNativeTheme();
   return static_cast<int>(std::max(0, base_view_->bounds().width() -
       (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding - 1 -
-      views::NativeScrollBar::GetVerticalScrollBarWidth()));
+      views::NativeScrollBar::GetVerticalScrollBarWidth(theme)));
 }
 
 void StatusBubbleViews::SetBubbleWidth(int width) {

@@ -7,12 +7,11 @@
 
 #include <string>
 
-#include "base/observer_list.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "chrome/browser/google_apis/auth_service.h"
 #include "chrome/browser/google_apis/auth_service_observer.h"
 #include "chrome/browser/google_apis/drive_service_interface.h"
-#include "chrome/browser/google_apis/gdata_operations.h"
 
 class FilePath;
 class GURL;
@@ -20,7 +19,11 @@ class Profile;
 
 namespace google_apis {
 class OperationRunner;
-}
+}  // namespace google_apis
+
+namespace net {
+class URLRequestContextGetter;
+}  // namespace net
 
 namespace drive {
 
@@ -33,7 +36,13 @@ class DriveAPIService : public google_apis::DriveServiceInterface,
  public:
   // Instance is usually created by DriveSystemServiceFactory and owned by
   // DriveFileSystem.
-  DriveAPIService();
+  //
+  // |url_request_context_getter| is used to initialize URLFetcher.
+  // |custom_user_agent| will be used for the User-Agent header in HTTP
+  // requests issues through the service if the value is not empty.
+  DriveAPIService(
+      net::URLRequestContextGetter* url_request_context_getter,
+      const std::string& custom_user_agent);
   virtual ~DriveAPIService();
 
   // DriveServiceInterface Overrides
@@ -47,28 +56,27 @@ class DriveAPIService : public google_apis::DriveServiceInterface,
   virtual bool CancelForFilePath(const FilePath& file_path) OVERRIDE;
   virtual google_apis::OperationProgressStatusList GetProgressStatusList()
       const OVERRIDE;
-  virtual void Authenticate(
-      const google_apis::AuthStatusCallback& callback) OVERRIDE;
   virtual bool HasAccessToken() const OVERRIDE;
   virtual bool HasRefreshToken() const OVERRIDE;
-  virtual void GetDocuments(
+  virtual void GetResourceList(
       const GURL& feed_url,
       int64 start_changestamp,
       const std::string& search_query,
+      bool shared_with_me,
       const std::string& directory_resource_id,
-      const google_apis::GetDataCallback& callback) OVERRIDE;
-  virtual void GetDocumentEntry(
+      const google_apis::GetResourceListCallback& callback) OVERRIDE;
+  virtual void GetResourceEntry(
       const std::string& resource_id,
-      const google_apis::GetDataCallback& callback) OVERRIDE;
+      const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
 
   virtual void GetAccountMetadata(
-      const google_apis::GetDataCallback& callback) OVERRIDE;
+      const google_apis::GetAccountMetadataCallback& callback) OVERRIDE;
   virtual void GetApplicationInfo(
       const google_apis::GetDataCallback& callback) OVERRIDE;
-  virtual void DeleteDocument(
-      const GURL& document_url,
+  virtual void DeleteResource(
+      const GURL& edit_url,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
-  virtual void DownloadDocument(
+  virtual void DownloadHostedDocument(
       const FilePath& virtual_path,
       const FilePath& local_cache_path,
       const GURL& content_url,
@@ -80,27 +88,26 @@ class DriveAPIService : public google_apis::DriveServiceInterface,
       const GURL& content_url,
       const google_apis::DownloadActionCallback& download_action_callback,
       const google_apis::GetContentCallback& get_content_callback) OVERRIDE;
-  virtual void CopyDocument(
+  virtual void CopyHostedDocument(
       const std::string& resource_id,
       const FilePath::StringType& new_name,
-      const google_apis::GetDataCallback& callback) OVERRIDE;
+      const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual void RenameResource(
-      const GURL& document_url,
+      const GURL& edit_url,
       const FilePath::StringType& new_name,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
   virtual void AddResourceToDirectory(
       const GURL& parent_content_url,
-      const GURL& resource_url,
+      const GURL& edit_url,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
   virtual void RemoveResourceFromDirectory(
       const GURL& parent_content_url,
-      const GURL& resource_url,
       const std::string& resource_id,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
-  virtual void CreateDirectory(
+  virtual void AddNewDirectory(
       const GURL& parent_content_url,
       const FilePath::StringType& directory_name,
-      const google_apis::GetDataCallback& callback) OVERRIDE;
+      const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual void InitiateUpload(
       const google_apis::InitiateUploadParams& params,
       const google_apis::InitiateUploadCallback& callback) OVERRIDE;
@@ -108,9 +115,9 @@ class DriveAPIService : public google_apis::DriveServiceInterface,
       const google_apis::ResumeUploadParams& params,
       const google_apis::ResumeUploadCallback& callback) OVERRIDE;
   virtual void AuthorizeApp(
-      const GURL& resource_url,
+      const GURL& edit_url,
       const std::string& app_id,
-      const google_apis::GetDataCallback& callback) OVERRIDE;
+      const google_apis::AuthorizeAppCallback& callback) OVERRIDE;
 
  private:
   google_apis::OperationRegistry* operation_registry() const;
@@ -123,7 +130,7 @@ class DriveAPIService : public google_apis::DriveServiceInterface,
   // Upon completion, invokes |callback| with results on calling thread.
   void GetChangelist(const GURL& url,
                      int64 start_changestamp,
-                     const google_apis::GetDataCallback& callback);
+                     const google_apis::GetResourceListCallback& callback);
 
   // Fetches a filelist from |url| with |search_query|, using Drive V2 API. If
   // this URL is empty the call will use the default URL. Specify |url| when
@@ -132,7 +139,7 @@ class DriveAPIService : public google_apis::DriveServiceInterface,
   // https://developers.google.com/drive/search-parameters
   void GetFilelist(const GURL& url,
                    const std::string& search_query,
-                   const google_apis::GetDataCallback& callback);
+                   const google_apis::GetResourceListCallback& callback);
 
   // AuthService::Observer override.
   virtual void OnOAuth2RefreshTokenChanged() OVERRIDE;
@@ -143,9 +150,11 @@ class DriveAPIService : public google_apis::DriveServiceInterface,
   virtual void OnAuthenticationFailed(
       google_apis::GDataErrorCode error) OVERRIDE;
 
+  net::URLRequestContextGetter* url_request_context_getter_;
   Profile* profile_;
   scoped_ptr<google_apis::OperationRunner> runner_;
   ObserverList<google_apis::DriveServiceObserver> observers_;
+  const std::string custom_user_agent_;
 
   DISALLOW_COPY_AND_ASSIGN(DriveAPIService);
 };

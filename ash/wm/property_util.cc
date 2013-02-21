@@ -24,9 +24,8 @@ void SetRestoreBoundsInScreen(aura::Window* window, const gfx::Rect& bounds) {
 }
 
 void SetRestoreBoundsInParent(aura::Window* window, const gfx::Rect& bounds) {
-  window->SetProperty(
-      aura::client::kRestoreBoundsKey,
-      new gfx::Rect(ScreenAsh::ConvertRectToScreen(window->parent(), bounds)));
+  SetRestoreBoundsInScreen(window,
+      ScreenAsh::ConvertRectToScreen(window->parent(), bounds));
 }
 
 const gfx::Rect* GetRestoreBoundsInScreen(aura::Window* window) {
@@ -34,7 +33,7 @@ const gfx::Rect* GetRestoreBoundsInScreen(aura::Window* window) {
 }
 
 gfx::Rect GetRestoreBoundsInParent(aura::Window* window) {
-  const gfx::Rect* rect = window->GetProperty(aura::client::kRestoreBoundsKey);
+  const gfx::Rect* rect = GetRestoreBoundsInScreen(window);
   if (!rect)
     return gfx::Rect();
   return ScreenAsh::ConvertRectFromScreen(window->parent(), *rect);
@@ -48,7 +47,7 @@ void SetTrackedByWorkspace(aura::Window* window, bool value) {
   window->SetProperty(internal::kWindowTrackedByWorkspaceKey, value);
 }
 
-bool GetTrackedByWorkspace(aura::Window* window) {
+bool GetTrackedByWorkspace(const aura::Window* window) {
   return window->GetProperty(internal::kWindowTrackedByWorkspaceKey);
 }
 
@@ -56,8 +55,16 @@ void SetIgnoredByShelf(aura::Window* window, bool value) {
   window->SetProperty(internal::kIgnoredByShelfKey, value);
 }
 
-bool GetIgnoredByShelf(aura::Window* window) {
+bool GetIgnoredByShelf(const aura::Window* window) {
   return window->GetProperty(internal::kIgnoredByShelfKey);
+}
+
+void SetWindowAlwaysRestoresToRestoreBounds(aura::Window* window, bool value) {
+  window->SetProperty(internal::kWindowRestoresToRestoreBounds, value);
+}
+
+bool GetWindowAlwaysRestoresToRestoreBounds(const aura::Window* window) {
+  return window->GetProperty(internal::kWindowRestoresToRestoreBounds);
 }
 
 void SetPersistsAcrossAllWorkspaces(

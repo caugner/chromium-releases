@@ -9,7 +9,6 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
 #include "content/public/browser/browser_context.h"
 
 namespace content {
@@ -35,9 +34,11 @@ class ShellBrowserContext : public BrowserContext {
       int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
-          const std::string& partition_id) OVERRIDE;
+          const FilePath& partition_path,
+          bool in_memory) OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
-      const std::string& partition_id) OVERRIDE;
+      const FilePath& partition_path,
+      bool in_memory) OVERRIDE;
   virtual ResourceContext* GetResourceContext() OVERRIDE;
   virtual GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
@@ -52,7 +53,6 @@ class ShellBrowserContext : public BrowserContext {
 
   bool off_the_record_;
   bool ignore_certificate_errors_;
-  ScopedTempDir testing_path_;
   FilePath path_;
   scoped_ptr<ResourceContext> resource_context_;
   scoped_refptr<ShellDownloadManagerDelegate> download_manager_delegate_;

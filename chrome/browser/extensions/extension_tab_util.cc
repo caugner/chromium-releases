@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
@@ -81,11 +80,10 @@ ListValue* ExtensionTabUtil::CreateTabList(
   ListValue* tab_list = new ListValue();
   TabStripModel* tab_strip = browser->tab_strip_model();
   for (int i = 0; i < tab_strip->count(); ++i) {
-    tab_list->Append(CreateTabValue(
-        tab_strip->GetTabContentsAt(i)->web_contents(),
-        tab_strip,
-        i,
-        extension));
+    tab_list->Append(CreateTabValue(tab_strip->GetWebContentsAt(i),
+                                    tab_strip,
+                                    i,
+                                    extension));
   }
 
   return tab_list;
@@ -157,15 +155,15 @@ bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
 }
 
 bool ExtensionTabUtil::GetDefaultTab(Browser* browser,
-                                     TabContents** contents,
+                                     WebContents** contents,
                                      int* tab_id) {
   DCHECK(browser);
   DCHECK(contents);
 
-  *contents = chrome::GetActiveTabContents(browser);
+  *contents = chrome::GetActiveWebContents(browser);
   if (*contents) {
     if (tab_id)
-      *tab_id = GetTabId((*contents)->web_contents());
+      *tab_id = GetTabId(*contents);
     return true;
   }
 
@@ -177,7 +175,7 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
                                   bool include_incognito,
                                   Browser** browser,
                                   TabStripModel** tab_strip,
-                                  TabContents** contents,
+                                  WebContents** contents,
                                   int* tab_index) {
   Profile* incognito_profile =
       include_incognito && profile->HasOffTheRecordProfile() ?
@@ -189,8 +187,8 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
         target_browser->profile() == incognito_profile) {
       TabStripModel* target_tab_strip = target_browser->tab_strip_model();
       for (int i = 0; i < target_tab_strip->count(); ++i) {
-        TabContents* target_contents = target_tab_strip->GetTabContentsAt(i);
-        if (SessionID::IdForTab(target_contents->web_contents()) == tab_id) {
+        WebContents* target_contents = target_tab_strip->GetWebContentsAt(i);
+        if (SessionID::IdForTab(target_contents) == tab_id) {
           if (browser)
             *browser = target_browser;
           if (tab_strip)
@@ -232,13 +230,14 @@ void ExtensionTabUtil::CreateTab(WebContents* web_contents,
                                  bool user_gesture) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  Browser* browser = browser::FindTabbedBrowser(profile, false);
+  chrome::HostDesktopType active_desktop = chrome::GetActiveDesktop();
+  Browser* browser = browser::FindTabbedBrowser(profile,
+                                                false,
+                                                active_desktop);
   const bool browser_created = !browser;
   if (!browser)
-    browser = new Browser(Browser::CreateParams(profile));
-  TabContents* tab_contents =
-      TabContents::Factory::CreateTabContents(web_contents);
-  chrome::NavigateParams params(browser, tab_contents);
+    browser = new Browser(Browser::CreateParams(profile, active_desktop));
+  chrome::NavigateParams params(browser, web_contents);
 
   // The extension_app_id parameter ends up as app_name in the Browser
   // which causes the Browser to return true for is_app().  This affects
@@ -263,13 +262,13 @@ void ExtensionTabUtil::CreateTab(WebContents* web_contents,
 void ExtensionTabUtil::ForEachTab(
     const base::Callback<void(WebContents*)>& callback) {
   for (TabContentsIterator iterator; !iterator.done(); ++iterator)
-    callback.Run((*iterator)->web_contents());
+    callback.Run(*iterator);
 }
 
 // static
 extensions::WindowController* ExtensionTabUtil::GetWindowControllerOfTab(
     const WebContents* web_contents) {
-  Browser* browser = browser::FindBrowserWithWebContents(web_contents);
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
   if (browser != NULL)
     return browser->extension_window_controller();
 

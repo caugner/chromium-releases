@@ -47,18 +47,31 @@
 
 namespace chrome_variations {
 
-// The Unique ID of a trial and its selected group, where the name and group
+// A key into the Associate/Get methods for VariationIDs. This is used to create
+// separate ID associations for separate parties interested in VariationIDs.
+enum IDCollectionKey {
+  // This collection is used by Google web properties, transmitted through the
+  // X-Chrome-Variations header.
+  GOOGLE_WEB_PROPERTIES,
+  // This collection is used by Google update services, transmitted through the
+  // Google Update experiment labels.
+  GOOGLE_UPDATE_SERVICE,
+  // The total count of collections.
+  ID_COLLECTION_COUNT,
+};
+
+// The Unique ID of a trial and its active group, where the name and group
 // identifiers are hashes of the trial and group name strings.
-struct SelectedGroupId {
+struct ActiveGroupId {
   uint32 name;
   uint32 group;
 };
 
-// We need to supply a Compare class for templates since SelectedGroupId is a
+// We need to supply a Compare class for templates since ActiveGroupId is a
 // user-defined type.
-struct SelectedGroupIdCompare {
-  bool operator() (const SelectedGroupId& lhs,
-                   const SelectedGroupId& rhs) const {
+struct ActiveGroupIdCompare {
+  bool operator() (const ActiveGroupId& lhs,
+                   const ActiveGroupId& rhs) const {
     // The group and name fields are just SHA-1 Hashes, so we just need to treat
     // them as IDs and do a less-than comparison. We test group first, since
     // name is more likely to collide.
@@ -69,41 +82,45 @@ struct SelectedGroupIdCompare {
 };
 
 // Fills the supplied vector |name_group_ids| (which must be empty when called)
-// with unique SelectedGroupIds for each Field Trial that has a chosen group.
+// with unique ActiveGroupIds for each Field Trial that has a chosen group.
 // Field Trials for which a group has not been chosen yet are NOT returned in
 // this list.
-void GetFieldTrialSelectedGroupIds(
-    std::vector<SelectedGroupId>* name_group_ids);
+void GetFieldTrialActiveGroupIds(
+    std::vector<ActiveGroupId>* name_group_ids);
 
 // Fills the supplied vector |output| (which must be empty when called) with
-// unique string representations of SelectedGroupIds for each Field Trial that
+// unique string representations of ActiveGroupIds for each Field Trial that
 // has a chosen group. The strings are formatted as "<TrialName>-<GroupName>",
 // with the names as hex strings. Field Trials for which a group has not been
 // chosen yet are NOT returned in this list.
-void GetFieldTrialSelectedGroupIdsAsStrings(std::vector<string16>* output);
+void GetFieldTrialActiveGroupIdsAsStrings(std::vector<string16>* output);
 
-// Associate a chrome_variations::VariationID value with a FieldTrial group. If
-// an id was previously set for |trial_name| and |group_name|, this does
-// nothing. The group is denoted by |trial_name| and |group_name|. This must be
-// called whenever you prepare a FieldTrial (create the trial and append groups)
-// that needs to have a chrome_variations::VariationID associated with it so
-// Google servers can recognize the FieldTrial.
-void AssociateGoogleVariationID(const std::string& trial_name,
+// Associate a chrome_variations::VariationID value with a FieldTrial group for
+// collection |key|. If an id was previously set for |trial_name| and
+// |group_name|, this does nothing. The group is denoted by |trial_name| and
+// |group_name|. This must be called whenever a FieldTrial is prepared (create
+// the trial and append groups) and needs to have a
+// chrome_variations::VariationID associated with it so Google servers can
+// recognize the FieldTrial.
+void AssociateGoogleVariationID(IDCollectionKey key,
+                                const std::string& trial_name,
                                 const std::string& group_name,
                                 chrome_variations::VariationID id);
 
 // As above, but overwrites any previously set id.
-void AssociateGoogleVariationIDForce(const std::string& trial_name,
+void AssociateGoogleVariationIDForce(IDCollectionKey key,
+                                     const std::string& trial_name,
                                      const std::string& group_name,
                                      chrome_variations::VariationID id);
 
 // Retrieve the chrome_variations::VariationID associated with a FieldTrial
-// group. The group is denoted by |trial_name| and |group_name|. This will
-// return chrome_variations::kEmptyID if there is currently no associated ID
-// for the named group. This API can be nicely combined with
-// FieldTrial::GetFieldTrialSelectedGroupIds to enumerate the
+// group for collection |key|. The group is denoted by |trial_name| and
+// |group_name|. This will return chrome_variations::kEmptyID if there is
+// currently no associated ID for the named group. This API can be nicely
+// combined with FieldTrial::GetActiveFieldTrialGroups() to enumerate the
 // variation IDs for all active FieldTrial groups.
 chrome_variations::VariationID GetGoogleVariationID(
+    IDCollectionKey key,
     const std::string& trial_name,
     const std::string& group_name);
 
@@ -120,9 +137,12 @@ void SetChildProcessLoggingVariationList();
 // that is implemented above.
 namespace testing {
 
-void TestGetFieldTrialSelectedGroupIdsForSelectedGroups(
-    const base::FieldTrial::SelectedGroups& selected_groups,
-    std::vector<SelectedGroupId>* name_group_ids);
+// Clears all of the mapped associations.
+void ClearAllVariationIDs();
+
+void TestGetFieldTrialActiveGroupIds(
+    const base::FieldTrial::ActiveGroups& active_groups,
+    std::vector<ActiveGroupId>* name_group_ids);
 
 }  // namespace testing
 

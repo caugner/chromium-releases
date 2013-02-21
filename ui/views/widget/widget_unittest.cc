@@ -5,10 +5,12 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 #include "ui/views/bubble/bubble_delegate.h"
+#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/test_views_delegate.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/views_delegate.h"
@@ -17,6 +19,9 @@
 #if defined(USE_AURA)
 #include "ui/aura/window.h"
 #include "ui/views/widget/native_widget_aura.h"
+#if !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+#endif
 #elif defined(OS_WIN)
 #include "ui/views/widget/native_widget_win.h"
 #endif
@@ -125,77 +130,83 @@ class GestureCaptureView : public View {
 
  private:
   // Overridden from View:
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE {
-    if (event.type() == ui::ET_GESTURE_BEGIN) {
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
+    if (event->type() == ui::ET_GESTURE_BEGIN) {
       GetWidget()->SetCapture(this);
-      return ui::ER_CONSUMED;
+      event->StopPropagation();
     }
-    return ui::ER_UNHANDLED;
   }
 
   DISALLOW_COPY_AND_ASSIGN(GestureCaptureView);
 };
 
-typedef ViewsTestBase WidgetTest;
+class WidgetTest : public ViewsTestBase {
+ public:
+  WidgetTest() {}
+  virtual ~WidgetTest() {}
 
-NativeWidget* CreatePlatformNativeWidget(
-    internal::NativeWidgetDelegate* delegate) {
-  return new NativeWidgetPlatformForTest(delegate);
-}
+  NativeWidget* CreatePlatformNativeWidget(
+      internal::NativeWidgetDelegate* delegate) {
+    return new NativeWidgetPlatformForTest(delegate);
+  }
 
-Widget* CreateTopLevelPlatformWidget() {
-  Widget* toplevel = new Widget;
-  Widget::InitParams toplevel_params(Widget::InitParams::TYPE_WINDOW);
-  toplevel_params.native_widget = CreatePlatformNativeWidget(toplevel);
-  toplevel->Init(toplevel_params);
-  return toplevel;
-}
+  Widget* CreateTopLevelPlatformWidget() {
+    Widget* toplevel = new Widget;
+    Widget::InitParams toplevel_params =
+        CreateParams(Widget::InitParams::TYPE_WINDOW);
+    toplevel_params.native_widget = CreatePlatformNativeWidget(toplevel);
+    toplevel->Init(toplevel_params);
+    return toplevel;
+  }
 
-Widget* CreateChildPlatformWidget(gfx::NativeView parent_native_view) {
-  Widget* child = new Widget;
-  Widget::InitParams child_params(Widget::InitParams::TYPE_CONTROL);
-  child_params.native_widget = CreatePlatformNativeWidget(child);
-  child_params.parent = parent_native_view;
-  child->Init(child_params);
-  child->SetContentsView(new View);
-  return child;
-}
+  Widget* CreateChildPlatformWidget(gfx::NativeView parent_native_view) {
+    Widget* child = new Widget;
+    Widget::InitParams child_params =
+        CreateParams(Widget::InitParams::TYPE_CONTROL);
+    child_params.native_widget = CreatePlatformNativeWidget(child);
+    child_params.parent = parent_native_view;
+    child->Init(child_params);
+    child->SetContentsView(new View);
+    return child;
+  }
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-// On Windows, it is possible for us to have a child window that is TYPE_POPUP.
-Widget* CreateChildPopupPlatformWidget(gfx::NativeView parent_native_view) {
-  Widget* child = new Widget;
-  Widget::InitParams child_params(Widget::InitParams::TYPE_POPUP);
-  child_params.child = true;
-  child_params.native_widget = CreatePlatformNativeWidget(child);
-  child_params.parent = parent_native_view;
-  child->Init(child_params);
-  child->SetContentsView(new View);
-  return child;
-}
+  // On Windows, it is possible for us to have a child window that is
+  // TYPE_POPUP.
+  Widget* CreateChildPopupPlatformWidget(gfx::NativeView parent_native_view) {
+    Widget* child = new Widget;
+    Widget::InitParams child_params =
+        CreateParams(Widget::InitParams::TYPE_POPUP);
+    child_params.child = true;
+    child_params.native_widget = CreatePlatformNativeWidget(child);
+    child_params.parent = parent_native_view;
+    child->Init(child_params);
+    child->SetContentsView(new View);
+    return child;
+  }
 #endif
 
-Widget* CreateTopLevelNativeWidget() {
-  Widget* toplevel = new Widget;
-  Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
-  toplevel->Init(params);
-  toplevel->SetContentsView(new View);
-  return toplevel;
-}
+  Widget* CreateTopLevelNativeWidget() {
+    Widget* toplevel = new Widget;
+    Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+    toplevel->Init(params);
+    toplevel->SetContentsView(new View);
+    return toplevel;
+  }
 
-Widget* CreateChildNativeWidgetWithParent(Widget* parent) {
-  Widget* child = new Widget;
-  Widget::InitParams params(Widget::InitParams::TYPE_CONTROL);
-  params.parent_widget = parent;
-  child->Init(params);
-  child->SetContentsView(new View);
-  return child;
-}
+  Widget* CreateChildNativeWidgetWithParent(Widget* parent) {
+    Widget* child = new Widget;
+    Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_CONTROL);
+    params.parent = parent->GetNativeView();
+    child->Init(params);
+    child->SetContentsView(new View);
+    return child;
+  }
 
-Widget* CreateChildNativeWidget() {
-  return CreateChildNativeWidgetWithParent(NULL);
-}
+  Widget* CreateChildNativeWidget() {
+    return CreateChildNativeWidgetWithParent(NULL);
+  }
+};
 
 bool WidgetHasMouseCapture(const Widget* widget) {
   return static_cast<const internal::NativeWidgetPrivate*>(widget->
@@ -273,7 +284,7 @@ TEST_F(WidgetTest, DISABLED_GrabUngrab) {
   gfx::Point p1(45, 45);
   ui::MouseEvent pressed(ui::ET_MOUSE_PRESSED, p1, p1,
                          ui::EF_LEFT_MOUSE_BUTTON);
-  toplevel->OnMouseEvent(pressed);
+  toplevel->OnMouseEvent(&pressed);
 
   EXPECT_TRUE(WidgetHasMouseCapture(toplevel));
   EXPECT_TRUE(WidgetHasMouseCapture(child1));
@@ -281,7 +292,7 @@ TEST_F(WidgetTest, DISABLED_GrabUngrab) {
 
   ui::MouseEvent released(ui::ET_MOUSE_RELEASED, p1, p1,
                           ui::EF_LEFT_MOUSE_BUTTON);
-  toplevel->OnMouseEvent(released);
+  toplevel->OnMouseEvent(&released);
 
   EXPECT_FALSE(WidgetHasMouseCapture(toplevel));
   EXPECT_FALSE(WidgetHasMouseCapture(child1));
@@ -293,14 +304,15 @@ TEST_F(WidgetTest, DISABLED_GrabUngrab) {
   gfx::Point p2(315, 45);
   ui::MouseEvent pressed2(ui::ET_MOUSE_PRESSED, p2, p2,
                           ui::EF_LEFT_MOUSE_BUTTON);
-  EXPECT_TRUE(toplevel->OnMouseEvent(pressed2));
+  toplevel->OnMouseEvent(&pressed2);
+  EXPECT_TRUE(pressed2.handled());
   EXPECT_TRUE(WidgetHasMouseCapture(toplevel));
   EXPECT_TRUE(WidgetHasMouseCapture(child2));
   EXPECT_FALSE(WidgetHasMouseCapture(child1));
 
   ui::MouseEvent released2(ui::ET_MOUSE_RELEASED, p2, p2,
                            ui::EF_LEFT_MOUSE_BUTTON);
-  toplevel->OnMouseEvent(released2);
+  toplevel->OnMouseEvent(&released2);
   EXPECT_FALSE(WidgetHasMouseCapture(toplevel));
   EXPECT_FALSE(WidgetHasMouseCapture(child1));
   EXPECT_FALSE(WidgetHasMouseCapture(child2));
@@ -325,26 +337,26 @@ TEST_F(WidgetTest, CheckResizeControllerEvents) {
   // Move to an outside position.
   gfx::Point p1(200, 200);
   ui::MouseEvent moved_out(ui::ET_MOUSE_MOVED, p1, p1, ui::EF_NONE);
-  toplevel->OnMouseEvent(moved_out);
+  toplevel->OnMouseEvent(&moved_out);
   EXPECT_EQ(0, view->EnteredCalls());
   EXPECT_EQ(0, view->ExitedCalls());
 
   // Move onto the active view.
   gfx::Point p2(95, 95);
   ui::MouseEvent moved_over(ui::ET_MOUSE_MOVED, p2, p2, ui::EF_NONE);
-  toplevel->OnMouseEvent(moved_over);
+  toplevel->OnMouseEvent(&moved_over);
   EXPECT_EQ(1, view->EnteredCalls());
   EXPECT_EQ(0, view->ExitedCalls());
 
   // Move onto the outer resizing border.
   gfx::Point p3(102, 95);
   ui::MouseEvent moved_resizer(ui::ET_MOUSE_MOVED, p3, p3, ui::EF_NONE);
-  toplevel->OnMouseEvent(moved_resizer);
+  toplevel->OnMouseEvent(&moved_resizer);
   EXPECT_EQ(0, view->EnteredCalls());
   EXPECT_EQ(1, view->ExitedCalls());
 
   // Move onto the view again.
-  toplevel->OnMouseEvent(moved_over);
+  toplevel->OnMouseEvent(&moved_over);
   EXPECT_EQ(1, view->EnteredCalls());
   EXPECT_EQ(0, view->ExitedCalls());
 
@@ -524,7 +536,7 @@ TEST_F(WidgetOwnershipTest, Ownership_WidgetOwnsPlatformNativeWidget) {
   OwnershipTestState state;
 
   scoped_ptr<Widget> widget(new OwnershipTestWidget(&state));
-  Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.native_widget =
       new OwnershipTestNativeWidgetPlatform(widget.get(), &state);
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -545,7 +557,7 @@ TEST_F(WidgetOwnershipTest, Ownership_WidgetOwnsViewsNativeWidget) {
   OwnershipTestState state;
 
   scoped_ptr<Widget> widget(new OwnershipTestWidget(&state));
-  Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.native_widget =
       new OwnershipTestNativeWidgetPlatform(widget.get(), &state);
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -570,10 +582,10 @@ TEST_F(WidgetOwnershipTest,
   Widget* toplevel = CreateTopLevelPlatformWidget();
 
   scoped_ptr<Widget> widget(new OwnershipTestWidget(&state));
-  Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.native_widget =
       new OwnershipTestNativeWidgetPlatform(widget.get(), &state);
-  params.parent_widget = toplevel;
+  params.parent = toplevel->GetNativeView();
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   widget->Init(params);
 
@@ -622,7 +634,7 @@ TEST_F(WidgetOwnershipTest, Ownership_ViewsNativeWidgetOwnsWidget) {
   Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
   params.native_widget =
       new OwnershipTestNativeWidgetPlatform(widget, &state);
-  params.parent_widget = toplevel;
+  params.parent = toplevel->GetNativeView();
   widget->Init(params);
 
   // Now destroy the native widget. This is achieved by closing the toplevel.
@@ -671,7 +683,7 @@ TEST_F(WidgetOwnershipTest,
   Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
   params.native_widget =
       new OwnershipTestNativeWidgetPlatform(widget, &state);
-  params.parent_widget = toplevel;
+  params.parent = toplevel->GetNativeView();
   widget->Init(params);
 
   // Destroy the widget (achieved by closing the toplevel).
@@ -697,7 +709,7 @@ TEST_F(WidgetOwnershipTest,
   Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
   params.native_widget =
       new OwnershipTestNativeWidgetPlatform(widget, &state);
-  params.parent_widget = toplevel;
+  params.parent = toplevel->GetNativeView();
   widget->Init(params);
 
   // Destroy the widget.
@@ -716,15 +728,15 @@ TEST_F(WidgetOwnershipTest,
 // Widget observer tests.
 //
 
-class WidgetObserverTest : public WidgetTest,
-                           public WidgetObserver {
+class WidgetObserverTest : public WidgetTest, public WidgetObserver {
  public:
   WidgetObserverTest()
       : active_(NULL),
         widget_closed_(NULL),
         widget_activated_(NULL),
         widget_shown_(NULL),
-        widget_hidden_(NULL) {
+        widget_hidden_(NULL),
+        widget_bounds_changed_(NULL) {
   }
 
   virtual ~WidgetObserverTest() {}
@@ -758,6 +770,11 @@ class WidgetObserverTest : public WidgetTest,
       widget_hidden_ = widget;
   }
 
+  virtual void OnWidgetBoundsChanged(Widget* widget,
+                                     const gfx::Rect& new_bounds) OVERRIDE {
+    widget_bounds_changed_ = widget;
+  }
+
   void reset() {
     active_ = NULL;
     widget_closed_ = NULL;
@@ -765,6 +782,7 @@ class WidgetObserverTest : public WidgetTest,
     widget_deactivated_ = NULL;
     widget_shown_ = NULL;
     widget_hidden_ = NULL;
+    widget_bounds_changed_ = NULL;
   }
 
   Widget* NewWidget() {
@@ -779,6 +797,7 @@ class WidgetObserverTest : public WidgetTest,
   const Widget* widget_deactivated() const { return widget_deactivated_; }
   const Widget* widget_shown() const { return widget_shown_; }
   const Widget* widget_hidden() const { return widget_hidden_; }
+  const Widget* widget_bounds_changed() const { return widget_bounds_changed_; }
 
  private:
 
@@ -789,6 +808,7 @@ class WidgetObserverTest : public WidgetTest,
   Widget* widget_deactivated_;
   Widget* widget_shown_;
   Widget* widget_hidden_;
+  Widget* widget_bounds_changed_;
 };
 
 TEST_F(WidgetObserverTest, DISABLED_ActivationChange) {
@@ -857,6 +877,23 @@ TEST_F(WidgetObserverTest, DestroyBubble) {
 
   anchor->Hide();
   anchor->CloseNow();
+}
+
+TEST_F(WidgetObserverTest, WidgetBoundsChanged) {
+  Widget* child1 = NewWidget();
+  Widget* child2 = NewWidget();
+
+  child1->OnNativeWidgetMove();
+  EXPECT_EQ(child1, widget_bounds_changed());
+
+  child2->OnNativeWidgetMove();
+  EXPECT_EQ(child2, widget_bounds_changed());
+
+  child1->OnNativeWidgetSizeChanged(gfx::Size());
+  EXPECT_EQ(child1, widget_bounds_changed());
+
+  child2->OnNativeWidgetSizeChanged(gfx::Size());
+  EXPECT_EQ(child2, widget_bounds_changed());
 }
 
 #if !defined(USE_AURA) && defined(OS_WIN)
@@ -951,7 +988,7 @@ TEST_F(WidgetTest, ResetCaptureOnGestureEnd) {
   ui::GestureEvent end(ui::ET_GESTURE_END,
       15, 15, 0, base::TimeDelta(),
       ui::GestureEventDetails(ui::ET_GESTURE_END, 0, 0), 1);
-  toplevel->OnGestureEvent(begin);
+  toplevel->OnGestureEvent(&begin);
 
   // Now try to click on |mouse|. Since |gesture| will have capture, |mouse|
   // will not receive the event.
@@ -961,20 +998,87 @@ TEST_F(WidgetTest, ResetCaptureOnGestureEnd) {
   ui::MouseEvent release(ui::ET_MOUSE_RELEASED, click_location, click_location,
       ui::EF_LEFT_MOUSE_BUTTON);
 
-  toplevel->OnMouseEvent(press);
-  toplevel->OnMouseEvent(release);
+  toplevel->OnMouseEvent(&press);
+  toplevel->OnMouseEvent(&release);
   EXPECT_EQ(0, mouse->pressed());
 
   // The end of the gesture should release the capture, and pressing on |mouse|
   // should now reach |mouse|.
-  toplevel->OnGestureEvent(end);
-  toplevel->OnMouseEvent(press);
-  toplevel->OnMouseEvent(release);
+  toplevel->OnGestureEvent(&end);
+  toplevel->OnMouseEvent(&press);
+  toplevel->OnMouseEvent(&release);
   EXPECT_EQ(1, mouse->pressed());
 
   toplevel->Close();
   RunPendingMessages();
 }
+
+#if defined(USE_AURA)
+// The key-event propagation from Widget happens differently on aura and
+// non-aura systems because of the difference in IME. So this test works only on
+// aura.
+TEST_F(WidgetTest, KeyboardInputEvent) {
+  Widget* toplevel = CreateTopLevelPlatformWidget();
+  View* container = new View;
+  toplevel->SetContentsView(container);
+
+  Textfield* textfield = new Textfield();
+  textfield->SetText(ASCIIToUTF16("some text"));
+  container->AddChildView(textfield);
+  toplevel->Show();
+  textfield->RequestFocus();
+
+  // The press gets handled. The release doesn't have an effect.
+  ui::KeyEvent backspace_p(ui::ET_KEY_PRESSED, ui::VKEY_DELETE, 0, false);
+  toplevel->OnKeyEvent(&backspace_p);
+  EXPECT_TRUE(backspace_p.stopped_propagation());
+  ui::KeyEvent backspace_r(ui::ET_KEY_RELEASED, ui::VKEY_DELETE, 0, false);
+  toplevel->OnKeyEvent(&backspace_r);
+  EXPECT_FALSE(backspace_r.handled());
+
+  toplevel->Close();
+}
+
+// Verifies bubbles result in a focus lost when shown.
+TEST_F(WidgetTest, FocusChangesOnBubble) {
+  // Create a widget, show and activate it and focus the contents view.
+  View* contents_view = new View;
+  contents_view->set_focusable(true);
+  Widget widget;
+  Widget::InitParams init_params =
+      CreateParams(Widget::InitParams::TYPE_WINDOW);
+  init_params.bounds = gfx::Rect(0, 0, 200, 200);
+  init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+#if !defined(OS_CHROMEOS)
+  init_params.native_widget = new DesktopNativeWidgetAura(&widget);
+#endif
+  widget.Init(init_params);
+  widget.SetContentsView(contents_view);
+  widget.Show();
+  widget.Activate();
+  contents_view->RequestFocus();
+  EXPECT_TRUE(contents_view->HasFocus());
+
+  // Show a buble.
+  BubbleDelegateView* bubble_delegate_view =
+      new BubbleDelegateView(contents_view, BubbleBorder::TOP_LEFT);
+  bubble_delegate_view->set_focusable(true);
+  Widget* bubble_widget =
+      BubbleDelegateView::CreateBubble(bubble_delegate_view);
+  bubble_delegate_view->Show();
+  bubble_delegate_view->RequestFocus();
+
+  // |contents_view_| should no longer have focus.
+  EXPECT_FALSE(contents_view->HasFocus());
+  EXPECT_TRUE(bubble_delegate_view->HasFocus());
+
+  bubble_widget->CloseNow();
+
+  // Closing the bubble should result in focus going back to the contents view.
+  EXPECT_TRUE(contents_view->HasFocus());
+}
+
+#endif  // defined(USE_AURA)
 
 }  // namespace
 }  // namespace views

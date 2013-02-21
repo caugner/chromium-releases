@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 
 // static SyncedWindowDelegate implementations
@@ -32,7 +31,7 @@ const std::set<browser_sync::SyncedWindowDelegate*>
 const browser_sync::SyncedWindowDelegate*
     browser_sync::SyncedWindowDelegate::FindSyncedWindowDelegateWithId(
         SessionID::id_type id) {
-  Browser* browser = browser::FindBrowserWithID(id);
+  Browser* browser = chrome::FindBrowserWithID(id);
   // In case we don't find the browser (e.g. for Developer Tools).
   return browser ? browser->synced_window_delegate() : NULL;
 }

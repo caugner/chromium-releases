@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu_controller_views_win.h"
 
-#include "base/win/metro.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,11 +12,13 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/views/widget/widget.h"
+#include "win8/util/win8_util.h"
 
 using content::OpenURLParams;
 using content::UserMetricsAction;
@@ -45,7 +46,8 @@ class NewBrowserPageNavigator : public content::PageNavigator {
     if (!browser_) {
       Profile* profile = (params.disposition == OFF_THE_RECORD) ?
           profile_->GetOffTheRecordProfile() : profile_;
-      browser_ = new Browser(Browser::CreateParams(profile));
+      browser_ = new Browser(Browser::CreateParams(profile,
+                                                   chrome::GetActiveDesktop()));
     }
 
     OpenURLParams forward_params = params;
@@ -94,7 +96,7 @@ BookmarkContextMenuControllerViewsWin
 }
 
 void BookmarkContextMenuControllerViewsWin::ExecuteCommand(int id) {
-  if (base::win::IsMetroProcess()) {
+  if (win8::IsSingleWindowMetroMode()) {
     switch (id) {
       // We need to handle the open in new window and open in incognito window
       // commands to ensure that they first look for an existing browser object
@@ -134,7 +136,7 @@ void BookmarkContextMenuControllerViewsWin::ExecuteCommand(int id) {
         }
 
         chrome::OpenAll(parent_widget()->GetNativeWindow(), navigator,
-                        selection(), NEW_FOREGROUND_TAB);
+                        selection(), NEW_FOREGROUND_TAB, profile_to_use);
         bookmark_utils::RecordBookmarkLaunch(
             bookmark_utils::LAUNCH_CONTEXT_MENU);
         return;
@@ -150,7 +152,7 @@ void BookmarkContextMenuControllerViewsWin::ExecuteCommand(int id) {
 bool BookmarkContextMenuControllerViewsWin::IsCommandEnabled(int id) const {
   // In Windows 8 metro mode no new window option on a regular chrome window
   // and no new incognito window option on an incognito chrome window.
-  if (base::win::IsMetroProcess()) {
+  if (win8::IsSingleWindowMetroMode()) {
     if (id == IDC_BOOKMARK_BAR_OPEN_ALL_NEW_WINDOW &&
         !profile()->IsOffTheRecord()) {
       return false;

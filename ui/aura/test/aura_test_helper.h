@@ -15,11 +15,11 @@ class InputMethod;
 }
 
 namespace aura {
-class FocusManager;
 class RootWindow;
 class TestScreen;
-namespace shared {
-class RootWindowCaptureClient;
+namespace client {
+class DefaultCaptureClient;
+class FocusClient;
 }
 namespace test {
 class TestActivationClient;
@@ -36,8 +36,8 @@ class AuraTestHelper {
   // Creates and initializes (shows and sizes) the RootWindow for use in tests.
   void SetUp();
 
-  // Clean up objects that are created for tests. This also delete
-  // aura::Env object.
+  // Clean up objects that are created for tests. This also deletes the Env
+  // object.
   void TearDown();
 
   // Flushes message loop.
@@ -53,10 +53,10 @@ class AuraTestHelper {
   scoped_ptr<RootWindow> root_window_;
   scoped_ptr<TestStackingClient> stacking_client_;
   scoped_ptr<TestActivationClient> test_activation_client_;
-  scoped_ptr<shared::RootWindowCaptureClient> root_window_capture_client_;
+  scoped_ptr<client::DefaultCaptureClient> capture_client_;
   scoped_ptr<ui::InputMethod> test_input_method_;
-  scoped_ptr<FocusManager> focus_manager_;
-  scoped_ptr<aura::TestScreen> test_screen_;
+  scoped_ptr<client::FocusClient> focus_client_;
+  scoped_ptr<TestScreen> test_screen_;
 
   DISALLOW_COPY_AND_ASSIGN(AuraTestHelper);
 };

@@ -13,11 +13,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "build/build_config.h"
+#include "ipc/ipc_channel.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "native_client/src/trusted/desc/nacl_desc_custom.h"
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/proxy/resource_message_params.h"
 
 namespace {
 
@@ -89,6 +91,8 @@ void DeleteChannel(IPC::Channel* channel) {
   delete channel;
 }
 
+// TODO(dmichael): Move all this handle conversion code to ppapi/proxy.
+//                 crbug.com/165201
 void WriteHandle(int handle_index,
                  const ppapi::proxy::SerializedHandle& handle,
                  IPC::Message* message) {
@@ -101,21 +105,55 @@ void WriteHandle(int handle_index,
 
 typedef std::vector<ppapi::proxy::SerializedHandle> Handles;
 
-// We define one overload for catching SerializedHandles, so that we can share
+// We define overload for catching SerializedHandles, so that we can share
 // them correctly to the untrusted side, and another for handling all other
 // parameters. See ConvertHandlesImpl for how these get used.
-void ConvertHandle(const ppapi::proxy::SerializedHandle& handle,
-                   Handles* handles, IPC::Message* msg, int* handle_index) {
+void ConvertHandlesInParam(const ppapi::proxy::SerializedHandle& handle,
+                           Handles* handles,
+                           IPC::Message* msg,
+                           int* handle_index) {
   handles->push_back(handle);
   if (msg)
     WriteHandle((*handle_index)++, handle, msg);
 }
 
-// This overload is to catch all types other than SerializedHandle. On Windows,
-// |msg| will be a valid pointer, and we must write |param| to it
+// For PpapiMsg_ResourceReply and the reply to PpapiHostMsg_ResourceSyncCall,
+// the handles are carried inside the ResourceMessageReplyParams.
+// NOTE: We only translate handles from host->NaCl. The only kind of
+//       ResourceMessageParams that travels this direction is
+//       ResourceMessageReplyParams, so that's the only one we need to handle.
+void ConvertHandlesInParam(
+    const ppapi::proxy::ResourceMessageReplyParams& params,
+    Handles* handles,
+    IPC::Message* msg,
+    int* handle_index) {
+  // First, if we need to rewrite the message parameters, write everything
+  // before the handles (there's nothing after the handles).
+  if (msg) {
+    params.WriteReplyHeader(msg);
+    // IPC writes the vector length as an int before the contents of the
+    // vector.
+    msg->WriteInt(static_cast<int>(params.handles().size()));
+  }
+  for (Handles::const_iterator iter = params.handles().begin();
+       iter != params.handles().end();
+       ++iter) {
+    // ConvertHandle will write each handle to |msg|, if necessary.
+    ConvertHandlesInParam(*iter, handles, msg, handle_index);
+  }
+  // Tell ResourceMessageReplyParams that we have taken the handles, so it
+  // shouldn't close them. The NaCl runtime will take ownership of them.
+  params.ConsumeHandles();
+}
+
+// This overload is to catch all types other than SerializedHandle or
+// ResourceMessageReplyParams. On Windows, |msg| will be a valid pointer, and we
+// must write |param| to it.
 template <class T>
-void ConvertHandle(const T& param, Handles* /* handles */, IPC::Message* msg,
-                   int* /* handle_index */) {
+void ConvertHandlesInParam(const T& param,
+                           Handles* /* handles */,
+                           IPC::Message* msg,
+                           int* /* handle_index */) {
   // It's not a handle, so just write to the output message, if necessary.
   if (msg)
     IPC::WriteParam(msg, param);
@@ -130,31 +168,31 @@ template <class A>
 void ConvertHandlesImpl(const Tuple1<A>& t1, Handles* handles,
                         IPC::Message* msg) {
   int handle_index = 0;
-  ConvertHandle(t1.a, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.a, handles, msg, &handle_index);
 }
 template <class A, class B>
 void ConvertHandlesImpl(const Tuple2<A, B>& t1, Handles* handles,
                         IPC::Message* msg) {
   int handle_index = 0;
-  ConvertHandle(t1.a, handles, msg, &handle_index);
-  ConvertHandle(t1.b, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.a, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.b, handles, msg, &handle_index);
 }
 template <class A, class B, class C>
 void ConvertHandlesImpl(const Tuple3<A, B, C>& t1, Handles* handles,
                         IPC::Message* msg) {
   int handle_index = 0;
-  ConvertHandle(t1.a, handles, msg, &handle_index);
-  ConvertHandle(t1.b, handles, msg, &handle_index);
-  ConvertHandle(t1.c, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.a, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.b, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.c, handles, msg, &handle_index);
 }
 template <class A, class B, class C, class D>
 void ConvertHandlesImpl(const Tuple4<A, B, C, D>& t1, Handles* handles,
                         IPC::Message* msg) {
   int handle_index = 0;
-  ConvertHandle(t1.a, handles, msg, &handle_index);
-  ConvertHandle(t1.b, handles, msg, &handle_index);
-  ConvertHandle(t1.c, handles, msg, &handle_index);
-  ConvertHandle(t1.d, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.a, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.b, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.c, handles, msg, &handle_index);
+  ConvertHandlesInParam(t1.d, handles, msg, &handle_index);
 }
 
 template <class MessageType>
@@ -295,8 +333,11 @@ NaClIPCAdapter::NaClIPCAdapter(const IPC::ChannelHandle& handle,
       locked_data_() {
   io_thread_data_.channel_.reset(
       new IPC::Channel(handle, IPC::Channel::MODE_SERVER, this));
-  task_runner_->PostTask(FROM_HERE,
-      base::Bind(&NaClIPCAdapter::ConnectChannelOnIOThread, this));
+  // Note, we can not PostTask for ConnectChannelOnIOThread here. If we did,
+  // and that task ran before this constructor completes, the reference count
+  // would go to 1 and then to 0 because of the Task, before we've been returned
+  // to the owning scoped_refptr, which is supposed to give us our first
+  // ref-count.
 }
 
 NaClIPCAdapter::NaClIPCAdapter(scoped_ptr<IPC::Channel> channel,
@@ -306,6 +347,11 @@ NaClIPCAdapter::NaClIPCAdapter(scoped_ptr<IPC::Channel> channel,
       task_runner_(runner),
       locked_data_() {
   io_thread_data_.channel_ = channel.Pass();
+}
+
+void NaClIPCAdapter::ConnectChannel() {
+  task_runner_->PostTask(FROM_HERE,
+      base::Bind(&NaClIPCAdapter::ConnectChannelOnIOThread, this));
 }
 
 // Note that this message is controlled by the untrusted code. So we should be
@@ -462,7 +508,7 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
     switch (msg.type()) {
       CASE_FOR_MESSAGE(PpapiMsg_CreateNaClChannel)
       CASE_FOR_MESSAGE(PpapiMsg_PPBAudio_NotifyAudioStreamCreated)
-      CASE_FOR_MESSAGE(PpapiMsg_PPBAudioInput_OpenACK)
+      CASE_FOR_MESSAGE(PpapiPluginMsg_ResourceReply)
       case IPC_REPLY_ID: {
         int id = IPC::SyncMessage::GetMessageId(msg);
         LockedData::PendingSyncMsgMap::iterator iter(
@@ -476,6 +522,7 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
         switch (type) {
           CASE_FOR_REPLY(PpapiHostMsg_PPBGraphics3D_GetTransferBuffer)
           CASE_FOR_REPLY(PpapiHostMsg_PPBImageData_CreateNaCl)
+          CASE_FOR_REPLY(PpapiHostMsg_ResourceSyncCall)
           default:
             // Do nothing for messages we don't know.
             break;
@@ -524,6 +571,7 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
               IPC::Channel::GenerateVerifiedChannelID("nacl");
           scoped_refptr<NaClIPCAdapter> ipc_adapter(
               new NaClIPCAdapter(channel_handle, task_runner_));
+          ipc_adapter->ConnectChannel();
 #if defined(OS_POSIX)
           channel_handle.socket = base::FileDescriptor(
               ipc_adapter->TakeClientFileDescriptor(), true);
@@ -537,6 +585,10 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
                          base::Passed(&response)));
           break;
         }
+        case ppapi::proxy::SerializedHandle::FILE:
+          // TODO(raymes): Handle file handles for NaCl.
+          NOTIMPLEMENTED();
+          break;
         case ppapi::proxy::SerializedHandle::INVALID: {
           // Nothing to do. TODO(dmichael): Should we log this? Or is it
           // sometimes okay to pass an INVALID handle?

@@ -23,8 +23,8 @@ const int kNotificationButtonWidth = 32;
 namespace ash {
 namespace internal {
 
-TrayNotificationView::TrayNotificationView(SystemTrayItem* tray, int icon_id)
-    : tray_(tray),
+TrayNotificationView::TrayNotificationView(SystemTrayItem* owner, int icon_id)
+    : owner_(owner),
       icon_id_(icon_id),
       icon_(NULL) {
 }
@@ -39,7 +39,7 @@ void TrayNotificationView::InitView(views::View* contents) {
   SetLayoutManager(layout);
 
   views::ImageButton* close_button = new views::ImageButton(this);
-  close_button->SetImage(views::CustomButton::BS_NORMAL,
+  close_button->SetImage(views::CustomButton::STATE_NORMAL,
                          ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
                              IDR_MESSAGE_CLOSE));
   close_button->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
@@ -124,12 +124,14 @@ bool TrayNotificationView::OnMousePressed(const ui::MouseEvent& event) {
   return true;
 }
 
-ui::EventResult TrayNotificationView::OnGestureEvent(
-    const ui::GestureEvent& event) {
-  if (event.type() != ui::ET_GESTURE_TAP)
-    return ui::ER_UNHANDLED;
+void TrayNotificationView::OnGestureEvent(ui::GestureEvent* event) {
+  SlideOutView::OnGestureEvent(event);
+  if (event->handled())
+    return;
+  if (event->type() != ui::ET_GESTURE_TAP)
+    return;
   HandleClickAction();
-  return ui::ER_CONSUMED;
+  event->SetHandled();
 }
 
 void TrayNotificationView::OnClose() {
@@ -138,9 +140,13 @@ void TrayNotificationView::OnClose() {
 void TrayNotificationView::OnClickAction() {
 }
 
+void TrayNotificationView::OnSlideOut() {
+  owner_->HideNotificationView();
+}
+
 void TrayNotificationView::HandleClose() {
   OnClose();
-  tray_->HideNotificationView();
+  owner_->HideNotificationView();
 }
 
 void TrayNotificationView::HandleClickAction() {

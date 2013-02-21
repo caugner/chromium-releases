@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/values.h"
 #include "chromeos/dbus/blocking_method_caller.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/shill_property_changed_observer.h"
@@ -51,8 +52,11 @@ class ShillClientHelper {
 
   // A callback to handle responses for methods with DictionaryValue results.
   // This is used by CallDictionaryValueMethodWithErrorCallback.
-  typedef base::Callback<void(const base::DictionaryValue& result
-                              )> DictionaryValueCallbackWithoutStatus;
+  typedef base::Callback<void(const base::DictionaryValue& result)>
+      DictionaryValueCallbackWithoutStatus;
+
+  // A callback to handle responses of methods returning a ListValue.
+  typedef base::Callback<void(const base::ListValue& result)> ListValueCallback;
 
   // A callback to handle errors for method call.
   typedef base::Callback<void(const std::string& error_name,
@@ -100,11 +104,14 @@ class ShillClientHelper {
       const DictionaryValueCallbackWithoutStatus& callback,
       const ErrorCallback& error_callback);
 
+  // Calls a method with a boolean array result with error callback.
+  void CallListValueMethodWithErrorCallback(
+      dbus::MethodCall* method_call,
+      const ListValueCallback& callback,
+      const ErrorCallback& error_callback);
+
   // DEPRECATED DO NOT USE: Calls a method without results.
   bool CallVoidMethodAndBlock(dbus::MethodCall* method_call);
-
-  // DEPRECATED DO NOT USE: Calls a method with an object path result.
-  dbus::ObjectPath CallObjectPathMethodAndBlock(dbus::MethodCall* method_call);
 
   // DEPRECATED DO NOT USE: Calls a method with a dictionary value result.
   // The caller is responsible to delete the result.
@@ -156,6 +163,13 @@ class ShillClientHelper {
       const ErrorCallback& error_callback,
       dbus::Response* response);
 
+  // Handles responses for methods with Boolean array results.
+  // Used by CallBooleanArrayMethodWithErrorCallback().
+  void OnListValueMethodWithErrorCallback(
+      const ListValueCallback& callback,
+      const ErrorCallback& error_callback,
+      dbus::Response* response);
+
   // Handles errors for method calls.
   void OnError(const ErrorCallback& error_callback,
                dbus::ErrorResponse* response);
@@ -164,7 +178,8 @@ class ShillClientHelper {
   BlockingMethodCaller blocking_method_caller_;
   dbus::ObjectProxy* proxy_;
   PropertyChangedHandler property_changed_handler_;
-  ObserverList<ShillPropertyChangedObserver> observer_list_;
+  ObserverList<ShillPropertyChangedObserver, true /* check_empty */>
+      observer_list_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

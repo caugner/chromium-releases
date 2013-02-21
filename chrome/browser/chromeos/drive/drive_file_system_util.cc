@@ -20,6 +20,7 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
+#include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/chromeos/drive/drive_system_service.h"
 #include "chrome/browser/chromeos/drive/file_write_helper.h"
@@ -74,33 +75,34 @@ FileWriteHelper* GetFileWriteHelper(Profile* profile) {
   return system_service ? system_service->file_write_helper() : NULL;
 }
 
-void GetHostedDocumentURLBlockingThread(const FilePath& drive_cache_path,
-                                        GURL* url) {
+GURL GetHostedDocumentURLBlockingThread(const FilePath& drive_cache_path) {
   std::string json;
   if (!file_util::ReadFileToString(drive_cache_path, &json)) {
     NOTREACHED() << "Unable to read file " << drive_cache_path.value();
-    return;
+    return GURL();
   }
   DVLOG(1) << "Hosted doc content " << json;
   scoped_ptr<base::Value> val(base::JSONReader::Read(json));
   base::DictionaryValue* dict_val;
   if (!val.get() || !val->GetAsDictionary(&dict_val)) {
     NOTREACHED() << "Parse failure for " << json;
-    return;
+    return GURL();
   }
   std::string edit_url;
   if (!dict_val->GetString("url", &edit_url)) {
     NOTREACHED() << "url field doesn't exist in " << json;
-    return;
+    return GURL();
   }
-  *url = GURL(edit_url);
-  DVLOG(1) << "edit url " << *url;
+  GURL url(edit_url);
+  DVLOG(1) << "edit url " << url;
+  return url;
 }
 
-void OpenEditURLUIThread(Profile* profile, const GURL* edit_url) {
-  Browser* browser = browser::FindLastActiveWithProfile(profile);
+void OpenEditURLUIThread(Profile* profile, const GURL& edit_url) {
+  Browser* browser = chrome::FindLastActiveWithProfile(profile,
+      chrome::HOST_DESKTOP_TYPE_ASH);
   if (browser) {
-    browser->OpenURL(content::OpenURLParams(*edit_url, content::Referrer(),
+    browser->OpenURL(content::OpenURLParams(edit_url, content::Referrer(),
         CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
   }
 }
@@ -120,7 +122,7 @@ void OnGetEntryInfoByResourceId(Profile* profile,
   DCHECK(entry_proto.get());
   const std::string& base_name = entry_proto->base_name();
   const GURL edit_url = GetFileResourceUrl(resource_id, base_name);
-  OpenEditURLUIThread(profile, &edit_url);
+  OpenEditURLUIThread(profile, edit_url);
   DVLOG(1) << "OnFindEntryByResourceId " << edit_url;
 }
 
@@ -224,11 +226,11 @@ void ModifyDriveFileResourceUrl(Profile* profile,
       IsParent(drive_cache_path)) {
     // Handle hosted documents. The edit url is in the temporary file, so we
     // read it on a blocking thread.
-    GURL* edit_url = new GURL();
-    content::BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
-        base::Bind(&GetHostedDocumentURLBlockingThread,
-                   drive_cache_path, edit_url),
-        base::Bind(&OpenEditURLUIThread, profile, base::Owned(edit_url)));
+    base::PostTaskAndReplyWithResult(
+        content::BrowserThread::GetBlockingPool(),
+        FROM_HERE,
+        base::Bind(&GetHostedDocumentURLBlockingThread, drive_cache_path),
+        base::Bind(&OpenEditURLUIThread, profile));
     *url = GURL();
   } else if (cache->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_TMP).
                  IsParent(drive_cache_path) ||
@@ -385,6 +387,7 @@ void PrepareWritableFileAndRun(Profile* profile,
                                const FilePath& path,
                                const OpenFileCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
   if (IsUnderDriveMountPoint(path)) {
     FileWriteHelper* file_write_helper = GetFileWriteHelper(profile);
     if (!file_write_helper)
@@ -392,10 +395,8 @@ void PrepareWritableFileAndRun(Profile* profile,
     FilePath remote_path(ExtractDrivePath(path));
     file_write_helper->PrepareWritableFileAndRun(remote_path, callback);
   } else {
-    if (!callback.is_null()) {
-      content::BrowserThread::GetBlockingPool()->PostTask(
-          FROM_HERE, base::Bind(callback, DRIVE_FILE_OK, path));
-    }
+    content::BrowserThread::GetBlockingPool()->PostTask(
+        FROM_HERE, base::Bind(callback, DRIVE_FILE_OK, path));
   }
 }
 
@@ -442,24 +443,27 @@ DriveFileError GDataToDriveFileError(google_apis::GDataErrorCode status) {
   }
 }
 
-bool IsConnectionTypeCellular() {
-  bool is_cellular = false;
-  // Use switch, not if, to allow compiler to catch future enum changes.
-  // (e.g. Addition of CONNECTION_5G)
-  switch (net::NetworkChangeNotifier::GetConnectionType()) {
-    case net::NetworkChangeNotifier::CONNECTION_2G:
-    case net::NetworkChangeNotifier::CONNECTION_3G:
-    case net::NetworkChangeNotifier::CONNECTION_4G:
-      is_cellular = true;
-      break;
-    case net::NetworkChangeNotifier::CONNECTION_UNKNOWN:
-    case net::NetworkChangeNotifier::CONNECTION_ETHERNET:
-    case net::NetworkChangeNotifier::CONNECTION_WIFI:
-    case net::NetworkChangeNotifier::CONNECTION_NONE:
-      is_cellular = false;
-      break;
-  }
-  return is_cellular;
+void ConvertProtoToPlatformFileInfo(const PlatformFileInfoProto& proto,
+                                    base::PlatformFileInfo* file_info) {
+  file_info->size = proto.size();
+  file_info->is_directory = proto.is_directory();
+  file_info->is_symbolic_link = proto.is_symbolic_link();
+  file_info->last_modified = base::Time::FromInternalValue(
+      proto.last_modified());
+  file_info->last_accessed = base::Time::FromInternalValue(
+      proto.last_accessed());
+  file_info->creation_time = base::Time::FromInternalValue(
+      proto.creation_time());
+}
+
+void ConvertPlatformFileInfoToProto(const base::PlatformFileInfo& file_info,
+                                    PlatformFileInfoProto* proto) {
+  proto->set_size(file_info.size);
+  proto->set_is_directory(file_info.is_directory);
+  proto->set_is_symbolic_link(file_info.is_symbolic_link);
+  proto->set_last_modified(file_info.last_modified.ToInternalValue());
+  proto->set_last_accessed(file_info.last_accessed.ToInternalValue());
+  proto->set_creation_time(file_info.creation_time.ToInternalValue());
 }
 
 }  // namespace util

@@ -21,8 +21,6 @@
       ],
       'sources': [
         # All .cc, .h under web_dialogs, except unittests.
-        'constrained_web_dialog_ui.cc',
-        'constrained_web_dialog_ui.h',
         'web_dialog_delegate.cc',
         'web_dialog_delegate.h',
         'web_dialog_observer.h',
@@ -31,6 +29,24 @@
         'web_dialog_web_contents_delegate.cc',
         'web_dialog_web_contents_delegate.h',
         'web_dialogs_export.h',
+      ],
+    },
+    {
+      'target_name': 'web_dialogs_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '../../base/base.gyp:base',
+        '../../content/content.gyp:content_browser',
+        '../../skia/skia.gyp:skia',
+        'web_dialogs',
+      ],
+      'sources': [
+        'test/test_web_contents_handler.cc',
+        'test/test_web_contents_handler.h',
+        'test/test_web_dialog_delegate.cc',
+        'test/test_web_dialog_delegate.h',
+        'test/test_web_dialog_observer.cc',
+        'test/test_web_dialog_observer.h',
       ],
     },
   ],

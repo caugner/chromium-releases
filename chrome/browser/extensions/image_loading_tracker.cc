@@ -9,19 +9,16 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/path_service.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "grit/component_extension_resources_map.h"
-#include "grit/theme_resources.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -186,8 +183,9 @@ class ImageLoadingTracker::ImageLoader
     DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
     // TODO(xiyuan): Clean up to use SkBitmap here and in LoadOnBlockingPool.
     scoped_ptr<SkBitmap> bitmap(new SkBitmap);
+    gfx::Size original_size(image.width(), image.height());
     *bitmap = ResizeIfNeeded(*image.bitmap(), image_info);
-    ReportBack(bitmap.release(), image_info, image_info.desired_size, id);
+    ReportBack(bitmap.release(), image_info, original_size, id);
   }
 
   void ReportBack(const SkBitmap* bitmap, const ImageRepresentation& image_info,
@@ -308,66 +306,14 @@ void ImageLoadingTracker::LoadImages(
       loader_ = new ImageLoader(this);
 
     int resource_id = -1;
-    if (IsComponentExtensionResource(extension, it->resource.relative_path(),
-                                     &resource_id))
+    if (extension->location() == Extension::COMPONENT &&
+        extensions::ImageLoader::IsComponentExtensionResource(
+            extension->path(), it->resource.relative_path(), &resource_id)) {
       loader_->LoadResource(*it, id, resource_id);
-    else
+    } else {
       loader_->LoadImage(*it, id);
-  }
-}
-
-bool ImageLoadingTracker::IsComponentExtensionResource(
-    const Extension* extension,
-    const FilePath& resource_path,
-    int* resource_id) {
-  static const GritResourceMap kExtraComponentExtensionResources[] = {
-    {"web_store/webstore_icon_128.png", IDR_WEBSTORE_ICON},
-    {"web_store/webstore_icon_16.png", IDR_WEBSTORE_ICON_16},
-    {"chrome_app/product_logo_128.png", IDR_PRODUCT_LOGO_128},
-    {"chrome_app/product_logo_16.png", IDR_PRODUCT_LOGO_16},
-    {"settings_app/settings_app_icon_128.png", IDR_SETTINGS_APP_ICON_128},
-    {"settings_app/settings_app_icon_16.png", IDR_SETTINGS_APP_ICON_16},
-  };
-  static const size_t kExtraComponentExtensionResourcesSize =
-      arraysize(kExtraComponentExtensionResources);
-
-  if (extension->location() != Extension::COMPONENT)
-    return false;
-
-  FilePath directory_path = extension->path();
-  FilePath resources_dir;
-  FilePath relative_path;
-  if (!PathService::Get(chrome::DIR_RESOURCES, &resources_dir) ||
-      !resources_dir.AppendRelativePath(directory_path, &relative_path)) {
-    return false;
-  }
-  relative_path = relative_path.Append(resource_path);
-  relative_path = relative_path.NormalizePathSeparators();
-
-  // TODO(tc): Make a map of FilePath -> resource ids so we don't have to
-  // covert to FilePaths all the time.  This will be more useful as we add
-  // more resources.
-  for (size_t i = 0; i < kComponentExtensionResourcesSize; ++i) {
-    FilePath resource_path =
-        FilePath().AppendASCII(kComponentExtensionResources[i].name);
-    resource_path = resource_path.NormalizePathSeparators();
-
-    if (relative_path == resource_path) {
-      *resource_id = kComponentExtensionResources[i].value;
-      return true;
     }
   }
-  for (size_t i = 0; i < kExtraComponentExtensionResourcesSize; ++i) {
-    FilePath resource_path =
-        FilePath().AppendASCII(kExtraComponentExtensionResources[i].name);
-    resource_path = resource_path.NormalizePathSeparators();
-
-    if (relative_path == resource_path) {
-      *resource_id = kExtraComponentExtensionResources[i].value;
-      return true;
-    }
-  }
-  return false;
 }
 
 void ImageLoadingTracker::OnBitmapLoaded(

@@ -18,7 +18,6 @@
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_infobar_delegates.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -104,8 +103,7 @@ string16 ConfirmInstallDialogDelegate::GetAcceptButtonTitle() {
 }
 
 void ConfirmInstallDialogDelegate::OnAccepted() {
-  installer()->StartInstalling(plugin_metadata_->plugin_url(),
-                               TabContents::FromWebContents(web_contents_));
+  installer()->StartInstalling(plugin_metadata_->plugin_url(), web_contents_);
 }
 
 void ConfirmInstallDialogDelegate::OnCanceled() {
@@ -300,7 +298,9 @@ void PluginObserver::OnFindMissingPlugin(int placeholder_id,
           infobar_helper,
           l10n_util::GetStringFUTF16(IDS_METRO_MISSING_PLUGIN_PROMPT,
                                      plugin_metadata->name()),
-          l10n_util::GetStringUTF16(IDS_WIN8_DESKTOP_RESTART)) :
+          l10n_util::GetStringUTF16(IDS_WIN8_DESKTOP_RESTART),
+          GURL("https://support.google.com/chrome/?p=ib_display_in_desktop"),
+          false) :
       PluginInstallerInfoBarDelegate::Create(
           infobar_helper, installer, plugin_metadata.Pass(), callback);
 #endif
@@ -316,7 +316,7 @@ void PluginObserver::InstallMissingPlugin(
     TabModalConfirmDialog::Create(
         new ConfirmInstallDialogDelegate(
             web_contents(), installer, plugin_metadata->Clone()),
-            TabContents::FromWebContents(web_contents()));
+        web_contents());
   }
 }
 
@@ -357,9 +357,18 @@ void PluginObserver::OnCouldNotLoadPlugin(const FilePath& plugin_path) {
 
 void PluginObserver::OnNPAPINotSupported(const std::string& identifier) {
 #if defined(OS_WIN) && defined(ENABLE_PLUGIN_INSTALLATION)
+  DCHECK(base::win::IsMetroProcess());
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   if (profile->IsOffTheRecord())
+    return;
+  HostContentSettingsMap* content_settings =
+      profile->GetHostContentSettingsMap();
+  if (content_settings->GetContentSetting(
+      web_contents()->GetURL(),
+      web_contents()->GetURL(),
+      CONTENT_SETTINGS_TYPE_METRO_SWITCH_TO_DESKTOP,
+      std::string()) == CONTENT_SETTING_BLOCK)
     return;
 
   scoped_ptr<PluginMetadata> plugin;
@@ -376,7 +385,9 @@ void PluginObserver::OnNPAPINotSupported(const std::string& identifier) {
           infobar_helper,
           l10n_util::GetStringFUTF16(IDS_METRO_NPAPI_PLUGIN_PROMPT,
                                      plugin->name()),
-          l10n_util::GetStringUTF16(IDS_WIN8_RESTART)));
+          l10n_util::GetStringUTF16(IDS_WIN8_RESTART),
+          GURL("https://support.google.com/chrome/?p=ib_redirect_to_desktop"),
+          true));
 #else
   NOTREACHED();
 #endif

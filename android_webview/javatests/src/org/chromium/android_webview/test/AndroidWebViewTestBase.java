@@ -19,6 +19,8 @@ import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.test.util.CallbackHelper;
+import org.chromium.content.browser.test.util.Criteria;
+import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.ui.gfx.ActivityNativeWindow;
 
@@ -168,6 +170,23 @@ public class AndroidWebViewTestBase
                 TimeUnit.SECONDS);
     }
 
+    protected void loadDataSyncWithCharset(final AwContents awContents,
+                                           CallbackHelper onPageFinishedHelper,
+                                           final String data, final String mimeType,
+                                           final boolean isBase64Encoded, final String charset)
+            throws Throwable {
+        int currentCallCount = onPageFinishedHelper.getCallCount();
+        runTestOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                awContents.loadUrl(LoadUrlParams.createLoadDataParams(
+                        data, mimeType, isBase64Encoded, charset));
+            }
+        });
+        onPageFinishedHelper.waitForCallback(currentCallCount, 1, WAIT_TIMEOUT_SECONDS,
+                TimeUnit.SECONDS);
+    }
+
     /**
      * Loads data on the UI thread but does not block.
      */
@@ -192,13 +211,12 @@ public class AndroidWebViewTestBase
     protected AwTestContainerView createAwTestContainerView(final boolean incognito,
             final AwTestContainerView testContainerView,
             final AwContentsClient awContentsClient) {
-        ContentViewCore contentViewCore = new ContentViewCore(
-                getActivity(), ContentViewCore.PERSONALITY_VIEW);
-        testContainerView.initialize(contentViewCore,
-                new AwContents(testContainerView, testContainerView.getInternalAccessDelegate(),
-                contentViewCore, awContentsClient, new ActivityNativeWindow(getActivity()),
+        testContainerView.initialize(new AwContents(testContainerView,
+                testContainerView.getInternalAccessDelegate(),
+                awContentsClient, new ActivityNativeWindow(getActivity()),
                 incognito, false));
         getActivity().addView(testContainerView);
+        testContainerView.requestFocus();
         return testContainerView;
     }
 
@@ -270,5 +288,37 @@ public class AndroidWebViewTestBase
         return JSUtils.executeJavaScriptAndWaitForResult(this, awContents,
                 viewClient.getOnEvaluateJavaScriptResultHelper(),
                 code);
+    }
+
+    /**
+     * Similar to CriteriaHelper.pollForCriteria but runs the callable on the UI thread.
+     * Note that exceptions are treated as failure.
+     */
+    protected boolean pollOnUiThread(final Callable<Boolean> callable) throws Throwable {
+        return CriteriaHelper.pollForCriteria(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                try {
+                    return runTestOnUiThreadAndGetResult(callable);
+                } catch (Throwable e) {
+                    return false;
+                }
+            }
+        });
+    }
+
+    /**
+     * Clears the resource cache. Note that the cache is per-application, so this will clear the
+     * cache for all WebViews used.
+     */
+    protected void clearCacheOnUiThread(
+            final AwContents awContents,
+            final boolean includeDiskFiles) throws Throwable {
+        runTestOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+              awContents.clearCache(includeDiskFiles);
+            }
+        });
     }
 }

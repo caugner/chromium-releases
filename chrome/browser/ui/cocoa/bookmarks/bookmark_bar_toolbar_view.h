@@ -17,8 +17,6 @@
 
 @class BookmarkBarView;
 
-class Profile;
-
 namespace ui {
 class ThemeProvider;
 }
@@ -31,11 +29,15 @@ class ThemeProvider;
 // background image is joined.
 - (int)currentTabContentsHeight;
 
-// Current theme provider, used in drawRectAsBubble to get theme toolbar colors.
+// Current theme provider, passed to the cross platform NtpBackgroundUtil class.
 - (ui::ThemeProvider*)themeProvider;
 
-// Current profile, passed to the cross platform NtpBackgroundUtil class.
-- (Profile*)profile;
+// Returns YES if the bookmark bar should be shown at the bottom of the content
+// view when detached.
+- (BOOL)shouldShowAtBottomWhenDetached;
+
+// Returns YES if the bookmark bar has no bookmarks.
+- (BOOL)isEmpty;
 
 @end
 

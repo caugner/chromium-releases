@@ -4,74 +4,139 @@
 
 #include "ppapi/proxy/resource_message_params.h"
 
+#include "base/logging.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/proxy/ppapi_messages.h"
 
 namespace ppapi {
 namespace proxy {
 
+ResourceMessageParams::SerializedHandles::SerializedHandles()
+    : should_close_(false) {
+}
+
+ResourceMessageParams::SerializedHandles::~SerializedHandles() {
+  if (should_close_) {
+    for (std::vector<SerializedHandle>::iterator iter = data_.begin();
+         iter != data_.end(); ++iter) {
+      iter->Close();
+    }
+  }
+}
+
 ResourceMessageParams::ResourceMessageParams()
     : pp_resource_(0),
-      sequence_(0) {
+      sequence_(0),
+      handles_(new SerializedHandles()) {
 }
 
 ResourceMessageParams::ResourceMessageParams(PP_Resource resource,
                                              int32_t sequence)
     : pp_resource_(resource),
-      sequence_(sequence) {
+      sequence_(sequence),
+      handles_(new SerializedHandles()) {
 }
 
 ResourceMessageParams::~ResourceMessageParams() {
 }
 
 void ResourceMessageParams::Serialize(IPC::Message* msg) const {
-  IPC::ParamTraits<PP_Resource>::Write(msg, pp_resource_);
-  IPC::ParamTraits<int32_t>::Write(msg, sequence_);
-  IPC::ParamTraits<std::vector<SerializedHandle> >::Write(msg, handles_);
+  WriteHeader(msg);
+  WriteHandles(msg);
 }
 
 bool ResourceMessageParams::Deserialize(const IPC::Message* msg,
                                         PickleIterator* iter) {
-  return IPC::ParamTraits<PP_Resource>::Read(msg, iter, &pp_resource_) &&
-         IPC::ParamTraits<int32_t>::Read(msg, iter, &sequence_) &&
-         IPC::ParamTraits<std::vector<SerializedHandle> >::Read(
-             msg, iter, &handles_);
+  return ReadHeader(msg, iter) && ReadHandles(msg, iter);
 }
 
-const SerializedHandle* ResourceMessageParams::GetHandleOfTypeAtIndex(
+void ResourceMessageParams::WriteHeader(IPC::Message* msg) const {
+  IPC::ParamTraits<PP_Resource>::Write(msg, pp_resource_);
+  IPC::ParamTraits<int32_t>::Write(msg, sequence_);
+}
+
+void ResourceMessageParams::WriteHandles(IPC::Message* msg) const {
+  IPC::ParamTraits<std::vector<SerializedHandle> >::Write(msg,
+                                                          handles_->data());
+}
+
+bool ResourceMessageParams::ReadHeader(const IPC::Message* msg,
+                                       PickleIterator* iter) {
+  DCHECK(handles_->data().empty());
+  handles_->set_should_close(true);
+  return IPC::ParamTraits<PP_Resource>::Read(msg, iter, &pp_resource_) &&
+         IPC::ParamTraits<int32_t>::Read(msg, iter, &sequence_);
+}
+
+bool ResourceMessageParams::ReadHandles(const IPC::Message* msg,
+                                        PickleIterator* iter) {
+  return IPC::ParamTraits<std::vector<SerializedHandle> >::Read(
+             msg, iter, &handles_->data());
+}
+
+void ResourceMessageParams::ConsumeHandles() const {
+  // Note: we must not invalidate the handles. This is used for converting
+  // handles from the host OS to NaCl, and that conversion will not work if we
+  // invalidate the handles (see HandleConverter).
+  handles_->set_should_close(false);
+}
+
+SerializedHandle ResourceMessageParams::TakeHandleOfTypeAtIndex(
     size_t index,
     SerializedHandle::Type type) const {
-  if (handles_.size() <= index)
-    return NULL;
-  if (handles_[index].type() != type)
-    return NULL;
-  return &handles_[index];
+  SerializedHandle handle;
+  std::vector<SerializedHandle>& data = handles_->data();
+  if (index < data.size() && data[index].type() == type) {
+    handle = data[index];
+    data[index] = SerializedHandle();
+  }
+  return handle;
 }
 
-bool ResourceMessageParams::GetSharedMemoryHandleAtIndex(
+bool ResourceMessageParams::TakeSharedMemoryHandleAtIndex(
     size_t index,
     base::SharedMemoryHandle* handle) const {
-  const SerializedHandle* serialized = GetHandleOfTypeAtIndex(
+  SerializedHandle serialized = TakeHandleOfTypeAtIndex(
       index, SerializedHandle::SHARED_MEMORY);
-  if (!serialized)
+  if (!serialized.is_shmem())
     return false;
-  *handle = serialized->shmem();
+  *handle = serialized.shmem();
   return true;
 }
 
-bool ResourceMessageParams::GetSocketHandleAtIndex(
+bool ResourceMessageParams::TakeSocketHandleAtIndex(
     size_t index,
     IPC::PlatformFileForTransit* handle) const {
-  const SerializedHandle* serialized = GetHandleOfTypeAtIndex(
+  SerializedHandle serialized = TakeHandleOfTypeAtIndex(
       index, SerializedHandle::SOCKET);
-  if (!serialized)
+  if (!serialized.is_socket())
     return false;
-  *handle = serialized->descriptor();
+  *handle = serialized.descriptor();
   return true;
 }
 
-void ResourceMessageParams::AppendHandle(const SerializedHandle& handle) {
-  handles_.push_back(handle);
+bool ResourceMessageParams::TakeFileHandleAtIndex(
+    size_t index,
+    IPC::PlatformFileForTransit* handle) const {
+  SerializedHandle serialized = TakeHandleOfTypeAtIndex(
+      index, SerializedHandle::FILE);
+  if (!serialized.is_file())
+    return false;
+  *handle = serialized.descriptor();
+  return true;
+}
+
+void ResourceMessageParams::TakeAllSharedMemoryHandles(
+    std::vector<base::SharedMemoryHandle>* handles) const {
+  for (size_t i = 0; i < handles_->data().size(); ++i) {
+    base::SharedMemoryHandle handle;
+    if (TakeSharedMemoryHandleAtIndex(i, &handle))
+      handles->push_back(handle);
+  }
+}
+
+void ResourceMessageParams::AppendHandle(const SerializedHandle& handle) const {
+  handles_->data().push_back(handle);
 }
 
 ResourceMessageCallParams::ResourceMessageCallParams()
@@ -115,15 +180,24 @@ ResourceMessageReplyParams::~ResourceMessageReplyParams() {
 }
 
 void ResourceMessageReplyParams::Serialize(IPC::Message* msg) const {
-  ResourceMessageParams::Serialize(msg);
-  IPC::ParamTraits<int32_t>::Write(msg, result_);
+  // Rather than serialize all of ResourceMessageParams first, we serialize all
+  // non-handle data first, then the handles. When transferring to NaCl on
+  // Windows, we need to be able to translate Windows-style handles to POSIX-
+  // style handles, and it's easier to put all the regular stuff at the front.
+  WriteReplyHeader(msg);
+  WriteHandles(msg);
 }
 
 bool ResourceMessageReplyParams::Deserialize(const IPC::Message* msg,
                                              PickleIterator* iter) {
-  if (!ResourceMessageParams::Deserialize(msg, iter))
-    return false;
-  return IPC::ParamTraits<int32_t>::Read(msg, iter, &result_);
+  return (ReadHeader(msg, iter) &&
+          IPC::ParamTraits<int32_t>::Read(msg, iter, &result_) &&
+          ReadHandles(msg, iter));
+}
+
+void ResourceMessageReplyParams::WriteReplyHeader(IPC::Message* msg) const {
+  WriteHeader(msg);
+  IPC::ParamTraits<int32_t>::Write(msg, result_);
 }
 
 }  // namespace proxy

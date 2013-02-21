@@ -46,14 +46,16 @@ class SyncSessionContext;
 //
 // Unless stated otherwise, all methods of SyncManager should be called on the
 // same thread.
-class SyncManagerImpl : public SyncManager,
-                        public net::NetworkChangeNotifier::IPAddressObserver,
-                        public InvalidationHandler,
-                        public JsBackend,
-                        public SyncEngineEventListener,
-                        public ServerConnectionEventListener,
-                        public syncable::DirectoryChangeDelegate,
-                        public SyncEncryptionHandler::Observer {
+class SyncManagerImpl :
+    public SyncManager,
+    public net::NetworkChangeNotifier::IPAddressObserver,
+    public net::NetworkChangeNotifier::ConnectionTypeObserver,
+    public InvalidationHandler,
+    public JsBackend,
+    public SyncEngineEventListener,
+    public ServerConnectionEventListener,
+    public syncable::DirectoryChangeDelegate,
+    public SyncEncryptionHandler::Observer {
  public:
   // Create an uninitialized SyncManager.  Callers must Init() before using.
   explicit SyncManagerImpl(const std::string& name);
@@ -66,7 +68,6 @@ class SyncManagerImpl : public SyncManager,
       const std::string& sync_server_and_path,
       int sync_server_port,
       bool use_ssl,
-      const scoped_refptr<base::TaskRunner>& blocking_task_runner,
       scoped_ptr<HttpPostProviderFactory> post_factory,
       const std::vector<ModelSafeWorker*>& workers,
       ExtensionsActivityMonitor* extensions_activity_monitor,
@@ -109,6 +110,7 @@ class SyncManagerImpl : public SyncManager,
   virtual void StopSyncingForShutdown(const base::Closure& callback) OVERRIDE;
   virtual void ShutdownOnSyncThread() OVERRIDE;
   virtual UserShare* GetUserShare() OVERRIDE;
+  virtual const std::string cache_guid() OVERRIDE;
   virtual bool ReceivedExperiment(Experiments* experiments) OVERRIDE;
   virtual bool HasUnsyncedItems() OVERRIDE;
   virtual SyncEncryptionHandler* GetEncryptionHandler() OVERRIDE;
@@ -163,10 +165,12 @@ class SyncManagerImpl : public SyncManager,
       syncable::BaseTransaction* trans) OVERRIDE;
   virtual void HandleCalculateChangesChangeEventFromSyncApi(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::BaseTransaction* trans) OVERRIDE;
+      syncable::BaseTransaction* trans,
+      std::vector<int64>* entries_changed) OVERRIDE;
   virtual void HandleCalculateChangesChangeEventFromSyncer(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::BaseTransaction* trans) OVERRIDE;
+      syncable::BaseTransaction* trans,
+      std::vector<int64>* entries_changed) OVERRIDE;
 
   // InvalidationHandler implementation.
   virtual void OnInvalidatorStateChange(InvalidatorState state) OVERRIDE;
@@ -174,10 +178,16 @@ class SyncManagerImpl : public SyncManager,
       const ObjectIdInvalidationMap& invalidation_map,
       IncomingInvalidationSource source) OVERRIDE;
 
-  // Called only by our NetworkChangeNotifier.
+  // These OnYYYChanged() methods are only called by our NetworkChangeNotifier.
+  // Called when IP address of primary interface changes.
   virtual void OnIPAddressChanged() OVERRIDE;
+  // Called when the connection type of the system has changed.
+  virtual void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType) OVERRIDE;
 
   const SyncScheduler* scheduler() const;
+
+  bool GetHasInvalidAuthTokenForTest() const;
 
  private:
   friend class SyncManagerTest;
@@ -221,8 +231,6 @@ class SyncManagerImpl : public SyncManager,
       const syncable::EntryKernelMutation& mutation,
       Cryptographer* cryptographer) const;
 
-  bool ChangeBuffersAreEmpty();
-
   // Open the directory named with username_for_share
   bool OpenDirectory();
 
@@ -252,7 +260,7 @@ class SyncManagerImpl : public SyncManager,
       const ModelTypeInvalidationMap& invalidation_map);
 
   // Checks for server reachabilty and requests a nudge.
-  void OnIPAddressChangedImpl();
+  void OnNetworkConnectivityChangedImpl();
 
   // Helper function used only by the constructor.
   void BindJsMessageHandler(
@@ -296,10 +304,6 @@ class SyncManagerImpl : public SyncManager,
   // WeakHandle when we construct it.
   WeakHandle<SyncManagerImpl> weak_handle_this_;
 
-  // |blocking_task_runner| is a TaskRunner to be used for tasks that
-  // may block on disk I/O.
-  scoped_refptr<base::TaskRunner> blocking_task_runner_;
-
   // We give a handle to share_ to clients of the API for use when constructing
   // any transaction type.
   UserShare share_;
@@ -329,20 +333,21 @@ class SyncManagerImpl : public SyncManager,
   // sync components.
   AllStatus allstatus_;
 
-  // Each element of this array is a store of change records produced by
-  // HandleChangeEvent during the CALCULATE_CHANGES step.  The changes are
-  // segregated by model type, and are stored here to be processed and
-  // forwarded to the observer slightly later, at the TRANSACTION_ENDING
-  // step by HandleTransactionEndingChangeEvent. The list is cleared in the
-  // TRANSACTION_COMPLETE step by HandleTransactionCompleteChangeEvent.
-  ChangeReorderBuffer change_buffers_[MODEL_TYPE_COUNT];
+  // Each element of this map is a store of change records produced by
+  // HandleChangeEventFromSyncer during the CALCULATE_CHANGES step. The changes
+  // are grouped by model type, and are stored here in tree order to be
+  // forwarded to the observer slightly later, at the TRANSACTION_ENDING step
+  // by HandleTransactionEndingChangeEvent. The list is cleared after observer
+  // finishes processing.
+  typedef std::map<int, ImmutableChangeRecordList> ChangeRecordMap;
+  ChangeRecordMap change_records_;
 
   SyncManager::ChangeDelegate* change_delegate_;
 
   // Set to true once Init has been called.
   bool initialized_;
 
-  bool observing_ip_address_changes_;
+  bool observing_network_connectivity_changes_;
 
   InvalidatorState invalidator_state_;
 

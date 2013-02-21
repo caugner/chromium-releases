@@ -75,8 +75,9 @@ class VIEWS_EXPORT SubmenuView : public View,
   // Scrolls on menu item boundaries.
   virtual bool OnMouseWheel(const ui::MouseWheelEvent& e) OVERRIDE;
 
+  // Overridden from ui::EventHandler.
   // Scrolls on menu item boundaries.
-  virtual ui::EventResult OnGestureEvent(const ui::GestureEvent& e) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Returns true if the menu is showing.
   bool IsShowing();
@@ -172,7 +173,7 @@ class VIEWS_EXPORT SubmenuView : public View,
                                          MenuDelegate::DropPosition position);
 
   // Implementation of ScrollDelegate
-  virtual void OnScroll(float dx, float dy) OVERRIDE;
+  virtual bool OnScroll(float dx, float dy) OVERRIDE;
 
   // Parent menu item.
   MenuItemView* parent_menu_item_;

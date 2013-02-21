@@ -18,8 +18,8 @@
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/byte_stream.h"
 #include "content/browser/download/download_stats.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
-#include "content/browser/renderer_host/resource_request_info_impl.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/browser/loader/resource_request_info_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
@@ -136,9 +136,9 @@ bool DownloadResourceHandler::OnResponseStarted(
 
   // Deleted in DownloadManager.
   scoped_ptr<DownloadCreateInfo> info(new DownloadCreateInfo(
-      base::Time::Now(), 0, content_length_, DownloadItem::IN_PROGRESS,
+      base::Time::Now(), content_length_,
       request_->net_log(), request_info->HasUserGesture(),
-      request_info->transition_type()));
+      request_info->GetPageTransition()));
 
   // Create the ByteStream for sending data to the download sink.
   scoped_ptr<ByteStreamReader> stream_reader;
@@ -152,14 +152,13 @@ bool DownloadResourceHandler::OnResponseStarted(
   info->url_chain = request_->url_chain();
   info->referrer_url = GURL(request_->referrer());
   info->start_time = base::Time::Now();
-  info->received_bytes = save_info_->offset;
   info->total_bytes = content_length_;
-  info->state = DownloadItem::IN_PROGRESS;
   info->has_user_gesture = request_info->HasUserGesture();
   info->content_disposition = content_disposition_;
   info->mime_type = response->head.mime_type;
   info->remote_address = request_->GetSocketAddress().host();
   RecordDownloadMimeType(info->mime_type);
+  RecordDownloadContentDisposition(info->content_disposition);
 
   info->request_handle =
       DownloadRequestHandle(AsWeakPtr(), global_id_.child_id,
@@ -188,8 +187,6 @@ bool DownloadResourceHandler::OnResponseStarted(
     accept_ranges_ = "";
   }
 
-  info->prompt_user_for_save_location =
-      save_info_->prompt_for_save_location && save_info_->file_path.empty();
   info->save_info = save_info_.Pass();
 
   BrowserThread::PostTask(
@@ -355,6 +352,14 @@ bool DownloadResourceHandler::OnResponseCompleted(
   // OnResponseCompleted without OnResponseStarted.
   if (stream_writer_.get())
     stream_writer_->Close(reason);
+
+  // If the error mapped to something unknown, record it so that
+  // we can drill down.
+  if (reason == DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED) {
+    UMA_HISTOGRAM_CUSTOM_ENUMERATION("Download.MapErrorNetworkFailed",
+                                     std::abs(status.error()),
+                                     net::GetAllErrorCodesForUma());
+  }
 
   stream_writer_.reset();  // We no longer need the stream.
   read_buffer_ = NULL;

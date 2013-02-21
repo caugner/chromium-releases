@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/display/display_preferences.h"
 
 #include "ash/display/display_controller.h"
-#include "ash/display/multi_display_manager.h"
+#include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
@@ -18,30 +18,11 @@
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/url_canon.h"
 #include "googleurl/src/url_util.h"
-#include "ui/aura/display_manager.h"
-#include "ui/aura/env.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/insets.h"
 
 namespace chromeos {
 namespace {
-
-// Replaces dot "." by "%2E" since it's the path separater of base::Value.  Also
-// replaces "%" by "%25" for unescaping.
-void EscapeDisplayName(const std::string& name, std::string* escaped) {
-  DCHECK(escaped);
-  std::string middle;
-  ReplaceChars(name, "%", "%25", &middle);
-  ReplaceChars(middle, ".", "%2E", escaped);
-}
-
-// Unescape %-encoded characters.
-std::string UnescapeDisplayName(const std::string& name) {
-  url_canon::RawCanonOutputT<char16> decoded;
-  url_util::DecodeURLEscapeSequences(name.data(), name.size(), &decoded);
-  // Display names are ASCII-only.
-  return UTF16ToASCII(string16(decoded.data(), decoded.length()));
-}
 
 // This kind of boilerplates should be done by base::JSONValueConverter but it
 // doesn't support classes like gfx::Insets for now.
@@ -70,9 +51,8 @@ void InsetsToValue(const gfx::Insets& insets, base::DictionaryValue* value) {
   value->SetInteger("right", insets.right());
 }
 
-ash::internal::MultiDisplayManager* GetDisplayManager() {
-  return static_cast<ash::internal::MultiDisplayManager*>(
-      aura::Env::GetInstance()->display_manager());
+ash::internal::DisplayManager* GetDisplayManager() {
+  return ash::Shell::GetInstance()->display_manager();
 }
 
 // Returns true id the current user can write display preferences to
@@ -85,17 +65,18 @@ bool IsValidUser() {
           !user_manager->IsLoggedInAsStub());
 }
 
-void NotifyDisplayLayoutChanged(PrefService* pref_service) {
+void NotifyDisplayLayoutChanged() {
+  PrefService* local_state = g_browser_process->local_state();
   ash::DisplayController* display_controller =
       ash::Shell::GetInstance()->display_controller();
 
   ash::DisplayLayout default_layout(
-      static_cast<ash::DisplayLayout::Position>(pref_service->GetInteger(
+      static_cast<ash::DisplayLayout::Position>(local_state->GetInteger(
           prefs::kSecondaryDisplayLayout)),
-      pref_service->GetInteger(prefs::kSecondaryDisplayOffset));
+      local_state->GetInteger(prefs::kSecondaryDisplayOffset));
   display_controller->SetDefaultDisplayLayout(default_layout);
 
-  const base::DictionaryValue* layouts = pref_service->GetDictionary(
+  const base::DictionaryValue* layouts = local_state->GetDictionary(
       prefs::kSecondaryDisplays);
   for (base::DictionaryValue::key_iterator it = layouts->begin_keys();
        it != layouts->end_keys(); ++it) {
@@ -111,14 +92,17 @@ void NotifyDisplayLayoutChanged(PrefService* pref_service) {
       continue;
     }
 
-    display_controller->SetLayoutForDisplayName(
-        UnescapeDisplayName(*it), layout);
+    int64 id = gfx::Display::kInvalidDisplayID;
+    if (!base::StringToInt64(*it, &id) || id == gfx::Display::kInvalidDisplayID)
+      continue;
+    display_controller->SetLayoutForDisplayId(id, layout);
   }
 }
 
 void NotifyDisplayOverscans() {
   PrefService* local_state = g_browser_process->local_state();
-  ash::internal::MultiDisplayManager* display_manager = GetDisplayManager();
+  ash::DisplayController* display_controller =
+      ash::Shell::GetInstance()->display_controller();
 
   const base::DictionaryValue* overscans = local_state->GetDictionary(
       prefs::kDisplayOverscans);
@@ -142,28 +126,26 @@ void NotifyDisplayOverscans() {
       continue;
     }
 
-    display_manager->SetOverscanInsets(display_id, insets);
+    display_controller->SetOverscanInsets(display_id, insets);
   }
 }
 
 }  // namespace
 
-void RegisterDisplayPrefs(PrefService* pref_service) {
+void RegisterDisplayLocalStatePrefs(PrefService* local_state) {
   // The default secondary display layout.
-  pref_service->RegisterIntegerPref(prefs::kSecondaryDisplayLayout,
-                                    static_cast<int>(ash::DisplayLayout::RIGHT),
-                                    PrefService::UNSYNCABLE_PREF);
+  local_state->RegisterIntegerPref(prefs::kSecondaryDisplayLayout,
+                                   static_cast<int>(ash::DisplayLayout::RIGHT),
+                                   PrefService::UNSYNCABLE_PREF);
   // The default offset of the secondary display position from the primary
   // display.
-  pref_service->RegisterIntegerPref(prefs::kSecondaryDisplayOffset,
-                                    0,
-                                    PrefService::UNSYNCABLE_PREF);
+  local_state->RegisterIntegerPref(prefs::kSecondaryDisplayOffset,
+                                   0,
+                                   PrefService::UNSYNCABLE_PREF);
   // Per-display preference.
-  pref_service->RegisterDictionaryPref(prefs::kSecondaryDisplays,
-                                       PrefService::UNSYNCABLE_PREF);
-}
+  local_state->RegisterDictionaryPref(prefs::kSecondaryDisplays,
+                                      PrefService::UNSYNCABLE_PREF);
 
-void RegisterDisplayLocalStatePrefs(PrefService* local_state) {
   // Primary output name.
   local_state->RegisterInt64Pref(prefs::kPrimaryDisplayID,
                                  gfx::Display::kInvalidDisplayID,
@@ -174,20 +156,17 @@ void RegisterDisplayLocalStatePrefs(PrefService* local_state) {
                                       PrefService::UNSYNCABLE_PREF);
 }
 
-void SetDisplayLayoutPref(PrefService* pref_service,
-                          const gfx::Display& display,
+void SetDisplayLayoutPref(const gfx::Display& display,
                           int layout,
                           int offset) {
+  PrefService* local_state = g_browser_process->local_state();
+
   {
-    DictionaryPrefUpdate update(pref_service, prefs::kSecondaryDisplays);
+    DictionaryPrefUpdate update(local_state, prefs::kSecondaryDisplays);
     ash::DisplayLayout display_layout(
         static_cast<ash::DisplayLayout::Position>(layout), offset);
 
-    aura::DisplayManager* display_manager =
-        aura::Env::GetInstance()->display_manager();
-    std::string name;
-    EscapeDisplayName(display_manager->GetDisplayNameFor(display),
-                      &name);
+    std::string name = base::Int64ToString(display.id());
     DCHECK(!name.empty());
 
     base::DictionaryValue* pref_data = update.Get();
@@ -201,10 +180,10 @@ void SetDisplayLayoutPref(PrefService* pref_service,
       pref_data->Set(name, layout_value.release());
   }
 
-  pref_service->SetInteger(prefs::kSecondaryDisplayLayout, layout);
-  pref_service->SetInteger(prefs::kSecondaryDisplayOffset, offset);
+  local_state->SetInteger(prefs::kSecondaryDisplayLayout, layout);
+  local_state->SetInteger(prefs::kSecondaryDisplayOffset, offset);
 
-  NotifyDisplayLayoutChanged(pref_service);
+  NotifyDisplayLayoutChanged();
 }
 
 void StorePrimaryDisplayIDPref(int64 display_id) {
@@ -243,14 +222,11 @@ void SetPrimaryDisplayIDPref(int64 display_id) {
       display_id);
 }
 
-void NotifyDisplayPrefChanged(PrefService* pref_service) {
-  NotifyDisplayLayoutChanged(pref_service);
-}
-
 void NotifyDisplayLocalStatePrefChanged() {
   PrefService* local_state = g_browser_process->local_state();
   ash::Shell::GetInstance()->display_controller()->SetPrimaryDisplayId(
       local_state->GetInt64(prefs::kPrimaryDisplayID));
+  NotifyDisplayLayoutChanged();
   NotifyDisplayOverscans();
 }
 

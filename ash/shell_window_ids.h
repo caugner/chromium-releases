@@ -36,12 +36,11 @@ const int kShellWindowId_UnparentedControlContainer = 3;
 // The desktop background window.
 const int kShellWindowId_DesktopBackgroundContainer = 4;
 
-// TODO(sky): rename kShellWindowId_DefaultContainer when Workspace2 is the
-// default.
+// TODO(sky): rename kShellWindowId_DefaultContainer.
 
 // The container for standard top-level windows.
-// WARNING: when Workspace2 is enabled the only children of
-// kShellWindowId_DefaultContainer are kShellWindowId_WorkspaceContainer.
+// WARNING: the only children of kShellWindowId_DefaultContainer are
+// kShellWindowId_WorkspaceContainer.
 const int kShellWindowId_DefaultContainer = 5;
 
 // Used by Worskpace2 for each workspace. Contains standard top-level windows.
@@ -94,7 +93,7 @@ const int kShellWindowId_SettingBubbleContainer = 19;
 // region selector for partial screenshots.
 const int kShellWindowId_OverlayContainer = 20;
 
-// ID of the window created by PhantomWindowController.
+// ID of the window created by PhantomWindowController or DragWindowController.
 const int kShellWindowId_PhantomWindow = 21;
 
 // The topmost container, used for power off animation.

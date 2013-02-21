@@ -22,11 +22,13 @@ namespace WebKit {
 class WebDataSource;
 class WebFrame;
 class WebFormElement;
+class WebGestureEvent;
 class WebMediaPlayerClient;
 class WebMouseEvent;
 class WebNode;
 class WebTouchEvent;
 class WebURL;
+struct WebContextMenuData;
 struct WebURLError;
 }
 
@@ -48,8 +50,6 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Listener,
   // These match the WebKit API notifications
   virtual void DidStartLoading() {}
   virtual void DidStopLoading() {}
-  virtual void DidChangeIcon(WebKit::WebFrame* frame,
-                             WebKit::WebIconURL::Type) {}
   virtual void DidFinishDocumentLoad(WebKit::WebFrame* frame) {}
   virtual void DidFailLoad(WebKit::WebFrame* frame,
                            const WebKit::WebURLError& error) {}
@@ -82,10 +82,14 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Listener,
   virtual void ZoomLevelChanged() {};
   virtual void DidChangeScrollOffset(WebKit::WebFrame* frame) {}
   virtual void DraggableRegionsChanged(WebKit::WebFrame* frame) {}
+  virtual void DidRequestShowContextMenu(
+      WebKit::WebFrame* frame,
+      const WebKit::WebContextMenuData& data) {}
 
   // These match the RenderView methods.
   virtual void DidHandleMouseEvent(const WebKit::WebMouseEvent& event) {}
   virtual void DidHandleTouchEvent(const WebKit::WebTouchEvent& event) {}
+  virtual void DidHandleGestureEvent(const WebKit::WebGestureEvent& event) {}
   virtual void DidCreatePepperPlugin(RendererPpapiHost* host) {}
 
   // These match incoming IPCs.
@@ -102,7 +106,7 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Listener,
   // IPC::Sender implementation.
   virtual bool Send(IPC::Message* message) OVERRIDE;
 
-  RenderView* render_view();
+  RenderView* render_view() const;
   int routing_id() { return routing_id_; }
 
  private:

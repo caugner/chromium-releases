@@ -46,7 +46,7 @@ class UserImageManagerTest : public CrosInProcessBrowserTest,
     user_image_manager_ = UserManager::Get()->GetUserImageManager();
     local_state_ = g_browser_process->local_state();
     // No migration delay for testing.
-    UserImageManagerImpl::user_image_migration_delay_ms = 0;
+    UserImageManagerImpl::user_image_migration_delay_sec = 0;
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
@@ -72,7 +72,7 @@ class UserImageManagerTest : public CrosInProcessBrowserTest,
   // Adds given user to Local State, if not there.
   void AddUser(const std::string& username) {
     ListPrefUpdate users_pref(local_state_, "LoggedInUsers");
-    users_pref->AppendIfNotPresent(base::Value::CreateStringValue(username));
+    users_pref->AppendIfNotPresent(new base::StringValue(username));
   }
 
   // Logs in |username|.
@@ -96,7 +96,7 @@ class UserImageManagerTest : public CrosInProcessBrowserTest,
     image_properties->Set(
         "index", base::Value::CreateIntegerValue(image_index));
     image_properties->Set(
-        "path" , base::Value::CreateStringValue(image_path.value()));
+        "path" , new base::StringValue(image_path.value()));
     images_pref->SetWithoutPathExpansion(username, image_properties);
   }
 
@@ -154,7 +154,7 @@ class UserImageManagerTest : public CrosInProcessBrowserTest,
                         int resource_id) {
     FilePath image_path = GetUserImagePath(username, "png");
     scoped_refptr<base::RefCountedStaticMemory> image_data(
-        ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
+        ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
             resource_id, ui::SCALE_FACTOR_100P));
     int written = file_util::WriteFile(
         image_path,

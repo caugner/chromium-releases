@@ -8,10 +8,10 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "base/test/scoped_path_override.h"
 #include "base/test/test_shortcut_win.h"
@@ -26,6 +26,7 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/product.h"
+#include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -52,7 +53,7 @@ class CreateVisualElementsManifestTest : public testing::Test {
   }
 
   // The temporary directory used to contain the test operations.
-  ScopedTempDir test_dir_;
+  base::ScopedTempDir test_dir_;
 
   // A dummy version number used to create the version directory.
   Version version_;
@@ -77,9 +78,16 @@ class InstallShortcutTest : public testing::Test {
     chrome_exe_ = temp_dir_.path().Append(installer::kChromeExe);
     EXPECT_EQ(0, file_util::WriteFile(chrome_exe_, "", 0));
 
+    ShellUtil::ShortcutProperties chrome_properties(ShellUtil::CURRENT_USER);
+    product_->AddDefaultShortcutProperties(chrome_exe_, &chrome_properties);
+
     expected_properties_.set_target(chrome_exe_);
+    expected_properties_.set_icon(chrome_properties.icon,
+                                  chrome_properties.icon_index);
+    expected_properties_.set_app_id(chrome_properties.app_id);
+    expected_properties_.set_description(chrome_properties.description);
     expected_properties_.set_dual_mode(false);
-    expected_start_menu_properties_.set_target(chrome_exe_);
+    expected_start_menu_properties_ = expected_properties_;
     expected_start_menu_properties_.set_dual_mode(true);
 
     prefs_.reset(GetFakeMasterPrefs(false, false, false));
@@ -177,13 +185,13 @@ class InstallShortcutTest : public testing::Test {
   scoped_ptr<installer::Product> product_;
   scoped_ptr<installer::MasterPreferences> prefs_;
 
-  ScopedTempDir temp_dir_;
-  ScopedTempDir fake_user_desktop_;
-  ScopedTempDir fake_common_desktop_;
-  ScopedTempDir fake_user_quick_launch_;
-  ScopedTempDir fake_default_user_quick_launch_;
-  ScopedTempDir fake_start_menu_;
-  ScopedTempDir fake_common_start_menu_;
+  base::ScopedTempDir temp_dir_;
+  base::ScopedTempDir fake_user_desktop_;
+  base::ScopedTempDir fake_common_desktop_;
+  base::ScopedTempDir fake_user_quick_launch_;
+  base::ScopedTempDir fake_default_user_quick_launch_;
+  base::ScopedTempDir fake_start_menu_;
+  base::ScopedTempDir fake_common_start_menu_;
   scoped_ptr<base::ScopedPathOverride> user_desktop_override_;
   scoped_ptr<base::ScopedPathOverride> common_desktop_override_;
   scoped_ptr<base::ScopedPathOverride> user_quick_launch_override_;

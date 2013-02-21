@@ -75,21 +75,21 @@ class XmppConnectionTest : public testing::Test {
  protected:
   XmppConnectionTest()
       : mock_pre_xmpp_auth_(new MockPreXmppAuth()),
-        url_request_context_getter_(new TestURLRequestContextGetter(
+        url_request_context_getter_(new net::TestURLRequestContextGetter(
             message_loop_.message_loop_proxy())) {}
 
   virtual ~XmppConnectionTest() {}
 
   virtual void TearDown() {
     // Clear out any messages posted by XmppConnection's destructor.
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
   }
 
   // Needed by XmppConnection.
   MessageLoop message_loop_;
   MockXmppConnectionDelegate mock_xmpp_connection_delegate_;
   scoped_ptr<MockPreXmppAuth> mock_pre_xmpp_auth_;
-  scoped_refptr<TestURLRequestContextGetter> url_request_context_getter_;
+  scoped_refptr<net::TestURLRequestContextGetter> url_request_context_getter_;
 };
 
 TEST_F(XmppConnectionTest, CreateDestroy) {
@@ -98,6 +98,7 @@ TEST_F(XmppConnectionTest, CreateDestroy) {
                                  &mock_xmpp_connection_delegate_, NULL);
 }
 
+#if !defined(_MSC_VER) || _MSC_VER < 1700 // http://crbug.com/158570
 TEST_F(XmppConnectionTest, ImmediateFailure) {
   // ChromeAsyncSocket::Connect() will always return false since we're
   // not setting a valid host, but this gets bubbled up as ERROR_NONE
@@ -111,7 +112,7 @@ TEST_F(XmppConnectionTest, ImmediateFailure) {
 
   // We need to do this *before* |xmpp_connection| gets destroyed or
   // our delegate won't be called.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 TEST_F(XmppConnectionTest, PreAuthFailure) {
@@ -130,7 +131,7 @@ TEST_F(XmppConnectionTest, PreAuthFailure) {
 
   // We need to do this *before* |xmpp_connection| gets destroyed or
   // our delegate won't be called.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 TEST_F(XmppConnectionTest, FailureAfterPreAuth) {
@@ -149,7 +150,7 @@ TEST_F(XmppConnectionTest, FailureAfterPreAuth) {
 
   // We need to do this *before* |xmpp_connection| gets destroyed or
   // our delegate won't be called.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 TEST_F(XmppConnectionTest, RaisedError) {
@@ -163,6 +164,7 @@ TEST_F(XmppConnectionTest, RaisedError) {
   xmpp_connection.weak_xmpp_client_->
       SignalStateChange(buzz::XmppEngine::STATE_CLOSED);
 }
+#endif
 
 TEST_F(XmppConnectionTest, Connect) {
   base::WeakPtr<talk_base::Task> weak_ptr;
@@ -203,6 +205,7 @@ TEST_F(XmppConnectionTest, MultipleConnect) {
   }, "more than once");
 }
 
+#if !defined(_MSC_VER) || _MSC_VER < 1700 // http://crbug.com/158570
 TEST_F(XmppConnectionTest, ConnectThenError) {
   base::WeakPtr<talk_base::Task> weak_ptr;
   EXPECT_CALL(mock_xmpp_connection_delegate_, OnConnect(_)).
@@ -222,6 +225,7 @@ TEST_F(XmppConnectionTest, ConnectThenError) {
       SignalStateChange(buzz::XmppEngine::STATE_CLOSED);
   EXPECT_EQ(NULL, weak_ptr.get());
 }
+#endif
 
 // We don't destroy XmppConnection's task pump on destruction, but it
 // should still not run any more tasks.
@@ -243,7 +247,7 @@ TEST_F(XmppConnectionTest, TasksDontRunAfterXmppConnectionDestructor) {
   }
 
   // This should destroy |task_pump|, but |task| still shouldn't run.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 }  // namespace notifier

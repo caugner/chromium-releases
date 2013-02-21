@@ -12,8 +12,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/download/download_util.h"
+#include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/platform_app_launcher.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/intents/cws_intents_registry_factory.h"
@@ -34,7 +35,6 @@
 #include "chrome/browser/ui/intents/web_intent_icon_loader.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/url_constants.h"
@@ -43,12 +43,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_intents_dispatcher.h"
-#include "ipc/ipc_message.h"
-#include "net/base/load_flags.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_fetcher_delegate.h"
-#include "skia/ext/image_operations.h"
-#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image.h"
 
@@ -74,37 +68,6 @@ CWSIntentsRegistry* GetCWSIntentsRegistry(Profile* profile) {
   return CWSIntentsRegistryFactory::GetForProfile(profile);
 }
 
-// Self-deleting trampoline that forwards A URLFetcher response to a callback.
-class URLFetcherTrampoline : public net::URLFetcherDelegate {
- public:
-  typedef base::Callback<void(const net::URLFetcher* source)>
-      ForwardingCallback;
-
-  explicit URLFetcherTrampoline(const ForwardingCallback& callback);
-  ~URLFetcherTrampoline();
-
-  // net::URLFetcherDelegate implementation.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
-
- private:
-  // Fowarding callback from |OnURLFetchComplete|.
-  ForwardingCallback callback_;
-};
-
-URLFetcherTrampoline::URLFetcherTrampoline(const ForwardingCallback& callback)
-    : callback_(callback) {
-}
-
-URLFetcherTrampoline::~URLFetcherTrampoline() {
-}
-
-void URLFetcherTrampoline::OnURLFetchComplete(
-    const net::URLFetcher* source) {
-  DCHECK(!callback_.is_null());
-  callback_.Run(source);
-  delete source;
-  delete this;
-}
 class SourceWindowObserver : content::WebContentsObserver {
  public:
   SourceWindowObserver(content::WebContents* web_contents,
@@ -238,17 +201,17 @@ void WebIntentPickerController::ShowDialog(DefaultsUsage suppress_defaults) {
   // in-flight dispatches since we don't create the picker
   // in this method, but only after calling the registry.
   if (picker_shown_) {
-    intents_dispatcher_->SendReplyMessage(
+    intents_dispatcher_->SendReply(webkit_glue::WebIntentReply(
         webkit_glue::WEB_INTENT_REPLY_FAILURE,
-        ASCIIToUTF16("Simultaneous intent invocation."));
+        ASCIIToUTF16("Simultaneous intent invocation.")));
     return;
   }
 
   // TODO(binji): Figure out what to do when intents are invoked from incognito
   // mode.
   if (profile_->IsOffTheRecord()) {
-    intents_dispatcher_->SendReplyMessage(
-        webkit_glue::WEB_INTENT_REPLY_FAILURE, string16());
+    intents_dispatcher_->SendReply(webkit_glue::WebIntentReply(
+        webkit_glue::WEB_INTENT_REPLY_FAILURE, string16()));
     return;
   }
 
@@ -312,7 +275,8 @@ void WebIntentPickerController::OnServiceChosen(
     DefaultsUsage suppress_defaults) {
   web_intents::RecordServiceInvoke(uma_bucket_);
   uma_reporter_->ResetServiceActiveTimer();
-  ExtensionService* extension_service = profile_->GetExtensionService();
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   DCHECK(extension_service);
 
 #if defined(TOOLKIT_VIEWS)
@@ -364,21 +328,21 @@ void WebIntentPickerController::OnServiceChosen(
     }
 
     case webkit_glue::WebIntentServiceData::DISPOSITION_WINDOW: {
-      TabContents* contents = chrome::TabContentsFactory(
-          profile_,
-          tab_util::GetSiteInstanceForNewTab(profile_, url),
-          MSG_ROUTING_NONE, NULL);
+      content::WebContents* contents = content::WebContents::Create(
+          content::WebContents::CreateParams(
+              profile_, tab_util::GetSiteInstanceForNewTab(profile_, url)));
+      WebIntentPickerController::CreateForWebContents(contents);
 
-      // Let the controller for the target TabContents know that it is hosting a
+      // Let the controller for the target WebContents know that it is hosting a
       // web intents service. Suppress if we're not showing the
       // use-another-service button.
       if (picker_model_->show_use_another_service()) {
-        WebIntentPickerController::FromWebContents(contents->web_contents())->
+        WebIntentPickerController::FromWebContents(contents)->
             SetWindowDispositionSource(web_contents_, intents_dispatcher_);
       }
 
-      intents_dispatcher_->DispatchIntent(contents->web_contents());
-      service_tab_ = contents->web_contents();
+      intents_dispatcher_->DispatchIntent(contents);
+      service_tab_ = contents;
 
       // This call performs all the tab strip manipulation, notifications, etc.
       // Since we're passing in a target_contents, it assumes that we will
@@ -407,10 +371,10 @@ void WebIntentPickerController::OnServiceChosen(
 content::WebContents*
 WebIntentPickerController::CreateWebContentsForInlineDisposition(
     Profile* profile, const GURL& url) {
+  content::WebContents::CreateParams create_params(
+      profile, tab_util::GetSiteInstanceForNewTab(profile, url));
   content::WebContents* web_contents = content::WebContents::Create(
-      profile,
-      tab_util::GetSiteInstanceForNewTab(profile, url),
-      MSG_ROUTING_NONE, NULL);
+      create_params);
   intents_dispatcher_->DispatchIntent(web_contents);
   return web_contents;
 }
@@ -483,8 +447,8 @@ void WebIntentPickerController::OnUserCancelledPickerDialog() {
   if (!intents_dispatcher_)
     return;
 
-  intents_dispatcher_->SendReplyMessage(
-      webkit_glue::WEB_INTENT_PICKER_CANCELLED, string16());
+  intents_dispatcher_->SendReply(webkit_glue::WebIntentReply(
+      webkit_glue::WEB_INTENT_PICKER_CANCELLED, string16()));
   web_intents::RecordPickerCancel(uma_bucket_);
 
   ClosePicker();
@@ -511,7 +475,7 @@ void WebIntentPickerController::OnClosing() {
 void WebIntentPickerController::OnExtensionDownloadStarted(
     const std::string& id,
     content::DownloadItem* item) {
-  download_util::SetShouldShowInShelf(item, false);
+  DownloadItemModel(item).SetShouldShowInShelf(false);
   download_id_ = item->GetGlobalId();
   picker_model_->UpdateExtensionDownloadState(item);
 }
@@ -590,20 +554,20 @@ void WebIntentPickerController::OnSendReturnMessage(
 
   if (service_tab_ &&
       reply_type != webkit_glue::WEB_INTENT_SERVICE_CONTENTS_CLOSED) {
-    Browser* browser = browser::FindBrowserWithWebContents(service_tab_);
+    Browser* browser = chrome::FindBrowserWithWebContents(service_tab_);
     if (browser) {
       int index = browser->tab_strip_model()->GetIndexOfWebContents(
           service_tab_);
-      browser->tab_strip_model()->CloseTabContentsAt(
+      browser->tab_strip_model()->CloseWebContentsAt(
           index, TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
 
       // Activate source tab.
       Browser* source_browser =
-          browser::FindBrowserWithWebContents(web_contents_);
+          chrome::FindBrowserWithWebContents(web_contents_);
       if (source_browser) {
         int source_index = source_browser->tab_strip_model()->
             GetIndexOfWebContents(web_contents_);
-        chrome::ActivateTabAt(source_browser, source_index, false);
+        source_browser->tab_strip_model()->ActivateTabAt(source_index, false);
       }
     }
     service_tab_ = NULL;
@@ -646,9 +610,9 @@ void WebIntentPickerController::OnWebIntentServicesAvailableForExplicitIntent(
   }
 
   // No acceptable extension. The intent cannot be dispatched.
-  intents_dispatcher_->SendReplyMessage(
+  intents_dispatcher_->SendReply(webkit_glue::WebIntentReply(
       webkit_glue::WEB_INTENT_REPLY_FAILURE,  ASCIIToUTF16(
-          "Explicit extension URL is not available."));
+          "Explicit extension URL is not available.")));
 
   AsyncOperationFinished();
 }
@@ -688,7 +652,7 @@ void WebIntentPickerController::RegistryCallsCompleted() {
 void WebIntentPickerController::OnCWSIntentServicesAvailable(
     const CWSIntentsRegistry::IntentExtensionList& extensions) {
   ExtensionServiceInterface* extension_service =
-      profile_->GetExtensionService();
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
 
   std::vector<WebIntentPickerModel::SuggestedExtension> suggestions;
   for (size_t i = 0; i < extensions.size(); ++i) {
@@ -701,20 +665,7 @@ void WebIntentPickerController::OnCWSIntentServicesAvailable(
     suggestions.push_back(WebIntentPickerModel::SuggestedExtension(
         info.name, info.id, info.average_rating));
 
-    pending_async_count_++;
-    net::URLFetcher* icon_url_fetcher = net::URLFetcher::Create(
-        0,
-        info.icon_url,
-        net::URLFetcher::GET,
-        new URLFetcherTrampoline(
-            base::Bind(
-                &WebIntentPickerController::OnExtensionIconURLFetchComplete,
-                weak_ptr_factory_.GetWeakPtr(), info.id)));
-
-    icon_url_fetcher->SetLoadFlags(
-        net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);
-    icon_url_fetcher->SetRequestContext(profile_->GetRequestContext());
-    icon_url_fetcher->Start();
+    icon_loader_->LoadExtensionIcon(info.icon_url, info.id);
   }
 
   picker_model_->AddSuggestedExtensions(suggestions);
@@ -724,50 +675,6 @@ void WebIntentPickerController::OnCWSIntentServicesAvailable(
   OnIntentDataArrived();
 }
 
-void WebIntentPickerController::OnExtensionIconURLFetchComplete(
-    const std::string& extension_id, const net::URLFetcher* source) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  if (source->GetResponseCode() != 200) {
-    AsyncOperationFinished();
-    return;
-  }
-
-  scoped_ptr<std::string> response(new std::string);
-  if (!source->GetResponseAsString(response.get())) {
-    AsyncOperationFinished();
-    return;
-  }
-
-  // I'd like to have the worker thread post a task directly to the UI thread
-  // to call OnExtensionIcon[Un]Available, but this doesn't work: To do so
-  // would require DecodeExtensionIconAndResize to be a member function (so it
-  // has access to |this|) but a weak pointer cannot be dereferenced on a
-  // thread other than the thread where the WeakPtrFactory was created. Since
-  // the stored |this| pointer is weak, DecodeExtensionIconAndResize asserts
-  // before it even starts.
-  //
-  // Instead, I package up the callbacks that I want the worker thread to call,
-  // and make DecodeExtensionIconAndResize static. The stored weak |this|
-  // pointers are not dereferenced until invocation (on the UI thread).
-  ExtensionIconAvailableCallback available_callback =
-      base::Bind(
-          &WebIntentPickerController::OnExtensionIconAvailable,
-          weak_ptr_factory_.GetWeakPtr(),
-          extension_id);
-  base::Closure unavailable_callback =
-      base::Bind(
-          &WebIntentPickerController::OnExtensionIconUnavailable,
-          weak_ptr_factory_.GetWeakPtr(),
-          extension_id);
-
-  // Decode PNG and resize on worker thread.
-  content::BrowserThread::PostBlockingPoolTask(
-      FROM_HERE,
-      base::Bind(&DecodeExtensionIconAndResize,
-                 base::Passed(&response),
-                 available_callback,
-                 unavailable_callback));
-}
 
 void WebIntentPickerController::OnIntentDataArrived() {
   DCHECK(picker_model_.get());
@@ -799,46 +706,6 @@ void WebIntentPickerController::Reset() {
   ConstrainedWindowTabHelper* constrained_window_tab_helper =
       ConstrainedWindowTabHelper::FromWebContents(web_contents_);
   constrained_window_tab_helper->BlockTabContent(false);
-}
-
-// static
-void WebIntentPickerController::DecodeExtensionIconAndResize(
-    scoped_ptr<std::string> icon_response,
-    const ExtensionIconAvailableCallback& callback,
-    const base::Closure& unavailable_callback) {
-  SkBitmap icon_bitmap;
-  if (gfx::PNGCodec::Decode(
-        reinterpret_cast<const unsigned char*>(icon_response->data()),
-        icon_response->length(),
-        &icon_bitmap)) {
-    SkBitmap resized_icon = skia::ImageOperations::Resize(
-        icon_bitmap,
-        skia::ImageOperations::RESIZE_BEST,
-        gfx::kFaviconSize, gfx::kFaviconSize);
-    gfx::Image icon_image(resized_icon);
-
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(callback, icon_image));
-  } else {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
-        unavailable_callback);
-  }
-}
-
-void WebIntentPickerController::OnExtensionIconAvailable(
-    const std::string& extension_id,
-    const gfx::Image& icon_image) {
-  picker_model_->SetSuggestedExtensionIconWithId(extension_id, icon_image);
-  AsyncOperationFinished();
-}
-
-void WebIntentPickerController::OnExtensionIconUnavailable(
-    const std::string& extension_id) {
-  AsyncOperationFinished();
 }
 
 void WebIntentPickerController::OnShowExtensionInstallDialog(
@@ -938,16 +805,15 @@ void WebIntentPickerController::LocationBarPickerButtonClicked() {
   DCHECK(web_contents_);
   if (window_disposition_source_ && source_intents_dispatcher_) {
     Browser* service_browser =
-        browser::FindBrowserWithWebContents(web_contents_);
+        chrome::FindBrowserWithWebContents(web_contents_);
     if (!service_browser) return;
 
-    TabContents* client_tab =
-        TabContents::FromWebContents(window_disposition_source_);
     Browser* client_browser =
-        browser::FindBrowserWithWebContents(window_disposition_source_);
-    if (!client_browser || !client_tab) return;
-    int client_index =
-        client_browser->tab_strip_model()->GetIndexOfTabContents(client_tab);
+        chrome::FindBrowserWithWebContents(window_disposition_source_);
+    if (!client_browser)
+      return;
+    int client_index = client_browser->tab_strip_model()->GetIndexOfWebContents(
+        window_disposition_source_);
     DCHECK(client_index != TabStripModel::kNoTab);
 
     source_intents_dispatcher_->ResetDispatch();
@@ -982,9 +848,9 @@ void WebIntentPickerController::AsyncOperationFinished() {
 void WebIntentPickerController::InvokeServiceWithSelection(
     const webkit_glue::WebIntentServiceData& service) {
   if (picker_shown_) {
-    intents_dispatcher_->SendReplyMessage(
+    intents_dispatcher_->SendReply(webkit_glue::WebIntentReply(
         webkit_glue::WEB_INTENT_REPLY_FAILURE,
-        ASCIIToUTF16("Simultaneous intent invocation."));
+        ASCIIToUTF16("Simultaneous intent invocation.")));
     return;
   }
 

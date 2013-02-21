@@ -5,15 +5,18 @@
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 
 #include "base/logging.h"
+#include "base/prefs/public/pref_service_base.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -59,8 +62,16 @@ bool ShouldOpenAll(gfx::NativeWindow parent,
 void OpenAllImpl(const BookmarkNode* node,
                  WindowOpenDisposition initial_disposition,
                  content::PageNavigator** navigator,
-                 bool* opened_url) {
+                 bool* opened_url,
+                 content::BrowserContext* browser_context) {
   if (node->is_url()) {
+    // When |initial_disposition| is OFF_THE_RECORD, a node which can't be
+    // opened in incognito window, it is detected using |browser_context|, is
+    // not opened.
+    if (initial_disposition == OFF_THE_RECORD &&
+        !IsURLAllowedInIncognito(node->url(), browser_context))
+        return;
+
     WindowOpenDisposition disposition;
     if (*opened_url)
       disposition = NEW_BACKGROUND_TAB;
@@ -72,15 +83,18 @@ void OpenAllImpl(const BookmarkNode* node,
     if (!*opened_url) {
       *opened_url = true;
       // We opened the first URL which may have opened a new window or clobbered
-      // the current page, reset the navigator just to be sure.
-      *navigator = opened_tab;
+      // the current page, reset the navigator just to be sure. |opened_tab| may
+      // be NULL in tests.
+      if (opened_tab)
+        *navigator = opened_tab;
     }
   } else {
     // For folders only open direct children.
     for (int i = 0; i < node->child_count(); ++i) {
       const BookmarkNode* child_node = node->GetChild(i);
       if (child_node->is_url())
-        OpenAllImpl(child_node, initial_disposition, navigator, opened_url);
+        OpenAllImpl(child_node, initial_disposition, navigator, opened_url,
+                    browser_context);
     }
   }
 }
@@ -126,22 +140,25 @@ void GetURLsForOpenTabs(Browser* browser,
 void OpenAll(gfx::NativeWindow parent,
              content::PageNavigator* navigator,
              const std::vector<const BookmarkNode*>& nodes,
-             WindowOpenDisposition initial_disposition) {
+             WindowOpenDisposition initial_disposition,
+             content::BrowserContext* browser_context) {
   if (!ShouldOpenAll(parent, nodes))
     return;
 
   bool opened_url = false;
   for (size_t i = 0; i < nodes.size(); ++i)
-    OpenAllImpl(nodes[i], initial_disposition, &navigator, &opened_url);
+    OpenAllImpl(nodes[i], initial_disposition, &navigator, &opened_url,
+                browser_context);
 }
 
 void OpenAll(gfx::NativeWindow parent,
              content::PageNavigator* navigator,
              const BookmarkNode* node,
-             WindowOpenDisposition initial_disposition) {
+             WindowOpenDisposition initial_disposition,
+             content::BrowserContext* browser_context) {
   std::vector<const BookmarkNode*> nodes;
   nodes.push_back(node);
-  OpenAll(parent, navigator, nodes, initial_disposition);
+  OpenAll(parent, navigator, nodes, initial_disposition, browser_context);
 }
 
 bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
@@ -159,8 +176,9 @@ void ShowBookmarkAllTabsDialog(Browser* browser) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
   DCHECK(model && model->IsLoaded());
 
+  const BookmarkNode* parent = model->GetParentForNewNodes();
   BookmarkEditor::EditDetails details =
-      BookmarkEditor::EditDetails::AddFolder(model->GetParentForNewNodes(), -1);
+      BookmarkEditor::EditDetails::AddFolder(parent, parent->child_count());
   GetURLsForOpenTabs(browser, &(details.urls));
   DCHECK(!details.urls.empty());
 
@@ -181,6 +199,14 @@ void GetURLAndTitleToBookmark(content::WebContents* web_contents,
                               string16* title) {
   *url = web_contents->GetURL();
   *title = web_contents->GetTitle();
+}
+
+void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context) {
+  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(browser_context);
+  const bool always_show = !prefs->GetBoolean(prefs::kShowBookmarkBar);
+
+  // The user changed when the bookmark bar is shown, update the preferences.
+  prefs->SetBoolean(prefs::kShowBookmarkBar, always_show);
 }
 
 }  // namespace chrome

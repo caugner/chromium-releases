@@ -30,6 +30,10 @@ class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public void doUpdateVisitedHistory(String url, boolean isReload) {
+    }
+
+    @Override
     public void onProgressChanged(int progress) {
     }
 
@@ -89,5 +93,26 @@ class NullContentsClient extends AwContentsClient {
     @Override
     public void onFormResubmission(Message dontResend, Message resend) {
         dontResend.sendToTarget();
+    }
+
+    @Override
+    public void onDownloadStart(String url,
+                                String userAgent,
+                                String contentDisposition,
+                                String mimeType,
+                                long contentLength) {
+    }
+
+    @Override
+    public boolean onCreateWindow(boolean isDialog, boolean isUserGesture) {
+        return false;
+    }
+
+    @Override
+    public void onCloseWindow() {
+    }
+
+    @Override
+    public void onRequestFocus() {
     }
 }

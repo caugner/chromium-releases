@@ -4,8 +4,10 @@
 
 #include "chrome/common/extensions/permissions/api_permission.h"
 
+#include "chrome/common/extensions/permissions/bluetooth_device_permission.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
+#include "chrome/common/extensions/permissions/usb_device_permission.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -60,8 +62,8 @@ class SimpleAPIPermission : public APIPermission {
     return true;
   }
 
-  virtual void ToValue(base::Value** value) const OVERRIDE {
-    *value = NULL;
+  virtual scoped_ptr<base::Value> ToValue() const OVERRIDE {
+    return scoped_ptr<base::Value>(NULL);
   }
 
   virtual APIPermission* Clone() const OVERRIDE {
@@ -114,6 +116,10 @@ APIPermission::ID APIPermission::id() const {
 
 const char* APIPermission::name() const {
   return info()->name();
+}
+
+bool APIPermission::ManifestEntryForbidden() const {
+  return false;
 }
 
 PermissionMessage APIPermission::GetMessage_() const {
@@ -233,10 +239,13 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kWebView, "webview", kFlagCannotBeOptional },
 
     // Register private permissions.
+    { APIPermission::kAutoTestPrivate, "autotestPrivate",
+      kFlagCannotBeOptional },
     { APIPermission::kBookmarkManagerPrivate, "bookmarkManagerPrivate",
       kFlagCannotBeOptional },
     { APIPermission::kChromeosInfoPrivate, "chromeosInfoPrivate",
       kFlagCannotBeOptional },
+    { APIPermission::kDial, "dial", kFlagCannotBeOptional },
     { APIPermission::kFileBrowserHandlerInternal, "fileBrowserHandlerInternal",
       kFlagCannotBeOptional },
     { APIPermission::kFileBrowserPrivate, "fileBrowserPrivate",
@@ -323,9 +332,19 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kBluetooth, "bluetooth", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH,
       PermissionMessage::kBluetooth },
+    { APIPermission::kBluetoothDevice, "bluetoothDevices",
+      kFlagNone, 0, PermissionMessage::kNone,
+      &::CreateAPIPermission<BluetoothDevicePermission> },
     { APIPermission::kUsb, "usb", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_USB,
       PermissionMessage::kUsb },
+    { APIPermission::kUsbDevice, "usbDevices",
+      kFlagMustBeOptional, 0, PermissionMessage::kNone,
+      &::CreateAPIPermission<UsbDevicePermission> },
+    { APIPermission::kSystemIndicator, "systemIndicator", kFlagNone,
+      IDS_EXTENSION_PROMPT_WARNING_SYSTEM_INDICATOR,
+      PermissionMessage::kSystemIndicator },
+    { APIPermission::kPointerLock, "pointerLock" },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(PermissionsToRegister); ++i) {

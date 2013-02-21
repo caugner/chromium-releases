@@ -12,8 +12,9 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/features/simple_feature.h"
+#include "extensions/common/error_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace errors = extension_manifest_errors;
@@ -94,7 +95,7 @@ TEST_F(ManifestTest, Extension) {
   EXPECT_TRUE(error.empty());
   ASSERT_EQ(2u, warnings.size());
   {
-    Feature feature;
+    SimpleFeature feature;
     feature.set_name("background_page");
     feature.set_max_manifest_version(1);
     EXPECT_EQ(

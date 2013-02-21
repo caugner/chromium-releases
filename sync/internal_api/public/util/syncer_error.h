@@ -1,9 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_UTIL_SYNCER_ERROR_H_
 #define SYNC_INTERNAL_API_PUBLIC_UTIL_SYNCER_ERROR_H_
+
+#include "sync/base/sync_export.h"
 
 namespace syncer {
 
@@ -18,7 +20,6 @@ namespace syncer {
 // it makes refactoring easier.
 enum SyncerError {
   UNSET = 0,       // Default value.
-  DIRECTORY_LOOKUP_FAILED,  // Local directory lookup failure.
   CANNOT_DO_WORK,  // A model worker could not process a work item.
 
   NETWORK_CONNECTION_UNAVAILABLE,  // Connectivity failure.
@@ -28,18 +29,21 @@ enum SyncerError {
 
   // Based on values returned by server.  Most are defined in sync.proto.
   SERVER_RETURN_INVALID_CREDENTIAL,
+  FIRST_SERVER_RETURN_VALUE = SERVER_RETURN_INVALID_CREDENTIAL,
+
   SERVER_RETURN_UNKNOWN_ERROR,
   SERVER_RETURN_THROTTLED,
   SERVER_RETURN_TRANSIENT_ERROR,
   SERVER_RETURN_MIGRATION_DONE,
   SERVER_RETURN_CLEAR_PENDING,
   SERVER_RETURN_NOT_MY_BIRTHDAY,
+  SERVER_RETURN_CONFLICT,
   SERVER_RESPONSE_VALIDATION_FAILED,
 
   SYNCER_OK
 };
 
-const char * GetSyncerErrorString(SyncerError);
+SYNC_EXPORT const char* GetSyncerErrorString(SyncerError);
 
 // Helper to check that |error| is set to something (not UNSET) and is not
 // SYNCER_OK.

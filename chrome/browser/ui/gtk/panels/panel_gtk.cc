@@ -31,7 +31,7 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
-#include "ui/base/accelerators/accelerator_gtk.h"
+#include "ui/base/accelerators/platform_accelerator_gtk.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
@@ -70,9 +70,6 @@ const SkColor kAttentionBackgroundDefaultColor =
     SkColorSetRGB(0xff, 0xab, 0x57);
 const SkColor kMinimizeBackgroundDefaultColor = SkColorSetRGB(0xf5, 0xf4, 0xf0);
 const SkColor kMinimizeBorderDefaultColor = SkColorSetRGB(0xc9, 0xc9, 0xc9);
-
-// Color used to draw the divider line between the titlebar and the client area.
-const SkColor kDividerColor = SkColorSetRGB(0x2a, 0x2c, 0x2c);
 
 // Set minimium width for window really small.
 const int kMinWindowWidth = 26;
@@ -129,14 +126,15 @@ const struct AcceleratorMapping {
 };
 
 // Table of accelerator mappings to command ids.
-typedef std::map<ui::AcceleratorGtk, int> AcceleratorGtkMap;
+typedef std::map<ui::Accelerator, int> AcceleratorMap;
 
-const AcceleratorGtkMap& GetAcceleratorTable() {
-  CR_DEFINE_STATIC_LOCAL(AcceleratorGtkMap, accelerator_table, ());
+const AcceleratorMap& GetAcceleratorTable() {
+  CR_DEFINE_STATIC_LOCAL(AcceleratorMap, accelerator_table, ());
   if (accelerator_table.empty()) {
     for (size_t i = 0; i < arraysize(kAcceleratorMap); ++i) {
       const AcceleratorMapping& entry = kAcceleratorMap[i];
-      ui::AcceleratorGtk accelerator(entry.keyval, entry.modifier_type);
+      ui::Accelerator accelerator = ui::AcceleratorForGdkKeyCodeAndModifier(
+          entry.keyval, entry.modifier_type);
       accelerator_table[accelerator] = entry.command_id;
     }
   }
@@ -278,7 +276,7 @@ void PanelGtk::Init() {
   gtk_widget_set_app_paintable(window_container_, TRUE);
   gtk_widget_set_double_buffered(window_container_, FALSE);
   gtk_widget_set_redraw_on_allocate(window_container_, TRUE);
-  gtk_alignment_set_padding(GTK_ALIGNMENT(window_container_), 1,
+  gtk_alignment_set_padding(GTK_ALIGNMENT(window_container_), 0,
       kFrameBorderThickness, kFrameBorderThickness, kFrameBorderThickness);
   g_signal_connect(window_container_, "expose-event",
                    G_CALLBACK(OnCustomFrameExposeThunk), this);
@@ -362,13 +360,13 @@ void PanelGtk::ConnectAccelerators() {
   accel_group_ = gtk_accel_group_new();
   gtk_window_add_accel_group(window_, accel_group_);
 
-  const AcceleratorGtkMap& accelerator_table = GetAcceleratorTable();
-  for (AcceleratorGtkMap::const_iterator iter = accelerator_table.begin();
+  const AcceleratorMap& accelerator_table = GetAcceleratorTable();
+  for (AcceleratorMap::const_iterator iter = accelerator_table.begin();
        iter != accelerator_table.end(); ++iter) {
     gtk_accel_group_connect(
         accel_group_,
-        iter->first.GetGdkKeyCode(),
-        static_cast<GdkModifierType>(iter->first.modifiers()),
+        ui::GetGdkKeyCodeForAccelerator(iter->first),
+        ui::GetGdkModifierForAccelerator(iter->first),
         GtkAccelFlags(0),
         g_cclosure_new(G_CALLBACK(OnGtkAccelerator),
                        GINT_TO_POINTER(iter->second), NULL));
@@ -378,12 +376,13 @@ void PanelGtk::ConnectAccelerators() {
 void PanelGtk::DisconnectAccelerators() {
   // Disconnecting the keys we connected to our accelerator group frees the
   // closures allocated in ConnectAccelerators.
-  const AcceleratorGtkMap& accelerator_table = GetAcceleratorTable();
-  for (AcceleratorGtkMap::const_iterator iter = accelerator_table.begin();
+  const AcceleratorMap& accelerator_table = GetAcceleratorTable();
+  for (AcceleratorMap::const_iterator iter = accelerator_table.begin();
        iter != accelerator_table.end(); ++iter) {
-    gtk_accel_group_disconnect_key(accel_group_,
-        iter->first.GetGdkKeyCode(),
-        static_cast<GdkModifierType>(iter->first.modifiers()));
+    gtk_accel_group_disconnect_key(
+        accel_group_,
+        ui::GetGdkKeyCodeForAccelerator(iter->first),
+        ui::GetGdkModifierForAccelerator(iter->first));
   }
   gtk_window_remove_accel_group(window_, accel_group_);
   g_object_unref(accel_group_);
@@ -546,16 +545,6 @@ gboolean PanelGtk::OnCustomFrameExpose(GtkWidget* widget,
   cairo_rectangle(cr, event->area.x, event->area.y,
                   event->area.width, event->area.height);
   cairo_fill(cr);
-
-  // Draw the divider only if we're showing more than titlebar.
-  if (window_height > panel::kTitlebarHeight) {
-    cairo_set_source_rgb(cr,
-                         SkColorGetR(kDividerColor) / 255.0,
-                         SkColorGetG(kDividerColor) / 255.0,
-                         SkColorGetB(kDividerColor) / 255.0);
-    cairo_rectangle(cr, 0, panel::kTitlebarHeight - 1, bounds_.width(), 1);
-    cairo_fill(cr);
-  }
 
   // Draw the border for the minimized panel only.
   if (paint_state_ == PAINT_AS_MINIMIZED) {
@@ -965,7 +954,7 @@ gfx::Size PanelGtk::ContentSizeFromWindowSize(
 int PanelGtk::TitleOnlyHeight() const {
   gfx::Size& frame_size = GetFrameSize();
   if (!frame_size.IsEmpty())
-    return frame_size.height() - kFrameBorderThickness;
+    return panel::kTitlebarHeight;
 
   NOTREACHED() << "Checking title height before window allocated";
   return 0;
@@ -1061,7 +1050,7 @@ void GtkNativePanelTesting::PressLeftMouseButtonTitlebar(
   panel_gtk_->OnTitlebarButtonPressEvent(
       NULL, reinterpret_cast<GdkEventButton*>(event));
   gdk_event_free(event);
-  MessageLoopForUI::current()->RunAllPending();
+  MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::ReleaseMouseButtonTitlebar(
@@ -1078,7 +1067,7 @@ void GtkNativePanelTesting::ReleaseMouseButtonTitlebar(
         NULL, reinterpret_cast<GdkEventButton*>(event));
   }
   gdk_event_free(event);
-  MessageLoopForUI::current()->RunAllPending();
+  MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::DragTitlebar(const gfx::Point& mouse_location) {
@@ -1090,14 +1079,14 @@ void GtkNativePanelTesting::DragTitlebar(const gfx::Point& mouse_location) {
   panel_gtk_->drag_helper_->OnMouseMoveEvent(
       NULL, reinterpret_cast<GdkEventMotion*>(event));
   gdk_event_free(event);
-  MessageLoopForUI::current()->RunAllPending();
+  MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::CancelDragTitlebar() {
   if (!panel_gtk_->drag_helper_.get())
     return;
   panel_gtk_->drag_helper_->OnGrabBrokenEvent(NULL, NULL);
-  MessageLoopForUI::current()->RunAllPending();
+  MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::FinishDragTitlebar() {

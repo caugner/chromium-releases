@@ -27,7 +27,7 @@ TestEntryFactory::TestEntryFactory(syncable::Directory *dir)
 
 TestEntryFactory::~TestEntryFactory() { }
 
-void TestEntryFactory::CreateUnappliedNewItemWithParent(
+int64 TestEntryFactory::CreateUnappliedNewItemWithParent(
     const string& item_id,
     const sync_pb::EntitySpecifics& specifics,
     const string& parent_id) {
@@ -42,6 +42,7 @@ void TestEntryFactory::CreateUnappliedNewItemWithParent(
   entry.Put(syncable::SERVER_PARENT_ID, Id::CreateFromServerId(parent_id));
   entry.Put(syncable::SERVER_IS_DIR, true);
   entry.Put(syncable::SERVER_SPECIFICS, specifics);
+  return entry.Get(syncable::META_HANDLE);
 }
 
 int64 TestEntryFactory::CreateUnappliedNewItem(
@@ -56,10 +57,12 @@ int64 TestEntryFactory::CreateUnappliedNewItem(
   entry.Put(syncable::IS_UNAPPLIED_UPDATE, true);
   entry.Put(syncable::SERVER_NON_UNIQUE_NAME, item_id);
   entry.Put(syncable::SERVER_PARENT_ID, syncable::GetNullId());
-  entry.Put(syncable::SERVER_IS_DIR, false);
+  entry.Put(syncable::SERVER_IS_DIR, is_unique);
   entry.Put(syncable::SERVER_SPECIFICS, specifics);
-  if (is_unique)  // For top-level nodes.
-    entry.Put(syncable::UNIQUE_SERVER_TAG, item_id);
+  if (is_unique) { // For top-level nodes.
+    entry.Put(syncable::UNIQUE_SERVER_TAG,
+              ModelTypeToRootTag(GetModelTypeFromSpecifics(specifics)));
+  }
   return entry.Get(syncable::META_HANDLE);
 }
 
@@ -119,8 +122,7 @@ int64 TestEntryFactory::CreateUnappliedAndUnsyncedItem(
 }
 
 int64 TestEntryFactory::CreateSyncedItem(
-    const std::string& name, ModelType
-    model_type, bool is_folder) {
+    const std::string& name, ModelType model_type, bool is_folder) {
   WriteTransaction trans(FROM_HERE, UNITTEST, directory_);
 
   syncable::Id parent_id(TestIdFactory::root());
@@ -158,6 +160,28 @@ int64 TestEntryFactory::CreateSyncedItem(
   entry.Put(syncable::SERVER_IS_DEL, false);
   entry.Put(syncable::SERVER_SPECIFICS, default_specifics);
   entry.Put(syncable::SERVER_PARENT_ID, parent_id);
+
+  return entry.Get(syncable::META_HANDLE);
+}
+
+int64 TestEntryFactory::CreateUnappliedRootNode(
+    ModelType model_type) {
+  syncable::WriteTransaction trans(FROM_HERE, syncable::UNITTEST, directory_);
+  sync_pb::EntitySpecifics specifics;
+  AddDefaultFieldValue(model_type, &specifics);
+  syncable::Id node_id = TestIdFactory::MakeServer("xyz");
+  syncable::MutableEntry entry(&trans, syncable::CREATE_NEW_UPDATE_ITEM,
+                               node_id);
+  DCHECK(entry.good());
+  // Make it look like sort of like a pending creation from the server.
+  // The SERVER_PARENT_ID and UNIQUE_CLIENT_TAG aren't quite right, but
+  // it's good enough for our purposes.
+  entry.Put(syncable::SERVER_VERSION, 1);
+  entry.Put(syncable::IS_UNAPPLIED_UPDATE, true);
+  entry.Put(syncable::SERVER_IS_DIR, false);
+  entry.Put(syncable::SERVER_PARENT_ID, TestIdFactory::root());
+  entry.Put(syncable::SERVER_SPECIFICS, specifics);
+  entry.Put(syncable::NON_UNIQUE_NAME, "xyz");
 
   return entry.Get(syncable::META_HANDLE);
 }

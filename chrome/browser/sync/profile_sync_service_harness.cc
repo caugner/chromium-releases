@@ -186,6 +186,19 @@ bool ProfileSyncServiceHarness::SetupSync(
     return false;
   }
 
+  // Make sure that initial sync wasn't blocked by a missing passphrase.
+  if (wait_state_ == SET_PASSPHRASE_FAILED) {
+    LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
+                  " until SetDecryptionPassphrase is called.";
+    return false;
+  }
+
+  // Make sure that initial sync wasn't blocked by rejected credentials.
+  if (wait_state_ == CREDENTIALS_REJECTED) {
+    LOG(ERROR) << "Credentials were rejected. Sync cannot proceed.";
+    return false;
+  }
+
   // Choose the datatypes to be synced. If all datatypes are to be synced,
   // set sync_everything to true; otherwise, set it to false.
   bool sync_everything =
@@ -199,13 +212,6 @@ bool ProfileSyncServiceHarness::SetupSync(
   // (possible only after choosing data types).
   if (!TryListeningToMigrationEvents()) {
     NOTREACHED();
-    return false;
-  }
-
-  // Make sure that a partner client hasn't already set an explicit passphrase.
-  if (wait_state_ == SET_PASSPHRASE_FAILED) {
-    LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
-                  " until SetDecryptionPassphrase is called.";
     return false;
   }
 
@@ -237,6 +243,12 @@ bool ProfileSyncServiceHarness::SetupSync(
     return false;
   }
 
+  // Make sure that initial sync wasn't blocked by rejected credentials.
+  if (wait_state_ == CREDENTIALS_REJECTED) {
+    LOG(ERROR) << "Credentials were rejected. Sync cannot proceed.";
+    return false;
+  }
+
   // Indicate to the browser that sync setup is complete.
   service()->SetSyncSetupCompleted();
 
@@ -261,7 +273,7 @@ void ProfileSyncServiceHarness::SignalStateCompleteWithNextState(
 
 void ProfileSyncServiceHarness::SignalStateComplete() {
   if (waiting_for_status_change_)
-    MessageLoop::current()->Quit();
+    MessageLoop::current()->QuitWhenIdle();
 }
 
 bool ProfileSyncServiceHarness::RunStateChangeMachine() {
@@ -287,6 +299,12 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
         // A passphrase is required for decryption and we don't have it. Do not
         // wait any more.
         SignalStateCompleteWithNextState(SET_PASSPHRASE_FAILED);
+        break;
+      }
+      if (service()->GetAuthError().state() ==
+          GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {
+        // Our credentials were rejected. Do not wait any more.
+        SignalStateCompleteWithNextState(CREDENTIALS_REJECTED);
         break;
       }
       break;
@@ -763,11 +781,9 @@ ProfileSyncService::Status ProfileSyncServiceHarness::GetStatus() {
 // while ensuring that all conditions are evaluated using on the same snapshot.
 bool ProfileSyncServiceHarness::IsDataSyncedImpl(
     const SyncSessionSnapshot& snap) {
-  return snap.num_simple_conflicts() == 0 &&
-         ServiceIsPushingChanges() &&
+  return ServiceIsPushingChanges() &&
          GetStatus().notifications_enabled &&
          !service()->HasUnsyncedItems() &&
-         !snap.has_more_to_sync() &&
          !HasPendingBackendMigration();
 }
 
@@ -999,9 +1015,7 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
     const SyncSessionSnapshot& snap = GetLastSessionSnapshot();
     const ProfileSyncService::Status& status = GetStatus();
     // Capture select info from the sync session snapshot and syncer status.
-    os << "has_more_to_sync: "
-       << snap.has_more_to_sync()
-       << ", has_unsynced_items: "
+    os << ", has_unsynced_items: "
        << (service()->sync_initialized() ? service()->HasUnsyncedItems() : 0)
        << ", did_commit: "
        << (snap.model_neutral_state().num_successful_commits == 0 &&
@@ -1010,8 +1024,6 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
        << snap.num_encryption_conflicts()
        << ", hierarchy conflicts: "
        << snap.num_hierarchy_conflicts()
-       << ", simple conflicts: "
-       << snap.num_simple_conflicts()
        << ", server conflicts: "
        << snap.num_server_conflicts()
        << ", num_updates_downloaded : "

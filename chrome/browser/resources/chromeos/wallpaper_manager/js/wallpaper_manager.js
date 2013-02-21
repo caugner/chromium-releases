@@ -15,13 +15,14 @@
 
 function WallpaperManager(dialogDom) {
   this.dialogDom_ = dialogDom;
+  this.storage_ = chrome.storage.local;
   this.document_ = dialogDom.ownerDocument;
   this.selectedCategory = null;
   this.butterBar_ = new ButterBar(this.dialogDom_);
   this.customWallpaperData_ = null;
   this.currentWallpaper_ = null;
+  this.wallpaperRequest_ = null;
   this.fetchManifest_();
-  this.initDom_();
 }
 
 // Anonymous 'namespace'.
@@ -38,6 +39,11 @@ function WallpaperManager(dialogDom) {
    * Suffix to append to baseURL if requesting high resoultion wallpaper.
    */
   /** @const */ var HighResolutionSuffix = '_high_resolution.jpg';
+
+  /**
+   * Key to access wallpaper manifest in chrome.local.storage.
+   */
+  /** @const */ var AccessManifestKey = 'wallpaper-picker-manifest-key';
 
   /**
    * Returns a translated string.
@@ -64,51 +70,97 @@ function WallpaperManager(dialogDom) {
   };
 
   /**
-   * Parses a string as manifest(JSON). Sets manifest to an empty object if a
-   * parsing exception is catched.
-   * @param {string} response The string to parse as JSON.
-   */
-  WallpaperManager.prototype.parseManifest_ = function(response) {
-    try {
-      this.manifest_ = JSON.parse(response);
-    } catch (e) {
-      this.butterBar_.showError_('Failed to parse manifest.');
-      this.manifest_ = {};
-    }
-  };
-
-  /**
    * Requests wallpaper manifest file from server.
    */
   WallpaperManager.prototype.fetchManifest_ = function() {
-    var xhr = new XMLHttpRequest();
     var locale = navigator.language;
     var urls = [
         ManifestBaseURL + locale + '.json',
         // Fallback url. Use 'en' locale by default.
         ManifestBaseURL + 'en.json'];
 
-    for (var i = 0; i < urls.length; i++) {
-      xhr.open('GET', urls[i], false);
-      try {
-        xhr.send(null);
-        // TODO(bshe): We should save the downloaded manifest to local disk.
-        // Other components may want to use it (i.e. screen saver).
-        if (xhr.status === 200) {
-          this.parseManifest_(xhr.responseText);
-          return;
-        }
-      } catch (e) {
-        this.manifest_ = {};
-        this.butterBar_.showError_(str('connectionFailed'));
-        return;
-      }
-    }
-    this.manifest_ = {};
-    this.butterBar_.showError_(str('connectionFailed'));
+    var asyncFetchManifestFromUrls = function(urls, func, successCallback,
+                                              failureCallback) {
+      var index = 0;
+      var loop = {
+        next: function() {
+          if (index < urls.length) {
+            func(loop, urls[index]);
+            index++;
+          } else {
+            failureCallback();
+          }
+        },
 
-    // TODO(bshe): Fall back to saved manifest if there is a problem fetching
-    // manifest from server.
+        success: function(response) {
+          successCallback(response);
+        },
+
+        failure: function() {
+          failureCallback();
+        }
+      };
+      loop.next();
+    };
+
+    var fetchManifestAsync = function(loop, url) {
+      var xhr = new XMLHttpRequest();
+      try {
+        xhr.addEventListener('loadend', function(e) {
+          if (this.status == 200 && this.responseText != null) {
+            try {
+              var manifest = JSON.parse(this.responseText);
+              loop.success(manifest);
+            } catch (e) {
+              loop.failure();
+            }
+          } else {
+            loop.next();
+          }
+        });
+        xhr.open('GET', url, true);
+        xhr.send(null);
+      } catch (e) {
+        loop.failure();
+      }
+    };
+
+    if (navigator.onLine) {
+      asyncFetchManifestFromUrls(urls, fetchManifestAsync,
+                                 this.onLoadManifestSuccess_.bind(this),
+                                 this.onLoadManifestFailed_.bind(this));
+    } else {
+      // If device is offline, fetches manifest from local storage.
+      // TODO(bshe): Always loading the offline manifest first and replacing
+      // with the online one when available.
+      this.onLoadManifestFailed_();
+    }
+  };
+
+  /**
+   * Sets manifest loaded from server. Called after manifest is successfully
+   * loaded.
+   * @param {object} manifest The parsed manifest file.
+   */
+  WallpaperManager.prototype.onLoadManifestSuccess_ = function(manifest) {
+    this.manifest_ = manifest;
+    var items = {};
+    items[AccessManifestKey] = manifest;
+    this.storage_.set(items, function() {});
+    this.initDom_();
+  };
+
+  // Sets manifest to previously saved object if any and shows connection error.
+  // Called after manifest failed to load.
+  WallpaperManager.prototype.onLoadManifestFailed_ = function() {
+    var self = this;
+    this.storage_.get(AccessManifestKey, function(items) {
+      self.manifest_ = items[AccessManifestKey] ? items[AccessManifestKey] : {};
+      self.butterBar_.showError_(str('connectionFailed'),
+                                 {help_url: LEARN_MORE_URL});
+      self.initDom_();
+      $('wallpaper-grid').classList.add('image-picker-offline');
+    });
   };
 
   /**
@@ -118,36 +170,82 @@ function WallpaperManager(dialogDom) {
     i18nTemplate.process(this.document_, loadTimeData);
     this.initCategoriesList_();
     this.initThumbnailsGrid_();
-
-    this.currentWallpaper_ = str('currentWallpaper');
-    if (this.currentWallpaper_ == 'CUSTOM') {
-      // Custom is the last one in the categories list.
-      this.categoriesList_.selectionModel.selectedIndex =
-          this.categoriesList_.dataModel.length - 1;
-    } else {
-      // Selects the first category in the categories list of current wallpaper
-      // as the default selected category when showing wallpaper picker UI.
-      var firstCategory = 0;
-      for (var key in this.manifest_.wallpaper_list) {
-        var url = this.manifest_.wallpaper_list[key].base_url +
-            HighResolutionSuffix;
-        if (url.indexOf(this.currentWallpaper_) != -1) {
-          firstCategory = this.manifest_.wallpaper_list[key].categories[0];
-        }
-      }
-      this.categoriesList_.selectionModel.selectedIndex = firstCategory;
-    }
+    this.presetCategory_();
 
     $('file-selector').addEventListener(
         'change', this.onFileSelectorChanged_.bind(this));
-
     $('set-wallpaper-layout').addEventListener(
         'change', this.onWallpaperLayoutChanged_.bind(this));
-
-    this.dialogDom_.ownerDocument.defaultView.addEventListener(
+    var self = this;
+    window.addEventListener('offline', function() {
+      chrome.wallpaperPrivate.getOfflineWallpaperList(function(lists) {
+        if (!self.downloadedListMap_)
+          self.downloadedListMap_ = {};
+        for (var i = 0; i < lists.length; i++)
+          self.downloadedListMap_[lists[i]] = true;
+        var thumbnails = self.document_.querySelectorAll('.thumbnail');
+        for (var i = 0; i < thumbnails.length; i++) {
+          var thumbnail = thumbnails[i];
+          var url = self.wallpaperGrid_.dataModel.item(i).baseURL;
+          var fileName = url.substring(url.lastIndexOf('/') + 1) +
+              HighResolutionSuffix;
+          if (self.downloadedListMap_ &&
+              self.downloadedListMap_.hasOwnProperty(encodeURI(fileName))) {
+            thumbnail.offline = true;
+          }
+        }
+      });
+      $('wallpaper-grid').classList.add('image-picker-offline');
+    });
+    window.addEventListener('online', function() {
+      self.downloadedListMap_ = null;
+      $('wallpaper-grid').classList.remove('image-picker-offline');
+    });
+    this.document_.defaultView.addEventListener(
         'resize', this.onResize_.bind(this));
 
     this.onResize_();
+  };
+
+  /**
+   * Preset to the category which contains current wallpaper.
+   */
+  WallpaperManager.prototype.presetCategory_ = function() {
+    this.currentWallpaper_ = str('currentWallpaper');
+    if (this.currentWallpaper_ && this.currentWallpaper_ == 'CUSTOM') {
+      // Custom is the last one in the categories list.
+      this.categoriesList_.selectionModel.selectedIndex =
+          this.categoriesList_.dataModel.length - 1;
+      return;
+    }
+    var self = this;
+    var presetCategoryInner_ = function() {
+      // Selects the first category in the categories list of current
+      // wallpaper as the default selected category when showing wallpaper
+      // picker UI.
+      var firstCategory = 0;
+      for (var key in self.manifest_.wallpaper_list) {
+        var url = self.manifest_.wallpaper_list[key].base_url +
+            HighResolutionSuffix;
+        if (url.indexOf(self.currentWallpaper_) != -1)
+          firstCategory = self.manifest_.wallpaper_list[key].categories[0];
+      }
+      self.categoriesList_.selectionModel.selectedIndex = firstCategory;
+    };
+    if (navigator.onLine) {
+      presetCategoryInner_();
+    } else {
+      // If device is offline, gets the available offline wallpaper list first.
+      // Wallpapers which are not in the list will display a grayscaled
+      // thumbnail.
+      chrome.wallpaperPrivate.getOfflineWallpaperList(function(lists) {
+        if (!self.downloadedListMap_)
+          self.downloadedListMap_ = {};
+        for (var i = 0; i < lists.length; i++)
+          self.downloadedListMap_[lists[i]] = true;
+        presetCategoryInner_();
+      });
+    }
   };
 
   /**
@@ -184,28 +282,39 @@ function WallpaperManager(dialogDom) {
     if (selectedItem && selectedItem.dynamicURL &&
         !this.wallpaperGrid_.inProgramSelection) {
       var wallpaperURL = selectedItem.baseURL + HighResolutionSuffix;
-
-      if (this.wallpaperRequest_)
-        this.wallpaperRequest_.abort();
-
-      this.wallpaperRequest_ = new XMLHttpRequest();
-      this.wallpaperRequest_.open('GET', wallpaperURL, true);
-      this.wallpaperRequest_.responseType = 'arraybuffer';
-      this.wallpaperRequest_.send(null);
-      this.butterBar_.setRequest(this.wallpaperRequest_);
       var self = this;
-      this.wallpaperRequest_.addEventListener('load', function(e) {
-        if (self.wallpaperRequest_.status === 200) {
-          var image = self.wallpaperRequest_.response;
-          chrome.wallpaperPrivate.setWallpaper(image,
-                                               selectedItem.layout,
-                                               wallpaperURL,
-                                               self.onFinished_.bind(self));
+
+      chrome.wallpaperPrivate.setWallpaperIfExist(wallpaperURL,
+                                                  selectedItem.layout,
+                                                  function() {
+        if (chrome.runtime.lastError == undefined) {
           self.currentWallpaper_ = wallpaperURL;
-        } else {
-          self.butterBar_.showError_(str('downloadFailed'));
+          return;
         }
-        self.wallpaperRequest_ = null;
+
+        // Falls back to request wallpaper from server.
+        if (self.wallpaperRequest_)
+          self.wallpaperRequest_.abort();
+
+        self.wallpaperRequest_ = new XMLHttpRequest();
+        self.wallpaperRequest_.open('GET', wallpaperURL, true);
+        self.wallpaperRequest_.responseType = 'arraybuffer';
+        self.wallpaperRequest_.send(null);
+        self.butterBar_.setRequest(self.wallpaperRequest_);
+        self.wallpaperRequest_.addEventListener('load', function(e) {
+          if (self.wallpaperRequest_.status === 200) {
+            var image = self.wallpaperRequest_.response;
+            chrome.wallpaperPrivate.setWallpaper(image,
+                                                 selectedItem.layout,
+                                                 wallpaperURL,
+                                                 self.onFinished_.bind(self));
+            self.currentWallpaper_ = wallpaperURL;
+          } else {
+            self.butterBar_.showError_(str('downloadFailed'),
+                                       {help_url: LEARN_MORE_URL});
+          }
+          self.wallpaperRequest_ = null;
+        });
       });
     }
     this.setWallpaperAttribution_(selectedItem);
@@ -215,7 +324,7 @@ function WallpaperManager(dialogDom) {
    * Set attributions of wallpaper with given URL. If URL is not valid, clear
    * the attributions.
    * @param {{baseURL: string, dynamicURL: string, layout: string,
-   *          author: string, authorWebsite: string}}
+   *          author: string, authorWebsite: string, availableOffline: boolean}}
    *     selectedItem selected wallpaper item in grid.
    * @private
    */
@@ -297,14 +406,16 @@ function WallpaperManager(dialogDom) {
       console.error('More than one files are selected or no file selected');
     var file = files[0];
     if (!file.type.match('image/jpeg')) {
-      this.butterBar_.showError_(str('invalidWallpaper'));
+      this.butterBar_.showError_(str('invalidWallpaper'),
+                                 {help_url: LEARN_MORE_URL});
       return;
     }
     var reader = new FileReader();
     reader.readAsArrayBuffer(files[0]);
     var self = this;
     reader.addEventListener('error', function(e) {
-      this.butterBar_.showError_(str('accessFileFailure'));
+      this.butterBar_.showError_(str('accessFileFailure'),
+                                 {help_url: LEARN_MORE_URL});
     });
     reader.addEventListener('load', function(e) {
       self.customWallpaperData_ = e.target.result;
@@ -331,10 +442,12 @@ function WallpaperManager(dialogDom) {
    * Sets wallpaper finished. Displays error message in butter bar if any.
    */
   WallpaperManager.prototype.onFinished_ = function() {
-    if (chrome.runtime.lastError != undefined)
-      this.butterBar_.showError_(chrome.runtime.lastError.message);
-    else
+    if (chrome.runtime.lastError != undefined) {
+      this.butterBar_.showError_(chrome.runtime.lastError.message,
+                                 {help_url: LEARN_MORE_URL});
+    } else {
       this.butterBar_.hide_();
+    }
   };
 
   /**
@@ -393,8 +506,16 @@ function WallpaperManager(dialogDom) {
             dynamicURL: this.manifest_.wallpaper_list[key].dynamic_url,
             layout: this.manifest_.wallpaper_list[key].default_layout,
             author: this.manifest_.wallpaper_list[key].author,
-            authorWebsite: this.manifest_.wallpaper_list[key].author_website
+            authorWebsite: this.manifest_.wallpaper_list[key].author_website,
+            availableOffline: false
           };
+          var startIndex = wallpaperInfo.baseURL.lastIndexOf('/') + 1;
+          var fileName = wallpaperInfo.baseURL.substring(startIndex) +
+              HighResolutionSuffix;
+          if (this.downloadedListMap_ &&
+              this.downloadedListMap_.hasOwnProperty(encodeURI(fileName))) {
+            wallpaperInfo.availableOffline = true;
+          }
           wallpapersDataModel.push(wallpaperInfo);
           var url = this.manifest_.wallpaper_list[key].base_url +
               HighResolutionSuffix;

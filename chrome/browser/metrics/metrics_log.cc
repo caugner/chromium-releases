@@ -42,6 +42,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/gpu_info.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/network_change_notifier.h"
 #include "ui/gfx/screen.h"
 #include "webkit/plugins/webplugininfo.h"
 
@@ -63,13 +64,13 @@ using metrics::OmniboxEventProto;
 using metrics::ProfilerEventProto;
 using metrics::SystemProfileProto;
 using tracked_objects::ProcessDataSnapshot;
-typedef chrome_variations::SelectedGroupId SelectedGroupId;
+typedef chrome_variations::ActiveGroupId ActiveGroupId;
 typedef SystemProfileProto::GoogleUpdate::ProductInfo ProductInfo;
 
 namespace {
 
 // Returns the date at which the current metrics client ID was created as
-// a string containing milliseconds since the epoch, or "0" if none was found.
+// a string containing seconds since the epoch, or "0" if none was found.
 std::string GetMetricsEnabledDate(PrefService* pref) {
   if (!pref) {
     NOTREACHED();
@@ -199,9 +200,9 @@ void SetPluginInfo(const webkit::WebPluginInfo& plugin_info,
     plugin->set_is_disabled(!plugin_prefs->IsPluginEnabled(plugin_info));
 }
 
-void WriteFieldTrials(const std::vector<SelectedGroupId>& field_trial_ids,
+void WriteFieldTrials(const std::vector<ActiveGroupId>& field_trial_ids,
                       SystemProfileProto* system_profile) {
-  for (std::vector<SelectedGroupId>::const_iterator it =
+  for (std::vector<ActiveGroupId>::const_iterator it =
        field_trial_ids.begin(); it != field_trial_ids.end(); ++it) {
     SystemProfileProto::FieldTrial* field_trial =
         system_profile->add_field_trial();
@@ -265,6 +266,65 @@ void ProductDataToProto(const GoogleUpdateSettings::ProductData& product_data,
 
 }  // namespace
 
+class MetricsLog::NetworkObserver
+    : public net::NetworkChangeNotifier::ConnectionTypeObserver {
+ public:
+  NetworkObserver() : connection_type_is_ambiguous_(false) {
+    net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+    Reset();
+  }
+  virtual ~NetworkObserver() {
+    net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+  }
+
+  void Reset() {
+    connection_type_is_ambiguous_ = false;
+    connection_type_ = net::NetworkChangeNotifier::GetConnectionType();
+  }
+
+  // ConnectionTypeObserver:
+  virtual void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE {
+    if (type == net::NetworkChangeNotifier::CONNECTION_NONE)
+      return;
+    if (type != connection_type_ &&
+        connection_type_ != net::NetworkChangeNotifier::CONNECTION_NONE) {
+      connection_type_is_ambiguous_ = true;
+    }
+    connection_type_ = type;
+  }
+
+  bool connection_type_is_ambiguous() const {
+    return connection_type_is_ambiguous_;
+  }
+
+  SystemProfileProto::Network::ConnectionType connection_type() const {
+    switch (connection_type_) {
+      case net::NetworkChangeNotifier::CONNECTION_NONE:
+      case net::NetworkChangeNotifier::CONNECTION_UNKNOWN:
+        return SystemProfileProto::Network::CONNECTION_UNKNOWN;
+      case net::NetworkChangeNotifier::CONNECTION_ETHERNET:
+        return SystemProfileProto::Network::CONNECTION_ETHERNET;
+      case net::NetworkChangeNotifier::CONNECTION_WIFI:
+        return SystemProfileProto::Network::CONNECTION_WIFI;
+      case net::NetworkChangeNotifier::CONNECTION_2G:
+        return SystemProfileProto::Network::CONNECTION_2G;
+      case net::NetworkChangeNotifier::CONNECTION_3G:
+        return SystemProfileProto::Network::CONNECTION_3G;
+      case net::NetworkChangeNotifier::CONNECTION_4G:
+        return SystemProfileProto::Network::CONNECTION_4G;
+    }
+    NOTREACHED();
+    return SystemProfileProto::Network::CONNECTION_UNKNOWN;
+  }
+
+ private:
+  bool connection_type_is_ambiguous_;
+  net::NetworkChangeNotifier::ConnectionType connection_type_;
+
+  DISALLOW_COPY_AND_ASSIGN(NetworkObserver);
+};
+
 GoogleUpdateMetrics::GoogleUpdateMetrics() : is_system_install(false) {}
 
 GoogleUpdateMetrics::~GoogleUpdateMetrics() {}
@@ -273,7 +333,8 @@ static base::LazyInstance<std::string>::Leaky
   g_version_extension = LAZY_INSTANCE_INITIALIZER;
 
 MetricsLog::MetricsLog(const std::string& client_id, int session_id)
-    : MetricsLogBase(client_id, session_id, MetricsLog::GetVersionString()) {}
+    : MetricsLogBase(client_id, session_id, MetricsLog::GetVersionString()),
+      network_observer_(new NetworkObserver()) {}
 
 MetricsLog::~MetricsLog() {}
 
@@ -364,8 +425,8 @@ int MetricsLog::GetScreenCount() const {
 }
 
 void MetricsLog::GetFieldTrialIds(
-    std::vector<SelectedGroupId>* field_trial_ids) const {
-  chrome_variations::GetFieldTrialSelectedGroupIds(field_trial_ids);
+    std::vector<ActiveGroupId>* field_trial_ids) const {
+  chrome_variations::GetFieldTrialActiveGroupIds(field_trial_ids);
 }
 
 void MetricsLog::WriteStabilityElement(
@@ -773,6 +834,12 @@ void MetricsLog::RecordEnvironmentProto(
   hardware->set_dll_base(reinterpret_cast<uint64>(&__ImageBase));
 #endif
 
+  SystemProfileProto::Network* network = system_profile->mutable_network();
+  network->set_connection_type_is_ambiguous(
+      network_observer_->connection_type_is_ambiguous());
+  network->set_connection_type(network_observer_->connection_type());
+  network_observer_->Reset();
+
   SystemProfileProto::OS* os = system_profile->mutable_os();
   std::string os_name = base::SysInfo::OperatingSystemName();
 #if defined(OS_WIN)
@@ -803,6 +870,8 @@ void MetricsLog::RecordEnvironmentProto(
   gpu_performance->set_graphics_score(gpu_info.performance_stats.graphics);
   gpu_performance->set_gaming_score(gpu_info.performance_stats.gaming);
   gpu_performance->set_overall_score(gpu_info.performance_stats.overall);
+  gpu->set_gl_vendor(gpu_info.gl_vendor);
+  gpu->set_gl_renderer(gpu_info.gl_renderer);
 
   const gfx::Size display_size = GetScreenSize();
   hardware->set_primary_screen_width(display_size.width());
@@ -815,7 +884,7 @@ void MetricsLog::RecordEnvironmentProto(
   bool write_as_xml = false;
   WritePluginList(plugin_list, write_as_xml);
 
-  std::vector<SelectedGroupId> field_trial_ids;
+  std::vector<ActiveGroupId> field_trial_ids;
   GetFieldTrialIds(&field_trial_ids);
   WriteFieldTrials(field_trial_ids, system_profile);
 }
@@ -933,7 +1002,8 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
     WriteIntAttribute("numterms", num_terms);
     WriteIntAttribute("selectedindex", static_cast<int>(log.selected_index));
     WriteIntAttribute("completedlength",
-                      static_cast<int>(log.inline_autocompleted_length));
+                      log.inline_autocompleted_length != string16::npos ?
+                      static_cast<int>(log.inline_autocompleted_length) : 0);
     if (log.elapsed_time_since_user_first_modified_omnibox !=
         base::TimeDelta::FromMilliseconds(-1)) {
       // Only upload the typing duration if it is set/valid.
@@ -969,13 +1039,16 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
   omnibox_event->set_just_deleted_text(log.just_deleted_text);
   omnibox_event->set_num_typed_terms(num_terms);
   omnibox_event->set_selected_index(log.selected_index);
-  omnibox_event->set_completed_length(log.inline_autocompleted_length);
+  if (log.inline_autocompleted_length != string16::npos)
+    omnibox_event->set_completed_length(log.inline_autocompleted_length);
   if (log.elapsed_time_since_user_first_modified_omnibox !=
       base::TimeDelta::FromMilliseconds(-1)) {
     // Only upload the typing duration if it is set/valid.
     omnibox_event->set_typing_duration_ms(
         log.elapsed_time_since_user_first_modified_omnibox.InMilliseconds());
   }
+  omnibox_event->set_duration_since_last_default_match_update_ms(
+      log.elapsed_time_since_last_change_to_default_match.InMilliseconds());
   omnibox_event->set_current_page_classification(
       log.current_page_classification);
   omnibox_event->set_input_type(AsOmniboxEventInputType(log.input_type));

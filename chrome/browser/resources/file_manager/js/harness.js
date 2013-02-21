@@ -10,7 +10,51 @@ var harness = {
    */
   init: function() {
     console.log('Initializing harness...');
+    harness.initPathControls();
+    harness.initListeners();
+    harness.initFileSystem(function() {
+      harness.iframe.src = 'main.html' + document.location.search;
+    });
+  },
 
+  /**
+   * Init the test harness when it is emmbedded into the File Manager page.
+   * @param {function} callback Callback.
+   */
+  initEmbedded: function(callback) {
+    var harnessControls = util.createChild(document.body);
+    harnessControls.style.cssText =
+        'position: absolute; left: 4px; bottom: 4px; width: 94px;' +
+        'z-index: 100; opacity: 0.3';
+
+    function createControl(tag) {
+      return util.createChild(harnessControls, '', tag);
+    }
+
+    var fileChooser = createControl('input');
+    fileChooser.type = 'file';
+    fileChooser.multiple = 'true';
+    fileChooser.style.width = '100%';
+
+    createControl('br');
+
+    var resetButton = createControl('button');
+    resetButton.id = 'reset';
+    resetButton.textContent = 'Reset';
+    resetButton.style.width = '100%';
+
+    createControl('br');
+
+    var populateButton = createControl('button');
+    populateButton.id = 'populate';
+    populateButton.textContent = 'Populate';
+    populateButton.style.width = '100%';
+
+    harness.initListeners();
+    harness.initFileSystem(callback);
+  },
+
+  initFileSystem: function(opt_callback) {
     util.installFileErrorToString();
 
     function onFilesystem(filesystem) {
@@ -27,7 +71,9 @@ var harness = {
 
     function createRoots(roots) {
       if (roots.length == 0) {
-        loadUI();
+        if (harness.fileManager)
+          harness.fileManager.directoryModel_.changeDirectory('/Downloads');
+        if (opt_callback) opt_callback();
         return;
       }
       var root = roots.shift();
@@ -42,28 +88,35 @@ var harness = {
           });
     }
 
-    function loadUI() {
-      harness.iframe.src = 'main.html' + document.location.search;
-    }
-
     window.webkitStorageInfo.requestQuota(
-        window.PERSISTENT,
+        chrome.fileBrowserPrivate.FS_TYPE,
         1024 * 1024 * 1024, // 1 Gig should be enough for everybody:)
         function(grantedBytes) {
           window.webkitRequestFileSystem(
-              window.PERSISTENT,
+              chrome.fileBrowserPrivate.FS_TYPE,
               grantedBytes,
               onFilesystem,
               util.flog('Error initializing filesystem'));
         },
         util.flog('Error requesting filesystem quota'));
+  },
 
+  initPathControls: function() {
     var paramstr = decodeURIComponent(document.location.search.substr(1));
     this.params = paramstr ? JSON.parse(paramstr) : {};
 
     var input = document.querySelector('#default-path');
     input.value = this.params.defaultPath || '';
     input.addEventListener('keyup', this.onInputKeyUp.bind(this));
+  },
+
+  initListeners: function() {
+    document.querySelector('input[type="file"]').
+        addEventListener('change', this.onFilesChange.bind(this));
+    document.querySelector('button#reset').
+        addEventListener('click', this.onClearClick.bind(this));
+    document.querySelector('button#populate').
+        addEventListener('click', this.onPopulateClick.bind(this));
   },
 
   onInputKeyUp: function(event) {
@@ -87,7 +140,7 @@ var harness = {
    * 'Reset Filesystem' button click handler.
    */
   onClearClick: function() {
-    harness.resetFilesystem(this.filesystem, harness.init);
+    harness.resetFilesystem(this.filesystem, harness.initFileSystem);
   },
 
   resetFilesystem: function(filesystem, opt_callback) {
@@ -109,7 +162,7 @@ var harness = {
    */
   onPopulateClick: function() {
     harness.importWebDirectory(this.filesystem,
-        'Downloads', 'harness_files', function() {}, harness.init);
+        'Downloads', 'harness_files', function() {}, harness.refreshDirectory);
   },
 
   /**
@@ -119,29 +172,31 @@ var harness = {
     this.importFiles(harness.filesystem,
         harness.fileManager.getCurrentDirectory(),
         [].slice.call(event.target.files),
-        function() {
-          harness.chrome.fileBrowserPrivate.onFileChanged.notify({
-            fileUrl: harness.fileManager.getCurrentDirectoryURL()
-        });
-    });
+        harness.refreshDirectory.bind(harness));
   },
 
   /**
-   * The fileManager object under test.
-   *
-   * This is a getter rather than a normal property because the fileManager
-   * is initialized asynchronously, and we won't be sure when it'll be
-   * done.  Since harness.fileManager is intended to be used for debugging
-   * from the JS console, we don't really need to be sure it's ready at any
-   * particular time.
+   * Force the file manager to refresh the current directory.
    */
-  get iframe() { return document.querySelector('#dialog') },
+  refreshDirectory: function() {
+    harness.chrome.fileBrowserPrivate.onDirectoryChanged.notify({
+      directoryUrl: harness.fileManager.getCurrentDirectoryURL()
+    });
+  },
 
-  get fileManager() { return harness.iframe.contentWindow.fileManager },
+  get iframe() { return document.querySelector('iframe#dialog') },
 
-  get pyautoAPI() { return harness.iframe.contentWindow.pyautoAPI },
+  get contentWindow() {
+    if (harness.iframe != null)
+      return harness.iframe.contentWindow;
+    return window;
+  },
 
-  get chrome() { return harness.iframe.contentWindow.chrome; },
+  get fileManager() { return harness.contentWindow.fileManager },
+
+  get pyautoAPI() { return harness.contentWindow.pyautoAPI },
+
+  get chrome() { return harness.contentWindow.chrome },
 
   /**
    * Copy a blob into the filesystem.
@@ -267,3 +322,5 @@ var harness = {
     });
   }
 };
+
+document.addEventListener('DOMContentLoaded', harness.init.bind(harness));

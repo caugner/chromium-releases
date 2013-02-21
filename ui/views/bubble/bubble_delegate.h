@@ -11,6 +11,10 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
+namespace gfx {
+class Rect;
+}
+
 namespace ui {
 class SlideAnimation;
 }
@@ -27,9 +31,6 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
                                         public ui::AnimationDelegate,
                                         public WidgetObserver {
  public:
-  // The default bubble background color.
-  static const SkColor kBackgroundColor;
-
   BubbleDelegateView();
   BubbleDelegateView(View* anchor_view,
                      BubbleBorder::ArrowLocation arrow_location);
@@ -48,7 +49,8 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
   virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) OVERRIDE;
   virtual void OnWidgetActivationChanged(Widget* widget, bool active) OVERRIDE;
-  virtual void OnWidgetMoved(Widget* widget) OVERRIDE;
+  virtual void OnWidgetBoundsChanged(Widget* widget,
+                                     const gfx::Rect& new_bounds) OVERRIDE;
 
   bool close_on_esc() const { return close_on_esc_; }
   void set_close_on_esc(bool close_on_esc) { close_on_esc_ = close_on_esc; }
@@ -73,7 +75,10 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   void set_shadow(BubbleBorder::Shadow shadow) { shadow_ = shadow; }
 
   SkColor color() const { return color_; }
-  void set_color(SkColor color) { color_ = color; }
+  void set_color(SkColor color) {
+    color_ = color;
+    color_explicitly_set_ = true;
+  }
 
   const gfx::Insets& margins() const { return margins_; }
   void set_margins(const gfx::Insets& margins) { margins_ = margins; }
@@ -118,6 +123,7 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
 
   // View overrides:
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+  virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE;
 
   // ui::AnimationDelegate overrides:
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -151,6 +157,9 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   FRIEND_TEST_ALL_PREFIXES(BubbleFrameViewTest, NonClientHitTest);
   FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, CreateDelegate);
 
+  // Update the bubble color from |theme|, unless it was explicitly set.
+  void UpdateColorsFromTheme(const ui::NativeTheme* theme);
+
 #if defined(OS_WIN) && !defined(USE_AURA)
   // Get bounds for the Windows-only widget that hosts the bubble's contents.
   gfx::Rect GetBubbleClientBounds() const;
@@ -179,8 +188,9 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // Bubble border shadow to use.
   BubbleBorder::Shadow shadow_;
 
-  // The background color of the bubble.
+  // The background color of the bubble; and flag for when it's explicitly set.
   SkColor color_;
+  bool color_explicitly_set_;
 
   // The margins between the content and the inside of the border.
   gfx::Insets margins_;

@@ -171,7 +171,10 @@ void GoogleOneShotRemoteEngine::StartRecognition() {
     net::URLRequestContext* request_context =
         url_context_->GetURLRequestContext();
     DCHECK(request_context);
-    std::string accepted_language_list = request_context->accept_language();
+    // TODO(pauljensen): GoogleOneShotRemoteEngine should be constructed with
+    // a reference to the HttpUserAgentSettings rather than accessing the
+    // accept language through the URLRequestContext.
+    std::string accepted_language_list = request_context->GetAcceptLanguage();
     size_t separator = accepted_language_list.find_first_of(",;");
     lang_param = accepted_language_list.substr(0, separator);
   }
@@ -259,7 +262,9 @@ void GoogleOneShotRemoteEngine::AudioChunksEnded() {
 void GoogleOneShotRemoteEngine::OnURLFetchComplete(
     const net::URLFetcher* source) {
   DCHECK_EQ(url_fetcher_.get(), source);
-  SpeechRecognitionResult result;
+  SpeechRecognitionResults results;
+  results.push_back(SpeechRecognitionResult());
+  SpeechRecognitionResult& result = results.back();
   SpeechRecognitionError error(SPEECH_RECOGNITION_ERROR_NETWORK);
   std::string data;
 
@@ -275,7 +280,7 @@ void GoogleOneShotRemoteEngine::OnURLFetchComplete(
     delegate()->OnSpeechRecognitionEngineError(error);
   } else {
     DVLOG(1) << "GoogleOneShotRemoteEngine: Invoking delegate with result.";
-    delegate()->OnSpeechRecognitionEngineResult(result);
+    delegate()->OnSpeechRecognitionEngineResults(results);
   }
 }
 

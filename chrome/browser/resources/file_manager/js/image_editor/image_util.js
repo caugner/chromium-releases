@@ -30,7 +30,7 @@ ImageUtil.trace = (function() {
       }
     }
     this.lines_[key].textContent = key + ': ' + value;
-    if (localStorage.logTrace) this.dumpLine(key);
+    if (ImageUtil.trace.log) this.dumpLine(key);
   };
 
   PerformanceTrace.prototype.resetTimer = function(key) {
@@ -426,6 +426,15 @@ ImageUtil.ImageLoader = function(document) {
 ImageUtil.ImageLoader.IMAGE_SIZE_LIMIT = 25 * 1000 * 1000;
 
 /**
+ * @param {HTMLImageElement|HTMLCanvasElement|Object} image Image or image
+ *   metadata, should have |width| and |height| properties.
+ * @return {boolean} True if the image is too large to be loaded.
+ */
+ImageUtil.ImageLoader.isTooLarge = function(image) {
+  return image.width * image.height > ImageUtil.ImageLoader.IMAGE_SIZE_LIMIT;
+};
+
+/**
  * @param {string} url Image URL.
  * @param {function(function(object))} transformFetcher function to get
  *    the image transform (which we need for the image orientation)
@@ -458,15 +467,15 @@ ImageUtil.ImageLoader.prototype.load = function(
     this.image_ = new Image();
     var errorCallback = function(error) {
       this.image_ = null;
+      var tmpCallback = this.callback_;
       this.callback_ = null;
       var emptyCanvas = this.document_.createElement('canvas');
       emptyCanvas.width = 0;
       emptyCanvas.height = 0;
-      callback(emptyCanvas, error);
+      tmpCallback(emptyCanvas, error);
     }.bind(this);
     this.image_.onload = function(e) {
-      if (this.image_.width * this.image_.height >
-          ImageUtil.ImageLoader.IMAGE_SIZE_LIMIT) {
+      if (ImageUtil.ImageLoader.isTooLarge(this.image_)) {
         errorCallback('IMAGE_TOO_BIG_ERROR');
         return;
       }
@@ -475,7 +484,7 @@ ImageUtil.ImageLoader.prototype.load = function(
     // errorCallback has an optional error argument, which in case of general
     // error should not be specified
     this.image_.onerror = errorCallback.bind(this, 'IMAGE_ERROR');
-    this.image_.src = url;
+    this.remoteLoader_ = util.loadImage(this.image_, url);
   }.bind(this);
   if (opt_delay) {
     this.timeout_ = setTimeout(startLoad, opt_delay);
@@ -519,6 +528,10 @@ ImageUtil.ImageLoader.prototype.cancel = function() {
   if (this.image_) {
     this.image_.onload = function() {};
     this.image_ = null;
+  }
+  if (this.remoteLoader_) {
+    this.remoteLoader_.cancel();
+    this.remoteLoader_ = null;
   }
   this.generation_++;  // Silence the transform fetcher if it is in progress.
 };

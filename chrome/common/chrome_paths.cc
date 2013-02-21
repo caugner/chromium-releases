@@ -20,7 +20,7 @@
 #endif
 
 #if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
+#include "base/mac/foundation_util.h"
 #endif
 
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
@@ -107,7 +107,7 @@ namespace chrome {
 
 // Gets the path for internal plugins.
 bool GetInternalPluginsDirectory(FilePath* result) {
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
   // If called from Chrome, get internal plugins from a subdirectory of the
   // framework.
   if (base::mac::AmIBundled()) {
@@ -168,15 +168,6 @@ bool PathProvider(int key, FilePath* result) {
       }
       create_dir = true;
       break;
-#if defined(OS_WIN)
-    case chrome::DIR_ALT_USER_DATA:
-      if (!GetAlternateUserDataDirectory(&cur)) {
-        NOTREACHED();
-        return false;
-      }
-      create_dir = false;
-      break;
-#endif  // OS_WIN
     case chrome::DIR_USER_DOCUMENTS:
       if (!GetUserDocumentsDirectory(&cur))
         return false;
@@ -309,13 +300,34 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       cur = cur.Append(kInternalNaClPluginFileName);
       break;
+    // PNaCl is currenly installable via the component updater or by being
+    // simply built-in, but only the builtin path is currently enabled.
+    // If PNaCl ends up using the component updater, it will need the version
+    // encoded in the path, and these will need to be split.
     case chrome::DIR_PNACL_BASE:
-      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("Pnacl"));
-      break;
     case chrome::DIR_PNACL_COMPONENT:
-      return false;
+#if defined(OS_MACOSX)
+      // PNaCl really belongs in the InternalPluginsDirectory but actually
+      // copying it there would result in the files also being shipped, which
+      // we don't want yet. So for now, just find them in the directory where
+      // they get built.
+      if (!PathService::Get(base::DIR_EXE, &cur))
+        return false;
+      if (base::mac::AmIBundled()) {
+        // If we're called from chrome, it's beside the app (outside the
+        // app bundle), if we're called from a unittest, we'll already be
+        // outside the bundle so use the exe dir.
+        // exe_dir gave us .../Chromium.app/Contents/MacOS/Chromium.
+        cur = cur.DirName();
+        cur = cur.DirName();
+        cur = cur.DirName();
+      }
+#else
+      if (!GetInternalPluginsDirectory(&cur))
+        return false;
+#endif
+      cur = cur.Append(FILE_PATH_LITERAL("pnacl"));
+      break;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     case chrome::FILE_NACL_HELPER:
       if (!PathService::Get(base::DIR_MODULE, &cur))
@@ -346,7 +358,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
 #endif
     case chrome::FILE_RESOURCES_PACK:
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
       if (base::mac::AmIBundled()) {
         cur = base::mac::FrameworkBundlePath();
         cur = cur.Append(FILE_PATH_LITERAL("Resources"))
@@ -375,6 +387,11 @@ bool PathProvider(int key, FilePath* result) {
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("wallpapers"));
+      break;
+    case chrome::DIR_CHROMEOS_WALLPAPER_THUMBNAILS:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("wallpaper_thumbnails"));
       break;
     case chrome::FILE_DEFAULT_APP_ORDER:
       cur = FilePath(FILE_PATH_LITERAL(kDefaultAppOrderFileName));
@@ -418,7 +435,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
     }
 #endif
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
     case chrome::DIR_MANAGED_PREFS: {
       if (!GetLocalLibraryDirectory(&cur))
         return false;
@@ -432,7 +449,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
     }
 #endif
-#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
+#if defined(OS_CHROMEOS) || (defined(OS_MACOSX) && !defined(OS_IOS))
     case chrome::DIR_USER_EXTERNAL_EXTENSIONS: {
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
@@ -447,7 +464,7 @@ bool PathProvider(int key, FilePath* result) {
     }
 #endif
     case chrome::DIR_EXTERNAL_EXTENSIONS:
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
       if (!chrome::GetGlobalApplicationSupportDirectory(&cur))
         return false;
 

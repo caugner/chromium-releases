@@ -61,7 +61,9 @@ class CONTENT_EXPORT DXVAVideoDecodeAccelerator
   // 1. Loads the dlls like mf/mfplat/d3d9, etc required for decoding.
   // 2. Setting up the device manager instance which is shared between all
   //    decoder instances.
-  static void PreSandboxInitialization();
+  // Invokes the completion task, potentially on another thread, when complete.
+  static void PreSandboxInitialization(
+      const base::Closure& completion_task);
 
  private:
   typedef void* EGLConfig;
@@ -69,7 +71,9 @@ class CONTENT_EXPORT DXVAVideoDecodeAccelerator
   // Creates and initializes an instance of the D3D device and the
   // corresponding device manager. The device manager instance is eventually
   // passed to the IMFTransform interface implemented by the h.264 decoder.
-  static bool CreateD3DDevManager();
+  // Invokes the completion task, potentially on another thread, when complete.
+  static void CreateD3DDevManager(
+      const base::Closure& completion_task);
 
   // Creates, initializes and sets the media types for the h.264 decoder.
   bool InitDecoder();
@@ -144,6 +148,9 @@ class CONTENT_EXPORT DXVAVideoDecodeAccelerator
   // Helper for handling the Flush operation.
   void FlushInternal();
 
+  // Helper for handling the Decode operation.
+  void DecodeInternal(const base::win::ScopedComPtr<IMFSample>& input_sample);
+
   // To expose client callbacks from VideoDecodeAccelerator.
   media::VideoDecodeAccelerator::Client* client_;
 
@@ -212,7 +219,7 @@ class CONTENT_EXPORT DXVAVideoDecodeAccelerator
   static bool pre_sandbox_init_done_;
 
   // List of input samples waiting to be processed.
-  typedef std::list<media::BitstreamBuffer> PendingInputs;
+  typedef std::list<base::win::ScopedComPtr<IMFSample>> PendingInputs;
   PendingInputs pending_input_buffers_;
 
   // Callback to set the correct gl context.

@@ -213,11 +213,9 @@ void TestRenderWidgetHostView::WillWmDestroy() {
 void TestRenderWidgetHostView::StartContentIntent(const GURL&) {}
 #endif
 
-#if defined(OS_POSIX) || defined(USE_AURA)
 gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
 }
-#endif
 
 #if defined(TOOLKIT_GTK)
 GdkEventButton* TestRenderWidgetHostView::GetLastMouseDown() {
@@ -290,13 +288,13 @@ void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
 
 void TestRenderViewHost::SendNavigateWithTransition(
     int page_id, const GURL& url, PageTransition transition) {
-  OnMsgDidStartProvisionalLoadForFrame(0, -1, true, GURL(), url);
+  OnMsgDidStartProvisionalLoadForFrame(0, -1, true, url);
   SendNavigateWithParameters(page_id, url, transition, url);
 }
 
 void TestRenderViewHost::SendNavigateWithOriginalRequestURL(
     int page_id, const GURL& url, const GURL& original_request_url) {
-  OnMsgDidStartProvisionalLoadForFrame(0, -1, true, GURL(), url);
+  OnMsgDidStartProvisionalLoadForFrame(0, -1, true, url);
   SendNavigateWithParameters(page_id, url, PAGE_TRANSITION_LINK,
       original_request_url);
 }
@@ -355,7 +353,9 @@ void TestRenderViewHost::SimulateWasShown() {
 void TestRenderViewHost::TestOnMsgStartDragging(
     const WebDropData& drop_data) {
   WebKit::WebDragOperationsMask drag_operation = WebKit::WebDragOperationEvery;
-  OnMsgStartDragging(drop_data, drag_operation, SkBitmap(), gfx::Point());
+  DragEventSourceInfo event_info;
+  OnMsgStartDragging(drop_data, drag_operation, SkBitmap(), gfx::Vector2d(),
+                     event_info);
 }
 
 void TestRenderViewHost::set_simulate_fetch_via_proxy(bool proxy) {

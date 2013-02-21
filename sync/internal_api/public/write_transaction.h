@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base_transaction.h"
 
 namespace tracked_objects {
@@ -25,11 +26,17 @@ class WriteTransaction;
 //
 // NOTE: Only a single model type can be mutated for a given
 // WriteTransaction.
-class WriteTransaction : public BaseTransaction {
+class SYNC_EXPORT WriteTransaction : public BaseTransaction {
  public:
   // Start a new read/write transaction.
   WriteTransaction(const tracked_objects::Location& from_here,
                    UserShare* share);
+  // |transaction_version| stores updated model and nodes version if model
+  // is changed by the transaction, or syncer::syncable::kInvalidTransaction
+  // if not after transaction is closed. This constructor is used for model
+  // types that support embassy data.
+  WriteTransaction(const tracked_objects::Location& from_here,
+                   UserShare* share, int64* transaction_version);
   virtual ~WriteTransaction();
 
   // Provide access to the syncable transaction from the API WriteNode.
@@ -40,7 +47,7 @@ class WriteTransaction : public BaseTransaction {
   WriteTransaction() {}
 
   void SetTransaction(syncable::WriteTransaction* trans) {
-      transaction_ = trans;
+    transaction_ = trans;
   }
 
  private:

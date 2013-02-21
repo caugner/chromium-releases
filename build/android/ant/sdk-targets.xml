@@ -62,6 +62,7 @@
         <src>
           <path refid="javac.srcdirs.additional"/>
         </src>
+        <compilerarg value="-Xlint:unchecked"/>
         <compilerarg line="${java.compilerargs}"/>
       </javac>
       <!--
@@ -193,7 +194,7 @@
 
     <!-- Package all the compiled .class files into a .jar. -->
     <jar
-      jarfile="${lib.java.dir}/chromium_apk_${PACKAGE_NAME}.jar"
+      jarfile="${lib.java.dir}/${JAR_NAME}"
       basedir="${out.classes.absolute.dir}"
     />
   </target>

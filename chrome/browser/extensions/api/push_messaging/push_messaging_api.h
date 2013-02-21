@@ -14,6 +14,7 @@
 #include "chrome/browser/extensions/api/push_messaging/obfuscated_gaia_id_fetcher.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_invalidation_handler_delegate.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -33,9 +34,6 @@ class PushMessagingEventRouter
  public:
   explicit PushMessagingEventRouter(Profile* profile);
   virtual ~PushMessagingEventRouter();
-
-  void Init();
-  void Shutdown();
 
   PushMessagingInvalidationMapper* GetMapperForTest() const {
     return handler_.get();
@@ -103,6 +101,29 @@ class PushMessagingGetChannelIdFunction
   bool interactive_;
 
   DISALLOW_COPY_AND_ASSIGN(PushMessagingGetChannelIdFunction);
+};
+
+class PushMessagingAPI : public ProfileKeyedService {
+ public:
+  explicit PushMessagingAPI(Profile* profile);
+  virtual ~PushMessagingAPI();
+
+  // Convenience method to get the PushMessagingAPI for a profile.
+  static PushMessagingAPI* Get(Profile* profile);
+
+  // ProfileKeyedService implementation.
+  virtual void Shutdown() OVERRIDE;
+
+  // For testing purposes.
+  PushMessagingEventRouter* GetEventRouterForTest();
+
+ private:
+  void InitializeEventRouter();
+
+  // Created at ExtensionService startup.
+  scoped_ptr<PushMessagingEventRouter> push_messaging_event_router_;
+
+  DISALLOW_COPY_AND_ASSIGN(PushMessagingAPI);
 };
 
 }  // namespace extension

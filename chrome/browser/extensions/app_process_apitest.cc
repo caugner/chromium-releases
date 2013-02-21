@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
@@ -14,7 +15,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -63,8 +63,8 @@ class AppApiTest : public ExtensionApiTest {
   void TestAppInstancesHelper(std::string app_name) {
     LOG(INFO) << "Start of test.";
 
-    extensions::ProcessMap* process_map =
-        browser()->profile()->GetExtensionService()->process_map();
+    extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service()->process_map();
 
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(test_server()->Start());
@@ -134,8 +134,8 @@ class BlockedAppApiTest : public AppApiTest {
 IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
   LOG(INFO) << "Start of test.";
 
-  extensions::ProcessMap* process_map =
-      browser()->profile()->GetExtensionService()->process_map();
+  extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
@@ -242,14 +242,22 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcessInstances) {
 // Test that hosted apps with the background permission but that set
 // allow_js_access to false also use a process per app instance model.
 // Separate instances should be in separate processes.
-IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcessBackgroundInstances) {
+// Flaky on XP: http://crbug.com/165834
+#if defined(OS_WIN)
+#define MAYBE_AppProcessBackgroundInstances \
+    DISABLED_AppProcessBackgroundInstances
+#else
+#define MAYBE_AppProcessBackgroundInstances AppProcessBackgroundInstances
+#endif
+IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_AppProcessBackgroundInstances) {
   TestAppInstancesHelper("app_process_background_instances");
 }
 
 // Tests that bookmark apps do not use the app process model and are treated
 // like normal web pages instead.  http://crbug.com/104636.
 IN_PROC_BROWSER_TEST_F(AppApiTest, BookmarkAppGetsNormalProcess) {
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   extensions::ProcessMap* process_map = service->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
@@ -265,7 +273,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, BookmarkAppGetsNormalProcess) {
       &error));
   service->OnExtensionInstalled(extension,
                                 syncer::StringOrdinal::CreateInitialOrdinal(),
-                                false /* no requirement errors */);
+                                false /* no requirement errors */,
+                                false /* don't wait for idle */);
   ASSERT_TRUE(extension.get());
   ASSERT_TRUE(extension->from_bookmark());
 
@@ -367,8 +376,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcessRedirectBack) {
 #define MAYBE_ReloadIntoAppProcess ReloadIntoAppProcess
 #endif
 IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadIntoAppProcess) {
-  extensions::ProcessMap* process_map =
-      browser()->profile()->GetExtensionService()->process_map();
+  extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
@@ -450,8 +459,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadIntoAppProcess) {
 // empty.html) results in the new window being in an app process. See
 // http://crbug.com/89272 for more details.
 IN_PROC_BROWSER_TEST_F(AppApiTest, OpenAppFromIframe) {
-  extensions::ProcessMap* process_map =
-      browser()->profile()->GetExtensionService()->process_map();
+  extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
@@ -561,8 +570,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, OpenAppFromExtension) {
 // missing special permissions and should be scriptable from the iframe.
 // See http://crbug.com/92669 for more details.
 IN_PROC_BROWSER_TEST_F(AppApiTest, OpenWebPopupFromWebIframe) {
-  extensions::ProcessMap* process_map =
-      browser()->profile()->GetExtensionService()->process_map();
+  extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
@@ -599,8 +608,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, OpenWebPopupFromWebIframe) {
 #define MAYBE_ReloadAppAfterCrash ReloadAppAfterCrash
 #endif
 IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadAppAfterCrash) {
-  extensions::ProcessMap* process_map =
-      browser()->profile()->GetExtensionService()->process_map();
+  extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());

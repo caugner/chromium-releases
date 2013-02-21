@@ -20,12 +20,10 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/browser_resources.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OFFICIAL_BUILD)
@@ -44,6 +42,8 @@
 namespace extensions {
 
 namespace {
+
+static bool enable_background_extensions_during_testing = false;
 
 std::string GenerateId(const DictionaryValue* manifest, const FilePath& path) {
   std::string raw_key;
@@ -78,18 +78,14 @@ ComponentLoader::ComponentLoader(ExtensionServiceInterface* extension_service,
 
   // This pref is set by policy. We have to watch it for change because on
   // ChromeOS, policy isn't loaded until after the browser process is started.
-  pref_change_registrar_.Add(prefs::kEnterpriseWebStoreURL, this);
+  pref_change_registrar_.Add(
+      prefs::kEnterpriseWebStoreURL,
+      base::Bind(&ComponentLoader::AddOrReloadEnterpriseWebStore,
+                 base::Unretained(this)));
 }
 
 ComponentLoader::~ComponentLoader() {
   ClearAllRegistered();
-}
-
-const Extension* ComponentLoader::GetScriptBubble() const {
-  if (script_bubble_id_.empty())
-    return NULL;
-
-  return extension_service_->extensions()->GetByID(script_bubble_id_);
 }
 
 void ComponentLoader::LoadAll() {
@@ -127,8 +123,7 @@ std::string ComponentLoader::Add(int manifest_resource_id,
                                  const FilePath& root_directory) {
   std::string manifest_contents =
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          manifest_resource_id,
-          ui::SCALE_FACTOR_NONE).as_string();
+          manifest_resource_id).as_string();
   return Add(manifest_contents, root_directory);
 }
 
@@ -178,7 +173,7 @@ void ComponentLoader::Reload(const std::string& extension_id) {
   }
 }
 
-const Extension* ComponentLoader::Load(const ComponentExtensionInfo& info) {
+void ComponentLoader::Load(const ComponentExtensionInfo& info) {
   // TODO(abarth): We should REQUIRE_MODERN_MANIFEST_VERSION once we've updated
   //               our component extensions to the new manifest version.
   int flags = Extension::REQUIRE_KEY;
@@ -193,11 +188,19 @@ const Extension* ComponentLoader::Load(const ComponentExtensionInfo& info) {
       &error));
   if (!extension.get()) {
     LOG(ERROR) << error;
-    return NULL;
+    return;
   }
+
   CHECK_EQ(info.extension_id, extension->id()) << extension->name();
-  extension_service_->AddExtension(extension);
-  return extension;
+  extension_service_->AddComponentExtension(extension);
+}
+
+void ComponentLoader::RemoveAll() {
+  RegisteredComponentExtensions::iterator it = component_extensions_.begin();
+  for (; it != component_extensions_.end(); ++it)
+    UnloadComponent(&(*it));
+
+  component_extensions_.clear();
 }
 
 void ComponentLoader::Remove(const FilePath& root_directory) {
@@ -215,11 +218,8 @@ void ComponentLoader::Remove(const std::string& id) {
   RegisteredComponentExtensions::iterator it = component_extensions_.begin();
   for (; it != component_extensions_.end(); ++it) {
     if (it->extension_id == id) {
-      delete it->manifest;
+      UnloadComponent(&(*it));
       it = component_extensions_.erase(it);
-      if (extension_service_->is_ready())
-        extension_service_->
-            UnloadExtension(id, extension_misc::UNLOAD_REASON_DISABLE);
       break;
     }
   }
@@ -236,16 +236,19 @@ bool ComponentLoader::Exists(const std::string& id) const {
 
 void ComponentLoader::AddFileManagerExtension() {
 #if defined(FILE_MANAGER_EXTENSION)
-#ifndef NDEBUG
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  int manifest_id = command_line->HasSwitch(switches::kFileManagerPackaged) ?
+      IDR_FILEMANAGER_MANIFEST :
+      IDR_FILEMANAGER_MANIFEST_V1;
+#ifndef NDEBUG
   if (command_line->HasSwitch(switches::kFileManagerExtensionPath)) {
     FilePath filemgr_extension_path(
         command_line->GetSwitchValuePath(switches::kFileManagerExtensionPath));
-    Add(IDR_FILEMANAGER_MANIFEST, filemgr_extension_path);
+    Add(manifest_id, filemgr_extension_path);
     return;
   }
 #endif  // NDEBUG
-  Add(IDR_FILEMANAGER_MANIFEST, FilePath(FILE_PATH_LITERAL("file_manager")));
+  Add(manifest_id, FilePath(FILE_PATH_LITERAL("file_manager")));
 #endif  // defined(FILE_MANAGER_EXTENSION)
 }
 
@@ -275,8 +278,7 @@ void ComponentLoader::AddOrReloadEnterpriseWebStore() {
   if (!enterprise_webstore_url.empty()) {
     std::string manifest_contents =
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_ENTERPRISE_WEBSTORE_MANIFEST,
-          ui::SCALE_FACTOR_NONE).as_string();
+          IDR_ENTERPRISE_WEBSTORE_MANIFEST).as_string();
 
     // The manifest is missing some values that are provided by policy.
     DictionaryValue* manifest = ParseManifest(manifest_contents);
@@ -293,8 +295,7 @@ void ComponentLoader::AddChromeApp() {
 #if defined(USE_ASH)
   std::string manifest_contents =
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_CHROME_APP_MANIFEST,
-          ui::SCALE_FACTOR_NONE).as_string();
+          IDR_CHROME_APP_MANIFEST).as_string();
 
   // The Value is kept for the lifetime of the ComponentLoader. This is
   // required in case LoadAll() is called again.
@@ -309,58 +310,21 @@ void ComponentLoader::AddChromeApp() {
 #endif
 }
 
-void ComponentLoader::AddScriptBubble() {
-  if (FeatureSwitch::script_bubble()->IsEnabled()) {
-    script_bubble_id_ =
-        Add(IDR_SCRIPT_BUBBLE_MANIFEST,
-            FilePath(FILE_PATH_LITERAL("script_bubble")));
-  }
+// static
+void ComponentLoader::EnableBackgroundExtensionsForTesting() {
+  enable_background_extensions_during_testing = true;
 }
 
-void ComponentLoader::AddDefaultComponentExtensions() {
+void ComponentLoader::AddDefaultComponentExtensions(
+    bool skip_session_components) {
+  // Do not add component extensions that have background pages here -- add them
+  // to AddDefaultComponentExtensionsWithBackgroundPages.
 #if defined(OS_CHROMEOS)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession))
-    Add(IDR_BOOKMARKS_MANIFEST,
-        FilePath(FILE_PATH_LITERAL("bookmark_manager")));
-#else
-  Add(IDR_BOOKMARKS_MANIFEST, FilePath(FILE_PATH_LITERAL("bookmark_manager")));
-#endif
-
-#if defined(OS_CHROMEOS)
-  if (!CommandLine::ForCurrentProcess()->
-          HasSwitch(switches::kDisableNewWallpaperUI)) {
-    Add(IDR_WALLPAPERMANAGER_MANIFEST,
-        FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
-  }
-#endif
-
-#if defined(FILE_MANAGER_EXTENSION)
-  AddFileManagerExtension();
-#endif
-
-#if defined(OS_CHROMEOS)
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableBackgroundLoader)) {
-    Add(IDR_BACKLOADER_MANIFEST,
-        FilePath(FILE_PATH_LITERAL("backloader")));
-  }
-
   Add(IDR_MOBILE_MANIFEST,
       FilePath(FILE_PATH_LITERAL("/usr/share/chromeos-assets/mobile")));
 
-  Add(IDR_CROSH_BUILTIN_MANIFEST, FilePath(FILE_PATH_LITERAL(
-      "/usr/share/chromeos-assets/crosh_builtin")));
-
-  AddGaiaAuthExtension();
-
-  // TODO(gauravsh): Only include echo extension on official builds.
-  FilePath echo_extension_path(FILE_PATH_LITERAL(
-      "/usr/share/chromeos-assets/echo"));
-  if (command_line->HasSwitch(switches::kEchoExtensionPath)) {
-    echo_extension_path =
-        command_line->GetSwitchValuePath(switches::kEchoExtensionPath);
-  }
-  Add(IDR_ECHO_MANIFEST, echo_extension_path);
+  if (skip_session_components)
+    AddGaiaAuthExtension();
 
 #if defined(OFFICIAL_BUILD)
   if (browser_defaults::enable_help_app) {
@@ -368,58 +332,96 @@ void ComponentLoader::AddDefaultComponentExtensions() {
         FilePath(FILE_PATH_LITERAL("/usr/share/chromeos-assets/helpapp")));
   }
 #endif
-#endif  // !defined(OS_CHROMEOS)
 
-  Add(IDR_WEBSTORE_MANIFEST, FilePath(FILE_PATH_LITERAL("web_store")));
+  // Skip all other extensions that require user session presence.
+  if (!skip_session_components) {
+    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (!command_line->HasSwitch(switches::kGuestSession))
+      Add(IDR_BOOKMARKS_MANIFEST,
+          FilePath(FILE_PATH_LITERAL("bookmark_manager")));
 
-#if defined(OS_WIN)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableSettingsApp)) {
-    Add(IDR_SETTINGS_APP_MANIFEST,
-        FilePath(FILE_PATH_LITERAL("settings_app")));
+    Add(IDR_CROSH_BUILTIN_MANIFEST, FilePath(FILE_PATH_LITERAL(
+        "/usr/share/chromeos-assets/crosh_builtin")));
   }
-#endif
-
-#if !defined(OS_CHROMEOS)
+#else  // !defined(OS_CHROMEOS)
+  DCHECK(!skip_session_components);
+  Add(IDR_BOOKMARKS_MANIFEST, FilePath(FILE_PATH_LITERAL("bookmark_manager")));
   // Cloud Print component app. Not required on Chrome OS.
   Add(IDR_CLOUDPRINT_MANIFEST, FilePath(FILE_PATH_LITERAL("cloud_print")));
 #endif
 
+  if (!skip_session_components) {
+    Add(IDR_WEBSTORE_MANIFEST, FilePath(FILE_PATH_LITERAL("web_store")));
+
+    // If a URL for the enterprise webstore has been specified, load the
+    // component extension. This extension might also be loaded later, because
+    // it is specified by policy, and on ChromeOS policies are loaded after
+    // the browser process has started.
+    AddOrReloadEnterpriseWebStore();
+
+#if defined(USE_ASH)
+    AddChromeApp();
+#endif
+  }
+
+  AddDefaultComponentExtensionsWithBackgroundPages(skip_session_components);
+}
+
+void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+    bool skip_session_components) {
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+
+  // Component extensions with background pages are not enabled during tests
+  // because they generate a lot of background behavior that can interfere.
+  if (!enable_background_extensions_during_testing &&
+      command_line->HasSwitch(switches::kTestType)) {
+    return;
+  }
+
+  if (!skip_session_components) {
+    // Apps Debugger
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kAppsDebugger)) {
+      Add(IDR_APPS_DEBUGGER_MANIFEST,
+          FilePath(FILE_PATH_LITERAL("apps_debugger")));
+    }
+
+    AddFileManagerExtension();
+
+#if defined(ENABLE_SETTINGS_APP)
+    Add(IDR_SETTINGS_APP_MANIFEST, FilePath(FILE_PATH_LITERAL("settings_app")));
+#endif
+  }
+
 #if defined(OS_CHROMEOS)
-  // Register access extensions only if accessibility is enabled.
+  if (!skip_session_components) {
+    Add(IDR_WALLPAPERMANAGER_MANIFEST,
+        FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
+
+    FilePath echo_extension_path(FILE_PATH_LITERAL(
+        "/usr/share/chromeos-assets/echo"));
+    if (command_line->HasSwitch(switches::kEchoExtensionPath)) {
+      echo_extension_path =
+          command_line->GetSwitchValuePath(switches::kEchoExtensionPath);
+    }
+    Add(IDR_ECHO_MANIFEST, echo_extension_path);
+  }
+
+  // Load ChromeVox extension now if spoken feedback is enabled.
   if (local_state_->GetBoolean(prefs::kSpokenFeedbackEnabled)) {
-    FilePath path = FilePath(extension_misc::kAccessExtensionPath)
-        .AppendASCII(extension_misc::kChromeVoxDirectoryName);
+    FilePath path = FilePath(extension_misc::kChromeVoxExtensionPath);
     Add(IDR_CHROMEVOX_MANIFEST, path);
   }
 #endif
 
-  // If a URL for the enterprise webstore has been specified, load the
-  // component extension. This extension might also be loaded later, because
-  // it is specified by policy, and on ChromeOS policies are loaded after
-  // the browser process has started.
-  AddOrReloadEnterpriseWebStore();
-
-#if defined(USE_ASH)
-  AddChromeApp();
-#endif
-
-  AddScriptBubble();
 }
 
-void ComponentLoader::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    const std::string* name =
-        content::Details<const std::string>(details).ptr();
-    if (*name == prefs::kEnterpriseWebStoreURL)
-      AddOrReloadEnterpriseWebStore();
-    else
-      NOTREACHED();
-  } else {
-    NOTREACHED();
+void ComponentLoader::UnloadComponent(ComponentExtensionInfo* component) {
+  delete component->manifest;
+  if (extension_service_->is_ready()) {
+    extension_service_->
+        UnloadExtension(component->extension_id,
+                        extension_misc::UNLOAD_REASON_DISABLE);
   }
 }
 

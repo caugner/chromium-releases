@@ -4,17 +4,16 @@
 
 #include "chrome/common/extensions/extension.h"
 
-#include "base/format_macros.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/format_macros.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/command.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -22,22 +21,27 @@
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
+#include "chrome/common/extensions/permissions/usb_device_permission.h"
 #include "chrome/common/url_constants.h"
+#include "extensions/common/error_utils.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_sniffer.h"
-#include "skia/ext/image_operations.h"
 #include "net/base/mock_host_resolver.h"
+#include "skia/ext/image_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 
+using content::SocketPermissionRequest;
 using extensions::APIPermission;
 using extensions::APIPermissionSet;
+using extensions::ErrorUtils;
 using extensions::Extension;
 using extensions::Feature;
 using extensions::PermissionSet;
 using extensions::SocketPermission;
-using extensions::SocketPermissionData;
+using extensions::URLPatternSet;
+using extensions::UsbDevicePermission;
 
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
@@ -285,7 +289,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
 
   // Use both "popup" and "default_popup", expect failure.
   LoadActionAndExpectError("page_action_popup_and_default_popup.json",
-      ExtensionErrorUtils::FormatErrorMessage(
+      ErrorUtils::FormatErrorMessage(
           errors::kInvalidPageActionOldAndNewKeys,
           keys::kPageActionDefaultPopup,
           keys::kPageActionPopup));
@@ -448,7 +452,7 @@ TEST(ExtensionTest, EffectiveHostPermissions) {
 }
 
 static bool CheckSocketPermission(scoped_refptr<Extension> extension,
-    SocketPermissionData::OperationType type,
+    SocketPermissionRequest::OperationType type,
     const char* host,
     int port) {
   SocketPermission::CheckParam param(type, host, port);
@@ -464,29 +468,31 @@ TEST(ExtensionTest, SocketPermissions) {
   std::string error;
 
   extension = LoadManifest("socket_permissions", "empty.json");
-  EXPECT_FALSE(CheckSocketPermission(
-        extension, SocketPermissionData::TCP_CONNECT, "www.example.com", 80));
+  EXPECT_FALSE(CheckSocketPermission(extension,
+      SocketPermissionRequest::TCP_CONNECT, "www.example.com", 80));
 
   extension = LoadManifestUnchecked("socket_permissions",
                                     "socket1.json",
                                     Extension::INTERNAL, Extension::NO_FLAGS,
                                     &error);
   EXPECT_TRUE(extension == NULL);
-  ASSERT_EQ(ExtensionErrorUtils::FormatErrorMessage(
+  ASSERT_EQ(ErrorUtils::FormatErrorMessage(
         errors::kInvalidPermission, "socket"), error);
 
   extension = LoadManifest("socket_permissions", "socket2.json");
-  EXPECT_TRUE(CheckSocketPermission(
-        extension, SocketPermissionData::TCP_CONNECT, "www.example.com", 80));
+  EXPECT_TRUE(CheckSocketPermission(extension,
+      SocketPermissionRequest::TCP_CONNECT, "www.example.com", 80));
   EXPECT_FALSE(CheckSocketPermission(
-        extension, SocketPermissionData::UDP_BIND, "", 80));
+        extension, SocketPermissionRequest::UDP_BIND, "", 80));
   EXPECT_TRUE(CheckSocketPermission(
-        extension, SocketPermissionData::UDP_BIND, "", 8888));
+        extension, SocketPermissionRequest::UDP_BIND, "", 8888));
 
   EXPECT_FALSE(CheckSocketPermission(
-        extension, SocketPermissionData::UDP_SEND_TO, "example.com", 1900));
+        extension, SocketPermissionRequest::UDP_SEND_TO, "example.com", 1900));
   EXPECT_TRUE(CheckSocketPermission(
-        extension, SocketPermissionData::UDP_SEND_TO, "239.255.255.250", 1900));
+        extension,
+        SocketPermissionRequest::UDP_SEND_TO,
+        "239.255.255.250", 1900));
 }
 
 // Returns a copy of |source| resized to |size| x |size|.
@@ -900,7 +906,7 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, Permissions) {
                                     Extension::INTERNAL, Extension::NO_FLAGS,
                                     &error);
   EXPECT_TRUE(extension == NULL);
-  EXPECT_EQ(ExtensionErrorUtils::FormatErrorMessage(
+  EXPECT_EQ(ErrorUtils::FormatErrorMessage(
       errors::kInvalidPermissionScheme, "chrome://*/"), error);
 
   // Having chrome://favicon/* should not give you chrome://*
@@ -1160,13 +1166,64 @@ TEST(ExtensionTest, OnlyDisplayAppsInLauncher) {
                             Extension::INTERNAL, 0, FilePath(),
                             Extension::NO_FLAGS));
 
-  EXPECT_FALSE(extension->ShouldDisplayInLauncher());
+  EXPECT_FALSE(extension->ShouldDisplayInAppLauncher());
+  EXPECT_FALSE(extension->ShouldDisplayInNewTabPage());
 
   scoped_refptr<Extension> app(
       MakeSyncTestExtension(APP, GURL(), GURL("http://www.google.com"),
                             Extension::INTERNAL, 0, FilePath(),
                             Extension::NO_FLAGS));
-  EXPECT_TRUE(app->ShouldDisplayInLauncher());
+  EXPECT_TRUE(app->ShouldDisplayInAppLauncher());
+  EXPECT_TRUE(app->ShouldDisplayInNewTabPage());
+}
+
+TEST(ExtensionTest, DisplayInXManifestProperties) {
+  DictionaryValue manifest;
+  manifest.SetString(keys::kName, "TestComponentApp");
+  manifest.SetString(keys::kVersion, "0.0.0.0");
+  manifest.SetString(keys::kApp, "true");
+  manifest.SetString(keys::kPlatformAppBackgroundPage, "");
+
+  std::string error;
+  scoped_refptr<Extension> app;
+
+  // Default to true.
+  app = Extension::Create(
+      FilePath(), Extension::COMPONENT, manifest, 0, &error);
+  EXPECT_EQ(error, std::string());
+  EXPECT_TRUE(app->ShouldDisplayInAppLauncher());
+  EXPECT_TRUE(app->ShouldDisplayInNewTabPage());
+
+  // Value display_in_NTP defaults to display_in_launcher.
+  manifest.SetBoolean(keys::kDisplayInLauncher, false);
+  app = Extension::Create(
+      FilePath(), Extension::COMPONENT, manifest, 0, &error);
+  EXPECT_EQ(error, std::string());
+  EXPECT_FALSE(app->ShouldDisplayInAppLauncher());
+  EXPECT_FALSE(app->ShouldDisplayInNewTabPage());
+
+  // Value display_in_NTP = true overriding display_in_launcher = false.
+  manifest.SetBoolean(keys::kDisplayInNewTabPage, true);
+  app = Extension::Create(
+      FilePath(), Extension::COMPONENT, manifest, 0, &error);
+  EXPECT_EQ(error, std::string());
+  EXPECT_FALSE(app->ShouldDisplayInAppLauncher());
+  EXPECT_TRUE(app->ShouldDisplayInNewTabPage());
+
+  // Value display_in_NTP = false only, overrides default = true.
+  manifest.Remove(keys::kDisplayInLauncher, NULL);
+  manifest.SetBoolean(keys::kDisplayInNewTabPage, false);
+  app = Extension::Create(
+      FilePath(), Extension::COMPONENT, manifest, 0, &error);
+  EXPECT_EQ(error, std::string());
+  EXPECT_TRUE(app->ShouldDisplayInAppLauncher());
+  EXPECT_FALSE(app->ShouldDisplayInNewTabPage());
+
+  // Error checking.
+  manifest.SetString(keys::kDisplayInNewTabPage, "invalid");
+  app = Extension::Create(
+      FilePath(), Extension::COMPONENT, manifest, 0, &error);
+  EXPECT_EQ(error, std::string(errors::kInvalidDisplayInNewTabPage));
 }
 
 TEST(ExtensionTest, OnlySyncInternal) {
@@ -1189,6 +1246,31 @@ TEST(ExtensionTest, DontSyncDefault) {
                             Extension::INTERNAL, 0, FilePath(),
                             Extension::WAS_INSTALLED_BY_DEFAULT));
   EXPECT_FALSE(extension_default->IsSyncable());
+}
+
+TEST(ExtensionTest, OptionalOnlyPermission) {
+  // Set feature current channel to dev because the only permission that must
+  // be optional (usbDevices) is only available on dev channel.
+  Feature::ScopedCurrentChannel scoped_channel(
+      chrome::VersionInfo::CHANNEL_DEV);
+
+  scoped_refptr<Extension> extension;
+  std::string error;
+  extension = LoadManifestUnchecked("optional_only_permission",
+                                    "manifest1.json",
+                                    Extension::INTERNAL, Extension::NO_FLAGS,
+                                    &error);
+  EXPECT_TRUE(extension == NULL);
+  ASSERT_EQ(ErrorUtils::FormatErrorMessage(
+        errors::kPermissionMustBeOptional, "usbDevices"), error);
+
+  error.clear();
+  extension = LoadManifestUnchecked("optional_only_permission",
+                                    "manifest2.json",
+                                    Extension::INTERNAL, Extension::NO_FLAGS,
+                                    &error);
+  EXPECT_TRUE(extension != NULL);
+  EXPECT_TRUE(error.empty());
 }
 
 // These last 2 tests don't make sense on Chrome OS, where extension plugins

@@ -2,16 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/tabs/dock_info.h"
+#include "chrome/browser/ui/ash/tabs/dock_info_ash.h"
 
 #include "ash/shell_window_ids.h"
 #include "ash/wm/coordinate_conversion.h"
-#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/compositor/layer.h"
-
-// DockInfo -------------------------------------------------------------------
 
 namespace {
 
@@ -25,7 +21,8 @@ aura::Window* GetLocalProcessWindowAtPointImpl(
   if (!window->IsVisible())
     return NULL;
 
-  if (window->id() == ash::internal::kShellWindowId_PhantomWindow)
+  if (window->id() == ash::internal::kShellWindowId_PhantomWindow ||
+      window->id() == ash::internal::kShellWindowId_OverlayContainer)
     return NULL;
 
   if (window->layer()->type() == ui::LAYER_TEXTURED)
@@ -43,29 +40,22 @@ aura::Window* GetLocalProcessWindowAtPointImpl(
 
 }  // namespace
 
-// static
-DockInfo DockInfo::GetDockInfoAtPoint(const gfx::Point& screen_point,
-                                      const std::set<gfx::NativeView>& ignore) {
+namespace chrome {
+namespace ash {
+
+DockInfo GetDockInfoAtPointAsh(
+    const gfx::Point& screen_point, const std::set<gfx::NativeView>& ignore) {
   // TODO(beng):
   NOTIMPLEMENTED();
   return DockInfo();
 }
 
-// static
-gfx::NativeView DockInfo::GetLocalProcessWindowAtPoint(
+gfx::NativeView GetLocalProcessWindowAtPointAsh(
     const gfx::Point& screen_point,
     const std::set<gfx::NativeView>& ignore) {
   return GetLocalProcessWindowAtPointImpl(
-      screen_point, ignore, ash::wm::GetRootWindowAt(screen_point));
+      screen_point, ignore, ::ash::wm::GetRootWindowAt(screen_point));
 }
 
-bool DockInfo::GetWindowBounds(gfx::Rect* bounds) const {
-  if (!window())
-    return false;
-  *bounds = window_->bounds();
-  return true;
-}
-
-void DockInfo::SizeOtherWindowTo(const gfx::Rect& bounds) const {
-  window_->SetBounds(bounds);
-}
+}  // namespace ash
+}  // namespace chrome

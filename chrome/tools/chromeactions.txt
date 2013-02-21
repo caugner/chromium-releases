@@ -17,9 +17,7 @@
 0x4eae5ccc2900dffa	AboutFlags_enable-nacl
 0x91d89fbc43b29963	AboutFlags_enable-nacl-debug
 0x6d932203ed5c6ae8	AboutFlags_enable-nacl-exception-handling
-0xa4ed571713f9e346	AboutFlags_enable-nacl-ipc-proxy
 0x26ca6c633d183f66	AboutFlags_enable-pnacl
-0x98ffd067fa68e69f	AboutFlags_enable-scripted-speech
 0x1a3d598e2cd416a0	AboutFlags_enable-smooth-scrolling
 0x22268494c966e464	AboutFlags_enable-website-settings
 0x79571e31c2dc4d3c	AboutFlags_experimental-location-features
@@ -1004,7 +1002,6 @@
 0x61bd701a880845ea	MobileTabSwitched
 0xeddccaa7cc01c9c4	MobileToolbarBack
 0x0082decef81a99e8	MobileToolbarForward
-0xc7cd1610c9a15c4d	MobileToolbarNewTab
 0xf7a930aae6dd681f	MobileToolbarReload
 0x3cf24b6fee3f97bf	MobileToolbarShowMenu
 0x3deff4b1d1a6c795	MobileToolbarShowStackView
@@ -1109,7 +1106,6 @@
 0xe2fd858f8395432f	Options_CustomFrame_Disable
 0x531823c36ca21da2	Options_CustomFrame_Enable
 0x33e7b018e003c5b1	Options_DefaultCookieSettingChanged
-0xd5a152f698cfa270	Options_DefaultFlashCameraMicSettingChanged
 0x3864ed1197ddceb8	Options_DefaultGeolocationSettingChanged
 0x3f92cd6678d2f595	Options_DefaultHandlersSettingChanged
 0x5dfe307474e6b526	Options_DefaultImagesSettingChanged

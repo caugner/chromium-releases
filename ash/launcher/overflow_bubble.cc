@@ -8,7 +8,11 @@
 
 #include "ash/launcher/launcher_types.h"
 #include "ash/launcher/launcher_view.h"
+#include "ash/root_window_controller.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/shell.h"
+#include "ash/wm/shelf_layout_manager.h"
+#include "ui/aura/root_window.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/bubble/bubble_delegate.h"
@@ -29,22 +33,6 @@ const int kPadding = 2;
 // Padding space in pixels between LauncherView's left/top edge to its contents.
 const int kLauncherViewLeadingInset = 8;
 
-// Gets arrow location based on shelf alignment.
-views::BubbleBorder::ArrowLocation GetBubbleArrowLocation(
-    ShelfAlignment shelf_alignment) {
-  switch (shelf_alignment) {
-    case ash::SHELF_ALIGNMENT_BOTTOM:
-      return views::BubbleBorder::BOTTOM_LEFT;
-    case ash::SHELF_ALIGNMENT_LEFT:
-      return views::BubbleBorder::LEFT_TOP;
-    case ash::SHELF_ALIGNMENT_RIGHT:
-      return views::BubbleBorder::RIGHT_TOP;
-    default:
-      NOTREACHED() << "Unknown shelf alignment " << shelf_alignment;
-      return views::BubbleBorder::BOTTOM_LEFT;
-  }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // OverflowBubbleView
 // OverflowBubbleView hosts a LauncherView to display overflown items.
@@ -57,16 +45,23 @@ class OverflowBubbleView : public views::BubbleDelegateView {
   void InitOverflowBubble(LauncherDelegate* delegate,
                           LauncherModel* model,
                           views::View* anchor,
-                          ShelfAlignment shelf_alignment,
                           int overflow_start_index);
 
  private:
-  bool is_horizontal_alignment() const {
-    return shelf_alignment_ == SHELF_ALIGNMENT_BOTTOM;
+  bool IsHorizontalAlignment() const {
+    return GetShelfLayoutManagerForLauncher()->IsHorizontalAlignment();
   }
 
   const gfx::Size GetContentsSize() const {
     return static_cast<views::View*>(launcher_view_)->GetPreferredSize();
+  }
+
+  // Gets arrow location based on shelf alignment.
+  views::BubbleBorder::ArrowLocation GetBubbleArrowLocation() const {
+    return GetShelfLayoutManagerForLauncher()->SelectValueForShelfAlignment(
+        views::BubbleBorder::BOTTOM_LEFT,
+        views::BubbleBorder::LEFT_TOP,
+        views::BubbleBorder::RIGHT_TOP);
   }
 
   void ScrollByXOffset(int x_offset);
@@ -77,21 +72,26 @@ class OverflowBubbleView : public views::BubbleDelegateView {
   virtual void Layout() OVERRIDE;
   virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
   virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
-  virtual bool OnScrollEvent(const ui::ScrollEvent& event) OVERRIDE;
+
+  // ui::EventHandler overrides:
+  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
 
   // views::BubbleDelegate overrides:
   virtual gfx::Rect GetBubbleBounds() OVERRIDE;
 
-  ShelfAlignment shelf_alignment_;
+  ShelfLayoutManager* GetShelfLayoutManagerForLauncher() const {
+    return ShelfLayoutManager::ForLauncher(
+        anchor_view()->GetWidget()->GetNativeView());
+  }
+
   LauncherView* launcher_view_;  // Owned by views hierarchy.
-  gfx::Point scroll_offset_;
+  gfx::Vector2d scroll_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(OverflowBubbleView);
 };
 
 OverflowBubbleView::OverflowBubbleView()
-    : shelf_alignment_(SHELF_ALIGNMENT_BOTTOM),
-      launcher_view_(NULL) {
+    : launcher_view_(NULL) {
 }
 
 OverflowBubbleView::~OverflowBubbleView() {
@@ -100,28 +100,30 @@ OverflowBubbleView::~OverflowBubbleView() {
 void OverflowBubbleView::InitOverflowBubble(LauncherDelegate* delegate,
                                             LauncherModel* model,
                                             views::View* anchor,
-                                            ShelfAlignment shelf_alignment,
                                             int overflow_start_index) {
-  shelf_alignment_ = shelf_alignment;
+  // set_anchor_view needs to be called before GetShelfLayoutManagerForLauncher
+  // can be called.
+  set_anchor_view(anchor);
+  set_arrow_location(GetBubbleArrowLocation());
+  set_background(NULL);
+  set_color(SkColorSetARGB(kLauncherBackgroundAlpha, 0, 0, 0));
+  set_margins(gfx::Insets(kPadding, kPadding, kPadding, kPadding));
+  set_move_with_anchor(true);
 
   // Makes bubble view has a layer and clip its children layers.
   SetPaintToLayer(true);
   SetFillsBoundsOpaquely(false);
   layer()->SetMasksToBounds(true);
 
-  launcher_view_ = new LauncherView(model, delegate, NULL);
+  launcher_view_ = new LauncherView(model,
+                                    delegate,
+                                    GetShelfLayoutManagerForLauncher());
   launcher_view_->set_first_visible_index(overflow_start_index);
   launcher_view_->set_leading_inset(kLauncherViewLeadingInset);
   launcher_view_->Init();
-  launcher_view_->SetAlignment(shelf_alignment);
+  launcher_view_->OnShelfAlignmentChanged();
   AddChildView(launcher_view_);
 
-  set_anchor_view(anchor);
-  set_arrow_location(GetBubbleArrowLocation(shelf_alignment));
-  set_background(NULL);
-  set_color(SkColorSetARGB(kLauncherBackgroundAlpha, 0, 0, 0));
-  set_margins(gfx::Insets(kPadding, kPadding, kPadding, kPadding));
-  set_move_with_anchor(true);
   views::BubbleDelegateView::CreateBubble(this);
 }
 
@@ -149,7 +151,7 @@ gfx::Size OverflowBubbleView::GetPreferredSize() {
   const gfx::Rect monitor_rect = Shell::GetScreen()->GetDisplayNearestPoint(
       GetAnchorRect().CenterPoint()).work_area();
   if (!monitor_rect.IsEmpty()) {
-    if (is_horizontal_alignment()) {
+    if (IsHorizontalAlignment()) {
       preferred_size.set_width(std::min(
           preferred_size.width(),
           static_cast<int>(monitor_rect.width() *
@@ -166,8 +168,8 @@ gfx::Size OverflowBubbleView::GetPreferredSize() {
 }
 
 void OverflowBubbleView::Layout() {
-  const gfx::Point origin(-scroll_offset_.x(), -scroll_offset_.y());
-  launcher_view_->SetBoundsRect(gfx::Rect(origin, GetContentsSize()));
+  launcher_view_->SetBoundsRect(gfx::Rect(
+      gfx::PointAtOffsetFromOrigin(-scroll_offset_), GetContentsSize()));
 }
 
 void OverflowBubbleView::ChildPreferredSizeChanged(views::View* child) {
@@ -180,7 +182,7 @@ void OverflowBubbleView::ChildPreferredSizeChanged(views::View* child) {
 }
 
 bool OverflowBubbleView::OnMouseWheel(const ui::MouseWheelEvent& event) {
-  if (is_horizontal_alignment())
+  if (IsHorizontalAlignment())
     ScrollByXOffset(-event.offset());
   else
     ScrollByYOffset(-event.offset());
@@ -189,17 +191,16 @@ bool OverflowBubbleView::OnMouseWheel(const ui::MouseWheelEvent& event) {
   return true;
 }
 
-bool OverflowBubbleView::OnScrollEvent(const ui::ScrollEvent& event) {
-  ScrollByXOffset(-event.x_offset());
-  ScrollByYOffset(-event.y_offset());
+void OverflowBubbleView::OnScrollEvent(ui::ScrollEvent* event) {
+  ScrollByXOffset(-event->x_offset());
+  ScrollByYOffset(-event->y_offset());
   Layout();
-  return true;
+  event->SetHandled();
 }
 
 gfx::Rect OverflowBubbleView::GetBubbleBounds() {
   views::BubbleBorder* border = GetBubbleFrameView()->bubble_border();
-  gfx::Insets bubble_insets;
-  border->GetInsets(&bubble_insets);
+  gfx::Insets bubble_insets = border->GetInsets();
 
   const int border_size =
       views::BubbleBorder::is_arrow_on_horizontal(arrow_location()) ?
@@ -255,7 +256,6 @@ OverflowBubble::~OverflowBubble() {
 void OverflowBubble::Show(LauncherDelegate* delegate,
                           LauncherModel* model,
                           views::View* anchor,
-                          ShelfAlignment shelf_alignment,
                           int overflow_start_index) {
   Hide();
 
@@ -263,10 +263,11 @@ void OverflowBubble::Show(LauncherDelegate* delegate,
   bubble_view->InitOverflowBubble(delegate,
                                   model,
                                   anchor,
-                                  shelf_alignment,
                                   overflow_start_index);
 
   bubble_ = bubble_view;
+  RootWindowController::ForWindow(anchor->GetWidget()->GetNativeView())->
+      GetSystemTray()->InitializeBubbleAnimations(bubble_->GetWidget());
   bubble_->GetWidget()->AddObserver(this);
   bubble_->GetWidget()->Show();
 }

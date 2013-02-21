@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
@@ -80,6 +80,14 @@ class TestConstrainedDialog : public views::DialogDelegate {
     return true;
   }
 
+  virtual ui::ModalType GetModalType() const OVERRIDE {
+#if defined(USE_ASH)
+    return ui::MODAL_TYPE_CHILD;
+#else
+    return views::WidgetDelegate::GetModalType();
+#endif
+  }
+
   bool done() {
     return done_;
   }
@@ -107,17 +115,17 @@ class ConstrainedWindowViewTest : public InProcessBrowserTest {
 // *) Constrained windows that are queued don't register themselves as
 //    accelerator targets until they are displayed.
 IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents != NULL);
   ConstrainedWindowTabHelper* constrained_window_helper =
       ConstrainedWindowTabHelper::FromWebContents(web_contents);
   ASSERT_TRUE(constrained_window_helper != NULL);
 
-  // Create a constrained dialog.  It will attach itself to tab_contents.
+  // Create a constrained dialog.  It will attach itself to web_contents.
   scoped_ptr<TestConstrainedDialog> test_dialog1(new TestConstrainedDialog);
   ConstrainedWindowViews* window1 = new ConstrainedWindowViews(
-      web_contents, test_dialog1.get(), false,
-      ConstrainedWindowViews::DEFAULT_INSETS);
+      web_contents, test_dialog1.get());
 
   views::FocusManager* focus_manager = window1->GetFocusManager();
   ASSERT_TRUE(focus_manager);
@@ -127,12 +135,11 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
             focus_manager->GetFocusedView());
 
   // Now create a second constrained dialog.  This will also be attached to
-  // tab_contents, but will remain hidden since the test_dialog1 is still
+  // web_contents, but will remain hidden since the test_dialog1 is still
   // showing.
   scoped_ptr<TestConstrainedDialog> test_dialog2(new TestConstrainedDialog);
   ConstrainedWindowViews* window2 = new ConstrainedWindowViews(
-      web_contents, test_dialog2.get(), false,
-      ConstrainedWindowViews::DEFAULT_INSETS);
+      web_contents, test_dialog2.get());
   // Should be the same focus_manager.
   ASSERT_EQ(focus_manager, window2->GetFocusManager());
 
@@ -164,7 +171,8 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
   EXPECT_NE(test_dialog2->GetInitiallyFocusedView(),
             focus_manager->GetFocusedView());
 
-  chrome::ActivateTabAt(browser(), tab_with_constrained_window, false);
+  browser()->tab_strip_model()->ActivateTabAt(tab_with_constrained_window,
+                                              false);
 
   // Activating the previous tab should bring focus to the constrained window.
   EXPECT_EQ(test_dialog2->GetInitiallyFocusedView(),
@@ -181,20 +189,20 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
 // Tests that the constrained window is closed properly when its tab is
 // closed.
 IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, TabCloseTest) {
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents != NULL);
   ConstrainedWindowTabHelper* constrained_window_helper =
       ConstrainedWindowTabHelper::FromWebContents(web_contents);
   ASSERT_TRUE(constrained_window_helper != NULL);
 
-  // Create a constrained dialog.  It will attach itself to tab_contents.
+  // Create a constrained dialog.  It will attach itself to web_contents.
   scoped_ptr<TestConstrainedDialog> test_dialog(new TestConstrainedDialog);
   new ConstrainedWindowViews(
-      web_contents, test_dialog.get(), true,
-      ConstrainedWindowViews::DEFAULT_INSETS);
+      web_contents, test_dialog.get());
 
   bool closed =
-      browser()->tab_strip_model()->CloseTabContentsAt(
+      browser()->tab_strip_model()->CloseWebContentsAt(
           browser()->tab_strip_model()->active_index(),
           TabStripModel::CLOSE_NONE);
   EXPECT_TRUE(closed);
@@ -205,33 +213,33 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, TabCloseTest) {
 // Tests that the constrained window is hidden when an other tab is selected and
 // shown when its tab is selected again.
 IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, TabSwitchTest) {
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents != NULL);
 
-  // Create a constrained dialog.  It will attach itself to tab_contents.
+  // Create a constrained dialog.  It will attach itself to web_contents.
   scoped_ptr<TestConstrainedDialog> test_dialog(new TestConstrainedDialog);
   ConstrainedWindowViews* window = new ConstrainedWindowViews(
-      web_contents, test_dialog.get(), true,
-      ConstrainedWindowViews::DEFAULT_INSETS);
+      web_contents, test_dialog.get());
   EXPECT_TRUE(window->IsVisible());
 
   // Open a new tab. The constrained window should hide itself.
-  browser()->tab_strip_model()->AppendTabContents(
-      chrome::TabContentsFactory(
-          browser()->profile(), NULL, MSG_ROUTING_NONE, NULL),
+  browser()->tab_strip_model()->AppendWebContents(
+      content::WebContents::Create(
+          content::WebContents::CreateParams(browser()->profile())),
       true);
   EXPECT_FALSE(window->IsVisible());
 
   // Close the new tab. The constrained window should show itself again.
   bool closed =
-      browser()->tab_strip_model()->CloseTabContentsAt(
+      browser()->tab_strip_model()->CloseWebContentsAt(
           browser()->tab_strip_model()->active_index(),
           TabStripModel::CLOSE_NONE);
   EXPECT_TRUE(closed);
   EXPECT_TRUE(window->IsVisible());
 
   // Close the original tab.
-  browser()->tab_strip_model()->CloseTabContentsAt(
+  browser()->tab_strip_model()->CloseWebContentsAt(
       browser()->tab_strip_model()->active_index(),
       TabStripModel::CLOSE_NONE);
   content::RunAllPendingInMessageLoop();

@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
@@ -16,6 +17,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/extensions/api/declarative_webrequest/request_stage.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rule.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rules_registry.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
@@ -28,6 +30,8 @@
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_id_map.h"
+#include "chrome/browser/extensions/extension_warning_service.h"
+#include "chrome/browser/extensions/extension_warning_set.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
@@ -35,21 +39,20 @@
 #include "chrome/common/extensions/event_filtering_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/features/feature.h"
-#include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_request_info.h"
+#include "extensions/common/error_utils.h"
+#include "extensions/common/url_pattern.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/auth.h"
 #include "net/base/net_errors.h"
-#include "net/base/upload_data.h"
-#include "net/base/upload_element.h"
+#include "net/base/upload_data_stream.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -61,9 +64,12 @@ using chrome::VersionInfo;
 using content::BrowserMessageFilter;
 using content::BrowserThread;
 using content::ResourceRequestInfo;
+using extensions::ErrorUtils;
 using extensions::Extension;
+using extensions::ExtensionWarning;
+using extensions::ExtensionWarningService;
+using extensions::ExtensionWarningSet;
 using extensions::Feature;
-
 using extensions::web_navigation_api_helpers::GetFrameId;
 
 namespace helpers = extension_web_request_api_helpers;
@@ -176,7 +182,9 @@ void ExtractRequestInfo(net::URLRequest* request, DictionaryValue* out) {
 // Extracts the body from |request| and writes the data into |out|.
 void ExtractRequestInfoBody(const net::URLRequest* request,
                             DictionaryValue* out) {
-  if (request->method() != "POST" && request->method() != "PUT")
+  const net::UploadDataStream* upload_data = request->get_upload();
+  if (!upload_data ||
+      (request->method() != "POST" && request->method() != "PUT"))
     return;  // Need to exit without "out->Set(keys::kRequestBodyKey, ...);" .
 
   DictionaryValue* requestBody = new DictionaryValue();
@@ -195,13 +203,13 @@ void ExtractRequestInfoBody(const net::URLRequest* request,
     keys::kRequestBodyRawKey
   };
 
-  const std::vector<net::UploadElement>* elements =
-      request->get_upload()->elements();
+  const ScopedVector<net::UploadElementReader>& readers =
+      upload_data->element_readers();
   bool some_succeeded = false;
   for (size_t i = 0; !some_succeeded && i < arraysize(presenters); ++i) {
-    std::vector<net::UploadElement>::const_iterator element;
-    for (element = elements->begin(); element != elements->end(); ++element)
-      presenters[i]->FeedNext(*element);
+    ScopedVector<net::UploadElementReader>::const_iterator reader;
+    for (reader = readers.begin(); reader != readers.end(); ++reader)
+      presenters[i]->FeedNext(**reader);
     if (presenters[i]->Succeeded()) {
       requestBody->Set(kKeys[i], presenters[i]->Result().release());
       some_succeeded = true;
@@ -411,7 +419,7 @@ bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
             URLPattern::SCHEME_EXTENSION);
         if (!urls_value->GetString(i, &url) ||
             pattern.Parse(url) != URLPattern::PARSE_SUCCESS) {
-          *error = ExtensionErrorUtils::FormatErrorMessage(
+          *error = ErrorUtils::FormatErrorMessage(
               keys::kInvalidRequestFilterUrl, url);
           return false;
         }
@@ -1183,6 +1191,7 @@ void ExtensionWebRequestEventRouter::GetMatchingListenersImpl(
     int tab_id,
     int window_id,
     ResourceType::Type resource_type,
+    bool is_async_request,
     bool is_request_from_extension,
     int* extra_info_spec,
     std::vector<const ExtensionWebRequestEventRouter::EventListener*>*
@@ -1221,11 +1230,11 @@ void ExtensionWebRequestEventRouter::GetMatchingListenersImpl(
     // and therefore prevent the extension from processing the request
     // handler. This is only a problem for blocking listeners.
     // http://crbug.com/105656
-    bool possibly_synchronous_xhr_from_extension =
+    bool synchronous_xhr_from_extension = !is_async_request &&
         is_request_from_extension && resource_type == ResourceType::XHR;
 
     // Only send webRequest events for URLs the extension has access to.
-    if (blocking_listener && possibly_synchronous_xhr_from_extension)
+    if (blocking_listener && synchronous_xhr_from_extension)
       continue;
 
     matching_listeners->push_back(&(*it));
@@ -1262,16 +1271,21 @@ ExtensionWebRequestEventRouter::GetMatchingListeners(
   bool is_request_from_extension =
       IsRequestFromExtension(request, extension_info_map);
 
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+  // We are conservative here and assume requests are asynchronous in case
+  // we don't have an info object. We don't want to risk a deadlock.
+  bool is_async_request = !info || info->IsAsync();
+
   GetMatchingListenersImpl(
       profile, extension_info_map, false, event_name, url,
-      tab_id, window_id, resource_type, is_request_from_extension,
-      extra_info_spec, &matching_listeners);
+      tab_id, window_id, resource_type, is_async_request,
+      is_request_from_extension, extra_info_spec, &matching_listeners);
   void* cross_profile = GetCrossProfile(profile);
   if (cross_profile) {
     GetMatchingListenersImpl(
         cross_profile, extension_info_map, true, event_name, url, tab_id,
-        window_id, resource_type, is_request_from_extension, extra_info_spec,
-        &matching_listeners);
+        window_id, resource_type, is_async_request, is_request_from_extension,
+        extra_info_spec, &matching_listeners);
   }
 
   return matching_listeners;
@@ -1383,7 +1397,7 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
   bool credentials_set = false;
 
   deltas.sort(&helpers::InDecreasingExtensionInstallationTimeOrder);
-  std::set<std::string> conflicting_extensions;
+  ExtensionWarningSet warnings;
 
   bool canceled = false;
   helpers::MergeCancelOfResponses(
@@ -1396,14 +1410,14 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
     helpers::MergeOnBeforeRequestResponses(
         blocked_request.response_deltas,
         blocked_request.new_url,
-        &conflicting_extensions,
+        &warnings,
         blocked_request.net_log);
   } else if (blocked_request.event == kOnBeforeSendHeaders) {
     CHECK(!blocked_request.callback.is_null());
     helpers::MergeOnBeforeSendHeadersResponses(
         blocked_request.response_deltas,
         blocked_request.request_headers,
-        &conflicting_extensions,
+        &warnings,
         blocked_request.net_log);
   } else if (blocked_request.event == kOnHeadersReceived) {
     CHECK(!blocked_request.callback.is_null());
@@ -1411,7 +1425,7 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
         blocked_request.response_deltas,
         blocked_request.original_response_headers.get(),
         blocked_request.override_response_headers,
-        &conflicting_extensions,
+        &warnings,
         blocked_request.net_log);
   } else if (blocked_request.event == kOnAuthRequired) {
     CHECK(blocked_request.callback.is_null());
@@ -1419,20 +1433,18 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
     credentials_set = helpers::MergeOnAuthRequiredResponses(
        blocked_request.response_deltas,
        blocked_request.auth_credentials,
-       &conflicting_extensions,
+       &warnings,
        blocked_request.net_log);
   } else {
     NOTREACHED();
   }
 
-  if (!conflicting_extensions.empty()) {
+  if (!warnings.empty()) {
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        base::Bind(&ExtensionWarningSet::NotifyWarningsOnUI,
-                   profile,
-                   conflicting_extensions,
-                   ExtensionWarningSet::kNetworkConflict));
+        base::Bind(&ExtensionWarningService::NotifyWarningsOnUI,
+                   profile, warnings));
   }
 
   if (canceled) {
@@ -1477,6 +1489,10 @@ bool ExtensionWebRequestEventRouter::ProcessDeclarativeRules(
     net::URLRequest* request,
     extensions::RequestStage request_stage,
     const net::HttpResponseHeaders* original_response_headers) {
+  // If this check fails, check that the active stages are up-to-date in
+  // browser/extensions/api/declarative_webrequest/request_stage.h .
+  DCHECK(request_stage & extensions::kActiveStages);
+
   // Rules of the current |profile| may apply but we need to check also whether
   // there are applicable rules from extensions whose background page
   // spans from regular to incognito mode.
@@ -1779,7 +1795,7 @@ bool WebRequestEventHandled::RunImpl() {
                                                    &new_url_str));
       response->new_url = GURL(new_url_str);
       if (!response->new_url.is_valid()) {
-        error_ = ExtensionErrorUtils::FormatErrorMessage(
+        error_ = ErrorUtils::FormatErrorMessage(
             keys::kInvalidRedirectUrl, new_url_str);
         return false;
       }
@@ -1861,15 +1877,14 @@ void WebRequestHandlerBehaviorChanged::GetQuotaLimitHeuristics(
 void WebRequestHandlerBehaviorChanged::OnQuotaExceeded(
     const std::string& violation_error) {
   // Post warning message.
-  std::set<std::string> extension_ids;
-  extension_ids.insert(extension_id());
+  ExtensionWarningSet warnings;
+  warnings.insert(
+      ExtensionWarning::CreateRepeatedCacheFlushesWarning(extension_id()));
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
-      base::Bind(&ExtensionWarningSet::NotifyWarningsOnUI,
-                 profile_id(),
-                 extension_ids,
-                 ExtensionWarningSet::kRepeatedCacheFlushes));
+      base::Bind(&ExtensionWarningService::NotifyWarningsOnUI,
+                 profile_id(), warnings));
 
   // Continue gracefully.
   Run();

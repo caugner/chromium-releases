@@ -29,7 +29,8 @@ void TestWebContentsView::StartDragging(
     const WebDropData& drop_data,
     WebKit::WebDragOperationsMask allowed_ops,
     const gfx::ImageSkia& image,
-    const gfx::Point& image_offset) {
+    const gfx::Vector2d& image_offset,
+    const DragEventSourceInfo& event_info) {
 }
 
 void TestWebContentsView::UpdateDragCursor(WebKit::WebDragOperation operation) {
@@ -41,7 +42,8 @@ void TestWebContentsView::GotFocus() {
 void TestWebContentsView::TakeFocus(bool reverse) {
 }
 
-void TestWebContentsView::CreateView(const gfx::Size& initial_size) {
+void TestWebContentsView::CreateView(const gfx::Size& initial_size,
+                                     gfx::NativeView context) {
 }
 
 RenderWidgetHostView* TestWebContentsView::CreateViewForWidget(
@@ -103,5 +105,10 @@ void TestWebContentsView::CloseTabAfterEventTracking() {
 gfx::Rect TestWebContentsView::GetViewBounds() const {
   return gfx::Rect();
 }
+
+#if defined(OS_MACOSX)
+void TestWebContentsView::SetAllowOverlappingViews(bool overlapping) {
+}
+#endif
 
 }  // namespace content

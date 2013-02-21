@@ -54,8 +54,21 @@ public abstract class CommandLine {
     // Change the url of the JavaScript that gets injected when accessibility mode is enabled.
     public static final String ACCESSIBILITY_JAVASCRIPT_URL = "accessibility-js-url";
 
+    public static final String ACCESSIBILITY_DEBUG_BRAILLE_SERVICE = "debug-braille-service";
+
     // Sets the ISO country code that will be used for phone number detection.
     public static final String NETWORK_COUNTRY_ISO = "network-country-iso";
+
+    // Sets the default tile width/height. We use this for very high-res
+    // displays until Chrome can detect and do this correctly for all platforms.
+    public static final String DEFAULT_TILE_WIDTH = "default-tile-width";
+    public static final String DEFAULT_TILE_HEIGHT = "default-tile-height";
+
+    // Whether fullscreen should be disabled.
+    public static final String DISABLE_FULLSCREEN = "disable-fullscreen";
+
+    // The height of the movable top controls.
+    public static final String TOP_CONTROLS_HEIGHT = "top-controls-height";
 
     // Public abstract interface, implemented in derived classes.
     // All these methods reflect their native-side counterparts.

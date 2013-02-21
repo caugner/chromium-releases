@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/gfx/rect.h"
 
@@ -55,7 +54,10 @@ void BlockedContentContainer::AddWebContents(content::WebContents* web_contents,
   blocked_contents_.push_back(
       BlockedContent(web_contents, disposition, bounds, user_gesture));
   web_contents->SetDelegate(this);
+
+  BlockedContentTabHelper::CreateForWebContents(web_contents);
   BlockedContentTabHelper::FromWebContents(web_contents)->set_delegate(this);
+
   // Since the new web_contents will not be shown, call WasHidden to change
   // its status on both RenderViewHost and RenderView.
   web_contents->WasHidden();
@@ -109,7 +111,7 @@ void BlockedContentContainer::Clear() {
     WebContents* web_contents = i->web_contents;
     web_contents->SetDelegate(NULL);
     BlockedContentTabHelper::FromWebContents(web_contents)->set_delegate(NULL);
-    delete TabContents::FromWebContents(web_contents);
+    delete web_contents;
   }
   blocked_contents_.clear();
 }
@@ -144,7 +146,7 @@ void BlockedContentContainer::CloseContents(WebContents* source) {
       BlockedContentTabHelper::FromWebContents(web_contents)->
           set_delegate(NULL);
       blocked_contents_.erase(i);
-      delete TabContents::FromWebContents(web_contents);
+      delete web_contents;
       break;
     }
   }

@@ -27,13 +27,11 @@ void LocationIconView::OnMouseReleased(const ui::MouseEvent& event) {
   page_info_helper_.ProcessEvent(event);
 }
 
-ui::EventResult LocationIconView::OnGestureEvent(
-    const ui::GestureEvent& event) {
-  if (event.type() == ui::ET_GESTURE_TAP) {
-    page_info_helper_.ProcessEvent(event);
-    return ui::ER_CONSUMED;
+void LocationIconView::OnGestureEvent(ui::GestureEvent* event) {
+  if (event->type() == ui::ET_GESTURE_TAP) {
+    page_info_helper_.ProcessEvent(*event);
+    event->SetHandled();
   }
-  return ui::ER_UNHANDLED;
 }
 
 int LocationIconView::GetBuiltInHorizontalPadding() const {

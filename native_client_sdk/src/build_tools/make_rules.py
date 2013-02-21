@@ -16,9 +16,15 @@ NEWLIB_CC?=$(TC_PATH)/$(OSNAME)_x86_newlib/bin/i686-nacl-gcc -c
 NEWLIB_CXX?=$(TC_PATH)/$(OSNAME)_x86_newlib/bin/i686-nacl-g++ -c
 NEWLIB_LINK?=$(TC_PATH)/$(OSNAME)_x86_newlib/bin/i686-nacl-g++ -Wl,-as-needed
 NEWLIB_LIB?=$(TC_PATH)/$(OSNAME)_x86_newlib/bin/i686-nacl-ar r
-NEWLIB_DUMP?=$(TC_PATH)/$(OSNAME)_x86_newlib/x86_64-nacl/bin/objdump
 NEWLIB_CCFLAGS?=-MMD -pthread $(NACL_WARNINGS) -idirafter $(NACL_SDK_ROOT)/include
 NEWLIB_LDFLAGS?=-pthread
+"""
+
+ARM_DEFAULTS = """
+ARM_CC?=$(TC_PATH)/$(OSNAME)_arm_newlib/bin/arm-nacl-gcc -c
+ARM_CXX?=$(TC_PATH)/$(OSNAME)_arm_newlib/bin/arm-nacl-g++ -c
+ARM_LINK?=$(TC_PATH)/$(OSNAME)_arm_newlib/bin/arm-nacl-g++ -Wl,-as-needed
+ARM_LIB?=$(TC_PATH)/$(OSNAME)_arm_newlib/bin/arm-nacl-ar r
 """
 
 GLIBC_DEFAULTS = """
@@ -38,18 +44,18 @@ PNACL_CC?=$(TC_PATH)/$(OSNAME)_x86_pnacl/newlib/bin/pnacl-clang -c
 PNACL_CXX?=$(TC_PATH)/$(OSNAME)_x86_pnacl/newlib/bin/pnacl-clang++ -c
 PNACL_LINK?=$(TC_PATH)/$(OSNAME)_x86_pnacl/newlib/bin/pnacl-clang++
 PNACL_LIB?=$(TC_PATH)/$(OSNAME)_x86_pnacl/newlib/bin/pnacl-ar r
-PNACL_DUMP?=$(TC_PATH)/$(OSNAME)_x86_pnacl/newlib/bin/objdump
 PNACL_CCFLAGS?=-MMD -pthread $(NACL_WARNINGS) -idirafter $(NACL_SDK_ROOT)/include
 PNACL_LDFLAGS?=-pthread
 TRANSLATE:=$(TC_PATH)/$(OSNAME)_x86_pnacl/newlib/bin/pnacl-translate
 """
 
 LINUX_DEFAULTS = """
+LINUX_WARNINGS?=-Wno-long-long
 LINUX_CC?=gcc -c
 LINUX_CXX?=g++ -c
 LINUX_LINK?=g++
 LINUX_LIB?=ar r
-LINUX_CCFLAGS=-I$(NACL_SDK_ROOT)/include -I$(NACL_SDK_ROOT)/include/linux
+LINUX_CCFLAGS=-MMD -pthread $(LINUX_WARNINGS) -I$(NACL_SDK_ROOT)/include -I$(NACL_SDK_ROOT)/include/linux
 """
 
 WIN_DEFAULTS = """
@@ -82,13 +88,13 @@ WIN_CC_RULES = {
 # Link rules for various platforms.
 #
 NEXE_LINK_RULES = {
-  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config> -Wl,--start-group <LIBLIST> -Wl,--end-group',
-  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config>  -Wl,--start-group <LIBLIST> -Wl,--end-group'
+  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/<libdir>/<config> -Wl,--start-group <LIBLIST> -Wl,--end-group',
+  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/<libdir>/<config>  -Wl,--start-group <LIBLIST> -Wl,--end-group'
 }
 
 SO_LINK_RULES = {
-  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tcname>/<config>',
-  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tcname>/<config>',
+  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/<libdir>/<config>',
+  'Release': '<TAB>$(<LINK>) -o $@ $^ <MACH> -shared $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/<libdir>/<config>',
 }
 
 LINUX_SO_LINK_RULES = {
@@ -107,8 +113,8 @@ PEXE_TRANSLATE_RULE = """
 <TAB>$(TRANSLATE) -arch arm $< -o $@"""
 
 PEXE_LINK_RULES = {
-  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config> <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
-  'Release': '<TAB>$(<LINK>) -o $@ $^ $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config> <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
+  'Debug': '<TAB>$(<LINK>) -o $@ $^ -g $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/<libdir>/<config> <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
+  'Release': '<TAB>$(<LINK>) -o $@ $^ $(<TC>_LDFLAGS) $(<PROJ>_LDFLAGS) -L$(NACL_SDK_ROOT)/lib/<libdir>/<config> <LIBLIST>\n' + PEXE_TRANSLATE_RULE,
 }
 
 WIN_LINK_RULES = {
@@ -140,7 +146,7 @@ WIN_LIB_RULES = {
 #
 NMF_RULE = """
 <tc>/<config>/<proj>.nmf : <NMF_TARGETS>
-<TAB>$(NMF) -D $(<DUMP>) -o $@ $^ -t <tc> -s <tc>/<config>
+<TAB>$(NMF) -o $@ $^ -s <tc>/<config>
 """
 
 NMF_EMPTY = """
@@ -150,7 +156,7 @@ NMF_EMPTY = """
 
 GLIBC_NMF_RULE = """
 <tc>/<config>/<proj>.nmf : <NMF_TARGETS>
-<TAB>$(NMF) -D $(<DUMP>) -o $@ $(GLIBC_PATHS) $^ -t <tc> -s <tc>/<config> $(GLIBC_REMAP)
+<TAB>$(NMF) -D $(<OBJDUMP>) -o $@ $(GLIBC_PATHS) $^ -s <tc>/<config> $(GLIBC_REMAP)
 """
 
 EXT_MAP = {
@@ -185,7 +191,7 @@ NACL_TOOL = {
   'MAIN': '<tc>/<config>/<proj>_<ARCH>.nexe',
   'NMFMAIN': '<tc>/<config>/<proj>_<ARCH>.nexe',
   'SO': '<tc>/<config>/<proj>_<ARCH>.so',
-  'LIB': '$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config>/lib<proj>.a',
+  'LIB': '$(NACL_SDK_ROOT)/lib/<libdir>/<config>/lib<proj>.a',
 }
 
 PNACL_TOOL = {
@@ -198,7 +204,7 @@ PNACL_TOOL = {
       '<tc>/<config>/<proj>_x86_64.nexe '
       '<tc>/<config>/<proj>_arm.nexe',
   'SO': None,
-  'LIB': '$(NACL_SDK_ROOT)/lib/$(OSNAME)_<ARCH>_<tc>/<config>/lib<proj>.a',
+  'LIB': '$(NACL_SDK_ROOT)/lib/<libdir>/<config>/lib<proj>.a',
 }
 
 
@@ -206,24 +212,30 @@ PNACL_TOOL = {
 # Various Architectures
 #
 LINUX = {
-  '<arch>': '',
+  '<arch>': 'linux',
   '<ARCH>': '',
   '<MACH>': '',
 }
 NACL_X86_32 = {
-  '<arch>': '32',
+  '<arch>': 'x86',
   '<ARCH>': 'x86_32',
   '<MACH>': '-m32',
 }
 NACL_X86_64 = {
-  '<arch>': '64',
+  '<arch>': 'x64',
   '<ARCH>': 'x86_64',
   '<MACH>': '-m64',
 }
 NACL_PNACL = {
   '<arch>': 'pnacl',
-  '<ARCH>': 'PNACL',
   '<MACH>': '',
+}
+NACL_ARM = {
+  '<arch>': 'arm',
+  '<ARCH>': 'arm',
+  '<MACH>': '',
+  # override the default NACL toolchain
+  '<TOOLSET>': 'ARM',
 }
 WIN_32 = {
   '<arch>': '',
@@ -234,8 +246,8 @@ WIN_32 = {
 
 BUILD_RULES = {
   'newlib' : {
-    'ARCHES': [NACL_X86_32, NACL_X86_64],
-    'DEFS': NEWLIB_DEFAULTS,
+    'ARCHES': [NACL_X86_32, NACL_X86_64, NACL_ARM],
+    'DEFS': NEWLIB_DEFAULTS + ARM_DEFAULTS,
     'CC' : NACL_CC_RULES,
     'CXX' : NACL_CC_RULES,
     'NMF' : NMF_RULE,
@@ -299,12 +311,12 @@ class MakeRules(object):
   to the appropriate format whenever the toolchain changes.
   """
 
-  def __init__(self, tc, cfg=None, arch=None):
+  def __init__(self, tc):
     self.tc = tc
     self.project = ''
     self.cfg = ''
-    self.arch = ''
     self.ptype = ''
+    self.arch_ext = ''
     self.defines = []
     self.includes = []
     self.libraries = []
@@ -312,10 +324,6 @@ class MakeRules(object):
       '<TAB>': '\t',
     }
     self.SetToolchain(tc)
-    if cfg:
-      self.SetConfig(cfg)
-    if arch:
-      self.SetArch(arch)
 
   def _BuildList(self, key, items):
     pattern = BUILD_RULES[self.tc]['TOOL'][key]
@@ -341,8 +349,9 @@ class MakeRules(object):
 
   def BuildCompileRule(self, ext, src):
     self.vars['<EXT>'] = ext
-    out = '<tc>/<config>/%s_<ARCH>.o : %s $(THIS_MAKE) | <tc>/<config>\n' % (
-        os.path.splitext(src)[0], src)
+    objname = '%s%s.o' % (os.path.splitext(src)[0], self.arch_ext)
+    out = '<tc>/<config>/%s : %s $(THIS_MAKE) | <tc>/<config>\n' % (objname,
+        src)
     rule = BUILD_RULES[self.tc][ext][self.cfg]
     if ext == 'CXX':
       rule = rule.replace('<CC>', '<CXX>')
@@ -354,34 +363,40 @@ class MakeRules(object):
     out = ''
     if self.ptype == 'lib':
       out = 'ALL_TARGETS+=%s\n' % target
-    out += target + ' : $(<PROJ>_<TC>_<CONFIG>_<ARCH>_O)\n'
+    out += target + (' : $(<PROJ>_<TC>_<CONFIG>%s_O)\n' %
+                     self.arch_ext)
     out += BUILD_RULES[self.tc][self.ptype.upper()][self.cfg] + '\n\n'
     return self.Replace(out)
 
   def BuildObjectList(self):
     obj_list = self.GetObjectList()
-    sub_str = '$(patsubst %%,%s/%s/%%_%s.o,$(%s_OBJS))' % (
-        self.tc, self.cfg, self.arch['<ARCH>'], self.project.upper())
+    sub_str = '$(patsubst %%,%s/%s/%%%s.o,$(%s_OBJS))' % (
+        self.tc, self.cfg, self.arch_ext, self.project.upper())
     return '%s:=%s\n' % (obj_list, sub_str)
 
   def GetArches(self):
     return BUILD_RULES[self.tc]['ARCHES']
 
   def GetObjectList(self):
-    return '%s_%s_%s_%s_O' % (self.project.upper(), self.tc.upper(),
-                              self.cfg.upper(), self.arch['<ARCH>'])
-
+    return '%s_%s_%s%s_O' % (self.project.upper(), self.tc.upper(),
+                              self.cfg.upper(), self.arch_ext)
   def GetPepperPlugin(self):
     plugin = self.Replace(BUILD_RULES[self.tc]['TOOL']['MAIN'])
     text = 'PPAPI_<CONFIG>:=$(abspath %s)' % plugin
     text += ';application/x-ppapi-%s\n' % self.vars['<config>'].lower()
     return self.Replace(text)
 
-
   def SetArch(self, arch):
-    self.arch = arch
     for key in arch:
       self.vars[key] = arch[key]
+    if '<ARCH>' in self.vars:
+      self.arch_ext = "_" + arch['<ARCH>']
+      self.vars['<libdir>'] = "%s_%s" % (self.tc, self.vars['<ARCH>'])
+    else:
+      self.vars['<libdir>'] = self.tc
+
+    toolset = arch.get('<TOOLSET>', self.tc.upper())
+    self.SetTools(toolset)
 
   def SetConfig(self, config):
     self.cfg = config
@@ -418,17 +433,18 @@ class MakeRules(object):
       tcname = 'host'
     else:
       tcname = tc
-    self.vars['<CC>'] = '%s_CC' % TC
-    self.vars['<CXX>'] = '%s_CXX' % TC
-    self.vars['<DUMP>'] = '%s_DUMP' % TC
-    self.vars['<LIB>'] = '%s_LIB' % TC
-    self.vars['<LINK>'] = '%s_LINK' % TC
     self.vars['<tc>'] = tc
     self.vars['<tcname>'] = tcname
     self.vars['<TC>'] = TC
     self.SetDefines(self.defines)
     self.SetIncludes(self.includes)
     self.SetLibraries(self.libraries)
+
+  def SetTools(self, toolname):
+    self.vars['<CC>'] = '%s_CC' % toolname
+    self.vars['<CXX>'] = '%s_CXX' % toolname
+    self.vars['<LIB>'] = '%s_LIB' % toolname
+    self.vars['<LINK>'] = '%s_LINK' % toolname
 
   def SetVars(self, **kwargs):
     # Add other passed in replacements
@@ -480,12 +496,14 @@ def GenerateNMFRules(tc, main, dlls, cfg, arches):
 
   for arch in arches:
     replace = {
-      '<ARCH>' : arch['<ARCH>'],
       '<config>' : cfg,
-      '<DUMP>' : '%s_DUMP' % tc.upper(),
       '<TAB>' : '\t',
       '<tc>' : tc
     }
+    if tc == 'glibc':
+      replace['<OBJDUMP>'] = 'GLIBC_DUMP'
+    if '<ARCH>' in arch:
+      replace['<ARCH>'] = arch['<ARCH>']
     for dll in dlls:
       replace['<proj>'] = dll
       nmf_targets.append(Replace(dll_target, replace))

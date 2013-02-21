@@ -6,15 +6,15 @@
 
 #include "build/build_config.h"
 #include "ui/base/layout.h"
+#include "ui/native_theme/native_theme.h"
 
 namespace views {
 
-static MenuConfig* config_instance = NULL;
-
-MenuConfig::MenuConfig()
+MenuConfig::MenuConfig(const ui::NativeTheme* theme)
     : text_color(SK_ColorBLACK),
-      submenu_horizontal_margin_size(3),
-      submenu_vertical_margin_size(3),
+      arrow_color(SK_ColorBLACK),
+      menu_vertical_border_size(3),
+      menu_horizontal_border_size(3),
       submenu_horizontal_inset(3),
       item_top_margin(3),
       item_bottom_margin(4),
@@ -44,28 +44,27 @@ MenuConfig::MenuConfig()
       show_accelerators(true),
       always_use_icon_to_label_padding(false),
       align_arrow_and_shortcut(false),
-      offset_context_menus(false) {
+      offset_context_menus(false),
+      native_theme(theme),
+      show_delay(400) {
   // Use 40px tall menu items when running in touch optimized mode.
   // For Windows use 40px tall menu items when running in touch optimized mode.
   if (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH) {
     item_top_margin = item_no_icon_top_margin = 12;
     item_bottom_margin = item_no_icon_bottom_margin = 13;
   }
-  Init();
+  Init(theme);
 }
 
 MenuConfig::~MenuConfig() {}
 
-void MenuConfig::Reset() {
-  delete config_instance;
-  config_instance = NULL;
-}
-
-// static
-const MenuConfig& MenuConfig::instance() {
-  if (!config_instance)
-    config_instance = new MenuConfig();
-  return *config_instance;
+void MenuConfig::AdjustForCommonTheme() {
+  render_gutter = false;
+  item_top_margin = 6;
+  item_bottom_margin = 6;
+  separator_height = 15;
+  menu_horizontal_border_size = 2;
+  menu_vertical_border_size = 8;
 }
 
 }  // namespace views

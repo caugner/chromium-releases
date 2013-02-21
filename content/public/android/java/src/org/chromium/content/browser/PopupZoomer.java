@@ -5,6 +5,7 @@
 package org.chromium.content.browser;
 
 import android.content.Context;
+import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -17,21 +18,25 @@ import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Region.Op;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.Interpolator;
 import android.view.animation.OvershootInterpolator;
 
-import org.chromium.content.app.AppResource;
+import org.chromium.content.R;
 
 /**
  * PopupZoomer is used to show the on-demand link zooming popup. It handles manipulation of the
  * canvas and touch events to display the on-demand zoom magnifier.
  */
 class PopupZoomer extends View {
+    private static String LOGTAG = "PopupZoomer";
+
     // The padding between the edges of the view and the popup. Note that there is a mirror
     // constant in content/renderer/render_view_impl.cc which should be kept in sync if
     // this is changed.
@@ -49,6 +54,16 @@ class PopupZoomer extends View {
     }
 
     private OnTapListener mOnTapListener = null;
+
+    /**
+     * Interface to be implemented to add and remove PopupZoomer to/from the view hierarchy.
+     */
+    public static interface OnVisibilityChangedListener {
+        public void onPopupZoomerShown(PopupZoomer zoomer);
+        public void onPopupZoomerHidden(PopupZoomer zoomer);
+    }
+
+    private OnVisibilityChangedListener mOnVisibilityChangedListener = null;
 
     // Cached drawable used to frame the zooming popup.
     // TODO(tonyg): This should be marked purgeable so that if the system wants to recover this
@@ -71,6 +86,9 @@ class PopupZoomer extends View {
     // This is used in the case that the zoomer is cancelled while it is still animating outwards,
     // to avoid having it jump to full size then animate closed.
     private long mTimeLeft = 0;
+
+    // initDimensions() needs to be called in onDraw().
+    private boolean mNeedsToInitDimensions;
 
     // Available view area after accounting for ZOOM_BOUNDS_MARGIN.
     private RectF mViewClipRect;
@@ -105,12 +123,15 @@ class PopupZoomer extends View {
     private GestureDetector mGestureDetector;
 
     private static float getOverlayCornerRadius(Context context) {
-        // TODO(leandrogracia): restore an assertion for the resource id != 0
-        // here after fixing crbug.com/136704
-        // assert AppResource.DIMENSION_LINK_PREVIEW_OVERLAY_RADIUS != 0;
-        if (sOverlayCornerRadius == 0 && AppResource.DIMENSION_LINK_PREVIEW_OVERLAY_RADIUS != 0)
-            sOverlayCornerRadius = context.getResources().getDimension(
-                    AppResource.DIMENSION_LINK_PREVIEW_OVERLAY_RADIUS);
+        if (sOverlayCornerRadius == 0) {
+            try {
+                sOverlayCornerRadius = context.getResources().getDimension(
+                        R.dimen.link_preview_overlay_radius);
+            } catch (Resources.NotFoundException e) {
+                Log.w(LOGTAG, "No corner radius resource for PopupZoomer overlay found.");
+                sOverlayCornerRadius = 1.0f;
+            }
+        }
         return sOverlayCornerRadius;
     }
 
@@ -120,23 +141,17 @@ class PopupZoomer extends View {
      */
     private static Drawable getOverlayDrawable(Context context) {
         if (sOverlayDrawable == null) {
-            sOverlayDrawable = context.getResources().getDrawable(
-                    AppResource.DRAWABLE_LINK_PREVIEW_POPUP_OVERLAY);
+            try {
+                sOverlayDrawable = context.getResources().getDrawable(
+                        R.drawable.ondemand_overlay);
+            } catch (Resources.NotFoundException e) {
+                Log.w(LOGTAG, "No drawable resource for PopupZoomer overlay found.");
+                sOverlayDrawable = new ColorDrawable();
+            }
             sOverlayPadding = new Rect();
             sOverlayDrawable.getPadding(sOverlayPadding);
         }
         return sOverlayDrawable;
-    }
-
-    /**
-     * Injects the overlay drawable for tests. Needs to be called before any instance
-     * of this class tries to draw.
-     *
-     * @VisibleForTesting
-     */
-    static void injectOverlayDrawable(Drawable drawable) {
-        sOverlayDrawable = drawable;
-        sOverlayPadding = new Rect();
     }
 
     private static float constrain(float amount, float low, float high) {
@@ -217,6 +232,13 @@ class PopupZoomer extends View {
     }
 
     /**
+     * Sets the OnVisibilityChangedListener.
+     */
+    public void setOnVisibilityChangedListener(OnVisibilityChangedListener listener) {
+        mOnVisibilityChangedListener = listener;
+    }
+
+    /**
      * Sets the bitmap to be used for the zoomed view.
      */
     public void setBitmap(Bitmap bitmap) {
@@ -225,6 +247,7 @@ class PopupZoomer extends View {
             mZoomedBitmap = null;
         }
         mZoomedBitmap = bitmap;
+
         // Round the corners of the bitmap so it doesn't stick out around the overlay.
         Canvas canvas = new Canvas(mZoomedBitmap);
         Path path = new Path();
@@ -250,7 +273,10 @@ class PopupZoomer extends View {
         mTimeLeft = 0;
         if (show) {
             setVisibility(VISIBLE);
-            initDimensions();
+            mNeedsToInitDimensions = true;
+            if (mOnVisibilityChangedListener != null) {
+                mOnVisibilityChangedListener.onPopupZoomerShown(this);
+            }
         } else {
             long endTime = mAnimationStartTime + ANIMATION_DURATION;
             mTimeLeft = endTime - SystemClock.uptimeMillis();
@@ -264,6 +290,9 @@ class PopupZoomer extends View {
         mAnimating = false;
         mShowing = false;
         mTimeLeft = 0;
+        if (mOnVisibilityChangedListener != null) {
+            mOnVisibilityChangedListener.onPopupZoomerHidden(this);
+        }
         setVisibility(INVISIBLE);
         mZoomedBitmap.recycle();
         mZoomedBitmap = null;
@@ -285,10 +314,6 @@ class PopupZoomer extends View {
     }
 
     private void setTargetBounds(Rect rect) {
-        mViewClipRect = new RectF(ZOOM_BOUNDS_MARGIN,
-                ZOOM_BOUNDS_MARGIN,
-                getWidth() - ZOOM_BOUNDS_MARGIN,
-                getHeight() - ZOOM_BOUNDS_MARGIN);
         mTargetBounds = rect;
     }
 
@@ -305,6 +330,11 @@ class PopupZoomer extends View {
         mClipRect = new RectF(l, t, r, b);
         int width = getWidth();
         int height = getHeight();
+
+        mViewClipRect = new RectF(ZOOM_BOUNDS_MARGIN,
+                ZOOM_BOUNDS_MARGIN,
+                width - ZOOM_BOUNDS_MARGIN,
+                height - ZOOM_BOUNDS_MARGIN);
 
         // Ensure it stays inside the bounds of the view.  First shift it around to see if it
         // can fully fit in the view, then clip it to the padding section of the view to
@@ -373,9 +403,23 @@ class PopupZoomer extends View {
         mPopupScrollY = constrain(mPopupScrollY, mMinScrollY, mMaxScrollY);
     }
 
+    /*
+     * Tests override it as the PopupZoomer is never attached to the view hierarchy.
+     */
+    protected boolean acceptZeroSizeView() {
+        return false;
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         if (!isShowing() || mZoomedBitmap == null) return;
+        if (!acceptZeroSizeView() && (getWidth() == 0 || getHeight() == 0)) return;
+
+        if (mNeedsToInitDimensions) {
+            mNeedsToInitDimensions = false;
+            initDimensions();
+        }
+
         canvas.save();
         // Calculate the elapsed fraction of animation.
         float time = (SystemClock.uptimeMillis() - mAnimationStartTime + mTimeLeft) /

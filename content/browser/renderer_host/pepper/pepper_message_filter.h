@@ -14,8 +14,8 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
-#include "base/time.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "content/public/browser/content_browser_client.h"
 #include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/ssl_config_service.h"
@@ -61,18 +61,27 @@ class PepperMessageFilter
     : public BrowserMessageFilter,
       public net::NetworkChangeNotifier::IPAddressObserver {
  public:
-  enum ProcessType { PLUGIN, RENDERER };
+  enum ProcessType { PLUGIN, RENDERER, NACL };
 
   // Constructor when used in the context of a render process (the argument is
-  // provided for sanity checking).
+  // provided for sanity checking and must be RENDERER).
   PepperMessageFilter(ProcessType type,
                       int process_id,
                       BrowserContext* browser_context);
 
   // Constructor when used in the context of a PPAPI process (the argument is
-  // provided for sanity checking).
+  // provided for sanity checking and must be PLUGIN).
   PepperMessageFilter(ProcessType type,
+                      const ppapi::PpapiPermissions& permissions,
                       net::HostResolver* host_resolver);
+
+  // Constructor when used in the context of a NaCl process (the argument is
+  // provided for sanity checking and must be NACL).
+  PepperMessageFilter(ProcessType type,
+                      const ppapi::PpapiPermissions& permissions,
+                      net::HostResolver* host_resolver,
+                      int process_id,
+                      int render_view_id);
 
   // BrowserMessageFilter methods.
   virtual void OverrideThreadForMessage(
@@ -126,7 +135,6 @@ class PepperMessageFilter
   // notifications.
   typedef std::set<uint32> NetworkMonitorIdSet;
 
-  void OnGetLocalTimeZoneOffset(base::Time t, double* result);
   void OnGetFontFamilies(IPC::Message* reply);
 
   void OnTCPCreate(int32 routing_id,
@@ -160,7 +168,8 @@ class PepperMessageFilter
                  uint32 socket_id,
                  const PP_NetAddress_Private& addr);
   void OnUDPRecvFrom(uint32 socket_id, int32_t num_bytes);
-  void OnUDPSendTo(uint32 socket_id,
+  void OnUDPSendTo(int32 routing_id,
+                   uint32 socket_id,
                    const std::string& data,
                    const PP_NetAddress_Private& addr);
   void OnUDPClose(uint32 socket_id);
@@ -203,14 +212,18 @@ class PepperMessageFilter
                  int32 routing_id,
                  uint32 socket_id,
                  const PP_NetAddress_Private& addr);
+  void DoUDPSendTo(bool allowed,
+                   int32 routing_id,
+                   uint32 socket_id,
+                   const std::string& data,
+                   const PP_NetAddress_Private& addr);
   void DoTCPServerListen(bool allowed,
                          int32 routing_id,
                          uint32 plugin_dispatcher_id,
                          PP_Resource socket_resource,
                          const PP_NetAddress_Private& addr,
                          int32_t backlog);
-  void DoHostResolverResolve(bool allowed,
-                             int32 routing_id,
+  void DoHostResolverResolve(int32 routing_id,
                              uint32 plugin_dispatcher_id,
                              uint32 host_resolver_id,
                              const ppapi::HostPortPair& host_port,
@@ -220,7 +233,6 @@ class PepperMessageFilter
                                  bool* succeeded,
                                  ppapi::PPB_X509Certificate_Fields* result);
   void OnUpdateActivity();
-  void OnGetDeviceID(std::string* id);
   void OnGetLocalDataRestrictions(const GURL& document_url,
                                   const GURL& plugin_url,
                                   PP_FlashLSORestrictions* restrictions);
@@ -232,7 +244,12 @@ class PepperMessageFilter
   uint32 GenerateSocketID();
 
   // Return true if render with given ID can use socket APIs.
-  bool CanUseSocketAPIs(int32 render_id);
+  bool CanUseSocketAPIs(int32 render_id,
+      const content::SocketPermissionRequest& params);
+
+  content::SocketPermissionRequest CreateSocketPermissionRequest(
+      content::SocketPermissionRequest::OperationType type,
+      const PP_NetAddress_Private& net_addr);
 
   void GetAndSendNetworkList();
   void DoGetNetworkList();
@@ -240,8 +257,19 @@ class PepperMessageFilter
 
   ProcessType process_type_;
 
+  // When attached to an out-of-process plugin (be it native or NaCl) this
+  // will have the Pepper permissions for the plugin. When attached to the
+  // renderer channel, this will have no permissions listed (since there may
+  // be many plugins sharing this channel).
+  ppapi::PpapiPermissions permissions_;
+
   // Render process ID.
   int process_id_;
+
+  // NACL RenderView id to determine private API access. Normally, we handle
+  // messages coming from multiple RenderViews, but NaClProcessHost always
+  // creates a new PepperMessageFilter for each RenderView.
+  int nacl_render_view_id_;
 
   // When non-NULL, this should be used instead of the host_resolver_.
   ResourceContext* const resource_context_;

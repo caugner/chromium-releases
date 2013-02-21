@@ -58,6 +58,10 @@ GamepadResource::GamepadResource(Connection connection, PP_Instance instance)
 GamepadResource::~GamepadResource() {
 }
 
+thunk::PPB_Gamepad_API* GamepadResource::AsPPB_Gamepad_API() {
+  return this;
+}
+
 void GamepadResource::Sample(PP_GamepadsSampleData* data) {
   if (!buffer_) {
     // Browser hasn't sent back our shared memory, give the plugin gamepad
@@ -98,8 +102,8 @@ void GamepadResource::Sample(PP_GamepadsSampleData* data) {
 void GamepadResource::OnPluginMsgSendMemory(
     const ResourceMessageReplyParams& params) {
   // On failure, the handle will be null and the CHECK below will be tripped.
-  base::SharedMemoryHandle handle;
-  params.GetSharedMemoryHandleAtIndex(0, &handle);
+  base::SharedMemoryHandle handle = base::SharedMemory::NULLHandle();
+  params.TakeSharedMemoryHandleAtIndex(0, &handle);
 
   shared_memory_.reset(new base::SharedMemory(handle, true));
   CHECK(shared_memory_->Map(sizeof(ContentGamepadHardwareBuffer)));

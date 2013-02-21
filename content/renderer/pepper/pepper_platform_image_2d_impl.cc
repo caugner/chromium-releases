@@ -52,7 +52,7 @@ PepperPlatformImage2DImpl* PepperPlatformImage2DImpl::Create(int width,
   if (!TransportDIB::is_valid_handle(dib_handle))
     return NULL;
 
-  TransportDIB* dib = TransportDIB::Map(dib_handle);
+  TransportDIB* dib = TransportDIB::CreateWithHandle(dib_handle);
 #else
   static int next_dib_id = 0;
   TransportDIB* dib = TransportDIB::Create(buffer_size, next_dib_id++);
@@ -63,7 +63,7 @@ PepperPlatformImage2DImpl* PepperPlatformImage2DImpl::Create(int width,
   return new PepperPlatformImage2DImpl(width, height, dib);
 }
 
-skia::PlatformCanvas* PepperPlatformImage2DImpl::Map() {
+SkCanvas* PepperPlatformImage2DImpl::Map() {
   return dib_->GetPlatformCanvas(width_, height_);
 }
 

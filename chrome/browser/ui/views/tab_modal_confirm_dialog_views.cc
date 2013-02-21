@@ -4,12 +4,10 @@
 
 #include "chrome/browser/ui/views/tab_modal_confirm_dialog_views.h"
 
-#include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/common/chrome_switches.h"
@@ -21,52 +19,21 @@
 // static
 TabModalConfirmDialog* TabModalConfirmDialog::Create(
     TabModalConfirmDialogDelegate* delegate,
-    TabContents* tab_contents) {
+    content::WebContents* web_contents) {
   return new TabModalConfirmDialogViews(
-      delegate,
-      tab_contents,
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableFramelessConstrainedDialogs));
+      delegate, web_contents);
 }
-
-namespace {
-
-const int kChromeStyleInterRowVerticalSpacing = 17;
-
-views::MessageBoxView::InitParams CreateMessageBoxViewInitParams(
-    const string16& message,
-    bool enable_chrome_style) {
-  views::MessageBoxView::InitParams params(message);
-
-  if (enable_chrome_style) {
-    params.top_inset = 0;
-    params.bottom_inset = 0;
-    params.left_inset = 0;
-    params.right_inset = 0;
-
-    params.inter_row_vertical_spacing = kChromeStyleInterRowVerticalSpacing;
-  }
-
-  return params;
-}
-
-}  // namespace
 
 //////////////////////////////////////////////////////////////////////////////
 // TabModalConfirmDialogViews, constructor & destructor:
 
 TabModalConfirmDialogViews::TabModalConfirmDialogViews(
     TabModalConfirmDialogDelegate* delegate,
-    TabContents* tab_contents,
-    bool enable_chrome_style)
+    content::WebContents* web_contents)
     : delegate_(delegate),
       message_box_view_(new views::MessageBoxView(
-          CreateMessageBoxViewInitParams(delegate->GetMessage(),
-                                         enable_chrome_style))),
-      enable_chrome_style_(enable_chrome_style) {
-  delegate_->set_window(new ConstrainedWindowViews(
-      tab_contents->web_contents(), this, enable_chrome_style,
-      ConstrainedWindowViews::DEFAULT_INSETS));
+          views::MessageBoxView::InitParams(delegate->GetMessage()))) {
+  delegate_->set_window(new ConstrainedWindowViews(web_contents, this));
 }
 
 TabModalConfirmDialogViews::~TabModalConfirmDialogViews() {
@@ -96,10 +63,6 @@ string16 TabModalConfirmDialogViews::GetDialogButtonLabel(
   return string16();
 }
 
-bool TabModalConfirmDialogViews::UseChromeStyle() const {
-  return enable_chrome_style_;
-}
-
 bool TabModalConfirmDialogViews::Cancel() {
   delegate_->Cancel();
   return true;
@@ -127,4 +90,12 @@ const views::Widget* TabModalConfirmDialogViews::GetWidget() const {
 
 void TabModalConfirmDialogViews::DeleteDelegate() {
   delete this;
+}
+
+ui::ModalType TabModalConfirmDialogViews::GetModalType() const {
+#if defined(USE_ASH)
+  return ui::MODAL_TYPE_CHILD;
+#else
+  return views::WidgetDelegate::GetModalType();
+#endif
 }

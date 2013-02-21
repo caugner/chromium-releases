@@ -24,7 +24,7 @@ const int kDefaultMargin = 6;
 
 class SizedBubbleDelegateView : public BubbleDelegateView {
  public:
-  SizedBubbleDelegateView();
+  SizedBubbleDelegateView(View* anchor_view);
   virtual ~SizedBubbleDelegateView();
 
   // View overrides:
@@ -34,7 +34,9 @@ class SizedBubbleDelegateView : public BubbleDelegateView {
   DISALLOW_COPY_AND_ASSIGN(SizedBubbleDelegateView);
 };
 
-SizedBubbleDelegateView::SizedBubbleDelegateView() {}
+SizedBubbleDelegateView::SizedBubbleDelegateView(View* anchor_view)
+    : BubbleDelegateView(anchor_view, BubbleBorder::TOP_LEFT) {
+}
 
 SizedBubbleDelegateView::~SizedBubbleDelegateView() {}
 
@@ -81,14 +83,21 @@ TEST_F(BubbleFrameViewTest, GetBoundsForClientView) {
 
   int margin_x = frame.content_margins().left();
   int margin_y = frame.content_margins().top();
-  gfx::Insets insets;
-  frame.bubble_border()->GetInsets(&insets);
+  gfx::Insets insets = frame.bubble_border()->GetInsets();
   EXPECT_EQ(insets.left() + margin_x, frame.GetBoundsForClientView().x());
   EXPECT_EQ(insets.top() + margin_y, frame.GetBoundsForClientView().y());
 }
 
 TEST_F(BubbleFrameViewTest, NonClientHitTest) {
-  BubbleDelegateView* delegate = new SizedBubbleDelegateView();
+  // Create the anchor and parent widgets.
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  scoped_ptr<Widget> anchor_widget(new Widget);
+  anchor_widget->Init(params);
+  anchor_widget->Show();
+
+  BubbleDelegateView* delegate =
+      new SizedBubbleDelegateView(anchor_widget->GetContentsView());
   Widget* widget(BubbleDelegateView::CreateBubble(delegate));
   delegate->Show();
   gfx::Point kPtInBound(100, 100);
@@ -105,8 +114,7 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBounds) {
   TestBubbleFrameView frame;
   gfx::Rect window_bounds;
 
-  gfx::Insets insets;
-  frame.bubble_border()->GetInsets(&insets);
+  gfx::Insets insets = frame.bubble_border()->GetInsets();
   int xposition = 95 - insets.width();
 
   // Test that the info bubble displays normally when it fits.

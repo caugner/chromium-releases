@@ -6,7 +6,9 @@
 #define ASH_ACCELERATORS_ACCELERATOR_TABLE_H_
 
 #include "ash/ash_export.h"
+#include "base/basictypes.h"
 #include "ui/base/events/event_constants.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 
 namespace ash {
 
@@ -15,21 +17,16 @@ namespace ash {
 enum AcceleratorAction {
   BRIGHTNESS_DOWN,
   BRIGHTNESS_UP,
-  CYCLE_BACKWARD_LINEAR_PRESSED,
-  CYCLE_BACKWARD_LINEAR_RELEASED,
-  CYCLE_BACKWARD_MRU_PRESSED,
-  CYCLE_BACKWARD_MRU_RELEASED,
-  CYCLE_FORWARD_LINEAR_PRESSED,
-  CYCLE_FORWARD_LINEAR_RELEASED,
-  CYCLE_FORWARD_MRU_PRESSED,
-  CYCLE_FORWARD_MRU_RELEASED,
+  CYCLE_BACKWARD_LINEAR,
+  CYCLE_BACKWARD_MRU,
+  CYCLE_FORWARD_LINEAR,
+  CYCLE_FORWARD_MRU,
   DISABLE_CAPS_LOCK,
   DISPLAY_TOGGLE_SCALE,
   EXIT,
   FOCUS_LAUNCHER,
   FOCUS_NEXT_PANE,
   FOCUS_PREVIOUS_PANE,
-  FOCUS_SYSTEM_TRAY,
   KEYBOARD_BRIGHTNESS_DOWN,
   KEYBOARD_BRIGHTNESS_UP,
   LOCK_PRESSED,
@@ -61,6 +58,7 @@ enum AcceleratorAction {
   SELECT_WIN_7,
   SHOW_KEYBOARD_OVERLAY,
   SHOW_OAK,
+  SHOW_SYSTEM_TRAY_BUBBLE,
   SHOW_TASK_MANAGER,
   SWAP_PRIMARY_DISPLAY,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
@@ -70,11 +68,12 @@ enum AcceleratorAction {
   TOGGLE_CAPS_LOCK,
   TOGGLE_CAPS_LOCK_BY_ALT_LWIN,
   TOGGLE_DESKTOP_BACKGROUND_MODE,
-  TOGGLE_MAXIMIZED_PRESSED,
-  TOGGLE_MAXIMIZED_RELEASED,
+  TOGGLE_MAXIMIZED,
   TOGGLE_ROOT_WINDOW_FULL_SCREEN,
   TOGGLE_SPOKEN_FEEDBACK,
   TOGGLE_WIFI,
+  TOUCH_HUD_CLEAR,
+  TOUCH_HUD_MODE_CHANGE,
   VOLUME_DOWN,
   VOLUME_MUTE,
   VOLUME_UP,
@@ -87,7 +86,7 @@ enum AcceleratorAction {
   LOCK_SCREEN,
   OPEN_CROSH,
   OPEN_FILE_MANAGER_DIALOG,
-  OPEN_FILE_MANAGER_TAB,
+  DISABLE_GPU_WATCHDOG,
 #endif
 #if !defined(NDEBUG)
   PRINT_LAYER_HIERARCHY,
@@ -141,6 +140,12 @@ ASH_EXPORT extern const AcceleratorAction kActionsAllowedAtModalWindow[];
 
 // The number of elements in kActionsAllowedAtModalWindow.
 ASH_EXPORT extern const size_t kActionsAllowedAtModalWindowLength;
+
+// Actions which will not be repeated while holding an accelerator key.
+ASH_EXPORT extern const AcceleratorAction kNonrepeatableActions[];
+
+// The number of elements in kNonrepeatableActions.
+ASH_EXPORT extern const size_t kNonrepeatableActionsLength;
 
 }  // namespace ash
 

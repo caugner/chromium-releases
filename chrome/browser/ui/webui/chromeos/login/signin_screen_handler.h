@@ -7,16 +7,19 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
+#include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui.h"
 
 class BrowsingDataRemover;
@@ -40,15 +43,17 @@ class LoginDisplayWebUIHandler {
   virtual void OnUserRemoved(const std::string& username) = 0;
   virtual void OnUserImageChanged(const User& user) = 0;
   virtual void OnPreferencesChanged() = 0;
+  virtual void ResetSigninScreenHandlerDelegate() = 0;
   virtual void ShowError(int login_attempts,
                          const std::string& error_text,
                          const std::string& help_link_text,
                          HelpAppLauncher::HelpTopic help_topic_id) = 0;
+  virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) = 0;
   virtual void ShowGaiaPasswordChanged(const std::string& username) = 0;
+  virtual void ShowPasswordChangedDialog(bool show_password_error) = 0;
   // Show siginin screen for the given credentials.
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password) = 0;
-  virtual void ResetSigninScreenHandlerDelegate() = 0;
  protected:
   virtual ~LoginDisplayWebUIHandler() {}
 };
@@ -56,6 +61,12 @@ class LoginDisplayWebUIHandler {
 // An interface for SigninScreenHandler to call WebUILoginDisplay.
 class SigninScreenHandlerDelegate {
  public:
+  // Cancels current password changed flow.
+  virtual void CancelPasswordChangedFlow() = 0;
+
+  // Create a new Google account.
+  virtual void CreateAccount() = 0;
+
   // Confirms sign up by provided |username| and |password| specified.
   // Used for new user login via GAIA extension.
   virtual void CompleteLogin(const std::string& username,
@@ -66,17 +77,18 @@ class SigninScreenHandlerDelegate {
   virtual void Login(const std::string& username,
                      const std::string& password) = 0;
 
-  // Sign in into a demo user session.
-  virtual void LoginAsDemoUser() = 0;
+  // Sign in into a retail mode session.
+  virtual void LoginAsRetailModeUser() = 0;
 
-  // Sign in into Guest session.
+  // Sign in into guest session.
   virtual void LoginAsGuest() = 0;
 
-  // Signs out if the screen is currently locked.
-  virtual void Signout() = 0;
+  // Sign in into the public account identified by |username|.
+  virtual void LoginAsPublicAccount(const std::string& username) = 0;
 
-  // Create a new Google account.
-  virtual void CreateAccount() = 0;
+  // Decrypt cryptohome using user provided |old_password|
+  // and migrate to new password.
+  virtual void MigrateUserData(const std::string& old_password) = 0;
 
   // Load wallpaper for given |username|.
   virtual void LoadWallpaper(const std::string& username) = 0;
@@ -86,6 +98,10 @@ class SigninScreenHandlerDelegate {
 
   // Attempts to remove given user.
   virtual void RemoveUser(const std::string& username) = 0;
+
+  // Ignore password change, remove existing cryptohome and
+  // force full sync of user data.
+  virtual void ResyncUserData() = 0;
 
   // Shows Enterprise Enrollment screen.
   virtual void ShowEnterpriseEnrollmentScreen() = 0;
@@ -112,6 +128,9 @@ class SigninScreenHandlerDelegate {
   // user's displayed email value will be updated to |email|.
   virtual void SetDisplayEmail(const std::string& email) = 0;
 
+  // Signs out if the screen is currently locked.
+  virtual void Signout() = 0;
+
  protected:
   virtual ~SigninScreenHandlerDelegate() {}
 };
@@ -124,8 +143,7 @@ class SigninScreenHandler
       public BrowsingDataRemover::Observer,
       public SystemKeyEventListener::CapsLockObserver,
       public content::NotificationObserver,
-      public NetworkStateInformerDelegate,
-      public NetworkStateInformer::NetworkStateInformerObserver {
+      public NetworkStateInformerDelegate {
  public:
   SigninScreenHandler(
       const scoped_refptr<NetworkStateInformer>& network_state_informer);
@@ -147,12 +165,6 @@ class SigninScreenHandler
   // NetworkStateInformerDelegate implementation:
   virtual void OnNetworkReady() OVERRIDE;
 
-  // NetworkStateInformer::NetworkStateInformerObserver implementation:
-  virtual void UpdateState(NetworkStateInformer::State state,
-                           const std::string& network_name,
-                           const std::string& reason,
-                           ConnectionType last_network_type) OVERRIDE;
-
  private:
   typedef base::hash_set<std::string> WebUIObservers;
 
@@ -167,20 +179,22 @@ class SigninScreenHandler
   // WebUIMessageHandler implementation:
   virtual void RegisterMessages() OVERRIDE;
 
-  // BaseLoginUIHandler implementation.
+  // BaseLoginUIHandler implementation:
   virtual void ClearAndEnablePassword() OVERRIDE;
   virtual void OnLoginSuccess(const std::string& username) OVERRIDE;
   virtual void OnUserRemoved(const std::string& username) OVERRIDE;
   virtual void OnUserImageChanged(const User& user) OVERRIDE;
   virtual void OnPreferencesChanged() OVERRIDE;
+  virtual void ResetSigninScreenHandlerDelegate() OVERRIDE;
   virtual void ShowError(int login_attempts,
                          const std::string& error_text,
                          const std::string& help_link_text,
                          HelpAppLauncher::HelpTopic help_topic_id) OVERRIDE;
+  virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
+  virtual void ShowPasswordChangedDialog(bool show_password_error) OVERRIDE;
+  virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) OVERRIDE;
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password) OVERRIDE;
-  virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
-  virtual void ResetSigninScreenHandlerDelegate() OVERRIDE;
 
   // BrowsingDataRemover::Observer overrides.
   virtual void OnBrowsingDataRemoverDone() OVERRIDE;
@@ -188,7 +202,7 @@ class SigninScreenHandler
   // SystemKeyEventListener::CapsLockObserver overrides.
   virtual void OnCapsLockChange(bool enabled) OVERRIDE;
 
-  // content::NotificationObserver implementation.
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
@@ -214,6 +228,7 @@ class SigninScreenHandler
   void HandleAuthenticateUser(const base::ListValue* args);
   void HandleLaunchDemoUser(const base::ListValue* args);
   void HandleLaunchIncognito(const base::ListValue* args);
+  void HandleLaunchPublicAccount(const base::ListValue* args);
   void HandleOfflineLogin(const base::ListValue* args);
   void HandleShutdownSystem(const base::ListValue* args);
   void HandleLoadWallpaper(const base::ListValue* args);
@@ -227,14 +242,17 @@ class SigninScreenHandler
   void HandleWallpaperReady(const base::ListValue* args);
   void HandleLoginWebuiReady(const base::ListValue* args);
   void HandleLoginRequestNetworkState(const base::ListValue* args);
-  void HandleLoginAddNetworkStateObserver(const base::ListValue* args);
-  void HandleLoginRemoveNetworkStateObserver(const base::ListValue* args);
   void HandleDemoWebuiReady(const base::ListValue* args);
   void HandleSignOutUser(const base::ListValue* args);
   void HandleUserImagesLoaded(const base::ListValue* args);
   void HandleNetworkErrorShown(const base::ListValue* args);
   void HandleOpenProxySettings(const base::ListValue* args);
   void HandleLoginVisible(const base::ListValue* args);
+  void HandleCancelPasswordChangedFlow(const base::ListValue* args);
+  void HandleMigrateUserData(const base::ListValue* args);
+  void HandleResyncUserData(const base::ListValue* args);
+  void HandleLoginUIStateChanged(const base::ListValue* args);
+  void HandleUnlockOnLoginSuccess(const base::ListValue* args);
 
   // Sends user list to account picker.
   void SendUserList(bool animated);
@@ -261,6 +279,10 @@ class SigninScreenHandler
                  const std::string& network_name,
                  const std::string& reason,
                  ConnectionType last_network_type);
+
+  // Cancels password changed flow - switches back to login screen.
+  // Called as a callback after cookies are cleared.
+  void CancelPasswordChangedFlowInternal();
 
   // A delegate that glues this handler with backend LoginDisplay.
   SigninScreenHandlerDelegate* delegate_;
@@ -295,6 +317,12 @@ class SigninScreenHandler
   // True if cookie jar cleanup is done.
   bool cookies_cleared_;
 
+  // True if proxy auth dialog was displayed.
+  //
+  // TODO (ygorshenin@): |proxy_dialog_was_displayed_| is used to fix
+  // 169068. Must be removed on M26 when 171668 will be fixed.
+  bool proxy_dialog_was_displayed_;
+
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;
 
@@ -311,14 +339,17 @@ class SigninScreenHandler
   std::string test_pass_;
 
   BrowsingDataRemover* cookie_remover_;
+  base::Closure cookie_remover_callback_;
 
   base::WeakPtrFactory<SigninScreenHandler> weak_factory_;
 
   // Set to true once |LOGIN_WEBUI_VISIBLE| notification is observed.
   bool webui_visible_;
 
-  // Sign-in screen WebUI observers of network state.
-  WebUIObservers observers_;
+  // True when signin UI is shown to user (either sign in form or user pods).
+  bool login_ui_active_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

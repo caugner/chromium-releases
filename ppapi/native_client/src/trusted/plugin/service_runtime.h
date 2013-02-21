@@ -238,6 +238,8 @@ class ServiceRuntime {
   bool Start(nacl::DescWrapper* nacl_file_desc,
              ErrorInfo* error_info,
              const nacl::string& url,
+             bool uses_ppapi,
+             bool enable_ppapi_dev,
              pp::CompletionCallback crash_cb);
 
   // Starts the application channel to the nexe.

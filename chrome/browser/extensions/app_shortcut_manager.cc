@@ -4,9 +4,13 @@
 
 #include "chrome/browser/extensions/app_shortcut_manager.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
+#include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -16,6 +20,11 @@
 #include "grit/theme_resources.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(OS_WIN)
+#include "chrome/browser/extensions/app_host_installer_win.h"
+#include "chrome/installer/util/browser_distribution.h"
+#endif
 
 namespace extensions {
 
@@ -30,15 +39,10 @@ const int kDesiredSizes[] = {32};
 ShellIntegration::ShortcutInfo ShortcutInfoForExtensionAndProfile(
     const Extension* extension, Profile* profile) {
   ShellIntegration::ShortcutInfo shortcut_info;
-  shortcut_info.extension_id = extension->id();
-  shortcut_info.url = GURL(extension->launch_web_url());
-  shortcut_info.title = UTF8ToUTF16(extension->name());
-  shortcut_info.description = UTF8ToUTF16(extension->description());
-  shortcut_info.extension_path = extension->path();
+  web_app::UpdateShortcutInfoForApp(*extension, profile, &shortcut_info);
   shortcut_info.create_in_applications_menu = true;
   shortcut_info.create_in_quick_launch_bar = true;
   shortcut_info.create_on_desktop = true;
-  shortcut_info.profile_path = profile->GetPath();
   return shortcut_info;
 }
 
@@ -46,12 +50,15 @@ ShellIntegration::ShortcutInfo ShortcutInfoForExtensionAndProfile(
 
 AppShortcutManager::AppShortcutManager(Profile* profile)
     : profile_(profile),
-      tracker_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      tracker_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
                  content::Source<Profile>(profile_));
 }
+
+AppShortcutManager::~AppShortcutManager() {}
 
 void AppShortcutManager::OnImageLoaded(const gfx::Image& image,
                                        const std::string& extension_id,
@@ -81,8 +88,23 @@ void AppShortcutManager::Observe(int type,
     case chrome::NOTIFICATION_EXTENSION_INSTALLED: {
       const Extension* extension = content::Details<const Extension>(
           details).ptr();
-      if (extension->is_platform_app())
+      if (extension->is_platform_app() &&
+          extension->location() != Extension::COMPONENT) {
+#if defined(OS_WIN)
+        if (BrowserDistribution::GetDistribution()->AppHostIsSupported() &&
+            extensions::AppHostInstaller::GetInstallWithLauncher()) {
+          scoped_refptr<Extension> extension_ref(const_cast<Extension*>(
+              extension));
+          extensions::AppHostInstaller::EnsureAppHostInstalled(
+              base::Bind(&AppShortcutManager::OnAppHostInstallationComplete,
+                         weak_factory_.GetWeakPtr(), extension_ref));
+        } else {
+          UpdateApplicationShortcuts(extension);
+        }
+#else
         UpdateApplicationShortcuts(extension);
+#endif
+      }
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED: {
@@ -96,6 +118,18 @@ void AppShortcutManager::Observe(int type,
   }
 #endif
 }
+
+#if defined(OS_WIN)
+void AppShortcutManager::OnAppHostInstallationComplete(
+    scoped_refptr<Extension> extension, bool app_host_install_success) {
+  if (!app_host_install_success) {
+    // Do not create shortcuts if App Host fails to install.
+    LOG(ERROR) << "Application Runtime installation failed.";
+    return;
+  }
+  UpdateApplicationShortcuts(extension);
+}
+#endif
 
 void AppShortcutManager::UpdateApplicationShortcuts(
     const Extension* extension) {

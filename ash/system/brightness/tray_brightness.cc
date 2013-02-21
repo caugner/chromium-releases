@@ -5,9 +5,11 @@
 #include "ash/system/brightness/tray_brightness.h"
 
 #include "ash/accelerators/accelerator_controller.h"
+#include "ash/ash_constants.h"
 #include "ash/shell.h"
 #include "ash/system/brightness/brightness_control_delegate.h"
 #include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
 #include "base/bind.h"
@@ -123,8 +125,9 @@ class BrightnessView : public views::View,
 
 }  // namespace tray
 
-TrayBrightness::TrayBrightness()
-    : weak_ptr_factory_(this),
+TrayBrightness::TrayBrightness(SystemTray* system_tray)
+    : SystemTrayItem(system_tray),
+      weak_ptr_factory_(this),
       brightness_view_(NULL),
       is_default_view_(false),
       current_percent_(100.0),
@@ -135,9 +138,12 @@ TrayBrightness::TrayBrightness()
       FROM_HERE,
       base::Bind(&TrayBrightness::GetInitialBrightness,
                  weak_ptr_factory_.GetWeakPtr()));
+  Shell::GetInstance()->system_tray_notifier()->AddBrightnessObserver(this);
 }
 
-TrayBrightness::~TrayBrightness() {}
+TrayBrightness::~TrayBrightness() {
+  Shell::GetInstance()->system_tray_notifier()->RemoveBrightnessObserver(this);
+}
 
 void TrayBrightness::GetInitialBrightness() {
   BrightnessControlDelegate* delegate =

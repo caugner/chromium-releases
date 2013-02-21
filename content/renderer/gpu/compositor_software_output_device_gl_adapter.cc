@@ -4,6 +4,7 @@
 
 #include "content/renderer/gpu/compositor_software_output_device_gl_adapter.h"
 
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
@@ -38,20 +39,20 @@ CompositorSoftwareOutputDeviceGLAdapter::
   Destroy();
 }
 
-WebImage* CompositorSoftwareOutputDeviceGLAdapter::lock(bool forWrite) {
+WebImage* CompositorSoftwareOutputDeviceGLAdapter::Lock(bool forWrite) {
   locked_for_write_ = forWrite;
   image_ = device_->accessBitmap(forWrite);
   return &image_;
 }
 
-void CompositorSoftwareOutputDeviceGLAdapter::unlock() {
+void CompositorSoftwareOutputDeviceGLAdapter::Unlock() {
   if (locked_for_write_)
     Draw(device_->accessBitmap(false).pixelRef()->pixels());
   image_.reset();
 }
 
-void CompositorSoftwareOutputDeviceGLAdapter::didChangeViewportSize(
-    WebSize size) {
+void CompositorSoftwareOutputDeviceGLAdapter::DidChangeViewportSize(
+    gfx::Size size) {
   if (!initialized_)
     Initialize();
 
@@ -148,7 +149,7 @@ void CompositorSoftwareOutputDeviceGLAdapter::Resize(
       viewport_size.width(), viewport_size.height(), true));
 
   context3d_->makeContextCurrent();
-  context3d_->ensureFramebufferCHROMIUM();
+  context3d_->ensureBackbufferCHROMIUM();
   framebuffer_texture_id_ = context3d_->createTexture();
   context3d_->bindTexture(GL_TEXTURE_2D, framebuffer_texture_id_);
   context3d_->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -161,13 +162,14 @@ void CompositorSoftwareOutputDeviceGLAdapter::Resize(
 }
 
 void CompositorSoftwareOutputDeviceGLAdapter::Draw(void* pixels) {
+  TRACE_EVENT0("renderer", "CompositorSoftwareOutputDeviceGLAdapter::Draw");
   if (!initialized_)
     NOTREACHED();
   if (!framebuffer_texture_id_)
     NOTREACHED();
 
   context3d_->makeContextCurrent();
-  context3d_->ensureFramebufferCHROMIUM();
+  context3d_->ensureBackbufferCHROMIUM();
   context3d_->clear(GL_COLOR_BUFFER_BIT);
 
   context3d_->texImage2D(GL_TEXTURE_2D, 0, GL_RGBA,

@@ -22,6 +22,7 @@
 #include "chrome/common/instant_types.h"
 #include "chrome/common/nacl_types.h"
 #include "chrome/common/search_provider.h"
+#include "chrome/common/search_types.h"
 #include "chrome/common/translate_errors.h"
 #include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_channel_handle.h"
@@ -119,6 +120,8 @@ IPC_ENUM_TRAITS(InstantSuggestionType)
 IPC_ENUM_TRAITS(InstantShownReason)
 IPC_ENUM_TRAITS(search_provider::OSDDType)
 IPC_ENUM_TRAITS(search_provider::InstallState)
+IPC_ENUM_TRAITS(ThemeBackgroundImageAlignment)
+IPC_ENUM_TRAITS(ThemeBackgroundImageTiling)
 IPC_ENUM_TRAITS(TranslateErrors::Type)
 IPC_ENUM_TRAITS(WebKit::WebConsoleMessage::Level)
 
@@ -156,9 +159,10 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(InstantAutocompleteResult)
   IPC_STRUCT_TRAITS_MEMBER(provider)
-  IPC_STRUCT_TRAITS_MEMBER(is_search)
-  IPC_STRUCT_TRAITS_MEMBER(contents)
+  IPC_STRUCT_TRAITS_MEMBER(type)
+  IPC_STRUCT_TRAITS_MEMBER(description)
   IPC_STRUCT_TRAITS_MEMBER(destination_url)
+  IPC_STRUCT_TRAITS_MEMBER(transition)
   IPC_STRUCT_TRAITS_MEMBER(relevance)
 IPC_STRUCT_TRAITS_END()
 
@@ -168,9 +172,28 @@ IPC_STRUCT_TRAITS_BEGIN(InstantSuggestion)
   IPC_STRUCT_TRAITS_MEMBER(type)
 IPC_STRUCT_TRAITS_END()
 
+IPC_ENUM_TRAITS(chrome::search::Mode::Type)
+IPC_ENUM_TRAITS(chrome::search::Mode::Origin)
+IPC_STRUCT_TRAITS_BEGIN(chrome::search::Mode)
+  IPC_STRUCT_TRAITS_MEMBER(mode)
+  IPC_STRUCT_TRAITS_MEMBER(origin)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(RendererContentSettingRules)
   IPC_STRUCT_TRAITS_MEMBER(image_rules)
   IPC_STRUCT_TRAITS_MEMBER(script_rules)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ThemeBackgroundInfo)
+  IPC_STRUCT_TRAITS_MEMBER(color_r)
+  IPC_STRUCT_TRAITS_MEMBER(color_g)
+  IPC_STRUCT_TRAITS_MEMBER(color_b)
+  IPC_STRUCT_TRAITS_MEMBER(color_a)
+  IPC_STRUCT_TRAITS_MEMBER(theme_id)
+  IPC_STRUCT_TRAITS_MEMBER(image_horizontal_alignment)
+  IPC_STRUCT_TRAITS_MEMBER(image_vertical_alignment)
+  IPC_STRUCT_TRAITS_MEMBER(image_tiling)
+  IPC_STRUCT_TRAITS_MEMBER(image_height)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebKit::WebCache::ResourceTypeStat)
@@ -283,8 +306,12 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSubmit,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxCancel,
                     string16 /* value */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxResize,
-                    gfx::Rect /* search_box_bounds */)
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxPopupResize,
+                    gfx::Rect /* bounds */)
+
+IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxMarginChange,
+                    int /* start */,
+                    int /* end */)
 
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_DetermineIfPageSupportsInstant)
 
@@ -295,12 +322,24 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxAutocompleteResults,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxUpOrDownKeyPressed,
                     int /* count */)
 
-IPC_MESSAGE_ROUTED0(ChromeViewMsg_SearchBoxFocus)
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxModeChanged,
+                    chrome::search::Mode /* mode */)
 
-IPC_MESSAGE_ROUTED0(ChromeViewMsg_SearchBoxBlur)
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSetDisplayInstantResults,
+                    bool /* display_instant_results */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxActiveTabModeChanged,
-                    bool /* active_tab_is_ntp */)
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxThemeChanged,
+                    ThemeBackgroundInfo /* value */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxThemeAreaHeightChanged,
+                    int /* height */)
+
+IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxFontInformation,
+                    string16 /* omnibox_font */,
+                    size_t /* omnibox_font_size */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxKeyCaptureChanged,
+                    bool /* is_key_capture_enabled */)
 
 // Toggles visual muting of the render view area. This is on when a constrained
 // window is showing.
@@ -502,12 +541,15 @@ IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_ForwardMessageToExternalHost,
 // a new instance of the Native Client process. The browser will launch
 // the process and return an IPC channel handle. This handle will only
 // be valid if the NaCl IPC proxy is enabled.
-IPC_SYNC_MESSAGE_CONTROL2_3(ChromeViewHostMsg_LaunchNaCl,
+IPC_SYNC_MESSAGE_CONTROL4_4(ChromeViewHostMsg_LaunchNaCl,
                             GURL /* manifest_url */,
+                            int /* render_view_id */,
+                            uint32 /* permission_bits */,
                             int /* socket count */,
                             std::vector<nacl::FileDescriptor>
                                 /* imc channel handles */,
                             IPC::ChannelHandle /* ipc_channel_handle */,
+                            base::ProcessId /* plugin_pid */,
                             int /* plugin_child_id */)
 
 // A renderer sends this to the browser process when it wants to
@@ -520,6 +562,11 @@ IPC_SYNC_MESSAGE_CONTROL1_1(ChromeViewHostMsg_GetReadonlyPnaclFD,
 // create a temporary file.
 IPC_SYNC_MESSAGE_CONTROL0_1(ChromeViewHostMsg_NaClCreateTemporaryFile,
                             IPC::PlatformFileForTransit /* out file */)
+
+// A renderer sends this to the browser process to display infobar
+IPC_MESSAGE_CONTROL2(ChromeViewHostMsg_NaClErrorStatus,
+                     int /* render_view_id */,
+                     int /* Error ID */)
 
 // Notification that the page has an OpenSearch description document
 // associated with it.
@@ -623,12 +670,23 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_InstantSupportDetermined,
                     int /* page_id */,
                     bool /* result */)
 
+IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_SearchBoxNavigate,
+                    int /* page_id */,
+                    GURL /* destination */,
+                    content::PageTransition /* transition */)
+
 // Sent by the Instant preview asking to show itself with the given height.
 IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_ShowInstantPreview,
                     int /* page_id */,
                     InstantShownReason /* reason */,
                     int /* height */,
                     InstantSizeUnits /* units */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_StartCapturingKeyStrokes,
+                    int /* page_id */)
+
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_StopCapturingKeyStrokes,
+                    int /* page_id */)
 
 // The currently displayed PDF has an unsupported feature.
 IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_PDFHasUnsupportedFeature)

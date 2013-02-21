@@ -17,6 +17,7 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/language_preferences.h"
@@ -42,8 +43,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_element.h"
@@ -72,7 +73,7 @@ void DetermineAndSaveHardwareKeyboard(const std::string& locale,
     layout = oem_layout;
   } else {
     chromeos::input_method::InputMethodManager* manager =
-        chromeos::input_method::InputMethodManager::GetInstance();
+        chromeos::input_method::GetInputMethodManager();
     // Otherwise, determine the hardware keyboard from the locale.
     std::vector<std::string> input_method_ids;
     if (manager->GetInputMethodUtil()->GetInputMethodIdsFromLanguageCode(
@@ -377,7 +378,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
   VLOG(1) << "Showing OOBE screen: " << first_screen_name;
 
   chromeos::input_method::InputMethodManager* manager =
-      chromeos::input_method::InputMethodManager::GetInstance();
+      chromeos::input_method::GetInputMethodManager();
 
   // Set up keyboards. For example, when |locale| is "en-US", enable US qwerty
   // and US dvorak keyboard layouts.
@@ -401,6 +402,9 @@ void ShowLoginWizard(const std::string& first_screen_name,
     system::touchpad_settings::SetTapToClick(
         prefs->GetBoolean(prefs::kOwnerTapToClickEnabled));
   }
+
+  ui::SetNaturalScroll(CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kNaturalScrollDefault));
 
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(size));
 

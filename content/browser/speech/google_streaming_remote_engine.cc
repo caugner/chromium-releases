@@ -436,9 +436,11 @@ GoogleStreamingRemoteEngine::ProcessDownstreamResponse(
     }
   }
 
+  SpeechRecognitionResults results;
   for (int i = 0; i < ws_event.result_size(); ++i) {
     const proto::SpeechRecognitionResult& ws_result = ws_event.result(i);
-    SpeechRecognitionResult result;
+    results.push_back(SpeechRecognitionResult());
+    SpeechRecognitionResult& result = results.back();
     result.is_provisional = !(ws_result.has_final() && ws_result.final());
 
     if (!result.is_provisional)
@@ -459,9 +461,9 @@ GoogleStreamingRemoteEngine::ProcessDownstreamResponse(
 
       result.hypotheses.push_back(hypothesis);
     }
-
-    delegate()->OnSpeechRecognitionEngineResult(result);
   }
+
+  delegate()->OnSpeechRecognitionEngineResults(results);
 
   return state_;
 }
@@ -472,7 +474,7 @@ GoogleStreamingRemoteEngine::RaiseNoMatchErrorIfGotNoResults(
   if (!got_last_definitive_result_) {
     // Provide an empty result to notify that recognition is ended with no
     // errors, yet neither any further results.
-    delegate()->OnSpeechRecognitionEngineResult(SpeechRecognitionResult());
+    delegate()->OnSpeechRecognitionEngineResults(SpeechRecognitionResults());
   }
   return AbortSilently(event_args);
 }
@@ -560,7 +562,10 @@ std::string GoogleStreamingRemoteEngine::GetAcceptedLanguages() const {
     net::URLRequestContext* request_context =
         url_context_->GetURLRequestContext();
     DCHECK(request_context);
-    std::string accepted_language_list = request_context->accept_language();
+    // TODO(pauljensen): GoogleStreamingRemoteEngine should be constructed with
+    // a reference to the HttpUserAgentSettings rather than accessing the
+    // accept language through the URLRequestContext.
+    std::string accepted_language_list = request_context->GetAcceptLanguage();
     size_t separator = accepted_language_list.find_first_of(",;");
     if (separator != std::string::npos)
       langs = accepted_language_list.substr(0, separator);

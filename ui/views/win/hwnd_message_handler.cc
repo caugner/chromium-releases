@@ -11,19 +11,19 @@
 #include "base/system_monitor/system_monitor.h"
 #include "base/win/windows_version.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
-#include "ui/base/native_theme/native_theme_win.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/base/win/shell.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_paint.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/icon_util.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/path_win.h"
 #include "ui/gfx/screen.h"
+#include "ui/native_theme/native_theme_win.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/monitor_win.h"
 #include "ui/views/widget/native_widget_win.h"
@@ -463,7 +463,6 @@ gfx::Rect HWNDMessageHandler::GetClientAreaBoundsInScreen() const {
   return gfx::Rect(point.x, point.y, r.right - r.left, r.bottom - r.top);
 }
 
-
 gfx::Rect HWNDMessageHandler::GetRestoredBounds() const {
   // If we're in fullscreen mode, we've changed the normal bounds to the monitor
   // rect, so return the saved bounds instead.
@@ -669,7 +668,7 @@ bool HWNDMessageHandler::IsMaximized() const {
   return !!::IsZoomed(hwnd());
 }
 
-bool HWNDMessageHandler::RunMoveLoop(const gfx::Point& drag_offset) {
+bool HWNDMessageHandler::RunMoveLoop(const gfx::Vector2d& drag_offset) {
   ReleaseCapture();
   MoveLoopMouseWatcher watcher(this);
   SendMessage(hwnd(), WM_SYSCOMMAND, SC_MOVE | 0x0002, GetMessagePos());
@@ -864,7 +863,8 @@ void HWNDMessageHandler::SetOpacity(BYTE opacity) {
 void HWNDMessageHandler::SetWindowIcons(const gfx::ImageSkia& window_icon,
                                         const gfx::ImageSkia& app_icon) {
   if (!window_icon.isNull()) {
-    HICON windows_icon = IconUtil::CreateHICONFromSkBitmap(window_icon);
+    HICON windows_icon = IconUtil::CreateHICONFromSkBitmap(
+        *window_icon.bitmap());
     // We need to make sure to destroy the previous icon, otherwise we'll leak
     // these GDI objects until we crash!
     HICON old_icon = reinterpret_cast<HICON>(
@@ -874,7 +874,7 @@ void HWNDMessageHandler::SetWindowIcons(const gfx::ImageSkia& window_icon,
       DestroyIcon(old_icon);
   }
   if (!app_icon.isNull()) {
-    HICON windows_icon = IconUtil::CreateHICONFromSkBitmap(app_icon);
+    HICON windows_icon = IconUtil::CreateHICONFromSkBitmap(*app_icon.bitmap());
     HICON old_icon = reinterpret_cast<HICON>(
         SendMessage(hwnd(), WM_SETICON, ICON_BIG,
                     reinterpret_cast<LPARAM>(windows_icon)));
@@ -1435,7 +1435,6 @@ void HWNDMessageHandler::OnInputLangChange(DWORD character_set,
 LRESULT HWNDMessageHandler::OnKeyEvent(UINT message,
                                        WPARAM w_param,
                                        LPARAM l_param) {
-
   MSG msg = { hwnd(), message, w_param, l_param };
   ui::KeyEvent key(msg, message == WM_CHAR);
   if (!delegate_->HandleUntranslatedKeyEvent(key))
@@ -1570,11 +1569,10 @@ LRESULT HWNDMessageHandler::OnNCActivate(BOOL active) {
   if (!delegate_->CanActivate())
     return TRUE;
 
-  // The frame may need to redraw as a result of the activation change.
-  // We can get WM_NCACTIVATE before we're actually visible. If we're not
-  // visible, no need to paint.
-  if (IsVisible())
-    delegate_->SchedulePaint();
+  // On activation, lift any prior restriction against rendering as inactive.
+  bool inactive_rendering_disabled = delegate_->IsInactiveRenderingDisabled();
+  if (active && inactive_rendering_disabled)
+    delegate_->EnableInactiveRendering();
 
   if (delegate_->IsUsingCustomFrame()) {
     // TODO(beng, et al): Hack to redraw this window and child windows
@@ -1587,11 +1585,11 @@ LRESULT HWNDMessageHandler::OnNCActivate(BOOL active) {
     EnumChildWindows(hwnd(), EnumChildWindowsForRedraw, NULL);
   }
 
-  // If we're active again, we should be allowed to render as inactive, so
-  // tell the non-client view.
-  bool inactive_rendering_disabled = delegate_->IsInactiveRenderingDisabled();
-  if (IsActive())
-    delegate_->EnableInactiveRendering();
+  // The frame may need to redraw as a result of the activation change.
+  // We can get WM_NCACTIVATE before we're actually visible. If we're not
+  // visible, no need to paint.
+  if (IsVisible())
+    delegate_->SchedulePaint();
 
   // Avoid DefWindowProc non-client rendering over our custom frame on newer
   // Windows versions only (breaks taskbar activation indication on XP/Vista).
@@ -1965,10 +1963,7 @@ void HWNDMessageHandler::OnSysCommand(UINT notification_code,
 }
 
 void HWNDMessageHandler::OnThemeChanged() {
-  // TODO(beng): resolve vis-a-vis aura.
-#if !defined(USE_AURA)
   ui::NativeThemeWin::instance()->CloseHandles();
-#endif
 }
 
 LRESULT HWNDMessageHandler::OnTouchEvent(UINT message,

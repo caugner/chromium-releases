@@ -8,12 +8,13 @@
 #include "android_webview/browser/aw_request_interceptor.h"
 #include "android_webview/browser/net/aw_network_delegate.h"
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
-#include "android_webview/browser/net/register_android_protocols.h"
+#include "android_webview/browser/net/init_native_callback.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "net/http/http_cache.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
@@ -84,35 +85,57 @@ void AwURLRequestContextGetter::Init() {
   builder.set_network_delegate(new AwNetworkDelegate());
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
   builder.set_proxy_config_service(proxy_config_service_.release());
+  builder.set_accept_language(net::HttpUtil::GenerateAcceptLanguageHeader(
+      content::GetContentClient()->browser()->GetAcceptLangs(
+          browser_context_)));
 
-  net::URLRequestContextBuilder::HttpCacheParams cache_params;
-  cache_params.type = net::URLRequestContextBuilder::HttpCacheParams::DISK;
-  cache_params.max_size = 10 * 1024 * 1024;  // 10M
-  cache_params.path =
-      browser_context_->GetPath().Append(FILE_PATH_LITERAL("Cache")),
-  builder.EnableHttpCache(cache_params);
+  // TODO(boliu): Values from chrome/app/resources/locale_settings_en-GB.xtb
+  builder.set_accept_charset(
+      net::HttpUtil::GenerateAcceptCharsetHeader("ISO-8859-1"));
 
   url_request_context_.reset(builder.Build());
 
-  url_request_context_->set_accept_language(
-      net::HttpUtil::GenerateAcceptLanguageHeader(
-          content::GetContentClient()->browser()->GetAcceptLangs(
-              browser_context_)));
-
-  // TODO(boliu): Values from chrome/app/resources/locale_settings_en-GB.xtb
-  url_request_context_->set_accept_charset(
-      net::HttpUtil::GenerateAcceptCharsetHeader("ISO-8859-1"));
-
-  job_factory_.reset(new AwURLRequestJobFactory);
-  bool set_protocol = job_factory_->SetProtocolHandler(
+  scoped_ptr<AwURLRequestJobFactory> job_factory(new AwURLRequestJobFactory);
+  bool set_protocol = job_factory->SetProtocolHandler(
       chrome::kFileScheme, new net::FileProtocolHandler());
   DCHECK(set_protocol);
-  set_protocol = job_factory_->SetProtocolHandler(
+  set_protocol = job_factory->SetProtocolHandler(
       chrome::kDataScheme, new net::DataProtocolHandler());
   DCHECK(set_protocol);
-  RegisterAndroidProtocolsOnIOThread(job_factory_.get());
-  job_factory_->AddInterceptor(new AwRequestInterceptor());
-  url_request_context_->set_job_factory(job_factory_.get());
+  job_factory->AddInterceptor(new AwRequestInterceptor());
+  url_request_context_->set_job_factory(job_factory.get());
+
+  // TODO(mnaganov): Fix URLRequestContextBuilder to use proper threads.
+  net::HttpNetworkSession::Params network_session_params;
+  PopulateNetworkSessionParams(&network_session_params);
+  net::HttpCache* main_cache = new net::HttpCache(
+      network_session_params,
+      new net::HttpCache::DefaultBackend(
+          net::DISK_CACHE,
+          browser_context_->GetPath().Append(FILE_PATH_LITERAL("Cache")),
+          10 * 1024 * 1024,  // 10M
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
+  main_http_factory_.reset(main_cache);
+  url_request_context_->set_http_transaction_factory(main_cache);
+
+  OnNetworkStackInitialized(url_request_context_.get(),
+                            job_factory.get());
+  job_factory_ = job_factory.Pass();
+}
+
+void AwURLRequestContextGetter::PopulateNetworkSessionParams(
+    net::HttpNetworkSession::Params* params) {
+  net::URLRequestContext* context = url_request_context_.get();
+  params->host_resolver = context->host_resolver();
+  params->cert_verifier = context->cert_verifier();
+  params->server_bound_cert_service = context->server_bound_cert_service();
+  params->transport_security_state = context->transport_security_state();
+  params->proxy_service = context->proxy_service();
+  params->ssl_config_service = context->ssl_config_service();
+  params->http_auth_handler_factory = context->http_auth_handler_factory();
+  params->network_delegate = context->network_delegate();
+  params->http_server_properties = context->http_server_properties();
+  params->net_log = context->net_log();
 }
 
 content::ResourceContext* AwURLRequestContextGetter::GetResourceContext() {

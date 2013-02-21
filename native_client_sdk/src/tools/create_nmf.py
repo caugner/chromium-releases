@@ -15,6 +15,8 @@ import subprocess
 import sys
 import urllib
 
+import quote
+
 try:
   import json
 except ImportError:
@@ -85,6 +87,91 @@ class Error(Exception):
   pass
 
 
+def ParseElfHeader(path):
+  """Determine properties of a nexe by parsing elf header.
+  Return tuple of architecture and boolean signalling whether
+  the executable is dynamic (has INTERP header) or static.
+  """
+  # From elf.h:
+  # typedef struct
+  # {
+  #   unsigned char e_ident[EI_NIDENT]; /* Magic number and other info */
+  #   Elf64_Half e_type; /* Object file type */
+  #   Elf64_Half e_machine; /* Architecture */
+  #   ...
+  # } Elf32_Ehdr;
+  elf_header_format = '16s2H'
+  elf_header_size = struct.calcsize(elf_header_format)
+
+  with open(path, 'rb') as f:
+    header = f.read(elf_header_size)
+
+  header = struct.unpack(elf_header_format, header)
+  e_ident, _, e_machine = header[:3]
+
+  elf_magic = '\x7fELF'
+  if e_ident[:4] != elf_magic:
+    raise Error("Not a valid NaCL executable: %s" % path)
+
+  e_machine_mapping = {
+    3 : 'x86-32',
+    40 : 'arm',
+    62 : 'x86-64'
+  }
+  if e_machine not in e_machine_mapping:
+    raise Error("Unknown machine type: %s" % e_machine)
+
+  # Set arch based on the machine type in the elf header
+  arch = e_machine_mapping[e_machine]
+
+  # Now read the full header in either 64bit or 32bit mode
+  if arch == 'x86-64':
+    elf_header_format = '16s2HI3lI3H'
+  else:
+    elf_header_format = '16s2HI3II3H'
+
+  dynamic = IsDynamicElf(path, elf_header_format)
+  return arch, dynamic
+
+
+def IsDynamicElf(path, elf_header_format):
+  """Examine an elf file to determine if it is dynamically
+  linked or not.
+  This is determined by searching the program headers for
+  a header of type PT_INTERP.
+  """
+  elf_header_size = struct.calcsize(elf_header_format)
+
+  with open(path, 'rb') as f:
+    header = f.read(elf_header_size)
+    header = struct.unpack(elf_header_format, header)
+    p_header_offset = header[5]
+    p_header_entry_size = header[9]
+    num_p_header = header[10]
+    f.seek(p_header_offset)
+    p_headers = f.read(p_header_entry_size*num_p_header)
+
+  # Read the first word of each Phdr to find out its type.
+  #
+  # typedef struct
+  # {
+  #   Elf32_Word  p_type;     /* Segment type */
+  #   ...
+  # } Elf32_Phdr;
+  elf_phdr_format = 'I'
+  PT_INTERP = 3
+
+  while p_headers:
+    p_header = p_headers[:p_header_entry_size]
+    p_headers = p_headers[p_header_entry_size:]
+    phdr_type = struct.unpack(elf_phdr_format, p_header[:4])[0]
+    if phdr_type == PT_INTERP:
+      return True
+
+  return False
+
+
+
 class ArchFile(object):
   '''Simple structure containing information about
 
@@ -101,41 +188,7 @@ class ArchFile(object):
     self.url = url
     self.arch = arch
     if arch is None:
-      self._ReadElfHeader()
-
-  def _ReadElfHeader(self):
-    """Determine architecture of nexe by reading elf header."""
-    # From elf.h:
-    # typedef struct
-    # {
-    #   unsigned char e_ident[EI_NIDENT]; /* Magic number and other info */
-    #   Elf64_Half e_type; /* Object file type */
-    #   Elf64_Half e_machine; /* Architecture */
-    #   ...
-    # } Elf32_Ehdr;
-    elf_header_format = '16s2H'
-    elf_header_size = struct.calcsize(elf_header_format)
-
-    with open(self.path, 'rb') as f:
-      header = f.read(elf_header_size)
-
-    header = struct.unpack(elf_header_format, header)
-    e_ident, _, e_machine = header
-
-    elf_magic = '\x7fELF'
-    if e_ident[:4] != elf_magic:
-      raise Error("Not a valid NaCL executable: %s" % self.path)
-
-    e_machine_mapping = {
-      3 : 'x86-32',
-      40 : 'arm',
-      62 : 'x86-64'
-    }
-    if e_machine not in e_machine_mapping:
-      raise Error("Unknown machine type: %s" % e_machine)
-
-    # set arch based on the machine type in the elf header
-    self.arch = e_machine_mapping[e_machine]
+      self.arch = ParseElfHeader(path)[0]
 
   def __repr__(self):
     return "<ArchFile %s>" % self.path
@@ -155,7 +208,7 @@ class NmfUtils(object):
 
   def __init__(self, main_files=None, objdump=None,
                lib_path=None, extra_files=None, lib_prefix=None,
-               toolchain=None, remap=None):
+               remap=None):
     '''Constructor
 
     Args:
@@ -167,8 +220,6 @@ class NmfUtils(object):
       lib_prefix: A list of path components to prepend to the library paths,
           both for staging the libraries and for inclusion into the nmf file.
           Examples:  ['..'], ['lib_dir']
-      toolchain: Specify which toolchain newlib|glibc|pnacl which can require
-          different forms of the NMF.
       remap: Remaps the library name in the manifest.
       '''
     self.objdump = objdump
@@ -178,9 +229,7 @@ class NmfUtils(object):
     self.manifest = None
     self.needed = {}
     self.lib_prefix = lib_prefix or []
-    self.toolchain = toolchain
     self.remap = remap or {}
-
 
   def GleanFromObjdump(self, files):
     '''Get architecture and dependency information for given files
@@ -209,11 +258,15 @@ class NmfUtils(object):
     input_info = {}
     needed = set()
     output, err_output = proc.communicate()
+    if proc.returncode:
+      raise Error('%s\nStdError=%s\nobjdump failed with error code: %d' %
+                  (output, err_output, proc.returncode))
+
     for line in output.splitlines(True):
       # Objdump should display the architecture first and then the dependencies
       # second for each file in the list.
       matched = FormatMatcher.match(line)
-      if matched is not None:
+      if matched:
         filename = matched.group(1)
         arch = OBJDUMP_ARCH_MAP[matched.group(2)]
         if files[filename] is None or arch in files[filename]:
@@ -224,13 +277,9 @@ class NmfUtils(object):
               path=filename,
               url='/'.join(self.lib_prefix + [ARCH_LOCATION[arch], name]))
       matched = NeededMatcher.match(line)
-      if matched is not None:
+      if matched:
         if files[filename] is None or arch in files[filename]:
           needed.add('/'.join([arch, matched.group(1)]))
-    status = proc.poll()
-    if status != 0:
-      raise Error('%s\nStdError=%s\nobjdump failed with error code: %d' %
-                  (output, err_output, status))
     return input_info, needed
 
   def FindLibsInPath(self, name):
@@ -261,10 +310,11 @@ class NmfUtils(object):
     if self.needed:
       return self.needed
 
-    runnable = (self.toolchain != 'newlib' and self.toolchain != 'pnacl')
     DebugPrint('GetNeeded(%s)' % self.main_files)
 
-    if runnable:
+    dynamic = any(ParseElfHeader(f)[1] for f in self.main_files)
+
+    if dynamic:
       examined = set()
       all_files, unexamined = self.GleanFromObjdump(
           dict([(f, None) for f in self.main_files]))
@@ -331,14 +381,22 @@ class NmfUtils(object):
     can always be found under the top key PROGRAM.  Additional files are under
     the FILES key further mapped by file name.  In the case of 'runnable' the
     PROGRAM key is populated with urls pointing the runnable-ld.so which acts
-    as the startup nexe.  The application itself, is then placed under the
-    FILES key mapped as 'main.exe' instead of it's original name so that the
-    loader can find it.'''
+    as the startup nexe.  The application itself is then placed under the
+    FILES key mapped as 'main.exe' instead of the original name so that the
+    loader can find it. '''
     manifest = { FILES_KEY: {}, PROGRAM_KEY: {} }
-    runnable = (self.toolchain != 'newlib' and self.toolchain != 'pnacl')
 
     needed = self.GetNeeded()
-    for need, archinfo in needed.items():
+
+    runnable = any(n.endswith(RUNNABLE_LD) for n in needed)
+
+    extra_files_kv = [(key, ArchFile(name=key,
+                                     arch=arch,
+                                     path=url,
+                                     url=url))
+                      for key, arch, url in self.extra_files]
+
+    for need, archinfo in needed.items() + extra_files_kv:
       urlinfo = { URL_KEY: archinfo.url }
       name = archinfo.name
 
@@ -383,19 +441,6 @@ class NmfUtils(object):
     return '\n'.join([line.rstrip() for line in pretty_lines]) + '\n'
 
 
-def DetermineToolchain(objdump):
-  objdump = objdump.replace('\\', '/')
-  paths = objdump.split('/')
-  count = len(paths)
-  for index in range(count - 2, 0, -1):
-    if paths[index] == 'toolchain':
-      if paths[index + 1].endswith('newlib'):
-        return 'newlib'
-      if paths[index + 1].endswith('glibc'):
-        return 'glibc'
-  raise Error('Could not deternime which toolchain to use.')
-
-
 def Trace(msg):
   if Trace.verbose:
     sys.stderr.write(str(msg) + '\n')
@@ -403,7 +448,47 @@ def Trace(msg):
 Trace.verbose = False
 
 
-def Main(argv):
+def ParseExtraFiles(encoded_list, err):
+  """Parse the extra-files list and return a canonicalized list of
+  [key, arch, url] triples.  The |encoded_list| should be a list of
+  strings of the form 'key:url' or 'key:arch:url', where an omitted
+  'arch' is taken to mean 'portable'.
+
+  All entries in |encoded_list| are checked for syntax errors before
+  returning.  Error messages are written to |err| (typically
+  sys.stderr) so that the user has actionable feedback for fixing all
+  errors, rather than one at a time.  If there are any errors, None is
+  returned instead of a list, since an empty list is a valid return
+  value.
+  """
+  seen_error = False
+  canonicalized = []
+  for ix in range(len(encoded_list)):
+    kv = encoded_list[ix]
+    unquoted = quote.unquote(kv, ':')
+    if len(unquoted) == 3:
+      if unquoted[1] != ':':
+        err.write('Syntax error for key:value tuple ' +
+                  'for --extra-files argument: ' + kv + '\n')
+        seen_error = True
+      else:
+        canonicalized.append([unquoted[0], 'portable', unquoted[2]])
+    elif len(unquoted) == 5:
+      if unquoted[1] != ':' or unquoted[3] != ':':
+        err.write('Syntax error for key:arch:url tuple ' +
+                  'for --extra-files argument: ' +
+                  kv + '\n')
+        seen_error = True
+      else:
+        canonicalized.append([unquoted[0], unquoted[2], unquoted[4]])
+    else:
+      err.write('Bad key:arch:url tuple for --extra-files: ' + kv + '\n')
+  if seen_error:
+    return None
+  return canonicalized
+
+
+def main(argv):
   parser = optparse.OptionParser(
       usage='Usage: %prog [options] nexe [extra_libs...]')
   parser.add_option('-o', '--output', dest='output',
@@ -425,30 +510,33 @@ def Main(argv):
   parser.add_option('-r', '--remove', dest='remove',
                     help='Remove the prefix from the files.',
                     metavar='PATH')
-  parser.add_option('-t', '--toolchain', dest='toolchain',
-                    help='Add DIRECTORY to library search path',
-                    default=None, metavar='TOOLCHAIN')
+  parser.add_option('-t', '--toolchain', help='Legacy option, do not use')
   parser.add_option('-n', '--name', dest='name',
                     help='Rename FOO as BAR',
                     action='append', default=[], metavar='FOO,BAR')
+  parser.add_option('-x', '--extra-files',
+                    help=('Add extra key:file tuple to the "files"' +
+                          ' section of the .nmf'),
+                    action='append', default=[], metavar='FILE')
   parser.add_option('-v', '--verbose',
                     help='Verbose output', action='store_true')
   parser.add_option('-d', '--debug-mode',
                     help='Debug mode', action='store_true')
-  (options, args) = parser.parse_args(argv)
+  options, args = parser.parse_args(argv)
   if options.verbose:
     Trace.verbose = True
   if options.debug_mode:
     DebugPrint.debug_mode = True
 
+  if options.toolchain is not None:
+    print "warning: option -t/--toolchain is deprecated."
+
   if len(args) < 1:
     raise Error("No nexe files specified.  See --help for more info")
 
-  if not options.toolchain:
-    options.toolchain = DetermineToolchain(os.path.abspath(options.objdump))
-
-  if options.toolchain not in ['newlib', 'glibc', 'pnacl']:
-    raise Error('Unknown toolchain: ' + str(options.toolchain))
+  canonicalized = ParseExtraFiles(options.extra_files, sys.stderr)
+  if canonicalized is None:
+    parser.error("Bad --extra-files (-x) argument syntax")
 
   remap = {}
   for ren in options.name:
@@ -465,8 +553,8 @@ def Main(argv):
   nmf = NmfUtils(objdump=options.objdump,
                  main_files=args,
                  lib_path=options.lib_path,
+                 extra_files=canonicalized,
                  lib_prefix=path_prefix,
-                 toolchain=options.toolchain,
                  remap=remap)
 
   nmf.GetManifest()
@@ -486,8 +574,8 @@ def Main(argv):
 # Invoke this file directly for simple testing.
 if __name__ == '__main__':
   try:
-    rtn = Main(sys.argv[1:])
+    rtn = main(sys.argv[1:])
   except Error, e:
-    print "%s: %s" % (os.path.basename(__file__), e)
+    sys.stderr.write("%s: %s\n" % (os.path.basename(__file__), e))
     rtn = 1
   sys.exit(rtn)

@@ -283,6 +283,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         '--allow-file-access',
         '--allow-file-access-from-files',
         '--enable-file-cookies',
+        '--disable-default-apps',
         '--dom-automation',
         '--skip-oauth-login',
         # Enables injection of test content script for webui login automation
@@ -2001,8 +2002,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
-  def GetInstantInfo(self):
+  def GetInstantInfo(self, windex=0):
     """Return info about the instant overlay tab.
+
+    Args:
+      windex: The window index, default is 0.
 
     Returns:
       A dictionary.
@@ -2018,7 +2022,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         { u'enabled': False }
     """
     cmd_dict = {'command': 'GetInstantInfo'}
-    return self._GetResultFromJSONRequest(cmd_dict)['instant']
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)['instant']
 
   def GetSearchEngineInfo(self, windex=0):
     """Return info about search engines.
@@ -2125,52 +2129,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     cmd_dict = {'command': 'PerformActionOnSearchEngine', 'keyword': keyword,
                 'action': 'default'}
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
-
-  def _EnsureProtectorCheck(self):
-    """Ensure that Protector check for changed settings has been performed in
-    the current browser session.
-
-    No-op if Protector is disabled.
-    """
-    # Ensure that check for default search engine change has been performed.
-    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
-
-  def GetProtectorState(self, window_index=0):
-    """Returns current Protector state.
-
-    This will trigger Protector's check for changed settings if it hasn't been
-    performed yet.
-
-    Args:
-      window_index: The window index, default is 0.
-
-    Returns:
-      A dictionary.
-      Example:
-        { u'enabled': True,
-          u'showing_change': False }
-    """
-    self._EnsureProtectorCheck()
-    cmd_dict = {'command': 'GetProtectorState'}
-    return self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
-
-  def ApplyProtectorChange(self):
-    """Applies the change shown by Protector and closes the bubble.
-
-    No-op if Protector is not showing any change.
-    """
-    cmd_dict = {'command': 'PerformProtectorAction',
-                'action': 'apply_change'}
-    self._GetResultFromJSONRequest(cmd_dict)
-
-  def DiscardProtectorChange(self):
-    """Discards the change shown by Protector and closes the bubble.
-
-    No-op if Protector is not showing any change.
-    """
-    cmd_dict = {'command': 'PerformProtectorAction',
-                'action': 'discard_change'}
-    self._GetResultFromJSONRequest(cmd_dict)
 
   def GetLocalStatePrefsInfo(self):
     """Return info about preferences.
@@ -4603,7 +4561,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'Chrome did not reopen the testing channel after login as guest.'
     self.SetUp()
 
-  def Login(self, username, password):
+  def Login(self, username, password, timeout=120 * 1000):
     """Login to chromeos.
 
     Waits until logged in and browser is ready.
@@ -4612,6 +4570,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Note that in case of webui auth-extension-based login, gaia auth errors
     will not be noticed here, because the browser has no knowledge of it. In
     this case the GetNextEvent automation command will always time out.
+
+    Args:
+      username: the username to log in as.
+      password: the user's password.
+      timeout: timeout in ms; defaults to two minutes.
 
     Returns:
       An error string if an error occured.
@@ -4630,9 +4593,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     self._GetResultFromJSONRequest(cmd_dict, windex=None)
     self.AddDomEventObserver('loginfail', automation_id=4444)
     try:
-      # TODO(craigdh): Add login failure events once PyAuto switches to mocked
-      # GAIA authentication.
-      if self.GetNextEvent().get('name') == 'loginfail':
+      if self.GetNextEvent(timeout=timeout).get('name') == 'loginfail':
         raise JSONInterfaceError('Login denied by auth server.')
     except JSONInterfaceError as e:
       raise JSONInterfaceError('Login failed. Perhaps Chrome crashed, '
@@ -5793,22 +5754,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'domAutomationController.send("done")' % text,
         tab_index=tab_index, windex=windex)
 
-
-  def CaptureProfilePhoto(self):
-    """Captures user profile photo on ChromeOS.
-
-    This is done by driving the TakePhotoDialog. The image file is
-    saved on disk and its path is set in the local state preferences.
-
-    A user needs to be logged-in as a precondition. Note that the UI is not
-    destroyed afterwards, a browser restart is necessary if you want
-    to interact with the browser after this call in the same test case.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'CaptureProfilePhoto' }
-    return self._GetResultFromJSONRequest(cmd_dict)
 
   def GetMemoryStatsChromeOS(self, duration):
     """Identifies and returns different kinds of current memory usage stats.

@@ -6,7 +6,7 @@
 #define ASH_SYSTEM_TRAY_TRAY_NOTIFICATION_VIEWS_H_
 
 #include "ui/views/controls/button/image_button.h"
-#include "ui/views/view.h"
+#include "ui/views/controls/slide_out_view.h"
 
 namespace gfx {
 class ImageSkia;
@@ -27,12 +27,12 @@ namespace internal {
 // | icon  contents  x |
 //  ----------------v--
 // The close button will call OnClose() when clicked.
-class TrayNotificationView : public views::View,
+class TrayNotificationView : public views::SlideOutView,
                              public views::ButtonListener {
  public:
   // If icon_id is 0, no icon image will be set. SetIconImage can be called
   // to later set the icon image.
-  TrayNotificationView(SystemTrayItem* tray, int icon_id);
+  TrayNotificationView(SystemTrayItem* owner, int icon_id);
   virtual ~TrayNotificationView();
 
   // InitView must be called once with the contents to be displayed.
@@ -57,8 +57,9 @@ class TrayNotificationView : public views::View,
 
   // Overridden from views::View.
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
+
+  // Overridden from ui::EventHandler.
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
  protected:
   // Called when the close button is pressed. Does nothing by default.
@@ -66,13 +67,16 @@ class TrayNotificationView : public views::View,
   // Called when the notification is clicked on. Does nothing by default.
   virtual void OnClickAction();
 
-  SystemTrayItem* tray() { return tray_; }
+  // Overridden from views::SlideOutView.
+  virtual void OnSlideOut() OVERRIDE;
+
+  SystemTrayItem* owner() { return owner_; }
 
  private:
   void HandleClose();
   void HandleClickAction();
 
-  SystemTrayItem* tray_;
+  SystemTrayItem* owner_;
   int icon_id_;
   views::ImageView* icon_;
 

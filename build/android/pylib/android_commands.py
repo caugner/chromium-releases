@@ -466,6 +466,25 @@ class AndroidCommands(object):
       logging.info('\n>>> '.join(result))
     return result
 
+  def GetShellCommandStatusAndOutput(self, command, timeout_time=20,
+                                     log_result=False):
+    """See RunShellCommand() above.
+
+    Returns:
+      The tuple (exit code, list of output lines).
+    """
+    lines = self.RunShellCommand(
+        command + '; echo %$?', timeout_time, log_result)
+    last_line = lines[-1]
+    status_pos = last_line.rfind('%')
+    assert status_pos >= 0
+    status = int(last_line[status_pos + 1:])
+    if status_pos == 0:
+      lines = lines[:-1]
+    else:
+      lines = lines[:-1] + last_line[:status_pos]
+    return (status, lines)
+
   def KillAll(self, process):
     """Android version of killall, connected via adb.
 
@@ -508,7 +527,8 @@ class AndroidCommands(object):
   def StartActivity(self, package, activity, wait_for_completion=False,
                     action='android.intent.action.VIEW',
                     category=None, data=None,
-                    extras=None, trace_file_name=None):
+                    extras=None, trace_file_name=None,
+                    force_stop=False):
     """Starts |package|'s activity on the device.
 
     Args:
@@ -521,8 +541,12 @@ class AndroidCommands(object):
       data: Data string to pass to activity (e.g. 'http://www.example.com/').
       extras: Dict of extras to pass to activity. Values are significant.
       trace_file_name: If used, turns on and saves the trace to this file name.
+      force_stop: force stop the target app before starting the activity (-S
+        flag).
     """
     cmd = 'am start -a %s' % action
+    if force_stop:
+      cmd += ' -S'
     if wait_for_completion:
       cmd += ' -W'
     if category:
@@ -590,9 +614,10 @@ class AndroidCommands(object):
 
     if not self._md5sum_path:
       default_build_type = os.environ.get('BUILD_TYPE', 'Debug')
-      md5sum_path = '%s/out/%s/md5sum_bin' % (CHROME_SRC, default_build_type)
+      md5sum_path = '%s/%s/md5sum_bin' % (cmd_helper.OutDirectory.get(),
+          default_build_type)
       if not os.path.exists(md5sum_path):
-        md5sum_path = '%s/out/Release/md5sum_bin' % (CHROME_SRC)
+        md5sum_path = '%s/Release/md5sum_bin' % cmd_helper.OutDirectory.get()
         if not os.path.exists(md5sum_path):
           print >> sys.stderr, 'Please build md5sum.'
           sys.exit(1)
@@ -1061,6 +1086,20 @@ class AndroidCommands(object):
 
       return False
 
+  def TakeScreenshot(self, host_file):
+    """Saves a screenshot image to |host_file| on the host.
+
+    Args:
+      host_file: Absolute path to the image file to store on the host.
+    """
+    host_dir = os.path.dirname(host_file)
+    if not os.path.exists(host_dir):
+      os.makedirs(host_dir)
+    device_file = '%s/screenshot.png' % self.GetExternalStorage()
+    self.RunShellCommand('/system/bin/screencap -p %s' % device_file)
+    assert self._adb.Pull(device_file, host_file)
+    assert os.path.exists(host_file)
+
 
 class NewLineNormalizer(object):
   """A file-like object to normalize EOLs to '\n'.
@@ -1080,4 +1119,3 @@ class NewLineNormalizer(object):
 
   def flush(self):
     self._output.flush()
-

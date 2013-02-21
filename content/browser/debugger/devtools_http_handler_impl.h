@@ -32,6 +32,7 @@ class URLRequestContextGetter;
 
 namespace content {
 
+class DevToolsBrowserTarget;
 class DevToolsClientHost;
 class RenderViewHost;
 
@@ -76,16 +77,10 @@ class DevToolsHttpHandlerImpl
                                   const std::string& data) OVERRIDE;
   virtual void OnClose(int connection_id) OVERRIDE;
 
-  void OnVersionRequestUI(int connection_id,
-                          const net::HttpServerRequestInfo& info);
   void OnJsonRequestUI(int connection_id,
                        const net::HttpServerRequestInfo& info);
-  void OnNewTargetRequestUI(int connection_id,
-                            const net::HttpServerRequestInfo& info);
-  void OnCloseTargetRequestUI(int connection_id,
-                              const net::HttpServerRequestInfo& info);
   void OnThumbnailRequestUI(int connection_id,
-                       const net::HttpServerRequestInfo& info);
+                            const net::HttpServerRequestInfo& info);
   void OnDiscoveryPageRequestUI(int connection_id);
 
   void OnWebSocketRequestUI(int connection_id,
@@ -93,15 +88,23 @@ class DevToolsHttpHandlerImpl
   void OnWebSocketMessageUI(int connection_id, const std::string& data);
   void OnCloseUI(int connection_id);
 
-  void Init();
-  void TeardownAndRelease();
+  void ResetHandlerThread();
+  void ResetHandlerThreadAndRelease();
 
+  void Init();
+  void Teardown();
+
+  void StartHandlerThread();
+  void StopHandlerThread();
+
+  void SendJson(int connection_id,
+                net::HttpStatusCode status_code,
+                base::Value* value,
+                const std::string& message,
+                const std::string& jsonp);
   void Send200(int connection_id,
                const std::string& data,
-               const std::string& mime_type = "text/html");
-  void SendJson(int connection_id,
-                const net::HttpServerRequestInfo& info,
-                const base::Value& value);
+               const std::string& mime_type);
   void Send404(int connection_id);
   void Send500(int connection_id,
                const std::string& message);
@@ -131,6 +134,7 @@ class DevToolsHttpHandlerImpl
   RenderViewHostBinding* binding_;
   scoped_ptr<RenderViewHostBinding> default_binding_;
   NotificationRegistrar registrar_;
+  scoped_ptr<DevToolsBrowserTarget> browser_target_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsHttpHandlerImpl);
 };
 

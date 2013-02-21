@@ -39,10 +39,6 @@ MultiProcessLockTest.RecursiveLock
 # http://crbug.com/117679
 WebsiteSettingsModelTest.*
 
-# fails with gmock errors
-# http://crbug.com/117796
-SyncNewNonFrontendDataTypeControllerTest.StartAfterSyncShutdown
-
 # fails to create thread
 # http://crbug.com/144087
 DesktopNotificationServiceTest.SettingsForSchemes
@@ -53,7 +49,3 @@ TemplateURLFetcherTest.*
 GAIAInfoUpdateServiceTest.*
 ProfileManagerTest.*
 ProfileInfoCacheTest.*
-
-# Unit tests crash under drmemory, disable them all for now.
-# http://crbug.com/157682
-*

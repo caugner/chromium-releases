@@ -17,14 +17,14 @@ namespace syncer {
 BackoffDelayProvider* BackoffDelayProvider::FromDefaults() {
   return new BackoffDelayProvider(
       TimeDelta::FromSeconds(kInitialBackoffRetrySeconds),
-      TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds));
+      TimeDelta::FromSeconds(kInitialBackoffImmediateRetrySeconds));
 }
 
 // static
 BackoffDelayProvider* BackoffDelayProvider::WithShortInitialRetryOverride() {
   return new BackoffDelayProvider(
       TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds),
-      TimeDelta::FromSeconds(kInitialBackoffShortRetrySeconds));
+      TimeDelta::FromSeconds(kInitialBackoffImmediateRetrySeconds));
 }
 
 BackoffDelayProvider::BackoffDelayProvider(
@@ -94,6 +94,18 @@ TimeDelta BackoffDelayProvider::GetInitialDelay(
   // and not if there were any more serious errors requiring the long retry.
   if (state.last_download_updates_result == SERVER_RETURN_MIGRATION_DONE ||
       state.commit_result == SERVER_RETURN_MIGRATION_DONE) {
+    return short_initial_backoff_;
+  }
+
+  // When the server tells us we have a conflict, then we should download the
+  // latest updates so we can see the conflict ourselves, resolve it locally,
+  // then try again to commit.  Running another sync cycle will do all these
+  // things.  There's no need to back off, we can do this immediately.
+  //
+  // TODO(sync): We shouldn't need to handle this in BackoffDelayProvider.
+  // There should be a way to deal with protocol errors before we get to this
+  // point.
+  if (state.commit_result == SERVER_RETURN_CONFLICT) {
     return short_initial_backoff_;
   }
 

@@ -191,6 +191,12 @@ class WizardController : public ScreenObserver {
   void OnResetCanceled();
   void OnOOBECompleted();
 
+  // Loads brand code on I/O enabled thread and stores to Local State.
+  void LoadBrandCodeFromFile();
+
+  // Called after all post-EULA blocking tasks have been completed.
+  void OnEulaBlockingTasksDone();
+
   // Shows update screen and starts update process.
   void InitiateOOBEUpdate();
 

@@ -50,7 +50,8 @@ class PbufferImageTransportSurface
 
  protected:
   // ImageTransportSurface implementation
-  virtual void OnBufferPresented(bool presented, uint32 sync_point) OVERRIDE;
+  virtual void OnBufferPresented(
+      const AcceleratedSurfaceMsg_BufferPresented_Params& params) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
@@ -198,6 +199,7 @@ void PbufferImageTransportSurface::SendBuffersSwapped() {
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
   params.surface_handle = reinterpret_cast<int64>(GetShareHandle());
   CHECK(params.surface_handle);
+  params.size = GetSize();
 
   helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
@@ -205,8 +207,8 @@ void PbufferImageTransportSurface::SendBuffersSwapped() {
   is_swap_buffers_pending_ = true;
 }
 
-void PbufferImageTransportSurface::OnBufferPresented(bool presented,
-                                                     uint32 sync_point) {
+void PbufferImageTransportSurface::OnBufferPresented(
+    const AcceleratedSurfaceMsg_BufferPresented_Params& /* params */) {
   is_swap_buffers_pending_ = false;
   if (did_unschedule_) {
     did_unschedule_ = false;
@@ -249,8 +251,7 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     DCHECK(handle.parent_client_id);
     surface = new TextureImageTransportSurface(manager, stub, handle);
   } else {
-    if (handle.transport &&
-        gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
+    if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
         !CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kDisableImageTransportSurface)) {
       // This path handles two different cases.

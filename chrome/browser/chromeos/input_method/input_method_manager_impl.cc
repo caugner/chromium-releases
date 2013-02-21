@@ -10,10 +10,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/chromeos/input_method/browser_state_monitor.h"
-#include "chrome/browser/chromeos/input_method/candidate_window.h"
+#include "chrome/browser/chromeos/input_method/candidate_window_controller.h"
+#include "chrome/browser/chromeos/input_method/input_method_delegate.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine_ibus.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -32,16 +31,20 @@ bool Contains(const std::vector<std::string>& container,
 
 }  // namespace
 
-InputMethodManagerImpl::InputMethodManagerImpl()
-    : state_(STATE_LOGIN_SCREEN),
-      util_(GetSupportedInputMethods()) {
+InputMethodManagerImpl::InputMethodManagerImpl(
+    scoped_ptr<InputMethodDelegate> delegate)
+    : delegate_(delegate.Pass()),
+      state_(STATE_LOGIN_SCREEN),
+      util_(delegate_.get(), GetSupportedInputMethods()) {
 }
 
 InputMethodManagerImpl::~InputMethodManagerImpl() {
   if (ibus_controller_.get())
     ibus_controller_->RemoveObserver(this);
-  if (candidate_window_controller_.get())
+  if (candidate_window_controller_.get()) {
     candidate_window_controller_->RemoveObserver(this);
+    candidate_window_controller_->Shutdown(ibus_controller_.get());
+  }
 }
 
 void InputMethodManagerImpl::AddObserver(
@@ -77,21 +80,25 @@ void InputMethodManagerImpl::SetState(State new_state) {
     case STATE_LOCK_SCREEN:
       OnScreenLocked();
       break;
-    case STATE_TERMINATING:
+    case STATE_TERMINATING: {
       ibus_controller_->Stop();
-      browser_state_monitor_.reset();  // For crbug.com/120183.
-      candidate_window_controller_.reset();
+      if (candidate_window_controller_.get()) {
+        candidate_window_controller_->Shutdown(ibus_controller_.get());
+        candidate_window_controller_.reset();
+      }
       break;
+    }
   }
 }
 
-InputMethodDescriptors*
+scoped_ptr<InputMethodDescriptors>
 InputMethodManagerImpl::GetSupportedInputMethods() const {
   return whitelist_.GetSupportedInputMethods();
 }
 
-InputMethodDescriptors* InputMethodManagerImpl::GetActiveInputMethods() const {
-  InputMethodDescriptors* result = new InputMethodDescriptors;
+scoped_ptr<InputMethodDescriptors>
+InputMethodManagerImpl::GetActiveInputMethods() const {
+  scoped_ptr<InputMethodDescriptors> result(new InputMethodDescriptors);
   // Build the active input method descriptors from the active input
   // methods cache |active_input_method_ids_|.
   for (size_t i = 0; i < active_input_method_ids_.size(); ++i) {
@@ -115,7 +122,7 @@ InputMethodDescriptors* InputMethodManagerImpl::GetActiveInputMethods() const {
     result->push_back(
         InputMethodDescriptor::GetFallbackInputMethodDescriptor());
   }
-  return result;
+  return result.Pass();
 }
 
 size_t InputMethodManagerImpl::GetNumActiveInputMethods() const {
@@ -572,7 +579,6 @@ void InputMethodManagerImpl::OnDisconnected() {
 void InputMethodManagerImpl::Init() {
   DCHECK(!ibus_controller_.get());
 
-  browser_state_monitor_.reset(new BrowserStateMonitor(this));
   ibus_controller_.reset(IBusController::Create());
   xkeyboard_.reset(XKeyboard::Create(util_));
   ibus_controller_->AddObserver(this);
@@ -587,7 +593,7 @@ void InputMethodManagerImpl::SetIBusControllerForTesting(
 void InputMethodManagerImpl::SetCandidateWindowControllerForTesting(
     CandidateWindowController* candidate_window_controller) {
   candidate_window_controller_.reset(candidate_window_controller);
-  candidate_window_controller_->Init();
+  candidate_window_controller_->Init(ibus_controller_.get());
   candidate_window_controller_->AddObserver(this);
 }
 
@@ -669,15 +675,10 @@ void InputMethodManagerImpl::MaybeInitializeCandidateWindowController() {
 
   candidate_window_controller_.reset(
       CandidateWindowController::CreateCandidateWindowController());
-  if (candidate_window_controller_->Init())
+  if (candidate_window_controller_->Init(ibus_controller_.get()))
     candidate_window_controller_->AddObserver(this);
   else
     DVLOG(1) << "Failed to initialize the candidate window controller";
-}
-
-// static
-InputMethodManagerImpl* InputMethodManagerImpl::GetInstanceForTesting() {
-  return new InputMethodManagerImpl;
 }
 
 }  // namespace input_method

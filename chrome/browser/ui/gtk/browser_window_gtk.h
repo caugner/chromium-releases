@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,9 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/timer.h"
 #include "build/build_config.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/infobars/infobar_container.h"
@@ -110,7 +110,7 @@ class BrowserWindowGtk
   virtual LocationBar* GetLocationBar() const OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual void UpdateReloadStopState(bool is_loading, bool force) OVERRIDE;
-  virtual void UpdateToolbar(TabContents* contents,
+  virtual void UpdateToolbar(content::WebContents* contents,
                              bool should_restore_state) OVERRIDE;
   virtual void FocusToolbar() OVERRIDE;
   virtual void FocusAppMenu() OVERRIDE;
@@ -146,7 +146,7 @@ class BrowserWindowGtk
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
   virtual void ShowWebsiteSettings(Profile* profile,
-                                   TabContents* tab_contents,
+                                   content::WebContents* web_contents,
                                    const GURL& url,
                                    const content::SSLStatus& ssl,
                                    bool show_history) OVERRIDE;
@@ -182,9 +182,10 @@ class BrowserWindowGtk
                        const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from TabStripModelObserver:
-  virtual void TabDetachedAt(TabContents* contents, int index) OVERRIDE;
-  virtual void ActiveTabChanged(TabContents* old_contents,
-                                TabContents* new_contents,
+  virtual void TabDetachedAt(content::WebContents* contents,
+                             int index) OVERRIDE;
+  virtual void ActiveTabChanged(content::WebContents* old_contents,
+                                content::WebContents* new_contents,
                                 int index,
                                 bool user_gesture) OVERRIDE;
 
@@ -247,7 +248,7 @@ class BrowserWindowGtk
   gfx::Rect bounds() const { return bounds_; }
 
   // Returns the tab we're currently displaying in the tab contents container.
-  TabContents* GetDisplayedTab();
+  content::WebContents* GetDisplayedTab();
 
   static void RegisterUserPrefs(PrefService* prefs);
 
@@ -461,6 +462,9 @@ class BrowserWindowGtk
   // Reads split position from the current tab's devtools window and applies
   // it to the devtools split.
   void UpdateDevToolsSplitPosition();
+
+  // Called when the preference changes.
+  void OnUseCustomChromeFrameChanged();
 
   // Determine whether we use should default to native decorations or the custom
   // frame based on the currently-running window manager.

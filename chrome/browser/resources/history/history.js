@@ -7,7 +7,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Globals:
 /** @const */ var RESULTS_PER_PAGE = 150;
-/** @const */ var MAX_SEARCH_DEPTH_MONTHS = 18;
 
 // Amount of time between pageviews that we consider a 'break' in browsing,
 // measured in milliseconds.
@@ -61,7 +60,7 @@ function Visit(result, continued, model, id) {
   // All the date information is public so that owners can compare properties of
   // two items easily.
 
-  this.time = new Date(result.time);
+  this.date = new Date(result.time);
 
   // See comment in BrowsingHistoryHandler::QueryComplete - we won't always
   // get all of these.
@@ -97,7 +96,7 @@ Visit.prototype.getResultDOM = function(searchResultFlag) {
   var checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.id = 'checkbox-' + this.id_;
-  checkbox.time = this.time.getTime();
+  checkbox.time = this.date.getTime();
   checkbox.addEventListener('click', checkboxClicked);
   time.appendChild(checkbox);
 
@@ -203,7 +202,7 @@ Visit.prototype.addHighlightedText_ = function(node, content, highlightText) {
  */
 Visit.prototype.getTitleDOM_ = function() {
   var node = createElementWithClassName('div', 'title');
-  node.style.backgroundImage = url('chrome://favicon/' + this.url_);
+  node.style.backgroundImage = url(getFaviconURL(this.url_));
   node.style.backgroundSize = '16px';
 
   var link = document.createElement('a');
@@ -244,7 +243,7 @@ Visit.prototype.removeFromHistory_ = function() {
   var onSuccessCallback = function() {
     removeEntryFromView(self.domNode_);
   };
-  queueURLsForDeletion(this.time, [this.url_], onSuccessCallback);
+  queueURLsForDeletion(this.date, [this.url_], onSuccessCallback);
   deleteNextInQueue();
 };
 
@@ -311,7 +310,7 @@ HistoryModel.prototype.setSearchText = function(searchText, opt_page) {
   this.clearModel_();
   this.searchText_ = searchText;
   this.requestedPage_ = opt_page ? opt_page : 0;
-  this.queryHistory_(false);
+  this.queryHistory_();
 };
 
 /**
@@ -323,7 +322,7 @@ HistoryModel.prototype.reload = function() {
   this.clearModel_();
   this.searchText_ = search;
   this.requestedPage_ = page;
-  this.queryHistory_(false);
+  this.queryHistory_();
 };
 
 /**
@@ -353,36 +352,35 @@ HistoryModel.prototype.addResults = function(info, results) {
   $('loading-spinner').hidden = true;
   this.inFlight_ = false;
   this.isQueryFinished_ = info.finished;
+  this.queryCursor_ = info.cursor;
 
-  if (this.searchText_ && this.searchDepth_ >= MAX_SEARCH_DEPTH_MONTHS)
-    this.isQueryFinished_ = true;
-
-  // If our results aren't for our current search term, they're rubbish.
-  if (info.term != this.searchText_)
+  // If there are no results, or they're not for the current search term,
+  // there's nothing more to do.
+  if (!results || !results.length || info.term != this.searchText_)
     return;
 
-  // Currently we assume we're getting things in date order. This needs to
-  // be updated if that ever changes.
-  if (results && results.length) {
-    var lastURL, lastDay;
-    var lastVisit = this.visits_.slice(-1)[0];
-    if (lastVisit) {
-      lastURL = lastVisit.url;
-      lastDay = lastVisit.dateRelativeDay;
-    }
+  // If necessary, sort the results from newest to oldest.
+  if (!results.sorted)
+    results.sort(function(a, b) { return b.time - a.time; });
 
-    for (var i = 0, thisResult; thisResult = results[i]; i++) {
-      var thisURL = thisResult.url;
-      var thisDay = thisResult.dateRelativeDay;
+  var lastVisit = this.visits_.slice(-1)[0];
+  var lastDay = lastVisit ? lastVisit.dateRelativeDay : null;
 
-      // Figure out if this visit is in the same day as the previous visit.
-      // This is used to determine how day headers should be drawn.
-      this.visits_.push(
-          new Visit(thisResult, thisDay == lastDay, this, this.last_id_++));
-      this.changed = true;
-      lastDay = thisDay;
-      lastURL = thisURL;
-    }
+  for (var i = 0, thisResult; thisResult = results[i]; i++) {
+    var thisDay = thisResult.dateRelativeDay;
+    var isSameDay = lastDay == thisDay;
+
+    // Keep track of all URLs seen on a particular day, and only use the
+    // latest visit from that day.
+    if (!isSameDay)
+      this.urlsFromLastSeenDay_ = {};
+    else if (thisResult.url in this.urlsFromLastSeenDay_)
+      continue;
+    this.urlsFromLastSeenDay_[thisResult.url] = thisResult.time;
+
+    this.visits_.push(new Visit(thisResult, isSameDay, this, this.last_id_++));
+    this.changed = true;
+    lastDay = thisDay;
   }
 
   this.updateSearch_();
@@ -424,10 +422,6 @@ HistoryModel.prototype.clearModel_ = function() {
   this.inFlight_ = false;  // Whether a query is inflight.
   this.searchText_ = '';
 
-  // Keeps track of how far back we've gone in the current query.
-  // This is in days when browsing, and in months when searching.
-  this.searchDepth_ = 0;
-
   this.visits_ = [];  // Date-sorted list of visits (most recent first).
   this.last_id_ = 0;
   selectionAnchor = -1;
@@ -440,6 +434,15 @@ HistoryModel.prototype.clearModel_ = function() {
   // Keeps track of whether or not there are more results available than are
   // currently held in |this.visits_|.
   this.isQueryFinished_ = false;
+
+  // An opaque value that is returned with the query results. This is used to
+  // fetch the next page of results for a query.
+  this.queryCursor_ = null;
+
+  // A map of URLs of visits on the same day as the last known visit.
+  // This is used for de-duping URLs, so that we only show the most recent
+  // visit to a URL on any day.
+  this.urlsFromLastSeenDay_ = {};
 
   if (this.view_)
     this.view_.clear_();
@@ -457,7 +460,7 @@ HistoryModel.prototype.updateSearch_ = function() {
 
   // Try to fetch more results if the current page isn't full.
   if (!doneLoading && !this.inFlight_)
-    this.queryHistory_(true);
+    this.queryHistory_();
 
   // If we have any data for the requested page, show it.
   if (this.changed && this.haveDataForPage_(this.requestedPage_)) {
@@ -468,18 +471,23 @@ HistoryModel.prototype.updateSearch_ = function() {
 
 /**
  * Query for history, either for a search or time-based browsing.
- *
- * @param {boolean} continueQuery If true, query for the next page of
- *     results from the current query. If false, start a new query.
- *
  * @private
  */
-HistoryModel.prototype.queryHistory_ = function(continueQuery) {
-  this.searchDepth_ = continueQuery ? this.searchDepth_ + 1 : 0;
-  chrome.send('queryHistory',
-              [this.searchText_, this.searchDepth_, RESULTS_PER_PAGE]);
+HistoryModel.prototype.queryHistory_ = function() {
+  var endTime = 0;
+
+  // If there are already some visits, pick up the previous query where it
+  // left off.
+  if (this.visits_.length > 0) {
+    var lastVisit = this.visits_.slice(-1)[0];
+    endTime = lastVisit.date.getTime();
+    cursor = this.queryCursor_;
+  }
+
   $('loading-spinner').hidden = false;
   this.inFlight_ = true;
+  chrome.send('queryHistory',
+      [this.searchText_, endTime, this.queryCursor_, RESULTS_PER_PAGE]);
 };
 
 /**
@@ -526,9 +534,6 @@ function HistoryView(model) {
   this.currentVisits_ = [];
 
   var self = this;
-  window.onresize = function() {
-    self.updateEntryAnchorWidth_();
-  };
 
   $('clear-browsing-data').addEventListener('click', openClearBrowsingData);
   $('remove-selected').addEventListener('click', removeItems);
@@ -592,6 +597,7 @@ HistoryView.prototype.getPage = function() {
  */
 HistoryView.prototype.onModelReady = function() {
   this.displayResults_();
+  this.updateNavBar_();
 };
 
 /**
@@ -670,10 +676,10 @@ HistoryView.prototype.displayResults_ = function() {
       if (visit.isRendered)
         continue;
 
-      // Break across day boundaries and insert gaps for browsing pauses.
-      // Create a dayResults element to contain results for each day
-      var thisTime = visit.time.getTime();
+      var thisTime = visit.date.getTime();
 
+      // Break across day boundaries and insert gaps for browsing pauses.
+      // Create a dayResults element to contain results for each day.
       if ((i == 0 && visit.continued) || !visit.continued) {
         // It's the first visit of the day, or the day is continued from
         // the previous page. Create a header for the day on the current page.
@@ -684,31 +690,20 @@ HistoryView.prototype.displayResults_ = function() {
               loadTimeData.getString('cont')));
         }
 
-        // If there is an existing dayResults element, append it.
-        if (dayResults)
-          resultsFragment.appendChild(dayResults);
         resultsFragment.appendChild(day);
         dayResults = createElementWithClassName('ol', 'day-results');
-      } else if (lastTime - thisTime > BROWSING_GAP_TIME) {
-        if (dayResults)
-          dayResults.appendChild(createElementWithClassName('li', 'gap'));
+        resultsFragment.appendChild(dayResults);
+      } else if (dayResults && lastTime - thisTime > BROWSING_GAP_TIME) {
+        dayResults.appendChild(createElementWithClassName('li', 'gap'));
       }
       lastTime = thisTime;
 
       // Add the entry to the appropriate day.
-      if (dayResults) {
-        dayResults.appendChild(visit.getResultDOM(false));
-        this.setVisitRendered_(visit);
-      }
+      dayResults.appendChild(visit.getResultDOM(false));
+      this.setVisitRendered_(visit);
     }
-    // Add the final dayResults element to the page.
-    if (dayResults)
-      resultsFragment.appendChild(dayResults);
-
     this.resultDiv_.appendChild(resultsFragment);
   }
-  this.updateNavBar_();
-  this.updateEntryAnchorWidth_();
 };
 
 /**
@@ -719,38 +714,6 @@ HistoryView.prototype.updateNavBar_ = function() {
   $('newest-button').hidden = this.pageIndex_ == 0;
   $('newer-button').hidden = this.pageIndex_ == 0;
   $('older-button').hidden = !this.model_.hasMoreResults();
-};
-
-/**
- * Updates the CSS rule for the entry anchor.
- * @private
- */
-HistoryView.prototype.updateEntryAnchorWidth_ = function() {
-  // We need to have at least on .title div to be able to calculate the
-  // desired width of the anchor.
-  var titleElement = document.querySelector('.entry .title');
-  if (!titleElement)
-    return;
-
-  // Create new CSS rules and add them last to the last stylesheet.
-  // TODO(jochen): The following code does not work due to WebKit bug #32309
-  // if (!this.entryAnchorRule_) {
-  //   var styleSheets = document.styleSheets;
-  //   var styleSheet = styleSheets[styleSheets.length - 1];
-  //   var rules = styleSheet.cssRules;
-  //   var createRule = function(selector) {
-  //     styleSheet.insertRule(selector + '{}', rules.length);
-  //     return rules[rules.length - 1];
-  //   };
-  //   this.entryAnchorRule_ = createRule('.entry .title > a');
-  //   // The following rule needs to be more specific to have higher priority.
-  //   this.entryAnchorStarredRule_ = createRule('.entry .title.starred > a');
-  // }
-  //
-  // var anchorMaxWith = titleElement.offsetWidth;
-  // this.entryAnchorRule_.style.maxWidth = anchorMaxWith + 'px';
-  // // Adjust by the width of star plus its margin.
-  // this.entryAnchorStarredRule_.style.maxWidth = anchorMaxWith - 23 + 'px';
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1115,7 +1078,6 @@ function deleteFailed() {
  * Called when the history is deleted by someone else.
  */
 function historyDeleted() {
-  window.console.log('History deleted');
   var anyChecked = document.querySelector('.entry input:checked') != null;
   // Reload the page, unless the user has any items checked.
   // TODO(dubroy): We should just reload the page & restore the checked items.

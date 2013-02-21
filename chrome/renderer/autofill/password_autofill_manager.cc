@@ -348,10 +348,6 @@ void PasswordAutofillManager::SendPasswordForms(WebKit::WebFrame* frame,
   for (size_t i = 0; i < forms.size(); ++i) {
     const WebKit::WebFormElement& form = forms[i];
 
-    // Respect autocomplete=off.
-    if (!form.autoComplete())
-      continue;
-
     // If requested, ignore non-rendered forms, e.g. those styled with
     // display:none.
     if (only_visible && !form.hasNonEmptyBoundingBox())
@@ -604,8 +600,12 @@ void PasswordAutofillManager::PerformInlineAutocomplete(
   // Show the popup with the list of available usernames.
   ShowSuggestionPopup(fill_data, username);
 
-  // Fill the user and password field with the most relevant match.
+
+#if !defined(OS_ANDROID)
+  // Fill the user and password field with the most relevant match. Android
+  // only fills in the fields after the user clicks on the suggestion popup.
   FillUserNameAndPassword(&username, &password, fill_data, false, true);
+#endif
 }
 
 void PasswordAutofillManager::FrameClosing(const WebKit::WebFrame* frame) {

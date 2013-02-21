@@ -15835,7 +15835,6 @@ var keyboardOverlayData = {
     'left<>ALT': 'keyboardOverlayGoBack',
     'left<>CTRL': 'keyboardOverlayPreviousWord',
     'left<>CTRL<>SHIFT': 'keyboardOverlaySelectWordAtATime',
-    'm<>CTRL': 'keyboardOverlayOpenFilesApp',
     'maximize<>ALT': 'keyboardOverlaySwapPrimaryMonitor',
     'maximize<>CTRL': 'keyboardOverlayMirrorMonitors',
     'maximize<>SHIFT': 'keyboardOverlayFullScreen',
@@ -15851,9 +15850,9 @@ var keyboardOverlayData = {
     'right<>ALT': 'keyboardOverlayGoForward',
     'right<>CTRL': 'keyboardOverlayNextWord',
     'right<>CTRL<>SHIFT': 'keyboardOverlaySelectWordAtATime',
-    's<>ALT<>SHIFT': 'keyboardOverlayFocusStatusIcon',
+    's<>ALT<>SHIFT': 'keyboardOverlayShowStatusMenu',
     's<>CTRL': 'keyboardOverlaySave',
-    'search<>ALT': 'keyboardOverlayToggleCapsLock',
+    'ALT<>SEARCH': 'keyboardOverlayToggleCapsLock',
     'space<>CTRL': 'keyboardOverlaySelectPreviousInputMethod',
     'space<>SHIFT': 'keyboardOverlayScrollUpOnePage',
     'switch window<>CTRL': 'keyboardOverlayTakeScreenshot',
@@ -15875,7 +15874,7 @@ var keyboardOverlayData = {
     'w<>CTRL': 'keyboardOverlayCloseTab',
     'w<>CTRL<>SHIFT': 'keyboardOverlayCloseWindow',
     'x<>CTRL': 'keyboardOverlayCut',
-    'z<>ALT<>CTRL': 'keyboardOverlayToggleAccessibilityFeatures',
+    'z<>ALT<>CTRL': 'keyboardOverlayToggleSpokenFeedback',
     'z<>CTRL': 'keyboardOverlayUndo'
   }
 };

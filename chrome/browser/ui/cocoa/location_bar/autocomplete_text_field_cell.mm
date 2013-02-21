@@ -22,7 +22,7 @@ namespace {
 const CGFloat kBaselineAdjust = 3.0;
 
 // Matches the clipping radius of |GradientButtonCell|.
-const CGFloat kCornerRadius = 4.0;
+const CGFloat kCornerRadius = 3.0;
 
 // How far to inset the left-hand decorations from the field's bounds.
 const CGFloat kLeftDecorationXOffset = 5.0;
@@ -734,6 +734,25 @@ static NSString* UnusedLegalNameForNewDropFile(NSURL* saveLocation,
     if ([tooltip length] > 0)
       [controlView addToolTip:tooltip forRect:decorationFrames[i]];
   }
+}
+
+- (BOOL)hideFocusState {
+  return hideFocusState_;
+}
+
+- (void)setHideFocusState:(BOOL)hideFocusState
+                   ofView:(AutocompleteTextField*)controlView {
+  if (hideFocusState_ == hideFocusState)
+    return;
+  hideFocusState_ = hideFocusState;
+  [controlView setNeedsDisplay:YES];
+  NSTextView* fieldEditor =
+      base::mac::ObjCCastStrict<NSTextView>([controlView currentEditor]);
+  [fieldEditor updateInsertionPointStateAndRestartTimer:YES];
+}
+
+- (BOOL)showsFirstResponder {
+  return [super showsFirstResponder] && !hideFocusState_;
 }
 
 @end

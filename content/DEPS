@@ -9,12 +9,11 @@ include_rules = [
   # directories in content/ so we disallow all of them.
   "-content",
   "+content/common",
+  "+content/port/common",
   "+content/public/common",
   "+content/public/test",
   "+content/shell",  # for content_browsertests
   "+content/test",
-
-  "+google_apis",
 
   "+grit/content_resources.h",
   "+grit/ui_resources.h",
@@ -29,6 +28,18 @@ include_rules = [
   "+printing",
   "+sandbox",
   "+skia",
+
+  # In general, content/ should not rely on google_apis, since URLs
+  # and access tokens should usually be provided by the
+  # embedder.
+  #
+  # There are a couple of specific parts of content that are excepted
+  # from this rule, see content/browser/speech/DEPS and
+  # content/browser/geolocation/DEPS.  Both of these are cases of
+  # implementations that are strongly tied to Google servers, i.e. we
+  # don't expect alternate implementations to be provided by the
+  # embedder.
+  "-google_apis",
 
   # Don't allow inclusion of these other libs we shouldn't be calling directly.
   "-v8",
@@ -55,6 +66,8 @@ include_rules = [
   "+ui/compositor",
   "+ui/gfx",
   "+ui/gl",
+  "+ui/native_theme",
+  "+ui/snapshot",
   "+ui/surface",
   # Content knows about grd files, but the specifics of how to get a resource
   # given its id is left to the embedder.
@@ -69,6 +82,8 @@ include_rules = [
   "-ui/views",
 
   "+webkit",
+  "-webkit/dom_storage",
+  "+webkit/dom_storage/dom_storage_types.h",
 
   # For generated JNI includes.
   "+jni",

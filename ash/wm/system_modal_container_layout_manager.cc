@@ -4,7 +4,6 @@
 
 #include "ash/wm/system_modal_container_layout_manager.h"
 
-#include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
@@ -16,45 +15,19 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/shared/compound_event_filter.h"
+#include "ui/views/corewm/compound_event_filter.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
-#include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace internal {
-
-namespace {
-
-class ModalBackgroundView : public views::View {
- public:
-  ModalBackgroundView() {}
-  virtual ~ModalBackgroundView() {}
-
-  // Overridden from views::View:
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->FillRect(GetLocalBounds(), GetOverlayColor());
-  }
-
- private:
-  SkColor GetOverlayColor() {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kAuraGoogleDialogFrames)) {
-      return SK_ColorWHITE;
-    }
-    return SK_ColorBLACK;
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(ModalBackgroundView);
-};
-
-}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // SystemModalContainerLayoutManager, public:
@@ -94,7 +67,8 @@ void SystemModalContainerLayoutManager::OnWindowAddedToLayout(
          child->type() == aura::client::WINDOW_TYPE_POPUP);
   DCHECK(
       container_->id() != internal::kShellWindowId_LockSystemModalContainer ||
-      Shell::GetInstance()->delegate()->IsScreenLocked());
+      Shell::GetInstance()->delegate()->IsScreenLocked() ||
+      !Shell::GetInstance()->delegate()->IsSessionStarted());
 
   child->AddObserver(this);
   if (child->GetProperty(aura::client::kModalKey) != ui::MODAL_TYPE_NONE)
@@ -137,6 +111,7 @@ void SystemModalContainerLayoutManager::OnWindowPropertyChanged(
     AddModalWindow(window);
   } else if (static_cast<ui::ModalType>(old) != ui::MODAL_TYPE_NONE) {
     RemoveModalWindow(window);
+    Shell::GetInstance()->OnModalWindowRemoved(window);
   }
 }
 
@@ -153,6 +128,14 @@ void SystemModalContainerLayoutManager::OnWindowDestroying(
 
 bool SystemModalContainerLayoutManager::CanWindowReceiveEvents(
     aura::Window* window) {
+  // We could get when we're at lock screen and there is modal window at
+  // system modal window layer which added event filter.
+  // Now this lock modal windows layer layout manager should not block events
+  // for windows at lock layer.
+  // See SystemModalContainerLayoutManagerTest.EventFocusContainers and
+  // http://crbug.com/157469
+  if (modal_windows_.empty())
+    return true;
   // This container can not handle events if the screen is locked and it is not
   // above the lock screen layer (crbug.com/110920).
   if (ash::Shell::GetInstance()->IsScreenLocked() &&
@@ -178,7 +161,11 @@ void SystemModalContainerLayoutManager::CreateModalBackground() {
     modal_background_->Init(params);
     modal_background_->GetNativeView()->SetName(
         "SystemModalContainerLayoutManager.ModalBackground");
-    modal_background_->SetContentsView(new ModalBackgroundView);
+    views::View* contents_view = new views::View();
+    contents_view->set_background(views::Background::CreateSolidBackground(
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableNewDialogStyle) ? SK_ColorWHITE : SK_ColorBLACK));
+    modal_background_->SetContentsView(contents_view);
     modal_background_->GetNativeView()->layer()->SetOpacity(0.0f);
   }
 
@@ -196,7 +183,7 @@ void SystemModalContainerLayoutManager::DestroyModalBackground() {
     ui::ScopedLayerAnimationSettings settings(
         modal_background_->GetNativeView()->layer()->GetAnimator());
     modal_background_->Close();
-    settings.AddObserver(CreateHidingWindowAnimationObserver(
+    settings.AddObserver(views::corewm::CreateHidingWindowAnimationObserver(
         modal_background_->GetNativeView()));
     modal_background_->GetNativeView()->layer()->SetOpacity(0.0f);
     modal_background_ = NULL;
@@ -228,6 +215,7 @@ void SystemModalContainerLayoutManager::AddModalWindow(aura::Window* window) {
   }
   modal_windows_.push_back(window);
   Shell::GetInstance()->CreateModalBackground(window);
+  window->parent()->StackChildAtTop(window);
 }
 
 void SystemModalContainerLayoutManager::RemoveModalWindow(
@@ -236,8 +224,6 @@ void SystemModalContainerLayoutManager::RemoveModalWindow(
       std::find(modal_windows_.begin(), modal_windows_.end(), window);
   if (it != modal_windows_.end())
     modal_windows_.erase(it);
-
-  Shell::GetInstance()->OnModalWindowRemoved(window);
 }
 
 }  // namespace internal

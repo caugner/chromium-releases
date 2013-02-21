@@ -8,10 +8,10 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/onc_constants.h"
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/net/x509_certificate_model.h"
+#include "chromeos/network/onc/onc_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -27,6 +27,7 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_client_view.h"
 
 namespace {
 
@@ -519,7 +520,8 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
   layout->StartRow(0, column_view_set_id);
   views::Label* title = new views::Label(l10n_util::GetStringUTF16(
       vpn ? IDS_OPTIONS_SETTINGS_JOIN_VPN : IDS_OPTIONS_SETTINGS_ADD_VPN));
-  title->SetFont(title->font().DeriveFont(1, gfx::Font::BOLD));
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  title->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   layout->AddView(title, 5, 1);
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
@@ -548,7 +550,7 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
     service_text_ = NULL;
   } else {
     service_text_ = new views::Label(ASCIIToUTF16(vpn->name()));
-    service_text_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    service_text_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     layout->AddView(service_text_);
     service_textfield_ = NULL;
   }
@@ -569,7 +571,7 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
   } else {
     provider_type_text_label_ =
         new views::Label(ProviderTypeToString(provider_type_));
-    provider_type_text_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    provider_type_text_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     layout->AddView(provider_type_text_label_);
     provider_type_combobox_ = NULL;
   }
@@ -712,7 +714,7 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
   layout->StartRow(0, column_view_set_id);
   layout->SkipColumns(1);
   error_label_ = new views::Label();
-  error_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  error_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   error_label_->SetEnabledColor(SK_ColorRED);
   layout->AddView(error_label_);
 

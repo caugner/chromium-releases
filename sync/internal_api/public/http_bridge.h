@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/http_post_provider_interface.h"
 
@@ -25,6 +26,7 @@ class HttpBridgeTest;
 
 namespace net {
 class HttpResponseHeaders;
+class HttpUserAgentSettings;
 class URLFetcher;
 }
 
@@ -58,12 +60,10 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
     // The destructor MUST be called on the IO thread.
     virtual ~RequestContext();
 
-    virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
-
    private:
     net::URLRequestContext* const baseline_context_;
     const scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-    const std::string user_agent_;
+    scoped_ptr<net::HttpUserAgentSettings> http_user_agent_settings_;
 
     DISALLOW_COPY_AND_ASSIGN(RequestContext);
   };
@@ -204,7 +204,7 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
   DISALLOW_COPY_AND_ASSIGN(HttpBridge);
 };
 
-class HttpBridgeFactory : public HttpPostProviderFactory {
+class SYNC_EXPORT HttpBridgeFactory : public HttpPostProviderFactory {
  public:
   HttpBridgeFactory(
       net::URLRequestContextGetter* baseline_context_getter,

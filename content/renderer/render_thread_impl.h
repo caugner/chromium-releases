@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/observer_list.h"
+#include "base/string16.h"
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "content/common/child_process.h"
@@ -116,8 +117,8 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   virtual void WidgetRestored() OVERRIDE;
   virtual void EnsureWebKitInitialized() OVERRIDE;
   virtual void RecordUserMetrics(const std::string& action) OVERRIDE;
-  virtual base::SharedMemoryHandle HostAllocateSharedMemoryBuffer(
-      uint32 buffer_size) OVERRIDE;
+  virtual scoped_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
+      size_t buffer_size) OVERRIDE;
   virtual void RegisterExtension(v8::Extension* extension) OVERRIDE;
   virtual void ScheduleIdleHandler(int64 initial_delay_ms) OVERRIDE;
   virtual void IdleHandler() OVERRIDE;
@@ -141,7 +142,7 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   virtual scoped_refptr<base::MessageLoopProxy> GetIOLoopProxy() OVERRIDE;
   virtual base::WaitableEvent* GetShutDownEvent() OVERRIDE;
   virtual scoped_ptr<base::SharedMemory> AllocateSharedMemory(
-      uint32 size) OVERRIDE;
+      size_t size) OVERRIDE;
   virtual int32 CreateViewCommandBuffer(
       int32 surface_id,
       const GPUCreateCommandBufferConfig& init_params) OVERRIDE;
@@ -238,6 +239,10 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   // instances shared based on configured audio parameters.  Lazily created on
   // first call.
   AudioRendererMixerManager* GetAudioRendererMixerManager();
+
+#if defined(OS_WIN)
+  void PreCacheFontCharacters(const LOGFONT& log_font, const string16& str);
+#endif
 
   // For producing custom V8 histograms. Custom histograms are produced if all
   // RenderViews share the same host, and the host is in the pre-specified set

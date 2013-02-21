@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/render_surface_impl.h"
 
 #include "cc/append_quads_data.h"
@@ -12,15 +10,15 @@
 #include "cc/scoped_ptr_vector.h"
 #include "cc/shared_quad_state.h"
 #include "cc/single_thread_proxy.h"
+#include "cc/test/fake_impl_proxy.h"
+#include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/mock_quad_culler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <public/WebTransformationMatrix.h>
+#include "ui/gfx/transform.h"
 
-using namespace cc;
-using WebKit::WebTransformationMatrix;
-
+namespace cc {
 namespace {
 
 #define EXECUTE_AND_VERIFY_SURFACE_CHANGED(codeToTest)                  \
@@ -39,14 +37,13 @@ TEST(RenderSurfaceTest, verifySurfaceChangesAreTrackedProperly)
     // This test checks that surfacePropertyChanged() has the correct behavior.
     //
 
-    // This will fake that we are on the correct thread for testing purposes.
-    DebugScopedSetImplThread setImplThread;
-
-    scoped_ptr<LayerImpl> owningLayer = LayerImpl::create(1);
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
+    scoped_ptr<LayerImpl> owningLayer = LayerImpl::create(hostImpl.activeTree(), 1);
     owningLayer->createRenderSurface();
     ASSERT_TRUE(owningLayer->renderSurface());
     RenderSurfaceImpl* renderSurface = owningLayer->renderSurface();
-    IntRect testRect = IntRect(IntPoint(3, 4), IntSize(5, 6));
+    gfx::Rect testRect = gfx::Rect(gfx::Point(3, 4), gfx::Size(5, 6));
     owningLayer->resetAllChangeTrackingForSubtree();
 
     // Currently, the contentRect, clipRect, and owningLayer->layerPropertyChanged() are
@@ -62,9 +59,9 @@ TEST(RenderSurfaceTest, verifySurfaceChangesAreTrackedProperly)
     EXECUTE_AND_VERIFY_SURFACE_DID_NOT_CHANGE(renderSurface->setClipRect(testRect));
     EXECUTE_AND_VERIFY_SURFACE_DID_NOT_CHANGE(renderSurface->setContentRect(testRect));
 
-    scoped_ptr<LayerImpl> dummyMask = LayerImpl::create(1);
-    WebTransformationMatrix dummyMatrix;
-    dummyMatrix.translate(1.0, 2.0);
+    scoped_ptr<LayerImpl> dummyMask = LayerImpl::create(hostImpl.activeTree(), 2);
+    gfx::Transform dummyMatrix;
+    dummyMatrix.Translate(1.0, 2.0);
 
     // The rest of the surface properties are either internal and should not cause change,
     // or they are already accounted for by the owninglayer->layerPropertyChanged().
@@ -76,24 +73,23 @@ TEST(RenderSurfaceTest, verifySurfaceChangesAreTrackedProperly)
 
 TEST(RenderSurfaceTest, sanityCheckSurfaceCreatesCorrectSharedQuadState)
 {
-    // This will fake that we are on the correct thread for testing purposes.
-    DebugScopedSetImplThread setImplThread;
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
+    scoped_ptr<LayerImpl> rootLayer = LayerImpl::create(hostImpl.activeTree(), 1);
 
-    scoped_ptr<LayerImpl> rootLayer = LayerImpl::create(1);
-
-    scoped_ptr<LayerImpl> owningLayer = LayerImpl::create(2);
+    scoped_ptr<LayerImpl> owningLayer = LayerImpl::create(hostImpl.activeTree(), 2);
     owningLayer->createRenderSurface();
     ASSERT_TRUE(owningLayer->renderSurface());
-    owningLayer->setRenderTarget(owningLayer.get());
+    owningLayer->drawProperties().render_target = owningLayer.get();
     RenderSurfaceImpl* renderSurface = owningLayer->renderSurface();
 
     rootLayer->addChild(owningLayer.Pass());
 
-    IntRect contentRect = IntRect(IntPoint::zero(), IntSize(50, 50));
-    IntRect clipRect = IntRect(IntPoint(5, 5), IntSize(40, 40));
-    WebTransformationMatrix origin;
+    gfx::Rect contentRect = gfx::Rect(gfx::Point(), gfx::Size(50, 50));
+    gfx::Rect clipRect = gfx::Rect(gfx::Point(5, 5), gfx::Size(40, 40));
+    gfx::Transform origin;
 
-    origin.translate(30, 40);
+    origin.Translate(30, 40);
 
     renderSurface->setDrawTransform(origin);
     renderSurface->setContentRect(contentRect);
@@ -111,11 +107,10 @@ TEST(RenderSurfaceTest, sanityCheckSurfaceCreatesCorrectSharedQuadState)
     ASSERT_EQ(1u, sharedStateList.size());
     SharedQuadState* sharedQuadState = sharedStateList[0];
 
-    EXPECT_EQ(30, sharedQuadState->quadTransform.m41());
-    EXPECT_EQ(40, sharedQuadState->quadTransform.m42());
-    EXPECT_RECT_EQ(contentRect, IntRect(sharedQuadState->visibleContentRect));
+    EXPECT_EQ(30, sharedQuadState->content_to_target_transform.matrix().getDouble(0, 3));
+    EXPECT_EQ(40, sharedQuadState->content_to_target_transform.matrix().getDouble(1, 3));
+    EXPECT_RECT_EQ(contentRect, gfx::Rect(sharedQuadState->visible_content_rect));
     EXPECT_EQ(1, sharedQuadState->opacity);
-    EXPECT_FALSE(sharedQuadState->opaque);
 }
 
 class TestRenderPassSink : public RenderPassSink {
@@ -130,22 +125,21 @@ private:
 
 TEST(RenderSurfaceTest, sanityCheckSurfaceCreatesCorrectRenderPass)
 {
-    // This will fake that we are on the correct thread for testing purposes.
-    DebugScopedSetImplThread setImplThread;
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
+    scoped_ptr<LayerImpl> rootLayer = LayerImpl::create(hostImpl.activeTree(), 1);
 
-    scoped_ptr<LayerImpl> rootLayer = LayerImpl::create(1);
-
-    scoped_ptr<LayerImpl> owningLayer = LayerImpl::create(2);
+    scoped_ptr<LayerImpl> owningLayer = LayerImpl::create(hostImpl.activeTree(), 2);
     owningLayer->createRenderSurface();
     ASSERT_TRUE(owningLayer->renderSurface());
-    owningLayer->setRenderTarget(owningLayer.get());
+    owningLayer->drawProperties().render_target = owningLayer.get();
     RenderSurfaceImpl* renderSurface = owningLayer->renderSurface();
 
     rootLayer->addChild(owningLayer.Pass());
 
-    IntRect contentRect = IntRect(IntPoint::zero(), IntSize(50, 50));
-    WebTransformationMatrix origin;
-    origin.translate(30, 40);
+    gfx::Rect contentRect = gfx::Rect(gfx::Point(), gfx::Size(50, 50));
+    gfx::Transform origin;
+    origin.Translate(30, 40);
 
     renderSurface->setScreenSpaceTransform(origin);
     renderSurface->setContentRect(contentRect);
@@ -157,9 +151,10 @@ TEST(RenderSurfaceTest, sanityCheckSurfaceCreatesCorrectRenderPass)
     ASSERT_EQ(1u, passSink.renderPasses().size());
     RenderPass* pass = passSink.renderPasses()[0];
 
-    EXPECT_EQ(RenderPass::Id(2, 0), pass->id());
-    EXPECT_RECT_EQ(contentRect, pass->outputRect());
-    EXPECT_EQ(origin, pass->transformToRootTarget());
+    EXPECT_EQ(RenderPass::Id(2, 0), pass->id);
+    EXPECT_RECT_EQ(contentRect, pass->output_rect);
+    EXPECT_EQ(origin, pass->transform_to_root_target);
 }
 
-} // namespace
+}  // namespace
+}  // namespace cc

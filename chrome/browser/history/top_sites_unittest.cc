@@ -5,9 +5,10 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/history/top_sites_cache.h"
 #include "chrome/browser/history/top_sites_database.h"
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -69,16 +71,18 @@ class WaitForHistoryTask : public HistoryDBTask {
 // TopSites is queried before it finishes loading.
 class TopSitesQuerier {
  public:
-  TopSitesQuerier() : number_of_callbacks_(0), waiting_(false) {}
+  TopSitesQuerier()
+      : ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
+        number_of_callbacks_(0),
+        waiting_(false) {}
 
   // Queries top sites. If |wait| is true a nested message loop is run until the
   // callback is notified.
   void QueryTopSites(TopSites* top_sites, bool wait) {
     int start_number_of_callbacks = number_of_callbacks_;
     top_sites->GetMostVisitedURLs(
-        &consumer_,
         base::Bind(&TopSitesQuerier::OnTopSitesAvailable,
-                   base::Unretained(this)));
+                   weak_ptr_factory_.GetWeakPtr()));
     if (wait && start_number_of_callbacks == number_of_callbacks_) {
       waiting_ = true;
       MessageLoop::current()->Run();
@@ -86,7 +90,7 @@ class TopSitesQuerier {
   }
 
   void CancelRequest() {
-    consumer_.CancelAllRequests();
+    weak_ptr_factory_.InvalidateWeakPtrs();
   }
 
   void set_urls(const MostVisitedURLList& urls) { urls_ = urls; }
@@ -105,7 +109,7 @@ class TopSitesQuerier {
     }
   }
 
-  CancelableRequestConsumer consumer_;
+  base::WeakPtrFactory<TopSitesQuerier> weak_ptr_factory_;
   MostVisitedURLList urls_;
   int number_of_callbacks_;
   bool waiting_;
@@ -194,9 +198,8 @@ class TopSitesTest : public HistoryUnitTestBase {
   // to wait until top sites finishes processing a task.
   void WaitForTopSites() {
     top_sites()->backend_->DoEmptyRequest(
-        &consumer_,
-        base::Bind(&TopSitesTest::QuitCallback,
-                   base::Unretained(this)));
+        base::Bind(&TopSitesTest::QuitCallback, base::Unretained(this)),
+        &cancelable_task_tracker_);
     MessageLoop::current()->Run();
   }
 
@@ -231,7 +234,7 @@ class TopSitesTest : public HistoryUnitTestBase {
 
   // Quit the current message loop when invoked. Useful when running a nested
   // message loop.
-  void QuitCallback(TopSitesBackend::Handle handle) {
+  void QuitCallback() {
     MessageLoop::current()->Quit();
   }
 
@@ -324,7 +327,12 @@ class TopSitesTest : public HistoryUnitTestBase {
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
   scoped_ptr<TestingProfile> profile_;
+
+  // To cancel HistoryService tasks.
   CancelableRequestConsumer consumer_;
+
+  // To cancel TopSitesBackend tasks.
+  CancelableTaskTracker cancelable_task_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(TopSitesTest);
 };  // Class TopSitesTest
@@ -1142,7 +1150,12 @@ TEST_F(TopSitesTest, Blacklisting) {
     ASSERT_EQ(2u + GetPrepopulatePages().size() - 1, q.urls().size());
     EXPECT_EQ("http://bbc.com/", q.urls()[0].url.spec());
     EXPECT_EQ("http://google.com/", q.urls()[1].url.spec());
-    EXPECT_NE(prepopulate_url.spec(), q.urls()[2].url.spec());
+    // Android has only one prepopulated page which has been blacklisted, so
+    // only 2 urls are returned.
+    if (q.urls().size() > 2)
+      EXPECT_NE(prepopulate_url.spec(), q.urls()[2].url.spec());
+    else
+      EXPECT_EQ(1u, GetPrepopulatePages().size());
   }
 
   // Remove all blacklisted sites.

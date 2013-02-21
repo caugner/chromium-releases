@@ -5,6 +5,7 @@
 package org.chromium.content.browser;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
@@ -19,6 +20,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
+import android.text.Editable;
 import android.util.Log;
 import android.util.Pair;
 import android.view.ActionMode;
@@ -27,6 +29,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Surface;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
@@ -38,11 +41,13 @@ import android.view.inputmethod.InputMethodManager;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.WeakContext;
-import org.chromium.content.app.AppResource;
 import org.chromium.content.browser.ContentViewGestureHandler.MotionEventDelegate;
 import org.chromium.content.browser.accessibility.AccessibilityInjector;
 import org.chromium.content.common.TraceEvent;
+import org.chromium.content.R;
 import org.chromium.ui.gfx.NativeWindow;
+
+import java.lang.annotation.Annotation;
 
 /**
  * Provides a Java-side 'wrapper' around a WebContent (native) instance.
@@ -53,12 +58,18 @@ import org.chromium.ui.gfx.NativeWindow;
 public class ContentViewCore implements MotionEventDelegate {
     private static final String TAG = ContentViewCore.class.getName();
 
-    // The following constants match the ones in chrome/common/page_transition_types.h.
-    // Add more if you need them.
+    // Use PageTransitionLink class instead.
+    // TODO(boliu): Remove these.
+    @Deprecated
     public static final int PAGE_TRANSITION_LINK = 0;
+    @Deprecated
     public static final int PAGE_TRANSITION_TYPED = 1;
+    @Deprecated
     public static final int PAGE_TRANSITION_AUTO_BOOKMARK = 2;
+    @Deprecated
     public static final int PAGE_TRANSITION_START_PAGE = 6;
+    @Deprecated
+    public static final int PAGE_TRANSITION_RELOAD = 8;
 
     // Used when ContentView implements a standalone View.
     public static final int PERSONALITY_VIEW = 0;
@@ -71,7 +82,7 @@ public class ContentViewCore implements MotionEventDelegate {
 
     // To avoid checkerboard, we clamp the fling velocity based on the maximum number of tiles
     // should be allowed to upload per 100ms.
-    private final int mMaxNumUploadTiles = 12;
+    private final int mMaxNumUploadTiles;
 
     // Personality of the ContentView.
     private final int mPersonality;
@@ -144,14 +155,7 @@ public class ContentViewCore implements MotionEventDelegate {
     // Native pointer to C++ ContentViewCoreImpl object which will be set by nativeInit().
     private int mNativeContentViewCore = 0;
 
-    // The vsync monitor is used to lock the compositor to the display refresh rate.
-    private VSyncMonitor mVSyncMonitor;
-
-    // The VSyncMonitor gives the timebase for the actual vsync, but we don't want render until
-    // we have had a chance for input events to propagate to the compositor thread. This takes
-    // 3 ms typically, so we adjust the vsync timestamps forward by a bit to give input events a
-    // chance to arrive.
-    private static final long INPUT_EVENT_LAG_FROM_VSYNC_MICROSECONDS = 3200;
+    private boolean mAttachedToWindow = false;
 
     private ContentViewGestureHandler mContentViewGestureHandler;
     private ZoomManager mZoomManager;
@@ -167,6 +171,10 @@ public class ContentViewCore implements MotionEventDelegate {
     // Cached content size from the native
     private int mContentWidth;
     private int mContentHeight;
+
+    // Cached size of the viewport
+    private int mViewportWidth;
+    private int mViewportHeight;
 
     // Cached page scale factor from native
     private float mNativePageScaleFactor = 1.0f;
@@ -200,23 +208,6 @@ public class ContentViewCore implements MotionEventDelegate {
 
     // Whether a physical keyboard is connected.
     private boolean mKeyboardConnected;
-
-    private final VSyncMonitor.Listener mVSyncListener = new VSyncMonitor.Listener() {
-        @Override
-        public void onVSync(VSyncMonitor monitor, long vsyncTimeMicros) {
-            TraceEvent.instant("VSync");
-            if (mNativeContentViewCore == 0 || mVSyncMonitor == null) {
-                return;
-            }
-            // Compensate for input event lag. Input events are delivered immediately on pre-JB
-            // releases, so this adjustment is only done for later versions.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-                vsyncTimeMicros += INPUT_EVENT_LAG_FROM_VSYNC_MICROSECONDS;
-            }
-            nativeUpdateVSyncParameters(mNativeContentViewCore, vsyncTimeMicros,
-                                        mVSyncMonitor.getVSyncPeriodInMicroseconds());
-        }
-    };
 
     // The AccessibilityInjector that handles loading Accessibility scripts into the web page.
     private AccessibilityInjector mAccessibilityInjector;
@@ -276,11 +267,6 @@ public class ContentViewCore implements MotionEventDelegate {
     public ContentViewCore(Context context, int personality) {
         mContext = context;
 
-        // All application resources must be registered by the time the content view is created.
-        // This should be omitted in final release builds where assertions are disabled.
-        // TODO(leandrogracia): re-enable this as soon as crbug.com/136704 is fixed.
-        // assert AppResource.verifyResourceRegistration();
-
         WeakContext.initializeWeakContext(context);
         // By default, ContentView will initialize single process mode. The call to
         // initContentViewProcess below is ignored if either the ContentView host called
@@ -290,6 +276,30 @@ public class ContentViewCore implements MotionEventDelegate {
 
         mPersonality = personality;
         HeapStatsLogger.init(mContext.getApplicationContext());
+
+        // We should set this constant based on the GPU performance. As it doesn't exist in the
+        // framework yet, we use the memory class as an indicator. Here are some good values that
+        // we determined via manual experimentation:
+        //
+        // Device            Screen size        Memory class   Tiles per 100ms
+        // ================= ================== ============== =====================
+        // Nexus S            480 x  800         128            9 (3 rows portrait)
+        // Galaxy Nexus       720 x 1280         256           12 (3 rows portrait)
+        // Nexus 7           1280 x  800         384           18 (3 rows landscape)
+        // Nexus 10          2560 x 1600         512           44 (4 rows landscape)
+        //
+        // Here is a spreadsheet with the data, plus a curve fit:
+        // https://docs.google.com/a/chromium.org/spreadsheet/pub?key=0AlNYk7HM2CgQdG1vUWRVWkU3ODRTc1B2SVF3ZTJBUkE&output=html
+        // That gives us tiles-per-100ms of 8, 13, 22, 37 for the devices listed above.
+        // Not too bad, and it should behave reasonably sensibly for unknown devices.
+        // If you want to tweak these constants, please update the spreadsheet appropriately.
+        //
+        // The curve is y = b * m^x, with coefficients as follows:
+        double b = 4.70009671080384;
+        double m = 1.00404437546897;
+        int memoryClass = ((ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE))
+                .getLargeMemoryClass();
+        mMaxNumUploadTiles = (int) Math.round(b * Math.pow(m, memoryClass));
     }
 
     /**
@@ -302,7 +312,7 @@ public class ContentViewCore implements MotionEventDelegate {
     /**
      * @return The ViewGroup that all view actions of this ContentViewCore should interact with.
      */
-    protected ViewGroup getContainerView() {
+    public ViewGroup getContainerView() {
         return mContainerView;
     }
 
@@ -330,6 +340,10 @@ public class ContentViewCore implements MotionEventDelegate {
                 mContainerView.removeView(view);
             }
         };
+    }
+
+    public ImeAdapter getImeAdapterForTest() {
+        return mImeAdapter;
     }
 
     private ImeAdapter createImeAdapter(Context context) {
@@ -461,9 +475,14 @@ public class ContentViewCore implements MotionEventDelegate {
         // move this check into onAttachedToWindow(), where we can test for
         // HW support directly.
         mHardwareAccelerated = hasHardwareAcceleration(mContext);
+
+        // Input events are delivered at vsync time on JB+.
+        boolean inputEventsDeliveredAtVSync =
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN);
+
         mContainerView = containerView;
-        mNativeContentViewCore = nativeInit(mHardwareAccelerated, nativeWebContents,
-                nativeWindow.getNativePointer());
+        mNativeContentViewCore = nativeInit(mHardwareAccelerated, inputEventsDeliveredAtVSync,
+                nativeWebContents, nativeWindow.getNativePointer());
         mContentSettings = new ContentSettings(
                 this, mNativeContentViewCore, isAccessFromFileURLsGrantedByDefault);
         initializeContainerView(internalDispatcher);
@@ -475,17 +494,18 @@ public class ContentViewCore implements MotionEventDelegate {
         mAccessibilityInjector.addOrRemoveAccessibilityApisIfNecessary();
 
         String contentDescription = "Web View";
-        if (AppResource.STRING_CONTENT_VIEW_CONTENT_DESCRIPTION == 0) {
+        if (R.string.accessibility_content_view == 0) {
             Log.w(TAG, "Setting contentDescription to 'Web View' as no value was specified.");
         } else {
             contentDescription = mContext.getResources().getString(
-                    AppResource.STRING_CONTENT_VIEW_CONTENT_DESCRIPTION);
+                    R.string.accessibility_content_view);
         }
         mContainerView.setContentDescription(contentDescription);
         mWebContentsObserver = new WebContentsObserverAndroid(this) {
             @Override
             public void didStartLoading(String url) {
                 hidePopupDialog();
+                resetGestureDetectors();
             }
         };
     }
@@ -531,13 +551,41 @@ public class ContentViewCore implements MotionEventDelegate {
         mImeAdapter = createImeAdapter(mContext);
         mKeyboardConnected = mContainerView.getResources().getConfiguration().keyboard
                 != Configuration.KEYBOARD_NOKEYS;
-        mVSyncMonitor = new VSyncMonitor(mContext, mContainerView, mVSyncListener);
         TraceEvent.end();
     }
 
     private void initPopupZoomer(Context context){
         mPopupZoomer = new PopupZoomer(context);
-        mContainerView.addView(mPopupZoomer);
+        mPopupZoomer.setOnVisibilityChangedListener(new PopupZoomer.OnVisibilityChangedListener() {
+            @Override
+            public void onPopupZoomerShown(final PopupZoomer zoomer) {
+                mContainerView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (mContainerView.indexOfChild(zoomer) == -1) {
+                            mContainerView.addView(zoomer);
+                        } else {
+                            assert false : "PopupZoomer should never be shown without being hidden";
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onPopupZoomerHidden(final PopupZoomer zoomer) {
+                mContainerView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (mContainerView.indexOfChild(zoomer) != -1) {
+                            mContainerView.removeView(zoomer);
+                            mContainerView.invalidate();
+                        } else {
+                            assert false : "PopupZoomer should never be hidden without being shown";
+                        }
+                    }
+                });
+            }
+        });
         PopupZoomer.OnTapListener listener = new PopupZoomer.OnTapListener() {
             @Override
             public boolean onSingleTap(View v, MotionEvent e) {
@@ -589,7 +637,6 @@ public class ContentViewCore implements MotionEventDelegate {
         }
         mNativeContentViewCore = 0;
         mContentSettings = null;
-        mVSyncMonitor.stop();
     }
 
     /**
@@ -711,12 +758,45 @@ public class ContentViewCore implements MotionEventDelegate {
         return null;
     }
 
-    public int getWidth() {
-        return mContainerView.getWidth();
+    /**
+     * Shows an interstitial page driven by the passed in delegate.
+     *
+     * @param url The URL being blocked by the interstitial.
+     * @param delegate The delegate handling the interstitial.
+     * @VisibleForTesting
+     */
+    public void showInterstitialPage(
+            String url, InterstitialPageDelegateAndroid delegate) {
+        if (mNativeContentViewCore == 0) return;
+        nativeShowInterstitialPage(mNativeContentViewCore, url, delegate.getNative());
     }
 
+    /**
+     * @return Whether the page is currently showing an interstitial, such as a bad HTTPS page.
+     */
+    public boolean isShowingInterstitialPage() {
+        return mNativeContentViewCore == 0 ?
+                false : nativeIsShowingInterstitialPage(mNativeContentViewCore);
+    }
+
+    /**
+     * Indicate that the browser compositor has consumed a pending renderer frame.
+     *
+     * @return Whether there was a pending renderer frame.
+     */
+    public boolean consumePendingRendererFrame() {
+        return mNativeContentViewCore == 0 ?
+                false : nativeConsumePendingRendererFrame(mNativeContentViewCore);
+    }
+
+    @CalledByNative
+    public int getWidth() {
+        return mViewportWidth;
+    }
+
+    @CalledByNative
     public int getHeight() {
-        return mContainerView.getHeight();
+        return mViewportHeight;
     }
 
     /**
@@ -738,7 +818,7 @@ public class ContentViewCore implements MotionEventDelegate {
     }
 
     public Bitmap getBitmap(int width, int height) {
-        if (getWidth() == 0 || getHeight() == 0) return null;
+        if (width == 0 || height == 0 || getWidth() == 0 || getHeight() == 0) return null;
 
         Bitmap b = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
 
@@ -746,8 +826,7 @@ public class ContentViewCore implements MotionEventDelegate {
                 nativePopulateBitmapFromCompositor(mNativeContentViewCore, b)) {
             // If we successfully grabbed a bitmap, check if we have to draw the Android overlay
             // components as well.
-            if (mContainerView.getParent() != null &&
-                    mContainerView.getVisibility() == View.VISIBLE) {
+            if (mContainerView.getChildCount() > 0) {
                 Canvas c = new Canvas(b);
                 c.scale(width / (float) getWidth(), height / (float) getHeight());
                 mContainerView.draw(c);
@@ -916,17 +995,19 @@ public class ContentViewCore implements MotionEventDelegate {
 
     @SuppressWarnings("unused")
     @CalledByNative
-    private void confirmTouchEvent(boolean handled) {
-        mContentViewGestureHandler.confirmTouchEvent(handled);
+    private void confirmTouchEvent(int ackResult) {
+        mContentViewGestureHandler.confirmTouchEvent(ackResult);
     }
 
     @Override
     public boolean sendGesture(int type, long timeMs, int x, int y, Bundle b) {
         if (mNativeContentViewCore == 0) return false;
-
         switch (type) {
             case ContentViewGestureHandler.GESTURE_SHOW_PRESSED_STATE:
                 nativeShowPressState(mNativeContentViewCore, timeMs, x, y);
+                return true;
+            case ContentViewGestureHandler.GESTURE_SHOW_PRESS_CANCEL:
+                nativeShowPressCancel(mNativeContentViewCore, timeMs, x, y);
                 return true;
             case ContentViewGestureHandler.GESTURE_DOUBLE_TAP:
                 nativeDoubleTap(mNativeContentViewCore, timeMs, x, y);
@@ -999,7 +1080,6 @@ public class ContentViewCore implements MotionEventDelegate {
         nativeOnHide(mNativeContentViewCore);
         setAccessibilityState(false);
         TraceEvent.end();
-        mVSyncMonitor.stop();
     }
 
     /**
@@ -1025,7 +1105,6 @@ public class ContentViewCore implements MotionEventDelegate {
         hidePopupDialog();
         setAccessibilityState(false);
         nativeOnHide(mNativeContentViewCore);
-        mVSyncMonitor.stop();
     }
 
     /**
@@ -1065,11 +1144,22 @@ public class ContentViewCore implements MotionEventDelegate {
         }
     }
 
+    private void resetGestureDetectors() {
+        mContentViewGestureHandler.resetGestureHandlers();
+    }
+
     /**
      * @see View#onAttachedToWindow()
      */
     @SuppressWarnings("javadoc")
     public void onAttachedToWindow() {
+        mAttachedToWindow = true;
+        if (mNativeContentViewCore != 0) {
+            int pid = nativeGetCurrentRenderProcessId(mNativeContentViewCore);
+            if (pid > 0) {
+                SandboxedProcessLauncher.bindAsHighPriority(pid);
+            }
+        }
         setAccessibilityState(true);
     }
 
@@ -1078,6 +1168,13 @@ public class ContentViewCore implements MotionEventDelegate {
      */
     @SuppressWarnings("javadoc")
     public void onDetachedFromWindow() {
+        mAttachedToWindow = false;
+        if (mNativeContentViewCore != 0) {
+            int pid = nativeGetCurrentRenderProcessId(mNativeContentViewCore);
+            if (pid > 0) {
+                SandboxedProcessLauncher.unbindAsHighPriority(pid);
+            }
+        }
         setAccessibilityState(false);
     }
 
@@ -1110,6 +1207,10 @@ public class ContentViewCore implements MotionEventDelegate {
         mInputConnection = ImeAdapter.AdapterInputConnection.getInstance(
                 mContainerView, mImeAdapter, outAttrs);
         return mInputConnection;
+    }
+
+    public Editable getEditableForTest() {
+        return mInputConnection.getEditable();
     }
 
     /**
@@ -1146,9 +1247,20 @@ public class ContentViewCore implements MotionEventDelegate {
     @SuppressWarnings("javadoc")
     public void onSizeChanged(int w, int h, int ow, int oh) {
         mPopupZoomer.hide(false);
+
         // Update the content size to make sure it is at least the View size
         if (mContentWidth < w) mContentWidth = w;
         if (mContentHeight < h) mContentHeight = h;
+
+        if (mViewportWidth != w || mViewportHeight != h) {
+            mViewportWidth = w;
+            mViewportHeight = h;
+            if (mNativeContentViewCore != 0) {
+                nativeSetSize(mNativeContentViewCore, mViewportWidth, mViewportHeight);
+            }
+        }
+
+        updateAfterSizeChanged();
     }
 
     public void updateAfterSizeChanged() {
@@ -1160,6 +1272,11 @@ public class ContentViewCore implements MotionEventDelegate {
         } else if (mUnfocusOnNextSizeChanged) {
             undoScrollFocusedEditableNodeIntoViewIfNeeded(true);
             mUnfocusOnNextSizeChanged = false;
+        }
+
+        if (mNeedUpdateOrientationChanged) {
+            sendOrientationChangeEvent();
+            mNeedUpdateOrientationChanged = false;
         }
     }
 
@@ -1237,7 +1354,6 @@ public class ContentViewCore implements MotionEventDelegate {
             } else {
                 undoScrollFocusedEditableNodeIntoViewIfNeeded(false);
             }
-            mImeAdapter.dispatchKeyEventPreIme(event);
             return mContainerViewInternals.super_dispatchKeyEventPreIme(event);
         } finally {
             TraceEvent.end();
@@ -1252,16 +1368,14 @@ public class ContentViewCore implements MotionEventDelegate {
                 !mImeAdapter.isNativeImeAdapterAttached() && mNativeContentViewCore != 0) {
             mImeAdapter.attach(nativeGetNativeImeAdapter(mNativeContentViewCore));
         }
-        // The key handling logic is kind of confusing here.
-        // The purpose of shouldOverrideKeyEvent() is to filter out some keys that is critical
-        // to browser function but useless in renderer process (for example, the back button),
-        // so the browser can still respond to these keys in a timely manner when the renderer
-        // process is busy/blocked/busted. mImeAdapter.dispatchKeyEvent() forwards the key event
-        // to the renderer process. If mImeAdapter is bypassed or is not interested to the event,
-        // fall back to the default dispatcher to propagate the event to sub-views.
-        return (!getContentViewClient().shouldOverrideKeyEvent(event)
-                && mImeAdapter.dispatchKeyEvent(event))
-                || mContainerViewInternals.super_dispatchKeyEvent(event);
+
+        if (getContentViewClient().shouldOverrideKeyEvent(event)) {
+            return mContainerViewInternals.super_dispatchKeyEvent(event);
+        }
+
+        if (mKeyboardConnected && mImeAdapter.dispatchKeyEvent(event)) return true;
+
+        return mContainerViewInternals.super_dispatchKeyEvent(event);
     }
 
     /**
@@ -1484,6 +1598,41 @@ public class ContentViewCore implements MotionEventDelegate {
     }
 
     /**
+     * Get the screen orientation from the OS and push it to WebKit.
+     *
+     * TODO(husky): Add a hook for mock orientations.
+     *
+     * TODO(husky): Currently each new tab starts with an orientation of 0 until you actually
+     * rotate the device. This is wrong if you actually started in landscape mode. To fix this, we
+     * need to push the correct orientation, but only after WebKit's Frame object has been fully
+     * initialized. Need to find a good time to do that. onPageFinished() would probably work but
+     * it isn't implemented yet.
+     */
+    private void sendOrientationChangeEvent() {
+        if (mNativeContentViewCore == 0) return;
+
+        WindowManager windowManager =
+                (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+        switch (windowManager.getDefaultDisplay().getRotation()) {
+            case Surface.ROTATION_90:
+                nativeSendOrientationChangeEvent(mNativeContentViewCore, 90);
+                break;
+            case Surface.ROTATION_180:
+                nativeSendOrientationChangeEvent(mNativeContentViewCore, 180);
+                break;
+            case Surface.ROTATION_270:
+                nativeSendOrientationChangeEvent(mNativeContentViewCore, -90);
+                break;
+            case Surface.ROTATION_0:
+                nativeSendOrientationChangeEvent(mNativeContentViewCore, 0);
+                break;
+            default:
+                Log.w(TAG, "Unknown rotation!");
+                break;
+        }
+    }
+
+    /**
      * Register the delegate to be used when content can not be handled by
      * the rendering engine, and should be downloaded instead. This will replace
      * the current delegate, if any.
@@ -1512,11 +1661,11 @@ public class ContentViewCore implements MotionEventDelegate {
                 public void showHandlesAt(int x1, int y1, int dir1, int x2, int y2, int dir2) {
                     super.showHandlesAt(x1, y1, dir1, x2, y2, dir2);
                     mStartHandleNormalizedPoint.set(
-                        (x1 + mNativeScrollX) / mNativePageScaleFactor,
-                        (y1 + mNativeScrollY) / mNativePageScaleFactor);
+                            (x1 + mNativeScrollX) / mNativePageScaleFactor,
+                            (y1 + mNativeScrollY) / mNativePageScaleFactor);
                     mEndHandleNormalizedPoint.set(
-                        (x2 + mNativeScrollX) / mNativePageScaleFactor,
-                        (y2 + mNativeScrollY) / mNativePageScaleFactor);
+                            (x2 + mNativeScrollX) / mNativePageScaleFactor,
+                            (y2 + mNativeScrollY) / mNativePageScaleFactor);
 
                     showSelectActionBar();
                 }
@@ -1537,7 +1686,7 @@ public class ContentViewCore implements MotionEventDelegate {
                 @Override
                 public void setCursorPosition(int x, int y) {
                     if (mNativeContentViewCore != 0) {
-                        nativeSelectBetweenCoordinates(mNativeContentViewCore, x, y, x, y);
+                        nativeMoveCaret(mNativeContentViewCore, x, y);
                     }
                 }
 
@@ -1556,14 +1705,18 @@ public class ContentViewCore implements MotionEventDelegate {
                 public void showHandleAt(int x, int y) {
                     super.showHandleAt(x, y);
                     mInsertionHandleNormalizedPoint.set(
-                        (x + mNativeScrollX) / mNativePageScaleFactor,
-                        (y + mNativeScrollY) / mNativePageScaleFactor);
+                            (x + mNativeScrollX) / mNativePageScaleFactor,
+                            (y + mNativeScrollY) / mNativePageScaleFactor);
                 }
             };
 
             mInsertionHandleController.hideAndDisallowAutomaticShowing();
         }
 
+        return mInsertionHandleController;
+    }
+
+    public InsertionHandleController getInsertionHandleControllerForTest() {
         return mInsertionHandleController;
     }
 
@@ -1704,12 +1857,24 @@ public class ContentViewCore implements MotionEventDelegate {
         // update mNativeScrollX/Y here for consistency.
         mNativeScrollX = x;
         mNativeScrollY = y;
+
+        if (mNativePageScaleFactor != scale && mContentViewClient != null) {
+            mContentViewClient.onScaleChanged(mNativePageScaleFactor, scale);
+        }
+
         mNativePageScaleFactor = scale;
 
         mPopupZoomer.hide(true);
         updateHandleScreenPositions();
 
         mZoomManager.updateZoomControls();
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private void updateOffsetsForFullscreen(float controlsOffsetY, float contentOffsetY) {
+        if (mContentViewClient == null) return;
+        mContentViewClient.onOffsetsForFullscreenChanged(controlsOffsetY, contentOffsetY);
     }
 
     @SuppressWarnings("unused")
@@ -1768,6 +1933,20 @@ public class ContentViewCore implements MotionEventDelegate {
     private void showSelectPopup(String[] items, int[] enabled, boolean multiple,
             int[] selectedIndices) {
         SelectPopupDialog.show(this, items, enabled, multiple, selectedIndices);
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private void showDisambiguationPopup(Rect targetRect, Bitmap zoomedBitmap) {
+        mPopupZoomer.setBitmap(zoomedBitmap);
+        mPopupZoomer.show(targetRect);
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private SmoothScroller createSmoothScroller(boolean scrollDown, int mouseEventX,
+            int mouseEventY) {
+        return new SmoothScroller(this, scrollDown, mouseEventX, mouseEventY);
     }
 
     @SuppressWarnings("unused")
@@ -1831,6 +2010,19 @@ public class ContentViewCore implements MotionEventDelegate {
     private void showPastePopup(int x, int y) {
         getInsertionHandleController()
                 .showHandleWithPastePopupAt(x - mNativeScrollX, y - mNativeScrollY);
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private void onRenderProcessSwap(int oldPid, int newPid) {
+        if (mAttachedToWindow && oldPid != newPid) {
+            if (oldPid > 0) {
+                SandboxedProcessLauncher.unbindAsHighPriority(oldPid);
+            }
+            if (newPid > 0) {
+                SandboxedProcessLauncher.bindAsHighPriority(newPid);
+            }
+        }
     }
 
     /**
@@ -1948,6 +2140,25 @@ public class ContentViewCore implements MotionEventDelegate {
         return mZoomManager.getZoomControlsViewForTest();
     }
 
+    // TODO(joth): Remove in next patch.
+    @Deprecated
+    public void addJavascriptInterface(Object object, String name, boolean requireAnnotation) {
+        addPossiblyUnsafeJavascriptInterface(object, name,
+                requireAnnotation ? JavascriptInterface.class : null);
+    }
+
+    /**
+     * This will mimic {@link #addPossiblyUnsafeJavascriptInterface(Object, String, Class)}
+     * and automatically pass in {@link JavascriptInterface} as the required annotation.
+     *
+     * @param object The Java object to inject into the ContentViewCore's JavaScript context.  Null
+     *               values are ignored.
+     * @param name   The name used to expose the instance in JavaScript.
+     */
+    public void addJavascriptInterface(Object object, String name) {
+        addPossiblyUnsafeJavascriptInterface(object, name, JavascriptInterface.class);
+    }
+
     /**
      * This method injects the supplied Java object into the ContentViewCore.
      * The object is injected into the JavaScript context of the main frame,
@@ -1968,23 +2179,32 @@ public class ContentViewCore implements MotionEventDelegate {
      * ContentViewCore which could contain untrusted content. Particular care
      * should be taken to avoid unintentional access to inherited methods, such
      * as {@link Object#getClass()}. To prevent access to inherited methods,
-     * set {@code allowInheritedMethods} to {@code false}. In addition, ensure
-     * that the injected object's public methods return only objects designed
-     * to be used by untrusted code, and never return a raw Object instance.
+     * pass an annotation for {@code requiredAnnotation}.  This will ensure
+     * that only methods with {@code requiredAnnotation} are exposed to the
+     * Javascript layer.  {@code requiredAnnotation} will be passed to all
+     * subsequently injected Java objects if any methods return an object.  This
+     * means the same restrictions (or lack thereof) will apply.  Alternatively,
+     * {@link #addJavascriptInterface(Object, String)} can be called, which
+     * automatically uses the {@link JavascriptInterface} annotation.
      * <li> JavaScript interacts with Java objects on a private, background
      * thread of the ContentViewCore. Care is therefore required to maintain
      * thread safety.</li>
      * </ul></p>
      *
-     * @param object The Java object to inject into the ContentViewCore's
-     *               JavaScript context. Null values are ignored.
-     * @param name The name used to expose the instance in JavaScript.
-     * @param requireAnnotation Restrict exposed methods to ones with the
-     *                          {@link JavascriptInterface} annotation.
+     * @param object             The Java object to inject into the
+     *                           ContentViewCore's JavaScript context. Null
+     *                           values are ignored.
+     * @param name               The name used to expose the instance in
+     *                           JavaScript.
+     * @param requiredAnnotation Restrict exposed methods to ones with this
+     *                           annotation.  If {@code null} all methods are
+     *                           exposed.
+     *
      */
-    public void addJavascriptInterface(Object object, String name, boolean requireAnnotation) {
+    public void addPossiblyUnsafeJavascriptInterface(Object object, String name,
+            Class<? extends Annotation> requiredAnnotation) {
         if (mNativeContentViewCore != 0 && object != null) {
-            nativeAddJavascriptInterface(mNativeContentViewCore, object, name, requireAnnotation);
+            nativeAddJavascriptInterface(mNativeContentViewCore, object, name, requiredAnnotation);
         }
     }
 
@@ -2014,8 +2234,7 @@ public class ContentViewCore implements MotionEventDelegate {
      * once the texture is actually ready.
      */
     public boolean isReady() {
-        // TODO(nileshagrawal): Implement this.
-        return false;
+        return nativeIsRenderWidgetHostViewReady(mNativeContentViewCore);
     }
 
     /**
@@ -2166,8 +2385,19 @@ public class ContentViewCore implements MotionEventDelegate {
         return history;
     }
 
-    private native int nativeInit(boolean hardwareAccelerated, int webContentsPtr,
-            int windowAndroidPtr);
+    /**
+     * Update of the latest vsync parameters.
+     * @param tickTimeMicros The latest vsync tick time in microseconds.
+     * @param intervalMicros The vsync interval in microseconds.
+     */
+    public void updateVSync(long tickTimeMicros, long intervalMicros) {
+        if (mNativeContentViewCore != 0) {
+            nativeUpdateVSyncParameters(mNativeContentViewCore, tickTimeMicros, intervalMicros);
+        }
+    }
+
+    private native int nativeInit(boolean hardwareAccelerated, boolean inputEventsDeliveredAtVSync,
+            int webContentsPtr, int windowAndroidPtr);
 
     private native void nativeOnJavaContentViewCoreDestroyed(int nativeContentViewCoreImpl);
 
@@ -2190,12 +2420,21 @@ public class ContentViewCore implements MotionEventDelegate {
 
     private native String nativeGetTitle(int nativeContentViewCoreImpl);
 
+    private native void nativeShowInterstitialPage(
+            int nativeContentViewCoreImpl, String url, int nativeInterstitialPageDelegateAndroid);
+    private native boolean nativeIsShowingInterstitialPage(int nativeContentViewCoreImpl);
+
+    private native boolean nativeConsumePendingRendererFrame(int nativeContentViewCoreImpl);
+
     private native boolean nativeIsIncognito(int nativeContentViewCoreImpl);
 
     // Returns true if the native side crashed so that java side can draw a sad tab.
     private native boolean nativeCrashed(int nativeContentViewCoreImpl);
 
     private native void nativeSetFocus(int nativeContentViewCoreImpl, boolean focused);
+
+    private native void nativeSendOrientationChangeEvent(
+            int nativeContentViewCoreImpl, int orientation);
 
     private native boolean nativeSendTouchEvent(
             int nativeContentViewCoreImpl, long timeMs, int action, TouchPoint[] pts);
@@ -2224,6 +2463,9 @@ public class ContentViewCore implements MotionEventDelegate {
     private native void nativeShowPressState(
             int nativeContentViewCoreImpl, long timeMs, int x, int y);
 
+    private native void nativeShowPressCancel(
+            int nativeContentViewCoreImpl, long timeMs, int x, int y);
+
     private native void nativeDoubleTap(int nativeContentViewCoreImpl, long timeMs, int x, int y);
 
     private native void nativeLongPress(int nativeContentViewCoreImpl, long timeMs, int x, int y,
@@ -2238,6 +2480,8 @@ public class ContentViewCore implements MotionEventDelegate {
 
     private native void nativeSelectBetweenCoordinates(
             int nativeContentViewCoreImpl, int x1, int y1, int x2, int y2);
+
+    private native void nativeMoveCaret(int nativeContentViewCoreImpl, int x, int y);
 
     private native boolean nativeCanGoBack(int nativeContentViewCoreImpl);
 
@@ -2287,7 +2531,7 @@ public class ContentViewCore implements MotionEventDelegate {
     private native void nativeClearSslPreferences(int nativeContentViewCoreImpl);
 
     private native void nativeAddJavascriptInterface(int nativeContentViewCoreImpl, Object object,
-                                                     String name, boolean requireAnnotation);
+            String name, Class requiredAnnotation);
 
     private native void nativeRemoveJavascriptInterface(int nativeContentViewCoreImpl, String name);
 
@@ -2298,4 +2542,8 @@ public class ContentViewCore implements MotionEventDelegate {
 
     private native boolean nativePopulateBitmapFromCompositor(int nativeContentViewCoreImpl,
             Bitmap bitmap);
+
+    private native void nativeSetSize(int nativeContentViewCoreImpl, int width, int height);
+
+    private native boolean nativeIsRenderWidgetHostViewReady(int nativeContentViewCoreImpl);
 }

@@ -4,10 +4,7 @@
 
 #include "chrome/browser/ui/views/extensions/media_galleries_dialog_views.h"
 
-#include "base/command_line.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
-#include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -18,6 +15,8 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/view.h"
+#include "ui/views/window/dialog_client_view.h"
+
 
 namespace chrome {
 
@@ -29,19 +28,6 @@ namespace {
 // Heading font size correction.
 const int kHeadingFontSizeDelta = 1;
 
-// A border with zero left inset.
-class MediaGalleriesCheckboxBorder : public views::TextButtonNativeThemeBorder {
- public:
-  explicit MediaGalleriesCheckboxBorder(views::NativeThemeDelegate* delegate)
-      : views::TextButtonNativeThemeBorder(delegate) {}
-  virtual ~MediaGalleriesCheckboxBorder() {}
-
-  virtual void GetInsets(gfx::Insets* insets) const OVERRIDE {
-    views::TextButtonNativeThemeBorder::GetInsets(insets);
-    insets->Set(insets->top(), 0, insets->bottom(), insets->right());
-  }
-};
-
 }  // namespace
 
 MediaGalleriesDialogViews::MediaGalleriesDialogViews(
@@ -52,19 +38,12 @@ MediaGalleriesDialogViews::MediaGalleriesDialogViews(
       checkbox_container_(NULL),
       add_gallery_container_(NULL),
       confirm_available_(false),
-      accepted_(false),
-      // Enable this once chrome style constrained windows work on shell
-      // windows. http://crbug.com/156694
-      enable_chrome_style_(CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableFramelessConstrainedDialogs)) {
+      accepted_(false) {
   InitChildViews();
 
   // Ownership of |contents_| is handed off by this call. |window_| will take
   // care of deleting itself after calling DeleteDelegate().
-  window_ = new ConstrainedWindowViews(
-      controller->web_contents(), this,
-      enable_chrome_style_,
-      ConstrainedWindowViews::DEFAULT_INSETS);
+  window_ = new ConstrainedWindowViews(controller->web_contents(), this);
 }
 
 MediaGalleriesDialogViews::~MediaGalleriesDialogViews() {}
@@ -72,10 +51,9 @@ MediaGalleriesDialogViews::~MediaGalleriesDialogViews() {}
 void MediaGalleriesDialogViews::InitChildViews() {
   // Layout.
   views::GridLayout* layout = new views::GridLayout(contents_);
-  if (!enable_chrome_style_) {
-    layout->SetInsets(views::kPanelVertMargin, views::kPanelHorizMargin,
-                      0, views::kPanelHorizMargin);
-  }
+  layout->SetInsets(views::kPanelVertMargin, views::kPanelHorizMargin,
+                    0, views::kPanelHorizMargin);
+
   int column_set_id = 0;
   views::ColumnSet* columns = layout->AddColumnSet(column_set_id);
   columns->AddColumn(views::GridLayout::LEADING,
@@ -88,19 +66,17 @@ void MediaGalleriesDialogViews::InitChildViews() {
   contents_->SetLayoutManager(layout);
 
   // Header text.
-  if (!enable_chrome_style_) {
-    views::Label* header = new views::Label(controller_->GetHeader());
-    header->SetFont(header->font().DeriveFont(kHeadingFontSizeDelta,
-                                              gfx::Font::BOLD));
-    header->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-    layout->StartRow(0, column_set_id);
-    layout->AddView(header);
-  }
+  views::Label* header = new views::Label(controller_->GetHeader());
+  header->SetFont(header->font().DeriveFont(kHeadingFontSizeDelta,
+                                            gfx::Font::BOLD));
+  header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  layout->StartRow(0, column_set_id);
+  layout->AddView(header);
 
   // Message text.
   views::Label* subtext = new views::Label(controller_->GetSubtext());
   subtext->SetMultiLine(true);
-  subtext->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  subtext->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   layout->StartRowWithPadding(0, column_set_id,
                               0, views::kRelatedControlVerticalSpacing);
   layout->AddView(subtext);
@@ -136,16 +112,20 @@ void MediaGalleriesDialogViews::UpdateGallery(
 bool MediaGalleriesDialogViews::AddOrUpdateGallery(
     const MediaGalleryPrefInfo* gallery,
     bool permitted) {
+  string16 label =
+      MediaGalleriesDialogController::GetGalleryDisplayName(*gallery);
   CheckboxMap::iterator iter = checkbox_map_.find(gallery);
   if (iter != checkbox_map_.end()) {
-    iter->second->SetChecked(permitted);
+    views::Checkbox* checkbox = iter->second;
+    checkbox->SetChecked(permitted);
+    checkbox->SetText(label);
     return false;
   }
 
-  views::Checkbox* checkbox = new views::Checkbox(gallery->display_name);
-  checkbox->set_border(new MediaGalleriesCheckboxBorder(checkbox));
+  views::Checkbox* checkbox = new views::Checkbox(label);
   checkbox->set_listener(this);
-  checkbox->SetTooltipText(gallery->AbsolutePath().LossyDisplayName());
+  checkbox->SetTooltipText(
+      MediaGalleriesDialogController::GetGalleryTooltip(*gallery));
   checkbox_container_->AddChildView(checkbox);
   checkbox->SetChecked(permitted);
   checkbox_map_[gallery] = checkbox;
@@ -158,7 +138,7 @@ string16 MediaGalleriesDialogViews::GetWindowTitle() const {
 }
 
 bool MediaGalleriesDialogViews::ShouldShowWindowTitle() const {
-  return enable_chrome_style_;
+  return false;
 }
 
 void MediaGalleriesDialogViews::DeleteDelegate() {
@@ -189,8 +169,12 @@ bool MediaGalleriesDialogViews::IsDialogButtonEnabled(
   return button != ui::DIALOG_BUTTON_OK || confirm_available_;
 }
 
-bool MediaGalleriesDialogViews::UseChromeStyle() const {
-  return enable_chrome_style_;
+ui::ModalType MediaGalleriesDialogViews::GetModalType() const {
+#if defined(USE_ASH)
+  return ui::MODAL_TYPE_CHILD;
+#else
+  return views::WidgetDelegate::GetModalType();
+#endif
 }
 
 views::View* MediaGalleriesDialogViews::GetExtraView() {
@@ -225,7 +209,7 @@ void MediaGalleriesDialogViews::ButtonPressed(views::Button* sender,
     return;
   }
 
-  for (CheckboxMap::iterator iter = checkbox_map_.begin();
+  for (CheckboxMap::const_iterator iter = checkbox_map_.begin();
        iter != checkbox_map_.end(); ++iter) {
     if (sender == iter->second) {
       controller_->DidToggleGallery(

@@ -11,6 +11,10 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/window/dialog_delegate.h"
 
+namespace content {
+class WebContents;
+}
+
 namespace views {
 class MessageBoxView;
 }
@@ -24,13 +28,11 @@ class TabModalConfirmDialogViews : public TabModalConfirmDialog,
                                    public views::DialogDelegate {
  public:
   TabModalConfirmDialogViews(TabModalConfirmDialogDelegate* delegate,
-                             TabContents* tab_contents,
-                             bool enable_chrome_style);
+                             content::WebContents* web_contents);
 
   // views::DialogDelegate:
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
-  virtual bool UseChromeStyle() const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
 
@@ -39,6 +41,7 @@ class TabModalConfirmDialogViews : public TabModalConfirmDialog,
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
 
  private:
   virtual ~TabModalConfirmDialogViews();
@@ -51,8 +54,6 @@ class TabModalConfirmDialogViews : public TabModalConfirmDialog,
 
   // The message box view whose commands we handle.
   views::MessageBoxView* message_box_view_;
-
-  bool enable_chrome_style_;
 
   DISALLOW_COPY_AND_ASSIGN(TabModalConfirmDialogViews);
 };

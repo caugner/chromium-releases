@@ -32,9 +32,9 @@ class InstallUtil {
   // e.g. Software\Microsoft\Active Setup\Installed Components\<dist_guid>
   static string16 GetActiveSetupPath(BrowserDistribution* dist);
 
-  // Attempts to trigger the command that would be triggered for Chrome on
-  // Active Setup. This will be a no-op for user-level installs.
-  static void TriggerActiveSetupCommandIfNeeded();
+  // Attempts to trigger the command that would be run by Active Setup for a
+  // system-level Chrome. For use only when system-level Chrome is installed.
+  static void TriggerActiveSetupCommand();
 
   // Launches given exe as admin on Vista.
   static bool ExecuteExeAsAdmin(const CommandLine& cmd, DWORD* exit_code);
@@ -101,11 +101,6 @@ class InstallUtil {
   // is running Chrome process from the Chrome SxS installation (as indicated
   // by either --chrome-sxs or the executable path).
   static bool IsChromeSxSProcess();
-
-  // Returns true if the Chrome installed at |chrome_exe| has a Windows shell
-  // DelegateExecute verb handler.
-  static bool HasDelegateExecuteHandler(BrowserDistribution* dist,
-                                        const string16& chrome_exe);
 
   // Populates |path| with the path to |file| in the sentinel directory. This is
   // the application directory for user-level installs, and the default user

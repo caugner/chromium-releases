@@ -113,7 +113,12 @@ class COMPOSITOR_EXPORT LayerAnimator
   // of this animation sequence.
   void ScheduleAnimation(LayerAnimationSequence* animation);
 
-  // Schedules the animations to be run together. Obviously will no work if
+  // Starts the animations to be run together. Obviously will not work if
+  // they animate any common properties. The animator takes ownership of the
+  // animation sequences. Takes PreemptionStrategy into account.
+  void StartTogether(const std::vector<LayerAnimationSequence*>& animations);
+
+  // Schedules the animations to be run together. Obviously will not work if
   // they animate any common properties. The animator takes ownership of the
   // animation sequences.
   void ScheduleTogether(const std::vector<LayerAnimationSequence*>& animations);
@@ -141,8 +146,13 @@ class COMPOSITOR_EXPORT LayerAnimator
   void StopAnimatingProperty(
       LayerAnimationElement::AnimatableProperty property);
 
-  // Stops all animation and clears any queued animations.
-  void StopAnimating();
+  // Stops all animation and clears any queued animations. This call progresses
+  // animations to their end points and notifies all observers.
+  void StopAnimating() { StopAnimatingInternal(false); }
+
+  // This is similar to StopAnimating, but aborts rather than finishes the
+  // animations and notifies all observers.
+  void AbortAllAnimations() { StopAnimatingInternal(true); }
 
   // These functions are used for adding or removing observers from the observer
   // list. The observers are notified when animations end.
@@ -158,6 +168,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   // For testing purposes only.
   void set_disable_timer_for_test(bool disable_timer) {
     disable_timer_for_test_ = disable_timer;
+  }
+
+  void set_last_step_time(base::TimeTicks time) {
+    last_step_time_ = time;
   }
   base::TimeTicks last_step_time() const { return last_step_time_; }
 
@@ -192,7 +206,7 @@ class COMPOSITOR_EXPORT LayerAnimator
 
   // Virtual for testing.
   virtual void ProgressAnimation(LayerAnimationSequence* sequence,
-                                 base::TimeDelta delta);
+                                 base::TimeTicks now);
 
   void ProgressAnimationToEnd(LayerAnimationSequence* sequence);
 
@@ -203,20 +217,16 @@ class COMPOSITOR_EXPORT LayerAnimator
   friend class base::RefCounted<LayerAnimator>;
   friend class ScopedLayerAnimationSettings;
 
-  // We need to keep track of the start time of every running animation.
   class RunningAnimation {
    public:
-    RunningAnimation(const base::WeakPtr<LayerAnimationSequence>& sequence,
-                     base::TimeTicks start_time);
+    RunningAnimation(const base::WeakPtr<LayerAnimationSequence>& sequence);
     ~RunningAnimation();
 
     bool is_sequence_alive() const { return !!sequence_; }
     LayerAnimationSequence* sequence() const { return sequence_.get(); }
-    base::TimeTicks start_time() const { return start_time_; }
 
    private:
     base::WeakPtr<LayerAnimationSequence> sequence_;
-    base::TimeTicks start_time_;
 
     // Copy and assign are allowed.
   };
@@ -229,6 +239,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   virtual void Step(base::TimeTicks time_now) OVERRIDE;
   virtual base::TimeDelta GetTimerInterval() const OVERRIDE;
 
+  // Finishes all animations by either advancing them to their final state or by
+  // aborting them.
+  void StopAnimatingInternal(bool abort);
+
   // Starts or stops stepping depending on whether thare are running animations.
   void UpdateAnimationState();
 
@@ -239,7 +253,7 @@ class COMPOSITOR_EXPORT LayerAnimator
       LayerAnimationSequence* sequence) WARN_UNUSED_RESULT;
 
   // Progresses to the end of the sequence before removing it.
-  void FinishAnimation(LayerAnimationSequence* sequence);
+  void FinishAnimation(LayerAnimationSequence* sequence, bool abort);
 
   // Finishes any running animation with zero duration.
   void FinishAnyAnimationWithZeroDuration();
@@ -330,6 +344,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   // This prevents the animator from automatically stepping through animations
   // and allows for manual stepping.
   bool disable_timer_for_test_;
+
+  // Prevents timer adjustments in case when we start multiple animations
+  // with preemption strategies that discard previous animations.
+  bool adding_animations_;
 
   // This causes all animations to complete immediately.
   static bool disable_animations_for_test_;

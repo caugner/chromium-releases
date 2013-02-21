@@ -14,10 +14,14 @@
 namespace base {
 class DictionaryValue;
 }
+
+namespace content {
+class WebContents;
+}
+
 namespace extensions {
 class TabHelper;
 }
-class TabContents;
 
 namespace extensions {
 
@@ -63,9 +67,12 @@ class ExtensionActionFunction : public SyncExtensionFunction {
   virtual ~ExtensionActionFunction();
   virtual bool RunImpl() OVERRIDE;
   virtual bool RunExtensionAction() = 0;
+
+  bool ExtractDataFromArguments();
   void NotifyChange();
   void NotifyBrowserActionChange();
   void NotifyLocationBarChange();
+  void NotifySystemIndicatorChange();
   bool SetVisible(bool visible);
 
   // Extension-related information for |tab_id_|.
@@ -80,8 +87,8 @@ class ExtensionActionFunction : public SyncExtensionFunction {
   // kDefaultTabId if none was specified.
   int tab_id_;
 
-  // Tab content for |tab_id_| if one exists.
-  TabContents* contents_;
+  // WebContents for |tab_id_| if one exists.
+  content::WebContents* contents_;
 
   // The extension action for the current extension.
   ExtensionAction* extension_action_;

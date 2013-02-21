@@ -38,11 +38,25 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
                      BookmarkService* bookmark_service);
   ~ScoredHistoryMatch();
 
-  // Calculates a component score based on position, ordering and total
-  // substring match size using metrics recorded in |matches|. |max_length|
-  // is the length of the string against which the terms are being searched.
-  static int ScoreComponentForMatches(const TermMatches& matches,
+  // Calculates a component score based on position, ordering, word
+  // boundaries, and total substring match size using metrics recorded
+  // in |matches| and |word_starts|. |max_length| is the length of
+  // the string against which the terms are being searched.
+  // |provided_matches| should already be sorted and de-duped, and
+  // |word_starts| must be sorted.
+  static int ScoreComponentForMatches(const TermMatches& provided_matches,
+                                      const WordStarts& word_starts,
                                       size_t max_length);
+
+  // Given a set of term matches |provided_matches| and word boundaries
+  // |word_starts|, fills in |matches_at_word_boundaries| with only the
+  // matches in |provided_matches| that are at word boundaries.
+  // |provided_matches| should already be sorted and de-duped, and
+  // |word_starts| must be sorted.
+  static void MakeTermMatchesOnlyAtWordBoundaries(
+      const TermMatches& provided_matches,
+      const WordStarts& word_starts,
+      TermMatches* matches_at_word_boundaries);
 
   // Converts a raw value for some particular scoring factor into a score
   // component for that factor.  The conversion function is piecewise linear,
@@ -61,8 +75,9 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // lower than 10 scored 0.
   static int ScoreForValue(int value, const int* value_ranks);
 
-  // Compares two matches by score. Functor supporting URLIndexPrivateData's
-  // HistoryItemsForTerms function.
+  // Compares two matches by score.  Functor supporting URLIndexPrivateData's
+  // HistoryItemsForTerms function.  Looks at particular fields within
+  // with url_info to make tie-breaking a bit smarter.
   static bool MatchScoreGreater(const ScoredHistoryMatch& m1,
                                 const ScoredHistoryMatch& m2);
 
@@ -73,7 +88,9 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // boundaries).  |url_matches| and |title_matches| provide details
   // about where the matches in the URL and title are and what terms
   // (identified by a term number < |num_terms|) match where.
-  // |word_starts| explains where word boundaries are.
+  // |word_starts| explains where word boundaries are.  Its parts (title
+  // and url) must be sorted.  Also, |url_matches| and
+  // |titles_matches| should already be sorted and de-duped.
   static float GetTopicalityScore(const int num_terms,
                                   const string16& url,
                                   const TermMatches& url_matches,
@@ -97,9 +114,22 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   static float GetPopularityScore(int typed_count,
                                   int visit_count);
 
+  // Combines the three component scores into a final score that's
+  // an appropriate value to use as a relevancy score.
+  static float GetFinalRelevancyScore(
+      float topicality_score,
+      float recency_score,
+      float popularity_score);
+
   // Sets use_new_scoring based on command line flags and/or
   // field trial state.
   static void InitializeNewScoringField();
+
+  // Sets only_count_matches_at_word_boundaries based on the field trial state.
+  static void InitializeOnlyCountMatchesAtWordBoundariesField();
+
+  // Sets also_do_hup_like_scoring based on the field trial state.
+  static void InitializeAlsoDoHUPLikeScoringField();
 
   // End of functions used only in "new" scoring --------------------------
 
@@ -130,12 +160,25 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   static const int kMaxRawTermScore = 30;
   static float* raw_term_score_to_topicality_score;
 
-  // Allows us to determing setting for use_new_scoring_ only once.
+  // Used so we initialize static variables only once (on first use).
   static bool initialized_;
 
-  // Whether to use new-score or old-scoring.  Set in the constructor
-  // by examining command line flags.
+  // Whether to use new-scoring or old-scoring.  Set in the
+  // constructor by examining command line flags and field trial
+  // state.  Note that new-scoring has to do with a new version of the
+  // ordinary scoring done here.  It has nothing to do with and no
+  // affect on HistoryURLProvider-like scoring that can happen in this
+  // class as well (see boolean below).
   static bool use_new_scoring;
+
+  // If true, we ignore all matches that are in the middle of a word.
+  static bool only_count_matches_at_word_boundaries;
+
+  // If true, assign raw scores to be max(whatever it normally would be,
+  // a score that's similar to the score HistoryURL provider would assign).
+  // This variable is set in the constructor by examining the field trial
+  // state.
+  static bool also_do_hup_like_scoring;
 };
 typedef std::vector<ScoredHistoryMatch> ScoredHistoryMatches;
 

@@ -6,9 +6,11 @@
 
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window_state.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 
 TEST_F(BrowserWithTestWindowTest, IsReservedCommandOrKey) {
 #if defined(OS_CHROMEOS)
@@ -115,4 +117,29 @@ TEST_F(BrowserWithTestWindowTest, IsReservedCommandOrKeyIsApp) {
       IDC_FIND, content::NativeWebKeyboardEvent(
           ui::ET_KEY_PRESSED, false, ui::VKEY_F, ui::EF_CONTROL_DOWN, 0)));
 #endif  // USE_AURA
+}
+
+TEST_F(BrowserWithTestWindowTest, AppFullScreen) {
+  // Enable for tabbed browser.
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_FULLSCREEN));
+
+  // Enabled for app windows.
+  browser()->app_name_ = "app";
+  ASSERT_TRUE(browser()->is_app());
+  browser()->command_controller()->FullscreenStateChanged();
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_FULLSCREEN));
+
+  // Enabled for panels.
+  Browser::CreateParams panel_params(Browser::TYPE_PANEL, profile());
+  TestBrowserWindow panel_window;
+  panel_params.window = &panel_window;
+  Browser panel_browser(panel_params);
+  ASSERT_TRUE(panel_browser.is_type_panel());
+  EXPECT_TRUE(chrome::IsCommandEnabled(&panel_browser, IDC_FULLSCREEN));
+
+  // Disabled for app-panels.
+  panel_browser.app_name_ = "app";
+  ASSERT_TRUE(panel_browser.is_app());
+  panel_browser.command_controller()->FullscreenStateChanged();
+  EXPECT_FALSE(chrome::IsCommandEnabled(&panel_browser, IDC_FULLSCREEN));
 }

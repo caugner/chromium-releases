@@ -12,11 +12,13 @@
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_test_util.h"
+#include "chrome/browser/chromeos/drive/event_logger.h"
 #include "chrome/browser/chromeos/drive/mock_drive_file_system.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using ::testing::AtMost;
 using ::testing::StrictMock;
 using ::testing::_;
 
@@ -35,7 +37,8 @@ enum TestEntryType {
 struct TestEntry {
   const FilePath::CharType* path;
   TestEntryType entry_type;
-  int64 last_access;
+  int64 last_accessed;
+  int64 last_modified;
   const char* resource_id;
   int64 file_size;
 
@@ -55,7 +58,8 @@ struct TestEntry {
           entry_type == TYPE_HOSTED_FILE);
       entry.mutable_file_info()->set_size(file_size);
     }
-    entry.mutable_file_info()->set_last_accessed(last_access);
+    entry.mutable_file_info()->set_last_accessed(last_accessed);
+    entry.mutable_file_info()->set_last_modified(last_modified);
     entry.set_resource_id(resource_id);
     return entry;
   }
@@ -84,37 +88,39 @@ ACTION_P(MockReadDirectory, test_entries) {
 }
 
 const TestEntry kEmptyDrive[] = {
-  { FILE_PATH_LITERAL("drive"), TYPE_DIRECTORY, 0, "id:drive" },
+  { FILE_PATH_LITERAL("drive"), TYPE_DIRECTORY, 0, 0, "id:drive" },
 };
 
 const TestEntry kOneFileDrive[] = {
-  { FILE_PATH_LITERAL("drive"), TYPE_DIRECTORY, 0, "id:drive" },
-  { FILE_PATH_LITERAL("drive/abc.txt"), TYPE_REGULAR_FILE, 1, "id:abc" },
+  { FILE_PATH_LITERAL("drive"), TYPE_DIRECTORY, 0, 0, "id:drive" },
+  { FILE_PATH_LITERAL("drive/abc.txt"), TYPE_REGULAR_FILE, 1, 0, "id:abc" },
 };
 
 const char* kExpectedOneFile[] = { "id:abc" };
 
 const TestEntry kComplexDrive[] = {
-  { FILE_PATH_LITERAL("drive"),              TYPE_DIRECTORY,    0, "id:root" },
-  { FILE_PATH_LITERAL("drive/a"),            TYPE_DIRECTORY,    0, "id:a" },
-  { FILE_PATH_LITERAL("drive/a/foo.txt"),    TYPE_REGULAR_FILE, 3, "id:foo1" },
-  { FILE_PATH_LITERAL("drive/a/b"),          TYPE_DIRECTORY,    8, "id:b" },
-  { FILE_PATH_LITERAL("drive/a/b/bar.jpg"),  TYPE_REGULAR_FILE, 5, "id:bar1",
-                                             999 },
-  { FILE_PATH_LITERAL("drive/a/b/new.gdoc"), TYPE_HOSTED_FILE,  7, "id:new" },
-  { FILE_PATH_LITERAL("drive/a/buz.zip"),    TYPE_REGULAR_FILE, 4, "id:buz1" },
-  { FILE_PATH_LITERAL("drive/a/old.gdoc"),   TYPE_HOSTED_FILE,  1, "id:old" },
-  { FILE_PATH_LITERAL("drive/c"),            TYPE_DIRECTORY,    0, "id:c" },
-  { FILE_PATH_LITERAL("drive/c/foo.txt"),    TYPE_REGULAR_FILE, 2, "id:foo2" },
-  { FILE_PATH_LITERAL("drive/c/buz.zip"),    TYPE_REGULAR_FILE, 1, "id:buz2" },
-  { FILE_PATH_LITERAL("drive/bar.jpg"),      TYPE_REGULAR_FILE, 6, "id:bar2" },
+  // Path                                  Type           Access Modify   ID
+  { FILE_PATH_LITERAL("drive"),            TYPE_DIRECTORY,    0, 0, "id:root" },
+  { FILE_PATH_LITERAL("drive/a"),          TYPE_DIRECTORY,    0, 0, "id:a" },
+  { FILE_PATH_LITERAL("drive/a/foo.txt"),  TYPE_REGULAR_FILE, 3, 2, "id:foo1" },
+  { FILE_PATH_LITERAL("drive/a/b"),        TYPE_DIRECTORY,    8, 0, "id:b" },
+  { FILE_PATH_LITERAL("drive/a/bar.jpg"),  TYPE_REGULAR_FILE, 5, 0, "id:bar1",
+                                           999 },
+  { FILE_PATH_LITERAL("drive/a/b/x.gdoc"), TYPE_HOSTED_FILE,  7, 0, "id:new" },
+  { FILE_PATH_LITERAL("drive/a/buz.zip"),  TYPE_REGULAR_FILE, 4, 0, "id:buz1" },
+  { FILE_PATH_LITERAL("drive/a/old.gdoc"), TYPE_HOSTED_FILE,  1, 0, "id:old" },
+  { FILE_PATH_LITERAL("drive/c"),          TYPE_DIRECTORY,    0, 0, "id:c" },
+  { FILE_PATH_LITERAL("drive/c/foo.txt"),  TYPE_REGULAR_FILE, 3, 1, "id:foo2" },
+  { FILE_PATH_LITERAL("drive/c/buz.zip"),  TYPE_REGULAR_FILE, 1, 0, "id:buz2" },
+  { FILE_PATH_LITERAL("drive/bar.jpg"),    TYPE_REGULAR_FILE, 6, 0, "id:bar2" },
 };
 
 const char* kTop3Files[] = {
   "id:bar2",  // The file with the largest timestamp
               // "bar1" is the second latest, but its file size is over limit.
   "id:buz1",  // The third latest file.
-  "id:foo1"   // 4th.
+  "id:foo1"   // 4th. Has same access time with id:foo2, so the one with the
+              // newer modified time wins.
 };
 
 const char* kAllRegularFiles[] = {
@@ -126,14 +132,15 @@ const char* kAllRegularFiles[] = {
 class DrivePrefetcherTest : public testing::Test {
  public:
   DrivePrefetcherTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_) {}
+      : dummy_event_logger_(0),
+        ui_thread_(content::BrowserThread::UI, &message_loop_) {}
 
   virtual void SetUp() OVERRIDE {
     mock_file_system_.reset(new StrictMock<MockDriveFileSystem>);
   }
 
   virtual void TearDown() OVERRIDE {
-    EXPECT_CALL(*mock_file_system_, RemoveObserver(_));
+    EXPECT_CALL(*mock_file_system_, RemoveObserver(_)).Times(AtMost(1));
     prefetcher_.reset();
     mock_file_system_.reset();
   }
@@ -141,12 +148,14 @@ class DrivePrefetcherTest : public testing::Test {
  protected:
   // Sets a new prefetcher that fetches at most |prefetch_count| latest files.
   void InitPrefetcher(int prefetch_count, int64 size_limit) {
-    EXPECT_CALL(*mock_file_system_, AddObserver(_));
+    EXPECT_CALL(*mock_file_system_, AddObserver(_)).Times(AtMost(1));
 
     DrivePrefetcherOptions options;
     options.initial_prefetch_count = prefetch_count;
     options.prefetch_file_size_limit = size_limit;
-    prefetcher_.reset(new DrivePrefetcher(mock_file_system_.get(), options));
+    prefetcher_.reset(new DrivePrefetcher(mock_file_system_.get(),
+                                          &dummy_event_logger_,
+                                          options));
   }
 
   // Flushes all the pending tasks on the current thread.
@@ -174,6 +183,7 @@ class DrivePrefetcherTest : public testing::Test {
     EXPECT_EQ(expected, fetched_list);
   }
 
+  EventLogger dummy_event_logger_;
   scoped_ptr<StrictMock<MockDriveFileSystem> > mock_file_system_;
   scoped_ptr<DrivePrefetcher> prefetcher_;
   MessageLoopForUI message_loop_;

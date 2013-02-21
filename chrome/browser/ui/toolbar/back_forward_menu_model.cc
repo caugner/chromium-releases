@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/singleton_tabs.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/favicon_status.h"
@@ -211,7 +210,7 @@ void BackForwardMenuModel::ActivatedAt(int index, int event_flags) {
 void BackForwardMenuModel::MenuWillShow() {
   content::RecordComputedAction(BuildActionName("Popup", -1));
   requested_favicons_.clear();
-  load_consumer_.CancelAllRequests();
+  cancelable_task_tracker_.TryCancelAll();
 }
 
 bool BackForwardMenuModel::IsSeparator(int index) const {
@@ -238,6 +237,10 @@ void BackForwardMenuModel::SetMenuModelDelegate(
   menu_model_delegate_ = menu_model_delegate;
 }
 
+ui::MenuModelDelegate* BackForwardMenuModel::GetMenuModelDelegate() const {
+  return menu_model_delegate_;
+}
+
 void BackForwardMenuModel::FetchFavicon(NavigationEntry* entry) {
   // If the favicon has already been requested for this menu, don't do
   // anything.
@@ -250,26 +253,29 @@ void BackForwardMenuModel::FetchFavicon(NavigationEntry* entry) {
       browser_->profile(), Profile::EXPLICIT_ACCESS);
   if (!favicon_service)
     return;
-  FaviconService::Handle handle = favicon_service->GetFaviconImageForURL(
-      FaviconService::FaviconForURLParams(browser_->profile(), entry->GetURL(),
-          history::FAVICON, gfx::kFaviconSize, &load_consumer_),
+
+  favicon_service->GetFaviconImageForURL(
+      FaviconService::FaviconForURLParams(browser_->profile(),
+                                          entry->GetURL(),
+                                          history::FAVICON,
+                                          gfx::kFaviconSize),
       base::Bind(&BackForwardMenuModel::OnFavIconDataAvailable,
-                 base::Unretained(this)));
-  load_consumer_.SetClientData(favicon_service, handle, entry->GetUniqueID());
+                 base::Unretained(this),
+                 entry->GetUniqueID()),
+      &cancelable_task_tracker_);
 }
 
 void BackForwardMenuModel::OnFavIconDataAvailable(
-    FaviconService::Handle handle,
+    int navigation_entry_unique_id,
     const history::FaviconImageResult& image_result) {
   if (!image_result.image.IsEmpty()) {
-    int unique_id = load_consumer_.GetClientDataForCurrentRequest();
-    // Find the current model_index for the unique_id.
+    // Find the current model_index for the unique id.
     NavigationEntry* entry = NULL;
     int model_index = -1;
     for (int i = 0; i < GetItemCount() - 1; i++) {
       if (IsSeparator(i))
         continue;
-      if (GetNavigationEntry(i)->GetUniqueID() == unique_id) {
+      if (GetNavigationEntry(i)->GetUniqueID() == navigation_entry_unique_id) {
         model_index = i;
         entry = GetNavigationEntry(i);
         break;

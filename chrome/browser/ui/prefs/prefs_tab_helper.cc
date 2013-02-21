@@ -9,12 +9,14 @@
 #include "base/prefs/overlay_user_pref_store.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/pref_names_util.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -38,7 +40,7 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(PrefsTabHelper)
 namespace {
 
 // Registers prefs only used for migration.
-static void RegisterPrefsToMigrate(PrefService* prefs) {
+void RegisterPrefsToMigrate(PrefService* prefs) {
   prefs->RegisterLocalizedStringPref(prefs::kWebKitOldStandardFontFamily,
                                      IDS_STANDARD_FONT_FAMILY,
                                      PrefService::UNSYNCABLE_PREF);
@@ -95,10 +97,7 @@ static void RegisterPrefsToMigrate(PrefService* prefs) {
 
 // The list of prefs we want to observe.
 const char* kPrefsToObserve[] = {
-  prefs::kDefaultZoomLevel,
   prefs::kDefaultCharset,
-  prefs::kEnableReferrers,
-  prefs::kEnableDoNotTrack,
   prefs::kWebKitAllowDisplayingInsecureContent,
   prefs::kWebKitAllowRunningInsecureContent,
   prefs::kWebKitDefaultFixedFontSize,
@@ -122,20 +121,27 @@ const int kPrefsToObserveLength = arraysize(kPrefsToObserve);
 // Registers a preference under the path |map_name| for each script used for
 // per-script font prefs.  For example, if |map_name| is "fonts.serif", then
 // "fonts.serif.Arab", "fonts.serif.Hang", etc. are registered.
-void RegisterFontFamilyMap(PrefService* prefs, const char* map_name) {
+void RegisterFontFamilyMap(PrefService* prefs,
+                           const char* map_name,
+                           const std::set<std::string>& fonts_with_defaults) {
   for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
     const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
     std::string pref_name_str = base::StringPrintf("%s.%s", map_name, script);
     const char* pref_name = pref_name_str.c_str();
-    if (!prefs->FindPreference(pref_name))
+    if (fonts_with_defaults.find(pref_name) == fonts_with_defaults.end()) {
+      // We haven't already set a default value for this font preference, so set
+      // an empty string as the default.
       prefs->RegisterStringPref(pref_name, "", PrefService::UNSYNCABLE_PREF);
+    }
   }
 }
 
 // Registers |obs| to observe per-script font prefs under the path |map_name|.
-void RegisterFontFamilyMapObserver(PrefChangeRegistrar* registrar,
-                                   const char* map_name,
-                                   content::NotificationObserver* obs) {
+void RegisterFontFamilyMapObserver(
+    PrefChangeRegistrar* registrar,
+    const char* map_name,
+    const PrefChangeRegistrar::NamedChangeCallback& obs) {
+  DCHECK(StartsWithASCII(map_name, "webkit.webprefs.", true));
   for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
     const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
     std::string pref_name = base::StringPrintf("%s.%s", map_name, script);
@@ -332,7 +338,7 @@ const struct {
 
 const int kPrefsToMigrateLength = ARRAYSIZE_UNSAFE(kPrefNamesToMigrate);
 
-static void MigratePreferences(PrefService* prefs) {
+void MigratePreferences(PrefService* prefs) {
   RegisterPrefsToMigrate(prefs);
   for (int i = 0; i < kPrefsToMigrateLength; ++i) {
     const PrefService::Preference* pref =
@@ -346,6 +352,31 @@ static void MigratePreferences(PrefService* prefs) {
   }
 }
 
+// Sets a font family pref in |prefs| to |pref_value|.
+void OverrideFontFamily(WebPreferences* prefs,
+                        const std::string& generic_family,
+                        const std::string& script,
+                        const std::string& pref_value) {
+  WebPreferences::ScriptFontFamilyMap* map = NULL;
+  if (generic_family == "standard")
+    map = &prefs->standard_font_family_map;
+  else if (generic_family == "fixed")
+    map = &prefs->fixed_font_family_map;
+  else if (generic_family == "serif")
+    map = &prefs->serif_font_family_map;
+  else if (generic_family == "sansserif")
+    map = &prefs->sans_serif_font_family_map;
+  else if (generic_family == "cursive")
+    map = &prefs->cursive_font_family_map;
+  else if (generic_family == "fantasy")
+    map = &prefs->fantasy_font_family_map;
+  else if (generic_family == "pictograph")
+    map = &prefs->pictograph_font_family_map;
+  else
+    NOTREACHED() << "Unknown generic font family: " << generic_family;
+  (*map)[script] = UTF8ToUTF16(pref_value);
+}
+
 }  // namespace
 
 PrefsTabHelper::PrefsTabHelper(WebContents* contents)
@@ -353,23 +384,42 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
   PrefService* prefs = GetProfile()->GetPrefs();
   pref_change_registrar_.Init(prefs);
   if (prefs) {
-    for (int i = 0; i < kPrefsToObserveLength; ++i)
-      pref_change_registrar_.Add(kPrefsToObserve[i], this);
+    base::Closure renderer_callback = base::Bind(
+        &PrefsTabHelper::UpdateRendererPreferences, base::Unretained(this));
+    pref_change_registrar_.Add(prefs::kDefaultZoomLevel, renderer_callback);
+    pref_change_registrar_.Add(prefs::kEnableDoNotTrack, renderer_callback);
+    pref_change_registrar_.Add(prefs::kEnableReferrers, renderer_callback);
+
+    PrefChangeRegistrar::NamedChangeCallback webkit_callback = base::Bind(
+        &PrefsTabHelper::OnWebPrefChanged, base::Unretained(this));
+    for (int i = 0; i < kPrefsToObserveLength; ++i) {
+      const char* pref_name = kPrefsToObserve[i];
+      DCHECK(std::string(pref_name) == prefs::kDefaultCharset ||
+             StartsWithASCII(pref_name, "webkit.webprefs.", true));
+      pref_change_registrar_.Add(pref_name, webkit_callback);
+    }
 
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitStandardFontFamilyMap, this);
+                                  prefs::kWebKitStandardFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitFixedFontFamilyMap, this);
+                                  prefs::kWebKitFixedFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitSerifFontFamilyMap, this);
+                                  prefs::kWebKitSerifFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitSansSerifFontFamilyMap, this);
+                                  prefs::kWebKitSansSerifFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitCursiveFontFamilyMap, this);
+                                  prefs::kWebKitCursiveFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitFantasyFontFamilyMap, this);
+                                  prefs::kWebKitFantasyFontFamilyMap,
+                                  webkit_callback);
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
-                                  prefs::kWebKitPictographFontFamilyMap, this);
+                                  prefs::kWebKitPictographFontFamilyMap,
+                                  webkit_callback);
   }
 
   renderer_preferences_util::UpdateFromSystemSettings(
@@ -468,6 +518,7 @@ void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
                                      PrefService::SYNCABLE_PREF);
 
   // Register font prefs that have defaults.
+  std::set<std::string> fonts_with_defaults;
   UScriptCode browser_script = GetScriptOfBrowserLocale();
   for (size_t i = 0; i < kFontDefaultsLength; ++i) {
     const FontDefault& pref = kFontDefaults[i];
@@ -489,17 +540,25 @@ void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
       prefs->RegisterLocalizedStringPref(pref.pref_name,
                                          pref.resource_id,
                                          PrefService::UNSYNCABLE_PREF);
+      fonts_with_defaults.insert(pref.pref_name);
     }
   }
 
   // Register font prefs that don't have defaults.
-  RegisterFontFamilyMap(prefs, prefs::kWebKitStandardFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitFixedFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitSerifFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitSansSerifFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitCursiveFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitFantasyFontFamilyMap);
-  RegisterFontFamilyMap(prefs, prefs::kWebKitPictographFontFamilyMap);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitStandardFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitFixedFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitSerifFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitSansSerifFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitCursiveFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitFantasyFontFamilyMap,
+                        fonts_with_defaults);
+  RegisterFontFamilyMap(prefs, prefs::kWebKitPictographFontFamilyMap,
+                        fonts_with_defaults);
 
   prefs->RegisterLocalizedIntegerPref(prefs::kWebKitDefaultFontSize,
                                       IDS_DEFAULT_FONT_SIZE,
@@ -539,22 +598,6 @@ void PrefsTabHelper::Observe(int type,
       break;
     }
 #endif
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      std::string* pref_name_in = content::Details<std::string>(details).ptr();
-      DCHECK(content::Source<PrefService>(source).ptr() ==
-                 GetProfile()->GetPrefs());
-      if (*pref_name_in == prefs::kDefaultCharset ||
-          StartsWithASCII(*pref_name_in, "webkit.webprefs.", true)) {
-        UpdateWebPreferences();
-      } else if (*pref_name_in == prefs::kDefaultZoomLevel ||
-                 *pref_name_in == prefs::kEnableReferrers ||
-                 *pref_name_in == prefs::kEnableDoNotTrack) {
-        UpdateRendererPreferences();
-      } else {
-        NOTREACHED() << "unexpected pref change notification" << *pref_name_in;
-      }
-      break;
-    }
     default:
       NOTREACHED();
   }
@@ -573,4 +616,36 @@ void PrefsTabHelper::UpdateRendererPreferences() {
 
 Profile* PrefsTabHelper::GetProfile() {
   return Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+}
+
+void PrefsTabHelper::OnWebPrefChanged(const std::string& pref_name) {
+  // When a font family pref's value goes from non-empty to the empty string, we
+  // must add it to the usual WebPreferences struct passed to the renderer.
+  //
+  // The empty string means to fall back to the pref for the Common script
+  // ("Zyyy").  For example, if chrome.fonts.serif.Cyrl is the empty string, it
+  // means to use chrome.fonts.serif.Zyyy for Cyrillic script. Prefs that are
+  // the empty string are normally not passed to WebKit, since there are so many
+  // of them that it would cause a performance regression. Not passing the pref
+  // is normally okay since WebKit does the desired fallback behavior regardless
+  // of whether the empty string is passed or the pref is not passed at all. But
+  // if the pref has changed from non-empty to the empty string, we must let
+  // WebKit know.
+  std::string generic_family;
+  std::string script;
+  if (pref_names_util::ParseFontNamePrefPath(pref_name,
+                                             &generic_family,
+                                             &script)) {
+    PrefService* prefs = GetProfile()->GetPrefs();
+    std::string pref_value = prefs->GetString(pref_name.c_str());
+    if (pref_value.empty()) {
+      WebPreferences web_prefs =
+          web_contents_->GetRenderViewHost()->GetWebkitPreferences();
+      OverrideFontFamily(&web_prefs, generic_family, script, "");
+      web_contents_->GetRenderViewHost()->UpdateWebkitPreferences(web_prefs);
+      return;
+    }
+  }
+
+  UpdateWebPreferences();
 }

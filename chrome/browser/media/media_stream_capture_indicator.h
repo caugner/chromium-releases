@@ -10,10 +10,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "content/public/common/media_stream_request.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/image/image_skia.h"
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 class StatusIcon;
 class StatusTray;
@@ -22,8 +25,7 @@ class StatusTray;
 // is deleted.
 class MediaStreamCaptureIndicator
     : public base::RefCountedThreadSafe<MediaStreamCaptureIndicator>,
-      public ui::SimpleMenuModel::Delegate,
-      public ImageLoadingTracker::Observer {
+      public ui::SimpleMenuModel::Delegate {
  public:
   MediaStreamCaptureIndicator();
 
@@ -48,39 +50,55 @@ class MediaStreamCaptureIndicator
   // Returns true if the render process is capturing media.
   bool IsProcessCapturing(int render_process_id, int render_view_id) const;
 
-  // ImageLoadingTracker::Observer implementation.
-  virtual void OnImageLoaded(const gfx::Image& image,
-                             const std::string& extension_id,
-                             int index) OVERRIDE;
+  // Returns true if the render process is capturing tab media.
+  bool IsProcessCapturingTab(int render_process_id, int render_view_id) const;
+
+  // ImageLoader callback.
+  void OnImageLoaded(const string16& message, const gfx::Image& image);
 
  private:
   // Struct to store the usage information of the capture devices for each tab.
+  // Note: It is not safe to dereference WebContents pointer. This is used to
+  // track the tab after navigations as render_view_id's can change.
   // TODO(estade): this should be called CaptureDeviceContents; not all the
   // render views it represents are tabs.
   struct CaptureDeviceTab {
-    CaptureDeviceTab(int render_process_id,
+    CaptureDeviceTab(content::WebContents* web_contents,
+                     int render_process_id,
                      int render_view_id)
-        : render_process_id(render_process_id),
+        : web_contents(web_contents),
+          render_process_id(render_process_id),
           render_view_id(render_view_id),
           audio_ref_count(0),
-          video_ref_count(0) {}
+          video_ref_count(0),
+          tab_capture_ref_count(0) {}
 
+    content::WebContents* web_contents;
     int render_process_id;
     int render_view_id;
     int audio_ref_count;
     int video_ref_count;
+    int tab_capture_ref_count;
   };
 
   // A private predicate used in std::find_if to find a |CaptureDeviceTab|
-  // which matches the information specified at construction.
+  // which matches the information specified at construction. A tab will match
+  // if either the web_contents pointer is the same or the render_process_id and
+  // render_view_id's are the same. In the first case, a tab with a UI indicator
+  // may have changed page so the id's are different. In the second case, the
+  // web_contents may have already been destroyed before the indicator was
+  // hidden.
   class TabEquals {
    public:
-    TabEquals(int render_process_id, int render_view_id);
+    TabEquals(content::WebContents* web_contents,
+              int render_process_id,
+              int render_view_id);
 
     bool operator() (
         const MediaStreamCaptureIndicator::CaptureDeviceTab& tab);
 
    private:
+    content::WebContents* web_contents_;
     int render_process_id_;
     int render_view_id_;
   };
@@ -131,9 +149,6 @@ class MediaStreamCaptureIndicator
   // UpdateStatusTrayIconContextMenu().
   void UpdateStatusTrayIconDisplay(bool audio, bool video);
 
-  // Initializes image loading state.
-  void EnsureImageLoadingTracker();
-
   // Reference to our status icon - owned by the StatusTray. If null,
   // the platform doesn't support status icons.
   StatusIcon* status_icon_;
@@ -147,13 +162,7 @@ class MediaStreamCaptureIndicator
   typedef std::vector<CaptureDeviceTab> CaptureDeviceTabs;
   CaptureDeviceTabs tabs_;
 
-  // Tracks the load of extension icons.
-  scoped_ptr<ImageLoadingTracker> tracker_;
-  // The messages to display when extension images are loaded. The index
-  // corresponds to the index of the associated LoadImage request.
-  std::map<int, string16> pending_messages_;
-  // Tracks the number of requests to |tracker_|.
-  int request_index_;
+  bool should_show_balloon_;
 };
 
 #endif  // CHROME_BROWSER_MEDIA_MEDIA_STREAM_CAPTURE_INDICATOR_H_

@@ -18,11 +18,11 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/table/table_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_client_view.h"
 
 using views::GridLayout;
 using views::Textfield;
@@ -212,7 +212,7 @@ void EditSearchEngineDialog::Init() {
   }
 
   views::Label* description_label = new views::Label(description);
-  description_label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  description_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   layout->AddView(description_label);
 
   layout->AddPaddingRow(0, related_y);
@@ -221,7 +221,7 @@ void EditSearchEngineDialog::Init() {
 views::Label* EditSearchEngineDialog::CreateLabel(int message_id) {
   views::Label* label =
       new views::Label(l10n_util::GetStringUTF16(message_id));
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   return label;
 }
 

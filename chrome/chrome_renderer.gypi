@@ -15,13 +15,8 @@
         'chrome_resources.gyp:chrome_strings',
         '../content/content.gyp:content_renderer',
         '../net/net.gyp:net',
-        '../ppapi/ppapi_internal.gyp:ppapi_host',
-        '../ppapi/ppapi_internal.gyp:ppapi_proxy',
-        '../ppapi/ppapi_internal.gyp:ppapi_ipc',
-        '../ppapi/ppapi_internal.gyp:ppapi_shared',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
-        '../third_party/cld/cld.gyp:cld',
         '../third_party/hunspell/hunspell.gyp:hunspell',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
@@ -35,7 +30,6 @@
       ],
       'include_dirs': [
         '..',
-        '../third_party/cld',
       ],
       'defines': [
         '<@(nacl_defines)',
@@ -152,7 +146,6 @@
         'renderer/resources/extensions/browser_action_custom_bindings.js',
         'renderer/resources/extensions/context_menus_custom_bindings.js',
         'renderer/resources/extensions/declarative_webrequest_custom_bindings.js',
-        'renderer/resources/extensions/devtools_custom_bindings.js',
         'renderer/resources/extensions/event.js',
         'renderer/resources/extensions/experimental.offscreenTabs_custom_bindings.js',
         'renderer/resources/extensions/extension_custom_bindings.js',
@@ -172,6 +165,7 @@
         'renderer/resources/extensions/schema_generated_bindings.js',
         'renderer/resources/extensions/send_request.js',
         'renderer/resources/extensions/set_icon.js',
+        'renderer/resources/extensions/system_indicator_custom_bindings.js',
         'renderer/resources/extensions/tts_custom_bindings.js',
         'renderer/resources/extensions/tts_engine_custom_bindings.js',
         'renderer/resources/extensions/types_custom_bindings.js',
@@ -202,6 +196,10 @@
         'renderer/pepper/chrome_renderer_pepper_host_factory.h',
         'renderer/pepper/pepper_flash_font_file_host.cc',
         'renderer/pepper/pepper_flash_font_file_host.h',
+        'renderer/pepper/pepper_flash_fullscreen_host.cc',
+        'renderer/pepper/pepper_flash_fullscreen_host.h',
+        'renderer/pepper/pepper_flash_menu_host.cc',
+        'renderer/pepper/pepper_flash_menu_host.h',
         'renderer/pepper/pepper_flash_renderer_message_filter.cc',
         'renderer/pepper/pepper_flash_renderer_message_filter.h',
         'renderer/pepper/pepper_helper.cc',
@@ -259,12 +257,17 @@
         'renderer/searchbox/searchbox_extension.h',
         'renderer/security_filter_peer.cc',
         'renderer/security_filter_peer.h',
+        'renderer/spellchecker/cocoa_spelling_engine_mac.cc',
+        'renderer/spellchecker/cocoa_spelling_engine_mac.h',
+        'renderer/spellchecker/hunspell_engine.cc',
+        'renderer/spellchecker/hunspell_engine.h',
         'renderer/spellchecker/spellcheck_provider.cc',
         'renderer/spellchecker/spellcheck_provider.h',
         'renderer/spellchecker/spellcheck.cc',
         'renderer/spellchecker/spellcheck.h',
         'renderer/spellchecker/spellcheck_worditerator.cc',
         'renderer/spellchecker/spellcheck_worditerator.h',
+        'renderer/spellchecker/spelling_engine.h',
         'renderer/static_v8_external_string_resource.cc',
         'renderer/static_v8_external_string_resource.h',
         'renderer/translate_helper.cc',
@@ -280,15 +283,27 @@
             'nacl',
           ],
         }],
+        ['enable_plugins==1', {
+          'dependencies': [
+            '../ppapi/ppapi_internal.gyp:ppapi_host',
+            '../ppapi/ppapi_internal.gyp:ppapi_proxy',
+            '../ppapi/ppapi_internal.gyp:ppapi_ipc',
+            '../ppapi/ppapi_internal.gyp:ppapi_shared',
+          ],
+        }, {  # enable_plugins==0
+          'sources/': [
+            ['exclude', '^renderer/pepper/'],
+          ],
+        }],
         ['safe_browsing==1', {
           'defines': [
-            'ENABLE_SAFE_BROWSING',
+            'FULL_SAFE_BROWSING',
           ],
           'dependencies': [
             'safe_browsing_proto',
             '../third_party/smhasher/smhasher.gyp:murmurhash3',
           ],
-        }, {  # safe_browsing==0
+        }, {  # safe_browsing==0 || safe_browsing==2
           'sources/': [
             ['exclude', '^renderer/safe_browsing/'],
           ],
@@ -298,6 +313,14 @@
             '../third_party/mach_override/mach_override.gyp:mach_override',
           ],
         }],
+        ['enable_language_detection==1', {
+          'dependencies': [
+            '../third_party/cld/cld.gyp:cld',
+          ],
+          'include_dirs': [
+            '../third_party/cld',
+          ],
+        }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
@@ -305,6 +328,11 @@
           ],
         }],
         ['OS=="android"', {
+          'sources!': [
+            'renderer/prerender/prerender_webmediaplayer.cc',
+            'renderer/prerender/prerender_webmediaplayer.h',
+            'renderer/print_web_view_helper.cc',
+          ],
           'defines': [
             'ENABLE_MOBILE_YOUTUBE_PLUGIN',
           ],

@@ -16,8 +16,8 @@ class AppListControllerDelegate {
  public:
   virtual ~AppListControllerDelegate();
 
-  // Close the view.
-  virtual void CloseView() = 0;
+  // Dismisses the view.
+  virtual void DismissView() = 0;
 
   // Handle the view being closed.
   virtual void ViewClosing();
@@ -30,6 +30,10 @@ class AppListControllerDelegate {
   virtual void PinApp(const std::string& extension_id);
   virtual void UnpinApp(const std::string& extension_id);
   virtual bool CanPin() = 0;
+
+  // Be aware of the extension uninstalling flow.
+  virtual void AboutToUninstallApp() {}
+  virtual void UninstallAppCompleted() {}
 
   // Whether the controller supports showing the Create Shortcuts dialog.
   virtual bool CanShowCreateShortcutsDialog() = 0;
@@ -52,6 +56,9 @@ class AppListControllerDelegate {
 };
 
 namespace app_list_controller {
+
+// Do any once off initialization needed for the app list.
+void InitAppList();
 
 // Show the app list.
 void ShowAppList();

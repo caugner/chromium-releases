@@ -36,9 +36,10 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   }
 
   // ash::ShellDelegate overrides;
-  virtual bool IsUserLoggedIn() OVERRIDE;
-  virtual bool IsSessionStarted() OVERRIDE;
-  virtual bool IsFirstRunAfterBoot() OVERRIDE;
+  virtual bool IsUserLoggedIn() const OVERRIDE;
+  virtual bool IsSessionStarted() const OVERRIDE;
+  virtual bool IsFirstRunAfterBoot() const OVERRIDE;
+  virtual bool CanLockScreen() const OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
@@ -47,7 +48,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool is_incognito) OVERRIDE;
   virtual void ToggleMaximized() OVERRIDE;
-  virtual void OpenFileManager(bool as_dialog) OVERRIDE;
+  virtual void OpenFileManager() OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
   virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
   virtual void RestoreTab() OVERRIDE;
@@ -55,13 +56,18 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void ShowKeyboardOverlay() OVERRIDE;
   virtual void ShowTaskManager() OVERRIDE;
   virtual content::BrowserContext* GetCurrentBrowserContext() OVERRIDE;
-  virtual void ToggleSpokenFeedback() OVERRIDE;
+  virtual void ToggleHighContrast() OVERRIDE;
   virtual bool IsSpokenFeedbackEnabled() const OVERRIDE;
+  virtual void ToggleSpokenFeedback(
+      ash::AccessibilityNotificationVisibility notify) OVERRIDE;
+  virtual bool IsHighContrastEnabled() const OVERRIDE;
+  virtual void SetMagnifier(ash::MagnifierType type) OVERRIDE;
+  virtual ash::MagnifierType GetMagnifierType() const OVERRIDE;
+  virtual bool ShouldAlwaysShowAccessibilityMenu() const OVERRIDE;
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
   virtual ash::LauncherDelegate* CreateLauncherDelegate(
       ash::LauncherModel* model) OVERRIDE;
-  virtual ash::SystemTrayDelegate* CreateSystemTrayDelegate(
-      ash::SystemTray* tray) OVERRIDE;
+  virtual ash::SystemTrayDelegate* CreateSystemTrayDelegate() OVERRIDE;
   virtual ash::UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
   virtual ash::CapsLockDelegate* CreateCapsLockDelegate() OVERRIDE;
   virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
@@ -71,9 +77,13 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void HandleMediaPlayPause() OVERRIDE;
   virtual void HandleMediaPrevTrack() OVERRIDE;
   virtual string16 GetTimeRemainingString(base::TimeDelta delta) OVERRIDE;
+  virtual string16 GetTimeDurationLongString(base::TimeDelta delta) OVERRIDE;
   virtual void SaveScreenMagnifierScale(double scale) OVERRIDE;
   virtual double GetSavedScreenMagnifierScale() OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(aura::RootWindow* root) OVERRIDE;
+  virtual aura::client::StackingClient* CreateStackingClient() OVERRIDE;
+  virtual ash::RootWindowHostFactory* CreateRootWindowHostFactory() OVERRIDE;
+  virtual string16 GetProductName() const OVERRIDE;
 
   // content::NotificationObserver override:
   virtual void Observe(int type,

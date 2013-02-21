@@ -58,6 +58,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual void RenderViewCreated(content::RenderView* render_view) OVERRIDE;
   virtual void SetNumberOfViews(int number_of_views) OVERRIDE;
   virtual SkBitmap* GetSadPluginBitmap() OVERRIDE;
+  virtual SkBitmap* GetSadWebViewBitmap() OVERRIDE;
   virtual std::string GetDefaultEncoding() OVERRIDE;
   virtual bool OverrideCreatePlugin(
       content::RenderView* render_view,
@@ -86,7 +87,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       webkit_media::MediaStreamClient* media_stream_client,
       media::MediaLog* media_log) OVERRIDE;
   virtual bool RunIdleHandlerWhenWidgetsHidden() OVERRIDE;
-  virtual bool AllowPopup(const GURL& creator) OVERRIDE;
+  virtual bool AllowPopup() OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
                           const GURL& url,
                           bool is_initial_navigation,
@@ -94,6 +95,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual bool WillSendRequest(WebKit::WebFrame* frame,
                                content::PageTransition transition_type,
                                const GURL& url,
+                               const GURL& first_party_for_cookies,
                                GURL* new_url) OVERRIDE;
   virtual bool ShouldPumpEventsDuringCookieMessage() OVERRIDE;
   virtual void DidCreateScriptContext(WebKit::WebFrame* frame,
@@ -130,14 +132,16 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   // For testing.
   void SetExtensionDispatcher(extensions::Dispatcher* extension_dispatcher);
 
+  // Sets a new |spellcheck|. Used for low-mem restart and testing only.
+  // Takes ownership of |spellcheck|.
+  void SetSpellcheck(SpellCheck* spellcheck);
+
   // Called in low-memory conditions to dump the memory used by the spellchecker
   // and start over.
   void OnPurgeMemory();
 
   virtual void RegisterPPAPIInterfaceFactories(
       webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) OVERRIDE;
-
-  SpellCheck* spellcheck() const { return spellcheck_.get(); }
 
   WebKit::WebPlugin* CreatePlugin(
       content::RenderView* render_view,

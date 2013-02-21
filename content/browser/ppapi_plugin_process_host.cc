@@ -101,14 +101,12 @@ PpapiPluginProcessHost* PpapiPluginProcessHost::CreateBrokerHost(
 void PpapiPluginProcessHost::DidCreateOutOfProcessInstance(
     int plugin_process_id,
     int32 pp_instance,
-    int render_process_id,
-    int render_view_id) {
+    const PepperRendererInstanceData& instance_data) {
   for (PpapiPluginProcessHostIterator iter; !iter.Done(); ++iter) {
     if (iter->process_.get() &&
         iter->process_->GetData().id == plugin_process_id) {
       // Found the plugin.
-      iter->host_impl_->AddInstanceForView(pp_instance,
-                                           render_process_id, render_view_id);
+      iter->host_impl_->AddInstance(pp_instance, instance_data);
       return;
     }
   }
@@ -130,7 +128,7 @@ void PpapiPluginProcessHost::DidDeleteOutOfProcessInstance(
     if (iter->process_.get() &&
         iter->process_->GetData().id == plugin_process_id) {
       // Found the plugin.
-      iter->host_impl_->DeleteInstanceForView(pp_instance);
+      iter->host_impl_->DeleteInstance(pp_instance);
       return;
     }
   }
@@ -162,25 +160,26 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(
     net::HostResolver* host_resolver)
     : permissions_(
           ppapi::PpapiPermissions::GetForCommandLine(info.permissions)),
-      network_observer_(new PluginNetworkObserver(this)),
       profile_data_directory_(profile_data_directory),
       is_broker_(false) {
   process_.reset(new BrowserChildProcessHostImpl(
       PROCESS_TYPE_PPAPI_PLUGIN, this));
 
   filter_ = new PepperMessageFilter(PepperMessageFilter::PLUGIN,
+                                    permissions_,
                                     host_resolver);
 
-  host_impl_ = new BrowserPpapiHostImpl(this, permissions_);
-
-  file_filter_ = new PepperTrustedFileMessageFilter(
-      process_->GetData().id, info.name, profile_data_directory);
+  host_impl_.reset(new BrowserPpapiHostImpl(this, permissions_, info.name,
+      profile_data_directory));
 
   process_->GetHost()->AddFilter(filter_.get());
-  process_->GetHost()->AddFilter(file_filter_.get());
-  process_->GetHost()->AddFilter(host_impl_.get());
+  process_->GetHost()->AddFilter(host_impl_->message_filter());
 
-  GetContentClient()->browser()->DidCreatePpapiPlugin(host_impl_);
+  GetContentClient()->browser()->DidCreatePpapiPlugin(host_impl_.get());
+
+  // Only request network status updates if the plugin has dev permissions.
+  if (permissions_.HasPermission(ppapi::PERMISSION_DEV))
+    network_observer_.reset(new PluginNetworkObserver(this));
 }
 
 PpapiPluginProcessHost::PpapiPluginProcessHost()
@@ -189,7 +188,12 @@ PpapiPluginProcessHost::PpapiPluginProcessHost()
       PROCESS_TYPE_PPAPI_BROKER, this));
 
   ppapi::PpapiPermissions permissions;  // No permissions.
-  host_impl_ = new BrowserPpapiHostImpl(this, permissions);
+  // The plugin name and profile data directory shouldn't be needed for the
+  // broker.
+  std::string plugin_name;
+  FilePath profile_data_directory;
+  host_impl_.reset(new BrowserPpapiHostImpl(this, permissions, plugin_name,
+      profile_data_directory));
 }
 
 bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
@@ -235,6 +239,7 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
     // TODO(vtl): Stop passing flash args in the command line, on windows is
     // going to explode.
     static const char* kPluginForwardSwitches[] = {
+      switches::kDisablePepperThreading,
       switches::kDisableSeccompFilterSandbox,
 #if defined(OS_MACOSX)
       switches::kEnableSandboxLogging,
@@ -278,18 +283,19 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
 
 void PpapiPluginProcessHost::RequestPluginChannel(Client* client) {
   base::ProcessHandle process_handle;
-  int renderer_id;
-  client->GetPpapiChannelInfo(&process_handle, &renderer_id);
+  int renderer_child_id;
+  client->GetPpapiChannelInfo(&process_handle, &renderer_child_id);
 
   // We can't send any sync messages from the browser because it might lead to
   // a hang. See the similar code in PluginProcessHost for more description.
   PpapiMsg_CreateChannel* msg = new PpapiMsg_CreateChannel(
-      renderer_id, client->OffTheRecord());
+      base::GetProcId(process_handle), renderer_child_id,
+      client->OffTheRecord());
   msg->set_unblock(true);
   if (Send(msg)) {
     sent_requests_.push(client);
   } else {
-    client->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
+    client->OnPpapiChannelOpened(IPC::ChannelHandle(), base::kNullProcessId, 0);
   }
 }
 
@@ -341,12 +347,14 @@ void PpapiPluginProcessHost::CancelRequests() {
   DVLOG(1) << "PpapiPluginProcessHost" << (is_broker_ ? "[broker]" : "")
            << "CancelRequests()";
   for (size_t i = 0; i < pending_requests_.size(); i++) {
-    pending_requests_[i]->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
+    pending_requests_[i]->OnPpapiChannelOpened(IPC::ChannelHandle(),
+                                               base::kNullProcessId, 0);
   }
   pending_requests_.clear();
 
   while (!sent_requests_.empty()) {
-    sent_requests_.front()->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
+    sent_requests_.front()->OnPpapiChannelOpened(IPC::ChannelHandle(),
+                                                 base::kNullProcessId, 0);
     sent_requests_.pop();
   }
 }
@@ -362,7 +370,9 @@ void PpapiPluginProcessHost::OnRendererPluginChannelCreated(
   Client* client = sent_requests_.front();
   sent_requests_.pop();
 
-  client->OnPpapiChannelOpened(channel_handle, process_->GetData().id);
+  const ChildProcessData& data = process_->GetData();
+  client->OnPpapiChannelOpened(channel_handle, base::GetProcId(data.handle),
+                               data.id);
 }
 
 }  // namespace content

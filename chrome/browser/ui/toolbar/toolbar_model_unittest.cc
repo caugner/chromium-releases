@@ -27,9 +27,9 @@ namespace {
 struct TestItem {
   GURL url;
   string16 expected_text;
-  // The expected text to display when Extended Instant is inactive.
+  // The expected text to display when query extraction is inactive.
   string16 expected_replace_text_inactive;
-  // The expected text to display when Extended Instant is active.
+  // The expected text to display when query extraction is active.
   string16 expected_replace_text_active;
   bool would_replace;
   bool should_display;
@@ -94,6 +94,14 @@ struct TestItem {
     GURL("https://google.com/search?q=tractor+supply"),
     ASCIIToUTF16("https://google.com/search?q=tractor+supply"),
     ASCIIToUTF16("https://google.com/search?q=tractor+supply"),
+    ASCIIToUTF16("https://google.com/search?q=tractor+supply"),
+    false,
+    true
+  },
+  {
+    GURL("https://google.com/search?q=tractor+supply&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=tractor+supply&espv=1"),
+    ASCIIToUTF16("https://google.com/search?q=tractor+supply&espv=1"),
     ASCIIToUTF16("tractor supply"),
     true,
     true
@@ -166,11 +174,10 @@ class ToolbarModelTest : public BrowserWithTestWindowTest {
   }
 };
 
-// Test that we don't replace any URLs when the InstantExtended API is disabled.
-TEST_F(ToolbarModelTest, ShouldDisplayURLInstantExtendedAPIDisabled) {
-  ASSERT_FALSE(CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableInstantExtendedAPI))
-      << "This test expects Extended Instant to be disabled.";
+// Test that we don't replace any URLs when the query extraction is disabled.
+TEST_F(ToolbarModelTest, ShouldDisplayURLQueryExtractionDisabled) {
+  ASSERT_FALSE(chrome::search::IsQueryExtractionEnabled(profile()))
+      << "This test expects query extraction to be disabled.";
 
   ResetDefaultTemplateURL();
   AddTab(browser(), GURL(chrome::kAboutBlankURL));
@@ -184,14 +191,9 @@ TEST_F(ToolbarModelTest, ShouldDisplayURLInstantExtendedAPIDisabled) {
   }
 }
 
-// Test that we replace URLs when the InstantExtended API is enabled.
-TEST_F(ToolbarModelTest, ShouldDisplayURLInstantExtendedAPIEnabled) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableInstantExtendedAPI);
-
-  // Avoid tests on branded Chrome where channel is set to CHANNEL_STABLE.
-  if (!chrome::search::IsInstantExtendedAPIEnabled(profile()))
-    return;
+// Test that we replace URLs when the query extraction API is enabled.
+TEST_F(ToolbarModelTest, ShouldDisplayURLQueryExtractionEnabled) {
+  chrome::search::EnableQueryExtractionForTesting();
 
   ResetDefaultTemplateURL();
   AddTab(browser(), GURL(chrome::kAboutBlankURL));

@@ -2,23 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/layer_iterator.h"
 
 #include "cc/layer.h"
 #include "cc/layer_tree_host_common.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <public/WebTransformationMatrix.h>
+#include "ui/gfx/transform.h"
 
-using namespace cc;
-using WebKit::WebTransformationMatrix;
 using ::testing::Mock;
 using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::AnyNumber;
 
+namespace cc {
 namespace {
 
 class TestLayer : public Layer {
@@ -37,9 +34,9 @@ private:
         : Layer()
         , m_drawsContent(true)
     {
-        setBounds(IntSize(100, 100));
-        setPosition(IntPoint());
-        setAnchorPoint(IntPoint());
+        setBounds(gfx::Size(100, 100));
+        setPosition(gfx::Point());
+        setAnchorPoint(gfx::Point());
     }
     virtual ~TestLayer()
     {
@@ -130,7 +127,7 @@ TEST(LayerIteratorTest, simpleTree)
     rootLayer->addChild(fourth);
 
     std::vector<scoped_refptr<Layer> > renderSurfaceLayerList;
-    LayerTreeHostCommon::calculateDrawTransforms(rootLayer.get(), rootLayer->bounds(), 1, 1, 256, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(rootLayer.get(), rootLayer->bounds(), 1, 1, 256, false, renderSurfaceLayerList);
 
     iterateBackToFront(&renderSurfaceLayerList);
     EXPECT_COUNT(rootLayer, 0, -1, 1);
@@ -172,7 +169,7 @@ TEST(LayerIteratorTest, complexTree)
     root23->addChild(root231);
 
     std::vector<scoped_refptr<Layer> > renderSurfaceLayerList;
-    LayerTreeHostCommon::calculateDrawTransforms(rootLayer.get(), rootLayer->bounds(), 1, 1, 256, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(rootLayer.get(), rootLayer->bounds(), 1, 1, 256, false, renderSurfaceLayerList);
 
     iterateBackToFront(&renderSurfaceLayerList);
     EXPECT_COUNT(rootLayer, 0, -1, 1);
@@ -211,13 +208,14 @@ TEST(LayerIteratorTest, complexTreeMultiSurface)
     scoped_refptr<TestLayer> root231 = TestLayer::create();
 
     rootLayer->createRenderSurface();
-    rootLayer->renderSurface()->setContentRect(IntRect(IntPoint(), rootLayer->bounds()));
+    rootLayer->renderSurface()->setContentRect(gfx::Rect(gfx::Point(), rootLayer->bounds()));
 
     rootLayer->addChild(root1);
     rootLayer->addChild(root2);
     rootLayer->addChild(root3);
     root2->setDrawsContent(false);
-    root2->setOpacity(0.5); // Force the layer to own a new surface.
+    root2->setOpacity(0.5);
+    root2->setForceRenderSurface(true); // Force the layer to own a new surface.
     root2->addChild(root21);
     root2->addChild(root22);
     root2->addChild(root23);
@@ -227,7 +225,7 @@ TEST(LayerIteratorTest, complexTreeMultiSurface)
     root23->addChild(root231);
 
     std::vector<scoped_refptr<Layer> > renderSurfaceLayerList;
-    LayerTreeHostCommon::calculateDrawTransforms(rootLayer.get(), rootLayer->bounds(), 1, 1, 256, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(rootLayer.get(), rootLayer->bounds(), 1, 1, 256, false, renderSurfaceLayerList);
 
     iterateBackToFront(&renderSurfaceLayerList);
     EXPECT_COUNT(rootLayer, 0, -1, 1);
@@ -252,4 +250,5 @@ TEST(LayerIteratorTest, complexTreeMultiSurface)
     EXPECT_COUNT(root3, -1, -1, 0);
 }
 
-} // namespace
+}  // namespace
+}  // namespace cc

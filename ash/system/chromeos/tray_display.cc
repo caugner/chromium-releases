@@ -5,6 +5,7 @@
 #include "ash/system/chromeos/tray_display.h"
 
 #include "ash/display/display_controller.h"
+#include "ash/display/display_manager.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
@@ -14,7 +15,6 @@
 #include "base/utf_string_conversions.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "ui/aura/display_manager.h"
 #include "ui/aura/env.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -24,6 +24,7 @@
 #include "ui/views/layout/box_layout.h"
 
 #if defined(USE_X11)
+#include "chromeos/display/output_configurator.h"
 #include "ui/base/x/x11_util.h"
 #endif
 
@@ -60,37 +61,17 @@ class DisplayView : public ash::internal::ActionableView {
         SetVisible(false);
         return;
       case chromeos::STATE_DUAL_MIRROR: {
-        // Simply assumes that the primary display appears first and the
-        // secondary display appears next in the list.
-        std::vector<std::string> display_names;
-#if defined(USE_X11)
-        std::vector<XID> output_ids;
-        ui::GetOutputDeviceHandles(&output_ids);
-        display_names = ui::GetDisplayNames(output_ids);
-#endif
-        if (display_names.size() > 1) {
-          label_->SetText(l10n_util::GetStringFUTF16(
-              IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING,
-              UTF8ToUTF16(display_names[1])));
-          SetVisible(true);
-        } else {
-          SetVisible(false);
-        }
+        label_->SetText(l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING, GetExternalDisplayName()));
+        SetVisible(true);
         return;
       }
       case chromeos::STATE_DUAL_PRIMARY_ONLY:
-      case chromeos::STATE_DUAL_SECONDARY_ONLY: {
-        aura::DisplayManager* display_manager =
-            aura::Env::GetInstance()->display_manager();
-        if (display_manager->GetNumDisplays() > 1) {
-          label_->SetText(l10n_util::GetStringFUTF16(
-              IDS_ASH_STATUS_TRAY_DISPLAY_EXTENDED,
-              UTF8ToUTF16(display_manager->GetDisplayNameFor(
-                  ScreenAsh::GetSecondaryDisplay()))));
-          SetVisible(true);
-        } else {
-          SetVisible(false);
-        }
+      case chromeos::STATE_DUAL_SECONDARY_ONLY:
+      case chromeos::STATE_DUAL_UNKNOWN: {
+        label_->SetText(l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_DISPLAY_EXTENDED, GetExternalDisplayName()));
+        SetVisible(true);
         return;
       }
       default:
@@ -99,12 +80,52 @@ class DisplayView : public ash::internal::ActionableView {
   }
 
  private:
+  // Returns the name of the currently connected external display.
+  string16 GetExternalDisplayName() {
+#if defined(USE_X11)
+    DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+    int64 internal_display_id = display_manager->internal_display_id();
+    int64 primary_display_id =
+        gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().id();
+
+    // Use xrandr features rather than DisplayManager to find out the external
+    // display's name. DisplayManager's API doesn't work well in mirroring mode
+    // since it's based on gfx::Display but in mirroring mode there's only one
+    // gfx::Display instance which represents both displays.
+    std::vector<XID> outputs;
+    ui::GetOutputDeviceHandles(&outputs);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      std::string name;
+      uint16 manufacturer_id = 0;
+      uint16 product_code = 0;
+      if (ui::GetOutputDeviceData(
+              outputs[i], &manufacturer_id, &product_code, &name)) {
+        int64 display_id = gfx::Display::GetID(
+            manufacturer_id, product_code, i);
+        if (display_id == internal_display_id)
+          continue;
+        // Some systems like stumpy don't have the internal display at all. It
+        // means both of the displays are external but we need to choose either
+        // one. Currently we adopt simple heuristics which just avoids the
+        // primary display.
+        if (!display_manager->HasInternalDisplay() &&
+            display_id == primary_display_id) {
+          continue;
+        }
+
+        return UTF8ToUTF16(name);
+      }
+    }
+#endif
+    return l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_UNKNOWN_DISPLAY_NAME);
+  }
+
   // Overridden from ActionableView.
   virtual bool PerformAction(const ui::Event& event) OVERRIDE {
     if (login_status_ == ash::user::LOGGED_IN_USER ||
         login_status_ == ash::user::LOGGED_IN_OWNER ||
         login_status_ == ash::user::LOGGED_IN_GUEST) {
-      ash::Shell::GetInstance()->tray_delegate()->ShowDisplaySettings();
+      ash::Shell::GetInstance()->system_tray_delegate()->ShowDisplaySettings();
     }
 
     return true;
@@ -116,15 +137,16 @@ class DisplayView : public ash::internal::ActionableView {
   DISALLOW_COPY_AND_ASSIGN(DisplayView);
 };
 
-TrayDisplay::TrayDisplay()
-    : default_(NULL) {
-  aura::Env::GetInstance()->display_manager()->AddObserver(this);
-  ash::Shell::GetInstance()->output_configurator()->AddObserver(this);
+TrayDisplay::TrayDisplay(SystemTray* system_tray)
+    : SystemTrayItem(system_tray),
+      default_(NULL) {
+  Shell::GetScreen()->AddObserver(this);
+  Shell::GetInstance()->output_configurator()->AddObserver(this);
 }
 
 TrayDisplay::~TrayDisplay() {
-  aura::Env::GetInstance()->display_manager()->RemoveObserver(this);
-  ash::Shell::GetInstance()->output_configurator()->RemoveObserver(this);
+  Shell::GetScreen()->RemoveObserver(this);
+  Shell::GetInstance()->output_configurator()->RemoveObserver(this);
 }
 
 views::View* TrayDisplay::CreateDefaultView(user::LoginStatus status) {

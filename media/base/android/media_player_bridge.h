@@ -15,6 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
+#include "media/base/media_export.h"
 #include "media/base/android/media_player_listener.h"
 
 namespace media {
@@ -29,12 +30,12 @@ class MediaPlayerBridgeManager;
 // Pause(), SeekTo() gets called. As a result, media information may not
 // be available until one of those operations is performed. After that, we
 // will cache those information in case the mediaplayer gets released.
-class MediaPlayerBridge {
+class MEDIA_EXPORT MediaPlayerBridge {
  public:
   // Error types for MediaErrorCB.
   enum MediaErrorType {
-    MEDIA_ERROR_UNKNOWN,
-    MEDIA_ERROR_SERVER_DIED,
+    MEDIA_ERROR_FORMAT,
+    MEDIA_ERROR_DECODE,
     MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK,
     MEDIA_ERROR_INVALID_CODE,
   };
@@ -54,6 +55,9 @@ class MediaPlayerBridge {
 
   // Callbacks when seek completed. Args: player ID, current time.
   typedef base::Callback<void(int, base::TimeDelta)> SeekCompleteCB;
+
+  // Callbacks when seek completed. Args: player ID
+  typedef base::Callback<void(int)> MediaInterruptedCB;
 
   // Callbacks when playback completed. Args: player ID.
   typedef base::Callback<void(int)> PlaybackCompleteCB;
@@ -81,7 +85,8 @@ class MediaPlayerBridge {
                     const MediaPreparedCB& media_prepared_cb,
                     const PlaybackCompleteCB& playback_complete_cb,
                     const SeekCompleteCB& seek_complete_cb,
-                    const TimeUpdateCB& time_update_cb);
+                    const TimeUpdateCB& time_update_cb,
+                    const MediaInterruptedCB& media_interrupted_cb);
   ~MediaPlayerBridge();
 
   typedef std::map<std::string, std::string> HeadersMap;
@@ -126,6 +131,7 @@ class MediaPlayerBridge {
   void OnPlaybackComplete();
   void OnSeekComplete();
   void OnMediaPrepared();
+  void OnMediaInterrupted();
 
   // Prepare the player for playback, asynchronously. When succeeds,
   // OnMediaPrepared() will be called. Otherwise, OnMediaError() will
@@ -157,6 +163,7 @@ class MediaPlayerBridge {
   MediaPreparedCB media_prepared_cb_;
   PlaybackCompleteCB playback_complete_cb_;
   SeekCompleteCB seek_complete_cb_;
+  MediaInterruptedCB media_interrupted_cb_;
 
   // Callbacks when timer events are received.
   TimeUpdateCB time_update_cb_;

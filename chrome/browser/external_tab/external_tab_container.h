@@ -14,7 +14,6 @@ class AutomationProvider;
 class AutomationResourceMessageFilter;
 class GURL;
 class Profile;
-class TabContents;
 
 namespace content {
 class WebContents;
@@ -49,7 +48,7 @@ class ExternalTabContainer : public base::RefCounted<ExternalTabContainer> {
                     DWORD style,
                     bool load_requests_via_automation,
                     bool handle_top_level_requests,
-                    TabContents* existing_tab_contents,
+                    content::WebContents* existing_contents,
                     const GURL& initial_url,
                     const GURL& referrer,
                     bool infobars_enabled,
@@ -80,8 +79,6 @@ class ExternalTabContainer : public base::RefCounted<ExternalTabContainer> {
   virtual void RunUnloadHandlers(IPC::Message* reply_message) = 0;
 
   virtual content::WebContents* GetWebContents() const = 0;
-
-  virtual TabContents* GetTabContents() = 0;
 
   // This is a wrapper for GetNativeView from ExternalTabContainerWin.
   virtual gfx::NativeView GetExternalTabNativeView() const = 0;

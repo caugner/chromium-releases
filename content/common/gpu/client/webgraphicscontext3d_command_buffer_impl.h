@@ -48,6 +48,8 @@ using WebKit::WGC3Dfloat;
 using WebKit::WGC3Dclampf;
 using WebKit::WGC3Dintptr;
 using WebKit::WGC3Dsizeiptr;
+using WebKit::WebGraphicsManagedMemoryStats;
+using WebKit::WebGraphicsMemoryAllocation;
 
 namespace content {
 class GpuChannelHost;
@@ -514,10 +516,14 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void discardFramebufferEXT(WGC3Denum target,
                                      WGC3Dsizei numAttachments,
                                      const WGC3Denum* attachments);
-  virtual void ensureFramebufferCHROMIUM();
+  virtual void discardBackbufferCHROMIUM();
+  virtual void ensureBackbufferCHROMIUM();
 
   virtual void setMemoryAllocationChangedCallbackCHROMIUM(
       WebGraphicsMemoryAllocationChangedCallbackCHROMIUM* callback);
+
+  virtual void sendManagedMemoryStatsCHROMIUM(
+      const WebGraphicsManagedMemoryStats* stats);
 
   virtual void copyTextureToParentTextureCHROMIUM(
       WebGLId texture, WebGLId parentTexture);
@@ -595,6 +601,34 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void bindTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint image_id);
   virtual void releaseTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint image_id);
 
+  virtual WebGLId createStreamTextureCHROMIUM(WebGLId texture);
+  virtual void destroyStreamTextureCHROMIUM(WebGLId texture);
+
+  virtual void* mapBufferCHROMIUM(WGC3Denum target, WGC3Denum access);
+  virtual WGC3Dboolean unmapBufferCHROMIUM(WGC3Denum target);
+
+  // Async pixel transfer functions.
+  virtual void asyncTexImage2DCHROMIUM(
+      WGC3Denum target,
+      WGC3Dint level,
+      WGC3Denum internalformat,
+      WGC3Dsizei width,
+      WGC3Dsizei height,
+      WGC3Dint border,
+      WGC3Denum format,
+      WGC3Denum type,
+      const void* pixels);
+  virtual void asyncTexSubImage2DCHROMIUM(
+      WGC3Denum target,
+      WGC3Dint level,
+      WGC3Dint xoffset,
+      WGC3Dint yoffset,
+      WGC3Dsizei width,
+      WGC3Dsizei height,
+      WGC3Denum format,
+      WGC3Denum type,
+      const void* pixels);
+
  protected:
   virtual GrGLInterface* onCreateGrGLInterface();
 
@@ -666,8 +700,13 @@ class WebGraphicsContext3DCommandBufferImpl
   bool ShouldUseSwapClient();
 
   // MemoryAllocationChanged callback.
-  void OnMemoryAllocationChanged(const GpuMemoryAllocationForRenderer&
-      allocation);
+  void OnMemoryAllocationChanged(
+      WebGraphicsMemoryAllocationChangedCallbackCHROMIUM* callback,
+      const GpuMemoryAllocationForRenderer& allocation);
+
+  // Convert the gpu cutoff enum to the WebKit enum.
+  static WebGraphicsMemoryAllocation::PriorityCutoff WebkitPriorityCutoff(
+      GpuMemoryAllocationForRenderer::PriorityCutoff priorityCutoff);
 
   bool initialize_failed_;
 
@@ -682,9 +721,6 @@ class WebGraphicsContext3DCommandBufferImpl
   int32 surface_id_;
   GURL active_url_;
   base::WeakPtr<WebGraphicsContext3DSwapBuffersClient> swap_client_;
-
-  WebGraphicsMemoryAllocationChangedCallbackCHROMIUM*
-      memory_allocation_changed_callback_;
 
   WebGraphicsContext3D::WebGraphicsContextLostCallback* context_lost_callback_;
   WGC3Denum context_lost_reason_;

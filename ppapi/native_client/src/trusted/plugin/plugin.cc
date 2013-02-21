@@ -43,12 +43,12 @@
 #include "native_client/src/trusted/plugin/utility.h"
 #include "native_client/src/trusted/service_runtime/nacl_error_code.h"
 
-#include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/dev/ppp_find_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/dev/ppp_selection_dev.h"
 #include "ppapi/c/dev/ppp_zoom_dev.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/c/ppb_console.h"
 #include "ppapi/c/ppb_var.h"
 #include "ppapi/c/ppp_input_event.h"
 #include "ppapi/c/ppp_instance.h"
@@ -544,6 +544,7 @@ bool Plugin::LoadNaClModuleCommon(nacl::DescWrapper* wrapper,
                                   NaClSubprocess* subprocess,
                                   const Manifest* manifest,
                                   bool should_report_uma,
+                                  bool uses_ppapi,
                                   ErrorInfo* error_info,
                                   pp::CompletionCallback init_done_cb,
                                   pp::CompletionCallback crash_cb) {
@@ -563,6 +564,8 @@ bool Plugin::LoadNaClModuleCommon(nacl::DescWrapper* wrapper,
       new_service_runtime->Start(wrapper,
                                  error_info,
                                  manifest_base_url(),
+                                 uses_ppapi,
+                                 enable_dev_interfaces_,
                                  crash_cb);
   PLUGIN_PRINTF(("Plugin::LoadNaClModuleCommon (service_runtime_started=%d)\n",
                  service_runtime_started));
@@ -582,7 +585,9 @@ bool Plugin::LoadNaClModule(nacl::DescWrapper* wrapper,
   // outlive the Plugin object, they will not be memory safe.
   ShutDownSubprocesses();
   if (!LoadNaClModuleCommon(wrapper, &main_subprocess_, manifest_.get(),
-                            true, error_info, init_done_cb, crash_cb)) {
+                            true /* should_report_uma */,
+                            true /* uses_ppapi */,
+                            error_info, init_done_cb, crash_cb)) {
     return false;
   }
   PLUGIN_PRINTF(("Plugin::LoadNaClModule (%s)\n",
@@ -592,16 +597,36 @@ bool Plugin::LoadNaClModule(nacl::DescWrapper* wrapper,
 
 bool Plugin::LoadNaClModuleContinuationIntern(ErrorInfo* error_info) {
   if (!main_subprocess_.StartSrpcServices()) {
-    error_info->SetReport(ERROR_SRPC_CONNECTION_FAIL,
-                          "SRPC connection failure for " +
-                          main_subprocess_.description());
+    // The NaCl process probably crashed. On Linux, a crash causes this error,
+    // while on other platforms, the error is detected below, when we attempt to
+    // start the proxy. Report a module initialization error here, to make it
+    // less confusing for developers.
+    error_info->SetReport(ERROR_START_PROXY_MODULE,
+                          "could not initialize module.");
     return false;
   }
-  // Try to start the Chrome IPC-based proxy first. If that fails, we
-  // must be using the SRPC proxy.
-  if (!nacl_interface_->StartPpapiProxy(pp_instance(),
-                                        enable_dev_interfaces_) &&
-      !main_subprocess_.StartJSObjectProxy(this, error_info)) {
+  // Try to start the Chrome IPC-based proxy first.
+  PP_NaClResult ipc_result = nacl_interface_->StartPpapiProxy(pp_instance());
+  if (ipc_result == PP_NACL_OK) {
+    // Log the amound of time that has passed between the trusted plugin being
+    // initialized and the untrusted plugin being initialized.  This is
+    // (roughly) the cost of using NaCl, in terms of startup time.
+    HistogramStartupTimeMedium(
+        "NaCl.Perf.StartupTime.NaClOverhead",
+        static_cast<float>(NaClGetTimeOfDayMicroseconds() - init_time_)
+            / NACL_MICROS_PER_MILLI);
+  } else if (ipc_result == PP_NACL_USE_SRPC) {
+    // Start the old SRPC PPAPI proxy.
+    if (!main_subprocess_.StartJSObjectProxy(this, error_info)) {
+      return false;
+    }
+  } else if (ipc_result == PP_NACL_ERROR_MODULE) {
+    error_info->SetReport(ERROR_START_PROXY_MODULE,
+                          "could not initialize module.");
+    return false;
+  } else if (ipc_result == PP_NACL_ERROR_INSTANCE) {
+    error_info->SetReport(ERROR_START_PROXY_INSTANCE,
+                          "could not create instance.");
     return false;
   }
   PLUGIN_PRINTF(("Plugin::LoadNaClModule (%s)\n",
@@ -623,7 +648,9 @@ NaClSubprocess* Plugin::LoadHelperNaClModule(nacl::DescWrapper* wrapper,
   // Do not report UMA stats for translator-related nexes.
   // TODO(sehr): define new UMA stats for translator related nexe events.
   if (!LoadNaClModuleCommon(wrapper, nacl_subprocess.get(), manifest,
-                            false, error_info,
+                            false /* should_report_uma */,
+                            false /* uses_ppapi */,
+                            error_info,
                             pp::BlockUntilComplete(),
                             pp::BlockUntilComplete())) {
     return NULL;
@@ -1474,15 +1501,21 @@ void Plugin::ProcessNaClManifest(const nacl::string& manifest_json) {
     // Inform JavaScript that we found a nexe URL to load.
     EnqueueProgressEvent(kProgressEventProgress);
     if (is_portable) {
-      pp::CompletionCallback translate_callback =
-          callback_factory_.NewCallback(&Plugin::BitcodeDidTranslate);
-      // Will always call the callback on success or failure.
-      pnacl_coordinator_.reset(
-          PnaclCoordinator::BitcodeToNative(this,
-                                            program_url,
-                                            cache_identity,
-                                            translate_callback));
-      return;
+      if (this->nacl_interface()->IsPnaclEnabled()) {
+        pp::CompletionCallback translate_callback =
+            callback_factory_.NewCallback(&Plugin::BitcodeDidTranslate);
+        // Will always call the callback on success or failure.
+        pnacl_coordinator_.reset(
+            PnaclCoordinator::BitcodeToNative(this,
+                                              program_url,
+                                              cache_identity,
+                                              translate_callback));
+        return;
+      } else {
+        error_info.SetReport(ERROR_UNKNOWN,
+                             "PNaCl has not been enabled (e.g., by setting "
+                             "the --enable-pnacl flag).");
+      }
     } else {
       pp::CompletionCallback open_callback =
           callback_factory_.NewCallback(&Plugin::NexeFileDidOpen);
@@ -1645,6 +1678,15 @@ void Plugin::ReportLoadSuccess(LengthComputable length_computable,
 void Plugin::ReportLoadError(const ErrorInfo& error_info) {
   PLUGIN_PRINTF(("Plugin::ReportLoadError (error='%s')\n",
                  error_info.message().c_str()));
+  // For errors the user (and not just the developer) should know about,
+  // report them to the renderer so the browser can display a message.
+  if (error_info.error_code() == ERROR_MANIFEST_PROGRAM_MISSING_ARCH) {
+    // A special case: the manifest may otherwise be valid but is missing
+    // a program/file compatible with the user's sandbox.
+    nacl_interface()->ReportNaClError(pp_instance(),
+                                      PP_NACL_MANIFEST_MISSING_ARCH);
+  }
+
   // Set the readyState attribute to indicate we need to start over.
   set_nacl_ready_state(DONE);
   set_nexe_error_reported(true);
@@ -1884,9 +1926,9 @@ void Plugin::AddToConsole(const nacl::string& text) {
                                  static_cast<uint32_t>(prefix_string.size()));
   PP_Var str = var_interface->VarFromUtf8(text.c_str(),
                                           static_cast<uint32_t>(text.size()));
-  const PPB_Console_Dev* console_interface =
-      static_cast<const PPB_Console_Dev*>(
-          module->GetBrowserInterface(PPB_CONSOLE_DEV_INTERFACE));
+  const PPB_Console* console_interface =
+      static_cast<const PPB_Console*>(
+          module->GetBrowserInterface(PPB_CONSOLE_INTERFACE));
   console_interface->LogWithSource(pp_instance(), PP_LOGLEVEL_LOG, prefix, str);
   var_interface->Release(prefix);
   var_interface->Release(str);

@@ -6,22 +6,15 @@
 
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
-#include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/test/test_renderer_host.h"
 
 typedef BrowserWithTestWindowTest BrowserListTest;
 
@@ -53,10 +46,10 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyCount) {
 
   // Sanity checks.
   EXPECT_EQ(4U, BrowserList::size());
-  EXPECT_EQ(0, browser()->tab_count());
-  EXPECT_EQ(0, browser2->tab_count());
-  EXPECT_EQ(0, browser3->tab_count());
-  EXPECT_EQ(0, browser4->tab_count());
+  EXPECT_EQ(0, browser()->tab_strip_model()->count());
+  EXPECT_EQ(0, browser2->tab_strip_model()->count());
+  EXPECT_EQ(0, browser3->tab_strip_model()->count());
+  EXPECT_EQ(0, browser4->tab_strip_model()->count());
 
   EXPECT_EQ(0U, CountAllTabs());
 
@@ -68,7 +61,7 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyCount) {
   EXPECT_EQ(4U, CountAllTabs());
 
   // Close some tabs.
-  chrome::CloseAllTabs(browser2.get());
+  browser2->tab_strip_model()->CloseAllTabs();
 
   EXPECT_EQ(1U, CountAllTabs());
 
@@ -78,7 +71,7 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyCount) {
 
   EXPECT_EQ(42U, CountAllTabs());
   // Close all remaining tabs to keep all the destructors happy.
-  chrome::CloseAllTabs(browser3.get());
+  browser3->tab_strip_model()->CloseAllTabs();
 }
 
 TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
@@ -93,9 +86,9 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
 
   // Sanity checks.
   EXPECT_EQ(3U, BrowserList::size());
-  EXPECT_EQ(0, browser()->tab_count());
-  EXPECT_EQ(0, browser2->tab_count());
-  EXPECT_EQ(0, browser3->tab_count());
+  EXPECT_EQ(0, browser()->tab_strip_model()->count());
+  EXPECT_EQ(0, browser2->tab_strip_model()->count());
+  EXPECT_EQ(0, browser3->tab_strip_model()->count());
 
   EXPECT_EQ(0U, CountAllTabs());
 
@@ -115,7 +108,7 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
   }
 
   // Close some tabs.
-  chrome::CloseAllTabs(browser2.get());
+  browser2->tab_strip_model()->CloseAllTabs();
 
   count = 0;
   for (TabContentsIterator iterator; !iterator.done(); ++iterator, ++count) {
@@ -142,8 +135,8 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
   }
 
   // Close all remaining tabs to keep all the destructors happy.
-  chrome::CloseAllTabs(browser2.get());
-  chrome::CloseAllTabs(browser3.get());
+  browser2->tab_strip_model()->CloseAllTabs();
+  browser3->tab_strip_model()->CloseAllTabs();
 }
 
 #if defined(OS_CHROMEOS)

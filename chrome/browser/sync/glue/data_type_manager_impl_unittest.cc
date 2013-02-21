@@ -144,7 +144,11 @@ class SyncDataTypeManagerImplTest : public testing::Test {
 // Set up a DTM with no controllers, configure it, finish downloading,
 // and then stop it.
 TEST_F(SyncDataTypeManagerImplTest, NoControllers) {
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
 
@@ -163,7 +167,11 @@ TEST_F(SyncDataTypeManagerImplTest, NoControllers) {
 TEST_F(SyncDataTypeManagerImplTest, ConfigureOne) {
   AddController(BOOKMARKS);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
 
@@ -188,7 +196,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureSlowLoadingType) {
 
   GetController(BOOKMARKS)->SetDelayModelLoad();
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::PARTIAL_SUCCESS);
 
@@ -233,7 +245,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureOneStopWhileDownloadPending) {
   AddController(BOOKMARKS);
 
   {
-    DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+    DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
     SetConfigureStartExpectation();
     SetConfigureDoneExpectation(DataTypeManager::ABORTED);
 
@@ -255,7 +271,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureOneStopWhileStartingModel) {
   AddController(BOOKMARKS);
 
   {
-    DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+    DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
     SetConfigureStartExpectation();
     SetConfigureDoneExpectation(DataTypeManager::ABORTED);
 
@@ -280,7 +300,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureOneStopWhileStartingModel) {
 TEST_F(SyncDataTypeManagerImplTest, ConfigureOneStopWhileAssociating) {
   AddController(BOOKMARKS);
   {
-    DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+    DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
     SetConfigureStartExpectation();
     SetConfigureDoneExpectation(DataTypeManager::ABORTED);
 
@@ -309,7 +333,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureOneStopWhileAssociating) {
 TEST_F(SyncDataTypeManagerImplTest, OneWaitingForCrypto) {
   AddController(PASSWORDS);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureBlockedExpectation();
 
@@ -360,7 +388,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureOneThenBoth) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
 
@@ -410,7 +442,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureOneThenSwitch) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
 
@@ -460,7 +496,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileOneInFlight) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureBlockedExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
@@ -483,7 +523,7 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileOneInFlight) {
 
   // Pump the loop to run the posted DTMI::ConfigureImpl() task from
   // DTMI::ProcessReconfigure() (triggered by FinishStart()).
-  ui_loop_.RunAllPending();
+  ui_loop_.RunUntilIdle();
   EXPECT_EQ(DataTypeManager::DOWNLOAD_PENDING, dtm.state());
 
   // Step 5.
@@ -505,7 +545,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileOneInFlight) {
 TEST_F(SyncDataTypeManagerImplTest, OneFailingController) {
   AddController(BOOKMARKS);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::UNRECOVERABLE_ERROR);
 
@@ -532,7 +576,11 @@ TEST_F(SyncDataTypeManagerImplTest, SecondControllerFails) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::UNRECOVERABLE_ERROR);
 
@@ -570,7 +618,11 @@ TEST_F(SyncDataTypeManagerImplTest, OneControllerFailsAssociation) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::PARTIAL_SUCCESS);
 
@@ -608,7 +660,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileDownloadPending) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureBlockedExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
@@ -627,7 +683,7 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileDownloadPending) {
 
   // Pump the loop to run the posted DTMI::ConfigureImpl() task from
   // DTMI::ProcessReconfigure() (triggered by step 3).
-  ui_loop_.RunAllPending();
+  ui_loop_.RunUntilIdle();
   EXPECT_EQ(DataTypeManager::DOWNLOAD_PENDING, dtm.state());
 
   // Step 4.
@@ -660,7 +716,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileDownloadPendingWithFailure) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureBlockedExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
@@ -679,7 +739,7 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileDownloadPendingWithFailure) {
 
   // Pump the loop to run the posted DTMI::ConfigureImpl() task from
   // DTMI::ProcessReconfigure() (triggered by step 3).
-  ui_loop_.RunAllPending();
+  ui_loop_.RunUntilIdle();
   EXPECT_EQ(DataTypeManager::DOWNLOAD_PENDING, dtm.state());
 
   // Step 4.
@@ -702,7 +762,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureWhileDownloadPendingWithFailure) {
 TEST_F(SyncDataTypeManagerImplTest, MigrateAll) {
   AddController(BOOKMARKS);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
 
@@ -745,7 +809,11 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureDuringPurge) {
   AddController(BOOKMARKS);
   AddController(PREFERENCES);
 
-  DataTypeManagerImpl dtm(&configurer_, &controllers_, &observer_);
+  DataTypeManagerImpl dtm(
+      syncer::WeakHandle<syncer::DataTypeDebugInfoListener>(),
+      &configurer_,
+      &controllers_,
+      &observer_);
 
   // Initial configure.
   SetConfigureStartExpectation();
@@ -781,7 +849,7 @@ TEST_F(SyncDataTypeManagerImplTest, ConfigureDuringPurge) {
   SetConfigureDoneExpectation(DataTypeManager::OK);
   // Pump the loop to run the posted DTMI::ConfigureImpl() task from
   // DTMI::ProcessReconfigure().
-  ui_loop_.RunAllPending();
+  ui_loop_.RunUntilIdle();
   EXPECT_EQ(DataTypeManager::DOWNLOAD_PENDING, dtm.state());
 
   // Now invoke the callback for the second configure request.

@@ -39,27 +39,19 @@ namespace keys = extensions::preference_api_constants;
 
 namespace extensions {
 
-ExtensionManagedModeEventRouter::ExtensionManagedModeEventRouter(
+ManagedModeEventRouter::ManagedModeEventRouter(
     Profile* profile) : profile_(profile) {
-}
-
-void ExtensionManagedModeEventRouter::Init() {
   registrar_.Init(g_browser_process->local_state());
-  registrar_.Add(prefs::kInManagedMode, this);
+  registrar_.Add(
+      prefs::kInManagedMode,
+      base::Bind(&ManagedModeEventRouter::OnInManagedModeChanged,
+                 base::Unretained(this)));
 }
 
-ExtensionManagedModeEventRouter::~ExtensionManagedModeEventRouter() {
+ManagedModeEventRouter::~ManagedModeEventRouter() {
 }
 
-void ExtensionManagedModeEventRouter::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
-  const std::string& pref_name =
-      *content::Details<std::string>(details).ptr();
-  DCHECK_EQ(std::string(prefs::kInManagedMode), pref_name);
-
+void ManagedModeEventRouter::OnInManagedModeChanged() {
   DictionaryValue* dict = new DictionaryValue();
   dict->SetBoolean(
       keys::kValue,
@@ -69,9 +61,9 @@ void ExtensionManagedModeEventRouter::Observe(
 
   extensions::EventRouter* event_router =
       extensions::ExtensionSystem::Get(profile_)->event_router();
-  event_router->DispatchEventToRenderers(kChangeEventName, args.Pass(), NULL,
-                                         GURL(),
-                                         extensions::EventFilteringInfo());
+  scoped_ptr<extensions::Event> event(new extensions::Event(
+      kChangeEventName, args.Pass()));
+  event_router->BroadcastEvent(event.Pass());
 }
 
 GetManagedModeFunction::~GetManagedModeFunction() { }
@@ -129,6 +121,25 @@ bool SetPolicyFunction::RunImpl() {
   policy_provider->SetPolicy(key, value);
 #endif
   return true;
+}
+
+ManagedModeAPI::ManagedModeAPI(Profile* profile)
+    : profile_(profile) {
+  ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
+      this, kChangeEventName);
+}
+
+ManagedModeAPI::~ManagedModeAPI() {
+}
+
+void ManagedModeAPI::Shutdown() {
+  ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
+}
+
+void ManagedModeAPI::OnListenerAdded(
+    const extensions::EventListenerInfo& details) {
+  managed_mode_event_router_.reset(new ManagedModeEventRouter(profile_));
+  ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
 }
 
 }  // namespace extensions

@@ -103,7 +103,10 @@ void CloudPolicySubsystem::CompleteInitialization(
     PrefService* local_state = g_browser_process->local_state();
     DCHECK(pref_change_registrar_.IsEmpty());
     pref_change_registrar_.Init(local_state);
-    pref_change_registrar_.Add(refresh_pref_name_, this);
+    pref_change_registrar_.Add(
+        refresh_pref_name_,
+        base::Bind(&CloudPolicySubsystem::OnRefreshPrefChanged,
+                   base::Unretained(this)));
     UpdatePolicyRefreshRate(local_state->GetInteger(refresh_pref_name_));
   }
 }
@@ -158,19 +161,9 @@ void CloudPolicySubsystem::UpdatePolicyRefreshRate(int64 refresh_rate) {
   }
 }
 
-void CloudPolicySubsystem::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    DCHECK_EQ(*(content::Details<std::string>(details).ptr()),
-              std::string(refresh_pref_name_));
-    PrefService* local_state = g_browser_process->local_state();
-    DCHECK_EQ(content::Source<PrefService>(source).ptr(), local_state);
-    UpdatePolicyRefreshRate(local_state->GetInteger(refresh_pref_name_));
-  } else {
-    NOTREACHED();
-  }
+void CloudPolicySubsystem::OnRefreshPrefChanged() {
+  PrefService* local_state = g_browser_process->local_state();
+  UpdatePolicyRefreshRate(local_state->GetInteger(refresh_pref_name_));
 }
 
 void CloudPolicySubsystem::ScheduleServiceInitialization(

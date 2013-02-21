@@ -40,6 +40,23 @@ CommandUtil.canExecuteOnGDataOnly = function(event, fileManager) {
 };
 
 /**
+ * Returns a single selected/passed entry or null.
+ * @param {Event} event Command event.
+ * @param {FileManager} fileManager FileManager to use.
+ * @return {FileEntry} The entry or null.
+ */
+CommandUtil.getSingleEntry = function(event, fileManager) {
+  if (event.target.entry) {
+    return event.target.entry;
+  }
+  var selection = fileManager.getSelection();
+  if (selection.totalCount == 1) {
+    return selection.entries[0];
+  }
+  return null;
+};
+
+/**
  * Registers handler on specific command on specific node.
  * @param {Node} node Node to register command handler on.
  * @param {string} commandId Command id to respond to.
@@ -60,6 +77,27 @@ CommandUtil.registerCommand = function(node, commandId, handler, var_args) {
     if (event.command.id == commandId)
       handler.canExecute.apply(handler, [event].concat(args));
   });
+};
+
+/**
+ * Sets Commands.defaultCommand for the commandId and prevents handling
+ * the keydown events for this command. Not doing that breaks relationship
+ * of original keyboard event and the command. WebKit would handle it
+ * differently in some cases.
+ * @param {Node} node to register command handler on.
+ * @param {string} commandId Command id to respond to.
+ */
+CommandUtil.forceDefaultHandler = function(node, commandId) {
+  var doc = node.ownerDocument;
+  var command = doc.querySelector('command[id="' + commandId + '"]');
+  node.addEventListener('keydown', function(e) {
+    if (command.matchesEvent(e)) {
+      // Prevent cr.ui.CommandManager of handling it and leave it
+      // for the default handler.
+      e.stopPropagation();
+    }
+  });
+  CommandUtil.registerCommand(node, commandId, Commands.defaultCommand, doc);
 };
 
 var Commands = {};
@@ -100,6 +138,9 @@ Commands.unmountCommand = {
 
     event.canExecute = (rootType == RootType.ARCHIVE ||
                         rootType == RootType.REMOVABLE);
+    event.command.label = rootType == RootType.ARCHIVE ?
+        str('CLOSE_ARCHIVE_BUTTON_LABEL') :
+        str('UNMOUNT_DEVICE_BUTTON_LABEL');
   }
 };
 
@@ -118,8 +159,10 @@ Commands.formatCommand = {
     }
   },
   canExecute: function(event, rootsList) {
-    event.canExecute = (CommandUtil.getCommandRootType(event, rootsList) ==
-                        RootType.REMOVABLE);
+    var enabled = (CommandUtil.getCommandRootType(event, rootsList) ==
+                   RootType.REMOVABLE);
+    event.canExecute = enabled;
+    event.command.setHidden(!enabled);
   }
 };
 
@@ -165,8 +208,8 @@ Commands.deleteFileCommand = {
   canExecute: function(event, fileManager) {
     var selection = fileManager.getSelection();
     event.canExecute = !fileManager.isOnReadonlyDirectory() &&
-        selection &&
-        selection.totalCount > 0;
+                  selection &&
+                  selection.totalCount > 0;
   }
 };
 
@@ -229,6 +272,16 @@ Commands.gdataClearCacheCommand = {
 };
 
 /**
+ * Reload the metadata of the file system from the server
+ */
+Commands.gdataReloadCommand = {
+  execute: function() {
+    chrome.fileBrowserPrivate.reloadDrive();
+  },
+  canExecute: CommandUtil.canExecuteOnGDataOnly
+};
+
+/**
  * Opens drive.google.com.
  */
 Commands.gdataGoToDriveCommand = {
@@ -256,5 +309,79 @@ Commands.openWithCommand = {
   canExecute: function(event, fileManager) {
     var tasks = fileManager.getSelection().tasks;
     event.canExecute = tasks && tasks.size() > 1;
+  }
+};
+
+/**
+ * Focuses search input box.
+ */
+Commands.searchCommand = {
+  execute: function(event, fileManager, elmnt) {
+    elmnt.focus();
+  },
+  canExecute: function(event, fileManager) {
+    event.canExecute = !fileManager.isRenamingInProgress();
+  }
+};
+
+/**
+ * Flips 'available offline' flag on the file.
+ */
+Commands.togglePinnedCommand = {
+  execute: function(event, fileManager) {
+    var pin = !event.command.checked;
+    var entry = CommandUtil.getSingleEntry(event, fileManager);
+
+    function showError(filesystem) {
+      fileManager.alert.showHtml(str('DRIVE_OUT_OF_SPACE_HEADER'),
+          strf('DRIVE_OUT_OF_SPACE_MESSAGE',
+               unescape(entry.name),
+               util.bytesToSi(filesystem.size)));
+    }
+
+    function callback(props) {
+      var fileProps = props[0];
+      if (fileProps.errorCode && pin) {
+        fileManager.metadataCache_.get(entry, 'filesystem', showError);
+      }
+      // We don't have update events yet, so clear the cached data.
+      fileManager.metadataCache_.clear(entry, 'gdata');
+      fileManager.metadataCache_.get(entry, 'gdata', function(gdata) {
+        fileManager.updateMetadataInUI_('gdata', [entry.toURL()], [gdata]);
+      });
+    }
+
+    chrome.fileBrowserPrivate.pinDriveFile([entry.toURL()], pin, callback);
+  },
+  canExecute: function(event, fileManager) {
+    var entry = CommandUtil.getSingleEntry(event, fileManager);
+    var gdata = entry && fileManager.metadataCache_.getCached(entry, 'gdata');
+
+    if (!fileManager.isOnGData() || !entry || entry.isDirectory || !gdata ||
+        gdata.hosted) {
+      event.canExecute = false;
+      event.command.setHidden(true);
+    } else {
+      event.canExecute = true;
+      event.command.setHidden(false);
+      event.command.checked = gdata.pinned;
+    }
+  }
+};
+
+/**
+ * Creates zip file for current selection.
+ */
+Commands.zipSelectionCommand = {
+  execute: function(event, fileManager) {
+    var dirEntry = fileManager.directoryModel_.getCurrentDirEntry();
+    var selectionEntries = fileManager.getSelection().entries;
+    fileManager.copyManager_.zipSelection(dirEntry, fileManager.isOnGData(),
+                                          selectionEntries);
+  },
+  canExecute: function(event, fileManager) {
+    var selection = fileManager.getSelection();
+    event.canExecute = !fileManager.isOnGData() && selection &&
+        selection.totalCount > 0;
   }
 };

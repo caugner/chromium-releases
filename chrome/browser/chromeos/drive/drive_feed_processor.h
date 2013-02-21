@@ -8,17 +8,22 @@
 #include <map>
 #include <set>
 #include <string>
-#include <vector>
 
+#include "base/callback.h"
 #include "base/file_path.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/drive/drive_file_error.h"
-#include "chrome/browser/google_apis/gdata_errorcode.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
+#include "googleurl/src/gurl.h"
+
+namespace google_apis {
+class ResourceList;
+}  // google_apis
 
 namespace drive {
 
-class DriveDirectory;
-class DriveEntry;
+class DriveEntryProto;
 class DriveResourceMetadata;
 
 // DriveFeedProcessor is used to process feeds from WAPI (codename for
@@ -36,57 +41,132 @@ class DriveFeedProcessor {
 
   // Applies the documents feeds to the file system using |resource_metadata_|.
   //
-  // |start_changestamp| determines the type of feed to process. The value is
-  // set to zero for the root feeds, every other value is for the delta feeds.
+  // |is_delta_feed| determines the type of feed to process, whether it is a
+  // root feed (false) or a delta feed (true).
   //
   // In the case of processing the root feeds |root_feed_changestamp| is used
   // as its initial changestamp value. The value comes from
   // google_apis::AccountMetadataFeed.
+  // |on_complete_callback| is run after the feed is applied.
+  // |on_complete_callback| must not be null.
+  // TODO(achuith): Change the type of on_complete_callback to
+  // FileOperationCallback instead.
   void ApplyFeeds(
-      const ScopedVector<google_apis::DocumentFeed>& feed_list,
-      int64 start_changestamp,
+      const ScopedVector<google_apis::ResourceList>& feed_list,
+      bool is_delta_feed,
       int64 root_feed_changestamp,
-      std::set<FilePath>* changed_dirs);
+      const base::Closure& on_complete_callback);
 
   // Converts list of document feeds from collected feeds into a
   // DriveEntryProtoMap. |feed_changestamp| and/or |uma_stats| may be NULL.
+  // entry_proto_map_ and root_upload_url_ are updated as side effects.
   void FeedToEntryProtoMap(
-    const ScopedVector<google_apis::DocumentFeed>& feed_list,
-    DriveEntryProtoMap* entry_proto_map,
-    int64* feed_changestamp,
-    FeedToEntryProtoMapUMAStats* uma_stats);
+      const ScopedVector<google_apis::ResourceList>& feed_list,
+      int64* feed_changestamp,
+      FeedToEntryProtoMapUMAStats* uma_stats);
+
+  // A map of DriveEntryProto's representing a feed.
+  const DriveEntryProtoMap& entry_proto_map() const { return entry_proto_map_; }
+
+  // The set of changed directories as a result of feed processing.
+  const std::set<FilePath>& changed_dirs() const { return changed_dirs_; }
 
  private:
-  typedef std::map<std::string /* resource_id */, DriveEntry*> ResourceMap;
+  // Applies the pre-processed feed from entry_proto_map_ onto the filesystem.
+  void ApplyEntryProtoMap(bool is_delta_feed);
 
-  // Applies the pre-processed feed from |entry_proto_map| onto the filesystem.
-  void ApplyEntryProtoMap(const DriveEntryProtoMap& entry_proto_map,
-                          bool is_delta_feed,
-                          int64 feed_changestamp,
-                          std::set<FilePath>* changed_dirs);
+  // Apply the next item from entry_proto_map_ to the file system. The async
+  // version posts to the message loop to avoid recursive stack-overflow.
+  void ApplyNextEntryProto();
+  void ApplyNextEntryProtoAsync();
 
-  // Helper function for adding new |entry| from the feed into |directory|. It
-  // checks the type of file and updates |changed_dirs| if this file adding
-  // operation needs to raise directory notification update.
-  static void AddEntryToDirectoryAndCollectChangedDirectories(
-      DriveEntry* entry,
-      DriveDirectory* directory,
-      std::set<FilePath>* changed_dirs);
+  // Apply |entry_proto| to resource_metadata_.
+  void ApplyEntryProto(const DriveEntryProto& entry_proto);
 
-  // Helper function for removing |entry| from its parent. If |entry| is a
-  // directory too, it will collect all its children file paths into
-  // |changed_dirs| as well.
-  static void RemoveEntryFromParentAndCollectChangedDirectories(
-      DriveEntry* entry,
-      std::set<FilePath>* changed_dirs);
+  // Continue ApplyEntryProto. This is a callback for
+  // DriveResourceMetadata::GetEntryInfoByResourceId.
+  void ContinueApplyEntryProto(
+      const DriveEntryProto& entry_proto,
+      DriveFileError error,
+      const FilePath& file_path,
+      scoped_ptr<DriveEntryProto> old_entry_proto);
 
-  // Finds directory where new |new_entry| should be added to during feed
-  // processing.
-  DriveDirectory* FindDirectoryForNewEntry(
-      DriveEntry* new_entry,
-      const ResourceMap& resource_map);
+  // Apply the DriveEntryProto pointed to by |it| to resource_metadata_.
+  void ApplyNextByIterator(DriveEntryProtoMap::iterator it);
+
+  // Helper function to add |entry_proto| to its parent. Updates changed_dirs_
+  // as a side effect.
+  void AddEntryToParent(const DriveEntryProto& entry_proto);
+
+  // Callback for DriveResourceMetadata::AddEntryToParent.
+  void NotifyForAddEntryToParent(bool is_directory,
+                                 DriveFileError error,
+                                 const FilePath& file_path);
+
+  // Removes entry pointed to by |resource_id| from its parent. Updates
+  // changed_dirs_ as a side effect.
+  void RemoveEntryFromParent(
+      const DriveEntryProto& entry_proto,
+      const FilePath& file_path);
+
+  // Continues RemoveEntryFromParent after
+  // DriveResourceMetadata::GetChildDirectories.
+  void OnGetChildrenForRemove(
+      const DriveEntryProto& entry_proto,
+      const FilePath& file_path,
+      const std::set<FilePath>& child_directories);
+
+  // Callback for DriveResourceMetadata::RemoveEntryFromParent.
+  void NotifyForRemoveEntryFromParent(
+      bool is_directory,
+      const FilePath& file_path,
+      const std::set<FilePath>& child_directories,
+      DriveFileError error,
+      const FilePath& parent_path);
+
+  // Refreshes DriveResourceMetadata entry that has the same resource_id as
+  // |entry_proto| with |entry_proto|. Updates changed_dirs_ as a side effect.
+  void RefreshEntry(const DriveEntryProto& entry_proto,
+                    const FilePath& file_path);
+
+  // Callback for DriveResourceMetadata::RefreshEntry.
+  void NotifyForRefreshEntry(
+      const FilePath& old_file_path,
+      DriveFileError error,
+      const FilePath& file_path,
+      scoped_ptr<DriveEntryProto> entry_proto);
+
+  // Updates the upload url of the root directory with root_upload_url_.
+  void UpdateRootUploadUrl();
+
+  // Callback for DriveResourceMetadata::GetEntryInfoByPath for the root proto.
+  // Updates root upload url in the root proto, and refreshes the proto.
+  void OnGetRootEntryProto(DriveFileError error,
+                           scoped_ptr<DriveEntryProto> root_proto);
+
+  // Callback for DriveResourceMetadata::RefreshEntry after the root upload
+  // url is set.
+  void OnUpdateRootUploadUrl(DriveFileError error,
+                             const FilePath& root_path,
+                             scoped_ptr<DriveEntryProto> root_proto);
+
+  // Runs after all entries have been processed.
+  void OnComplete();
+
+  // Reset the state of this object.
+  void Clear();
 
   DriveResourceMetadata* resource_metadata_;  // Not owned.
+
+  DriveEntryProtoMap entry_proto_map_;
+  std::set<FilePath> changed_dirs_;
+  GURL root_upload_url_;
+  int64 largest_changestamp_;
+  base::Closure on_complete_callback_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<DriveFeedProcessor> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(DriveFeedProcessor);
 };
 

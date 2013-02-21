@@ -44,6 +44,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "webkit/dom_storage/dom_storage_types.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/quota/mock_quota_manager.h"
 #include "webkit/quota/quota_manager.h"
@@ -226,7 +227,7 @@ class RemoveProfileCookieTester : public RemoveCookieTester {
   }
 };
 
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
 class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
  public:
   RemoveSafeBrowsingCookieTester()
@@ -236,7 +237,7 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
         SafeBrowsingService::CreateSafeBrowsingService();
     browser_process_->SetSafeBrowsingService(sb_service);
     sb_service->Initialize();
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
 
     // Create a cookiemonster that does not have persistant storage, and replace
     // the SafeBrowsingService created one with it.
@@ -248,7 +249,7 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
 
   virtual ~RemoveSafeBrowsingCookieTester() {
     browser_process_->safe_browsing_service()->ShutDown();
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
     browser_process_->SetSafeBrowsingService(NULL);
   }
 
@@ -259,12 +260,19 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
 };
 #endif
 
-class RemoveServerBoundCertTester {
+class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
  public:
-  explicit RemoveServerBoundCertTester(TestingProfile* profile) {
+  explicit RemoveServerBoundCertTester(TestingProfile* profile)
+      : ssl_config_changed_count_(0) {
     profile->CreateRequestContext();
     server_bound_cert_service_ = profile->GetRequestContext()->
         GetURLRequestContext()->server_bound_cert_service();
+    ssl_config_service_ = profile->GetSSLConfigService();
+    ssl_config_service_->AddObserver(this);
+  }
+
+  virtual ~RemoveServerBoundCertTester() {
+    ssl_config_service_->RemoveObserver(this);
   }
 
   int ServerBoundCertCount() {
@@ -294,12 +302,19 @@ class RemoveServerBoundCertTester {
     return server_bound_cert_service_->GetCertStore();
   }
 
+  int ssl_config_changed_count() const {
+    return ssl_config_changed_count_;
+  }
+
+  // net::SSLConfigService::Observer implementation:
+  virtual void OnSSLConfigChanged() OVERRIDE {
+    ssl_config_changed_count_++;
+  }
+
  private:
   net::ServerBoundCertService* server_bound_cert_service_;
-
-  net::SSLClientCertType type_;
-  std::string key_;
-  std::string cert_;
+  scoped_refptr<net::SSLConfigService> ssl_config_service_;
+  int ssl_config_changed_count_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveServerBoundCertTester);
 };
@@ -368,17 +383,17 @@ class RemoveAutofillTester : public PersonalDataManagerObserver {
 
   // Returns true if there are autofill profiles.
   bool HasProfile() {
-    return !personal_data_manager_->profiles().empty() &&
+    return !personal_data_manager_->GetProfiles().empty() &&
            !personal_data_manager_->credit_cards().empty();
   }
 
   void AddProfile() {
     AutofillProfile profile;
-    profile.SetInfo(NAME_FIRST, ASCIIToUTF16("Bob"));
-    profile.SetInfo(NAME_LAST, ASCIIToUTF16("Smith"));
-    profile.SetInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("94043"));
-    profile.SetInfo(EMAIL_ADDRESS, ASCIIToUTF16("sue@example.com"));
-    profile.SetInfo(COMPANY_NAME, ASCIIToUTF16("Company X"));
+    profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Bob"));
+    profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
+    profile.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("94043"));
+    profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("sue@example.com"));
+    profile.SetRawInfo(COMPANY_NAME, ASCIIToUTF16("Company X"));
 
     std::vector<AutofillProfile> profiles;
     profiles.push_back(profile);
@@ -386,7 +401,7 @@ class RemoveAutofillTester : public PersonalDataManagerObserver {
     MessageLoop::current()->Run();
 
     CreditCard card;
-    card.SetInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1234-5678-9012-3456"));
+    card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1234-5678-9012-3456"));
 
     std::vector<CreditCard> cards;
     cards.push_back(card);
@@ -453,8 +468,7 @@ class RemoveLocalStorageTester {
                    base::Unretained(this)));
   }
   void OnGotLocalStorageUsage(
-      const std::vector<
-          dom_storage::DomStorageContext::LocalStorageUsageInfo>& infos) {
+      const std::vector<dom_storage::LocalStorageUsageInfo>& infos) {
     infos_ = infos;
     await_completion_.Notify();
   }
@@ -463,7 +477,7 @@ class RemoveLocalStorageTester {
   TestingProfile* profile_;
   content::DOMStorageContext* dom_storage_context_;
 
-  std::vector<dom_storage::DomStorageContext::LocalStorageUsageInfo> infos_;
+  std::vector<dom_storage::LocalStorageUsageInfo> infos_;
 
   AwaitCompletionHelper await_completion_;
 
@@ -498,7 +512,7 @@ class BrowsingDataRemoverTest : public testing::Test,
     // the message loop is cleared out, before destroying the threads and loop.
     // Otherwise we leak memory.
     profile_.reset();
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
   }
 
   void BlockUntilBrowsingDataRemoved(BrowsingDataRemover::TimePeriod period,
@@ -631,7 +645,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveCookieLastHour) {
   EXPECT_FALSE(tester.ContainsCookie());
 }
 
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
 TEST_F(BrowsingDataRemoverTest, RemoveSafeBrowsingCookieForever) {
   RemoveSafeBrowsingCookieTester tester;
 
@@ -667,6 +681,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveServerBoundCertForever) {
   RemoveServerBoundCertTester tester(GetProfile());
 
   tester.AddServerBoundCert(kTestOrigin1);
+  EXPECT_EQ(0, tester.ssl_config_changed_count());
   EXPECT_EQ(1, tester.ServerBoundCertCount());
 
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
@@ -674,6 +689,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveServerBoundCertForever) {
 
   EXPECT_EQ(BrowsingDataRemover::REMOVE_SERVER_BOUND_CERTS, GetRemovalMask());
   EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+  EXPECT_EQ(1, tester.ssl_config_changed_count());
   EXPECT_EQ(0, tester.ServerBoundCertCount());
 }
 
@@ -685,6 +701,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveServerBoundCertLastHour) {
   tester.AddServerBoundCertWithTimes(kTestOrigin2,
                                      now - base::TimeDelta::FromHours(2),
                                      now);
+  EXPECT_EQ(0, tester.ssl_config_changed_count());
   EXPECT_EQ(2, tester.ServerBoundCertCount());
 
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::LAST_HOUR,
@@ -692,7 +709,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveServerBoundCertLastHour) {
 
   EXPECT_EQ(BrowsingDataRemover::REMOVE_SERVER_BOUND_CERTS, GetRemovalMask());
   EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
-  EXPECT_EQ(1, tester.ServerBoundCertCount());
+  EXPECT_EQ(1, tester.ssl_config_changed_count());
+  ASSERT_EQ(1, tester.ServerBoundCertCount());
   net::ServerBoundCertStore::ServerBoundCertList certs;
   tester.GetCertStore()->GetAllServerBoundCerts(&certs);
   EXPECT_EQ(kTestOrigin2, certs.front().server_identifier());

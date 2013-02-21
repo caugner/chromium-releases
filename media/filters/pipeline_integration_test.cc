@@ -38,13 +38,14 @@ class MockMediaSource {
  public:
   MockMediaSource(const std::string& filename, const std::string& mimetype,
                   int initial_append_size)
-      : url_(GetTestDataURL(filename)),
+      : file_path_(GetTestDataFilePath(filename)),
         current_position_(0),
         initial_append_size_(initial_append_size),
         mimetype_(mimetype) {
     chunk_demuxer_ = new ChunkDemuxer(
         base::Bind(&MockMediaSource::DemuxerOpened, base::Unretained(this)),
-        base::Bind(&MockMediaSource::DemuxerNeedKey, base::Unretained(this)));
+        base::Bind(&MockMediaSource::DemuxerNeedKey, base::Unretained(this)),
+        LogCB());
 
     file_data_ = ReadTestDataFile(filename);
 
@@ -129,7 +130,7 @@ class MockMediaSource {
   }
 
  private:
-  std::string url_;
+  FilePath file_path_;
   scoped_refptr<DecoderBuffer> file_data_;
   int current_position_;
   int initial_append_size_;
@@ -162,13 +163,11 @@ class FakeDecryptorClient : public DecryptorClient {
 
   virtual void KeyMessage(const std::string& key_system,
                           const std::string& session_id,
-                          scoped_array<uint8> message,
-                          int message_length,
+                          const std::string& message,
                           const std::string& default_url) {
     EXPECT_EQ(kClearKeySystem, key_system);
     EXPECT_FALSE(session_id.empty());
-    EXPECT_TRUE(message.get());
-    EXPECT_GT(message_length, 0);
+    EXPECT_FALSE(message.empty());
 
     current_key_system_ = key_system;
     current_session_id_ = session_id;
@@ -277,7 +276,7 @@ class PipelineIntegrationTest
 
 
 TEST_F(PipelineIntegrationTest, BasicPlayback) {
-  ASSERT_TRUE(Start(GetTestDataURL("bear-320x240.webm"), PIPELINE_OK));
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-320x240.webm"), PIPELINE_OK));
 
   Play();
 
@@ -285,7 +284,8 @@ TEST_F(PipelineIntegrationTest, BasicPlayback) {
 }
 
 TEST_F(PipelineIntegrationTest, BasicPlaybackHashed) {
-  ASSERT_TRUE(Start(GetTestDataURL("bear-320x240.webm"), PIPELINE_OK, true));
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-320x240.webm"),
+                    PIPELINE_OK, true));
 
   Play();
 
@@ -364,7 +364,7 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_MP4) {
 #endif
 
 TEST_F(PipelineIntegrationTest, BasicPlayback_16x9AspectRatio) {
-  ASSERT_TRUE(Start(GetTestDataURL("bear-320x240-16x9-aspect.webm"),
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-320x240-16x9-aspect.webm"),
                     PIPELINE_OK));
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
@@ -387,7 +387,7 @@ TEST_F(PipelineIntegrationTest, EncryptedPlayback) {
 
 // TODO(acolwell): Fix flakiness http://crbug.com/117921
 TEST_F(PipelineIntegrationTest, DISABLED_SeekWhilePaused) {
-  ASSERT_TRUE(Start(GetTestDataURL("bear-320x240.webm"), PIPELINE_OK));
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-320x240.webm"), PIPELINE_OK));
 
   base::TimeDelta duration(pipeline_->GetMediaDuration());
   base::TimeDelta start_seek_time(duration / 4);
@@ -411,7 +411,7 @@ TEST_F(PipelineIntegrationTest, DISABLED_SeekWhilePaused) {
 
 // TODO(acolwell): Fix flakiness http://crbug.com/117921
 TEST_F(PipelineIntegrationTest, DISABLED_SeekWhilePlaying) {
-  ASSERT_TRUE(Start(GetTestDataURL("bear-320x240.webm"), PIPELINE_OK));
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-320x240.webm"), PIPELINE_OK));
 
   base::TimeDelta duration(pipeline_->GetMediaDuration());
   base::TimeDelta start_seek_time(duration / 4);

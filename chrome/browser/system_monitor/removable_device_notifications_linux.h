@@ -23,38 +23,41 @@
 #include "base/files/file_path_watcher.h"
 #include "base/memory/ref_counted.h"
 #include "base/system_monitor/system_monitor.h"
+#include "chrome/browser/system_monitor/removable_storage_notifications.h"
 #include "content/public/browser/browser_thread.h"
 
 class FilePath;
 
 // Gets device information given a |device_path|. On success, fills in
-// |unique_id|, |name|, and |removable|.
+// |unique_id|, |name|, |removable| and |partition_size_in_bytes|.
 typedef void (*GetDeviceInfoFunc)(const FilePath& device_path,
-                                  std::string* unique_id, string16* name,
-                                  bool* removable);
+                                  std::string* unique_id,
+                                  string16* name,
+                                  bool* removable,
+                                  uint64* partition_size_in_bytes);
 
 namespace chrome {
 
-class RemovableDeviceNotificationsLinux;
-typedef RemovableDeviceNotificationsLinux RemovableDeviceNotifications;
-
 class RemovableDeviceNotificationsLinux
-    : public base::RefCountedThreadSafe<RemovableDeviceNotificationsLinux,
+    : public RemovableStorageNotifications,
+      public base::RefCountedThreadSafe<RemovableDeviceNotificationsLinux,
           content::BrowserThread::DeleteOnFileThread> {
  public:
   // Should only be called by browser start up code.  Use GetInstance() instead.
   explicit RemovableDeviceNotificationsLinux(const FilePath& path);
-
-  static RemovableDeviceNotificationsLinux* GetInstance();
 
   // Must be called for RemovableDeviceNotificationsLinux to work.
   void Init();
 
   // Finds the device that contains |path| and populates |device_info|.
   // Returns false if unable to find the device.
-  bool GetDeviceInfoForPath(
+  virtual bool GetDeviceInfoForPath(
       const FilePath& path,
-      base::SystemMonitor::RemovableStorageInfo* device_info) const;
+      base::SystemMonitor::RemovableStorageInfo* device_info) const OVERRIDE;
+
+  // Returns the storage partition size of the device present at |location|.
+  // If the requested information is unavailable, returns 0.
+  virtual uint64 GetStorageSize(const std::string& location) const OVERRIDE;
 
  protected:
   // Only for use in unit tests.
@@ -75,12 +78,15 @@ class RemovableDeviceNotificationsLinux
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::FILE>;
 
-  // Structure to save mounted device information such as device path and unique
-  // identifier.
+  // Structure to save mounted device information such as device path, unique
+  // identifier, device name and partition size.
   struct MountPointInfo {
+    MountPointInfo();
+
     FilePath mount_device;
     std::string device_id;
     string16 device_name;
+    uint64 partition_size_in_bytes;
   };
 
   // Mapping of mount points to MountPointInfo.

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "net/quic/test_tools/quic_test_utils.h"
+
 #include "net/quic/crypto/crypto_framer.h"
 
 using std::max;
@@ -18,10 +19,87 @@ MockFramerVisitor::MockFramerVisitor() {
       .WillByDefault(testing::Return(true));
 }
 
-MockFramerVisitor::~MockFramerVisitor() {}
+MockFramerVisitor::~MockFramerVisitor() {
+}
 
 bool NoOpFramerVisitor::OnPacketHeader(const QuicPacketHeader& header) {
   return true;
+}
+
+FramerVisitorCapturingAcks::FramerVisitorCapturingAcks() {
+}
+
+FramerVisitorCapturingAcks::~FramerVisitorCapturingAcks() {
+}
+
+bool FramerVisitorCapturingAcks::OnPacketHeader(
+    const QuicPacketHeader& header) {
+  header_ = header;
+  return true;
+}
+
+void FramerVisitorCapturingAcks::OnAckFrame(const QuicAckFrame& frame) {
+  ack_.reset(new QuicAckFrame(frame));
+}
+
+void FramerVisitorCapturingAcks::OnCongestionFeedbackFrame(
+    const QuicCongestionFeedbackFrame& frame) {
+  feedback_.reset(new QuicCongestionFeedbackFrame(frame));
+}
+
+MockHelper::MockHelper() {
+}
+
+MockHelper::~MockHelper() {
+}
+
+const QuicClock* MockHelper::GetClock() const {
+  return &clock_;
+}
+
+MockConnectionVisitor::MockConnectionVisitor() {
+}
+
+MockConnectionVisitor::~MockConnectionVisitor() {
+}
+
+MockScheduler::MockScheduler()
+    : QuicSendScheduler(NULL, kFixRate) {
+}
+
+MockScheduler::~MockScheduler() {
+}
+
+MockConnection::MockConnection(QuicGuid guid, IPEndPoint address)
+    : QuicConnection(guid, address, new MockHelper()),
+      helper_(helper()) {
+}
+
+MockConnection::~MockConnection() {
+}
+
+PacketSavingConnection::PacketSavingConnection(QuicGuid guid,
+                                               IPEndPoint address)
+    : MockConnection(guid, address) {
+}
+
+PacketSavingConnection::~PacketSavingConnection() {
+}
+
+bool PacketSavingConnection::SendPacket(QuicPacketSequenceNumber number,
+                                        QuicPacket* packet,
+                                        bool should_resend,
+                                        bool force,
+                                        bool is_retransmit) {
+  packets_.push_back(packet);
+  return true;
+}
+
+MockSession::MockSession(QuicConnection* connection, bool is_server)
+    : QuicSession(connection, is_server) {
+}
+
+MockSession::~MockSession() {
 }
 
 namespace {
@@ -116,23 +194,18 @@ QuicPacket* ConstructHandshakePacket(QuicGuid guid, CryptoTag tag) {
 
   QuicPacketHeader header;
   header.guid = guid;
-  header.retransmission_count = 0;
   header.packet_sequence_number = 1;
-  header.transmission_time = 0;
   header.flags = PACKET_FLAGS_NONE;
   header.fec_group = 0;
 
   QuicStreamFrame stream_frame(kCryptoStreamId, false, 0,
-                                     data->AsStringPiece());
+                               data->AsStringPiece());
 
   QuicFrame frame(&stream_frame);
   QuicFrames frames;
   frames.push_back(frame);
-  QuicPacket* packet;
-  quic_framer.ConstructFragementDataPacket(header, frames, &packet);
-  return packet;
+  return quic_framer.ConstructFrameDataPacket(header, frames);
 }
 
 }  // namespace test
-
 }  // namespace net

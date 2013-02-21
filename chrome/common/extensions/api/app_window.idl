@@ -9,31 +9,35 @@ namespace app.window {
     // with the same id (and no explicit size or position) is later opened.
     DOMString? id;
 
-    // Default width of the window.
-    long? defaultWidth;
+    // Default width of the window. (Deprecated; regular bounds act like this
+    // now.)
+    [nodoc] long? defaultWidth;
 
-    // Default height of the window.
-    long? defaultHeight;
+    // Default height of the window. (Deprecated; regular bounds act like this
+    // now.)
+    [nodoc] long? defaultHeight;
 
-    // Default X coordinate of the window.
-    long? defaultLeft;
+    // Default X coordinate of the window. (Deprecated; regular bounds act like
+    // this now.)
+    [nodoc] long? defaultLeft;
 
-    // Default Y coordinate of the window.
-    long? defaultTop;
+    // Default Y coordinate of the window. (Deprecated; regular bounds act like
+    // this now.)
+    [nodoc] long? defaultTop;
 
-    // Width of the window.
-    long? width;
+    // Width of the window. (Deprecated; use 'bounds'.)
+    [nodoc] long? width;
 
-    // Height of the window.
-    long? height;
+    // Height of the window. (Deprecated; use 'bounds'.)
+    [nodoc] long? height;
 
-    // X coordinate of the window.
-    long? left;
+    // X coordinate of the window. (Deprecated; use 'bounds'.)
+    [nodoc] long? left;
 
-    // Y coordinate of the window.
-    long? top;
+    // Y coordinate of the window. (Deprecated; use 'bounds'.)
+    [nodoc] long? top;
 
-    // Minimium width of the window.
+    // Minimum width of the window.
     long? minWidth;
 
     // Minimum height of the window.
@@ -45,19 +49,41 @@ namespace app.window {
     // Maximum height of the window.
     long? maxHeight;
 
-    // Window type: 'shell' (the default) is the only currently supported value.
-    DOMString? type;
+    // Window type: 
+    //  'shell' - the default window type
+    //  'panel' - a panel, managed by the OS (Currently experimental, Ash only)
+    [nodoc] DOMString? type;
 
     // Frame type: 'none' or 'chrome' (defaults to 'chrome').
     DOMString? frame;
 
+    // Size of the content in the window (excluding the titlebar). If specified
+    // in addition to any of the left/top/width/height parameters, this field
+    // takes precedence. If a frameBounds is specified, the frameBounds take
+    // precedence.
+    Bounds? bounds;
+
     // If true, the window will be created in a hidden state. Call show() on
     // the window to show it once it has been created. Defaults to false.
     boolean? hidden;
+
+    // By default if you specify an id for the window, the window will only be
+    // created if another window with the same id doesn't already exist. If a
+    // window with the same id already exists that window is activated instead.
+    // If you do want to create multiple windows with the same id, you can
+    // set this property to false.
+    boolean? singleton;
   };
 
   callback CreateWindowCallback =
       void ([instanceOf=AppWindow] object created_window);
+
+  dictionary Bounds {
+    long? left;
+    long? top;
+    long? width;
+    long? height;
+  };
 
   dictionary AppWindow {
     // Focus the window.
@@ -66,14 +92,20 @@ namespace app.window {
     // Minimize the window.
     static void minimize();
 
+    // Is the window minimized?
+    static boolean isMinimized();
+
     // Maximize the window.
     static void maximize();
+
+    // Is the window maximized?
+    static bool isMaximized();
 
     // Restore the window.
     static void restore();
 
-    // Move the window to the position (|x|, |y|).
-    static void moveTo(long x, long y);
+    // Move the window to the position (|left|, |top|).
+    static void moveTo(long left, long top);
 
     // Resize the window to |width|x|height| pixels in size.
     static void resizeTo(long width, long height);
@@ -93,6 +125,14 @@ namespace app.window {
     // Hide the window. Does nothing if the window is already hidden.
     static void hide();
 
+    // Set the window's bounds.
+    static void setBounds(Bounds bounds);
+
+    // Set the app icon for the window (experimental).
+    // Currently this is only being implemented on Ash.
+    // TODO(stevenjb): Investigate implementing this on Windows and OSX.
+    [nodoc] static void setIcon(DOMString icon_url);
+
     // The JavaScript 'window' object for the created child.
     [instanceOf=global] object contentWindow;
   };
@@ -109,10 +149,11 @@ namespace app.window {
     //
     // Yet another option is to give the window a (unique) id. This id is then
     // used to remember the size and position of the window whenever it is
-    // moved or resized. This size and position is then used on subsequent
-    // opening of a window with the same id. The defaultLeft/defaultTop and
-    // defaultWidth/defaultHeight properties can be used to specify a position
-    // and size when no geometry has been stored for the window yet.
+    // moved or resized. This size and position is then used instead of the
+    // specified bounds on subsequent opening of a window with the same id. If
+    // you need to open a window with an id at a location other than the
+    // remembered default, you can create it hidden, move it to the desired
+    // location, then show it.
     //
     // You can also combine these various options, explicitly specifying for
     // example the size while having the position be remembered or other
@@ -127,6 +168,10 @@ namespace app.window {
                        optional CreateWindowOptions options,
                        optional CreateWindowCallback callback);
 
+    // Returns an $ref:AppWindow object for the
+    // current script context (ie JavaScript 'window' object). This can also be
+    // called on a handle to a script context for another page, for example:
+    // otherWindow.chrome.app.window.current().
     [nocompile] static AppWindow current();
     [nocompile, nodoc] static void initializeAppWindow(object state);
   };

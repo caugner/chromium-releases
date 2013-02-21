@@ -9,10 +9,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros/onc_constants.h"
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chromeos/network/onc/onc_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -28,6 +28,7 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_client_view.h"
 
 namespace chromeos {
 
@@ -901,7 +902,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   layout->StartRow(0, column_view_set_id);
   views::Label* title = new views::Label(l10n_util::GetStringUTF16(
       IDS_OPTIONS_SETTINGS_JOIN_WIFI_NETWORKS));
-  title->SetFont(title->font().DeriveFont(1, gfx::Font::BOLD));
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  title->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   layout->AddView(title, 5, 1);
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
@@ -917,7 +919,7 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
     layout->AddView(ssid_textfield_);
   } else {
     views::Label* label = new views::Label(UTF8ToUTF16(wifi->name()));
-    label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     layout->AddView(label);
   }
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
@@ -1050,19 +1052,19 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
         l10n_util::GetStringUTF16(
             IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE_HIDE));
     passphrase_visible_button_->SetImage(
-        views::ImageButton::BS_NORMAL,
+        views::ImageButton::STATE_NORMAL,
         ResourceBundle::GetSharedInstance().
         GetImageSkiaNamed(IDR_NETWORK_SHOW_PASSWORD));
     passphrase_visible_button_->SetImage(
-        views::ImageButton::BS_HOT,
+        views::ImageButton::STATE_HOVERED,
         ResourceBundle::GetSharedInstance().
         GetImageSkiaNamed(IDR_NETWORK_SHOW_PASSWORD_HOVER));
     passphrase_visible_button_->SetToggledImage(
-        views::ImageButton::BS_NORMAL,
+        views::ImageButton::STATE_NORMAL,
         ResourceBundle::GetSharedInstance().
         GetImageSkiaNamed(IDR_NETWORK_HIDE_PASSWORD));
     passphrase_visible_button_->SetToggledImage(
-        views::ImageButton::BS_HOT,
+        views::ImageButton::STATE_HOVERED,
         ResourceBundle::GetSharedInstance().
         GetImageSkiaNamed(IDR_NETWORK_HIDE_PASSWORD_HOVER));
     passphrase_visible_button_->SetImageAlignment(
@@ -1124,7 +1126,7 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   layout->StartRow(0, column_view_set_id);
   layout->SkipColumns(1);
   error_label_ = new views::Label();
-  error_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  error_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   error_label_->SetEnabledColor(SK_ColorRED);
   layout->AddView(error_label_);
 

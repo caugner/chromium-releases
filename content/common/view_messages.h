@@ -7,11 +7,16 @@
 
 #include "base/process.h"
 #include "base/shared_memory.h"
+#include "base/string16.h"
+#include "cc/compositor_frame.h"
+#include "cc/compositor_frame_ack.h"
 #include "content/common/content_export.h"
 #include "content/common/content_param_traits.h"
 #include "content/common/edit_command.h"
 #include "content/common/navigation_gesture.h"
+#include "content/common/pepper_renderer_instance_data.h"
 #include "content/common/view_message_enums.h"
+#include "content/port/common/input_event_ack_state.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/file_chooser_params.h"
@@ -21,6 +26,7 @@
 #include "content/public/common/referrer.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/stop_find_action.h"
+#include "content/public/common/three_d_api_types.h"
 #include "content/public/common/window_container_type.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
@@ -44,6 +50,7 @@
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_f.h"
+#include "ui/gfx/vector2d.h"
 #include "webkit/glue/webcookie.h"
 #include "webkit/glue/webmenuitem.h"
 #include "webkit/glue/webpreferences.h"
@@ -68,15 +75,18 @@ IPC_ENUM_TRAITS(WebKit::WebTextDirection)
 IPC_ENUM_TRAITS(WebMenuItem::Type)
 IPC_ENUM_TRAITS(WindowContainerType)
 IPC_ENUM_TRAITS(content::FileChooserParams::Mode)
+IPC_ENUM_TRAITS(content::InputEventAckState)
 IPC_ENUM_TRAITS(content::JavaScriptMessageType)
 IPC_ENUM_TRAITS(content::NavigationGesture)
 IPC_ENUM_TRAITS(content::PageZoom)
 IPC_ENUM_TRAITS(content::RendererPreferencesHintingEnum)
 IPC_ENUM_TRAITS(content::RendererPreferencesSubpixelRenderingEnum)
 IPC_ENUM_TRAITS(content::StopFindAction)
+IPC_ENUM_TRAITS(content::ThreeDAPIType)
 IPC_ENUM_TRAITS(media::ChannelLayout)
 IPC_ENUM_TRAITS(media::MediaLogEvent::Type)
 IPC_ENUM_TRAITS(ui::TextInputType)
+IPC_ENUM_TRAITS(webkit_glue::WebPreferences::EditingBehavior)
 
 #if defined(OS_MACOSX)
 IPC_STRUCT_TRAITS_BEGIN(FontDescriptor)
@@ -121,8 +131,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebKit::WebFloatRect)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebKit::WebScreenInfo)
-  IPC_STRUCT_TRAITS_MEMBER(verticalDPI)
-  IPC_STRUCT_TRAITS_MEMBER(horizontalDPI)
+  IPC_STRUCT_TRAITS_MEMBER(deviceScaleFactor)
   IPC_STRUCT_TRAITS_MEMBER(depth)
   IPC_STRUCT_TRAITS_MEMBER(depthPerComponent)
   IPC_STRUCT_TRAITS_MEMBER(isMonochrome)
@@ -140,6 +149,9 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(default_font_size)
   IPC_STRUCT_TRAITS_MEMBER(default_fixed_font_size)
   IPC_STRUCT_TRAITS_MEMBER(apply_default_device_scale_factor_in_compositor)
+  IPC_STRUCT_TRAITS_MEMBER(apply_page_scale_factor_in_compositor)
+  IPC_STRUCT_TRAITS_MEMBER(per_tile_painting_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(accelerated_animation_enabled)
   IPC_STRUCT_TRAITS_MEMBER(minimum_font_size)
   IPC_STRUCT_TRAITS_MEMBER(minimum_logical_font_size)
   IPC_STRUCT_TRAITS_MEMBER(default_encoding)
@@ -185,6 +197,9 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(show_composited_layer_tree)
   IPC_STRUCT_TRAITS_MEMBER(show_fps_counter)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_for_overflow_scroll_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(
+      accelerated_compositing_for_scrollable_frames_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(composited_scrolling_for_frames_enabled)
   IPC_STRUCT_TRAITS_MEMBER(show_paint_rects)
   IPC_STRUCT_TRAITS_MEMBER(render_vsync_enabled)
   IPC_STRUCT_TRAITS_MEMBER(asynchronous_spell_checking_enabled)
@@ -194,13 +209,14 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(fixed_position_compositing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_2d_canvas_enabled)
   IPC_STRUCT_TRAITS_MEMBER(deferred_2d_canvas_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(antialiased_2d_canvas_disabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_painting_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_filters_enabled)
   IPC_STRUCT_TRAITS_MEMBER(gesture_tap_highlight_enabled)
-  IPC_STRUCT_TRAITS_MEMBER(accelerated_plugins_enabled)
-  IPC_STRUCT_TRAITS_MEMBER(accelerated_layers_enabled)
-  IPC_STRUCT_TRAITS_MEMBER(accelerated_animation_enabled)
-  IPC_STRUCT_TRAITS_MEMBER(accelerated_video_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_for_plugins_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_for_3d_transforms_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_for_animation_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_for_video_enabled)
   IPC_STRUCT_TRAITS_MEMBER(memory_info_enabled)
   IPC_STRUCT_TRAITS_MEMBER(fullscreen_enabled)
   IPC_STRUCT_TRAITS_MEMBER(allow_displaying_insecure_content)
@@ -209,11 +225,13 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(visual_word_movement_enabled)
   IPC_STRUCT_TRAITS_MEMBER(password_echo_enabled)
   IPC_STRUCT_TRAITS_MEMBER(css_sticky_position_enabled)
-  IPC_STRUCT_TRAITS_MEMBER(css_regions_enabled)
   IPC_STRUCT_TRAITS_MEMBER(css_shaders_enabled)
   IPC_STRUCT_TRAITS_MEMBER(css_variables_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(css_grid_layout_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(touch_enabled)
   IPC_STRUCT_TRAITS_MEMBER(device_supports_touch)
   IPC_STRUCT_TRAITS_MEMBER(device_supports_mouse)
+  IPC_STRUCT_TRAITS_MEMBER(touch_adjustment_enabled)
   IPC_STRUCT_TRAITS_MEMBER(default_tile_width)
   IPC_STRUCT_TRAITS_MEMBER(default_tile_height)
   IPC_STRUCT_TRAITS_MEMBER(max_untiled_layer_width)
@@ -222,12 +240,14 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(sync_xhr_in_documents_enabled)
   IPC_STRUCT_TRAITS_MEMBER(deferred_image_decoding_enabled)
   IPC_STRUCT_TRAITS_MEMBER(number_of_cpu_cores)
+  IPC_STRUCT_TRAITS_MEMBER(editing_behavior)
   IPC_STRUCT_TRAITS_MEMBER(cookie_enabled)
   IPC_STRUCT_TRAITS_MEMBER(apply_page_scale_factor_in_compositor)
 #if defined(OS_ANDROID)
   IPC_STRUCT_TRAITS_MEMBER(text_autosizing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(font_scale_factor)
   IPC_STRUCT_TRAITS_MEMBER(force_enable_zoom)
+  IPC_STRUCT_TRAITS_MEMBER(supports_multiple_windows)
 #endif
 IPC_STRUCT_TRAITS_END()
 
@@ -296,6 +316,9 @@ IPC_STRUCT_TRAITS_BEGIN(content::FileChooserParams)
   IPC_STRUCT_TRAITS_MEMBER(title)
   IPC_STRUCT_TRAITS_MEMBER(default_file_name)
   IPC_STRUCT_TRAITS_MEMBER(accept_types)
+#if defined(OS_ANDROID)
+  IPC_STRUCT_TRAITS_MEMBER(capture)
+#endif
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::FrameNavigateParams)
@@ -311,6 +334,13 @@ IPC_STRUCT_TRAITS_BEGIN(content::FrameNavigateParams)
   IPC_STRUCT_TRAITS_MEMBER(password_form)
   IPC_STRUCT_TRAITS_MEMBER(contents_mime_type)
   IPC_STRUCT_TRAITS_MEMBER(socket_address)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::PepperRendererInstanceData)
+  IPC_STRUCT_TRAITS_MEMBER(render_process_id)
+  IPC_STRUCT_TRAITS_MEMBER(render_view_id)
+  IPC_STRUCT_TRAITS_MEMBER(document_url)
+  IPC_STRUCT_TRAITS_MEMBER(plugin_url)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
@@ -337,15 +367,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(default_zoom_level)
   IPC_STRUCT_TRAITS_MEMBER(user_agent_override)
   IPC_STRUCT_TRAITS_MEMBER(throttle_input_events)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(content::SSLStatus)
-  IPC_STRUCT_TRAITS_MEMBER(security_style)
-  IPC_STRUCT_TRAITS_MEMBER(cert_id)
-  IPC_STRUCT_TRAITS_MEMBER(cert_status)
-  IPC_STRUCT_TRAITS_MEMBER(security_bits)
-  IPC_STRUCT_TRAITS_MEMBER(connection_status)
-  IPC_STRUCT_TRAITS_MEMBER(content_status)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebCookie)
@@ -405,7 +426,7 @@ IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Params)
   IPC_STRUCT_MEMBER(GURL, opener_url)
 
   // The security origin of the frame initiating the open.
-  IPC_STRUCT_MEMBER(std::string, opener_security_origin)
+  IPC_STRUCT_MEMBER(GURL, opener_security_origin)
 
   // Whether the opener will be suppressed in the new window, in which case
   // scripting the new window is not allowed.
@@ -549,17 +570,16 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   // The position and size of the bitmap.
   IPC_STRUCT_MEMBER(gfx::Rect, bitmap_rect)
 
-  // The scroll offset.  Only one of these can be non-zero, and if they are
-  // both zero, then it means there is no scrolling and the scroll_rect is
-  // ignored.
-  IPC_STRUCT_MEMBER(int, dx)
-  IPC_STRUCT_MEMBER(int, dy)
+  // The scroll delta.  Only one of the delta components can be non-zero, and if
+  // they are both zero, then it means there is no scrolling and the scroll_rect
+  // is ignored.
+  IPC_STRUCT_MEMBER(gfx::Vector2d, scroll_delta)
 
   // The rectangular region to scroll.
   IPC_STRUCT_MEMBER(gfx::Rect, scroll_rect)
 
   // The scroll offset of the render view.
-  IPC_STRUCT_MEMBER(gfx::Point, scroll_offset)
+  IPC_STRUCT_MEMBER(gfx::Vector2d, scroll_offset)
 
   // The regions of the bitmap (in view coords) that contain updated pixels.
   // In the case of scrolling, this includes the scroll damage rect.
@@ -738,10 +758,16 @@ IPC_STRUCT_BEGIN(ViewMsg_Navigate_Params)
   IPC_STRUCT_MEMBER(bool, can_load_local_resources)
 IPC_STRUCT_END()
 
-IPC_STRUCT_BEGIN(ViewMsg_New_Params)
-  // The parent window's id.
-  IPC_STRUCT_MEMBER(gfx::NativeViewId, parent_window)
+// Parameters for an OpenURL request.
+IPC_STRUCT_BEGIN(ViewHostMsg_OpenURL_Params)
+  IPC_STRUCT_MEMBER(GURL, url)
+  IPC_STRUCT_MEMBER(content::Referrer, referrer)
+  IPC_STRUCT_MEMBER(WindowOpenDisposition, disposition)
+  IPC_STRUCT_MEMBER(int64, frame_id)
+  IPC_STRUCT_MEMBER(bool, is_cross_site_redirect)
+IPC_STRUCT_END()
 
+IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // Renderer-wide preferences.
   IPC_STRUCT_MEMBER(content::RendererPreferences, renderer_preferences)
 
@@ -832,8 +858,7 @@ IPC_MESSAGE_CONTROL1(ViewMsg_New,
 // Reply in response to ViewHostMsg_ShowView or ViewHostMsg_ShowWidget.
 // similar to the new command, but used when the renderer created a view
 // first, and we need to update it.
-IPC_MESSAGE_ROUTED1(ViewMsg_CreatingNew_ACK,
-                    gfx::NativeViewId /* parent_hwnd */)
+IPC_MESSAGE_ROUTED0(ViewMsg_CreatingNew_ACK)
 
 // Sends updated preferences to the renderer.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetRendererPrefs,
@@ -905,11 +930,10 @@ IPC_MESSAGE_ROUTED0(ViewMsg_UpdateRect_ACK)
 // compositor path.
 IPC_MESSAGE_ROUTED0(ViewMsg_SwapBuffers_ACK)
 
-// Message payload includes:
-// 1. A blob that should be cast to WebInputEvent
-// 2. An optional boolean value indicating if a RawKeyDown event is associated
-//    to a keyboard shortcut of the browser.
-IPC_MESSAGE_ROUTED0(ViewMsg_HandleInputEvent)
+// Sends an input event to the render widget.
+IPC_MESSAGE_ROUTED2(ViewMsg_HandleInputEvent,
+                    IPC::WebInputEventPointer /* event */,
+                    bool /* is_keyboard_shortcut */)
 
 // Tells the render widget that a smooth scroll completed.
 IPC_MESSAGE_ROUTED1(ViewMsg_SmoothScrollCompleted,
@@ -998,9 +1022,9 @@ IPC_MESSAGE_ROUTED1(ViewMsg_Replace,
 IPC_MESSAGE_ROUTED0(ViewMsg_Delete)
 IPC_MESSAGE_ROUTED0(ViewMsg_SelectAll)
 
-// Replaces all text in the current input field with the specified string.
-IPC_MESSAGE_ROUTED1(ViewMsg_ReplaceAll,
-                    string16 /* text */)
+// Replaces a date time input field.
+IPC_MESSAGE_ROUTED1(ViewMsg_ReplaceDateTime, string16 /* text */)
+
 IPC_MESSAGE_ROUTED0(ViewMsg_Unselect)
 
 // Requests the renderer to select the region between two points.
@@ -1008,6 +1032,11 @@ IPC_MESSAGE_ROUTED0(ViewMsg_Unselect)
 IPC_MESSAGE_ROUTED2(ViewMsg_SelectRange,
                     gfx::Point /* start */,
                     gfx::Point /* end */)
+
+// Requests the renderer to move the caret selection toward the point.
+// Expects a MoveCaret_ACK message when finished.
+IPC_MESSAGE_ROUTED1(ViewMsg_MoveCaret,
+                    gfx::Point /* location */)
 
 // Copies the image at location x, y to the clipboard (if there indeed is an
 // image at that location).
@@ -1059,6 +1088,9 @@ IPC_MESSAGE_ROUTED4(ViewMsg_ScriptEvalRequest,
 // Posts a message from a frame in another process to the current renderer.
 IPC_MESSAGE_ROUTED1(ViewMsg_PostMessageEvent,
                     ViewMsg_PostMessage_Params)
+
+// Requests that the RenderView's main frame sets its opener to null.
+IPC_MESSAGE_ROUTED0(ViewMsg_DisownOpener)
 
 // Sends a JSON serialized frame tree to RenderView along with the process id
 // and route id of the source renderer.
@@ -1235,6 +1267,10 @@ IPC_MESSAGE_ROUTED0(ViewMsg_MoveOrResizeStarted)
 IPC_MESSAGE_ROUTED1(ViewMsg_ScreenInfoChanged,
                     WebKit::WebScreenInfo /* screen_info */)
 
+IPC_MESSAGE_ROUTED2(ViewMsg_UpdateScreenRects,
+                    gfx::Rect /* view_screen_rect */,
+                    gfx::Rect /* window_screen_rect */)
+
 // Reply to ViewHostMsg_RequestMove, ViewHostMsg_ShowView, and
 // ViewHostMsg_ShowWidget to inform the renderer that the browser has
 // processed the move.  The browser may have ignored the move, but it finished
@@ -1254,10 +1290,6 @@ IPC_MESSAGE_ROUTED2(ViewMsg_EnableAutoResize,
 // Used to instruct the RenderView to disalbe automatically resize.
 IPC_MESSAGE_ROUTED1(ViewMsg_DisableAutoResize,
                     gfx::Size /* new_size */)
-
-// Updates the device scale factor.
-IPC_MESSAGE_ROUTED1(ViewMsg_SetDeviceScaleFactor,
-                    float /* device_scale_factor */)
 
 // Changes the text direction of the currently selected input field (if any).
 IPC_MESSAGE_ROUTED1(ViewMsg_SetTextDirection,
@@ -1301,8 +1333,9 @@ IPC_MESSAGE_CONTROL1(ViewMsg_NetworkStateChanged,
 
 // Reply to ViewHostMsg_OpenChannelToPpapiBroker
 // Tells the renderer that the channel to the broker has been created.
-IPC_MESSAGE_ROUTED2(ViewMsg_PpapiBrokerChannelCreated,
+IPC_MESSAGE_ROUTED3(ViewMsg_PpapiBrokerChannelCreated,
                     int /* request_id */,
+                    base::ProcessId /* broker_pid */,
                     IPC::ChannelHandle /* handle */)
 
 // Reply to ViewHostMsg_RequestPpapiBrokerPermission.
@@ -1386,6 +1419,16 @@ IPC_MESSAGE_ROUTED0(ViewMsg_UndoScrollFocusedEditableNodeIntoView)
 // Message sent when the renderer changed the background color for the view.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidChangeBodyBackgroundColor,
                     uint32  /* bg_color */)
+
+// Information about current document scroll, scale and size. Sent on a
+// best-effort basis.
+IPC_MESSAGE_ROUTED5(ViewHostMsg_UpdateFrameInfo,
+                    gfx::Vector2d /* scroll_offset */,
+                    float /* page_scale_factor */,
+                    float /* min_page_scale_factor */,
+                    float /* max_page_scale_factor */,
+                    gfx::Size /* content_size */)
+
 #elif defined(OS_MACOSX)
 // Let the RenderView know its window has changed visibility.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetWindowVisibility,
@@ -1415,6 +1458,12 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SelectPopupMenuItem,
 // process to release the magnified image.
 IPC_MESSAGE_ROUTED1(ViewMsg_ReleaseDisambiguationPopupDIB,
                     TransportDIB::Handle /* DIB handle */)
+
+// Notifies the renderer that a snapshot has been retrieved.
+IPC_MESSAGE_ROUTED3(ViewMsg_WindowSnapshotCompleted,
+                    int /* snapshot_id */,
+                    gfx::Size /* size */,
+                    std::vector<unsigned char> /* png */)
 
 // -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
@@ -1506,6 +1555,10 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_RenderViewGone,
 // this message.  Otherwise, the browser will generates a ViewMsg_Close
 // message to close the view.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_Close)
+
+// Send in response to a ViewMsg_UpdateScreenRects so that the renderer can
+// throttle these messages.
+IPC_MESSAGE_ROUTED0(ViewHostMsg_UpdateScreenRects_ACK)
 
 // Sent by the renderer process to request that the browser move the view.
 // This corresponds to the window.resizeTo() and window.moveTo() APIs, and
@@ -1627,6 +1680,10 @@ IPC_MESSAGE_ROUTED0(ViewHostMsg_DidStopLoading)
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidChangeLoadProgress,
                     double /* load_progress */)
 
+// Sent when the renderer main frame sets its opener to null, disowning it for
+// the lifetime of the window.
+IPC_MESSAGE_ROUTED0(ViewHostMsg_DidDisownOpener)
+
 // Sent when the document element is available for the top-level frame.  This
 // happens after the page starts loading, but before all resources are
 // finished.
@@ -1657,11 +1714,10 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_DidRunInsecureContent,
                     GURL         /* target URL */)
 
 // Sent when the renderer starts a provisional load for a frame.
-IPC_MESSAGE_ROUTED5(ViewHostMsg_DidStartProvisionalLoadForFrame,
+IPC_MESSAGE_ROUTED4(ViewHostMsg_DidStartProvisionalLoadForFrame,
                     int64 /* frame_id */,
                     int64 /* parent_frame_id */,
                     bool /* true if it is the main frame */,
-                    GURL /* opener url if present, else empty */,
                     GURL /* url */)
 
 IPC_MESSAGE_ROUTED5(ViewHostMsg_DidFailLoadWithError,
@@ -1704,7 +1760,7 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DidActivateAcceleratedCompositing,
 // Acknowledges receipt of a ViewMsg_HandleInputEvent message.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_HandleInputEvent_ACK,
                     WebKit::WebInputEvent::Type,
-                    bool /* processed */)
+                    content::InputEventAckState /* ack_result */)
 
 IPC_STRUCT_BEGIN(ViewHostMsg_BeginSmoothScroll_Params)
   IPC_STRUCT_MEMBER(bool, scroll_down)
@@ -1725,13 +1781,6 @@ IPC_MESSAGE_ROUTED0(ViewHostMsg_Blur)
 // keyboard input (true for textfields, text areas and content editable divs).
 IPC_MESSAGE_ROUTED1(ViewHostMsg_FocusedNodeChanged,
     bool /* is_editable_node */)
-
-// Returns the window location of the given window.
-// TODO(shess): Provide a mapping from reply_msg->routing_id() to
-// HWND so that we can eliminate the NativeViewId parameter.
-IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_GetWindowRect,
-                           gfx::NativeViewId /* window */,
-                           gfx::Rect /* Out: Window location */)
 
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SetCursor,
                     WebCursor)
@@ -1799,6 +1848,14 @@ IPC_SYNC_MESSAGE_CONTROL4_2(ViewHostMsg_OpenChannelToPlugin,
                             std::string /* mime_type */,
                             IPC::ChannelHandle /* channel_handle */,
                             webkit::WebPluginInfo /* info */)
+
+#if defined(OS_WIN)
+IPC_MESSAGE_ROUTED1(ViewHostMsg_WindowlessPluginDummyWindowCreated,
+                    gfx::NativeViewId /* dummy_activation_window */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_WindowlessPluginDummyWindowDestroyed,
+                    gfx::NativeViewId /* dummy_activation_window */)
+#endif
 
 // Get the list of proxies to use for |url|, as a semicolon delimited list
 // of "<TYPE> <HOST>:<PORT>" | "DIRECT".
@@ -1876,15 +1933,17 @@ IPC_SYNC_MESSAGE_ROUTED4_2(ViewHostMsg_RunJavaScriptMessage,
                            string16     /* out - user_input field */)
 
 // Requests that the given URL be opened in the specified manner.
-IPC_MESSAGE_ROUTED4(ViewHostMsg_OpenURL,
-                    GURL /* url */,
-                    content::Referrer /* referrer */,
-                    WindowOpenDisposition /* disposition */,
-                    int64 /* frame id */)
+IPC_MESSAGE_ROUTED1(ViewHostMsg_OpenURL, ViewHostMsg_OpenURL_Params)
 
 // Notifies that the preferred size of the content changed.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidContentsPreferredSizeChange,
                     gfx::Size /* pref_size */)
+
+// Notifies that the scroll offset changed.
+// This is different from ViewHostMsg_UpdateRect in that ViewHostMsg_UpdateRect
+// is not sent at all when threaded compositing is enabled while
+// ViewHostMsg_DidChangeScrollOffset works properly in this case.
+IPC_MESSAGE_ROUTED0(ViewHostMsg_DidChangeScrollOffset)
 
 // Notifies that the scrollbars-visible state of the content changed.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_DidChangeScrollOffsetPinningForMainFrame,
@@ -1911,6 +1970,10 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_WebUISend,
                     std::string  /* message */,
                     base::ListValue /* args */)
 
+// Requests a snapshot of the given window.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_GetWindowSnapshot,
+                    int /* snapshot_id */)
+
 // A renderer sends this to the browser process when it wants to create a ppapi
 // plugin.  The browser will create the plugin process if necessary, and will
 // return a handle to the channel on success.
@@ -1921,32 +1984,39 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_WebUISend,
 // plugin is hung.
 //
 // On error an empty string and null handles are returned.
-IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_OpenChannelToPepperPlugin,
+IPC_SYNC_MESSAGE_CONTROL1_3(ViewHostMsg_OpenChannelToPepperPlugin,
                             FilePath /* path */,
                             IPC::ChannelHandle /* handle to channel */,
+                            base::ProcessId /* plugin_pid */,
                             int /* plugin_child_id */)
 
-// Notification that a native (non-NaCl) plugin has created a new plugin
-// instance. The parameters indicate the plugin process ID that we're creating
-// the instance for, and the routing ID of the render view that the plugin
-// instance is associated with. This allows us to create a mapping in the
-// browser process for what objects a given PP_Instance is associated with.
+// Notification that a plugin has created a new plugin instance. The parameters
+// indicate:
+// -The plugin process ID that we're creating the instance for.
+// -The instance ID of the instance being created.
+// -A PepperRendererInstanceData struct which contains properties from the
+// renderer which are associated with the plugin instance. This includes the
+// routing ID of the associated render view and the URL of plugin.
+// -Whether the plugin we're creating an instance for is external or internal.
 //
 // This message must be sync even though it returns no parameters to avoid
 // a race condition with the plugin process. The plugin process sends messages
 // to the browser that assume the browser knows about the instance. We need to
-// sure that the browser actually knows about the instance before we tell the
-// plugin to run.
-IPC_SYNC_MESSAGE_CONTROL3_0(ViewHostMsg_DidCreateOutOfProcessPepperInstance,
-                            int /* plugin_child_id */,
-                            int32 /* pp_instance */,
-                            int /* view_routing_id */)
+// make sure that the browser actually knows about the instance before we tell
+// the plugin to run.
+IPC_SYNC_MESSAGE_CONTROL4_0(
+    ViewHostMsg_DidCreateOutOfProcessPepperInstance,
+    int /* plugin_child_id */,
+    int32 /* pp_instance */,
+    content::PepperRendererInstanceData /* creation_data */,
+    bool /* is_external */)
 
-// Notification that a native (non-NaCl) plugin has destroyed an instance. This
-// is the opposite if the "DidCreate" version above.
-IPC_MESSAGE_CONTROL2(ViewHostMsg_DidDeleteOutOfProcessPepperInstance,
+// Notification that a plugin has destroyed an instance. This is the opposite of
+// the "DidCreate" message above.
+IPC_MESSAGE_CONTROL3(ViewHostMsg_DidDeleteOutOfProcessPepperInstance,
                      int /* plugin_child_id */,
-                     int32 /* pp_instance */)
+                     int32 /* pp_instance */,
+                     bool /* is_external */)
 
 // A renderer sends this to the browser process when it wants to
 // create a ppapi broker.  The browser will create the broker process
@@ -1987,6 +2057,7 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_SetTooltipText,
                     WebKit::WebTextDirection /* text direction hint */)
 
 IPC_MESSAGE_ROUTED0(ViewHostMsg_SelectRange_ACK)
+IPC_MESSAGE_ROUTED0(ViewHostMsg_MoveCaret_ACK)
 
 // Notification that the text selection has changed.
 // Note: The secound parameter is the character based offset of the string16
@@ -2034,13 +2105,6 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_EnumerateDirectory,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_TakeFocus,
                     bool /* reverse */)
 
-// Returns the window location of the window this widget is embeded.
-// TODO(shess): Provide a mapping from reply_msg->routing_id() to
-// HWND so that we can eliminate the NativeViewId parameter.
-IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_GetRootWindowRect,
-                           gfx::NativeViewId /* window */,
-                           gfx::Rect /* Out: Window location */)
-
 // Required for updating text input state.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_TextInputStateChanged,
                     ViewHostMsg_TextInputState_Params /* input state params */)
@@ -2052,6 +2116,9 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_ImeCompositionRangeChanged,
 
 // Required for cancelling an ongoing input method composition.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_ImeCancelComposition)
+
+// Tells the renderer to cancel an opened date/time dialog.
+IPC_MESSAGE_ROUTED0(ViewMsg_CancelDateTimeDialog)
 
 // WebKit and JavaScript error messages to log to the console
 // or debugger UI.
@@ -2082,9 +2149,8 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DataReceived_ACK,
                     int /* request_id */)
 
 // Sent when a provisional load on the main frame redirects.
-IPC_MESSAGE_ROUTED4(ViewHostMsg_DidRedirectProvisionalLoad,
+IPC_MESSAGE_ROUTED3(ViewHostMsg_DidRedirectProvisionalLoad,
                     int /* page_id */,
-                    GURL /* opener url if present, else empty */,
                     GURL /* last url */,
                     GURL /* url redirected to */)
 
@@ -2209,6 +2275,11 @@ IPC_MESSAGE_ROUTED5(ViewHostMsg_CompositorSurfaceBuffersSwapped,
                     int32 /* route_id */,
                     gfx::Size /* size */,
                     int32 /* gpu_process_host_id */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_SwapCompositorFrame,
+                    cc::CompositorFrame /* frame */)
+IPC_MESSAGE_ROUTED1(ViewHostMsg_SwapCompositorFrameAck,
+                    cc::CompositorFrameAck /* ack */)
 
 // Opens a file asynchronously. The response returns a file descriptor
 // and an error code from base/platform_file.h.
@@ -2391,3 +2462,28 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_ShowDisambiguationPopup,
                     gfx::Rect, /* Border of touched targets */
                     gfx::Size, /* Size of zoomed image */
                     TransportDIB::Id /* DIB of zoomed image */)
+
+// Sent by the renderer process to check whether client 3D APIs
+// (Pepper 3D, WebGL) are explicitly blocked.
+IPC_SYNC_MESSAGE_CONTROL3_1(ViewHostMsg_Are3DAPIsBlocked,
+                            int /* render_view_id */,
+                            GURL /* top_origin_url */,
+                            content::ThreeDAPIType /* requester */,
+                            bool /* blocked */)
+
+// Sent by the renderer process to indicate that a context was lost by
+// client 3D content (Pepper 3D, WebGL) running on the page at the
+// given URL.
+IPC_MESSAGE_CONTROL3(ViewHostMsg_DidLose3DContext,
+                     GURL /* top_origin_url */,
+                     content::ThreeDAPIType /* context_type */,
+                     int /* arb_robustness_status_code */)
+
+#if defined(OS_WIN)
+// Request that the given font characters be loaded by the browser so it's
+// cached by the OS. Please see RenderMessageFilter::OnPreCacheFontCharacters
+// for details.
+IPC_SYNC_MESSAGE_CONTROL2_0(ViewHostMsg_PreCacheFontCharacters,
+                            LOGFONT /* font_data */,
+                            string16 /* characters */)
+#endif

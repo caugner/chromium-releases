@@ -13,22 +13,22 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 
+namespace content {
+
 namespace {
 
 // A helper function that closes the specified file in the FILE thread. This
 // function may be called after the HyphenatorMessageFilter object that owns the
 // specified file is deleted, i.e. this function must not depend on the object.
 void CloseDictionary(base::PlatformFile file) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   base::ClosePlatformFile(file);
 }
 
 }  // namespace
 
-namespace content {
-
 HyphenatorMessageFilter::HyphenatorMessageFilter(
-    content::RenderProcessHost* render_process_host)
+    RenderProcessHost* render_process_host)
     : render_process_host_(render_process_host),
       dictionary_file_(base::kInvalidPlatformFileValue),
       weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
@@ -38,7 +38,7 @@ HyphenatorMessageFilter::~HyphenatorMessageFilter() {
   // Post a FILE task that deletes the dictionary file. This message filter is
   // usually deleted on the IO thread, which does not allow file operations.
   if (dictionary_file_ != base::kInvalidPlatformFileValue) {
-    content::BrowserThread::PostTask(
+    BrowserThread::PostTask(
         BrowserThread::FILE,
         FROM_HERE,
         base::Bind(&CloseDictionary, dictionary_file_));
@@ -74,8 +74,8 @@ void HyphenatorMessageFilter::OnOpenDictionary(const string16& locale) {
     SendDictionary();
     return;
   }
-  content::BrowserThread::PostTaskAndReply(
-      content::BrowserThread::FILE,
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::FILE,
       FROM_HERE,
       base::Bind(&HyphenatorMessageFilter::OpenDictionary, this, locale),
       base::Bind(&HyphenatorMessageFilter::SendDictionary,
@@ -90,6 +90,14 @@ void HyphenatorMessageFilter::OpenDictionary(const string16& locale) {
         GetContentClient()->browser()->GetHyphenDictionaryDirectory();
   }
   std::string rule_file = locale.empty() ? "en-US" : UTF16ToASCII(locale);
+
+  // Currently, only en-US is hyphenated. This is a quick fix for
+  // http://crbug.com/167122.
+  // TODO(groby): The proper fix entails validating if locale is a properly
+  // formatted locale string, but knowledge about valid locales currently
+  // resides in chrome, not content.
+  if (rule_file != "en-US")
+    return;
   rule_file.append("-1-0.dic");
   FilePath rule_path = dictionary_base_.AppendASCII(rule_file);
   dictionary_file_ = base::CreatePlatformFile(

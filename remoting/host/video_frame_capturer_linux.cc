@@ -14,10 +14,13 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "remoting/base/capture_data.h"
 #include "remoting/host/differ.h"
 #include "remoting/host/linux/x_server_pixel_buffer.h"
+#include "remoting/host/video_frame.h"
 #include "remoting/host/video_frame_capturer_helper.h"
+#include "remoting/host/video_frame_queue.h"
 #include "remoting/proto/control.pb.h"
 
 namespace remoting {
@@ -34,44 +37,17 @@ static bool ShouldUseXDamage() {
   return g_should_use_x_damage;
 }
 
-// A class representing a full-frame pixel buffer
-class VideoFrameBuffer {
+// A class representing a full-frame pixel buffer.
+class VideoFrameLinux : public VideoFrame {
  public:
-  VideoFrameBuffer()
-      : size_(SkISize::Make(0, 0)),
-        bytes_per_row_(0),
-        needs_update_(true) {
-  }
-
-  void Update(Display* display, Window root_window) {
-    if (needs_update_) {
-      needs_update_ = false;
-      XWindowAttributes root_attr;
-      XGetWindowAttributes(display, root_window, &root_attr);
-      if (root_attr.width != size_.width() ||
-          root_attr.height != size_.height()) {
-        size_.set(root_attr.width, root_attr.height);
-        bytes_per_row_ = size_.width() * kBytesPerPixel;
-        size_t buffer_size = size_.width() * size_.height() * kBytesPerPixel;
-        ptr_.reset(new uint8[buffer_size]);
-      }
-    }
-  }
-
-  SkISize size() const { return size_; }
-  int bytes_per_row() const { return bytes_per_row_; }
-  uint8* ptr() const { return ptr_.get(); }
-
-  void set_needs_update() { needs_update_ = true; }
-  bool needs_update() const { return needs_update_; }
+  explicit VideoFrameLinux(const SkISize& window_size);
+  virtual ~VideoFrameLinux();
 
  private:
-  SkISize size_;
-  int bytes_per_row_;
-  scoped_array<uint8> ptr_;
-  bool needs_update_;
+  // Allocated pixel buffer.
+  scoped_array<uint8> data_;
 
-  DISALLOW_COPY_AND_ASSIGN(VideoFrameBuffer);
+  DISALLOW_COPY_AND_ASSIGN(VideoFrameLinux);
 };
 
 // A class to perform video frame capturing for Linux.
@@ -83,12 +59,11 @@ class VideoFrameCapturerLinux : public VideoFrameCapturer {
   bool Init();  // TODO(ajwong): Do we really want this to be synchronous?
 
   // Capturer interface.
-  virtual void Start(const CursorShapeChangedCallback& callback) OVERRIDE;
+  virtual void Start(Delegate* delegate) OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual media::VideoFrame::Format pixel_format() const OVERRIDE;
   virtual void InvalidateRegion(const SkRegion& invalid_region) OVERRIDE;
-  virtual void CaptureInvalidRegion(
-      const CaptureCompletedCallback& callback) OVERRIDE;
+  virtual void CaptureFrame() OVERRIDE;
   virtual const SkISize& size_most_recent() const OVERRIDE;
 
  private:
@@ -101,6 +76,9 @@ class VideoFrameCapturerLinux : public VideoFrameCapturer {
   // ConfigNotify events.
   void ProcessPendingXEvents();
 
+  // Capture the cursor image and notify the delegate if it was captured.
+  void CaptureCursor();
+
   // Capture screen pixels, and return the data in a new CaptureData object,
   // to be freed by the caller.
   // In the DAMAGE case, the VideoFrameCapturerHelper already holds the list of
@@ -108,14 +86,11 @@ class VideoFrameCapturerLinux : public VideoFrameCapturer {
   // In the non-DAMAGE case, this captures the whole screen, then calculates
   // some invalid rectangles that include any differences between this and the
   // previous capture.
-  CaptureData* CaptureFrame();
+  scoped_refptr<CaptureData> CaptureScreen();
 
-  // Capture the cursor image and call the CursorShapeChangedCallback if it
-  // has been set (using SetCursorShapeChangedCallback).
-  void CaptureCursor();
-
-  // Called when the screen configuration is changed.
-  void ScreenConfigurationChanged();
+  // Called when the screen configuration is changed. |root_window_size|
+  // specifies the most recent size of the root window.
+  void ScreenConfigurationChanged(const SkISize& root_window_size);
 
   // Synchronize the current buffer with |last_buffer_|, by copying pixels from
   // the area of |last_invalid_rects|.
@@ -135,10 +110,15 @@ class VideoFrameCapturerLinux : public VideoFrameCapturer {
   void FastBlit(uint8* image, const SkIRect& rect, CaptureData* capture_data);
   void SlowBlit(uint8* image, const SkIRect& rect, CaptureData* capture_data);
 
+  Delegate* delegate_;
+
   // X11 graphics context.
   Display* display_;
   GC gc_;
   Window root_window_;
+
+  // Last known dimensions of the root window.
+  SkISize root_window_size_;
 
   // XFixes.
   bool has_xfixes_;
@@ -159,13 +139,8 @@ class VideoFrameCapturerLinux : public VideoFrameCapturer {
   // recently captured screen.
   VideoFrameCapturerHelper helper_;
 
-  // Callback notified whenever the cursor shape is changed.
-  CursorShapeChangedCallback cursor_shape_changed_callback_;
-
-  // Capture state.
-  static const int kNumBuffers = 2;
-  VideoFrameBuffer buffers_[kNumBuffers];
-  int current_buffer_;
+  // Queue of the frames buffers.
+  VideoFrameQueue queue_;
 
   // Format of pixels returned in buffer.
   media::VideoFrame::Format pixel_format_;
@@ -174,19 +149,30 @@ class VideoFrameCapturerLinux : public VideoFrameCapturer {
   // current with the last buffer used.
   SkRegion last_invalid_region_;
 
-  // Last capture buffer used.
-  int last_buffer_;
-
   // |Differ| for use when polling for changes.
   scoped_ptr<Differ> differ_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoFrameCapturerLinux);
 };
 
+VideoFrameLinux::VideoFrameLinux(const SkISize& window_size) {
+  set_bytes_per_row(window_size.width() * kBytesPerPixel);
+  set_dimensions(window_size);
+
+  size_t buffer_size = bytes_per_row() * window_size.height();
+  data_.reset(new uint8[buffer_size]);
+  set_pixels(data_.get());
+}
+
+VideoFrameLinux::~VideoFrameLinux() {
+}
+
 VideoFrameCapturerLinux::VideoFrameCapturerLinux()
-    : display_(NULL),
+    : delegate_(NULL),
+      display_(NULL),
       gc_(NULL),
       root_window_(BadValue),
+      root_window_size_(SkISize::Make(0, 0)),
       has_xfixes_(false),
       xfixes_event_base_(-1),
       xfixes_error_base_(-1),
@@ -195,9 +181,7 @@ VideoFrameCapturerLinux::VideoFrameCapturerLinux()
       damage_event_base_(-1),
       damage_error_base_(-1),
       damage_region_(0),
-      current_buffer_(0),
-      pixel_format_(media::VideoFrame::RGB32),
-      last_buffer_(kNumBuffers - 1) {
+      pixel_format_(media::VideoFrame::RGB32) {
   helper_.SetLogGridSize(4);
 }
 
@@ -213,8 +197,6 @@ bool VideoFrameCapturerLinux::Init() {
     LOG(ERROR) << "Unable to open display";
     return false;
   }
-
-  x_server_pixel_buffer_.Init(display_);
 
   root_window_ = RootWindow(display_, DefaultScreen(display_));
   if (root_window_ == BadValue) {
@@ -239,17 +221,20 @@ bool VideoFrameCapturerLinux::Init() {
     LOG(INFO) << "X server does not support XFixes.";
   }
 
-  if (ShouldUseXDamage()) {
-    InitXDamage();
-  }
-
   // Register for changes to the dimensions of the root window.
   XSelectInput(display_, root_window_, StructureNotifyMask);
+
+  root_window_size_ = XServerPixelBuffer::GetRootWindowSize(display_);
+  x_server_pixel_buffer_.Init(display_, root_window_size_);
 
   if (has_xfixes_) {
     // Register for changes to the cursor shape.
     XFixesSelectCursorInput(display_, root_window_,
                             XFixesDisplayCursorNotifyMask);
+  }
+
+  if (ShouldUseXDamage()) {
+    InitXDamage();
   }
 
   return true;
@@ -293,9 +278,10 @@ void VideoFrameCapturerLinux::InitXDamage() {
   LOG(INFO) << "Using XDamage extension.";
 }
 
-void VideoFrameCapturerLinux::Start(
-    const CursorShapeChangedCallback& callback) {
-  cursor_shape_changed_callback_ = callback;
+void VideoFrameCapturerLinux::Start(Delegate* delegate) {
+  DCHECK(delegate_ == NULL);
+
+  delegate_ = delegate;
 }
 
 void VideoFrameCapturerLinux::Stop() {
@@ -309,35 +295,44 @@ void VideoFrameCapturerLinux::InvalidateRegion(const SkRegion& invalid_region) {
   helper_.InvalidateRegion(invalid_region);
 }
 
-void VideoFrameCapturerLinux::CaptureInvalidRegion(
-    const CaptureCompletedCallback& callback) {
+void VideoFrameCapturerLinux::CaptureFrame() {
+  base::Time capture_start_time = base::Time::Now();
+
   // Process XEvents for XDamage and cursor shape tracking.
   ProcessPendingXEvents();
 
-  // Resize the current buffer if there was a recent change of
-  // screen-resolution.
-  VideoFrameBuffer &current = buffers_[current_buffer_];
-  current.Update(display_, root_window_);
-
-  // Mark the previous frame for update if its dimensions no longer match.
-  if (buffers_[last_buffer_].size() != current.size()) {
-    buffers_[last_buffer_].set_needs_update();
-
-    // Also refresh the Differ helper used by CaptureFrame(), if needed.
-    if (!use_damage_) {
-      differ_.reset(new Differ(current.size().width(), current.size().height(),
-                               kBytesPerPixel, current.bytes_per_row()));
-    }
+  // If the current buffer is from an older generation then allocate a new one.
+  // Note that we can't reallocate other buffers at this point, since the caller
+  // may still be reading from them.
+  if (queue_.current_frame_needs_update()) {
+    scoped_ptr<VideoFrameLinux> buffer(new VideoFrameLinux(
+        root_window_size_));
+    queue_.ReplaceCurrentFrame(buffer.PassAs<VideoFrame>());
   }
 
-  scoped_refptr<CaptureData> capture_data(CaptureFrame());
+  // Refresh the Differ helper used by CaptureFrame(), if needed.
+  const VideoFrame* current_buffer = queue_.current_frame();
+  if (!use_damage_ && (
+      !differ_.get() ||
+      (differ_->width() != current_buffer->dimensions().width()) ||
+      (differ_->height() != current_buffer->dimensions().height()) ||
+      (differ_->bytes_per_row() != current_buffer->bytes_per_row()))) {
+    differ_.reset(new Differ(current_buffer->dimensions().width(),
+                             current_buffer->dimensions().height(),
+                             kBytesPerPixel,
+                             current_buffer->bytes_per_row()));
+  }
+
+  scoped_refptr<CaptureData> capture_data(CaptureScreen());
 
   // Swap the current & previous buffers ready for the next capture.
   last_invalid_region_ = capture_data->dirty_region();
-  last_buffer_ = current_buffer_;
-  current_buffer_ = (current_buffer_ + 1) % kNumBuffers;
 
-  callback.Run(capture_data);
+  queue_.DoneWithCurrentFrame();
+
+  capture_data->set_capture_time_ms(
+      (base::Time::Now() - capture_start_time).InMillisecondsRoundedUp());
+  delegate_->OnCaptureCompleted(capture_data);
 }
 
 void VideoFrameCapturerLinux::ProcessPendingXEvents() {
@@ -352,7 +347,8 @@ void VideoFrameCapturerLinux::ProcessPendingXEvents() {
       XDamageNotifyEvent* event = reinterpret_cast<XDamageNotifyEvent*>(&e);
       DCHECK(event->level == XDamageReportNonEmpty);
     } else if (e.type == ConfigureNotify) {
-      ScreenConfigurationChanged();
+      const XConfigureEvent& event = e.xconfigure;
+      ScreenConfigurationChanged(SkISize::Make(event.width, event.height));
     } else if (has_xfixes_ &&
                e.type == xfixes_event_base_ + XFixesCursorNotify) {
       XFixesCursorNotifyEvent* cne;
@@ -368,8 +364,6 @@ void VideoFrameCapturerLinux::ProcessPendingXEvents() {
 
 void VideoFrameCapturerLinux::CaptureCursor() {
   DCHECK(has_xfixes_);
-  if (cursor_shape_changed_callback_.is_null())
-    return;
 
   XFixesCursorImage* img = XFixesGetCursorImage(display_);
   if (!img) {
@@ -400,17 +394,17 @@ void VideoFrameCapturerLinux::CaptureCursor() {
   }
   XFree(img);
 
-  cursor_shape_changed_callback_.Run(cursor_proto.Pass());
+  delegate_->OnCursorShapeChanged(cursor_proto.Pass());
 }
 
-CaptureData* VideoFrameCapturerLinux::CaptureFrame() {
-  VideoFrameBuffer& buffer = buffers_[current_buffer_];
+scoped_refptr<CaptureData> VideoFrameCapturerLinux::CaptureScreen() {
+  VideoFrame* current = queue_.current_frame();
   DataPlanes planes;
-  planes.data[0] = buffer.ptr();
-  planes.strides[0] = buffer.bytes_per_row();
+  planes.data[0] = current->pixels();
+  planes.strides[0] = current->bytes_per_row();
 
-  CaptureData* capture_data = new CaptureData(planes, buffer.size(),
-                                              media::VideoFrame::RGB32);
+  scoped_refptr<CaptureData> capture_data(
+      new CaptureData(planes, current->dimensions(), media::VideoFrame::RGB32));
 
   // Pass the screen size to the helper, so it can clip the invalid region if it
   // expands that region to a grid.
@@ -420,13 +414,13 @@ CaptureData* VideoFrameCapturerLinux::CaptureFrame() {
   // if any.  If there isn't a previous frame, that means a screen-resolution
   // change occurred, and |invalid_rects| will be updated to include the whole
   // screen.
-  if (use_damage_ && !buffers_[last_buffer_].needs_update())
+  if (use_damage_ && queue_.previous_frame())
     SynchronizeFrame();
 
   SkRegion invalid_region;
 
   x_server_pixel_buffer_.Synchronize();
-  if (use_damage_ && !buffers_[last_buffer_].needs_update()) {
+  if (use_damage_ && queue_.previous_frame()) {
     // Atomically fetch and clear the damage region.
     XDamageSubtract(display_, damage_handle_, None, damage_region_);
     int nRects = 0;
@@ -443,23 +437,28 @@ CaptureData* VideoFrameCapturerLinux::CaptureFrame() {
 
     // Capture the damaged portions of the desktop.
     helper_.SwapInvalidRegion(&invalid_region);
+
+    // Clip the damaged portions to the current screen size, just in case some
+    // spurious XDamage notifications were received for a previous (larger)
+    // screen size.
+    invalid_region.op(SkIRect::MakeSize(root_window_size_),
+                      SkRegion::kIntersect_Op);
     for (SkRegion::Iterator it(invalid_region); !it.done(); it.next()) {
       CaptureRect(it.rect(), capture_data);
     }
   } else {
     // Doing full-screen polling, or this is the first capture after a
     // screen-resolution change.  In either case, need a full-screen capture.
-    SkIRect screen_rect = SkIRect::MakeWH(buffer.size().width(),
-                                          buffer.size().height());
+    SkIRect screen_rect = SkIRect::MakeWH(current->dimensions().width(),
+                                          current->dimensions().height());
     CaptureRect(screen_rect, capture_data);
 
-    if (!buffers_[last_buffer_].needs_update()) {
+    if (queue_.previous_frame()) {
       // Full-screen polling, so calculate the invalid rects here, based on the
       // changed pixels between current and previous buffers.
       DCHECK(differ_ != NULL);
-      VideoFrameBuffer& last_buffer = buffers_[last_buffer_];
-      differ_->CalcDirtyRegion(
-          last_buffer.ptr(), buffer.ptr(), &invalid_region);
+      differ_->CalcDirtyRegion(queue_.previous_frame()->pixels(),
+                               current->pixels(), &invalid_region);
     } else {
       // No previous buffer, so always invalidate the whole screen, whether
       // or not DAMAGE is being used.  DAMAGE doesn't necessarily send a
@@ -473,12 +472,15 @@ CaptureData* VideoFrameCapturerLinux::CaptureFrame() {
   return capture_data;
 }
 
-void VideoFrameCapturerLinux::ScreenConfigurationChanged() {
-  for (int i = 0; i < kNumBuffers; ++i) {
-    buffers_[i].set_needs_update();
-  }
+void VideoFrameCapturerLinux::ScreenConfigurationChanged(
+    const SkISize& root_window_size) {
+  root_window_size_ = root_window_size;
+
+  // Make sure the frame buffers will be reallocated.
+  queue_.SetAllFramesNeedUpdate();
+
   helper_.ClearInvalidRegion();
-  x_server_pixel_buffer_.Init(display_);
+  x_server_pixel_buffer_.Init(display_, root_window_size_);
 }
 
 void VideoFrameCapturerLinux::SynchronizeFrame() {
@@ -490,17 +492,18 @@ void VideoFrameCapturerLinux::SynchronizeFrame() {
   // TODO(hclam): We can reduce the amount of copying here by subtracting
   // |capturer_helper_|s region from |last_invalid_region_|.
   // http://crbug.com/92354
-  DCHECK(!buffers_[last_buffer_].needs_update());
-  DCHECK_NE(last_buffer_, current_buffer_);
-  VideoFrameBuffer& buffer = buffers_[current_buffer_];
-  VideoFrameBuffer& last_buffer = buffers_[last_buffer_];
+  DCHECK(queue_.previous_frame());
+
+  VideoFrame* current = queue_.current_frame();
+  VideoFrame* last = queue_.previous_frame();
+  DCHECK_NE(current, last);
   for (SkRegion::Iterator it(last_invalid_region_); !it.done(); it.next()) {
     const SkIRect& r = it.rect();
-    int offset = r.fTop * buffer.bytes_per_row() + r.fLeft * kBytesPerPixel;
+    int offset = r.fTop * current->bytes_per_row() + r.fLeft * kBytesPerPixel;
     for (int i = 0; i < r.height(); ++i) {
-      memcpy(buffer.ptr() + offset, last_buffer.ptr() + offset,
+      memcpy(current->pixels() + offset, last->pixels() + offset,
              r.width() * kBytesPerPixel);
-      offset += buffer.size().width() * kBytesPerPixel;
+      offset += current->dimensions().width() * kBytesPerPixel;
     }
   }
 }
@@ -620,13 +623,18 @@ const SkISize& VideoFrameCapturerLinux::size_most_recent() const {
 }  // namespace
 
 // static
-VideoFrameCapturer* VideoFrameCapturer::Create() {
-  VideoFrameCapturerLinux* capturer = new VideoFrameCapturerLinux();
-  if (!capturer->Init()) {
-    delete capturer;
-    capturer = NULL;
-  }
-  return capturer;
+scoped_ptr<VideoFrameCapturer> VideoFrameCapturer::Create() {
+  scoped_ptr<VideoFrameCapturerLinux> capturer(new VideoFrameCapturerLinux());
+  if (!capturer->Init())
+    capturer.reset();
+  return capturer.PassAs<VideoFrameCapturer>();
+}
+
+// static
+scoped_ptr<VideoFrameCapturer> VideoFrameCapturer::CreateWithFactory(
+    SharedBufferFactory* shared_buffer_factory) {
+  NOTIMPLEMENTED();
+  return scoped_ptr<VideoFrameCapturer>();
 }
 
 // static

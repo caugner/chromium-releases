@@ -40,6 +40,21 @@ class CHROMEOS_EXPORT ShillDeviceClient {
   typedef ShillClientHelper::DictionaryValueCallback DictionaryValueCallback;
   typedef ShillClientHelper::ErrorCallback ErrorCallback;
 
+  // Interface for setting up devices for testing.
+  // Accessed through GetTestInterface(), only implemented in the Stub Impl.
+  class TestInterface {
+   public:
+    virtual void AddDevice(const std::string& device_path,
+                           const std::string& type,
+                           const std::string& object_path,
+                           const std::string& connection_path) = 0;
+    virtual void RemoveDevice(const std::string& device_path) = 0;
+    virtual void ClearDevices() = 0;
+
+   protected:
+    ~TestInterface() {}
+  };
+
   virtual ~ShillDeviceClient();
 
   // Factory function, creates a new instance which is owned by the caller.
@@ -96,16 +111,6 @@ class CHROMEOS_EXPORT ShillDeviceClient {
                            const std::string& method,
                            const ObjectPathDBusMethodCallback& callback) = 0;
 
-  // DEPRECATED DO NOT USE: Calls AddIPConfig method and blocks until the method
-  // call finishes.
-  // This method returns an empty path when method call fails.
-  //
-  // TODO(hashimoto): Refactor CrosAddIPConfig and remove this method.
-  // crosbug.com/29902
-  virtual dbus::ObjectPath CallAddIPConfigAndBlock(
-      const dbus::ObjectPath& device_path,
-      const std::string& method) = 0;
-
   // Calls the RequirePin method.
   // |callback| is called after the method call finishes.
   virtual void RequirePin(const dbus::ObjectPath& device_path,
@@ -150,6 +155,15 @@ class CHROMEOS_EXPORT ShillDeviceClient {
                           const std::string& carrier,
                           const base::Closure& callback,
                           const ErrorCallback& error_callback) = 0;
+
+  // Calls the Reset method.
+  // |callback| is called after the method call finishes.
+  virtual void Reset(const dbus::ObjectPath& device_path,
+                          const base::Closure& callback,
+                          const ErrorCallback& error_callback) = 0;
+
+  // Returns an interface for testing (stub only), or returns NULL.
+  virtual TestInterface* GetTestInterface() = 0;
 
  protected:
   // Create() should be used instead.

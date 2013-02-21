@@ -7,18 +7,24 @@
 #include "base/i18n/case_conversion.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
+#include "grit/ui_resources.h"
 #include "grit/ui_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
+#include "ui/native_theme/common_theme.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/menu_controller.h"
+#include "ui/views/controls/menu/menu_image_util.h"
 #include "ui/views/controls/menu/menu_separator.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/widget/widget.h"
 
 namespace views {
 
@@ -97,7 +103,7 @@ MenuItemView::MenuItemView(MenuDelegate* delegate)
       requested_menu_position_(POSITION_BEST_FIT),
       actual_menu_position_(requested_menu_position_),
       use_right_margin_(true) {
-  // NOTE: don't check the delegate for NULL, UpdateMenuPartSizes supplies a
+  // NOTE: don't check the delegate for NULL, UpdateMenuPartSizes() supplies a
   // NULL delegate.
   Init(NULL, 0, SUBMENU, delegate);
 }
@@ -551,11 +557,10 @@ void MenuItemView::SetMargins(int top_margin, int bottom_margin) {
 }
 
 const MenuConfig& MenuItemView::GetMenuConfig() const {
-  const MenuItemView* root_menu_item = GetRootMenuItem();
-  if (root_menu_item->menu_config_.get())
-    return *(root_menu_item->menu_config_);
-
- return MenuConfig::instance();
+  const MenuController* controller = GetMenuController();
+  if (controller)
+    return controller->menu_config_;
+  return MenuConfig::instance(NULL);
 }
 
 MenuItemView::MenuItemView(MenuItemView* parent,
@@ -593,7 +598,6 @@ std::string MenuItemView::GetClassName() const {
 //
 // This is invoked prior to Running a menu.
 void MenuItemView::UpdateMenuPartSizes() {
-  MenuConfig::Reset();
   const MenuConfig& config = GetMenuConfig();
 
   item_right_margin_ = config.label_to_arrow_padding + config.arrow_width +
@@ -618,6 +622,7 @@ void MenuItemView::UpdateMenuPartSizes() {
     label_start_ += config.gutter_width + config.gutter_to_label;
 
   EmptyMenuMenuItem menu_item(this);
+  menu_item.set_controller(GetMenuController());
   pref_menu_height_ = menu_item.GetPreferredSize().height();
 }
 
@@ -645,7 +650,9 @@ void MenuItemView::Init(MenuItemView* parent,
     SetEnabled(root_delegate->IsCommandEnabled(command));
 }
 
-void MenuItemView::PrepareForRun(bool has_mnemonics, bool show_mnemonics) {
+void MenuItemView::PrepareForRun(bool is_first_menu,
+                                 bool has_mnemonics,
+                                 bool show_mnemonics) {
   // Currently we only support showing the root.
   DCHECK(!parent_menu_item_);
 
@@ -659,7 +666,7 @@ void MenuItemView::PrepareForRun(bool has_mnemonics, bool show_mnemonics) {
 
   AddEmptyMenus();
 
-  if (!MenuController::GetActiveInstance()) {
+  if (is_first_menu) {
     // Only update the menu size if there are no menus showing, otherwise
     // things may shift around.
     UpdateMenuPartSizes();
@@ -673,7 +680,7 @@ int MenuItemView::GetDrawStringFlags() {
   else
     flags |= gfx::Canvas::TEXT_ALIGN_LEFT;
 
-  if (has_mnemonics_) {
+  if (GetRootMenuItem()->has_mnemonics_) {
     if (GetMenuConfig().show_mnemonics || GetRootMenuItem()->show_mnemonics_) {
       flags |= gfx::Canvas::SHOW_PREFIX;
     } else {
@@ -684,10 +691,13 @@ int MenuItemView::GetDrawStringFlags() {
 }
 
 const gfx::Font& MenuItemView::GetFont() {
-  // Check for item-specific font.
   const MenuDelegate* delegate = GetDelegate();
-  return delegate ?
-      delegate->GetLabelFont(GetCommand()) : GetMenuConfig().font;
+  if (delegate) {
+    const gfx::Font* font = delegate->GetLabelFont(GetCommand());
+    if (font)
+      return *font;
+  }
+  return GetMenuConfig().font;
 }
 
 void MenuItemView::AddEmptyMenus() {
@@ -726,6 +736,98 @@ void MenuItemView::AdjustBoundsForRTLUI(gfx::Rect* rect) const {
   rect->set_x(GetMirroredXForRect(*rect));
 }
 
+#if defined(USE_AURA) && !defined(OS_WIN)
+void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
+  PaintButtonCommon(canvas, mode);
+}
+#endif
+
+void MenuItemView::PaintButtonCommon(gfx::Canvas* canvas,
+                                     PaintButtonMode mode) {
+  const MenuConfig& config = GetMenuConfig();
+  bool render_selection =
+      (mode == PB_NORMAL && IsSelected() &&
+       parent_menu_item_->GetSubmenu()->GetShowSelection(this) &&
+       (NonIconChildViewsCount() == 0));
+
+  int icon_x = config.item_left_margin;
+  int top_margin = GetTopMargin();
+  int bottom_margin = GetBottomMargin();
+  int icon_y = top_margin + (height() - config.item_top_margin -
+                             bottom_margin - config.check_height) / 2;
+  int icon_height = config.check_height;
+  int available_height = height() - top_margin - bottom_margin;
+
+  // Render the background. As MenuScrollViewContainer draws the background, we
+  // only need the background when we want it to look different, as when we're
+  // selected.
+  ui::NativeTheme* native_theme = GetNativeTheme();
+  if (render_selection) {
+    if (ui::NativeTheme::IsNewMenuStyleEnabled()) {
+      gfx::Rect item_bounds(0, 0, width(), height());
+      AdjustBoundsForRTLUI(&item_bounds);
+      CommonThemePaintMenuItemBackground(canvas->sk_canvas(),
+          ui::NativeTheme::kHovered, item_bounds);
+    } else {
+      SkColor bg_color = native_theme->GetSystemColor(
+          ui::NativeTheme::kColorId_FocusedMenuItemBackgroundColor);
+      canvas->DrawColor(bg_color, SkXfermode::kSrc_Mode);
+    }
+  }
+
+  // Render the check.
+  if (type_ == CHECKBOX && GetDelegate()->IsItemChecked(GetCommand())) {
+    const gfx::ImageSkia* check = GetMenuCheckImage();
+    // Don't use config.check_width here as it's padded
+    // to force more padding (AURA).
+    gfx::Rect check_bounds(icon_x, icon_y, check->width(), icon_height);
+    AdjustBoundsForRTLUI(&check_bounds);
+    canvas->DrawImageInt(*check, check_bounds.x(), check_bounds.y());
+  } else if (type_ == RADIO) {
+    const gfx::ImageSkia* image =
+        GetRadioButtonImage(GetDelegate()->IsItemChecked(GetCommand()));
+    gfx::Rect radio_bounds(icon_x,
+                           top_margin +
+                           (height() - top_margin - bottom_margin -
+                            image->height()) / 2,
+                           image->width(),
+                           image->height());
+    AdjustBoundsForRTLUI(&radio_bounds);
+    canvas->DrawImageInt(*image, radio_bounds.x(), radio_bounds.y());
+  }
+
+  // Render the foreground.
+  SkColor fg_color = native_theme->GetSystemColor(
+      enabled() ? ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor
+          : ui::NativeTheme::kColorId_DisabledMenuItemForegroundColor);
+
+  const gfx::Font& font = GetFont();
+  int accel_width = parent_menu_item_->GetSubmenu()->max_accelerator_width();
+  int width = this->width() - item_right_margin_ - label_start_ - accel_width;
+  gfx::Rect text_bounds(label_start_, top_margin, width, available_height);
+  text_bounds.set_x(GetMirroredXForRect(text_bounds));
+  int flags = GetDrawStringFlags();
+  if (mode == PB_FOR_DRAG)
+    flags |= gfx::Canvas::NO_SUBPIXEL_RENDERING;
+  canvas->DrawStringInt(title(), font, fg_color,
+                        text_bounds.x(), text_bounds.y(), text_bounds.width(),
+                        text_bounds.height(), flags);
+
+  PaintAccelerator(canvas);
+
+  // Render the submenu indicator (arrow).
+  if (HasSubmenu()) {
+    gfx::Rect arrow_bounds(this->width() - config.arrow_width -
+                               config.arrow_to_edge_padding,
+                           top_margin + (available_height -
+                                         config.arrow_width) / 2,
+                           config.arrow_width, height());
+    AdjustBoundsForRTLUI(&arrow_bounds);
+    canvas->DrawImageInt(*GetSubmenuArrowImage(),
+                         arrow_bounds.x(), arrow_bounds.y());
+  }
+}
+
 void MenuItemView::PaintAccelerator(gfx::Canvas* canvas) {
   string16 accel_text = GetAcceleratorText();
   if (accel_text.empty())
@@ -741,15 +843,14 @@ void MenuItemView::PaintAccelerator(gfx::Canvas* canvas) {
   gfx::Rect accel_bounds(width() - accel_right_margin - max_accel_width,
                          GetTopMargin(), max_accel_width, available_height);
   accel_bounds.set_x(GetMirroredXForRect(accel_bounds));
-  int flags = GetRootMenuItem()->GetDrawStringFlags() |
-      gfx::Canvas::TEXT_VALIGN_MIDDLE;
+  int flags = GetDrawStringFlags();
   flags &= ~(gfx::Canvas::TEXT_ALIGN_RIGHT | gfx::Canvas::TEXT_ALIGN_LEFT);
   if (base::i18n::IsRTL())
     flags |= gfx::Canvas::TEXT_ALIGN_LEFT;
   else
     flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
   canvas->DrawStringInt(
-      accel_text, font, ui::NativeTheme::instance()->GetSystemColor(
+      accel_text, font, GetNativeTheme()->GetSystemColor(
           ui::NativeTheme::kColorId_TextButtonDisabledColor),
       accel_bounds.x(), accel_bounds.y(), accel_bounds.width(),
       accel_bounds.height(), flags);

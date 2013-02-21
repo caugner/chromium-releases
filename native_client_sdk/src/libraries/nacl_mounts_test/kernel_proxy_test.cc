@@ -120,11 +120,32 @@ TEST(KernelProxy, MemMountIO) {
   EXPECT_STREQ("HELLOWORLD", text);
 }
 
+TEST(KernelProxy, MemMountLseek) {
+  ki_init(new KernelProxy());
+
+  int fd = ki_open("/foo", O_CREAT | O_RDWR);
+  EXPECT_EQ(9, ki_write(fd, "Some text", 9));
+
+  EXPECT_EQ(9, ki_lseek(fd, 0, SEEK_CUR));
+  EXPECT_EQ(9, ki_lseek(fd, 0, SEEK_END));
+  EXPECT_EQ(-1, ki_lseek(fd, -1, SEEK_SET));
+  EXPECT_EQ(EINVAL, errno);
+
+  // Seek past end of file.
+  EXPECT_EQ(13, ki_lseek(fd, 13, SEEK_SET));
+  char buffer[4];
+  memset(&buffer[0], 0xfe, 4);
+  EXPECT_EQ(9, ki_lseek(fd, -4, SEEK_END));
+  EXPECT_EQ(4, ki_read(fd, &buffer[0], 4));
+  EXPECT_EQ(0, memcmp("\0\0\0\0", buffer, 4));
+}
+
+
 StringMap_t g_StringMap;
 
 class MountMockInit : public MountMem {
  public:
-  bool Init(int dev, StringMap_t& args) {
+  virtual bool Init(int dev, StringMap_t& args, PepperInterface* ppapi) {
     g_StringMap = args;
     if (args.find("false") != args.end())
       return false;
@@ -133,8 +154,8 @@ class MountMockInit : public MountMem {
 };
 
 class KernelProxyMountMock : public KernelProxy {
-  void Init() {
-    KernelProxy::Init();
+  virtual void Init(PepperInterface* ppapi) {
+    KernelProxy::Init(NULL);
     factories_["initfs"] = MountMockInit::Create<MountMockInit>;
   }
 };

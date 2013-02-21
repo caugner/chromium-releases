@@ -7,6 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/process_util.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
@@ -19,6 +20,7 @@
 namespace content {
 class NavigationEntry;
 class RenderViewHostImpl;
+class RenderWidgetHostView;
 class WebContentsView;
 class WebContentsImpl;
 
@@ -67,11 +69,19 @@ class CONTENT_EXPORT InterstitialPageImpl
   // Called when tab traversing.
   void FocusThroughTabTraversal(bool reverse);
 
+  RenderWidgetHostView* GetView();
+
   // See description above field.
   void set_reload_on_dont_proceed(bool value) {
     reload_on_dont_proceed_ = value;
   }
   bool reload_on_dont_proceed() const { return reload_on_dont_proceed_; }
+
+#if defined(OS_ANDROID)
+  // Android shares a single platform window for all tabs, so we need to expose
+  // the RenderViewHost to properly route gestures to the interstitial.
+  RenderViewHost* GetRenderViewHost() const;
+#endif
 
  protected:
   // NotificationObserver method:
@@ -115,6 +125,8 @@ class CONTENT_EXPORT InterstitialPageImpl
       ContextMenuSourceType type) OVERRIDE;
 
   // RenderWidgetHostDelegate implementation:
+  virtual void RenderWidgetDeleted(
+      RenderWidgetHostImpl* render_widget_host) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
       const NativeWebKeyboardEvent& event,
       bool* is_keyboard_shortcut) OVERRIDE;
@@ -143,6 +155,9 @@ class CONTENT_EXPORT InterstitialPageImpl
   // - if it is not yet showing, then it won't be shown.
   // - any command sent by the RenderViewHost will be ignored.
   void Disable();
+
+  // Shutdown the RVH.  We will be deleted by the time this method returns.
+  void Shutdown(RenderViewHostImpl* render_view_host);
 
   // Executes the passed action on the ResourceDispatcher (on the IO thread).
   // Used to block/resume/cancel requests for the RenderViewHost hidden by this
@@ -209,6 +224,8 @@ class CONTENT_EXPORT InterstitialPageImpl
   bool create_view_;
 
   scoped_ptr<InterstitialPageDelegate> delegate_;
+
+  base::WeakPtrFactory<InterstitialPageImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InterstitialPageImpl);
 };

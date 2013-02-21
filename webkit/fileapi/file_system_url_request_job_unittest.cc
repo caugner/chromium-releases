@@ -9,13 +9,13 @@
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/rand_util.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_piece.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -73,7 +73,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
         GURL("http://remote/"), kFileSystemTypeTemporary, true,  // create
         base::Bind(&FileSystemURLRequestJobTest::OnValidateFileSystem,
                    weak_factory_.GetWeakPtr()));
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
 
     net::URLRequest::Deprecated::RegisterProtocolFactory(
         "filesystem", &FileSystemURLRequestJobFactory);
@@ -87,7 +87,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
       pending_job_ = NULL;
     }
     // FileReader posts a task to close the file in destructor.
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
   }
 
   void OnValidateFileSystem(base::PlatformFileError result) {
@@ -97,7 +97,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
   void TestRequestHelper(const GURL& url,
                          const net::HttpRequestHeaders* headers,
                          bool run_to_completion) {
-    delegate_.reset(new TestDelegate());
+    delegate_.reset(new net::TestDelegate());
     // Make delegate_ exit the MessageLoop when the request is done.
     delegate_->set_quit_on_complete(true);
     delegate_->set_quit_on_redirect(true);
@@ -197,7 +197,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
   // Put the message loop at the top, so that it's the last thing deleted.
   MessageLoop message_loop_;
 
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::WeakPtrFactory<FileSystemURLRequestJobTest> weak_factory_;
@@ -205,7 +205,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
   net::URLRequestContext empty_context_;
 
   // NOTE: order matters, request must die before delegate
-  scoped_ptr<TestDelegate> delegate_;
+  scoped_ptr<net::TestDelegate> delegate_;
   scoped_ptr<net::URLRequest> request_;
 
   scoped_refptr<net::URLRequestJob> pending_job_;
@@ -341,7 +341,7 @@ TEST_F(FileSystemURLRequestJobTest, Cancel) {
 
   // Run StartAsync() and only StartAsync().
   MessageLoop::current()->DeleteSoon(FROM_HERE, request_.release());
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   // If we get here, success! we didn't crash!
 }
 

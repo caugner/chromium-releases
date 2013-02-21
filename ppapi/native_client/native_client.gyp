@@ -71,15 +71,15 @@
           ],
         },
         {
-          'target_name': 'nacl_irt',
+          'target_name': 'nacl_irt_srpc',
           'type': 'none',
           'variables': {
-            'nexe_target': 'nacl_irt',
+            'nexe_target': 'nacl_irt_srpc',
             # These out_* fields override the default filenames, which
             # include a "_newlib" suffix.
-            'out_newlib64': '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
-            'out_newlib32': '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
-            'out_newlib_arm': '<(PRODUCT_DIR)/nacl_irt_arm.nexe',
+            'out_newlib64': '<(PRODUCT_DIR)/nacl_irt_srpc_x86_64.nexe',
+            'out_newlib32': '<(PRODUCT_DIR)/nacl_irt_srpc_x86_32.nexe',
+            'out_newlib_arm': '<(PRODUCT_DIR)/nacl_irt_srpc_arm.nexe',
             'build_glibc': 0,
             'build_newlib': 1,
             'include_dirs': [
@@ -128,6 +128,7 @@
                    '--pnacl-allow-native',
                    '-arch', 'arm',
                    '-Wt,-mtls-use-call',
+                   '-Wl,--pnacl-irt-link',
                  ],
                },
              ],
@@ -220,15 +221,15 @@
           ],
         },
         {
-          'target_name': 'nacl_ipc_irt',
+          'target_name': 'nacl_irt',
           'type': 'none',
           'variables': {
-            'nexe_target': 'nacl_ipc_irt',
+            'nexe_target': 'nacl_irt',
             # These out_* fields override the default filenames, which
             # include a "_newlib" suffix.
-            'out_newlib64': '<(PRODUCT_DIR)/nacl_ipc_irt_x86_64.nexe',
-            'out_newlib32': '<(PRODUCT_DIR)/nacl_ipc_irt_x86_32.nexe',
-            'out_newlib_arm': '<(PRODUCT_DIR)/nacl_ipc_irt_arm.nexe',
+            'out_newlib64': '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
+            'out_newlib32': '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
+            'out_newlib_arm': '<(PRODUCT_DIR)/nacl_irt_arm.nexe',
             'build_glibc': 0,
             'build_newlib': 1,
             'include_dirs': [
@@ -246,6 +247,7 @@
               '-lgles2_utils_untrusted',
               '-lcommand_buffer_client_untrusted',
               '-lcommand_buffer_common_untrusted',
+              '-ltracing_untrusted',
               '-lgpu_ipc_untrusted',
               '-lipc_untrusted',
               '-lbase_untrusted',
@@ -271,12 +273,20 @@
                    '-Wl,-Ttext-segment=<(NACL_IRT_TEXT_START)',
                  ]
                }, { # target_arch == "arm"
+                 # TODO(mcgrathr): This knowledge really belongs in
+                 # native_client/src/untrusted/irt/irt.gyp instead of here.
+                 # But that builds libirt_browser.a as bitcode, so a native
+                 # object does not fit happily there.
+                 'sources': [
+                   '../../native_client/src/untrusted/irt/aeabi_read_tp.S',
+                 ],
                  'link_flags': [
                    '-Wl,--section-start,.rodata=<(NACL_IRT_DATA_START)',
                    '-Wl,-Ttext=<(NACL_IRT_TEXT_START)',
                    '--pnacl-allow-native',
                    '-arch', 'arm',
                    '-Wt,-mtls-use-call',
+                   '-Wl,--pnacl-irt-link',
                  ],
                },
              ],
@@ -296,6 +306,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libcommand_buffer_client_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libcommand_buffer_common_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libgpu_ipc_untrusted.a',
+              '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libtracing_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libgles2_cmd_helper_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libgles2_utils_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libipc_untrusted.a',
@@ -315,6 +326,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libcommand_buffer_client_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libcommand_buffer_common_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libgpu_ipc_untrusted.a',
+              '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libtracing_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libgles2_cmd_helper_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libgles2_utils_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libipc_untrusted.a',
@@ -334,6 +346,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libcommand_buffer_client_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libcommand_buffer_common_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libgpu_ipc_untrusted.a',
+              '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libtracing_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libgles2_cmd_helper_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libgles2_utils_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libipc_untrusted.a',
@@ -353,6 +366,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libcommand_buffer_client_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libcommand_buffer_common_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libgpu_ipc_untrusted.a',
+              '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libtracing_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libgles2_cmd_helper_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libgles2_utils_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libipc_untrusted.a',
@@ -372,6 +386,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libcommand_buffer_client_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libcommand_buffer_common_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libgpu_ipc_untrusted.a',
+              '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libtracing_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libgles2_cmd_helper_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libgles2_utils_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib64/libipc_untrusted.a',
@@ -391,6 +406,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libcommand_buffer_client_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libcommand_buffer_common_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libgpu_ipc_untrusted.a',
+              '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libtracing_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libgles2_cmd_helper_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libgles2_utils_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_glibc/lib32/libipc_untrusted.a',
@@ -410,6 +426,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libcommand_buffer_client_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libcommand_buffer_common_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libgpu_ipc_untrusted.a',
+              '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libtracing_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libgles2_cmd_helper_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libgles2_utils_untrusted.a',
               '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/libarm/libipc_untrusted.a',
@@ -432,6 +449,7 @@
             '../../gpu/gpu_untrusted.gyp:gles2_implementation_untrusted',
             '../../gpu/gpu_untrusted.gyp:gles2_cmd_helper_untrusted',
             '../../gpu/gpu_untrusted.gyp:gpu_ipc_untrusted',
+            '../../content/content_components_tracing_untrusted.gyp:tracing_untrusted',
             '../../ipc/ipc_untrusted.gyp:ipc_untrusted',
             '../../base/base_untrusted.gyp:base_untrusted',
             '../../media/media_untrusted.gyp:shared_memory_support_untrusted',

@@ -59,7 +59,7 @@ bool FocusManager::OnKeyEvent(const ui::KeyEvent& event) {
   accelerator.set_type(event.type());
 
   if (event.type() == ui::ET_KEY_PRESSED) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     // If the focused view wants to process the key event as is, let it be.
     // This is not used for linux/aura.
     if (focused_view_ && focused_view_->SkipDefaultKeyEventProcessing(event) &&
@@ -121,10 +121,8 @@ bool FocusManager::OnKeyEvent(const ui::KeyEvent& event) {
 }
 
 void FocusManager::ValidateFocusedView() {
-  if (focused_view_) {
-    if (!ContainsView(focused_view_))
-      ClearFocus();
-  }
+  if (focused_view_ && !ContainsView(focused_view_))
+    ClearFocus();
 }
 
 // Tests whether a view is valid, whether it still belongs to the window
@@ -142,8 +140,12 @@ void FocusManager::AdvanceFocus(bool reverse) {
   // fullscreen mode), we need to run this block in order to cycle around to the
   // first element on the page.
   if (v) {
+    views::View* focused_view = focused_view_;
     v->AboutToRequestFocusFromTabTraversal(reverse);
-    SetFocusedViewWithReason(v, kReasonFocusTraversal);
+    // AboutToRequestFocusFromTabTraversal() may have changed focus. If it did,
+    // don't change focus again.
+    if (focused_view == focused_view_)
+      SetFocusedViewWithReason(v, kReasonFocusTraversal);
   }
 }
 
@@ -250,7 +252,7 @@ void FocusManager::SetFocusedViewWithReason(
   if (focused_view_ == view)
     return;
 
-  AutoReset<bool> auto_changing_focus(&is_changing_focus_, true);
+  base::AutoReset<bool> auto_changing_focus(&is_changing_focus_, true);
   // Update the reason for the focus change (since this is checked by
   // some listeners), then notify all listeners.
   focus_change_reason_ = reason;
@@ -273,7 +275,7 @@ void FocusManager::ClearFocus() {
   ClearNativeFocus();
 }
 
-void FocusManager::StoreFocusedView() {
+void FocusManager::StoreFocusedView(bool clear_native_focus) {
   ViewStorage* view_storage = ViewStorage::GetInstance();
   if (!view_storage) {
     // This should never happen but bug 981648 seems to indicate it could.
@@ -293,13 +295,15 @@ void FocusManager::StoreFocusedView() {
 
   View* v = focused_view_;
 
-  {
+  if (clear_native_focus) {
     // Temporarily disable notification.  ClearFocus() will set the focus to the
     // main browser window.  This extra focus bounce which happens during
     // deactivation can confuse registered WidgetFocusListeners, as the focus
     // is not changing due to a user-initiated event.
     AutoNativeNotificationDisabler local_notification_disabler;
     ClearFocus();
+  } else {
+    SetFocusedView(NULL);
   }
 
   if (v)

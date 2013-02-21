@@ -19,10 +19,6 @@ namespace chromeos {
 class SessionManagerClient;
 }
 
-namespace enterprise_management {
-class CloudPolicySettings;
-}
-
 namespace policy {
 
 class LegacyPolicyCacheLoader;
@@ -38,6 +34,7 @@ class UserCloudPolicyStoreChromeOS : public UserCloudPolicyStoreBase {
  public:
   UserCloudPolicyStoreChromeOS(
       chromeos::SessionManagerClient* session_manager_client,
+      const std::string& username,
       const FilePath& legacy_token_cache_file,
       const FilePath& legacy_policy_cache_file);
   virtual ~UserCloudPolicyStoreChromeOS();
@@ -46,9 +43,6 @@ class UserCloudPolicyStoreChromeOS : public UserCloudPolicyStoreBase {
   virtual void Store(
       const enterprise_management::PolicyFetchResponse& policy) OVERRIDE;
   virtual void Load() OVERRIDE;
-
- protected:
-  virtual void RemoveStoredPolicy() OVERRIDE;
 
  private:
   // Called back from SessionManagerClient for policy load operations.
@@ -90,6 +84,7 @@ class UserCloudPolicyStoreChromeOS : public UserCloudPolicyStoreBase {
   static void RemoveLegacyCacheDir(const FilePath& dir);
 
   chromeos::SessionManagerClient* session_manager_client_;
+  const std::string username_;
 
   base::WeakPtrFactory<UserCloudPolicyStoreChromeOS> weak_factory_;
 

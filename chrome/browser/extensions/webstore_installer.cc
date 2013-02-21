@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -35,6 +34,8 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
@@ -276,6 +277,7 @@ void WebstoreInstaller::SetDownloadDirectoryForTests(FilePath* directory) {
 }
 
 WebstoreInstaller::~WebstoreInstaller() {
+  controller_ = NULL;
   if (download_item_) {
     download_item_->RemoveObserver(this);
     download_item_ = NULL;
@@ -332,35 +334,69 @@ void WebstoreInstaller::OnDownloadDestroyed(DownloadItem* download) {
   download_item_ = NULL;
 }
 
+// http://crbug.com/165634
+// http://crbug.com/126013
+// The current working theory is that one of the many pointers dereferenced in
+// here is occasionally deleted before all of its referers are nullified,
+// probably in a callback race. After this comment is released, the crash
+// reports should narrow down exactly which pointer it is.  Collapsing all the
+// early-returns into a single branch makes it hard to see exactly which pointer
+// it is.
 void WebstoreInstaller::StartDownload(const FilePath& file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DownloadManager* download_manager =
     BrowserContext::GetDownloadManager(profile_);
-  if (file.empty() ||
-      !download_manager ||
-      !controller_->GetWebContents() ||
-      !controller_->GetWebContents()->GetRenderProcessHost() ||
-      !controller_->GetWebContents()->GetRenderViewHost() ||
-      !controller_->GetWebContents()->GetBrowserContext() ||
-      !controller_->GetWebContents()->GetBrowserContext()
-        ->GetResourceContext()) {
+  if (file.empty()) {
     ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
     return;
   }
-
-  scoped_ptr<content::DownloadSaveInfo> save_info(
-      new content::DownloadSaveInfo());
-  save_info->file_path = file;
+  if (!download_manager) {
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
+    return;
+  }
+  if (!controller_) {
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
+    return;
+  }
+  if (!controller_->GetWebContents()) {
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
+    return;
+  }
+  if (!controller_->GetWebContents()->GetRenderProcessHost()) {
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
+    return;
+  }
+  if (!controller_->GetWebContents()->GetRenderViewHost()) {
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
+    return;
+  }
+  if (!controller_->GetBrowserContext()) {
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
+    return;
+  }
+  if (!controller_->GetBrowserContext()->GetResourceContext()) {
+    ReportFailure(kDownloadDirectoryError, FAILURE_REASON_OTHER);
+    return;
+  }
 
   // The download url for the given extension is contained in |download_url_|.
   // We will navigate the current tab to this url to start the download. The
   // download system will then pass the crx to the CrxInstaller.
   download_util::RecordDownloadSource(
       download_util::INITIATED_BY_WEBSTORE_INSTALLER);
-  scoped_ptr<DownloadUrlParameters> params(
-      DownloadUrlParameters::FromWebContents(
-          controller_->GetWebContents(), download_url_, save_info.Pass()));
+  int render_process_host_id =
+    controller_->GetWebContents()->GetRenderProcessHost()->GetID();
+  int render_view_host_routing_id =
+    controller_->GetWebContents()->GetRenderViewHost()->GetRoutingID();
+  content::ResourceContext* resource_context =
+    controller_->GetBrowserContext()->GetResourceContext();
+  scoped_ptr<DownloadUrlParameters> params(new DownloadUrlParameters(
+      download_url_,
+      render_process_host_id,
+      render_view_host_routing_id ,
+      resource_context));
+  params->set_file_path(file);
   if (controller_->GetActiveEntry())
     params->set_referrer(
         content::Referrer(controller_->GetActiveEntry()->GetURL(),

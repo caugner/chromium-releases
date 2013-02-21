@@ -13,6 +13,7 @@ import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnRece
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 
 class TestAwContentsClient extends NullContentsClient {
+    private String mUpdatedTitle;
     private OnPageStartedHelper mOnPageStartedHelper;
     private OnPageFinishedHelper mOnPageFinishedHelper;
     private OnReceivedErrorHelper mOnReceivedErrorHelper;
@@ -45,6 +46,15 @@ class TestAwContentsClient extends NullContentsClient {
 
     public AddMessageToConsoleHelper getAddMessageToConsoleHelper() {
         return mAddMessageToConsoleHelper;
+    }
+
+    @Override
+    public void onUpdateTitle(String title) {
+        mUpdatedTitle = title;
+    }
+
+    public String getUpdatedTitle() {
+        return mUpdatedTitle;
     }
 
     @Override
@@ -119,5 +129,33 @@ class TestAwContentsClient extends NullContentsClient {
             assert getCallCount() > 0;
             return mSourceId;
         }
+    }
+
+    String mLastVisitedUrl;
+    boolean mLastVisitIsReload;
+
+    @Override
+    public void doUpdateVisitedHistory(String url, boolean isReload) {
+        mLastVisitedUrl = url;
+        mLastVisitIsReload = isReload;
+    }
+
+    String mLastDownloadUrl;
+    String mLastDownloadUserAgent;
+    String mLastDownloadContentDisposition;
+    String mLastDownloadMimeType;
+    long mLastDownloadContentLength;
+
+    @Override
+    public void onDownloadStart(String url,
+                                String userAgent,
+                                String contentDisposition,
+                                String mimeType,
+                                long contentLength) {
+        mLastDownloadUrl = url;
+        mLastDownloadUserAgent = userAgent;
+        mLastDownloadContentDisposition = contentDisposition;
+        mLastDownloadMimeType = mimeType;
+        mLastDownloadContentLength = contentLength;
     }
 }

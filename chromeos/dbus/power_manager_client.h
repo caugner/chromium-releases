@@ -60,23 +60,27 @@ class CHROMEOS_EXPORT PowerManagerClient {
     // structure that contains the current state of the power supply.
     virtual void PowerChanged(const PowerSupplyStatus& status) {}
 
-    // Called when the system resumes from suspend.
-    virtual void SystemResumed() {}
-
-    // Called when the power button is pressed or released.
-    virtual void PowerButtonStateChanged(bool down,
-                                         const base::TimeTicks& timestamp) {}
-
-    // Called when the lock button is pressed or released.
-    virtual void LockButtonStateChanged(bool down,
-                                        const base::TimeTicks& timestamp) {}
-
     // Called when we go idle for threshold time.
     virtual void IdleNotify(int64 threshold_secs) {}
 
     // Called when a request is received to dim or undim the screen in software
     // (as opposed to the more-common method of adjusting the backlight).
     virtual void ScreenDimmingRequested(ScreenDimmingState state) {}
+
+    // Called when the system is about to suspend. Suspend is deferred until
+    // all observers' implementations of this method have finished running.
+    virtual void SuspendImminent() {}
+
+    // Called when the power button is pressed or released.
+    virtual void PowerButtonEventReceived(bool down,
+                                          const base::TimeTicks& timestamp) {}
+
+    // Called when the device's lid is opened or closed.
+    virtual void LidEventReceived(bool open,
+                                  const base::TimeTicks& timestamp) {}
+
+    // Called when the system resumes from sleep.
+    virtual void SystemResumed(const base::TimeDelta& sleep_duration) {}
   };
 
   enum UpdateRequestType {

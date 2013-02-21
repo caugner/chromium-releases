@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_KEYBOARD_HANDLER_H_
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/api/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 
 namespace chromeos {
@@ -20,6 +20,7 @@ class KeyboardHandler : public ::options::OptionsPageUIHandler {
 
   // OptionsPageUIHandler implementation.
   virtual void GetLocalizedValues(DictionaryValue* localized_strings) OVERRIDE;
+  virtual void InitializePage() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(KeyboardHandler);

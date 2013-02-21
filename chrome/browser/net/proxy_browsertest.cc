@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/login/login_prompt.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -22,6 +21,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test_utils.h"
+#include "net/base/test_data_directory.h"
 #include "net/test/test_server.h"
 
 namespace {
@@ -51,6 +51,8 @@ class LoginPromptObserver : public content::NotificationObserver {
 
  private:
   bool auth_handled_;
+
+  DISALLOW_COPY_AND_ASSIGN(LoginPromptObserver);
 };
 
 class ProxyBrowserTest : public InProcessBrowserTest {
@@ -73,6 +75,10 @@ class ProxyBrowserTest : public InProcessBrowserTest {
 
  protected:
   net::TestServer proxy_server_;
+
+ private:
+
+  DISALLOW_COPY_AND_ASSIGN(ProxyBrowserTest);
 };
 
 #if defined(OS_CHROMEOS)
@@ -87,7 +93,7 @@ IN_PROC_BROWSER_TEST_F(ProxyBrowserTest, MAYBE_BasicAuthWSConnect) {
   // Launch WebSocket server.
   net::TestServer ws_server(net::TestServer::TYPE_WS,
                             net::TestServer::kLocalhost,
-                            FilePath(FILE_PATH_LITERAL("net/data/websocket")));
+                            net::GetWebSocketTestDataDirectory());
   ASSERT_TRUE(ws_server.Start());
 
   content::WebContents* tab = chrome::GetActiveWebContents(browser());

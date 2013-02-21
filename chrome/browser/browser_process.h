@@ -16,11 +16,14 @@
 
 class AutomationProviderList;
 class BackgroundModeManager;
+class BookmarkPromptController;
 class ChromeNetLog;
+class CommandLine;
 class CRLSetFetcher;
 class ComponentUpdateService;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
+class GLStringManager;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
@@ -33,6 +36,10 @@ class RenderWidgetSnapshotTaker;
 class SafeBrowsingService;
 class StatusTray;
 class WatchDogThread;
+
+namespace chrome {
+class MediaFileSystemRegistry;
+}
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
@@ -127,6 +134,8 @@ class BrowserProcess {
 
   virtual IconManager* icon_manager() = 0;
 
+  virtual GLStringManager* gl_string_manager() = 0;
+
   virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() = 0;
 
   virtual AutomationProviderList* GetAutomationProviderList() = 0;
@@ -173,10 +182,6 @@ class BrowserProcess {
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service() = 0;
 
-  // Returns the state of the disable plugin finder policy. Callable only on
-  // the IO thread.
-  virtual bool plugin_finder_disabled() const = 0;
-
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   // This will start a timer that, if Chrome is in persistent mode, will check
   // whether an update is available, and if that's the case, restart the
@@ -195,6 +200,13 @@ class BrowserProcess {
   virtual ComponentUpdateService* component_updater() = 0;
 
   virtual CRLSetFetcher* crl_set_fetcher() = 0;
+
+  virtual BookmarkPromptController* bookmark_prompt_controller() = 0;
+
+  virtual chrome::MediaFileSystemRegistry* media_file_system_registry() = 0;
+
+  virtual void PlatformSpecificCommandLineProcessing(
+      const CommandLine& command_line) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

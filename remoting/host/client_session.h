@@ -88,13 +88,15 @@ class ClientSession
 
   // |event_handler| must outlive |this|. |desktop_environment_factory| is only
   // used by the constructor to create an instance of DesktopEnvironment.
-  ClientSession(EventHandler* event_handler,
-                scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-                scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
-                scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
-                scoped_ptr<protocol::ConnectionToClient> connection,
-                DesktopEnvironmentFactory* desktop_environment_factory,
-                const base::TimeDelta& max_duration);
+  ClientSession(
+      EventHandler* event_handler,
+      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
+      scoped_ptr<protocol::ConnectionToClient> connection,
+      DesktopEnvironmentFactory* desktop_environment_factory,
+      const base::TimeDelta& max_duration);
 
   // protocol::HostStub interface.
   virtual void NotifyClientDimensions(
@@ -118,14 +120,14 @@ class ClientSession
       const std::string& channel_name,
       const protocol::TransportRoute& route) OVERRIDE;
 
-  // Disconnects the session and destroys the transport. Event handler
-  // is guaranteed not to be called after this method is called. The object
-  // should not be used after this method returns.
+  // Disconnects the session, tears down transport resources and stops scheduler
+  // components. |event_handler_| is guaranteed not to be called after this
+  // method returns.
   void Disconnect();
 
-  // Stop all recorders asynchronously. |done_task| is executed when the session
-  // is completely stopped.
-  void Stop(const base::Closure& done_task);
+  // Stops the ClientSession, and calls |stopped_task| on |network_task_runner_|
+  // when fully stopped.
+  void Stop(const base::Closure& stopped_task);
 
   protocol::ConnectionToClient* connection() const {
     return connection_.get();
@@ -216,8 +218,9 @@ class ClientSession
   // is reached.
   base::OneShotTimer<ClientSession> max_duration_timer_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
 
   // Schedulers for audio and video capture.
@@ -229,8 +232,8 @@ class ClientSession
   // recorders/schedulers are asynchronously shutting down.
   int active_recorders_;
 
-  // The task to be executed when the session is completely stopped.
-  base::Closure done_task_;
+  // Task to execute once the session is completely stopped.
+  base::Closure stopped_task_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSession);
 };

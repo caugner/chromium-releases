@@ -15,6 +15,7 @@
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/event_disposition.h"
+#include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_icon_image.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -171,7 +172,7 @@ class ExtensionAppResult : public SearchBuilderResult,
 
  private:
   void LoadExtensionIcon(const extensions::Extension* extension) {
-    const gfx::ImageSkia default_icon = profile()->GetExtensionService()->
+    const gfx::ImageSkia default_icon = extensions::OmniboxAPI::Get(profile())->
         GetOmniboxPopupIcon(extension->id()).AsImageSkia();
     icon_.reset(new extensions::IconImage(
         extension,
@@ -305,13 +306,17 @@ SearchBuilder::SearchBuilder(
   search_box_->SetIcon(*ui::ResourceBundle::GetSharedInstance().
       GetImageSkiaNamed(IDR_OMNIBOX_SEARCH));
 
-  // TODO(xiyuan): Consider requesting fewer providers in the non-apps-only
-  // case.
-  int providers =
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          app_list::switches::kAppListShowAppsOnly) ?
-      AutocompleteProvider::TYPE_EXTENSION_APP :
-      AutocompleteClassifier::kDefaultOmniboxProviders;
+  int providers = AutocompleteProvider::TYPE_EXTENSION_APP;
+  bool apps_only = true;
+#if defined(OS_CHROMEOS)
+  apps_only = CommandLine::ForCurrentProcess()->HasSwitch(
+      app_list::switches::kAppListShowAppsOnly);
+#endif
+  if (!apps_only) {
+    // TODO(xiyuan): Consider requesting fewer providers in the non-apps-only
+    // case.
+    providers |= AutocompleteClassifier::kDefaultOmniboxProviders;
+  }
 #if defined(OS_CHROMEOS)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableContacts))
     providers |= AutocompleteProvider::TYPE_CONTACT;
@@ -326,8 +331,9 @@ void SearchBuilder::StartSearch() {
   // Omnibox features such as keyword selection/accepting and instant query
   // are not implemented.
   // TODO(xiyuan): Figure out the features that need to support here.
-  controller_->Start(search_box_->text(), string16(), false, false, true,
-      AutocompleteInput::ALL_MATCHES);
+  controller_->Start(AutocompleteInput(search_box_->text(), string16::npos,
+                                       string16(), false, false, true,
+                                       AutocompleteInput::ALL_MATCHES));
 }
 
 void SearchBuilder::StopSearch() {

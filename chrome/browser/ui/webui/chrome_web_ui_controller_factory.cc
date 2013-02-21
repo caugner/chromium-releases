@@ -4,7 +4,10 @@
 
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/location.h"
+#include "base/message_loop_proxy.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
@@ -13,9 +16,9 @@
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/about_ui.h"
 #include "chrome/browser/ui/webui/bookmarks_ui.h"
+#include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/browser/ui/webui/crashes_ui.h"
 #include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
@@ -31,6 +34,7 @@
 #include "chrome/browser/ui/webui/history_ui.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
+#include "chrome/browser/ui/webui/local_omnibox_popup/local_omnibox_popup_ui.h"
 #include "chrome/browser/ui/webui/media/media_internals_ui.h"
 #if !defined(DISABLE_NACL)
 #include "chrome/browser/ui/webui/nacl_ui.h"
@@ -41,15 +45,16 @@
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/performance_monitor/performance_monitor_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
-#include "chrome/browser/ui/webui/policy_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
 #include "chrome/browser/ui/webui/quota_internals_ui.h"
+#include "chrome/browser/ui/webui/signin_internals_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
 #include "chrome/browser/ui/webui/task_manager/task_manager_ui.h"
 #include "chrome/browser/ui/webui/test_chrome_web_ui_controller_factory.h"
 #include "chrome/browser/ui/webui/tracing_ui.h"
+#include "chrome/browser/ui/webui/user_actions/user_actions_ui.h"
 #include "chrome/browser/ui/webui/version_ui.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -59,10 +64,14 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
+#include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/favicon_size.h"
-#include "ui/web_dialogs/constrained_web_dialog_ui.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
+
+#if defined(ENABLE_CONFIGURATION_POLICY)
+#include "chrome/browser/ui/webui/policy_ui.h"
+#endif
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/welcome_ui_android.h"
@@ -72,10 +81,10 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/ui/webui/chromeos/drive_internals_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
 #include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
 #include "chrome/browser/ui/webui/chromeos/diagnostics/diagnostics_ui.h"
+#include "chrome/browser/ui/webui/chromeos/drive_internals_ui.h"
 #include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
 #include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -105,7 +114,6 @@
 
 using content::WebUI;
 using content::WebUIController;
-using ui::ConstrainedWebDialogUI;
 using ui::ExternalWebDialogUI;
 using ui::WebDialogUI;
 
@@ -142,16 +150,10 @@ WebUIController* NewWebUI<AboutUI>(WebUI* web_ui, const GURL& url) {
 }
 
 // Only create ExtensionWebUI for URLs that are allowed extension bindings,
-// hosted by actual tabs. If there is no TabContents, it likely refers
-// to another container type, like an extension background page. If there is
-// no WebUI (it's not accessible when calling GetWebUIType and related
-// functions) then we conservatively assume that we need a WebUI.
-bool NeedsExtensionWebUI(WebUI* web_ui,
-                         Profile* profile,
-                         const GURL& url) {
+// hosted by actual tabs.
+bool NeedsExtensionWebUI(Profile* profile, const GURL& url) {
   ExtensionService* service = profile ? profile->GetExtensionService() : NULL;
-  return service && service->ExtensionBindingsAllowed(url) &&
-      (!web_ui || TabContents::FromWebContents(web_ui->GetWebContents()));
+  return service && service->ExtensionBindingsAllowed(url);
 }
 
 // Returns a function that can be used to create the right type of WebUI for a
@@ -161,7 +163,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
                                              Profile* profile,
                                              const GURL& url) {
 #if defined(ENABLE_EXTENSIONS)
-  if (NeedsExtensionWebUI(web_ui, profile, url))
+  if (NeedsExtensionWebUI(profile, url))
     return &NewWebUI<ExtensionWebUI>;
 #endif
 
@@ -197,12 +199,16 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<WebDialogUI>;
   if (url.spec() == chrome::kChromeUIConstrainedHTMLTestURL)
     return &NewWebUI<ConstrainedWebDialogUI>;
+  if (url.host() == chrome::kChromeUIFlagsHost)
+    return &NewWebUI<FlagsUI>;
   if (url.host() == chrome::kChromeUIGpuInternalsHost)
     return &NewWebUI<GpuInternalsUI>;
   if (url.host() == chrome::kChromeUIHistoryFrameHost)
     return &NewWebUI<HistoryUI>;
   if (url.host() == chrome::kChromeUIInstantHost)
     return &NewWebUI<InstantUI>;
+  if (url.host() == chrome::kChromeUILocalOmniboxPopupHost)
+    return &NewWebUI<LocalOmniboxPopupUI>;
   if (url.host() == chrome::kChromeUIMediaInternalsHost)
     return &NewWebUI<MediaInternalsUI>;
 #if !defined(DISABLE_NACL)
@@ -219,10 +225,14 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<ProfilerUI>;
   if (url.host() == chrome::kChromeUIQuotaInternalsHost)
     return &NewWebUI<QuotaInternalsUI>;
+  if (url.host() == chrome::kChromeUISignInInternalsHost)
+    return &NewWebUI<SignInInternalsUI>;
   if (url.host() == chrome::kChromeUISyncInternalsHost)
     return &NewWebUI<SyncInternalsUI>;
   if (url.host() == chrome::kChromeUISyncResourcesHost)
     return &NewWebUI<WebDialogUI>;
+  if (url.host() == chrome::kChromeUIUserActionsHost)
+    return &NewWebUI<UserActionsUI>;
   if (url.host() == chrome::kChromeUIVersionHost)
     return &NewWebUI<VersionUI>;
 
@@ -249,10 +259,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // Feedback on Android uses the built-in feedback app.
   if (url.host() == chrome::kChromeUIFeedbackHost)
     return &NewWebUI<FeedbackUI>;
-  // chrome://flags is currently unsupported on Android.
-  // TODO(satish): Enable after http://crbug.com/143146 is fixed.
-  if (url.host() == chrome::kChromeUIFlagsHost)
-    return &NewWebUI<FlagsUI>;
   // Flash is not available on android.
   if (url.host() == chrome::kChromeUIFlashHost)
     return &NewWebUI<FlashUI>;
@@ -419,6 +425,16 @@ struct PossibleTestSingletonTraits : public DefaultSingletonTraits<Type> {
   }
 };
 
+void RunFaviconCallbackAsync(
+    const FaviconService::FaviconResultsCallback& callback,
+    const std::vector<history::FaviconBitmapResult>* results,
+    const history::IconURLSizesMap* size_map) {
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&FaviconService::FaviconResultsCallbackRunner,
+                 callback, base::Owned(results), base::Owned(size_map)));
+}
+
 }  // namespace
 
 WebUI::TypeID ChromeWebUIControllerFactory::GetWebUIType(
@@ -437,9 +453,8 @@ bool ChromeWebUIControllerFactory::UseWebUIBindingsForURL(
     content::BrowserContext* browser_context, const GURL& url) const {
   // Extensions are rendered via WebUI in tabs, but don't actually need WebUI
   // bindings (see the ExtensionWebUI constructor).
-  return !NeedsExtensionWebUI(NULL,
-                              Profile::FromBrowserContext(browser_context),
-                              url) &&
+  return
+      !NeedsExtensionWebUI(Profile::FromBrowserContext(browser_context), url) &&
       UseWebUIForURL(browser_context, url);
 }
 
@@ -457,7 +472,7 @@ bool ChromeWebUIControllerFactory::IsURLAcceptableForWebUI(
       url == GURL(chrome::kChromeUICrashURL) ||
       url == GURL(chrome::kChromeUIKillURL) ||
       url == GURL(chrome::kChromeUIHangURL) ||
-      url == GURL(chrome::kChromeUIShorthangURL) ||
+      url == GURL(content::kChromeUIShorthangURL) ||
       // Data URLs are usually not allowed in WebUI for security reasons.
       // BalloonHosts are one exception needed by ChromeOS, and are safe because
       // they cannot be scripted by other pages.
@@ -480,9 +495,9 @@ WebUIController* ChromeWebUIControllerFactory::CreateWebUIControllerForURL(
 
 void ChromeWebUIControllerFactory::GetFaviconForURL(
     Profile* profile,
-    FaviconService::GetFaviconRequest* request,
     const GURL& page_url,
-    const std::vector<ui::ScaleFactor>& scale_factors) const {
+    const std::vector<ui::ScaleFactor>& scale_factors,
+    const FaviconService::FaviconResultsCallback& callback) const {
   // Before determining whether page_url is an extension url, we must handle
   // overrides. This changes urls in |kChromeUIScheme| to extension urls, and
   // allows to use ExtensionWebUI::GetFaviconForURL.
@@ -491,47 +506,53 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
 
   // All extensions but the bookmark manager get their favicon from the icons
   // part of the manifest.
-  if (url.SchemeIs(chrome::kExtensionScheme) &&
+  if (url.SchemeIs(extensions::kExtensionScheme) &&
       url.host() != extension_misc::kBookmarkManagerId) {
 #if defined(ENABLE_EXTENSIONS)
-    ExtensionWebUI::GetFaviconForURL(profile, request, url);
+    ExtensionWebUI::GetFaviconForURL(profile, url, callback);
+#else
+    RunFaviconCallbackAsync(callback,
+                            new std::vector<history::FaviconBitmapResult>(),
+                            new history::IconURLSizesMap());
 #endif
-  } else {
-    std::vector<history::FaviconBitmapResult> favicon_bitmap_results;
-    for (size_t i = 0; i < scale_factors.size(); ++i) {
-      scoped_refptr<base::RefCountedMemory> bitmap(GetFaviconResourceBytes(
-            url, scale_factors[i]));
-      if (bitmap.get() && bitmap->size()) {
-        history::FaviconBitmapResult bitmap_result;
-        bitmap_result.bitmap_data = bitmap;
-        // Leave |bitmap_result|'s icon URL as the default of GURL().
-        bitmap_result.icon_type = history::FAVICON;
-        favicon_bitmap_results.push_back(bitmap_result);
-
-        // Assume that |bitmap| is |gfx::kFaviconSize| x |gfx::kFaviconSize|
-        // DIP.
-        float scale = ui::GetScaleFactorScale(scale_factors[i]);
-        int edge_pixel_size =
-            static_cast<int>(gfx::kFaviconSize * scale + 0.5f);
-        bitmap_result.pixel_size = gfx::Size(edge_pixel_size, edge_pixel_size);
-      }
-    }
-
-    // Populate IconURLSizesMap such that the requirement that all the icon URLs
-    // in |favicon_bitmap_results| be present in |icon_url_sizes| holds.
-    // Populate the favicon sizes with the pixel sizes of the bitmaps available
-    // for |url|.
-    history::IconURLSizesMap icon_url_sizes;
-    for (size_t i = 0; i < favicon_bitmap_results.size(); ++i) {
-      const history::FaviconBitmapResult& bitmap_result =
-          favicon_bitmap_results[i];
-      const GURL& icon_url = bitmap_result.icon_url;
-      icon_url_sizes[icon_url].push_back(bitmap_result.pixel_size);
-    }
-
-    request->ForwardResultAsync(request->handle(), favicon_bitmap_results,
-                                icon_url_sizes);
+    return;
   }
+
+  std::vector<history::FaviconBitmapResult>* favicon_bitmap_results =
+      new std::vector<history::FaviconBitmapResult>();
+  history::IconURLSizesMap* icon_url_sizes = new history::IconURLSizesMap();
+
+  for (size_t i = 0; i < scale_factors.size(); ++i) {
+    scoped_refptr<base::RefCountedMemory> bitmap(GetFaviconResourceBytes(
+          url, scale_factors[i]));
+    if (bitmap.get() && bitmap->size()) {
+      history::FaviconBitmapResult bitmap_result;
+      bitmap_result.bitmap_data = bitmap;
+      // Leave |bitmap_result|'s icon URL as the default of GURL().
+      bitmap_result.icon_type = history::FAVICON;
+      favicon_bitmap_results->push_back(bitmap_result);
+
+      // Assume that |bitmap| is |gfx::kFaviconSize| x |gfx::kFaviconSize|
+      // DIP.
+      float scale = ui::GetScaleFactorScale(scale_factors[i]);
+      int edge_pixel_size =
+          static_cast<int>(gfx::kFaviconSize * scale + 0.5f);
+      bitmap_result.pixel_size = gfx::Size(edge_pixel_size, edge_pixel_size);
+    }
+  }
+
+  // Populate IconURLSizesMap such that the requirement that all the icon URLs
+  // in |favicon_bitmap_results| be present in |icon_url_sizes| holds.
+  // Populate the favicon sizes with the pixel sizes of the bitmaps available
+  // for |url|.
+  for (size_t i = 0; i < favicon_bitmap_results->size(); ++i) {
+    const history::FaviconBitmapResult& bitmap_result =
+        (*favicon_bitmap_results)[i];
+    const GURL& icon_url = bitmap_result.icon_url;
+    (*icon_url_sizes)[icon_url].push_back(bitmap_result.pixel_size);
+  }
+
+  RunFaviconCallbackAsync(callback, favicon_bitmap_results, icon_url_sizes);
 }
 
 // static
@@ -555,7 +576,7 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
     return BookmarksUI::GetFaviconResourceBytes(scale_factor);
 
   // The extension scheme is handled in GetFaviconForURL.
-  if (page_url.SchemeIs(chrome::kExtensionScheme)) {
+  if (page_url.SchemeIs(extensions::kExtensionScheme)) {
     NOTREACHED();
     return NULL;
   }
@@ -572,6 +593,9 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
   if (page_url.host() == chrome::kChromeUICrashesHost)
     return CrashesUI::GetFaviconResourceBytes(scale_factor);
 
+  if (page_url.host() == chrome::kChromeUIFlagsHost)
+    return FlagsUI::GetFaviconResourceBytes(scale_factor);
+
   if (page_url.host() == chrome::kChromeUIHistoryHost)
     return HistoryUI::GetFaviconResourceBytes(scale_factor);
 
@@ -583,11 +607,6 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
   // Android uses the native download manager.
   if (page_url.host() == chrome::kChromeUIDownloadsHost)
     return DownloadsUI::GetFaviconResourceBytes(scale_factor);
-
-  // chrome://flags is currently unsupported on Android.
-  // TODO(satish): Enable after http://crbug.com/143146 is fixed.
-  if (page_url.host() == chrome::kChromeUIFlagsHost)
-    return FlagsUI::GetFaviconResourceBytes(scale_factor);
 
   // Android doesn't use the Options pages.
   if (page_url.host() == chrome::kChromeUISettingsFrameHost)

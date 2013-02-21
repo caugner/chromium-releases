@@ -32,7 +32,8 @@ const int kQueryId = 5;
 // A constant value to use as an Autofill profile ID.
 const int kAutofillProfileId = 1;
 
-class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
+class MockAutofillExternalDelegate :
+      public autofill::TestAutofillExternalDelegate {
  public:
   MockAutofillExternalDelegate(content::WebContents* web_contents,
                                AutofillManager* autofill_manger)
@@ -47,12 +48,9 @@ class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
 
   MOCK_METHOD0(ClearPreviewedForm, void());
 
+  MOCK_METHOD1(EnsurePopupForElement, void(const gfx::Rect& element_bounds));
+
   MOCK_METHOD0(HideAutofillPopup, void());
-
-  MOCK_METHOD1(SetBounds, void(const gfx::Rect& bounds));
-
- private:
-  virtual void HideAutofillPopupInternal() {};
 };
 
 class MockAutofillManager : public AutofillManager {
@@ -91,14 +89,15 @@ class AutofillExternalDelegateUnitTest
     FormFieldData field;
     field.is_focusable = true;
     field.should_autocomplete = true;
-    const gfx::Rect bounds;
+    const gfx::Rect element_bounds;
 
-    EXPECT_CALL(*external_delegate_, SetBounds(bounds));
-    external_delegate_->OnQuery(query_id, form, field, bounds, false);
+    EXPECT_CALL(*external_delegate_, EnsurePopupForElement(element_bounds));
+    external_delegate_->OnQuery(query_id, form, field, element_bounds, false);
   }
 
   scoped_refptr<MockAutofillManager> autofill_manager_;
-  scoped_ptr<MockAutofillExternalDelegate> external_delegate_;
+  scoped_ptr<testing::NiceMock<MockAutofillExternalDelegate> >
+      external_delegate_;
 
  private:
   virtual void SetUp() OVERRIDE {
@@ -107,9 +106,10 @@ class AutofillExternalDelegateUnitTest
     autofill_manager_ = new MockAutofillManager(
         web_contents(),
         TabAutofillManagerDelegate::FromWebContents(web_contents()));
-    external_delegate_.reset(new MockAutofillExternalDelegate(
-        web_contents(),
-        autofill_manager_));
+    external_delegate_.reset(
+        new testing::NiceMock<MockAutofillExternalDelegate>(
+            web_contents(),
+            autofill_manager_));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -149,16 +149,15 @@ TEST_F(AutofillExternalDelegateUnitTest, TestExternalDelegateVirtualCalls) {
                                             autofill_item,
                                             autofill_ids);
 
-
-  EXPECT_CALL(*external_delegate_, HideAutofillPopup());
-
   // Called by DidAutofillSuggestions, add expectation to remove warning.
   EXPECT_CALL(*autofill_manager_, OnFillAutofillFormData(_, _, _, _));
 
+  EXPECT_CALL(*external_delegate_, HideAutofillPopup());
+
   // This should trigger a call to hide the popup since
   // we've selected an option.
-  external_delegate_->DidAcceptAutofillSuggestions(autofill_item[0],
-                                                   autofill_ids[0], 0);
+  external_delegate_->DidAcceptAutofillSuggestion(autofill_item[0],
+                                                  autofill_ids[0], 0);
 }
 
 // Test that data list elements for a node will appear in the Autofill popup.
@@ -226,7 +225,7 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateInvalidUniqueId) {
 
   // Ensure it doesn't try to fill the form in with the negative id.
   EXPECT_CALL(*autofill_manager_, OnFillAutofillFormData(_, _, _, _)).Times(0);
-  external_delegate_->DidAcceptAutofillSuggestions(string16(), -1, 0);
+  external_delegate_->DidAcceptAutofillSuggestion(string16(), -1, 0);
 }
 
 // Test that the ClearPreview IPC is only sent the form was being previewed
@@ -249,7 +248,48 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateClearPreviewedForm) {
 // Test that the popup is hidden once we are done editing the autofill field.
 TEST_F(AutofillExternalDelegateUnitTest,
        ExternalDelegateHidePopupAfterEditing) {
+  EXPECT_CALL(*external_delegate_, EnsurePopupForElement(_));
+  EXPECT_CALL(*external_delegate_, ApplyAutofillSuggestions(_, _, _, _));
+
+  autofill::GenerateTestAutofillPopup(external_delegate_.get());
+
   EXPECT_CALL(*external_delegate_, HideAutofillPopup());
 
   external_delegate_->DidEndTextFieldEditing();
+}
+
+// Test that the popup is marked as visible after recieving password
+// suggestions.
+TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegatePasswordSuggestions) {
+  std::vector<string16> suggestions;
+  suggestions.push_back(string16());
+
+  FormFieldData field;
+  field.is_focusable = true;
+  field.should_autocomplete = true;
+  const gfx::Rect element_bounds;
+
+  EXPECT_CALL(*external_delegate_, EnsurePopupForElement(element_bounds));
+
+  // The enums must be cast to ints to prevent compile errors on linux_rel.
+  EXPECT_CALL(*external_delegate_,
+              ApplyAutofillSuggestions(_, _, _, testing::ElementsAre(
+                  static_cast<int>(
+                      WebAutofillClient::MenuItemIDPasswordEntry))));
+
+  external_delegate_->OnShowPasswordSuggestions(suggestions,
+                                                field,
+                                                element_bounds);
+
+  // Called by DidAutofillSuggestions, add expectation to remove warning.
+  EXPECT_CALL(*autofill_manager_, OnFillAutofillFormData(_, _, _, _));
+
+  EXPECT_CALL(*external_delegate_, HideAutofillPopup());
+
+  // This should trigger a call to hide the popup since
+  // we've selected an option.
+  external_delegate_->DidAcceptAutofillSuggestion(
+      suggestions[0],
+      WebAutofillClient::MenuItemIDPasswordEntry,
+      0);
 }

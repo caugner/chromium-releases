@@ -139,6 +139,7 @@ void ChromeClassTester::BuildBannedLists() {
   banned_namespaces_.push_back("std");
   banned_namespaces_.push_back("__gnu_cxx");
   banned_namespaces_.push_back("WebKit");
+  banned_namespaces_.push_back("WebTestRunner");
 
   banned_directories_.push_back("third_party/");
   banned_directories_.push_back("native_client/");
@@ -199,6 +200,10 @@ void ChromeClassTester::BuildBannedLists() {
   // Part of our public interface that nacl and friends use. (Arguably, this
   // should mean that this is a higher priority but fixing this looks hard.)
   ignored_record_names_.insert("PluginVersionInfo");
+
+  // Measured performance improvement on cc_perftests. See
+  // https://codereview.chromium.org/11299290/
+  ignored_record_names_.insert("QuadF");
 }
 
 std::string ChromeClassTester::GetNamespaceImpl(const DeclContext* context,

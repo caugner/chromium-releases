@@ -11,12 +11,12 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -40,8 +40,8 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/speech/chrome_speech_recognition_preferences.h"
-#include "chrome/browser/spellchecker/spellcheck_host.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
+#include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
 #include "chrome/browser/tab_contents/spellchecker_submenu_observer.h"
 #include "chrome/browser/tab_contents/spelling_menu_observer.h"
@@ -53,7 +53,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -224,6 +223,10 @@ bool ShouldShowTranslateItem(const GURL& page_url) {
 
   return true;
 }
+
+void DevToolsInspectElementAt(RenderViewHost* rvh, int x, int y) {
+  DevToolsWindow::InspectElement(rvh, x, y);
+}
 }  // namespace
 
 // static
@@ -273,7 +276,7 @@ void RenderViewContextMenu::Cancel() {
   PlatformCancel();
 }
 
-static bool ExtensionPatternMatch(const URLPatternSet& patterns,
+static bool ExtensionPatternMatch(const extensions::URLPatternSet& patterns,
                                   const GURL& url) {
   // No patterns means no restriction, so that implicitly matches.
   if (patterns.is_empty())
@@ -285,7 +288,7 @@ static bool ExtensionPatternMatch(const URLPatternSet& patterns,
 bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
     const content::ContextMenuParams& params,
     MenuItem::ContextList contexts,
-    const URLPatternSet& target_url_patterns) {
+    const extensions::URLPatternSet& target_url_patterns) {
   bool has_link = !params.link_url.is_empty();
   bool has_selection = !params.selection_text.empty();
   bool in_frame = !params.frame_url.is_empty();
@@ -353,7 +356,8 @@ bool RenderViewContextMenu::MenuItemMatchesParams(
 
 void RenderViewContextMenu::AppendAllExtensionItems() {
   extension_items_.Clear();
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
   if (!service)
     return;  // In unit-tests, we may not have an ExtensionService.
   MenuManager* menu_manager = service->menu_manager();
@@ -490,10 +494,8 @@ void RenderViewContextMenu::InitMenu() {
   AppendDeveloperItems();
 
   if (!print_preview_menu_observer_.get()) {
-    TabContents* tab_contents =
-        TabContents::FromWebContents(source_web_contents_);
     print_preview_menu_observer_.reset(
-        new PrintPreviewContextMenuObserver(tab_contents));
+        new PrintPreviewContextMenuObserver(source_web_contents_));
   }
   observers_.AddObserver(print_preview_menu_observer_.get());
 }
@@ -540,8 +542,6 @@ void RenderViewContextMenu::AppendPlatformAppItems() {
             ui::MenuModel::TYPE_SEPARATOR)
       menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 
-    menu_model_.AddItemWithStringId(IDC_RELOAD,
-                                    IDS_CONTENT_CONTEXT_RELOAD_PAGE);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP,
                                     IDS_CONTENT_CONTEXT_RELOAD_PACKAGED_APP);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP,
@@ -971,7 +971,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
   // Allow Spell Check language items on sub menu for text area context menu.
   if ((id >= IDC_SPELLCHECK_LANGUAGES_FIRST) &&
       (id < IDC_SPELLCHECK_LANGUAGES_LAST)) {
-    return profile_->GetPrefs()->GetBoolean(prefs::kEnableSpellCheck);
+    return profile_->GetPrefs()->GetBoolean(prefs::kEnableContinuousSpellcheck);
   }
 
   // Custom items.
@@ -1025,7 +1025,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       if (source_web_contents_->GetController().GetActiveEntry() == NULL)
         return false;
       // Disabled if no browser is associated (e.g. desktop notifications).
-      if (browser::FindBrowserWithWebContents(source_web_contents_) == NULL)
+      if (chrome::FindBrowserWithWebContents(source_web_contents_) == NULL)
         return false;
       return true;
 
@@ -1215,12 +1215,13 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return true;
     case IDC_CONTENT_CONTEXT_VIEWFRAMEINFO:
       // Disabled if no browser is associated (e.g. desktop notifications).
-      if (browser::FindBrowserWithWebContents(source_web_contents_) == NULL)
+      if (chrome::FindBrowserWithWebContents(source_web_contents_) == NULL)
         return false;
       return true;
 
     case IDC_CHECK_SPELLING_WHILE_TYPING:
-      return profile_->GetPrefs()->GetBoolean(prefs::kEnableSpellCheck);
+      return profile_->GetPrefs()->GetBoolean(
+          prefs::kEnableContinuousSpellcheck);
 
 #if !defined(OS_MACOSX) && defined(OS_POSIX)
     // TODO(suzhe): this should not be enabled for password fields.
@@ -1269,7 +1270,7 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
 
   if (id == IDC_CONTENT_CONTEXT_CONTROLS) {
     return (params_.media_flags &
-            WebContextMenuData::MediaControlRootElement) != 0;
+            WebContextMenuData::MediaControls) != 0;
   }
 
   // Custom items.
@@ -1350,7 +1351,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
   switch (id) {
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB: {
       Browser* browser =
-          browser::FindBrowserWithWebContents(source_web_contents_);
+          chrome::FindBrowserWithWebContents(source_web_contents_);
       OpenURL(
           params_.link_url,
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
@@ -1382,16 +1383,13 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       const GURL& referrer =
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
       const GURL& url = params_.link_url;
-      scoped_ptr<content::DownloadSaveInfo> save_info(
-          new content::DownloadSaveInfo());
-      save_info->prompt_for_save_location = true;
       DownloadManager* dlm = BrowserContext::GetDownloadManager(profile_);
       scoped_ptr<DownloadUrlParameters> dl_params(
-          DownloadUrlParameters::FromWebContents(
-              source_web_contents_, url, save_info.Pass()));
+          DownloadUrlParameters::FromWebContents(source_web_contents_, url));
       dl_params->set_referrer(
           content::Referrer(referrer, params_.referrer_policy));
       dl_params->set_referrer_encoding(params_.frame_charset);
+      dl_params->set_prompt(true);
       dlm->DownloadUrl(dl_params.Pass());
       break;
     }
@@ -1403,9 +1401,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       const GURL& referrer =
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
       const GURL& url = params_.src_url;
-      scoped_ptr<content::DownloadSaveInfo> save_info(
-          new content::DownloadSaveInfo());
-      save_info->prompt_for_save_location = true;
       int64 post_id = -1;
       if (url == source_web_contents_->GetURL()) {
         const NavigationEntry* entry =
@@ -1415,14 +1410,14 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       }
       DownloadManager* dlm = BrowserContext::GetDownloadManager(profile_);
       scoped_ptr<DownloadUrlParameters> dl_params(
-          DownloadUrlParameters::FromWebContents(
-              source_web_contents_, url, save_info.Pass()));
+          DownloadUrlParameters::FromWebContents(source_web_contents_, url));
       dl_params->set_referrer(
           content::Referrer(referrer, params_.referrer_policy));
       dl_params->set_post_id(post_id);
       dl_params->set_prefer_cache(true);
       if (post_id >= 0)
         dl_params->set_method("POST");
+      dl_params->set_prompt(true);
       dlm->DownloadUrl(dl_params.Pass());
       break;
     }
@@ -1588,7 +1583,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       NavigationController* controller = &source_web_contents_->GetController();
       NavigationEntry* nav_entry = controller->GetActiveEntry();
       Browser* browser =
-          browser::FindBrowserWithWebContents(source_web_contents_);
+          chrome::FindBrowserWithWebContents(source_web_contents_);
       chrome::ShowPageInfo(browser, source_web_contents_, nav_entry->GetURL(),
                            nav_entry->GetSSL(), true);
       break;
@@ -1628,7 +1623,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMEINFO: {
-      Browser* browser = browser::FindBrowserWithWebContents(
+      Browser* browser = chrome::FindBrowserWithWebContents(
           source_web_contents_);
       chrome::ShowPageInfo(browser, source_web_contents_, params_.frame_url,
                            params_.security_info, false);
@@ -1843,8 +1838,8 @@ void RenderViewContextMenu::CopyImageAt(int x, int y) {
 
 void RenderViewContextMenu::Inspect(int x, int y) {
   content::RecordAction(UserMetricsAction("DevTools_InspectElement"));
-  DevToolsWindow::InspectElement(
-      source_web_contents_->GetRenderViewHost(), x, y);
+  source_web_contents_->GetRenderViewHostAtPosition(
+      x, y, base::Bind(&DevToolsInspectElementAt));
 }
 
 void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {

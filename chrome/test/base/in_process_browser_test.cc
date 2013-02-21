@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_file_util.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -39,6 +41,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_launcher.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 #include "ui/compositor/compositor_switches.h"
@@ -57,6 +60,10 @@ namespace {
 
 // Passed as value of kTestType.
 const char kBrowserTestType[] = "browser";
+
+// Used when running in single-process mode.
+base::LazyInstance<chrome::ChromeContentRendererClient>::Leaky
+    g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -109,10 +116,8 @@ void InProcessBrowserTest::SetUp() {
   // Single-process mode is not set in BrowserMain, so process it explicitly,
   // and set up renderer.
   if (command_line->HasSwitch(switches::kSingleProcess)) {
-    single_process_renderer_client_.reset(
-        new chrome::ChromeContentRendererClient);
     content::GetContentClient()->set_renderer_for_testing(
-        single_process_renderer_client_.get());
+        &g_chrome_content_renderer_client.Get());
   }
 
 #if defined(OS_CHROMEOS)
@@ -149,6 +154,8 @@ void InProcessBrowserTest::SetUp() {
   captive_portal::CaptivePortalService::set_state_for_testing(
       captive_portal::CaptivePortalService::DISABLED_FOR_TESTING);
 #endif
+
+  chrome_browser_net::NetErrorTabHelper::set_enabled_for_testing(false);
 
   google_util::SetMockLinkDoctorBaseURLForTesting();
 
@@ -212,10 +219,15 @@ void InProcessBrowserTest::AddTabAtIndexToBrowser(
     int index,
     const GURL& url,
     content::PageTransition transition) {
+  content::TestNavigationObserver observer(
+      content::NotificationService::AllSources(), NULL, 1);
+
   chrome::NavigateParams params(browser, url, transition);
   params.tabstrip_index = index;
   params.disposition = NEW_FOREGROUND_TAB;
   chrome::Navigate(&params);
+
+  observer.Wait();
 }
 
 void InProcessBrowserTest::AddTabAtIndex(
@@ -280,7 +292,7 @@ CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
       CommandLine::ForCurrentProcess()->GetSwitches();
   switches.erase(switches::kUserDataDir);
   switches.erase(content::kSingleProcessTestsFlag);
-  switches.erase(content::kSingleProcessTestsAndChromeFlag);
+  switches.erase(switches::kSingleProcess);
   new_command_line.AppendSwitch(content::kLaunchAsBrowser);
 
 #if defined(USE_AURA)

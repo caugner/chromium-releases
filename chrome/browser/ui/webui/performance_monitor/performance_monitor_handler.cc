@@ -132,17 +132,17 @@ Unit GetUnitForMetricType(MetricType type) {
   return UNIT_UNDEFINED;
 }
 
-// Returns a dictionary for the aggregation strategy. Aggregation strategies
-// contain an id representing the strategy, and localized strings for the
-// strategy name and strategy description.
-scoped_ptr<DictionaryValue> GetAggregationStrategy(
-    AggregationStrategy strategy) {
+// Returns a dictionary for the aggregation method. Aggregation strategies
+// contain an id representing the method, and localized strings for the
+// method name and method description.
+scoped_ptr<DictionaryValue> GetAggregationMethod(
+    AggregationMethod method) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
-  value->SetInteger("id", strategy);
-  value->SetString("name", GetLocalizedStringFromAggregationStrategy(strategy));
+  value->SetInteger("id", method);
+  value->SetString("name", GetLocalizedStringFromAggregationMethod(method));
   value->SetString(
       "description",
-      GetLocalizedStringForAggregationStrategyDescription(strategy));
+      GetLocalizedStringForAggregationMethodDescription(method));
   return value.Pass();
 }
 
@@ -224,7 +224,8 @@ scoped_ptr<DictionaryValue> GetEventCategory(EventCategory category) {
 // Queries the performance monitor database for active intervals between
 // |start| and |end| times and appends the results to |results|.
 void DoGetActiveIntervals(ListValue* results,
-                          const base::Time& start, const base::Time& end) {
+                          const base::Time& start,
+                          const base::Time& end) {
   Database* db = PerformanceMonitor::GetInstance()->database();
   std::vector<TimeRange> intervals = db->GetActiveIntervals(start, end);
 
@@ -240,114 +241,140 @@ void DoGetActiveIntervals(ListValue* results,
 // Queries the PerformanceMonitor database for events of type |event_type|
 // between |start| and |end| times, creates a new event with localized keys
 // for display, and appends the results to |results|.
-void DoGetEvents(ListValue* results, EventType event_type,
-                 const base::Time& start, const base::Time& end) {
-  Database* db = PerformanceMonitor::GetInstance()->database();
-  Database::EventVector events = db->GetEvents(event_type, start, end);
-
-  for (Database::EventVector::iterator event = events.begin();
-       event != events.end(); ++event) {
-    DictionaryValue* localized_event = new DictionaryValue();
-
-    for (DictionaryValue::key_iterator key = (*event)->data()->begin_keys();
-         key != (*event)->data()->end_keys(); ++key) {
-      std::string localized_key;
-
-      Value* value = NULL;
-
-      // The property 'eventType' is set in HandleGetEvents as part of the
-      // entire result set, so we don't need to include this here in the event.
-      if (*key == "eventType")
-        continue;
-      else if (*key == "time") {
-        // The property 'time' is also used computationally, but must be
-        // converted to JS-style time.
-        double time = 0.0;
-        if (!(*event)->data()->GetDouble(std::string("time"), &time)) {
-          LOG(ERROR) << "Failed to get 'time' field from event.";
-          continue;
-        }
-        value = Value::CreateDoubleValue(
-            base::Time::FromInternalValue(static_cast<int64>(time)).ToJsTime());
-      } else {
-        // All other values are user-facing, so we create a new value for
-        // localized display.
-        DictionaryValue* localized_value = new DictionaryValue();
-        localized_value->SetString("label",
-                                   GetLocalizedStringFromEventProperty(*key));
-        Value* old_value = NULL;
-        (*event)->data()->Get(*key, &old_value);
-        localized_value->SetWithoutPathExpansion("value",
-                                                 old_value->DeepCopy());
-        value = static_cast<Value*>(localized_value);
-      }
-
-      localized_event->SetWithoutPathExpansion(*key, value);
-    }
-    results->Append(localized_event);
-  }
-}
-
-// Populates |results| for the UI, including setting the 'metricId' property,
-// converting and adding |max_value| to the 'maxValue' property, and converting
-// each metric in |aggregated_metrics| to be in JS-friendly and readable units
-// in the 'metrics' property.
-void ConvertUnitsAndPopulateMetricResults(
-    DictionaryValue* results,
-    MetricType metric_type,
-    double max_value,
-    const Database::MetricVector* aggregated_metrics) {
-  results->SetInteger("metricId", static_cast<int>(metric_type));
-
-  double conversion_factor =
-      GetConversionFactor(*GetUnitDetails(GetUnitForMetricType(metric_type)),
-                          *GetUnitDetails(GetUnitForMetricCategory(
-                              GetCategoryForMetric(metric_type))));
-
-  results->SetDouble("maxValue", max_value * conversion_factor);
-
-  ListValue* metric_list = new ListValue();
-  results->Set("metrics", metric_list);
-
-  if (!aggregated_metrics)
-    return;
-
-  for (Database::MetricVector::const_iterator it = aggregated_metrics->begin();
-       it != aggregated_metrics->end(); ++it) {
-    DictionaryValue* metric_value = new DictionaryValue();
-    // Convert time to JS-friendly time.
-    metric_value->SetDouble("time", it->time.ToJsTime());
-    // Convert the units to the proper unit type.
-    metric_value->SetDouble("value", it->value * conversion_factor);
-    metric_list->Append(metric_value);
-  }
-}
-
-// Queries the performance monitor database for metrics of type |metric_type|
-// between |start| and |end| times and appends the results to |results|.
-void DoGetMetric(DictionaryValue* results,
-                 MetricType metric_type,
+void DoGetEvents(ListValue* results,
+                 const std::set<EventType>& event_types,
                  const base::Time& start,
-                 const base::Time& end,
-                 const base::TimeDelta& resolution,
-                 AggregationStrategy aggregation_strategy) {
+                 const base::Time& end) {
   Database* db = PerformanceMonitor::GetInstance()->database();
 
-  Database::MetricVectorMap metric_vector_map =
-      db->GetStatsForMetricByActivity(metric_type, start, end);
+  for (std::set<EventType>::const_iterator iter = event_types.begin();
+       iter != event_types.end(); ++iter) {
+    DictionaryValue* event_results = new DictionaryValue();
+    event_results->SetInteger("eventId", static_cast<int>(*iter));
+    ListValue* events = new ListValue();
+    event_results->Set("events", events);
+    results->Append(event_results);
 
-  linked_ptr<Database::MetricVector> metric_vector =
-      metric_vector_map[kProcessChromeAggregate];
+    Database::EventVector event_vector = db->GetEvents(*iter, start, end);
 
-  ConvertUnitsAndPopulateMetricResults(
-      results,
-      metric_type,
-      db->GetMaxStatsForActivityAndMetric(metric_type),
-      AggregateMetric(metric_type,
-                      metric_vector.get(),
-                      start,
-                      resolution,
-                      aggregation_strategy).get());
+    for (Database::EventVector::iterator event = event_vector.begin();
+         event != event_vector.end(); ++event) {
+      DictionaryValue* localized_event = new DictionaryValue();
+
+      for (DictionaryValue::key_iterator key = (*event)->data()->begin_keys();
+           key != (*event)->data()->end_keys(); ++key) {
+        std::string localized_key;
+
+        Value* value = NULL;
+
+        // The property 'eventType' is set in HandleGetEvents as part of the
+        // entire result set, so we don't need to include this here in the
+        // event.
+        if (*key == "eventType")
+          continue;
+        else if (*key == "time") {
+          // The property 'time' is also used computationally, but must be
+          // converted to JS-style time.
+          double time = 0.0;
+          if (!(*event)->data()->GetDouble(std::string("time"), &time)) {
+            LOG(ERROR) << "Failed to get 'time' field from event.";
+            continue;
+          }
+          value = Value::CreateDoubleValue(
+              base::Time::FromInternalValue(
+                  static_cast<int64>(time)).ToJsTime());
+        } else {
+          // All other values are user-facing, so we create a new value for
+          // localized display.
+          DictionaryValue* localized_value = new DictionaryValue();
+          localized_value->SetString("label",
+                                     GetLocalizedStringFromEventProperty(*key));
+          Value* old_value = NULL;
+          (*event)->data()->Get(*key, &old_value);
+          localized_value->SetWithoutPathExpansion("value",
+                                                   old_value->DeepCopy());
+          value = localized_value;
+        }
+
+        localized_event->SetWithoutPathExpansion(*key, value);
+      }
+      events->Append(localized_event);
+    }
+  }
+}
+
+// Populates results with a dictionary for each metric requested. The dictionary
+// includes a metric id, the maximum value for the metric, and a list of lists
+// of metric points, with each sublist containing the aggregated data for an
+// interval for which PerformanceMonitor was active. This will also convert
+// time to JS-style time.
+void DoGetMetrics(ListValue* results,
+                  const std::set<MetricType>& metric_types,
+                  const base::Time& start,
+                  const base::Time& end,
+                  const base::TimeDelta& resolution,
+                  AggregationMethod aggregation_method) {
+  Database* db = PerformanceMonitor::GetInstance()->database();
+  std::vector<TimeRange> intervals = db->GetActiveIntervals(start, end);
+
+  // For each metric type, populate a new dictionary and append it to results.
+  for (std::set<MetricType>::const_iterator metric_type = metric_types.begin();
+       metric_type != metric_types.end(); ++metric_type) {
+    double conversion_factor =
+        GetConversionFactor(*GetUnitDetails(GetUnitForMetricType(*metric_type)),
+                            *GetUnitDetails(GetUnitForMetricCategory(
+                                GetCategoryForMetric(*metric_type))));
+
+    DictionaryValue* metric_set = new DictionaryValue();
+    metric_set->SetInteger("metricId", static_cast<int>(*metric_type));
+    metric_set->SetDouble(
+        "maxValue",
+        db->GetMaxStatsForActivityAndMetric(*metric_type) * conversion_factor);
+
+    // Retrieve all metrics in the database, and aggregate them into a series
+    // of points for each active interval.
+    scoped_ptr<Database::MetricVector> metric_vector =
+        db->GetStatsForActivityAndMetric(*metric_type, start, end);
+
+    scoped_ptr<VectorOfMetricVectors> aggregated_metrics =
+        AggregateMetric(*metric_type,
+                        metric_vector.get(),
+                        start,
+                        intervals,
+                        resolution,
+                        aggregation_method);
+
+    // The JS-side expects a list to be present, even if there are no metrics.
+    if (!aggregated_metrics) {
+      metric_set->Set("metrics", new ListValue());
+      results->Append(metric_set);
+      continue;
+    }
+
+    ListValue* metric_points_by_interval = new ListValue();
+
+    // For each metric point, record it in the expected format for the JS-side
+    // (a dictionary of time and value, with time as a JS-style time), and
+    // convert the values to be display-friendly.
+    for (VectorOfMetricVectors::const_iterator metric_series =
+             aggregated_metrics->begin();
+         metric_series != aggregated_metrics->end(); ++metric_series) {
+      ListValue* series_value = new ListValue();
+      for (Database::MetricVector::const_iterator metric_point =
+               metric_series->begin();
+           metric_point != metric_series->end(); ++metric_point) {
+        DictionaryValue* point_value = new DictionaryValue();
+        point_value->SetDouble("time", metric_point->time.ToJsTime());
+        point_value->SetDouble("value",
+                               metric_point->value * conversion_factor);
+        series_value->Append(point_value);
+      }
+      metric_points_by_interval->Append(series_value);
+    }
+
+    metric_set->Set("metrics", metric_points_by_interval);
+    results->Append(metric_set);
+  }
 }
 
 }  // namespace
@@ -387,8 +414,8 @@ void PerformanceMonitorHandler::RegisterMessages() {
       base::Bind(&PerformanceMonitorHandler::HandleGetMetricTypes,
                  AsWeakPtr()));
   web_ui()->RegisterMessageCallback(
-      "getMetric",
-      base::Bind(&PerformanceMonitorHandler::HandleGetMetric,
+      "getMetrics",
+      base::Bind(&PerformanceMonitorHandler::HandleGetMetrics,
                  AsWeakPtr()));
 }
 
@@ -431,9 +458,9 @@ void PerformanceMonitorHandler::HandleGetAggregationTypes(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK_EQ(0u, args->GetSize());
   ListValue results;
-  for (int i = 0; i < AGGREGATION_STRATEGY_NUMBER_OF_STRATEGIES; ++i) {
+  for (int i = 0; i < AGGREGATION_METHOD_NUMBER_OF_METHODS; ++i) {
     results.Append(
-        GetAggregationStrategy(static_cast<AggregationStrategy>(i)).release());
+        GetAggregationMethod(static_cast<AggregationMethod>(i)).release());
   }
 
   ReturnResults(
@@ -453,10 +480,19 @@ void PerformanceMonitorHandler::HandleGetEventTypes(const ListValue* args) {
 void PerformanceMonitorHandler::HandleGetEvents(const ListValue* args) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK_EQ(3u, args->GetSize());
-  double event = 0;
-  CHECK(args->GetDouble(0, &event));
-  CHECK(event < EVENT_NUMBER_OF_EVENTS && event > EVENT_UNDEFINED);
-  EventType event_type = static_cast<EventType>(static_cast<int>(event));
+
+  const ListValue* event_type_list;
+  CHECK(args->GetList(0, &event_type_list));
+  std::set<EventType> event_types;
+  for (ListValue::const_iterator iter = event_type_list->begin();
+       iter != event_type_list->end(); ++iter) {
+    double event_type_double = 0.0;
+    CHECK((*iter)->GetAsDouble(&event_type_double));
+    CHECK(event_type_double < EVENT_NUMBER_OF_EVENTS &&
+        event_type_double > EVENT_UNDEFINED);
+    event_types.insert(
+        static_cast<EventType>(static_cast<int>(event_type_double)));
+  }
 
   double double_time = 0.0;
   CHECK(args->GetDouble(1, &double_time));
@@ -464,14 +500,10 @@ void PerformanceMonitorHandler::HandleGetEvents(const ListValue* args) {
   CHECK(args->GetDouble(2, &double_time));
   base::Time end = base::Time::FromJsTime(double_time);
 
-  DictionaryValue* results = new DictionaryValue();
-  results->SetInteger("eventId", static_cast<int>(event_type));
-  ListValue* events = new ListValue();
-  results->Set("events", events);
-
+  ListValue* results = new ListValue();
   util::PostTaskToDatabaseThreadAndReply(
       FROM_HERE,
-      base::Bind(&DoGetEvents, events, event_type, start, end),
+      base::Bind(&DoGetEvents, results, event_types, start, end),
       base::Bind(&PerformanceMonitorHandler::ReturnResults, AsWeakPtr(),
                  "PerformanceMonitor.getEventsCallback",
                  base::Owned(results)));
@@ -487,39 +519,48 @@ void PerformanceMonitorHandler::HandleGetMetricTypes(const ListValue* args) {
   ReturnResults("PerformanceMonitor.getMetricTypesCallback", &results);
 }
 
-void PerformanceMonitorHandler::HandleGetMetric(const ListValue* args) {
+void PerformanceMonitorHandler::HandleGetMetrics(const ListValue* args) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK_EQ(5u, args->GetSize());
-  double metric = 0;
-  CHECK(args->GetDouble(0, &metric));
-  CHECK(metric < METRIC_NUMBER_OF_METRICS && metric > METRIC_UNDEFINED);
-  MetricType metric_type = static_cast<MetricType>(static_cast<int>(metric));
 
-  double double_time = 0.0;
-  CHECK(args->GetDouble(1, &double_time));
-  base::Time start = base::Time::FromJsTime(double_time);
-  CHECK(args->GetDouble(2, &double_time));
-  base::Time end = base::Time::FromJsTime(double_time);
+  const ListValue* metric_type_list;
+  CHECK(args->GetList(0, &metric_type_list));
+  std::set<MetricType> metric_types;
+  for (ListValue::const_iterator iter = metric_type_list->begin();
+       iter != metric_type_list->end(); ++iter) {
+    double metric_type_double = 0.0;
+    CHECK((*iter)->GetAsDouble(&metric_type_double));
+    CHECK(metric_type_double < METRIC_NUMBER_OF_METRICS &&
+          metric_type_double > METRIC_UNDEFINED);
+    metric_types.insert(
+        static_cast<MetricType>(static_cast<int>(metric_type_double)));
+  }
 
-  double resolution_in_milliseconds = 0;
+  double time_double = 0.0;
+  CHECK(args->GetDouble(1, &time_double));
+  base::Time start = base::Time::FromJsTime(time_double);
+  CHECK(args->GetDouble(2, &time_double));
+  base::Time end = base::Time::FromJsTime(time_double);
+
+  double resolution_in_milliseconds = 0.0;
   CHECK(args->GetDouble(3, &resolution_in_milliseconds));
   base::TimeDelta resolution =
       base::TimeDelta::FromMilliseconds(resolution_in_milliseconds);
 
-  double aggregation;
-  CHECK(args->GetDouble(4, &aggregation));
-  CHECK(aggregation < AGGREGATION_STRATEGY_NUMBER_OF_STRATEGIES &&
-        aggregation >= 0);
-  AggregationStrategy aggregation_strategy =
-      static_cast<AggregationStrategy>(static_cast<int>(aggregation));
+  double aggregation_double = 0.0;
+  CHECK(args->GetDouble(4, &aggregation_double));
+  CHECK(aggregation_double < AGGREGATION_METHOD_NUMBER_OF_METHODS &&
+        aggregation_double >= 0);
+  AggregationMethod aggregation_method =
+      static_cast<AggregationMethod>(static_cast<int>(aggregation_double));
 
-  DictionaryValue* results = new DictionaryValue();
+  ListValue* results = new ListValue();
   util::PostTaskToDatabaseThreadAndReply(
       FROM_HERE,
-      base::Bind(&DoGetMetric, results, metric_type,
-                 start, end, resolution, aggregation_strategy),
+      base::Bind(&DoGetMetrics, results, metric_types,
+                 start, end, resolution, aggregation_method),
       base::Bind(&PerformanceMonitorHandler::ReturnResults, AsWeakPtr(),
-                 "PerformanceMonitor.getMetricCallback",
+                 "PerformanceMonitor.getMetricsCallback",
                  base::Owned(results)));
 }
 

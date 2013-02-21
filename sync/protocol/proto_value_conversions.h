@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #ifndef SYNC_PROTOCOL_PROTO_VALUE_CONVERSIONS_H_
 #define SYNC_PROTOCOL_PROTO_VALUE_CONVERSIONS_H_
+
+#include "sync/base/sync_export.h"
 
 namespace base {
 class DictionaryValue;
@@ -21,6 +23,9 @@ class AutofillSpecifics;
 class BookmarkSpecifics;
 class ClientToServerMessage;
 class ClientToServerResponse;
+class DatatypeAssociationStats;
+class DebugEventInfo;
+class DebugInfo;
 class DeviceInfoSpecifics;
 class DeviceInformation;
 class EncryptedData;
@@ -43,6 +48,7 @@ class SessionHeader;
 class SessionSpecifics;
 class SessionTab;
 class SessionWindow;
+class SyncCycleCompletedEventInfo;
 class TabNavigation;
 class ThemeSpecifics;
 class TimeRangeDirective;
@@ -140,7 +146,7 @@ base::DictionaryValue* ExtensionSettingSpecificsToValue(
 base::DictionaryValue* ExtensionSpecificsToValue(
     const sync_pb::ExtensionSpecifics& extension_specifics);
 
-base::DictionaryValue* HistoryDeleteDirectiveSpecificsToValue(
+SYNC_EXPORT base::DictionaryValue* HistoryDeleteDirectiveSpecificsToValue(
     const sync_pb::HistoryDeleteDirectiveSpecifics&
         history_delete_directive_specifics);
 
@@ -178,6 +184,17 @@ base::DictionaryValue* ClientToServerResponseToValue(
     const sync_pb::ClientToServerResponse& proto,
     bool include_specifics);
 
+base::DictionaryValue* DatatypeAssociationStatsToValue(
+    const sync_pb::DatatypeAssociationStats& proto);
+
+base::DictionaryValue* DebugEventInfoToValue(
+    const sync_pb::DebugEventInfo& proto);
+
+base::DictionaryValue* DebugInfoToValue(
+    const sync_pb::DebugInfo& proto);
+
+base::DictionaryValue* SyncCycleCompletedEventInfoToValue(
+    const sync_pb::SyncCycleCompletedEventInfo& proto);
 
 }  // namespace syncer
 

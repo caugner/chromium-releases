@@ -8,8 +8,7 @@
 #include "chrome/browser/instant/instant_model_observer.h"
 
 InstantModel::InstantModel(InstantController* controller)
-  : display_state_(NOT_READY),
-    height_(0),
+  : height_(0),
     height_units_(INSTANT_SIZE_PIXELS),
     preview_contents_(NULL),
     controller_(controller) {
@@ -18,34 +17,42 @@ InstantModel::InstantModel(InstantController* controller)
 InstantModel::~InstantModel() {
 }
 
-void InstantModel::SetDisplayState(DisplayState display_state,
+void InstantModel::SetPreviewState(const chrome::search::Mode& mode,
                                    int height,
                                    InstantSizeUnits height_units) {
-  if (display_state_ == display_state &&
-      height_ == height &&
-      height_units_ == height_units)
+  if (mode_.mode == mode.mode && height_ == height &&
+      height_units_ == height_units) {
+    // Mode::mode hasn't changed, but perhaps bits that we ignore (such as
+    // Mode::origin) have. Update |mode_| anyway, so it's consistent with the
+    // argument (so InstantModel::mode() doesn't return something unexpected).
+    mode_ = mode;
     return;
+  }
 
-  display_state_ = display_state;
+  DVLOG(1) << "SetPreviewState: " << mode_.mode << " to " << mode.mode;
+  mode_ = mode;
   height_ = height;
   height_units_ = height_units;
 
   FOR_EACH_OBSERVER(InstantModelObserver, observers_,
-                    DisplayStateChanged(*this));
+                    PreviewStateChanged(*this));
 }
 
-void InstantModel::SetPreviewContents(TabContents* preview_contents) {
+void InstantModel::SetPreviewContents(content::WebContents* preview_contents) {
   if (preview_contents_ == preview_contents)
     return;
 
   preview_contents_ = preview_contents;
 
   FOR_EACH_OBSERVER(InstantModelObserver, observers_,
-                    DisplayStateChanged(*this));
+                    PreviewStateChanged(*this));
 }
 
-TabContents* InstantModel::GetPreviewContents() const {
-  return controller_->GetPreviewContents();
+content::WebContents* InstantModel::GetPreviewContents() const {
+  // |controller_| maybe NULL durning tests.
+  if (controller_)
+    return controller_->GetPreviewContents();
+  return preview_contents_;
 }
 
 void InstantModel::AddObserver(InstantModelObserver* observer) const {
@@ -54,8 +61,4 @@ void InstantModel::AddObserver(InstantModelObserver* observer) const {
 
 void InstantModel::RemoveObserver(InstantModelObserver* observer) const {
   observers_.RemoveObserver(observer);
-}
-
-bool InstantModel::HasObserver(InstantModelObserver* observer) const {
-  return observers_.HasObserver(observer);
 }

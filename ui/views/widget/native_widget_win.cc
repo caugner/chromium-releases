@@ -31,6 +31,7 @@
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/screen.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/accessibility/native_view_accessibility_win.h"
 #include "ui/views/controls/native_control_win.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -143,7 +144,7 @@ void NativeWidgetWin::ClearAccessibilityViewEvent(View* view) {
 
 void NativeWidgetWin::InitNativeWidget(const Widget::InitParams& params) {
   SetInitParams(params);
-  message_handler_->Init(params.GetParent(), params.bounds);
+  message_handler_->Init(params.parent, params.bounds);
 }
 
 NonClientFrameView* NativeWidgetWin::CreateNonClientFrameView() {
@@ -188,9 +189,9 @@ ui::Compositor* NativeWidgetWin::GetCompositor() {
   return NULL;
 }
 
-void NativeWidgetWin::CalculateOffsetToAncestorWithLayer(
-    gfx::Point* offset,
+gfx::Vector2d NativeWidgetWin::CalculateOffsetToAncestorWithLayer(
     ui::Layer** layer_parent) {
+  return gfx::Vector2d();
 }
 
 void NativeWidgetWin::ViewRemoved(View* view) {
@@ -446,8 +447,9 @@ bool NativeWidgetWin::IsAccessibleWidget() const {
 void NativeWidgetWin::RunShellDrag(View* view,
                                    const ui::OSExchangeData& data,
                                    const gfx::Point& location,
-                                   int operation) {
-  views::RunShellDrag(NULL, data, location, operation);
+                                   int operation,
+                                   ui::DragDropTypes::DragEventSource source) {
+  views::RunShellDrag(NULL, data, location, operation, source);
 }
 
 void NativeWidgetWin::SchedulePaintInRect(const gfx::Rect& rect) {
@@ -471,7 +473,7 @@ void NativeWidgetWin::SetInactiveRenderingDisabled(bool value) {
 }
 
 Widget::MoveLoopResult NativeWidgetWin::RunMoveLoop(
-    const gfx::Point& drag_offset) {
+    const gfx::Vector2d& drag_offset) {
   return message_handler_->RunMoveLoop(drag_offset) ?
       Widget::MOVE_LOOP_SUCCESSFUL : Widget::MOVE_LOOP_CANCELED;
 }
@@ -482,6 +484,10 @@ void NativeWidgetWin::EndMoveLoop() {
 
 void NativeWidgetWin::SetVisibilityChangedAnimationsEnabled(bool value) {
   message_handler_->SetVisibilityChangedAnimationsEnabled(value);
+}
+
+ui::NativeTheme* NativeWidgetWin::GetNativeTheme() const {
+  return ui::NativeTheme::instance();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -555,7 +561,7 @@ bool NativeWidgetWin::CanSaveFocus() const {
 }
 
 void NativeWidgetWin::SaveFocusOnDeactivate() {
-  GetWidget()->GetFocusManager()->StoreFocusedView();
+  GetWidget()->GetFocusManager()->StoreFocusedView(true);
 }
 
 void NativeWidgetWin::RestoreFocusOnActivate() {
@@ -628,9 +634,14 @@ gfx::NativeViewAccessible NativeWidgetWin::GetNativeViewAccessible() {
 }
 
 void NativeWidgetWin::HandleAppDeactivated() {
-  // Another application was activated, we should reset any state that
-  // disables inactive rendering now.
-  delegate_->EnableInactiveRendering();
+  if (IsInactiveRenderingDisabled()) {
+    delegate_->EnableInactiveRendering();
+  } else {
+    // TODO(pkotwicz): Remove need for SchedulePaint(). crbug.com/165841
+    View* non_client_view = GetWidget()->non_client_view();
+    if (non_client_view)
+      non_client_view->SchedulePaint();
+  }
 }
 
 void NativeWidgetWin::HandleActivationChanged(bool active) {
@@ -754,11 +765,13 @@ void NativeWidgetWin::HandleNativeBlur(HWND focused_window) {
 }
 
 bool NativeWidgetWin::HandleMouseEvent(const ui::MouseEvent& event) {
-  return delegate_->OnMouseEvent(event);
+  delegate_->OnMouseEvent(const_cast<ui::MouseEvent*>(&event));
+  return event.handled();
 }
 
 bool NativeWidgetWin::HandleKeyEvent(const ui::KeyEvent& event) {
-  return delegate_->OnKeyEvent(event);
+  delegate_->OnKeyEvent(const_cast<ui::KeyEvent*>(&event));
+  return event.handled();
 }
 
 bool NativeWidgetWin::HandleUntranslatedKeyEvent(const ui::KeyEvent& event) {

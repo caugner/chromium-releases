@@ -4,12 +4,16 @@
 
 #include "chrome/browser/ui/tabs/dock_info.h"
 
+#include "chrome/browser/ui/host_desktop.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/x/x11_util.h"
-#include "ui/views/widget/desktop_root_window_host_linux.h"
 
-#if !defined(USE_ASH)
+#if !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_root_window_host_linux.h"
+#endif
+
+#if !defined(OS_CHROMEOS)
 
 namespace {
 
@@ -172,7 +176,8 @@ class LocalProcessWindowFinder : public BaseWindowFinder {
 }  // namespace
 
 // static
-DockInfo DockInfo::GetDockInfoAtPoint(const gfx::Point& screen_point,
+DockInfo DockInfo::GetDockInfoAtPoint(chrome::HostDesktopType host_desktop_type,
+                                      const gfx::Point& screen_point,
                                       const std::set<gfx::NativeView>& ignore) {
   // TODO(beng):
   NOTIMPLEMENTED();
@@ -181,6 +186,7 @@ DockInfo DockInfo::GetDockInfoAtPoint(const gfx::Point& screen_point,
 
 // static
 gfx::NativeView DockInfo::GetLocalProcessWindowAtPoint(
+    chrome::HostDesktopType host_desktop_type,
     const gfx::Point& screen_point,
     const std::set<gfx::NativeView>& ignore) {
   // The X11 server is the canonical state of what the window stacking order

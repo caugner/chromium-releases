@@ -7,13 +7,16 @@ package org.chromium.content.browser;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.res.Resources;
+import android.graphics.Point;
 import android.util.Log;
+import android.view.WindowManager;
+import android.view.Display;
 
 import org.chromium.base.JNINamespace;
-import org.chromium.content.app.AppResource;
 import org.chromium.content.app.ContentMain;
 import org.chromium.content.app.LibraryLoader;
 import org.chromium.content.common.CommandLine;
+import org.chromium.content.R;
 
 // NOTE: This file hasn't been fully upstreamed, please don't merge to downstream.
 @JNINamespace("content")
@@ -103,7 +106,7 @@ public class AndroidBrowserProcess {
 
         // Normally Main.java will have already loaded the library asynchronously, we only
         // need to load it here if we arrived via another flow, e.g. bookmark access & sync setup.
-        LibraryLoader.loadAndInitSync();
+        LibraryLoader.ensureInitialized();
 
         Context appContext = context.getApplicationContext();
 
@@ -115,13 +118,33 @@ public class AndroidBrowserProcess {
                     CommandLine.getInstance().hasSwitch(CommandLine.ADD_OFFICIAL_COMMAND_LINE)) {
                 Resources res = context.getResources();
                 try {
-                    String[] switches = res.getStringArray(AppResource.ARRAY_OFFICIAL_COMMAND_LINE);
+                    String[] switches = res.getStringArray(R.array.official_command_line);
                     CommandLine.getInstance().appendSwitchesAndArguments(switches);
                 } catch (Resources.NotFoundException e) {
                     // Do nothing.  It is fine to have no command line
                     // additions for an official build.
                 }
             }
+        }
+
+        // For very high resolution displays (eg. Nexus 10), set the default tile size
+        // to be 512. This should be removed in favour of a generic hueristic that works
+        // across all platforms and devices, once that exists: http://crbug.com/159524
+        // This switches to 512 for screens containing 40 or more 256x256 tiles, such
+        // that 1080p devices do not use 512x512 tiles (eg. 1920x1280 requires 37.5 tiles)
+        WindowManager windowManager = (WindowManager)
+                appContext.getSystemService(Context.WINDOW_SERVICE);
+        Display display = windowManager.getDefaultDisplay();
+        Point displaySize = new Point();
+        display.getSize(displaySize);
+        int numTiles = (displaySize.x * displaySize.y) / (256 * 256);
+        if (numTiles >= 40
+                && !CommandLine.getInstance().hasSwitch(CommandLine.DEFAULT_TILE_WIDTH)
+                && !CommandLine.getInstance().hasSwitch(CommandLine.DEFAULT_TILE_HEIGHT)) {
+            CommandLine.getInstance().appendSwitchWithValue(
+                    CommandLine.DEFAULT_TILE_WIDTH, "512");
+            CommandLine.getInstance().appendSwitchWithValue(
+                    CommandLine.DEFAULT_TILE_HEIGHT, "512");
         }
 
         int maxRenderers = normalizeMaxRendererProcesses(appContext, maxRendererProcesses);

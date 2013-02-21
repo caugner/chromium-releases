@@ -27,6 +27,8 @@ namespace content {
 
 namespace {
 
+const int kRenderViewId = 1;
+
 class AudioUtil : public AudioUtilInterface {
  public:
   AudioUtil() {}
@@ -265,7 +267,8 @@ TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
   EXPECT_CALL(media_observer(),
       OnDeleteAudioStream(_, 1)).Times(AnyNumber());
 
-  scoped_refptr<WebRtcAudioRenderer> renderer = new WebRtcAudioRenderer();
+  scoped_refptr<WebRtcAudioRenderer> renderer =
+      new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
   webrtc_audio_device->SetSessionId(1);
@@ -297,8 +300,8 @@ TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
   EXPECT_TRUE(event.TimedWait(TestTimeouts::action_timeout()));
   WaitForIOThreadCompletion();
 
-  EXPECT_TRUE(webrtc_audio_device->playing());
-  EXPECT_FALSE(webrtc_audio_device->recording());
+  EXPECT_TRUE(webrtc_audio_device->Playing());
+  EXPECT_FALSE(webrtc_audio_device->Recording());
   EXPECT_EQ(ch, media_process->channel_id());
   EXPECT_EQ(webrtc::kPlaybackPerChannel, media_process->type());
   EXPECT_EQ(80, media_process->packet_size());
@@ -373,8 +376,8 @@ TEST_F(WebRTCAudioDeviceTest, StartRecording) {
   EXPECT_TRUE(event.TimedWait(TestTimeouts::action_timeout()));
   WaitForIOThreadCompletion();
 
-  EXPECT_FALSE(webrtc_audio_device->playing());
-  EXPECT_TRUE(webrtc_audio_device->recording());
+  EXPECT_FALSE(webrtc_audio_device->Playing());
+  EXPECT_TRUE(webrtc_audio_device->Recording());
   EXPECT_EQ(ch, media_process->channel_id());
   EXPECT_EQ(webrtc::kRecordingPerChannel, media_process->type());
   EXPECT_EQ(80, media_process->packet_size());
@@ -414,8 +417,8 @@ TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
   EXPECT_CALL(media_observer(),
       OnDeleteAudioStream(_, 1)).Times(AnyNumber());
 
-  scoped_refptr<WebRtcAudioRenderer> renderer = new WebRtcAudioRenderer();
-
+  scoped_refptr<WebRtcAudioRenderer> renderer =
+      new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
   webrtc_audio_device->SetSessionId(1);
@@ -486,8 +489,8 @@ TEST_F(WebRTCAudioDeviceTest, FullDuplexAudioWithAGC) {
   EXPECT_CALL(media_observer(),
       OnDeleteAudioStream(_, 1)).Times(AnyNumber());
 
-  scoped_refptr<WebRtcAudioRenderer> renderer = new WebRtcAudioRenderer();
-
+  scoped_refptr<WebRtcAudioRenderer> renderer =
+      new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
   webrtc_audio_device->SetSessionId(1);

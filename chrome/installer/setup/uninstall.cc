@@ -70,6 +70,41 @@ void DeleteInstallTempDir(const FilePath& target_path) {
   }
 }
 
+// Iterates over the list of distribution types in |dist_types|, and
+// adds to |update_list| the work item to update the corresponding "ap"
+// registry value specified in |channel_info|.
+void AddChannelValueUpdateWorkItems(
+    const installer::InstallationState& original_state,
+    const installer::InstallerState& installer_state,
+    const installer::ChannelInfo& channel_info,
+    const std::vector<BrowserDistribution::Type>& dist_types,
+    WorkItemList* update_list) {
+  const bool system_level = installer_state.system_install();
+  const HKEY reg_root = installer_state.root_key();
+  for (size_t i = 0; i < dist_types.size(); ++i) {
+    BrowserDistribution::Type dist_type = dist_types[i];
+    const installer::ProductState* product_state =
+        original_state.GetProductState(system_level, dist_type);
+    // Only modify other products if they're installed and multi.
+    if (product_state != NULL &&
+        product_state->is_multi_install() &&
+        !product_state->channel().Equals(channel_info)) {
+      BrowserDistribution* other_dist =
+          BrowserDistribution::GetSpecificDistribution(dist_type);
+      update_list->AddSetRegValueWorkItem(reg_root, other_dist->GetStateKey(),
+          google_update::kRegApField, channel_info.value(), true);
+    } else {
+      LOG_IF(ERROR,
+             product_state != NULL && product_state->is_multi_install())
+          << "Channel value for "
+          << BrowserDistribution::GetSpecificDistribution(
+                 dist_type)->GetAppShortCutName()
+          << " is somehow already set to the desired new value of "
+          << channel_info.value();
+    }
+  }
+}
+
 // Makes appropriate changes to the Google Update "ap" value in the registry.
 // Specifically, removes the flags associated with this product ("-chrome" or
 // "-chromeframe[-readymode]") from the "ap" values for all other
@@ -81,7 +116,6 @@ void ProcessGoogleUpdateItems(
   DCHECK(installer_state.is_multi_install());
   const bool system_level = installer_state.system_install();
   BrowserDistribution* distribution = product.distribution();
-  const HKEY reg_root = installer_state.root_key();
   const installer::ProductState* product_state =
       original_state.GetProductState(system_level, distribution->GetType());
   DCHECK(product_state != NULL);
@@ -95,34 +129,16 @@ void ProcessGoogleUpdateItems(
   if (modified) {
     scoped_ptr<WorkItemList>
         update_list(WorkItem::CreateNoRollbackWorkItemList());
-
+    std::vector<BrowserDistribution::Type> dist_types;
     for (size_t i = 0; i < BrowserDistribution::NUM_TYPES; ++i) {
       BrowserDistribution::Type other_dist_type =
           static_cast<BrowserDistribution::Type>(i);
-      if (distribution->GetType() == other_dist_type)
-        continue;
-
-      product_state =
-          original_state.GetProductState(system_level, other_dist_type);
-      // Only modify other products if they're installed and multi.
-      if (product_state != NULL &&
-          product_state->is_multi_install() &&
-          !product_state->channel().Equals(channel_info)) {
-        BrowserDistribution* other_dist =
-            BrowserDistribution::GetSpecificDistribution(other_dist_type);
-        update_list->AddSetRegValueWorkItem(reg_root, other_dist->GetStateKey(),
-            google_update::kRegApField, channel_info.value(), true);
-      } else {
-        LOG_IF(ERROR,
-               product_state != NULL && product_state->is_multi_install())
-            << "Channel value for "
-            << BrowserDistribution::GetSpecificDistribution(
-                   other_dist_type)->GetAppShortCutName()
-            << " is somehow already set to the desired new value of "
-            << channel_info.value();
-      }
+      if (distribution->GetType() != other_dist_type)
+        dist_types.push_back(other_dist_type);
     }
-
+    AddChannelValueUpdateWorkItems(original_state, installer_state,
+                                   channel_info, dist_types,
+                                   update_list.get());
     bool success = update_list->Do();
     LOG_IF(ERROR, !success) << "Failed updating channel values.";
   }
@@ -150,9 +166,9 @@ void ProcessQuickEnableWorkItems(
   AddQuickEnableChromeFrameWorkItems(installer_state, machine_state, FilePath(),
                                      Version(), work_item_list.get());
 
-  AddQuickEnableApplicationHostWorkItems(installer_state, machine_state,
-                                         FilePath(), Version(),
-                                         work_item_list.get());
+  AddQuickEnableApplicationLauncherWorkItems(installer_state, machine_state,
+                                             FilePath(), Version(),
+                                             work_item_list.get());
   if (!work_item_list->Do())
     LOG(ERROR) << "Failed to update quick-enable-cf command.";
 }
@@ -181,42 +197,96 @@ void ClearRlzProductState() {
   }
 }
 
+// Decides whether setup.exe and the installer archive should be removed based
+// on the original and installer states:
+// * non-multi product being uninstalled: remove both
+// * any multi product left besides App Host: keep both
+// * only App Host left: keep setup.exe
+void CheckShouldRemoveSetupAndArchive(
+    const installer::InstallationState& original_state,
+    const installer::InstallerState& installer_state,
+    bool* remove_setup,
+    bool* remove_archive) {
+  *remove_setup = true;
+  *remove_archive = true;
+
+  // If any multi-install product is left (other than App Host) we must leave
+  // the installer and archive. For the App Host, we only leave the installer.
+  if (!installer_state.is_multi_install()) {
+    VLOG(1) << "Removing all installer files for a non-multi installation.";
+  } else {
+    // Loop through all known products...
+    for (size_t i = 0; i < BrowserDistribution::NUM_TYPES; ++i) {
+      BrowserDistribution::Type dist_type =
+          static_cast<BrowserDistribution::Type>(i);
+      const installer::ProductState* product_state =
+          original_state.GetProductState(
+              installer_state.system_install(), dist_type);
+      // If the product is installed, in multi mode, and is not part of the
+      // active uninstallation...
+      if (product_state && product_state->is_multi_install() &&
+          !installer_state.FindProduct(dist_type)) {
+        // setup.exe will not be removed as there is a remaining multi-install
+        // product.
+        *remove_setup = false;
+        // As a special case, we can still remove the actual archive if the
+        // only remaining product is the App Host.
+        if (dist_type != BrowserDistribution::CHROME_APP_HOST) {
+          VLOG(1) << "Keeping all installer files due to a remaining "
+                  << "multi-install product.";
+          *remove_archive = false;
+          return;
+        }
+        VLOG(1) << "Keeping setup.exe due to a remaining "
+                << "app-host installation.";
+      }
+    }
+    VLOG(1) << "Removing the installer archive.";
+    if (remove_setup)
+      VLOG(1) << "Removing setup.exe.";
+  }
+}
+
+// Removes all files from the installer directory, leaving setup.exe iff
+// |remove_setup| is false.
+// Returns false in case of an error.
+bool RemoveInstallerFiles(const FilePath& installer_directory,
+                          bool remove_setup) {
+  using file_util::FileEnumerator;
+  FileEnumerator file_enumerator(
+      installer_directory,
+      false,
+      FileEnumerator::FILES | FileEnumerator::DIRECTORIES);
+  bool success = true;
+
+  FilePath setup_exe_base_name(installer::kSetupExe);
+
+  while (true) {
+    FilePath to_delete(file_enumerator.Next());
+    if (to_delete.empty())
+      break;
+    if (!remove_setup && to_delete.BaseName() == setup_exe_base_name)
+      continue;
+
+    VLOG(1) << "Deleting installer path " << to_delete.value();
+    if (!file_util::Delete(to_delete, true)) {
+      LOG(ERROR) << "Failed to delete path: " << to_delete.value();
+      success = false;
+    }
+  }
+
+  return success;
+}
+
 }  // namespace
 
 namespace installer {
 
-// This functions checks for any Chrome instances that are
-// running and first asks them to close politely by sending a Windows message.
-// If there is an error while sending message or if there are still Chrome
-// procesess active after the message has been sent, this function will try
-// to kill them.
+// Kills all Chrome processes, immediately.
 void CloseAllChromeProcesses() {
-  for (int j = 0; j < 4; ++j) {
-    string16 wnd_class(L"Chrome_WidgetWin_");
-    wnd_class.append(base::IntToString16(j));
-    HWND window = FindWindowEx(NULL, NULL, wnd_class.c_str(), NULL);
-    while (window) {
-      HWND tmpWnd = window;
-      window = FindWindowEx(NULL, window, wnd_class.c_str(), NULL);
-      if (!SendMessageTimeout(tmpWnd, WM_CLOSE, 0, 0, SMTO_BLOCK, 3000, NULL) &&
-          (GetLastError() == ERROR_TIMEOUT)) {
-        base::CleanupProcesses(installer::kChromeExe, base::TimeDelta(),
-                               content::RESULT_CODE_HUNG, NULL);
-        base::CleanupProcesses(installer::kNaClExe, base::TimeDelta(),
-                               content::RESULT_CODE_HUNG, NULL);
-        return;
-      }
-    }
-  }
-
-  // If asking politely didn't work, wait for 15 seconds and then kill all
-  // chrome.exe. This check is just in case Chrome is ignoring WM_CLOSE
-  // messages.
-  base::CleanupProcesses(installer::kChromeExe,
-                         base::TimeDelta::FromSeconds(15),
+  base::CleanupProcesses(installer::kChromeExe, base::TimeDelta(),
                          content::RESULT_CODE_HUNG, NULL);
-  base::CleanupProcesses(installer::kNaClExe,
-                         base::TimeDelta::FromSeconds(15),
+  base::CleanupProcesses(installer::kNaClExe, base::TimeDelta(),
                          content::RESULT_CODE_HUNG, NULL);
 }
 
@@ -256,22 +326,12 @@ void CloseChromeFrameHelperProcess() {
   }
 }
 
-// This method deletes Chrome shortcut folder from Windows Start menu. It
-// checks system_uninstall to see if the shortcut is in all users start menu
-// or current user start menu.
-// We try to remove the standard desktop shortcut but if that fails we try
-// to remove the alternate desktop shortcut. Only one of them should be
-// present in a given install but at this point we don't know which one.
-// We remove all start screen secondary tiles by removing the folder Windows
-// uses to store this installation's tiles.
-void DeleteChromeShortcuts(const InstallerState& installer_state,
-                           const Product& product,
-                           const string16& chrome_exe) {
-  if (!product.is_chrome()) {
-    VLOG(1) << __FUNCTION__ " called for non-CHROME distribution";
-    return;
-  }
-
+// Deletes shortcuts at |install_level| from Start menu, Desktop,
+// Quick Launch, taskbar, and secondary tiles on the Start Screen (Win8+).
+// Only shortcuts pointing to |target| will be removed.
+void DeleteShortcuts(const InstallerState& installer_state,
+                     const Product& product,
+                     const string16& target_exe) {
   BrowserDistribution* dist = product.distribution();
 
   // The per-user shortcut for this user, if present on a system-level install,
@@ -280,35 +340,40 @@ void DeleteChromeShortcuts(const InstallerState& installer_state,
       ShellUtil::SYSTEM_LEVEL : ShellUtil::CURRENT_USER;
 
   VLOG(1) << "Deleting Desktop shortcut.";
-  if (!ShellUtil::RemoveChromeShortcut(
-          ShellUtil::SHORTCUT_DESKTOP, dist, chrome_exe, install_level, NULL)) {
+  if (!ShellUtil::RemoveShortcut(ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist,
+                                 target_exe, install_level, NULL)) {
     LOG(WARNING) << "Failed to delete Desktop shortcut.";
   }
   // Also try to delete the alternate desktop shortcut. It is not sufficient
   // to do so upon failure of the above call as ERROR_FILE_NOT_FOUND on
   // delete is considered success.
-  if (!ShellUtil::RemoveChromeShortcut(
-          ShellUtil::SHORTCUT_DESKTOP, dist, chrome_exe, install_level,
+  if (!ShellUtil::RemoveShortcut(
+          ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist, target_exe, install_level,
           &dist->GetAlternateApplicationName())) {
     LOG(WARNING) << "Failed to delete alternate Desktop shortcut.";
   }
 
   VLOG(1) << "Deleting Quick Launch shortcut.";
-  if (!ShellUtil::RemoveChromeShortcut(
-          ShellUtil::SHORTCUT_QUICK_LAUNCH, dist, chrome_exe, install_level,
-          NULL)) {
+  if (!ShellUtil::RemoveShortcut(ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH,
+                                 dist, target_exe, install_level, NULL)) {
     LOG(WARNING) << "Failed to delete Quick Launch shortcut.";
   }
 
   VLOG(1) << "Deleting Start Menu shortcuts.";
-  if (!ShellUtil::RemoveChromeShortcut(
-          ShellUtil::SHORTCUT_START_MENU, dist, chrome_exe, install_level,
-          NULL)) {
+  if (!ShellUtil::RemoveShortcut(ShellUtil::SHORTCUT_LOCATION_START_MENU, dist,
+                                 target_exe, install_level, NULL)) {
     LOG(WARNING) << "Failed to delete Start Menu shortcuts.";
   }
 
-  ShellUtil::RemoveChromeStartScreenShortcuts(product.distribution(),
-                                              chrome_exe);
+  // Although the shortcut removal calls above will unpin their shortcut if they
+  // result in a deletion (i.e. shortcut existed and pointed to |target_exe|),
+  // it is possible for shortcuts to remain pinned while their parent shortcut
+  // has been deleted or changed to point to another |target_exe|. Make sure all
+  // pinned-to-taskbar shortcuts that point to |target_exe| are unpinned.
+  ShellUtil::RemoveTaskbarShortcuts(target_exe);
+
+  ShellUtil::RemoveStartScreenShortcuts(product.distribution(),
+                                        target_exe);
 }
 
 bool ScheduleParentAndGrandparentForDeletion(const FilePath& path) {
@@ -414,16 +479,24 @@ DeleteResult DeleteLocalState(const std::vector<FilePath>& local_state_folders,
   return result;
 }
 
+// Moves setup to a temporary file, outside of the install folder. Also attempts
+// to change the current directory to the TMP directory. On Windows, each
+// process has a handle to its CWD. If setup.exe's CWD happens to be within the
+// install directory, deletion will fail as a result of the open handle.
 bool MoveSetupOutOfInstallFolder(const InstallerState& installer_state,
-                                 const FilePath& setup_path,
-                                 const Version& installed_version) {
+                                 const FilePath& setup_exe) {
   bool ret = false;
-  FilePath setup_exe(installer_state.GetInstallerDirectory(installed_version)
-      .Append(setup_path.BaseName()));
+  FilePath tmp_dir;
   FilePath temp_file;
-  if (!file_util::CreateTemporaryFile(&temp_file)) {
+  if (!PathService::Get(base::DIR_TEMP, &tmp_dir)) {
+    NOTREACHED();
+  } else if (!file_util::CreateTemporaryFileInDir(tmp_dir, &temp_file)) {
     LOG(ERROR) << "Failed to create temporary file for setup.exe.";
   } else {
+    VLOG(1) << "Changing current directory to: " << tmp_dir.value();
+    if (!file_util::SetCurrentDirectory(tmp_dir))
+      PLOG(ERROR) << "Failed to change the current directory.";
+
     VLOG(1) << "Attempting to move setup to: " << temp_file.value();
     ret = file_util::Move(setup_exe, temp_file);
     PLOG_IF(ERROR, !ret) << "Failed to move setup to " << temp_file.value();
@@ -476,15 +549,13 @@ DeleteResult DeleteAppHostFilesAndFolders(const InstallerState& installer_state,
   if (!file_util::Delete(app_host_exe, false)) {
     result = DELETE_FAILED;
     LOG(ERROR) << "Failed to delete path: " << app_host_exe.value();
-  } else {
-    result = DeleteApplicationProductAndVendorDirectories(target_path);
   }
 
   return result;
 }
 
 DeleteResult DeleteChromeFilesAndFolders(const InstallerState& installer_state,
-                                         const Version& installed_version) {
+                                         const FilePath& setup_exe) {
   const FilePath& target_path = installer_state.target_path();
   if (target_path.empty()) {
     LOG(ERROR) << "DeleteChromeFilesAndFolders: no installation destination "
@@ -496,15 +567,30 @@ DeleteResult DeleteChromeFilesAndFolders(const InstallerState& installer_state,
 
   DeleteResult result = DELETE_SUCCEEDED;
 
+  FilePath installer_directory;
+  if (target_path.IsParent(setup_exe))
+    installer_directory = setup_exe.DirName();
+
+  // Enumerate all the files in target_path recursively (breadth-first).
+  // We delete a file or folder unless it is a parent/child of the installer
+  // directory. For parents of the installer directory, we will later recurse
+  // and delete all the children (that are not also parents/children of the
+  // installer directory).
   using file_util::FileEnumerator;
-  FileEnumerator file_enumerator(target_path, false,
-      FileEnumerator::FILES | FileEnumerator::DIRECTORIES);
+  FileEnumerator file_enumerator(
+      target_path, true, FileEnumerator::FILES | FileEnumerator::DIRECTORIES);
   while (true) {
     FilePath to_delete(file_enumerator.Next());
     if (to_delete.empty())
       break;
     if (to_delete.BaseName().value() == installer::kChromeAppHostExe)
       continue;
+    if (!installer_directory.empty() &&
+        (to_delete == installer_directory ||
+         installer_directory.IsParent(to_delete) ||
+         to_delete.IsParent(installer_directory))) {
+      continue;
+    }
 
     VLOG(1) << "Deleting install path " << to_delete.value();
     if (!file_util::Delete(to_delete, true)) {
@@ -534,17 +620,6 @@ DeleteResult DeleteChromeFilesAndFolders(const InstallerState& installer_state,
     }
   }
 
-  if (result == DELETE_REQUIRES_REBOOT) {
-    // Delete the Application directory at reboot if empty.
-    ScheduleFileSystemEntityForDeletion(target_path.value().c_str());
-
-    // If we need a reboot to continue, schedule the parent directories for
-    // deletion unconditionally. If they are not empty, the session manager
-    // will not delete them on reboot.
-    ScheduleParentAndGrandparentForDeletion(target_path);
-  } else {
-    result = DeleteApplicationProductAndVendorDirectories(target_path);
-  }
   return result;
 }
 
@@ -1053,10 +1128,10 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
     }
   }
 
-  // Chrome is not in use so lets uninstall Chrome by deleting various files
-  // and registry entries. Here we will just make best effort and keep going
-  // in case of errors.
   if (is_chrome) {
+    // Chrome is not in use so lets uninstall Chrome by deleting various files
+    // and registry entries. Here we will just make best effort and keep going
+    // in case of errors.
     ClearRlzProductState();
     // Delete the key that delegate_execute might make.
     if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
@@ -1067,8 +1142,15 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
     auto_launch_util::DisableAllAutoStartFeatures(
         ASCIIToUTF16(chrome::kInitialProfile));
 
-    // First delete shortcuts from Start->Programs, Desktop & Quick Launch.
-    DeleteChromeShortcuts(installer_state, product, chrome_exe);
+    DeleteShortcuts(installer_state, product, chrome_exe);
+
+  } else if (product.is_chrome_app_host()) {
+    // TODO(huangs): Remove this check once we have system-level App Host.
+    DCHECK(!installer_state.system_install());
+    const string16 app_host_exe(
+        installer_state.target_path().Append(installer::kChromeAppHostExe)
+            .value());
+    DeleteShortcuts(installer_state, product, app_host_exe);
   }
 
   // Delete the registry keys (Uninstall key and Version key).
@@ -1232,30 +1314,23 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
   GetLocalStateFolders(product, &local_state_folders);
   FilePath backup_state_file(BackupLocalStateFile(local_state_folders));
 
-  DeleteResult delete_result = DELETE_SUCCEEDED;
-
   if (product.is_chrome_app_host()) {
     DeleteAppHostFilesAndFolders(installer_state, product_state->version());
   } else if (!installer_state.is_multi_install() ||
              product.is_chrome_binaries()) {
-
-    // In order to be able to remove the folder in which we're running, we
-    // need to move setup.exe out of the install folder.
-    // TODO(tommi): What if the temp folder is on a different volume?
-    MoveSetupOutOfInstallFolder(installer_state, setup_path,
-                                product_state->version());
-    delete_result = DeleteChromeFilesAndFolders(installer_state,
-                                                product_state->version());
+    FilePath setup_exe(cmd_line.GetProgram());
+    file_util::AbsolutePath(&setup_exe);
+    DeleteResult delete_result = DeleteChromeFilesAndFolders(
+        installer_state, setup_exe);
+    if (delete_result == DELETE_FAILED) {
+      ret = installer::UNINSTALL_FAILED;
+    } else if (delete_result == DELETE_REQUIRES_REBOOT) {
+      ret = installer::UNINSTALL_REQUIRES_REBOOT;
+    }
   }
 
   if (delete_profile)
     DeleteLocalState(local_state_folders, product.is_chrome_frame());
-
-  if (delete_result == DELETE_FAILED) {
-    ret = installer::UNINSTALL_FAILED;
-  } else if (delete_result == DELETE_REQUIRES_REBOOT) {
-    ret = installer::UNINSTALL_REQUIRES_REBOOT;
-  }
 
   if (!force_uninstall) {
     VLOG(1) << "Uninstallation complete. Launching post-uninstall operations.";
@@ -1268,7 +1343,92 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
   if (!backup_state_file.empty())
     file_util::Delete(backup_state_file, false);
 
+  // If user-level Chrome is being uninstalled and system-level Chrome is
+  // present, launch the system-level Active Setup command to do post-install
+  // tasks for this user (i.e., create shortcuts).
+  if (product.is_chrome() && !installer_state.system_install() &&
+      original_state.GetProductState(true, browser_dist->GetType())) {
+    InstallUtil::TriggerActiveSetupCommand();
+  }
+
   return ret;
+}
+
+void CleanUpInstallationDirectoryAfterUninstall(
+    const InstallationState& original_state,
+    const InstallerState& installer_state,
+    const CommandLine& cmd_line,
+    installer::InstallStatus* uninstall_status) {
+  if (*uninstall_status != installer::UNINSTALL_SUCCESSFUL &&
+      *uninstall_status != installer::UNINSTALL_REQUIRES_REBOOT) {
+    return;
+  }
+  const FilePath target_path(installer_state.target_path());
+  if (target_path.empty()) {
+    LOG(ERROR) << "No installation destination path.";
+    *uninstall_status = installer::UNINSTALL_FAILED;
+    return;
+  }
+  FilePath setup_exe(cmd_line.GetProgram());
+  file_util::AbsolutePath(&setup_exe);
+  if (!target_path.IsParent(setup_exe)) {
+    LOG(INFO) << "setup.exe is not in target path. Skipping installer cleanup.";
+    return;
+  }
+  FilePath install_directory(setup_exe.DirName());
+
+  bool remove_setup = true;
+  bool remove_archive = true;
+  CheckShouldRemoveSetupAndArchive(original_state, installer_state,
+                                   &remove_setup, &remove_archive);
+  if (!remove_archive)
+    return;
+
+  if (remove_setup) {
+    // In order to be able to remove the folder in which we're running, we
+    // need to move setup.exe out of the install folder.
+    // TODO(tommi): What if the temp folder is on a different volume?
+    MoveSetupOutOfInstallFolder(installer_state, setup_exe);
+  }
+
+  // Remove files from "...\<product>\Application\<version>\Installer"
+  if (!RemoveInstallerFiles(install_directory, remove_setup)) {
+    *uninstall_status = installer::UNINSTALL_FAILED;
+    return;
+  }
+
+  if (!remove_setup)
+    return;
+
+  // Try to remove the empty directory hierarchy.
+
+  // Delete "...\<product>\Application\<version>\Installer"
+  if (DeleteEmptyDir(install_directory) != DELETE_SUCCEEDED) {
+    *uninstall_status = installer::UNINSTALL_FAILED;
+    return;
+  }
+
+  // Delete "...\<product>\Application\<version>"
+  DeleteResult delete_result = DeleteEmptyDir(install_directory.DirName());
+  if (delete_result == DELETE_FAILED ||
+      (delete_result == DELETE_NOT_EMPTY &&
+       *uninstall_status != installer::UNINSTALL_REQUIRES_REBOOT)) {
+    *uninstall_status = installer::UNINSTALL_FAILED;
+    return;
+  }
+
+  if (*uninstall_status == installer::UNINSTALL_REQUIRES_REBOOT) {
+    // Delete the Application directory at reboot if empty.
+    ScheduleFileSystemEntityForDeletion(target_path.value().c_str());
+
+    // If we need a reboot to continue, schedule the parent directories for
+    // deletion unconditionally. If they are not empty, the session manager
+    // will not delete them on reboot.
+    ScheduleParentAndGrandparentForDeletion(target_path);
+  } else if (DeleteApplicationProductAndVendorDirectories(target_path) ==
+             installer::DELETE_FAILED) {
+    *uninstall_status = installer::UNINSTALL_FAILED;
+  }
 }
 
 }  // namespace installer

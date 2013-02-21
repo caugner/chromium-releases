@@ -11,6 +11,7 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/number_formatting.h"
 #include "base/json/json_reader.h"
@@ -35,10 +36,10 @@
 #include "chrome/browser/printing/printer_manager_dialog.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
 #include "content/public/browser/browser_context.h"
@@ -62,11 +63,6 @@
 // TODO(kinaba): provide more non-intrusive way for handling local/remote
 // distinction and remove these ugly #ifdef's. http://crbug.com/140425
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
-#endif
-
-#if !defined(OS_MACOSX)
-#include "base/command_line.h"
-#include "chrome/common/chrome_switches.h"
 #endif
 
 using content::BrowserThread;
@@ -324,10 +320,6 @@ void PrintPreviewHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-TabContents* PrintPreviewHandler::preview_tab_contents() const {
-  return TabContents::FromWebContents(preview_web_contents());
-}
-
 WebContents* PrintPreviewHandler::preview_web_contents() const {
   return web_ui()->GetWebContents();
 }
@@ -365,7 +357,7 @@ void PrintPreviewHandler::HandleGetPreview(const ListValue* args) {
   // Increment request count.
   ++regenerate_preview_request_count_;
 
-  TabContents* initiator_tab = GetInitiatorTab();
+  WebContents* initiator_tab = GetInitiatorTab();
   if (!initiator_tab) {
     ReportUserActionHistogram(INITIATOR_TAB_CLOSED);
     print_preview_ui->OnClosePrintPreviewTab();
@@ -381,10 +373,9 @@ void PrintPreviewHandler::HandleGetPreview(const ListValue* args) {
   }
   if (display_header_footer) {
     settings->SetString(printing::kSettingHeaderFooterTitle,
-                        initiator_tab->web_contents()->GetTitle());
+                        initiator_tab->GetTitle());
     std::string url;
-    NavigationEntry* entry =
-        initiator_tab->web_contents()->GetController().GetActiveEntry();
+    NavigationEntry* entry = initiator_tab->GetController().GetActiveEntry();
     if (entry)
       url = entry->GetVirtualURL().spec();
     settings->SetString(printing::kSettingHeaderFooterURL, url);
@@ -412,7 +403,7 @@ void PrintPreviewHandler::HandleGetPreview(const ListValue* args) {
   }
 
   VLOG(1) << "Print preview request start";
-  RenderViewHost* rvh = initiator_tab->web_contents()->GetRenderViewHost();
+  RenderViewHost* rvh = initiator_tab->GetRenderViewHost();
   rvh->Send(new PrintMsg_PrintPreview(rvh->GetRoutingID(), *settings));
 }
 
@@ -424,9 +415,9 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
   UMA_HISTOGRAM_COUNTS("PrintPreview.RegeneratePreviewRequest.BeforePrint",
                        regenerate_preview_request_count_);
 
-  TabContents* initiator_tab = GetInitiatorTab();
+  WebContents* initiator_tab = GetInitiatorTab();
   if (initiator_tab) {
-    RenderViewHost* rvh = initiator_tab->web_contents()->GetRenderViewHost();
+    RenderViewHost* rvh = initiator_tab->GetRenderViewHost();
     rvh->Send(new PrintMsg_ResetScriptedPrintCount(rvh->GetRoutingID()));
   }
 
@@ -486,8 +477,7 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
     // call.
     if (initiator_tab) {
       printing::PrintViewManager* print_view_manager =
-          printing::PrintViewManager::FromWebContents(
-              initiator_tab->web_contents());
+          printing::PrintViewManager::FromWebContents(initiator_tab);
       print_view_manager->PrintPreviewDone();
     }
   }
@@ -535,11 +525,11 @@ void PrintPreviewHandler::HandleHidePreview(const ListValue* /*args*/) {
 
 void PrintPreviewHandler::HandleCancelPendingPrintRequest(
     const ListValue* /*args*/) {
-  TabContents* initiator_tab = GetInitiatorTab();
+  WebContents* initiator_tab = GetInitiatorTab();
   if (initiator_tab)
     ClearInitiatorTabDetails();
   gfx::NativeWindow parent = initiator_tab ?
-      initiator_tab->web_contents()->GetView()->GetTopLevelNativeWindow() :
+      initiator_tab->GetView()->GetTopLevelNativeWindow() :
       NULL;
   chrome::ShowPrintErrorDialog(parent);
 }
@@ -640,13 +630,12 @@ void PrintPreviewHandler::HandleShowSystemDialog(const ListValue* /*args*/) {
   ReportStats();
   ReportUserActionHistogram(FALLBACK_TO_ADVANCED_SETTINGS_DIALOG);
 
-  TabContents* initiator_tab = GetInitiatorTab();
+  WebContents* initiator_tab = GetInitiatorTab();
   if (!initiator_tab)
     return;
 
   printing::PrintViewManager* print_view_manager =
-      printing::PrintViewManager::FromWebContents(
-          initiator_tab->web_contents());
+      printing::PrintViewManager::FromWebContents(initiator_tab);
   print_view_manager->set_observer(this);
   print_view_manager->PrintForSystemDialogNow();
 
@@ -757,27 +746,19 @@ void PrintPreviewHandler::SendInitialSettings(
     initial_settings.SetString(kAppState,
                                *sticky_settings->printer_app_state());
 
-#if defined(OS_MACOSX)
-  bool kiosk_mode = false;  // No kiosk mode on Mac yet.
-#else
   CommandLine* cmdline = CommandLine::ForCurrentProcess();
-  bool kiosk_mode = (cmdline->HasSwitch(switches::kKioskMode) &&
-                     cmdline->HasSwitch(switches::kKioskModePrinting));
-#endif
-  initial_settings.SetBoolean(kPrintAutomaticallyInKioskMode, kiosk_mode);
+  initial_settings.SetBoolean(kPrintAutomaticallyInKioskMode,
+                              cmdline->HasSwitch(switches::kKioskModePrinting));
 
-  if (print_preview_ui->source_is_modifiable()) {
+  if (print_preview_ui->source_is_modifiable())
     GetNumberFormatAndMeasurementSystem(&initial_settings);
-  }
   web_ui()->CallJavascriptFunction("setInitialSettings", initial_settings);
 }
 
 void PrintPreviewHandler::ActivateInitiatorTabAndClosePreviewTab() {
-  TabContents* initiator_tab = GetInitiatorTab();
-  if (initiator_tab) {
-    WebContents* web_contents = initiator_tab->web_contents();
-    web_contents->GetDelegate()->ActivateContents(web_contents);
-  }
+  WebContents* initiator_tab = GetInitiatorTab();
+  if (initiator_tab)
+    initiator_tab->GetDelegate()->ActivateContents(initiator_tab);
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
       web_ui()->GetController());
   print_preview_ui->OnClosePrintPreviewTab();
@@ -831,17 +812,15 @@ void PrintPreviewHandler::SendCloudPrintJob() {
     StringValue data_value(base64_data);
 
     web_ui()->CallJavascriptFunction("printToCloud", data_value);
-  } else {
-    NOTREACHED();
   }
 }
 
-TabContents* PrintPreviewHandler::GetInitiatorTab() const {
+WebContents* PrintPreviewHandler::GetInitiatorTab() const {
   printing::PrintPreviewTabController* tab_controller =
       printing::PrintPreviewTabController::GetInstance();
   if (!tab_controller)
     return NULL;
-  return tab_controller->GetInitiatorTab(preview_tab_contents());
+  return tab_controller->GetInitiatorTab(preview_web_contents());
 }
 
 void PrintPreviewHandler::OnPrintDialogShown() {
@@ -852,6 +831,7 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions.resize(1);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("pdf"));
+  file_type_info.support_gdata = true;
 
   // Initializing save_path_ if it is not already initialized.
   printing::StickySettings* sticky_settings = GetStickySettings();
@@ -881,13 +861,12 @@ void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
 }
 
 void PrintPreviewHandler::OnTabDestroyed() {
-  TabContents* initiator_tab = GetInitiatorTab();
+  WebContents* initiator_tab = GetInitiatorTab();
   if (!initiator_tab)
     return;
 
   printing::PrintViewManager* print_view_manager =
-      printing::PrintViewManager::FromWebContents(
-          initiator_tab->web_contents());
+      printing::PrintViewManager::FromWebContents(initiator_tab);
   print_view_manager->set_observer(NULL);
 }
 
@@ -951,7 +930,7 @@ void PrintPreviewHandler::FileSelectionCanceled(void* params) {
 }
 
 void PrintPreviewHandler::ClearInitiatorTabDetails() {
-  TabContents* initiator_tab = GetInitiatorTab();
+  WebContents* initiator_tab = GetInitiatorTab();
   if (!initiator_tab)
     return;
 
@@ -961,5 +940,5 @@ void PrintPreviewHandler::ClearInitiatorTabDetails() {
   printing::PrintPreviewTabController* tab_controller =
       printing::PrintPreviewTabController::GetInstance();
   if (tab_controller)
-    tab_controller->EraseInitiatorTabInfo(preview_tab_contents());
+    tab_controller->EraseInitiatorTabInfo(preview_web_contents());
 }

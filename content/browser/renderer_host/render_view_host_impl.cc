@@ -26,7 +26,6 @@
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/host_zoom_map_impl.h"
-#include "content/browser/power_save_blocker.h"
 #include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -50,6 +49,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/power_save_blocker.h"
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/bindings_policy.h"
@@ -65,6 +65,7 @@
 #include "ui/base/dialogs/selected_file_info.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/snapshot/snapshot.h"
 #include "webkit/fileapi/isolated_context.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/webkit_glue.h"
@@ -247,7 +248,6 @@ bool RenderViewHostImpl::CreateRenderView(
     next_page_id = max_page_id + 1;
 
   ViewMsg_New_Params params;
-  params.parent_window = GetNativeViewId();
   params.renderer_preferences =
       delegate_->GetRendererPrefs(GetProcess()->GetBrowserContext());
   params.web_preferences = delegate_->GetWebkitPrefs();
@@ -919,17 +919,7 @@ bool RenderViewHostImpl::SuddenTerminationAllowed() const {
 // RenderViewHostImpl, IPC message handlers:
 
 bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
-  // Allow BrowserPluginHostMsg_* sync messages to run on the UI thread.
-  // Platform apps will not support windowed plugins so the deadlock cycle
-  // browser -> plugin -> renderer -> browser referred in
-  // BrowserMessageFilter::CheckCanDispatchOnUI() is not supposed to happen. If
-  // we want to support windowed plugins, sync messages in BrowserPlugin might
-  // need to be changed to async messages.
-  // TODO(fsamuel): Disallow BrowserPluginHostMsg_* sync messages to run on UI
-  // thread and make these messages async: http://crbug.com/149063.
-  if (msg.type() != BrowserPluginHostMsg_HandleInputEvent::ID &&
-      msg.type() != BrowserPluginHostMsg_ResizeGuest::ID &&
-      !BrowserMessageFilter::CheckCanDispatchOnUI(msg, this))
+  if (!BrowserMessageFilter::CheckCanDispatchOnUI(msg, this))
     return true;
 
   // Filter out most IPC messages if this renderer is swapped out.
@@ -992,6 +982,8 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidStopLoading, OnMsgDidStopLoading)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeLoadProgress,
                         OnMsgDidChangeLoadProgress)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidDisownOpener,
+                        OnMsgDidDisownOpener)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DocumentAvailableInMainFrame,
                         OnMsgDocumentAvailableInMainFrame)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DocumentOnLoadCompletedInMainFrame,
@@ -1002,6 +994,8 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_OpenURL, OnMsgOpenURL)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidContentsPreferredSizeChange,
                         OnMsgDidContentsPreferredSizeChange)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeScrollOffset,
+                        OnDidChangeScrollOffset)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeScrollbarsForMainFrame,
                         OnMsgDidChangeScrollbarsForMainFrame)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeScrollOffsetPinningForMainFrame,
@@ -1029,6 +1023,7 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_ScriptEvalResponse, OnScriptEvalResponse)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidZoomURL, OnDidZoomURL)
     IPC_MESSAGE_HANDLER(ViewHostMsg_MediaNotification, OnMediaNotification)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowSnapshot, OnGetWindowSnapshot)
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ViewHostMsg_StartContentIntent, OnStartContentIntent)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeBodyBackgroundColor,
@@ -1040,7 +1035,7 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
                         OnShowDesktopNotification)
     IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_Cancel,
                         OnCancelDesktopNotification)
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowPopup, OnMsgShowPopup)
 #endif
     IPC_MESSAGE_HANDLER(ViewHostMsg_RunFileChooser, OnRunFileChooser)
@@ -1091,7 +1086,16 @@ void RenderViewHostImpl::CreateNewWindow(
     int route_id,
     const ViewHostMsg_CreateWindow_Params& params,
     SessionStorageNamespace* session_storage_namespace) {
-  delegate_->CreateNewWindow(route_id, params, session_storage_namespace);
+  ViewHostMsg_CreateWindow_Params validated_params(params);
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+  FilterURL(policy, GetProcess(), false, &validated_params.target_url);
+  FilterURL(policy, GetProcess(), false, &validated_params.opener_url);
+  FilterURL(policy, GetProcess(), true,
+            &validated_params.opener_security_origin);
+
+  delegate_->CreateNewWindow(route_id, validated_params,
+                             session_storage_namespace);
 }
 
 void RenderViewHostImpl::CreateNewWidget(int route_id,
@@ -1149,6 +1153,7 @@ void RenderViewHostImpl::OnMsgRunModal(int opener_id, IPC::Message* reply_msg) {
 
 void RenderViewHostImpl::OnMsgRenderViewReady() {
   render_view_termination_status_ = base::TERMINATION_STATUS_STILL_RUNNING;
+  SendScreenRects();
   WasResized();
   delegate_->RenderViewReady(this);
 }
@@ -1174,19 +1179,17 @@ void RenderViewHostImpl::OnMsgDidStartProvisionalLoadForFrame(
     int64 frame_id,
     int64 parent_frame_id,
     bool is_main_frame,
-    const GURL& opener_url,
     const GURL& url) {
   delegate_->DidStartProvisionalLoadForFrame(
-      this, frame_id, parent_frame_id, is_main_frame, opener_url, url);
+      this, frame_id, parent_frame_id, is_main_frame, url);
 }
 
 void RenderViewHostImpl::OnMsgDidRedirectProvisionalLoad(
     int32 page_id,
-    const GURL& opener_url,
     const GURL& source_url,
     const GURL& target_url) {
   delegate_->DidRedirectProvisionalLoad(
-      this, page_id, opener_url, source_url, target_url);
+      this, page_id, source_url, target_url);
 }
 
 void RenderViewHostImpl::OnMsgDidFailProvisionalLoadWithError(
@@ -1234,6 +1237,25 @@ void RenderViewHostImpl::OnMsgNavigate(const IPC::Message& msg) {
     return;
 
   RenderProcessHost* process = GetProcess();
+
+  // If the --site-per-process flag is passed, then the renderer process is
+  // not allowed to request web pages from other sites than the one it is
+  // dedicated to.
+  // Kill the renderer process if it violates this policy.
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kSitePerProcess) &&
+      static_cast<SiteInstanceImpl*>(GetSiteInstance())->HasSite() &&
+      validated_params.url != GURL(chrome::kAboutBlankURL)) {
+    if (!SiteInstance::IsSameWebSite(GetSiteInstance()->GetBrowserContext(),
+                                     GetSiteInstance()->GetSiteURL(),
+                                     validated_params.url) ||
+        static_cast<SiteInstanceImpl*>(GetSiteInstance())->
+            HasWrongProcessForURL(validated_params.url)) {
+      base::KillProcess(process->GetHandle(), RESULT_CODE_KILLED, true);
+      UMA_HISTOGRAM_COUNTS("ChildProcess.ViolatedSitePerProcess", 1);
+    }
+  }
+
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
   // Without this check, an evil renderer can trick the browser into creating
@@ -1322,6 +1344,10 @@ void RenderViewHostImpl::OnMsgDidChangeLoadProgress(double load_progress) {
   delegate_->DidChangeLoadProgress(load_progress);
 }
 
+void RenderViewHostImpl::OnMsgDidDisownOpener() {
+  delegate_->DidDisownOpener(this);
+}
+
 void RenderViewHostImpl::OnMsgDocumentAvailableInMainFrame() {
   delegate_->DocumentAvailableInMainFrame(this);
 }
@@ -1363,16 +1389,15 @@ void RenderViewHostImpl::OnMsgToggleFullscreen(bool enter_fullscreen) {
   WasResized();
 }
 
-void RenderViewHostImpl::OnMsgOpenURL(const GURL& url,
-                                      const Referrer& referrer,
-                                      WindowOpenDisposition disposition,
-                                      int64 source_frame_id) {
-  GURL validated_url(url);
+void RenderViewHostImpl::OnMsgOpenURL(
+    const ViewHostMsg_OpenURL_Params& params) {
+  GURL validated_url(params.url);
   FilterURL(ChildProcessSecurityPolicyImpl::GetInstance(),
             GetProcess(), false, &validated_url);
 
   delegate_->RequestOpenURL(
-      this, validated_url, referrer, disposition, source_frame_id);
+      this, validated_url, params.referrer, params.disposition, params.frame_id,
+      params.is_cross_site_redirect);
 }
 
 void RenderViewHostImpl::OnMsgDidContentsPreferredSizeChange(
@@ -1382,6 +1407,11 @@ void RenderViewHostImpl::OnMsgDidContentsPreferredSizeChange(
 
 void RenderViewHostImpl::OnRenderAutoResized(const gfx::Size& new_size) {
   delegate_->ResizeDueToAutoResize(new_size);
+}
+
+void RenderViewHostImpl::OnDidChangeScrollOffset() {
+  if (view_)
+    view_->ScrollOffsetChanged();
 }
 
 void RenderViewHostImpl::OnMsgDidChangeScrollbarsForMainFrame(
@@ -1458,7 +1488,8 @@ void RenderViewHostImpl::OnMsgStartDragging(
     const WebDropData& drop_data,
     WebDragOperationsMask drag_operations_mask,
     const SkBitmap& bitmap,
-    const gfx::Point& bitmap_offset_in_dip) {
+    const gfx::Vector2d& bitmap_offset_in_dip,
+    const DragEventSourceInfo& event_info) {
   RenderViewHostDelegateView* view = delegate_->GetDelegateView();
   if (!view)
     return;
@@ -1491,7 +1522,7 @@ void RenderViewHostImpl::OnMsgStartDragging(
   ui::ScaleFactor scale_factor = GetScaleFactorForView(GetView());
   gfx::ImageSkia image(gfx::ImageSkiaRep(bitmap, scale_factor));
   view->StartDragging(filtered_data, drag_operations_mask, image,
-      bitmap_offset_in_dip);
+      bitmap_offset_in_dip, event_info);
 }
 
 void RenderViewHostImpl::OnUpdateDragCursor(WebDragOperation current_op) {
@@ -1531,8 +1562,10 @@ void RenderViewHostImpl::OnAddMessageToConsole(
   int32 resolved_level =
       (enabled_bindings_ & BINDINGS_POLICY_WEB_UI) ? level : 0;
 
-  logging::LogMessage("CONSOLE", line_no, resolved_level).stream() << "\"" <<
-      message << "\", source: " << source_id << " (" << line_no << ")";
+  if (resolved_level >= ::logging::GetMinLogLevel()) {
+    logging::LogMessage("CONSOLE", line_no, resolved_level).stream() << "\"" <<
+        message << "\", source: " << source_id << " (" << line_no << ")";
+  }
 }
 
 void RenderViewHostImpl::AddObserver(RenderViewHostObserver* observer) {
@@ -1674,13 +1707,6 @@ void RenderViewHostImpl::ForwardKeyboardEvent(
 }
 
 #if defined(OS_ANDROID)
-void RenderViewHostImpl::AttachLayer(WebKit::WebLayer* layer) {
-  delegate_->AttachLayer(layer);
-}
-
-void RenderViewHostImpl::RemoveLayer(WebKit::WebLayer* layer) {
-  delegate_->RemoveLayer(layer);
-}
 void RenderViewHostImpl::DidSelectPopupMenuItems(
     const std::vector<int>& selected_indices) {
   Send(new ViewMsg_SelectPopupMenuItems(GetRoutingID(), false,
@@ -1717,6 +1743,11 @@ void RenderViewHostImpl::FilterURL(ChildProcessSecurityPolicyImpl* policy,
                                    GURL* url) {
   if (empty_allowed && url->is_empty())
     return;
+
+  // The browser process should never hear the swappedout:// URL from any
+  // of the renderer's messages.  Check for this in debug builds, but don't
+  // let it crash a release browser.
+  DCHECK(GURL(kSwappedOutURL) != *url);
 
   if (!url->is_valid()) {
     // Have to use about:blank for the denied case, instead of an empty GURL.
@@ -1762,10 +1793,20 @@ webkit_glue::WebPreferences RenderViewHostImpl::GetWebkitPreferences() {
   return delegate_->GetWebkitPrefs();
 }
 
+void RenderViewHostImpl::DisownOpener() {
+  // This should only be called when swapped out.
+  DCHECK(is_swapped_out_);
+
+  Send(new ViewMsg_DisownOpener(GetRoutingID()));
+}
+
 void RenderViewHostImpl::UpdateFrameTree(
     int process_id,
     int route_id,
     const std::string& frame_tree) {
+  // This should only be called when swapped out.
+  DCHECK(is_swapped_out_);
+
   frame_tree_ = frame_tree;
   Send(new ViewMsg_UpdateFrameTree(GetRoutingID(),
                                    process_id,
@@ -1927,19 +1968,19 @@ void RenderViewHostImpl::OnMediaNotification(int64 player_cookie,
                                              bool has_audio,
                                              bool is_playing) {
   if (is_playing) {
-    PowerSaveBlocker* blocker = NULL;
+    scoped_ptr<PowerSaveBlocker> blocker;
     if (has_video) {
-      blocker = new PowerSaveBlocker(
+      blocker = PowerSaveBlocker::Create(
           PowerSaveBlocker::kPowerSaveBlockPreventDisplaySleep,
           "Playing video");
     } else if (has_audio) {
-      blocker = new PowerSaveBlocker(
+      blocker = PowerSaveBlocker::Create(
           PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
           "Playing audio");
     }
 
     if (blocker)
-      power_save_blockers_[player_cookie] = blocker;
+      power_save_blockers_[player_cookie] = blocker.release();
   } else {
     delete power_save_blockers_[player_cookie];
     power_save_blockers_.erase(player_cookie);
@@ -2033,6 +2074,29 @@ void RenderViewHostImpl::SetSwappedOut(bool is_swapped_out) {
 
 void RenderViewHostImpl::ClearPowerSaveBlockers() {
   STLDeleteValues(&power_save_blockers_);
+}
+
+void RenderViewHostImpl::OnGetWindowSnapshot(const int snapshot_id) {
+  std::vector<unsigned char> png;
+
+  // This feature is behind the kEnableGpuBenchmarking command line switch
+  // because it poses security concerns and should only be used for testing.
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kEnableGpuBenchmarking)) {
+    gfx::Rect view_bounds = GetView()->GetViewBounds();
+    gfx::Rect snapshot_bounds(view_bounds.size());
+    gfx::Size snapshot_size = snapshot_bounds.size();
+
+    if (ui::GrabViewSnapshot(GetView()->GetNativeView(),
+                             &png, snapshot_bounds)) {
+      Send(new ViewMsg_WindowSnapshotCompleted(
+          GetRoutingID(), snapshot_id, snapshot_size, png));
+      return;
+    }
+  }
+
+  Send(new ViewMsg_WindowSnapshotCompleted(
+      GetRoutingID(), snapshot_id, gfx::Size(), png));
 }
 
 }  // namespace content

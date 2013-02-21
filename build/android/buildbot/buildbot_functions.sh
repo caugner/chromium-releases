@@ -47,18 +47,6 @@ function bb_baseline_setup {
   shift
   cd $SRC_ROOT
 
-  if [[ $BUILDBOT_CLOBBER ]]; then
-    echo "@@@BUILD_STEP Clobber@@@"
-    # Sdk key expires, delete android folder.
-    # crbug.com/145860
-    rm -rf ~/.android
-    rm -rf "${SRC_ROOT}"/out
-    if [ -e "${SRC_ROOT}"/out ] ; then
-      echo "Clobber appeared to fail?  ${SRC_ROOT}/out still exists."
-      echo "@@@STEP_WARNINGS@@@"
-    fi
-  fi
-
   echo "@@@BUILD_STEP Environment setup@@@"
   bb_parse_args "$@"
 
@@ -68,17 +56,44 @@ function bb_baseline_setup {
   fi
   export GOMA_DIR=/b/build/goma
   . build/android/envsetup.sh
-  adb kill-server
-  adb start-server
-}
 
-function bb_compile_setup {
   local extra_gyp_defines="$(bb_get_json_prop "$FACTORY_PROPERTIES" \
      extra_gyp_defines)"
   export GYP_DEFINES+=" fastbuild=1 $extra_gyp_defines"
-  if echo $extra_gyp_defines | grep -q clang; then
+  if echo $extra_gyp_defines | grep -qE 'clang|asan'; then
     unset CXX_target
   fi
+
+  adb kill-server
+  adb start-server
+
+  local build_path="${SRC_ROOT}/out/${BUILDTYPE}"
+  local landmines_triggered_path="$build_path/.landmines_triggered"
+  python "$SRC_ROOT/build/landmines.py"
+
+  if [[ $BUILDBOT_CLOBBER || -f "$landmines_triggered_path" ]]; then
+    echo "@@@BUILD_STEP Clobber@@@"
+
+    if [[ -z $BUILDBOT_CLOBBER ]]; then
+      echo "Clobbering due to triggered landmines: "
+      cat "$landmines_triggered_path"
+    else
+      # Also remove all the files under out/ on an explicit clobber
+      find "${SRC_ROOT}/out" -maxdepth 1 -type f -exec rm -f {} +
+    fi
+
+    # Sdk key expires, delete android folder.
+    # crbug.com/145860
+    rm -rf ~/.android
+    rm -rf "$build_path"
+    if [[ -e $build_path ]] ; then
+      echo "Clobber appeared to fail?  $build_path still exists."
+      echo "@@@STEP_WARNINGS@@@"
+    fi
+  fi
+}
+
+function bb_compile_setup {
   bb_setup_goma_internal
   # Should be called only after envsetup is done.
   gclient runhooks
@@ -208,13 +223,69 @@ function bb_run_unit_tests {
   build/android/run_tests.py --xvfb --verbose
 }
 
-# Run experimental unittest bundles.
-function bb_run_experimental_unit_tests {
-  build/android/run_tests.py --xvfb --verbose -s \
-    webkit_compositor_bindings_unittests
+# Run WebKit's test suites: webkit_unit_tests and TestWebKitAPI
+function bb_run_webkit_unit_tests {
+  if [[ $BUILDTYPE = Release ]]; then
+    local BUILDFLAG="--release"
+  fi
+  bb_run_step build/android/run_tests.py --xvfb --verbose $BUILDFLAG \
+      -s webkit_unit_tests
+  bb_run_step build/android/run_tests.py --xvfb --verbose $BUILDFLAG \
+      -s TestWebKitAPI
 }
 
-# Run a buildbot step and handle failure.
+# Lint WebKit's TestExpectation files.
+function bb_lint_webkit_expectation_files {
+  echo "@@@BUILD_STEP webkit_lint@@@"
+  bb_run_step python webkit/tools/layout_tests/run_webkit_tests.py \
+    --lint-test-files \
+    --chromium
+}
+
+# Run layout tests on an actual device.
+function bb_run_webkit_layout_tests {
+  echo "@@@BUILD_STEP webkit_tests@@@"
+  local BUILDERNAME="$(bb_get_json_prop "$BUILD_PROPERTIES" buildername)"
+  local BUILDNUMBER="$(bb_get_json_prop "$BUILD_PROPERTIES" buildnumber)"
+  local MASTERNAME="$(bb_get_json_prop "$BUILD_PROPERTIES" mastername)"
+  local RESULTSERVER=\
+"$(bb_get_json_prop "$FACTORY_PROPERTIES" test_results_server)"
+
+  bb_run_step python webkit/tools/layout_tests/run_webkit_tests.py \
+      --no-show-results \
+      --no-new-test-results \
+      --full-results-html \
+      --clobber-old-results \
+      --exit-after-n-failures 5000 \
+      --exit-after-n-crashes-or-timeouts 100 \
+      --debug-rwt-logging \
+      --results-directory "../layout-test-results" \
+      --target "$BUILDTYPE" \
+      --builder-name "$BUILDERNAME" \
+      --build-number "$BUILDNUMBER" \
+      --master-name "$MASTERNAME" \
+      --build-name "$BUILDERNAME" \
+      --platform=chromium-android \
+      --test-results-server "$RESULTSERVER"
+}
+
+# Run experimental unittest bundles.
+function bb_run_experimental_unit_tests {
+  build/android/run_tests.py --xvfb --verbose -s android_webview_unittests
+}
+
+# Run findbugs.
+function bb_run_findbugs {
+  echo "@@@BUILD_STEP findbugs@@@"
+  if [[ $BUILDTYPE = Release ]]; then
+    local BUILDFLAG="--release-build"
+  fi
+  bb_run_step build/android/findbugs_diff.py $BUILDFLAG
+  bb_run_step tools/android/findbugs_plugin/test/run_findbugs_plugin_tests.py \
+    $BUILDFLAG
+}
+
+# Run a buildbot step and handle failure (failure will not halt build).
 function bb_run_step {
   (
   set +e
@@ -225,33 +296,59 @@ function bb_run_step {
   )
 }
 
+# Install a specific APK.
+# Args:
+#   $1: APK to be installed.
+#   $2: APK_PACKAGE for the APK to be installed.
+function bb_install_apk {
+  local APK=${1}
+  local APK_PACKAGE=${2}
+  if [[ $BUILDTYPE = Release ]]; then
+    local BUILDFLAG="--release"
+  fi
+
+  echo "@@@BUILD_STEP Install ${APK}@@@"
+  python build/android/adb_install_apk.py --apk ${APK} \
+      --apk_package ${APK_PACKAGE} ${BUILDFLAG}
+}
+
 # Run instrumentation tests for a specific APK.
 # Args:
 #   $1: APK to be installed.
 #   $2: APK_PACKAGE for the APK to be installed.
 #   $3: TEST_APK to run the tests against.
+#   $4: TEST_DATA in format destination:source
 function bb_run_all_instrumentation_tests_for_apk {
   local APK=${1}
   local APK_PACKAGE=${2}
   local TEST_APK=${3}
+  local TEST_DATA=${4}
 
   # Install application APK.
-  python build/android/adb_install_apk.py --apk ${APK} \
-      --apk_package ${APK_PACKAGE}
+  bb_install_apk ${APK} ${APK_PACKAGE}
 
   # Run instrumentation tests. Using -I to install the test apk.
+  echo "@@@BUILD_STEP Run instrumentation tests ${TEST_APK}@@@"
   bb_run_step python build/android/run_instrumentation_tests.py \
-      -vvv --test-apk ${TEST_APK} -I
+      -vvv --test-apk ${TEST_APK} -I --test_data ${TEST_DATA}
 }
 
 # Run instrumentation tests for all relevant APKs on device.
 function bb_run_instrumentation_tests {
   bb_run_all_instrumentation_tests_for_apk "ContentShell.apk" \
-      "org.chromium.content_shell" "ContentShellTest"
+      "org.chromium.content_shell" "ContentShellTest" \
+      "content:content/test/data/android/device_files"
   bb_run_all_instrumentation_tests_for_apk "ChromiumTestShell.apk" \
-      "org.chromium.chrome.testshell" "ChromiumTestShellTest"
+      "org.chromium.chrome.testshell" "ChromiumTestShellTest" \
+      "chrome:chrome/test/data/android/device_files"
   bb_run_all_instrumentation_tests_for_apk "AndroidWebView.apk" \
-      "org.chromium.android_webview" "AndroidWebViewTest"
+      "org.chromium.android_webview" "AndroidWebViewTest" \
+      "webview:android_webview/test/data/device_files"
+}
+
+# Run instrumentation tests for experimental APKs on device.
+function bb_run_experimental_instrumentation_tests {
+  echo "" # Can't have empty functions in bash.
 }
 
 # Zip and archive a build.
@@ -315,7 +412,7 @@ function bb_check_webview_licenses {
   cd "${SRC_ROOT}"
   python android_webview/tools/webview_licenses.py scan
   if [[ $? -ne 0 ]]; then
-    echo "@@@STEP_FAILURE@@@"
+    echo "@@@STEP_WARNINGS@@@"
   fi
   return 0
   )

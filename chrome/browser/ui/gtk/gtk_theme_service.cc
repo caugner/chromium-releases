@@ -291,7 +291,9 @@ GtkThemeService::~GtkThemeService() {
 
 void GtkThemeService::Init(Profile* profile) {
   registrar_.Init(profile->GetPrefs());
-  registrar_.Add(prefs::kUsesSystemTheme, this);
+  registrar_.Add(prefs::kUsesSystemTheme,
+                 base::Bind(&GtkThemeService::OnUsesSystemThemeChanged,
+                            base::Unretained(this)));
   use_gtk_ = profile->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
   ThemeService::Init(profile);
 }
@@ -334,7 +336,7 @@ bool GtkThemeService::HasCustomImage(int id) const {
   return ThemeService::HasCustomImage(id);
 }
 
-void GtkThemeService::InitThemesFor(NotificationObserver* observer) {
+void GtkThemeService::InitThemesFor(content::NotificationObserver* observer) {
   observer->Observe(chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                     content::Source<ThemeService>(this),
                     content::NotificationService::NoDetails());
@@ -365,18 +367,6 @@ bool GtkThemeService::UsingDefaultTheme() const {
 
 bool GtkThemeService::UsingNativeTheme() const {
   return use_gtk_;
-}
-
-void GtkThemeService::Observe(int type,
-                              const content::NotificationSource& source,
-                              const content::NotificationDetails& details) {
-  if ((type == chrome::NOTIFICATION_PREF_CHANGED) &&
-      (*content::Details<std::string>(details).ptr() ==
-          prefs::kUsesSystemTheme)) {
-    use_gtk_ = profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
-  } else {
-    ThemeService::Observe(type, source, details);
-  }
 }
 
 GtkWidget* GtkThemeService::BuildChromeButton() {
@@ -1026,13 +1016,12 @@ SkBitmap GtkThemeService::GenerateFrameImage(
         color_utils::HSLShift(base, kGtkFrameShift);
     if (gradient_top_color)
       gdk_color_free(gradient_top_color);
-    SkShader* shader = gfx::CreateGradientShader(
+    skia::RefPtr<SkShader> shader = gfx::CreateGradientShader(
         0, gradient_size, lighter, base);
     SkPaint paint;
     paint.setStyle(SkPaint::kFill_Style);
     paint.setAntiAlias(true);
-    paint.setShader(shader);
-    shader->unref();
+    paint.setShader(shader.get());
 
     canvas.DrawRect(gfx::Rect(0, 0, kToolbarImageWidth, gradient_size), paint);
   }
@@ -1156,4 +1145,8 @@ gboolean GtkThemeService::OnSeparatorExpose(GtkWidget* widget,
   cairo_pattern_destroy(pattern);
 
   return TRUE;
+}
+
+void GtkThemeService::OnUsesSystemThemeChanged() {
+  use_gtk_ = profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
 }

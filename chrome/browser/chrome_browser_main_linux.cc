@@ -33,12 +33,7 @@
 namespace {
 
 #if defined(USE_LINUX_BREAKPAD)
-#if defined(OS_CHROMEOS)
-void ChromeOSVersionCallback(chromeos::VersionLoader::Handle,
-                             const std::string& version) {
-  base::SetLinuxDistro(std::string("CrOS ") + version);
-}
-#else
+#if !defined(OS_CHROMEOS)
 void GetLinuxDistroCallback() {
   base::GetLinuxDistro();  // Initialize base::linux_distro if needed.
 }
@@ -81,20 +76,18 @@ bool IsCrashReportingEnabled(const PrefService* local_state) {
 
 ChromeBrowserMainPartsLinux::ChromeBrowserMainPartsLinux(
     const content::MainFunctionParams& parameters)
-    : ChromeBrowserMainPartsPosix(parameters) {
+    : ChromeBrowserMainPartsPosix(parameters),
+      did_pre_profile_init_(false) {
 }
 
 ChromeBrowserMainPartsLinux::~ChromeBrowserMainPartsLinux() {
-  chrome::MediaTransferProtocolManager::Shutdown();
+  if (did_pre_profile_init_)
+    chrome::MediaTransferProtocolManager::Shutdown();
 }
 
 void ChromeBrowserMainPartsLinux::PreProfileInit() {
 #if defined(USE_LINUX_BREAKPAD)
-#if defined(OS_CHROMEOS)
-  cros_version_loader_.GetVersion(&cros_consumer_,
-                                  base::Bind(&ChromeOSVersionCallback),
-                                  chromeos::VersionLoader::VERSION_FULL);
-#else
+#if !defined(OS_CHROMEOS)
   // Needs to be called after we have chrome::DIR_USER_DATA and
   // g_browser_process.  This happens in PreCreateThreads.
   content::BrowserThread::PostTask(content::BrowserThread::FILE,
@@ -115,12 +108,16 @@ void ChromeBrowserMainPartsLinux::PreProfileInit() {
 
   chrome::MediaTransferProtocolManager::Initialize();
 
+  did_pre_profile_init_ = true;
+
   ChromeBrowserMainPartsPosix::PreProfileInit();
 }
 
 void ChromeBrowserMainPartsLinux::PostProfileInit() {
   media_transfer_protocol_device_observer_.reset(
       new chrome::MediaTransferProtocolDeviceObserverLinux());
+
+  ChromeBrowserMainPartsPosix::PostProfileInit();
 }
 
 void ChromeBrowserMainPartsLinux::PostMainMessageLoopRun() {

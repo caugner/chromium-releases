@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/input_method/candidate_view.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -16,6 +17,31 @@ namespace chromeos {
 namespace input_method {
 
 namespace {
+const char* kSampleCandidate[] = {
+  "Sample Candidate 1",
+  "Sample Candidate 2",
+  "Sample Candidate 3"
+};
+const char* kSampleLabel[] = {
+  "Sample Label 1",
+  "Sample Label 2",
+  "Sample Label 3"
+};
+const char* kSampleAnnotation[] = {
+  "Sample Annotation 1",
+  "Sample Annotation 2",
+  "Sample Annotation 3"
+};
+const char* kSampleDescriptionTitle[] = {
+  "Sample Description Title 1",
+  "Sample Description Title 2",
+  "Sample Description Title 3",
+};
+const char* kSampleDescriptionBody[] = {
+  "Sample Description Body 1",
+  "Sample Description Body 2",
+  "Sample Description Body 3",
+};
 
 void ClearInputMethodLookupTable(size_t page_size,
                                  InputMethodLookupTable* table) {
@@ -26,26 +52,17 @@ void ClearInputMethodLookupTable(size_t page_size,
   table->orientation = InputMethodLookupTable::kVertical;
   table->labels.clear();
   table->annotations.clear();
-  table->mozc_candidates.Clear();
 }
 
-void InitializeMozcCandidates(InputMethodLookupTable* table) {
-  table->mozc_candidates.Clear();
-  table->mozc_candidates.set_position(0);
-  table->mozc_candidates.set_size(0);
-}
-
-void AppendCandidateIntoLookupTable(InputMethodLookupTable* table,
-                                    const std::string& value) {
-  mozc::commands::Candidates::Candidate *candidate =
-      table->mozc_candidates.add_candidate();
-
-  int current_entry_count = table->mozc_candidates.candidate_size();
-  table->candidates.push_back(value);
-  candidate->set_index(current_entry_count);
-  candidate->set_value(value);
-  candidate->set_id(current_entry_count);
-  candidate->set_information_id(current_entry_count);
+void InitIBusLookupTableWithCandidatesFilled(size_t page_size,
+                                             InputMethodLookupTable* table) {
+  ClearInputMethodLookupTable(page_size, table);
+  for (size_t i = 0; i < page_size; ++i) {
+    table->candidates.push_back(
+        base::StringPrintf("value %lld", static_cast<unsigned long long>(i)));
+    table->labels.push_back(
+        base::StringPrintf("%lld", static_cast<unsigned long long>(i)));
+  }
 }
 
 }  // namespace
@@ -66,18 +83,6 @@ TEST_F(CandidateWindowViewTest, ShouldUpdateCandidateViewsTest) {
   // This test verifies the process of judging update lookup-table or not.
   // This judgement is handled by ShouldUpdateCandidateViews, which returns true
   // if update is necessary and vice versa.
-  const char* kSampleCandidate1 = "Sample Candidate 1";
-  const char* kSampleCandidate2 = "Sample Candidate 2";
-  const char* kSampleCandidate3 = "Sample Candidate 3";
-
-  const char* kSampleAnnotation1 = "Sample Annotation 1";
-  const char* kSampleAnnotation2 = "Sample Annotation 2";
-  const char* kSampleAnnotation3 = "Sample Annotation 3";
-
-  const char* kSampleLabel1 = "Sample Label 1";
-  const char* kSampleLabel2 = "Sample Label 2";
-  const char* kSampleLabel3 = "Sample Label 3";
-
   InputMethodLookupTable old_table;
   InputMethodLookupTable new_table;
 
@@ -104,16 +109,25 @@ TEST_F(CandidateWindowViewTest, ShouldUpdateCandidateViewsTest) {
   EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                                new_table));
   new_table = old_table;
-  new_table.candidates.push_back(kSampleCandidate1);
-  old_table.candidates.push_back(kSampleCandidate1);
+  new_table.candidates.push_back(kSampleCandidate[0]);
+  old_table.candidates.push_back(kSampleCandidate[0]);
   EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                                new_table));
-  new_table.labels.push_back(kSampleLabel1);
-  old_table.labels.push_back(kSampleLabel1);
+  new_table.labels.push_back(kSampleLabel[0]);
+  old_table.labels.push_back(kSampleLabel[0]);
   EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                                new_table));
-  new_table.annotations.push_back(kSampleAnnotation1);
-  old_table.annotations.push_back(kSampleAnnotation1);
+  new_table.annotations.push_back(kSampleAnnotation[0]);
+  old_table.annotations.push_back(kSampleAnnotation[0]);
+  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                               new_table));
+
+  InputMethodLookupTable::Description description;
+  description.title = kSampleDescriptionTitle[0];
+  description.body = kSampleDescriptionBody[0];
+
+  new_table.descriptions.push_back(description);
+  old_table.descriptions.push_back(description);
   EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                                new_table));
 
@@ -132,158 +146,111 @@ TEST_F(CandidateWindowViewTest, ShouldUpdateCandidateViewsTest) {
                                                               new_table));
 
   new_table = old_table;
-  new_table.candidates.push_back(kSampleCandidate2);
+  new_table.candidates.push_back(kSampleCandidate[1]);
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
-  old_table.candidates.push_back(kSampleCandidate3);
+  old_table.candidates.push_back(kSampleCandidate[2]);
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
   new_table.candidates.clear();
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
-  new_table.candidates.push_back(kSampleCandidate2);
+  new_table.candidates.push_back(kSampleCandidate[1]);
   old_table.candidates.clear();
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
 
   new_table = old_table;
-  new_table.labels.push_back(kSampleLabel2);
+  new_table.labels.push_back(kSampleLabel[1]);
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
-  old_table.labels.push_back(kSampleLabel3);
+  old_table.labels.push_back(kSampleLabel[2]);
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
   new_table.labels.clear();
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
-  new_table.labels.push_back(kSampleLabel2);
+  new_table.labels.push_back(kSampleLabel[1]);
   old_table.labels.clear();
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
 
   new_table = old_table;
-  new_table.annotations.push_back(kSampleAnnotation2);
+  new_table.annotations.push_back(kSampleAnnotation[1]);
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
-  old_table.annotations.push_back(kSampleAnnotation3);
+  old_table.annotations.push_back(kSampleAnnotation[2]);
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
   new_table.annotations.clear();
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
-  new_table.annotations.push_back(kSampleAnnotation2);
+  new_table.annotations.push_back(kSampleAnnotation[1]);
+  old_table.annotations.clear();
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+
+  new_table = old_table;
+  new_table.annotations.push_back(kSampleDescriptionTitle[1]);
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+  old_table.annotations.push_back(kSampleDescriptionTitle[2]);
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+  new_table.annotations.clear();
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+  new_table.annotations.push_back(kSampleDescriptionTitle[1]);
+  old_table.annotations.clear();
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+
+  new_table = old_table;
+  new_table.annotations.push_back(kSampleDescriptionBody[1]);
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+  old_table.annotations.push_back(kSampleDescriptionBody[2]);
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+  new_table.annotations.clear();
+  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
+                                                              new_table));
+  new_table.annotations.push_back(kSampleDescriptionBody[1]);
   old_table.annotations.clear();
   EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
                                                               new_table));
 }
 
-TEST_F(CandidateWindowViewTest, MozcSuggestWindowShouldUpdateTest) {
-  // ShouldUpdateCandidateViews method should also judge with consideration of
-  // the mozc specific candidate information. Following tests verify them.
-  const char* kSampleCandidate1 = "Sample Candidate 1";
-  const char* kSampleCandidate2 = "Sample Candidate 2";
-
-  const size_t kPageSize = 10;
-
-  InputMethodLookupTable old_table;
-  InputMethodLookupTable new_table;
-
-  // State chagne from using non-mozc candidate to mozc candidate.
-  ClearInputMethodLookupTable(kPageSize, &old_table);
-  ClearInputMethodLookupTable(kPageSize, &new_table);
-
-  old_table.candidates.push_back(kSampleCandidate1);
-  InitializeMozcCandidates(&new_table);
-  AppendCandidateIntoLookupTable(&new_table, kSampleCandidate2);
-
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-
-  // State change from using mozc candidate to non-mozc candidate
-  ClearInputMethodLookupTable(kPageSize, &old_table);
-  ClearInputMethodLookupTable(kPageSize, &new_table);
-
-  InitializeMozcCandidates(&old_table);
-  AppendCandidateIntoLookupTable(&old_table, kSampleCandidate1);
-
-  new_table.candidates.push_back(kSampleCandidate2);
-
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-
-  // State change from using mozc candidate to mozc candidate
-
-  // No change
-  ClearInputMethodLookupTable(kPageSize, &old_table);
-  ClearInputMethodLookupTable(kPageSize, &new_table);
-
-  InitializeMozcCandidates(&old_table);
-  AppendCandidateIntoLookupTable(&old_table, kSampleCandidate1);
-
-  InitializeMozcCandidates(&new_table);
-  AppendCandidateIntoLookupTable(&new_table, kSampleCandidate1);
-
-  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                               new_table));
-  // Candidate contents
-  ClearInputMethodLookupTable(kPageSize, &old_table);
-  ClearInputMethodLookupTable(kPageSize, &new_table);
-
-  InitializeMozcCandidates(&old_table);
-  AppendCandidateIntoLookupTable(&old_table, kSampleCandidate1);
-
-  InitializeMozcCandidates(&new_table);
-  AppendCandidateIntoLookupTable(&new_table, kSampleCandidate2);
-
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-}
-
-TEST_F(CandidateWindowViewTest, MozcUpdateCandidateTest) {
-  // This test verifies whether UpdateCandidates function updates window mozc
-  // specific candidate position correctly on the correct condition.
-
-  // For testing, we have to prepare empty widget.
-  // We should NOT manually free widget by default, otherwise double free will
-  // be occurred. So, we should instantiate widget class with "new" operation.
+TEST_F(CandidateWindowViewTest, SelectCandidateAtTest) {
   views::Widget* widget = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  views::Widget::InitParams params =
+      CreateParams(views::Widget::InitParams::TYPE_WINDOW);
   widget->Init(params);
 
   CandidateWindowView candidate_window_view(widget);
   candidate_window_view.Init();
 
-  const size_t kPageSize = 10;
+  // Set 9 candidates.
+  InputMethodLookupTable table_large;
+  const int table_large_size = 9;
+  InitIBusLookupTableWithCandidatesFilled(table_large_size, &table_large);
+  table_large.cursor_absolute_index = table_large_size - 1;
+  candidate_window_view.UpdateCandidates(table_large);
+  // Select the last candidate.
+  candidate_window_view.SelectCandidateAt(table_large_size - 1);
 
-  InputMethodLookupTable new_table;
-  ClearInputMethodLookupTable(kPageSize, &new_table);
-  InitializeMozcCandidates(&new_table);
-
-  // If candidate category is SUGGESTION, should not show at composition head.
-  new_table.mozc_candidates.set_category(mozc::commands::CONVERSION);
-  candidate_window_view.UpdateCandidates(new_table);
-  EXPECT_FALSE(candidate_window_view.should_show_at_composition_head_);
-
-  // If candidate category is SUGGESTION, should show at composition head.
-  new_table.mozc_candidates.set_category(mozc::commands::SUGGESTION);
-  candidate_window_view.UpdateCandidates(new_table);
-  EXPECT_TRUE(candidate_window_view.should_show_at_composition_head_);
-
-  // We should call CloseNow method, otherwise this test will leak memory.
-  widget->CloseNow();
+  // Reduce the number of candidates to 3.
+  InputMethodLookupTable table_small;
+  const int table_small_size = 3;
+  InitIBusLookupTableWithCandidatesFilled(table_small_size, &table_small);
+  table_small.cursor_absolute_index = table_small_size - 1;
+ // Make sure the test doesn't crash if the candidate table reduced its size.
+  // (crbug.com/174163)
+  candidate_window_view.UpdateCandidates(table_small);
+ candidate_window_view.SelectCandidateAt(table_small_size - 1);
 }
 
 TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
-  const char* kSampleCandidate[] = {
-    "Sample Candidate 1",
-    "Sample Candidate 2",
-    "Sample Candidate 3"
-  };
-  const char* kSampleAnnotation[] = {
-    "Sample Annotation 1",
-    "Sample Annotation 2",
-    "Sample Annotation 3"
-  };
   const char* kEmptyLabel = "";
   const char* kDefaultVerticalLabel[] = { "1", "2", "3" };
   const char* kDefaultHorizontalLabel[] = { "1.", "2.", "3." };
@@ -317,6 +284,10 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     for (size_t i = 0; i < kPageSize; ++i) {
       table.candidates.push_back(kSampleCandidate[i]);
       table.annotations.push_back(kSampleAnnotation[i]);
+      InputMethodLookupTable::Description description;
+      description.title = kSampleDescriptionTitle[i];
+      description.body = kSampleDescriptionBody[i];
+      table.descriptions.push_back(description);
     }
 
     table.labels.clear();
@@ -341,6 +312,10 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     for (size_t i = 0; i < kPageSize; ++i) {
       table.candidates.push_back(kSampleCandidate[i]);
       table.annotations.push_back(kSampleAnnotation[i]);
+      InputMethodLookupTable::Description description;
+      description.title = kSampleDescriptionTitle[i];
+      description.body = kSampleDescriptionBody[i];
+      table.descriptions.push_back(description);
       table.labels.push_back(kEmptyLabel);
     }
 
@@ -362,6 +337,10 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     for (size_t i = 0; i < kPageSize; ++i) {
       table.candidates.push_back(kSampleCandidate[i]);
       table.annotations.push_back(kSampleAnnotation[i]);
+      InputMethodLookupTable::Description description;
+      description.title = kSampleDescriptionTitle[i];
+      description.body = kSampleDescriptionBody[i];
+      table.descriptions.push_back(description);
     }
 
     table.labels.clear();
@@ -387,6 +366,10 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     for (size_t i = 0; i < kPageSize; ++i) {
       table.candidates.push_back(kSampleCandidate[i]);
       table.annotations.push_back(kSampleAnnotation[i]);
+      InputMethodLookupTable::Description description;
+      description.title = kSampleDescriptionTitle[i];
+      description.body = kSampleDescriptionBody[i];
+      table.descriptions.push_back(description);
       table.labels.push_back(kEmptyLabel);
     }
 
@@ -409,6 +392,10 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     for (size_t i = 0; i < kPageSize; ++i) {
       table.candidates.push_back(kSampleCandidate[i]);
       table.annotations.push_back(kSampleAnnotation[i]);
+      InputMethodLookupTable::Description description;
+      description.title = kSampleDescriptionTitle[i];
+      description.body = kSampleDescriptionBody[i];
+      table.descriptions.push_back(description);
       table.labels.push_back(kCustomizedLabel[i]);
     }
 
@@ -433,6 +420,10 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     for (size_t i = 0; i < kPageSize; ++i) {
       table.candidates.push_back(kSampleCandidate[i]);
       table.annotations.push_back(kSampleAnnotation[i]);
+      InputMethodLookupTable::Description description;
+      description.title = kSampleDescriptionTitle[i];
+      description.body = kSampleDescriptionBody[i];
+      table.descriptions.push_back(description);
       table.labels.push_back(kCustomizedLabel[i]);
     }
 
@@ -450,120 +441,6 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
 
   // We should call CloseNow method, otherwise this test will leak memory.
   widget->CloseNow();
-}
-
-class InfolistWindowViewTest : public views::ViewsTestBase {
-};
-
-TEST_F(InfolistWindowViewTest, ShouldUpdateViewTest) {
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    EXPECT_FALSE(InfolistWindowView::ShouldUpdateView(&old_usages,
-                                                      &new_usages));
-  }
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    mozc::commands::Information *old_info = old_usages.add_information();
-    old_info->set_title("title1");
-    old_info->set_description("description1");
-    EXPECT_TRUE(InfolistWindowView::ShouldUpdateView(&old_usages, &new_usages));
-  }
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    mozc::commands::Information *old_info = old_usages.add_information();
-    old_info->set_title("title1");
-    old_info->set_description("description1");
-    mozc::commands::Information *new_info = new_usages.add_information();
-    new_info->set_title("title1");
-    new_info->set_description("description1");
-    EXPECT_FALSE(InfolistWindowView::ShouldUpdateView(&old_usages,
-                                                      &new_usages));
-  }
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    mozc::commands::Information *old_info = old_usages.add_information();
-    old_info->set_title("title1");
-    old_info->set_description("description1");
-    mozc::commands::Information *new_info = new_usages.add_information();
-    new_info->set_title("title2");
-    new_info->set_description("description1");
-    EXPECT_TRUE(InfolistWindowView::ShouldUpdateView(&old_usages, &new_usages));
-  }
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    mozc::commands::Information *old_info = old_usages.add_information();
-    old_info->set_title("title1");
-    old_info->set_description("description1");
-    mozc::commands::Information *new_info = new_usages.add_information();
-    new_info->set_title("title1");
-    new_info->set_description("description2");
-    EXPECT_TRUE(InfolistWindowView::ShouldUpdateView(&old_usages, &new_usages));
-  }
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    mozc::commands::Information *old_info = old_usages.add_information();
-    old_info->set_title("title1");
-    old_info->set_description("description1");
-    mozc::commands::Information *new_info = new_usages.add_information();
-    new_info->set_title("title2");
-    new_info->set_description("description2");
-    EXPECT_TRUE(InfolistWindowView::ShouldUpdateView(&old_usages, &new_usages));
-  }
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    mozc::commands::Information *old_info1 = old_usages.add_information();
-    old_info1->set_title("title1");
-    old_info1->set_description("description1");
-    mozc::commands::Information *old_info2 = old_usages.add_information();
-    old_info2->set_title("title2");
-    old_info2->set_description("description2");
-    mozc::commands::Information *new_info1 = new_usages.add_information();
-    new_info1->set_title("title1");
-    new_info1->set_description("description1");
-    mozc::commands::Information *new_info2 = new_usages.add_information();
-    new_info2->set_title("title2");
-    new_info2->set_description("description2");
-    EXPECT_FALSE(InfolistWindowView::ShouldUpdateView(&old_usages,
-                                                      &new_usages));
-    old_usages.set_focused_index(0);
-    new_usages.set_focused_index(0);
-    EXPECT_FALSE(InfolistWindowView::ShouldUpdateView(&old_usages,
-                                                      &new_usages));
-    old_usages.set_focused_index(0);
-    new_usages.set_focused_index(1);
-    EXPECT_FALSE(InfolistWindowView::ShouldUpdateView(&old_usages,
-                                                      &new_usages));
-  }
-  {
-    mozc::commands::InformationList old_usages;
-    mozc::commands::InformationList new_usages;
-    mozc::commands::Information *old_info1 = old_usages.add_information();
-    old_info1->set_title("title1");
-    old_info1->set_description("description1");
-    mozc::commands::Information *old_info2 = old_usages.add_information();
-    old_info2->set_title("title2");
-    old_info2->set_description("description2");
-    mozc::commands::Information *new_info1 = new_usages.add_information();
-    new_info1->set_title("title1");
-    new_info1->set_description("description1");
-    mozc::commands::Information *new_info2 = new_usages.add_information();
-    new_info2->set_title("title3");
-    new_info2->set_description("description3");
-    EXPECT_TRUE(InfolistWindowView::ShouldUpdateView(&old_usages, &new_usages));
-    old_usages.set_focused_index(0);
-    new_usages.set_focused_index(0);
-    EXPECT_TRUE(InfolistWindowView::ShouldUpdateView(&old_usages, &new_usages));
-    old_usages.set_focused_index(0);
-    new_usages.set_focused_index(1);
-    EXPECT_TRUE(InfolistWindowView::ShouldUpdateView(&old_usages, &new_usages));
-  }
 }
 
 TEST_F(CandidateWindowViewTest, DoNotChangeRowHeightWithLabelSwitchTest) {
@@ -624,6 +501,8 @@ TEST_F(CandidateWindowViewTest, DoNotChangeRowHeightWithLabelSwitchTest) {
   // Initialize with a shortcut mode lookup table.
   candidate_window_view.MaybeInitializeCandidateViews(table);
   ASSERT_EQ(3UL, candidate_window_view.candidate_views_.size());
+  // Check the selected index is invalidated.
+  EXPECT_EQ(-1, candidate_window_view.selected_candidate_index_in_page_);
   before_height =
       candidate_window_view.candidate_views_[0]->GetContentsBounds().height();
   // Checks all entry have same row height.
@@ -635,6 +514,8 @@ TEST_F(CandidateWindowViewTest, DoNotChangeRowHeightWithLabelSwitchTest) {
   // Initialize with a no shortcut mode lookup table.
   candidate_window_view.MaybeInitializeCandidateViews(no_shortcut_table);
   ASSERT_EQ(3UL, candidate_window_view.candidate_views_.size());
+  // Check the selected index is invalidated.
+  EXPECT_EQ(-1, candidate_window_view.selected_candidate_index_in_page_);
   EXPECT_EQ(before_height,
             candidate_window_view.candidate_views_[0]->GetContentsBounds()
                 .height());
@@ -648,6 +529,8 @@ TEST_F(CandidateWindowViewTest, DoNotChangeRowHeightWithLabelSwitchTest) {
   // Initialize with a no shortcut mode lookup table.
   candidate_window_view.MaybeInitializeCandidateViews(no_shortcut_table);
   ASSERT_EQ(3UL, candidate_window_view.candidate_views_.size());
+  // Check the selected index is invalidated.
+  EXPECT_EQ(-1, candidate_window_view.selected_candidate_index_in_page_);
   before_height =
       candidate_window_view.candidate_views_[0]->GetContentsBounds().height();
   // Checks all entry have same row height.
@@ -659,6 +542,8 @@ TEST_F(CandidateWindowViewTest, DoNotChangeRowHeightWithLabelSwitchTest) {
   // Initialize with a shortcut mode lookup table.
   candidate_window_view.MaybeInitializeCandidateViews(table);
   ASSERT_EQ(3UL, candidate_window_view.candidate_views_.size());
+  // Check the selected index is invalidated.
+  EXPECT_EQ(-1, candidate_window_view.selected_candidate_index_in_page_);
   EXPECT_EQ(before_height,
             candidate_window_view.candidate_views_[0]->GetContentsBounds()
                 .height());

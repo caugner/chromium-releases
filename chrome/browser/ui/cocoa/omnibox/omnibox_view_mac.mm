@@ -13,6 +13,7 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
+#include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_popup_view_mac.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
@@ -133,7 +134,7 @@ OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
                                CommandUpdater* command_updater,
                                AutocompleteTextField* field)
     : OmniboxView(profile, controller, toolbar_model, command_updater),
-      popup_view_(new OmniboxPopupViewMac(this, model(), field)),
+      popup_view_(OmniboxPopupViewMac::Create(this, model(), field)),
       field_(field),
       suggest_text_length_(0),
       delete_was_pressed_(false),
@@ -269,7 +270,7 @@ void OmniboxViewMac::SetWindowTextAndCaretPos(const string16& text,
                                               bool update_popup,
                                               bool notify_text_changed) {
   DCHECK_LE(caret_pos, text.size());
-  SetTextAndSelectedRange(text, NSMakeRange(caret_pos, caret_pos));
+  SetTextAndSelectedRange(text, NSMakeRange(caret_pos, 0));
 
   if (update_popup)
     UpdatePopup();
@@ -360,6 +361,13 @@ void OmniboxViewMac::CloseOmniboxPopup() {
 }
 
 void OmniboxViewMac::SetFocus() {
+  FocusLocation(false);
+  model()->SetCaretVisibility(true);
+}
+
+void OmniboxViewMac::ApplyCaretVisibility() {
+  [[field_ cell] setHideFocusState:!model()->is_caret_visible()
+                            ofView:field_];
 }
 
 void OmniboxViewMac::SetText(const string16& display_text) {
@@ -486,8 +494,8 @@ void OmniboxViewMac::ApplyTextAttributes(const string16& display_text,
       toolbar_model()->GetSecurityLevel();
 
   // Emphasize the scheme for security UI display purposes (if necessary).
-  if (!model()->user_input_in_progress() && scheme.is_nonempty() &&
-      (security_level != ToolbarModel::NONE)) {
+  if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
+      scheme.is_nonempty() && (security_level != ToolbarModel::NONE)) {
     NSColor* color;
     if (security_level == ToolbarModel::EV_SECURE ||
         security_level == ToolbarModel::SECURE) {
@@ -812,6 +820,14 @@ void OmniboxViewMac::OnKillFocus() {
   controller()->OnKillFocus();
 }
 
+void OmniboxViewMac::OnMouseDown(NSInteger button_number) {
+  // Restore caret visibility whenever the user clicks in the the omnibox. This
+  // is not always covered by OnSetFocus() because when clicking while the
+  // omnibox has invisible focus does not trigger a new OnSetFocus() call.
+  if (button_number == 0 || button_number == 1)
+    model()->SetCaretVisibility(true);
+}
+
 bool OmniboxViewMac::CanCopy() {
   const NSRange selection = GetSelectedRange();
   return selection.length > 0;
@@ -922,7 +938,7 @@ void OmniboxViewMac::OnFrameChanged() {
   // things even cheaper by refactoring between the popup-placement
   // code and the matrix-population code.
   popup_view_->UpdatePopupAppearance();
-  model()->PopupBoundsChangedTo(popup_view_->GetTargetBounds());
+  model()->OnPopupBoundsChanged(popup_view_->GetTargetBounds());
 
   // Give controller a chance to rearrange decorations.
   model()->OnChanged();

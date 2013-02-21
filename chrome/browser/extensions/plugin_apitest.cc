@@ -5,11 +5,11 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -48,7 +48,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
       tab->GetRenderViewHost(), L"", L"testPluginWorks()", &result));
   EXPECT_FALSE(result);
 
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   service->set_show_extensions_prompts(false);
   const size_t size_before = service->extensions()->size();
   const Extension* extension = LoadExtension(extension_dir);
@@ -104,7 +105,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PluginPrivate) {
   FilePath extension_dir =
       test_data_dir_.AppendASCII("uitest").AppendASCII("plugins_private");
 
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   service->set_show_extensions_prompts(false);
   const size_t size_before = service->extensions()->size();
   const Extension* extension = LoadExtension(extension_dir);

@@ -12,7 +12,6 @@
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "third_party/skia/include/core/SkPath.h"
-#include "ui/aura/focus_manager.h"
 #include "ui/aura/window.h"
 #include "ui/base/animation/animation.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -67,8 +66,7 @@ class MaximizeBubbleBorder : public views::BubbleBorder {
                               const gfx::Size& contents_size) const OVERRIDE;
 
   // Overridden from views::Border.
-  virtual void Paint(const views::View& view,
-                     gfx::Canvas* canvas) const OVERRIDE;
+  virtual void Paint(const views::View& view, gfx::Canvas* canvas) OVERRIDE;
 
  private:
   // Note: Animations can continue after then main window frame was destroyed.
@@ -93,8 +91,7 @@ MaximizeBubbleBorder::MaximizeBubbleBorder(views::View* content_view,
 }
 
 void MaximizeBubbleBorder::GetMask(gfx::Path* mask) {
-  gfx::Insets inset;
-  GetInsets(&inset);
+  gfx::Insets inset = GetInsets();
   // Note: Even though the tip could be added as activatable, it is left out
   // since it would not change the action behavior in any way plus it makes
   // more sense to keep the focus on the underlying button for clicks.
@@ -114,8 +111,7 @@ gfx::Rect MaximizeBubbleBorder::GetBounds(
     const gfx::Rect& position_relative_to,
     const gfx::Size& contents_size) const {
   gfx::Size border_size(contents_size);
-  gfx::Insets insets;
-  GetInsets(&insets);
+  gfx::Insets insets = GetInsets();
   border_size.Enlarge(insets.width(), insets.height());
 
   // Position the bubble to center the box on the anchor.
@@ -129,10 +125,8 @@ gfx::Rect MaximizeBubbleBorder::GetBounds(
   return gfx::Rect(view_origin, border_size);
 }
 
-void MaximizeBubbleBorder::Paint(const views::View& view,
-                                 gfx::Canvas* canvas) const {
-  gfx::Insets inset;
-  GetInsets(&inset);
+void MaximizeBubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) {
+  gfx::Insets inset = GetInsets();
 
   // Draw the border line around everything.
   int y = inset.top();
@@ -695,7 +689,6 @@ BubbleContentsView::BubbleContentsView(
 
   label_view_ = new views::Label();
   SetSnapType(SNAP_NONE);
-  label_view_->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
   label_view_->SetBackgroundColor(kBubbleBackgroundColor);
   label_view_->SetEnabledColor(kBubbleTextColor);
   label_view_->set_border(views::Border::CreateEmptyBorder(
@@ -823,9 +816,11 @@ BubbleDialogButton::BubbleDialogButton(
     : views::ImageButton(button_row),
       button_row_(button_row) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  SetImage(views::CustomButton::BS_NORMAL, rb.GetImageSkiaNamed(normal_image));
-  SetImage(views::CustomButton::BS_HOT, rb.GetImageSkiaNamed(hovered_image));
-  SetImage(views::CustomButton::BS_PUSHED,
+  SetImage(views::CustomButton::STATE_NORMAL,
+           rb.GetImageSkiaNamed(normal_image));
+  SetImage(views::CustomButton::STATE_HOVERED,
+           rb.GetImageSkiaNamed(hovered_image));
+  SetImage(views::CustomButton::STATE_PRESSED,
            rb.GetImageSkiaNamed(pressed_image));
   button_row->AddChildView(this);
 }

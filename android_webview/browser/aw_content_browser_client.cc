@@ -42,7 +42,9 @@ class DummyAccessTokenStore : public content::AccessTokenStore {
 
 namespace android_webview {
 
-AwContentBrowserClient::AwContentBrowserClient() {
+AwContentBrowserClient::AwContentBrowserClient(
+    ViewDelegateFactoryFn* view_delegate_factory)
+    : view_delegate_factory_(view_delegate_factory) {
   FilePath user_data_dir;
   if (!PathService::Get(base::DIR_ANDROID_APP_DATA, &user_data_dir)) {
     NOTREACHED() << "Failed to get app data directory for Android WebView";
@@ -60,6 +62,12 @@ AwBrowserContext* AwContentBrowserClient::GetAwBrowserContext() {
 content::BrowserMainParts* AwContentBrowserClient::CreateBrowserMainParts(
     const content::MainFunctionParams& parameters) {
   return new AwBrowserMainParts(browser_context_.get());
+}
+
+content::WebContentsViewDelegate*
+AwContentBrowserClient::GetWebContentsViewDelegate(
+    content::WebContents* web_contents) {
+  return (*view_delegate_factory_)(web_contents);
 }
 
 void AwContentBrowserClient::RenderProcessHostCreated(
@@ -114,9 +122,9 @@ gfx::ImageSkia* AwContentBrowserClient::GetDefaultFavicon() {
 bool AwContentBrowserClient::AllowAppCache(const GURL& manifest_url,
                            const GURL& first_party,
                            content::ResourceContext* context) {
-  // TODO(boliu): Implement this to power WebSettings.SetAppCacheEnabled.
-  NOTIMPLEMENTED();
-  return false;
+  // WebView doesn't have a per-site policy for locally stored data,
+  // instead AppCache can be disabled for individual WebViews.
+  return true;
 }
 
 
@@ -237,10 +245,17 @@ bool AwContentBrowserClient::CanCreateWindow(
     content::ResourceContext* context,
     int render_process_id,
     bool* no_javascript_access) {
-  // TODO(boliu): Implement this to power SupportMultipleWindow.
-  NOTIMPLEMENTED();
-  *no_javascript_access = false;
-  return false;
+  // We unconditionally allow popup windows at this stage and will give
+  // the embedder the opporunity to handle displaying of the popup in
+  // WebContentsDelegate::AddContents (via the
+  // AwContentsClient.onCreateWindow callback).
+  // Note that if the embedder has blocked support for creating popup
+  // windows through AwSettings, then we won't get to this point as
+  // the popup creation will have been blocked at the WebKit level.
+  if (no_javascript_access) {
+    *no_javascript_access = false;
+  }
+  return true;
 }
 
 std::string AwContentBrowserClient::GetWorkerProcessTitle(const GURL& url,
@@ -295,7 +310,11 @@ void AwContentBrowserClient::ClearCookies(content::RenderViewHost* rvh) {
 }
 
 FilePath AwContentBrowserClient::GetDefaultDownloadDirectory() {
-  NOTREACHED() << "Android WebView does not use chromium downloads";
+  // Android WebView does not currently use the Chromium downloads system.
+  // Download requests are cancelled immedately when recognized; see
+  // AwResourceDispatcherHost::CreateResourceHandlerForDownload. However the
+  // download system still tries to start up and calls this before recognizing
+  // the request has been cancelled.
   return FilePath();
 }
 
@@ -311,7 +330,8 @@ void AwContentBrowserClient::DidCreatePpapiPlugin(
 
 bool AwContentBrowserClient::AllowPepperSocketAPI(
     content::BrowserContext* browser_context,
-                                  const GURL& url) {
+    const GURL& url,
+    const content::SocketPermissionRequest& params) {
   NOTREACHED() << "Android WebView does not support plugins";
   return false;
 }

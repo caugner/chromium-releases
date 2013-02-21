@@ -77,7 +77,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testNoProxy() throws Exception {
         checkMapping("ftp://example.com/", "DIRECT");
         checkMapping("http://example.com/", "DIRECT");
@@ -90,7 +90,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpProxyHostAndPort() throws Exception {
         System.setProperty("http.proxyHost", "httpproxy.com");
         System.setProperty("http.proxyPort", "8080");
@@ -105,7 +105,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpProxyHostOnly() throws Exception {
         System.setProperty("http.proxyHost", "httpproxy.com");
         checkMapping("ftp://example.com/", "DIRECT");
@@ -119,7 +119,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpProxyPortOnly() throws Exception {
         System.setProperty("http.proxyPort", "8080");
         checkMapping("ftp://example.com/", "DIRECT");
@@ -133,7 +133,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpNonProxyHosts1() throws Exception {
         System.setProperty("http.nonProxyHosts", "slashdot.org");
         System.setProperty("http.proxyHost", "httpproxy.com");
@@ -148,7 +148,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpNonProxyHosts2() throws Exception {
         System.setProperty("http.nonProxyHosts", "slashdot.org|freecode.net");
         System.setProperty("http.proxyHost", "httpproxy.com");
@@ -164,7 +164,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpNonProxyHosts3() throws Exception {
         System.setProperty("http.nonProxyHosts", "*example.com");
         System.setProperty("http.proxyHost", "httpproxy.com");
@@ -180,7 +180,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testFtpNonProxyHosts() throws Exception {
         System.setProperty("ftp.nonProxyHosts", "slashdot.org");
         System.setProperty("ftp.proxyHost", "httpproxy.com");
@@ -195,7 +195,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testFtpProxyHostAndPort() throws Exception {
         System.setProperty("ftp.proxyHost", "httpproxy.com");
         System.setProperty("ftp.proxyPort", "8080");
@@ -210,7 +210,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testFtpProxyHostOnly() throws Exception {
         System.setProperty("ftp.proxyHost", "httpproxy.com");
         checkMapping("ftp://example.com/", "PROXY httpproxy.com:80");
@@ -224,7 +224,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpsProxyHostAndPort() throws Exception {
         System.setProperty("https.proxyHost", "httpproxy.com");
         System.setProperty("https.proxyPort", "8080");
@@ -234,26 +234,12 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
     }
 
     /**
-     * Test https.proxyHost and default port.
-     *
-     * @throws Exception
-     */
-    @SmallTest
-    @Feature({"Android-WebView"})
-    public void testHttpsProxyHostOnly() throws Exception {
-        System.setProperty("https.proxyHost", "httpproxy.com");
-        checkMapping("ftp://example.com/", "DIRECT");
-        checkMapping("http://example.com/", "DIRECT");
-        checkMapping("https://example.com/", "PROXY httpproxy.com:443");
-    }
-
-    /**
      * Default http proxy is used if a scheme-specific one is not found.
      *
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testDefaultProxyExplictPort() throws Exception {
         System.setProperty("ftp.proxyHost", "httpproxy.com");
         System.setProperty("ftp.proxyPort", "8080");
@@ -265,25 +251,12 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
     }
 
     /**
-     * Check that the default proxy port is as expected.
-     *
-     * @throws Exception
-     */
-    @SmallTest
-    @Feature({"Android-WebView"})
-    public void testDefaultProxyDefaultPort() throws Exception {
-        System.setProperty("proxyHost", "defaultproxy.com");
-        checkMapping("http://example.com/", "PROXY defaultproxy.com:80");
-        checkMapping("https://example.com/", "PROXY defaultproxy.com:443");
-    }
-
-    /**
      * SOCKS proxy is used if scheme-specific one is not found.
      *
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testFallbackToSocks() throws Exception {
         System.setProperty("http.proxyHost", "defaultproxy.com");
         System.setProperty("socksProxyHost", "socksproxy.com");
@@ -298,7 +271,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testSocksExplicitPort() throws Exception {
         System.setProperty("socksProxyHost", "socksproxy.com");
         System.setProperty("socksProxyPort", "9000");
@@ -311,7 +284,7 @@ public class AndroidProxySelectorTest extends InstrumentationTestCase {
      * @throws Exception
      */
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testHttpProxySupercedesSocks() throws Exception {
         System.setProperty("proxyHost", "defaultproxy.com");
         System.setProperty("socksProxyHost", "socksproxy.com");

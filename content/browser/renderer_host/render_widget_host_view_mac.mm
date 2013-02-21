@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/mac/crash_logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
@@ -48,6 +49,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #import "ui/base/cocoa/fullscreen_window_manager.h"
 #import "ui/base/cocoa/underlay_opengl_hosting_window.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect_conversions.h"
@@ -137,7 +139,7 @@ static float ScaleFactor(NSView* view) {
 - (void)keyEvent:(NSEvent*)theEvent wasKeyEquivalent:(BOOL)equiv;
 - (void)cancelChildPopups;
 - (void)windowDidChangeBackingProperties:(NSNotification*)notification;
-- (void)windowChangedScreen:(NSNotification*)notification;
+- (void)windowChangedGlobalFrame:(NSNotification*)notification;
 - (void)checkForPluginImeCancellation;
 - (void)updateTabBackingStoreScaleFactor;
 - (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
@@ -287,6 +289,7 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
       last_frame_was_accelerated_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       can_compose_inline_(true),
+      allow_overlapping_views_(false),
       is_loading_(false),
       is_hidden_(false),
       weak_factory_(this),
@@ -302,11 +305,20 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
 RenderWidgetHostViewMac::~RenderWidgetHostViewMac() {
   AckPendingSwapBuffers();
   UnlockMouse();
+  // We are owned by RenderWidgetHostViewCocoa, so if we go away before the
+  // RenderWidgetHost does we need to tell it not to hold a stale pointer to
+  // us.
+  if (render_widget_host_)
+    render_widget_host_->SetView(NULL);
 }
 
 void RenderWidgetHostViewMac::SetDelegate(
     NSObject<RenderWidgetHostViewMacDelegate>* delegate) {
   [cocoa_view_ setRWHVDelegate:delegate];
+}
+
+void RenderWidgetHostViewMac::SetAllowOverlappingViews(bool overlapping) {
+  allow_overlapping_views_ = overlapping;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -488,7 +500,7 @@ gfx::NativeViewAccessible RenderWidgetHostViewMac::GetNativeViewAccessible() {
 }
 
 void RenderWidgetHostViewMac::MovePluginWindows(
-    const gfx::Point& scroll_offset,
+    const gfx::Vector2d& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewMac::MovePluginWindows");
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -638,7 +650,8 @@ void RenderWidgetHostViewMac::ImeCompositionRangeChanged(
 }
 
 void RenderWidgetHostViewMac::DidUpdateBackingStore(
-    const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+    const gfx::Rect& scroll_rect,
+    const gfx::Vector2d& scroll_delta,
     const std::vector<gfx::Rect>& copy_rects) {
   GotSoftwareFrame();
 
@@ -720,7 +733,11 @@ void RenderWidgetHostViewMac::Destroy() {
   [fullscreen_window_manager_ exitFullscreenMode];
   fullscreen_window_manager_.reset();
   [pepper_fullscreen_window_ close];
-  pepper_fullscreen_window_.reset();
+
+  // This can be called as part of processing the window's responder
+  // chain, for instance |-performKeyEquivalent:|.  In that case the
+  // object needs to survive until the stack unwinds.
+  pepper_fullscreen_window_.autorelease();
 
   // We get this call just before |render_widget_host_| deletes
   // itself.  But we are owned by |cocoa_view_|, which may be retained
@@ -851,7 +868,8 @@ void RenderWidgetHostViewMac::CopyFromCompositingSurface(
     return;
 
   float scale = ScaleFactor(cocoa_view_);
-  gfx::Size dst_pixel_size = gfx::ToFlooredSize(dst_size.Scale(scale));
+  gfx::Size dst_pixel_size = gfx::ToFlooredSize(
+      gfx::ScaleSize(dst_size, scale));
   if (!output->Allocate(
       dst_pixel_size.width(), dst_pixel_size.height(), true))
     return;
@@ -1010,8 +1028,35 @@ bool RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle,
   if (is_hidden_)
     return true;
 
-  if (!compositing_iosurface_.get())
-    compositing_iosurface_.reset(CompositingIOSurfaceMac::Create());
+  // TODO(shess) If the view does not have a window, or the window
+  // does not have backing, the IOSurface will log "invalid drawable"
+  // in -setView:.  It is not clear how this code is reached with such
+  // a case, so record some info into breakpad (some subset of
+  // browsers are likely to crash later for unrelated reasons).
+  // http://crbug.com/148882
+  NSWindow* window = [cocoa_view_ window];
+  if ([window windowNumber] <= 0) {
+    NSString* const kCrashKey = @"rwhvm_window";
+    if (!window) {
+      base::mac::SetCrashKeyValue(kCrashKey, @"Missing window");
+    } else {
+      NSString* value =
+          [NSString stringWithFormat:@"window %s delegate %s controller %s",
+                    object_getClassName(window),
+                    object_getClassName([window delegate]),
+                    object_getClassName([window windowController])];
+      base::mac::SetCrashKeyValue(kCrashKey, value);
+    }
+
+    return true;
+  }
+
+  if (!compositing_iosurface_.get()) {
+    CompositingIOSurfaceMac::SurfaceOrder order = allow_overlapping_views_ ?
+        CompositingIOSurfaceMac::SURFACE_ORDER_BELOW_WINDOW :
+        CompositingIOSurfaceMac::SURFACE_ORDER_ABOVE_WINDOW;
+    compositing_iosurface_.reset(CompositingIOSurfaceMac::Create(order));
+  }
 
   if (!compositing_iosurface_.get())
     return true;
@@ -1040,11 +1085,13 @@ void RenderWidgetHostViewMac::AckPendingSwapBuffers() {
   TRACE_EVENT0("browser", "RenderWidgetHostViewMac::AckPendingSwapBuffers");
   while (!pending_swap_buffers_acks_.empty()) {
     if (pending_swap_buffers_acks_.front().first != 0) {
+      AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
+      ack_params.surface_handle = 0;
+      ack_params.sync_point = 0;
       RenderWidgetHostImpl::AcknowledgeBufferPresent(
           pending_swap_buffers_acks_.front().first,
           pending_swap_buffers_acks_.front().second,
-          true,
-          0);
+          ack_params);
       if (render_widget_host_) {
         render_widget_host_->AcknowledgeSwapBuffersToRenderer();
 
@@ -1539,13 +1586,6 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
            selector:@selector(globalFrameDidChange:)
                name:NSViewGlobalFrameDidChangeNotification
              object:self];
-    if ([self window]) {
-      [[NSNotificationCenter defaultCenter]
-          addObserver:self
-             selector:@selector(windowChangedScreen:)
-                 name:NSWindowDidChangeScreenNotification
-               object:[self window]];
-    }
   }
   return self;
 }
@@ -1599,31 +1639,15 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
   if (delegate_)
     return [delegate_ respondsToSelector:selector];
-  else
-    return NO;
+
+  return NO;
 }
 
-- (NSMethodSignature*)methodSignatureForSelector:(SEL)selector {
-  // Trickiness: this doesn't mean "does this object's superclass respond to
-  // this selector" but rather "does the -respondsToSelector impl from the
-  // superclass say that this class responds to the selector".
-  if ([super respondsToSelector:selector])
-    return [super methodSignatureForSelector:selector];
+- (id)forwardingTargetForSelector:(SEL)selector {
+  if ([delegate_ respondsToSelector:selector])
+    return delegate_;
 
-  if (delegate_)
-    return [delegate_ methodSignatureForSelector:selector];
-  else
-    return nil;
-}
-
-- (void)forwardInvocation:(NSInvocation*)invocation {
-  // TODO(avi): Oh, man, use -forwardingTargetForSelector: when 10.6 is the
-  // minimum requirement.
-
-  if (delegate_ && [delegate_ respondsToSelector:[invocation selector]])
-    [invocation invokeWithTarget:delegate_];
-  else
-    [super forwardInvocation:invocation];
+  return [super forwardingTargetForSelector:selector];
 }
 
 - (void)setCanBeKeyView:(BOOL)can {
@@ -2100,28 +2124,40 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 - (void)viewWillMoveToWindow:(NSWindow*)newWindow {
   // We're messing with the window, so do this to ensure no flashes. This one
   // prevents a flash when the current tab is closed.
-  [[self window] disableScreenUpdatesUntilFlush];
+  NSWindow* oldWindow = [self window];
+  [oldWindow disableScreenUpdatesUntilFlush];
 
-  if ([self window]) {
-    [[NSNotificationCenter defaultCenter]
+  NSNotificationCenter* notificationCenter =
+      [NSNotificationCenter defaultCenter];
+  if (oldWindow) {
+    [notificationCenter
         removeObserver:self
                   name:NSWindowDidChangeBackingPropertiesNotification
-                object:[self window]];
-    [[NSNotificationCenter defaultCenter]
+                object:oldWindow];
+    [notificationCenter
         removeObserver:self
-                  name:NSWindowDidChangeScreenNotification
-                object:[self window]];
+                  name:NSWindowDidMoveNotification
+                object:oldWindow];
+    [notificationCenter
+        removeObserver:self
+                  name:NSWindowDidEndLiveResizeNotification
+                object:oldWindow];
   }
   if (newWindow) {
-    [[NSNotificationCenter defaultCenter]
+    [notificationCenter
         addObserver:self
            selector:@selector(windowDidChangeBackingProperties:)
                name:NSWindowDidChangeBackingPropertiesNotification
              object:newWindow];
-    [[NSNotificationCenter defaultCenter]
+    [notificationCenter
         addObserver:self
-           selector:@selector(windowChangedScreen:)
-               name:NSWindowDidChangeScreenNotification
+           selector:@selector(windowChangedGlobalFrame:)
+               name:NSWindowDidMoveNotification
+             object:newWindow];
+    [notificationCenter
+        addObserver:self
+           selector:@selector(windowChangedGlobalFrame:)
+               name:NSWindowDidEndLiveResizeNotification
              object:newWindow];
   }
 }
@@ -2140,8 +2176,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   if (backingStore)  // NULL in hardware path.
     backingStore->ScaleFactorChanged(scaleFactor);
 
-  renderWidgetHostView_->render_widget_host_->SetDeviceScaleFactor(
-      scaleFactor);
+  renderWidgetHostView_->render_widget_host_->NotifyScreenInfoChanged();
 }
 
 // http://developer.apple.com/library/mac/#documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/CapturingScreenContents/CapturingScreenContents.html#//apple_ref/doc/uid/TP40012302-CH10-SW4
@@ -2176,7 +2211,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   handlingGlobalFrameDidChange_ = NO;
 }
 
-- (void)windowChangedScreen:(NSNotification*)notification {
+- (void)windowChangedGlobalFrame:(NSNotification*)notification {
   renderWidgetHostView_->UpdateScreenInfo(
       renderWidgetHostView_->GetNativeView());
 }
@@ -2185,8 +2220,10 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   // NB: -[NSView setFrame:] calls through -setFrameSize:, so overriding
   // -setFrame: isn't neccessary.
   [super setFrameSize:newSize];
-  if (renderWidgetHostView_->render_widget_host_)
+  if (renderWidgetHostView_->render_widget_host_) {
+    renderWidgetHostView_->render_widget_host_->SendScreenRects();
     renderWidgetHostView_->render_widget_host_->WasResized();
+  }
 }
 
 - (void)callSetNeedsDisplayInRect {
@@ -2268,21 +2305,20 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
   if (renderWidgetHostView_->last_frame_was_accelerated_ &&
       renderWidgetHostView_->compositing_iosurface_.get()) {
-    {
+    if (renderWidgetHostView_->allow_overlapping_views_) {
+      // If overlapping views need to be allowed, punch a hole in the window
+      // to expose the GL underlay.
       TRACE_EVENT2("gpu", "NSRectFill clear", "w", damagedRect.width(),
                    "h", damagedRect.height());
-      // Draw transparency to expose the GL underlay. NSRectFill is extremely
-      // slow (15ms for a window on a fast MacPro), so this is only done when
-      // it's a real invalidation from window damage (not when a BuffersSwapped
-      // was received). Note that even a 1x1 NSRectFill can take many
-      // milliseconds sometimes (!) so this is skipped completely for drawRects
-      // that are triggered by BuffersSwapped messages.
+      // NSRectFill is extremely slow (15ms for a window on a fast MacPro), so
+      // this is only done when it's a real invalidation from window damage (not
+      // when a BuffersSwapped was received). Note that even a 1x1 NSRectFill
+      // can take many milliseconds sometimes (!) so this is skipped completely
+      // for drawRects that are triggered by BuffersSwapped messages.
       [[NSColor clearColor] set];
       NSRectFill(dirtyRect);
     }
 
-    // TODO(thakis): Register for backing scale factor change events and pass
-    // that on.
     renderWidgetHostView_->compositing_iosurface_->DrawIOSurface(
         self, ScaleFactor(self));
     return;

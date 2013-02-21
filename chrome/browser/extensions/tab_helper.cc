@@ -14,15 +14,16 @@
 #include "chrome/browser/extensions/page_action_controller.h"
 #include "chrome/browser/extensions/script_badge_controller.h"
 #include "chrome/browser/extensions/script_bubble_controller.h"
+#include "chrome/browser/extensions/script_executor.h"
 #include "chrome/browser/extensions/webstore_standalone_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -57,17 +58,19 @@ const char kPermissionError[] = "permission_error";
 
 namespace extensions {
 
-TabHelper::ContentScriptObserver::ContentScriptObserver(TabHelper* tab_helper)
+TabHelper::ScriptExecutionObserver::ScriptExecutionObserver(
+    TabHelper* tab_helper)
     : tab_helper_(tab_helper) {
-  tab_helper_->AddContentScriptObserver(this);
+  tab_helper_->AddScriptExecutionObserver(this);
 }
 
-TabHelper::ContentScriptObserver::ContentScriptObserver() : tab_helper_(NULL) {
+TabHelper::ScriptExecutionObserver::ScriptExecutionObserver()
+    : tab_helper_(NULL) {
 }
 
-TabHelper::ContentScriptObserver::~ContentScriptObserver() {
+TabHelper::ScriptExecutionObserver::~ScriptExecutionObserver() {
   if (tab_helper_)
-    tab_helper_->RemoveContentScriptObserver(this);
+    tab_helper_->RemoveScriptExecutionObserver(this);
 }
 
 TabHelper::TabHelper(content::WebContents* web_contents)
@@ -78,7 +81,8 @@ TabHelper::TabHelper(content::WebContents* web_contents)
               Profile::FromBrowserContext(web_contents->GetBrowserContext()),
               this)),
       pending_web_app_action_(NONE),
-      script_executor_(web_contents) {
+      script_executor_(new ScriptExecutor(web_contents,
+                                          &script_execution_observers_)) {
   // The ActiveTabPermissionManager requires a session ID; ensure this
   // WebContents has one.
   SessionTabHelper::CreateForWebContents(web_contents);
@@ -88,7 +92,7 @@ TabHelper::TabHelper(content::WebContents* web_contents)
       Profile::FromBrowserContext(web_contents->GetBrowserContext())));
   if (FeatureSwitch::script_badges()->IsEnabled()) {
     location_bar_controller_.reset(
-        new ScriptBadgeController(web_contents, &script_executor_, this));
+        new ScriptBadgeController(web_contents, this));
   } else {
     location_bar_controller_.reset(
         new PageActionController(web_contents));
@@ -101,16 +105,20 @@ TabHelper::TabHelper(content::WebContents* web_contents)
 
   // If more classes need to listen to global content script activity, then
   // a separate routing class with an observer interface should be written.
-  AddContentScriptObserver(ActivityLog::GetInstance());
+  AddScriptExecutionObserver(ActivityLog::GetInstance());
 
   registrar_.Add(this,
                  content::NOTIFICATION_LOAD_STOP,
                  content::Source<NavigationController>(
                      &web_contents->GetController()));
+
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_UNLOADED,
+                 content::NotificationService::AllSources());
 }
 
 TabHelper::~TabHelper() {
-  RemoveContentScriptObserver(ActivityLog::GetInstance());
+  RemoveScriptExecutionObserver(ActivityLog::GetInstance());
 }
 
 void TabHelper::CreateApplicationShortcuts() {
@@ -330,9 +338,8 @@ void TabHelper::OnGetAppNotifyChannel(const GURL& requestor_url,
     return;
   }
 
-  TabContents* tab_contents = TabContents::FromWebContents(web_contents());
   AppNotifyChannelUI* ui = AppNotifyChannelUI::Create(
-      profile, tab_contents, extension->name(),
+      profile, web_contents(), extension->name(),
       AppNotifyChannelUI::NOTIFICATION_INFOBAR);
 
   scoped_refptr<AppNotifyChannelSetup> channel_setup(
@@ -396,14 +403,14 @@ void TabHelper::OnRequest(const ExtensionHostMsg_Request_Params& request) {
 }
 
 void TabHelper::OnContentScriptsExecuting(
-    const ContentScriptObserver::ExecutingScriptsMap& executing_scripts_map,
+    const ScriptExecutionObserver::ExecutingScriptsMap& executing_scripts_map,
     int32 on_page_id,
     const GURL& on_url) {
-  FOR_EACH_OBSERVER(ContentScriptObserver, content_script_observers_,
-                    OnContentScriptsExecuting(web_contents(),
-                                              executing_scripts_map,
-                                              on_page_id,
-                                              on_url));
+  FOR_EACH_OBSERVER(ScriptExecutionObserver, script_execution_observers_,
+                    OnScriptsExecuted(web_contents(),
+                                      executing_scripts_map,
+                                      on_page_id,
+                                      on_url));
 }
 
 const Extension* TabHelper::GetExtension(const std::string& extension_app_id) {
@@ -480,21 +487,34 @@ void TabHelper::GetApplicationInfo(int32 page_id) {
 void TabHelper::Observe(int type,
                         const content::NotificationSource& source,
                         const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_LOAD_STOP);
-  const NavigationController& controller =
-      *content::Source<NavigationController>(source).ptr();
-  DCHECK_EQ(controller.GetWebContents(), web_contents());
+  switch (type) {
+    case content::NOTIFICATION_LOAD_STOP: {
+      const NavigationController& controller =
+          *content::Source<NavigationController>(source).ptr();
+      DCHECK_EQ(controller.GetWebContents(), web_contents());
 
-  if (pending_web_app_action_ == UPDATE_SHORTCUT) {
-    // Schedule a shortcut update when web application info is available if
-    // last committed entry is not NULL. Last committed entry could be NULL
-    // when an interstitial page is injected (e.g. bad https certificate,
-    // malware site etc). When this happens, we abort the shortcut update.
-    NavigationEntry* entry = controller.GetLastCommittedEntry();
-    if (entry)
-      GetApplicationInfo(entry->GetPageID());
-    else
-      pending_web_app_action_ = NONE;
+      if (pending_web_app_action_ == UPDATE_SHORTCUT) {
+        // Schedule a shortcut update when web application info is available if
+        // last committed entry is not NULL. Last committed entry could be NULL
+        // when an interstitial page is injected (e.g. bad https certificate,
+        // malware site etc). When this happens, we abort the shortcut update.
+        NavigationEntry* entry = controller.GetLastCommittedEntry();
+        if (entry)
+          GetApplicationInfo(entry->GetPageID());
+        else
+          pending_web_app_action_ = NONE;
+      }
+      break;
+    }
+
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
+      if (script_bubble_controller_.get()) {
+        script_bubble_controller_->OnExtensionUnloaded(
+            content::Details<extensions::UnloadedExtensionInfo>(
+                details)->extension->id());
+        break;
+      }
+    }
   }
 }
 

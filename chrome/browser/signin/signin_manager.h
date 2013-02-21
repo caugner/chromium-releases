@@ -25,6 +25,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
+#include "chrome/browser/signin/about_signin_internals.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
@@ -45,6 +46,13 @@ struct GoogleServiceSigninSuccessDetails {
         password(in_password) {}
   std::string username;
   std::string password;
+};
+
+// Details for the Notification type NOTIFICATION_GOOGLE_SIGNED_OUT.
+struct GoogleServiceSignoutDetails {
+  explicit GoogleServiceSignoutDetails(const std::string& in_username)
+      : username(in_username) {}
+  std::string username;
 };
 
 class SigninManager : public GaiaAuthConsumer,
@@ -130,6 +138,10 @@ class SigninManager : public GaiaAuthConsumer,
   // GetUserInfo call.
   void OnGetUserInfoKeyNotFound(const std::string& key);
 
+  // Set the profile preference to turn off one-click sign-in so that it won't
+  // ever show it again in this profile (even if the user tries a new account).
+  static void DisableOneClickSignIn(Profile* profile);
+
   // GaiaAuthConsumer
   virtual void OnClientLoginSuccess(const ClientLoginResult& result) OVERRIDE;
   virtual void OnClientLoginFailure(
@@ -145,6 +157,8 @@ class SigninManager : public GaiaAuthConsumer,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  AboutSigninInternals* about_signin_internals();
 
  protected:
   // Weak pointer to parent profile (protected so FakeSigninManager can access
@@ -191,6 +205,8 @@ class SigninManager : public GaiaAuthConsumer,
 
   void CleanupNotificationRegistration();
 
+  void OnGoogleServicesUsernamePatternChanged();
+
   // Result of the last client login, kept pending the lookup of the
   // canonical email.
   ClientLoginResult last_result_;
@@ -212,6 +228,16 @@ class SigninManager : public GaiaAuthConsumer,
   // to one of the StartSigninXXX methods and when the sign in is either
   // successful or not.
   SigninType type_;
+
+  // Temporarily saves the oauth2 refresh and access tokens when signing in
+  // with credentials.  These will be passed to TokenService so that it does
+  // not need to mint new ones.
+  ClientOAuthResult temp_oauth_login_tokens_;
+
+  // A class that encapsulates information relevant to the
+  // about:signin-internals page and takes care of communication
+  // with the UI front-end.
+  AboutSigninInternals about_signin_internals_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninManager);
 };

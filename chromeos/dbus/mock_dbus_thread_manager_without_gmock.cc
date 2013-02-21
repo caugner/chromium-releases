@@ -6,9 +6,11 @@
 
 #include "chromeos/dbus/dbus_thread_manager_observer.h"
 #include "chromeos/dbus/ibus/mock_ibus_client.h"
+#include "chromeos/dbus/ibus/mock_ibus_config_client.h"
 #include "chromeos/dbus/ibus/mock_ibus_engine_factory_service.h"
 #include "chromeos/dbus/ibus/mock_ibus_engine_service.h"
 #include "chromeos/dbus/ibus/mock_ibus_input_context_client.h"
+#include "chromeos/dbus/ibus/mock_ibus_panel_service.h"
 
 namespace chromeos {
 
@@ -75,11 +77,6 @@ BluetoothManagerClient*
 
 BluetoothNodeClient*
     MockDBusThreadManagerWithoutGMock::GetBluetoothNodeClient() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
-CashewClient* MockDBusThreadManagerWithoutGMock::GetCashewClient() {
   NOTIMPLEMENTED();
   return NULL;
 }
@@ -168,6 +165,12 @@ PowerManagerClient* MockDBusThreadManagerWithoutGMock::GetPowerManagerClient() {
   return NULL;
 }
 
+RootPowerManagerClient*
+MockDBusThreadManagerWithoutGMock::GetRootPowerManagerClient() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 SessionManagerClient*
     MockDBusThreadManagerWithoutGMock::GetSessionManagerClient() {
   NOTIMPLEMENTED();
@@ -200,6 +203,10 @@ IBusClient* MockDBusThreadManagerWithoutGMock::GetIBusClient() {
   return mock_ibus_client_.get();
 }
 
+IBusConfigClient* MockDBusThreadManagerWithoutGMock::GetIBusConfigClient() {
+  return mock_ibus_config_client_.get();
+}
+
 IBusInputContextClient*
     MockDBusThreadManagerWithoutGMock::GetIBusInputContextClient() {
   return mock_ibus_input_context_client_.get();
@@ -217,6 +224,11 @@ IBusEngineService* MockDBusThreadManagerWithoutGMock::GetIBusEngineService(
 
 void MockDBusThreadManagerWithoutGMock::RemoveIBusEngineService(
     const dbus::ObjectPath& object_path) {
+}
+
+ibus::IBusPanelService*
+    MockDBusThreadManagerWithoutGMock::GetIBusPanelService() {
+  return mock_ibus_panel_service_.get();
 }
 
 }  // namespace chromeos

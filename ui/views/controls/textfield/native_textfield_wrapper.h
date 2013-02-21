@@ -45,6 +45,9 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
   // text field.
   virtual void AppendText(const string16& text) = 0;
 
+  // Replaces the selected text with |text|.
+  virtual void ReplaceSelection(const string16& text) = 0;
+
   // Returns the text direction.
   virtual base::i18n::TextDirection GetTextDirection() const = 0;
 
@@ -68,9 +71,6 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
 
   // Updates the background color used when painting the native text field.
   virtual void UpdateBackgroundColor() = 0;
-
-  // Updates the cursor color used when painting the native text field.
-  virtual void UpdateCursorColor() = 0;
 
   // Updates the read-only state of the native text field.
   virtual void UpdateReadOnly() = 0;
@@ -121,6 +121,10 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
   // Returns the currnet cursor position.
   virtual size_t GetCursorPosition() const = 0;
 
+  // Get or set whether or not the cursor is enabled.
+  virtual bool GetCursorEnabled() const = 0;
+  virtual void SetCursorEnabled(bool enabled) = 0;
+
   // Following methods are to forward key/focus related events to the
   // views wrapper so that TextfieldViews can handle key inputs without
   // having focus.
@@ -153,6 +157,14 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
 
   // Get the height in pixels of the first font used in this textfield.
   virtual int GetFontHeight() = 0;
+
+  // Returns the baseline of the textfield. This should not take into account
+  // any insets.
+  virtual int GetTextfieldBaseline() const = 0;
+
+  // Performs the action associated with the specified command id. Not called
+  // ExecuteCommand to avoid name clash.
+  virtual void ExecuteTextCommand(int command_id) = 0;
 
   // Creates an appropriate NativeTextfieldWrapper for the platform.
   static NativeTextfieldWrapper* CreateWrapper(Textfield* field);

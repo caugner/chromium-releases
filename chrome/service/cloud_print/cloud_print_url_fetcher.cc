@@ -6,8 +6,8 @@
 
 #include "base/stringprintf.h"
 #include "base/values.h"
+#include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/common/cloud_print/cloud_print_helpers.h"
-#include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/cloud_print/cloud_print_helpers.h"
 #include "chrome/service/cloud_print/cloud_print_token_store.h"
 #include "chrome/service/net/service_url_request_context.h"
@@ -18,6 +18,7 @@
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
+namespace cloud_print {
 
 CloudPrintURLFetcher::ResponseAction
 CloudPrintURLFetcher::Delegate::HandleRawResponse(
@@ -122,7 +123,7 @@ void CloudPrintURLFetcher::OnURLFetchComplete(
       // to a non-cloudprint-server URL eg. for authentication).
       bool succeeded = false;
       DictionaryValue* response_dict = NULL;
-      cloud_print::ParseResponseJSON(data, &succeeded, &response_dict);
+      ParseResponseJSON(data, &succeeded, &response_dict);
       if (response_dict)
         action = delegate_->HandleJSONData(source,
                                            source->GetURL(),
@@ -144,11 +145,11 @@ void CloudPrintURLFetcher::OnURLFetchComplete(
     // there is no reason to retry, request will never succeed.
     // In that case we should call OnRequestGiveUp() right away.
     if (source->GetResponseCode() == net::HTTP_UNSUPPORTED_MEDIA_TYPE)
-      num_retries_ = source->GetMaxRetries();
+      num_retries_ = source->GetMaxRetriesOn5xx();
 
     ++num_retries_;
-    if ((-1 != source->GetMaxRetries()) &&
-        (num_retries_ > source->GetMaxRetries())) {
+    if ((-1 != source->GetMaxRetriesOn5xx()) &&
+        (num_retries_ > source->GetMaxRetriesOn5xx())) {
       // Retry limit reached. Give up.
       delegate_->OnRequestGiveUp();
     } else {
@@ -177,7 +178,7 @@ void CloudPrintURLFetcher::StartRequestHelper(
   request_->SetRequestContext(GetRequestContextGetter());
   // Since we implement our own retry logic, disable the retry in URLFetcher.
   request_->SetAutomaticallyRetryOn5xx(false);
-  request_->SetMaxRetries(max_retries);
+  request_->SetMaxRetriesOn5xx(max_retries);
   delegate_ = delegate;
   SetupRequestHeaders();
   request_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
@@ -193,7 +194,7 @@ void CloudPrintURLFetcher::SetupRequestHeaders() {
   std::string headers = delegate_->GetAuthHeader();
   if (!headers.empty())
     headers += "\r\n";
-  headers += cloud_print::kChromeCloudPrintProxyHeader;
+  headers += kChromeCloudPrintProxyHeader;
   if (!additional_headers_.empty()) {
     headers += "\r\n";
     headers += additional_headers_;
@@ -212,3 +213,5 @@ net::URLRequestContextGetter* CloudPrintURLFetcher::GetRequestContextGetter() {
   getter->set_user_agent(user_agent);
   return getter;
 }
+
+}  // namespace cloud_print

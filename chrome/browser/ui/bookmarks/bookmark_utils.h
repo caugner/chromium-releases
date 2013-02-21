@@ -16,6 +16,7 @@ class Browser;
 class GURL;
 
 namespace content {
+class BrowserContext;
 class PageNavigator;
 class WebContents;
 }
@@ -29,13 +30,15 @@ namespace chrome {
 void OpenAll(gfx::NativeWindow parent,
              content::PageNavigator* navigator,
              const std::vector<const BookmarkNode*>& nodes,
-             WindowOpenDisposition initial_disposition);
+             WindowOpenDisposition initial_disposition,
+             content::BrowserContext* browser_context);
 
 // Convenience for OpenAll() with a single BookmarkNode.
 void OpenAll(gfx::NativeWindow parent,
              content::PageNavigator* navigator,
              const BookmarkNode* node,
-             WindowOpenDisposition initial_disposition);
+             WindowOpenDisposition initial_disposition,
+             content::BrowserContext* browser_context);
 
 // Asks the user before deleting a non-empty bookmark folder.
 bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
@@ -51,6 +54,10 @@ bool HasBookmarkURLs(const std::vector<const BookmarkNode*>& selection);
 void GetURLAndTitleToBookmark(content::WebContents* web_contents,
                               GURL* url,
                               string16* title);
+
+// Toggles whether the bookmark bar is shown only on the new tab page or on
+// all tabs. This is a preference modifier, not a visual modifier.
+void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context);
 
 }  // namespace chrome
 

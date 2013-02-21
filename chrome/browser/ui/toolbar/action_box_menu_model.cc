@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -43,9 +42,9 @@ ActionBoxMenuModel::ActionBoxMenuModel(Browser* browser,
   BookmarkTabHelper* bookmark_tab_helper = BookmarkTabHelper::FromWebContents(
       chrome::GetActiveWebContents(browser_));
   bool starred = bookmark_tab_helper->is_starred();
-  AddItemWithStringId(IDC_BOOKMARK_PAGE,
+  AddItemWithStringId(IDC_BOOKMARK_PAGE_FROM_STAR,
                       starred ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR);
-  SetIcon(GetIndexOfCommandId(IDC_BOOKMARK_PAGE),
+  SetIcon(GetIndexOfCommandId(IDC_BOOKMARK_PAGE_FROM_STAR),
           rb.GetNativeImageNamed(starred ? IDR_STAR_LIT : IDR_STAR));
 }
 

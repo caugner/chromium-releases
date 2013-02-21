@@ -4,17 +4,16 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/scoped_temp_dir.h"
+#include "base/files/scoped_temp_dir.h"
 #include "content/browser/download/download_file_factory.h"
 #include "content/browser/download/download_file_impl.h"
 #include "content/browser/download/download_item_impl.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
-#include "content/browser/power_save_blocker.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/power_save_blocker.h"
 #include "content/public/common/content_client.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_utils.h"
@@ -84,7 +83,7 @@ class DragDownloadFileTest : public ContentBrowserTest {
   }
 
  private:
-  ScopedTempDir downloads_directory_;
+  base::ScopedTempDir downloads_directory_;
 
   DISALLOW_COPY_AND_ASSIGN(DragDownloadFileTest);
 };
@@ -94,7 +93,7 @@ IN_PROC_BROWSER_TEST_F(DragDownloadFileTest, DragDownloadFileTest_NetError) {
       "DragDownloadFileTest_NetError.txt"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(FilePath(FILE_PATH_LITERAL(
       "download-test.lib"))));
-  content::Referrer referrer;
+  Referrer referrer;
   std::string referrer_encoding;
   DragDownloadFile* file = new DragDownloadFile(
       name, scoped_ptr<net::FileStream>(NULL), url, referrer,
@@ -114,7 +113,7 @@ IN_PROC_BROWSER_TEST_F(DragDownloadFileTest, DragDownloadFileTest_Complete) {
         "DragDownloadFileTest_Complete.txt"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(FilePath(FILE_PATH_LITERAL(
       "download-test.lib"))));
-  content::Referrer referrer;
+  Referrer referrer;
   std::string referrer_encoding;
   net::FileStream* stream = NULL;
 #if defined(OS_POSIX)

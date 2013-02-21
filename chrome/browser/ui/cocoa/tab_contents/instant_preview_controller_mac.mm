@@ -5,32 +5,30 @@
 #include "chrome/browser/ui/cocoa/tab_contents/instant_preview_controller_mac.h"
 
 #include "chrome/browser/instant/instant_model.h"
+#include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/previewable_contents_controller.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 
 InstantPreviewControllerMac::InstantPreviewControllerMac(
     Browser* browser,
-    BrowserWindowController* window_controller,
-    PreviewableContentsController* previewable_contents_controller)
+    BrowserWindowController* window,
+    PreviewableContentsController* preview)
     : InstantPreviewController(browser),
-      window_controller_(window_controller),
-      previewable_contents_controller_(previewable_contents_controller) {
+      window_(window),
+      preview_(preview) {
 }
 
 InstantPreviewControllerMac::~InstantPreviewControllerMac() {
 }
 
-void InstantPreviewControllerMac::DisplayStateChanged(
+void InstantPreviewControllerMac::PreviewStateChanged(
     const InstantModel& model) {
-  if (model.is_ready()) {
-    // TODO(dhollowa): Needs height and units implementation on Mac.
-    [previewable_contents_controller_
-        showPreview:model.GetPreviewContents()->web_contents()];
+  if (model.mode().is_ntp() || model.mode().is_search_suggestions()) {
+    [preview_ showPreview:model.GetPreviewContents()
+                   height:model.height()
+              heightUnits:model.height_units()];
   } else {
-    if (![previewable_contents_controller_ isShowingPreview])
-      return;
-    [previewable_contents_controller_ hidePreview];
+    [preview_ hidePreview];
   }
-  [window_controller_ updateBookmarkBarVisibilityWithAnimation:NO];
+  browser_->MaybeUpdateBookmarkBarStateForInstantPreview(model.mode());
 }

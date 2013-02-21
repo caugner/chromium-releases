@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_FONT_SETTINGS_HANDLER_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/api/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 
 namespace base {
@@ -28,11 +28,6 @@ class FontSettingsHandler : public OptionsPageUIHandler {
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
  private:
   void HandleFetchFontsData(const ListValue* args);
 
@@ -43,6 +38,7 @@ class FontSettingsHandler : public OptionsPageUIHandler {
   void SetUpSansSerifFontSample();
   void SetUpFixedFontSample();
   void SetUpMinimumFontSample();
+  void OnWebKitDefaultFontSizeChanged();
 
   StringPrefMember standard_font_;
   StringPrefMember serif_font_;

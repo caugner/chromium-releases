@@ -2,10 +2,33 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-.app {
+.apps-page .tile-cell {
+  -webkit-margin-start: 20px;
+  height: 70px;
+  margin-bottom: 12px;
+  width: 70px;
+}
+
+.apps-page .tile-cell:first-child {
+  -webkit-margin-start: 0;
+}
+
+.apps-page .app {
+  display: block;
+  height: 70px;
+  margin-top: 8px;
   outline: none;
-  position: absolute;
   text-align: center;
+  width: 70px;
+}
+
+.apps-page .app .title {
+  color: #777;
+  font-size: 0.9166em;
+  left: -7px;
+  margin-top: 4px;
+  position: relative;
+  width: 84px;
 }
 
 .app-contents {
@@ -59,13 +82,25 @@
   z-index: 0;
 }
 
-.app-icon-div .app-img-container {
-  bottom: 10px;
-  left: 10px;
-  position: absolute;
+.animate-tile-repositioning .app.small-icon {
+  margin-top: 0;
 }
 
-.app-icon-div .color-stripe {
+.small-icon .app-icon-div {
+  height: 50px;
+  margin: 18px 9px 12px;
+  width: 50px;
+}
+
+.small-icon .app-img-container {
+  bottom: 7px;
+  height: 16px;
+  left: 5px;
+  position: absolute;
+  width: 16px;
+}
+
+.small-icon .color-stripe {
   border-bottom-left-radius: 5px 5px;
   border-bottom-right-radius: 5px 5px;
   bottom: 0;
@@ -82,6 +117,10 @@
 
 .app-context-menu {
   z-index: 1000;
+}
+
+.app-context-menu > [checked]::before {
+  height: 5px;
 }
 
 .launch-click-target {

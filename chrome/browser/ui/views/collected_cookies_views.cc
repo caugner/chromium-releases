@@ -11,10 +11,10 @@
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
+#include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -198,8 +198,7 @@ CollectedCookiesViews::CollectedCookiesViews(content::WebContents* web_contents)
       TabSpecificContentSettings::FromWebContents(web_contents);
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
                  content::Source<TabSpecificContentSettings>(content_settings));
-  window_ = new ConstrainedWindowViews(
-      web_contents, this, false, ConstrainedWindowViews::DEFAULT_INSETS);
+  window_ = new ConstrainedWindowViews(web_contents, this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -235,6 +234,14 @@ bool CollectedCookiesViews::Cancel() {
 
 views::View* CollectedCookiesViews::GetContentsView() {
   return this;
+}
+
+ui::ModalType CollectedCookiesViews::GetModalType() const {
+#if defined(USE_ASH)
+  return ui::MODAL_TYPE_CHILD;
+#else
+  return views::WidgetDelegate::GetModalType();
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -402,7 +409,7 @@ views::View* CollectedCookiesViews::CreateBlockedPane() {
               IDS_COLLECTED_COOKIES_BLOCKED_THIRD_PARTY_BLOCKING_ENABLED :
               IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL));
   blocked_label_->SetMultiLine(true);
-  blocked_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  blocked_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   const LocalSharedObjectsContainer& blocked_data =
       content_settings->blocked_local_shared_objects();
   blocked_cookies_tree_model_ = blocked_data.CreateCookiesTreeModel();

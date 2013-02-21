@@ -11,6 +11,7 @@
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
+#include "content/browser/renderer_host/media/web_contents_capture_util.h"
 #include "content/common/media/audio_messages.h"
 
 namespace content {
@@ -183,6 +184,8 @@ bool AudioInputRendererHost::OnMessageReceived(const IPC::Message& message,
   IPC_BEGIN_MESSAGE_MAP_EX(AudioInputRendererHost, message, *message_was_ok)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_StartDevice, OnStartDevice)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_CreateStream, OnCreateStream)
+    IPC_MESSAGE_HANDLER(AudioInputHostMsg_AssociateStreamWithConsumer,
+                        OnAssociateStreamWithConsumer)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_RecordStream, OnRecordStream)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_CloseStream, OnCloseStream)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_SetVolume, OnSetVolume)
@@ -209,11 +212,25 @@ void AudioInputRendererHost::OnCreateStream(
   VLOG(1) << "AudioInputRendererHost::OnCreateStream(stream_id="
           << stream_id << ")";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(LookupById(stream_id) == NULL);
+  // media::AudioParameters is validated in the deserializer.
+  if (LookupById(stream_id) != NULL) {
+    SendErrorMessage(stream_id);
+    return;
+  }
 
   media::AudioParameters audio_params(params);
 
-  DCHECK_GT(audio_params.frames_per_buffer(), 0);
+  if (media_stream_manager_->audio_input_device_manager()->
+      ShouldUseFakeDevice()) {
+    audio_params.Reset(media::AudioParameters::AUDIO_FAKE,
+                       params.channel_layout(), params.sample_rate(),
+                       params.bits_per_sample(), params.frames_per_buffer());
+  } else if (WebContentsCaptureUtil::IsWebContentsDeviceId(device_id)) {
+    audio_params.Reset(media::AudioParameters::AUDIO_VIRTUAL,
+                       params.channel_layout(), params.sample_rate(),
+                       params.bits_per_sample(), params.frames_per_buffer());
+  }
+
   uint32 buffer_size = audio_params.GetBytesPerBuffer();
 
   // Create a new AudioEntry structure.
@@ -255,14 +272,24 @@ void AudioInputRendererHost::OnCreateStream(
     return;
   }
 
-  // Set the initial AGC state for the audio input stream.
-  entry->controller->SetAutomaticGainControl(automatic_gain_control);
+  // Set the initial AGC state for the audio input stream. Note that, the AGC
+  // is only supported in AUDIO_PCM_LOW_LATENCY mode.
+  if (params.format() == media::AudioParameters::AUDIO_PCM_LOW_LATENCY)
+    entry->controller->SetAutomaticGainControl(automatic_gain_control);
 
   // If we have created the controller successfully create a entry and add it
   // to the map.
   entry->stream_id = stream_id;
 
   audio_entries_.insert(std::make_pair(stream_id, entry.release()));
+}
+
+void AudioInputRendererHost::OnAssociateStreamWithConsumer(int stream_id,
+                                                           int render_view_id) {
+  // TODO(miu): Will use render_view_id in upcoming change.
+  DVLOG(1) << "AudioInputRendererHost@" << this
+           << "::OnAssociateStreamWithConsumer(stream_id=" << stream_id
+           << ", render_view_id=" << render_view_id << ")";
 }
 
 void AudioInputRendererHost::OnRecordStream(int stream_id) {

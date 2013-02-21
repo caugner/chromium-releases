@@ -7,7 +7,6 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -28,7 +27,10 @@ ZoomController::ZoomController(content::WebContents* web_contents)
       observer_(NULL) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  default_zoom_level_.Init(prefs::kDefaultZoomLevel, profile->GetPrefs(), this);
+  default_zoom_level_.Init(prefs::kDefaultZoomLevel, profile->GetPrefs(),
+                           base::Bind(&ZoomController::UpdateState,
+                                      base::Unretained(this),
+                                      std::string()));
 
   content::HostZoomMap* zoom_map =
       content::HostZoomMap::GetForBrowserContext(profile);
@@ -38,17 +40,20 @@ ZoomController::ZoomController(content::WebContents* web_contents)
   UpdateState(std::string());
 }
 
-ZoomController::~ZoomController() {
-  default_zoom_level_.Destroy();
-  registrar_.RemoveAll();
-}
+ZoomController::~ZoomController() {}
 
 bool ZoomController::IsAtDefaultZoom() const {
+  if (!web_contents())
+    return true;
+
   return content::ZoomValuesEqual(web_contents()->GetZoomLevel(),
                                   default_zoom_level_.GetValue());
 }
 
 int ZoomController::GetResourceForZoomLevel() const {
+  if (!web_contents())
+    return IDR_ZOOM_MINUS;
+
   DCHECK(!IsAtDefaultZoom());
   double zoom = web_contents()->GetZoomLevel();
   return zoom > default_zoom_level_.GetValue() ? IDR_ZOOM_PLUS : IDR_ZOOM_MINUS;
@@ -65,32 +70,28 @@ void ZoomController::DidNavigateMainFrame(
 void ZoomController::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      std::string* pref_name = content::Details<std::string>(details).ptr();
-      DCHECK(pref_name && *pref_name == prefs::kDefaultZoomLevel);
-      UpdateState(std::string());
-      break;
-    }
-    case content::NOTIFICATION_ZOOM_LEVEL_CHANGED:
-      UpdateState(*content::Details<std::string>(details).ptr());
-      break;
-    default:
-      NOTREACHED();
-  }
+  DCHECK_EQ(content::NOTIFICATION_ZOOM_LEVEL_CHANGED, type);
+  UpdateState(*content::Details<std::string>(details).ptr());
 }
 
 void ZoomController::UpdateState(const std::string& host) {
-  if (host.empty())
+  // TODO(dbeam): I'm not totally sure why this is happening, and there's been a
+  // bit of effort to understand with no tangible results yet. It's possible
+  // that WebContents is NULL as it's being destroyed or some other random
+  // reason that I haven't found yet. Applying band-aid. http://crbug.com/144879
+  if (!web_contents())
     return;
 
-  // Use the active navigation entry's URL instead of the WebContents' so
-  // virtual URLs work (e.g. chrome://settings). http://crbug.com/153950
-  content::NavigationEntry* active_entry =
-      web_contents()->GetController().GetActiveEntry();
-  if (!active_entry ||
-      host != net::GetHostOrSpecFromURL(active_entry->GetURL())) {
-    return;
+  // If |host| is empty, all observers should be updated.
+  if (!host.empty()) {
+    // Use the active navigation entry's URL instead of the WebContents' so
+    // virtual URLs work (e.g. chrome://settings). http://crbug.com/153950
+    content::NavigationEntry* active_entry =
+        web_contents()->GetController().GetActiveEntry();
+    if (!active_entry ||
+        host != net::GetHostOrSpecFromURL(active_entry->GetURL())) {
+      return;
+    }
   }
 
   bool dummy;

@@ -22,16 +22,15 @@ namespace ibus {
 
 // The IBusLookupTable is one of IBusObjects. IBusLookupTable contains IBusTexts
 // but all of them are used as plain string. The overview of each data
-// strucutres is as follows:
+// structure is as follows:
 //
 // DATA STRUCTURE OVERVIEW:
 //  variant  struct {
 //   string "IBusLookupTable"
 //   array [
 //     dict_entry (
-//       string "mozc.candidates"
-//       variant  variant  array of bytes [
-//         08 01 10 16 ...
+//       string "window_show_at_composition"
+//       variant  variant  boolean false
 //       ]
 //     )
 //   ]
@@ -71,7 +70,7 @@ namespace ibus {
 class IBusLookupTable;
 
 // Pops a IBusLookupTable from |reader|.
-// Returns false if an error occures.
+// Returns false if an error occurs.
 bool CHROMEOS_EXPORT PopIBusLookupTable(dbus::MessageReader* reader,
                                         IBusLookupTable* table);
 // Appends a IBusLookupTable to |writer| except mozc_candidates_ in |table|.
@@ -91,8 +90,13 @@ class CHROMEOS_EXPORT IBusLookupTable {
   // field is represented as IBusText, but attributes are not used in Chrome.
   // So just simple string is sufficient in this case.
   struct Entry {
+    Entry();
+    virtual ~Entry();
     std::string value;
     std::string label;
+    std::string annotation;
+    std::string description_title;
+    std::string description_body;
   };
 
   IBusLookupTable();
@@ -108,7 +112,7 @@ class CHROMEOS_EXPORT IBusLookupTable {
     cursor_position_ = cursor_position;
   }
 
-  // Returns true if the cusros is visible.
+  // Returns true if the cursor is visible.
   bool is_cursor_visible() const { return is_cursor_visible_; }
   void set_is_cursor_visible(bool is_cursor_visible) {
     is_cursor_visible_ = is_cursor_visible;
@@ -123,12 +127,11 @@ class CHROMEOS_EXPORT IBusLookupTable {
   const std::vector<Entry>& candidates() const { return candidates_; }
   std::vector<Entry>* mutable_candidates() { return &candidates_; }
 
-  const std::string& serialized_mozc_candidates_data() {
-    return serialized_mozc_candidates_data_;
+  bool show_window_at_composition() const {
+    return show_window_at_composition_;
   }
-  void set_serialized_mozc_candidates_data(
-      const std::string& serialized_mozc_candidates_data) {
-    serialized_mozc_candidates_data_ = serialized_mozc_candidates_data;
+  void set_show_window_at_composition(bool show_window_at_composition) {
+    show_window_at_composition_ = show_window_at_composition;
   }
 
  private:
@@ -137,9 +140,7 @@ class CHROMEOS_EXPORT IBusLookupTable {
   bool is_cursor_visible_;
   Orientation orientation_;
   std::vector<Entry> candidates_;
-
-  // TODO(nona): Refine data structure(crbug.com/129403).
-  std::string serialized_mozc_candidates_data_;
+  bool show_window_at_composition_;
 
   DISALLOW_COPY_AND_ASSIGN(IBusLookupTable);
 };

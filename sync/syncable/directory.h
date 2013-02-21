@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/file_util.h"
 #include "base/gtest_prod_util.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/util/report_unrecoverable_error_function.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/syncable/dir_open_result.h"
@@ -128,7 +129,7 @@ enum InvariantCheckLevel {
   FULL_DB_VERIFICATION = 2 // Check every entry.  This can be expensive.
 };
 
-class Directory {
+class SYNC_EXPORT Directory {
   friend class BaseTransaction;
   friend class Entry;
   friend class MutableEntry;
@@ -168,8 +169,6 @@ class Directory {
     // TODO(hatiaol): implement detection and fixing of out-of-sync models.
     //                Bug 154858.
     int64 transaction_version[MODEL_TYPE_COUNT];
-    // true iff we ever reached the end of the changelog.
-    ModelTypeSet initial_sync_ended;
     // The store birthday we were given by the server. Contents are opaque to
     // the client.
     std::string store_birthday;
@@ -264,9 +263,9 @@ class Directory {
   int64 GetTransactionVersion(ModelType type) const;
   void IncrementTransactionVersion(ModelType type);
 
-  ModelTypeSet initial_sync_ended_types() const;
-  bool initial_sync_ended_for_type(ModelType type) const;
-  void set_initial_sync_ended_for_type(ModelType type, bool value);
+  ModelTypeSet InitialSyncEndedTypes();
+  bool InitialSyncEndedForType(ModelType type);
+  bool InitialSyncEndedForType(BaseTransaction* trans, ModelType type);
 
   const std::string& name() const { return kernel_->name; }
 
@@ -423,6 +422,13 @@ class Directory {
                                      FullModelTypeSet server_types,
                                      std::vector<int64>* result);
 
+  // Get metahandle counts for various criteria to show on the
+  // about:sync page. The information is computed on the fly
+  // each time. If this results in a significant performance hit,
+  // additional data structures can be added to cache results.
+  void CollectMetaHandleCounts(std::vector<int>* num_entries_by_type,
+                               std::vector<int>* num_to_delete_entries_by_type);
+
   // Sets the level of invariant checking performed after transactions.
   void SetInvariantCheckLevel(InvariantCheckLevel check_level);
 
@@ -483,7 +489,6 @@ class Directory {
   // Internal setters that do not acquire a lock internally.  These are unsafe
   // on their own; caller must guarantee exclusive access manually by holding
   // a ScopedKernelLock.
-  void set_initial_sync_ended_for_type_unsafe(ModelType type, bool x);
   void SetNotificationStateUnsafe(const std::string& notification_state);
 
   Directory& operator = (const Directory&);

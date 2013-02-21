@@ -7,6 +7,7 @@
 
 #include "base/platform_file.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "webkit/fileapi/syncable/sync_file_status.h"
 #include "webkit/fileapi/syncable/sync_status_code.h"
 #include "webkit/quota/quota_types.h"
 
@@ -15,6 +16,49 @@ class FileSystemContext;
 }
 
 namespace extensions {
+
+class SyncFileSystemDeleteFileSystemFunction
+    : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("syncFileSystem.deleteFileSystem");
+
+ protected:
+  virtual ~SyncFileSystemDeleteFileSystemFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  void DidDeleteFileSystem(base::PlatformFileError error);
+};
+
+
+class SyncFileSystemGetFileSyncStatusFunction
+    : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("syncFileSystem.getFileSyncStatus");
+
+ protected:
+  virtual ~SyncFileSystemGetFileSyncStatusFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  void DidGetFileSyncStatus(const fileapi::SyncStatusCode sync_service_status,
+                            const fileapi::SyncFileStatus sync_file_status);
+};
+
+class SyncFileSystemGetUsageAndQuotaFunction
+    : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("syncFileSystem.getUsageAndQuota");
+
+ protected:
+  virtual ~SyncFileSystemGetUsageAndQuotaFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  void DidGetUsageAndQuota(quota::QuotaStatusCode status,
+                           int64 usage,
+                           int64 quota);
+};
 
 class SyncFileSystemRequestFileSystemFunction
     : public AsyncExtensionFunction {
@@ -36,21 +80,6 @@ class SyncFileSystemRequestFileSystemFunction
   void DidOpenFileSystem(base::PlatformFileError error,
                          const std::string& file_system_name,
                          const GURL& root_url);
-};
-
-class SyncFileSystemGetUsageAndQuotaFunction
-    : public AsyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION_NAME("syncFileSystem.getUsageAndQuota");
-
- protected:
-  virtual ~SyncFileSystemGetUsageAndQuotaFunction() {}
-  virtual bool RunImpl() OVERRIDE;
-
- private:
-  void DidGetUsageAndQuota(quota::QuotaStatusCode status,
-                           int64 usage,
-                           int64 quota);
 };
 
 }  // namespace extensions

@@ -77,6 +77,7 @@ MasterPreferences::MasterPreferences() : distribution_(NULL),
                                          preferences_read_from_file_(false),
                                          chrome_(true),
                                          chrome_app_host_(false),
+                                         chrome_app_launcher_(false),
                                          chrome_frame_(false),
                                          multi_install_(false) {
   InitializeFromCommandLine(*CommandLine::ForCurrentProcess());
@@ -87,14 +88,19 @@ MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
       preferences_read_from_file_(false),
       chrome_(true),
       chrome_app_host_(false),
+      chrome_app_launcher_(false),
       chrome_frame_(false),
       multi_install_(false) {
   InitializeFromCommandLine(cmd_line);
 }
 
 MasterPreferences::MasterPreferences(const FilePath& prefs_path)
-    : distribution_(NULL), preferences_read_from_file_(false),
-      chrome_(true), chrome_app_host_(false), chrome_frame_(false),
+    : distribution_(NULL),
+      preferences_read_from_file_(false),
+      chrome_(true),
+      chrome_app_host_(false),
+      chrome_app_launcher_(false),
+      chrome_frame_(false),
       multi_install_(false) {
   std::string json_data;
   // Failure to read the file is ignored as |json_data| will be the empty string
@@ -110,8 +116,12 @@ MasterPreferences::MasterPreferences(const FilePath& prefs_path)
 }
 
 MasterPreferences::MasterPreferences(const std::string& prefs)
-    : distribution_(NULL), preferences_read_from_file_(false),
-      chrome_(true), chrome_app_host_(false), chrome_frame_(false),
+    : distribution_(NULL),
+      preferences_read_from_file_(false),
+      chrome_(true),
+      chrome_app_host_(false),
+      chrome_app_launcher_(false),
+      chrome_frame_(false),
       multi_install_(false) {
   InitializeFromString(prefs);
 }
@@ -142,6 +152,8 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
       installer::master_preferences::kAutoLaunchChrome },
     { installer::switches::kChromeAppHost,
       installer::master_preferences::kChromeAppHost },
+    { installer::switches::kChromeAppLauncher,
+      installer::master_preferences::kChromeAppLauncher },
     { installer::switches::kChrome,
       installer::master_preferences::kChrome },
     { installer::switches::kChromeFrame,
@@ -229,11 +241,15 @@ void MasterPreferences::InitializeProductFlags() {
   multi_install_ = false;
   chrome_frame_ = false;
   chrome_app_host_ = false;
+  chrome_app_launcher_ = false;
   chrome_ = true;
 
   GetBool(installer::master_preferences::kMultiInstall, &multi_install_);
   GetBool(installer::master_preferences::kChromeFrame, &chrome_frame_);
+
   GetBool(installer::master_preferences::kChromeAppHost, &chrome_app_host_);
+  GetBool(installer::master_preferences::kChromeAppLauncher,
+          &chrome_app_launcher_);
 
   // When multi-install is specified, the checks are pretty simple (in theory):
   // In order to be installed/uninstalled, each product must have its switch

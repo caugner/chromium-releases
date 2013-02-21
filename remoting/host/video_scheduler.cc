@@ -30,35 +30,60 @@ namespace remoting {
 // TODO(hclam): Move this value to CaptureScheduler.
 static const int kMaxPendingCaptures = 2;
 
-VideoScheduler::VideoScheduler(
+// static
+scoped_refptr<VideoScheduler> VideoScheduler::Create(
     scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
     VideoFrameCapturer* capturer,
     scoped_ptr<VideoEncoder> encoder,
     protocol::ClientStub* client_stub,
-    protocol::VideoStub* video_stub)
-    : capture_task_runner_(capture_task_runner),
-      encode_task_runner_(encode_task_runner),
-      network_task_runner_(network_task_runner),
-      capturer_(capturer),
-      encoder_(encoder.Pass()),
-      cursor_stub_(client_stub),
-      video_stub_(video_stub),
-      pending_captures_(0),
-      did_skip_frame_(false),
-      is_paused_(false),
-      sequence_number_(0) {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
-  DCHECK(capturer_);
-  DCHECK(cursor_stub_);
-  DCHECK(video_stub_);
+    protocol::VideoStub* video_stub) {
+  DCHECK(network_task_runner->BelongsToCurrentThread());
+  DCHECK(capturer);
+  DCHECK(encoder);
+  DCHECK(client_stub);
+  DCHECK(video_stub);
 
-  capture_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&VideoScheduler::StartOnCaptureThread, this));
+  scoped_refptr<VideoScheduler> scheduler = new VideoScheduler(
+      capture_task_runner, encode_task_runner, network_task_runner,
+      capturer, encoder.Pass(), client_stub, video_stub);
+  capture_task_runner->PostTask(
+      FROM_HERE, base::Bind(&VideoScheduler::StartOnCaptureThread, scheduler));
+
+  return scheduler;
 }
 
 // Public methods --------------------------------------------------------------
+
+void VideoScheduler::OnCaptureCompleted(
+    scoped_refptr<CaptureData> capture_data) {
+  DCHECK(capture_task_runner_->BelongsToCurrentThread());
+
+  if (capture_data) {
+    scheduler_.RecordCaptureTime(
+        base::TimeDelta::FromMilliseconds(capture_data->capture_time_ms()));
+
+    // The best way to get this value is by binding the sequence number to
+    // the callback when calling CaptureInvalidRects(). However the callback
+    // system doesn't allow this. Reading from the member variable is
+    // accurate as long as capture is synchronous as the following statement
+    // will obtain the most recent sequence number received.
+    capture_data->set_client_sequence_number(sequence_number_);
+  }
+
+  encode_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&VideoScheduler::EncodeFrame, this, capture_data));
+}
+
+void VideoScheduler::OnCursorShapeChanged(
+    scoped_ptr<protocol::CursorShapeInfo> cursor_shape) {
+  DCHECK(capture_task_runner_->BelongsToCurrentThread());
+
+  network_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&VideoScheduler::SendCursorShape, this,
+                            base::Passed(&cursor_shape)));
+}
 
 void VideoScheduler::Stop(const base::Closure& done_task) {
   DCHECK(network_task_runner_->BelongsToCurrentThread());
@@ -103,6 +128,27 @@ void VideoScheduler::UpdateSequenceNumber(int64 sequence_number) {
 
 // Private methods -----------------------------------------------------------
 
+VideoScheduler::VideoScheduler(
+    scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
+    VideoFrameCapturer* capturer,
+    scoped_ptr<VideoEncoder> encoder,
+    protocol::ClientStub* client_stub,
+    protocol::VideoStub* video_stub)
+    : capture_task_runner_(capture_task_runner),
+      encode_task_runner_(encode_task_runner),
+      network_task_runner_(network_task_runner),
+      capturer_(capturer),
+      encoder_(encoder.Pass()),
+      cursor_stub_(client_stub),
+      video_stub_(video_stub),
+      pending_captures_(0),
+      did_skip_frame_(false),
+      is_paused_(false),
+      sequence_number_(0) {
+}
+
 VideoScheduler::~VideoScheduler() {
 }
 
@@ -112,8 +158,7 @@ void VideoScheduler::StartOnCaptureThread() {
   DCHECK(capture_task_runner_->BelongsToCurrentThread());
 
   // Start the capturer and let it notify us of cursor shape changes.
-  capturer_->Start(
-      base::Bind(&VideoScheduler::CursorShapeChangedCallback, this));
+  capturer_->Start(this);
 
   capture_timer_.reset(new base::OneShotTimer<VideoScheduler>());
 
@@ -131,9 +176,12 @@ void VideoScheduler::StopOnCaptureThread(const base::Closure& done_task) {
   // |capture_timer_| must be destroyed on the thread on which it is used.
   capture_timer_.reset();
 
-  // Activity on the encode thread will stop implicitly as a result of
-  // captures having stopped.
-  network_task_runner_->PostTask(FROM_HERE, done_task);
+  // Ensure that the encode thread is no longer processing capture data,
+  // otherwise tearing down |capturer_| will crash it.  See crbug.com/163641.
+  // TODO(wez): Make it safe to tear down capturer while buffers remain, and
+  // remove this work-around.
+  encode_task_runner_->PostTask(FROM_HERE,
+      base::Bind(&VideoScheduler::StopOnEncodeThread, this, done_task));
 }
 
 void VideoScheduler::ScheduleNextCapture() {
@@ -170,41 +218,7 @@ void VideoScheduler::CaptureNextFrame() {
   ScheduleNextCapture();
 
   // And finally perform one capture.
-  capture_start_time_ = base::Time::Now();
-  capturer_->CaptureInvalidRegion(
-      base::Bind(&VideoScheduler::CaptureDoneCallback, this));
-}
-
-void VideoScheduler::CaptureDoneCallback(
-    scoped_refptr<CaptureData> capture_data) {
-  DCHECK(capture_task_runner_->BelongsToCurrentThread());
-
-  if (capture_data) {
-    base::TimeDelta capture_time = base::Time::Now() - capture_start_time_;
-    int capture_time_ms =
-        static_cast<int>(capture_time.InMilliseconds());
-    capture_data->set_capture_time_ms(capture_time_ms);
-    scheduler_.RecordCaptureTime(capture_time);
-
-    // The best way to get this value is by binding the sequence number to
-    // the callback when calling CaptureInvalidRects(). However the callback
-    // system doesn't allow this. Reading from the member variable is
-    // accurate as long as capture is synchronous as the following statement
-    // will obtain the most recent sequence number received.
-    capture_data->set_client_sequence_number(sequence_number_);
-  }
-
-  encode_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&VideoScheduler::EncodeFrame, this, capture_data));
-}
-
-void VideoScheduler::CursorShapeChangedCallback(
-    scoped_ptr<protocol::CursorShapeInfo> cursor_shape) {
-  DCHECK(capture_task_runner_->BelongsToCurrentThread());
-
-  network_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&VideoScheduler::SendCursorShape, this,
-                            base::Passed(&cursor_shape)));
+  capturer_->CaptureFrame();
 }
 
 void VideoScheduler::FrameCaptureCompleted() {
@@ -271,7 +285,6 @@ void VideoScheduler::EncodeFrame(
     return;
   }
 
-  encode_start_time_ = base::Time::Now();
   encoder_->Encode(
       capture_data, false,
       base::Bind(&VideoScheduler::EncodedDataAvailableCallback, this));
@@ -283,16 +296,21 @@ void VideoScheduler::EncodedDataAvailableCallback(
 
   bool last = (packet->flags() & VideoPacket::LAST_PACKET) != 0;
   if (last) {
-    base::TimeDelta encode_time = base::Time::Now() - encode_start_time_;
-    int encode_time_ms =
-        static_cast<int>(encode_time.InMilliseconds());
-    packet->set_encode_time_ms(encode_time_ms);
-    scheduler_.RecordEncodeTime(encode_time);
+    scheduler_.RecordEncodeTime(
+        base::TimeDelta::FromMilliseconds(packet->encode_time_ms()));
   }
 
   network_task_runner_->PostTask(
       FROM_HERE, base::Bind(&VideoScheduler::SendVideoPacket, this,
                             base::Passed(&packet)));
+}
+
+void VideoScheduler::StopOnEncodeThread(const base::Closure& done_task) {
+  DCHECK(encode_task_runner_->BelongsToCurrentThread());
+
+  // This is posted by StopOnCaptureThread, so we know that by the time we
+  // process it there are no more encode tasks queued.
+  network_task_runner_->PostTask(FROM_HERE, done_task);
 }
 
 }  // namespace remoting

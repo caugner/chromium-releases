@@ -37,7 +37,7 @@ extern const char kOnExtensionDisabled[];
 
 // FileBrowser.
 extern const char kOnFileBrowserDiskChanged[];
-extern const char kOnFileChanged[];
+extern const char kOnDirectoryChanged[];
 extern const char kOnFileBrowserMountCompleted[];
 extern const char kOnFileTransfersUpdated[];
 extern const char kOnDocumentFeedFetched[];
@@ -50,6 +50,9 @@ extern const char kOnInputMethodChanged[];
 // Context menus.
 extern const char kOnContextMenus[];
 extern const char kOnContextMenuClicked[];
+
+// DIAL.
+extern const char kOnDialDeviceList[];
 
 // Downloads.
 extern const char kOnDownloadCreated[];
@@ -69,12 +72,10 @@ extern const char kOnOffscreenTabUpdated[];
 extern const char kOnTabCaptureStatusChanged[];
 
 // Bluetooth.
-extern const char kBluetoothOnAvailabilityChanged[];
+extern const char kBluetoothOnAdapterStateChanged[];
 extern const char kBluetoothOnDeviceDiscovered[];
 extern const char kBluetoothOnDeviceSearchFinished[];
 extern const char kBluetoothOnDeviceSearchResult[];
-extern const char kBluetoothOnDiscoveringChanged[];
-extern const char kBluetoothOnPowerChanged[];
 
 // Push messaging.
 extern const char kOnPushMessage[];
@@ -84,6 +85,17 @@ extern const char kOnCpuUpdated[];
 extern const char kOnStorageAvailableCapacityChanged[];
 extern const char kOnStorageAdded[];
 extern const char kOnStorageRemoved[];
+
+// System Indicator icon.
+extern const char kOnSystemIndicatorClicked[];
+
+// SyncFileSystem.
+extern const char kOnSyncStateChanged[];
+extern const char kOnFileSynced[];
+
+// MediaGalleriesPrivate.
+extern const char kOnAttachEventName[];
+extern const char kOnDetachEventName[];
 
 }  // namespace event_names
 

@@ -6,16 +6,16 @@
 
 #include "ash/wm/window_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/web_contents.h"
 
 // Returns the currently-active WebContents belonging to the active browser, or
 // NULL if there's no currently-active browser.
 content::WebContents* GetActiveWebContents() {
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = chrome::FindLastActiveWithHostDesktopType(
+      chrome::HOST_DESKTOP_TYPE_ASH);
   if (!browser)
     return NULL;
   if (!ash::wm::IsActiveWindow(browser->window()->GetNativeWindow()))

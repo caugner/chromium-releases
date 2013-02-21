@@ -31,15 +31,10 @@ class UsbService : public ProfileKeyedService {
   // event handling thread and disposes of open devices.
   void Cleanup();
 
-  // Find the (topologically) first USB device identified by vendor_id and
-  // product_id. The created device is associated with this service, so that
-  // it can be used to close the device later.
-  UsbDevice* FindDevice(const uint16 vendor_id, const uint16 product_id);
-
   // Find all of the devices attached to the system that are identified by
   // |vendor_id| and |product_id|, inserting them into |devices|. Clears
   // |devices| before use.
-  bool FindDevices(const uint16 vendor_id,
+  void FindDevices(const uint16 vendor_id,
                    const uint16 product_id,
                    std::vector<scoped_refptr<UsbDevice> >* devices);
 
@@ -70,6 +65,15 @@ class UsbService : public ProfileKeyedService {
   static bool DeviceMatches(PlatformUsbDevice device,
                             const uint16 vendor_id,
                             const uint16 product_id);
+
+  // FindDevicesImpl is called by FindDevices on ChromeOS after the permission
+  // broker has signalled that permission has been granted to access the
+  // underlying device nodes. On other platforms, it is called directly by
+  // FindDevices.
+  void FindDevicesImpl(const uint16 vendor_id,
+                       const uint16 product_id,
+                       std::vector<scoped_refptr<UsbDevice> >* devices,
+                       bool success);
 
   // Populates |output| with the result of enumerating all attached USB devices.
   void EnumerateDevices(DeviceVector* output);

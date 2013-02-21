@@ -13,6 +13,7 @@
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/browser/web_contents/interstitial_page_impl.h"
 #include "content/browser/web_contents/navigation_controller_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/webui/web_ui_impl.h"
@@ -89,6 +90,8 @@ RenderViewHostImpl* RenderViewHostManager::pending_render_view_host() const {
 }
 
 RenderWidgetHostView* RenderViewHostManager::GetRenderWidgetHostView() const {
+  if (interstitial_page_)
+    return interstitial_page_->GetView();
   if (!render_view_host_)
     return NULL;
   return render_view_host_->GetView();
@@ -232,6 +235,17 @@ void RenderViewHostManager::DidNavigateMainFrame(
   }
 }
 
+void RenderViewHostManager::DidDisownOpener(RenderViewHost* render_view_host) {
+  // Notify all swapped out hosts, including the pending RVH.
+  for (RenderViewHostMap::iterator iter = swapped_out_hosts_.begin();
+       iter != swapped_out_hosts_.end();
+       ++iter) {
+    DCHECK_NE(iter->second->GetSiteInstance(),
+              current_host()->GetSiteInstance());
+    iter->second->DisownOpener();
+  }
+}
+
 void RenderViewHostManager::DidUpdateFrameTree(
     RenderViewHost* render_view_host) {
   // TODO(nasko): This used to be a CHECK_EQ, but it causes more crashes than
@@ -251,7 +265,6 @@ void RenderViewHostManager::DidUpdateFrameTree(
 
     // Send updates to the other swapped out RVHs, unless it's the pending RVH
     // (which is in the process of navigating).
-    // TODO(creis): Remove the pending RVH from swapped_out_hosts_.
     // TODO(nasko): Don't send updates across BrowsingInstances.
     // See http://crbug.com/150855.
     if (iter->second != pending_render_view_host_) {
@@ -757,11 +770,12 @@ void RenderViewHostManager::CommitPending() {
     swapped_out_hosts_[old_site_instance_id] = old_render_view_host;
   } else {
     old_render_view_host->Shutdown();
+    old_render_view_host = NULL;  // Shutdown() deletes it.
   }
 
   // Let the task manager know that we've swapped RenderViewHosts, since it
   // might need to update its process groupings.
-  delegate_->NotifySwappedFromRenderManager();
+  delegate_->NotifySwappedFromRenderManager(old_render_view_host);
 }
 
 RenderViewHostImpl* RenderViewHostManager::UpdateRendererStateForNavigate(

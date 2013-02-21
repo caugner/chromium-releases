@@ -10,12 +10,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
+#include "extensions/common/error_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::Extension;
@@ -23,6 +23,9 @@ using extensions::Extension;
 namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
+
+namespace extensions {
+
 namespace {
 
 scoped_refptr<Extension> LoadManifest(const std::string& dir,
@@ -76,7 +79,6 @@ bool Contains(const std::vector<string16>& warnings,
 
 }  // namespace
 
-namespace extensions {
 
 class PermissionsTest : public testing::Test {
 };
@@ -651,19 +653,20 @@ TEST(PermissionsTest, PermissionMessages) {
   // a prompt.
   skip.insert(APIPermission::kActiveTab);
   skip.insert(APIPermission::kAlarms);
+  skip.insert(APIPermission::kAppCurrentWindowInternal);
   skip.insert(APIPermission::kAppNotifications);
   skip.insert(APIPermission::kAppRuntime);
   skip.insert(APIPermission::kAppWindow);
-  skip.insert(APIPermission::kAppCurrentWindowInternal);
   skip.insert(APIPermission::kBrowsingData);
   skip.insert(APIPermission::kContextMenus);
   skip.insert(APIPermission::kFontSettings);
   skip.insert(APIPermission::kIdle);
   skip.insert(APIPermission::kNotification);
+  skip.insert(APIPermission::kPointerLock);
   skip.insert(APIPermission::kPushMessaging);
-  skip.insert(APIPermission::kUnlimitedStorage);
   skip.insert(APIPermission::kStorage);
   skip.insert(APIPermission::kTts);
+  skip.insert(APIPermission::kUnlimitedStorage);
   skip.insert(APIPermission::kWebView);
 
   // TODO(erikkay) add a string for this permission.
@@ -697,9 +700,11 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kExperimental);
 
   // These are private.
+  skip.insert(APIPermission::kAutoTestPrivate);
   skip.insert(APIPermission::kBookmarkManagerPrivate);
   skip.insert(APIPermission::kChromeosInfoPrivate);
   skip.insert(APIPermission::kCloudPrintPrivate);
+  skip.insert(APIPermission::kDial);
   skip.insert(APIPermission::kEchoPrivate);
   skip.insert(APIPermission::kFileBrowserHandlerInternal);
   skip.insert(APIPermission::kFileBrowserPrivate);
@@ -726,6 +731,7 @@ TEST(PermissionsTest, PermissionMessages) {
   // Platform apps.
   skip.insert(APIPermission::kFileSystem);
   skip.insert(APIPermission::kSocket);
+  skip.insert(APIPermission::kUsbDevice);
 
   PermissionsInfo* info = PermissionsInfo::GetInstance();
   APIPermissionSet permissions = info->GetAll();
@@ -733,6 +739,13 @@ TEST(PermissionsTest, PermissionMessages) {
        i != permissions.end(); ++i) {
     const APIPermissionInfo* permission_info = i->info();
     EXPECT_TRUE(permission_info != NULL);
+
+    // Always skip permissions that cannot be in the manifest.
+    scoped_ptr<const APIPermission> permission(
+        permission_info->CreateAPIPermission());
+    if (permission->ManifestEntryForbidden())
+      continue;
+
     if (skip.count(i->id())) {
       EXPECT_EQ(PermissionMessage::kNone, permission_info->message_id())
           << "unexpected message_id for " << permission_info->name();
@@ -777,7 +790,7 @@ TEST(PermissionsTest, DefaultFunctionAccess) {
   scoped_refptr<PermissionSet> empty = new PermissionSet();
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
     EXPECT_EQ(kTests[i].expect_success,
-              empty->HasAccessToFunction(kTests[i].permission_name))
+              empty->HasAccessToFunction(kTests[i].permission_name, true))
                   << "Permission being tested: " << kTests[i].permission_name;
   }
 }

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <map>
-#include <peninputpanel_i.c>
 #include <stack>
 
 #include "base/bind.h"
@@ -52,6 +51,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/ime/composition_text.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/text/text_elider.h"
@@ -66,6 +66,7 @@
 #include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
+#include "win8/util/win8_util.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -100,13 +101,6 @@ const int kDestroyCompositorHostWindowDelay = 10000;
 // if it approaches the border. |kMouseLockBorderPercentage| specifies the width
 // of the border area, in percentage of the corresponding dimension.
 const int kMouseLockBorderPercentage = 15;
-
-// We display the onscreen keyboard in the context of a WM_POINTERDOWN message.
-// This context is reset in a delayed task. Theory being that the page should
-// have enough time to change focus before this context is reset.
-// TODO(ananta)
-// Refine this.
-const int kPointerDownContextResetDelay = 200;
 
 // A callback function for EnumThreadWindows to enumerate and dismiss
 // any owned popup windows.
@@ -249,122 +243,22 @@ ui::EventType ConvertToUIEvent(WebKit::WebTouchPoint::State t) {
   }
 }
 
-WebKit::WebInputEvent::Type ConvertToWebInputEvent(ui::EventType t) {
-  switch (t) {
-    case ui::ET_UNKNOWN:
-      return WebKit::WebInputEvent::Undefined;
-    case ui::ET_GESTURE_SCROLL_BEGIN:
-      return WebKit::WebGestureEvent::GestureScrollBegin;
-    case ui::ET_GESTURE_SCROLL_END:
-      return WebKit::WebGestureEvent::GestureScrollEnd;
-    case ui::ET_GESTURE_SCROLL_UPDATE:
-      return WebKit::WebGestureEvent::GestureScrollUpdate;
-    case ui::ET_SCROLL_FLING_START:
-      return WebKit::WebGestureEvent::GestureFlingStart;
-    case ui::ET_SCROLL_FLING_CANCEL:
-      return WebKit::WebGestureEvent::GestureFlingCancel;
-    case ui::ET_GESTURE_TAP:
-      return WebKit::WebGestureEvent::GestureTap;
-    case ui::ET_GESTURE_TAP_DOWN:
-      return WebKit::WebGestureEvent::GestureTapDown;
-    case ui::ET_GESTURE_TAP_CANCEL:
-      return WebKit::WebGestureEvent::GestureTapCancel;
-    case ui::ET_GESTURE_DOUBLE_TAP:
-      return WebKit::WebGestureEvent::GestureDoubleTap;
-    case ui::ET_GESTURE_LONG_PRESS:
-      return WebKit::WebGestureEvent::GestureLongPress;
-    case ui::ET_GESTURE_PINCH_BEGIN:
-      return WebKit::WebGestureEvent::GesturePinchBegin;
-    case ui::ET_GESTURE_PINCH_END:
-      return WebKit::WebGestureEvent::GesturePinchEnd;
-    case ui::ET_GESTURE_PINCH_UPDATE:
-      return WebKit::WebGestureEvent::GesturePinchUpdate;
-    case ui::ET_GESTURE_BEGIN:
-      return WebKit::WebGestureEvent::Undefined;
-    case ui::ET_GESTURE_END:
-      return WebKit::WebGestureEvent::Undefined;
-    case ui::ET_GESTURE_MULTIFINGER_SWIPE:
-      return WebKit::WebGestureEvent::Undefined;
-    case ui::ET_GESTURE_TWO_FINGER_TAP:
-      return WebKit::WebGestureEvent::GestureTwoFingerTap;
-    case ui::ET_TOUCH_PRESSED:
-      return WebKit::WebInputEvent::TouchStart;
-    case ui::ET_TOUCH_MOVED:
-    case ui::ET_TOUCH_STATIONARY:
-      return WebKit::WebInputEvent::TouchMove;
-    case ui::ET_TOUCH_RELEASED:
-      return WebKit::WebInputEvent::TouchEnd;
-    case ui::ET_TOUCH_CANCELLED:
-      return WebKit::WebInputEvent::TouchCancel;
-    default:
-      DCHECK(false) << "Unexpected ui type. " << t;
-      return WebKit::WebInputEvent::Undefined;
-  }
-}
-
 // Creates a WebGestureEvent corresponding to the given |gesture|
 WebKit::WebGestureEvent CreateWebGestureEvent(HWND hwnd,
                                               const ui::GestureEvent& gesture) {
+  WebKit::WebGestureEvent gesture_event =
+      MakeWebGestureEventFromUIEvent(gesture);
+
   POINT client_point = gesture.location().ToPOINT();
   POINT screen_point = gesture.location().ToPOINT();
   MapWindowPoints(::GetParent(hwnd), hwnd, &client_point, 1);
   MapWindowPoints(hwnd, HWND_DESKTOP, &screen_point, 1);
 
-  WebKit::WebGestureEvent gesture_event;
-  gesture_event.timeStampSeconds = gesture.time_stamp().InSecondsF();
-  gesture_event.type = ConvertToWebInputEvent(gesture.type());
   gesture_event.x = client_point.x;
   gesture_event.y = client_point.y;
   gesture_event.globalX = screen_point.x;
   gesture_event.globalY = screen_point.y;
-  gesture_event.modifiers =
-      (base::win::IsShiftPressed() ? WebKit::WebGestureEvent::ShiftKey : 0)
-      | (base::win::IsCtrlPressed() ? WebKit::WebGestureEvent::ControlKey : 0)
-      | (base::win::IsAltPressed() ? WebKit::WebGestureEvent::AltKey : 0);
 
-  // Copy any event-type specific data.
-  switch (gesture.type()) {
-    case ui::ET_GESTURE_TAP:
-      gesture_event.data.tap.tapCount = gesture.details().tap_count();
-      gesture_event.data.tap.width =
-          gesture.details().bounding_box().width();
-      gesture_event.data.tap.height =
-          gesture.details().bounding_box().height();
-      break;
-    case ui::ET_GESTURE_TAP_DOWN:
-      gesture_event.data.tapDown.width =
-          gesture.details().bounding_box().width();
-      gesture_event.data.tapDown.height =
-          gesture.details().bounding_box().height();
-      break;
-    case ui::ET_GESTURE_SCROLL_UPDATE:
-      gesture_event.data.scrollUpdate.deltaX = gesture.details().scroll_x();
-      gesture_event.data.scrollUpdate.deltaY = gesture.details().scroll_y();
-      break;
-    case ui::ET_GESTURE_PINCH_UPDATE:
-      gesture_event.data.pinchUpdate.scale = gesture.details().scale();
-      break;
-    case ui::ET_SCROLL_FLING_START:
-      gesture_event.data.flingStart.velocityX = gesture.details().velocity_x();
-      gesture_event.data.flingStart.velocityY = gesture.details().velocity_y();
-      gesture_event.data.flingStart.sourceDevice =
-          WebKit::WebGestureEvent::Touchscreen;
-      break;
-    case ui::ET_GESTURE_LONG_PRESS:
-      gesture_event.data.longPress.width =
-          gesture.details().bounding_box().width();
-      gesture_event.data.longPress.height =
-          gesture.details().bounding_box().height();
-      break;
-    case ui::ET_GESTURE_TWO_FINGER_TAP:
-      gesture_event.data.twoFingerTap.firstFingerWidth =
-          gesture.details().first_finger_width();
-      gesture_event.data.twoFingerTap.firstFingerHeight =
-          gesture.details().first_finger_height();
-      break;
-    default:
-      break;
-  }
   return gesture_event;
 }
 
@@ -386,6 +280,7 @@ class TouchEventFromWebTouchPoint : public ui::TouchEvent {
     set_radius(touch_point.radiusX, touch_point.radiusY);
     set_rotation_angle(touch_point.rotationAngle);
     set_force(touch_point.force);
+    set_flags(ui::GetModifiersFromKeyState());
   }
 
   virtual ~TouchEventFromWebTouchPoint() {}
@@ -480,17 +375,12 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
           touch_state_(new WebTouchState(this))),
       pointer_down_context_(false),
       last_touch_location_(-1, -1),
-      focus_on_editable_field_(false),
-      received_focus_change_after_pointer_down_(false),
       touch_events_enabled_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           gesture_recognizer_(ui::GestureRecognizer::Create(this))) {
   render_widget_host_->SetView(this);
   registrar_.Add(this,
                  NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this,
-                 NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
                  NotificationService::AllBrowserContextsAndSources());
 }
 
@@ -502,21 +392,6 @@ RenderWidgetHostViewWin::~RenderWidgetHostViewWin() {
 void RenderWidgetHostViewWin::CreateWnd(HWND parent) {
   // ATL function to create the window.
   Create(parent);
-  // Creating an instance of the text input panel is crashy. Will reenable this
-  // after investigation.
-  // TODO(ananta)
-#if 0
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-      !base::win::IsMetroProcess()) {
-    virtual_keyboard_.CreateInstance(CLSID_TextInputPanel, NULL, CLSCTX_INPROC);
-    if (virtual_keyboard_) {
-      virtual_keyboard_->put_AttachedEditWindow(m_hWnd);
-      virtual_keyboard_->SetInPlaceVisibility(FALSE);
-    } else {
-      NOTREACHED() << "Failed to create instance of pen input panel";
-    }
-  }
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -637,7 +512,7 @@ RenderWidgetHostViewWin::GetNativeViewAccessible() {
 }
 
 void RenderWidgetHostViewWin::MovePluginWindows(
-    const gfx::Point& scroll_offset,
+    const gfx::Vector2d& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& plugin_window_moves) {
   MovePluginWindowsHelper(m_hWnd, plugin_window_moves);
 }
@@ -813,15 +688,15 @@ void RenderWidgetHostViewWin::Redraw() {
   RedrawWindow(NULL, damage_region, RDW_UPDATENOW | RDW_NOCHILDREN);
 
   // Send the invalid rect in screen coordinates.
-  gfx::Rect screen_rect = GetViewBounds();
   gfx::Rect invalid_screen_rect(damage_bounds);
-  invalid_screen_rect.Offset(screen_rect.x(), screen_rect.y());
+  invalid_screen_rect.Offset(GetViewBounds().OffsetFromOrigin());
 
   PaintPluginWindowsHelper(m_hWnd, invalid_screen_rect);
 }
 
 void RenderWidgetHostViewWin::DidUpdateBackingStore(
-    const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+    const gfx::Rect& scroll_rect,
+    const gfx::Vector2d& scroll_delta,
     const std::vector<gfx::Rect>& copy_rects) {
   if (is_hidden_)
     return;
@@ -836,8 +711,8 @@ void RenderWidgetHostViewWin::DidUpdateBackingStore(
 
   if (!scroll_rect.IsEmpty()) {
     RECT clip_rect = scroll_rect.ToRECT();
-    ScrollWindowEx(scroll_dx, scroll_dy, NULL, &clip_rect, NULL, NULL,
-                   SW_INVALIDATE);
+    ScrollWindowEx(scroll_delta.x(), scroll_delta.y(), NULL, &clip_rect,
+                   NULL, NULL, SW_INVALIDATE);
   }
 
   if (!about_to_validate_and_paint_)
@@ -865,7 +740,7 @@ void RenderWidgetHostViewWin::Destroy() {
   being_destroyed_ = true;
   CleanupCompositorWindow();
 
-  if (is_fullscreen_ && base::win::IsMetroProcess()) {
+  if (is_fullscreen_ && win8::IsSingleWindowMetroMode()) {
     MetroCloseFrameWindow close_frame_window =
         reinterpret_cast<MetroCloseFrameWindow>(
             ::GetProcAddress(base::win::GetMetroModule(), "CloseFrameWindow"));
@@ -927,12 +802,12 @@ void RenderWidgetHostViewWin::CopyFromCompositingSurface(
   if (!output->Allocate(dst_size.width(), dst_size.height(), true))
     return;
 
-  const bool result = accelerated_surface_->CopyTo(
+  scoped_callback_runner.Release();
+  accelerated_surface_->AsyncCopyTo(
       src_subrect,
       dst_size,
-      output->GetBitmap().getPixels());
-  scoped_callback_runner.Release();
-  callback.Run(result);
+      output->GetBitmap().getPixels(),
+      callback);
 }
 
 void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
@@ -941,15 +816,15 @@ void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
 }
 
 void RenderWidgetHostViewWin::ProcessAckedTouchEvent(
-    const WebKit::WebTouchEvent& touch,
-    bool processed) {
+    const WebKit::WebTouchEvent& touch, InputEventAckState ack_result) {
   DCHECK(touch_events_enabled_);
 
   ScopedVector<ui::TouchEvent> events;
   if (!MakeUITouchEventsFromWebTouchEvents(touch, &events))
     return;
 
-  ui::EventResult result = processed ? ui::ER_HANDLED : ui::ER_UNHANDLED;
+  ui::EventResult result = (ack_result ==
+      INPUT_EVENT_ACK_STATE_CONSUMED) ? ui::ER_HANDLED : ui::ER_UNHANDLED;
   for (ScopedVector<ui::TouchEvent>::iterator iter = events.begin(),
       end = events.end(); iter != end; ++iter)  {
     scoped_ptr<ui::GestureRecognizer::Gestures> gestures;
@@ -961,8 +836,12 @@ void RenderWidgetHostViewWin::ProcessAckedTouchEvent(
 
 void RenderWidgetHostViewWin::UpdateDesiredTouchMode() {
   // Make sure that touch events even make sense.
+  CommandLine* cmdline = CommandLine::ForCurrentProcess();
   static bool touch_mode = base::win::GetVersion() >= base::win::VERSION_WIN7 &&
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTouchEvents);
+      base::win::IsTouchEnabled() && (
+          !cmdline->HasSwitch(switches::kTouchEvents) ||
+          cmdline->GetSwitchValueASCII(switches::kTouchEvents) !=
+              switches::kTouchEventsDisabled);
 
   if (!touch_mode)
     return;
@@ -1018,7 +897,7 @@ void RenderWidgetHostViewWin::SetScrollOffsetPinning(
 
 void RenderWidgetHostViewWin::SetCompositionText(
     const ui::CompositionText& composition) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return;
   }
@@ -1038,7 +917,7 @@ void RenderWidgetHostViewWin::SetCompositionText(
 }
 
 void RenderWidgetHostViewWin::ConfirmCompositionText()  {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return;
   }
@@ -1047,7 +926,7 @@ void RenderWidgetHostViewWin::ConfirmCompositionText()  {
 }
 
 void RenderWidgetHostViewWin::ClearCompositionText() {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return;
   }
@@ -1056,7 +935,7 @@ void RenderWidgetHostViewWin::ClearCompositionText() {
 }
 
 void RenderWidgetHostViewWin::InsertText(const string16& text) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return;
   }
@@ -1065,7 +944,7 @@ void RenderWidgetHostViewWin::InsertText(const string16& text) {
 }
 
 void RenderWidgetHostViewWin::InsertChar(char16 ch, int flags) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return;
   }
@@ -1074,7 +953,7 @@ void RenderWidgetHostViewWin::InsertChar(char16 ch, int flags) {
 }
 
 ui::TextInputType RenderWidgetHostViewWin::GetTextInputType() const {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return ui::TEXT_INPUT_TYPE_NONE;
   }
@@ -1082,7 +961,7 @@ ui::TextInputType RenderWidgetHostViewWin::GetTextInputType() const {
 }
 
 bool RenderWidgetHostViewWin::CanComposeInline() const {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1092,7 +971,7 @@ bool RenderWidgetHostViewWin::CanComposeInline() const {
 }
 
 gfx::Rect RenderWidgetHostViewWin::GetCaretBounds() {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return gfx::Rect(0, 0, 0, 0);
   }
@@ -1103,7 +982,7 @@ gfx::Rect RenderWidgetHostViewWin::GetCaretBounds() {
 
 bool RenderWidgetHostViewWin::GetCompositionCharacterBounds(
     uint32 index, gfx::Rect* rect) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1117,7 +996,7 @@ bool RenderWidgetHostViewWin::GetCompositionCharacterBounds(
 }
 
 bool RenderWidgetHostViewWin::HasCompositionText() {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1127,7 +1006,7 @@ bool RenderWidgetHostViewWin::HasCompositionText() {
 }
 
 bool RenderWidgetHostViewWin::GetTextRange(ui::Range* range) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1137,7 +1016,7 @@ bool RenderWidgetHostViewWin::GetTextRange(ui::Range* range) {
 }
 
 bool RenderWidgetHostViewWin::GetCompositionTextRange(ui::Range* range) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1147,7 +1026,7 @@ bool RenderWidgetHostViewWin::GetCompositionTextRange(ui::Range* range) {
 }
 
 bool RenderWidgetHostViewWin::GetSelectionRange(ui::Range* range) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1157,7 +1036,7 @@ bool RenderWidgetHostViewWin::GetSelectionRange(ui::Range* range) {
 }
 
 bool RenderWidgetHostViewWin::SetSelectionRange(const ui::Range& range) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1167,7 +1046,7 @@ bool RenderWidgetHostViewWin::SetSelectionRange(const ui::Range& range) {
 }
 
 bool RenderWidgetHostViewWin::DeleteRange(const ui::Range& range) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1178,7 +1057,7 @@ bool RenderWidgetHostViewWin::DeleteRange(const ui::Range& range) {
 
 bool RenderWidgetHostViewWin::GetTextFromRange(const ui::Range& range,
                                                string16* text) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1199,7 +1078,7 @@ bool RenderWidgetHostViewWin::GetTextFromRange(const ui::Range& range,
 }
 
 void RenderWidgetHostViewWin::OnInputMethodChanged() {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return;
   }
@@ -1209,7 +1088,7 @@ void RenderWidgetHostViewWin::OnInputMethodChanged() {
 
 bool RenderWidgetHostViewWin::ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return false;
   }
@@ -1221,7 +1100,7 @@ bool RenderWidgetHostViewWin::ChangeTextDirectionAndLayoutAlignment(
 void RenderWidgetHostViewWin::ExtendSelectionAndDelete(
     size_t before,
     size_t after) {
-  if (!base::win::IsTsfAwareRequired()) {
+  if (!base::win::IsTSFAwareRequired()) {
     NOTREACHED();
     return;
   }
@@ -1427,7 +1306,7 @@ void RenderWidgetHostViewWin::DrawBackground(const RECT& dirty_rect,
   if (!background_.empty()) {
     gfx::Rect dirty_area(dirty_rect);
     gfx::Canvas canvas(dirty_area.size(), ui::SCALE_FACTOR_100P, true);
-    canvas.Translate(gfx::Point().Subtract(dirty_area.origin()));
+    canvas.Translate(-dirty_area.OffsetFromOrigin());
 
     gfx::Rect dc_rect(dc->m_ps.rcPaint);
     // TODO(pkotwicz): Fix |background_| such that it is an ImageSkia.
@@ -1488,8 +1367,8 @@ void RenderWidgetHostViewWin::OnSetFocus(HWND window) {
   render_widget_host_->GotFocus();
   render_widget_host_->SetActive(true);
 
-  if (base::win::IsTsfAwareRequired())
-    ui::TsfBridge::GetInstance()->SetFocusedClient(m_hWnd, this);
+  if (base::win::IsTSFAwareRequired())
+    ui::TSFBridge::GetInstance()->SetFocusedClient(m_hWnd, this);
 }
 
 void RenderWidgetHostViewWin::OnKillFocus(HWND window) {
@@ -1502,8 +1381,8 @@ void RenderWidgetHostViewWin::OnKillFocus(HWND window) {
 
   last_touch_location_ = gfx::Point(-1, -1);
 
-  if (base::win::IsTsfAwareRequired())
-    ui::TsfBridge::GetInstance()->RemoveFocusedClient(this);
+  if (base::win::IsTSFAwareRequired())
+    ui::TSFBridge::GetInstance()->RemoveFocusedClient(this);
 }
 
 void RenderWidgetHostViewWin::OnCaptureChanged(HWND window) {
@@ -1810,8 +1689,8 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
       case WM_RBUTTONDOWN:
         // Finish the ongoing composition whenever a mouse click happens.
         // It matches IE's behavior.
-        if (base::win::IsTsfAwareRequired()) {
-          ui::TsfBridge::GetInstance()->CancelComposition();
+        if (base::win::IsTSFAwareRequired()) {
+          ui::TSFBridge::GetInstance()->CancelComposition();
         } else {
           ime_input_.CleanupComposition(m_hWnd);
         }
@@ -1946,12 +1825,13 @@ LRESULT RenderWidgetHostViewWin::OnKeyEvent(UINT message, WPARAM wparam,
   MSG msg = { m_hWnd, message, wparam, lparam };
   ui::KeyEvent key_event(msg, message == WM_CHAR);
   if (render_widget_host_ &&
-      render_widget_host_->KeyPressListenersHandleEvent(&key_event))
+      render_widget_host_->KeyPressListenersHandleEvent(
+          NativeWebKeyboardEvent(msg)))
     return 0;
 
-  if (render_widget_host_ && !ignore_keyboard_event) {
+  if (render_widget_host_ && !ignore_keyboard_event)
     render_widget_host_->ForwardKeyboardEvent(NativeWebKeyboardEvent(msg));
-  }
+
   return 0;
 }
 
@@ -2026,6 +1906,8 @@ size_t WebTouchState::UpdateTouchPoints(
     }
   }
   touch_event_.changedTouchesLength = 0;
+  touch_event_.modifiers = content::EventFlagsToWebEventModifiers(
+      ui::GetModifiersFromKeyState());
 
   // Consume all events of the same type and add them to the changed list.
   int last_type = 0;
@@ -2203,8 +2085,8 @@ LRESULT RenderWidgetHostViewWin::OnTouchEvent(UINT message, WPARAM wparam,
   TRACE_EVENT0("browser", "RenderWidgetHostViewWin::OnTouchEvent");
   // Finish the ongoing composition whenever a touch event happens.
   // It matches IE's behavior.
-  if (base::win::IsTsfAwareRequired()) {
-    ui::TsfBridge::GetInstance()->CancelComposition();
+  if (base::win::IsTSFAwareRequired()) {
+    ui::TSFBridge::GetInstance()->CancelComposition();
   } else {
     ime_input_.CleanupComposition(m_hWnd);
   }
@@ -2345,6 +2227,17 @@ LRESULT RenderWidgetHostViewWin::OnGestureEvent(
   return 0;
 }
 
+LRESULT RenderWidgetHostViewWin::OnMoveOrSize(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  // Reset the cliping rectangle if the mouse is locked.
+  if (mouse_locked_) {
+    CRect rect;
+    GetWindowRect(&rect);
+    ::ClipCursor(&rect);
+  }
+  return 0;
+}
+
 void RenderWidgetHostViewWin::OnAccessibilityNotifications(
     const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
   if (!GetBrowserAccessibilityManager()) {
@@ -2408,30 +2301,22 @@ void RenderWidgetHostViewWin::Observe(
     int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  DCHECK(type == NOTIFICATION_RENDERER_PROCESS_TERMINATED ||
-         type == NOTIFICATION_FOCUS_CHANGED_IN_PAGE);
+  DCHECK(type == NOTIFICATION_RENDERER_PROCESS_TERMINATED);
 
-  if (type == NOTIFICATION_FOCUS_CHANGED_IN_PAGE) {
-    if (pointer_down_context_)
-      received_focus_change_after_pointer_down_ = true;
-    focus_on_editable_field_ = *Details<bool>(details).ptr();
-    if (virtual_keyboard_)
-      DisplayOnScreenKeyboardIfNeeded();
-  } else {
-    // Get the RenderProcessHost that posted this notification, and exit
-    // if it's not the one associated with this host view.
-    RenderProcessHost* render_process_host =
-        Source<RenderProcessHost>(source).ptr();
-    DCHECK(render_process_host);
-    if (!render_widget_host_ ||
-        render_process_host != render_widget_host_->GetProcess())
-      return;
-
-    // If it was our RenderProcessHost that posted the notification,
-    // clear the BrowserAccessibilityManager, because the renderer is
-    // dead and any accessibility information we have is now stale.
-    SetBrowserAccessibilityManager(NULL);
+  // Get the RenderProcessHost that posted this notification, and exit
+  // if it's not the one associated with this host view.
+  RenderProcessHost* render_process_host =
+      Source<RenderProcessHost>(source).ptr();
+  DCHECK(render_process_host);
+  if (!render_widget_host_ ||
+      render_process_host != render_widget_host_->GetProcess()) {
+    return;
   }
+
+  // If it was our RenderProcessHost that posted the notification,
+  // clear the BrowserAccessibilityManager, because the renderer is
+  // dead and any accessibility information we have is now stale.
+  SetBrowserAccessibilityManager(NULL);
 }
 
 static void PaintCompositorHostWindow(HWND hWnd) {
@@ -2470,6 +2355,23 @@ void RenderWidgetHostViewWin::AcceleratedPaint(HDC dc) {
     render_widget_host_->ScheduleComposite();
   if (accelerated_surface_.get())
     accelerated_surface_->Present(dc);
+}
+
+gfx::Rect RenderWidgetHostViewWin::GetBoundsInRootWindow() {
+  RECT window_rect = {0};
+  HWND root_window = GetAncestor(m_hWnd, GA_ROOT);
+  ::GetWindowRect(root_window, &window_rect);
+  gfx::Rect rect(window_rect);
+
+  // Maximized windows are outdented from the work area by the frame thickness
+  // even though this "frame" is not painted.  This confuses code (and people)
+  // that think of a maximized window as corresponding exactly to the work area.
+  // Correct for this by subtracting the frame thickness back off.
+  if (::IsZoomed(root_window)) {
+    rect.Inset(GetSystemMetrics(SM_CXSIZEFRAME),
+               GetSystemMetrics(SM_CYSIZEFRAME));
+  }
+  return rect;
 }
 
 // Creates a HWND within the RenderWidgetHostView that will serve as a host
@@ -2891,7 +2793,7 @@ void RenderWidgetHostViewWin::DoPopupOrFullscreenInit(HWND parent_hwnd,
   MoveWindow(pos.x(), pos.y(), pos.width(), pos.height(), TRUE);
   ShowWindow(IsActivatable() ? SW_SHOW : SW_SHOWNA);
 
-  if (is_fullscreen_ && base::win::IsMetroProcess()) {
+  if (is_fullscreen_ && win8::IsSingleWindowMetroMode()) {
     MetroSetFrameWindow set_frame_window =
         reinterpret_cast<MetroSetFrameWindow>(
             ::GetProcAddress(base::win::GetMetroModule(), "SetFrameWindow"));
@@ -2910,7 +2812,7 @@ void RenderWidgetHostViewWin::MoveCursorToCenterIfNecessary() {
   DCHECK(mouse_locked_);
 
   CRect rect;
-  GetWindowRect(&rect);
+  GetClipCursor(&rect);
   int border_x = rect.Width() * kMouseLockBorderPercentage / 100;
   int border_y = rect.Height() * kMouseLockBorderPercentage / 100;
 
@@ -3077,8 +2979,8 @@ LRESULT RenderWidgetHostViewWin::OnQueryCharPosition(
 }
 
 void RenderWidgetHostViewWin::UpdateIMEState() {
-  if (base::win::IsTsfAwareRequired()) {
-    ui::TsfBridge::GetInstance()->OnTextInputTypeChanged(this);
+  if (base::win::IsTSFAwareRequired()) {
+    ui::TSFBridge::GetInstance()->OnTextInputTypeChanged(this);
     return;
   }
   if (text_input_type_ != ui::TEXT_INPUT_TYPE_NONE &&
@@ -3097,27 +2999,6 @@ void RenderWidgetHostViewWin::UpdateIMEState() {
 RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
     RenderWidgetHost* widget) {
   return new RenderWidgetHostViewWin(widget);
-}
-
-void RenderWidgetHostViewWin::DisplayOnScreenKeyboardIfNeeded() {
-  if (focus_on_editable_field_) {
-    if (pointer_down_context_) {
-      virtual_keyboard_->SetInPlaceVisibility(TRUE);
-    }
-  } else {
-    virtual_keyboard_->SetInPlaceVisibility(FALSE);
-  }
-}
-
-void RenderWidgetHostViewWin::ResetPointerDownContext() {
-  // If the default focus on the page is on an edit field and we did not
-  // receive a focus change in the context of a pointer down message, it means
-  // that the pointer down message occurred on the edit field and we should
-  // display the on screen keyboard
-  if (!received_focus_change_after_pointer_down_ && virtual_keyboard_)
-    DisplayOnScreenKeyboardIfNeeded();
-  received_focus_change_after_pointer_down_ = false;
-  pointer_down_context_ = false;
 }
 
 }  // namespace content

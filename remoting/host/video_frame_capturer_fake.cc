@@ -4,6 +4,7 @@
 
 #include "remoting/host/video_frame_capturer_fake.h"
 
+#include "base/time.h"
 #include "remoting/base/capture_data.h"
 
 namespace remoting {
@@ -39,7 +40,8 @@ VideoFrameCapturerFake::VideoFrameCapturerFake()
 VideoFrameCapturerFake::~VideoFrameCapturerFake() {
 }
 
-void VideoFrameCapturerFake::Start(const CursorShapeChangedCallback& callback) {
+void VideoFrameCapturerFake::Start(Delegate* delegate) {
+  delegate_ = delegate;
 }
 
 void VideoFrameCapturerFake::Stop() {
@@ -53,8 +55,9 @@ void VideoFrameCapturerFake::InvalidateRegion(const SkRegion& invalid_region) {
   helper_.InvalidateRegion(invalid_region);
 }
 
-void VideoFrameCapturerFake::CaptureInvalidRegion(
-    const CaptureCompletedCallback& callback) {
+void VideoFrameCapturerFake::CaptureFrame() {
+  base::Time capture_start_time = base::Time::Now();
+
   GenerateImage();
   helper_.InvalidateScreen(size_);
 
@@ -73,7 +76,9 @@ void VideoFrameCapturerFake::CaptureInvalidRegion(
 
   helper_.set_size_most_recent(capture_data->size());
 
-  callback.Run(capture_data);
+  capture_data->set_capture_time_ms(
+      (base::Time::Now() - capture_start_time).InMillisecondsRoundedUp());
+  delegate_->OnCaptureCompleted(capture_data);
 }
 
 const SkISize& VideoFrameCapturerFake::size_most_recent() const {

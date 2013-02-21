@@ -164,8 +164,12 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(theme_service_));
 
-  edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
-                               browser_->profile()->GetPrefs(), this);
+  edit_bookmarks_enabled_.Init(
+      prefs::kEditBookmarksEnabled,
+      browser_->profile()->GetPrefs(),
+      base::Bind(&BookmarkBarGtk::OnEditBookmarksEnabledChanged,
+                 base::Unretained(this)));
+
   OnEditBookmarksEnabledChanged();
 }
 
@@ -676,15 +680,15 @@ void BookmarkBarGtk::UpdateEventBoxPaintability() {
 }
 
 void BookmarkBarGtk::PaintEventBox() {
-  gfx::Size tab_contents_size;
-  if (GetTabContentsSize(&tab_contents_size) &&
-      tab_contents_size != last_tab_contents_size_) {
-    last_tab_contents_size_ = tab_contents_size;
+  gfx::Size web_contents_size;
+  if (GetWebContentsSize(&web_contents_size) &&
+      web_contents_size != last_web_contents_size_) {
+    last_web_contents_size_ = web_contents_size;
     gtk_widget_queue_draw(event_box_.get());
   }
 }
 
-bool BookmarkBarGtk::GetTabContentsSize(gfx::Size* size) {
+bool BookmarkBarGtk::GetWebContentsSize(gfx::Size* size) {
   Browser* browser = browser_;
   if (!browser) {
     NOTREACHED();
@@ -980,11 +984,6 @@ void BookmarkBarGtk::Observe(int type,
     }
 
     SetOverflowButtonAppearance();
-  } else if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    const std::string& pref_name =
-        *content::Details<std::string>(details).ptr();
-    if (pref_name == prefs::kEditBookmarksEnabled)
-      OnEditBookmarksEnabledChanged();
   }
 }
 
@@ -1149,7 +1148,8 @@ void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
 
   RecordAppLaunch(browser_->profile(), node->url());
   chrome::OpenAll(window_->GetNativeWindow(), page_navigator_, node,
-      event_utils::DispositionForCurrentButtonPressEvent());
+                  event_utils::DispositionForCurrentButtonPressEvent(),
+                  browser_->profile());
 
   content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
 }
@@ -1176,8 +1176,8 @@ void BookmarkBarGtk::OnButtonDragBegin(GtkWidget* button,
   gtk_widget_size_request(drag_icon_, &req);
   gfx::Rect button_rect = gtk_util::WidgetBounds(button);
   gfx::Point drag_icon_relative =
-      gfx::Rect(req.width, req.height).CenterPoint().Add(
-          (last_pressed_coordinates_.Subtract(button_rect.CenterPoint())));
+      gfx::Rect(req.width, req.height).CenterPoint() +
+      (last_pressed_coordinates_ - button_rect.CenterPoint());
   gtk_drag_set_icon_widget(drag_context, drag_icon_,
                            drag_icon_relative.x(),
                            drag_icon_relative.y());
@@ -1235,7 +1235,7 @@ void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
   } else if (event->button.button == 2) {
     const BookmarkNode* node = GetNodeForToolButton(sender);
     chrome::OpenAll(window_->GetNativeWindow(), page_navigator_, node,
-                    NEW_BACKGROUND_TAB);
+                    NEW_BACKGROUND_TAB, browser_->profile());
   }
 }
 
@@ -1409,8 +1409,8 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
 
     cairo_destroy(cr);
   } else {
-    gfx::Size tab_contents_size;
-    if (!GetTabContentsSize(&tab_contents_size))
+    gfx::Size web_contents_size;
+    if (!GetWebContentsSize(&web_contents_size))
       return FALSE;
     gfx::CanvasSkiaPaint canvas(event, true);
 
@@ -1420,8 +1420,8 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
     gfx::Rect area = gtk_widget_get_has_window(widget) ?
                      gfx::Rect(0, 0, allocation.width, allocation.height) :
                      gfx::Rect(allocation);
-    NtpBackgroundUtil::PaintBackgroundDetachedMode(browser_->profile(), &canvas,
-        area, tab_contents_size.height());
+    NtpBackgroundUtil::PaintBackgroundDetachedMode(theme_provider, &canvas,
+        area, web_contents_size.height());
   }
 
   return FALSE;  // Propagate expose to children.

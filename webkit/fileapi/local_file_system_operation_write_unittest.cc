@@ -4,11 +4,11 @@
 
 #include <vector>
 
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_temp_dir.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -152,7 +152,7 @@ class LocalFileSystemOperationWriteTest
 
   MessageLoop loop_;
 
-  ScopedTempDir dir_;
+  base::ScopedTempDir dir_;
   FilePath virtual_path_;
 
   // For post-operation status.
@@ -313,7 +313,7 @@ TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelSuccessfulWrite) {
   // We use RunAllPendings() instead of Run() here, because we won't dispatch
   // callbacks after Cancel() is issued (so no chance to Quit) nor do we need
   // to run another write cycle.
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   // Issued Cancel() before receiving any response from Write(),
   // so nothing should have happen.
@@ -337,7 +337,7 @@ TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelFailingWrite) {
   // We use RunAllPendings() instead of Run() here, because we won't dispatch
   // callbacks after Cancel() is issued (so no chance to Quit) nor do we need
   // to run another write cycle.
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   // Issued Cancel() before receiving any response from Write(),
   // so nothing should have happen.

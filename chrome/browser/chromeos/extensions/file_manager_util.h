@@ -64,6 +64,10 @@ string16 GetTitleFromType(ui::SelectFileDialog::Type type);
 // |path|. In this case the tab will automatically close on |path| unmount.
 void ViewRemovableDrive(const FilePath& path);
 
+// Opens an action choice dialog for an external drive.
+// One of the actions is opening the File Manager.
+void OpenActionChoiceDialog(const FilePath& path);
+
 // Opens file browser UI in its own tab on file system location defined with
 // |dir|.
 void ViewFolder(const FilePath& dir);
@@ -73,9 +77,6 @@ void ViewFile(const FilePath& path);
 
 // Opens file browser on the folder containing the file, with the file selected.
 void ShowFileInFolder(const FilePath& path);
-
-// Opens file browser application.
-void OpenApplication();
 
 // Executes the built-in File Manager handler or tries to open |file| directly
 // in the browser. Returns false if neither is possible.

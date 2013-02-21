@@ -10,8 +10,10 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
+#include "base/debug/stack_trace.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -19,7 +21,6 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -35,13 +36,13 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #if defined(TOOLKIT_GTK)
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
 #endif
@@ -297,7 +298,7 @@ TestEnvironment* test_environment;
 
 void SetUpTestEnvironmentImpl(bool unit_test_mode,
                               WebKit::Platform* shadow_platform_delegate) {
-  base::EnableInProcessStackDumping();
+  base::debug::EnableInProcessStackDumping();
   base::EnableTerminationOnHeapCorruption();
 
   // Initialize the singleton CommandLine with fixed values.  Some code refer to
@@ -361,7 +362,7 @@ void SetUpTestEnvironmentForUnitTests(
 void TearDownTestEnvironment() {
   // Flush any remaining messages before we kill ourselves.
   // http://code.google.com/p/chromium/issues/detail?id=9500
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   BeforeShutdown();
   if (RunningOnValgrind())
@@ -400,6 +401,15 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
     const WebURL& url,
     WebMediaPlayerClient* client,
     webkit_media::MediaStreamClient* media_stream_client) {
+  if (media_stream_client && media_stream_client->IsMediaStream(url)) {
+    return new webkit_media::WebMediaPlayerMS(
+        frame,
+        client,
+        base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
+        media_stream_client,
+        new media::MediaLog());
+  }
+
 #if defined(OS_ANDROID)
   return new webkit_media::WebMediaPlayerInProcessAndroid(
       frame,
@@ -415,15 +425,6 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
 
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
-
-  if (media_stream_client && media_stream_client->IsMediaStream(url)) {
-    return new webkit_media::WebMediaPlayerMS(
-        frame,
-        client,
-        base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
-        media_stream_client,
-        new media::MediaLog());
-  }
 
   return new webkit_media::WebMediaPlayerImpl(
       frame,
@@ -561,7 +562,7 @@ void QuitMessageLoopNow() {
 }
 
 void RunAllPendingMessages() {
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 }
 
 bool MessageLoopNestableTasksAllowed() {
@@ -575,7 +576,7 @@ void MessageLoopSetNestableTasksAllowed(bool allowed) {
 void DispatchMessageLoop() {
   MessageLoop* current = MessageLoop::current();
   MessageLoop::ScopedNestableTaskAllower allow(current);
-  current->RunAllPending();
+  current->RunUntilIdle();
 }
 
 WebDevToolsAgentClient::WebKitClientMessageLoop* CreateDevToolsMessageLoop() {
@@ -636,10 +637,12 @@ WebURL CreateURLForPathOrURL(const std::string& path_or_url_in_nativemb) {
   if (url.is_valid() && url.has_scheme())
     return WebURL(url);
 #if defined(OS_WIN)
-  return net::FilePathToFileURL(FilePath(wide_path_or_url));
+  FilePath path(wide_path_or_url);
 #else
-  return net::FilePathToFileURL(FilePath(path_or_url_in_nativemb));
+  FilePath path(path_or_url_in_nativemb);
 #endif
+  file_util::AbsolutePath(&path);
+  return net::FilePathToFileURL(path);
 }
 
 WebURL RewriteLayoutTestsURL(const std::string& utf8_url) {
@@ -707,7 +710,7 @@ WebURL LocalFileToDataURL(const WebURL& fileUrl) {
   return WebURL(GURL(kDataUrlPrefix + contents_base64));
 }
 
-// A wrapper object for exporting ScopedTempDir to be used
+// A wrapper object for exporting base::ScopedTempDir to be used
 // by webkit layout tests.
 class ScopedTempDirectoryInternal : public ScopedTempDirectory {
  public:
@@ -720,7 +723,7 @@ class ScopedTempDirectoryInternal : public ScopedTempDirectory {
   }
 
  private:
-  ScopedTempDir tempDirectory_;
+  base::ScopedTempDir tempDirectory_;
 };
 
 ScopedTempDirectory* CreateScopedTempDirectory() {
@@ -811,13 +814,16 @@ WebKit::WebThemeEngine* GetThemeEngine() {
 
 #endif
 
-// DevTools
+// DevTools frontend path for inspector LayoutTests.
 WebURL GetDevToolsPathAsURL() {
   FilePath dirExe;
   if (!PathService::Get(base::DIR_EXE, &dirExe)) {
       DCHECK(false);
       return WebURL();
   }
+#if defined(OS_MACOSX)
+  dirExe = dirExe.AppendASCII("../../..");
+#endif
   FilePath devToolsPath = dirExe.AppendASCII(
       "resources/inspector/devtools.html");
   return net::FilePathToFileURL(devToolsPath);

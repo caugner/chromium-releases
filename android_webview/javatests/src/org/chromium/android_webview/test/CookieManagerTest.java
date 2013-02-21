@@ -11,11 +11,12 @@ import android.util.Pair;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.CookieManager;
-import org.chromium.android_webview.test.util.TestWebServer;
+import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
+import org.chromium.net.test.util.TestWebServer;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,17 +49,17 @@ public class CookieManagerTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView", "Privacy"})
+    @Feature({"AndroidWebView", "Privacy"})
     public void testAllowFileSchemeCookies() throws Throwable {
-        assertFalse(CookieManager.allowFileSchemeCookies());
-        CookieManager.setAcceptFileSchemeCookies(true);
-        assertTrue(CookieManager.allowFileSchemeCookies());
-        CookieManager.setAcceptFileSchemeCookies(false);
-        assertFalse(CookieManager.allowFileSchemeCookies());
+        assertFalse(mCookieManager.allowFileSchemeCookies());
+        mCookieManager.setAcceptFileSchemeCookies(true);
+        assertTrue(mCookieManager.allowFileSchemeCookies());
+        mCookieManager.setAcceptFileSchemeCookies(false);
+        assertFalse(mCookieManager.allowFileSchemeCookies());
     }
 
     @MediumTest
-    @Feature({"Android-WebView", "Privacy"})
+    @Feature({"AndroidWebView", "Privacy"})
     public void testAcceptCookie() throws Throwable {
         TestWebServer webServer = null;
         try {
@@ -114,23 +115,13 @@ public class CookieManagerTest extends AndroidWebViewTestBase {
 
     private void setCookie(final String name, final String value)
             throws Throwable {
-        OnEvaluateJavaScriptResultHelper onEvaluateJavaScriptResultHelper =
-                mContentsClient.getOnEvaluateJavaScriptResultHelper();
-        int currentCallCount = onEvaluateJavaScriptResultHelper.getCallCount();
-        final AtomicInteger requestId = new AtomicInteger();
-        runTestOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                requestId.set(mAwContents.getContentViewCore().evaluateJavaScript(
-                        "var expirationDate = new Date();" +
-                        "expirationDate.setDate(expirationDate.getDate() + 5);" +
-                        "document.cookie='" + name + "=" + value +
-                                "; expires=' + expirationDate.toUTCString();"));
-            }
-        });
-        onEvaluateJavaScriptResultHelper.waitForCallback(currentCallCount);
-        assertEquals("Response ID mismatch when evaluating JavaScript.",
-                requestId.get(), onEvaluateJavaScriptResultHelper.getId());
+        JSUtils.executeJavaScriptAndWaitForResult(
+                this, mAwContents,
+                mContentsClient.getOnEvaluateJavaScriptResultHelper(),
+                "var expirationDate = new Date();" +
+                "expirationDate.setDate(expirationDate.getDate() + 5);" +
+                "document.cookie='" + name + "=" + value +
+                        "; expires=' + expirationDate.toUTCString();");
     }
 
     private void waitForCookie(final String url) throws InterruptedException {
@@ -153,7 +144,7 @@ public class CookieManagerTest extends AndroidWebViewTestBase {
     }
 
     @MediumTest
-    @Feature({"Android-WebView", "Privacy"})
+    @Feature({"AndroidWebView", "Privacy"})
     public void testRemoveAllCookie() throws InterruptedException {
         // enable cookie
         mCookieManager.setAcceptCookie(true);
@@ -161,6 +152,7 @@ public class CookieManagerTest extends AndroidWebViewTestBase {
 
         // first there should be no cookie stored
         mCookieManager.removeAllCookie();
+        mCookieManager.flushCookieStore();
         assertFalse(mCookieManager.hasCookies());
 
         String url = "http://www.example.com";
@@ -186,7 +178,7 @@ public class CookieManagerTest extends AndroidWebViewTestBase {
     }
 
     @MediumTest
-    @Feature({"Android-WebView", "Privacy"})
+    @Feature({"AndroidWebView", "Privacy"})
     @SuppressWarnings("deprecation")
     public void testCookieExpiration() throws InterruptedException {
         // enable cookie

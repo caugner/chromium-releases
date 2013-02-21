@@ -9,6 +9,7 @@
 
 #include "base/file_path.h"
 #include "base/platform_file.h"
+#include "base/process.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -28,8 +29,10 @@ class RenderProcessHost;
 // processes and take the appropriate action when the render process terminates.
 class CrashDumpManager : public content::NotificationObserver {
  public:
-  // Should be created on the UI thread.
-  CrashDumpManager();
+  // This object is a singleton created and owned by the
+  // ChromeBrowserMainPartsAndroid.
+  static CrashDumpManager* GetInstance();
+
   virtual ~CrashDumpManager();
 
   // Returns a file descriptor that should be used to generate a minidump for
@@ -37,16 +40,15 @@ class CrashDumpManager : public content::NotificationObserver {
   int CreateMinidumpFile(int child_process_id);
 
  private:
-  struct MinidumpInfo {
-    MinidumpInfo() : file(base::kInvalidPlatformFileValue) {}
-    base::PlatformFile file;
-    FilePath path;
-    int pid;
-  };
+  friend class ChromeBrowserMainPartsAndroid;
 
-  typedef std::map<int, MinidumpInfo> ChildProcessIDToMinidumpInfo;
+  // Should be created on the UI thread.
+  CrashDumpManager();
 
-  static void ProcessMinidump(const MinidumpInfo& minidump);
+  typedef std::map<int, FilePath> ChildProcessIDToMinidumpPath;
+
+  static void ProcessMinidump(const FilePath& minidump_path,
+                              base::ProcessHandle pid);
 
   // NotificationObserver implementation:
   virtual void Observe(int type,
@@ -57,8 +59,10 @@ class CrashDumpManager : public content::NotificationObserver {
 
   // This map should only be accessed with its lock aquired as it is accessed
   // from the PROCESS_LAUNCHER and UI threads.
-  base::Lock child_process_id_to_minidump_info_lock_;
-  ChildProcessIDToMinidumpInfo child_process_id_to_minidump_info_;
+  base::Lock child_process_id_to_minidump_path_lock_;
+  ChildProcessIDToMinidumpPath child_process_id_to_minidump_path_;
+
+  static CrashDumpManager* instance_;
 
   DISALLOW_COPY_AND_ASSIGN(CrashDumpManager);
 };

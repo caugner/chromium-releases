@@ -19,7 +19,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
 
 using std::max;
 using std::min;
@@ -80,22 +79,30 @@ AudioHandler* AudioHandler::GetInstance() {
 
 // static
 void AudioHandler::RegisterPrefs(PrefService* local_state) {
-  if (!local_state->FindPreference(prefs::kAudioVolumePercent))
+  if (!local_state->FindPreference(prefs::kAudioVolumePercent)) {
     local_state->RegisterDoublePref(prefs::kAudioVolumePercent,
                                     kDefaultVolumePercent,
                                     PrefService::UNSYNCABLE_PREF);
-  if (!local_state->FindPreference(prefs::kAudioMute))
+  }
+  if (!local_state->FindPreference(prefs::kAudioMute)) {
     local_state->RegisterIntegerPref(prefs::kAudioMute,
                                      kPrefMuteOff,
                                      PrefService::UNSYNCABLE_PREF);
+  }
 
-  // Register the prefs backing the audio muting policies.
-  local_state->RegisterBooleanPref(prefs::kAudioOutputAllowed,
-                                   true,
-                                   PrefService::UNSYNCABLE_PREF);
-  local_state->RegisterBooleanPref(prefs::kAudioCaptureAllowed,
-                                   true,
-                                   PrefService::UNSYNCABLE_PREF);
+  if (!local_state->FindPreference(prefs::kAudioOutputAllowed)) {
+    // Register the prefs backing the audio muting policies.
+    local_state->RegisterBooleanPref(prefs::kAudioOutputAllowed,
+                                     true,
+                                     PrefService::UNSYNCABLE_PREF);
+  }
+  // This pref has moved to the media subsystem but we should verify it is there
+  // before we use it.
+  if (!local_state->FindPreference(prefs::kAudioCaptureAllowed)) {
+    local_state->RegisterBooleanPref(prefs::kAudioCaptureAllowed,
+                                     true,
+                                     PrefService::UNSYNCABLE_PREF);
+  }
 }
 
 double AudioHandler::GetVolumePercent() {
@@ -161,20 +168,6 @@ void AudioHandler::RemoveVolumeObserver(VolumeObserver* observer) {
   volume_observers_.RemoveObserver(observer);
 }
 
-void AudioHandler::Observe(int type,
-                           const content::NotificationSource& source,
-                           const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    std::string* pref_name = content::Details<std::string>(details).ptr();
-    if (*pref_name == prefs::kAudioOutputAllowed ||
-        *pref_name == prefs::kAudioCaptureAllowed) {
-      ApplyAudioPolicy();
-    }
-  } else {
-    NOTREACHED() << "Unexpected notification type : " << type;
-  }
-}
-
 AudioHandler::AudioHandler(AudioMixer* mixer)
     : mixer_(mixer),
       local_state_(g_browser_process->local_state()) {
@@ -191,8 +184,10 @@ AudioHandler::~AudioHandler() {
 
 void AudioHandler::InitializePrefObservers() {
   pref_change_registrar_.Init(local_state_);
-  pref_change_registrar_.Add(prefs::kAudioOutputAllowed, this);
-  pref_change_registrar_.Add(prefs::kAudioCaptureAllowed, this);
+  base::Closure callback = base::Bind(&AudioHandler::ApplyAudioPolicy,
+                                      base::Unretained(this));
+  pref_change_registrar_.Add(prefs::kAudioOutputAllowed, callback);
+  pref_change_registrar_.Add(prefs::kAudioCaptureAllowed, callback);
 }
 
 void AudioHandler::ApplyAudioPolicy() {

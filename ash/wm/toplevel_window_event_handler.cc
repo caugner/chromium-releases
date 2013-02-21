@@ -21,7 +21,7 @@
 #include "ui/aura/window_observer.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/events/event.h"
-#include "ui/base/events/event_functions.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/gestures/gesture_recognizer.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ui_base_types.h"
@@ -109,7 +109,8 @@ void ToplevelWindowEventHandler::ScopedWindowResizer::OnWindowDestroying(
 ToplevelWindowEventHandler::ToplevelWindowEventHandler(aura::Window* owner)
     : in_move_loop_(false),
       move_cancelled_(false),
-      in_gesture_resize_(false) {
+      in_gesture_drag_(false),
+      destroyed_(NULL) {
   aura::client::SetWindowMoveClient(owner, this);
   Shell::GetInstance()->display_controller()->AddObserver(this);
   owner->AddPreTargetHandler(this);
@@ -118,130 +119,130 @@ ToplevelWindowEventHandler::ToplevelWindowEventHandler(aura::Window* owner)
 
 ToplevelWindowEventHandler::~ToplevelWindowEventHandler() {
   Shell::GetInstance()->display_controller()->RemoveObserver(this);
+  if (destroyed_)
+    *destroyed_ = true;
 }
 
-ui::EventResult ToplevelWindowEventHandler::OnKeyEvent(ui::KeyEvent* event) {
+void ToplevelWindowEventHandler::OnKeyEvent(ui::KeyEvent* event) {
   if (window_resizer_.get() && event->type() == ui::ET_KEY_PRESSED &&
       event->key_code() == ui::VKEY_ESCAPE) {
     CompleteDrag(DRAG_REVERT, event->flags());
   }
-  return ui::ER_UNHANDLED;
 }
 
-ui::EventResult ToplevelWindowEventHandler::OnMouseEvent(
+void ToplevelWindowEventHandler::OnMouseEvent(
     ui::MouseEvent* event) {
   if ((event->flags() &
       (ui::EF_MIDDLE_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON)) != 0)
-    return ui::ER_UNHANDLED;
+    return;
 
   aura::Window* target = static_cast<aura::Window*>(event->target());
   switch (event->type()) {
     case ui::ET_MOUSE_PRESSED:
-      return HandleMousePressed(target, event);
+      HandleMousePressed(target, event);
+      break;
     case ui::ET_MOUSE_DRAGGED:
-      return HandleDrag(target, event) ? ui::ER_CONSUMED : ui::ER_UNHANDLED;
+      HandleDrag(target, event);
+      break;
     case ui::ET_MOUSE_CAPTURE_CHANGED:
     case ui::ET_MOUSE_RELEASED:
-      return HandleMouseReleased(target, event);
+      HandleMouseReleased(target, event);
+      break;
     case ui::ET_MOUSE_MOVED:
-      return HandleMouseMoved(target, event);
+      HandleMouseMoved(target, event);
+      break;
     case ui::ET_MOUSE_EXITED:
-      return HandleMouseExited(target, event);
+      HandleMouseExited(target, event);
+      break;
     default:
       break;
   }
-  return ui::ER_UNHANDLED;
 }
 
-ui::EventResult ToplevelWindowEventHandler::OnScrollEvent(
-    ui::ScrollEvent* event) {
-  return ui::ER_UNHANDLED;
-}
-
-ui::EventResult ToplevelWindowEventHandler::OnTouchEvent(
-    ui::TouchEvent* event) {
-  return ui::ER_UNHANDLED;
-}
-
-ui::EventResult ToplevelWindowEventHandler::OnGestureEvent(
-    ui::GestureEvent* event) {
+void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
   aura::Window* target = static_cast<aura::Window*>(event->target());
+  if (!target->delegate())
+    return;
+
   switch (event->type()) {
     case ui::ET_GESTURE_SCROLL_BEGIN: {
       int component =
           target->delegate()->GetNonClientComponent(event->location());
       if (WindowResizer::GetBoundsChangeForWindowComponent(component) == 0) {
         window_resizer_.reset();
-        return ui::ER_UNHANDLED;
+        return;
       }
-      in_gesture_resize_ = true;
+      in_gesture_drag_ = true;
+      pre_drag_window_bounds_ = target->bounds();
       gfx::Point location_in_parent(
           ConvertPointToParent(target, event->location()));
       CreateScopedWindowResizer(target, location_in_parent, component);
       break;
     }
     case ui::ET_GESTURE_SCROLL_UPDATE: {
-      if (!in_gesture_resize_)
-        return ui::ER_UNHANDLED;
+      if (!in_gesture_drag_)
+        return;
       HandleDrag(target, event);
       break;
     }
     case ui::ET_GESTURE_SCROLL_END:
     case ui::ET_SCROLL_FLING_START: {
-      ui::EventResult status = ui::ER_UNHANDLED;
-      if (in_gesture_resize_) {
-        // If the window was being resized, then just complete the resize.
-        CompleteDrag(DRAG_COMPLETE, event->flags());
-        if (in_move_loop_) {
-          quit_closure_.Run();
-          in_move_loop_ = false;
-        }
-        in_gesture_resize_ = false;
-        status = ui::ER_CONSUMED;
-      }
+      if (!in_gesture_drag_)
+        return;
 
-      if (event->type() == ui::ET_GESTURE_SCROLL_END)
-        return status;
+      CompleteDrag(DRAG_COMPLETE, event->flags());
+      if (in_move_loop_) {
+        quit_closure_.Run();
+        in_move_loop_ = false;
+      }
+      in_gesture_drag_ = false;
+
+      if (event->type() == ui::ET_GESTURE_SCROLL_END) {
+        event->StopPropagation();
+        return;
+      }
 
       int component =
           target->delegate()->GetNonClientComponent(event->location());
       if (WindowResizer::GetBoundsChangeForWindowComponent(component) == 0)
-        return ui::ER_UNHANDLED;
+        return;
       if (!wm::IsWindowNormal(target))
-        return ui::ER_UNHANDLED;
+        return;
 
       if (fabs(event->details().velocity_y()) >
           kMinVertVelocityForWindowMinimize) {
         // Minimize/maximize.
-        target->SetProperty(aura::client::kShowStateKey,
-            event->details().velocity_y() > 0 ? ui::SHOW_STATE_MINIMIZED :
-                                      ui::SHOW_STATE_MAXIMIZED);
+        if (event->details().velocity_y() > 0) {
+          wm::MinimizeWindow(target);
+          SetWindowAlwaysRestoresToRestoreBounds(target, true);
+          SetRestoreBoundsInParent(target, pre_drag_window_bounds_);
+        } else if (wm::CanMaximizeWindow(target)) {
+          SetRestoreBoundsInParent(target, pre_drag_window_bounds_);
+          wm::MaximizeWindow(target);
+        }
       } else if (fabs(event->details().velocity_x()) >
                  kMinHorizVelocityForWindowSwipe) {
         // Snap left/right.
-        internal::SnapSizer sizer(target,
-            gfx::Point(),
-            event->details().velocity_x() < 0 ? internal::SnapSizer::LEFT_EDGE :
-            internal::SnapSizer::RIGHT_EDGE);
-
         ui::ScopedLayerAnimationSettings scoped_setter(
             target->layer()->GetAnimator());
         scoped_setter.SetPreemptionStrategy(
             ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
-        target->SetBounds(sizer.target_bounds());
+        internal::SnapSizer::SnapWindow(target,
+            event->details().velocity_x() < 0 ?
+            internal::SnapSizer::LEFT_EDGE : internal::SnapSizer::RIGHT_EDGE);
       }
       break;
     }
     default:
-      return ui::ER_UNHANDLED;
+      return;
   }
 
-  return ui::ER_CONSUMED;
+  event->StopPropagation();
 }
 
 aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
     aura::Window* source,
-    const gfx::Point& drag_offset) {
+    const gfx::Vector2d& drag_offset) {
   DCHECK(!in_move_loop_);  // Can only handle one nested loop at a time.
   in_move_loop_ = true;
   move_cancelled_ = false;
@@ -249,7 +250,7 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
   DCHECK(root_window);
   gfx::Point drag_location;
   if (aura::Env::GetInstance()->is_touch_down()) {
-    in_gesture_resize_ = true;
+    in_gesture_drag_ = true;
     bool has_point = root_window->gesture_recognizer()->
         GetLastTouchPointForTarget(source, &drag_location);
     DCHECK(has_point);
@@ -263,6 +264,8 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
       aura::client::GetCursorClient(root_window);
   if (cursor_client)
     cursor_client->SetCursor(ui::kCursorPointer);
+  bool destroyed = false;
+  destroyed_ = &destroyed;
 #if !defined(OS_MACOSX)
   MessageLoopForUI* loop = MessageLoopForUI::current();
   MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
@@ -270,7 +273,10 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
   quit_closure_ = run_loop.QuitClosure();
   run_loop.Run();
 #endif  // !defined(OS_MACOSX)
-  in_gesture_resize_ = in_move_loop_ = false;
+  if (destroyed)
+    return aura::client::MOVE_CANCELED;
+  destroyed_ = NULL;
+  in_gesture_drag_ = in_move_loop_ = false;
   return move_cancelled_ ? aura::client::MOVE_CANCELED :
       aura::client::MOVE_SUCCESSFUL;
 }
@@ -319,13 +325,13 @@ void ToplevelWindowEventHandler::CompleteDrag(DragCompletionStatus status,
   }
 }
 
-ui::EventResult ToplevelWindowEventHandler::HandleMousePressed(
+void ToplevelWindowEventHandler::HandleMousePressed(
     aura::Window* target,
     ui::MouseEvent* event) {
   // Move/size operations are initiated post-target handling to give the target
   // an opportunity to cancel this default behavior by returning ER_HANDLED.
   if (ui::EventCanceledDefaultHandling(*event))
-    return ui::ER_UNHANDLED;
+    return;
 
   // We also update the current window component here because for the
   // mouse-drag-release-press case, where the mouse is released and
@@ -341,15 +347,15 @@ ui::EventResult ToplevelWindowEventHandler::HandleMousePressed(
   } else {
     window_resizer_.reset();
   }
-  return WindowResizer::GetBoundsChangeForWindowComponent(component) != 0 ?
-      ui::ER_CONSUMED : ui::ER_UNHANDLED;
+  if (WindowResizer::GetBoundsChangeForWindowComponent(component) != 0)
+    event->StopPropagation();
 }
 
-ui::EventResult ToplevelWindowEventHandler::HandleMouseReleased(
+void ToplevelWindowEventHandler::HandleMouseReleased(
     aura::Window* target,
     ui::MouseEvent* event) {
   if (event->phase() != ui::EP_PRETARGET)
-    return ui::ER_UNHANDLED;
+    return;
 
   CompleteDrag(event->type() == ui::ET_MOUSE_RELEASED ?
                     DRAG_COMPLETE : DRAG_REVERT,
@@ -363,12 +369,11 @@ ui::EventResult ToplevelWindowEventHandler::HandleMouseReleased(
   // they see the event on a hidden window.
   if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED &&
       !target->IsVisible()) {
-    return ui::ER_CONSUMED;
+    event->StopPropagation();
   }
-  return ui::ER_UNHANDLED;
 }
 
-ui::EventResult ToplevelWindowEventHandler::HandleDrag(
+void ToplevelWindowEventHandler::HandleDrag(
     aura::Window* target,
     ui::LocatedEvent* event) {
   // This function only be triggered to move window
@@ -380,23 +385,23 @@ ui::EventResult ToplevelWindowEventHandler::HandleDrag(
   // Drag actions are performed pre-target handling to prevent spurious mouse
   // moves from the move/size operation from being sent to the target.
   if (event->phase() != ui::EP_PRETARGET)
-    return ui::ER_UNHANDLED;
+    return;
 
   if (!window_resizer_.get())
-    return ui::ER_UNHANDLED;
+    return;
   window_resizer_->resizer()->Drag(
       ConvertPointToParent(target, event->location()), event->flags());
-  return ui::ER_CONSUMED;
+  event->StopPropagation();
 }
 
-ui::EventResult ToplevelWindowEventHandler::HandleMouseMoved(
+void ToplevelWindowEventHandler::HandleMouseMoved(
     aura::Window* target,
     ui::LocatedEvent* event) {
   // Shadow effects are applied after target handling. Note that we don't
   // respect ER_HANDLED here right now since we have not had a reason to allow
   // the target to cancel shadow rendering.
   if (event->phase() != ui::EP_POSTTARGET)
-    return ui::ER_UNHANDLED;
+    return;
 
   // TODO(jamescook): Move the resize cursor update code into here from
   // CompoundEventFilter?
@@ -411,23 +416,21 @@ ui::EventResult ToplevelWindowEventHandler::HandleMouseMoved(
       controller->HideShadow(target);
     }
   }
-  return ui::ER_UNHANDLED;
 }
 
-ui::EventResult ToplevelWindowEventHandler::HandleMouseExited(
+void ToplevelWindowEventHandler::HandleMouseExited(
     aura::Window* target,
     ui::LocatedEvent* event) {
   // Shadow effects are applied after target handling. Note that we don't
   // respect ER_HANDLED here right now since we have not had a reason to allow
   // the target to cancel shadow rendering.
   if (event->phase() != ui::EP_POSTTARGET)
-    return ui::ER_UNHANDLED;
+    return;
 
   internal::ResizeShadowController* controller =
       Shell::GetInstance()->resize_shadow_controller();
   if (controller)
     controller->HideShadow(target);
-  return ui::ER_UNHANDLED;
 }
 
 void ToplevelWindowEventHandler::ResizerWindowDestroyed() {

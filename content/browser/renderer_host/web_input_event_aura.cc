@@ -4,8 +4,10 @@
 
 #include "content/browser/renderer_host/web_input_event_aura.h"
 
+#include "content/browser/renderer_host/ui_events_helper.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 
 namespace content {
 
@@ -18,24 +20,19 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEventFromNativeEvent(
     base::NativeEvent native_event);
 WebKit::WebGestureEvent MakeWebGestureEventFromNativeEvent(
     base::NativeEvent native_event);
-WebKit::WebTouchPoint* UpdateWebTouchEventFromNativeEvent(
-    base::NativeEvent native_event, WebKit::WebTouchEvent* web_event);
 #else
-WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
-    ui::MouseWheelEvent* event);
 WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
     ui::ScrollEvent* event);
 WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
     ui::KeyEvent* event);
 WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
-    ui::GestureEvent* event);
-WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
     ui::ScrollEvent* event);
-WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
-    ui::TouchEvent* event, WebKit::WebTouchEvent* web_event);
 #endif
 
-WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(ui::MouseEvent* event);
+WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(
+    ui::MouseEvent* event);
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    ui::MouseWheelEvent* event);
 
 // General approach:
 //
@@ -87,8 +84,9 @@ WebKit::WebMouseEvent MakeWebMouseEvent(ui::MouseEvent* event) {
 WebKit::WebMouseWheelEvent MakeWebMouseWheelEvent(ui::MouseWheelEvent* event) {
 #if defined(OS_WIN)
   // Construct an untranslated event from the platform event data.
-  WebKit::WebMouseWheelEvent webkit_event =
-      MakeUntranslatedWebMouseWheelEventFromNativeEvent(event->native_event());
+  WebKit::WebMouseWheelEvent webkit_event = event->native_event().message ?
+      MakeUntranslatedWebMouseWheelEventFromNativeEvent(event->native_event()) :
+      MakeWebMouseWheelEventFromAuraEvent(event);
 #else
   WebKit::WebMouseWheelEvent webkit_event =
       MakeWebMouseWheelEventFromAuraEvent(event);
@@ -146,9 +144,12 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEvent(ui::KeyEvent* event) {
 WebKit::WebGestureEvent MakeWebGestureEvent(ui::GestureEvent* event) {
   WebKit::WebGestureEvent gesture_event;
 #if defined(OS_WIN)
-  gesture_event = MakeWebGestureEventFromNativeEvent(event->native_event());
+  if (event->HasNativeEvent())
+    gesture_event = MakeWebGestureEventFromNativeEvent(event->native_event());
+  else
+    gesture_event = MakeWebGestureEventFromUIEvent(*event);
 #else
-  gesture_event = MakeWebGestureEventFromAuraEvent(event);
+  gesture_event = MakeWebGestureEventFromUIEvent(*event);
 #endif
 
   gesture_event.x = event->x();
@@ -188,35 +189,6 @@ WebKit::WebGestureEvent MakeWebGestureEventFlingCancel() {
   return gesture_event;
 }
 
-WebKit::WebTouchPoint* UpdateWebTouchEvent(ui::TouchEvent* event,
-                                           WebKit::WebTouchEvent* web_event) {
-#if defined(OS_WIN)
-  return UpdateWebTouchEventFromNativeEvent(event->native_event(), web_event);
-#else
-  return UpdateWebTouchEventFromAuraEvent(event, web_event);
-#endif
-}
-
-int EventFlagsToWebEventModifiers(int flags) {
-  int modifiers = 0;
-  if (flags & ui::EF_SHIFT_DOWN)
-    modifiers |= WebKit::WebInputEvent::ShiftKey;
-  if (flags & ui::EF_CONTROL_DOWN)
-    modifiers |= WebKit::WebInputEvent::ControlKey;
-  if (flags & ui::EF_ALT_DOWN)
-    modifiers |= WebKit::WebInputEvent::AltKey;
-  // TODO(beng): MetaKey/META_MASK
-  if (flags & ui::EF_LEFT_MOUSE_BUTTON)
-    modifiers |= WebKit::WebInputEvent::LeftButtonDown;
-  if (flags & ui::EF_MIDDLE_MOUSE_BUTTON)
-    modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
-  if (flags & ui::EF_RIGHT_MOUSE_BUTTON)
-    modifiers |= WebKit::WebInputEvent::RightButtonDown;
-  if (flags & ui::EF_CAPS_LOCK_DOWN)
-    modifiers |= WebKit::WebInputEvent::CapsLockOn;
-  return modifiers;
-}
-
 WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(ui::MouseEvent* event) {
   WebKit::WebMouseEvent webkit_event;
 
@@ -249,6 +221,20 @@ WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(ui::MouseEvent* event) {
       NOTIMPLEMENTED() << "Received unexpected event: " << event->type();
       break;
   }
+
+  return webkit_event;
+}
+
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    ui::MouseWheelEvent* event) {
+  WebKit::WebMouseWheelEvent webkit_event;
+
+  webkit_event.type = WebKit::WebInputEvent::MouseWheel;
+  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+  webkit_event.deltaY = event->offset();
+  webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
 
   return webkit_event;
 }

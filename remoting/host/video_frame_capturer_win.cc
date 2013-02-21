@@ -6,19 +6,26 @@
 
 #include <windows.h>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_native_library.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "remoting/base/capture_data.h"
+#include "remoting/base/shared_buffer_factory.h"
 #include "remoting/host/differ.h"
+#include "remoting/host/video_frame.h"
 #include "remoting/host/video_frame_capturer_helper.h"
+#include "remoting/host/video_frame_queue.h"
 #include "remoting/host/win/desktop.h"
 #include "remoting/host/win/scoped_thread_desktop.h"
 #include "remoting/proto/control.pb.h"
+#include "third_party/skia/include/core/SkColorPriv.h"
 
 namespace remoting {
 
@@ -37,6 +44,32 @@ const uint32 kPixelBgraBlack = 0xff000000;
 const uint32 kPixelBgraWhite = 0xffffffff;
 const uint32 kPixelBgraTransparent = 0x00000000;
 
+// A class representing a full-frame pixel buffer.
+class VideoFrameWin : public VideoFrame {
+ public:
+  VideoFrameWin(HDC desktop_dc, const SkISize& size,
+                SharedBufferFactory* shared_buffer_factory);
+  virtual ~VideoFrameWin();
+
+  // Returns handle of the device independent bitmap representing this frame
+  // buffer to GDI.
+  HBITMAP GetBitmap();
+
+ private:
+  // Allocates a device independent bitmap representing this frame buffer to
+  // GDI.
+  void AllocateBitmap(HDC desktop_dc, const SkISize& size);
+
+  // Handle of the device independent bitmap representing this frame buffer to
+  // GDI.
+  base::win::ScopedBitmap bitmap_;
+
+  // Used to allocate shared memory buffers if set.
+  SharedBufferFactory* shared_buffer_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(VideoFrameWin);
+};
+
 // VideoFrameCapturerWin captures 32bit RGB using GDI.
 //
 // VideoFrameCapturerWin is double-buffered as required by VideoFrameCapturer.
@@ -44,41 +77,27 @@ const uint32 kPixelBgraTransparent = 0x00000000;
 class VideoFrameCapturerWin : public VideoFrameCapturer {
  public:
   VideoFrameCapturerWin();
+  explicit VideoFrameCapturerWin(SharedBufferFactory* shared_buffer_factory);
   virtual ~VideoFrameCapturerWin();
 
   // Overridden from VideoFrameCapturer:
-  virtual void Start(const CursorShapeChangedCallback& callback) OVERRIDE;
+  virtual void Start(Delegate* delegate) OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual media::VideoFrame::Format pixel_format() const OVERRIDE;
   virtual void InvalidateRegion(const SkRegion& invalid_region) OVERRIDE;
-  virtual void CaptureInvalidRegion(
-      const CaptureCompletedCallback& callback) OVERRIDE;
+  virtual void CaptureFrame() OVERRIDE;
   virtual const SkISize& size_most_recent() const OVERRIDE;
 
  private:
-  struct VideoFrameBuffer {
-    VideoFrameBuffer();
-
-    void* data;
-    SkISize size;
-    int bytes_per_pixel;
-    int bytes_per_row;
-    int resource_generation;
-  };
-
-  // Make sure that the device contexts and the current bufffer match the screen
-  // configuration.
+  // Make sure that the device contexts match the screen configuration.
   void PrepareCaptureResources();
 
-  // Allocates the specified capture buffer using the current device contexts
-  // and desktop dimensions, releasing any pre-existing buffer.
-  void AllocateBuffer(int buffer_index, int resource_generation);
-
-  void CalculateInvalidRegion();
+  // Creates a CaptureData instance wrapping the current framebuffer and
+  // notifies |delegate_|.
   void CaptureRegion(const SkRegion& region,
-                     const CaptureCompletedCallback& callback);
+                     const base::Time& capture_start_time);
 
-  // Generates an image in the current buffer.
+  // Captures the current screen contents into the current buffer.
   void CaptureImage();
 
   // Expand the cursor shape to add a white outline for visibility against
@@ -88,12 +107,14 @@ class VideoFrameCapturerWin : public VideoFrameCapturer {
   // Capture the current cursor shape.
   void CaptureCursor();
 
+  // Used to allocate shared memory buffers if set.
+  SharedBufferFactory* shared_buffer_factory_;
+
+  Delegate* delegate_;
+
   // A thread-safe list of invalid rectangles, and the size of the most
   // recently captured screen.
   VideoFrameCapturerHelper helper_;
-
-  // Callback notified whenever the cursor shape is changed.
-  CursorShapeChangedCallback cursor_shape_changed_callback_;
 
   // Snapshot of the last cursor bitmap we sent to the client. This is used
   // to diff against the current cursor so we only send a cursor-change
@@ -101,23 +122,17 @@ class VideoFrameCapturerWin : public VideoFrameCapturer {
   scoped_array<uint8> last_cursor_;
   SkISize last_cursor_size_;
 
-  // There are two buffers for the screen images, as required by Capturer.
-  static const int kNumBuffers = 2;
-  VideoFrameBuffer buffers_[kNumBuffers];
-
   ScopedThreadDesktop desktop_;
 
   // GDI resources used for screen capture.
   scoped_ptr<base::win::ScopedGetDC> desktop_dc_;
   base::win::ScopedCreateDC memory_dc_;
-  base::win::ScopedBitmap target_bitmap_[kNumBuffers];
-  int resource_generation_;
+
+  // Queue of the frames buffers.
+  VideoFrameQueue queue_;
 
   // Rectangle describing the bounds of the desktop device context.
   SkIRect desktop_dc_rect_;
-
-  // The current buffer with valid data for reading.
-  int current_buffer_;
 
   // Format of pixels returned in buffer.
   media::VideoFrame::Format pixel_format_;
@@ -136,19 +151,81 @@ static const int kPixelsPerMeter = 3780;
 // 32 bit RGBA is 4 bytes per pixel.
 static const int kBytesPerPixel = 4;
 
-VideoFrameCapturerWin::VideoFrameBuffer::VideoFrameBuffer()
-    : data(NULL),
-      size(SkISize::Make(0, 0)),
-      bytes_per_pixel(0),
-      bytes_per_row(0),
-      resource_generation(0) {
+VideoFrameWin::VideoFrameWin(
+    HDC desktop_dc,
+    const SkISize& size,
+    SharedBufferFactory* shared_buffer_factory)
+    : shared_buffer_factory_(shared_buffer_factory) {
+  // Allocate a shared memory buffer.
+  uint32 buffer_size = size.width() * size.height() * kBytesPerPixel;
+  if (shared_buffer_factory_) {
+    scoped_refptr<SharedBuffer> shared_buffer =
+        shared_buffer_factory_->CreateSharedBuffer(buffer_size);
+    CHECK(shared_buffer->ptr() != NULL);
+    set_shared_buffer(shared_buffer);
+  }
+
+  AllocateBitmap(desktop_dc, size);
+}
+
+VideoFrameWin::~VideoFrameWin() {
+  if (shared_buffer())
+    shared_buffer_factory_->ReleaseSharedBuffer(shared_buffer());
+}
+
+HBITMAP VideoFrameWin::GetBitmap() {
+  return bitmap_;
+}
+
+void VideoFrameWin::AllocateBitmap(HDC desktop_dc, const SkISize& size) {
+  int bytes_per_row = size.width() * kBytesPerPixel;
+
+  // Describe a device independent bitmap (DIB) that is the size of the desktop.
+  BITMAPINFO bmi;
+  memset(&bmi, 0, sizeof(bmi));
+  bmi.bmiHeader.biHeight = -size.height();
+  bmi.bmiHeader.biWidth = size.width();
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = kBytesPerPixel * 8;
+  bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+  bmi.bmiHeader.biSizeImage = bytes_per_row * size.height();
+  bmi.bmiHeader.biXPelsPerMeter = kPixelsPerMeter;
+  bmi.bmiHeader.biYPelsPerMeter = kPixelsPerMeter;
+
+  // Create the DIB, and store a pointer to its pixel buffer.
+  HANDLE section_handle = NULL;
+  if (shared_buffer())
+    section_handle = shared_buffer()->handle();
+  void* data = NULL;
+  bitmap_ = CreateDIBSection(desktop_dc, &bmi, DIB_RGB_COLORS, &data,
+                             section_handle, 0);
+
+  // TODO(wez): Cope gracefully with failure (crbug.com/157170).
+  CHECK(bitmap_ != NULL);
+  CHECK(data != NULL);
+
+  set_pixels(reinterpret_cast<uint8*>(data));
+  set_dimensions(SkISize::Make(bmi.bmiHeader.biWidth,
+                               std::abs(bmi.bmiHeader.biHeight)));
+  set_bytes_per_row(
+      bmi.bmiHeader.biSizeImage / std::abs(bmi.bmiHeader.biHeight));
 }
 
 VideoFrameCapturerWin::VideoFrameCapturerWin()
-    : last_cursor_size_(SkISize::Make(0, 0)),
+    : shared_buffer_factory_(NULL),
+      delegate_(NULL),
+      last_cursor_size_(SkISize::Make(0, 0)),
       desktop_dc_rect_(SkIRect::MakeEmpty()),
-      resource_generation_(0),
-      current_buffer_(0),
+      pixel_format_(media::VideoFrame::RGB32),
+      composition_func_(NULL) {
+}
+
+VideoFrameCapturerWin::VideoFrameCapturerWin(
+    SharedBufferFactory* shared_buffer_factory)
+    : shared_buffer_factory_(shared_buffer_factory),
+      delegate_(NULL),
+      last_cursor_size_(SkISize::Make(0, 0)),
+      desktop_dc_rect_(SkIRect::MakeEmpty()),
       pixel_format_(media::VideoFrame::RGB32),
       composition_func_(NULL) {
 }
@@ -164,16 +241,48 @@ void VideoFrameCapturerWin::InvalidateRegion(const SkRegion& invalid_region) {
   helper_.InvalidateRegion(invalid_region);
 }
 
-void VideoFrameCapturerWin::CaptureInvalidRegion(
-    const CaptureCompletedCallback& callback) {
+void VideoFrameCapturerWin::CaptureFrame() {
+  base::Time capture_start_time = base::Time::Now();
+
   // Force the system to power-up display hardware, if it has been suspended.
   SetThreadExecutionState(ES_DISPLAY_REQUIRED);
 
-  // Perform the capture.
-  CalculateInvalidRegion();
+  // Make sure the GDI capture resources are up-to-date.
+  PrepareCaptureResources();
+
+  // Copy screen bits to the current buffer.
+  CaptureImage();
+
+  const VideoFrame* current_buffer = queue_.current_frame();
+  const VideoFrame* last_buffer = queue_.previous_frame();
+  if (last_buffer) {
+    // Make sure the differencer is set up correctly for these previous and
+    // current screens.
+    if (!differ_.get() ||
+        (differ_->width() != current_buffer->dimensions().width()) ||
+        (differ_->height() != current_buffer->dimensions().height()) ||
+        (differ_->bytes_per_row() != current_buffer->bytes_per_row())) {
+      differ_.reset(new Differ(current_buffer->dimensions().width(),
+                               current_buffer->dimensions().height(),
+                               kBytesPerPixel,
+                               current_buffer->bytes_per_row()));
+    }
+
+    // Calculate difference between the two last captured frames.
+    SkRegion region;
+    differ_->CalcDirtyRegion(last_buffer->pixels(), current_buffer->pixels(),
+                             &region);
+    InvalidateRegion(region);
+  } else {
+    // No previous frame is available. Invalidate the whole screen.
+    helper_.InvalidateScreen(current_buffer->dimensions());
+  }
+
+  // Wrap the captured frame into CaptureData structure and invoke
+  // the completion callback.
   SkRegion invalid_region;
   helper_.SwapInvalidRegion(&invalid_region);
-  CaptureRegion(invalid_region, callback);
+  CaptureRegion(invalid_region, capture_start_time);
 
   // Check for cursor shape update.
   CaptureCursor();
@@ -183,9 +292,10 @@ const SkISize& VideoFrameCapturerWin::size_most_recent() const {
   return helper_.size_most_recent();
 }
 
-void VideoFrameCapturerWin::Start(
-    const CursorShapeChangedCallback& callback) {
-  cursor_shape_changed_callback_ = callback;
+void VideoFrameCapturerWin::Start(Delegate* delegate) {
+  DCHECK(delegate_ == NULL);
+
+  delegate_ = delegate;
 
   // Load dwmapi.dll dynamically since it is not available on XP.
   if (!dwmapi_library_.is_valid()) {
@@ -211,6 +321,8 @@ void VideoFrameCapturerWin::Stop() {
   if (composition_func_ != NULL) {
     (*composition_func_)(DWM_EC_ENABLECOMPOSITION);
   }
+
+  delegate_ = NULL;
 }
 
 void VideoFrameCapturerWin::PrepareCaptureResources() {
@@ -240,134 +352,78 @@ void VideoFrameCapturerWin::PrepareCaptureResources() {
     desktop_dc_rect_.setEmpty();
   }
 
-  // Create GDI device contexts to capture from the desktop into memory, and
-  // allocate buffers to capture into.
   if (desktop_dc_.get() == NULL) {
     DCHECK(memory_dc_.Get() == NULL);
 
+    // Create GDI device contexts to capture from the desktop into memory.
     desktop_dc_.reset(new base::win::ScopedGetDC(NULL));
     memory_dc_.Set(CreateCompatibleDC(*desktop_dc_));
     desktop_dc_rect_ = screen_rect;
 
-    ++resource_generation_;
+    // Make sure the frame buffers will be reallocated.
+    queue_.SetAllFramesNeedUpdate();
+
+    helper_.ClearInvalidRegion();
   }
-
-  // If the current buffer is from an older generation then allocate a new one.
-  // Note that we can't reallocate other buffers at this point, since the caller
-  // may still be reading from them.
-  if (resource_generation_ != buffers_[current_buffer_].resource_generation) {
-    AllocateBuffer(current_buffer_, resource_generation_);
-
-    SkRegion region;
-    region.op(SkIRect::MakeSize(helper_.size_most_recent()),
-              SkRegion::kUnion_Op);
-    InvalidateRegion(region);
-  }
-}
-
-void VideoFrameCapturerWin::AllocateBuffer(int buffer_index,
-                                           int resource_generation) {
-  DCHECK(desktop_dc_.get() != NULL);
-  DCHECK(memory_dc_.Get() != NULL);
-  // Windows requires DIB sections' rows to start DWORD-aligned, which is
-  // implicit when working with RGB32 pixels.
-  DCHECK_EQ(pixel_format_, media::VideoFrame::RGB32);
-
-  // Describe a device independent bitmap (DIB) that is the size of the desktop.
-  BITMAPINFO bmi;
-  memset(&bmi, 0, sizeof(bmi));
-  bmi.bmiHeader.biHeight = -desktop_dc_rect_.height();
-  bmi.bmiHeader.biWidth = desktop_dc_rect_.width();
-  bmi.bmiHeader.biPlanes = 1;
-  bmi.bmiHeader.biBitCount = kBytesPerPixel * 8;
-  bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
-  int bytes_per_row = desktop_dc_rect_.width() * kBytesPerPixel;
-  bmi.bmiHeader.biSizeImage = bytes_per_row * desktop_dc_rect_.height();
-  bmi.bmiHeader.biXPelsPerMeter = kPixelsPerMeter;
-  bmi.bmiHeader.biYPelsPerMeter = kPixelsPerMeter;
-
-  // Create the DIB, and store a pointer to its pixel buffer.
-  target_bitmap_[buffer_index] =
-      CreateDIBSection(*desktop_dc_, &bmi, DIB_RGB_COLORS,
-                       static_cast<void**>(&buffers_[buffer_index].data),
-                       NULL, 0);
-  buffers_[buffer_index].size = SkISize::Make(bmi.bmiHeader.biWidth,
-                                              std::abs(bmi.bmiHeader.biHeight));
-  buffers_[buffer_index].bytes_per_pixel = bmi.bmiHeader.biBitCount / 8;
-  buffers_[buffer_index].bytes_per_row =
-      bmi.bmiHeader.biSizeImage / std::abs(bmi.bmiHeader.biHeight);
-  buffers_[buffer_index].resource_generation = resource_generation;
-}
-
-void VideoFrameCapturerWin::CalculateInvalidRegion() {
-  CaptureImage();
-
-  const VideoFrameBuffer& current = buffers_[current_buffer_];
-
-  // Find the previous and current screens.
-  int prev_buffer_id = current_buffer_ - 1;
-  if (prev_buffer_id < 0) {
-    prev_buffer_id = kNumBuffers - 1;
-  }
-  const VideoFrameBuffer& prev = buffers_[prev_buffer_id];
-
-  // Maybe the previous and current screens can't be differenced.
-  if ((current.size != prev.size) ||
-      (current.bytes_per_pixel != prev.bytes_per_pixel) ||
-      (current.bytes_per_row != prev.bytes_per_row)) {
-    helper_.InvalidateScreen(current.size);
-    return;
-  }
-
-  // Make sure the differencer is set up correctly for these previous and
-  // current screens.
-  if (!differ_.get() ||
-      (differ_->width() != current.size.width()) ||
-      (differ_->height() != current.size.height()) ||
-      (differ_->bytes_per_pixel() != current.bytes_per_pixel) ||
-      (differ_->bytes_per_row() != current.bytes_per_row)) {
-    differ_.reset(new Differ(current.size.width(), current.size.height(),
-      current.bytes_per_pixel, current.bytes_per_row));
-  }
-
-  SkRegion region;
-  differ_->CalcDirtyRegion(prev.data, current.data, &region);
-
-  InvalidateRegion(region);
 }
 
 void VideoFrameCapturerWin::CaptureRegion(
     const SkRegion& region,
-    const CaptureCompletedCallback& callback) {
-  const VideoFrameBuffer& buffer = buffers_[current_buffer_];
-  current_buffer_ = (current_buffer_ + 1) % kNumBuffers;
+    const base::Time& capture_start_time) {
+  const VideoFrame* current_buffer = queue_.current_frame();
 
   DataPlanes planes;
-  planes.data[0] = static_cast<uint8*>(buffer.data);
-  planes.strides[0] = buffer.bytes_per_row;
+  planes.data[0] = current_buffer->pixels();
+  planes.strides[0] = current_buffer->bytes_per_row();
 
   scoped_refptr<CaptureData> data(new CaptureData(planes,
-                                                  buffer.size,
+                                                  current_buffer->dimensions(),
                                                   pixel_format_));
   data->mutable_dirty_region() = region;
+  data->set_shared_buffer(current_buffer->shared_buffer());
 
   helper_.set_size_most_recent(data->size());
 
-  callback.Run(data);
+  queue_.DoneWithCurrentFrame();
+
+  data->set_capture_time_ms(
+      (base::Time::Now() - capture_start_time).InMillisecondsRoundedUp());
+  delegate_->OnCaptureCompleted(data);
 }
 
 void VideoFrameCapturerWin::CaptureImage() {
-  // Make sure the GDI capture resources are up-to-date.
-  PrepareCaptureResources();
+  // If the current buffer is from an older generation then allocate a new one.
+  // Note that we can't reallocate other buffers at this point, since the caller
+  // may still be reading from them.
+  if (queue_.current_frame_needs_update()) {
+    DCHECK(desktop_dc_.get() != NULL);
+    DCHECK(memory_dc_.Get() != NULL);
+    // Windows requires DIB sections' rows to start DWORD-aligned, which is
+    // implicit when working with RGB32 pixels.
+    DCHECK_EQ(pixel_format_, media::VideoFrame::RGB32);
 
-  // Select the target bitmap into the memory dc.
-  SelectObject(memory_dc_, target_bitmap_[current_buffer_]);
+    SkISize size = SkISize::Make(desktop_dc_rect_.width(),
+                                 desktop_dc_rect_.height());
+    scoped_ptr<VideoFrameWin> buffer(
+        new VideoFrameWin(*desktop_dc_, size, shared_buffer_factory_));
+    queue_.ReplaceCurrentFrame(buffer.PassAs<VideoFrame>());
+  }
 
-  // And then copy the rect from desktop to memory.
-  BitBlt(memory_dc_, 0, 0, buffers_[current_buffer_].size.width(),
-      buffers_[current_buffer_].size.height(), *desktop_dc_,
-      desktop_dc_rect_.x(), desktop_dc_rect_.y(),
-      SRCCOPY | CAPTUREBLT);
+  // Select the target bitmap into the memory dc and copy the rect from desktop
+  // to memory.
+  VideoFrameWin* current = static_cast<VideoFrameWin*>(queue_.current_frame());
+  HGDIOBJ previous_object = SelectObject(memory_dc_, current->GetBitmap());
+  if (previous_object != NULL) {
+    BitBlt(memory_dc_,
+           0, 0, desktop_dc_rect_.width(), desktop_dc_rect_.height(),
+           *desktop_dc_,
+           desktop_dc_rect_.x(), desktop_dc_rect_.y(),
+           SRCCOPY | CAPTUREBLT);
+
+    // Select back the previously selected object to that the device contect
+    // could be destroyed independently of the bitmap if needed.
+    SelectObject(memory_dc_, previous_object);
+  }
 }
 
 void VideoFrameCapturerWin::AddCursorOutline(int width,
@@ -463,15 +519,23 @@ void VideoFrameCapturerWin::CaptureCursor() {
       return;
     }
 
-    // Cursor bitmap is stored upside-down on Windows. Flip the rows and store
-    // it in the proto.
+    // Copy across colour cursor imagery.
+    // CursorShapeInfo stores imagery top-down, and premultiplied
+    // by the alpha channel, whereas windows stores them bottom-up
+    // and not premultiplied.
     uint8* cursor_src_data = reinterpret_cast<uint8*>(bitmap.bmBits);
     uint8* src = cursor_src_data + ((height - 1) * row_bytes);
     uint8* dst = cursor_dst_data;
-    for (int row = 0; row < height; row++) {
-      memcpy(dst, src, row_bytes);
-      dst += width * kBytesPerPixel;
-      src -= row_bytes;
+    for (int row = 0; row < height; ++row) {
+      for (int column = 0; column < width; ++column) {
+        dst[0] = SkAlphaMul(src[0], src[3]);
+        dst[1] = SkAlphaMul(src[1], src[3]);
+        dst[2] = SkAlphaMul(src[2], src[3]);
+        dst[3] = src[3];
+        dst += kBytesPerPixel;
+        src += kBytesPerPixel;
+      }
+      src -= row_bytes + (width * kBytesPerPixel);
     }
   } else {
     if (bitmap.bmPlanes != 1 || bitmap.bmBitsPixel != 1) {
@@ -542,14 +606,22 @@ void VideoFrameCapturerWin::CaptureCursor() {
   memcpy(last_cursor_.get(), cursor_dst_data, data_size);
   last_cursor_size_ = SkISize::Make(width, height);
 
-  cursor_shape_changed_callback_.Run(cursor_proto.Pass());
+  delegate_->OnCursorShapeChanged(cursor_proto.Pass());
 }
 
 }  // namespace
 
 // static
-VideoFrameCapturer* VideoFrameCapturer::Create() {
-  return new VideoFrameCapturerWin();
+scoped_ptr<VideoFrameCapturer> VideoFrameCapturer::Create() {
+  return scoped_ptr<VideoFrameCapturer>(new VideoFrameCapturerWin());
+}
+
+// static
+scoped_ptr<VideoFrameCapturer> VideoFrameCapturer::CreateWithFactory(
+    SharedBufferFactory* shared_buffer_factory) {
+  scoped_ptr<VideoFrameCapturerWin> capturer(
+      new VideoFrameCapturerWin(shared_buffer_factory));
+  return capturer.PassAs<VideoFrameCapturer>();
 }
 
 }  // namespace remoting

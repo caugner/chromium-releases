@@ -115,7 +115,7 @@ class DownloadsCancelFunction : public SyncExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(DownloadsCancelFunction);
 };
 
-class DownloadsEraseFunction : public AsyncExtensionFunction {
+class DownloadsEraseFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("downloads.erase");
   DownloadsEraseFunction();
@@ -167,7 +167,7 @@ class DownloadsShowFunction : public AsyncExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(DownloadsShowFunction);
 };
 
-class DownloadsOpenFunction : public AsyncExtensionFunction {
+class DownloadsOpenFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("downloads.open");
   DownloadsOpenFunction();
@@ -206,7 +206,6 @@ class DownloadsGetFileIconFunction : public AsyncExtensionFunction {
  private:
   void OnIconURLExtracted(const std::string& url);
   FilePath path_;
-  int icon_size_;
   scoped_ptr<DownloadFileIconExtractor> icon_extractor_;
   DISALLOW_COPY_AND_ASSIGN(DownloadsGetFileIconFunction);
 };

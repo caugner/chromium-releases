@@ -30,7 +30,7 @@ class MockExtensionService : public TestExtensionService {
   MockExtensionService() : ready_(false), unloaded_count_(0) {
   }
 
-  virtual void AddExtension(const Extension* extension) OVERRIDE {
+  virtual void AddComponentExtension(const Extension* extension) OVERRIDE {
     EXPECT_FALSE(extension_set_.Contains(extension->id()));
     // ExtensionService must become the owner of the extension object.
     extension_set_.Insert(extension);
@@ -220,7 +220,7 @@ TEST_F(ComponentLoaderTest, LoadAll) {
   EXPECT_EQ(0u, extension_service_.extensions()->size());
 
   // Use LoadAll() to load the default extensions.
-  component_loader_.AddDefaultComponentExtensions();
+  component_loader_.AddDefaultComponentExtensions(false);
   component_loader_.LoadAll();
   unsigned int default_count = extension_service_.extensions()->size();
 
@@ -232,8 +232,26 @@ TEST_F(ComponentLoaderTest, LoadAll) {
   EXPECT_EQ(default_count + 1, extension_service_.extensions()->size());
 }
 
+TEST_F(ComponentLoaderTest, RemoveAll) {
+  extension_service_.set_ready(true);
+  EXPECT_EQ(0u, extension_service_.extensions()->size());
+  // Add all the default extensions. Since the extension service is ready, they
+  // will be loaded immediately.
+  component_loader_.AddDefaultComponentExtensions(false);
+  unsigned int default_count = extension_service_.extensions()->size();
+
+  // And add one more just to make sure there is anything in there in case
+  // there are no defaults for this platform.
+  component_loader_.Add(manifest_contents_, extension_path_);
+  EXPECT_EQ(default_count + 1, extension_service_.extensions()->size());
+
+  // Remove all default extensions.
+  component_loader_.RemoveAll();
+  EXPECT_EQ(0u, extension_service_.extensions()->size());
+}
+
 TEST_F(ComponentLoaderTest, EnterpriseWebStore) {
-  component_loader_.AddDefaultComponentExtensions();
+  component_loader_.AddDefaultComponentExtensions(false);
   component_loader_.LoadAll();
   unsigned int default_count = extension_service_.extensions()->size();
 
@@ -247,7 +265,7 @@ TEST_F(ComponentLoaderTest, EnterpriseWebStore) {
   extension_service_.set_ready(false);
   extension_service_.clear_extensions();
   component_loader_.ClearAllRegistered();
-  component_loader_.AddDefaultComponentExtensions();
+  component_loader_.AddDefaultComponentExtensions(false);
   component_loader_.LoadAll();
   EXPECT_EQ(default_count + 1, extension_service_.extensions()->size());
 
@@ -259,7 +277,7 @@ TEST_F(ComponentLoaderTest, EnterpriseWebStore) {
 
 TEST_F(ComponentLoaderTest, AddOrReplace) {
   EXPECT_EQ(0u, component_loader_.registered_extensions_count());
-  component_loader_.AddDefaultComponentExtensions();
+  component_loader_.AddDefaultComponentExtensions(false);
   size_t const default_count = component_loader_.registered_extensions_count();
   FilePath known_extension = GetBasePath()
       .AppendASCII("override_component_extension");

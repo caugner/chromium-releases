@@ -9,10 +9,10 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/time.h"
 #include "chrome/browser/sessions/session_types_test_helper.h"
@@ -20,10 +20,12 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
+#include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/glue/synced_device_tracker.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
@@ -59,11 +61,31 @@ using content::BrowserThread;
 using syncer::ChangeRecord;
 using testing::_;
 using testing::Return;
-using syncer::TestIdFactory;
 
 namespace browser_sync {
 
 namespace {
+
+class FakeProfileSyncService : public TestProfileSyncService {
+ public:
+  FakeProfileSyncService(
+      ProfileSyncComponentsFactory* factory,
+      Profile* profile,
+      SigninManager* signin,
+      ProfileSyncService::StartBehavior behavior,
+      bool synchronous_backend_initialization)
+      : TestProfileSyncService(factory,
+                               profile,
+                               signin,
+                               behavior,
+                               synchronous_backend_initialization) {}
+  virtual ~FakeProfileSyncService() {}
+
+  virtual scoped_ptr<DeviceInfo> GetLocalDeviceInfo() const OVERRIDE {
+    return scoped_ptr<DeviceInfo>(
+        new DeviceInfo("client_name", "", "", sync_pb::SyncEnums::TYPE_WIN));
+  }
+};
 
 void BuildSessionSpecifics(const std::string& tag,
                            sync_pb::SessionSpecifics* meta) {
@@ -88,7 +110,7 @@ void AddWindowSpecifics(int window_id,
 }
 
 void BuildTabSpecifics(const std::string& tag, int window_id, int tab_id,
-                     sync_pb::SessionSpecifics* tab_base) {
+                       sync_pb::SessionSpecifics* tab_base) {
   tab_base->set_session_tag(tag);
   sync_pb::SessionTab* tab = tab_base->mutable_tab();
   tab->set_tab_id(tab_id);
@@ -212,9 +234,9 @@ class ProfileSyncServiceSessionTest
 
     // Pump messages posted by the sync core thread (which may end up
     // posting on the IO thread).
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
     io_thread_.Stop();
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
     BrowserWithTestWindowTest::TearDown();
   }
 
@@ -226,13 +248,13 @@ class ProfileSyncServiceSessionTest
     signin->SetAuthenticatedUsername("test_user");
     ProfileSyncComponentsFactoryMock* factory =
         new ProfileSyncComponentsFactoryMock();
-    sync_service_.reset(new TestProfileSyncService(
+    sync_service_.reset(new FakeProfileSyncService(
         factory,
         profile(),
         signin,
         ProfileSyncService::AUTO_START,
-        false,
-        callback));
+        false));
+    sync_service_->set_backend_init_callback(callback);
 
     // Register the session data type.
     SessionDataTypeController *dtc = new SessionDataTypeController(factory,
@@ -249,7 +271,7 @@ class ProfileSyncServiceSessionTest
     EXPECT_CALL(*factory, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
-    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _)).
         WillOnce(ReturnNewDataTypeManager());
 
     TokenServiceFactory::GetForProfile(profile())->IssueAuthTokenForTest(
@@ -261,7 +283,7 @@ class ProfileSyncServiceSessionTest
 
   content::TestBrowserThread io_thread_;
   // Path used in testing.
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   SessionModelAssociator* model_associator_;
   SessionChangeProcessor* change_processor_;
   SessionID window_id_;
@@ -320,14 +342,13 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   ASSERT_TRUE(specifics.has_header());
   const sync_pb::SessionHeader& header_s = specifics.header();
   ASSERT_TRUE(header_s.has_device_type());
-  ASSERT_EQ("TestSessionName", header_s.client_name());
+  ASSERT_EQ("client_name", header_s.client_name());
   ASSERT_EQ(0, header_s.window_size());
 }
 
 // Test that we can fill this machine's session, write it to a node,
 // and then retrieve it.
-// Disabled because this test fails occasionally: http://crbug.com/81104
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_WriteFilledSessionToNode) {
+TEST_F(ProfileSyncServiceSessionTest, WriteFilledSessionToNode) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -725,8 +746,7 @@ TEST_F(ProfileSyncServiceSessionTest, TabNodePoolEmpty) {
 }
 
 // TODO(jhorwich): Re-enable when crbug.com/121487 addressed
-// Test the TabNodePool when it starts off with nodes
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_TabNodePoolNonEmpty) {
+TEST_F(ProfileSyncServiceSessionTest, TabNodePoolNonEmpty) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -920,8 +940,7 @@ TEST_F(ProfileSyncServiceSessionTest, StaleSessionRefresh) {
 
 // Test that tabs with nothing but "chrome://*" and "file://*" navigations are
 // not be synced.
-// This test is crashing occasionally: http://crbug.com/116097
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_ValidTabs) {
+TEST_F(ProfileSyncServiceSessionTest, ValidTabs) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -963,8 +982,7 @@ TEST_F(ProfileSyncServiceSessionTest, SessionsRefresh) {
 }
 
 // Ensure model association associates the pre-existing tabs.
-// TODO(jhorwich): Fix the test so that it doesn't crash (crbug.com/121487)
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_ExistingTabs) {
+TEST_F(ProfileSyncServiceSessionTest, ExistingTabs) {
   AddTab(browser(), GURL("http://foo1"));
   NavigateAndCommitActiveTab(GURL("http://foo2"));
   AddTab(browser(), GURL("http://bar1"));
@@ -1006,8 +1024,7 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_ExistingTabs) {
       GetEntryAtIndex(1)->GetVirtualURL());
 }
 
-// TODO(jhorwich): Re-enable when crbug.com/121487 addressed
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_MissingHeaderAndTab) {
+TEST_F(ProfileSyncServiceSessionTest, MissingHeaderAndTab) {
   AddTab(browser(), GURL("http://foo1"));
   NavigateAndCommitActiveTab(GURL("http://foo2"));
   AddTab(browser(), GURL("http://bar1"));
@@ -1033,12 +1050,11 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_MissingHeaderAndTab) {
     extra_header.SetSessionSpecifics(specifics);
   }
 
-  error = model_associator_->AssociateModels();
+  error = model_associator_->AssociateModels(NULL, NULL);
   ASSERT_FALSE(error.IsSet());
 }
 
-// TODO(jhorwich): Re-enable when crbug.com/121487 addressed
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_MultipleHeaders) {
+TEST_F(ProfileSyncServiceSessionTest, MultipleHeaders) {
   AddTab(browser(), GURL("http://foo1"));
   NavigateAndCommitActiveTab(GURL("http://foo2"));
   AddTab(browser(), GURL("http://bar1"));
@@ -1065,12 +1081,11 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_MultipleHeaders) {
     specifics.mutable_header();
     extra_header.SetSessionSpecifics(specifics);
   }
-  error = model_associator_->AssociateModels();
+  error = model_associator_->AssociateModels(NULL, NULL);
   ASSERT_FALSE(error.IsSet());
 }
 
-// TODO(jhorwich): Re-enable when crbug.com/121487 addressed
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_CorruptedForeign) {
+TEST_F(ProfileSyncServiceSessionTest, CorruptedForeign) {
   AddTab(browser(), GURL("http://foo1"));
   NavigateAndCommitActiveTab(GURL("http://foo2"));
   AddTab(browser(), GURL("http://bar1"));
@@ -1097,12 +1112,11 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_CorruptedForeign) {
     specifics.set_session_tag(foreign_tag);
     extra_header.SetSessionSpecifics(specifics);
   }
-  error = model_associator_->AssociateModels();
+  error = model_associator_->AssociateModels(NULL, NULL);
   ASSERT_FALSE(error.IsSet());
 }
 
-// TODO(jhorwich): Re-enable when crbug.com/121487 addressed
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_MissingLocalTabNode) {
+TEST_F(ProfileSyncServiceSessionTest, MissingLocalTabNode) {
   AddTab(browser(), GURL("http://foo1"));
   NavigateAndCommitActiveTab(GURL("http://foo2"));
   AddTab(browser(), GURL("http://bar1"));
@@ -1122,10 +1136,11 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_MissingLocalTabNode) {
     syncer::ReadNode root(&trans);
     root.InitByTagLookup(syncer::ModelTypeToRootTag(syncer::SESSIONS));
     syncer::WriteNode tab_node(&trans);
-    ASSERT_TRUE(tab_node.InitByClientTagLookup(syncer::SESSIONS, tab_tag));
+    ASSERT_EQ(syncer::BaseNode::INIT_OK,
+              tab_node.InitByClientTagLookup(syncer::SESSIONS, tab_tag));
     tab_node.Remove();
   }
-  error = model_associator_->AssociateModels();
+  error = model_associator_->AssociateModels(NULL, NULL);
   ASSERT_FALSE(error.IsSet());
 
   // Add some more tabs to ensure we don't conflict with the pre-existing tab
@@ -1174,8 +1189,7 @@ TEST_F(ProfileSyncServiceSessionTest, Favicons) {
   ASSERT_FALSE(model_associator_->GetSyncedFaviconForPageURL(url, &favicon));
 }
 
-// TODO(jhorwich): Re-enable when crbug.com/121487 addressed
-TEST_F(ProfileSyncServiceSessionTest, DISABLED_CorruptedLocalHeader) {
+TEST_F(ProfileSyncServiceSessionTest, CorruptedLocalHeader) {
   AddTab(browser(), GURL("http://foo1"));
   NavigateAndCommitActiveTab(GURL("http://foo2"));
   AddTab(browser(), GURL("http://bar1"));
@@ -1198,7 +1212,7 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_CorruptedLocalHeader) {
   }
   // Ensure we associate properly despite the pre-existing node with our local
   // tag.
-  error = model_associator_->AssociateModels();
+  error = model_associator_->AssociateModels(NULL, NULL);
   ASSERT_FALSE(error.IsSet());
 }
 

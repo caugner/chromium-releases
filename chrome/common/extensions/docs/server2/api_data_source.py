@@ -3,13 +3,12 @@
 # found in the LICENSE file.
 
 import copy
-import json
+import logging
 import os
 
-from docs_server_utils import GetLinkToRefType
 import compiled_file_system as compiled_fs
 from file_system import FileNotFoundError
-import third_party.json_schema_compiler.json_comment_eater as json_comment_eater
+import third_party.json_schema_compiler.json_parse as json_parse
 import third_party.json_schema_compiler.model as model
 import third_party.json_schema_compiler.idl_schema as idl_schema
 import third_party.json_schema_compiler.idl_parser as idl_parser
@@ -17,10 +16,10 @@ import third_party.json_schema_compiler.idl_parser as idl_parser
 # Increment this version when there are changes to the data stored in any of
 # the caches used by APIDataSource. This allows the cache to be invalidated
 # without having to flush memcache on the production server.
-_VERSION = 2
+_VERSION = 7
 
 def _RemoveNoDocs(item):
-  if type(item) == dict:
+  if json_parse.IsDict(item):
     if item.get('nodoc', False):
       return True
     to_remove = []
@@ -49,11 +48,13 @@ def _FormatValue(value):
   s = str(value)
   return ','.join([s[max(0, i - 3):i] for i in range(len(s), 0, -3)][::-1])
 
-class _JscModel(object):
+class _JSCModel(object):
   """Uses a Model from the JSON Schema Compiler and generates a dict that
   a Handlebar template can use for a data source.
   """
-  def __init__(self, json):
+  def __init__(self, json, ref_resolver, disable_refs):
+    self._ref_resolver = ref_resolver
+    self._disable_refs = disable_refs
     clean_json = copy.deepcopy(json)
     if _RemoveNoDocs(clean_json):
       self._namespace = None
@@ -61,25 +62,15 @@ class _JscModel(object):
       self._namespace = model.Namespace(clean_json, clean_json['namespace'])
 
   def _FormatDescription(self, description):
-    if description is None or '$ref:' not in description:
+    if self._disable_refs:
       return description
-    refs = description.split('$ref:')
-    formatted_description = [refs[0]]
-    for ref in refs[1:]:
-      parts = ref.split(' ', 1)
-      if len(parts) == 1:
-        ref = parts[0]
-        rest = ''
-      else:
-        ref, rest = parts
-        rest = ' ' + rest
-      if not ref[-1].isalnum():
-        rest = ref[-1] + rest
-        ref = ref[:-1]
-      ref_dict = GetLinkToRefType(self._namespace.name, ref)
-      formatted_description.append('<a href="%(href)s">%(text)s</a>%(rest)s' %
-          { 'href': ref_dict['href'], 'text': ref_dict['text'], 'rest': rest })
-    return ''.join(formatted_description)
+    return self._ref_resolver.ResolveAllLinks(description, self._namespace.name)
+
+  def _GetLink(self, link):
+    if self._disable_refs:
+      type_name = link.split('.', 1)[-1]
+      return { 'href': '#type-%s' % type_name, 'text': link, 'name': link }
+    return self._ref_resolver.SafeGetLink(link, self._namespace.name)
 
   def ToDict(self):
     if self._namespace is None:
@@ -126,8 +117,6 @@ class _JscModel(object):
       function_dict['returns'] = self._GenerateProperty(function.returns)
     for param in function.params:
       function_dict['parameters'].append(self._GenerateProperty(param))
-    if function_dict['callback']:
-      function_dict['parameters'].append(function_dict['callback'])
     if len(function_dict['parameters']) > 0:
       function_dict['parameters'][-1]['last'] = True
     return function_dict
@@ -139,13 +128,12 @@ class _JscModel(object):
     event_dict = {
       'name': event.simple_name,
       'description': self._FormatDescription(event.description),
-      'parameters': map(self._GenerateProperty, event.params),
+      'parameters': [self._GenerateProperty(p) for p in event.params],
       'callback': self._GenerateCallback(event.callback),
-      'conditions': [GetLinkToRefType(self._namespace.name, c)
-                     for c in event.conditions],
-      'actions': [GetLinkToRefType(self._namespace.name, a)
-                     for a in event.actions],
-      'filters': map(self._GenerateProperty, event.filters),
+      'filters': [self._GenerateProperty(f) for f in event.filters],
+      'conditions': [self._GetLink(condition)
+                     for condition in event.conditions],
+      'actions': [self._GetLink(action) for action in event.actions],
       'supportsRules': event.supports_rules,
       'id': _CreateId(event, 'event')
     }
@@ -154,8 +142,6 @@ class _JscModel(object):
       event_dict['parent_name'] = event.parent.simple_name
     else:
       event_dict['parent_name'] = None
-    if event_dict['callback']:
-      event_dict['parameters'].append(event_dict['callback'])
     if len(event_dict['parameters']) > 0:
       event_dict['parameters'][-1]['last'] = True
     return event_dict
@@ -186,8 +172,8 @@ class _JscModel(object):
       'optional': property_.optional,
       'description': self._FormatDescription(property_.description),
       'properties': self._GenerateProperties(property_.properties),
-      'parameters': [],
       'functions': self._GenerateFunctions(property_.functions),
+      'parameters': [],
       'returns': None,
       'id': _CreateId(property_, 'property')
     }
@@ -211,15 +197,14 @@ class _JscModel(object):
 
   def _RenderTypeInformation(self, property_, dst_dict):
     if property_.type_ == model.PropertyType.CHOICES:
-      dst_dict['choices'] = map(self._GenerateProperty,
-                                property_.choices.values())
+      dst_dict['choices'] = [self._GenerateProperty(c)
+                             for c in property_.choices.values()]
       # We keep track of which is last for knowing when to add "or" between
       # choices in templates.
       if len(dst_dict['choices']) > 0:
         dst_dict['choices'][-1]['last'] = True
     elif property_.type_ == model.PropertyType.REF:
-      dst_dict['link'] = GetLinkToRefType(self._namespace.name,
-                                          property_.ref_type)
+      dst_dict['link'] = self._GetLink(property_.ref_type)
     elif property_.type_ == model.PropertyType.ARRAY:
       dst_dict['array'] = self._GenerateProperty(property_.item_type)
     elif property_.type_ == model.PropertyType.ENUM:
@@ -249,57 +234,127 @@ class APIDataSource(object):
   |cache_factory|, so the APIs can be plugged into templates.
   """
   class Factory(object):
-    def __init__(self, cache_factory, base_path, samples_factory):
+    def __init__(self,
+                 cache_factory,
+                 base_path):
       self._permissions_cache = cache_factory.Create(self._LoadPermissions,
                                                      compiled_fs.PERMS,
                                                      version=_VERSION)
-      self._json_cache = cache_factory.Create(self._LoadJsonAPI,
-                                              compiled_fs.JSON,
-                                              version=_VERSION)
-      self._idl_cache = cache_factory.Create(self._LoadIdlAPI,
-                                             compiled_fs.IDL,
-                                             version=_VERSION)
+      self._json_cache = cache_factory.Create(
+          lambda api: self._LoadJsonAPI(api, False),
+          compiled_fs.JSON,
+          version=_VERSION)
+      self._idl_cache = cache_factory.Create(
+          lambda api: self._LoadIdlAPI(api, False),
+          compiled_fs.IDL,
+          version=_VERSION)
+
+      # These caches are used if an APIDataSource does not want to resolve the
+      # $refs in an API. This is needed to prevent infinite recursion in
+      # ReferenceResolver.
+      self._json_cache_no_refs = cache_factory.Create(
+          lambda api: self._LoadJsonAPI(api, True),
+          compiled_fs.JSON_NO_REFS,
+          version=_VERSION)
+      self._idl_cache_no_refs = cache_factory.Create(
+          lambda api: self._LoadIdlAPI(api, True),
+          compiled_fs.IDL_NO_REFS,
+          version=_VERSION)
       self._idl_names_cache = cache_factory.Create(self._GetIDLNames,
                                                    compiled_fs.IDL_NAMES,
                                                    version=_VERSION)
-      self._samples_factory = samples_factory
+      self._names_cache = cache_factory.Create(self._GetAllNames,
+                                               compiled_fs.NAMES,
+                                               version=_VERSION)
       self._base_path = base_path
 
-    def Create(self, request):
+      # These must be set later via the SetFooDataSourceFactory methods.
+      self._ref_resolver_factory = None
+      self._samples_data_source_factory = None
+
+    def SetSamplesDataSourceFactory(self, samples_data_source_factory):
+      self._samples_data_source_factory = samples_data_source_factory
+
+    def SetReferenceResolverFactory(self, ref_resolver_factory):
+      self._ref_resolver_factory = ref_resolver_factory
+
+    def Create(self, request, disable_refs=False):
+      """Create an APIDataSource. |disable_refs| specifies whether $ref's in
+      APIs being processed by the |ToDict| method of _JSCModel follows $ref's
+      in the API. This prevents endless recursion in ReferenceResolver.
+      """
+      if self._samples_data_source_factory is None:
+        # Only error if there is a request, which means this APIDataSource is
+        # actually being used to render a page.
+        if request is not None:
+          logging.error('SamplesDataSource.Factory was never set in '
+                        'APIDataSource.Factory.')
+        samples = None
+      else:
+        samples = self._samples_data_source_factory.Create(request)
+      if not disable_refs and self._ref_resolver_factory is None:
+        logging.error('ReferenceResolver.Factory was never set in '
+                      'APIDataSource.Factory.')
       return APIDataSource(self._permissions_cache,
                            self._json_cache,
                            self._idl_cache,
+                           self._json_cache_no_refs,
+                           self._idl_cache_no_refs,
+                           self._names_cache,
                            self._idl_names_cache,
                            self._base_path,
-                           self._samples_factory.Create(request))
+                           samples,
+                           disable_refs)
 
     def _LoadPermissions(self, json_str):
-      return json.loads(json_comment_eater.Nom(json_str))
+      return json_parse.Parse(json_str)
 
-    def _LoadJsonAPI(self, api):
-      return _JscModel(json.loads(json_comment_eater.Nom(api))[0])
+    def _LoadJsonAPI(self, api, disable_refs):
+      return _JSCModel(
+          json_parse.Parse(api)[0],
+          self._ref_resolver_factory.Create() if not disable_refs else None,
+          disable_refs).ToDict()
 
-    def _LoadIdlAPI(self, api):
+    def _LoadIdlAPI(self, api, disable_refs):
       idl = idl_parser.IDLParser().ParseData(api)
-      return _JscModel(idl_schema.IDLSchema(idl).process()[0])
+      return _JSCModel(
+          idl_schema.IDLSchema(idl).process()[0],
+          self._ref_resolver_factory.Create() if not disable_refs else None,
+          disable_refs).ToDict()
 
     def _GetIDLNames(self, apis):
-      return [model.UnixName(os.path.splitext(api.split('/')[-1])[0])
-              for api in apis if api.endswith('.idl')]
+      return [
+        model.UnixName(os.path.splitext(api[len('%s/' % self._base_path):])[0])
+        for api in apis if api.endswith('.idl')
+      ]
+
+    def _GetAllNames(self, apis):
+      return [
+        model.UnixName(os.path.splitext(api[len('%s/' % self._base_path):])[0])
+        for api in apis
+      ]
 
   def __init__(self,
                permissions_cache,
                json_cache,
                idl_cache,
+               json_cache_no_refs,
+               idl_cache_no_refs,
+               names_cache,
                idl_names_cache,
                base_path,
-               samples):
+               samples,
+               disable_refs):
     self._base_path = base_path
     self._permissions_cache = permissions_cache
     self._json_cache = json_cache
     self._idl_cache = idl_cache
+    self._json_cache_no_refs = json_cache_no_refs
+    self._idl_cache_no_refs = idl_cache_no_refs
+    self._names_cache = names_cache
     self._idl_names_cache = idl_names_cache
     self._samples = samples
+    self._disable_refs = disable_refs
 
   def _GetPermsFromFile(self, filename):
     try:
@@ -321,23 +376,36 @@ class APIDataSource(object):
       api_perms[api_perms['channel']] = True
     return api_perms
 
-  def _GenerateHandlebarContext(self, handlebar, path):
-    return_dict = {
-      'permissions': self._GetFeature(path),
-      'samples': _LazySamplesGetter(path, self._samples)
-    }
-    return_dict.update(handlebar.ToDict())
-    return return_dict
+  def _GenerateHandlebarContext(self, handlebar_dict, path):
+    handlebar_dict['permissions'] = self._GetFeature(path)
+    handlebar_dict['samples'] = _LazySamplesGetter(path, self._samples)
+    return handlebar_dict
 
-  def __getitem__(self, key):
-    return self.get(key)
+  def _GetAsSubdirectory(self, name):
+    if name.startswith('experimental_'):
+      parts = name[len('experimental_'):].split('_', 1)
+      parts[1] = 'experimental_%s' % parts[1]
+      return '/'.join(parts)
+    return name.replace('_', '/', 1)
 
   def get(self, key):
-    path, ext = os.path.splitext(key)
+    if key.endswith('.html') or key.endswith('.json') or key.endswith('.idl'):
+      path, ext = os.path.splitext(key)
+    else:
+      path = key
     unix_name = model.UnixName(path)
     idl_names = self._idl_names_cache.GetFromFileListing(self._base_path)
-    cache, ext = ((self._idl_cache, '.idl') if (unix_name in idl_names) else
-                  (self._json_cache, '.json'))
+    names = self._names_cache.GetFromFileListing(self._base_path)
+    if unix_name not in names and self._GetAsSubdirectory(unix_name) in names:
+      unix_name = self._GetAsSubdirectory(unix_name)
+
+    if self._disable_refs:
+      cache, ext = (
+          (self._idl_cache_no_refs, '.idl') if (unix_name in idl_names) else
+          (self._json_cache_no_refs, '.json'))
+    else:
+      cache, ext = ((self._idl_cache, '.idl') if (unix_name in idl_names) else
+                    (self._json_cache, '.json'))
     return self._GenerateHandlebarContext(
         cache.GetFromFile('%s/%s%s' % (self._base_path, unix_name, ext)),
         path)

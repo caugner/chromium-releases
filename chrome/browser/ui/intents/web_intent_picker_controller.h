@@ -176,7 +176,7 @@ class WebIntentPickerController
     picker_model_->set_observer(observer);
   }
 
-  // Notify the controller that its TabContents is hosting a web intents
+  // Notify the controller that its WebContents is hosting a web intents
   // service. Sets the source and dispatcher for the invoking client.
   void SetWindowDispositionSource(content::WebContents* source,
                                   content::WebIntentsDispatcher* dispatcher);
@@ -212,30 +212,10 @@ class WebIntentPickerController
   void OnCWSIntentServicesAvailable(
       const CWSIntentsRegistry::IntentExtensionList& extensions);
 
-  // Called when a suggested extension's icon is fetched.
-  void OnExtensionIconURLFetchComplete(const std::string& extension_id,
-                                       const net::URLFetcher* source);
-
-  // Called whenever intent data (both from registry and CWS) arrives.
   void OnIntentDataArrived();
 
   // Reset internal state to default values.
   void Reset();
-
-  typedef base::Callback<void(const gfx::Image&)>
-      ExtensionIconAvailableCallback;
-  // Called on a worker thread to decode and resize the extension's icon.
-  static void DecodeExtensionIconAndResize(
-      scoped_ptr<std::string> icon_response,
-      const ExtensionIconAvailableCallback& callback,
-      const base::Closure& unavailable_callback);
-
-  // Called when an extension's icon is successfully decoded and resized.
-  void OnExtensionIconAvailable(const std::string& extension_id,
-                                const gfx::Image& icon_image);
-
-  // Called when an extension's icon failed to be decoded or resized.
-  void OnExtensionIconUnavailable(const std::string& extension_id);
 
   // Called to show a custom extension install dialog.
   void OnShowExtensionInstallDialog(
@@ -314,9 +294,8 @@ class WebIntentPickerController
   bool cancelled_;
 #endif
 
-  // Weak pointer to the source WebContents for the intent if the TabContents
-  // with which this controller is associated is hosting a web intents window
-  // disposition service.
+  // Weak pointer to the source WebContents for the intent if it is associated
+  // with this controller and hosting a web intents window disposition service.
   content::WebContents* window_disposition_source_;
 
   // If this tab is hosting a web intents service, a weak pointer to dispatcher

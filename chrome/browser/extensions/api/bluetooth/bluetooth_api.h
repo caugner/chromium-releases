@@ -8,8 +8,11 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/api/api_function.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "device/bluetooth/bluetooth_device.h"
 
 namespace device {
@@ -20,47 +23,43 @@ struct BluetoothOutOfBandPairingData;
 }  // namespace device
 
 namespace extensions {
+
+class ExtensionBluetoothEventRouter;
+
+// The profile-keyed service that manages the bluetooth extension API.
+class BluetoothAPI : public ProfileKeyedService,
+                     public EventRouter::Observer {
+ public:
+  // Convenience method to get the BluetoothAPI for a profile.
+  static BluetoothAPI* Get(Profile* profile);
+
+  explicit BluetoothAPI(Profile* profile);
+  virtual ~BluetoothAPI();
+
+  ExtensionBluetoothEventRouter* bluetooth_event_router();
+
+  // ProfileKeyedService implementation.
+  virtual void Shutdown() OVERRIDE;
+
+  // EventRouter::Observer implementation.
+  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
+  virtual void OnListenerRemoved(const EventListenerInfo& details) OVERRIDE;
+
+ private:
+  Profile* profile_;
+
+  // Created lazily on first access.
+  scoped_ptr<ExtensionBluetoothEventRouter> bluetooth_event_router_;
+};
+
 namespace api {
 
-class BluetoothIsAvailableFunction : public SyncExtensionFunction {
+class BluetoothGetAdapterStateFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("bluetooth.isAvailable")
+  DECLARE_EXTENSION_FUNCTION_NAME("bluetooth.getAdapterState")
 
  protected:
-  virtual ~BluetoothIsAvailableFunction() {}
-
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
-};
-
-class BluetoothIsPoweredFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION_NAME("bluetooth.isPowered")
-
- protected:
-  virtual ~BluetoothIsPoweredFunction() {}
-
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
-};
-
-class BluetoothGetAddressFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION_NAME("bluetooth.getAddress")
-
- protected:
-  virtual ~BluetoothGetAddressFunction() {}
-
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
-};
-
-class BluetoothGetNameFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION_NAME("bluetooth.getName")
-
- protected:
-  virtual ~BluetoothGetNameFunction() {}
+  virtual ~BluetoothGetAdapterStateFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;

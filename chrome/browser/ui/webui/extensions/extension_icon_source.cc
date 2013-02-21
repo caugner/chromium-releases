@@ -15,6 +15,8 @@
 #include "base/threading/thread.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
@@ -57,9 +59,7 @@ SkBitmap* ToBitmap(const unsigned char* data, size_t size) {
 
 ExtensionIconSource::ExtensionIconSource(Profile* profile)
     : DataSource(chrome::kChromeUIExtensionIconHost, MessageLoop::current()),
-      profile_(profile),
-      next_tracker_id_(0) {
-  tracker_.reset(new ImageLoadingTracker(this));
+      profile_(profile) {
 }
 
 struct ExtensionIconSource::ExtensionIconRequest {
@@ -94,8 +94,8 @@ GURL ExtensionIconSource::GetIconURL(const extensions::Extension* extension,
 // static
 SkBitmap* ExtensionIconSource::LoadImageByResourceId(int resource_id) {
   std::string contents = ResourceBundle::GetSharedInstance()
-      .GetRawDataResource(resource_id,
-                          ui::SCALE_FACTOR_100P).as_string();
+      .GetRawDataResourceForScale(resource_id,
+                                  ui::SCALE_FACTOR_100P).as_string();
 
   // Convert and return it.
   const unsigned char* data =
@@ -188,11 +188,10 @@ void ExtensionIconSource::LoadDefaultImage(int request_id) {
 void ExtensionIconSource::LoadExtensionImage(const ExtensionResource& icon,
                                              int request_id) {
   ExtensionIconRequest* request = GetData(request_id);
-  tracker_map_[next_tracker_id_++] = request_id;
-  tracker_->LoadImage(request->extension,
-                      icon,
-                      gfx::Size(request->size, request->size),
-                      ImageLoadingTracker::DONT_CACHE);
+  extensions::ImageLoader::Get(profile_)->LoadImageAsync(
+      request->extension, icon,
+      gfx::Size(request->size, request->size),
+      base::Bind(&ExtensionIconSource::OnImageLoaded, this, request_id));
 }
 
 void ExtensionIconSource::LoadFaviconImage(int request_id) {
@@ -205,25 +204,18 @@ void ExtensionIconSource::LoadFaviconImage(int request_id) {
   }
 
   GURL favicon_url = GetData(request_id)->extension->GetFullLaunchURL();
-  FaviconService::Handle handle = favicon_service->GetRawFaviconForURL(
+  favicon_service->GetRawFaviconForURL(
       FaviconService::FaviconForURLParams(
-          profile_,
-          favicon_url,
-          history::FAVICON,
-          gfx::kFaviconSize,
-          &cancelable_consumer_),
+          profile_, favicon_url, history::FAVICON, gfx::kFaviconSize),
       ui::SCALE_FACTOR_100P,
       base::Bind(&ExtensionIconSource::OnFaviconDataAvailable,
-                 base::Unretained(this)));
-  cancelable_consumer_.SetClientData(favicon_service, handle, request_id);
+                 base::Unretained(this), request_id),
+      &cancelable_task_tracker_);
 }
 
 void ExtensionIconSource::OnFaviconDataAvailable(
-    FaviconService::Handle request_handle,
+    int request_id,
     const history::FaviconBitmapResult& bitmap_result) {
-  int request_id = cancelable_consumer_.GetClientData(
-      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS),
-      request_handle);
   ExtensionIconRequest* request = GetData(request_id);
 
   // Fallback to the default icon if there wasn't a favicon.
@@ -243,12 +235,8 @@ void ExtensionIconSource::OnFaviconDataAvailable(
   }
 }
 
-void ExtensionIconSource::OnImageLoaded(const gfx::Image& image,
-                                        const std::string& extension_id,
-                                        int index) {
-  int request_id = tracker_map_[index];
-  tracker_map_.erase(tracker_map_.find(index));
-
+void ExtensionIconSource::OnImageLoaded(int request_id,
+                                        const gfx::Image& image) {
   if (image.IsEmpty())
     LoadIconFailed(request_id);
   else
@@ -283,7 +271,7 @@ bool ExtensionIconSource::ParseData(const std::string& path,
   int size;
   if (!base::StringToInt(size_param, &size))
     return false;
-  if (size <= 0)
+  if (size <= 0 || size > extension_misc::EXTENSION_ICON_GIGANTOR)
     return false;
 
   ExtensionIconSet::MatchType match_type;
@@ -298,7 +286,8 @@ bool ExtensionIconSource::ParseData(const std::string& path,
 
   std::string extension_id = path_parts.at(0);
   const extensions::Extension* extension =
-      profile_->GetExtensionService()->GetInstalledExtension(extension_id);
+      extensions::ExtensionSystem::Get(profile_)->extension_service()->
+          GetInstalledExtension(extension_id);
   if (!extension)
     return false;
 

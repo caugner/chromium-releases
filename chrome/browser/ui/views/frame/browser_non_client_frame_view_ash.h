@@ -7,8 +7,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/search/search_types.h"
-#include "chrome/browser/ui/search/toolbar_search_animator_observer.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/tab_icon_view_model.h"
 #include "ui/views/controls/button/button.h"  // ButtonListener
@@ -20,13 +18,13 @@ class FramePainter;
 }
 namespace views {
 class ImageButton;
+class ToggleImageButton;
 }
 
 class BrowserNonClientFrameViewAsh
     : public BrowserNonClientFrameView,
       public views::ButtonListener,
-      public chrome::TabIconViewModel,
-      public chrome::search::ToolbarSearchAnimatorObserver {
+      public chrome::TabIconViewModel {
  public:
   static const char kViewClassName[];
 
@@ -68,12 +66,6 @@ class BrowserNonClientFrameViewAsh
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
   virtual gfx::ImageSkia GetFaviconForTabIconView() OVERRIDE;
 
-  // Overridden from chrome::search::ToolbarSearchAnimatorObserver:
-  virtual void OnToolbarBackgroundAnimatorProgressed() OVERRIDE;
-  virtual void OnToolbarBackgroundAnimatorCanceled(
-      content::WebContents* web_contents) OVERRIDE;
-  virtual void OnToolbarSeparatorChanged() OVERRIDE;
-
  private:
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest, WindowHeader);
 
@@ -87,8 +79,7 @@ class BrowserNonClientFrameViewAsh
   void LayoutAvatar();
 
   void PaintTitleBar(gfx::Canvas* canvas);
-  void PaintToolbarBackground(gfx::Canvas* canvas,
-                              chrome::search::Mode::Type mode);
+  void PaintToolbarBackground(gfx::Canvas* canvas);
 
   // Windows without a toolbar need to draw their own line under the header,
   // above the content area.
@@ -103,6 +94,9 @@ class BrowserNonClientFrameViewAsh
   // minimized. The exact behavior is determined by |size_button_minimizes_|.
   views::ImageButton* size_button_;
   views::ImageButton* close_button_;
+
+  // Optional button to toggle immersive UI. May be NULL.
+  views::ToggleImageButton* immersive_button_;
 
   // For popups, the window icon.
   TabIconView* window_icon_;

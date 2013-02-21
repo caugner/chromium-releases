@@ -123,6 +123,8 @@ void MediaPlayerManagerAndroid::OnInitialize(
       base::Bind(&MediaPlayerManagerAndroid::OnSeekComplete,
                  base::Unretained(this)),
       base::Bind(&MediaPlayerManagerAndroid::OnTimeUpdate,
+                 base::Unretained(this)),
+      base::Bind(&MediaPlayerManagerAndroid::OnMediaInterrupted,
                  base::Unretained(this))));
 
   // Send a MediaPrepared message to webkit so that Load() can finish.
@@ -167,7 +169,10 @@ void MediaPlayerManagerAndroid::OnExitFullscreen(int player_id) {
 
 void MediaPlayerManagerAndroid::OnReleaseResources(int player_id) {
   MediaPlayerBridge* player = GetPlayer(player_id);
-  if (player)
+  // Don't release the fullscreen player when tab visibility changes,
+  // it will be released when user hit the back/home button or when
+  // OnDestroyPlayer is called.
+  if (player && player_id != fullscreen_player_id_)
     player->Release();
 }
 
@@ -215,6 +220,12 @@ void MediaPlayerManagerAndroid::OnPlaybackComplete(int player_id) {
   Send(new MediaPlayerMsg_MediaPlaybackCompleted(routing_id(), player_id));
   if (fullscreen_player_id_ != -1)
     video_view_.OnPlaybackComplete();
+}
+
+void MediaPlayerManagerAndroid::OnMediaInterrupted(int player_id) {
+  // Tell WebKit that the audio should be paused, then release all resources
+  Send(new MediaPlayerMsg_DidMediaPlayerPause(routing_id(), player_id));
+  OnReleaseResources(player_id);
 }
 
 void MediaPlayerManagerAndroid::OnBufferingUpdate(

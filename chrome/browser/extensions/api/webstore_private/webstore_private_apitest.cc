@@ -8,13 +8,13 @@
 #include "base/file_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -75,11 +75,8 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
     waiting_ = true;
     content::RunMessageLoop();
   }
-
-  bool received_failure() const { return received_failure_; }
   bool received_success() const { return received_success_; }
   const std::string& id() const { return id_; }
-  const std::string& error() const { return error_; }
 
  private:
   bool received_failure_;
@@ -153,7 +150,7 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
     return browser()->profile()->GetExtensionService();
   }
 
-  ScopedTempDir tmp_;
+  base::ScopedTempDir tmp_;
 };
 
 class ExtensionWebstorePrivateBundleTest
@@ -176,18 +173,10 @@ class ExtensionWebstorePrivateBundleTest
   }
 
  protected:
-  void PackCRX(const std::string& id) {
-    FilePath dir_path = tmp_.path()
-        .AppendASCII("webstore_private/bundle")
-        .AppendASCII(id);
-
-    PackCRX(id, dir_path);
-  }
-
   // Packs the |manifest| file into a CRX using |id|'s PEM key.
   void PackCRX(const std::string& id, const std::string& manifest) {
     // Move the extension to a temporary directory.
-    ScopedTempDir tmp;
+    base::ScopedTempDir tmp;
     ASSERT_TRUE(tmp.CreateUniqueTempDir());
     ASSERT_TRUE(file_util::CreateDirectory(tmp.path()));
 
@@ -300,7 +289,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallAccepted) {
 // Test having the default download directory missing.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, MissingDownloadDir) {
   // Set a non-existent directory as the download path.
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   EXPECT_TRUE(temp_dir.CreateUniqueTempDir());
   FilePath missing_directory = temp_dir.Take();
   EXPECT_TRUE(file_util::Delete(missing_directory, true));
@@ -398,9 +387,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateBundleTest, InstallBundle) {
   ASSERT_TRUE(RunPageTest(GetTestServerURL("install_bundle.html").spec()));
 }
 
+#if defined(OS_WIN)
+// Acting flakey in Windows. http://crbug.com/160219
+#define MAYBE_InstallBundleIncognito DISABLED_InstallBundleIncognito
+#else
+#define MAYBE_InstallBundleIncognito InstallBundleIncognito
+#endif
+
 // Tests that bundles can be installed from incognito windows.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateBundleTest,
-                       InstallBundleIncognito) {
+                       MAYBE_InstallBundleIncognito) {
   extensions::BundleInstaller::SetAutoApproveForTesting(true);
 
   PackCRX("bmfoocgfinpmkmlbjhcbofejhkhlbchk", "extension1.json");

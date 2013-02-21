@@ -34,6 +34,7 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
@@ -42,8 +43,8 @@
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_host.h"
+#include "chrome/browser/notifications/balloon_notification_ui_manager.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
@@ -58,7 +59,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/login/login_prompt.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -482,13 +482,13 @@ TabCountChangeObserver::~TabCountChangeObserver() {
   tab_strip_model_->RemoveObserver(this);
 }
 
-void TabCountChangeObserver::TabInsertedAt(TabContents* contents,
+void TabCountChangeObserver::TabInsertedAt(WebContents* contents,
                                            int index,
                                            bool foreground) {
   CheckTabCount();
 }
 
-void TabCountChangeObserver::TabDetachedAt(TabContents* contents,
+void TabCountChangeObserver::TabDetachedAt(WebContents* contents,
                                            int index) {
   CheckTabCount();
 }
@@ -691,18 +691,6 @@ ExtensionsUpdatedObserver::ExtensionsUpdatedObserver(
       reply_message_(reply_message), updater_finished_(false) {
   registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_NOT_ALLOWED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATE_FOUND,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATING_FINISHED,
-                 content::NotificationService::AllSources());
 }
 
 ExtensionsUpdatedObserver::~ExtensionsUpdatedObserver() {
@@ -716,64 +704,25 @@ void ExtensionsUpdatedObserver::Observe(
     return;
   }
 
-  // We expect the following sequence of events.  First, the ExtensionUpdater
-  // service notifies of each extension that needs to be updated.  Once the
-  // ExtensionUpdater has finished searching for extensions to update, it
-  // notifies that it is finished.  Meanwhile, the extensions are updated
-  // asynchronously: either they will be updated and loaded, or else they will
-  // not load due to (1) not being allowed; (2) having updating disabled; or
-  // (3) encountering an error.  Finally, notifications are also sent whenever
-  // a view stops loading.  Updating is not considered complete if any extension
-  // views are still loading.
-  switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_UPDATE_FOUND:
-      // Extension updater has identified an extension that needs to be updated.
-      in_progress_updates_.insert(
-          *(content::Details<const std::string>(details).ptr()));
-      break;
+  DCHECK(type == content::NOTIFICATION_LOAD_STOP);
+  MaybeReply();
+}
 
-    case chrome::NOTIFICATION_EXTENSION_UPDATING_FINISHED:
-      // Extension updater has completed notifying all extensions to update
-      // themselves.
-      updater_finished_ = true;
-      break;
-
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
-    case chrome::NOTIFICATION_EXTENSION_INSTALL_NOT_ALLOWED:
-    case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED: {
-      // An extension has either completed update installation and is now
-      // loaded, or else the install has been skipped because it is
-      // either not allowed or else has been disabled.
-      const extensions::Extension* extension =
-          content::Details<extensions::Extension>(details).ptr();
-      in_progress_updates_.erase(extension->id());
-      break;
-    }
-
-    case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR: {
-      // An extension had an error on update installation.
-      extensions::CrxInstaller* installer =
-          content::Source<extensions::CrxInstaller>(source).ptr();
-      in_progress_updates_.erase(installer->expected_id());
-      break;
-    }
-
-    case content::NOTIFICATION_LOAD_STOP:
-      // Break out to the conditional check below to see if all extension views
-      // have stopped loading.
-      break;
-
-    default:
-      NOTREACHED();
-      break;
+void ExtensionsUpdatedObserver::UpdateCheckFinished() {
+  if (!automation_) {
+    delete this;
+    return;
   }
 
-  // Send the reply if (1) the extension updater has finished notifying all
-  // extensions to update themselves; (2) all extensions that need to be updated
-  // have completed installation and are now loaded; and (3) all extension views
-  // have stopped loading.
-  if (updater_finished_ && in_progress_updates_.empty() &&
-      DidExtensionViewsStopLoading(manager_)) {
+  // Extension updater has completed updating all extensions.
+  updater_finished_ = true;
+  MaybeReply();
+}
+
+void ExtensionsUpdatedObserver::MaybeReply() {
+  // Send the reply if (1) the extension updater has finished updating all
+  // extensions; and (2) all extension views have stopped loading.
+  if (updater_finished_ && DidExtensionViewsStopLoading(manager_)) {
     AutomationJSONReply reply(automation_, reply_message_.release());
     reply.SendSuccess(NULL);
     delete this;
@@ -1253,14 +1202,14 @@ void MetricEventDurationObserver::Observe(
 
 InfoBarCountObserver::InfoBarCountObserver(AutomationProvider* automation,
                                            IPC::Message* reply_message,
-                                           TabContents* tab_contents,
+                                           WebContents* web_contents,
                                            size_t target_count)
     : automation_(automation->AsWeakPtr()),
       reply_message_(reply_message),
-      tab_contents_(tab_contents),
+      web_contents_(web_contents),
       target_count_(target_count) {
   content::Source<InfoBarTabHelper> source(
-      InfoBarTabHelper::FromWebContents(tab_contents->web_contents()));
+      InfoBarTabHelper::FromWebContents(web_contents));
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
                  source);
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
@@ -1281,7 +1230,7 @@ void InfoBarCountObserver::Observe(
 
 void InfoBarCountObserver::CheckCount() {
   InfoBarTabHelper* infobar_tab_helper =
-      InfoBarTabHelper::FromWebContents(tab_contents_->web_contents());
+      InfoBarTabHelper::FromWebContents(web_contents_);
   if (infobar_tab_helper->GetInfoBarCount() != target_count_)
     return;
 
@@ -1392,21 +1341,26 @@ AutomationProviderDownloadModelChangedObserver(
     DownloadManager* download_manager)
     : provider_(provider->AsWeakPtr()),
       reply_message_(reply_message),
-      download_manager_(download_manager) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(notifier_(download_manager, this)) {
 }
 
 AutomationProviderDownloadModelChangedObserver::
     ~AutomationProviderDownloadModelChangedObserver() {}
 
-void AutomationProviderDownloadModelChangedObserver::ModelChanged(
-    DownloadManager* manager) {
-  DCHECK_EQ(manager, download_manager_);
-
-  download_manager_->RemoveObserver(this);
-
+void AutomationProviderDownloadModelChangedObserver::ModelChanged() {
   if (provider_)
     AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(NULL);
   delete this;
+}
+
+void AutomationProviderDownloadModelChangedObserver::OnDownloadCreated(
+    DownloadManager* manager, DownloadItem* item) {
+  ModelChanged();
+}
+
+void AutomationProviderDownloadModelChangedObserver::OnDownloadRemoved(
+    DownloadManager* manager, DownloadItem* item) {
+  ModelChanged();
 }
 
 AllDownloadsCompleteObserver::AllDownloadsCompleteObserver(
@@ -1626,6 +1580,13 @@ void AutomationProviderGetPasswordsObserver::OnPasswordStoreRequestDone(
   delete this;
 }
 
+void AutomationProviderGetPasswordsObserver::OnGetPasswordStoreResults(
+    const std::vector<content::PasswordForm*>& results) {
+  // TODO(kaiwang): Implement when I refactor
+  // PasswordManager::GetAutofillableLogins.
+  NOTIMPLEMENTED();
+}
+
 PasswordStoreLoginsChangedObserver::PasswordStoreLoginsChangedObserver(
     AutomationProvider* automation,
     IPC::Message* reply_message,
@@ -1775,11 +1736,11 @@ void SavePackageNotificationObserver::Observe(
 
 PageSnapshotTaker::PageSnapshotTaker(AutomationProvider* automation,
                                      IPC::Message* reply_message,
-                                     TabContents* tab_contents,
+                                     WebContents* web_contents,
                                      const FilePath& path)
     : automation_(automation->AsWeakPtr()),
       reply_message_(reply_message),
-      tab_contents_(tab_contents),
+      web_contents_(web_contents),
       image_path_(path) {
   registrar_.Add(this, chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
                  content::NotificationService::AllSources());
@@ -1789,7 +1750,7 @@ PageSnapshotTaker::~PageSnapshotTaker() {}
 
 void PageSnapshotTaker::Start() {
   AutomationTabHelper* automation_tab_helper =
-      AutomationTabHelper::FromWebContents(tab_contents_->web_contents());
+      AutomationTabHelper::FromWebContents(web_contents_);
   StartObserving(automation_tab_helper);
   automation_tab_helper->SnapshotEntirePage();
 }
@@ -1943,13 +1904,10 @@ std::vector<DictionaryValue*>* GetAppInfoFromExtensions(
 
 }  // namespace
 
-NTPInfoObserver::NTPInfoObserver(
-    AutomationProvider* automation,
-    IPC::Message* reply_message,
-    CancelableRequestConsumer* consumer)
+NTPInfoObserver::NTPInfoObserver(AutomationProvider* automation,
+                                 IPC::Message* reply_message)
     : automation_(automation->AsWeakPtr()),
       reply_message_(reply_message),
-      consumer_(consumer),
       request_(0),
       ntp_info_(new DictionaryValue) {
   top_sites_ = automation_->profile()->GetTopSites();
@@ -1967,7 +1925,8 @@ NTPInfoObserver::NTPInfoObserver(
   }
 
   // Collect information about the apps in the new tab page.
-  ExtensionService* ext_service = automation_->profile()->GetExtensionService();
+  ExtensionService* ext_service = extensions::ExtensionSystem::Get(
+      automation_->profile())->extension_service();
   if (!ext_service) {
     AutomationJSONReply(automation_, reply_message_.release())
         .SendError("No ExtensionService.");
@@ -2044,7 +2003,6 @@ void NTPInfoObserver::Observe(int type,
           details);
     if (request_ == *request_details.ptr()) {
       top_sites_->GetMostVisitedURLs(
-          consumer_,
           base::Bind(&NTPInfoObserver::OnTopSitesReceived,
                      base::Unretained(this)));
     }
@@ -2130,7 +2088,8 @@ namespace {
 
 // Returns whether all active notifications have an associated process ID.
 bool AreActiveNotificationProcessesReady() {
-  NotificationUIManager* manager = g_browser_process->notification_ui_manager();
+  BalloonNotificationUIManager* manager =
+      BalloonNotificationUIManager::GetInstanceForTesting();
   const BalloonCollection::Balloons& balloons =
       manager->balloon_collection()->GetActiveBalloons();
   BalloonCollection::Balloons::const_iterator iter;
@@ -2182,8 +2141,8 @@ base::DictionaryValue* GetAllNotificationsObserver::NotificationToJson(
 }
 
 void GetAllNotificationsObserver::SendMessage() {
-  NotificationUIManager* manager =
-      g_browser_process->notification_ui_manager();
+  BalloonNotificationUIManager* manager =
+      BalloonNotificationUIManager::GetInstanceForTesting();
   const BalloonCollection::Balloons& balloons =
       manager->balloon_collection()->GetActiveBalloons();
   DictionaryValue return_value;
@@ -2242,8 +2201,8 @@ OnNotificationBalloonCountObserver::OnNotificationBalloonCountObserver(
     int count)
     : automation_(provider->AsWeakPtr()),
       reply_message_(reply_message),
-      collection_(
-          g_browser_process->notification_ui_manager()->balloon_collection()),
+      collection_(BalloonNotificationUIManager::GetInstanceForTesting()->
+          balloon_collection()),
       count_(count) {
   registrar_.Add(this, chrome::NOTIFICATION_NOTIFY_BALLOON_CONNECTED,
                  content::NotificationService::AllSources());

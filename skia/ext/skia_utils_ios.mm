@@ -4,6 +4,7 @@
 
 #include "skia/ext/skia_utils_ios.h"
 
+#import <ImageIO/ImageIO.h>
 #import <UIKit/UIKit.h>
 
 #include "base/logging.h"
@@ -12,7 +13,7 @@
 
 namespace gfx {
 
-SkBitmap UIImageToSkBitmap(UIImage* image, CGSize size, bool is_opaque) {
+SkBitmap CGImageToSkBitmap(CGImageRef image, CGSize size, bool is_opaque) {
   SkBitmap bitmap;
   if (!image)
     return bitmap;
@@ -47,21 +48,9 @@ SkBitmap UIImageToSkBitmap(UIImage* image, CGSize size, bool is_opaque) {
   if (!context)
     return bitmap;
 
-  // We need to invert the y-axis of the canvas so that Core Graphics drawing
-  // happens right-side up. Skia has an upper-left origin and CG has a lower-
-  // left one.
-  CGContextScaleCTM(context, 1.0, -1.0);
-  CGContextTranslateCTM(context, 0, -size.height);
-
-  // UIGraphicsPushContext be called from the main thread.
-  // TODO(rohitrao): We can use CG to make this thread safe, but the mac code
-  // calls setCurrentContext, so it's similarly limited to the main thread.
-  DCHECK([NSThread isMainThread]);
-  UIGraphicsPushContext(context);
-  [image drawInRect:CGRectMake(0, 0, size.width, size.height)
-          blendMode:kCGBlendModeCopy
-              alpha:1.0];
-  UIGraphicsPopContext();
+  CGRect imageRect = CGRectMake(0.0, 0.0, size.width, size.height);
+  CGContextSetBlendMode(context, kCGBlendModeCopy);
+  CGContextDrawImage(context, imageRect, image);
 
   return bitmap;
 }
@@ -80,6 +69,32 @@ UIImage* SkBitmapToUIImageWithColorSpace(const SkBitmap& skia_bitmap,
   return [UIImage imageWithCGImage:cg_image.get()
                              scale:scale
                        orientation:UIImageOrientationUp];
+}
+
+std::vector<SkBitmap> ImageDataToSkBitmaps(NSData* image_data) {
+  DCHECK(image_data);
+  base::mac::ScopedCFTypeRef<CFDictionaryRef> empty_dictionary(
+      CFDictionaryCreate(NULL, NULL, NULL, 0, NULL, NULL));
+  std::vector<SkBitmap> frames;
+
+  base::mac::ScopedCFTypeRef<CGImageSourceRef> source(
+      CGImageSourceCreateWithData((CFDataRef)image_data, empty_dictionary));
+
+  size_t count = CGImageSourceGetCount(source);
+  for (size_t index = 0; index < count; ++index) {
+    base::mac::ScopedCFTypeRef<CGImageRef> cg_image(
+        CGImageSourceCreateImageAtIndex(source, index, empty_dictionary));
+
+    CGSize size = CGSizeMake(CGImageGetWidth(cg_image),
+                             CGImageGetHeight(cg_image));
+    const SkBitmap bitmap = CGImageToSkBitmap(cg_image, size, false);
+    if (!bitmap.empty())
+      frames.push_back(bitmap);
+  }
+
+  DLOG_IF(WARNING, frames.size() != count) << "Only decoded " << frames.size()
+      << " frames for " << count << " expected.";
+  return frames;
 }
 
 }  // namespace gfx

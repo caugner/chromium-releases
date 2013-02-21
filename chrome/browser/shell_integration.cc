@@ -26,7 +26,8 @@ ShellIntegration::DefaultWebClientSetPermission
 }
 
 ShellIntegration::ShortcutInfo::ShortcutInfo()
-    : create_on_desktop(false),
+    : is_platform_app(false),
+      create_on_desktop(false),
       create_in_applications_menu(false),
       create_in_quick_launch_bar(false) {
 }
@@ -200,13 +201,13 @@ void ShellIntegration::DefaultWebClientWorker::UpdateUI(
     DefaultWebClientState state) {
   if (observer_) {
     switch (state) {
-      case NOT_DEFAULT_WEB_CLIENT:
+      case NOT_DEFAULT:
         observer_->SetDefaultWebClientUIState(STATE_NOT_DEFAULT);
         break;
-      case IS_DEFAULT_WEB_CLIENT:
+      case IS_DEFAULT:
         observer_->SetDefaultWebClientUIState(STATE_IS_DEFAULT);
         break;
-      case UNKNOWN_DEFAULT_WEB_CLIENT:
+      case UNKNOWN_DEFAULT:
         observer_->SetDefaultWebClientUIState(STATE_UNKNOWN);
         break;
       default:
@@ -229,7 +230,7 @@ ShellIntegration::DefaultBrowserWorker::DefaultBrowserWorker(
 
 ShellIntegration::DefaultWebClientState
 ShellIntegration::DefaultBrowserWorker::CheckIsDefault() {
-  return ShellIntegration::IsDefaultBrowser();
+  return ShellIntegration::GetDefaultBrowser();
 }
 
 bool ShellIntegration::DefaultBrowserWorker::SetAsDefault(

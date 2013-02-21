@@ -35,13 +35,14 @@ void ResourceBundle::LoadCommonResources() {
   // scale factor to gfx::ImageSkia::AddRepresentation.
 
   AddDataPackFromPath(GetResourcesPakFilePath("chrome.pak"),
-                      SCALE_FACTOR_100P);
+                      SCALE_FACTOR_NONE);
   AddDataPackFromPath(GetResourcesPakFilePath(
-                      "chrome_100_percent.pak"),
-                      SCALE_FACTOR_100P);
-  AddOptionalDataPackFromPath(GetResourcesPakFilePath(
-                              "chrome_200_percent.pak"),
-                              SCALE_FACTOR_200P);
+      "chrome_100_percent.pak"), SCALE_FACTOR_100P);
+
+  if (ui::IsScaleFactorSupported(SCALE_FACTOR_200P)) {
+    AddOptionalDataPackFromPath(GetResourcesPakFilePath(
+        "chrome_200_percent.pak"), SCALE_FACTOR_200P);
+  }
 }
 
 gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id, ImageRTL rtl) {

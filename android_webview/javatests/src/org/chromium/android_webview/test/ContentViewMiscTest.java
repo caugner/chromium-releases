@@ -11,6 +11,7 @@ import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Proxy;
+import android.test.FlakyTest;
 import android.test.mock.MockContext;
 import android.test.suitebuilder.annotation.SmallTest;
 
@@ -45,12 +46,12 @@ public class ContentViewMiscTest extends AndroidWebViewTestBase {
         mContentViewCore = testContainerView.getContentViewCore();
     }
 
-    /**
+    /*
      * @SmallTest
      * @Feature({"Android-WebView"})
-     * crbug.com/147721
+     * BUG 162967
      */
-    @DisabledTest
+    @FlakyTest
     public void testFlingScroll() throws Throwable {
         StringBuffer testPage = new StringBuffer().append("data:text/html;utf-8,")
                 .append("<html><head><style>body { width: 5000px; height: 5000px; }</head><body>")
@@ -82,7 +83,7 @@ public class ContentViewMiscTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testFindAddress() {
         assertNull(ContentViewStatics.findAddress("This is some random text"));
 
@@ -91,7 +92,7 @@ public class ContentViewMiscTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testEnableDisablePlatformNotifications() {
 
         // Set up mock contexts to use with the listener
@@ -150,7 +151,7 @@ public class ContentViewMiscTest extends AndroidWebViewTestBase {
 
     /**
      * @SmallTest
-     * @Feature({"Android-WebView"})
+     * @Feature({"AndroidWebView"})
      * Bug 6931901
      */
     @DisabledTest

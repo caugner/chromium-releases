@@ -4,16 +4,34 @@
  * found in the LICENSE file.
  **/
 
-if (chrome.app.runtime) {
-  chrome.app.runtime.onLaunched.addListener(function() {
+// Checking for "chrome.app.runtime" availability allows this Chrome app code to
+// be tested in a regular web page (like tests/manual.html). Checking for
+// "chrome" and "chrome.app" availability further allows this code to be tested
+// in non-Chrome browsers, which is useful for example to test touch support
+// with a non-Chrome touch device.
+if (typeof chrome !== 'undefined' && chrome.app && chrome.app.runtime) {
+  var showCalculatorWindow = function () {
     chrome.app.window.create('calculator.html', {
       defaultWidth: 243, minWidth: 243, maxWidth: 243,
       defaultHeight: 380, minHeight: 380, maxHeight: 380,
       id: 'calculator'
     }, function(appWindow) {
       appWindow.contentWindow.onload = function() {
-        new Controller(new Model(8), new View(appWindow.contentWindow));
+        new Controller(new Model(9), new View(appWindow.contentWindow));
       };
+
+      chrome.storage.local.set({windowVisible: true});
+      appWindow.onClosed.addListener(function() {
+        chrome.storage.local.set({windowVisible: false});
+      });
+    });
+  }
+
+  chrome.app.runtime.onLaunched.addListener(showCalculatorWindow);
+  chrome.app.runtime.onRestarted.addListener(function() {
+    chrome.storage.local.get('windowVisible', function(data) {
+      if (data.windowVisible)
+        showCalculatorWindow();
     });
   });
 }

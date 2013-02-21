@@ -15,11 +15,10 @@
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/error_utils.h"
 #include "grit/generated_resources.h"
 
 using extensions::Extension;
@@ -53,23 +52,23 @@ bool ShowInfoBarFunction::RunImpl() {
   GURL url = extension->GetResourceURL(extension->url(), html_path);
 
   Browser* browser = NULL;
-  TabContents* tab_contents = NULL;
+  content::WebContents* web_contents = NULL;
   if (!ExtensionTabUtil::GetTabById(
       tab_id,
       profile(),
       include_incognito(),
       &browser,
       NULL,
-      &tab_contents,
+      &web_contents,
       NULL)) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
+    error_ = extensions::ErrorUtils::FormatErrorMessage(
         extensions::tabs_constants::kTabNotFoundError,
         base::IntToString(tab_id));
     return false;
   }
 
   InfoBarTabHelper* infobar_tab_helper =
-      InfoBarTabHelper::FromWebContents(tab_contents->web_contents());
+      InfoBarTabHelper::FromWebContents(web_contents);
   infobar_tab_helper->AddInfoBar(
       new ExtensionInfoBarDelegate(browser, infobar_tab_helper,
                                    GetExtension(), url, height));

@@ -8,10 +8,14 @@
 #include <Vssym32.h>
 
 #include "grit/ui_strings.h"
-#include "ui/base/native_theme/native_theme_win.h"
 #include "ui/gfx/canvas.h"
+#include "ui/native_theme/native_theme_win.h"
 #include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/submenu_view.h"
+
+#if defined(USE_AURA)
+#include "ui/native_theme/native_theme_aura.h"
+#endif
 
 using ui::NativeTheme;
 
@@ -19,6 +23,18 @@ namespace views {
 
 void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   const MenuConfig& config = GetMenuConfig();
+
+#if defined(USE_AURA)
+  if (config.native_theme == ui::NativeThemeAura::instance()) {
+    PaintButtonCommon(canvas, mode);
+    return;
+  }
+#else
+  if (NativeTheme::IsNewMenuStyleEnabled()) {
+    PaintButtonCommon(canvas, mode);
+    return;
+  }
+#endif
 
   bool render_selection =
       (mode == PB_NORMAL && IsSelected() &&
@@ -44,27 +60,27 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
     control_state = NativeTheme::kDisabled;
   }
 
-  // The gutter is rendered before the background.
+  // Render the gutter.
   if (config.render_gutter && mode == PB_NORMAL) {
     gfx::Rect gutter_bounds(label_start_ - config.gutter_to_label -
                             config.gutter_width, 0, config.gutter_width,
                             height());
     AdjustBoundsForRTLUI(&gutter_bounds);
     NativeTheme::ExtraParams extra;
-    NativeTheme::instance()->Paint(canvas->sk_canvas(),
-                                   NativeTheme::kMenuPopupGutter,
-                                   NativeTheme::kNormal,
-                                   gutter_bounds,
-                                   extra);
+    config.native_theme->Paint(canvas->sk_canvas(),
+                               NativeTheme::kMenuPopupGutter,
+                               NativeTheme::kNormal,
+                               gutter_bounds,
+                               extra);
   }
 
-  // Render the background.
+  // If using native theme then background (especialy when item is selected)
+  // need to be rendered after the gutter.
   if (mode == PB_NORMAL) {
     gfx::Rect item_bounds(0, 0, width(), height());
     NativeTheme::ExtraParams extra;
     extra.menu_item.is_selected = render_selection;
-    AdjustBoundsForRTLUI(&item_bounds);
-    NativeTheme::instance()->Paint(canvas->sk_canvas(),
+    config.native_theme->Paint(canvas->sk_canvas(),
         NativeTheme::kMenuItemBackground, control_state, item_bounds, extra);
   }
 
@@ -87,8 +103,7 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   int accel_width = parent_menu_item_->GetSubmenu()->max_accelerator_width();
   int width = this->width() - item_right_margin_ - label_start_ - accel_width;
   int height = this->height() - GetTopMargin() - GetBottomMargin();
-  int flags = gfx::Canvas::TEXT_VALIGN_MIDDLE |
-              GetRootMenuItem()->GetDrawStringFlags();
+  int flags = GetDrawStringFlags();
   gfx::Rect text_bounds(label_start_, top_margin, width, height);
   text_bounds.set_x(GetMirroredXForRect(text_bounds));
   if (mode == PB_FOR_DRAG) {
@@ -120,7 +135,7 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
     ui::NativeTheme::ExtraParams extra;
     extra.menu_arrow.pointing_right = !base::i18n::IsRTL();
     extra.menu_arrow.is_selected = render_selection;
-    ui::NativeTheme::instance()->Paint(canvas->sk_canvas(),
+    config.native_theme->Paint(canvas->sk_canvas(),
         ui::NativeTheme::kMenuPopupArrow, control_state, arrow_bounds, extra);
   }
 }
@@ -150,13 +165,13 @@ void MenuItemView::PaintCheck(gfx::Canvas* canvas,
   // Draw the background.
   gfx::Rect bg_bounds(0, 0, icon_x + icon_width, height());
   AdjustBoundsForRTLUI(&bg_bounds);
-  NativeTheme::instance()->Paint(canvas->sk_canvas(),
+  GetNativeTheme()->Paint(canvas->sk_canvas(),
       NativeTheme::kMenuCheckBackground, state, bg_bounds, extra);
 
   // And the check.
   gfx::Rect icon_bounds(icon_x / 2, icon_y, icon_width, icon_height);
   AdjustBoundsForRTLUI(&icon_bounds);
-  NativeTheme::instance()->Paint(canvas->sk_canvas(),
+  GetNativeTheme()->Paint(canvas->sk_canvas(),
       NativeTheme::kMenuCheck, state, bg_bounds, extra);
 }
 

@@ -1,5 +1,8 @@
 include_rules = [
   "+chrome/plugin",  # For checking whether we're a plugin process.
+  "+device/bluetooth",  # For BluetoothDevicePermission
+  "+device/usb",  # For UsbDevicePermission
+  "+extensions/common",
   "+grit",  # For generated headers
   "+libxml",
   "+ppapi/c",  # For various types.
@@ -13,7 +16,6 @@ include_rules = [
   "+webkit/user_agent",
 
   # TODO(jam): remove me once chrome_notifcation_types.h moves to browser
-  "+content/public/browser/notification_source.h",
   "+content/public/browser/notification_types.h",
 
   # Other libraries.

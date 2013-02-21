@@ -27,8 +27,8 @@
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -245,8 +245,8 @@ void ThumbnailLoader::LoadThumbnail() {
   int bottomOffset = 0;
   DevToolsWindow* devToolsWindow =
       DevToolsWindow::GetDockedInstanceForInspectedTab(contents_);
-  content::WebContents* devToolsContents = devToolsWindow ?
-      devToolsWindow->tab_contents()->web_contents() : NULL;
+  content::WebContents* devToolsContents =
+      devToolsWindow ? devToolsWindow->web_contents() : NULL;
   if (devToolsContents && devToolsContents->GetRenderViewHost() &&
       devToolsContents->GetRenderViewHost()->GetView()) {
     // The devtool's size might not be up-to-date, but since its height doesn't
@@ -1311,7 +1311,7 @@ void AnimateCALayerOpacityFromTo(
     CGPoint lp = [layer convertPoint:p fromLayer:rootLayer_];
     if ([static_cast<CALayer*>([layer presentationLayer]) containsPoint:lp] &&
         !layer.hidden) {
-      tabStripModel_->CloseTabContentsAt(i,
+      tabStripModel_->CloseWebContentsAt(i,
           TabStripModel::CLOSE_USER_GESTURE |
           TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
       return;

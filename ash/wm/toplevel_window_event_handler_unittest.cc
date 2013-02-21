@@ -5,13 +5,16 @@
 #include "ash/wm/toplevel_window_event_handler.h"
 
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/property_util.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/event_generator.h"
@@ -66,26 +69,8 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
 
 class ToplevelWindowEventHandlerTest : public AshTestBase {
  public:
-  ToplevelWindowEventHandlerTest() : parent_(NULL) {}
+  ToplevelWindowEventHandlerTest() {}
   virtual ~ToplevelWindowEventHandlerTest() {}
-
-  virtual void SetUp() OVERRIDE {
-    AshTestBase::SetUp();
-    parent_ = new aura::Window(NULL);
-    parent_->Init(ui::LAYER_NOT_DRAWN);
-    parent_->Show();
-    Shell::GetPrimaryRootWindow()->AddChild(parent_);
-    parent_->SetBounds(Shell::GetPrimaryRootWindow()->bounds());
-    handler_.reset(new ToplevelWindowEventHandler(parent_));
-    parent_->AddPreTargetHandler(handler_.get());
-  }
-
-  virtual void TearDown() OVERRIDE {
-    parent_->RemovePreTargetHandler(handler_.get());
-    handler_.reset();
-    parent_ = NULL;
-    AshTestBase::TearDown();
-  }
 
  protected:
   aura::Window* CreateWindow(int hittest_code) {
@@ -93,7 +78,10 @@ class ToplevelWindowEventHandlerTest : public AshTestBase {
     aura::Window* w1 = new aura::Window(d1);
     w1->set_id(1);
     w1->Init(ui::LAYER_TEXTURED);
-    w1->SetParent(parent_);
+    aura::Window* parent =
+      Shell::GetContainer(Shell::GetPrimaryRootWindow(),
+                          internal::kShellWindowId_AlwaysOnTopContainer);
+    parent->AddChild(w1);
     w1->SetBounds(gfx::Rect(0, 0, 100, 100));
     w1->Show();
     return w1;
@@ -112,9 +100,6 @@ class ToplevelWindowEventHandlerTest : public AshTestBase {
   scoped_ptr<ToplevelWindowEventHandler> handler_;
 
  private:
-  // Window |handler_| is installed on. Owned by RootWindow.
-  aura::Window* parent_;
-
   DISALLOW_COPY_AND_ASSIGN(ToplevelWindowEventHandlerTest);
 };
 
@@ -401,41 +386,54 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
                                        target.get());
   gfx::Rect old_bounds = target->bounds();
   gfx::Point location(5, 5);
+  target->SetProperty(aura::client::kCanMaximizeKey, true);
+
+  gfx::Point end = location;
 
   // Snap right;
-  gfx::Point end = location;
-  end.Offset(100, 0);
-  generator.GestureScrollSequence(location, end,
-      base::TimeDelta::FromMilliseconds(5),
-      10);
-  RunAllPendingInMessageLoop();
-
-  // Verify that the window has moved after the gesture.
-  EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
   {
+    // Get the expected snapped bounds before snapping.
     internal::SnapSizer sizer(target.get(), location,
-        internal::SnapSizer::RIGHT_EDGE);
-    EXPECT_EQ(sizer.target_bounds().ToString(), target->bounds().ToString());
+        internal::SnapSizer::RIGHT_EDGE,
+        internal::SnapSizer::OTHER_INPUT);
+    gfx::Rect snapped_bounds = sizer.GetSnapBounds(target->bounds());
+
+    end.Offset(100, 0);
+    generator.GestureScrollSequence(location, end,
+        base::TimeDelta::FromMilliseconds(5),
+        10);
+    RunAllPendingInMessageLoop();
+
+    // Verify that the window has moved after the gesture.
+    EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
+    EXPECT_EQ(snapped_bounds.ToString(), target->bounds().ToString());
   }
 
   old_bounds = target->bounds();
 
   // Snap left.
-  end = location = target->GetBoundsInRootWindow().CenterPoint();
-  end.Offset(-100, 0);
-  generator.GestureScrollSequence(location, end,
-      base::TimeDelta::FromMilliseconds(5),
-      10);
-  RunAllPendingInMessageLoop();
-
-  EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
   {
+    // Get the expected snapped bounds before snapping.
     internal::SnapSizer sizer(target.get(), location,
-        internal::SnapSizer::LEFT_EDGE);
-    EXPECT_EQ(sizer.target_bounds().ToString(), target->bounds().ToString());
+        internal::SnapSizer::LEFT_EDGE,
+        internal::SnapSizer::OTHER_INPUT);
+    gfx::Rect snapped_bounds = sizer.GetSnapBounds(target->bounds());
+    end = location = target->GetBoundsInRootWindow().CenterPoint();
+    end.Offset(-100, 0);
+    generator.GestureScrollSequence(location, end,
+        base::TimeDelta::FromMilliseconds(5),
+        10);
+    RunAllPendingInMessageLoop();
+
+    EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
+    EXPECT_EQ(snapped_bounds.ToString(), target->bounds().ToString());
   }
 
+  gfx::Rect bounds_before_maximization = target->bounds();
+  bounds_before_maximization.Offset(0, 100);
+  target->SetBounds(bounds_before_maximization);
   old_bounds = target->bounds();
+
   // Maximize.
   end = location = target->GetBoundsInRootWindow().CenterPoint();
   end.Offset(0, -100);
@@ -445,6 +443,8 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
   RunAllPendingInMessageLoop();
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
   EXPECT_TRUE(wm::IsWindowMaximized(target.get()));
+  EXPECT_EQ(old_bounds.ToString(),
+            GetRestoreBoundsInScreen(target.get())->ToString());
 
   wm::RestoreWindow(target.get());
   target->SetBounds(old_bounds);
@@ -458,21 +458,46 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
   RunAllPendingInMessageLoop();
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
   EXPECT_TRUE(wm::IsWindowMinimized(target.get()));
+  EXPECT_TRUE(GetWindowAlwaysRestoresToRestoreBounds(target.get()));
+  EXPECT_EQ(old_bounds.ToString(),
+            GetRestoreBoundsInScreen(target.get())->ToString());
+}
+
+TEST_F(ToplevelWindowEventHandlerTest, GestureDragToRestore) {
+  scoped_ptr<aura::Window> window(
+      CreateTestWindowInShellWithDelegate(
+          new TestWindowDelegate(HTCAPTION),
+          0,
+          gfx::Rect(10, 20, 30, 40)));
+  window->Show();
+  ash::wm::ActivateWindow(window.get());
+
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                       window.get());
+  gfx::Rect old_bounds = window->bounds();
+  gfx::Point location, end;
+  end = location = window->GetBoundsInRootWindow().CenterPoint();
+  end.Offset(0, 100);
+  generator.GestureScrollSequence(location, end,
+      base::TimeDelta::FromMilliseconds(5),
+      10);
+  RunAllPendingInMessageLoop();
+  EXPECT_NE(old_bounds.ToString(), window->bounds().ToString());
+  EXPECT_TRUE(wm::IsWindowMinimized(window.get()));
+  EXPECT_TRUE(GetWindowAlwaysRestoresToRestoreBounds(window.get()));
+  EXPECT_EQ(old_bounds.ToString(),
+            GetRestoreBoundsInScreen(window.get())->ToString());
 }
 
 // Verifies pressing escape resets the bounds to the original bounds.
-#if defined(OS_MACOSX)
-#define MAYBE_EscapeReverts FAILS_EscapeReverts
+// Disabled crbug.com/166219.
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#define MAYBE_EscapeReverts DISABLED_EscapeReverts
 #else
 #define MAYBE_EscapeReverts EscapeReverts
 #endif
 TEST_F(ToplevelWindowEventHandlerTest, MAYBE_EscapeReverts) {
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
-  aura::client::ActivationClient* original_client =
-      aura::client::GetActivationClient(root);
-  aura::test::TestActivationClient activation_client(root);
   scoped_ptr<aura::Window> target(CreateWindow(HTBOTTOMRIGHT));
-  target->Focus();
   aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
                                        target.get());
   generator.PressLeftButton();
@@ -485,11 +510,16 @@ TEST_F(ToplevelWindowEventHandlerTest, MAYBE_EscapeReverts) {
   generator.PressKey(ui::VKEY_ESCAPE, 0);
   generator.ReleaseKey(ui::VKEY_ESCAPE, 0);
   EXPECT_EQ("0,0 100x100", target->bounds().ToString());
-  aura::client::SetActivationClient(root, original_client);
 }
 
 // Verifies window minimization/maximization completes drag.
-TEST_F(ToplevelWindowEventHandlerTest, MinimizeMaximizeCompletes) {
+// Disabled crbug.com/166219.
+#if defined(OS_WIN)
+#define MAYBE_MinimizeMaximizeCompletes DISABLED_MinimizeMaximizeCompletes
+#else
+#define MAYBE_MinimizeMaximizeCompletes MinimizeMaximizeCompletes
+#endif
+TEST_F(ToplevelWindowEventHandlerTest, MAYBE_MinimizeMaximizeCompletes) {
   // Once window is minimized, window dragging completes.
   {
     scoped_ptr<aura::Window> target(CreateWindow(HTCAPTION));

@@ -31,7 +31,6 @@
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/fileicon_source.h"
 #include "chrome/common/time_format.h"
@@ -111,6 +110,10 @@ const char* GetDangerTypeString(content::DownloadDangerType danger_type) {
 DictionaryValue* CreateDownloadItemValue(
     content::DownloadItem* download_item,
     bool incognito) {
+  // TODO(asanka): Move towards using download_model here for getting status and
+  // progress. The difference currently only matters to Drive downloads and
+  // those don't show up on the downloads page, but should.
+  DownloadItemModel download_model(download_item);
   DictionaryValue* file_value = new DictionaryValue();
 
   file_value->SetInteger(
@@ -178,8 +181,7 @@ DictionaryValue* CreateDownloadItemValue(
     file_value->SetInteger("received",
         static_cast<int>(download_item->GetReceivedBytes()));
     file_value->SetString("last_reason_text",
-        BaseDownloadItemModel::InterruptReasonMessage(
-            download_item->GetLastReason()));
+                          download_model.GetInterruptReasonText());
   } else if (download_item->IsCancelled()) {
     file_value->SetString("state", "CANCELLED");
   } else if (download_item->IsComplete()) {
@@ -197,7 +199,6 @@ DictionaryValue* CreateDownloadItemValue(
 // Filters out extension downloads and downloads that don't have a filename yet.
 bool IsDownloadDisplayable(const content::DownloadItem& item) {
   return (!download_crx_util::IsExtensionDownload(item) &&
-          item.IsPersisted() &&
           !item.IsTemporary() &&
           !item.GetFileNameToReportUser().empty() &&
           !item.GetTargetFilePath().empty());
@@ -325,8 +326,6 @@ void DownloadsDOMHandler::HandleGetDownloads(const base::ListValue* args) {
   CountDownloadsDOMEvents(DOWNLOADS_DOM_EVENT_GET_DOWNLOADS);
   search_text_ = ExtractStringValue(args);
   SendCurrentDownloads();
-  if (main_notifier_.GetManager())
-    main_notifier_.GetManager()->CheckForHistoryFilesRemoval();
 }
 
 void DownloadsDOMHandler::HandleOpenFile(const base::ListValue* args) {
@@ -433,10 +432,14 @@ void DownloadsDOMHandler::ScheduleSendCurrentDownloads() {
 void DownloadsDOMHandler::SendCurrentDownloads() {
   update_scheduled_ = false;
   content::DownloadManager::DownloadVector all_items, filtered_items;
-  if (main_notifier_.GetManager())
+  if (main_notifier_.GetManager()) {
     main_notifier_.GetManager()->GetAllDownloads(&all_items);
-  if (original_notifier_.get() && original_notifier_->GetManager())
+    main_notifier_.GetManager()->CheckForHistoryFilesRemoval();
+  }
+  if (original_notifier_.get() && original_notifier_->GetManager()) {
     original_notifier_->GetManager()->GetAllDownloads(&all_items);
+    original_notifier_->GetManager()->CheckForHistoryFilesRemoval();
+  }
   DownloadQuery query;
   if (!search_text_.empty()) {
     scoped_ptr<base::Value> query_text(base::Value::CreateStringValue(
@@ -464,7 +467,7 @@ void DownloadsDOMHandler::ShowDangerPrompt(
     content::DownloadItem* dangerous_item) {
   DownloadDangerPrompt* danger_prompt = DownloadDangerPrompt::Create(
       dangerous_item,
-      TabContents::FromWebContents(GetWebUIWebContents()),
+      GetWebUIWebContents(),
       base::Bind(&DownloadsDOMHandler::DangerPromptAccepted,
                  weak_ptr_factory_.GetWeakPtr(), dangerous_item->GetId()),
       base::Closure());

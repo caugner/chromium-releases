@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -10,26 +8,56 @@
 # ANDROID_SDK_BUILD=1 will then be defined and used in the rest of the setup to
 # specifiy build type.
 
+# Source functions script.  The file is in the same directory as this script.
+. "$(dirname $BASH_SOURCE)"/envsetup_functions.sh
+
+export ANDROID_SDK_BUILD=1  # Default to SDK build.
+
+process_options "$@"
+
 # When building WebView as part of Android we can't use the SDK. Other builds
 # default to using the SDK.
 if [[ "${CHROME_ANDROID_BUILD_WEBVIEW}" -eq 1 ]]; then
   export ANDROID_SDK_BUILD=0
-else
-  export ANDROID_SDK_BUILD=1
 fi
 
 if [[ "${ANDROID_SDK_BUILD}" -eq 1 ]]; then
   echo "Using SDK build"
 fi
 
+# Get host architecture, and abort if it is 32-bit, unless --try-32
+# is also used.
+host_arch=$(uname -m)
+case "${host_arch}" in
+  x86_64)  # pass
+    ;;
+  i?86)
+    if [[ -z "${try_32bit_host_build}" ]]; then
+      echo "ERROR: Android build requires a 64-bit host build machine."
+      echo "If you really want to try it on this machine, use the \
+--try-32bit-host flag."
+      echo "Be warned that this may fail horribly at link time, due \
+very large binaries."
+      return 1
+    else
+      echo "WARNING: 32-bit host build enabled. Here be dragons!"
+      host_arch=x86
+    fi
+    ;;
+  *)
+    echo "ERROR: Unsupported host architecture (${host_arch})."
+    echo "Try running this script on a Linux/x86_64 machine instead."
+    return 1
+esac
+
 host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
 
 case "${host_os}" in
   "linux")
-    toolchain_dir="linux-x86_64"
+    toolchain_dir="linux-${host_arch}"
     ;;
   "mac")
-    toolchain_dir="darwin-x86"
+    toolchain_dir="darwin-${host_arch}"
     ;;
   *)
     echo "Host platform ${host_os} is not supported" >& 2
@@ -55,10 +83,10 @@ fi
 # Android sdk platform version to use
 export ANDROID_SDK_VERSION=16
 
-# Source functions script.  The file is in the same directory as this script.
-. "$(dirname $BASH_SOURCE)"/envsetup_functions.sh
-
 if [[ "${ANDROID_SDK_BUILD}" -eq 1 ]]; then
+  if [[ -z "${TARGET_ARCH}" ]]; then
+    return 1
+  fi
   sdk_build_init
 # Sets up environment for building Chromium for Android with source. Expects
 # android environment setup and lunch.

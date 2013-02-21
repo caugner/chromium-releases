@@ -31,7 +31,6 @@
   outline: 1px solid rgb(171, 255, 255);
 }
 
-.debug #bottom-panel-footer,
 .debug #bottom-panel-toolbar {
   background: rgb(255, 170, 255);
 }
@@ -45,8 +44,8 @@
   background: rgb(255, 255, 119);
 }
 
-.debug .hide-row {
-  opacity: 0.35;
+.debug #bookmark-bar-spacer {
+  background: rgb(255, 255, 119);
 }
 
 .debug .hide-col-0 .tile-col-0,

@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "media/base/buffers.h"
 #include "media/base/limits.h"
-#include "webkit/media/crypto/ppapi/content_decryption_module.h"
+#include "webkit/media/crypto/ppapi/cdm/content_decryption_module.h"
 
 // Include FFmpeg header files.
 extern "C" {
@@ -283,15 +283,16 @@ cdm::Status FFmpegCdmAudioDecoder::DecodeBuffer(
   } while (packet.size > 0);
 
   if (!serialized_audio_frames_.empty()) {
-    decoded_frames->set_buffer(
+    decoded_frames->SetFrameBuffer(
         allocator_->Allocate(serialized_audio_frames_.size()));
-    if (!decoded_frames->buffer()) {
+    if (!decoded_frames->FrameBuffer()) {
       LOG(ERROR) << "DecodeBuffer() cdm::Allocator::Allocate failed.";
       return cdm::kDecodeError;
     }
-    memcpy(decoded_frames->buffer()->data(),
+    memcpy(decoded_frames->FrameBuffer()->Data(),
            &serialized_audio_frames_[0],
            serialized_audio_frames_.size());
+    decoded_frames->FrameBuffer()->SetSize(serialized_audio_frames_.size());
     serialized_audio_frames_.clear();
 
     return cdm::kSuccess;

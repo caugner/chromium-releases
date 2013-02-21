@@ -7,9 +7,12 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "chrome/browser/chromeos/system_logs/command_line_log_source.h"
+#include "chrome/browser/chromeos/system_logs/dbus_log_source.h"
 #include "chrome/browser/chromeos/system_logs/debug_daemon_log_source.h"
 #include "chrome/browser/chromeos/system_logs/lsb_release_log_source.h"
 #include "chrome/browser/chromeos/system_logs/memory_details_log_source.h"
+#include "chrome/browser/chromeos/system_logs/network_event_log_source.h"
+#include "chrome/browser/chromeos/system_logs/touch_log_source.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -25,8 +28,12 @@ SystemLogsFetcher::SystemLogsFetcher()
 
   // Chrome data sources.
   data_sources_.push_back(new CommandLineLogSource());
+  data_sources_.push_back(new DBusLogSource());
   data_sources_.push_back(new LsbReleaseLogSource());
   data_sources_.push_back(new MemoryDetailsLogSource());
+  data_sources_.push_back(new NetworkEventLogSource());
+  data_sources_.push_back(new TouchLogSource());
+
   num_pending_requests_ = data_sources_.size();
 }
 
@@ -50,12 +57,10 @@ void SystemLogsFetcher::AddResponse(SystemLogsResponse* response) {
   for (SystemLogsResponse::const_iterator it = response->begin();
        it != response->end();
        ++it) {
-    // It is false if the insert if there is already an element with the same
-    // key.
+    // It is an error to insert an element with a pre-existing key.
     bool ok = response_->insert(*it).second;
     DCHECK(ok) << "Duplicate key found: " << it->first;
   }
-
 
   --num_pending_requests_;
   if (num_pending_requests_ > 0)
@@ -66,4 +71,3 @@ void SystemLogsFetcher::AddResponse(SystemLogsResponse* response) {
 }
 
 }  // namespace chromeos
-

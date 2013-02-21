@@ -15,7 +15,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/event_types.h"
 #include "ui/base/events/event_constants.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/ui_export.h"
 #include "ui/gfx/point.h"
 
@@ -71,10 +73,6 @@ UI_EXPORT bool QueryRenderSupport(Display* dpy);
 
 // Return the default screen number for the display
 int GetDefaultScreen(Display* display);
-
-// TODO(xiyuan): Fix the stale XCursorCache problem per http://crbug.com/102759.
-// A special cursor that makes GetXCursor below to clear its XCursorCache.
-const int kCursorClearXCursorCache = -1;
 
 // Returns an X11 Cursor, sharable across the process.
 // |cursor_shape| is an X font cursor shape, see XCreateFontCursor().
@@ -142,6 +140,9 @@ UI_EXPORT void SetHideTitlebarWhenMaximizedProperty(
     XID window,
     HideTitlebarWhenMaximized property);
 
+// Clears all regions of X11's default root window by filling black pixels.
+UI_EXPORT void ClearX11DefaultRootWindow();
+
 // Return the number of bits-per-pixel for a pixmap of the given depth
 UI_EXPORT int BitsPerPixelForPixmapDepth(Display* display, int depth);
 
@@ -191,6 +192,9 @@ static const int kAllDesktops = -1;
 // Queries the desktop |window| is on, kAllDesktops if sticky. Returns false if
 // property not found.
 bool GetWindowDesktop(XID window, int* desktop);
+
+// Translates an X11 error code into a printable string.
+UI_EXPORT std::string GetX11ErrorString(Display* display, int err);
 
 // Implementers of this interface receive a notification for every X window of
 // the main display.
@@ -264,12 +268,12 @@ void FreePixmap(Display* display, XID pixmap);
 UI_EXPORT bool GetOutputDeviceHandles(std::vector<XID>* outputs);
 
 // Gets some useful data from the specified output device, such like
-// manufacturer's ID, serial#, and human readable name. Returns false if it
-// fails to get those data and doesn't touch manufacturer ID/serial#/name.
+// manufacturer's ID, product code, and human readable name. Returns false if it
+// fails to get those data and doesn't touch manufacturer ID/product code/name.
 // NULL can be passed for unwanted output parameters.
 UI_EXPORT bool GetOutputDeviceData(XID output,
                                    uint16* manufacturer_id,
-                                   uint32* serial_number,
+                                   uint16* product_code,
                                    std::string* human_readable_name);
 
 // Gets the names of the all displays physically connected to the system.

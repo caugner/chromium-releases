@@ -18,7 +18,7 @@
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -26,6 +26,7 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/resource_request_info.h"
+#include "extensions/common/constants.h"
 #include "googleurl/src/url_util.h"
 #include "grit/component_extension_resources_map.h"
 #include "net/base/mime_util.h"
@@ -35,7 +36,6 @@
 #include "net/url_request/url_request_error_job.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_simple_job.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::ResourceRequestInfo;
@@ -49,7 +49,7 @@ net::HttpResponseHeaders* BuildHttpHeaders(
   raw_headers.append("HTTP/1.1 200 OK");
   if (!content_security_policy.empty()) {
     raw_headers.append(1, '\0');
-    raw_headers.append("X-WebKit-CSP: ");
+    raw_headers.append("Content-Security-Policy: ");
     raw_headers.append(content_security_policy);
   }
 
@@ -89,8 +89,7 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
                       std::string* data,
                       const net::CompletionCallback& callback) const OVERRIDE {
     const ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    *data = rb.GetRawDataResource(
-        resource_id_, ui::SCALE_FACTOR_NONE).as_string();
+    *data = rb.GetRawDataResource(resource_id_).as_string();
 
     std::string* read_mime_type = new std::string;
     bool* read_result = new bool;
@@ -286,7 +285,7 @@ bool AllowExtensionResourceLoad(net::URLRequest* request,
 
 // Returns true if the given URL references an icon in the given extension.
 bool URLIsForExtensionIcon(const GURL& url, const Extension* extension) {
-  DCHECK(url.SchemeIs(chrome::kExtensionScheme));
+  DCHECK(url.SchemeIs(extensions::kExtensionScheme));
 
   if (!extension)
     return false;
@@ -379,8 +378,8 @@ ExtensionProtocolHandler::MaybeCreateJob(
     FilePath request_path =
         extension_file_util::ExtensionURLToRelativeFilePath(request->url());
     int resource_id;
-    if (ImageLoadingTracker::IsComponentExtensionResource(extension,
-        request_path, &resource_id)) {
+    if (extensions::ImageLoader::IsComponentExtensionResource(
+        directory_path, request_path, &resource_id)) {
       relative_path = relative_path.Append(request_path);
       relative_path = relative_path.NormalizePathSeparators();
       return new URLRequestResourceBundleJob(

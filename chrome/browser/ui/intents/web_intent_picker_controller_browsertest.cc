@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model_observer.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -36,6 +36,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/common/constants.h"
 #include "net/base/escape.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -195,11 +196,6 @@ class IntentsDispatcherMock : public content::WebIntentsDispatcher {
   virtual void ResetDispatch() OVERRIDE {
   }
 
-  virtual void SendReplyMessage(webkit_glue::WebIntentReplyType reply_type,
-                                const string16& data) OVERRIDE {
-    replied_ = true;
-  }
-
   virtual void SendReply(const webkit_glue::WebIntentReply& reply) OVERRIDE {
     replied_ = true;
   }
@@ -340,11 +336,10 @@ class WebIntentPickerControllerBrowserTest : public InProcessBrowserTest {
 
   void CreateFakeIcon() {
     gfx::Image image(gfx::test::CreateImage());
-    std::vector<unsigned char> image_data;
-    bool result = gfx::PNGEncodedDataFromImage(image, &image_data);
-    DCHECK(result);
+    scoped_refptr<base::RefCountedMemory> image_data = image.As1xPNGBytes();
+    DCHECK(image_data->size());
 
-    std::copy(image_data.begin(), image_data.end(),
+    std::copy(image_data->front(), image_data->front() + image_data->size(),
               std::back_inserter(icon_response_));
   }
 
@@ -418,6 +413,10 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
 
   controller_->ShowDialog(kAction1, kType1);
   picker_.Wait();
+  // Flush all pending worker tasks for PNG decoding.
+  content::BrowserThread::GetBlockingPool()->FlushForTesting();
+  // Flush all tasks posted from the worker tasks.
+  MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2, picker_.num_installed_services_);
   EXPECT_EQ(0, picker_.num_icons_changed_);
   EXPECT_EQ(1, picker_.num_extension_icons_changed_);
@@ -631,7 +630,7 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
   explicitIntent.action = kAction1;
   explicitIntent.type = kType2;
   explicitIntent.service = GURL(StringPrintf("%s://%s/%s",
-                                             chrome::kExtensionScheme,
+                                             extensions::kExtensionScheme,
                                              extension_id,
                                              "share.html"));
   IntentsDispatcherMock dispatcher2(explicitIntent);
@@ -675,7 +674,7 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest,
   intent.action = kAction1;
   intent.type = kType1;
   intent.service = GURL(StringPrintf("%s://%s/%s",
-                                     chrome::kExtensionScheme,
+                                     extensions::kExtensionScheme,
                                      kDummyExtensionId,
                                      UTF16ToASCII(kAction1).c_str()));
   IntentsDispatcherMock dispatcher(intent);

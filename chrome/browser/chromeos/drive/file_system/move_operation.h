@@ -28,7 +28,7 @@ namespace file_system {
 
 class OperationObserver;
 
-// This class encapsulates the drive Move function.  It is resposible for
+// This class encapsulates the drive Move function.  It is responsible for
 // sending the request to the drive API, then updating the local state and
 // metadata to reflect the new state.
 class MoveOperation {
@@ -40,10 +40,10 @@ class MoveOperation {
 
   // Performs the move operation on the file at drive path |src_file_path|
   // with a target of |dest_file_path|.  Invokes |callback| when finished with
-  // the result of the operation.
-  void Move(const FilePath& src_file_path,
-            const FilePath& dest_file_path,
-            const FileOperationCallback& callback);
+  // the result of the operation. |callback| must not be null.
+  virtual void Move(const FilePath& src_file_path,
+                    const FilePath& dest_file_path,
+                    const FileOperationCallback& callback);
  private:
   // Part of Move(). Called after GetEntryInfoPairByPaths() is
   // complete. |callback| must not be null.
@@ -84,39 +84,36 @@ class MoveOperation {
   void RenameEntryLocally(const FilePath& file_path,
                           const FilePath::StringType& new_name,
                           const FileMoveCallback& callback,
-                          google_apis::GDataErrorCode status,
-                          const GURL& document_url);
+                          google_apis::GDataErrorCode status);
 
-  // Removes a file or directory at |file_path| from the current directory if
-  // it's not in the root directory. This essentially moves an entry to the
-  // root directory on the server side.
+  // Removes a file or directory at |file_path| from the current directory.
+  // It moves the entry to a dangle, no-parent state on the server side.
   //
   // Can be called from UI thread. |callback| is run on the calling thread.
   // |callback| must not be null.
-  void RemoveEntryFromNonRootDirectory(const FileMoveCallback& callback,
-                                       DriveFileError error,
-                                       const FilePath& file_path);
+  void RemoveEntryFromDirectory(const FileMoveCallback& callback,
+                                DriveFileError error,
+                                const FilePath& file_path);
 
-  // Part of RemoveEntryFromNonRootDirectory(). Called after
+  // Part of RemoveEntryFromDirectory(). Called after
   // GetEntryInfoPairByPaths() is complete. |callback| must not be null.
-  void RemoveEntryFromNonRootDirectoryAfterEntryInfoPair(
+  void RemoveEntryFromDirectoryAfterEntryInfoPair(
     const FileMoveCallback& callback,
     scoped_ptr<EntryInfoPairResult> result);
 
-  // Moves a file or directory at |file_path| in the root directory to
-  // another directory at |dir_path|. This function does nothing if
-  // |dir_path| points to the root directory.
+  // Moves a file or directory at |file_path| to another directory at
+  // |dir_path|.
   //
   // Can be called from UI thread. |callback| is run on the calling thread.
   // |callback| must not be null.
-  void MoveEntryFromRootDirectory(const FilePath& directory_path,
-                                  const FileOperationCallback& callback,
-                                  DriveFileError error,
-                                  const FilePath& file_path);
+  void AddEntryToDirectory(const FilePath& directory_path,
+                           const FileOperationCallback& callback,
+                           DriveFileError error,
+                           const FilePath& file_path);
 
-  // Part of MoveEntryFromRootDirectory(). Called after
+  // Part of AddEntryToDirectory(). Called after
   // GetEntryInfoPairByPaths() is complete. |callback| must not be null.
-  void MoveEntryFromRootDirectoryAfterGetEntryInfoPair(
+  void AddEntryToDirectoryAfterGetEntryInfoPair(
     const FileOperationCallback& callback,
     scoped_ptr<EntryInfoPairResult> result);
 
@@ -126,8 +123,7 @@ class MoveOperation {
   void MoveEntryToDirectory(const FilePath& file_path,
                             const FilePath& directory_path,
                             const FileMoveCallback& callback,
-                            google_apis::GDataErrorCode status,
-                            const GURL& document_url);
+                            google_apis::GDataErrorCode status);
 
   // Callback when an entry is moved to another directory on the client side.
   // Notifies the directory change and runs |callback|.

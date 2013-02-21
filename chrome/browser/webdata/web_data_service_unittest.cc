@@ -6,11 +6,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/string_util.h"
@@ -104,7 +104,7 @@ class WebDataServiceTest : public testing::Test {
   content::TestBrowserThread db_thread_;
   FilePath profile_dir_;
   scoped_refptr<WebDataService> wds_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
 };
 
 class WebDataServiceAutofillTest : public WebDataServiceTest {
@@ -400,9 +400,9 @@ TEST_F(WebDataServiceAutofillTest, ProfileRemove) {
 
 TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
   AutofillProfile profile1;
-  profile1.SetInfo(NAME_FIRST, ASCIIToUTF16("Abe"));
+  profile1.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Abe"));
   AutofillProfile profile2;
-  profile2.SetInfo(NAME_FIRST, ASCIIToUTF16("Alice"));
+  profile2.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Alice"));
 
   EXPECT_CALL(*observer_helper_->observer(), Observe(_, _, _)).
       WillOnce(DoDefault()).
@@ -422,7 +422,7 @@ TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
   STLDeleteElements(&consumer.result());
 
   AutofillProfile profile1_changed(profile1);
-  profile1_changed.SetInfo(NAME_FIRST, ASCIIToUTF16("Bill"));
+  profile1_changed.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Bill"));
   const AutofillProfileChange expected_change(
       AutofillProfileChange::UPDATE, profile1.guid(), &profile1_changed);
 
@@ -519,9 +519,9 @@ TEST_F(WebDataServiceAutofillTest, CreditCardRemove) {
 
 TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
   CreditCard card1;
-  card1.SetInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Abe"));
+  card1.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Abe"));
   CreditCard card2;
-  card2.SetInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Alice"));
+  card2.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Alice"));
 
   EXPECT_CALL(*observer_helper_->observer(), Observe(_, _, _)).
       Times(2).
@@ -542,7 +542,7 @@ TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
   STLDeleteElements(&consumer.result());
 
   CreditCard card1_changed(card1);
-  card1_changed.SetInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Bill"));
+  card1_changed.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Bill"));
   const AutofillCreditCardChange expected_change(
       AutofillCreditCardChange::UPDATE, card1.guid(), &card1_changed);
 
@@ -655,7 +655,7 @@ TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
 TEST_F(WebDataServiceTest, WebIntents) {
   WebIntentsConsumer consumer;
 
-  wds_->GetWebIntentServices(ASCIIToUTF16("share"), &consumer);
+  wds_->GetWebIntentServicesForAction(ASCIIToUTF16("share"), &consumer);
   WaitUntilCalled();
   EXPECT_EQ(0U, consumer.services_.size());
 
@@ -672,7 +672,7 @@ TEST_F(WebDataServiceTest, WebIntents) {
   service.type = ASCIIToUTF16("video/*");
   wds_->AddWebIntentService(service);
 
-  wds_->GetWebIntentServices(ASCIIToUTF16("share"), &consumer);
+  wds_->GetWebIntentServicesForAction(ASCIIToUTF16("share"), &consumer);
   WaitUntilCalled();
   ASSERT_EQ(2U, consumer.services_.size());
 
@@ -689,7 +689,7 @@ TEST_F(WebDataServiceTest, WebIntents) {
   service.type = ASCIIToUTF16("image/*");
   wds_->RemoveWebIntentService(service);
 
-  wds_->GetWebIntentServices(ASCIIToUTF16("share"), &consumer);
+  wds_->GetWebIntentServicesForAction(ASCIIToUTF16("share"), &consumer);
   WaitUntilCalled();
   ASSERT_EQ(1U, consumer.services_.size());
 
@@ -819,19 +819,10 @@ TEST_F(WebDataServiceTest, WebIntentsRemoveDefaultByServiceURL) {
   ASSERT_EQ(2U, consumer.services_.size());
 
   wds_->RemoveWebIntentServiceDefaults(service_url_0);
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 
   wds_->GetAllDefaultWebIntentServices(&consumer);
   WaitUntilCalled();
   ASSERT_EQ(1U, consumer.services_.size());
   EXPECT_EQ(service_url_1.spec(), consumer.services_[0].service_url);
-}
-
-TEST_F(WebDataServiceTest, DidDefaultSearchProviderChangeOnNewProfile) {
-  KeywordsConsumer consumer;
-  wds_->GetKeywords(&consumer);
-  WaitUntilCalled();
-  ASSERT_TRUE(consumer.load_succeeded);
-  EXPECT_FALSE(consumer.keywords_result.did_default_search_provider_change);
-  EXPECT_FALSE(consumer.keywords_result.backup_valid);
 }

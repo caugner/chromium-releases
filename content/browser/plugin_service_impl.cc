@@ -40,7 +40,7 @@
 #include "content/browser/plugin_loader_posix.h"
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_OPENBSD)
+#if defined(OS_POSIX) && !defined(OS_OPENBSD) && !defined(OS_ANDROID)
 using ::base::files::FilePathWatcher;
 #endif
 
@@ -71,7 +71,7 @@ static void NotifyPluginsOfActivation() {
     iter->OnAppActivation();
 }
 #endif
-#if defined(OS_POSIX) && !defined(OS_OPENBSD)
+#if defined(OS_POSIX) && !defined(OS_OPENBSD) && !defined(OS_ANDROID)
 // Delegate class for monitoring directories.
 class PluginDirWatcherDelegate : public FilePathWatcher::Delegate {
   virtual void OnFilePathChanged(const FilePath& path) OVERRIDE {
@@ -182,7 +182,7 @@ void PluginServiceImpl::StartWatchingPlugins() {
     }
   }
 #endif
-#if defined(OS_POSIX) && !defined(OS_OPENBSD)
+#if defined(OS_POSIX) && !defined(OS_OPENBSD) && !defined(OS_ANDROID)
 // On ChromeOS the user can't install plugins anyway and on Windows all
 // important plugins register themselves in the registry so no need to do that.
   file_watcher_delegate_ = new PluginDirWatcherDelegate();
@@ -268,6 +268,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
     const FilePath& plugin_path,
     const FilePath& profile_data_directory,
     PpapiPluginProcessHost::PluginClient* client) {
+#if defined(ENABLE_PLUGINS)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   PpapiPluginProcessHost* plugin_host =
@@ -284,6 +285,9 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
   return PpapiPluginProcessHost::CreatePluginHost(
       *info, profile_data_directory,
       client->GetResourceContext()->GetHostResolver());
+#else
+  return NULL;
+#endif
 }
 
 PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiBrokerProcess(
@@ -339,20 +343,22 @@ void PluginServiceImpl::OpenChannelToPpapiPlugin(
     plugin_host->OpenChannelToPlugin(client);
   } else {
     // Send error.
-    client->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
+    client->OnPpapiChannelOpened(IPC::ChannelHandle(), base::kNullProcessId, 0);
   }
 }
 
 void PluginServiceImpl::OpenChannelToPpapiBroker(
     const FilePath& path,
     PpapiPluginProcessHost::BrokerClient* client) {
+#if defined(ENABLE_PLUGINS)
   PpapiPluginProcessHost* plugin_host = FindOrStartPpapiBrokerProcess(path);
   if (plugin_host) {
     plugin_host->OpenChannelToPlugin(client);
   } else {
     // Send error.
-    client->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
+    client->OnPpapiChannelOpened(IPC::ChannelHandle(), base::kNullProcessId, 0);
   }
+#endif
 }
 
 void PluginServiceImpl::CancelOpenChannelToNpapiPlugin(
@@ -594,7 +600,7 @@ PepperPluginInfo* PluginServiceImpl::GetRegisteredPpapiPluginInfo(
   return &ppapi_plugins_[ppapi_plugins_.size() - 1];
 }
 
-#if defined(OS_POSIX) && !defined(OS_OPENBSD)
+#if defined(OS_POSIX) && !defined(OS_OPENBSD) && !defined(OS_ANDROID)
 // static
 void PluginServiceImpl::RegisterFilePathWatcher(
     FilePathWatcher* watcher,

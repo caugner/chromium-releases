@@ -24,8 +24,10 @@ namespace internal {
 // the detailed view of the tray-item that owns it.
 class TrayItemMore : public ActionableView {
  public:
-  explicit TrayItemMore(SystemTrayItem* owner);
+  TrayItemMore(SystemTrayItem* owner, bool show_more);
   virtual ~TrayItemMore();
+
+  SystemTrayItem* owner() const { return owner_; }
 
   void SetLabel(const string16& label);
   void SetImage(const gfx::ImageSkia* image_skia);
@@ -33,7 +35,7 @@ class TrayItemMore : public ActionableView {
 
  protected:
   // Replaces the default icon (on the left of the label), and allows a custom
-  // view to be palced there. Once the default icon is replaced, |SetImage|
+  // view to be placed there. Once the default icon is replaced, |SetImage|
   // should never be called.
   void ReplaceIcon(views::View* view);
 
@@ -46,6 +48,8 @@ class TrayItemMore : public ActionableView {
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   SystemTrayItem* owner_;
+  // True if |more_| should be shown.
+  bool show_more_;
   views::ImageView* icon_;
   views::Label* label_;
   views::ImageView* more_;

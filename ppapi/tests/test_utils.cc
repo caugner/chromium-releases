@@ -138,7 +138,7 @@ int32_t TestCompletionCallback::WaitForResult() {
   errors_.clear();
   if (!have_result_) {
     post_quit_task_ = true;
-    GetTestingInterface()->RunMessageLoop(instance_);
+    RunMessageLoop();
   }
   return result_;
 }
@@ -150,7 +150,7 @@ void TestCompletionCallback::WaitForResult(int32_t result) {
   if (result == PP_OK_COMPLETIONPENDING) {
     if (!have_result_) {
       post_quit_task_ = true;
-      GetTestingInterface()->RunMessageLoop(instance_);
+      RunMessageLoop();
     }
     if (callback_type_ == PP_BLOCKING) {
       errors_.assign(
@@ -200,6 +200,7 @@ pp::CompletionCallback TestCompletionCallback::GetCallback() {
     return pp::CompletionCallback();
   else if (callback_type_ == PP_OPTIONAL)
     flags = PP_COMPLETIONCALLBACK_FLAG_OPTIONAL;
+  target_loop_ = pp::MessageLoop::GetCurrent();
   return pp::CompletionCallback(&TestCompletionCallback::Handler,
                                 const_cast<TestCompletionCallback*>(this),
                                 flags);
@@ -229,7 +230,36 @@ void TestCompletionCallback::Handler(void* user_data, int32_t result) {
     callback->delegate_->OnCallback(user_data, result);
   if (callback->post_quit_task_) {
     callback->post_quit_task_ = false;
-    GetTestingInterface()->QuitMessageLoop(callback->instance_);
+    callback->QuitMessageLoop();
+  }
+  if (callback->target_loop_ != pp::MessageLoop::GetCurrent()) {
+    // Note, in-process, loop_ and GetCurrent() will both be NULL, so should
+    // still be equal.
+    callback->errors_.assign(
+        ReportError("TestCompletionCallback: Callback ran on the wrong message "
+                    "loop!",
+                    result));
   }
 }
 
+void TestCompletionCallback::RunMessageLoop() {
+  pp::MessageLoop loop(pp::MessageLoop::GetCurrent());
+  // If we don't have a message loop, we're probably running in process, where
+  // PPB_MessageLoop is not supported. Just use the Testing message loop.
+  if (loop.is_null() || loop == pp::MessageLoop::GetForMainThread())
+    GetTestingInterface()->RunMessageLoop(instance_);
+  else
+    loop.Run();
+}
+
+void TestCompletionCallback::QuitMessageLoop() {
+  pp::MessageLoop loop(pp::MessageLoop::GetCurrent());
+  // If we don't have a message loop, we're probably running in process, where
+  // PPB_MessageLoop is not supported. Just use the Testing message loop.
+  if (loop.is_null() || loop == pp::MessageLoop::GetForMainThread()) {
+    GetTestingInterface()->QuitMessageLoop(instance_);
+  } else {
+    const bool should_quit = false;
+    loop.PostQuit(should_quit);
+  }
+}

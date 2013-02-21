@@ -46,6 +46,7 @@ NONESSENTIAL_DIRS = (
     'third_party/hunspell_dictionaries',
     'third_party/hunspell/tests',
     'third_party/lighttpd',
+    'third_party/sqlite/src/test',
     'third_party/sqlite/test',
     'third_party/vc_80',
     'third_party/xdg-utils/tests',
@@ -82,12 +83,17 @@ class MyTarFile(tarfile.TarFile):
   def set_remove_nonessential_files(self, remove):
     self.__remove_nonessential_files = remove
 
-  def add(self, name, arcname=None, recursive=True, exclude=None):
+  def add(self, name, arcname=None, recursive=True, exclude=None, filter=None):
     head, tail = os.path.split(name)
     if tail in ('.svn', '.git'):
       return
 
     if self.__remove_nonessential_files:
+      # WebKit change logs take quite a lot of space. This saves ~10 MB
+      # in a bzip2-compressed tarball.
+      if 'ChangeLog' in name:
+        return
+
       for nonessential_dir in NONESSENTIAL_DIRS:
         dir_path = os.path.join(GetSourceDirectory(), nonessential_dir)
         if name.startswith(dir_path):
@@ -101,6 +107,7 @@ def main(argv):
   parser.add_option("--remove-nonessential-files",
                     dest="remove_nonessential_files",
                     action="store_true", default=False)
+  parser.add_option("--xz", action="store_true")
 
   options, args = parser.parse_args(argv)
 
@@ -119,15 +126,27 @@ def main(argv):
     print 'Could not run build/util/lastchange.py to update LASTCHANGE.'
     return 1
 
-  output_fullname = args[0] + '.tar.bz2'
+  if options.xz:
+    output_fullname = args[0] + '.tar'
+  else:
+    output_fullname = args[0] + '.tar.bz2'
+
   output_basename = os.path.basename(args[0])
 
-  archive = MyTarFile.open(output_fullname, 'w:bz2')
+  if options.xz:
+    archive = MyTarFile.open(output_fullname, 'w')
+  else:
+    archive = MyTarFile.open(output_fullname, 'w:bz2')
   archive.set_remove_nonessential_files(options.remove_nonessential_files)
   try:
     archive.add(GetSourceDirectory(), arcname=output_basename)
   finally:
     archive.close()
+
+  if options.xz:
+    if subprocess.call(['xz', '-9', output_fullname]) != 0:
+      print 'xz -9 failed!'
+      return 1
 
   return 0
 

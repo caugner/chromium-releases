@@ -21,12 +21,14 @@
 
 class Pickle;
 struct PP_FontDescription_Dev;
+struct PP_BrowserFont_Trusted_Description;
 
 namespace ppapi {
 namespace proxy {
 
-// PP_FontDescript_Dev has to be redefined with a string in place of the PP_Var
-// used for the face name.
+// PP_FontDescription_Dev/PP_BrowserFontDescription (same definition, different
+// names) has to be redefined with a string in place of the PP_Var used for the
+// face name.
 struct PPAPI_PROXY_EXPORT SerializedFontDescription {
   SerializedFontDescription();
   ~SerializedFontDescription();
@@ -36,10 +38,14 @@ struct PPAPI_PROXY_EXPORT SerializedFontDescription {
   // The reference of |face| owned by the PP_FontDescription_Dev will be
   // unchanged and the caller is responsible for freeing it.
   void SetFromPPFontDescription(const PP_FontDescription_Dev& desc);
+  void SetFromPPBrowserFontDescription(
+      const PP_BrowserFont_Trusted_Description& desc);
 
   // Converts to a PP_FontDescription_Dev. The face name will have one ref
   // assigned to it. The caller is responsible for freeing it.
   void SetToPPFontDescription(PP_FontDescription_Dev* desc) const;
+  void SetToPPBrowserFontDescription(
+      PP_BrowserFont_Trusted_Description* desc) const;
 
   std::string face;
   int32_t family;
@@ -81,17 +87,11 @@ struct PPBURLLoader_UpdateProgress_Params {
   int64_t total_bytes_to_be_received;
 };
 
-struct PPPVideoCapture_Buffer {
-  ppapi::HostResource resource;
-  uint32_t size;
-  base::SharedMemoryHandle handle;
-};
-
 // We put all our handles in a unified structure to make it easy to translate
 // them in NaClIPCAdapter for use in NaCl.
 class PPAPI_PROXY_EXPORT SerializedHandle {
  public:
-  enum Type { INVALID, SHARED_MEMORY, SOCKET, CHANNEL_HANDLE };
+  enum Type { INVALID, SHARED_MEMORY, SOCKET, CHANNEL_HANDLE, FILE };
   struct Header {
     Header() : type(INVALID), size(0) {}
     Header(Type type_arg, uint32_t size_arg)
@@ -108,7 +108,7 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   // Create a shared memory handle.
   SerializedHandle(const base::SharedMemoryHandle& handle, uint32_t size);
 
-  // Create a socket or channel handle.
+  // Create a socket, channel or file handle.
   SerializedHandle(const Type type,
                    const IPC::PlatformFileForTransit& descriptor);
 
@@ -116,6 +116,7 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   bool is_shmem() const { return type_ == SHARED_MEMORY; }
   bool is_socket() const { return type_ == SOCKET; }
   bool is_channel_handle() const { return type_ == CHANNEL_HANDLE; }
+  bool is_file() const { return type_ == FILE; }
   const base::SharedMemoryHandle& shmem() const {
     DCHECK(is_shmem());
     return shm_handle_;
@@ -125,7 +126,7 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
     return size_;
   }
   const IPC::PlatformFileForTransit& descriptor() const {
-    DCHECK(is_socket() || is_channel_handle());
+    DCHECK(is_socket() || is_channel_handle() || is_file());
     return descriptor_;
   }
   void set_shmem(const base::SharedMemoryHandle& handle, uint32_t size) {
@@ -149,6 +150,13 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
     shm_handle_ = base::SharedMemory::NULLHandle();
     size_ = 0;
   }
+  void set_file_handle(const IPC::PlatformFileForTransit& descriptor) {
+    type_ = FILE;
+
+    descriptor_ = descriptor;
+    shm_handle_ = base::SharedMemory::NULLHandle();
+    size_ = 0;
+  }
   void set_null_shmem() {
     set_shmem(base::SharedMemory::NULLHandle(), 0);
   }
@@ -158,11 +166,17 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   void set_null_channel_handle() {
     set_channel_handle(IPC::InvalidPlatformFileForTransit());
   }
+  void set_null_file_handle() {
+    set_file_handle(IPC::InvalidPlatformFileForTransit());
+  }
   bool IsHandleValid() const;
 
   Header header() const {
     return Header(type_, size_);
   }
+
+  // Closes the handle and sets it to invalid.
+  void Close();
 
   // Write/Read a Header, which contains all the data except the handle. This
   // allows us to write the handle in a platform-specific way, as is necessary
@@ -186,8 +200,6 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   IPC::PlatformFileForTransit descriptor_;
 };
 
-// TODO(tomfinegan): This is identical to PPPVideoCapture_Buffer, maybe replace
-// both with a single type?
 struct PPPDecryptor_Buffer {
   ppapi::HostResource resource;
   uint32_t size;

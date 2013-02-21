@@ -16,7 +16,6 @@
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
-#include "content/public/browser/notification_observer.h"
 
 class Profile;
 
@@ -34,8 +33,7 @@ class PluginList;
 // This class stores information about whether a plug-in or a plug-in group is
 // enabled or disabled.
 // Except where otherwise noted, it can be used on every thread.
-class PluginPrefs : public RefcountedProfileKeyedService,
-                    public content::NotificationObserver {
+class PluginPrefs : public RefcountedProfileKeyedService {
  public:
   enum PolicyStatus {
     NO_POLICY = 0,  // Neither enabled or disabled by policy.
@@ -85,11 +83,6 @@ class PluginPrefs : public RefcountedProfileKeyedService,
   // RefCountedProfileKeyedBase method override.
   virtual void ShutdownOnUIThread() OVERRIDE;
 
-  // content::NotificationObserver method override.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
  private:
   friend class base::RefCountedThreadSafe<PluginPrefs>;
   friend class PluginPrefsTest;
@@ -106,9 +99,6 @@ class PluginPrefs : public RefcountedProfileKeyedService,
     // |*enabled| won't be touched.
     bool Get(const FilePath& plugin, bool* enabled) const;
     void Set(const FilePath& plugin, bool enabled);
-    // It is similar to Set(), except that it does nothing if |plugin| needs to
-    // be converted to a different key.
-    void SetIgnorePseudoKey(const FilePath& plugin, bool enabled);
 
    private:
     FilePath ConvertMapKey(const FilePath& plugin) const;
@@ -117,6 +107,11 @@ class PluginPrefs : public RefcountedProfileKeyedService,
   };
 
   virtual ~PluginPrefs();
+
+  // Called to update one of the policy_xyz patterns below when a
+  // preference changes.
+  void UpdatePatternsAndNotify(std::set<string16>* patterns,
+                               const std::string& pref_name);
 
   // Allows unit tests to directly set enforced plug-in patterns.
   void SetPolicyEnforcedPluginPatterns(

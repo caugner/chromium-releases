@@ -5,17 +5,20 @@
 #include "content/shell/shell_content_browser_client.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/path_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/shell/geolocation/shell_access_token_store.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
 #include "content/shell/shell_browser_main_parts.h"
 #include "content/shell/shell_devtools_delegate.h"
+#include "content/shell/shell_messages.h"
 #include "content/shell/shell_resource_dispatcher_host_delegate.h"
 #include "content/shell/shell_switches.h"
 #include "content/shell/shell_web_contents_view_delegate_creator.h"
-#include "content/shell/webkit_test_runner_host.h"
+#include "content/shell/webkit_test_controller.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/webpreferences.h"
 
@@ -28,8 +31,36 @@
 
 namespace content {
 
+namespace {
+
+FilePath GetWebKitRootDirFilePath() {
+  FilePath base_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &base_path);
+  if (file_util::PathExists(
+          base_path.Append(FILE_PATH_LITERAL("third_party/WebKit")))) {
+    // We're in a WebKit-in-chrome checkout.
+    return base_path.Append(FILE_PATH_LITERAL("third_party/WebKit"));
+  } else if (file_util::PathExists(
+          base_path.Append(FILE_PATH_LITERAL("chromium")))) {
+    // We're in a WebKit-only checkout on Windows.
+    return base_path.Append(FILE_PATH_LITERAL("../.."));
+  } else if (file_util::PathExists(
+          base_path.Append(FILE_PATH_LITERAL("webkit/support")))) {
+    // We're in a WebKit-only/xcodebuild checkout on Mac
+    return base_path.Append(FILE_PATH_LITERAL("../../.."));
+  }
+  // We're in a WebKit-only, make-build, so the DIR_SOURCE_ROOT is already the
+  // WebKit root. That, or we have no idea where we are.
+  return base_path;
+}
+
+}  // namespace
+
 ShellContentBrowserClient::ShellContentBrowserClient()
     : shell_browser_main_parts_(NULL) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+    return;
+  webkit_source_dir_ = GetWebKitRootDirFilePath();
 }
 
 ShellContentBrowserClient::~ShellContentBrowserClient() {
@@ -41,11 +72,11 @@ BrowserMainParts* ShellContentBrowserClient::CreateBrowserMainParts(
   return shell_browser_main_parts_;
 }
 
-void ShellContentBrowserClient::RenderViewHostCreated(
-    RenderViewHost* render_view_host) {
+void ShellContentBrowserClient::RenderProcessHostCreated(
+    RenderProcessHost* host) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
-  new WebKitTestRunnerHost(render_view_host);
+  host->Send(new ShellViewMsg_SetWebKitSourceDir(webkit_source_dir_));
 }
 
 void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -60,9 +91,7 @@ void ShellContentBrowserClient::OverrideWebkitPrefs(
     webkit_glue::WebPreferences* prefs) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
-  prefs->dom_paste_enabled = true;
-  prefs->javascript_can_access_clipboard = true;
-  prefs->allow_universal_access_from_file_urls = true;
+  WebKitTestController::Get()->web_preferences().Export(prefs);
 }
 
 void ShellContentBrowserClient::ResourceDispatcherHostCreated() {
@@ -83,6 +112,19 @@ WebContentsViewDelegate* ShellContentBrowserClient::GetWebContentsViewDelegate(
 #endif
   NOTIMPLEMENTED();
   return NULL;
+}
+
+bool ShellContentBrowserClient::CanCreateWindow(
+    const GURL& opener_url,
+    const GURL& origin,
+    WindowContainerType container_type,
+    ResourceContext* context,
+    int render_process_id,
+    bool* no_javascript_access) {
+  *no_javascript_access = false;
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+    return true;
+  return WebKitTestController::Get()->CanOpenWindows();
 }
 
 #if defined(OS_ANDROID)

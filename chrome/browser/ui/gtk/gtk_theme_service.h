@@ -13,13 +13,16 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "content/public/browser/notification_observer.h"
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/color_utils.h"
 
 class Profile;
+
+namespace content {
+class NotificationObserver;
+}
 
 namespace extensions {
 class Extension;
@@ -76,11 +79,6 @@ class GtkThemeService : public ThemeService {
   virtual void SetNativeTheme() OVERRIDE;
   virtual bool UsingDefaultTheme() const OVERRIDE;
   virtual bool UsingNativeTheme() const OVERRIDE;
-
-  // Overridden from ThemeService, content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
   // Creates a GtkChromeButton instance, registered with this theme provider,
   // with a "destroy" signal to remove it from our internal list when it goes
@@ -243,6 +241,8 @@ class GtkThemeService : public ThemeService {
 
   CHROMEGTK_CALLBACK_1(GtkThemeService, gboolean, OnSeparatorExpose,
                        GdkEventExpose*);
+
+  void OnUsesSystemThemeChanged();
 
   // Whether we should be using gtk rendering.
   bool use_gtk_;

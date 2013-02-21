@@ -12,7 +12,6 @@
 #include "content/public/browser/download_item.h"
 
 namespace content {
-class DownloadFileManager;
 class DownloadItemImpl;
 class BrowserContext;
 
@@ -29,6 +28,10 @@ class CONTENT_EXPORT DownloadItemImplDelegate {
       const FilePath&                   // Intermediate file path
                               )> DownloadTargetCallback;
 
+  // The boolean argument indicates whether or not the download was
+  // actually opened.
+  typedef base::Callback<void(bool)> ShouldOpenDownloadCallback;
+
   DownloadItemImplDelegate();
   virtual ~DownloadItemImplDelegate();
 
@@ -41,17 +44,17 @@ class CONTENT_EXPORT DownloadItemImplDelegate {
       DownloadItemImpl* download, const DownloadTargetCallback& callback);
 
   // Allows the delegate to delay completion of the download.  This function
-  // will call the callback passed when the download is ready for completion.
-  // This may be done immediately, from within the routine itself, or it
-  // may be delayed.
-  // This routine should only be called once per download.
-  virtual void ReadyForDownloadCompletion(
+  // will either return true (if the download may complete now) or will return
+  // false and call the provided callback at some future point.  This function
+  // may be called repeatedly.
+  virtual bool ShouldCompleteDownload(
       DownloadItemImpl* download,
       const base::Closure& complete_callback);
 
   // Allows the delegate to override the opening of a download. If it returns
   // true then it's reponsible for opening the item.
-  virtual bool ShouldOpenDownload(DownloadItemImpl* download);
+  virtual bool ShouldOpenDownload(
+      DownloadItemImpl* download, const ShouldOpenDownloadCallback& callback);
 
   // Tests if a file type should be opened automatically.
   virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path);
@@ -65,21 +68,16 @@ class CONTENT_EXPORT DownloadItemImplDelegate {
   // For contextual issues like language and prefs.
   virtual BrowserContext* GetBrowserContext() const;
 
-  // Get the DownloadFileManager to use for this download.
-  virtual DownloadFileManager* GetDownloadFileManager();
-
   // Update the persistent store with our information.
   virtual void UpdatePersistence(DownloadItemImpl* download);
 
   // Handle any delegate portions of a state change operation on the
   // DownloadItem.
-  virtual void DownloadStopped(DownloadItemImpl* download);
-  virtual void DownloadCompleted(DownloadItemImpl* download);
   virtual void DownloadOpened(DownloadItemImpl* download);
   virtual void DownloadRemoved(DownloadItemImpl* download);
-  virtual void DownloadRenamedToIntermediateName(
-      DownloadItemImpl* download);
-  virtual void DownloadRenamedToFinalName(DownloadItemImpl* download);
+
+  // Show the download in the browser.
+  virtual void ShowDownloadInBrowser(DownloadItemImpl* download);
 
   // Assert consistent state for delgate object at various transitions.
   virtual void AssertStateConsistent(DownloadItemImpl* download) const;

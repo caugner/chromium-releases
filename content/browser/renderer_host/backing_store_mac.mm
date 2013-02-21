@@ -70,7 +70,8 @@ void BackingStoreMac::ScaleFactorChanged(float device_scale_factor) {
 }
 
 size_t BackingStoreMac::MemorySize() {
-  return gfx::ToFlooredSize(size().Scale(device_scale_factor_)).GetArea() * 4;
+  return gfx::ToFlooredSize(
+      gfx::ScaleSize(size(), device_scale_factor_)).GetArea() * 4;
 }
 
 void BackingStoreMac::PaintToBackingStore(
@@ -89,7 +90,7 @@ void BackingStoreMac::PaintToBackingStore(
     return;
 
   gfx::Size pixel_size = gfx::ToFlooredSize(
-      size().Scale(device_scale_factor_));
+      gfx::ScaleSize(size(), device_scale_factor_));
   gfx::Rect pixel_bitmap_rect = ToFlooredRectDeprecated(
       gfx::ScaleRect(bitmap_rect, scale_factor));
 
@@ -171,7 +172,7 @@ bool BackingStoreMac::CopyFromBackingStore(const gfx::Rect& rect,
 }
 
 // Scroll the contents of our CGLayer
-void BackingStoreMac::ScrollBackingStore(int dx, int dy,
+void BackingStoreMac::ScrollBackingStore(const gfx::Vector2d& delta,
                                          const gfx::Rect& clip_rect,
                                          const gfx::Size& view_size) {
   DCHECK_NE(static_cast<bool>(cg_layer()), static_cast<bool>(cg_bitmap()));
@@ -189,7 +190,8 @@ void BackingStoreMac::ScrollBackingStore(int dx, int dy,
   DCHECK(clip_rect.bottom() <= size().height());
   DCHECK(clip_rect.right() <= size().width());
 
-  if ((dx || dy) && abs(dx) < size().width() && abs(dy) < size().height()) {
+  if ((delta.x() || delta.y()) &&
+       abs(delta.x()) < size().width() && abs(delta.y()) < size().height()) {
     if (cg_layer()) {
       CGContextRef layer = CGLayerGetContext(cg_layer());
       gfx::ScopedCGContextSaveGState save_gstate(layer);
@@ -198,7 +200,8 @@ void BackingStoreMac::ScrollBackingStore(int dx, int dy,
                                      size().height() - clip_rect.bottom(),
                                      clip_rect.width(),
                                      clip_rect.height()));
-      CGContextDrawLayerAtPoint(layer, CGPointMake(dx, -dy), cg_layer());
+      CGContextDrawLayerAtPoint(layer,
+                                CGPointMake(delta.x(), -delta.y()), cg_layer());
     } else {
       // We don't have a layer, so scroll the contents of the CGBitmapContext.
       base::mac::ScopedCFTypeRef<CGImageRef> bitmap_image(
@@ -210,7 +213,8 @@ void BackingStoreMac::ScrollBackingStore(int dx, int dy,
                                      clip_rect.width(),
                                      clip_rect.height()));
       CGContextDrawImage(cg_bitmap_,
-                         CGRectMake(dx, -dy, size().width(), size().height()),
+                         CGRectMake(delta.x(), -delta.y(),
+                                    size().width(), size().height()),
                          bitmap_image);
     }
   }
@@ -248,7 +252,7 @@ CGLayerRef BackingStoreMac::CreateCGLayer() {
   DCHECK(cg_context);
 
   // Note: This takes the backingScaleFactor of cg_context into account. The
-  // bitmap backing |layer| with be size().Scale(2) in HiDPI mode automatically.
+  // bitmap backing |layer| will be size() * 2 in HiDPI mode automatically.
   CGLayerRef layer = CGLayerCreateWithContext(cg_context,
                                               size().ToCGSize(),
                                               NULL);
@@ -258,7 +262,8 @@ CGLayerRef BackingStoreMac::CreateCGLayer() {
 }
 
 CGContextRef BackingStoreMac::CreateCGBitmapContext() {
-  gfx::Size pixel_size = gfx::ToFlooredSize(size().Scale(device_scale_factor_));
+  gfx::Size pixel_size = gfx::ToFlooredSize(
+      gfx::ScaleSize(size(), device_scale_factor_));
   // A CGBitmapContext serves as a stand-in for the layer before the view is
   // in a containing window.
   CGContextRef context = CGBitmapContextCreate(NULL,

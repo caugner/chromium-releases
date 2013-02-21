@@ -34,7 +34,7 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
 
-class BaseDownloadItemModel;
+class DownloadItemModel;
 class DownloadShelfView;
 class DownloadShelfContextMenuView;
 
@@ -60,7 +60,7 @@ class DownloadItemView : public views::ButtonListener,
  public:
   DownloadItemView(content::DownloadItem* download,
                    DownloadShelfView* parent,
-                   BaseDownloadItemModel* model);
+                   DownloadItemModel* model);
   virtual ~DownloadItemView();
 
   // Timer callback for handling animations
@@ -69,7 +69,7 @@ class DownloadItemView : public views::ButtonListener,
   void StopDownloadProgress();
 
   // IconManager::Client interface.
-  void OnExtractIconComplete(IconManager::Handle handle, gfx::Image* icon);
+  void OnExtractIconComplete(gfx::Image* icon);
 
   // Returns the DownloadItem model object belonging to this item.
   content::DownloadItem* download() const { return download_; }
@@ -89,12 +89,13 @@ class DownloadItemView : public views::ButtonListener,
   virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
   virtual bool GetTooltipText(const gfx::Point& p,
                               string16* tooltip) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
+
+  // Overridden from ui::EventHandler:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from views::ContextMenuController.
   virtual void ShowContextMenuForView(View* source,
@@ -235,8 +236,8 @@ class DownloadItemView : public views::ButtonListener,
   // The model we query for display information
   content::DownloadItem* download_;
 
-  // Our parent view that owns us.
-  DownloadShelfView* parent_;
+  // The download shelf that owns us.
+  DownloadShelfView* shelf_;
 
   // Elements of our particular download
   string16 status_text_;
@@ -280,12 +281,12 @@ class DownloadItemView : public views::ButtonListener,
   gfx::Point drag_start_point_;
 
   // For canceling an in progress icon request.
-  CancelableRequestConsumerT<int, 0> icon_consumer_;
+  CancelableTaskTracker cancelable_task_tracker_;
 
   // A model class to control the status text we display and the cancel
   // behavior.
   // This class owns the pointer.
-  scoped_ptr<BaseDownloadItemModel> model_;
+  scoped_ptr<DownloadItemModel> model_;
 
   // Hover animations for our body and drop buttons.
   scoped_ptr<ui::SlideAnimation> body_hover_animation_;

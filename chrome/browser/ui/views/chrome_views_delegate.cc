@@ -25,13 +25,14 @@
 #endif
 
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/native_widget_aura.h"
-#include "ui/views/widget/desktop_native_widget_aura.h"
 #endif
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
 #include "chrome/browser/ui/ash/ash_init.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #endif
 
 namespace {
@@ -133,10 +134,10 @@ HICON ChromeViewsDelegate::GetDefaultWindowIcon() const {
 views::NonClientFrameView* ChromeViewsDelegate::CreateDefaultNonClientFrameView(
     views::Widget* widget) {
 #if defined(USE_ASH)
-  return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
-#else
-  return NULL;
+  if (chrome::IsNativeViewInAsh(widget->GetNativeView()))
+    return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
 #endif
+  return NULL;
 }
 
 bool ChromeViewsDelegate::UseTransparentWindows() const {
@@ -175,11 +176,15 @@ content::WebContents* ChromeViewsDelegate::CreateWebContents(
 views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(
     views::Widget::InitParams::Type type,
     views::internal::NativeWidgetDelegate* delegate,
-    gfx::NativeView parent) {
+    gfx::NativeView parent,
+    gfx::NativeView context) {
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
   if (parent && type != views::Widget::InitParams::TYPE_MENU)
     return new views::NativeWidgetAura(delegate);
-  if (chrome::GetHostDesktopTypeForNativeView(parent) ==
+  // TODO(erg): Once we've threaded context to everywhere that needs it, we
+  // should remove this check here.
+  gfx::NativeView to_check = context ? context : parent;
+  if (chrome::GetHostDesktopTypeForNativeView(to_check) ==
       chrome::HOST_DESKTOP_TYPE_NATIVE)
     return new views::DesktopNativeWidgetAura(delegate);
 #endif

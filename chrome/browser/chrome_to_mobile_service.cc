@@ -28,6 +28,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/common/cloud_print/cloud_print_helpers.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
@@ -118,7 +119,7 @@ std::string GetJSON(const ChromeToMobileService::JobData& data) {
     case ChromeToMobileService::IOS:
       // TODO(chenyu|msw): Currently only sends an alert; include the url here?
       json.SetString("aps.alert.body", "A print job is available");
-      json.SetString("aps.alert.loc-key", "IDS_CHROME_TO_DEVICE_SNAPSHOTS_IOS");
+      json.SetString("aps.alert.loc-key", "IDS_CHROME_TO_DEVICE_SNAPSHOTS");
       break;
     default:
       NOTREACHED() << "Unknown mobile_os " << data.mobile_os;
@@ -496,7 +497,7 @@ void ChromeToMobileService::SnapshotFileCreated(
   snapshots_.insert(path);
 
   // Generate the snapshot and callback SnapshotGenerated, or signal failure.
-  Browser* browser = browser::FindBrowserWithID(browser_id);
+  Browser* browser = chrome::FindBrowserWithID(browser_id);
   if (!path.empty() && browser && chrome::GetActiveWebContents(browser)) {
     chrome::GetActiveWebContents(browser)->GenerateMHTML(path,
         base::Bind(&ChromeToMobileService::SnapshotGenerated,
@@ -529,7 +530,7 @@ void ChromeToMobileService::SnapshotFileRead(base::WeakPtr<Observer> observer,
 void ChromeToMobileService::InitRequest(net::URLFetcher* request) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   request->SetRequestContext(profile_->GetRequestContext());
-  request->SetMaxRetries(kMaxRetries);
+  request->SetMaxRetriesOn5xx(kMaxRetries);
   DCHECK(!access_token_.empty());
   request->SetExtraRequestHeaders("Authorization: OAuth " +
       access_token_ + "\r\n" + cloud_print::kChromeCloudPrintProxyHeader);

@@ -30,7 +30,6 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cros_network_functions.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros/onc_constants.h"
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
@@ -50,9 +49,11 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/time_format.h"
+#include "chromeos/network/onc/onc_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "grit/ash_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -75,7 +76,6 @@ const char kNetworkInfoKeyConnectable[] = "connectable";
 const char kNetworkInfoKeyConnected[] = "connected";
 const char kNetworkInfoKeyConnecting[] = "connecting";
 const char kNetworkInfoKeyIconURL[] = "iconURL";
-const char kNetworkInfoKeyNeedsNewPlan[] = "needs_new_plan";
 const char kNetworkInfoKeyNetworkName[] = "networkName";
 const char kNetworkInfoKeyNetworkStatus[] = "networkStatus";
 const char kNetworkInfoKeyNetworkType[] = "networkType";
@@ -107,12 +107,12 @@ const char kGoogleNameServers[] = "8.8.4.4,8.8.8.8";
 // Functions we call in JavaScript.
 const char kRefreshNetworkDataFunction[] =
     "options.network.NetworkList.refreshNetworkData";
+const char kSetDefaultNetworkIconsFunction[] =
+    "options.network.NetworkList.setDefaultNetworkIcons";
 const char kShowDetailedInfoFunction[] =
     "options.internet.DetailsInternetPage.showDetailedInfo";
 const char kUpdateCarrierFunction[] =
     "options.internet.DetailsInternetPage.updateCarrier";
-const char kUpdateCellularPlansFunction[] =
-    "options.internet.DetailsInternetPage.updateCellularPlans";
 const char kUpdateSecurityTabFunction[] =
     "options.internet.DetailsInternetPage.updateSecurityTab";
 
@@ -126,7 +126,6 @@ const char kEnableCellularMessage[] = "enableCellular";
 const char kEnableWifiMessage[] = "enableWifi";
 const char kEnableWimaxMessage[] = "enableWimax";
 const char kNetworkCommandMessage[] = "networkCommand";
-const char kRefreshCellularPlanMessage[] = "refreshCellularPlan";
 const char kRefreshNetworksMessage[] = "refreshNetworks";
 const char kSetApnMessage[] = "setApn";
 const char kSetAutoConnectMessage[] = "setAutoConnect";
@@ -149,6 +148,7 @@ const char kTagAutoConnect[] = "autoConnect";
 const char kTagBssid[] = "bssid";
 const char kTagCarrierSelectFlag[] = "showCarrierSelect";
 const char kTagCarrierUrl[] = "carrierUrl";
+const char kTagCellular[] = "cellular";
 const char kTagCellularAvailable[] = "cellularAvailable";
 const char kTagCellularBusy[] = "cellularBusy";
 const char kTagCellularEnabled[] = "cellularEnabled";
@@ -184,7 +184,6 @@ const char kTagModelId[] = "modelId";
 const char kTagName[] = "name";
 const char kTagNameServersGoogle[] = "nameServersGoogle";
 const char kTagNameServerType[] = "nameServerType";
-const char kTagNeedsPlan[] = "needsPlan";
 const char kTagNetworkId[] = "networkId";
 const char kTagNetworkName[] = "networkName";
 const char kTagNetworkTechnology[] = "networkTechnology";
@@ -192,10 +191,6 @@ const char kTagOperatorCode[] = "operatorCode";
 const char kTagOperatorName[] = "operatorName";
 const char kTagOptions[] = "options";
 const char kTagPassword[] = "password";
-const char kTagPlanExpires[] = "planExpires";
-const char kTagPlans[] = "plans";
-const char kTagPlanSummary[] = "planSummary";
-const char kTagPlanType[] = "planType";
 const char kTagPolicy[] = "policy";
 const char kTagPreferred[] = "preferred";
 const char kTagPrlVersion[] = "prlVersion";
@@ -228,8 +223,10 @@ const char kTagTrue[] = "true";
 const char kTagType[] = "type";
 const char kTagUsername[] = "username";
 const char kTagValue[] = "value";
+const char kTagVpn[] = "vpn";
 const char kTagVpnList[] = "vpnList";
 const char kTagWarning[] = "warning";
+const char kTagWifi[] = "wifi";
 const char kTagWifiAvailable[] = "wifiAvailable";
 const char kTagWifiBusy[] = "wifiBusy";
 const char kTagWifiEnabled[] = "wifiEnabled";
@@ -293,9 +290,6 @@ class NetworkInfoDictionary {
   void set_activation_state(chromeos::ActivationState activation_state) {
     activation_state_ = activation_state;
   }
-  void set_needs_new_plan(bool needs_new_plan) {
-    needs_new_plan_ = needs_new_plan;
-  }
   void set_policy_managed(bool policy_managed) {
     policy_managed_ = policy_managed;
   }
@@ -316,7 +310,6 @@ class NetworkInfoDictionary {
   bool remembered_;
   bool shared_;
   chromeos::ActivationState activation_state_;
-  bool needs_new_plan_;
   bool policy_managed_;
   ui::ScaleFactor icon_scale_factor_;
 
@@ -332,7 +325,6 @@ NetworkInfoDictionary::NetworkInfoDictionary(
   set_remembered(false);
   set_shared(false);
   set_activation_state(chromeos::ACTIVATION_STATE_UNKNOWN);
-  set_needs_new_plan(false);
   set_policy_managed(false);
 }
 
@@ -349,7 +341,6 @@ NetworkInfoDictionary::NetworkInfoDictionary(const chromeos::Network* network,
   set_connection_type(network->type());
   set_remembered(false);
   set_shared(false);
-  set_needs_new_plan(false);
   set_policy_managed(network->ui_data().is_managed());
 }
 
@@ -368,7 +359,6 @@ NetworkInfoDictionary::NetworkInfoDictionary(
   set_connection_type(remembered->type());
   set_remembered(true);
   set_shared(remembered->profile_type() == chromeos::PROFILE_SHARED);
-  set_needs_new_plan(false);
   set_policy_managed(remembered->ui_data().is_managed());
 }
 
@@ -391,9 +381,7 @@ DictionaryValue* NetworkInfoDictionary::BuildDictionary() {
       connection_state = IDS_STATUSBAR_NETWORK_DEVICE_NOT_CONFIGURED;
     status = l10n_util::GetStringUTF8(connection_state);
     if (connection_type_ == chromeos::TYPE_CELLULAR) {
-      if (needs_new_plan_) {
-        status = l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_NO_PLAN_LABEL);
-      } else if (activation_state_ != chromeos::ACTIVATION_STATE_ACTIVATED) {
+      if (activation_state_ != chromeos::ACTIVATION_STATE_ACTIVATED) {
         status.append(" / ");
         status.append(chromeos::CellularNetwork::ActivationStateToString(
             activation_state_));
@@ -408,7 +396,6 @@ DictionaryValue* NetworkInfoDictionary::BuildDictionary() {
   network_info->SetBoolean(kNetworkInfoKeyConnected, connected_);
   network_info->SetBoolean(kNetworkInfoKeyConnecting, connecting_);
   network_info->SetString(kNetworkInfoKeyIconURL, icon_url_);
-  network_info->SetBoolean(kNetworkInfoKeyNeedsNewPlan, needs_new_plan_);
   network_info->SetString(kNetworkInfoKeyNetworkName, name_);
   network_info->SetString(kNetworkInfoKeyNetworkStatus, status);
   network_info->SetInteger(kNetworkInfoKeyNetworkType,
@@ -533,7 +520,7 @@ void PopulateVPNDetails(
                          chromeos::onc::kVPN,
                          chromeos::onc::vpn::kHost));
   SetValueDictionary(dictionary, kTagServerHostname,
-                     Value::CreateStringValue(vpn->server_hostname()),
+                     new base::StringValue(vpn->server_hostname()),
                      hostname_ui_data);
 }
 
@@ -579,7 +566,6 @@ InternetOptionsHandler::InternetOptionsHandler()
   cros_ = chromeos::CrosLibrary::Get()->GetNetworkLibrary();
   if (cros_) {
     cros_->AddNetworkManagerObserver(this);
-    cros_->AddCellularDataPlanObserver(this);
     MonitorNetworks();
   }
 }
@@ -587,7 +573,6 @@ InternetOptionsHandler::InternetOptionsHandler()
 InternetOptionsHandler::~InternetOptionsHandler() {
   if (cros_) {
     cros_->RemoveNetworkManagerObserver(this);
-    cros_->RemoveCellularDataPlanObserver(this);
     cros_->RemoveObserverForAllNetworks(this);
   }
 }
@@ -639,7 +624,6 @@ void InternetOptionsHandler::GetLocalizedValues(
     { "managedNetwork", IDS_OPTIONS_SETTINGS_MANAGED_NETWORK },
     { "wifiNetworkTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION },
     { "vpnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_VPN },
-    { "cellularPlanTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_PLAN },
     { "cellularConnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION },
     { "cellularDeviceTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_DEVICE },
     { "networkTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_NETWORK },
@@ -764,6 +748,15 @@ void InternetOptionsHandler::GetLocalizedValues(
 }
 
 void InternetOptionsHandler::InitializePage() {
+  DictionaryValue dictionary;
+  dictionary.SetString(kTagCellular,
+      GetIconDataUrl(IDR_AURA_UBER_TRAY_NETWORK_BARS_DARK));
+  dictionary.SetString(kTagWifi,
+      GetIconDataUrl(IDR_AURA_UBER_TRAY_NETWORK_ARCS_DARK));
+  dictionary.SetString(kTagVpn,
+      GetIconDataUrl(IDR_AURA_UBER_TRAY_NETWORK_VPN));
+  web_ui()->CallJavascriptFunction(kSetDefaultNetworkIconsFunction,
+                                   dictionary);
   cros_->RequestNetworkScan();
 }
 
@@ -774,9 +767,6 @@ void InternetOptionsHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kRefreshNetworksMessage,
       base::Bind(&InternetOptionsHandler::RefreshNetworksCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kRefreshCellularPlanMessage,
-      base::Bind(&InternetOptionsHandler::RefreshCellularPlanCallback,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kSetPreferNetworkMessage,
       base::Bind(&InternetOptionsHandler::SetPreferNetworkCallback,
@@ -985,6 +975,14 @@ void InternetOptionsHandler::RefreshNetworksCallback(const ListValue* args) {
   cros_->RequestNetworkScan();
 }
 
+std::string InternetOptionsHandler::GetIconDataUrl(int resource_id) const {
+  gfx::ImageSkia* icon =
+      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
+  gfx::ImageSkiaRep image_rep = icon->GetRepresentation(
+      web_ui()->GetDeviceScaleFactor());
+  return web_ui_util::GetBitmapDataUrl(image_rep.sk_bitmap());
+}
+
 void InternetOptionsHandler::RefreshNetworkData() {
   DictionaryValue dictionary;
   FillNetworkInfo(&dictionary);
@@ -1046,37 +1044,6 @@ void InternetOptionsHandler::MonitorNetworks() {
     cros_->AddNetworkObserver(virtual_network->service_path(), this);
 }
 
-void InternetOptionsHandler::OnCellularDataPlanChanged(
-    chromeos::NetworkLibrary* cros) {
-  if (!web_ui())
-    return;
-  const chromeos::CellularNetwork* cellular = cros_->cellular_network();
-  if (!cellular)
-    return;
-  const chromeos::CellularDataPlanVector* plans =
-      cros_->GetDataPlans(cellular->service_path());
-  DictionaryValue connection_plans;
-  ListValue* plan_list = new ListValue();
-  if (plans) {
-    for (chromeos::CellularDataPlanVector::const_iterator iter = plans->begin();
-         iter != plans->end(); ++iter) {
-      plan_list->Append(CellularDataPlanToDictionary(*iter));
-    }
-  }
-  connection_plans.SetString(kTagServicePath, cellular->service_path());
-  connection_plans.SetBoolean(kTagNeedsPlan, cellular->needs_new_plan());
-  connection_plans.SetBoolean(kTagActivated,
-      cellular->activation_state() == chromeos::ACTIVATION_STATE_ACTIVATED);
-  connection_plans.Set(kTagPlans, plan_list);
-  SetActivationButtonVisibility(cellular,
-                                &connection_plans,
-                                cros_->GetCellularHomeCarrierId());
-  web_ui()->CallJavascriptFunction(
-      kUpdateCellularPlansFunction,
-      connection_plans);
-}
-
-
 void InternetOptionsHandler::Observe(
     int type,
     const content::NotificationSource& source,
@@ -1096,18 +1063,6 @@ void InternetOptionsHandler::Observe(
     // The case in which the correct PIN was entered and the SIM is
     // now unlocked is handled in NetworkMenuButton.
   }
-}
-
-DictionaryValue* InternetOptionsHandler::CellularDataPlanToDictionary(
-    const chromeos::CellularDataPlan* plan) {
-  DictionaryValue* plan_dict = new DictionaryValue();
-  plan_dict->SetInteger(kTagPlanType, plan->plan_type);
-  plan_dict->SetString(kTagName, plan->plan_name);
-  plan_dict->SetString(kTagPlanSummary, plan->GetPlanDesciption());
-  plan_dict->SetString(kTagDataRemaining, plan->GetDataRemainingDesciption());
-  plan_dict->SetString(kTagPlanExpires, plan->GetPlanExpiration());
-  plan_dict->SetString(kTagWarning, plan->GetRemainingWarning());
-  return plan_dict;
 }
 
 void InternetOptionsHandler::SetServerHostnameCallback(const ListValue* args) {
@@ -1220,13 +1175,36 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
   chromeos::CrosRequestNetworkServiceProperties(
       network->service_path(),
       base::Bind(&InternetOptionsHandler::PopulateDictionaryDetailsCallback,
-                 weak_factory_.GetWeakPtr(), network));
+                 weak_factory_.GetWeakPtr()));
 }
 
 void InternetOptionsHandler::PopulateDictionaryDetailsCallback(
-    const chromeos::Network* network,
     const std::string& service_path,
     const base::DictionaryValue* shill_properties) {
+  if (!shill_properties)
+    return;
+  chromeos::Network* network = cros_->FindNetworkByPath(service_path);
+  if (!network)
+    return;
+  // Have to copy the properties because the object will go out of scope when
+  // this function call completes (it's owned by the calling function).
+  base::DictionaryValue* shill_props_copy = shill_properties->DeepCopy();
+  cros_->GetIPConfigs(
+      network->device_path(),
+      chromeos::NetworkLibrary::FORMAT_COLON_SEPARATED_HEX,
+      base::Bind(&InternetOptionsHandler::PopulateIPConfigsCallback,
+                 weak_factory_.GetWeakPtr(),
+                 service_path,
+                 base::Owned(shill_props_copy)));
+}
+
+void InternetOptionsHandler::PopulateIPConfigsCallback(
+    const std::string& service_path,
+    base::DictionaryValue* shill_properties,
+    const chromeos::NetworkIPConfigVector& ipconfigs,
+    const std::string& hardware_address) {
+  if (!shill_properties)
+    return;
   if (VLOG_IS_ON(2)) {
     std::string properties_json;
     base::JSONWriter::WriteWithOptions(shill_properties,
@@ -1234,9 +1212,12 @@ void InternetOptionsHandler::PopulateDictionaryDetailsCallback(
                                        &properties_json);
     VLOG(2) << "Shill Properties: " << std::endl << properties_json;
   }
+  chromeos::Network* network = cros_->FindNetworkByPath(service_path);
+  if (!network)
+    return;
 
   Profile::FromWebUI(web_ui())->GetProxyConfigTracker()->UISetCurrentNetwork(
-      network->service_path());
+      service_path);
 
   const chromeos::NetworkUIData& ui_data = network->ui_data();
   const chromeos::NetworkPropertyUIData property_ui_data(ui_data);
@@ -1244,10 +1225,6 @@ void InternetOptionsHandler::PopulateDictionaryDetailsCallback(
       cros_->FindOncForNetwork(network->unique_id());
 
   base::DictionaryValue dictionary;
-  std::string hardware_address;
-  chromeos::NetworkIPConfigVector ipconfigs = cros_->GetIPConfigs(
-      network->device_path(), &hardware_address,
-      chromeos::NetworkLibrary::FORMAT_COLON_SEPARATED_HEX);
   if (!hardware_address.empty())
     dictionary.SetString(kTagHardwareAddress, hardware_address);
 
@@ -1271,35 +1248,47 @@ void InternetOptionsHandler::PopulateDictionaryDetailsCallback(
       break;
     }
   }
-
-  int automatic_ip_config;
-  scoped_ptr<DictionaryValue> static_ip_dict(
-      BuildIPInfoDictionary(*shill_properties, true, &automatic_ip_config));
-  dictionary.SetBoolean(kIpConfigAutoConfig, automatic_ip_config == 0);
-  DCHECK(automatic_ip_config == 3 || automatic_ip_config == 0)
-      << "UI doesn't support automatic specification of individual "
-      << "static ip parameters.";
-  scoped_ptr<DictionaryValue> saved_ip_dict(
-      BuildIPInfoDictionary(*shill_properties, false, NULL));
-  dictionary.Set(kDictionarySavedIp, saved_ip_dict.release());
-
-  // Determine what kind of name server setting we have by comparing the
-  // StaticIP and Google values with the ipconfig values.
-  std::string name_server_type = kNameServerTypeAutomatic;
-  std::string static_ip_nameservers;
-  static_ip_dict->GetString(kIpConfigNameServers, &static_ip_nameservers);
-  if (!static_ip_nameservers.empty() &&
-      static_ip_nameservers == ipconfig_name_servers) {
-    name_server_type = kNameServerTypeUser;
-  }
-  if (ipconfig_name_servers == kGoogleNameServers) {
-    name_server_type = kNameServerTypeGoogle;
-  }
-
   SetValueDictionary(&dictionary, kDictionaryIpConfig, ipconfig_dhcp.release(),
                      property_ui_data);
-  SetValueDictionary(&dictionary, kDictionaryStaticIp, static_ip_dict.release(),
-                     property_ui_data);
+
+  std::string name_server_type = kNameServerTypeAutomatic;
+  if (shill_properties) {
+    int automatic_ip_config = 0;
+    scoped_ptr<DictionaryValue> static_ip_dict(
+        BuildIPInfoDictionary(*shill_properties, true, &automatic_ip_config));
+    dictionary.SetBoolean(kIpConfigAutoConfig, automatic_ip_config == 0);
+    DCHECK(automatic_ip_config == 3 || automatic_ip_config == 0)
+        << "UI doesn't support automatic specification of individual "
+        << "static IP parameters.";
+    scoped_ptr<DictionaryValue> saved_ip_dict(
+        BuildIPInfoDictionary(*shill_properties, false, NULL));
+    dictionary.Set(kDictionarySavedIp, saved_ip_dict.release());
+
+    // Determine what kind of name server setting we have by comparing the
+    // StaticIP and Google values with the ipconfig values.
+    std::string static_ip_nameservers;
+    static_ip_dict->GetString(kIpConfigNameServers, &static_ip_nameservers);
+
+    if (!static_ip_nameservers.empty() &&
+        static_ip_nameservers == ipconfig_name_servers) {
+      name_server_type = kNameServerTypeUser;
+    }
+    if (ipconfig_name_servers == kGoogleNameServers) {
+      name_server_type = kNameServerTypeGoogle;
+    }
+    SetValueDictionary(&dictionary,
+                       kDictionaryStaticIp,
+                       static_ip_dict.release(),
+                       property_ui_data);
+  } else {
+    LOG(ERROR) << "Unable to fetch IP configuration for " << service_path;
+    // If we were unable to fetch shill_properties for some reason,
+    // then just go with some defaults.
+    dictionary.SetBoolean(kIpConfigAutoConfig, false);
+    dictionary.Set(kDictionarySavedIp, new DictionaryValue);
+    SetValueDictionary(&dictionary, kDictionaryStaticIp, new DictionaryValue,
+                       property_ui_data);
+  }
 
   chromeos::ConnectionType type = network->type();
   dictionary.SetInteger(kTagType, type);
@@ -1326,7 +1315,7 @@ void InternetOptionsHandler::PopulateDictionaryDetailsCallback(
   dictionary.SetBoolean(kTagShowPreferred,
                         network_profile == chromeos::PROFILE_USER);
   SetValueDictionary(&dictionary, kTagPreferred,
-                     Value::CreateBooleanValue(network->preferred()),
+                     new base::FundamentalValue(network->preferred()),
                      property_ui_data);
 
   chromeos::NetworkPropertyUIData auto_connect_ui_data(ui_data);
@@ -1338,7 +1327,7 @@ void InternetOptionsHandler::PopulateDictionaryDetailsCallback(
                            chromeos::onc::wifi::kAutoConnect));
   }
   SetValueDictionary(&dictionary, kTagAutoConnect,
-                     Value::CreateBooleanValue(network->auto_connect()),
+                     new base::FundamentalValue(network->auto_connect()),
                      auto_connect_ui_data);
 
   if (type == chromeos::TYPE_WIFI) {
@@ -1432,7 +1421,6 @@ void InternetOptionsHandler::PopulateCellularDetails(
                             IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL));
   dictionary->SetString(kTagErrorState, cellular->GetErrorString());
   dictionary->SetString(kTagSupportUrl, cellular->payment_url());
-  dictionary->SetBoolean(kTagNeedsPlan, cellular->needs_new_plan());
 
   dictionary->Set(kTagApn, CreateDictionaryFromCellularApn(cellular->apn()));
   dictionary->Set(kTagLastGoodApn,
@@ -1460,7 +1448,7 @@ void InternetOptionsHandler::PopulateCellularDetails(
         device->technology_family() == chromeos::TECHNOLOGY_FAMILY_GSM);
     SetValueDictionary(
         dictionary, kTagSimCardLockEnabled,
-        Value::CreateBooleanValue(
+        new base::FundamentalValue(
             device->sim_pin_required() == chromeos::SIM_PIN_REQUIRED),
         cellular_property_ui_data);
 
@@ -1507,12 +1495,8 @@ void InternetOptionsHandler::SetActivationButtonVisibility(
     const chromeos::CellularNetwork* cellular,
     DictionaryValue* dictionary,
     const std::string& carrier_id) {
-  if (cellular->needs_new_plan()) {
-    dictionary->SetBoolean(kTagShowBuyButton, true);
-  } else if (cellular->activation_state() !=
-                 chromeos::ACTIVATION_STATE_ACTIVATING &&
-             cellular->activation_state() !=
-                 chromeos::ACTIVATION_STATE_ACTIVATED) {
+  if (cellular->activation_state() != chromeos::ACTIVATION_STATE_ACTIVATING &&
+      cellular->activation_state() != chromeos::ACTIVATION_STATE_ACTIVATED) {
     dictionary->SetBoolean(kTagShowActivateButton, true);
   } else {
     const chromeos::MobileConfig::Carrier* carrier =
@@ -1529,7 +1513,7 @@ gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
   // TODO(beng): This is an improper direct dependency on Browser. Route this
   // through some sort of delegate.
   Browser* browser =
-      browser::FindBrowserWithWebContents(web_ui()->GetWebContents());
+      chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
   return browser->window()->GetNativeWindow();
 }
 
@@ -1667,20 +1651,6 @@ void InternetOptionsHandler::DoConnect(chromeos::Network* network) {
   }
 }
 
-void InternetOptionsHandler::RefreshCellularPlanCallback(
-    const ListValue* args) {
-  std::string service_path;
-  if (args->GetSize() != 1 ||
-      !args->GetString(0, &service_path)) {
-    NOTREACHED();
-    return;
-  }
-  const chromeos::CellularNetwork* cellular =
-      cros_->FindCellularNetworkByPath(service_path);
-  if (cellular)
-    cellular->RefreshDataPlansIfNeeded();
-}
-
 ListValue* InternetOptionsHandler::GetWiredList() {
   ListValue* list = new ListValue();
 
@@ -1725,8 +1695,6 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
     NetworkInfoDictionary network_dict(*it, web_ui()->GetDeviceScaleFactor());
     network_dict.set_connectable(cros_->CanConnectToNetwork(*it));
     network_dict.set_activation_state((*it)->activation_state());
-    network_dict.set_needs_new_plan(
-        (*it)->SupportsDataPlan() && (*it)->restricted_pool());
     list->Append(network_dict.BuildDictionary());
   }
 

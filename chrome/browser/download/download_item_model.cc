@@ -7,9 +7,10 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/string16.h"
+#include "base/supports_user_data.h"
 #include "base/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/common/time_format.h"
 #include "content/public/browser/download_danger_type.h"
@@ -21,22 +22,213 @@
 #include "ui/base/text/bytes_formatting.h"
 #include "ui/base/text/text_elider.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/drive/drive_download_observer.h"
-#endif
-
 using base::TimeDelta;
 using content::DownloadItem;
+
+namespace {
+
+// Per DownloadItem data used by DownloadItemModel. The model doesn't keep any
+// state since there could be multiple models associated with a single
+// DownloadItem, and the lifetime of the model is shorter than the DownloadItem.
+class DownloadItemModelData : public base::SupportsUserData::Data {
+ public:
+  // Get the DownloadItemModelData object for |download|. Returns NULL if
+  // there's no model data.
+  static const DownloadItemModelData* Get(const DownloadItem* download);
+
+  // Get the DownloadItemModelData object for |download|. Creates a model data
+  // object if not found. Always returns a non-NULL pointer, unless OOM.
+  static DownloadItemModelData* GetOrCreate(DownloadItem* download);
+
+  bool should_show_in_shelf() const { return should_show_in_shelf_; }
+  void set_should_show_in_shelf(bool should_show_in_shelf) {
+    should_show_in_shelf_ = should_show_in_shelf;
+  }
+
+ private:
+  DownloadItemModelData();
+  virtual ~DownloadItemModelData() {}
+
+  static const char kKey[];
+
+  // Whether the download should be displayed in the download shelf. True by
+  // default.
+  bool should_show_in_shelf_;
+};
+
+// static
+const char DownloadItemModelData::kKey[] = "DownloadItemModelData key";
+
+// static
+const DownloadItemModelData* DownloadItemModelData::Get(
+    const DownloadItem* download) {
+  return static_cast<const DownloadItemModelData*>(download->GetUserData(kKey));
+}
+
+// static
+DownloadItemModelData* DownloadItemModelData::GetOrCreate(
+    DownloadItem* download) {
+  DownloadItemModelData* data =
+      static_cast<DownloadItemModelData*>(download->GetUserData(kKey));
+  if (data == NULL) {
+    data = new DownloadItemModelData();
+    download->SetUserData(kKey, data);
+  }
+  return data;
+}
+
+DownloadItemModelData::DownloadItemModelData()
+    : should_show_in_shelf_(true) {
+}
+
+string16 InterruptReasonStatusMessage(int reason) {
+  int string_id = 0;
+
+  switch (reason) {
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_ACCESS_DENIED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_DISK_FULL;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_PATH_TOO_LONG;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_FILE_TOO_LARGE;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_VIRUS;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_TEMPORARY_PROBLEM;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_BLOCKED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SECURITY_CHECK_FAILED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NETWORK_ERROR;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NETWORK_TIMEOUT;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NETWORK_DISCONNECTED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SERVER_DOWN;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SERVER_PROBLEM;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NO_FILE;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED:
+      string_id = IDS_DOWNLOAD_STATUS_CANCELLED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN:
+    case content::DOWNLOAD_INTERRUPT_REASON_CRASH:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SHUTDOWN;
+      break;
+    default:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS;
+      break;
+  }
+
+  return l10n_util::GetStringUTF16(string_id);
+}
+
+string16 InterruptReasonMessage(int reason) {
+  int string_id = 0;
+  string16 status_text;
+
+  switch (reason) {
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_ACCESS_DENIED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_DISK_FULL;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_PATH_TOO_LONG;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_FILE_TOO_LARGE;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_VIRUS;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_TEMPORARY_PROBLEM;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_BLOCKED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SECURITY_CHECK_FAILED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NETWORK_ERROR;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NETWORK_TIMEOUT;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NETWORK_DISCONNECTED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SERVER_DOWN;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SERVER_PROBLEM;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NO_FILE;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED:
+      string_id = IDS_DOWNLOAD_STATUS_CANCELLED;
+      break;
+    case content::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN:
+    case content::DOWNLOAD_INTERRUPT_REASON_CRASH:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SHUTDOWN;
+      break;
+    default:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS;
+      break;
+  }
+
+  status_text = l10n_util::GetStringUTF16(string_id);
+
+  return status_text;
+}
+
+} // namespace
 
 // -----------------------------------------------------------------------------
 // DownloadItemModel
 
 DownloadItemModel::DownloadItemModel(DownloadItem* download)
-    : BaseDownloadItemModel(download) {
+    : download_(download) {
+}
+
+DownloadItemModel::~DownloadItemModel() {
 }
 
 void DownloadItemModel::CancelTask() {
   download_->Cancel(true /* update history service */);
+}
+
+string16 DownloadItemModel::GetInterruptReasonText() const {
+  if (download_->GetState() != DownloadItem::INTERRUPTED ||
+      download_->GetLastReason() ==
+      content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED) {
+    return string16();
+  }
+  return InterruptReasonMessage(download_->GetLastReason());
 }
 
 string16 DownloadItemModel::GetStatusText() const {
@@ -59,9 +251,8 @@ string16 DownloadItemModel::GetStatusText() const {
       content::DownloadInterruptReason reason = download_->GetLastReason();
       if (reason != content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED) {
         string16 interrupt_reason = InterruptReasonStatusMessage(reason);
-        string16 size_ratio = GetProgressSizesString();
         status_text = l10n_util::GetStringFUTF16(
-            IDS_DOWNLOAD_STATUS_INTERRUPTED, size_ratio, interrupt_reason);
+            IDS_DOWNLOAD_STATUS_INTERRUPTED, interrupt_reason);
       } else {
         // Same as DownloadItem::CANCELLED.
         status_text = l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_CANCELLED);
@@ -87,16 +278,6 @@ string16 DownloadItemModel::GetTooltipText(const gfx::Font& font,
                              font, max_width, ui::ELIDE_AT_END);
   }
   return tooltip;
-}
-
-int DownloadItemModel::PercentComplete() const {
-#if defined(OS_CHROMEOS)
-  // For Drive uploads, progress is based on the number of bytes
-  // uploaded. Progress is unknown until the upload starts.
-  if (IsDriveDownload())
-    return drive::DriveDownloadObserver::PercentComplete(download_);
-#endif
-  return download_->PercentComplete();
 }
 
 string16 DownloadItemModel::GetWarningText(const gfx::Font& font,
@@ -150,6 +331,26 @@ string16 DownloadItemModel::GetWarningConfirmButtonText() const {
   }
 }
 
+int64 DownloadItemModel::GetCompletedBytes() const {
+  return download_->GetReceivedBytes();
+}
+
+int64 DownloadItemModel::GetTotalBytes() const {
+  return download_->AllDataSaved() ? download_->GetReceivedBytes() :
+                                     download_->GetTotalBytes();
+}
+
+// TODO(asanka,rdsmith): Once 'open' moves exclusively to the
+//     ChromeDownloadManagerDelegate, we should calculate the percentage here
+//     instead of calling into the DownloadItem.
+int DownloadItemModel::PercentComplete() const {
+  return download_->PercentComplete();
+}
+
+bool DownloadItemModel::IsDangerous() const {
+  return download_->GetSafetyState() == DownloadItem::DANGEROUS;
+}
+
 bool DownloadItemModel::IsMalicious() const {
   if (!IsDangerous())
     return false;
@@ -172,30 +373,14 @@ bool DownloadItemModel::IsMalicious() const {
   return false;
 }
 
-bool DownloadItemModel::IsDangerous() const {
-  return download_->GetSafetyState() == DownloadItem::DANGEROUS;
+bool DownloadItemModel::ShouldShowInShelf() const {
+  const DownloadItemModelData* data = DownloadItemModelData::Get(download_);
+  return !data || data->should_show_in_shelf();
 }
 
-int64 DownloadItemModel::GetTotalBytes() const {
-  return download_->AllDataSaved() ? download_->GetReceivedBytes() :
-                                     download_->GetTotalBytes();
-}
-
-int64 DownloadItemModel::GetCompletedBytes() const {
-#if defined(OS_CHROMEOS)
-  // For Drive downloads, the size is the count of bytes uploaded.
-  if (IsDriveDownload())
-    return drive::DriveDownloadObserver::GetUploadedBytes(download_);
-#endif
-  return download_->GetReceivedBytes();
-}
-
-bool DownloadItemModel::IsDriveDownload() const {
-#if defined(OS_CHROMEOS)
-  return drive::DriveDownloadObserver::IsDriveDownload(download_);
-#else
-  return false;
-#endif
+void DownloadItemModel::SetShouldShowInShelf(bool should_show) {
+  DownloadItemModelData* data = DownloadItemModelData::GetOrCreate(download_);
+  data->set_should_show_in_shelf(should_show);
 }
 
 string16 DownloadItemModel::GetProgressSizesString() const {
@@ -225,10 +410,8 @@ string16 DownloadItemModel::GetInProgressStatusString() const {
   DCHECK(download_->IsInProgress());
 
   TimeDelta time_remaining;
-  // time_remaining is only known if the download isn't paused and is not a
-  // Drive download.
-  // TODO(asanka): Calculate a TimeRemaining() for Drive uploads.
-  bool time_remaining_known = (!IsDriveDownload() && !download_->IsPaused() &&
+  // time_remaining is only known if the download isn't paused.
+  bool time_remaining_known = (!download_->IsPaused() &&
                                download_->TimeRemaining(&time_remaining));
 
   // Indication of progress. (E.g.:"100/200 MB" or "100MB")
@@ -270,144 +453,6 @@ string16 DownloadItemModel::GetInProgressStatusString() const {
   if (GetCompletedBytes() > 0)
     return size_ratio;
 
-#if defined(OS_CHROMEOS)
-  // We haven't started the upload yet. The download needs to progress
-  // further before we will see any upload progress. Show "Downloading..."
-  // until we start uploading.
-  if (IsDriveDownload())
-    return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_WAITING);
-#endif
-
   // Instead of displaying "0 B" we say "Starting..."
   return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_STARTING);
-}
-
-// static
-string16 BaseDownloadItemModel::InterruptReasonStatusMessage(int reason) {
-  int string_id = 0;
-
-  switch (reason) {
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_ACCESS_DENIED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_DISK_FULL;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_PATH_TOO_LONG;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_FILE_TOO_LARGE;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_VIRUS;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_BLOCKED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SECURITY_CHECK_FAILED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_TEMPORARY_PROBLEM;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NETWORK_TIMEOUT;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NETWORK_DISCONNECTED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SERVER_DOWN;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NETWORK_ERROR;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NO_FILE;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SERVER_PROBLEM;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN:
-    case content::DOWNLOAD_INTERRUPT_REASON_CRASH:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SHUTDOWN;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED:
-      string_id = IDS_DOWNLOAD_STATUS_CANCELLED;
-      break;
-    default:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS;
-      break;
-  }
-
-  return l10n_util::GetStringUTF16(string_id);
-}
-
-// static
-string16 BaseDownloadItemModel::InterruptReasonMessage(int reason) {
-  int string_id = 0;
-  string16 status_text;
-
-  switch (reason) {
-    case content::DOWNLOAD_INTERRUPT_REASON_NONE:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_ACCESS_DENIED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_DISK_FULL;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_PATH_TOO_LONG;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_FILE_TOO_LARGE;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_VIRUS;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_BLOCKED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SECURITY_CHECK_FAILED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_TEMPORARY_PROBLEM;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NETWORK_TIMEOUT;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NETWORK_DISCONNECTED;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SERVER_DOWN;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NETWORK_ERROR;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NO_FILE;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SERVER_PROBLEM;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN:
-    case content::DOWNLOAD_INTERRUPT_REASON_CRASH:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SHUTDOWN;
-      break;
-    case content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED:
-      string_id = IDS_DOWNLOAD_STATUS_CANCELLED;
-      break;
-    default:
-      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS;
-      break;
-  }
-
-  status_text = l10n_util::GetStringUTF16(string_id);
-
-  return status_text;
 }

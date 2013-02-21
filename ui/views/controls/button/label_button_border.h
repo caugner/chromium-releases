@@ -5,10 +5,12 @@
 #ifndef UI_VIEWS_CONTROLS_BUTTON_LABEL_BUTTON_BORDER_H_
 #define UI_VIEWS_CONTROLS_BUTTON_LABEL_BUTTON_BORDER_H_
 
-#include "ui/gfx/image/image_skia.h"
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/views/border.h"
-#include "ui/views/controls/button/border_images.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/custom_button.h"
+#include "ui/views/painter.h"
 
 namespace views {
 
@@ -22,19 +24,17 @@ class VIEWS_EXPORT LabelButtonBorder : public Border {
   void set_native_theme(bool native_theme) { native_theme_ = native_theme; }
 
   // Overridden from Border:
-  virtual void Paint(const View& view, gfx::Canvas* canvas) const OVERRIDE;
-  virtual void GetInsets(gfx::Insets* insets) const OVERRIDE;
+  virtual void Paint(const View& view, gfx::Canvas* canvas) OVERRIDE;
+  virtual gfx::Insets GetInsets() const OVERRIDE;
 
-  // Set the images shown for the specified button state.
-  void SetImages(CustomButton::ButtonState state, const BorderImages& images);
+  // Get or set the painter used for the specified button state.
+  // LabelButtonBorder takes and retains ownership of |painter|.
+  Painter* GetPainter(CustomButton::ButtonState state);
+  void SetPainter(CustomButton::ButtonState state, Painter* painter);
 
  private:
-  // Paint the border image set or native-style button border and background.
-  void PaintImages(const LabelButton* button, gfx::Canvas* canvas) const;
-  void PaintNativeTheme(const LabelButton* button, gfx::Canvas* canvas) const;
-
-  // The images shown for each button state.
-  BorderImages images_[CustomButton::BS_COUNT];
+  // The painters used for each button state.
+  scoped_ptr<Painter> painters_[CustomButton::STATE_COUNT];
 
   // A flag controlling native (true) or Views theme styling; false by default.
   bool native_theme_;

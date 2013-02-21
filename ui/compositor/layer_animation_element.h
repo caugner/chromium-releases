@@ -113,11 +113,24 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
       SkColor color,
       base::TimeDelta duration);
 
-  // Updates the delegate to the appropriate value for |t|, which is in the
-  // range [0, 1] (0 for initial, and 1 for final). If the animation is not
-  // aborted, it is guaranteed that Progress will eventually be called with
-  // t = 1.0. Returns true if a redraw is required.
-  bool Progress(double t, LayerAnimationDelegate* delegate);
+  // Sets the start time for the animation. This must be called before the first
+  // call to {Progress, IsFinished}. Once the animation is finished, this must
+  // be called again in order to restart the animation.
+  void set_start_time(base::TimeTicks start_time) { start_time_ = start_time; }
+  base::TimeTicks start_time() const { return start_time_; }
+
+  // Updates the delegate to the appropriate value for |now|. Returns true
+  // if a redraw is required.
+  bool Progress(base::TimeTicks now, LayerAnimationDelegate* delegate);
+
+  // If calling Progress now, with the given time, will finish the animation,
+  // returns true and sets |end_duration| to the actual duration for this
+  // animation, incuding any queueing delays.
+  bool IsFinished(base::TimeTicks time, base::TimeDelta* total_duration);
+
+  // Updates the delegate to the end of the animation. Returns true if a
+  // redraw is required.
+  bool ProgressToEnd(LayerAnimationDelegate* delegate);
 
   // Called if the animation is not allowed to complete. This may be called
   // before OnStarted or Progress.
@@ -128,9 +141,6 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
 
   // The properties that the element modifies.
   const AnimatableProperties& properties() const { return properties_; }
-
-  // The duration of the animation
-  base::TimeDelta duration() const { return duration_; }
 
   Tween::Type tween_type() const { return tween_type_; }
   void set_tween_type(Tween::Type tween_type) { tween_type_ = tween_type; }
@@ -151,6 +161,7 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
 
   bool first_frame_;
   const AnimatableProperties properties_;
+  base::TimeTicks start_time_;
   const base::TimeDelta duration_;
   Tween::Type tween_type_;
 

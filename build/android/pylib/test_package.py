@@ -14,9 +14,7 @@ from test_result import BaseTestResult, TestResults
 
 from android_commands import errors
 
-# TODO(bulach): TestPackage, TestPackageExecutable and
-# TestPackageApk are a work in progress related to making the native tests
-# run as a NDK-app from an APK rather than a stand-alone executable.
+
 class TestPackage(object):
   """A helper base class for both APK and stand-alone executables.
 
@@ -25,15 +23,13 @@ class TestPackage(object):
     device: Device to run the tests.
     test_suite: A specific test suite to run, empty to run all.
     timeout: Timeout for each test.
-    rebaseline: Whether or not to run tests in isolation and update the filter.
-    performance_test: Whether or not performance test(s).
     cleanup_test_files: Whether or not to cleanup test files on device.
     tool: Name of the Valgrind tool.
     dump_debug_info: A debug_info object.
   """
 
-  def __init__(self, adb, device, test_suite, timeout, rebaseline,
-               performance_test, cleanup_test_files, tool, dump_debug_info):
+  def __init__(self, adb, device, test_suite, timeout,
+               cleanup_test_files, tool, dump_debug_info):
     self.adb = adb
     self.device = device
     self.test_suite_full = test_suite
@@ -41,8 +37,6 @@ class TestPackage(object):
     self.test_suite_basename = self._GetTestSuiteBaseName()
     self.test_suite_dirname = os.path.dirname(
         self.test_suite.split(self.test_suite_basename)[0])
-    self.rebaseline = rebaseline
-    self.performance_test = performance_test
     self.cleanup_test_files = cleanup_test_files
     self.tool = tool
     if timeout == 0:
@@ -53,44 +47,26 @@ class TestPackage(object):
     self.timeout = timeout * self.tool.GetTimeoutScale()
     self.dump_debug_info = dump_debug_info
 
-  def _BeginGetIOStats(self):
-    """Gets I/O statistics before running test.
-
-    Return:
-      I/O stats object.The I/O stats object may be None if the test is not
-      performance test.
-    """
-    initial_io_stats = None
-    # Try to get the disk I/O statistics for all performance tests.
-    if self.performance_test and not self.rebaseline:
-      initial_io_stats = self.adb.GetIoStats()
-    return initial_io_stats
-
-  def _EndGetIOStats(self, initial_io_stats):
-    """Gets I/O statistics after running test and calcuate the I/O delta.
-
-    Args:
-      initial_io_stats: I/O stats object got from _BeginGetIOStats.
-
-    Return:
-      String for formated diso I/O statistics.
-    """
-    disk_io = ''
-    if self.performance_test and initial_io_stats:
-      final_io_stats = self.adb.GetIoStats()
-      for stat in final_io_stats:
-        disk_io += '\n' + PrintPerfResult(stat, stat,
-                                          [final_io_stats[stat] -
-                                           initial_io_stats[stat]],
-                                          stat.split('_')[1],
-                                          print_to_stdout=False)
-      logging.info(disk_io)
-    return disk_io
-
   def GetDisabledPrefixes(self):
     return ['DISABLED_', 'FLAKY_', 'FAILS_']
 
   def _ParseGTestListTests(self, all_tests):
+    """Parses and filters the raw test lists.
+
+    Args:
+    all_tests: The raw test listing with the following format:
+
+      IPCChannelTest.
+        SendMessageInChannelConnected
+      IPCSyncChannelTest.
+        Simple
+        DISABLED_SendWithTimeoutMixedOKAndTimeout
+
+    Returns:
+      A list of non-disabled tests. For the above raw listing:
+
+      [IPCChannelTest.SendMessageInChannelConnected, IPCSyncChannelTest.Simple]
+    """
     ret = []
     current = ''
     disabled_prefixes = self.GetDisabledPrefixes()
@@ -133,6 +109,10 @@ class TestPackage(object):
       self.adb.PushIfNeeded(
           self.test_suite_dirname + '/content_resources.pak',
           external_storage + '/paks/content_resources.pak')
+    if self.test_suite_basename == 'breakpad_unittests':
+      self.adb.PushIfNeeded(
+          self.test_suite_dirname + '/linux_dumper_unittest_helper',
+          constants.TEST_EXECUTABLE_DIR + '/linux_dumper_unittest_helper')
 
   def _WatchTestOutput(self, p):
     """Watches the test output.
@@ -144,40 +124,43 @@ class TestPackage(object):
     crashed_tests = []
     timed_out = False
     overall_fail = False
+
+    # Test case statuses.
     re_run = re.compile('\[ RUN      \] ?(.*)\r\n')
-    # APK tests rely on the PASSED tag.
+    re_fail = re.compile('\[  FAILED  \] ?(.*)\r\n')
+    re_ok = re.compile('\[       OK \] ?(.*?) .*\r\n')
+
+    # Test run statuses.
     re_passed = re.compile('\[  PASSED  \] ?(.*)\r\n')
+    re_runner_fail = re.compile('\[ RUNNER_FAILED \] ?(.*)\r\n')
     # Signal handlers are installed before starting tests
     # to output the CRASHED marker when a crash happens.
     re_crash = re.compile('\[ CRASHED      \](.*)\r\n')
-    re_fail = re.compile('\[  FAILED  \] ?(.*)\r\n')
-    re_runner_fail = re.compile('\[ RUNNER_FAILED \] ?(.*)\r\n')
-    re_ok = re.compile('\[       OK \] ?(.*?) .*\r\n')
-    io_stats_before = self._BeginGetIOStats()
+
     try:
       while True:
         found = p.expect([re_run, re_passed, re_runner_fail],
                          timeout=self.timeout)
-        if found == 1:  # matched PASSED.
+        if found == 1:  # re_passed
           break
-        if found == 2:  # RUNNER_FAILED
-          logging.error('RUNNER_FAILED')
+        elif found == 2:  # re_runner_fail
           overall_fail = True
           break
-        if self.dump_debug_info:
-          self.dump_debug_info.TakeScreenshot('_Test_Start_Run_')
-        full_test_name = p.match.group(1).replace('\r', '')
-        found = p.expect([re_ok, re_fail, re_crash], timeout=self.timeout)
-        if found == 0:  # re_ok
-          if full_test_name == p.match.group(1).replace('\r', ''):
-            ok_tests += [BaseTestResult(full_test_name, p.before)]
-            continue
-        if found == 2: # re_crash
-          crashed_tests += [BaseTestResult(full_test_name, p.before)]
-          overall_fail = True
-          break
-        # The test failed.
-        failed_tests += [BaseTestResult(full_test_name, p.before)]
+        else:  # re_run
+          if self.dump_debug_info:
+            self.dump_debug_info.TakeScreenshot('_Test_Start_Run_')
+
+          full_test_name = p.match.group(1).replace('\r', '')
+          found = p.expect([re_ok, re_fail, re_crash], timeout=self.timeout)
+          if found == 0:  # re_ok
+            if full_test_name == p.match.group(1).replace('\r', ''):
+              ok_tests += [BaseTestResult(full_test_name, p.before)]
+          elif found == 2:  # re_crash
+            crashed_tests += [BaseTestResult(full_test_name, p.before)]
+            overall_fail = True
+            break
+          else:  # re_fail
+            failed_tests += [BaseTestResult(full_test_name, p.before)]
     except pexpect.EOF:
       logging.error('Test terminated - EOF')
       raise errors.DeviceUnresponsiveError('Device may be offline')
@@ -187,15 +170,14 @@ class TestPackage(object):
       timed_out = True
     finally:
       p.close()
-    if not self.rebaseline:
-      ok_tests += self._EndGetIOStats(io_stats_before)
-      ret_code = self._GetGTestReturnCode()
-      if ret_code:
-        failed_tests += [BaseTestResult('gtest exit code: %d' % ret_code,
-                                        'pexpect.before: %s'
-                                        '\npexpect.after: %s'
-                                        % (p.before,
-                                           p.after))]
+
+    ret_code = self._GetGTestReturnCode()
+    if ret_code:
+      logging.critical(
+          'gtest exit code: %d\npexpect.before: %s\npexpect.after: %s',
+          ret_code, p.before, p.after)
+      overall_fail = True
+
     # Create TestResults and return
     return TestResults.FromRun(ok=ok_tests, failed=failed_tests,
                                crashed=crashed_tests, timed_out=timed_out,

@@ -6,8 +6,8 @@
 #define ASH_SYSTEM_TRAY_SYSTEM_TRAY_ITEM_H_
 
 #include "ash/ash_export.h"
+#include "ash/shelf_types.h"
 #include "ash/system/user/login_status.h"
-#include "ash/wm/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 
@@ -17,13 +17,15 @@ class View;
 
 namespace ash {
 
+class SystemTray;
+
 namespace internal {
 class TrayItemView;
 }
 
 class ASH_EXPORT SystemTrayItem {
  public:
-  SystemTrayItem();
+  explicit SystemTrayItem(SystemTray* system_tray);
   virtual ~SystemTrayItem();
 
   // Create* functions may return NULL if nothing should be displayed for the
@@ -100,7 +102,12 @@ class ASH_EXPORT SystemTrayItem {
   // the launcher is in the auto-hide state. Default is true.
   virtual bool ShouldShowLauncher() const;
 
+  // Returns the system tray that this item belongs to.
+  SystemTray* system_tray() const { return system_tray_; }
+
  private:
+  SystemTray* system_tray_;
+
   DISALLOW_COPY_AND_ASSIGN(SystemTrayItem);
 };
 

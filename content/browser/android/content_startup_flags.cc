@@ -7,6 +7,7 @@
 #include "base/string_number_conversions.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "cc/switches.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
@@ -49,10 +50,13 @@ void SetContentCommandLineFlags(int max_render_process_count) {
   parsed_command_line->AppendSwitch(switches::kEnableThreadedCompositing);
   parsed_command_line->AppendSwitch(
       switches::kEnableCompositingForFixedPosition);
+  parsed_command_line->AppendSwitch(
+      switches::kEnableAcceleratedScrollableFrames);
+  parsed_command_line->AppendSwitch(
+      switches::kEnableCompositedScrollingForFrames);
 
   parsed_command_line->AppendSwitch(switches::kEnableGestureTapHighlight);
-  parsed_command_line->AppendSwitch(switches::kEnableTouchEvents);
-  parsed_command_line->AppendSwitch(switches::kEnablePinch);
+  parsed_command_line->AppendSwitch(switches::kEnableCssTransformPinch);
 
   // Run the GPU service as a thread in the browser instead of as a
   // standalone process.
@@ -61,6 +65,10 @@ void SetContentCommandLineFlags(int max_render_process_count) {
   // Always use fixed layout and viewport tag.
   parsed_command_line->AppendSwitch(switches::kEnableFixedLayout);
   parsed_command_line->AppendSwitch(switches::kEnableViewport);
+
+  // FIXME(aelias): Commented out due to flaky tests.
+//  parsed_command_line->AppendSwitch(
+//      cc::switches::kEnableCompositorFrameMessage);
 }
 
 }  // namespace content

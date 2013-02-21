@@ -82,11 +82,11 @@ class ProfileSyncServiceTestHarness {
     profile.reset();
     // Pump messages posted by the sync thread (which may end up
     // posting on the IO thread).
-    ui_loop_.RunAllPending();
+    ui_loop_.RunUntilIdle();
     io_thread_.Stop();
     file_thread_.Stop();
     // Ensure that the sync objects destruct to avoid memory leaks.
-    ui_loop_.RunAllPending();
+    ui_loop_.RunUntilIdle();
   }
 
   // TODO(akalin): Refactor the StartSyncService*() functions below.
@@ -113,8 +113,7 @@ class ProfileSyncServiceTestHarness {
           profile.get(),
           signin,
           ProfileSyncService::AUTO_START,
-          true,
-          base::Closure()));
+          true));
       if (!set_initial_sync_ended)
         service->dont_set_initial_sync_ended_on_init();
       if (synchronous_sync_configuration)
@@ -124,7 +123,7 @@ class ProfileSyncServiceTestHarness {
         profile->GetPrefs()->SetBoolean(prefs::kSyncHasSetupCompleted, false);
 
       // Register the bookmark data type.
-      ON_CALL(*factory, CreateDataTypeManager(_, _, _)).
+      ON_CALL(*factory, CreateDataTypeManager(_, _, _, _)).
           WillByDefault(ReturnNewDataTypeManager());
 
       if (issue_auth_token) {
@@ -157,6 +156,19 @@ class ProfileSyncServiceTestHarness {
   content::TestBrowserThread io_thread_;
 };
 
+class TestProfileSyncServiceObserver : public ProfileSyncServiceObserver {
+ public:
+  explicit TestProfileSyncServiceObserver(ProfileSyncService* service)
+      : service_(service), first_setup_in_progress_(false) {}
+  virtual void OnStateChanged() OVERRIDE {
+    first_setup_in_progress_ = service_->FirstSetupInProgress();
+  }
+  bool first_setup_in_progress() const { return first_setup_in_progress_; }
+ private:
+  ProfileSyncService* service_;
+  bool first_setup_in_progress_;
+};
+
 class ProfileSyncServiceTest : public testing::Test {
  protected:
   virtual void SetUp() {
@@ -178,14 +190,27 @@ TEST_F(ProfileSyncServiceTest, InitialState) {
       harness_.profile.get(),
       signin,
       ProfileSyncService::MANUAL_START,
-      true,
-      base::Closure()));
+      true));
   harness_.service->Initialize();
   EXPECT_TRUE(
       harness_.service->sync_service_url().spec() ==
         ProfileSyncService::kSyncServerUrl ||
       harness_.service->sync_service_url().spec() ==
         ProfileSyncService::kDevServerUrl);
+}
+
+// Tests that the sync service doesn't forget to notify observers about
+// setup state.
+TEST(ProfileSyncServiceTestBasic, SetupInProgress) {
+  ProfileSyncService service(
+      NULL, NULL, NULL, ProfileSyncService::MANUAL_START);
+  TestProfileSyncServiceObserver observer(&service);
+  service.AddObserver(&observer);
+  service.SetSetupInProgress(true);
+  EXPECT_TRUE(observer.first_setup_in_progress());
+  service.SetSetupInProgress(false);
+  EXPECT_FALSE(observer.first_setup_in_progress());
+  service.RemoveObserver(&observer);
 }
 
 TEST_F(ProfileSyncServiceTest, DisabledByPolicy) {
@@ -199,8 +224,7 @@ TEST_F(ProfileSyncServiceTest, DisabledByPolicy) {
       harness_.profile.get(),
       signin,
       ProfileSyncService::MANUAL_START,
-      true,
-      base::Closure()));
+      true));
   harness_.service->Initialize();
   EXPECT_TRUE(harness_.service->IsManaged());
 }
@@ -216,9 +240,8 @@ TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
       harness_.profile.get(),
       signin,
       ProfileSyncService::AUTO_START,
-      true,
-      base::Closure()));
-  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _)).Times(0);
+      true));
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _)).Times(0);
   EXPECT_CALL(*factory, CreateBookmarkSyncComponents(_, _)).
       Times(0);
   harness_.service->RegisterDataTypeController(
@@ -241,10 +264,9 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
       harness_.profile.get(),
       signin,
       ProfileSyncService::AUTO_START,
-      true,
-      base::Closure()));
+      true));
   // Register the bookmark data type.
-  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _)).
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _)).
       WillRepeatedly(ReturnNewDataTypeManager());
 
   harness_.IssueTestTokens();
@@ -363,7 +385,7 @@ TEST_F(ProfileSyncServiceTest, TestStartupWithOldSyncData) {
   ASSERT_NE(-1,
             file_util::WriteFile(sync_file3, nonsense3, strlen(nonsense3)));
 
-  harness_.StartSyncServiceAndSetInitialSyncEnded(false, false, true, false,
+  harness_.StartSyncServiceAndSetInitialSyncEnded(true, false, true, false,
                                                   syncer::STORAGE_ON_DISK);
   EXPECT_FALSE(harness_.service->HasSyncSetupCompleted());
   EXPECT_FALSE(harness_.service->sync_initialized());
@@ -394,6 +416,18 @@ TEST_F(ProfileSyncServiceTest, TestStartupWithOldSyncData) {
 TEST_F(ProfileSyncServiceTest, FailToOpenDatabase) {
   harness_.StartSyncServiceAndSetInitialSyncEnded(false, true, true, true,
                                                   syncer::STORAGE_INVALID);
+
+  // The backend is not ready.  Ensure the PSS knows this.
+  EXPECT_FALSE(harness_.service->sync_initialized());
+}
+
+// This setup will allow the database to exist, but leave it empty.  The attempt
+// to download control types will silently fail (no downloads have any effect in
+// these tests).  The sync_backend_host will notice this and inform the profile
+// sync service of the failure to initialize the backed.
+TEST_F(ProfileSyncServiceTest, FailToDownloadControlTypes) {
+  harness_.StartSyncServiceAndSetInitialSyncEnded(false, true, true, true,
+                                                  syncer::STORAGE_IN_MEMORY);
 
   // The backend is not ready.  Ensure the PSS knows this.
   EXPECT_FALSE(harness_.service->sync_initialized());

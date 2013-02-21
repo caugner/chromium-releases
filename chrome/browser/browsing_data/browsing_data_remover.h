@@ -10,17 +10,16 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "base/time.h"
-#include "chrome/browser/api/prefs/pref_member.h"
-#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/dom_storage/dom_storage_context.h"
 #include "webkit/quota/quota_types.h"
 
 class ExtensionSpecialStoragePolicy;
@@ -43,12 +42,19 @@ namespace quota {
 class QuotaManager;
 }
 
+namespace dom_storage {
+struct LocalStorageUsageInfo;
+struct SessionStorageUsageInfo;
+}
+
 // BrowsingDataRemover is responsible for removing data related to browsing:
 // visits in url database, downloads, cookies ...
 
 class BrowsingDataRemover : public content::NotificationObserver,
-                            public base::WaitableEventWatcher::Delegate,
-                            public PepperFlashSettingsManager::Client {
+#if defined(ENABLE_PLUGINS)
+                            public PepperFlashSettingsManager::Client,
+#endif
+                            public base::WaitableEventWatcher::Delegate {
  public:
   // Time period ranges available when doing browsing data removals.
   enum TimePeriod {
@@ -209,9 +215,11 @@ class BrowsingDataRemover : public content::NotificationObserver,
   virtual void OnWaitableEventSignaled(
       base::WaitableEvent* waitable_event) OVERRIDE;
 
+#if defined(ENABLE_PLUGINS)
   // PepperFlashSettingsManager::Client implementation.
   virtual void OnDeauthorizeContentLicensesCompleted(uint32 request_id,
                                                      bool success) OVERRIDE;
+#endif
 
   // Removes the specified items related to browsing for a specific host. If the
   // provided |origin| is empty, data is removed for all origins. The
@@ -225,13 +233,24 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // object.
   void NotifyAndDeleteIfDone();
 
-  // Callback when the network history has been deleted. Invokes
-  // NotifyAndDeleteIfDone.
-  void ClearedNetworkHistory();
+  // Callback when the hostname resolution cache has been cleared.
+  // Clears the respective waiting flag and invokes NotifyAndDeleteIfDone.
+  void OnClearedHostnameResolutionCache();
 
-  // Invoked on the IO thread to clear the HostCache, speculative data about
-  // subresources on visited sites, and initial navigation history.
-  void ClearNetworkingHistory(IOThread* io_thread);
+  // Invoked on the IO thread to clear the hostname resolution cache.
+  void ClearHostnameResolutionCacheOnIOThread(IOThread* io_thread);
+
+  // Callback when speculative data in the network Predictor has been cleared.
+  // Clears the respective waiting flag and invokes NotifyAndDeleteIfDone.
+  void OnClearedNetworkPredictor();
+
+  // Invoked on the IO thread to clear speculative data related to hostname
+  // pre-resolution from the network Predictor.
+  void ClearNetworkPredictorOnIOThread();
+
+  // Callback when network related data in ProfileIOData has been cleared.
+  // Clears the respective waiting flag and invokes NotifyAndDeleteIfDone.
+  void OnClearedNetworkingHistory();
 
   // Callback when the cache has been deleted. Invokes NotifyAndDeleteIfDone.
   void ClearedCache();
@@ -259,16 +278,14 @@ class BrowsingDataRemover : public content::NotificationObserver,
 
   // Callback to deal with the list gathered in ClearLocalStorageOnUIThread.
   void OnGotLocalStorageUsageInfo(
-      const std::vector<
-          dom_storage::DomStorageContext::LocalStorageUsageInfo>& infos);
+      const std::vector<dom_storage::LocalStorageUsageInfo>& infos);
 
   // Invoked on the UI thread to delete session storage.
   void ClearSessionStorageOnUIThread();
 
   // Callback to deal with the list gathered in ClearSessionStorageOnUIThread.
   void OnGotSessionStorageUsageInfo(
-      const std::vector<
-          dom_storage::DomStorageContext::SessionStorageUsageInfo>& infos);
+      const std::vector<dom_storage::SessionStorageUsageInfo>& infos);
 
   // Invoked on the IO thread to delete all storage types managed by the quota
   // system: AppCache, Databases, FileSystems.
@@ -349,29 +366,33 @@ class BrowsingDataRemover : public content::NotificationObserver,
   scoped_refptr<net::URLRequestContextGetter> main_context_getter_;
   scoped_refptr<net::URLRequestContextGetter> media_context_getter_;
 
+#if defined(ENABLE_PLUGINS)
   // Used to delete plugin data.
   scoped_ptr<content::PluginDataRemover> plugin_data_remover_;
   base::WaitableEventWatcher watcher_;
 
   // Used to deauthorize content licenses for Pepper Flash.
   scoped_ptr<PepperFlashSettingsManager> pepper_flash_settings_manager_;
-  uint32 deauthorize_content_licenses_request_id_;
+#endif
 
+  uint32 deauthorize_content_licenses_request_id_;
   // True if we're waiting for various data to be deleted.
   // These may only be accessed from UI thread in order to avoid races!
   bool waiting_for_clear_cache_;
-  bool waiting_for_clear_nacl_cache_;
+  bool waiting_for_clear_content_licenses_;
   // Non-zero if waiting for cookies to be cleared.
   int waiting_for_clear_cookies_count_;
+  bool waiting_for_clear_form_;
   bool waiting_for_clear_history_;
+  bool waiting_for_clear_hostname_resolution_cache_;
   bool waiting_for_clear_local_storage_;
-  bool waiting_for_clear_session_storage_;
+  bool waiting_for_clear_nacl_cache_;
+  bool waiting_for_clear_network_predictor_;
   bool waiting_for_clear_networking_history_;
-  bool waiting_for_clear_server_bound_certs_;
   bool waiting_for_clear_plugin_data_;
   bool waiting_for_clear_quota_managed_data_;
-  bool waiting_for_clear_content_licenses_;
-  bool waiting_for_clear_form_;
+  bool waiting_for_clear_server_bound_certs_;
+  bool waiting_for_clear_session_storage_;
 
   // Tracking how many origins need to be deleted, and whether we're finished
   // gathering origins.
@@ -390,7 +411,7 @@ class BrowsingDataRemover : public content::NotificationObserver,
   ObserverList<Observer> observer_list_;
 
   // Used if we need to clear history.
-  CancelableRequestConsumer request_consumer_;
+  CancelableTaskTracker history_task_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataRemover);
 };

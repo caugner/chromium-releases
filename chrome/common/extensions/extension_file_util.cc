@@ -9,11 +9,11 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
@@ -83,7 +83,7 @@ FilePath InstallExtension(const FilePath& unpacked_source_dir,
 
   // Get a temp directory on the same file system as the profile.
   FilePath install_temp_dir = GetInstallTempDir(extensions_dir);
-  ScopedTempDir extension_temp_dir;
+  base::ScopedTempDir extension_temp_dir;
   if (install_temp_dir.empty() ||
       !extension_temp_dir.CreateUniqueTempDirUnderPath(install_temp_dir)) {
     LOG(ERROR) << "Creating of temp dir under in the profile failed.";
@@ -422,7 +422,7 @@ bool ValidateExtension(const Extension* extension,
 
 void GarbageCollectExtensions(
     const FilePath& install_directory,
-    const std::map<std::string, FilePath>& extension_paths) {
+    const std::multimap<std::string, FilePath>& extension_paths) {
   // Nothing to clean up if it doesn't exist.
   if (!file_util::DirectoryExists(install_directory))
     return;
@@ -461,13 +461,13 @@ void GarbageCollectExtensions(
       continue;
     }
 
-    std::map<std::string, FilePath>::const_iterator iter =
-        extension_paths.find(extension_id);
+    typedef std::multimap<std::string, FilePath>::const_iterator Iter;
+    std::pair<Iter, Iter> iter_pair = extension_paths.equal_range(extension_id);
 
     // If there is no entry in the prefs file, just delete the directory and
     // move on. This can legitimately happen when an uninstall does not
     // complete, for example, when a plugin is in use at uninstall time.
-    if (iter == extension_paths.end()) {
+    if (iter_pair.first == iter_pair.second) {
       DVLOG(1) << "Deleting unreferenced install for directory "
                << extension_path.LossyDisplayName() << ".";
       file_util::Delete(extension_path, true);  // Recursive.
@@ -482,7 +482,13 @@ void GarbageCollectExtensions(
     for (FilePath version_dir = versions_enumerator.Next();
          !version_dir.value().empty();
          version_dir = versions_enumerator.Next()) {
-      if (version_dir.BaseName() != iter->second.BaseName()) {
+      bool knownVersion = false;
+      for (Iter it = iter_pair.first; it != iter_pair.second; ++it)
+        if (version_dir.BaseName() == it->second.BaseName()) {
+          knownVersion = true;
+          break;
+        }
+      if (!knownVersion) {
         DVLOG(1) << "Deleting old version for directory "
                  << version_dir.LossyDisplayName() << ".";
         file_util::Delete(version_dir, true);  // Recursive.

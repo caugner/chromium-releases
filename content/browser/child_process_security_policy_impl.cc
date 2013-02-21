@@ -4,6 +4,7 @@
 
 #include "content/browser/child_process_security_policy_impl.h"
 
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
@@ -12,7 +13,9 @@
 #include "base/string_util.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
@@ -143,11 +146,22 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
 
   // Determine if the certain permissions have been granted to a file.
   bool HasPermissionsForFile(const FilePath& file, int permissions) {
+    if (!permissions || file.empty() || !file.IsAbsolute())
+      return false;
     FilePath current_path = file.StripTrailingSeparators();
     FilePath last_path;
+    int skip = 0;
     while (current_path != last_path) {
-      if (file_permissions_.find(current_path) != file_permissions_.end())
-        return (file_permissions_[current_path] & permissions) == permissions;
+      FilePath base_name =  current_path.BaseName();
+      if (base_name.value() == FilePath::kParentDirectory) {
+        ++skip;
+      } else if (skip > 0) {
+        if (base_name.value() != FilePath::kCurrentDirectory)
+          --skip;
+      } else {
+        if (file_permissions_.find(current_path) != file_permissions_.end())
+          return (file_permissions_[current_path] & permissions) == permissions;
+      }
       last_path = current_path;
       current_path = current_path.DirName();
     }
@@ -155,9 +169,42 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
     return false;
   }
 
-  bool CanUseCookiesForOrigin(const GURL& gurl) {
+  bool CanLoadPage(const GURL& gurl) {
     if (origin_lock_.is_empty())
       return true;
+
+    // TODO(creis): We must pass the valid browser_context to convert hosted
+    // apps URLs.  Currently, hosted apps cannot be loaded in this mode.
+    // See http://crbug.com/160576.
+    GURL site_gurl = SiteInstanceImpl::GetSiteForURL(NULL, gurl);
+    return origin_lock_ == site_gurl;
+  }
+
+  bool CanAccessCookiesForOrigin(const GURL& gurl) {
+    if (origin_lock_.is_empty())
+      return true;
+    // TODO(creis): We must pass the valid browser_context to convert hosted
+    // apps URLs.  Currently, hosted apps cannot set cookies in this mode.
+    // See http://crbug.com/160576.
+    GURL site_gurl = SiteInstanceImpl::GetSiteForURL(NULL, gurl);
+    return origin_lock_ == site_gurl;
+  }
+
+  bool CanSendCookiesForOrigin(const GURL& gurl) {
+    // We only block cross-site cookies on network requests if the
+    // --enable-strict-site-isolation flag is passed.  This is expected to break
+    // compatibility with many sites.  The similar --site-per-process flag only
+    // blocks JavaScript access to cross-site cookies (in
+    // CanAccessCookiesForOrigin).
+    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+    if (!command_line.HasSwitch(switches::kEnableStrictSiteIsolation))
+      return true;
+
+    if (origin_lock_.is_empty())
+      return true;
+    // TODO(creis): We must pass the valid browser_context to convert hosted
+    // apps URLs.  Currently, hosted apps cannot set cookies in this mode.
+    // See http://crbug.com/160576.
     GURL site_gurl = SiteInstanceImpl::GetSiteForURL(NULL, gurl);
     return origin_lock_ == site_gurl;
   }
@@ -453,6 +500,27 @@ void ChildProcessSecurityPolicyImpl::RevokeReadRawCookies(int child_id) {
   state->second->RevokeReadRawCookies();
 }
 
+bool ChildProcessSecurityPolicyImpl::CanLoadPage(
+    int child_id,
+    const GURL& url,
+    ResourceType::Type resource_type) {
+  // If --site-per-process flag is passed, we should enforce
+  // stronger security restrictions on page navigation.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSitePerProcess) &&
+      ResourceType::IsFrame(resource_type)) {
+    // TODO(irobert): This currently breaks some WebUI page such as
+    // "chrome://extensions/" (belongs to site chrome://chrome/) which
+    // will load an iframe for the page "chrome://uber-frame/"
+    // (belongs to site chrome://uber-frame/).
+    base::AutoLock lock(lock_);
+    SecurityStateMap::iterator state = security_state_.find(child_id);
+    if (state == security_state_.end())
+      return false;
+    return state->second->CanLoadPage(url);
+  }
+  return true;
+}
+
 bool ChildProcessSecurityPolicyImpl::CanRequestURL(
     int child_id, const GURL& url) {
   if (!url.is_valid())
@@ -586,13 +654,22 @@ bool ChildProcessSecurityPolicyImpl::ChildProcessHasPermissionsForFile(
   return state->second->HasPermissionsForFile(file, permissions);
 }
 
-bool ChildProcessSecurityPolicyImpl::CanUseCookiesForOrigin(int child_id,
-                                                            const GURL& gurl) {
+bool ChildProcessSecurityPolicyImpl::CanAccessCookiesForOrigin(
+    int child_id, const GURL& gurl) {
   base::AutoLock lock(lock_);
   SecurityStateMap::iterator state = security_state_.find(child_id);
   if (state == security_state_.end())
     return false;
-  return state->second->CanUseCookiesForOrigin(gurl);
+  return state->second->CanAccessCookiesForOrigin(gurl);
+}
+
+bool ChildProcessSecurityPolicyImpl::CanSendCookiesForOrigin(int child_id,
+                                                             const GURL& gurl) {
+  base::AutoLock lock(lock_);
+  SecurityStateMap::iterator state = security_state_.find(child_id);
+  if (state == security_state_.end())
+    return false;
+  return state->second->CanSendCookiesForOrigin(gurl);
 }
 
 void ChildProcessSecurityPolicyImpl::LockToOrigin(int child_id,

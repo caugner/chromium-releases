@@ -79,10 +79,12 @@ class DirectoryBackingStore : public base::NonThreadSafe {
   bool CreateShareInfoTable(bool is_temporary);
 
   bool CreateShareInfoTableVersion71(bool is_temporary);
-  // Create 'metas' or 'temp_metas' depending on value of is_temporary.
+  // Create 'metas' or 'temp_metas' depending on value of is_temporary. Also
+  // create a 'deleted_metas' table using same schema.
   bool CreateMetasTable(bool is_temporary);
   bool CreateModelsTable();
   bool CreateV71ModelsTable();
+  bool CreateV75ModelsTable();
 
   // We don't need to load any synced and applied deleted entries, we can
   // in fact just purge them forever on startup.
@@ -157,6 +159,9 @@ class DirectoryBackingStore : public base::NonThreadSafe {
   bool MigrateVersion79To80();
   bool MigrateVersion80To81();
   bool MigrateVersion81To82();
+  bool MigrateVersion82To83();
+  bool MigrateVersion83To84();
+  bool MigrateVersion84To85();
 
   scoped_ptr<sql::Connection> db_;
   sql::Statement save_entry_statement_;

@@ -275,7 +275,15 @@ html[dir='rtl'] #extension-settings .trash {
   visibility: hidden;
 }
 
-.may-not-disable .optional-controls {
+.extension-highlight {
+  background: rgb(238, 238, 238);
+  background-position: auto;
+  background-repeat: auto;
+  border-radius: 3px;
+  padding: 5px 0 5px 5px;
+}
+
+.may-not-disable .optional-controls .optional-controls-disableable {
   display: none;
 }
 
@@ -285,6 +293,21 @@ html[dir='rtl'] #extension-settings .trash {
   display: none;
 }
 
+.managed-mode-banner .page-banner-text {
+  background-image: url('chrome://theme/IDR_WARNING');
+}
+
 .managed-mode .more-extensions-link {
   display: none;
+}
+
+/* Sideload Wipeout */
+
+.sideload-wipeout-learn-more {
+  text-decoration: none;
+}
+
+.sideload-wipeout-banner .page-banner-text {
+  -webkit-padding-start: 8px;
+  background-image: none;
 }

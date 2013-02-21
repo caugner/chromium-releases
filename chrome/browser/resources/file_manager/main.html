@@ -77,8 +77,10 @@
       <script src="js/directory_model.js"></script>
       <script src="js/drive_banners.js"></script>
       <script src="js/file_copy_manager_wrapper.js"></script>
+      <script src="js/file_grid.js"></script>
       <script src="js/file_manager.js"></script>
       <script src="js/file_manager_pyauto.js"></script>
+      <script src="js/file_table.js"></script>
       <script src="js/file_tasks.js"></script>
       <script src="js/file_transfer_controller.js"></script>
       <script src="js/file_type.js"></script>
@@ -112,24 +114,34 @@
       <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
                shortcut="U+0045-Ctrl"></command>
 
+      <command id="search" shortcut="U+0046-Ctrl"></command>
+
       <command id="unmount" i18n-values="label:UNMOUNT_DEVICE_BUTTON_LABEL"
           ></command>
       <command id="format" i18n-values="label:FORMAT_DEVICE_BUTTON_LABEL"
           ></command>
       <command id="import-photos" i18n-values="label:PHOTO_IMPORT_TITLE"
-          ></command>
+          hidden></command>
 
       <command id="gdata-buy-more-space"
-          i18n-values="label:GDATA_BUY_MORE_SPACE"
+          i18n-values="label:DRIVE_BUY_MORE_SPACE"
           ></command>
-      <command id="gdata-help" i18n-values="label:GDATA_MENU_HELP"
+      <command id="gdata-help" i18n-values="label:DRIVE_MENU_HELP"
           ></command>
       <command id="gdata-clear-local-cache"
-          i18n-values="label:GDATA_CLEAR_LOCAL_CACHE"></command>
+          i18n-values="label:DRIVE_CLEAR_LOCAL_CACHE"></command>
+      <command id="gdata-reload"
+          i18n-values="label:DRIVE_RELOAD"></command>
       <command id="gdata-go-to-drive"
-          i18n-values="label:GDATA_VISIT_DRIVE_GOOGLE_COM"></command>
+          i18n-values="label:DRIVE_VISIT_DRIVE_GOOGLE_COM"></command>
+
+      <command id="toggle-pinned"
+          i18n-values="label:OFFLINE_COLUMN_LABEL"></command>
+
       <command id="open-with"
           i18n-values="label:OPEN_WITH_BUTTON_LABEL"></command>
+      <command id="zip-selection"
+          i18n-values="label:ZIP_SELECTION_BUTTON_LABEL"></command>
     </commands>
 
     <menu id="file-context-menu" class="chrome-menu" showShortcuts>
@@ -138,12 +150,15 @@
       <menuitem command="#open-with"
           visibleif="full-page" hidden></menuitem>
       <hr id="default-action-separator" visibleif="full-page" hidden>
+      <menuitem command="#toggle-pinned"></menuitem>
+      <hr command="#toggle-pinned">
       <menuitem command="#cut" visibleif="full-page"></menuitem>
       <menuitem command="#copy" visibleif="full-page"></menuitem>
       <menuitem command="#paste" visibleif="full-page"></menuitem>
       <hr visibleif="full-page">
       <menuitem command="#rename"></menuitem>
       <menuitem command="#delete"></menuitem>
+      <menuitem command="#zip-selection"></menuitem>
       <hr visibleif="saveas-file full-page">
       <menuitem command="#newfolder"
           visibleif="saveas-file full-page"></menuitem>
@@ -156,16 +171,18 @@
 
     <menu id="docs-settings" class="chrome-menu">
       <menuitem id="gdata-sync-settings"
-          i18n-content=GDATA_MOBILE_CONNECTION_OPTION></menuitem>
+          i18n-content=DRIVE_MOBILE_CONNECTION_OPTION></menuitem>
       <menuitem id="gdata-hosted-settings"
-          i18n-content=GDATA_SHOW_HOSTED_FILES_OPTION></menuitem>
+          i18n-content=DRIVE_SHOW_HOSTED_FILES_OPTION></menuitem>
       <hr required_attr="ctrl-pressing">
-      <menuitem id="gdata-clear-local-cache" required_attr="ctrl-pressing"
+      <menuitem required_attr="ctrl-pressing"
           command="#gdata-clear-local-cache"></menuitem>
+      <menuitem required_attr="ctrl-pressing"
+          command="#gdata-reload"></menuitem>
       <hr>
       <div id="gdata-space-info" disabled>
         <span id="gdata-space-info-label"
-            i18n-content=GDATA_WAITING_FOR_SPACE_INFO
+            i18n-content=DRIVE_WAITING_FOR_SPACE_INFO
             ></span>
         <div><div id="gdata-space-info-bar" style="width:100%" pending></div
             ></div>
@@ -188,31 +205,31 @@
     <div class=dialog-title invisibleif="full-page">[TITLE]</div>
     <div class=dialog-container>
       <div class=dialog-sidebar>
-        <list id="roots-list"></list>
+        <list id="roots-list" tabindex="8"></list>
       </div>
       <div class=sidebar-splitter></div>
       <div class=dialog-main>
         <div class=dialog-header>
           <div id="dir-breadcrumbs" class="breadcrumbs"></div>
-          <input id="search-box" type="search" tabindex="4"
+          <input id="search-box" type="search" tabindex="9"
               i18n-values="aria-label:SEARCH_TEXT_LABEL">
 
           <div class="right buttonbar">
             <div>
-              <button class="left small" id="detail-view" tabindex="5"
+              <button class="left small" id="detail-view" tabindex="10"
                       i18n-values="aria-label:DETAIL_VIEW_TOOLTIP">
               </button>
               <div class="tooltip" i18n-content=DETAIL_VIEW_TOOLTIP
                    >[DETAIL VIEW]</div>
             </div>
             <div>
-              <button class="right small" id="thumbnail-view" tabindex="6"
+              <button class="right small" id="thumbnail-view" tabindex="11"
                       i18n-values="aria-label:THUMBNAIL_VIEW_TOOLTIP">
               </button>
               <div class="tooltip" i18n-content=THUMBNAIL_VIEW_TOOLTIP
                    >[THUMBNAIL VIEW]</div>
             </div>
-            <button class="menubutton" id="gdata-settings" tabindex="7"
+            <button class="menubutton" id="gdata-settings" tabindex="12"
                     menu="#docs-settings" visibleif="full-page">
               <span class="disclosureindicator"></span>
             </button>
@@ -224,8 +241,8 @@
         <div class=dialog-body>
           <div class=filelist-panel>
             <div id="list-container">
-              <div class=detail-table id="detail-table" tabindex=0></div>
-              <grid class=thumbnail-grid tabindex=0></grid>
+              <div class=detail-table id="detail-table" tabindex=1></div>
+              <grid class=thumbnail-grid tabindex=1></grid>
               <div id="spinner-container">
                 <div id="spinner-with-text"></div>
               </div>
@@ -239,13 +256,16 @@
               <div class="preview-thumbnails"></div>
             </div>
             <div id="preview-lines"> 
-              <div class="preview-summary"></div>
+              <div class="preview-summary">
+                <span class="preview-text"></span>
+                <span class="calculating-size" hidden></span>
+              </div>
               <div id="search-breadcrumbs" class="breadcrumbs"></div>
             </div>
             <div class="right buttonbar" visibleif="full-page">
-              <button id="tasks" class="combobutton" menu="#tasks-menu">
+              <button id="tasks" class="combobutton" menu="#tasks-menu" tabindex="2">
               </button>
-              <button id="delete-button" command="#delete"></button>
+              <button id="delete-button" command="#delete" tabindex="3"></button>
             </div>
           </div>
           <div id="unmounted-panel"></div>
@@ -258,19 +278,19 @@
     </div>
     <div class=dialog-footer invisibleif="full-page">
       <button id="new-folder" i18n-content=NEW_FOLDER_BUTTON_LABEL
-              visibleif="saveas-file folder" command="#newfolder">[NEW FOLDER]</button>
+              visibleif="saveas-file folder" command="#newfolder" tabindex="4">[NEW FOLDER]</button>
       <div id="filename-input-box">
         <div class=filename-label i18n-content=FILENAME_LABEL>[FILENAME]</div>
-        <input type=text spellcheck=false>
+        <input type=text spellcheck=false tabindex="5">
       </div>
       <div class=horizontal-spacer></div>
       <select id="file-type"></select>
-      <button class=ok disabled>[OK]</button>
+      <button class=ok disabled tabindex="6">[OK]</button>
       <div class=preparing-label i18n-content=PREPARING_LABEL>[PREPARING]</div>
       <div class=progress-bar>
         <div class=progress-track></div>
       </div>
-      <button class=cancel i18n-content=CANCEL_LABEL>[CANCEL]</button>
+      <button class=cancel i18n-content=CANCEL_LABEL tabindex="7">[CANCEL]</button>
     </div>
     <div id="butter-bar-container">
       <div id="butter-bar">

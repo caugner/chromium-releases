@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/nacl_host/nacl_infobar.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/nacl_host/pnacl_file_host.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -37,9 +38,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/common/process_type.h"
+#include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 
 #if defined(USE_TCMALLOC)
@@ -78,6 +80,7 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                                     OnGetReadonlyPnaclFd)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_NaClCreateTemporaryFile,
                                     OnNaClCreateTemporaryFile)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_NaClErrorStatus, OnNaClErrorStatus)
 #endif
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DnsPrefetch, OnDnsPrefetch)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ResourceTypeStats,
@@ -171,9 +174,14 @@ net::HostResolver* ChromeRenderMessageFilter::GetHostResolver() {
 
 #if !defined(DISABLE_NACL)
 void ChromeRenderMessageFilter::OnLaunchNaCl(const GURL& manifest_url,
+                                             int render_view_id,
+                                             uint32 permission_bits,
                                              int socket_count,
                                              IPC::Message* reply_msg) {
-  NaClProcessHost* host = new NaClProcessHost(manifest_url, off_the_record_);
+  NaClProcessHost* host = new NaClProcessHost(manifest_url,
+                                              render_view_id,
+                                              permission_bits,
+                                              off_the_record_);
   host->Launch(this, socket_count, reply_msg, extension_info_map_);
 }
 
@@ -187,6 +195,13 @@ void ChromeRenderMessageFilter::OnGetReadonlyPnaclFd(
 void ChromeRenderMessageFilter::OnNaClCreateTemporaryFile(
     IPC::Message* reply_msg) {
   pnacl_file_host::CreateTemporaryFile(this, reply_msg);
+}
+
+void ChromeRenderMessageFilter::OnNaClErrorStatus(int render_view_id,
+                                                  int error_id) {
+  // Currently there is only one kind of error status, for which
+  // we want to show the user an infobar.
+  ShowNaClInfobar(render_process_id_, render_view_id, error_id);
 }
 #endif
 
@@ -584,7 +599,7 @@ void ChromeRenderMessageFilter::OnCanTriggerClipboardWrite(
     const GURL& origin, bool* allowed) {
   // Since all extensions could historically write to the clipboard, preserve it
   // for compatibility.
-  *allowed = (origin.SchemeIs(chrome::kExtensionScheme) ||
+  *allowed = (origin.SchemeIs(extensions::kExtensionScheme) ||
       extension_info_map_->SecurityOriginHasAPIPermission(
           origin, render_process_id_, APIPermission::kClipboardWrite));
 }

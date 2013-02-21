@@ -5,12 +5,17 @@
 {
   'variables': {
     'content_shell_product_name': 'Content Shell',
+    # The "19" is so that sites that sniff for version think that this is
+    # something reasonably current; the "77.34.5" is a hint that this isn't a
+    # standard Chrome.
+    'content_shell_version': '19.77.34.5',
   },
   'targets': [
     {
       'target_name': 'content_shell_lib',
       'type': 'static_library',
       'defines!': ['CONTENT_IMPLEMENTATION'],
+      'defines': ['CONTENT_SHELL_VERSION="<(content_shell_version)"'],
       'variables': {
         'chromium_code': 1,
       },
@@ -25,6 +30,7 @@
         'content_shell_resources',
         'content_utility',
         'content_worker',
+        'test_support_content',
         'content_resources.gyp:content_resources',
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -34,11 +40,13 @@
         '../net/net.gyp:net',
         '../net/net.gyp:net_resources',
         '../skia/skia.gyp:skia',
+        '../ui/gl/gl.gyp:gl',
         '../ui/ui.gyp:ui',
         '../v8/tools/gyp/v8.gyp:v8',
         '../webkit/support/webkit_support.gyp:webkit_support',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit_test_support',
+        '<(webkit_src_dir)/Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:TestRunner',
       ],
       'include_dirs': [
         '..',
@@ -102,11 +110,15 @@
         'shell/shell_switches.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
+        'shell/shell_webpreferences.cc',
+        'shell/shell_webpreferences.h',
         'shell/shell_web_contents_view_delegate_creator.h',
         'shell/shell_web_contents_view_delegate_gtk.cc',
         'shell/shell_web_contents_view_delegate_mac.mm',
         'shell/shell_web_contents_view_delegate_win.cc',
         'shell/shell_web_contents_view_delegate.h',
+        'shell/webkit_test_controller.cc',
+        'shell/webkit_test_controller.h',
         'shell/webkit_test_platform_support.h',
         'shell/webkit_test_platform_support_android.cc',
         'shell/webkit_test_platform_support_linux.cc',
@@ -116,8 +128,6 @@
         'shell/webkit_test_runner.h',
         'shell/webkit_test_runner_bindings.cc',
         'shell/webkit_test_runner_bindings.h',
-        'shell/webkit_test_runner_host.cc',
-        'shell/webkit_test_runner_host.h',
       ],
       'msvs_settings': {
         'VCLinkerTool': {
@@ -148,6 +158,11 @@
             },
           },
         }],  # OS=="win"
+        ['OS=="linux"', {
+          'dependencies': [
+            '../build/linux/system.gyp:fontconfig',
+          ],
+        }],
         ['OS=="android"', {
           'dependencies': [
             'content_shell_jni_headers',
@@ -184,6 +199,7 @@
         }],  # use_aura==1
         ['chromeos==1', {
           'dependencies': [
+            '../ash/ash.gyp:ash',
             '../chromeos/chromeos.gyp:chromeos',
            ],
         }], # chromeos==1
@@ -286,7 +302,6 @@
         'content_shell_lib',
         'content_shell_pak',
         '../third_party/mesa/mesa.gyp:osmesa',
-        '<(webkit_src_dir)/Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:TestRunner_resources',
       ],
       'include_dirs': [
         '..',
@@ -383,7 +398,8 @@
               # Modify the Info.plist as needed.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['../build/mac/tweak_info_plist.py',
-                         '--scm=1'],
+                         '--scm=1',
+                         '--version=<(content_shell_version)'],
             },
             {
               # This postbuid step is responsible for creating the following
@@ -507,7 +523,8 @@
               'action': ['../build/mac/tweak_info_plist.py',
                          '--breakpad=0',
                          '--keystone=0',
-                         '--scm=0'],
+                         '--scm=0',
+                         '--version=<(content_shell_version)'],
             },
             {
               # Make sure there isn't any Objective-C in the helper app's
@@ -584,27 +601,19 @@
         {
           # content_shell_apk creates a .jar as a side effect. Any java targets
           # that need that .jar in their classpath should depend on this target,
-          # content_shell_java.
+          # content_shell_java. Dependents of content_shell_apk receive its jar
+          # path in the variable 'apk_output_jar_path'.
           'target_name': 'content_shell_java',
           'type': 'none',
-          'variables': {
-            'output_jar': '<(PRODUCT_DIR)/lib.java/chromium_apk_content_shell.jar'
-          },
-          'outputs': ['<(output_jar)'],
           'dependencies': [
-            'content_java',
             'content_shell_apk',
-            '../base/base.gyp:base_java',
-            '../media/media.gyp:media_java',
-            '../net/net.gyp:net_java',
-            '../ui/ui.gyp:ui_java',
           ],
           # This all_dependent_settings is used for java targets only. This will
           # add the content_shell jar to the classpath of dependent java
           # targets.
           'all_dependent_settings': {
             'variables': {
-              'input_jars_paths': ['<(output_jar)'],
+              'input_jars_paths': ['>(apk_output_jar_path)'],
             },
           },
           # Add an action with the appropriate output. This allows the generated
@@ -613,7 +622,7 @@
             {
               'action_name': 'fake_generate_jar',
               'inputs': [],
-              'outputs': ['<(output_jar)'],
+              'outputs': ['>(apk_output_jar_path)'],
               'action': [],
             },
           ],

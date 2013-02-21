@@ -36,14 +36,15 @@
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/extension_webkit_preferences.h"
 #include "chrome/browser/extensions/message_handler.h"
+#include "chrome/browser/extensions/suggest_permission_util.h"
 #include "chrome/browser/geolocation/chrome_access_token_store.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/media/media_internals.h"
+#include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
-#include "chrome/browser/pepper_gtalk_message_filter.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -62,13 +63,12 @@
 #include "chrome/browser/search_engines/search_provider_install_state_message_filter.h"
 #include "chrome/browser/speech/chrome_speech_recognition_manager_delegate.h"
 #include "chrome/browser/spellchecker/spellcheck_message_filter.h"
-#include "chrome/browser/ssl/ssl_add_cert_handler.h"
+#include "chrome/browser/ssl/ssl_add_certificate.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 #include "chrome/browser/ssl/ssl_tab_helper.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/toolkit_extra_parts.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/browser/user_style_sheet_watcher_factory.h"
@@ -80,6 +80,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/permissions/socket_permission.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -88,6 +89,7 @@
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_ppapi_host.h"
 #include "content/public/browser/browser_url_handler.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/compositor_util.h"
 #include "content/public/browser/render_process_host.h"
@@ -98,8 +100,11 @@
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_descriptors.h"
+#include "extensions/common/constants.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_resources.h"
+#include "net/base/escape.h"
+#include "net/base/mime_util.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
@@ -146,6 +151,7 @@
 
 using base::FileDescriptor;
 using content::AccessTokenStore;
+using content::BrowserChildProcessHostIterator;
 using content::BrowserThread;
 using content::BrowserURLHandler;
 using content::ChildProcessSecurityPolicy;
@@ -175,7 +181,8 @@ const char* kPredefinedAllowedSocketOrigins[] = {
   "cabapfdbkniadpollkckdnedaanlciaj",  // see crbug.com/134099
   "mapljbgnjledlpdmlchihnmeclmefbba",  // see crbug.com/134099
   "ghbfeebgmiidnnmeobbbaiamklmpbpii",  // see crbug.com/134099
-  "jdfhpkjeckflbbleddjlpimecpbjdeep"   // see crbug.com/142514
+  "jdfhpkjeckflbbleddjlpimecpbjdeep",  // see crbug.com/142514
+  "iabmpiboiopbgfabjmgeedhcmjenhbla"   // see crbug.com/165080
 };
 
 // Returns a copy of the given url with its host set to given host and path set
@@ -301,7 +308,7 @@ RenderProcessHostPrivilege GetPrivilegeRequiredByUrl(
   if (!url.is_valid())
     return PRIV_NORMAL;
 
-  if (url.SchemeIs(chrome::kExtensionScheme)) {
+  if (url.SchemeIs(extensions::kExtensionScheme)) {
     const Extension* extension =
         service->extensions()->GetByID(url.host());
     if (extension && extension->is_storage_isolated())
@@ -428,7 +435,7 @@ content::BrowserMainParts* ChromeContentBrowserClient::CreateBrowserMainParts(
 #elif defined(OS_MACOSX)
   main_parts = new ChromeBrowserMainPartsMac(parameters);
 #elif defined(OS_CHROMEOS)
-  main_parts = new ChromeBrowserMainPartsChromeos(parameters);
+  main_parts = new chromeos::ChromeBrowserMainPartsChromeos(parameters);
 #elif defined(OS_LINUX)
   main_parts = new ChromeBrowserMainPartsLinux(parameters);
 #elif defined(OS_ANDROID)
@@ -468,61 +475,100 @@ content::WebContentsView*
   return NULL;
 }
 
-std::string ChromeContentBrowserClient::GetStoragePartitionIdForChildProcess(
-    content::BrowserContext* browser_context,
-    int child_process_id) {
-  const Extension* extension = NULL;
-  Profile* profile = Profile::FromBrowserContext(browser_context);
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  if (extension_service) {
-    std::set<std::string> extension_ids =
-        extension_service->process_map()->
-            GetExtensionsInProcess(child_process_id);
-    if (!extension_ids.empty())
-      // Since All the apps in a process share the same storage partition,
-      // we can pick any of them to retrieve the storage partition id.
-      extension =
-          extension_service->extensions()->GetByID(*(extension_ids.begin()));
-  }
-  return GetStoragePartitionIdForExtension(browser_context, extension);
-}
-
 std::string ChromeContentBrowserClient::GetStoragePartitionIdForSite(
     content::BrowserContext* browser_context,
     const GURL& site) {
-  const Extension* extension = NULL;
-  Profile* profile = Profile::FromBrowserContext(browser_context);
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  if (extension_service) {
-    extension = extension_service->extensions()->
-        GetExtensionOrAppByURL(ExtensionURLInfo(site));
-  }
+  std::string partition_id;
 
-  return GetStoragePartitionIdForExtension(browser_context, extension);
+  // The partition ID for webview guest processes is the string value of its
+  // SiteInstance URL - "chrome-guest://app_id/persist?partition".
+  if (site.SchemeIs(chrome::kGuestScheme))
+    partition_id = site.spec();
+
+  DCHECK(IsValidStoragePartitionId(browser_context,partition_id));
+  return partition_id;
 }
 
 bool ChromeContentBrowserClient::IsValidStoragePartitionId(
     content::BrowserContext* browser_context,
     const std::string& partition_id) {
-  // The default ID is empty which is always allowed.
+  // The default ID is empty and is always valid.
   if (partition_id.empty())
     return true;
 
-  // If it isn't empty, then it must belong to an extension of some sort. Parse
-  // out the extension ID and make sure it is still installed.
-  Profile* profile = Profile::FromBrowserContext(browser_context);
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  if (!extension_service) {
-    // No extension service means no storage partitions in Chrome.
-    return false;
+  return GURL(partition_id).is_valid();
+}
+
+void ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
+    content::BrowserContext* browser_context,
+    const GURL& site,
+    bool can_be_default,
+    std::string* partition_domain,
+    std::string* partition_name,
+    bool* in_memory) {
+  // Default to the browser-wide storage partition and override based on |site|
+  // below.
+  partition_domain->clear();
+  partition_name->clear();
+  *in_memory = false;
+
+  // For the webview tag, we create special guest processes, which host the
+  // tag content separately from the main application that embeds the tag.
+  // A webview tag can specify both the partition name and whether the storage
+  // for that partition should be persisted. Each tag gets a SiteInstance with
+  // a specially formatted URL, based on the application it is hosted by and
+  // the partition requested by it. The format for that URL is:
+  // chrome-guest://partition_domain/persist?partition_name
+  if (site.SchemeIs(chrome::kGuestScheme)) {
+    // Since guest URLs are only used for packaged apps, there must be an app
+    // id in the URL.
+    CHECK(site.has_host());
+    *partition_domain = site.host();
+    // Since persistence is optional, the path must either be empty or the
+    // literal string.
+    *in_memory = (site.path() != "/persist");
+    // The partition name is user supplied value, which we have encoded when the
+    // URL was created, so it needs to be decoded.
+    *partition_name = net::UnescapeURLComponent(site.query(),
+                                                net::UnescapeRule::NORMAL);
+  } else if (site.SchemeIs(extensions::kExtensionScheme)) {
+    // If |can_be_default| is false, the caller is stating that the |site|
+    // should be parsed as if it had isolated storage. In particular it is
+    // important to NOT check ExtensionService for the is_storage_isolated()
+    // attribute because this code path is run during Extension uninstall
+    // to do cleanup after the Extension has already been unloaded from the
+    // ExtensionService.
+    bool is_isolated = !can_be_default;
+    if (can_be_default) {
+      const Extension* extension = NULL;
+      Profile* profile = Profile::FromBrowserContext(browser_context);
+      ExtensionService* extension_service =
+          extensions::ExtensionSystem::Get(profile)->extension_service();
+      if (extension_service) {
+        extension = extension_service->extensions()->
+            GetExtensionOrAppByURL(ExtensionURLInfo(site));
+        if (extension && extension->is_storage_isolated()) {
+          is_isolated = true;
+        }
+      }
+    }
+
+    if (is_isolated) {
+      CHECK(site.has_host());
+      // For extensions with isolated storage, the the host of the |site| is
+      // the |partition_domain|. The |in_memory| and |partition_name| are only
+      // used in guest schemes so they are cleared here.
+      *partition_domain = site.host();
+      *in_memory = false;
+      partition_name->clear();
+    }
   }
 
-  // See if we can find an extension. The |partition_id| is the extension ID so
-  // no parsing needed to be done.
-  return extension_service->GetExtensionById(partition_id, false) != NULL;
+  // Assert that if |can_be_default| is false, the code above must have found a
+  // non-default partition.  If this fails, the caller has a serious logic
+  // error about which StoragePartition they expect to be in and it is not
+  // safe to continue.
+  CHECK(can_be_default || !partition_domain->empty());
 }
 
 content::WebContentsViewDelegate*
@@ -572,15 +618,6 @@ void ChromeContentBrowserClient::RenderProcessHostCreated(
   RendererContentSettingRules rules;
   GetRendererContentSettingRules(profile->GetHostContentSettingsMap(), &rules);
   host->Send(new ChromeViewMsg_SetContentSettingRules(rules));
-
-#if defined(OS_ANDROID) && defined(USE_LINUX_BREAKPAD)
-  InitCrashDumpManager();
-#endif
-}
-
-void ChromeContentBrowserClient::BrowserChildProcessHostCreated(
-    content::BrowserChildProcessHost* host) {
-  host->GetHost()->AddFilter(new PepperGtalkMessageFilter());
 }
 
 content::WebUIControllerFactory*
@@ -595,10 +632,12 @@ GURL ChromeContentBrowserClient::GetEffectiveURL(
   // installed app, the effective URL is an extension URL with the ID of that
   // extension as the host. This has the effect of grouping apps together in
   // a common SiteInstance.
-  if (!profile || !profile->GetExtensionService())
+  ExtensionService* extension_service = !profile ? NULL :
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  if (!extension_service)
     return url;
 
-  const Extension* extension = profile->GetExtensionService()->extensions()->
+  const Extension* extension = extension_service->extensions()->
       GetHostedAppByURL(ExtensionURLInfo(url));
   if (!extension)
     return url;
@@ -618,14 +657,16 @@ bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
   // Non-extension URLs should generally use process-per-site-instance.
   // Because we expect to use the effective URL, URLs for hosted apps (apart
   // from bookmark apps) should have an extension scheme by now.
-  if (!effective_url.SchemeIs(chrome::kExtensionScheme))
+  if (!effective_url.SchemeIs(extensions::kExtensionScheme))
     return false;
 
   Profile* profile = Profile::FromBrowserContext(browser_context);
-  if (!profile || !profile->GetExtensionService())
+  ExtensionService* extension_service = !profile ? NULL :
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  if (!extension_service)
     return false;
 
-  const Extension* extension = profile->GetExtensionService()->extensions()->
+  const Extension* extension = extension_service->extensions()->
       GetExtensionOrAppByURL(ExtensionURLInfo(effective_url));
   if (!extension)
     return false;
@@ -656,7 +697,8 @@ bool ChromeContentBrowserClient::IsSuitableHost(
     const GURL& site_url) {
   Profile* profile =
       Profile::FromBrowserContext(process_host->GetBrowserContext());
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   extensions::ProcessMap* process_map = service->process_map();
 
   // Don't allow the Task Manager to share a process with anything else.
@@ -671,16 +713,6 @@ bool ChromeContentBrowserClient::IsSuitableHost(
   // share any host.
   if (!service || !process_map)
     return true;
-
-  // Experimental:
-  // If --enable-strict-site-isolation is enabled, do not allow non-WebUI pages
-  // to share a renderer process.  (We could allow pages from the same site or
-  // extensions of the same type to share, if we knew what the given process
-  // was dedicated to.  Allowing no sharing is simpler for now.)  This may
-  // cause resource exhaustion issues if too many sites are open at once.
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kEnableStrictSiteIsolation))
-    return false;
 
   // Otherwise, just make sure the process privilege matches the privilege
   // required by the site.
@@ -701,7 +733,8 @@ bool ChromeContentBrowserClient::ShouldTryToUseExistingProcessHost(
     return false;
 
   Profile* profile = Profile::FromBrowserContext(browser_context);
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service = !profile ? NULL :
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   if (!service)
     return false;
 
@@ -747,7 +780,8 @@ void ChromeContentBrowserClient::SiteInstanceGotProcess(
 
   Profile* profile = Profile::FromBrowserContext(
       site_instance->GetBrowserContext());
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   if (!service)
     return;
 
@@ -776,7 +810,8 @@ void ChromeContentBrowserClient::SiteInstanceDeleting(
 
   Profile* profile = Profile::FromBrowserContext(
       site_instance->GetBrowserContext());
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   if (!service)
     return;
 
@@ -805,7 +840,7 @@ bool ChromeContentBrowserClient::ShouldSwapProcessesForNavigation(
     // Always choose a new process when navigating to extension URLs. The
     // process grouping logic will combine all of a given extension's pages
     // into the same process.
-    if (new_url.SchemeIs(chrome::kExtensionScheme))
+    if (new_url.SchemeIs(extensions::kExtensionScheme))
       return true;
 
     return false;
@@ -813,8 +848,8 @@ bool ChromeContentBrowserClient::ShouldSwapProcessesForNavigation(
 
   // Also, we must switch if one is an extension and the other is not the exact
   // same extension.
-  if (current_url.SchemeIs(chrome::kExtensionScheme) ||
-      new_url.SchemeIs(chrome::kExtensionScheme)) {
+  if (current_url.SchemeIs(extensions::kExtensionScheme) ||
+      new_url.SchemeIs(extensions::kExtensionScheme)) {
     if (current_url.GetOrigin() != new_url.GetOrigin())
       return true;
   }
@@ -873,9 +908,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
     if (process) {
       Profile* profile = Profile::FromBrowserContext(
           process->GetBrowserContext());
-      if (profile->GetExtensionService()) {
-        extensions::ProcessMap* process_map =
-            profile->GetExtensionService()->process_map();
+      ExtensionService* extension_service =
+          extensions::ExtensionSystem::Get(profile)->extension_service();
+      if (extension_service) {
+        extensions::ProcessMap* process_map = extension_service->process_map();
         if (process_map && process_map->Contains(process->GetID()))
           command_line->AppendSwitch(switches::kExtensionProcess);
       }
@@ -920,10 +956,10 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kEnableBundledPpapiFlash,
       switches::kEnableCrxlessWebApps,
       switches::kEnableExperimentalExtensionApis,
-      switches::kEnableFramelessConstrainedDialogs,
       switches::kEnableIPCFuzzing,
+      switches::kEnableInteractiveAutocomplete,
       switches::kEnableNaCl,
-      switches::kEnableNaClIPCProxy,
+      switches::kEnableNaClSRPCProxy,
       switches::kEnablePasswordGeneration,
       switches::kEnablePnacl,
       switches::kEnableWatchdog,
@@ -1164,7 +1200,7 @@ net::URLRequestContext*
 ChromeContentBrowserClient::OverrideRequestContextForURL(
     const GURL& url, content::ResourceContext* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (url.SchemeIs(chrome::kExtensionScheme)) {
+  if (url.SchemeIs(extensions::kExtensionScheme)) {
     ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
     return io_data->extensions_request_context();
   }
@@ -1284,13 +1320,15 @@ void ChromeContentBrowserClient::SelectClientCertificate(
       network_session, cert_request_info, callback);
 }
 
-void ChromeContentBrowserClient::AddNewCertificate(
+void ChromeContentBrowserClient::AddCertificate(
     net::URLRequest* request,
-    net::X509Certificate* cert,
+    net::CertificateMimeType cert_type,
+    const void* cert_data,
+    size_t cert_size,
     int render_process_id,
     int render_view_id) {
-  // The handler will run the UI and delete itself when it's finished.
-  new SSLAddCertHandler(request, cert, render_process_id, render_view_id);
+  chrome::SSLAddCertificate(request, cert_type, cert_data, cert_size,
+      render_process_id, render_view_id);
 }
 
 content::MediaObserver* ChromeContentBrowserClient::GetMediaObserver() {
@@ -1315,14 +1353,15 @@ void ChromeContentBrowserClient::RequestDesktopNotificationPermission(
   // extension has the 'notify' permission. (If the extension does not have the
   // permission, the user will still be prompted.)
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   const Extension* extension = !service ? NULL :
       service->extensions()->GetExtensionOrAppByURL(ExtensionURLInfo(
           source_origin));
-  if (extension &&
-      extension->HasAPIPermission(APIPermission::kNotification)) {
-    RenderViewHost* rvh =
-        RenderViewHost::FromID(render_process_id, render_view_id);
+  RenderViewHost* rvh =
+      RenderViewHost::FromID(render_process_id, render_view_id);
+  if (IsExtensionWithPermissionOrSuggestInConsole(
+      APIPermission::kNotification, extension, rvh)) {
     if (rvh)
       rvh->DesktopNotificationPermissionRequestDone(callback_context);
     return;
@@ -1580,8 +1619,7 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
       // Mac so it uses NSSpellChecker in the background.
       false;
 #else
-      !CommandLine::ForCurrentProcess()->
-          HasSwitch(switches::kForceSyncSpellCheck);
+      true;
 #endif
   web_prefs->unified_textchecker_enabled =
       web_prefs->asynchronous_spell_checking_enabled;
@@ -1603,18 +1641,25 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
   }
   DCHECK(!web_prefs->default_encoding.empty());
 
-  WebContents* web_contents = WebContents::FromRenderViewHost(rvh);
-  chrome::ViewType view_type = chrome::GetViewType(web_contents);
-  ExtensionService* service = profile->GetExtensionService();
-  if (service) {
-    const Extension* extension = service->extensions()->GetByID(
-        rvh->GetSiteInstance()->GetSiteURL().host());
-    extension_webkit_preferences::SetPreferences(
-        extension, view_type, web_prefs);
-  }
-
   if (content::IsForceCompositingModeEnabled())
     web_prefs->force_compositing_mode = true;
+
+  WebContents* web_contents = WebContents::FromRenderViewHost(rvh);
+  chrome::ViewType view_type = chrome::GetViewType(web_contents);
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  if (service) {
+    const GURL& url = rvh->GetSiteInstance()->GetSiteURL();
+    const Extension* extension = service->extensions()->GetByID(url.host());
+    // Ensure that we are only granting extension preferences to URLs with
+    // the correct scheme. Without this check, chrome-guest:// schemes used by
+    // webview tags as well as hosts that happen to match the id of an
+    // installed extension would get the wrong preferences.
+    if (url.SchemeIs(extensions::kExtensionScheme)) {
+      extension_webkit_preferences::SetPreferences(
+          extension, view_type, web_prefs);
+    }
+  }
 
   if (view_type == chrome::VIEW_TYPE_NOTIFICATION) {
     web_prefs->allow_scripts_to_close_windows = true;
@@ -1623,10 +1668,6 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
     // See http://crbug.com/96005 and http://crbug.com/96006
     web_prefs->force_compositing_mode = false;
     web_prefs->accelerated_compositing_enabled = false;
-    web_prefs->accelerated_2d_canvas_enabled = false;
-    web_prefs->accelerated_video_enabled = false;
-    web_prefs->accelerated_painting_enabled = false;
-    web_prefs->accelerated_plugins_enabled = false;
   }
 
 #if defined(FILE_MANAGER_EXTENSION)
@@ -1706,24 +1747,48 @@ std::string ChromeContentBrowserClient::GetDefaultDownloadName() {
 
 void ChromeContentBrowserClient::DidCreatePpapiPlugin(
     content::BrowserPpapiHost* browser_host) {
+#if defined(ENABLE_PLUGINS)
   browser_host->GetPpapiHost()->AddHostFactoryFilter(
       scoped_ptr<ppapi::host::HostFactory>(
           new ChromeBrowserPepperHostFactory(browser_host)));
+#endif
+}
+
+content::BrowserPpapiHost*
+    ChromeContentBrowserClient::GetExternalBrowserPpapiHost(
+        int plugin_process_id) {
+  BrowserChildProcessHostIterator iter(content::PROCESS_TYPE_NACL_LOADER);
+  while (!iter.Done()) {
+    NaClProcessHost* host = static_cast<NaClProcessHost*>(iter.GetDelegate());
+    if (host->process() &&
+        host->process()->GetData().id == plugin_process_id) {
+      // Found the plugin.
+      return host->browser_ppapi_host();
+    }
+    ++iter;
+  }
+  return NULL;
 }
 
 bool ChromeContentBrowserClient::AllowPepperSocketAPI(
-    content::BrowserContext* browser_context, const GURL& url) {
+    content::BrowserContext* browser_context,
+    const GURL& url,
+    const content::SocketPermissionRequest& params) {
   if (!url.is_valid())
     return false;
 
   std::string host = url.host();
-  if (url.SchemeIs(kExtensionScheme) && allowed_socket_origins_.count(host))
+  if (url.SchemeIs(extensions::kExtensionScheme) &&
+      allowed_socket_origins_.count(host)) {
     return true;
+  }
 
   Profile* profile = Profile::FromBrowserContext(browser_context);
   const Extension* extension = NULL;
-  if (profile && profile->GetExtensionService()) {
-    extension = profile->GetExtensionService()->extensions()->
+  ExtensionService* extension_service = !profile ? NULL :
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  if (extension_service) {
+    extension = extension_service->extensions()->
         GetExtensionOrAppByURL(ExtensionURLInfo(url));
   }
 
@@ -1748,15 +1813,13 @@ bool ChromeContentBrowserClient::AllowPepperSocketAPI(
   if (!extension)
     return false;
 
-  if (extension->HasAPIPermission(APIPermission::kSocket))
+  extensions::SocketPermission::CheckParam extension_params(
+      params.type, params.host, params.port);
+  if (extension->CheckAPIPermissionWithParam(APIPermission::kSocket,
+                                             &extension_params))
     return true;
 
   return false;
-}
-
-bool ChromeContentBrowserClient::AllowPepperPrivateFileAPI() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kPpapiFlashInProcess);
 }
 
 FilePath ChromeContentBrowserClient::GetHyphenDictionaryDirectory() {
@@ -1799,7 +1862,7 @@ void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
                                          FileDescriptor(f, true)));
 
 #if defined(USE_LINUX_BREAKPAD)
-  f = crash_dump_manager_->CreateMinidumpFile(child_process_id);
+  f = CrashDumpManager::GetInstance()->CreateMinidumpFile(child_process_id);
   if (f == base::kInvalidPlatformFileValue) {
     LOG(ERROR) << "Failed to create file for minidump, crash reporting will be "
         "disabled for this process.";
@@ -1823,13 +1886,6 @@ void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 #if defined(OS_WIN)
 const wchar_t* ChromeContentBrowserClient::GetResourceDllName() {
   return chrome::kBrowserResourcesDll;
-}
-#endif
-
-#if defined(OS_ANDROID)
-void ChromeContentBrowserClient::InitCrashDumpManager() {
-  if (!crash_dump_manager_.get())
-    crash_dump_manager_.reset(new CrashDumpManager());
 }
 #endif
 
@@ -1866,24 +1922,5 @@ void ChromeContentBrowserClient::SetApplicationLocaleOnIOThread(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   io_thread_application_locale_ = locale;
 }
-
-std::string ChromeContentBrowserClient::GetStoragePartitionIdForExtension(
-    content::BrowserContext* browser_context, const Extension* extension) {
-  // In chrome, we use the extension ID as the partition ID. This works well
-  // because the extension ID fits the partition ID pattern and currently only
-  // apps can designate that storage should be isolated.
-  //
-  // If |extension| is NULL, then the default, empty string, partition id is
-  // used.
-  std::string partition_id;
-  if (extension && extension->is_storage_isolated()) {
-    partition_id = extension->id();
-  }
-
-  // Enforce that IsValidStoragePartitionId() implementation stays in sync.
-  DCHECK(IsValidStoragePartitionId(browser_context, partition_id));
-  return partition_id;
-}
-
 
 }  // namespace chrome

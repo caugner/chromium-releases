@@ -28,7 +28,7 @@ namespace file_system {
 
 class OperationObserver;
 
-// This class encapsulates the drive Remove function.  It is resposible for
+// This class encapsulates the drive Remove function.  It is responsible for
 // sending the request to the drive API, then updating the local state and
 // metadata to reflect the new state.
 class RemoveOperation {
@@ -41,6 +41,7 @@ class RemoveOperation {
 
   // Perform the remove operation on the file at drive path |file_path|.
   // Invokes |callback| when finished with the result of the operation.
+  // |callback| must not be null.
   virtual void Remove(const FilePath& file_path,
                       bool is_recursive,
                       const FileOperationCallback& callback);
@@ -53,17 +54,16 @@ class RemoveOperation {
       DriveFileError error,
       scoped_ptr<DriveEntryProto> entry_proto);
 
-  // Callback for DriveServiceInterface::DeleteDocument. Removes the entry with
+  // Callback for DriveServiceInterface::DeleteResource. Removes the entry with
   // |resource_id| from the local snapshot of the filesystem and the cache.
-  // |document_url| is unused. |callback| must not be null.
+  // |callback| must not be null.
   void RemoveResourceLocally(
       const FileOperationCallback& callback,
       const std::string& resource_id,
-      google_apis::GDataErrorCode status,
-      const GURL& /* document_url */);
+      google_apis::GDataErrorCode status);
 
   // Sends notification for directory changes. Notifies of directory changes,
-  // and runs |callback| with |error|. |callback| may be null.
+  // and runs |callback| with |error|. |callback| must not be null.
   void NotifyDirectoryChanged(
       const FileOperationCallback& callback,
       DriveFileError error,

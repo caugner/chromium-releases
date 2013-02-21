@@ -8,18 +8,19 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_temp_dir.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_task_runners.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
@@ -237,7 +238,7 @@ class FileSystemMountPointProviderTest : public testing::Test {
       virtual_path = FilePath(kVirtualPath);
     FilePath returned_root_path =
         provider(type)->GetFileSystemRootPathOnFileThread(
-            origin_url, type, virtual_path, create);
+            FileSystemURL(origin_url, type, virtual_path), create);
     if (root_path)
       *root_path = returned_root_path;
     return !returned_root_path.empty();
@@ -246,14 +247,14 @@ class FileSystemMountPointProviderTest : public testing::Test {
   FilePath data_path() const { return data_dir_.path(); }
   FilePath file_system_path() const {
     return data_dir_.path().Append(
-        SandboxMountPointProvider::kNewFileSystemDirectory);
+        SandboxMountPointProvider::kFileSystemDirectory);
   }
   FileSystemContext* file_system_context() const {
     return file_system_context_.get();
   }
 
  private:
-  ScopedTempDir data_dir_;
+  base::ScopedTempDir data_dir_;
   MessageLoop message_loop_;
   base::WeakPtrFactory<FileSystemMountPointProviderTest> weak_factory_;
 

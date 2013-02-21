@@ -6,24 +6,32 @@
 
 #include "grit/ui_resources.h"
 #include "ui/base/layout.h"
-#include "ui/base/native_theme/native_theme_aura.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/native_theme/native_theme_aura.h"
+#include "ui/views/controls/menu/menu_image_util.h"
 
 namespace views {
 
-void MenuConfig::Init() {
-  text_color = ui::NativeTheme::instance()->GetSystemColor(
+#if !defined(OS_WIN)
+void MenuConfig::Init(const ui::NativeTheme* theme) {
+  InitAura();
+}
+#endif
+
+void MenuConfig::InitAura() {
+  ui::NativeTheme* theme = ui::NativeThemeAura::instance();
+  text_color = theme->GetSystemColor(
       ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor);
-  submenu_horizontal_margin_size = 0;
-  submenu_vertical_margin_size = 0;
+  menu_horizontal_border_size = 0;
+  menu_vertical_border_size = 0;
   submenu_horizontal_inset = 1;
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   arrow_to_edge_padding = 20;
   icon_to_label_padding = 4;
   arrow_width = rb.GetImageNamed(IDR_MENU_ARROW).ToImageSkia()->width();
-  const gfx::ImageSkia* check = rb.GetImageNamed(IDR_MENU_CHECK).ToImageSkia();
+  const gfx::ImageSkia* check = GetMenuCheckImage();
   // Add 4 to force some padding between check and label.
   check_width = check->width() + 4;
   check_height = check->height();
@@ -40,5 +48,15 @@ void MenuConfig::Init() {
   align_arrow_and_shortcut = true;
   offset_context_menus = true;
 }
+
+#if !defined(OS_WIN)
+// static
+const MenuConfig& MenuConfig::instance(const ui::NativeTheme* theme) {
+  static MenuConfig* views_instance = NULL;
+  if (!views_instance)
+    views_instance = new MenuConfig(ui::NativeTheme::instance());
+  return *views_instance;
+}
+#endif
 
 }  // namespace views

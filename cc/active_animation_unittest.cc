@@ -2,17 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/active_animation.h"
 
 #include "cc/test/animation_test_common.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using namespace WebKitTests;
-using namespace cc;
-
+namespace cc {
 namespace {
 
 scoped_ptr<ActiveAnimation> createActiveAnimation(int iterations, double duration)
@@ -218,4 +214,5 @@ TEST(ActiveAnimationTest, RunStateChangesIgnoredWhileSuspended)
     EXPECT_EQ(ActiveAnimation::Running, anim->runState());
 }
 
-} // namespace
+}  // namespace
+}  // namespace cc

@@ -6,6 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -24,6 +25,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/ssl_status.h"
+#include "extensions/common/constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/cert_status_flags.h"
@@ -47,10 +49,8 @@ ToolbarModelImpl::~ToolbarModelImpl() {
 // ToolbarModelImpl Implementation.
 string16 ToolbarModelImpl::GetText(
     bool display_search_urls_as_search_terms) const {
-  GURL url(GetURL());
-
   if (display_search_urls_as_search_terms) {
-    string16 search_terms = TryToExtractSearchTermsFromURL(url);
+    string16 search_terms = TryToExtractSearchTermsFromURL();
     if (!search_terms.empty())
       return search_terms;
   }
@@ -59,6 +59,7 @@ string16 ToolbarModelImpl::GetText(
   if (profile)
     languages = profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
 
+  GURL url(GetURL());
   if (url.spec().length() > content::kMaxURLDisplayChars)
     url = url.IsStandard() ? url.GetOrigin() : GURL(url.scheme() + ":");
   // Note that we can't unescape spaces here, because if the user copies this
@@ -81,7 +82,7 @@ GURL ToolbarModelImpl::GetURL() const {
 }
 
 bool ToolbarModelImpl::WouldReplaceSearchURLWithSearchTerms() const {
-  return !TryToExtractSearchTermsFromURL(GetURL()).empty();
+  return !TryToExtractSearchTermsFromURL().empty();
 }
 
 bool ToolbarModelImpl::ShouldDisplayURL() const {
@@ -105,7 +106,7 @@ bool ToolbarModelImpl::ShouldDisplayURL() const {
   if (web_contents && web_contents->GetWebUIForCurrentState())
     return !web_contents->GetWebUIForCurrentState()->ShouldHideURL();
 
-  if (entry && entry->GetURL().SchemeIs(chrome::kExtensionScheme))
+  if (entry && entry->GetURL().SchemeIs(extensions::kExtensionScheme))
     return false;
 
 #if defined(OS_CHROMEOS)
@@ -156,6 +157,8 @@ ToolbarModelImpl::SecurityLevel ToolbarModelImpl::GetSecurityLevel() const {
 }
 
 int ToolbarModelImpl::GetIcon() const {
+  if (WouldReplaceSearchURLWithSearchTerms())
+    return IDR_OMNIBOX_SEARCH;
   static int icon_ids[NUM_SECURITY_LEVELS] = {
     IDR_LOCATION_BAR_HTTP,
     IDR_OMNIBOX_HTTPS_VALID,
@@ -208,13 +211,14 @@ NavigationController* ToolbarModelImpl::GetNavigationController() const {
   return current_tab ? &current_tab->GetController() : NULL;
 }
 
-string16 ToolbarModelImpl::TryToExtractSearchTermsFromURL(
-    const GURL& url) const {
+string16 ToolbarModelImpl::TryToExtractSearchTermsFromURL() const {
+  const GURL& url = GetURL();
   Profile* profile = GetProfile();
 
-  // Ensure instant extended API is enabled and query URL is HTTPS.
-  if (!profile || !chrome::search::IsInstantExtendedAPIEnabled(profile) ||
-      !url.SchemeIs(chrome::kHttpsScheme))
+  // Ensure query extraction is enabled and query URL is HTTPS.
+  if (!profile || !chrome::search::IsQueryExtractionEnabled(profile) ||
+      !url.SchemeIs(chrome::kHttpsScheme) ||
+      !google_util::IsInstantExtendedAPIGoogleSearchUrl(url.spec()))
     return string16();
 
   TemplateURLService* template_url_service =

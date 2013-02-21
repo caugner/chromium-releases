@@ -40,7 +40,7 @@ BaseScrollBar::BaseScrollBar(bool horizontal, BaseScrollBarThumb* thumb)
       thumb_(thumb),
       contents_size_(0),
       contents_scroll_offset_(0),
-      thumb_track_state_(CustomButton::BS_NORMAL),
+      thumb_track_state_(CustomButton::STATE_NORMAL),
       last_scroll_amount_(SCROLL_NONE),
       ALLOW_THIS_IN_INITIALIZER_LIST(repeater_(
           base::Bind(&BaseScrollBar::TrackClicked, base::Unretained(this)))),
@@ -99,14 +99,19 @@ void BaseScrollBar::ScrollToThumbPosition(int thumb_position,
   SchedulePaint();
 }
 
-void BaseScrollBar::ScrollByContentsOffset(int contents_offset) {
+bool BaseScrollBar::ScrollByContentsOffset(int contents_offset) {
+  int old_offset = contents_scroll_offset_;
   contents_scroll_offset_ -= contents_offset;
   if (contents_scroll_offset_ < GetMinPosition()) {
     contents_scroll_offset_ = GetMinPosition();
   } else if (contents_scroll_offset_ > GetMaxPosition()) {
     contents_scroll_offset_ = GetMaxPosition();
   }
+  if (old_offset == contents_scroll_offset_)
+    return false;
+
   ScrollContentsToOffset();
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -167,69 +172,72 @@ bool BaseScrollBar::OnKeyPressed(const ui::KeyEvent& event) {
   return false;
 }
 
-ui::EventResult BaseScrollBar::OnGestureEvent(const ui::GestureEvent& event) {
-  // If a fling is in progress, then stop the fling for any incoming gesture
-  // event (except for the GESTURE_END event that is generated at the end of the
-  // fling).
-  if (scroll_animator_.get() && scroll_animator_->is_scrolling() &&
-      (event.type() != ui::ET_GESTURE_END ||
-       event.details().touch_points() > 1)) {
-    scroll_animator_->Stop();
-  }
-
-  if (event.type() == ui::ET_GESTURE_TAP_DOWN) {
-    ProcessPressEvent(event);
-    return ui::ER_CONSUMED;
-  }
-
-  if (event.type() == ui::ET_GESTURE_LONG_PRESS) {
-    // For a long-press, the repeater started in tap-down should continue. So
-    // return early.
-    return ui::ER_UNHANDLED;
-  }
-
-  ResetState();
-
-  if (event.type() == ui::ET_GESTURE_TAP) {
-    // TAP_DOWN would have already scrolled some amount. So scrolling again on
-    // TAP is not necessary.
-    return ui::ER_CONSUMED;
-  }
-
-  if (event.type() == ui::ET_GESTURE_SCROLL_BEGIN ||
-      event.type() == ui::ET_GESTURE_SCROLL_END)
-    return ui::ER_CONSUMED;
-
-  if (event.type() == ui::ET_GESTURE_SCROLL_UPDATE) {
-    ScrollByContentsOffset(IsHorizontal() ? event.details().scroll_x() :
-                                            event.details().scroll_y());
-    return ui::ER_CONSUMED;
-  }
-
-  if (event.type() == ui::ET_SCROLL_FLING_START) {
-    if (!scroll_animator_.get())
-      scroll_animator_.reset(new ScrollAnimator(this));
-    scroll_animator_->Start(IsHorizontal() ? event.details().velocity_x() : 0.f,
-        IsHorizontal() ? 0.f : event.details().velocity_y());
-    return ui::ER_CONSUMED;
-  }
-
-  return ui::ER_UNHANDLED;
-}
-
 bool BaseScrollBar::OnMouseWheel(const ui::MouseWheelEvent& event) {
   ScrollByContentsOffset(event.offset());
   return true;
 }
 
+void BaseScrollBar::OnGestureEvent(ui::GestureEvent* event) {
+  // If a fling is in progress, then stop the fling for any incoming gesture
+  // event (except for the GESTURE_END event that is generated at the end of the
+  // fling).
+  if (scroll_animator_.get() && scroll_animator_->is_scrolling() &&
+      (event->type() != ui::ET_GESTURE_END ||
+       event->details().touch_points() > 1)) {
+    scroll_animator_->Stop();
+  }
+
+  if (event->type() == ui::ET_GESTURE_TAP_DOWN) {
+    ProcessPressEvent(*event);
+    event->SetHandled();
+    return;
+  }
+
+  if (event->type() == ui::ET_GESTURE_LONG_PRESS) {
+    // For a long-press, the repeater started in tap-down should continue. So
+    // return early.
+    return;
+  }
+
+  ResetState();
+
+  if (event->type() == ui::ET_GESTURE_TAP) {
+    // TAP_DOWN would have already scrolled some amount. So scrolling again on
+    // TAP is not necessary.
+    event->SetHandled();
+    return;
+  }
+
+  if (event->type() == ui::ET_GESTURE_SCROLL_BEGIN ||
+      event->type() == ui::ET_GESTURE_SCROLL_END) {
+    event->SetHandled();
+    return;
+  }
+
+  if (event->type() == ui::ET_GESTURE_SCROLL_UPDATE) {
+    if (ScrollByContentsOffset(IsHorizontal() ? event->details().scroll_x() :
+                                                event->details().scroll_y())) {
+      event->SetHandled();
+    }
+    return;
+  }
+
+  if (event->type() == ui::ET_SCROLL_FLING_START) {
+    if (!scroll_animator_.get())
+      scroll_animator_.reset(new ScrollAnimator(this));
+    scroll_animator_->Start(
+        IsHorizontal() ?  event->details().velocity_x() : 0.f,
+        IsHorizontal() ? 0.f : event->details().velocity_y());
+    event->SetHandled();
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // BaseScrollBar, ScrollDelegate implementation:
 
-void BaseScrollBar::OnScroll(float dx, float dy) {
-  if (IsHorizontal())
-    ScrollByContentsOffset(dx);
-  else
-    ScrollByContentsOffset(dy);
+bool BaseScrollBar::OnScroll(float dx, float dy) {
+  return IsHorizontal() ? ScrollByContentsOffset(dx) :
+                          ScrollByContentsOffset(dy);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -402,7 +410,7 @@ int BaseScrollBar::GetScrollIncrement(bool is_page, bool is_positive) {
 // BaseScrollBar, private:
 
 void BaseScrollBar::ProcessPressEvent(const ui::LocatedEvent& event) {
-  SetThumbTrackState(CustomButton::BS_PUSHED);
+  SetThumbTrackState(CustomButton::STATE_PRESSED);
   gfx::Rect thumb_bounds = thumb_->bounds();
   if (IsHorizontal()) {
     if (event.x() < thumb_bounds.x()) {
@@ -422,7 +430,7 @@ void BaseScrollBar::ProcessPressEvent(const ui::LocatedEvent& event) {
 }
 
 void BaseScrollBar::ResetState() {
-  SetThumbTrackState(CustomButton::BS_NORMAL);
+  SetThumbTrackState(CustomButton::STATE_NORMAL);
   repeater_.Stop();
 }
 

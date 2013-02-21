@@ -43,6 +43,18 @@ VerifyResult VerifyX509CertChain(const std::vector<std::string>& cert_chain,
   return trusted ? VERIFY_OK : VERIFY_NO_TRUSTED_ROOT;
 }
 
+void AddTestRootCertificate(const uint8* cert, size_t len) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jbyteArray> cert_array = ToJavaByteArray(env, cert, len);
+  DCHECK(!cert_array.is_null());
+  Java_AndroidNetworkLibrary_addTestRootCertificate(env, cert_array.obj());
+}
+
+void ClearTestRootCertificates() {
+  JNIEnv* env = AttachCurrentThread();
+  Java_AndroidNetworkLibrary_clearTestRootCertificates(env);
+}
+
 bool StoreKeyPair(const uint8* public_key,
                   size_t public_len,
                   const uint8* private_key,
@@ -57,6 +69,22 @@ bool StoreKeyPair(const uint8* public_key,
   LOG_IF(WARNING, !ret) <<
       "Call to Java_AndroidNetworkLibrary_storeKeyPair failed";
   return ret;
+}
+
+void StoreCertificate(net::CertificateMimeType cert_type,
+                      const void* data,
+                      size_t data_len) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jbyteArray> data_array =
+      ToJavaByteArray(env, reinterpret_cast<const uint8*>(data), data_len);
+  jboolean ret = Java_AndroidNetworkLibrary_storeCertificate(env,
+      GetApplicationContext(), cert_type, data_array.obj());
+  LOG_IF(WARNING, !ret) <<
+      "Call to Java_AndroidNetworkLibrary_storeCertificate"
+      " failed";
+  // Intentionally do not return 'ret', there is little the caller can
+  // do in case of failure (the CertInstaller itself will deal with
+  // incorrect data and display the appropriate toast).
 }
 
 bool HaveOnlyLoopbackAddresses() {
@@ -81,11 +109,8 @@ bool GetMimeTypeFromExtension(const std::string& extension,
       Java_AndroidNetworkLibrary_getMimeTypeFromExtension(
           env, extension_string.obj());
 
-  if (!ret.obj()) {
-    LOG(WARNING) << "Call to getMimeTypeFromExtension failed for extension: "
-        << extension;
+  if (!ret.obj())
     return false;
-  }
   *result = ConvertJavaStringToUTF8(ret);
   return true;
 }

@@ -35,6 +35,16 @@ XSESSION_COMMAND = None
 
 LOG_FILE_ENV_VAR = "CHROME_REMOTE_DESKTOP_LOG_FILE"
 
+# This script has a sensible default for the initial and maximum desktop size,
+# which can be overridden either on the command-line, or via a comma-separated
+# list of sizes in this environment variable.
+DEFAULT_SIZES_ENV_VAR = "CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES"
+
+# By default, provide a relatively small size to handle the case where resize-
+# to-client is disabled, and a much larger size to support clients with large
+# or mulitple monitors. These defaults can be overridden in ~/.profile.
+DEFAULT_SIZES = "1600x1200,3840x1600"
+
 SCRIPT_PATH = sys.path[0]
 
 DEFAULT_INSTALL_PATH = "/opt/google/chrome-remote-desktop"
@@ -85,14 +95,15 @@ class Config:
   def save(self):
     if not self.changed:
       return True
+    old_umask = os.umask(0066)
     try:
-      old_umask = os.umask(0066)
       settings_file = open(self.path, 'w')
       settings_file.write(json.dumps(self.data, indent=2))
       settings_file.close()
-      os.umask(old_umask)
     except Exception:
       return False
+    finally:
+      os.umask(old_umask)
     self.changed = False
     return True
 
@@ -190,6 +201,7 @@ class Desktop:
     # Create clean environment for new session, so it is cleanly separated from
     # the user's console X session.
     self.child_env = {}
+
     for key in [
         "HOME",
         "LANG",
@@ -201,6 +213,26 @@ class Desktop:
         LOG_FILE_ENV_VAR]:
       if os.environ.has_key(key):
         self.child_env[key] = os.environ[key]
+
+    # Read from /etc/environment if it exists, as it is a standard place to
+    # store system-wide environment settings. During a normal login, this would
+    # typically be done by the pam_env PAM module, depending on the local PAM
+    # configuration.
+    env_filename = "/etc/environment"
+    try:
+      with open(env_filename, "r") as env_file:
+        for line in env_file:
+          line = line.rstrip("\n")
+          # Split at the first "=", leaving any further instances in the value.
+          key_value_pair = line.split("=", 1)
+          if len(key_value_pair) == 2:
+            key, value = tuple(key_value_pair)
+            # The file stores key=value assignments, but the value may be
+            # quoted, so strip leading & trailing quotes from it.
+            value = value.strip("'\"")
+            self.child_env[key] = value
+    except IOError:
+      logging.info("Failed to read %s, skipping." % env_filename)
 
   def _setup_pulseaudio(self):
     self.pulseaudio_pipe = None
@@ -233,7 +265,7 @@ class Desktop:
       pulse_config.write("load-module module-native-protocol-unix\n")
       pulse_config.write(
           ("load-module module-pipe-sink sink_name=%s file=\"%s\" " +
-           "rate=44100 channels=2 format=s16le\n") %
+           "rate=48000 channels=2 format=s16le\n") %
           (sink_name, pipe_name))
       pulse_config.close()
     except IOError, e:
@@ -747,7 +779,6 @@ def waitpid_handle_exceptions(pid, deadline):
 
 
 def main():
-  DEFAULT_SIZE = "2560x1600"
   EPILOG = """This script is not intended for use by end-users.  To configure
 Chrome Remote Desktop, please install the app from the Chrome
 Web Store: https://chrome.google.com/remotedesktop"""
@@ -755,10 +786,9 @@ Web Store: https://chrome.google.com/remotedesktop"""
       usage="Usage: %prog [options] [ -- [ X server options ] ]",
       epilog=EPILOG)
   parser.add_option("-s", "--size", dest="size", action="append",
-                    help="Dimensions of virtual desktop (default: %s). "
-                    "This can be specified multiple times to make multiple "
-                    "screen resolutions available (if the Xvfb server "
-                    "supports this)" % DEFAULT_SIZE)
+                    help="Dimensions of virtual desktop. This can be specified "
+                    "multiple times to make multiple screen resolutions "
+                    "available (if the Xvfb server supports this).")
   parser.add_option("-f", "--foreground", dest="foreground", default=False,
                     action="store_true",
                     help="Don't run as a background daemon.")
@@ -771,6 +801,8 @@ Web Store: https://chrome.google.com/remotedesktop"""
   parser.add_option("", "--check-running", dest="check_running", default=False,
                     action="store_true",
                     help="Return 0 if the daemon is running, or 1 otherwise.")
+  parser.add_option("", "--config", dest="config", action="store",
+                    help="Use the specified configuration file.")
   parser.add_option("", "--reload", dest="reload", default=False,
                     action="store_true",
                     help="Signal currently running host to reload the config.")
@@ -782,7 +814,10 @@ Web Store: https://chrome.google.com/remotedesktop"""
                     help="Prints version of the host.")
   (options, args) = parser.parse_args()
 
-  pid_filename = os.path.join(CONFIG_DIR, "host#%s.pid" % g_host_hash)
+  # Determine the filename of the host configuration and PID files.
+  if not options.config:
+    options.config = os.path.join(CONFIG_DIR, "host#%s.json" % g_host_hash)
+  pid_filename = os.path.splitext(options.config)[0] + ".pid"
 
   # Check for a modal command-line option (start, stop, etc.)
   if options.check_running:
@@ -825,8 +860,12 @@ Web Store: https://chrome.google.com/remotedesktop"""
     print >> sys.stderr, EPILOG
     return 1
 
+  # Collate the list of sizes that XRANDR should support.
   if not options.size:
-    options.size = [DEFAULT_SIZE]
+    default_sizes = DEFAULT_SIZES
+    if os.environ.has_key(DEFAULT_SIZES_ENV_VAR):
+      default_sizes = os.environ[DEFAULT_SIZES_ENV_VAR]
+    options.size = default_sizes.split(",");
 
   sizes = []
   for size in options.size:
@@ -847,6 +886,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
     sizes.append((width, height))
 
+  # Determine the command-line to run the user's preferred X environment.
   global XSESSION_COMMAND
   XSESSION_COMMAND = choose_x_session()
   if XSESSION_COMMAND is None:
@@ -859,18 +899,20 @@ Web Store: https://chrome.google.com/remotedesktop"""
       "If you encounter problems with this choice of desktop, please install\n"
       "the gnome-session-fallback package, and restart this script.\n")
 
+  # Register an exit handler to clean up session process and the PID file.
   atexit.register(cleanup)
 
-  config_filename = os.path.join(CONFIG_DIR, "host#%s.json" % g_host_hash)
-  host_config = Config(config_filename)
-
-  for s in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1]:
-    signal.signal(s, SignalHandler(host_config))
-
+  # Load the initial host configuration.
+  host_config = Config(options.config)
   if (not host_config.load()):
     print >> sys.stderr, "Failed to load " + config_filename
     return 1
 
+  # Register handler to re-load the configuration in response to signals.
+  for s in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1]:
+    signal.signal(s, SignalHandler(host_config))
+
+  # Verify that the initial host configuration has the necessary fields.
   auth = Authentication()
   auth_config_valid = auth.copy_from(host_config)
   host = Host()
@@ -879,18 +921,22 @@ Web Store: https://chrome.google.com/remotedesktop"""
     logging.error("Failed to load host configuration.")
     return 1
 
+  # Determine whether a desktop is already active for the specified host
+  # host configuration.
   global g_pidfile
   g_pidfile = PidFile(pid_filename)
   running, pid = g_pidfile.check()
-
   if running:
     # Debian policy requires that services should "start" cleanly and return 0
     # if they are already running.
     print "Service already running."
     return 0
 
+  # Record that we are running a desktop against for this configuration.
   g_pidfile.create()
 
+  # Detach a separate "daemon" process to run the session, unless specifically
+  # requested to run in the foreground.
   if not options.foreground:
     if not os.environ.has_key(LOG_FILE_ENV_VAR):
       log_file = tempfile.NamedTemporaryFile(
@@ -995,27 +1041,35 @@ Web Store: https://chrome.google.com/remotedesktop"""
       # Delete the host or auth configuration depending on the returned error
       # code, so the next time this script is run, a new configuration
       # will be created and registered.
-      if os.WEXITSTATUS(status) == 2:
+      if os.WEXITSTATUS(status) == 100:
         logging.info("Host configuration is invalid - exiting.")
         host_config.clear_auth()
         host_config.clear_host_info()
         host_config.save()
         return 0
-      elif os.WEXITSTATUS(status) == 3:
+      elif os.WEXITSTATUS(status) == 101:
         logging.info("Host ID has been deleted - exiting.")
         host_config.clear_host_info()
         host_config.save()
         return 0
-      elif os.WEXITSTATUS(status) == 4:
+      elif os.WEXITSTATUS(status) == 102:
         logging.info("OAuth credentials are invalid - exiting.")
         host_config.clear_auth()
         host_config.save()
         return 0
-      elif os.WEXITSTATUS(status) == 5:
+      elif os.WEXITSTATUS(status) == 103:
         logging.info("Host domain is blocked by policy - exiting.")
-        os.remove(host.config_file)
+        host_config.clear_auth()
+        host_config.clear_host_info()
+        host_config.save()
         return 0
-      # Nothing to do for Mac-only status 6 (login screen unsupported)
+      # Nothing to do for Mac-only status 104 (login screen unsupported)
+      elif os.WEXITSTATUS(status) == 105:
+        logging.info("Username is blocked by policy - exiting.")
+        host_config.clear_auth()
+        host_config.clear_host_info()
+        host_config.save()
+        return 0
 
 
 if __name__ == "__main__":

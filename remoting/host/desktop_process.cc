@@ -18,8 +18,6 @@
 #include "remoting/host/chromoting_messages.h"
 #include "remoting/host/desktop_session_agent.h"
 
-const char kIoThreadName[] = "I/O thread";
-
 namespace remoting {
 
 DesktopProcess::DesktopProcess(
@@ -34,6 +32,18 @@ DesktopProcess::DesktopProcess(
 DesktopProcess::~DesktopProcess() {
   DCHECK(!daemon_channel_);
   DCHECK(!desktop_agent_);
+}
+
+void DesktopProcess::OnNetworkProcessDisconnected() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  OnChannelError();
+}
+
+void DesktopProcess::InjectSas() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  daemon_channel_->Send(new ChromotingDesktopDaemonMsg_InjectSas());
 }
 
 bool DesktopProcess::OnMessageReceived(const IPC::Message& message) {
@@ -51,8 +61,6 @@ void DesktopProcess::OnChannelConnected(int32 peer_pid) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   VLOG(1) << "IPC: desktop <- daemon (" << peer_pid << ")";
-
-  NOTIMPLEMENTED();
 }
 
 void DesktopProcess::OnChannelError() {
@@ -60,30 +68,39 @@ void DesktopProcess::OnChannelError() {
 
   // Shutdown the desktop process.
   daemon_channel_.reset();
-  desktop_agent_.reset();
+  desktop_agent_->Stop();
+  desktop_agent_ = NULL;
   caller_task_runner_ = NULL;
 }
 
 bool DesktopProcess::Start() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
+  // Launch the input thread.
+  scoped_refptr<AutoThreadTaskRunner> input_task_runner =
+      AutoThread::CreateWithType("Input thread", caller_task_runner_,
+                                 MessageLoop::TYPE_IO);
+
   // Launch the I/O thread.
   scoped_refptr<AutoThreadTaskRunner> io_task_runner =
-      AutoThread::CreateWithType(kIoThreadName, caller_task_runner_,
+      AutoThread::CreateWithType("I/O thread", caller_task_runner_,
                                  MessageLoop::TYPE_IO);
+
+  // Launch the video capture thread.
+  scoped_refptr<AutoThreadTaskRunner> video_capture_task_runner =
+      AutoThread::Create("Video capture thread", caller_task_runner_);
 
   // Create a desktop agent.
   desktop_agent_ = DesktopSessionAgent::Create(caller_task_runner_,
-                                               io_task_runner);
+                                               input_task_runner,
+                                               io_task_runner,
+                                               video_capture_task_runner);
 
-  // Start the agent and create an IPC channel to talk to it. It is safe to
-  // use base::Unretained(this) here because the message loop below will run
-  // until |desktop_agent_| is completely destroyed.
+  // Start the agent and create an IPC channel to talk to it.
   IPC::PlatformFileForTransit desktop_pipe;
-  if (!desktop_agent_->Start(base::Bind(&DesktopProcess::OnChannelError,
-                                        base::Unretained(this)),
-                             &desktop_pipe)) {
-    desktop_agent_.reset();
+  if (!desktop_agent_->Start(AsWeakPtr(), &desktop_pipe)) {
+    desktop_agent_ = NULL;
+    caller_task_runner_ = NULL;
     return false;
   }
 

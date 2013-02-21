@@ -16,6 +16,12 @@ using content::BrowserThread;
 namespace drive {
 namespace file_system {
 
+namespace {
+
+void EmptyFileOperationCallback(DriveFileError error) {}
+
+}  // namespace
+
 RemoveOperation::RemoveOperation(
     google_apis::DriveServiceInterface* drive_service,
     DriveCache* cache,
@@ -67,7 +73,7 @@ void RemoveOperation::RemoveAfterGetEntryInfo(
     return;
   }
 
-  drive_service_->DeleteDocument(
+  drive_service_->DeleteResource(
       GURL(entry_proto->edit_url()),
       base::Bind(&RemoveOperation::RemoveResourceLocally,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -78,8 +84,7 @@ void RemoveOperation::RemoveAfterGetEntryInfo(
 void RemoveOperation::RemoveResourceLocally(
     const FileOperationCallback& callback,
     const std::string& resource_id,
-    google_apis::GDataErrorCode status,
-    const GURL& /* document_url */) {
+    google_apis::GDataErrorCode status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -95,18 +100,20 @@ void RemoveOperation::RemoveResourceLocally(
                  weak_ptr_factory_.GetWeakPtr(),
                  callback));
 
-  cache_->RemoveOnUIThread(resource_id, CacheOperationCallback());
+  cache_->Remove(resource_id, base::Bind(&EmptyFileOperationCallback));
 }
 
 void RemoveOperation::NotifyDirectoryChanged(
     const FileOperationCallback& callback,
     DriveFileError error,
     const FilePath& directory_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
   if (error == DRIVE_FILE_OK)
     observer_->OnDirectoryChangedByOperation(directory_path);
 
-  if (!callback.is_null())
-    callback.Run(error);
+  callback.Run(error);
 }
 
 }  // namespace file_system

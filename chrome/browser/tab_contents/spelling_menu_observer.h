@@ -9,9 +9,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/string16.h"
 #include "base/timer.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_observer.h"
 
 class RenderViewContextMenuProxy;
@@ -75,7 +75,7 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver {
   // service. The current animation just adds periods at the end of this string:
   //   'Loading' -> 'Loading.' -> 'Loading..' -> 'Loading...' (-> 'Loading')
   string16 loading_message_;
-  int loading_frame_;
+  size_t loading_frame_;
 
   // A flag represending whether a JSON-RPC call to the Spelling service
   // finished successfully and its response had a suggestion not included in the

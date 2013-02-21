@@ -29,10 +29,6 @@ namespace ui {
 class WindowAndroid;
 }
 
-namespace WebKit {
-class WebLayer;
-}
-
 class TabBaseAndroidImpl : public TabAndroid {
  public:
   TabBaseAndroidImpl(JNIEnv* env,
@@ -40,8 +36,6 @@ class TabBaseAndroidImpl : public TabAndroid {
                      content::WebContents* web_contents,
                      ui::WindowAndroid* window_android);
   void Destroy(JNIEnv* env, jobject obj);
-
-  WebKit::WebLayer* tab_layer() const { return tab_layer_.get(); }
 
   // --------------------------------------------------------------------------
   // TabAndroid Methods
@@ -64,6 +58,7 @@ class TabBaseAndroidImpl : public TabAndroid {
                                      int r_value,
                                      int g_value,
                                      int b_value) OVERRIDE;
+  virtual void EditBookmark(int64 node_id, bool is_folder) OVERRIDE;
 
   virtual void RunExternalProtocolDialog(const GURL& url) OVERRIDE;
 
@@ -86,7 +81,6 @@ class TabBaseAndroidImpl : public TabAndroid {
 
  private:
   scoped_ptr<content::WebContents> web_contents_;
-  scoped_ptr<WebKit::WebLayer> tab_layer_;
   scoped_ptr<chrome::android::ChromeWebContentsDelegateAndroid>
           web_contents_delegate_;
 

@@ -154,13 +154,8 @@ class CertLibraryImpl
     // Ensure we've opened the real user's key/certificate database.
     crypto::OpenPersistentNSSDB();
 
-    // Only load the Opencryptoki library into NSS if we have this switch.
-    // TODO(gspencer): Remove this switch once cryptohomed work is finished:
-    // http://crosbug.com/12295 and 12304
-    // Note: ChromeOS login with or without loginmanager will crash when
-    // the CertLibrary is not there (http://crosbug.com/121456). Before removing
-    // make sure that that case still works.
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
+    if (base::chromeos::IsRunningOnChromeOS() ||
+        CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kLoadOpencryptoki)) {
       crypto::EnableTPMTokenForNSS();
       // Note: this calls crypto::EnsureTPMTokenReady()
@@ -202,6 +197,10 @@ class CertLibraryImpl
   }
 
   virtual std::string EncryptToken(const std::string& token) OVERRIDE {
+    // Don't care about token encryption while debugging.
+    if (!base::chromeos::IsRunningOnChromeOS())
+      return token;
+
     if (!LoadSupplementalUserKey()) {
       LOG(WARNING) << "Supplemental user key is not available for encrypt.";
       return std::string();
@@ -229,6 +228,10 @@ class CertLibraryImpl
 
   virtual std::string DecryptToken(
       const std::string& encrypted_token_hex) OVERRIDE {
+    // Don't care about token encryption while debugging.
+    if (!base::chromeos::IsRunningOnChromeOS())
+      return encrypted_token_hex;
+
     if (!LoadSupplementalUserKey()) {
       LOG(WARNING) << "Supplemental user key is not available for decrypt.";
       return std::string();

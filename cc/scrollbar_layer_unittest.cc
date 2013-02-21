@@ -2,22 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "cc/scrollbar_layer.h"
 
 #include "cc/scrollbar_animation_controller.h"
 #include "cc/scrollbar_layer_impl.h"
 #include "cc/single_thread_proxy.h"
+#include "cc/test/fake_impl_proxy.h"
+#include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_web_scrollbar_theme_geometry.h"
+#include "cc/test/layer_tree_test_common.h"
 #include "cc/tree_synchronizer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include <public/WebScrollbar.h>
 #include <public/WebScrollbarThemeGeometry.h>
 #include <public/WebScrollbarThemePainter.h>
 
-using namespace cc;
-
+namespace cc {
 namespace {
 
 class FakeWebScrollbar : public WebKit::WebScrollbar {
@@ -45,19 +45,19 @@ public:
 
 TEST(ScrollbarLayerTest, resolveScrollLayerPointer)
 {
-    DebugScopedSetImplThread impl;
-
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
     WebKit::WebScrollbarThemePainter painter;
 
     {
         scoped_ptr<WebKit::WebScrollbar> scrollbar(FakeWebScrollbar::create());
         scoped_refptr<Layer> layerTreeRoot = Layer::create();
         scoped_refptr<Layer> child1 = Layer::create();
-        scoped_refptr<Layer> child2 = ScrollbarLayer::create(scrollbar.Pass(), painter, WebKit::FakeWebScrollbarThemeGeometry::create(), child1->id());
+        scoped_refptr<Layer> child2 = ScrollbarLayer::create(scrollbar.Pass(), painter, FakeWebScrollbarThemeGeometry::create(), child1->id());
         layerTreeRoot->addChild(child1);
         layerTreeRoot->addChild(child2);
 
-        scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), 0);
+        scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), hostImpl.activeTree());
 
         LayerImpl* ccChild1 = layerImplTreeRoot->children()[0];
         ScrollbarLayerImpl* ccChild2 = static_cast<ScrollbarLayerImpl*>(layerImplTreeRoot->children()[1]);
@@ -70,11 +70,11 @@ TEST(ScrollbarLayerTest, resolveScrollLayerPointer)
         scoped_ptr<WebKit::WebScrollbar> scrollbar(FakeWebScrollbar::create());
         scoped_refptr<Layer> layerTreeRoot = Layer::create();
         scoped_refptr<Layer> child2 = Layer::create();
-        scoped_refptr<Layer> child1 = ScrollbarLayer::create(scrollbar.Pass(), painter, WebKit::FakeWebScrollbarThemeGeometry::create(), child2->id());
+        scoped_refptr<Layer> child1 = ScrollbarLayer::create(scrollbar.Pass(), painter, FakeWebScrollbarThemeGeometry::create(), child2->id());
         layerTreeRoot->addChild(child1);
         layerTreeRoot->addChild(child2);
 
-        scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), 0);
+        scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), hostImpl.activeTree());
 
         ScrollbarLayerImpl* ccChild1 = static_cast<ScrollbarLayerImpl*>(layerImplTreeRoot->children()[0]);
         LayerImpl* ccChild2 = layerImplTreeRoot->children()[1];
@@ -86,22 +86,22 @@ TEST(ScrollbarLayerTest, resolveScrollLayerPointer)
 
 TEST(ScrollbarLayerTest, scrollOffsetSynchronization)
 {
-    DebugScopedSetImplThread impl;
-
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
     WebKit::WebScrollbarThemePainter painter;
 
     scoped_ptr<WebKit::WebScrollbar> scrollbar(FakeWebScrollbar::create());
     scoped_refptr<Layer> layerTreeRoot = Layer::create();
     scoped_refptr<Layer> contentLayer = Layer::create();
-    scoped_refptr<Layer> scrollbarLayer = ScrollbarLayer::create(scrollbar.Pass(), painter, WebKit::FakeWebScrollbarThemeGeometry::create(), layerTreeRoot->id());
+    scoped_refptr<Layer> scrollbarLayer = ScrollbarLayer::create(scrollbar.Pass(), painter, FakeWebScrollbarThemeGeometry::create(), layerTreeRoot->id());
     layerTreeRoot->addChild(contentLayer);
     layerTreeRoot->addChild(scrollbarLayer);
 
-    layerTreeRoot->setScrollPosition(IntPoint(10, 20));
-    layerTreeRoot->setMaxScrollPosition(IntSize(30, 50));
-    contentLayer->setBounds(IntSize(100, 200));
+    layerTreeRoot->setScrollOffset(gfx::Vector2d(10, 20));
+    layerTreeRoot->setMaxScrollOffset(gfx::Vector2d(30, 50));
+    contentLayer->setBounds(gfx::Size(100, 200));
 
-    scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), 0);
+    scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), hostImpl.activeTree());
 
     ScrollbarLayerImpl* ccScrollbarLayer = static_cast<ScrollbarLayerImpl*>(layerImplTreeRoot->children()[1]);
 
@@ -109,23 +109,81 @@ TEST(ScrollbarLayerTest, scrollOffsetSynchronization)
     EXPECT_EQ(100, ccScrollbarLayer->totalSize());
     EXPECT_EQ(30, ccScrollbarLayer->maximum());
 
-    layerTreeRoot->setScrollPosition(IntPoint(100, 200));
-    layerTreeRoot->setMaxScrollPosition(IntSize(300, 500));
-    contentLayer->setBounds(IntSize(1000, 2000));
+    layerTreeRoot->setScrollOffset(gfx::Vector2d(100, 200));
+    layerTreeRoot->setMaxScrollOffset(gfx::Vector2d(300, 500));
+    contentLayer->setBounds(gfx::Size(1000, 2000));
 
     ScrollbarAnimationController* scrollbarController = layerImplTreeRoot->scrollbarAnimationController();
-    layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), layerImplTreeRoot.Pass(), 0);
+    layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), layerImplTreeRoot.Pass(), hostImpl.activeTree());
     EXPECT_EQ(scrollbarController, layerImplTreeRoot->scrollbarAnimationController());
 
     EXPECT_EQ(100, ccScrollbarLayer->currentPos());
     EXPECT_EQ(1000, ccScrollbarLayer->totalSize());
     EXPECT_EQ(300, ccScrollbarLayer->maximum());
 
-    layerImplTreeRoot->scrollBy(FloatSize(12, 34));
+    layerImplTreeRoot->scrollBy(gfx::Vector2d(12, 34));
 
     EXPECT_EQ(112, ccScrollbarLayer->currentPos());
     EXPECT_EQ(1000, ccScrollbarLayer->totalSize());
     EXPECT_EQ(300, ccScrollbarLayer->maximum());
 }
 
+class ScrollbarLayerTestMaxTextureSize : public ThreadedTest {
+public:
+    ScrollbarLayerTestMaxTextureSize() {}
+
+    void setScrollbarBounds(gfx::Size bounds) {
+        m_bounds = bounds;
+    }
+
+    virtual void beginTest() OVERRIDE
+    {
+        m_layerTreeHost->initializeRendererIfNeeded();
+
+        scoped_ptr<WebKit::WebScrollbar> scrollbar(FakeWebScrollbar::create());
+        m_scrollbarLayer = ScrollbarLayer::create(scrollbar.Pass(), m_painter, FakeWebScrollbarThemeGeometry::create(), 1);
+        m_scrollbarLayer->setLayerTreeHost(m_layerTreeHost.get());
+        m_scrollbarLayer->setBounds(m_bounds);
+        m_layerTreeHost->rootLayer()->addChild(m_scrollbarLayer);
+
+        m_scrollLayer = Layer::create();
+        m_scrollbarLayer->setScrollLayerId(m_scrollLayer->id());
+        m_layerTreeHost->rootLayer()->addChild(m_scrollLayer);
+
+        postSetNeedsCommitToMainThread();
+    }
+
+    virtual void commitCompleteOnThread(LayerTreeHostImpl* impl) OVERRIDE
+    {
+        const int kMaxTextureSize = m_layerTreeHost->rendererCapabilities().maxTextureSize;
+
+        // Check first that we're actually testing something.
+        EXPECT_GT(m_scrollbarLayer->bounds().width(), kMaxTextureSize);
+
+        EXPECT_EQ(m_scrollbarLayer->contentBounds().width(), kMaxTextureSize - 1);
+        EXPECT_EQ(m_scrollbarLayer->contentBounds().height(), kMaxTextureSize - 1);
+
+        endTest();
+    }
+
+    virtual void afterTest() OVERRIDE
+    {
+    }
+
+private:
+    scoped_refptr<ScrollbarLayer> m_scrollbarLayer;
+    scoped_refptr<Layer> m_scrollLayer;
+    WebKit::WebScrollbarThemePainter m_painter;
+    gfx::Size m_bounds;
+};
+
+TEST_F(ScrollbarLayerTestMaxTextureSize, runTest) {
+    FakeWebGraphicsContext3D context;
+    int max_size = 0;
+    context.getIntegerv(GL_MAX_TEXTURE_SIZE, &max_size);
+    setScrollbarBounds(gfx::Size(max_size + 100, max_size + 100));
+    runTest(true);
 }
+
+}  // namespace
+}  // namespace cc

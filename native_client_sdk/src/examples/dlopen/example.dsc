@@ -11,7 +11,7 @@
       'NAME' : 'libeightball',
       'TYPE' : 'so',
       'SOURCES' : ['eightball.cc', 'eightball.h'],
-      'CXXFLAGS': ['$(NACL_CXXFLAGS)', '-fPIC'],
+      'CXXFLAGS': ['-fPIC'],
       'LIBS' : ['ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
@@ -25,6 +25,7 @@ open and use them at runtime.  When the page loads, type in a question and
 hit enter or click the ASK! button.  The question and answer will be
 displayed in the page under the text entry box.  Shared libraries are only
 available with the GLIBC toolchain.""",
-  'INFO': 'Teaching focus: Using shared objects'
+  'FOCUS': 'Using shared objects.',
+  'GROUP': 'Concepts'
 }
 

@@ -73,7 +73,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
   virtual void WasShown() OVERRIDE;
   virtual void WasHidden() OVERRIDE;
   virtual void MovePluginWindows(
-      const gfx::Point& scroll_offset,
+      const gfx::Vector2d& scroll_offset,
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void Blur() OVERRIDE;
@@ -83,7 +83,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
       const ViewHostMsg_TextInputState_Params& params) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void DidUpdateBackingStore(
-      const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+      const gfx::Rect& scroll_rect,
+      const gfx::Vector2d& scroll_delta,
       const std::vector<gfx::Rect>& copy_rects) OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status,
                               int error_code) OVERRIDE;
@@ -271,6 +272,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
   gfx::Point global_mouse_position_;
   // Indicates when mouse motion is valid after the widget has moved.
   bool mouse_has_been_warped_to_new_center_;
+  // Indicates the cursor has been warped to the unlocked position,
+  // but a move event has not yet been received for it there.
+  bool mouse_is_being_warped_to_unlocked_position_;
 
   // For full-screen windows we have a OnDestroy handler that we need to remove,
   // so we keep it ID here.

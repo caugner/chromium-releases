@@ -29,8 +29,9 @@ namespace remoting {
 
 ClientSession::ClientSession(
     EventHandler* event_handler,
-    scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
     scoped_ptr<protocol::ConnectionToClient> connection,
     DesktopEnvironmentFactory* desktop_environment_factory,
@@ -52,8 +53,9 @@ ClientSession::ClientSession(
       auth_clipboard_filter_(&disable_clipboard_filter_),
       client_clipboard_factory_(clipboard_echo_filter_.client_filter()),
       max_duration_(max_duration),
-      capture_task_runner_(capture_task_runner),
-      encode_task_runner_(encode_task_runner),
+      audio_task_runner_(audio_task_runner),
+      video_capture_task_runner_(video_capture_task_runner),
+      video_encode_task_runner_(video_encode_task_runner),
       network_task_runner_(network_task_runner),
       active_recorders_(0) {
   connection_->SetEventHandler(this);
@@ -132,21 +134,22 @@ void ClientSession::OnConnectionChannelsConnected(
       CreateVideoEncoder(connection_->session()->config());
 
   // Create a VideoScheduler to pump frames from the capturer to the client.
-  video_scheduler_ = new VideoScheduler(capture_task_runner_,
-                                        encode_task_runner_,
-                                        network_task_runner_,
-                                        desktop_environment_->video_capturer(),
-                                        video_encoder.Pass(),
-                                        connection_->client_stub(),
-                                        connection_->video_stub());
+  video_scheduler_ = VideoScheduler::Create(
+      video_capture_task_runner_,
+      video_encode_task_runner_,
+      network_task_runner_,
+      desktop_environment_->video_capturer(),
+      video_encoder.Pass(),
+      connection_->client_stub(),
+      connection_->video_stub());
   ++active_recorders_;
 
   // Create an AudioScheduler if audio is enabled, to pump audio samples.
   if (connection_->session()->config().is_audio_enabled()) {
     scoped_ptr<AudioEncoder> audio_encoder =
         CreateAudioEncoder(connection_->session()->config());
-    audio_scheduler_ = new AudioScheduler(
-        capture_task_runner_,
+    audio_scheduler_ = AudioScheduler::Create(
+        audio_task_runner_,
         network_task_runner_,
         desktop_environment_->audio_capturer(),
         audio_encoder.Pass(),
@@ -167,6 +170,7 @@ void ClientSession::OnConnectionClosed(
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
 
+  // If the client never authenticated then the session failed.
   if (!auth_input_filter_.enabled())
     event_handler_->OnSessionAuthenticationFailed(this);
 
@@ -179,6 +183,19 @@ void ClientSession::OnConnectionClosed(
   // Ensure that any pressed keys or buttons are released.
   input_tracker_.ReleaseAll();
 
+  // Stop components access the client, audio or video stubs, which are no
+  // longer valid once ConnectionToClient calls OnConnectionClosed().
+  if (audio_scheduler_.get()) {
+    audio_scheduler_->Stop(base::Bind(&ClientSession::OnRecorderStopped, this));
+    audio_scheduler_ = NULL;
+  }
+  if (video_scheduler_.get()) {
+    video_scheduler_->Stop(base::Bind(&ClientSession::OnRecorderStopped, this));
+    video_scheduler_ = NULL;
+  }
+  client_clipboard_factory_.InvalidateWeakPtrs();
+
+  // Notify the ChromotingHost that this client is disconnected.
   // TODO(sergeyu): Log failure reason?
   event_handler_->OnSessionClosed(this);
 }
@@ -208,29 +225,26 @@ void ClientSession::Disconnect() {
   DCHECK(connection_.get());
 
   max_duration_timer_.Stop();
+
   // This triggers OnConnectionClosed(), and the session may be destroyed
   // as the result, so this call must be the last in this method.
   connection_->Disconnect();
 }
 
-void ClientSession::Stop(const base::Closure& done_task) {
+void ClientSession::Stop(const base::Closure& stopped_task) {
   DCHECK(CalledOnValidThread());
-  DCHECK(done_task_.is_null());
+  DCHECK(stopped_task_.is_null());
+  DCHECK(!stopped_task.is_null());
+  DCHECK(audio_scheduler_.get() == NULL);
+  DCHECK(video_scheduler_.get() == NULL);
 
-  done_task_ = done_task;
-  if (audio_scheduler_.get()) {
-    audio_scheduler_->Stop(base::Bind(&ClientSession::OnRecorderStopped, this));
-    audio_scheduler_ = NULL;
-  }
+  stopped_task_ = stopped_task;
 
-  if (video_scheduler_.get()) {
-    video_scheduler_->Stop(base::Bind(&ClientSession::OnRecorderStopped, this));
-    video_scheduler_ = NULL;
-  }
-
-  if (!active_recorders_) {
+  if (active_recorders_ == 0) {
+    // |stopped_task_| may tear down the signalling layer, so tear-down
+    // |connection_| before invoking it.
     connection_.reset();
-    done_task_.Run();
+    stopped_task_.Run();
   }
 }
 
@@ -250,7 +264,7 @@ void ClientSession::SetDisableInputs(bool disable_inputs) {
 }
 
 ClientSession::~ClientSession() {
-  DCHECK(!active_recorders_);
+  DCHECK_EQ(active_recorders_, 0);
   DCHECK(audio_scheduler_.get() == NULL);
   DCHECK(video_scheduler_.get() == NULL);
 }
@@ -271,14 +285,15 @@ void ClientSession::OnRecorderStopped() {
     return;
   }
 
-  DCHECK(!done_task_.is_null());
-
   --active_recorders_;
   DCHECK_GE(active_recorders_, 0);
 
-  if (!active_recorders_) {
+  DCHECK(!stopped_task_.is_null());
+  if (active_recorders_ == 0) {
+    // |stopped_task_| may result in the signalling layer being torn down, so
+    // tear down the ConnectionToClient first.
     connection_.reset();
-    done_task_.Run();
+    stopped_task_.Run();
   }
 }
 

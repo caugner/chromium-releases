@@ -16,6 +16,9 @@
 #include "sync/util/time.h"
 
 namespace syncer {
+
+class Cryptographer;
+
 namespace syncable {
 
 // Things you need to update if you change any of the fields below:
@@ -50,6 +53,7 @@ enum Int64Field {
   SERVER_VERSION = BASE_VERSION + 1,
   LOCAL_EXTERNAL_ID,  // ID of an item in the external local storage that this
                       // entry is associated with. (such as bookmarks.js)
+  TRANSACTION_VERSION,
   INT64_FIELDS_END
 };
 
@@ -308,7 +312,10 @@ struct EntryKernel {
 
   // Dumps all kernel info into a DictionaryValue and returns it.
   // Transfers ownership of the DictionaryValue to the caller.
-  base::DictionaryValue* ToValue() const;
+  // Note: |cryptographer| is an optional parameter for use in decrypting
+  // encrypted specifics. If it is NULL or the specifics are not decryptsble,
+  // they will be serialized as empty proto's.
+  base::DictionaryValue* ToValue(Cryptographer* cryptographer) const;
 
  private:
   // Tracks whether this entry needs to be saved to the database.

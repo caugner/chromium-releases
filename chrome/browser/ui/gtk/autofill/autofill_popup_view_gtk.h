@@ -8,12 +8,14 @@
 #include <pango/pango.h>
 #include <vector>
 
-#include "chrome/browser/autofill/autofill_popup_view.h"
-#include "content/public/browser/keyboard_listener.h"
+#include "base/compiler_specific.h"
+#include "base/string16.h"
+#include "chrome/browser/ui/autofill/autofill_popup_view.h"
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/gfx/font.h"
 
-class GtkThemeService;
+class AutofillPopupController;
 class Profile;
 
 namespace content {
@@ -32,23 +34,20 @@ typedef struct _GdkEventMotion GdkEventMotion;
 typedef struct _GdkColor GdkColor;
 typedef struct _GtkWidget GtkWidget;
 
-class AutofillPopupViewGtk : public AutofillPopupView,
-                             public KeyboardListener {
+// Gtk implementation for AutofillPopupView interface.
+class AutofillPopupViewGtk : public AutofillPopupView {
  public:
-  AutofillPopupViewGtk(content::WebContents* web_contents,
-                       GtkThemeService* theme_service,
-                       AutofillExternalDelegate* external_delegate,
-                       GtkWidget* parent);
-  virtual ~AutofillPopupViewGtk();
-
- protected:
-  // AutofillPopupView implementations.
-  virtual void ShowInternal() OVERRIDE;
-  virtual void HideInternal() OVERRIDE;
-  virtual void InvalidateRow(size_t row) OVERRIDE;
-  virtual void ResizePopup() OVERRIDE;
+  explicit AutofillPopupViewGtk(AutofillPopupController* controller);
 
  private:
+  virtual ~AutofillPopupViewGtk();
+
+  // AutofillPopupView implementation.
+  virtual void Hide() OVERRIDE;
+  virtual void Show() OVERRIDE;
+  virtual void InvalidateRow(size_t row) OVERRIDE;
+  virtual void UpdateBoundsAndRedrawPopup() OVERRIDE;
+
   CHROMEGTK_CALLBACK_1(AutofillPopupViewGtk, gboolean, HandleButtonRelease,
                        GdkEventButton*);
   CHROMEGTK_CALLBACK_1(AutofillPopupViewGtk, gboolean, HandleExpose,
@@ -57,9 +56,6 @@ class AutofillPopupViewGtk : public AutofillPopupView,
                        GdkEventCrossing*)
   CHROMEGTK_CALLBACK_1(AutofillPopupViewGtk, gboolean, HandleMotion,
                        GdkEventMotion*);
-
-  //  KeyboardListener implementation.
-  virtual bool HandleKeyPressEvent(GdkEventKey* event) OVERRIDE;
 
   // Set up the pango layout to display the autofill results.
   void SetupLayout(const gfx::Rect& window_rect);
@@ -78,18 +74,14 @@ class AutofillPopupViewGtk : public AutofillPopupView,
                          size_t index,
                          const gfx::Rect& entry_rect);
 
-  // Set the bounds of the popup to show, including the placement of it.
-  void SetBounds();
+  // Set the initial bounds of the popup to show, including the placement
+  // of it.
+  void SetInitialBounds();
 
-  GtkWidget* parent_;  // Weak reference.
+  AutofillPopupController* controller_;  // Weak reference.
+
   GtkWidget* window_;  // Strong reference.
-  PangoLayout* layout_;  // Strong reference
-  GtkThemeService* theme_service_;
-
-  // The size of the popup.
-  gfx::Rect bounds_;
-
-  content::RenderViewHost* render_view_host_;  // Weak reference.
+  PangoLayout* layout_;  // Strong reference.
 
   DISALLOW_COPY_AND_ASSIGN(AutofillPopupViewGtk);
 };

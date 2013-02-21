@@ -4,11 +4,11 @@
 
 #include <vector>
 
+#include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/event_names.h"
@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/browser/extensions/test_extension_system.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -44,14 +45,20 @@ class MenuManagerTest : public testing::Test {
   MenuManagerTest() : ui_thread_(BrowserThread::UI, &message_loop_),
                       file_thread_(BrowserThread::FILE, &message_loop_),
                       manager_(&profile_),
+                      prefs_(message_loop_.message_loop_proxy()),
                       next_id_(1) {
   }
 
+  virtual void TearDown() OVERRIDE {
+    prefs_.pref_service()->CommitPendingWrite();
+    message_loop_.RunUntilIdle();
+  }
+
   // Returns a test item.
-  MenuItem* CreateTestItem(Extension* extension) {
+  MenuItem* CreateTestItem(Extension* extension, bool incognito = false) {
     MenuItem::Type type = MenuItem::NORMAL;
     MenuItem::ContextList contexts(MenuItem::ALL);
-    MenuItem::Id id(false, extension->id());
+    MenuItem::Id id(incognito, extension->id());
     id.uid = next_id_++;
     return new MenuItem(id, "test", false, true, type, contexts);
   }
@@ -450,13 +457,13 @@ class MockEventRouter : public EventRouter {
                     EventRouter::UserGestureState state));
 
   virtual void DispatchEventToExtension(const std::string& extension_id,
-                                        const std::string& event_name,
-                                        scoped_ptr<base::ListValue> event_args,
-                                        Profile* source_profile,
-                                        const GURL& event_url,
-                                        EventRouter::UserGestureState state) {
-    DispatchEventToExtensionMock(extension_id, event_name, event_args.release(),
-                                 source_profile, event_url, state);
+                                        scoped_ptr<Event> event) {
+    DispatchEventToExtensionMock(extension_id,
+                                 event->event_name,
+                                 event->event_args.release(),
+                                 event->restrict_to_profile,
+                                 event->event_url,
+                                 event->user_gesture);
   }
 
  private:
@@ -554,9 +561,12 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
   params.is_editable = false;
 
   Extension* extension = AddExtension("test");
+  MenuItem* parent = CreateTestItem(extension);
   MenuItem* item = CreateTestItem(extension);
+  MenuItem::Id parent_id = parent->id();
   MenuItem::Id id = item->id();
-  ASSERT_TRUE(manager_.AddContextItem(extension, item));
+  ASSERT_TRUE(manager_.AddContextItem(extension, parent));
+  ASSERT_TRUE(manager_.AddChildItem(parent->id(), item));
 
   // Use the magic of googlemock to save a parameter to our mock's
   // DispatchEventToExtension method into event_args.
@@ -584,7 +594,7 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
       .Times(1)
       .WillOnce(DeleteArg<2>());
   }
-  manager_.ExecuteCommand(&profile, NULL /* tab_contents */, params, id);
+  manager_.ExecuteCommand(&profile, NULL /* web_contents */, params, id);
 
   ASSERT_EQ(2u, list->GetSize());
 
@@ -594,6 +604,8 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
   int tmp_id = 0;
   ASSERT_TRUE(info->GetInteger("menuItemId", &tmp_id));
   ASSERT_EQ(id.uid, tmp_id);
+  ASSERT_TRUE(info->GetInteger("parentMenuItemId", &tmp_id));
+  ASSERT_EQ(parent_id.uid, tmp_id);
 
   std::string tmp;
   ASSERT_TRUE(info->GetString("mediaType", &tmp));
@@ -703,6 +715,41 @@ TEST_F(MenuManagerTest, SanitizeRadioButtons) {
   parent = NULL;
   ASSERT_FALSE(new_item->checked());
   ASSERT_TRUE(child1->checked());
+}
+
+// Tests the RemoveAllIncognitoContextItems functionality.
+TEST_F(MenuManagerTest, RemoveAllIncognito) {
+  Extension* extension1 = AddExtension("1111");
+  // Add 2 top-level and one child item for extension 1
+  // with incognito 'true'.
+  MenuItem* item1 = CreateTestItem(extension1, true);
+  MenuItem* item2 = CreateTestItem(extension1, true);
+  MenuItem* item3 = CreateTestItem(extension1, true);
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item1));
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item2));
+  ASSERT_TRUE(manager_.AddChildItem(item1->id(), item3));
+
+  // Add 2 top-level and one child item for extension 1
+  // with incognito 'false'.
+  MenuItem* item4 = CreateTestItem(extension1);
+  MenuItem* item5 = CreateTestItem(extension1);
+  MenuItem* item6 = CreateTestItem(extension1);
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item4));
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item5));
+  ASSERT_TRUE(manager_.AddChildItem(item4->id(), item6));
+
+  // Add one top-level item for extension 2.
+  Extension* extension2 = AddExtension("2222");
+  MenuItem* item7 = CreateTestItem(extension2);
+  ASSERT_TRUE(manager_.AddContextItem(extension2, item7));
+
+  EXPECT_EQ(4u, manager_.MenuItems(extension1->id())->size());
+  EXPECT_EQ(1u, manager_.MenuItems(extension2->id())->size());
+
+  // Remove all context menu items with incognito true.
+  manager_.RemoveAllIncognitoContextItems();
+  EXPECT_EQ(2u, manager_.MenuItems(extension1->id())->size());
+  EXPECT_EQ(1u, manager_.MenuItems(extension2->id())->size());
 }
 
 }  // namespace extensions

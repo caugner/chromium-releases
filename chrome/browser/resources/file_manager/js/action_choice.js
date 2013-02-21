@@ -19,9 +19,12 @@ function ActionChoice(dom, filesystem, params) {
   this.document_ = this.dom_.ownerDocument;
   this.metadataCache_ = params.metadataCache;
   this.volumeManager_ = new VolumeManager();
+  this.volumeManager_.addEventListener('externally-unmounted',
+     this.onDeviceUnmounted_.bind(this));
   this.closeBound_ = this.close_.bind(this);
 
   this.initDom_();
+  this.checkDrive_();
   this.loadSource_(params.source);
 }
 
@@ -40,28 +43,18 @@ ActionChoice.PREVIEW_COUNT = 3;
 ActionChoice.load = function(opt_filesystem, opt_params) {
   ImageUtil.metrics = metrics;
 
-  var hash = location.hash ? location.hash.substr(1) : '';
+  var hash = location.hash ? decodeURI(location.hash.substr(1)) : '';
   var params = opt_params || {};
   if (!params.source) params.source = hash;
   if (!params.metadataCache) params.metadataCache = MetadataCache.createFull();
 
   function onFilesystem(filesystem) {
     var dom = document.querySelector('.action-choice');
-    new ActionChoice(dom, filesystem, params);
+    ActionChoice.instance = new ActionChoice(dom, filesystem, params);
   }
 
   chrome.fileBrowserPrivate.getStrings(function(strings) {
     loadTimeData.data = strings;
-
-    // TODO(dgozman): remove when all strings finalized.
-    var original = loadTimeData.getString;
-    loadTimeData.getString = function(s) {
-      return original.call(loadTimeData, s) || s;
-    };
-    var originalF = loadTimeData.getStringF;
-    loadTimeData.getStringF = function() {
-      return originalF.apply(loadTimeData, arguments) || arguments[0];
-    };
 
     i18nTemplate.process(document, loadTimeData);
 
@@ -91,9 +84,35 @@ ActionChoice.prototype.initDom_ = function() {
 
   this.document_.addEventListener('keydown', this.onKeyDown_.bind(this));
 
+  metrics.startInterval('PhotoImport.Load');
   this.dom_.setAttribute('loading', '');
 
   this.document_.querySelectorAll('.choices input')[0].focus();
+};
+
+/**
+ * Checks whether Drive is reachable.
+ * @private
+ */
+ActionChoice.prototype.checkDrive_ = function() {
+  var driveLabel = this.dom_.querySelector('label[for=import-photos-to-drive]');
+  var driveChoice = this.dom_.querySelector('#import-photos-to-drive');
+  var driveDiv = driveChoice.parentNode;
+  driveChoice.disabled = true;
+  driveDiv.setAttribute('disabled', '');
+
+  var onMounted = function() {
+    driveChoice.disabled = false;
+    driveDiv.removeAttribute('disabled');
+    driveLabel.textContent =
+        loadTimeData.getString('ACTION_CHOICE_PHOTOS_DRIVE');
+  };
+
+  if (this.volumeManager_.isMounted(RootDirectory.GDATA)) {
+    onMounted();
+  } else {
+    this.volumeManager_.mountGData(onMounted, function() {});
+  }
 };
 
 /**
@@ -103,6 +122,7 @@ ActionChoice.prototype.initDom_ = function() {
  */
 ActionChoice.prototype.loadSource_ = function(source) {
   var onTraversed = function(results) {
+    metrics.recordInterval('PhotoImport.Scan');
     var videos = results.filter(FileType.isVideo);
     var videoLabel = this.dom_.querySelector('label[for=watch-single-video]');
     if (videos.length == 1) {
@@ -117,6 +137,11 @@ ActionChoice.prototype.loadSource_ = function(source) {
     if (mediaFiles.length == 0) {
       this.dom_.querySelector('#import-photos-to-drive').parentNode.
           style.display = 'none';
+
+      // If we have no media files, the only choice is view files. So, don't
+      // confuse user with a single choice, and just open file manager.
+      this.viewFiles_();
+      this.close_();
     }
 
     if (mediaFiles.length < ActionChoice.PREVIEW_COUNT) {
@@ -127,7 +152,8 @@ ActionChoice.prototype.loadSource_ = function(source) {
           'ACTION_CHOICE_COUNTER', mediaFiles.length);
     }
     var previews = mediaFiles.length ? mediaFiles : results;
-    this.renderPreview_(previews, ActionChoice.PREVIEW_COUNT);
+    var previewsCount = Math.min(ActionChoice.PREVIEW_COUNT, previews.length);
+    this.renderPreview_(previews, previewsCount);
   }.bind(this);
 
   var onEntry = function(entry) {
@@ -142,10 +168,12 @@ ActionChoice.prototype.loadSource_ = function(source) {
         loadTimeData.getString('ACTION_CHOICE_LOADING_' +
                                deviceType.toUpperCase());
 
-    util.traverseTree(entry, onTraversed, 0 /* infinite depth */);
+    util.traverseTree(entry, onTraversed, 0 /* infinite depth */,
+        FileType.isVisible);
   }.bind(this);
 
   this.sourceEntry_ = null;
+  metrics.startInterval('PhotoImport.Scan');
   util.resolvePath(this.filesystem_.root, source, onEntry, this.closeBound_);
 };
 
@@ -160,10 +188,15 @@ ActionChoice.prototype.renderPreview_ = function(entries, count) {
   var box = this.document_.createElement('div');
   box.className = 'img-container';
 
+  var done = function() {
+    this.dom_.removeAttribute('loading');
+    metrics.recordInterval('PhotoImport.Load');
+  }.bind(this);
+
   var onSuccess = function() {
     this.previews_.appendChild(box);
     if (--count == 0) {
-      this.dom_.removeAttribute('loading');
+      done();
     } else {
       this.renderPreview_(entries, count);
     }
@@ -173,7 +206,7 @@ ActionChoice.prototype.renderPreview_ = function(entries, count) {
     if (entries.length == 0) {
       // Append one image with generic thumbnail.
       this.previews_.appendChild(box);
-      this.dom_.removeAttribute('loading');
+      done();
     } else {
       this.renderPreview_(entries, count);
     }
@@ -212,20 +245,50 @@ ActionChoice.prototype.onKeyDown_ = function(e) {
 
 /**
  * Called when OK button clicked.
+ * @param {Event} event The event object.
  * @private
  */
-ActionChoice.prototype.onOk_ = function() {
+ActionChoice.prototype.onOk_ = function(event) {
+  // Check for click on the disabled choice.
+  var input = event.currentTarget.querySelector('input');
+  if (input && input.disabled) return;
+
   if (this.document_.querySelector('#import-photos-to-drive').checked) {
-    var url = chrome.extension.getURL('photo_import.html') +
+    var url = util.platform.getURL('photo_import.html') +
         '#' + this.sourceEntry_.fullPath;
-    chrome.windows.create({url: url, type: 'popup', height: 656, width: 728});
+    util.platform.createWindow(url, {height: 656, width: 728});
   } else if (this.document_.querySelector('#view-files').checked) {
-    var url = chrome.extension.getURL('main.html') +
-        '#' + this.sourceEntry_.fullPath;
-    chrome.windows.create({url: url, type: 'popup'});
+    this.viewFiles_();
   } else if (this.document_.querySelector('#watch-single-video').checked) {
     chrome.fileBrowserPrivate.viewFiles([this.singleVideo_.toURL()], 'watch',
         function(success) {});
   }
   this.close_();
+};
+
+/**
+ * Called when some device is unmounted.
+ * @param {Event} event Event object.
+ * @private
+ */
+ActionChoice.prototype.onDeviceUnmounted_ = function(event) {
+  if (this.sourceEntry_ && event.mountPath == this.sourceEntry_.fullPath) {
+    util.platform.closeWindow();
+  }
+};
+
+/**
+ * Perform the 'view files' action.
+ * @private
+ */
+ActionChoice.prototype.viewFiles_ = function() {
+  var path = this.sourceEntry_.fullPath;
+  if (util.platform.v2()) {
+    chrome.runtime.getBackgroundPage(function(bg) {
+      bg.launchFileManager({defaultPath: path});
+    });
+  } else {
+    var url = util.platform.getURL('main.html') + '#' + path;
+    util.platform.createWindow(url);
+  }
 };

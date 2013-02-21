@@ -13,8 +13,8 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/google_apis/gdata_test_util.h"
-#include "chrome/browser/google_apis/gdata_util.h"
+#include "chrome/browser/google_apis/test_util.h"
+#include "chrome/browser/google_apis/time_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libxml/chromium/libxml_utils.h"
@@ -27,7 +27,7 @@ namespace google_apis {
 
 class GDataWAPIParserTest : public testing::Test {
  protected:
-  static DocumentEntry* LoadDocumentEntryFromXml(const std::string& filename) {
+  static ResourceEntry* LoadResourceEntryFromXml(const std::string& filename) {
     FilePath path;
     std::string error;
     PathService::Get(chrome::DIR_TEST_DATA, &path);
@@ -43,10 +43,10 @@ class GDataWAPIParserTest : public testing::Test {
       NOTREACHED() << "Invalid xml:\n" << contents;
       return NULL;
     }
-    scoped_ptr<DocumentEntry> entry;
+    scoped_ptr<ResourceEntry> entry;
     while (reader.Read()) {
       if (reader.NodeName() == "entry") {
-        entry.reset(DocumentEntry::CreateFromXml(&reader));
+        entry = ResourceEntry::CreateFromXml(&reader);
         break;
       }
     }
@@ -54,21 +54,20 @@ class GDataWAPIParserTest : public testing::Test {
   }
 };
 
-// TODO(nhiroki): Make it possible to run these tests on any platforms after
-// moving json files to out of 'chromeos' directory (http://crbug.com/149788).
-#if defined(OS_CHROMEOS)
+// TODO(nhiroki): Move json files to out of 'chromeos' directory
+// (http://crbug.com/149788).
 // Test document feed parsing.
-TEST_F(GDataWAPIParserTest, DocumentFeedJsonParser) {
+TEST_F(GDataWAPIParserTest, ResourceListJsonParser) {
   std::string error;
   scoped_ptr<Value> document =
       test_util::LoadJSONFile("gdata/basic_feed.json");
   ASSERT_TRUE(document.get());
   ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
-  scoped_ptr<DocumentFeed> feed(DocumentFeed::ExtractAndParse(*document));
+  scoped_ptr<ResourceList> feed(ResourceList::ExtractAndParse(*document));
   ASSERT_TRUE(feed.get());
 
   base::Time update_time;
-  ASSERT_TRUE(google_apis::util::GetTimeFromString("2011-12-14T01:03:21.151Z",
+  ASSERT_TRUE(util::GetTimeFromString("2011-12-14T01:03:21.151Z",
                                                    &update_time));
 
   EXPECT_EQ(1, feed->start_index());
@@ -99,7 +98,7 @@ TEST_F(GDataWAPIParserTest, DocumentFeedJsonParser) {
   ASSERT_EQ(4U, feed->entries().size());
 
   // Check a folder entry.
-  const DocumentEntry* folder_entry = feed->entries()[0];
+  const ResourceEntry* folder_entry = feed->entries()[0];
   ASSERT_TRUE(folder_entry);
   EXPECT_EQ(ENTRY_KIND_FOLDER, folder_entry->kind());
   EXPECT_EQ("\"HhMOFgcNHSt7ImBr\"", folder_entry->etag());
@@ -108,9 +107,9 @@ TEST_F(GDataWAPIParserTest, DocumentFeedJsonParser) {
   EXPECT_EQ(ASCIIToUTF16("Entry 1 Title"), folder_entry->title());
   base::Time entry1_update_time;
   base::Time entry1_publish_time;
-  ASSERT_TRUE(google_apis::util::GetTimeFromString("2011-04-01T18:34:08.234Z",
+  ASSERT_TRUE(util::GetTimeFromString("2011-04-01T18:34:08.234Z",
                                                    &entry1_update_time));
-  ASSERT_TRUE(google_apis::util::GetTimeFromString("2010-11-07T05:03:54.719Z",
+  ASSERT_TRUE(util::GetTimeFromString("2010-11-07T05:03:54.719Z",
                                                    &entry1_publish_time));
   EXPECT_EQ(entry1_update_time, folder_entry->updated_time());
   EXPECT_EQ(entry1_publish_time, folder_entry->published_time());
@@ -141,7 +140,7 @@ TEST_F(GDataWAPIParserTest, DocumentFeedJsonParser) {
   EXPECT_EQ("application/atom+xml", entry1_edit_link->mime_type());
 
   // Check a file entry.
-  const DocumentEntry* file_entry = feed->entries()[1];
+  const ResourceEntry* file_entry = feed->entries()[1];
   ASSERT_TRUE(file_entry);
   EXPECT_EQ(ENTRY_KIND_FILE, file_entry->kind());
   EXPECT_EQ(ASCIIToUTF16("filename.m4a"), file_entry->filename());
@@ -161,6 +160,7 @@ TEST_F(GDataWAPIParserTest, DocumentFeedJsonParser) {
             file_open_with_link->href().spec());
   EXPECT_EQ("application/atom+xml", file_open_with_link->mime_type());
   EXPECT_EQ("the_app_id", file_open_with_link->app_id());
+  EXPECT_EQ(654321, file_entry->changestamp());
 
   const Link* file_unknown_link = file_entry->GetLinkByType(Link::LINK_UNKNOWN);
   ASSERT_TRUE(file_unknown_link);
@@ -170,15 +170,15 @@ TEST_F(GDataWAPIParserTest, DocumentFeedJsonParser) {
   EXPECT_EQ("", file_unknown_link->app_id());
 
   // Check a file entry.
-  const DocumentEntry* document_entry = feed->entries()[2];
-  ASSERT_TRUE(document_entry);
-  EXPECT_EQ(ENTRY_KIND_DOCUMENT, document_entry->kind());
-  EXPECT_TRUE(document_entry->is_hosted_document());
-  EXPECT_TRUE(document_entry->is_google_document());
-  EXPECT_FALSE(document_entry->is_external_document());
+  const ResourceEntry* resource_entry = feed->entries()[2];
+  ASSERT_TRUE(resource_entry);
+  EXPECT_EQ(ENTRY_KIND_DOCUMENT, resource_entry->kind());
+  EXPECT_TRUE(resource_entry->is_hosted_document());
+  EXPECT_TRUE(resource_entry->is_google_document());
+  EXPECT_FALSE(resource_entry->is_external_document());
 
   // Check an external document entry.
-  const DocumentEntry* app_entry = feed->entries()[3];
+  const ResourceEntry* app_entry = feed->entries()[3];
   ASSERT_TRUE(app_entry);
   EXPECT_EQ(ENTRY_KIND_EXTERNAL_APP, app_entry->kind());
   EXPECT_TRUE(app_entry->is_hosted_document());
@@ -188,8 +188,8 @@ TEST_F(GDataWAPIParserTest, DocumentFeedJsonParser) {
 
 
 // Test document feed parsing.
-TEST_F(GDataWAPIParserTest, DocumentEntryXmlParser) {
-  scoped_ptr<DocumentEntry> entry(LoadDocumentEntryFromXml("entry.xml"));
+TEST_F(GDataWAPIParserTest, ResourceEntryXmlParser) {
+  scoped_ptr<ResourceEntry> entry(LoadResourceEntryFromXml("entry.xml"));
   ASSERT_TRUE(entry.get());
 
   EXPECT_EQ(ENTRY_KIND_FILE, entry->kind());
@@ -199,9 +199,9 @@ TEST_F(GDataWAPIParserTest, DocumentEntryXmlParser) {
   EXPECT_EQ(ASCIIToUTF16("Xml Entry File Title.tar"), entry->title());
   base::Time entry1_update_time;
   base::Time entry1_publish_time;
-  ASSERT_TRUE(google_apis::util::GetTimeFromString("2011-04-01T18:34:08.234Z",
+  ASSERT_TRUE(util::GetTimeFromString("2011-04-01T18:34:08.234Z",
                                                    &entry1_update_time));
-  ASSERT_TRUE(google_apis::util::GetTimeFromString("2010-11-07T05:03:54.719Z",
+  ASSERT_TRUE(util::GetTimeFromString("2010-11-07T05:03:54.719Z",
                                                    &entry1_publish_time));
   EXPECT_EQ(entry1_update_time, entry->updated_time());
   EXPECT_EQ(entry1_publish_time, entry->published_time());
@@ -336,61 +336,60 @@ TEST_F(GDataWAPIParserTest, AccountMetadataFeedParser) {
   EXPECT_EQ(1U, second_app->primary_extensions().size());
   EXPECT_EQ(0U, second_app->secondary_extensions().size());
 }
-#endif  // OS_CHROMEOS
 
-// Test file extension checking in DocumentEntry::HasDocumentExtension().
-TEST_F(GDataWAPIParserTest, DocumentEntryHasDocumentExtension) {
-  EXPECT_TRUE(DocumentEntry::HasHostedDocumentExtension(
+// Test file extension checking in ResourceEntry::HasDocumentExtension().
+TEST_F(GDataWAPIParserTest, ResourceEntryHasDocumentExtension) {
+  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test.gdoc"))));
-  EXPECT_TRUE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test.gsheet"))));
-  EXPECT_TRUE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test.gslides"))));
-  EXPECT_TRUE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test.gdraw"))));
-  EXPECT_TRUE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test.gtable"))));
-  EXPECT_FALSE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test.tar.gz"))));
-  EXPECT_FALSE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test.txt"))));
-  EXPECT_FALSE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL("Test"))));
-  EXPECT_FALSE(DocumentEntry::HasHostedDocumentExtension(
+  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
       FilePath(FILE_PATH_LITERAL(""))));
 }
 
-TEST_F(GDataWAPIParserTest, DocumentEntryClassifyEntryKind) {
-  EXPECT_EQ(DocumentEntry::KIND_OF_NONE,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_UNKNOWN));
-  EXPECT_EQ(DocumentEntry::KIND_OF_NONE,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_ITEM));
-  EXPECT_EQ(DocumentEntry::KIND_OF_NONE,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_SITE));
-  EXPECT_EQ(DocumentEntry::KIND_OF_GOOGLE_DOCUMENT |
-            DocumentEntry::KIND_OF_HOSTED_DOCUMENT,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_DOCUMENT));
-  EXPECT_EQ(DocumentEntry::KIND_OF_GOOGLE_DOCUMENT |
-            DocumentEntry::KIND_OF_HOSTED_DOCUMENT,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_SPREADSHEET));
-  EXPECT_EQ(DocumentEntry::KIND_OF_GOOGLE_DOCUMENT |
-            DocumentEntry::KIND_OF_HOSTED_DOCUMENT,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_PRESENTATION));
-  EXPECT_EQ(DocumentEntry::KIND_OF_GOOGLE_DOCUMENT |
-            DocumentEntry::KIND_OF_HOSTED_DOCUMENT,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_DRAWING));
-  EXPECT_EQ(DocumentEntry::KIND_OF_GOOGLE_DOCUMENT |
-            DocumentEntry::KIND_OF_HOSTED_DOCUMENT,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_TABLE));
-  EXPECT_EQ(DocumentEntry::KIND_OF_EXTERNAL_DOCUMENT |
-            DocumentEntry::KIND_OF_HOSTED_DOCUMENT,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_EXTERNAL_APP));
-  EXPECT_EQ(DocumentEntry::KIND_OF_FOLDER,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_FOLDER));
-  EXPECT_EQ(DocumentEntry::KIND_OF_FILE,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_FILE));
-  EXPECT_EQ(DocumentEntry::KIND_OF_FILE,
-            DocumentEntry::ClassifyEntryKind(ENTRY_KIND_PDF));
+TEST_F(GDataWAPIParserTest, ResourceEntryClassifyEntryKind) {
+  EXPECT_EQ(ResourceEntry::KIND_OF_NONE,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_UNKNOWN));
+  EXPECT_EQ(ResourceEntry::KIND_OF_NONE,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_ITEM));
+  EXPECT_EQ(ResourceEntry::KIND_OF_NONE,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_SITE));
+  EXPECT_EQ(ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+            ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_DOCUMENT));
+  EXPECT_EQ(ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+            ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_SPREADSHEET));
+  EXPECT_EQ(ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+            ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_PRESENTATION));
+  EXPECT_EQ(ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+            ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_DRAWING));
+  EXPECT_EQ(ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+            ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_TABLE));
+  EXPECT_EQ(ResourceEntry::KIND_OF_EXTERNAL_DOCUMENT |
+            ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_EXTERNAL_APP));
+  EXPECT_EQ(ResourceEntry::KIND_OF_FOLDER,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_FOLDER));
+  EXPECT_EQ(ResourceEntry::KIND_OF_FILE,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_FILE));
+  EXPECT_EQ(ResourceEntry::KIND_OF_FILE,
+            ResourceEntry::ClassifyEntryKind(ENTRY_KIND_PDF));
 }
 
 }  // namespace google_apis

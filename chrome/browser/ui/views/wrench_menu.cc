@@ -40,6 +40,7 @@
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gfx/text_utils.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/menu_button.h"
@@ -51,6 +52,10 @@
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
 #include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/widget/widget.h"
+
+#if defined(USE_AURA)
+#include "ui/native_theme/native_theme_aura.h"
+#endif
 
 using content::HostZoomMap;
 using content::UserMetricsAction;
@@ -87,16 +92,6 @@ const int kHorizontalTouchPadding = 15;
 // Menu items which have embedded buttons should have this height in pixel.
 const int kMenuItemContainingButtonsHeight = 43;
 
-// Returns true when the new menu style is used.
-// TODO(skuhne): Remove when only the new menu style is left.
-bool IsNewMenu() {
-#if defined(USE_AURA)
-  return true;
-#else
-  return ui::GetDisplayLayout() == ui::LAYOUT_TOUCH;
-#endif
-}
-
 // Subclass of ImageButton whose preferred size includes the size of the border.
 class FullscreenButton : public ImageButton {
  public:
@@ -106,10 +101,10 @@ class FullscreenButton : public ImageButton {
   // Overridden from ImageButton.
   virtual gfx::Size GetPreferredSize() OVERRIDE {
     gfx::Size pref = ImageButton::GetPreferredSize();
-    gfx::Insets insets;
-    if (border())
-      border()->GetInsets(&insets);
-    pref.Enlarge(insets.width(), insets.height());
+    if (border()) {
+      gfx::Insets insets = border()->GetInsets();
+      pref.Enlarge(insets.width(), insets.height());
+    }
     return pref;
   }
 
@@ -121,26 +116,27 @@ class FullscreenButton : public ImageButton {
 // insets, the actual painting is done in MenuButtonBackground.
 class MenuButtonBorder : public views::Border {
  public:
-  MenuButtonBorder()
-    : horizontal_padding_(IsNewMenu() ?
-                              kHorizontalTouchPadding :
-                              kHorizontalPadding) {}
+  MenuButtonBorder(const MenuConfig& config, bool use_new_menu)
+      : horizontal_padding_(use_new_menu ?
+                            kHorizontalTouchPadding : kHorizontalPadding),
+        insets_(config.item_top_margin, horizontal_padding_,
+                config.item_bottom_margin, horizontal_padding_) {
+  }
 
   // Overridden from views::Border.
-  virtual void Paint(const View& view, gfx::Canvas* canvas) const OVERRIDE {
+  virtual void Paint(const View& view, gfx::Canvas* canvas) OVERRIDE {
     // Painting of border is done in MenuButtonBackground.
   }
 
-  virtual void GetInsets(gfx::Insets* insets) const OVERRIDE {
-    insets->Set(MenuConfig::instance().item_top_margin,
-                horizontal_padding_,
-                MenuConfig::instance().item_bottom_margin,
-                horizontal_padding_);
+  virtual gfx::Insets GetInsets() const OVERRIDE {
+    return insets_;
   }
 
  private:
   // The horizontal padding dependent on the layout.
   const int horizontal_padding_;
+
+  const gfx::Insets insets_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuButtonBorder);
 };
@@ -157,8 +153,9 @@ class MenuButtonBackground : public views::Background {
     SINGLE_BUTTON,
   };
 
-  explicit MenuButtonBackground(ButtonType type)
+  MenuButtonBackground(ButtonType type, bool use_new_menu)
       : type_(type),
+        use_new_menu_(use_new_menu),
         left_button_(NULL),
         right_button_(NULL) {}
 
@@ -178,13 +175,12 @@ class MenuButtonBackground : public views::Background {
   virtual void Paint(gfx::Canvas* canvas, View* view) const OVERRIDE {
     CustomButton::ButtonState state =
         (view->GetClassName() == views::Label::kViewClassName) ?
-        CustomButton::BS_NORMAL : static_cast<CustomButton*>(view)->state();
+        CustomButton::STATE_NORMAL : static_cast<CustomButton*>(view)->state();
     int w = view->width();
     int h = view->height();
-    // Windows is drawing its own separators and we cannot use the touch button
-    // for that.
-#if !defined(OS_WIN)
-    if (IsNewMenu()) {
+#if defined(USE_AURA)
+    if (use_new_menu_ &&
+        view->GetNativeTheme() == ui::NativeThemeAura::instance()) {
       // Normal buttons get a border drawn on the right side and the rest gets
       // filled in. The left button however does not get a line to combine
       // buttons.
@@ -192,7 +188,7 @@ class MenuButtonBackground : public views::Background {
       if (type_ != RIGHT_BUTTON) {
         border = 1;
         canvas->FillRect(gfx::Rect(0, 0, border, h),
-                         border_color(CustomButton::BS_NORMAL));
+                         border_color(CustomButton::STATE_NORMAL));
       }
       canvas->FillRect(gfx::Rect(border, 0, w - border, h),
                        touch_background_color(state));
@@ -212,12 +208,12 @@ class MenuButtonBackground : public views::Background {
       case CENTER_BUTTON: {
         canvas->FillRect(gfx::Rect(1, 1, w - 2, h - 2),
                          background_color(state));
-        SkColor left_color = state != CustomButton::BS_NORMAL ?
+        SkColor left_color = state != CustomButton::STATE_NORMAL ?
             border_color(state) : border_color(left_button_->state());
         canvas->FillRect(gfx::Rect(0, 0, 1, h), left_color);
         canvas->FillRect(gfx::Rect(1, 0, w - 2, 1), border_color(state));
         canvas->FillRect(gfx::Rect(1, h - 1, w - 2, 1), border_color(state));
-        SkColor right_color = state != CustomButton::BS_NORMAL ?
+        SkColor right_color = state != CustomButton::STATE_NORMAL ?
             border_color(state) : border_color(right_button_->state());
         canvas->FillRect(gfx::Rect(w - 1, 0, 1, h), right_color);
         break;
@@ -255,25 +251,25 @@ class MenuButtonBackground : public views::Background {
  private:
   static SkColor border_color(CustomButton::ButtonState state) {
     switch (state) {
-      case CustomButton::BS_HOT:    return kHotBorderColor;
-      case CustomButton::BS_PUSHED: return kPushedBorderColor;
-      default:                      return kBorderColor;
+      case CustomButton::STATE_HOVERED: return kHotBorderColor;
+      case CustomButton::STATE_PRESSED: return kPushedBorderColor;
+      default:                          return kBorderColor;
     }
   }
 
   static SkColor background_color(CustomButton::ButtonState state) {
     switch (state) {
-      case CustomButton::BS_HOT:    return kHotBackgroundColor;
-      case CustomButton::BS_PUSHED: return kPushedBackgroundColor;
-      default:                      return kBackgroundColor;
+      case CustomButton::STATE_HOVERED: return kHotBackgroundColor;
+      case CustomButton::STATE_PRESSED: return kPushedBackgroundColor;
+      default:                          return kBackgroundColor;
     }
   }
 
   static SkColor touch_background_color(CustomButton::ButtonState state) {
     switch (state) {
-      case CustomButton::BS_HOT:    return kHotTouchBackgroundColor;
-      case CustomButton::BS_PUSHED: return kPushedTouchBackgroundColor;
-      default:                      return kTouchBackgroundColor;
+      case CustomButton::STATE_HOVERED: return kHotTouchBackgroundColor;
+      case CustomButton::STATE_PRESSED: return kPushedTouchBackgroundColor;
+      default:                          return kTouchBackgroundColor;
     }
   }
 
@@ -290,6 +286,7 @@ class MenuButtonBackground : public views::Background {
   }
 
   const ButtonType type_;
+  const bool use_new_menu_;
 
   // See description above setter for details.
   CustomButton* left_button_;
@@ -336,7 +333,8 @@ string16 GetAccessibleNameForWrenchMenuItem(
 class WrenchMenuView : public ScheduleAllView, public views::ButtonListener {
  public:
   WrenchMenuView(WrenchMenu* menu, MenuModel* menu_model)
-      : menu_(menu), menu_model_(menu_model) { }
+      : menu_(menu),
+        menu_model_(menu_model) {}
 
   TextButton* CreateAndConfigureButton(int string_id,
                                        MenuButtonBackground::ButtonType type,
@@ -351,23 +349,25 @@ class WrenchMenuView : public ScheduleAllView, public views::ButtonListener {
                                       int index,
                                       MenuButtonBackground** background,
                                       int acc_string_id) {
-    TextButton* button = new TextButton(this,
-                                        l10n_util::GetStringUTF16(string_id));
+    TextButton* button = new TextButton(this, gfx::RemoveAcceleratorChar(
+        l10n_util::GetStringUTF16(string_id), '&', NULL, NULL));
     button->SetAccessibleName(
         GetAccessibleNameForWrenchMenuItem(menu_model_, index, acc_string_id));
     button->set_focusable(true);
     button->set_request_focus_on_press(false);
     button->set_tag(index);
     button->SetEnabled(menu_model_->IsEnabledAt(index));
-    button->set_prefix_type(TextButton::PREFIX_HIDE);
-    MenuButtonBackground* bg = new MenuButtonBackground(type);
+    MenuButtonBackground* bg =
+        new MenuButtonBackground(type, menu_->use_new_menu());
     button->set_background(bg);
-    button->SetEnabledColor(MenuConfig::instance().text_color);
+    const MenuConfig& menu_config = menu_->GetMenuConfig();
+    button->SetEnabledColor(menu_config.text_color);
     if (background)
       *background = bg;
-    button->set_border(new MenuButtonBorder());
+    button->set_border(
+        new MenuButtonBorder(menu_config, menu_->use_new_menu()));
     button->set_alignment(TextButton::ALIGN_CENTER);
-    button->SetFont(views::MenuConfig::instance().font);
+    button->SetFont(menu_config.font);
     button->ClearMaxTextSize();
     AddChildView(button);
     return button;
@@ -387,7 +387,7 @@ class WrenchMenuView : public ScheduleAllView, public views::ButtonListener {
 class ButtonContainerMenuItemView : public MenuItemView {
  public:
   // Constructor for use with button containing menu items which have a
-  // different height then .
+  // different height then normal items.
   ButtonContainerMenuItemView(MenuItemView* parent, int id, int height)
       : MenuItemView(parent, id, MenuItemView::NORMAL),
         height_(height) {
@@ -432,17 +432,14 @@ class WrenchMenu::CutCopyPasteView : public WrenchMenuView {
         IDS_COPY, MenuButtonBackground::CENTER_BUTTON, copy_index,
         &copy_background);
 
-    bool is_new_menu = IsNewMenu();
-
     TextButton* paste = CreateAndConfigureButton(
         IDS_PASTE,
-#if !defined(OS_WIN)
-        is_new_menu ? MenuButtonBackground::CENTER_BUTTON :
-#endif
+        menu_->use_new_menu() && menu_->supports_new_separators_ ?
+            MenuButtonBackground::CENTER_BUTTON :
             MenuButtonBackground::RIGHT_BUTTON,
         paste_index,
         NULL);
-    if (is_new_menu) {
+    if (menu_->use_new_menu()) {
       cut->SetEnabledColor(kTouchButtonText);
       copy->SetEnabledColor(kTouchButtonText);
       paste->SetEnabledColor(kTouchButtonText);
@@ -513,18 +510,18 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
     zoom_label_ = new Label(
         l10n_util::GetStringFUTF16Int(IDS_ZOOM_PERCENT, 100));
     zoom_label_->SetAutoColorReadabilityEnabled(false);
-    zoom_label_->SetHorizontalAlignment(Label::ALIGN_RIGHT);
-
-    bool is_new_menu = IsNewMenu();
+    zoom_label_->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
 
     MenuButtonBackground* center_bg = new MenuButtonBackground(
-#if !defined(OS_WIN)
-        is_new_menu ? MenuButtonBackground::RIGHT_BUTTON :
-#endif
-            MenuButtonBackground::CENTER_BUTTON);
+        menu_->use_new_menu() && menu_->supports_new_separators_ ?
+            MenuButtonBackground::RIGHT_BUTTON :
+            MenuButtonBackground::CENTER_BUTTON,
+        menu_->use_new_menu());
     zoom_label_->set_background(center_bg);
-    zoom_label_->set_border(new MenuButtonBorder());
-    zoom_label_->SetFont(MenuConfig::instance().font);
+    const MenuConfig& menu_config(menu->GetMenuConfig());
+    zoom_label_->set_border(
+        new MenuButtonBorder(menu_config, menu->use_new_menu()));
+    zoom_label_->SetFont(menu_config.font);
 
     AddChildView(zoom_label_);
     zoom_label_width_ = MaxWidthForZoomLabel();
@@ -539,13 +536,13 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
     gfx::ImageSkia* full_screen_image =
         ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
             IDR_FULLSCREEN_MENU_BUTTON);
-    fullscreen_button_->SetImage(ImageButton::BS_NORMAL, full_screen_image);
-    if (is_new_menu) {
+    fullscreen_button_->SetImage(ImageButton::STATE_NORMAL, full_screen_image);
+    if (menu_->use_new_menu()) {
       zoom_label_->SetEnabledColor(kTouchButtonText);
       decrement_button_->SetEnabledColor(kTouchButtonText);
       increment_button_->SetEnabledColor(kTouchButtonText);
     } else {
-      zoom_label_->SetEnabledColor(MenuConfig::instance().text_color);
+      zoom_label_->SetEnabledColor(menu_config.text_color);
     }
 
     fullscreen_button_->set_focusable(true);
@@ -553,12 +550,13 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
     fullscreen_button_->set_tag(fullscreen_index);
     fullscreen_button_->SetImageAlignment(
         ImageButton::ALIGN_CENTER, ImageButton::ALIGN_MIDDLE);
-    int horizontal_padding = IsNewMenu() ?
-                                 kHorizontalTouchPadding : kHorizontalPadding;
+    int horizontal_padding =
+        menu_->use_new_menu() ? kHorizontalTouchPadding : kHorizontalPadding;
     fullscreen_button_->set_border(views::Border::CreateEmptyBorder(
         0, horizontal_padding, 0, horizontal_padding));
     fullscreen_button_->set_background(
-        new MenuButtonBackground(MenuButtonBackground::SINGLE_BUTTON));
+        new MenuButtonBackground(MenuButtonBackground::SINGLE_BUTTON,
+                                 menu_->use_new_menu()));
     fullscreen_button_->SetAccessibleName(
         GetAccessibleNameForWrenchMenuItem(
             menu_model, fullscreen_index, IDS_ACCNAME_FULLSCREEN));
@@ -577,7 +575,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
     // The increment/decrement button are forced to the same width.
     int button_width = std::max(increment_button_->GetPreferredSize().width(),
                                 decrement_button_->GetPreferredSize().width());
-    int zoom_padding = IsNewMenu() ? kTouchZoomPadding : kZoomPadding;
+    int zoom_padding = menu_->use_new_menu() ? kTouchZoomPadding : kZoomPadding;
     int fullscreen_width = fullscreen_button_->GetPreferredSize().width() +
                            zoom_padding;
     // Returned height doesn't matter as MenuItemView forces everything to the
@@ -605,11 +603,10 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
     bounds.set_width(button_width);
     increment_button_->SetBoundsRect(bounds);
 
-    bool is_new_menu = IsNewMenu();
-    x += bounds.width() + (is_new_menu ? 0 : kZoomPadding);
+    x += bounds.width() + (menu_->use_new_menu() ? 0 : kZoomPadding);
     bounds.set_x(x);
     bounds.set_width(fullscreen_button_->GetPreferredSize().width() +
-                     (is_new_menu ? kTouchZoomPadding : 0));
+                     (menu_->use_new_menu() ? kTouchZoomPadding : 0));
     fullscreen_button_->SetBoundsRect(bounds);
   }
 
@@ -662,9 +659,8 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
   // Calculates the max width the zoom string can be.
   int MaxWidthForZoomLabel() {
     gfx::Font font = zoom_label_->font();
-    gfx::Insets insets;
-    if (zoom_label_->border())
-      zoom_label_->border()->GetInsets(&insets);
+    int border_width =
+        zoom_label_->border() ? zoom_label_->border()->GetInsets().width() : 0;
 
     int max_w = 0;
 
@@ -684,7 +680,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
           l10n_util::GetStringFUTF16Int(IDS_ZOOM_PERCENT, 100));
     }
 
-    return max_w + insets.width();
+    return max_w + border_width;
   }
 
   // Index of the fullscreen menu item in the model.
@@ -709,16 +705,70 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
   DISALLOW_COPY_AND_ASSIGN(ZoomView);
 };
 
+// RecentTabsMenuModelDelegate -------------------------------------------------
+
+// Provides the ui::MenuModelDelegate implementation for RecentTabsSubMenuModel
+// items.
+class WrenchMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
+ public:
+  RecentTabsMenuModelDelegate(ui::MenuModel* model,
+                              views::MenuItemView* menu_item)
+      : model_(model),
+        menu_item_(menu_item) {
+    model_->SetMenuModelDelegate(this);
+  }
+
+  virtual ~RecentTabsMenuModelDelegate() {
+    model_->SetMenuModelDelegate(NULL);
+  }
+
+  // ui::MenuModelDelegate implementation:
+  virtual void OnIconChanged(int index) OVERRIDE {
+    // |index| specifies position in children items of |menu_item_| starting at
+    // 0, its corresponding command id as used in the children menu item views
+    // follows that of the parent menu item view |menu_item_|.
+    int command_id = menu_item_->GetCommand() + 1 + index;
+    views::MenuItemView* item = menu_item_->GetMenuItemByID(command_id);
+    DCHECK(item);
+    gfx::Image icon;
+    if (model_->GetIconAt(index, &icon))
+      item->SetIcon(*icon.ToImageSkia());
+  }
+
+  // Return the specific menu width of recent tab menu item if |command_id|
+  // refers to one of recent tabs menu items, else return -1.
+  int GetMaxWidthForMenu(MenuItemView* menu) {
+    views::SubmenuView* submenu = menu_item_->GetSubmenu();
+    if (!submenu)
+      return -1;
+    const int kMaxMenuItemWidth = 320;
+    return menu->GetCommand() >= menu_item_->GetCommand() &&
+        menu->GetCommand() <=
+            menu_item_->GetCommand() + submenu->GetMenuItemCount() ?
+        kMaxMenuItemWidth : -1;
+  }
+
+ private:
+  ui::MenuModel* model_;
+  views::MenuItemView* menu_item_;
+
+  DISALLOW_COPY_AND_ASSIGN(RecentTabsMenuModelDelegate);
+};
+
 // WrenchMenu ------------------------------------------------------------------
 
-WrenchMenu::WrenchMenu(Browser* browser)
+WrenchMenu::WrenchMenu(Browser* browser,
+                       bool use_new_menu,
+                       bool supports_new_separators)
     : root_(NULL),
       browser_(browser),
       selected_menu_model_(NULL),
       selected_index_(0),
       bookmark_menu_(NULL),
       feedback_menu_item_(NULL),
-      first_bookmark_command_id_(0) {
+      first_bookmark_command_id_(0),
+      use_new_menu_(use_new_menu),
+      supports_new_separators_(supports_new_separators) {
   registrar_.Add(this, chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
                  content::Source<Profile>(browser_->profile()));
 }
@@ -764,6 +814,13 @@ void WrenchMenu::RunMenu(views::MenuButton* host) {
 
 bool WrenchMenu::IsShowing() {
   return menu_runner_.get() && menu_runner_->IsRunning();
+}
+
+const views::MenuConfig& WrenchMenu::GetMenuConfig() const {
+  views::Widget* browser_widget = views::Widget::GetWidgetForNativeView(
+      browser_->window()->GetNativeWindow());
+  DCHECK(browser_widget);
+  return MenuConfig::instance(browser_widget->GetNativeTheme());
 }
 
 string16 WrenchMenu::GetTooltipText(int id,
@@ -848,9 +905,17 @@ int WrenchMenu::GetDragOperations(MenuItemView* sender) {
 }
 
 int WrenchMenu::GetMaxWidthForMenu(MenuItemView* menu) {
-  return is_bookmark_command(menu->GetCommand()) ?
-      bookmark_menu_delegate_->GetMaxWidthForMenu(menu) :
-      MenuDelegate::GetMaxWidthForMenu(menu);
+  if (is_bookmark_command(menu->GetCommand()))
+    return bookmark_menu_delegate_->GetMaxWidthForMenu(menu);
+  int max_width = -1;
+  // If recent tabs menu is available, it will decide if |menu| is one of recent
+  // tabs; if yes, it would return the menu width for recent tabs.
+  // otherwise, it would return -1.
+  if (recent_tabs_menu_model_delegate_.get())
+    max_width = recent_tabs_menu_model_delegate_->GetMaxWidthForMenu(menu);
+  if (max_width == -1)
+    max_width = MenuDelegate::GetMaxWidthForMenu(menu);
+  return max_width;
 }
 
 bool WrenchMenu::IsItemChecked(int id) const {
@@ -892,7 +957,7 @@ void WrenchMenu::ExecuteCommand(int id, int mouse_event_flags) {
     return;
   }
 
-  return entry.first->ActivatedAt(entry.second);
+  return entry.first->ActivatedAt(entry.second, mouse_event_flags);
 }
 
 bool WrenchMenu::GetAccelerator(int id, ui::Accelerator* accelerator) {
@@ -945,7 +1010,6 @@ void WrenchMenu::BookmarkModelChanged() {
     root_->Cancel();
 }
 
-
 void WrenchMenu::Observe(int type,
                          const content::NotificationSource& source,
                          const content::NotificationDetails& details) {
@@ -963,8 +1027,6 @@ void WrenchMenu::Observe(int type,
 void WrenchMenu::PopulateMenu(MenuItemView* parent,
                               MenuModel* model,
                               int* next_id) {
-  bool is_new_menu = IsNewMenu();
-
   int index_offset = model->GetFirstItemIndex(NULL);
   for (int i = 0, max = model->GetItemCount(); i < max; ++i) {
     int index = i + index_offset;
@@ -972,7 +1034,7 @@ void WrenchMenu::PopulateMenu(MenuItemView* parent,
     // The button container menu items have a special height which we have to
     // use instead of the normal height.
     int height = 0;
-    if (is_new_menu &&
+    if (use_new_menu_ &&
         (model->GetCommandIdAt(index) == IDC_CUT ||
          model->GetCommandIdAt(index) == IDC_ZOOM_MINUS))
       height = kMenuItemContainingButtonsHeight;
@@ -1016,6 +1078,15 @@ void WrenchMenu::PopulateMenu(MenuItemView* parent,
         feedback_menu_item_ = item;
         break;
 
+      case IDC_RECENT_TABS_MENU:
+        DCHECK(chrome::search::IsInstantExtendedAPIEnabled(
+            browser_->profile()));
+        DCHECK(!recent_tabs_menu_model_delegate_.get());
+        recent_tabs_menu_model_delegate_.reset(
+            new RecentTabsMenuModelDelegate(model->GetSubmenuModelAt(index),
+                                            item));
+        break;
+
       default:
         break;
     }
@@ -1045,9 +1116,8 @@ MenuItemView* WrenchMenu::AppendMenuItem(MenuItemView* parent,
   }
 
   if (menu_item) {
-    bool is_new_menu = IsNewMenu();
     // Flush all buttons to the right side of the menu for the new menu type.
-    menu_item->set_use_right_margin(!is_new_menu);
+    menu_item->set_use_right_margin(!use_new_menu_);
     menu_item->SetVisible(model->IsVisibleAt(index));
 
     if (menu_type == MenuModel::TYPE_COMMAND && model->HasIcons()) {

@@ -131,7 +131,7 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
             UserMetricsAction("BookmarkBar_ContextMenu_OpenAllIncognito"));
       }
       chrome::OpenAll(parent_window_, navigator_, selection_,
-                      initial_disposition);
+                      initial_disposition, profile_);
       break;
     }
 
@@ -201,7 +201,7 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
     }
 
     case IDC_BOOKMARK_BAR_ALWAYS_SHOW:
-      bookmark_utils::ToggleWhenVisible(profile_);
+      chrome::ToggleBookmarkBarWhenVisible(profile_);
       break;
 
     case IDC_BOOKMARK_MANAGER: {
