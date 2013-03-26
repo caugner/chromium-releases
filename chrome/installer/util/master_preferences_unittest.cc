@@ -27,10 +27,10 @@ class MasterPreferencesTest : public testing::Test {
     EXPECT_TRUE(file_util::Delete(prefs_file_, false));
   }
 
-  const FilePath& prefs_file() const { return prefs_file_; }
+  const base::FilePath& prefs_file() const { return prefs_file_; }
 
  private:
-  FilePath prefs_file_;
+  base::FilePath prefs_file_;
 };
 
 // Used to specify an expected value for a set boolean preference variable.
@@ -51,7 +51,6 @@ TEST_F(MasterPreferencesTest, ParseDistroParams) {
   const char text[] =
     "{ \n"
     "  \"distribution\": { \n"
-    "     \"skip_first_run_ui\": true,\n"
     "     \"show_welcome_page\": true,\n"
     "     \"import_search_engine\": true,\n"
     "     \"import_history\": true,\n"
@@ -80,8 +79,6 @@ TEST_F(MasterPreferencesTest, ParseDistroParams) {
   EXPECT_TRUE(prefs.read_from_file());
 
   const char* expected_true[] = {
-    installer::master_preferences::kDistroSkipFirstRunPref,
-    installer::master_preferences::kDistroShowWelcomePage,
     installer::master_preferences::kDistroImportSearchPref,
     installer::master_preferences::kDistroImportHistoryPref,
     installer::master_preferences::kDistroImportBookmarksPref,
@@ -124,7 +121,6 @@ TEST_F(MasterPreferencesTest, ParseMissingDistroParams) {
   const char text[] =
     "{ \n"
     "  \"distribution\": { \n"
-    "     \"skip_first_run_ui\": true,\n"
     "     \"import_search_engine\": true,\n"
     "     \"import_bookmarks\": false,\n"
     "     \"import_bookmarks_from_file\": \"\",\n"
@@ -140,7 +136,6 @@ TEST_F(MasterPreferencesTest, ParseMissingDistroParams) {
   EXPECT_TRUE(prefs.read_from_file());
 
   ExpectedBooleans expected_bool[] = {
-    { installer::master_preferences::kDistroSkipFirstRunPref, true },
     { installer::master_preferences::kDistroImportSearchPref, true },
     { installer::master_preferences::kDistroImportBookmarksPref, false },
     { installer::master_preferences::kDoNotCreateDesktopShortcut, true },
@@ -155,8 +150,6 @@ TEST_F(MasterPreferencesTest, ParseMissingDistroParams) {
   }
 
   const char* missing_bools[] = {
-    installer::master_preferences::kDistroShowWelcomePage,
-    installer::master_preferences::kDistroImportHistoryPref,
     installer::master_preferences::kDistroImportHomePagePref,
     installer::master_preferences::kDoNotRegisterForUpdateLaunch,
     installer::master_preferences::kMakeChromeDefault,
@@ -212,7 +205,7 @@ TEST_F(MasterPreferencesTest, FirstRunTabs) {
 // they change something in the manifest this test will break, but in
 // general it is expected the extension format to be backwards compatible.
 TEST(MasterPrefsExtension, ValidateExtensionJSON) {
-  FilePath prefs_path;
+  base::FilePath prefs_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &prefs_path));
   prefs_path = prefs_path.AppendASCII("extensions")
       .AppendASCII("good").AppendASCII("Preferences");
@@ -243,12 +236,11 @@ TEST(MasterPrefsExtension, ValidateExtensionJSON) {
 // Test that we are parsing master preferences correctly.
 TEST_F(MasterPreferencesTest, GetInstallPreferencesTest) {
   // Create a temporary prefs file.
-  FilePath prefs_file;
+  base::FilePath prefs_file;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&prefs_file));
   const char text[] =
     "{ \n"
     "  \"distribution\": { \n"
-    "     \"skip_first_run_ui\": true,\n"
     "     \"do_not_create_desktop_shortcut\": false,\n"
     "     \"do_not_create_quick_launch_shortcut\": false,\n"
     "     \"do_not_launch_chrome\": true,\n"
@@ -267,7 +259,6 @@ TEST_F(MasterPreferencesTest, GetInstallPreferencesTest) {
 
   // Check prefs that do not have any equivalent command line option.
   ExpectedBooleans expected_bool[] = {
-    { installer::master_preferences::kDistroSkipFirstRunPref, true },
     { installer::master_preferences::kDoNotLaunchChrome, true },
     { installer::master_preferences::kSystemLevel, true },
     { installer::master_preferences::kVerboseLogging, false },

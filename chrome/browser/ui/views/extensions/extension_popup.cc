@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/platform_util.h"
@@ -204,6 +204,10 @@ ExtensionPopup* ExtensionPopup::ShowPopup(
 
 void ExtensionPopup::ShowBubble() {
   Show();
+
+  // Request focus for the View. Without this, the FocusManager gets confused.
+  host()->view()->SetVisible(true);
+  host()->view()->RequestFocus();
 
   // Focus on the host contents when the bubble is first shown.
   host()->host_contents()->Focus();

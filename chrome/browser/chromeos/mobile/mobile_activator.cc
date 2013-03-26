@@ -17,6 +17,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/observer_list_threadsafe.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/timer.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -88,7 +88,7 @@ std::string CellularConfigDocument::GetErrorMessage(const std::string& code) {
 void CellularConfigDocument::LoadCellularConfigFile() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   // Load partner customization startup manifest if it is available.
-  FilePath config_path(kCellularConfigPath);
+  base::FilePath config_path(kCellularConfigPath);
   if (!file_util::PathExists(config_path))
     return;
 
@@ -107,7 +107,7 @@ void CellularConfigDocument::SetErrorMap(
   error_map_.insert(map.begin(), map.end());
 }
 
-bool CellularConfigDocument::LoadFromFile(const FilePath& config_path) {
+bool CellularConfigDocument::LoadFromFile(const base::FilePath& config_path) {
   std::string config;
   if (!file_util::ReadFileToString(config_path, &config))
     return false;

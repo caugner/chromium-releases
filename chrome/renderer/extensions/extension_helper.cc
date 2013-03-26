@@ -24,7 +24,7 @@
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "extensions/common/constants.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -75,7 +75,7 @@ class ViewAccumulator : public content::RenderViewVisitor {
   std::vector<content::RenderView*> views() { return views_; }
 
   // Returns false to terminate the iteration.
-  virtual bool Visit(content::RenderView* render_view) {
+  virtual bool Visit(content::RenderView* render_view) OVERRIDE {
     ExtensionHelper* helper = ExtensionHelper::Get(render_view);
     if (!ViewTypeMatches(helper->view_type(), view_type_))
       return true;

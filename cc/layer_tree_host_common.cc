@@ -169,6 +169,7 @@ static inline bool transformToParentIsKnown(LayerImpl*)
 
 static inline bool transformToParentIsKnown(Layer* layer)
 {
+
     return !layer->transformIsAnimating();
 }
 
@@ -235,12 +236,19 @@ static inline bool subtreeShouldBeSkipped(Layer* layer)
 // Called on each layer that could be drawn after all information from
 // calcDrawProperties has been updated on that layer.  May have some false
 // positives (e.g. layers get this called on them but don't actually get drawn).
-static inline void markLayerAsUpdated(LayerImpl* layer)
+static inline void updateTilePrioritiesForLayer(LayerImpl* layer)
 {
-    layer->didUpdateTransforms();
+    layer->updateTilePriorities();
+
+    // Mask layers don't get this call, so explicitly update them so they can
+    // kick off tile rasterization.
+    if (layer->maskLayer())
+        layer->maskLayer()->updateTilePriorities();
+    if (layer->replicaLayer() && layer->replicaLayer()->maskLayer())
+      layer->replicaLayer()->maskLayer()->updateTilePriorities();
 }
 
-static inline void markLayerAsUpdated(Layer* layer)
+static inline void updateTilePrioritiesForLayer(Layer* layer)
 {
 }
 
@@ -281,7 +289,9 @@ static bool subtreeShouldRenderToSeparateSurface(LayerType* layer, bool axisAlig
     }
 
     // If the layer clips its descendants but it is not axis-aligned with respect to its parent.
-    if (layerClipsSubtree(layer) && !axisAlignedWithRespectToParent && numDescendantsThatDrawContent > 0) {
+    bool layerClipsExternalContent = layerClipsSubtree(layer) || layer->hasDelegatedContent();
+    if (layerClipsExternalContent && !axisAlignedWithRespectToParent && !layer->drawProperties().descendants_can_clip_selves)
+    {
         TRACE_EVENT_INSTANT0("cc", "LayerTreeHostCommon::requireSurface clipping");
         return true;
     }
@@ -291,8 +301,7 @@ static bool subtreeShouldRenderToSeparateSurface(LayerType* layer, bool axisAlig
     // subtree overlap. But checking layer overlaps is unnecessarily costly so
     // instead we conservatively create a surface whenever at least two layers
     // draw content for this subtree.
-    bool atLeastTwoLayersInSubtreeDrawContent = layer->hasDelegatedContent() ||
-        (numDescendantsThatDrawContent > 0 && (layer->drawsContent() || numDescendantsThatDrawContent > 1));
+    bool atLeastTwoLayersInSubtreeDrawContent = numDescendantsThatDrawContent > 0 && (layer->drawsContent() || numDescendantsThatDrawContent > 1);
 
     if (layer->opacity() != 1 && !layer->preserves3D() && atLeastTwoLayersInSubtreeDrawContent) {
         TRACE_EVENT_INSTANT0("cc", "LayerTreeHostCommon::requireSurface opacity");
@@ -396,8 +405,44 @@ gfx::Transform computeScrollCompensationMatrixForChildren(LayerImpl* layer, cons
     return nextScrollCompensationMatrix;
 }
 
+template<typename LayerType>
+static inline void calculateContentsScale(LayerType* layer, float contentsScale, bool animatingTransformToScreen)
+{
+    layer->calculateContentsScale(
+        contentsScale,
+        animatingTransformToScreen,
+        &layer->drawProperties().contents_scale_x,
+        &layer->drawProperties().contents_scale_y,
+        &layer->drawProperties().content_bounds);
+
+    LayerType* maskLayer = layer->maskLayer();
+    if (maskLayer)
+    {
+        maskLayer->calculateContentsScale(
+            contentsScale,
+            animatingTransformToScreen,
+            &maskLayer->drawProperties().contents_scale_x,
+            &maskLayer->drawProperties().contents_scale_y,
+            &maskLayer->drawProperties().content_bounds);
+    }
+
+    LayerType* replicaMaskLayer = layer->replicaLayer() ? layer->replicaLayer()->maskLayer() : 0;
+    if (replicaMaskLayer)
+    {
+        replicaMaskLayer->calculateContentsScale(
+            contentsScale,
+            animatingTransformToScreen,
+            &replicaMaskLayer->drawProperties().contents_scale_x,
+            &replicaMaskLayer->drawProperties().contents_scale_y,
+            &replicaMaskLayer->drawProperties().content_bounds);
+    }
+}
+
 static inline void updateLayerContentsScale(LayerImpl* layer, const gfx::Transform& combinedTransform, float deviceScaleFactor, float pageScaleFactor, bool animatingTransformToScreen)
 {
+    gfx::Vector2dF transformScale = MathUtil::computeTransform2dScaleComponents(combinedTransform, deviceScaleFactor * pageScaleFactor);
+    float contentsScale = std::max(transformScale.x(), transformScale.y());
+    calculateContentsScale(layer, contentsScale, animatingTransformToScreen);
 }
 
 static inline void updateLayerContentsScale(Layer* layer, const gfx::Transform& combinedTransform, float deviceScaleFactor, float pageScaleFactor, bool animatingTransformToScreen)
@@ -434,31 +479,8 @@ static inline void updateLayerContentsScale(Layer* layer, const gfx::Transform& 
     float contentsScale = rasterScale * deviceScaleFactor;
     if (!layer->boundsContainPageScale())
         contentsScale *= pageScaleFactor;
-    layer->calculateContentsScale(
-        contentsScale,
-        &layer->drawProperties().contents_scale_x,
-        &layer->drawProperties().contents_scale_y,
-        &layer->drawProperties().content_bounds);
 
-    Layer* maskLayer = layer->maskLayer();
-    if (maskLayer)
-    {
-        maskLayer->calculateContentsScale(
-            contentsScale,
-            &maskLayer->drawProperties().contents_scale_x,
-            &maskLayer->drawProperties().contents_scale_y,
-            &maskLayer->drawProperties().content_bounds);
-    }
-
-    Layer* replicaMaskLayer = layer->replicaLayer() ? layer->replicaLayer()->maskLayer() : 0;
-    if (replicaMaskLayer)
-    {
-        replicaMaskLayer->calculateContentsScale(
-            contentsScale,
-            &replicaMaskLayer->drawProperties().contents_scale_x,
-            &replicaMaskLayer->drawProperties().contents_scale_y,
-            &replicaMaskLayer->drawProperties().content_bounds);
-    }
+    calculateContentsScale(layer, contentsScale, animatingTransformToScreen);
 }
 
 template<typename LayerType, typename LayerList>
@@ -485,16 +507,35 @@ static inline void removeSurfaceForEarlyExit(LayerType* layerToRemove, LayerList
 template<typename LayerType>
 static void preCalculateMetaInformation(LayerType* layer)
 {
+    if (layer->hasDelegatedContent()) {
+        // Layers with delegated content need to be treated as if they have as many children as the number
+        // of layers they own delegated quads for. Since we don't know this number right now, we choose
+        // one that acts like infinity for our purposes.
+        layer->drawProperties().num_descendants_that_draw_content = 1000;
+        layer->drawProperties().descendants_can_clip_selves = false;
+        return;
+    }
+
     int numDescendantsThatDrawContent = 0;
+    bool descendantsCanClipSelves = true;
+    bool sublayerTransformPreventsClip = !layer->sublayerTransform().IsPositiveScaleOrTranslation();
 
     for (size_t i = 0; i < layer->children().size(); ++i) {
         LayerType* childLayer = layer->children()[i];
         preCalculateMetaInformation<LayerType>(childLayer);
+
         numDescendantsThatDrawContent += childLayer->drawsContent() ? 1 : 0;
         numDescendantsThatDrawContent += childLayer->drawProperties().num_descendants_that_draw_content;
+
+        if ((childLayer->drawsContent() && !childLayer->canClipSelf()) ||
+            !childLayer->drawProperties().descendants_can_clip_selves ||
+            sublayerTransformPreventsClip ||
+            !childLayer->transform().IsPositiveScaleOrTranslation())
+            descendantsCanClipSelves = false;
     }
 
     layer->drawProperties().num_descendants_that_draw_content = numDescendantsThatDrawContent;
+    layer->drawProperties().descendants_can_clip_selves = descendantsCanClipSelves;
 }
 
 // Recursively walks the layer tree starting at the given node and computes all the
@@ -505,7 +546,7 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
     const gfx::Rect& clipRectFromAncestor, const gfx::Rect& clipRectFromAncestorInDescendantSpace, bool ancestorClipsSubtree,
     RenderSurfaceType* nearestAncestorThatMovesPixels, LayerList& renderSurfaceLayerList, LayerList& layerList,
     LayerSorter* layerSorter, int maxTextureSize, float deviceScaleFactor, float pageScaleFactor, bool subtreeCanUseLCDText,
-    gfx::Rect& drawableContentRectOfSubtree)
+    gfx::Rect& drawableContentRectOfSubtree, bool updateTilePriorities)
 {
     // This function computes the new matrix transformations recursively for this
     // layer and all its descendants. It also computes the appropriate render surfaces.
@@ -530,15 +571,12 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
     //        Tr[origin2anchor] is the translation from the layer's origin to its anchor point
     //        Tr[origin2center] is the translation from the layer's origin to its center
     //        M[layer] is the layer's matrix (applied at the anchor point)
-    //        M[sublayer] is the layer's sublayer transform (applied at the layer's center)
+    //        M[sublayer] is the layer's sublayer transform (also applied at the layer's anchor point)
     //        S[layer2content] is the ratio of a layer's contentBounds() to its bounds().
     //
     //    Some composite transforms can help in understanding the sequence of transforms:
     //        compositeLayerTransform = Tr[origin2anchor] * M[layer] * Tr[origin2anchor].inverse()
-    //        compositeSublayerTransform = Tr[origin2center] * M[sublayer] * Tr[origin2center].inverse()
-    //
-    //    In words, the layer transform is applied about the anchor point, and the sublayer transform is
-    //    applied about the center of the layer.
+    //        compositeSublayerTransform = Tr[origin2anchor] * M[sublayer] * Tr[origin2anchor].inverse()
     //
     // 4. When a layer (or render surface) is drawn, it is drawn into a "target render surface". Therefore the draw
     //    transform does not necessarily transform from screen space to local layer space. Instead, the draw transform
@@ -671,7 +709,7 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
     // layerScreenSpaceTransform represents the transform between root layer's "screen space" and local content space.
     layerDrawProperties.screen_space_transform = fullHierarchyMatrix;
     if (!layer->preserves3D())
-        MathUtil::flattenTransformTo2d(layerDrawProperties.screen_space_transform);
+        layerDrawProperties.screen_space_transform.FlattenTo2d();
     layerDrawProperties.screen_space_transform.PreconcatTransform(layerDrawProperties.target_space_transform);
 
     // Adjusting text AA method during animation may cause repaints, which in-turn causes jank.
@@ -714,7 +752,7 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
         layerDrawProperties.target_space_transform.Scale(renderSurfaceSublayerScale.x() / layer->contentsScaleX(), renderSurfaceSublayerScale.y() / layer->contentsScaleY());
 
         // Inside the surface's subtree, we scale everything to the owning layer's scale.
-        // The sublayer matrix transforms centered layer rects into target
+        // The sublayer matrix transforms layer rects into target
         // surface content space.
         DCHECK(sublayerMatrix.IsIdentity());
         sublayerMatrix.Scale(renderSurfaceSublayerScale.x(), renderSurfaceSublayerScale.y());
@@ -825,13 +863,13 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
 
     // Flatten to 2D if the layer doesn't preserve 3D.
     if (!layer->preserves3D())
-        MathUtil::flattenTransformTo2d(sublayerMatrix);
+        sublayerMatrix.FlattenTo2d();
 
-    // Apply the sublayer transform at the center of the layer.
+    // Apply the sublayer transform at the anchor point of the layer.
     if (!layer->sublayerTransform().IsIdentity()) {
-        sublayerMatrix.Translate(0.5 * bounds.width(), 0.5 * bounds.height());
+        sublayerMatrix.Translate(layer->anchorPoint().x() * bounds.width(), layer->anchorPoint().y() * bounds.height());
         sublayerMatrix.PreconcatTransform(layer->sublayerTransform());
-        sublayerMatrix.Translate(-0.5 * bounds.width(), -0.5 * bounds.height());
+        sublayerMatrix.Translate(-layer->anchorPoint().x() * bounds.width(), -layer->anchorPoint().y() * bounds.height());
     }
 
     LayerList& descendants = (layer->renderSurface() ? layer->renderSurface()->layerList() : layerList);
@@ -851,7 +889,7 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
         calculateDrawPropertiesInternal<LayerType, LayerList, RenderSurfaceType>(child, sublayerMatrix, nextHierarchyMatrix, nextScrollCompensationMatrix,
                                                                                  clipRectForSubtree, clipRectForSubtreeInDescendantSpace, subtreeShouldBeClipped, nearestAncestorThatMovesPixels,
                                                                                  renderSurfaceLayerList, descendants, layerSorter, maxTextureSize, deviceScaleFactor, pageScaleFactor,
-                                                                                 subtreeCanUseLCDText, drawableContentRectOfChildSubtree);
+                                                                                 subtreeCanUseLCDText, drawableContentRectOfChildSubtree, updateTilePriorities);
         if (!drawableContentRectOfChildSubtree.IsEmpty()) {
             accumulatedDrawableContentRectOfChildren.Union(drawableContentRectOfChildSubtree);
             if (child->renderSurface())
@@ -951,7 +989,8 @@ static void calculateDrawPropertiesInternal(LayerType* layer, const gfx::Transfo
         }
     }
 
-    markLayerAsUpdated(layer);
+    if (updateTilePriorities)
+        updateTilePrioritiesForLayer(layer);
 
     // If neither this layer nor any of its children were added, early out.
     if (sortingStartIndex == descendants.size())
@@ -983,6 +1022,7 @@ void LayerTreeHostCommon::calculateDrawProperties(Layer* rootLayer, const gfx::S
     // The root layer's renderSurface should receive the deviceViewport as the initial clipRect.
     bool subtreeShouldBeClipped = true;
     gfx::Rect deviceViewportRect(gfx::Point(), deviceViewportSize);
+    bool updateTilePriorities = false;
 
     // This function should have received a root layer.
     DCHECK(isRootLayer(rootLayer));
@@ -992,7 +1032,8 @@ void LayerTreeHostCommon::calculateDrawProperties(Layer* rootLayer, const gfx::S
         rootLayer, deviceScaleTransform, identityMatrix, identityMatrix,
         deviceViewportRect, deviceViewportRect, subtreeShouldBeClipped, 0, renderSurfaceLayerList,
         dummyLayerList, 0, maxTextureSize,
-        deviceScaleFactor, pageScaleFactor, canUseLCDText, totalDrawableContentRect);
+        deviceScaleFactor, pageScaleFactor, canUseLCDText, totalDrawableContentRect,
+        updateTilePriorities);
 
     // The dummy layer list should not have been used.
     DCHECK(dummyLayerList.size() == 0);
@@ -1000,7 +1041,7 @@ void LayerTreeHostCommon::calculateDrawProperties(Layer* rootLayer, const gfx::S
     DCHECK(rootLayer->renderSurface());
 }
 
-void LayerTreeHostCommon::calculateDrawProperties(LayerImpl* rootLayer, const gfx::Size& deviceViewportSize, float deviceScaleFactor, float pageScaleFactor, int maxTextureSize, bool canUseLCDText, std::vector<LayerImpl*>& renderSurfaceLayerList)
+void LayerTreeHostCommon::calculateDrawProperties(LayerImpl* rootLayer, const gfx::Size& deviceViewportSize, float deviceScaleFactor, float pageScaleFactor, int maxTextureSize, bool canUseLCDText, std::vector<LayerImpl*>& renderSurfaceLayerList, bool updateTilePriorities)
 {
     gfx::Rect totalDrawableContentRect;
     gfx::Transform identityMatrix;
@@ -1021,7 +1062,8 @@ void LayerTreeHostCommon::calculateDrawProperties(LayerImpl* rootLayer, const gf
         rootLayer, deviceScaleTransform, identityMatrix, identityMatrix,
         deviceViewportRect, deviceViewportRect, subtreeShouldBeClipped, 0, renderSurfaceLayerList,
         dummyLayerList, &layerSorter, maxTextureSize,
-        deviceScaleFactor, pageScaleFactor, canUseLCDText, totalDrawableContentRect);
+        deviceScaleFactor, pageScaleFactor, canUseLCDText, totalDrawableContentRect,
+        updateTilePriorities);
 
     // The dummy layer list should not have been used.
     DCHECK(dummyLayerList.size() == 0);
@@ -1088,7 +1130,7 @@ static bool pointIsClippedBySurfaceOrClipRect(const gfx::PointF& screenSpacePoin
     return false;
 }
 
-LayerImpl* LayerTreeHostCommon::findLayerThatIsHitByPoint(const gfx::PointF& screenSpacePoint, std::vector<LayerImpl*>& renderSurfaceLayerList)
+LayerImpl* LayerTreeHostCommon::findLayerThatIsHitByPoint(const gfx::PointF& screenSpacePoint, const std::vector<LayerImpl*>& renderSurfaceLayerList)
 {
     LayerImpl* foundLayer = 0;
 
@@ -1120,7 +1162,7 @@ LayerImpl* LayerTreeHostCommon::findLayerThatIsHitByPoint(const gfx::PointF& scr
     return foundLayer;
 }
 
-LayerImpl* LayerTreeHostCommon::findLayerThatIsHitByPointInTouchHandlerRegion(const gfx::PointF& screenSpacePoint, std::vector<LayerImpl*>& renderSurfaceLayerList)
+LayerImpl* LayerTreeHostCommon::findLayerThatIsHitByPointInTouchHandlerRegion(const gfx::PointF& screenSpacePoint, const std::vector<LayerImpl*>& renderSurfaceLayerList)
 {
     LayerImpl* foundLayer = 0;
 

@@ -30,7 +30,6 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool npot_ok;
     bool enable_texture_float_linear;
     bool enable_texture_half_float_linear;
-    bool chromium_webglsl;
     bool chromium_stream_texture;
     bool angle_translated_shader_source;
     bool angle_pack_reverse_row_order;
@@ -55,6 +54,7 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool set_texture_filter_before_generating_mipmap;
     bool use_current_program_after_successful_link;
     bool restore_scissor_on_fbo_change;
+    bool flush_on_context_switch;
 
     // Note: 0 here means use driver limit.
     GLint max_texture_size;
@@ -69,9 +69,8 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   bool Initialize(const DisallowedFeatures& disallowed_features,
                   const char* allowed_features);
 
-  // Turns on certain features if they can be turned on. NULL turns on
-  // all available features.
-  void AddFeatures(const char* desired_features);
+  // Turns on certain features if they can be turned on.
+  void AddFeatures();
 
   const Validators* validators() const {
     return &validators_;

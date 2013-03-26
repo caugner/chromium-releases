@@ -20,7 +20,12 @@ using ::testing::StrictMock;
 
 class SyncPrefsTest : public testing::Test {
  protected:
-  TestingPrefService pref_service_;
+  virtual void SetUp() OVERRIDE {
+    SyncPrefs::RegisterUserPrefs(&pref_service_,
+                                 pref_service_.registry());
+  }
+
+  TestingPrefServiceSyncable pref_service_;
 
  private:
   MessageLoop loop_;
@@ -32,6 +37,7 @@ syncer::ModelTypeSet GetUserVisibleTypes() {
   user_visible_types.Remove(syncer::APP_NOTIFICATIONS);
   user_visible_types.Remove(syncer::APP_SETTINGS);
   user_visible_types.Remove(syncer::AUTOFILL_PROFILE);
+  user_visible_types.Remove(syncer::DICTIONARY);
   user_visible_types.Remove(syncer::EXTENSION_SETTINGS);
   user_visible_types.Remove(syncer::SEARCH_ENGINES);
   return user_visible_types;
@@ -103,6 +109,7 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
       expected_preferred_types.Put(syncer::AUTOFILL_PROFILE);
     }
     if (it.Get() == syncer::PREFERENCES) {
+      expected_preferred_types.Put(syncer::DICTIONARY);
       expected_preferred_types.Put(syncer::SEARCH_ENGINES);
     }
     if (it.Get() == syncer::APPS) {

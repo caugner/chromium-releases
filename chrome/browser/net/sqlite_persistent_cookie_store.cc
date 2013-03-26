@@ -21,7 +21,6 @@
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 #include "chrome/browser/net/clear_on_exit_policy.h"
@@ -63,7 +62,7 @@ using content::BrowserThread;
 class SQLitePersistentCookieStore::Backend
     : public base::RefCountedThreadSafe<SQLitePersistentCookieStore::Backend> {
  public:
-  Backend(const FilePath& path,
+  Backend(const base::FilePath& path,
           bool restore_old_session_cookies,
           ClearOnExitPolicy* clear_on_exit_policy)
       : path_(path),
@@ -109,7 +108,7 @@ class SQLitePersistentCookieStore::Backend
 
   class KillDatabaseErrorDelegate : public sql::ErrorDelegate {
    public:
-    KillDatabaseErrorDelegate(Backend* backend);
+    explicit KillDatabaseErrorDelegate(Backend* backend);
 
     virtual ~KillDatabaseErrorDelegate() {}
 
@@ -119,12 +118,6 @@ class SQLitePersistentCookieStore::Backend
                         sql::Statement* stmt) OVERRIDE;
 
    private:
-
-    class HistogramUniquifier {
-     public:
-      static const char* name() { return "Sqlite.Cookie.Error"; }
-    };
-
     // Do not increment the count on Backend, as that would create a circular
     // reference (Backend -> Connection -> ErrorDelegate -> Backend).
     Backend* backend_;
@@ -223,7 +216,7 @@ class SQLitePersistentCookieStore::Backend
   void KillDatabase();
   void ScheduleKillDatabase();
 
-  FilePath path_;
+  base::FilePath path_;
   scoped_ptr<sql::Connection> db_;
   sql::MetaTable meta_table_;
 
@@ -292,8 +285,6 @@ KillDatabaseErrorDelegate(Backend* backend)
 
 int SQLitePersistentCookieStore::Backend::KillDatabaseErrorDelegate::OnError(
     int error, sql::Connection* connection, sql::Statement* stmt) {
-  sql::LogAndRecordErrorInHistogram<HistogramUniquifier>(error, connection);
-
   // Do not attempt to kill database more than once. If the first time failed,
   // it is unlikely that a second time will be successful.
   if (!attempted_to_kill_database_ && sql::IsErrorCatastrophic(error)) {
@@ -540,18 +531,17 @@ bool SQLitePersistentCookieStore::Backend::InitializeDatabase() {
 
   base::Time start = base::Time::Now();
 
-  const FilePath dir = path_.DirName();
+  const base::FilePath dir = path_.DirName();
   if (!file_util::PathExists(dir) && !file_util::CreateDirectory(dir)) {
     return false;
   }
 
   int64 db_size = 0;
-  if (file_util::GetFileSize(path_, &db_size)) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+  if (file_util::GetFileSize(path_, &db_size))
     UMA_HISTOGRAM_COUNTS("Cookie.DBSizeInKB", db_size / 1024 );
-  }
 
   db_.reset(new sql::Connection);
+  db_->set_error_histogram_name("Sqlite.Cookie.Error");
   db_->set_error_delegate(new KillDatabaseErrorDelegate(this));
 
   if (!db_->Open(path_)) {
@@ -1054,9 +1044,8 @@ void SQLitePersistentCookieStore::Backend::KillDatabase() {
   if (db_.get()) {
     // This Backend will now be in-memory only. In a future run we will recreate
     // the database. Hopefully things go better then!
-    bool success = db_->Raze();
+    bool success = db_->RazeAndClose();
     UMA_HISTOGRAM_BOOLEAN("Cookie.KillDatabaseResult", success);
-    db_->Close();
     meta_table_.Reset();
     db_.reset();
   }
@@ -1074,7 +1063,7 @@ void SQLitePersistentCookieStore::Backend::DeleteSessionCookiesOnStartup() {
 }
 
 SQLitePersistentCookieStore::SQLitePersistentCookieStore(
-    const FilePath& path,
+    const base::FilePath& path,
     bool restore_old_session_cookies,
     ClearOnExitPolicy* clear_on_exit_policy)
     : backend_(
@@ -1092,38 +1081,28 @@ void SQLitePersistentCookieStore::LoadCookiesForKey(
 }
 
 void SQLitePersistentCookieStore::AddCookie(const net::CanonicalCookie& cc) {
-  if (backend_.get())
-    backend_->AddCookie(cc);
+  backend_->AddCookie(cc);
 }
 
 void SQLitePersistentCookieStore::UpdateCookieAccessTime(
     const net::CanonicalCookie& cc) {
-  if (backend_.get())
-    backend_->UpdateCookieAccessTime(cc);
+  backend_->UpdateCookieAccessTime(cc);
 }
 
 void SQLitePersistentCookieStore::DeleteCookie(const net::CanonicalCookie& cc) {
-  if (backend_.get())
-    backend_->DeleteCookie(cc);
+  backend_->DeleteCookie(cc);
 }
 
 void SQLitePersistentCookieStore::SetForceKeepSessionState() {
-  if (backend_.get())
-    backend_->SetForceKeepSessionState();
+  backend_->SetForceKeepSessionState();
 }
 
 void SQLitePersistentCookieStore::Flush(const base::Closure& callback) {
-  if (backend_.get())
-    backend_->Flush(callback);
-  else if (!callback.is_null())
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
+  backend_->Flush(callback);
 }
 
 SQLitePersistentCookieStore::~SQLitePersistentCookieStore() {
-  if (backend_.get()) {
-    backend_->Close();
-    // Release our reference, it will probably still have a reference if the
-    // background thread has not run Close() yet.
-    backend_ = NULL;
-  }
+  backend_->Close();
+  // We release our reference to the Backend, though it will probably still have
+  // a reference if the background thread has not run Close() yet.
 }

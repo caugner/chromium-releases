@@ -19,6 +19,8 @@ import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputMethodManager;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 
@@ -42,7 +44,7 @@ import org.chromium.base.JNINamespace;
 class ImeAdapter {
     interface ViewEmbedder {
         /**
-         * @param isFinish whether the event is occuring because input is finished.
+         * @param isFinish whether the event is occurring because input is finished.
          */
         public void onImeEvent(boolean isFinish);
         public void onSetFieldValue();
@@ -105,8 +107,6 @@ class ImeAdapter {
         sTextInputTypeNumber = textInputTypeNumber;
         sTextInputTypeWeek = textInputTypeWeek;
         sTextInputTypeContentEditable = textInputTypeContentEditable;
-        InputDialogContainer.initializeInputTypes(textInputTypeDate, textInputTypeDateTime,
-                textInputTypeDateTimeLocal, textInputTypeMonth, textInputTypeTime);
     }
 
     private int mNativeImeAdapterAndroid;
@@ -118,7 +118,6 @@ class ImeAdapter {
     private AdapterInputConnection mInputConnection;
     private ViewEmbedder mViewEmbedder;
     private Handler mHandler;
-    private InputDialogContainer mInputDialogContainer;
 
     private class DelayedDismissInput implements Runnable {
         private int mNativeImeAdapter;
@@ -136,6 +135,9 @@ class ImeAdapter {
 
     private DelayedDismissInput mDismissInput = null;
 
+    @VisibleForTesting
+    protected boolean mIsShowWithoutHideOutstanding = false;
+
     // Delay introduced to avoid hiding the keyboard if new show requests are received.
     // The time required by the unfocus-focus events triggered by tab has been measured in soju:
     // Mean: 18.633 ms, Standard deviation: 7.9837 ms.
@@ -150,20 +152,6 @@ class ImeAdapter {
         mInsertionHandleController = insertionHandleController;
         mViewEmbedder = embedder;
         mHandler = new Handler();
-        mInputDialogContainer = new InputDialogContainer(context,
-                new InputDialogContainer.InputActionDelegate() {
-
-                    @Override
-                    public void replaceDateTime(String text) {
-                        mViewEmbedder.onSetFieldValue();
-                        nativeReplaceDateTime(mNativeImeAdapterAndroid, text);
-                    }
-
-                    @Override
-                    public void cancelDateTimeDialog() {
-                        nativeCancelDialog(mNativeImeAdapterAndroid);
-                    }
-                });
     }
 
     boolean isFor(int nativeImeAdapter, int textInputType) {
@@ -196,30 +184,12 @@ class ImeAdapter {
             InputMethodManager manager = (InputMethodManager)
                     mContext.getSystemService(Context.INPUT_METHOD_SERVICE);
 
-            if (hasTextInputType()) {
-                manager.restartInput(mViewEmbedder.getAttachedView());
-                // If type has changed from dialog to text, show even if showIfNeeded is not true.
-                if (showIfNeeded || mInputDialogContainer.isDialogShowing()) {
-                    showKeyboard();
-                }
-            } else if (hasDialogInputType()) {
-                // If type has changed from text to dialog, show even if showIfNeeded is not true.
-                if (showIfNeeded || isTextInputType(previousType)) {
-                    // Make sure the keyboard is dismissed before displaying the dialog.
-                    dismissInput(false);
-                    mInsertionHandleController.hideAndDisallowAutomaticShowing();
-                    mInputDialogContainer.showDialog(text, textInputType);
-                }
+            manager.restartInput(mViewEmbedder.getAttachedView());
+            if (showIfNeeded) {
+                showKeyboard();
             }
         } else if (hasInputType()) {
-            if (!mInputDialogContainer.isDialogShowing() && showIfNeeded) {
-                if (hasDialogInputType()) {
-                    mInsertionHandleController.hideAndDisallowAutomaticShowing();
-                    mInputDialogContainer.showDialog(text, textInputType);
-                } else {
-                    showKeyboard();
-                }
-            }
+            showKeyboard();
         }
     }
 
@@ -250,7 +220,7 @@ class ImeAdapter {
     }
 
     private void showKeyboard() {
-        mInputDialogContainer.dismissDialog();
+        mIsShowWithoutHideOutstanding = true;
         InputMethodManager manager = (InputMethodManager)
                 mContext.getSystemService(Context.INPUT_METHOD_SERVICE);
         manager.showSoftInput(mViewEmbedder.getAttachedView(), 0,
@@ -263,6 +233,7 @@ class ImeAdapter {
     }
 
     private void hideKeyboard(boolean unzoomIfNeeded) {
+        mIsShowWithoutHideOutstanding  = false;
         InputMethodManager manager = (InputMethodManager)
                 mContext.getSystemService(Context.INPUT_METHOD_SERVICE);
         View view = mViewEmbedder.getAttachedView();
@@ -288,10 +259,6 @@ class ImeAdapter {
 
     boolean hasTextInputType() {
         return isTextInputType(mTextInputType);
-    }
-
-    boolean hasDialogInputType() {
-        return InputDialogContainer.isDialogInputType(mTextInputType);
     }
 
     boolean dispatchKeyEvent(KeyEvent event) {
@@ -500,7 +467,6 @@ class ImeAdapter {
     static public class AdapterInputConnection extends BaseInputConnection {
         private View mInternalView;
         private ImeAdapter mImeAdapter;
-        private Editable mEditable;
         private boolean mSingleLine;
 
         // Factory function.
@@ -527,16 +493,14 @@ class ImeAdapter {
         public void setEditableText(String text, int selectionStart, int selectionEnd,
                 int compositionStart, int compositionEnd) {
 
-            if (mEditable == null) {
-                mEditable = Editable.Factory.getInstance().newEditable("");
-            }
+            Editable editable = getEditable();
 
-            int prevSelectionStart = Selection.getSelectionStart(mEditable);
-            int prevSelectionEnd = Selection.getSelectionEnd(mEditable);
-            int prevEditableLength = mEditable.length();
-            int prevCompositionStart = getComposingSpanStart(mEditable);
-            int prevCompositionEnd = getComposingSpanEnd(mEditable);
-            String prevText = mEditable.toString();
+            int prevSelectionStart = Selection.getSelectionStart(editable);
+            int prevSelectionEnd = Selection.getSelectionEnd(editable);
+            int prevEditableLength = editable.length();
+            int prevCompositionStart = getComposingSpanStart(editable);
+            int prevCompositionEnd = getComposingSpanEnd(editable);
+            String prevText = editable.toString();
 
             selectionStart = Math.min(selectionStart, text.length());
             selectionEnd = Math.min(selectionEnd, text.length());
@@ -554,9 +518,9 @@ class ImeAdapter {
             }
 
             if (!textUnchanged) {
-                mEditable.replace(0, mEditable.length(), text);
+                editable.replace(0, editable.length(), text);
             }
-            Selection.setSelection(mEditable, selectionStart, selectionEnd);
+            Selection.setSelection(editable, selectionStart, selectionEnd);
             super.setComposingRegion(compositionStart, compositionEnd);
 
             if (textUnchanged || prevText.equals("")) {
@@ -573,15 +537,6 @@ class ImeAdapter {
             if (textUnchanged && compositionStart == -1 && compositionEnd == -1) {
                 restartInput();
             }
-        }
-
-        @Override
-        public Editable getEditable() {
-            if (mEditable == null) {
-                mEditable = Editable.Factory.getInstance().newEditable("");
-                Selection.setSelection(mEditable, 0);
-            }
-            return mEditable;
         }
 
         @Override
@@ -638,14 +593,11 @@ class ImeAdapter {
         @Override
         public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
             ExtractedText et = new ExtractedText();
-            if (mEditable == null) {
-                et.text = "";
-            } else {
-                et.text = mEditable.toString();
-                et.partialEndOffset = mEditable.length();
-                et.selectionStart = Selection.getSelectionStart(mEditable);
-                et.selectionEnd = Selection.getSelectionEnd(mEditable);
-            }
+            Editable editable = getEditable();
+            et.text = editable.toString();
+            et.partialEndOffset = editable.length();
+            et.selectionStart = Selection.getSelectionStart(editable);
+            et.selectionEnd = Selection.getSelectionEnd(editable);
             et.flags = mSingleLine ? ExtractedText.FLAG_SINGLE_LINE : 0;
             return et;
         }
@@ -693,8 +645,8 @@ class ImeAdapter {
 
         @Override
         public boolean finishComposingText() {
-            if (mEditable == null
-                    || (getComposingSpanStart(mEditable) == getComposingSpanEnd(mEditable))) {
+            Editable editable = getEditable();
+            if (getComposingSpanStart(editable) == getComposingSpanEnd(editable)) {
                 return true;
             }
             super.finishComposingText();
@@ -799,10 +751,6 @@ class ImeAdapter {
     private native void nativeCommitText(int nativeImeAdapterAndroid, String text);
 
     private native void nativeAttachImeAdapter(int nativeImeAdapterAndroid);
-
-    private native void nativeReplaceDateTime(int nativeImeAdapterAndroid, String text);
-
-    private native void nativeCancelDialog(int nativeImeAdapterAndroid);
 
     private native void nativeSetEditableSelectionOffsets(int nativeImeAdapterAndroid,
             int start, int end);

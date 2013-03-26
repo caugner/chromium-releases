@@ -6,6 +6,9 @@
 
 #include "base/logging.h"
 #include "skia/ext/refptr.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
 #include "third_party/skia/include/effects/SkColorMatrixFilter.h"
@@ -13,9 +16,6 @@
 #include "third_party/skia/include/gpu/SkGpuDevice.h"
 #include "third_party/skia/include/gpu/SkGrPixelRef.h"
 #include "ui/gfx/size_f.h"
-#include <public/WebFilterOperation.h>
-#include <public/WebFilterOperations.h>
-#include <public/WebGraphicsContext3D.h>
 
 namespace cc {
 
@@ -242,12 +242,12 @@ public:
         , m_currentTexture(0)
     {
         // Wrap the source texture in a Ganesh platform texture.
-        GrPlatformTextureDesc platformTextureDescription;
-        platformTextureDescription.fWidth = size.width();
-        platformTextureDescription.fHeight = size.height();
-        platformTextureDescription.fConfig = kSkia8888_GrPixelConfig;
-        platformTextureDescription.fTextureHandle = textureId;
-        skia::RefPtr<GrTexture> texture = skia::AdoptRef(grContext->createPlatformTexture(platformTextureDescription));
+        GrBackendTextureDesc backendTextureDescription;
+        backendTextureDescription.fWidth = size.width();
+        backendTextureDescription.fHeight = size.height();
+        backendTextureDescription.fConfig = kSkia8888_GrPixelConfig;
+        backendTextureDescription.fTextureHandle = textureId;
+        skia::RefPtr<GrTexture> texture = skia::AdoptRef(grContext->wrapBackendTexture(backendTextureDescription));
         // Place the platform texture inside an SkBitmap.
         m_source.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
         skia::RefPtr<SkGrPixelRef> pixelRef = skia::AdoptRef(new SkGrPixelRef(texture.get()));
@@ -360,6 +360,7 @@ WebKit::WebFilterOperations RenderSurfaceFilters::optimize(const WebKit::WebFilt
         case WebKit::WebFilterOperation::FilterTypeInvert:
         case WebKit::WebFilterOperation::FilterTypeOpacity:
         case WebKit::WebFilterOperation::FilterTypeColorMatrix:
+        default: // FIXME: temporary place holder to prevent build failures
             break;
         }
     }
@@ -433,6 +434,7 @@ SkBitmap RenderSurfaceFilters::apply(const WebKit::WebFilterOperations& filters,
         case WebKit::WebFilterOperation::FilterTypeHueRotate:
         case WebKit::WebFilterOperation::FilterTypeInvert:
         case WebKit::WebFilterOperation::FilterTypeOpacity:
+        default: // FIXME: temporary place holder to prevent build failures
             NOTREACHED();
             break;
         }

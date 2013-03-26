@@ -24,15 +24,19 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "googleurl/src/gurl.h"
-#include "ui/base/dialogs/select_file_dialog.h"
+#include "ui/shell_dialogs/select_file_dialog.h"
 
 class ExtensionService;
-class FilePath;
-class PrefService;
+class PrefRegistrySyncable;
 
 namespace base {
 class DictionaryValue;
+class FilePath;
 class ListValue;
+}
+
+namespace content {
+class WebUIDataSource;
 }
 
 namespace extensions {
@@ -69,7 +73,7 @@ class ExtensionSettingsHandler
   ExtensionSettingsHandler();
   virtual ~ExtensionSettingsHandler();
 
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Extension Detail JSON Struct for page. |pages| is injected for unit
   // testing.
@@ -79,7 +83,7 @@ class ExtensionSettingsHandler
       const std::vector<ExtensionPage>& pages,
       const extensions::ExtensionWarningService* warning_service);
 
-  void GetLocalizedValues(base::DictionaryValue* localized_strings);
+  void GetLocalizedValues(content::WebUIDataSource* source);
 
   // content::WebContentsObserver implementation, which reloads all unpacked
   // extensions whenever chrome://extensions is reloaded.
@@ -98,10 +102,10 @@ class ExtensionSettingsHandler
   virtual void RegisterMessages() OVERRIDE;
 
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const FilePath& path,
+  virtual void FileSelected(const base::FilePath& path,
                             int index, void* params) OVERRIDE;
   virtual void MultiFilesSelected(
-      const std::vector<FilePath>& files, void* params) OVERRIDE;
+      const std::vector<base::FilePath>& files, void* params) OVERRIDE;
   virtual void FileSelectionCanceled(void* params) OVERRIDE {}
 
   // content::NotificationObserver implementation.
@@ -205,7 +209,7 @@ class ExtensionSettingsHandler
 
   // Used to start the |load_extension_dialog_| in the last directory that was
   // loaded.
-  FilePath last_unpacked_directory_;
+  base::FilePath last_unpacked_directory_;
 
   // Used to show confirmation UI for uninstalling extensions in incognito mode.
   scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;

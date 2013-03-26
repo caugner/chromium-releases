@@ -65,7 +65,7 @@ class RulesRegistryStorageDelegate::Inner
   friend class base::RefCountedThreadSafe<Inner>;
   friend class RulesRegistryStorageDelegate;
 
-  ~Inner();
+  virtual ~Inner();
 
   // Initialization of the storage delegate if it is used in the context of
   // an incognito profile.
@@ -132,7 +132,7 @@ void RulesRegistryStorageDelegate::InitOnUIThread(
     RulesRegistryWithCache* rules_registry,
     const std::string& storage_key) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  extensions::StateStore* store = ExtensionSystem::Get(profile)->state_store();
+  extensions::StateStore* store = ExtensionSystem::Get(profile)->rules_store();
   if (store)
     store->RegisterKey(storage_key);
   inner_ = new Inner(profile, rules_registry, storage_key);
@@ -194,7 +194,8 @@ void RulesRegistryStorageDelegate::Inner::InitForOTRProfile() {
   const ExtensionSet* extensions = extension_service->extensions();
   for (ExtensionSet::const_iterator i = extensions->begin();
        i != extensions->end(); ++i) {
-    if ((*i)->HasAPIPermission(APIPermission::kDeclarativeWebRequest) &&
+    if (((*i)->HasAPIPermission(APIPermission::kDeclarativeContent) ||
+         (*i)->HasAPIPermission(APIPermission::kDeclarativeWebRequest)) &&
         extension_service->IsIncognitoEnabled((*i)->id()))
       ReadFromStorage((*i)->id());
   }
@@ -211,8 +212,8 @@ void RulesRegistryStorageDelegate::Inner::Observe(
         content::Details<const extensions::Extension>(details).ptr();
     // TODO(mpcomplete): This API check should generalize to any use of
     // declarative rules, not just webRequest.
-    if (extension->HasAPIPermission(
-            APIPermission::kDeclarativeWebRequest)) {
+    if (extension->HasAPIPermission(APIPermission::kDeclarativeContent) ||
+        extension->HasAPIPermission(APIPermission::kDeclarativeWebRequest)) {
       ExtensionInfoMap* extension_info_map =
           ExtensionSystem::Get(profile_)->info_map();
       if (profile_->IsOffTheRecord() &&
@@ -233,11 +234,22 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorage(
   if (!profile_)
     return;
 
-  extensions::StateStore* store = ExtensionSystem::Get(profile_)->state_store();
+  extensions::StateStore* store = ExtensionSystem::Get(profile_)->rules_store();
   if (store) {
     waiting_for_extensions_.insert(extension_id);
     store->GetExtensionValue(extension_id, storage_key_,
         base::Bind(&Inner::ReadFromStorageCallback, this, extension_id));
+  }
+
+  // TODO(mpcomplete): Migration code. Remove when declarativeWebRequest goes
+  // to stable.
+  // http://crbug.com/166474
+  store = ExtensionSystem::Get(profile_)->state_store();
+  if (store) {
+    waiting_for_extensions_.insert(extension_id);
+    store->GetExtensionValue(extension_id, storage_key_,
+        base::Bind(&Inner::ReadFromStorageCallback, this, extension_id));
+    store->RemoveExtensionValue(extension_id, storage_key_);
   }
 }
 
@@ -246,8 +258,8 @@ void RulesRegistryStorageDelegate::Inner::ReadFromStorageCallback(
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   content::BrowserThread::PostTask(
       rules_registry_thread_, FROM_HERE,
-      base::Bind(&Inner::ReadFromStorageOnRegistryThread, this,
-                 extension_id, base::Passed(value.Pass())));
+      base::Bind(&Inner::ReadFromStorageOnRegistryThread, this, extension_id,
+                 base::Passed(&value)));
 
   waiting_for_extensions_.erase(extension_id);
   CheckIfReady();
@@ -259,7 +271,7 @@ void RulesRegistryStorageDelegate::Inner::WriteToStorage(
   if (!profile_)
     return;
 
-  StateStore* store = ExtensionSystem::Get(profile_)->state_store();
+  StateStore* store = ExtensionSystem::Get(profile_)->rules_store();
   if (store)
     store->SetExtensionValue(extension_id, storage_key_, value.Pass());
 }
