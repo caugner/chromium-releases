@@ -13,7 +13,6 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 
 import org.chromium.content.browser.ContentVideoViewContextDelegate;
-import org.chromium.content.R;
 
 /**
  * Uses an exisiting Activity to handle displaying video in full screen.
@@ -25,6 +24,7 @@ public class ActivityContentVideoViewDelegate implements ContentVideoViewContext
         this.mActivity = activity;
     }
 
+    @Override
     public void onShowCustomView(View view) {
         mActivity.getWindow().setFlags(
                 WindowManager.LayoutParams.FLAG_FULLSCREEN,
@@ -37,31 +37,18 @@ public class ActivityContentVideoViewDelegate implements ContentVideoViewContext
                         Gravity.CENTER));
     }
 
+    @Override
     public void onDestroyContentVideoView() {
         mActivity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
     }
 
+    @Override
     public Context getContext() {
         return mActivity;
     }
 
-    public String getPlayBackErrorText() {
-        return mActivity.getString(R.string.media_player_error_text_invalid_progressive_playback);
-    }
-
-    public String getUnknownErrorText() {
-        return mActivity.getString(R.string.media_player_error_text_unknown);
-    }
-
-    public String getErrorButton() {
-        return mActivity.getString(R.string.media_player_error_button);
-    }
-
-    public String getErrorTitle() {
-        return mActivity.getString(R.string.media_player_error_title);
-    }
-
-    public String getVideoLoadingText() {
-        return mActivity.getString(R.string.media_player_loading_video);
+    @Override
+    public View getVideoLoadingProgressView() {
+        return null;
     }
 }

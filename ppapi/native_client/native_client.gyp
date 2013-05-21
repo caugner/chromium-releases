@@ -146,6 +146,20 @@
                  ],
                },
              ],
+             # untrusted.gypi and build_nexe.py currently build
+             # both x86-32 and x86-64 whenever target_arch is some
+             # flavor of x86.  However, on non-windows platforms
+             # we only need one architecture.
+             ['OS!="win" and target_arch=="ia32"',
+               {
+                 'enable_x86_64': 0
+               }
+             ],
+             ['OS!="win" and target_arch=="x64"',
+               {
+                 'enable_x86_32': 0
+               }
+             ]
             ],
             'sources': [
             ],
@@ -305,7 +319,7 @@
             '../../gpu/gpu_untrusted.gyp:gles2_implementation_untrusted',
             '../../gpu/gpu_untrusted.gyp:gles2_cmd_helper_untrusted',
             '../../gpu/gpu_untrusted.gyp:gpu_ipc_untrusted',
-            '../../components/components_tracing_untrusted.gyp:tracing_untrusted',
+            '../../components/tracing_untrusted.gyp:tracing_untrusted',
             '../../ipc/ipc_untrusted.gyp:ipc_untrusted',
             '../../base/base_untrusted.gyp:base_untrusted',
             '../../media/media_untrusted.gyp:shared_memory_support_untrusted',

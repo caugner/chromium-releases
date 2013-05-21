@@ -5,10 +5,10 @@
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 
 #include "base/logging.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
-#include "chrome/browser/autofill/credit_card.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
-#include "chrome/common/url_constants.h"
+#include "chrome/browser/infobars/infobar_service.h"
+#include "components/autofill/browser/credit_card.h"
+#include "components/autofill/browser/personal_data_manager.h"
+#include "components/autofill/common/autofill_constants.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -20,26 +20,31 @@
 // static
 void AutofillCCInfoBarDelegate::Create(
     InfoBarService* infobar_service,
-    const CreditCard* credit_card,
-    PersonalDataManager* personal_data,
-    const AutofillMetrics* metric_logger) {
+    const AutofillMetrics* metric_logger,
+    const base::Closure& save_card_callback) {
   infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
-      new AutofillCCInfoBarDelegate(infobar_service, credit_card, personal_data,
-                                    metric_logger)));
+      new AutofillCCInfoBarDelegate(
+          infobar_service, metric_logger, save_card_callback)));
+  metric_logger->LogCreditCardInfoBarMetric(AutofillMetrics::INFOBAR_SHOWN);
+}
+
+// static
+scoped_ptr<ConfirmInfoBarDelegate> AutofillCCInfoBarDelegate::CreateForTesting(
+    const AutofillMetrics* metric_logger,
+    const base::Closure& save_card_callback) {
+  metric_logger->LogCreditCardInfoBarMetric(AutofillMetrics::INFOBAR_SHOWN);
+  return scoped_ptr<ConfirmInfoBarDelegate>(
+      new AutofillCCInfoBarDelegate(NULL, metric_logger, save_card_callback));
 }
 
 AutofillCCInfoBarDelegate::AutofillCCInfoBarDelegate(
     InfoBarService* infobar_service,
-    const CreditCard* credit_card,
-    PersonalDataManager* personal_data,
-    const AutofillMetrics* metric_logger)
+    const AutofillMetrics* metric_logger,
+    const base::Closure& save_card_callback)
     : ConfirmInfoBarDelegate(infobar_service),
-      credit_card_(credit_card),
-      personal_data_(personal_data),
       metric_logger_(metric_logger),
-      had_user_interaction_(false) {
-  metric_logger_->LogCreditCardInfoBarMetric(AutofillMetrics::INFOBAR_SHOWN);
-}
+      save_card_callback_(save_card_callback),
+      had_user_interaction_(false) {}
 
 AutofillCCInfoBarDelegate::~AutofillCCInfoBarDelegate() {
   if (!had_user_interaction_)
@@ -85,7 +90,8 @@ string16 AutofillCCInfoBarDelegate::GetButtonLabel(InfoBarButton button) const {
 }
 
 bool AutofillCCInfoBarDelegate::Accept() {
-  personal_data_->SaveImportedCreditCard(*credit_card_);
+  save_card_callback_.Run();
+  save_card_callback_.Reset();
   LogUserAction(AutofillMetrics::INFOBAR_ACCEPTED);
   return true;
 }
@@ -102,7 +108,7 @@ string16 AutofillCCInfoBarDelegate::GetLinkText() const {
 bool AutofillCCInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
   owner()->GetWebContents()->GetDelegate()->OpenURLFromTab(
       owner()->GetWebContents(),
-      content::OpenURLParams(GURL(chrome::kAutofillHelpURL),
+      content::OpenURLParams(GURL(components::autofill::kHelpURL),
                              content::Referrer(),
                              NEW_FOREGROUND_TAB,
                              content::PAGE_TRANSITION_LINK,

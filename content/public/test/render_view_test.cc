@@ -4,6 +4,7 @@
 
 #include "content/public/test/render_view_test.h"
 
+#include "base/run_loop.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/renderer_preferences.h"
@@ -62,7 +63,7 @@ RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox::
     ~RendererWebKitPlatformSupportImplNoSandbox() {
 }
 
-WebKit::WebKitPlatformSupport*
+WebKit::Platform*
     RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox::Get() {
   return webkit_platform_support_.get();
 }
@@ -90,6 +91,7 @@ void RenderViewTest::ExecuteJavaScript(const char* js) {
 bool RenderViewTest::ExecuteJavaScriptAndReturnIntValue(
     const string16& script,
     int* int_result) {
+  v8::HandleScope handle_scope;
   v8::Handle<v8::Value> result =
       GetMainFrame()->executeScriptAndReturnValue(WebScriptSource(script));
   if (result.IsEmpty() || !result->IsInt32())
@@ -172,7 +174,8 @@ void RenderViewTest::SetUp() {
       false,
       1,
       WebKit::WebScreenInfo(),
-      AccessibilityModeOff);
+      AccessibilityModeOff,
+      true);
   view->AddRef();
   view_ = view;
 }
@@ -192,7 +195,7 @@ void RenderViewTest::TearDown() {
   // After telling the view to close and resetting mock_process_ we may get
   // some new tasks which need to be processed before shutting down WebKit
   // (http://crbug.com/21508).
-  msg_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   WebKit::shutdown();
 
@@ -310,7 +313,7 @@ void RenderViewTest::Resize(gfx::Size new_size,
                             gfx::Rect resizer_rect,
                             bool is_fullscreen) {
   scoped_ptr<IPC::Message> resize_message(new ViewMsg_Resize(
-      0, new_size, resizer_rect, is_fullscreen));
+      0, new_size, new_size, 0.f, resizer_rect, is_fullscreen));
   OnMessageReceived(*resize_message);
 }
 

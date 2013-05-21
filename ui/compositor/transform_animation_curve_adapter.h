@@ -6,7 +6,7 @@
 #define UI_COMPOSITOR_TRANSFORM_ANIMATION_CURVE_ADAPTER_H_
 
 #include "base/time.h"
-#include "cc/animation_curve.h"
+#include "cc/animation/animation_curve.h"
 #include "ui/base/animation/tween.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/transform_util.h"
@@ -23,9 +23,9 @@ class TransformAnimationCurveAdapter :public cc::TransformAnimationCurve {
   virtual ~TransformAnimationCurveAdapter();
 
   // TransformAnimationCurve implementation.
-  virtual double duration() const OVERRIDE;
-  virtual scoped_ptr<AnimationCurve> clone() const OVERRIDE;
-  virtual gfx::Transform getValue(double t) const OVERRIDE;
+  virtual double Duration() const OVERRIDE;
+  virtual scoped_ptr<AnimationCurve> Clone() const OVERRIDE;
+  virtual gfx::Transform GetValue(double t) const OVERRIDE;
 
  private:
   Tween::Type tween_type_;

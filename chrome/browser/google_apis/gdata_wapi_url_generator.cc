@@ -13,18 +13,8 @@
 namespace google_apis {
 namespace {
 
-// URL requesting resource list that belong to the authenticated user only
-// (handled with '/-/mine' part).
-const char kGetResourceListURLForAllDocuments[] =
-    "/feeds/default/private/full/-/mine";
-
-// URL requesting resource list in a particular directory specified by "%s"
-// that belong to the authenticated user only (handled with '/-/mine' part).
-const char kGetResourceListURLForDirectoryFormat[] =
-    "/feeds/default/private/full/%s/contents/-/mine";
-
-// Content URL for modification in a particular directory specifyied by "%s"
-// which will be replaced with its resource id.
+// Content URL for modification or resource list retrieval in a particular
+// directory specified by "%s" which will be replaced with its resource id.
 const char kContentURLFormat[] = "/feeds/default/private/full/%s/contents";
 
 // Content URL for removing a resource specified by the latter "%s" from the
@@ -42,16 +32,21 @@ const char kResourceListRootURL[] = "/feeds/default/private/full";
 // Metadata feed with things like user quota.
 const char kAccountMetadataURL[] = "/feeds/metadata/default";
 
-#ifndef NDEBUG
-// Use smaller 'page' size while debugging to ensure we hit feed reload
-// almost always. Be careful not to use something too small on account that
-// have many items because server side 503 error might kick in.
+// URL to upload a new file under a particular directory specified by "%s".
+const char kInitiateUploadNewFileURLFormat[] =
+    "/feeds/upload/create-session/default/private/full/%s/contents";
+
+// URL to upload a file content to overwrite a file whose resource id is
+// followed by this prefix.
+const char kInitiateUploadExistingFileURLPrefix[] =
+    "/feeds/upload/create-session/default/private/full/";
+
+// Maximum number of resource entries to include in a feed.
+// Be careful not to use something too small because it might overload the
+// server. Be careful not to use something too large because it makes the
+// "fetched N items" UI less responsive.
 const int kMaxDocumentsPerFeed = 500;
 const int kMaxDocumentsPerSearchFeed = 50;
-#else
-const int kMaxDocumentsPerFeed = 500;
-const int kMaxDocumentsPerSearchFeed = 50;
-#endif
 
 // URL requesting documents list that shared to the authenticated user only
 const char kGetResourceListURLForSharedWithMe[] =
@@ -69,6 +64,7 @@ const char GDataWapiUrlGenerator::kBaseUrlForProduction[] =
 GURL GDataWapiUrlGenerator::AddStandardUrlParams(const GURL& url) {
   GURL result = net::AppendOrReplaceQueryParameter(url, "v", "3");
   result = net::AppendOrReplaceQueryParameter(result, "alt", "json");
+  result = net::AppendOrReplaceQueryParameter(result, "showroot", "true");
   return result;
 }
 
@@ -79,14 +75,6 @@ GURL GDataWapiUrlGenerator::AddInitiateUploadUrlParams(const GURL& url) {
 }
 
 // static
-GURL GDataWapiUrlGenerator::AddMetadataUrlParams(const GURL& url) {
-  GURL result = AddStandardUrlParams(url);
-  result = net::AppendOrReplaceQueryParameter(
-      result, "include-installed-apps", "true");
-  return result;
-}
-
-// static
 GURL GDataWapiUrlGenerator::AddFeedUrlParams(
     const GURL& url,
     int num_items_to_fetch,
@@ -94,6 +82,7 @@ GURL GDataWapiUrlGenerator::AddFeedUrlParams(
     const std::string& search_string) {
   GURL result = AddStandardUrlParams(url);
   result = net::AppendOrReplaceQueryParameter(result, "showfolders", "true");
+  result = net::AppendOrReplaceQueryParameter(result, "include-shared", "true");
   result = net::AppendOrReplaceQueryParameter(
       result,
       "max-results",
@@ -145,11 +134,11 @@ GURL GDataWapiUrlGenerator::GenerateResourceListUrl(
     url = base_url_.Resolve(kGetChangesListURL);
   } else if (!directory_resource_id.empty()) {
     url = base_url_.Resolve(
-        base::StringPrintf(kGetResourceListURLForDirectoryFormat,
+        base::StringPrintf(kContentURLFormat,
                            net::EscapePath(
                                directory_resource_id).c_str()));
   } else {
-    url = base_url_.Resolve(kGetResourceListURLForAllDocuments);
+    url = base_url_.Resolve(kResourceListRootURL);
   }
   return AddFeedUrlParams(url, max_docs, start_changestamp, search_string);
 }
@@ -193,12 +182,33 @@ GURL GDataWapiUrlGenerator::GenerateResourceUrlForRemoval(
   return AddStandardUrlParams(result);
 }
 
+GURL GDataWapiUrlGenerator::GenerateInitiateUploadNewFileUrl(
+    const std::string& parent_resource_id) const {
+  GURL result = base_url_.Resolve(
+      base::StringPrintf(kInitiateUploadNewFileURLFormat,
+                         net::EscapePath(parent_resource_id).c_str()));
+  return AddInitiateUploadUrlParams(result);
+}
+
+GURL GDataWapiUrlGenerator::GenerateInitiateUploadExistingFileUrl(
+    const std::string& resource_id) const {
+  GURL result = base_url_.Resolve(
+      kInitiateUploadExistingFileURLPrefix + net::EscapePath(resource_id));
+  return AddInitiateUploadUrlParams(result);
+}
+
 GURL GDataWapiUrlGenerator::GenerateResourceListRootUrl() const {
   return AddStandardUrlParams(base_url_.Resolve(kResourceListRootURL));
 }
 
-GURL GDataWapiUrlGenerator::GenerateAccountMetadataUrl() const {
-  return AddMetadataUrlParams(base_url_.Resolve(kAccountMetadataURL));
+GURL GDataWapiUrlGenerator::GenerateAccountMetadataUrl(
+    bool include_installed_apps) const {
+  GURL result = AddStandardUrlParams(base_url_.Resolve(kAccountMetadataURL));
+  if (include_installed_apps) {
+    result = net::AppendOrReplaceQueryParameter(
+        result, "include-installed-apps", "true");
+  }
+  return result;
 }
 
 }  // namespace google_apis

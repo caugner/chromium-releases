@@ -6,8 +6,8 @@
 
 #include "base/message_loop.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/chromeos/drive/change_list_loader.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
-#include "chrome/browser/chromeos/drive/drive_feed_loader.h"
 #include "chrome/browser/chromeos/drive/drive_resource_metadata.h"
 #include "chrome/browser/chromeos/drive/drive_scheduler.h"
 #include "chrome/browser/chromeos/drive/drive_test_util.h"
@@ -40,12 +40,29 @@ class CreateDirectoryOperationTest
     profile_.reset(new TestingProfile);
 
     fake_drive_service_.reset(new google_apis::FakeDriveService);
-    fake_drive_service_->LoadResourceListForWapi("gdata/root_feed.json");
+    fake_drive_service_->LoadResourceListForWapi(
+        "chromeos/gdata/root_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
-        "gdata/account_metadata.json");
+        "chromeos/gdata/account_metadata.json");
+    fake_drive_service_->LoadAppListForDriveApi("chromeos/drive/applist.json");
 
-    metadata_.reset(
-        new DriveResourceMetadata(fake_drive_service_->GetRootResourceId()));
+    fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
+    cache_.reset(new DriveCache(DriveCache::GetCacheRootPath(profile_.get()),
+                                blocking_task_runner_,
+                                fake_free_disk_space_getter_.get()));
+    cache_->RequestInitializeForTesting();
+    google_apis::test_util::RunBlockingPoolTask();
+
+    metadata_.reset(new DriveResourceMetadata(
+        fake_drive_service_->GetRootResourceId(),
+        cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META),
+        blocking_task_runner_));
+
+    DriveFileError error = DRIVE_FILE_ERROR_FAILED;
+    metadata_->Initialize(
+        google_apis::test_util::CreateCopyResultCallback(&error));
+    google_apis::test_util::RunBlockingPoolTask();
+    ASSERT_EQ(DRIVE_FILE_OK, error);
 
     scheduler_.reset(
         new DriveScheduler(profile_.get(), fake_drive_service_.get(), NULL));
@@ -53,21 +70,12 @@ class CreateDirectoryOperationTest
 
     drive_web_apps_registry_.reset(new DriveWebAppsRegistry);
 
-    fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
-    cache_ = new DriveCache(
-        DriveCache::GetCacheRootPath(profile_.get()),
-        blocking_task_runner_,
-        fake_free_disk_space_getter_.get());
+    change_list_loader_.reset(new ChangeListLoader(
+        metadata_.get(), scheduler_.get(), drive_web_apps_registry_.get()));
 
-    drive_feed_loader_.reset(new DriveFeedLoader(
-        metadata_.get(), scheduler_.get(), drive_web_apps_registry_.get(),
-        cache_, blocking_task_runner_));
-
-    DriveFileError error = DRIVE_FILE_OK;
-    drive_feed_loader_->ReloadFromServerIfNeeded(
-        base::Bind(&test_util::CopyErrorCodeFromFileOperationCallback,
-                   &error));
-    cache_->RequestInitializeForTesting();
+    change_list_loader_->LoadFromServerIfNeeded(
+        DirectoryFetchInfo(),
+        google_apis::test_util::CreateCopyResultCallback(&error));
     google_apis::test_util::RunBlockingPoolTask();
 
     operation_.reset(
@@ -76,12 +84,8 @@ class CreateDirectoryOperationTest
 
   virtual void TearDown() OVERRIDE {
     operation_.reset();
-    drive_feed_loader_.reset();
-
-    cache_->Destroy();
-    // The cache destruction requires to post a task to the blocking pool.
-    google_apis::test_util::RunBlockingPoolTask();
-
+    change_list_loader_.reset();
+    cache_.reset();
     fake_free_disk_space_getter_.reset();
     drive_web_apps_registry_.reset();
     scheduler_.reset();
@@ -92,16 +96,6 @@ class CreateDirectoryOperationTest
     blocking_task_runner_ = NULL;
   }
 
-  // Copy the result from FindFirstMissingParentDirectory().
-  static void CopyResultFromFindFirstMissingParentDirectory(
-      CreateDirectoryOperation
-          ::FindFirstMissingParentDirectoryResult* out_result,
-      const CreateDirectoryOperation
-          ::FindFirstMissingParentDirectoryResult& result) {
-    DCHECK(out_result);
-    *out_result = result;
-  }
-
   virtual void OnDirectoryChangedByOperation(
       const base::FilePath& directory_path) OVERRIDE {
     // Do nothing.
@@ -109,8 +103,9 @@ class CreateDirectoryOperationTest
 
   bool LoadRootFeedDocument(const std::string& filename) {
     return test_util::LoadChangeFeed(filename,
-                                     drive_feed_loader_.get(),
+                                     change_list_loader_.get(),
                                      false,  // is_delta_feed
+                                     fake_drive_service_->GetRootResourceId(),
                                      0);
   }
 
@@ -128,21 +123,19 @@ class CreateDirectoryOperationTest
   scoped_ptr<TestingProfile> profile_;
 
   scoped_ptr<google_apis::FakeDriveService> fake_drive_service_;
-  scoped_ptr<DriveResourceMetadata> metadata_;
+  scoped_ptr<DriveResourceMetadata, test_util::DestroyHelperForTests> metadata_;
   scoped_ptr<DriveScheduler> scheduler_;
   scoped_ptr<DriveWebAppsRegistry> drive_web_apps_registry_;
   scoped_ptr<FakeFreeDiskSpaceGetter> fake_free_disk_space_getter_;
 
-  // The way to delete the DriveCache instance is a bit tricky, so here we use
-  // a raw point. See TearDown method for how to delete it.
-  DriveCache* cache_;
-  scoped_ptr<DriveFeedLoader> drive_feed_loader_;
+  scoped_ptr<DriveCache, test_util::DestroyHelperForTests> cache_;
+  scoped_ptr<ChangeListLoader> change_list_loader_;
 
   scoped_ptr<CreateDirectoryOperation> operation_;
 };
 
 TEST_F(CreateDirectoryOperationTest, FindFirstMissingParentDirectory) {
-  ASSERT_TRUE(LoadRootFeedDocument("gdata/root_feed.json"));
+  ASSERT_TRUE(LoadRootFeedDocument("chromeos/gdata/root_feed.json"));
 
   CreateDirectoryOperation::FindFirstMissingParentDirectoryResult result;
 
@@ -150,8 +143,7 @@ TEST_F(CreateDirectoryOperationTest, FindFirstMissingParentDirectory) {
   base::FilePath dir_path(FILE_PATH_LITERAL("drive/New Folder 1"));
   operation()->FindFirstMissingParentDirectory(
       dir_path,
-      base::Bind(&CopyResultFromFindFirstMissingParentDirectory,
-                 &result));
+      google_apis::test_util::CreateCopyResultCallback(&result));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(CreateDirectoryOperation::FIND_FIRST_FOUND_MISSING, result.error);
   EXPECT_EQ(base::FilePath(FILE_PATH_LITERAL("drive/New Folder 1")),
@@ -162,8 +154,7 @@ TEST_F(CreateDirectoryOperationTest, FindFirstMissingParentDirectory) {
   base::FilePath dir_path2(FILE_PATH_LITERAL("drive/Directory 1/New Folder 2"));
   operation()->FindFirstMissingParentDirectory(
       dir_path2,
-      base::Bind(&CopyResultFromFindFirstMissingParentDirectory,
-                 &result));
+      google_apis::test_util::CreateCopyResultCallback(&result));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(CreateDirectoryOperation::FIND_FIRST_FOUND_MISSING, result.error);
   EXPECT_EQ(base::FilePath(FILE_PATH_LITERAL("drive/Directory 1/New Folder 2")),
@@ -175,8 +166,7 @@ TEST_F(CreateDirectoryOperationTest, FindFirstMissingParentDirectory) {
       dir_path2.Append(FILE_PATH_LITERAL("Another Folder"));
   operation()->FindFirstMissingParentDirectory(
       dir_path3,
-      base::Bind(&CopyResultFromFindFirstMissingParentDirectory,
-                 &result));
+      google_apis::test_util::CreateCopyResultCallback(&result));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(CreateDirectoryOperation::FIND_FIRST_FOUND_MISSING, result.error);
   EXPECT_EQ(base::FilePath(FILE_PATH_LITERAL("drive/Directory 1/New Folder 2")),
@@ -186,16 +176,14 @@ TEST_F(CreateDirectoryOperationTest, FindFirstMissingParentDirectory) {
   // Folders on top of an existing file.
   operation()->FindFirstMissingParentDirectory(
       base::FilePath(FILE_PATH_LITERAL("drive/File 1.txt/BadDir")),
-      base::Bind(&CopyResultFromFindFirstMissingParentDirectory,
-                 &result));
+      google_apis::test_util::CreateCopyResultCallback(&result));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(CreateDirectoryOperation::FIND_FIRST_FOUND_INVALID, result.error);
 
   // Existing folder.
   operation()->FindFirstMissingParentDirectory(
       base::FilePath(FILE_PATH_LITERAL("drive/Directory 1")),
-      base::Bind(&CopyResultFromFindFirstMissingParentDirectory,
-                 &result));
+      google_apis::test_util::CreateCopyResultCallback(&result));
   google_apis::test_util::RunBlockingPoolTask();
   EXPECT_EQ(CreateDirectoryOperation::FIND_FIRST_DIRECTORY_ALREADY_PRESENT,
             result.error);

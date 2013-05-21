@@ -14,10 +14,10 @@ FakeContentLayerImpl::FakeContentLayerImpl(LayerTreeImpl* tree_impl, int id)
 FakeContentLayerImpl::~FakeContentLayerImpl() {}
 
 bool FakeContentLayerImpl::HaveResourceForTileAt(int i, int j) {
-  return hasResourceIdForTileAt(i, j);
+  return HasResourceIdForTileAt(i, j);
 }
 
-void FakeContentLayerImpl::didLoseOutputSurface() {
+void FakeContentLayerImpl::DidLoseOutputSurface() {
   ++lost_output_surface_count_;
 }
 

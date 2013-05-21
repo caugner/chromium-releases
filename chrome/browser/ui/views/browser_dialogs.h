@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_BROWSER_DIALOGS_H_
 #define CHROME_BROWSER_UI_VIEWS_BROWSER_DIALOGS_H_
 
-#include "chrome/browser/ui/host_desktop.h"
 #include "ui/gfx/native_widget_types.h"
 
 // This file contains functions for running a variety of browser dialogs and
@@ -23,12 +22,6 @@ class FindBar;
 class GURL;
 class Profile;
 class TemplateURL;
-
-namespace content {
-class PageNavigator;
-class WebContents;
-struct SSLStatus;
-}
 
 namespace extensions {
 class Extension;
@@ -56,12 +49,6 @@ bool IsChromeToMobileBubbleViewShowing();
 
 // Creates and returns a find bar for the given browser window. See FindBarWin.
 FindBar* CreateFindBar(BrowserView* browser_view);
-
-// Shows the Task Manager.
-void ShowTaskManager(Browser* browser);
-
-// Shows the Task Manager, highlighting the background pages.
-void ShowBackgroundPages(Browser* browser);
 
 // Shows a dialog box that allows a search engine to be edited. |template_url|
 // is the search engine being edited. If it is NULL, then the dialog will add a

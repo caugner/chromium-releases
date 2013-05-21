@@ -5,8 +5,13 @@
 #ifndef UI_AURA_CLIENT_CURSOR_CLIENT_H_
 #define UI_AURA_CLIENT_CURSOR_CLIENT_H_
 
+#include "base/string16.h"
 #include "ui/aura/aura_export.h"
 #include "ui/gfx/native_widget_types.h"
+
+namespace gfx {
+class Display;
+}
 
 namespace aura {
 class Window;
@@ -38,8 +43,8 @@ class AURA_EXPORT CursorClient {
   // Returns true if mouse events are enabled.
   virtual bool IsMouseEventsEnabled() const = 0;
 
-  // Sets the device scale factor of the cursor.
-  virtual void SetDeviceScaleFactor(float device_scale_factor) = 0;
+  // Sets the display for the cursor.
+  virtual void SetDisplay(const gfx::Display& display) = 0;
 
   // Locks the cursor change. The cursor type, cursor visibility, and mouse
   // events enable state never change as long as lock is held by anyone.
@@ -50,6 +55,10 @@ class AURA_EXPORT CursorClient {
   // set by the lastest call of SetCursor, ShowCursor/HideCursor, and
   // EnableMouseEvents/DisableMouseEvents.
   virtual void UnlockCursor() = 0;
+
+  // Used to pass the cursor resource module name to the cursor loader. This is
+  // typically used to load non system cursors.
+  virtual void SetCursorResourceModule(const string16& module_name) = 0;
 
  protected:
   virtual ~CursorClient() {}

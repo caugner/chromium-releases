@@ -184,12 +184,10 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
 #if defined(OS_CHROMEOS)
   // When we are doing straight chromeos builds, we still need to handle the
   // toplevel window case.
-  // TODO(jamescook): There may be a few remaining widgets in Chrome OS that
-  // are not top level, but have neither a context nor a parent. Provide a
-  // fallback context so users don't crash. After the R26 branch replace
-  // the if() with:
-  //   if (!params->parent && !params->context && !params->top_level)
-  // so we only fix up top level windows. http://crbug.com/173496
+  // There may be a few remaining widgets in Chrome OS that are not top level,
+  // but have neither a context nor a parent. Provide a fallback context so
+  // users don't crash. Developers will hit the DCHECK and should provide a
+  // context.
   DCHECK(params->parent || params->context || params->top_level)
       << "Please provide a parent or context for this widget.";
   if (!params->parent && !params->context)
@@ -216,10 +214,22 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
       default:
         NOTREACHED();
     }
+#if defined(OS_WIN) && defined(USE_AURA)
+  } else if (chrome::GetActiveDesktop() != chrome::HOST_DESKTOP_TYPE_ASH &&
+             params->parent &&
+             (params->type == views::Widget::InitParams::TYPE_CONTROL ||
+              params->type == views::Widget::InitParams::TYPE_WINDOW)) {
+    // On Aura Desktop, we want most windows (popups, bubbles, regular top
+    // level windows) not to be handled in this function. They'll get a
+    // DesktopNativeWidgetAura created. For controls, and child windows (e.g.
+    // modal dialogs) we want to create a NativeWidgetAura, which will be
+    // inside the parent.
+#else
   } else if (params->parent &&
              params->type != views::Widget::InitParams::TYPE_MENU) {
+#endif
     params->native_widget = new views::NativeWidgetAura(delegate);
-  } else {
+  } else if (params->type != views::Widget::InitParams::TYPE_TOOLTIP) {
     // TODO(erg): Once we've threaded context to everywhere that needs it, we
     // should remove this check here.
     gfx::NativeView to_check =

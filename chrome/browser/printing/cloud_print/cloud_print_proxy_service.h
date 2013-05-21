@@ -12,7 +12,7 @@
 #include "base/callback_forward.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_handler.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 
@@ -59,6 +59,10 @@ class CloudPrintProxyService
 
   // CloudPrintSetupHandler::Delegate implementation.
   virtual void OnCloudPrintSetupClosed() OVERRIDE;
+
+  // Returns list of printer names available for registration.
+  static void GetPrintersAvalibleForRegistration(
+      std::vector<std::string>* printers);
 
  private:
   // NotificationDelegate implementation for the token expired notification.

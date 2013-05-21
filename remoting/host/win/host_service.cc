@@ -7,19 +7,22 @@
 
 #include "remoting/host/win/host_service.h"
 
+#include <sddl.h>
 #include <windows.h>
-#include <shellapi.h>
 #include <wtsapi32.h>
 
 #include "base/base_paths.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
+#include "base/utf_string_conversions.h"
+#include "base/win/scoped_com_initializer.h"
+#include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/scoped_sc_handle_win.h"
@@ -27,22 +30,22 @@
 #include "remoting/host/branding.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/logging.h"
+#include "remoting/host/win/security_descriptor.h"
 
 #if defined(REMOTING_MULTI_PROCESS)
 #include "remoting/host/daemon_process.h"
 #endif  // defined(REMOTING_MULTI_PROCESS)
 
 #include "remoting/host/win/core_resource.h"
-#include "remoting/host/win/wts_console_observer.h"
+#include "remoting/host/win/wts_terminal_observer.h"
 
 #if !defined(REMOTING_MULTI_PROCESS)
 #include "remoting/host/win/wts_console_session_process_driver.h"
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
-namespace {
+namespace remoting {
 
-// Session id that does not represent any session.
-const uint32 kInvalidSessionId = 0xffffffffu;
+namespace {
 
 const char kIoThreadName[] = "I/O thread";
 
@@ -55,92 +58,86 @@ const wchar_t kSessionNotificationWindowClass[] =
 // "--console" runs the service interactively for debugging purposes.
 const char kConsoleSwitchName[] = "console";
 
-// "--elevate=<binary>" requests <binary> to be launched elevated, presenting
-// a UAC prompt if necessary.
-const char kElevateSwitchName[] = "elevate";
+// Concatenates ACE type, permissions and sid given as SDDL strings into an ACE
+// definition in SDDL form.
+#define SDDL_ACE(type, permissions, sid) \
+    L"(" type L";;" permissions L";;;" sid L")"
 
-// The command line parameters that should be copied from the service's command
-// line when launching an elevated child.
-const char* kCopiedSwitchNames[] = {
-    "host-config", "daemon-pipe", switches::kV, switches::kVModule };
+// Text representation of COM_RIGHTS_EXECUTE and COM_RIGHTS_EXECUTE_LOCAL
+// permission bits that is used in the SDDL definition below.
+#define SDDL_COM_EXECUTE_LOCAL L"0x3"
+
+// Security descriptor allowing local processes running under SYSTEM or
+// LocalService accounts to call COM methods exposed by the daemon.
+const wchar_t kComProcessSd[] =
+    SDDL_OWNER L":" SDDL_LOCAL_SYSTEM
+    SDDL_GROUP L":" SDDL_LOCAL_SYSTEM
+    SDDL_DACL L":"
+    SDDL_ACE(SDDL_ACCESS_ALLOWED, SDDL_COM_EXECUTE_LOCAL, SDDL_LOCAL_SYSTEM)
+    SDDL_ACE(SDDL_ACCESS_ALLOWED, SDDL_COM_EXECUTE_LOCAL, SDDL_LOCAL_SERVICE);
+
+// Appended to |kComProcessSd| to specify that only callers running at medium or
+// higher integrity level are allowed to call COM methods exposed by the daemon.
+const wchar_t kComProcessMandatoryLabel[] =
+    SDDL_SACL L":"
+    SDDL_ACE(SDDL_MANDATORY_LABEL, SDDL_NO_EXECUTE_UP, SDDL_ML_MEDIUM);
+
+#undef SDDL_ACE
+#undef SDDL_COM_EXECUTE_LOCAL
+
+// Allows incoming calls from clients running under SYSTEM or LocalService at
+// medium integrity level.
+bool InitializeComSecurity() {
+  std::string sddl = WideToUTF8(kComProcessSd);
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+    sddl += WideToUTF8(kComProcessMandatoryLabel);
+  }
+
+  // Convert the SDDL description into a security descriptor in absolute format.
+  ScopedSd relative_sd = ConvertSddlToSd(sddl);
+  if (!relative_sd) {
+    LOG_GETLASTERROR(ERROR) << "Failed to create a security descriptor";
+    return false;
+  }
+  ScopedSd absolute_sd;
+  ScopedAcl dacl;
+  ScopedSid group;
+  ScopedSid owner;
+  ScopedAcl sacl;
+  if (!MakeScopedAbsoluteSd(relative_sd, &absolute_sd, &dacl, &group, &owner,
+                            &sacl)) {
+    LOG_GETLASTERROR(ERROR) << "MakeScopedAbsoluteSd() failed";
+    return false;
+  }
+
+  // Apply the security descriptor and the following settings:
+  //   - The daemon authenticates that all data received is from the expected
+  //     client.
+  //   - The daemon can impersonate clients to check their identity but cannot
+  //     act on their behalf.
+  //   - The caller's identity on every call (Dynamic cloaking).
+  //   - Activations where the activated COM server would run under the daemon's
+  //     identity are prohibited.
+  HRESULT result = CoInitializeSecurity(
+      absolute_sd.get(),
+      -1,       // Let COM choose which authentication services to register.
+      NULL,     // See above.
+      NULL,     // Reserved, must be NULL.
+      RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+      RPC_C_IMP_LEVEL_IDENTIFY,
+      NULL,     // Default authentication information is not provided.
+      EOAC_DYNAMIC_CLOAKING | EOAC_DISABLE_AAA,
+      NULL);    /// Reserved, must be NULL
+  if (FAILED(result)) {
+    LOG(ERROR) << "CoInitializeSecurity() failed, result=0x"
+               << std::hex << result << std::dec << ".";
+    return false;
+  }
+
+  return true;
+}
 
 }  // namespace
-
-namespace remoting {
-
-HostService::HostService() :
-  console_session_id_(kInvalidSessionId),
-  run_routine_(&HostService::RunAsService),
-  service_status_handle_(0),
-  stopped_event_(true, false) {
-}
-
-HostService::~HostService() {
-}
-
-void HostService::AddWtsConsoleObserver(WtsConsoleObserver* observer) {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-
-  console_observers_.AddObserver(observer);
-  if (console_session_id_ != kInvalidSessionId)
-    observer->OnSessionAttached(console_session_id_);
-}
-
-void HostService::RemoveWtsConsoleObserver(WtsConsoleObserver* observer) {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-
-  console_observers_.RemoveObserver(observer);
-}
-
-void HostService::OnChildStopped() {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-
-  child_.reset(NULL);
-}
-
-void HostService::OnSessionChange() {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-
-  // WTSGetActiveConsoleSessionId is a very cheap API. It basically reads
-  // a single value from shared memory. Therefore it is better to check if
-  // the console session is still the same every time a session change
-  // notification event is posted. This also takes care of coalescing multiple
-  // events into one since we look at the latest state.
-  uint32 console_session_id = WTSGetActiveConsoleSessionId();
-  if (console_session_id_ != console_session_id) {
-    if (console_session_id_ != kInvalidSessionId) {
-      FOR_EACH_OBSERVER(WtsConsoleObserver,
-                        console_observers_,
-                        OnSessionDetached());
-    }
-
-    console_session_id_ = console_session_id;
-
-    if (console_session_id_ != kInvalidSessionId) {
-      FOR_EACH_OBSERVER(WtsConsoleObserver,
-                        console_observers_,
-                        OnSessionAttached(console_session_id_));
-    }
-  }
-}
-
-BOOL WINAPI HostService::ConsoleControlHandler(DWORD event) {
-  HostService* self = HostService::GetInstance();
-  switch (event) {
-    case CTRL_C_EVENT:
-    case CTRL_BREAK_EVENT:
-    case CTRL_CLOSE_EVENT:
-    case CTRL_LOGOFF_EVENT:
-    case CTRL_SHUTDOWN_EVENT:
-      self->main_task_runner_->PostTask(FROM_HERE, base::Bind(
-          &Stoppable::Stop, base::Unretained(self->child_.get())));
-      self->stopped_event_.Wait();
-      return TRUE;
-
-    default:
-      return FALSE;
-  }
-}
 
 HostService* HostService::GetInstance() {
   return Singleton<HostService>::get();
@@ -148,13 +145,6 @@ HostService* HostService::GetInstance() {
 
 bool HostService::InitWithCommandLine(const CommandLine* command_line) {
   CommandLine::StringVector args = command_line->GetArgs();
-
-  // Check if launch with elevation was requested.
-  if (command_line->HasSwitch(kElevateSwitchName)) {
-    run_routine_ = &HostService::Elevate;
-    return true;
-  }
-
   if (!args.empty()) {
     LOG(ERROR) << "No positional parameters expected.";
     return false;
@@ -171,6 +161,120 @@ bool HostService::InitWithCommandLine(const CommandLine* command_line) {
 
 int HostService::Run() {
   return (this->*run_routine_)();
+}
+
+bool HostService::AddWtsTerminalObserver(const net::IPEndPoint& client_endpoint,
+                                        WtsTerminalObserver* observer) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  RegisteredObserver registered_observer;
+  registered_observer.client_endpoint = client_endpoint;
+  registered_observer.session_id = kInvalidSessionId;
+  registered_observer.observer = observer;
+
+  bool session_id_found = false;
+  std::list<RegisteredObserver>::const_iterator i;
+  for (i = observers_.begin(); i != observers_.end(); ++i) {
+    // Get the attached session ID from another observer watching the same WTS
+    // console if any.
+    if (i->client_endpoint == client_endpoint) {
+      registered_observer.session_id = i->session_id;
+      session_id_found = true;
+    }
+
+    // Check that |observer| hasn't been registered already.
+    if (i->observer == observer)
+      return false;
+  }
+
+  // If |client_endpoint| is new, enumerate all sessions to see if there is one
+  // attached to |client_endpoint|.
+  if (!session_id_found)
+    registered_observer.session_id = GetSessionIdForEndpoint(client_endpoint);
+
+  observers_.push_back(registered_observer);
+
+  if (registered_observer.session_id != kInvalidSessionId) {
+    observer->OnSessionAttached(registered_observer.session_id);
+  }
+
+  return true;
+}
+
+void HostService::RemoveWtsTerminalObserver(WtsTerminalObserver* observer) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  std::list<RegisteredObserver>::const_iterator i;
+  for (i = observers_.begin(); i != observers_.end(); ++i) {
+    if (i->observer == observer) {
+      observers_.erase(i);
+      return;
+    }
+  }
+}
+
+HostService::HostService() :
+  run_routine_(&HostService::RunAsService),
+  service_status_handle_(0),
+  stopped_event_(true, false) {
+}
+
+HostService::~HostService() {
+}
+
+void HostService::OnSessionChange(uint32 event, uint32 session_id) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+  DCHECK_NE(session_id, kInvalidSessionId);
+
+  // Process only attach/detach notifications.
+  if (event != WTS_CONSOLE_CONNECT && event != WTS_CONSOLE_DISCONNECT &&
+      event != WTS_REMOTE_CONNECT && event != WTS_REMOTE_DISCONNECT) {
+    return;
+  }
+
+  // Assuming that notification can arrive later query the current state of
+  // |session_id|.
+  net::IPEndPoint client_endpoint;
+  bool attached = GetEndpointForSessionId(session_id, &client_endpoint);
+
+  std::list<RegisteredObserver>::iterator i = observers_.begin();
+  while (i != observers_.end()) {
+    std::list<RegisteredObserver>::iterator next = i;
+    ++next;
+
+    // Issue a detach notification if the session was detached from a client or
+    // if it is now attached to a different client.
+    if (i->session_id == session_id &&
+        (!attached || !(i->client_endpoint == client_endpoint))) {
+      i->session_id = kInvalidSessionId;
+      i->observer->OnSessionDetached();
+      i = next;
+      continue;
+    }
+
+    // The client currently attached to |session_id| was attached to a different
+    // session before. Reconnect it to |session_id|.
+    if (attached && i->client_endpoint == client_endpoint &&
+        i->session_id != session_id) {
+      WtsTerminalObserver* observer = i->observer;
+
+      if (i->session_id != kInvalidSessionId) {
+        i->session_id = kInvalidSessionId;
+        i->observer->OnSessionDetached();
+      }
+
+      // Verify that OnSessionDetached() above didn't remove |observer|
+      // from the list.
+      std::list<RegisteredObserver>::iterator j = next;
+      --j;
+      if (j->observer == observer) {
+        j->session_id = session_id;
+        observer->OnSessionAttached(session_id);
+      }
+    }
+
+    i = next;
+  }
 }
 
 void HostService::CreateLauncher(
@@ -204,33 +308,10 @@ void HostService::CreateLauncher(
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 }
 
-int HostService::Elevate() {
-  // Get the name of the binary to launch.
-  base::FilePath binary =
-      CommandLine::ForCurrentProcess()->GetSwitchValuePath(kElevateSwitchName);
+void HostService::OnChildStopped() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  // Create the child process command line by copying known switches from our
-  // command line.
-  CommandLine command_line(CommandLine::NO_PROGRAM);
-  command_line.CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
-                                kCopiedSwitchNames,
-                                arraysize(kCopiedSwitchNames));
-  CommandLine::StringType parameters = command_line.GetCommandLineString();
-
-  // Launch the child process requesting elevation.
-  SHELLEXECUTEINFO info;
-  memset(&info, 0, sizeof(info));
-  info.cbSize = sizeof(info);
-  info.lpVerb = L"runas";
-  info.lpFile = binary.value().c_str();
-  info.lpParameters = parameters.c_str();
-  info.nShow = SW_SHOWNORMAL;
-
-  if (!ShellExecuteEx(&info)) {
-    return GetLastError();
-  }
-
-  return kSuccessExitCode;
+  child_.reset(NULL);
 }
 
 int HostService::RunAsService() {
@@ -254,7 +335,7 @@ int HostService::RunAsService() {
 }
 
 void HostService::RunAsServiceImpl() {
-  MessageLoop message_loop(MessageLoop::TYPE_DEFAULT);
+  MessageLoop message_loop(MessageLoop::TYPE_UI);
   base::RunLoop run_loop;
   main_task_runner_ = message_loop.message_loop_proxy();
 
@@ -282,8 +363,13 @@ void HostService::RunAsServiceImpl() {
     return;
   }
 
-  // Peek up the current console session.
-  console_session_id_ = WTSGetActiveConsoleSessionId();
+  // Initialize COM.
+  base::win::ScopedCOMInitializer com_initializer;
+  if (!com_initializer.succeeded())
+    return;
+
+  if (!InitializeComSecurity())
+    return;
 
   CreateLauncher(scoped_refptr<AutoThreadTaskRunner>(
       new AutoThreadTaskRunner(main_task_runner_,
@@ -308,6 +394,14 @@ int HostService::RunInConsole() {
   main_task_runner_ = message_loop.message_loop_proxy();
 
   int result = kInitializationFailed;
+
+  // Initialize COM.
+  base::win::ScopedCOMInitializer com_initializer;
+  if (!com_initializer.succeeded())
+    return result;
+
+  if (!InitializeComSecurity())
+    return result;
 
   // Subscribe to Ctrl-C and other console events.
   if (!SetConsoleCtrlHandler(&HostService::ConsoleControlHandler, TRUE)) {
@@ -344,9 +438,6 @@ int HostService::RunInConsole() {
   // Subscribe to session change notifications.
   if (WTSRegisterSessionNotification(window,
                                      NOTIFY_FOR_ALL_SESSIONS) != FALSE) {
-    // Peek up the current console session.
-    console_session_id_ = WTSGetActiveConsoleSessionId();
-
     CreateLauncher(scoped_refptr<AutoThreadTaskRunner>(
         new AutoThreadTaskRunner(main_task_runner_,
                                  run_loop.QuitClosure())));
@@ -378,6 +469,26 @@ cleanup:
   return result;
 }
 
+// static
+BOOL WINAPI HostService::ConsoleControlHandler(DWORD event) {
+  HostService* self = HostService::GetInstance();
+  switch (event) {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_LOGOFF_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+      self->main_task_runner_->PostTask(FROM_HERE, base::Bind(
+          &Stoppable::Stop, base::Unretained(self->child_.get())));
+      self->stopped_event_.Wait();
+      return TRUE;
+
+    default:
+      return FALSE;
+  }
+}
+
+// static
 DWORD WINAPI HostService::ServiceControlHandler(DWORD control,
                                                 DWORD event_type,
                                                 LPVOID event_data,
@@ -396,7 +507,8 @@ DWORD WINAPI HostService::ServiceControlHandler(DWORD control,
 
     case SERVICE_CONTROL_SESSIONCHANGE:
       self->main_task_runner_->PostTask(FROM_HERE, base::Bind(
-          &HostService::OnSessionChange, base::Unretained(self)));
+          &HostService::OnSessionChange, base::Unretained(self), event_type,
+          reinterpret_cast<WTSSESSION_NOTIFICATION*>(event_data)->dwSessionId));
       return NO_ERROR;
 
     default:
@@ -404,6 +516,7 @@ DWORD WINAPI HostService::ServiceControlHandler(DWORD control,
   }
 }
 
+// static
 VOID WINAPI HostService::ServiceMain(DWORD argc, WCHAR* argv[]) {
   HostService* self = HostService::GetInstance();
 
@@ -415,6 +528,7 @@ VOID WINAPI HostService::ServiceMain(DWORD argc, WCHAR* argv[]) {
   self->stopped_event_.Signal();
 }
 
+// static
 LRESULT CALLBACK HostService::SessionChangeNotificationProc(HWND hwnd,
                                                             UINT message,
                                                             WPARAM wparam,
@@ -422,13 +536,22 @@ LRESULT CALLBACK HostService::SessionChangeNotificationProc(HWND hwnd,
   switch (message) {
     case WM_WTSSESSION_CHANGE: {
       HostService* self = HostService::GetInstance();
-      self->OnSessionChange();
+      self->OnSessionChange(wparam, lparam);
       return 0;
     }
 
     default:
       return DefWindowProc(hwnd, message, wparam, lparam);
   }
+}
+
+int DaemonProcessMain() {
+  HostService* service = HostService::GetInstance();
+  if (!service->InitWithCommandLine(CommandLine::ForCurrentProcess())) {
+    return kUsageExitCode;
+  }
+
+  return service->Run();
 }
 
 } // namespace remoting

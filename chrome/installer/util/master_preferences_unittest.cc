@@ -13,7 +13,6 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -57,8 +56,10 @@ TEST_F(MasterPreferencesTest, ParseDistroParams) {
     "     \"import_bookmarks\": true,\n"
     "     \"import_bookmarks_from_file\": \"c:\\\\foo\",\n"
     "     \"import_home_page\": true,\n"
+    "     \"do_not_create_any_shortcuts\": true,\n"
     "     \"do_not_create_desktop_shortcut\": true,\n"
     "     \"do_not_create_quick_launch_shortcut\": true,\n"
+    "     \"do_not_create_taskbar_shortcut\": true,\n"
     "     \"do_not_launch_chrome\": true,\n"
     "     \"make_chrome_default\": true,\n"
     "     \"make_chrome_default_for_user\": true,\n"
@@ -83,8 +84,10 @@ TEST_F(MasterPreferencesTest, ParseDistroParams) {
     installer::master_preferences::kDistroImportHistoryPref,
     installer::master_preferences::kDistroImportBookmarksPref,
     installer::master_preferences::kDistroImportHomePagePref,
+    installer::master_preferences::kDoNotCreateAnyShortcuts,
     installer::master_preferences::kDoNotCreateDesktopShortcut,
     installer::master_preferences::kDoNotCreateQuickLaunchShortcut,
+    installer::master_preferences::kDoNotCreateTaskbarShortcut,
     installer::master_preferences::kDoNotLaunchChrome,
     installer::master_preferences::kMakeChromeDefault,
     installer::master_preferences::kMakeChromeDefaultForUser,
@@ -192,12 +195,12 @@ TEST_F(MasterPreferencesTest, FirstRunTabs) {
 
   EXPECT_TRUE(file_util::WriteFile(prefs_file(), text, strlen(text)));
   installer::MasterPreferences prefs(prefs_file());
-  typedef std::vector<GURL> TabsVector;
+  typedef std::vector<std::string> TabsVector;
   TabsVector tabs = prefs.GetFirstRunTabs();
   ASSERT_EQ(3, tabs.size());
-  EXPECT_EQ(GURL("http://google.com/f1"), tabs[0]);
-  EXPECT_EQ(GURL("https://google.com/f2"), tabs[1]);
-  EXPECT_EQ(GURL("new_tab_page"), tabs[2]);
+  EXPECT_EQ("http://google.com/f1", tabs[0]);
+  EXPECT_EQ("https://google.com/f2", tabs[1]);
+  EXPECT_EQ("new_tab_page", tabs[2]);
 }
 
 // In this test instead of using our synthetic json file, we use an
@@ -359,14 +362,22 @@ TEST_F(MasterPreferencesTest, EnforceLegacyCreateAllShortcutsFalse) {
 
     bool do_not_create_desktop_shortcut = false;
     bool do_not_create_quick_launch_shortcut = false;
+    bool do_not_create_taskbar_shortcut = false;
     prefs.GetBool(
         installer::master_preferences::kDoNotCreateDesktopShortcut,
         &do_not_create_desktop_shortcut);
     prefs.GetBool(
         installer::master_preferences::kDoNotCreateQuickLaunchShortcut,
         &do_not_create_quick_launch_shortcut);
+    prefs.GetBool(
+        installer::master_preferences::kDoNotCreateTaskbarShortcut,
+        &do_not_create_taskbar_shortcut);
+    // create_all_shortcuts is a legacy preference that should only enforce
+    // do_not_create_desktop_shortcut and do_not_create_quick_launch_shortcut
+    // when set to false.
     EXPECT_TRUE(do_not_create_desktop_shortcut);
     EXPECT_TRUE(do_not_create_quick_launch_shortcut);
+    EXPECT_FALSE(do_not_create_taskbar_shortcut);
 }
 
 TEST_F(MasterPreferencesTest, DontEnforceLegacyCreateAllShortcutsTrue) {
@@ -381,14 +392,19 @@ TEST_F(MasterPreferencesTest, DontEnforceLegacyCreateAllShortcutsTrue) {
 
     bool do_not_create_desktop_shortcut = false;
     bool do_not_create_quick_launch_shortcut = false;
+    bool do_not_create_taskbar_shortcut = false;
     prefs.GetBool(
         installer::master_preferences::kDoNotCreateDesktopShortcut,
         &do_not_create_desktop_shortcut);
     prefs.GetBool(
         installer::master_preferences::kDoNotCreateQuickLaunchShortcut,
         &do_not_create_quick_launch_shortcut);
+    prefs.GetBool(
+        installer::master_preferences::kDoNotCreateTaskbarShortcut,
+        &do_not_create_taskbar_shortcut);
     EXPECT_FALSE(do_not_create_desktop_shortcut);
     EXPECT_FALSE(do_not_create_quick_launch_shortcut);
+    EXPECT_FALSE(do_not_create_taskbar_shortcut);
 }
 
 TEST_F(MasterPreferencesTest, DontEnforceLegacyCreateAllShortcutsNotSpecified) {
@@ -403,12 +419,17 @@ TEST_F(MasterPreferencesTest, DontEnforceLegacyCreateAllShortcutsNotSpecified) {
 
     bool do_not_create_desktop_shortcut = false;
     bool do_not_create_quick_launch_shortcut = false;
+    bool do_not_create_taskbar_shortcut = false;
     prefs.GetBool(
         installer::master_preferences::kDoNotCreateDesktopShortcut,
         &do_not_create_desktop_shortcut);
     prefs.GetBool(
         installer::master_preferences::kDoNotCreateQuickLaunchShortcut,
         &do_not_create_quick_launch_shortcut);
+    prefs.GetBool(
+        installer::master_preferences::kDoNotCreateTaskbarShortcut,
+        &do_not_create_taskbar_shortcut);
     EXPECT_FALSE(do_not_create_desktop_shortcut);
     EXPECT_FALSE(do_not_create_quick_launch_shortcut);
+    EXPECT_FALSE(do_not_create_taskbar_shortcut);
 }

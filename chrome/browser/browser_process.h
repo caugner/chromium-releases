@@ -13,6 +13,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/browser/ui/host_desktop.h"
 
 class AutomationProviderList;
 class BackgroundModeManager;
@@ -24,6 +25,7 @@ class ComponentUpdateService;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GLStringManager;
+class GpuModeManager;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
@@ -148,12 +150,15 @@ class BrowserProcess {
 
   virtual GLStringManager* gl_string_manager() = 0;
 
+  virtual GpuModeManager* gpu_mode_manager() = 0;
+
   virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() = 0;
 
   virtual AutomationProviderList* GetAutomationProviderList() = 0;
 
   virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
+      chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
       int port,
       const std::string& frontend_url) = 0;
@@ -219,6 +224,8 @@ class BrowserProcess {
 
   virtual void PlatformSpecificCommandLineProcessing(
       const CommandLine& command_line) = 0;
+
+  virtual bool created_local_state() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

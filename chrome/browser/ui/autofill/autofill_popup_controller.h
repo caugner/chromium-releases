@@ -21,7 +21,10 @@ class RectF;
 // This interface provides data to an AutofillPopupView.
 class AutofillPopupController {
  public:
-  // Called when the view is going down.
+  // Called when the popup should get hidden.
+  virtual void Hide() = 0;
+
+  // Called whent the popup view was destroyed.
   virtual void ViewDestroyed() = 0;
 
   // Recalculates the height and width of the popup and triggers a redraw.
@@ -87,9 +90,6 @@ class AutofillPopupController {
   // Returns the index of the selected line. A line is "selected" when it is
   // hovered or has keyboard focus.
   virtual int selected_line() const = 0;
-
-  // Returns true if the delete icon of the selected line is currently hovered.
-  virtual bool delete_icon_hovered() const = 0;
 
  protected:
   virtual ~AutofillPopupController() {}

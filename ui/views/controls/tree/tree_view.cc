@@ -168,6 +168,10 @@ void TreeView::StartEditing(TreeModelNode* node) {
   focus_manager_ = GetFocusManager();
   if (focus_manager_)
     focus_manager_->AddFocusChangeListener(this);
+
+  // Accelerators to commit/cancel edit.
+  AddAccelerator(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
+  AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
 }
 
 void TreeView::CancelEdit() {
@@ -183,6 +187,9 @@ void TreeView::CancelEdit() {
   }
   editor_->SetVisible(false);
   SchedulePaint();
+
+  RemoveAccelerator(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
+  RemoveAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
 }
 
 void TreeView::CommitEdit() {
@@ -190,9 +197,11 @@ void TreeView::CommitEdit() {
     return;
 
   DCHECK(selected_node_);
+  const bool editor_has_focus = editor_->HasFocus();
   model_->SetTitle(GetSelectedNode(), editor_->text());
   CancelEdit();
-  RequestFocus();
+  if (editor_has_focus)
+    RequestFocus();
 }
 
 TreeModelNode* TreeView::GetEditingNode() {
@@ -319,13 +328,23 @@ gfx::Size TreeView::GetPreferredSize() {
   return preferred_size_;
 }
 
+bool TreeView::AcceleratorPressed(const ui::Accelerator& accelerator) {
+  if (accelerator.key_code() == ui::VKEY_RETURN) {
+    CommitEdit();
+  } else {
+    DCHECK_EQ(ui::VKEY_ESCAPE, accelerator.key_code());
+    CancelEdit();
+    RequestFocus();
+  }
+  return true;
+}
+
 bool TreeView::OnMousePressed(const ui::MouseEvent& event) {
   return OnClickOrTap(event);
 }
 
 void TreeView::OnGestureEvent(ui::GestureEvent* event) {
-  if (event->type() == ui::ET_GESTURE_TAP ||
-      event->type() == ui::ET_GESTURE_DOUBLE_TAP) {
+  if (event->type() == ui::ET_GESTURE_TAP) {
     if (OnClickOrTap(*event))
       event->SetHandled();
   }
@@ -440,13 +459,11 @@ bool TreeView::HandleKeyEvent(Textfield* sender,
   }
 }
 
-void TreeView::OnWillChangeFocus(View* focused_before,
-                                 View* focused_now) {
+void TreeView::OnWillChangeFocus(View* focused_before, View* focused_now) {
 }
 
-void TreeView::OnDidChangeFocus(View* focused_before,
-                                View* focused_now) {
-  CancelEdit();
+void TreeView::OnDidChangeFocus(View* focused_before, View* focused_now) {
+  CommitEdit();
 }
 
 gfx::Point TreeView::GetKeyboardContextMenuLocation() {
@@ -546,11 +563,13 @@ void TreeView::OnBlur() {
 }
 
 bool TreeView::OnClickOrTap(const ui::LocatedEvent& event) {
+  CommitEdit();
+  RequestFocus();
+
   int row = (event.y() - kVerticalInset) / row_height_;
   int depth;
   InternalNode* node = GetNodeByRow(row, &depth);
   if (node) {
-    RequestFocus();
     gfx::Rect bounds(GetBoundsForNodeImpl(node, row, depth));
     if (bounds.Contains(event.location())) {
       int relative_x = event.x() - bounds.x();
@@ -564,8 +583,15 @@ bool TreeView::OnClickOrTap(const ui::LocatedEvent& event) {
           Expand(node->model_node());
       } else if (relative_x > kArrowRegionSize) {
         SetSelectedNode(node->model_node());
-        if (event.flags() & ui::EF_IS_DOUBLE_CLICK ||
-            event.type() == ui::ET_GESTURE_DOUBLE_TAP) {
+        bool should_toggle = false;
+        if (event.type() == ui::ET_GESTURE_TAP) {
+          const ui::GestureEvent& gesture =
+              static_cast<const ui::GestureEvent&>(event);
+          should_toggle = gesture.details().tap_count() == 2;
+        } else {
+          should_toggle = (event.flags() & ui::EF_IS_DOUBLE_CLICK) != 0;
+        }
+        if (should_toggle) {
           if (node->is_expanded())
             Collapse(node->model_node());
           else

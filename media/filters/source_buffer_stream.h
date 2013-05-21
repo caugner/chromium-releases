@@ -12,6 +12,7 @@
 
 #include <deque>
 #include <list>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -125,7 +126,10 @@ class MEDIA_EXPORT SourceBufferStream {
   // end overlaps if necessary.
   // |deleted_buffers| is an output parameter containing candidates for
   // |track_buffer_|.
-  void InsertIntoExistingRange(
+  // Returns true if the buffers were successfully inserted into the existing
+  // range.
+  // Returns false if the buffers being inserted triggered an error.
+  bool InsertIntoExistingRange(
       const RangeList::iterator& range_for_new_buffers_itr,
       const BufferQueue& new_buffers,
       BufferQueue* deleted_buffers);
@@ -266,8 +270,8 @@ class MEDIA_EXPORT SourceBufferStream {
 
   // Holds the audio/video configs for this stream. |current_config_index_|
   // and |append_config_index_| represent indexes into one of these vectors.
-  std::vector<AudioDecoderConfig*> audio_configs_;
-  std::vector<VideoDecoderConfig*> video_configs_;
+  std::vector<AudioDecoderConfig> audio_configs_;
+  std::vector<VideoDecoderConfig> video_configs_;
 
   // True if more data needs to be appended before the Seek() can complete,
   // false if no Seek() has been requested or the Seek() is completed.
@@ -297,6 +301,7 @@ class MEDIA_EXPORT SourceBufferStream {
   // The timestamp of the last buffer appended to the media segment, set to
   // kNoTimestamp() if the beginning of the segment.
   base::TimeDelta last_appended_buffer_timestamp_;
+  bool last_appended_buffer_is_keyframe_;
 
   // The decode timestamp on the last buffer returned by the most recent
   // GetNextBuffer() call. Set to kNoTimestamp() if GetNextBuffer() hasn't been

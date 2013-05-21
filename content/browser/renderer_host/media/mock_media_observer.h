@@ -20,9 +20,10 @@ class MockMediaObserver : public MediaObserver {
   MockMediaObserver();
   virtual ~MockMediaObserver();
 
-  MOCK_METHOD3(OnCaptureDevicesOpened,
+  MOCK_METHOD4(OnCaptureDevicesOpened,
                void(int render_process_id, int render_view_id,
-                    const MediaStreamDevices& devices));
+                    const MediaStreamDevices& devices,
+                    const base::Closure& close_callback));
   MOCK_METHOD3(OnCaptureDevicesClosed,
                void(int render_process_id, int render_view_id,
                     const MediaStreamDevices& devices));
@@ -34,6 +35,11 @@ class MockMediaObserver : public MediaObserver {
                void(int render_process_id, int render_view_id,
                     const MediaStreamDevice& device,
                     const MediaRequestState state));
+  MOCK_METHOD4(OnAudioStreamPlayingChanged,
+               void(int render_process_id,
+                    int render_view_id,
+                    int stream_id,
+                    bool playing));
 };
 
 class MockMediaInternals : public MediaInternals {

@@ -60,7 +60,7 @@ remoting.HostSettings.save = function(hostId, options, opt_callback) {
     allHosts[hostId] = requestedHost;
     var newSettings = {};
     newSettings[remoting.HostSettings.KEY_] = JSON.stringify(allHosts);
-    chrome.storage.local.set(newSettings, opt_callback);
+    remoting.storage.local.set(newSettings, opt_callback);
   };
   remoting.HostSettings.loadInternal_(hostId, onDone);
 };
@@ -81,10 +81,12 @@ remoting.HostSettings.loadInternal_ = function(hostId, callback) {
   var onDone = function(allHosts) {
     var result = {};
     try {
-      var result = jsonParseSafe(allHosts[remoting.HostSettings.KEY_]);
-      if (typeof(result) == 'object' &&
-          hostId in result &&
-          typeof(result[hostId]) == 'object') {
+      result = jsonParseSafe(allHosts[remoting.HostSettings.KEY_]);
+      if (typeof(result) != 'object') {
+        console.error("Error loading host settings: Not an object");
+        result = {};
+      } else if (hostId in result &&
+                 typeof(result[hostId]) == 'object') {
         callback(result[hostId], /** @type {Object} */(result));
         return;
       }
@@ -92,9 +94,9 @@ remoting.HostSettings.loadInternal_ = function(hostId, callback) {
       var typedErr = /** @type {*} */ (err);
       console.error('Error loading host settings:', typedErr);
     }
-    callback({}, {});
+    callback({}, /** @type {Object} */(result));
   };
-  chrome.storage.local.get(remoting.HostSettings.KEY_, onDone);
+  remoting.storage.local.get(remoting.HostSettings.KEY_, onDone);
 };
 
 /** @type {string} @private */

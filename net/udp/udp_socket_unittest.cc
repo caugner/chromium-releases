@@ -13,9 +13,9 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log_unittest.h"
-#include "net/base/net_test_suite.h"
 #include "net/base/net_util.h"
 #include "net/base/test_completion_callback.h"
+#include "net/test/net_test_suite.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -334,6 +334,28 @@ TEST_F(UDPSocketTest, ConnectRandomBind) {
   EXPECT_EQ(used_ports.back(), client_address.port());
 
   STLDeleteElements(&sockets);
+}
+
+// Return a privileged port (under 1024) so binding will fail.
+int PrivilegedRand(int min, int max) {
+  // Chosen by fair dice roll.  Guaranteed to be random.
+  return 4;
+}
+
+TEST_F(UDPSocketTest, ConnectFail) {
+  IPEndPoint peer_address;
+  CreateUDPAddress("0.0.0.0", 53, &peer_address);
+
+  scoped_ptr<UDPSocket> socket(
+      new UDPSocket(DatagramSocket::RANDOM_BIND,
+                    base::Bind(&PrivilegedRand),
+                    NULL,
+                    NetLog::Source()));
+  int rv = socket->Connect(peer_address);
+  // Connect should have failed since we couldn't bind to that port,
+  EXPECT_NE(OK, rv);
+  // Make sure that UDPSocket actually closed the socket.
+  EXPECT_FALSE(socket->is_connected());
 }
 
 // In this test, we verify that connect() on a socket will have the effect

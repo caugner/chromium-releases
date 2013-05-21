@@ -10,11 +10,12 @@
 #include "android_webview/browser/aw_download_manager_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/geolocation_permission_context.h"
 #include "net/url_request/url_request_job_factory.h"
 
@@ -32,16 +33,15 @@ class WebContents;
 namespace android_webview {
 
 class AwURLRequestContextGetter;
-
-typedef content::GeolocationPermissionContext* GeolocationPermissionFactoryFn();
+class AwQuotaManagerBridge;
+class JniDependencyFactory;
 
 class AwBrowserContext : public content::BrowserContext,
                          public components::VisitedLinkDelegate {
  public:
 
-  AwBrowserContext(
-      const base::FilePath path,
-      GeolocationPermissionFactoryFn* geolocation_permission_factory);
+  AwBrowserContext(const base::FilePath path,
+                   JniDependencyFactory* native_factory);
   virtual ~AwBrowserContext();
 
   // Convenience method to returns the AwBrowserContext corresponding to the
@@ -59,29 +59,13 @@ class AwBrowserContext : public content::BrowserContext,
   void AddVisitedURLs(const std::vector<GURL>& urls);
 
   net::URLRequestContextGetter* CreateRequestContext(
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          blob_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          file_system_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          developer_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_devtools_protocol_handler);
+      content::ProtocolHandlerMap* protocol_handlers);
   net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
       const base::FilePath& partition_path,
       bool in_memory,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          blob_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          file_system_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          developer_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_devtools_protocol_handler);
+      content::ProtocolHandlerMap* protocol_handlers);
+
+  AwQuotaManagerBridge* GetQuotaManagerBridge();
 
   // content::BrowserContext implementation.
   virtual base::FilePath GetPath() OVERRIDE;
@@ -112,10 +96,11 @@ class AwBrowserContext : public content::BrowserContext,
   // The file path where data for this context is persisted.
   base::FilePath context_storage_path_;
 
+  JniDependencyFactory* native_factory_;
   scoped_refptr<AwURLRequestContextGetter> url_request_context_getter_;
-  GeolocationPermissionFactoryFn* geolocation_permission_factory_;
   scoped_refptr<content::GeolocationPermissionContext>
       geolocation_permission_context_;
+  scoped_ptr<AwQuotaManagerBridge> quota_manager_bridge_;
 
   AwDownloadManagerDelegate download_manager_delegate_;
 

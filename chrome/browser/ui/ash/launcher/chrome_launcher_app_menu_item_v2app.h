@@ -25,9 +25,10 @@ class ChromeLauncherAppMenuItemV2App : public ChromeLauncherAppMenuItem {
       const gfx::Image* icon,
       const std::string& app_id,
       ChromeLauncherControllerPerApp* launcher_controller,
-      int app_index);
+      int app_index,
+      bool has_leading_separator);
   virtual bool IsEnabled() const OVERRIDE;
-  virtual void Execute() OVERRIDE;
+  virtual void Execute(int event_flags) OVERRIDE;
 
  private:
   // The owning class which can be used to validate the controller.

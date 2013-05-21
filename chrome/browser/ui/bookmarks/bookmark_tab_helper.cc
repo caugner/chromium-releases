@@ -6,23 +6,43 @@
 
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/defaults.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
+#include "chrome/browser/ui/sad_tab.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/common/pref_names.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(BookmarkTabHelper);
 
 namespace {
 
-bool CanShowBookmarkBar(content::WebUI* ui) {
-  if (!ui)
-    return false;
-  NewTabUI* new_tab = NewTabUI::FromWebUIController(ui->GetController());
-  return new_tab && new_tab->CanShowBookmarkBar();
+bool IsNTPWebUI(content::WebContents* web_contents) {
+  content::WebUI* web_ui = NULL;
+  // Use the committed entry so the bookmarks bar disappears at the same time
+  // the page does.
+  if (web_contents->GetController().GetLastCommittedEntry())
+    web_ui = web_contents->GetCommittedWebUI();
+  else
+    web_ui = web_contents->GetWebUI();
+  return web_ui && NewTabUI::FromWebUIController(web_ui->GetController());
+}
+
+bool IsInstantNTP(content::WebContents* web_contents) {
+  // Use the committed entry so the bookmarks bar disappears at the same time
+  // the page does.
+  const content::NavigationEntry* entry =
+      web_contents->GetController().GetLastCommittedEntry();
+  if (!entry)
+    entry = web_contents->GetController().GetVisibleEntry();
+  return chrome::search::NavEntryIsInstantNTP(web_contents, entry);
 }
 
 }  // namespace
+
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(BookmarkTabHelper);
 
 BookmarkTabHelper::~BookmarkTabHelper() {
   if (bookmark_model_)
@@ -33,19 +53,20 @@ bool BookmarkTabHelper::ShouldShowBookmarkBar() const {
   if (web_contents()->ShowingInterstitialPage())
     return false;
 
-  // See WebContents::GetWebUIForCurrentState() comment for more info. This case
-  // is very similar, but for non-first loads, we want to use the committed
-  // entry. This is so the bookmarks bar disappears at the same time the page
-  // does.
-  if (web_contents()->GetController().GetLastCommittedEntry()) {
-    // Not the first load, always use the committed Web UI.
-    return CanShowBookmarkBar(web_contents()->GetCommittedWebUI());
-  }
+  if (chrome::SadTab::ShouldShow(web_contents()->GetCrashedStatus()))
+    return false;
 
-  // When it's the first load, we know either the pending one or the committed
-  // one will have the Web UI in it (see GetWebUIForCurrentState), and only one
-  // of them will be valid, so we can just check both.
-  return CanShowBookmarkBar(web_contents()->GetWebUI());
+  if (!browser_defaults::bookmarks_enabled)
+    return false;
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  PrefService* prefs = profile->GetPrefs();
+  if (prefs->IsManagedPreference(prefs::kShowBookmarkBar) &&
+      !prefs->GetBoolean(prefs::kShowBookmarkBar))
+    return false;
+
+  return IsNTPWebUI(web_contents()) || IsInstantNTP(web_contents());
 }
 
 BookmarkTabHelper::BookmarkTabHelper(content::WebContents* web_contents)

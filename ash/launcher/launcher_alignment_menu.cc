@@ -4,9 +4,9 @@
 
 #include "ash/launcher/launcher_alignment_menu.h"
 
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_types.h"
 #include "ash/shell.h"
-#include "ash/wm/shelf_layout_manager.h"
 #include "grit/ash_strings.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -29,9 +29,6 @@ LauncherAlignmentMenu::LauncherAlignmentMenu(
   AddRadioItemWithStringId(MENU_ALIGN_RIGHT,
                            IDS_AURA_LAUNCHER_CONTEXT_MENU_ALIGN_RIGHT,
                            align_group_id);
-  AddRadioItemWithStringId(MENU_ALIGN_TOP,
-                           IDS_AURA_LAUNCHER_CONTEXT_MENU_ALIGN_TOP,
-                           align_group_id);
 }
 
 LauncherAlignmentMenu::~LauncherAlignmentMenu() {
@@ -43,7 +40,7 @@ bool LauncherAlignmentMenu::IsCommandIdChecked(int command_id) const {
           MENU_ALIGN_BOTTOM == command_id,
           MENU_ALIGN_LEFT == command_id,
           MENU_ALIGN_RIGHT == command_id,
-          MENU_ALIGN_TOP == command_id);
+          false);
 }
 
 bool LauncherAlignmentMenu::IsCommandIdEnabled(int command_id) const {
@@ -56,7 +53,7 @@ bool LauncherAlignmentMenu::GetAcceleratorForCommandId(
   return false;
 }
 
-void LauncherAlignmentMenu::ExecuteCommand(int command_id) {
+void LauncherAlignmentMenu::ExecuteCommand(int command_id, int event_flags) {
   switch (static_cast<MenuItem>(command_id)) {
     case MENU_ALIGN_LEFT:
       Shell::GetInstance()->SetShelfAlignment(SHELF_ALIGNMENT_LEFT,
@@ -68,10 +65,6 @@ void LauncherAlignmentMenu::ExecuteCommand(int command_id) {
       break;
     case MENU_ALIGN_RIGHT:
       Shell::GetInstance()->SetShelfAlignment(SHELF_ALIGNMENT_RIGHT,
-                                              root_window_);
-      break;
-    case MENU_ALIGN_TOP:
-      Shell::GetInstance()->SetShelfAlignment(SHELF_ALIGNMENT_TOP,
                                               root_window_);
       break;
   }

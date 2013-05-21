@@ -43,7 +43,7 @@ class WindowTypeLauncherItem : public app_list::AppListItemModel {
   };
 
   explicit WindowTypeLauncherItem(Type type) : type_(type) {
-    SetIcon(GetIcon(type));
+    SetIcon(GetIcon(type), false);
     SetTitle(GetTitle(type));
   }
 
@@ -291,6 +291,22 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
 
   virtual gfx::ImageSkia GetWindowIcon() OVERRIDE {
     return gfx::ImageSkia();
+  }
+
+  virtual string16 GetCurrentUserName() {
+    return string16();
+  }
+
+  virtual string16 GetCurrentUserEmail() {
+    return string16();
+  }
+
+  virtual void OpenSettings() {
+    // Nothing needs to be done.
+  }
+
+  virtual void OpenFeedback() {
+    // Nothing needs to be done.
   }
 
   app_list::AppListModel* model_;

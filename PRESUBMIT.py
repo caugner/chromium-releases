@@ -25,7 +25,6 @@ _EXCLUDED_PATHS = (
     r".*MakeFile$",
     r".+_autogen\.h$",
     r"^cc[\\\/].*",
-    r"^webkit[\\\/]compositor_bindings[\\\/].*",
     r".+[\\\/]pnacl_shim\.c$",
 )
 
@@ -844,9 +843,9 @@ def GetPreferredTrySlaves(project, change):
     return []
 
   if all(re.search('\.(m|mm)$|(^|[/_])mac[/_.]', f) for f in files):
-    return ['mac_rel', 'mac_asan']
+    return ['mac_rel', 'mac_asan', 'mac:compile']
   if all(re.search('(^|[/_])win[/_.]', f) for f in files):
-    return ['win_rel']
+    return ['win_rel', 'win7_aura', 'win:compile']
   if all(re.search('(^|[/_])android[/_.]', f) for f in files):
     return ['android_dbg', 'android_clang_dbg']
   if all(re.search('^native_client_sdk', f) for f in files):
@@ -866,8 +865,10 @@ def GetPreferredTrySlaves(project, change):
       'linux_rel',
       'mac_asan',
       'mac_rel',
+      'mac:compile',
       'win7_aura',
       'win_rel',
+      'win:compile',
   ]
 
   # Match things like path/aura/file.cc and path/file_aura.cc.

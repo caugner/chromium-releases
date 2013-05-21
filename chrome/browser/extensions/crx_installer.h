@@ -8,11 +8,10 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/version.h"
-#include "chrome/browser/extensions/crx_installer_error.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/sandboxed_unpacker.h"
 #include "chrome/browser/extensions/webstore_installer.h"
@@ -30,6 +29,7 @@ class SequencedTaskRunner;
 }
 
 namespace extensions {
+class CrxInstallerError;
 class ExtensionUpdaterTest;
 class RequirementsChecker;
 
@@ -227,6 +227,11 @@ class CrxInstaller
   // Runs on the UI thread. Callback from RequirementsChecker.
   void OnRequirementsChecked(std::vector<std::string> requirement_errors);
 
+#if defined(ENABLE_MANAGED_USERS)
+  // Runs on the UI thread. Callback from the managed user passphrase dialog.
+  void OnAuthorizationResult(bool success);
+#endif
+
   // Runs on the UI thread. Confirms with the user (via ExtensionInstallPrompt)
   // that it is OK to install this extension.
   void ConfirmInstall();
@@ -247,8 +252,13 @@ class CrxInstaller
   // Deletes temporary directory and crx file if needed.
   void CleanupTempFiles();
 
-  // Creates sequenced task runner for extension install file I/O operations.
-  scoped_refptr<base::SequencedTaskRunner> CreateSequencedTaskRunner();
+  // Checks whether the current installation is initiated by the user from
+  // the extension settings page to update an existing extension or app.
+  void CheckUpdateFromSettingsPage();
+
+  // Show re-enable prompt if the update is initiated from the settings page
+  // and needs additional permissions.
+  void ConfirmReEnable();
 
   // The file we're installing.
   base::FilePath source_file_;
@@ -276,7 +286,7 @@ class CrxInstaller
   // A parsed copy of the expected manifest, before any transformations like
   // localization have taken place. If |approved_| is true, then the
   // extension's manifest must match this for the install to proceed.
-  scoped_ptr<base::DictionaryValue> expected_manifest_;
+  scoped_ptr<Manifest> expected_manifest_;
 
   // If non-NULL, contains the expected version of the extension we're
   // installing.  Important for external sources, where claiming the wrong
@@ -310,7 +320,7 @@ class CrxInstaller
 
   // A parsed copy of the unmodified original manifest, before any
   // transformations like localization have taken place.
-  scoped_ptr<base::DictionaryValue> original_manifest_;
+  scoped_ptr<Manifest> original_manifest_;
 
   // If non-empty, contains the current version of the extension we're
   // installing (for upgrades).
@@ -373,9 +383,6 @@ class CrxInstaller
   // still consider the installation 'handled'.
   bool did_handle_successfully_;
 
-  // Whether we should record an oauth2 grant upon successful install.
-  bool record_oauth2_grant_;
-
   // Whether we should produce an error if the manifest declares requirements
   // that are not met. If false and there is an unmet requirement, the install
   // will continue but the extension will be distabled.
@@ -392,6 +399,10 @@ class CrxInstaller
 
   // Used to show the install dialog.
   ExtensionInstallPrompt::ShowDialogCallback show_dialog_callback_;
+
+  // Whether the update is initiated by the user from the extension settings
+  // page.
+  bool update_from_settings_page_;
 
   DISALLOW_COPY_AND_ASSIGN(CrxInstaller);
 };

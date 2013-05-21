@@ -11,24 +11,24 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
-#include "net/base/ssl_config_service.h"
 #include "net/base/test_completion_callback.h"
-#include "net/base/transport_security_state.h"
 #include "net/cookies/cookie_store.h"
 #include "net/cookies/cookie_store_test_helpers.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/http/transport_security_state.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket_stream/socket_stream.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_test_util_spdy2.h"
 #include "net/spdy/spdy_websocket_test_util_spdy2.h"
+#include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/websockets/websocket_throttle.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -203,13 +203,6 @@ class MockCookieStore : public net::CookieStore {
       callback.Run(GetCookiesWithOptions(url, options));
   }
 
-  virtual void GetCookiesWithInfoAsync(
-      const GURL& url,
-      const net::CookieOptions& options,
-      const GetCookieInfoCallback& callback) OVERRIDE {
-    ADD_FAILURE();
-  }
-
   virtual void DeleteCookieAsync(const GURL& url,
                                  const std::string& cookie_name,
                                  const base::Closure& callback) OVERRIDE {
@@ -252,10 +245,10 @@ class MockURLRequestContext : public net::URLRequestContext {
       : transport_security_state_() {
     set_cookie_store(cookie_store);
     set_transport_security_state(&transport_security_state_);
-    net::TransportSecurityState::DomainState state;
-    state.upgrade_expiry = base::Time::Now() +
-        base::TimeDelta::FromSeconds(1000);
-    transport_security_state_.EnableHost("upgrademe.com", state);
+    base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
+    bool include_subdomains = false;
+    transport_security_state_.AddHSTS("upgrademe.com", expiry,
+                                      include_subdomains);
   }
 
   virtual ~MockURLRequestContext() {}
@@ -304,6 +297,7 @@ class MockHttpTransactionFactory : public net::HttpTransactionFactory {
   }
 
   virtual int CreateTransaction(
+      net::RequestPriority priority,
       scoped_ptr<net::HttpTransaction>* trans,
       net::HttpTransactionDelegate* delegate) OVERRIDE {
     NOTREACHED();

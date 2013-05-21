@@ -10,7 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/prefs/public/pref_member.h"
+#include "base/prefs/pref_member.h"
 #include "chrome/browser/command_observer.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -189,6 +189,9 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // Shows the critical notification bubble against the wrench menu.
   void ShowCriticalNotification();
+
+  // Shows the outdated install notification bubble against the wrench menu.
+  void ShowOutdatedInstallNotification();
 
   // Updates the badge and the accessible name of the app menu (Wrench).
   void UpdateAppMenuState();

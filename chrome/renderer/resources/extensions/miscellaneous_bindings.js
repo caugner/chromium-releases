@@ -8,9 +8,10 @@
 // content scripts only.
 
   require('json_schema');
-  require('event_bindings');
+  var json = require('json');
   var lastError = require('lastError');
   var miscNatives = requireNative('miscellaneous_bindings');
+  var chrome = requireNative('chrome').GetChrome();
   var CloseChannel = miscNatives.CloseChannel;
   var PortAddRef = miscNatives.PortAddRef;
   var PortRelease = miscNatives.PortRelease;
@@ -52,10 +53,10 @@
   // Sends a message asynchronously to the context on the other end of this
   // port.
   PortImpl.prototype.postMessage = function(msg) {
-    // JSON.stringify doesn't support a root object which is undefined.
+    // json.stringify doesn't support a root object which is undefined.
     if (msg === undefined)
       msg = null;
-    PostMessage(this.portId_, chromeHidden.JSON.stringify(msg));
+    PostMessage(this.portId_, json.stringify(msg));
   };
 
   // Disconnects the port from the other end.
@@ -120,7 +121,7 @@
     if (sourceExtensionId != targetExtensionId)
       errorMsg += " for extension " + targetExtensionId;
     errorMsg += ").";
-    lastError.set(errorMsg);
+    lastError.set(errorMsg, chrome);
     console.error("Could not send response: " + errorMsg);
   }
 
@@ -197,7 +198,7 @@
     var isExternal = sourceExtensionId != extensionId;
 
     if (tab)
-      tab = chromeHidden.JSON.parse(tab);
+      tab = json.parse(tab);
     var sender = {tab: tab, id: sourceExtensionId};
 
     // Special case for sendRequest/onRequest and sendMessage/onMessage.
@@ -224,22 +225,20 @@
 
   // Called by native code when a channel has been closed.
   chromeHidden.Port.dispatchOnDisconnect = function(
-      portId, connectionInvalid) {
+      portId, errorMessage) {
     var port = ports[portId];
     if (port) {
       // Update the renderer's port bookkeeping, without notifying the browser.
       CloseChannel(portId, false);
-      if (connectionInvalid) {
-        var errorMsg =
-            "Could not establish connection. Receiving end does not exist.";
-        lastError.set(errorMsg);
-        console.error("Port error: " + errorMsg);
+      if (errorMessage) {
+        lastError.set(errorMessage, chrome);
+        console.error("Port error: " + errorMessage);
       }
       try {
         port.onDisconnect.dispatch(port);
       } finally {
         port.destroy_();
-        lastError.clear();
+        lastError.clear(chrome);
       }
     }
   };
@@ -249,7 +248,7 @@
     var port = ports[portId];
     if (port) {
       if (msg) {
-        msg = chromeHidden.JSON.parse(msg);
+        msg = json.parse(msg);
       }
       port.onMessage.dispatch(msg, port);
     }

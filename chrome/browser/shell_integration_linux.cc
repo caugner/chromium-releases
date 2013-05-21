@@ -17,8 +17,8 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/message_loop.h"
@@ -36,6 +36,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
 using content::BrowserThread;
 
@@ -83,33 +85,46 @@ std::string CreateShortcutIcon(
 
   base::FilePath temp_file_path = temp_dir.path().Append(
       shortcut_filename.ReplaceExtension("png"));
-
-  std::vector<unsigned char> png_data;
-  const SkBitmap* bitmap = shortcut_info.favicon.ToSkBitmap();
-  gfx::PNGCodec::EncodeBGRASkBitmap(*bitmap, false, &png_data);
-  int bytes_written = file_util::WriteFile(temp_file_path,
-      reinterpret_cast<char*>(png_data.data()), png_data.size());
-
-  if (bytes_written != static_cast<int>(png_data.size()))
-    return std::string();
-
-  std::vector<std::string> argv;
-  argv.push_back("xdg-icon-resource");
-  argv.push_back("install");
-
-  // Always install in user mode, even if someone runs the browser as root
-  // (people do that).
-  argv.push_back("--mode");
-  argv.push_back("user");
-
-  argv.push_back("--size");
-  argv.push_back(base::IntToString(bitmap->width()));
-
-  argv.push_back(temp_file_path.value());
   std::string icon_name = temp_file_path.BaseName().RemoveExtension().value();
-  argv.push_back(icon_name);
-  int exit_code;
-  LaunchXdgUtility(argv, &exit_code);
+
+  std::vector<gfx::ImageSkiaRep> image_reps =
+      shortcut_info.favicon.ToImageSkia()->image_reps();
+  for (std::vector<gfx::ImageSkiaRep>::const_iterator it = image_reps.begin();
+       it != image_reps.end(); ++it) {
+    std::vector<unsigned char> png_data;
+    const SkBitmap& bitmap = it->sk_bitmap();
+    if (!gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, false, &png_data)) {
+      // If the bitmap could not be encoded to PNG format, skip it.
+      LOG(WARNING) << "Could not encode icon " << icon_name << ".png at size "
+                   << bitmap.width() << ".";
+      continue;
+    }
+    int bytes_written = file_util::WriteFile(temp_file_path,
+        reinterpret_cast<char*>(png_data.data()), png_data.size());
+
+    if (bytes_written != static_cast<int>(png_data.size()))
+      return std::string();
+
+    std::vector<std::string> argv;
+    argv.push_back("xdg-icon-resource");
+    argv.push_back("install");
+
+    // Always install in user mode, even if someone runs the browser as root
+    // (people do that).
+    argv.push_back("--mode");
+    argv.push_back("user");
+
+    argv.push_back("--size");
+    argv.push_back(base::IntToString(bitmap.width()));
+
+    argv.push_back(temp_file_path.value());
+    argv.push_back(icon_name);
+    int exit_code;
+    if (!LaunchXdgUtility(argv, &exit_code) || exit_code) {
+      LOG(WARNING) << "Could not install icon " << icon_name << ".png at size "
+                   << bitmap.width() << ".";
+    }
+  }
   return icon_name;
 }
 
@@ -379,6 +394,37 @@ ShellIntegration::DefaultWebClientState GetIsDefaultWebClient(
 #endif
 }
 
+// Get the value of NoDisplay from the [Desktop Entry] section of a .desktop
+// file, given in |shortcut_contents|. If the key is not found, returns false.
+bool GetNoDisplayFromDesktopFile(const std::string& shortcut_contents) {
+  // An empty file causes a crash with glib <= 2.32, so special case here.
+  if (shortcut_contents.empty())
+    return false;
+
+  GKeyFile* key_file = g_key_file_new();
+  GError* err = NULL;
+  if (!g_key_file_load_from_data(key_file, shortcut_contents.c_str(),
+                                 shortcut_contents.size(), G_KEY_FILE_NONE,
+                                 &err)) {
+    LOG(WARNING) << "Unable to read desktop file template: " << err->message;
+    g_error_free(err);
+    g_key_file_free(key_file);
+    return false;
+  }
+
+  bool nodisplay = false;
+  char* nodisplay_c_string = g_key_file_get_string(key_file, kDesktopEntry,
+                                                   "NoDisplay", &err);
+  if (nodisplay_c_string) {
+    if (!g_strcmp0(nodisplay_c_string, "true"))
+      nodisplay = true;
+    g_free(nodisplay_c_string);
+  }
+
+  g_key_file_free(key_file);
+  return nodisplay;
+}
+
 } // namespace
 
 // static
@@ -442,16 +488,66 @@ std::string GetDesktopName(base::Environment* env) {
 #endif
 }
 
-bool GetDesktopShortcutTemplate(base::Environment* env,
-                                std::string* output) {
+ShellIntegration::ShortcutLocations GetExistingShortcutLocations(
+    base::Environment* env,
+    const base::FilePath& profile_path,
+    const std::string& extension_id) {
+  base::FilePath desktop_path;
+  // If Get returns false, just leave desktop_path empty.
+  PathService::Get(base::DIR_USER_DESKTOP, &desktop_path);
+  return GetExistingShortcutLocations(env, profile_path, extension_id,
+                                             desktop_path);
+}
+
+ShellIntegration::ShortcutLocations GetExistingShortcutLocations(
+    base::Environment* env,
+    const base::FilePath& profile_path,
+    const std::string& extension_id,
+    const base::FilePath& desktop_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  base::FilePath shortcut_filename = GetExtensionShortcutFilename(
+      profile_path, extension_id);
+  DCHECK(!shortcut_filename.empty());
+  ShellIntegration::ShortcutLocations locations;
+
+  // Determine whether there is a shortcut on desktop.
+  if (!desktop_path.empty()) {
+    locations.on_desktop =
+        file_util::PathExists(desktop_path.Append(shortcut_filename));
+  }
+
+  // Determine whether there is a shortcut in the applications directory.
+  std::string shortcut_contents;
+  if (GetExistingShortcutContents(env, shortcut_filename, &shortcut_contents)) {
+    // Whether this counts as "hidden" or "in_applications_menu" depends on
+    // whether it contains NoDisplay=true.
+    if (GetNoDisplayFromDesktopFile(shortcut_contents))
+      locations.hidden = true;
+    else
+      locations.in_applications_menu = true;
+  }
+
+  return locations;
+}
+
+bool GetExistingShortcutContents(base::Environment* env,
+                                 const base::FilePath& desktop_filename,
+                                 std::string* output) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   std::vector<base::FilePath> search_paths;
 
+  // Search paths as specified in the XDG Base Directory Specification.
+  // http://standards.freedesktop.org/basedir-spec/latest/
   std::string xdg_data_home;
+  std::string home;
   if (env->GetVar("XDG_DATA_HOME", &xdg_data_home) &&
       !xdg_data_home.empty()) {
     search_paths.push_back(base::FilePath(xdg_data_home));
+  } else if (env->GetVar("HOME", &home) && !home.empty()) {
+    search_paths.push_back(base::FilePath(home).Append(".local").Append(
+        "share"));
   }
 
   std::string xdg_data_dirs;
@@ -461,28 +557,35 @@ bool GetDesktopShortcutTemplate(base::Environment* env,
     while (tokenizer.GetNext()) {
       base::FilePath data_dir(tokenizer.token());
       search_paths.push_back(data_dir);
-      search_paths.push_back(data_dir.Append("applications"));
     }
+  } else {
+    search_paths.push_back(base::FilePath("/usr/local/share"));
+    search_paths.push_back(base::FilePath("/usr/share"));
   }
 
-  // Add some fallback paths for systems which don't have XDG_DATA_DIRS or have
-  // it incomplete.
-  search_paths.push_back(base::FilePath("/usr/share/applications"));
-  search_paths.push_back(base::FilePath("/usr/local/share/applications"));
-
-  std::string template_filename(GetDesktopName(env));
   for (std::vector<base::FilePath>::const_iterator i = search_paths.begin();
        i != search_paths.end(); ++i) {
-    base::FilePath path = i->Append(template_filename);
-    VLOG(1) << "Looking for desktop file template in " << path.value();
+    base::FilePath path = i->Append("applications").Append(desktop_filename);
+    VLOG(1) << "Looking for desktop file in " << path.value();
     if (file_util::PathExists(path)) {
-      VLOG(1) << "Found desktop file template at " << path.value();
+      VLOG(1) << "Found desktop file at " << path.value();
       return file_util::ReadFileToString(path, output);
     }
   }
 
-  LOG(ERROR) << "Could not find desktop file template.";
   return false;
+}
+
+bool GetDesktopShortcutTemplate(base::Environment* env,
+                                std::string* output) {
+  base::FilePath template_filename(GetDesktopName(env));
+  if (GetExistingShortcutContents(env, template_filename, output)) {
+    return true;
+  } else {
+    LOG(ERROR) << "Could not find desktop file " << template_filename.value()
+               << ".";
+    return false;
+  }
 }
 
 base::FilePath GetWebShortcutFilename(const GURL& url) {
@@ -531,10 +634,12 @@ std::string GetDesktopFileContents(
     const base::FilePath& extension_path,
     const string16& title,
     const std::string& icon_name,
-    const base::FilePath& profile_path) {
+    const base::FilePath& profile_path,
+    bool no_display) {
   // Although not required by the spec, Nautilus on Ubuntu Karmic creates its
   // launchers with an xdg-open shebang. Follow that convention.
   std::string output_buffer = std::string(kXdgOpenShebang) + "\n";
+  // An empty file causes a crash with glib <= 2.32, so special case here.
   if (template_contents.empty())
     return output_buffer;
 
@@ -550,8 +655,9 @@ std::string GetDesktopFileContents(
           template_contents.size(),
           G_KEY_FILE_NONE,
           &err)) {
-    NOTREACHED() << "Unable to read desktop file template:" << err->message;
+    LOG(WARNING) << "Unable to read desktop file template: " << err->message;
     g_error_free(err);
+    g_key_file_free(key_file);
     return output_buffer;
   }
 
@@ -576,13 +682,15 @@ std::string GetDesktopFileContents(
                                             static_cast<GRegexMatchFlags>(0),
                                             NULL);
   gchar** keys = g_key_file_get_keys(key_file, kDesktopEntry, NULL, NULL);
-  for (gchar** keys_ptr = keys; *keys_ptr; ++keys_ptr) {
-    if (g_regex_match(localized_key_regex, *keys_ptr,
-                      static_cast<GRegexMatchFlags>(0), NULL)) {
-      g_key_file_remove_key(key_file, kDesktopEntry, *keys_ptr, NULL);
+  if (keys != NULL) {
+    for (gchar** keys_ptr = keys; *keys_ptr; ++keys_ptr) {
+      if (g_regex_match(localized_key_regex, *keys_ptr,
+                        static_cast<GRegexMatchFlags>(0), NULL)) {
+        g_key_file_remove_key(key_file, kDesktopEntry, *keys_ptr, NULL);
+      }
     }
+    g_strfreev(keys);
   }
-  g_strfreev(keys);
   g_regex_unref(localized_key_regex);
 
   // Set the "Name" key.
@@ -632,6 +740,10 @@ std::string GetDesktopFileContents(
   if (!icon_name.empty())
     g_key_file_set_string(key_file, kDesktopEntry, "Icon", icon_name.c_str());
 
+  // Set the "NoDisplay" key.
+  if (no_display)
+    g_key_file_set_string(key_file, kDesktopEntry, "NoDisplay", "true");
+
 #if defined(TOOLKIT_GTK)
   std::string wmclass = web_app::GetWMClassFromAppName(app_name);
   g_key_file_set_string(key_file, kDesktopEntry, "StartupWMClass",
@@ -658,6 +770,7 @@ std::string GetDesktopFileContents(
 
 bool CreateDesktopShortcut(
     const ShellIntegration::ShortcutInfo& shortcut_info,
+    const ShellIntegration::ShortcutLocations& creation_locations,
     const std::string& shortcut_template) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
@@ -667,9 +780,9 @@ bool CreateDesktopShortcut(
         shortcut_info.profile_path, shortcut_info.extension_id);
     // For extensions we do not want duplicate shortcuts. So, delete any that
     // already exist and replace them.
-    if (shortcut_info.create_on_desktop)
+    if (creation_locations.on_desktop)
       DeleteShortcutOnDesktop(shortcut_filename);
-    if (shortcut_info.create_in_applications_menu)
+    if (creation_locations.in_applications_menu || creation_locations.hidden)
       DeleteShortcutInApplicationsMenu(shortcut_filename);
   } else {
     shortcut_filename = GetWebShortcutFilename(shortcut_info.url);
@@ -681,24 +794,41 @@ bool CreateDesktopShortcut(
 
   std::string app_name =
       web_app::GenerateApplicationNameFromInfo(shortcut_info);
-  std::string contents = ShellIntegrationLinux::GetDesktopFileContents(
-      shortcut_template,
-      app_name,
-      shortcut_info.url,
-      shortcut_info.extension_id,
-      shortcut_info.extension_path,
-      shortcut_info.title,
-      icon_name,
-      shortcut_info.profile_path);
 
   bool success = true;
 
-  if (shortcut_info.create_on_desktop)
+  if (creation_locations.on_desktop) {
+    std::string contents = ShellIntegrationLinux::GetDesktopFileContents(
+        shortcut_template,
+        app_name,
+        shortcut_info.url,
+        shortcut_info.extension_id,
+        shortcut_info.extension_path,
+        shortcut_info.title,
+        icon_name,
+        shortcut_info.profile_path,
+        false);
     success = CreateShortcutOnDesktop(shortcut_filename, contents);
+  }
 
-  if (shortcut_info.create_in_applications_menu)
+  // The 'in_applications_menu' and 'hidden' locations are actually the same
+  // place ('applications').
+  if (creation_locations.in_applications_menu || creation_locations.hidden) {
+    // Set NoDisplay=true if hidden but not in_applications_menu. This will hide
+    // the application from user-facing menus.
+    std::string contents = ShellIntegrationLinux::GetDesktopFileContents(
+        shortcut_template,
+        app_name,
+        shortcut_info.url,
+        shortcut_info.extension_id,
+        shortcut_info.extension_path,
+        shortcut_info.title,
+        icon_name,
+        shortcut_info.profile_path,
+        !creation_locations.in_applications_menu);
     success = CreateShortcutInApplicationsMenu(shortcut_filename, contents) &&
               success;
+  }
 
   return success;
 }

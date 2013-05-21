@@ -81,7 +81,9 @@ FeatureInfo::FeatureFlags::FeatureFlags()
       use_arb_occlusion_query_for_occlusion_query_boolean(false),
       native_vertex_array_object(false),
       disable_workarounds(false),
-      enable_shader_name_hashing(false) {
+      enable_shader_name_hashing(false),
+      enable_samplers(false),
+      ext_draw_buffers(false) {
 }
 
 FeatureInfo::Workarounds::Workarounds()
@@ -93,6 +95,9 @@ FeatureInfo::Workarounds::Workarounds()
       use_current_program_after_successful_link(false),
       restore_scissor_on_fbo_change(false),
       flush_on_context_switch(false),
+      makecurrent_recreates_surfaces(false),
+      delete_instead_of_resize_fbo(false),
+      use_client_side_arrays_for_stream_buffers(false),
       max_texture_size(0),
       max_cube_map_texture_size(0) {
 }
@@ -166,6 +171,9 @@ void FeatureInfo::AddFeatures() {
   bool is_amd = false;
   bool is_mesa = false;
   bool is_qualcomm = false;
+  bool is_imagination = false;
+  bool is_arm = false;
+  bool is_hisilicon = false;
   for (size_t ii = 0; ii < arraysize(string_ids); ++ii) {
     const char* str = reinterpret_cast<const char*>(
           glGetString(string_ids[ii]));
@@ -177,6 +185,9 @@ void FeatureInfo::AddFeatures() {
       is_amd |= string_set.Contains("amd") || string_set.Contains("ati");
       is_mesa |= string_set.Contains("mesa");
       is_qualcomm |= string_set.Contains("qualcomm");
+      is_imagination |= string_set.Contains("imagination");
+      is_arm |= string_set.Contains("arm");
+      is_hisilicon |= string_set.Contains("hisilicon");
     }
   }
 
@@ -187,7 +198,6 @@ void FeatureInfo::AddFeatures() {
   feature_flags_.enable_shader_name_hashing =
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableShaderNameHashing);
-
 
   bool npot_ok = false;
 
@@ -209,6 +219,12 @@ void FeatureInfo::AddFeatures() {
   AddExtensionString("GL_CHROMIUM_stream_texture");
   AddExtensionString("GL_CHROMIUM_texture_mailbox");
   AddExtensionString("GL_EXT_debug_marker");
+
+  // Add extension to indicate fast-path texture uploads. This is
+  // for IMG, where everything except async + non-power-of-two +
+  // multiple-of-eight textures are brutally slow.
+  if (is_imagination)
+    AddExtensionString("GL_CHROMIUM_fast_NPOT_MO8_textures");
 
   feature_flags_.chromium_stream_texture = true;
 
@@ -326,6 +342,19 @@ void FeatureInfo::AddFeatures() {
       extensions.Contains("GL_ARB_vertex_array_object") ||
       extensions.Contains("GL_APPLE_vertex_array_object")) {
     feature_flags_.native_vertex_array_object = true;
+  }
+
+  // If the driver doesn't like uploading lots of buffer data constantly
+  // work around it by using client side arrays.
+  if (is_arm || is_imagination) {
+    workarounds_.use_client_side_arrays_for_stream_buffers = true;
+  }
+
+  // If we're using client_side_arrays we have to emulate
+  // vertex array objects since vertex array objects do not work
+  // with client side arrays.
+  if (workarounds_.use_client_side_arrays_for_stream_buffers) {
+    feature_flags_.native_vertex_array_object = false;
   }
 
   if (extensions.Contains("GL_OES_element_index_uint") ||
@@ -589,6 +618,29 @@ void FeatureInfo::AddFeatures() {
     validators_.vertex_attribute.AddValue(GL_VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE);
   }
 
+  if (extensions.Contains("GL_ARB_draw_buffers")) {
+    AddExtensionString("GL_EXT_draw_buffers");
+    feature_flags_.ext_draw_buffers = true;
+
+    GLint max_color_attachments = 0;
+    glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS_EXT, &max_color_attachments);
+    for (GLenum i = GL_COLOR_ATTACHMENT1_EXT;
+         i < static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + max_color_attachments);
+         ++i) {
+      validators_.attachment.AddValue(i);
+    }
+
+    validators_.g_l_state.AddValue(GL_MAX_COLOR_ATTACHMENTS_EXT);
+    validators_.g_l_state.AddValue(GL_MAX_DRAW_BUFFERS_ARB);
+    GLint max_draw_buffers = 0;
+    glGetIntegerv(GL_MAX_DRAW_BUFFERS_ARB, &max_draw_buffers);
+    for (GLenum i = GL_DRAW_BUFFER0_ARB;
+         i < static_cast<GLenum>(GL_DRAW_BUFFER0_ARB + max_draw_buffers);
+         ++i) {
+      validators_.g_l_state.AddValue(i);
+    }
+  }
+
   if (!disallowed_features_.swap_buffer_complete_callback)
     AddExtensionString("GL_CHROMIUM_swapbuffers_complete_callback");
 
@@ -603,6 +655,12 @@ void FeatureInfo::AddFeatures() {
     if (is_qualcomm) {
       workarounds_.restore_scissor_on_fbo_change = true;
       workarounds_.flush_on_context_switch = true;
+      // This is only needed on the ICS driver.
+      workarounds_.delete_instead_of_resize_fbo = true;
+    }
+
+    if (is_hisilicon) {
+      workarounds_.makecurrent_recreates_surfaces = true;
     }
 
 #if defined(OS_MACOSX)
@@ -636,6 +694,19 @@ void FeatureInfo::AddFeatures() {
       workarounds_.max_cube_map_texture_size = 4096;
     }
 #endif
+  }
+
+  bool is_es3 = false;
+  const char* str = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+  if (str) {
+    std::string lstr(StringToLowerASCII(std::string(str)));
+    is_es3 = (lstr.substr(0, 12) == "opengl es 3.");
+  }
+
+  if (is_es3 || extensions.Contains("GL_ARB_sampler_objects")) {
+    feature_flags_.enable_samplers = true;
+    // TODO(dsinclair): Add AddExtensionString("GL_CHROMIUM_sampler_objects")
+    // when available.
   }
 }
 

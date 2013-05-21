@@ -26,7 +26,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
@@ -57,6 +56,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -132,16 +132,13 @@ ProfileSyncService::ProfileSyncService(ProfileSyncComponentsFactory* factory,
                                        Profile* profile,
                                        SigninManager* signin_manager,
                                        StartBehavior start_behavior)
-    : last_auth_error_(AuthError::None()),
+    : last_auth_error_(AuthError::AuthErrorNone()),
       passphrase_required_reason_(syncer::REASON_PASSPHRASE_NOT_REQUIRED),
       factory_(factory),
       profile_(profile),
       // |profile| may be NULL in unit tests.
       sync_prefs_(profile_ ? profile_->GetPrefs() : NULL),
-      invalidator_storage_(
-          profile_ ? profile_->GetPrefs(): NULL,
-          profile_ ? static_cast<PrefRegistrySyncable*>(
-              profile_->GetPrefs()->DeprecatedGetPrefRegistry()) : NULL),
+      invalidator_storage_(profile_ ? profile_->GetPrefs(): NULL),
       sync_service_url_(kDevServerUrl),
       is_first_time_sync_configure_(false),
       backend_initialized_(false),
@@ -202,6 +199,10 @@ bool ProfileSyncService::ShouldEnablePasswordSyncForAndroid() const {
       sync_prefs_.GetPreferredDataTypes(registered_types);
   if (!preferred_types.Has(syncer::PASSWORDS))
     return false;
+  // If backend has not completed initializing we cannot check if the
+  // cryptographer is ready.
+  if (!sync_initialized())
+    return false;
   // On Android we do not want to prompt user to enter a passphrase. If
   // passwords cannot be decrypted we just disable them.
   syncer::ReadTransaction trans(FROM_HERE, GetUserShare());
@@ -253,8 +254,6 @@ void ProfileSyncService::TrySyncDatatypePrefRecovery() {
   PrefService* const pref_service = profile_->GetPrefs();
   if (!pref_service)
     return;
-  if (sync_prefs_.HasKeepEverythingSynced())
-    return;
   const syncer::ModelTypeSet registered_types = GetRegisteredDataTypes();
   if (sync_prefs_.GetPreferredDataTypes(registered_types).Size() > 1)
     return;
@@ -297,11 +296,21 @@ void ProfileSyncService::TryStart() {
   // but we haven't completed sync setup, we try to start sync anyway, since
   // it's possible we crashed/shutdown after logging in but before the backend
   // finished initializing the last time.
-  if (!HasSyncSetupCompleted() && !setup_in_progress_ && !auto_start_enabled_)
-    return;
-
-  // All systems Go for launch.
-  StartUp();
+  //
+  // However, the only time we actually need to start sync _immediately_ is if
+  // we haven't completed sync setup and the user is in the process of setting
+  // up - either they just signed in (for the first time) on an auto-start
+  // platform or they explicitly kicked off sync setup, and e.g we need to
+  // fetch account details like encryption state to populate UI. Otherwise,
+  // for performance reasons and maximizing parallelism at chrome startup, we
+  // defer the heavy lifting for sync init until things have calmed down.
+  if (HasSyncSetupCompleted()) {
+    StartUp(STARTUP_BACKEND_DEFERRED);
+  } else if (setup_in_progress_ || auto_start_enabled_) {
+    // We haven't completed sync setup. Start immediately if the user explicitly
+    // kicked this off or we're supposed to automatically start syncing.
+    StartUp(STARTUP_IMMEDIATE);
+  }
 }
 
 void ProfileSyncService::StartSyncingWithServer() {
@@ -467,8 +476,7 @@ void ProfileSyncService::OnSyncConfigureRetry() {
   NotifyObservers();
 }
 
-
-void ProfileSyncService::StartUp() {
+void ProfileSyncService::StartUp(StartUpDeferredOption deferred_option) {
   // Don't start up multiple times.
   if (backend_.get()) {
     DVLOG(1) << "Skipping bringing up backend host.";
@@ -478,6 +486,8 @@ void ProfileSyncService::StartUp() {
   DCHECK(IsSyncEnabledAndLoggedIn());
 
   last_synced_time_ = sync_prefs_.GetLastSyncedTime();
+
+  DCHECK(start_up_time_.is_null());
   start_up_time_ = base::Time::Now();
 
 #if defined(OS_CHROMEOS)
@@ -487,6 +497,40 @@ void ProfileSyncService::StartUp() {
         sync_prefs_.GetSpareBootstrapToken());
   }
 #endif
+
+  if (!sync_global_error_.get()) {
+#if !defined(OS_ANDROID)
+    sync_global_error_.reset(new SyncGlobalError(this, signin()));
+#endif
+    GlobalErrorServiceFactory::GetForProfile(profile_)->AddGlobalError(
+        sync_global_error_.get());
+    AddObserver(sync_global_error_.get());
+  }
+
+  if (deferred_option == STARTUP_BACKEND_DEFERRED &&
+      CommandLine::ForCurrentProcess()->
+          HasSwitch(switches::kSyncEnableDeferredStartup)) {
+    return;
+  }
+
+  StartUpSlowBackendComponents(STARTUP_IMMEDIATE);
+}
+
+void ProfileSyncService::StartUpSlowBackendComponents(
+    StartUpDeferredOption deferred_option) {
+  // Don't start up multiple times.
+  if (backend_.get()) {
+    DVLOG(1) << "Skipping bringing up backend host.";
+    return;
+  }
+
+  DCHECK(!start_up_time_.is_null());
+  if (deferred_option == STARTUP_BACKEND_DEFERRED) {
+    base::TimeDelta time_deferred = base::Time::Now() - start_up_time_;
+    UMA_HISTOGRAM_TIMES("Sync.Startup.TimeDeferred", time_deferred);
+  }
+
+  DCHECK(IsSyncEnabledAndLoggedIn());
   CreateBackend();
 
   // Initialize the backend.  Every time we start up a new SyncBackendHost,
@@ -502,15 +546,11 @@ void ProfileSyncService::StartUp() {
   if (backend_.get()) {
     backend_->UpdateRegisteredInvalidationIds(
         invalidator_registrar_->GetAllRegisteredIds());
-  }
-
-  if (!sync_global_error_.get()) {
-#if !defined(OS_ANDROID)
-    sync_global_error_.reset(new SyncGlobalError(this, signin()));
-#endif
-    GlobalErrorServiceFactory::GetForProfile(profile_)->AddGlobalError(
-        sync_global_error_.get());
-    AddObserver(sync_global_error_.get());
+    for (AckHandleReplayQueue::const_iterator it = ack_replay_queue_.begin();
+         it != ack_replay_queue_.end(); ++it) {
+      backend_->AcknowledgeInvalidation(it->first, it->second);
+    }
+    ack_replay_queue_.clear();
   }
 }
 
@@ -535,6 +575,18 @@ void ProfileSyncService::UpdateRegisteredInvalidationIds(
 void ProfileSyncService::UnregisterInvalidationHandler(
     syncer::InvalidationHandler* handler) {
   invalidator_registrar_->UnregisterHandler(handler);
+}
+
+void ProfileSyncService::AcknowledgeInvalidation(
+    const invalidation::ObjectId& id,
+    const syncer::AckHandle& ack_handle) {
+  if (backend_.get()) {
+    backend_->AcknowledgeInvalidation(id, ack_handle);
+  } else {
+    // If |backend_| is NULL, save the acknowledgements to replay when
+    // it's created and initialized.
+    ack_replay_queue_.push_back(std::make_pair(id, ack_handle));
+  }
 }
 
 syncer::InvalidatorState ProfileSyncService::GetInvalidatorState() const {
@@ -621,7 +673,7 @@ void ProfileSyncService::ShutdownImpl(bool sync_disabled) {
   passphrase_required_reason_ = syncer::REASON_PASSPHRASE_NOT_REQUIRED;
   // Revert to "no auth error".
   if (last_auth_error_.state() != GoogleServiceAuthError::NONE)
-    UpdateAuthErrorState(GoogleServiceAuthError::None());
+    UpdateAuthErrorState(GoogleServiceAuthError::AuthErrorNone());
 
   if (sync_global_error_.get()) {
     GlobalErrorServiceFactory::GetForProfile(profile_)->RemoveGlobalError(
@@ -665,6 +717,8 @@ void ProfileSyncService::NotifyObservers() {
 void ProfileSyncService::ClearStaleErrors() {
   ClearUnrecoverableError();
   last_actionable_error_ = SyncProtocolError();
+  // Clear the data type errors as well.
+  failed_datatypes_handler_.OnUserChoseDatatypes();
 }
 
 void ProfileSyncService::ClearUnrecoverableError() {
@@ -769,16 +823,15 @@ void ProfileSyncService::OnBackendInitialized(
     UMA_HISTOGRAM_BOOLEAN("Sync.BackendInitializeRestoreSuccess", success);
   }
 
-  if (!start_up_time_.is_null()) {
-    base::Time on_backend_initialized_time = base::Time::Now();
-    base::TimeDelta delta = on_backend_initialized_time - start_up_time_;
-    if (is_first_time_sync_configure_) {
-      UMA_HISTOGRAM_LONG_TIMES("Sync.BackendInitializeFirstTime", delta);
-    } else {
-      UMA_HISTOGRAM_LONG_TIMES("Sync.BackendInitializeRestoreTime", delta);
-    }
-    start_up_time_ = base::Time();
+  DCHECK(!start_up_time_.is_null());
+  base::Time on_backend_initialized_time = base::Time::Now();
+  base::TimeDelta delta = on_backend_initialized_time - start_up_time_;
+  if (is_first_time_sync_configure_) {
+    UMA_HISTOGRAM_LONG_TIMES("Sync.BackendInitializeFirstTime", delta);
+  } else {
+    UMA_HISTOGRAM_LONG_TIMES("Sync.BackendInitializeRestoreTime", delta);
   }
+  start_up_time_ = base::Time();
 
   if (!success) {
     // Something went unexpectedly wrong.  Play it safe: stop syncing at once
@@ -911,18 +964,6 @@ void ProfileSyncService::OnExperimentsChanged(
   }
 
   // Now enable any non-datatype features.
-  if (experiments.sync_tab_favicons) {
-    DVLOG(1) << "Enabling syncing of tab favicons.";
-    about_flags::SetExperimentEnabled(g_browser_process->local_state(),
-                                      "sync-tab-favicons",
-                                      true);
-#if defined(OS_ANDROID)
-    // Android does not support about:flags and experiments, so we need to force
-    // setting the experiments as command line switches.
-    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kSyncTabFavicons);
-#endif
-  }
-
   if (experiments.keystore_encryption) {
     about_flags::SetExperimentEnabled(g_browser_process->local_state(),
                                       syncer::kKeystoreEncryptionFlag,
@@ -932,6 +973,12 @@ void ProfileSyncService::OnExperimentsChanged(
   if (experiments.full_history_sync) {
     about_flags::SetExperimentEnabled(g_browser_process->local_state(),
                                       syncer::kFullHistorySyncFlag,
+                                      true);
+  }
+
+  if (experiments.favicon_sync) {
+    about_flags::SetExperimentEnabled(g_browser_process->local_state(),
+                                      syncer::kFaviconSyncFlag,
                                       true);
   }
 
@@ -956,7 +1003,7 @@ AuthError ConnectionStatusToAuthError(
     syncer::ConnectionStatus status) {
   switch (status) {
     case syncer::CONNECTION_OK:
-      return AuthError::None();
+      return AuthError::AuthErrorNone();
       break;
     case syncer::CONNECTION_AUTH_ERROR:
       return AuthError(AuthError::INVALID_GAIA_CREDENTIALS);
@@ -984,6 +1031,9 @@ void ProfileSyncService::OnStopSyncingPermanently() {
   UpdateAuthErrorState(AuthError(AuthError::SERVICE_UNAVAILABLE));
   sync_prefs_.SetStartSuppressed(true);
   DisableForUser();
+  // If signout is allowed, signout the user on a dashboard clear.
+  if (!auto_start_enabled_)  // Skip signout on ChromeOS/Android.
+    signin_->SignOut();
 }
 
 void ProfileSyncService::OnPassphraseRequired(
@@ -1240,6 +1290,15 @@ std::string ProfileSyncService::QuerySyncStatusSummary() {
   }
 }
 
+std::string ProfileSyncService::GetBackendInitializationStateString() const {
+  if (sync_initialized())
+    return "Done";
+  else if (!start_up_time_.is_null())
+    return "Deferred";
+  else
+    return "Not started";
+}
+
 bool ProfileSyncService::QueryDetailedSyncStatus(
     SyncBackendHost::Status* result) {
   if (backend_.get() && backend_initialized_) {
@@ -1326,44 +1385,34 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
   }
 
   // Only log the data types that are shown in the sync settings ui.
-  const syncer::ModelType model_types[] = {
-    syncer::APPS,
-    syncer::AUTOFILL,
-    syncer::BOOKMARKS,
-    syncer::EXTENSIONS,
-    syncer::PASSWORDS,
-    syncer::PREFERENCES,
-    syncer::SESSIONS,
-    syncer::SYNCED_NOTIFICATIONS,
-    syncer::THEMES,
-    syncer::TYPED_URLS
-  };
-
-  const browser_sync::user_selectable_type::UserSelectableSyncType
+  // Note: the order of these types must match the ordering of
+  // the respective types in ModelType
+const browser_sync::user_selectable_type::UserSelectableSyncType
       user_selectable_types[] = {
-    browser_sync::user_selectable_type::APPS,
-    browser_sync::user_selectable_type::AUTOFILL,
     browser_sync::user_selectable_type::BOOKMARKS,
-    browser_sync::user_selectable_type::EXTENSIONS,
-    browser_sync::user_selectable_type::PASSWORDS,
     browser_sync::user_selectable_type::PREFERENCES,
-    browser_sync::user_selectable_type::SESSIONS,
-    browser_sync::user_selectable_type::SYNCED_NOTIFICATIONS,
+    browser_sync::user_selectable_type::PASSWORDS,
+    browser_sync::user_selectable_type::AUTOFILL,
     browser_sync::user_selectable_type::THEMES,
-    browser_sync::user_selectable_type::TYPED_URLS
+    browser_sync::user_selectable_type::TYPED_URLS,
+    browser_sync::user_selectable_type::EXTENSIONS,
+    browser_sync::user_selectable_type::APPS,
+    browser_sync::user_selectable_type::PROXY_TABS
   };
 
-  COMPILE_ASSERT(23 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
-  COMPILE_ASSERT(arraysize(model_types) ==
-                 browser_sync::user_selectable_type::SELECTABLE_DATATYPE_COUNT,
-                 UpdateCustomConfigHistogram);
-  COMPILE_ASSERT(arraysize(model_types) == arraysize(user_selectable_types),
-                 UpdateCustomConfigHistogram);
+  COMPILE_ASSERT(26 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
 
   if (!sync_everything) {
     const syncer::ModelTypeSet current_types = GetPreferredDataTypes();
-    for (size_t i = 0; i < arraysize(model_types); ++i) {
-      const syncer::ModelType type = model_types[i];
+
+    syncer::ModelTypeSet type_set = syncer::UserSelectableTypes();
+    syncer::ModelTypeSet::Iterator it = type_set.First();
+
+    DCHECK_EQ(arraysize(user_selectable_types), type_set.Size());
+
+    for (size_t i = 0; i < arraysize(user_selectable_types) && it.Good();
+         ++i, it.Inc()) {
+      const syncer::ModelType type = it.Get();
       if (chosen_types.Has(type) &&
           (!HasSyncSetupCompleted() || !current_types.Has(type))) {
         // Selected type has changed - log it.
@@ -1393,7 +1442,8 @@ void ProfileSyncService::RefreshSpareBootstrapToken(
 }
 #endif
 
-void ProfileSyncService::OnUserChoseDatatypes(bool sync_everything,
+void ProfileSyncService::OnUserChoseDatatypes(
+    bool sync_everything,
     syncer::ModelTypeSet chosen_types) {
   if (!backend_.get() && !HasUnrecoverableError()) {
     NOTREACHED();
@@ -1706,9 +1756,6 @@ void ProfileSyncService::SetEncryptionPassphrase(const std::string& passphrase,
            passphrase_required_reason_ == syncer::REASON_DECRYPTION)) <<
          "Can not set explicit passphrase when decryption is needed.";
 
-  if (type == EXPLICIT)
-    UMA_HISTOGRAM_BOOLEAN("Sync.CustomPassphrase", true);
-
   DVLOG(1) << "Setting " << (type == EXPLICIT ? "explicit" : "implicit")
            << " passphrase for encryption.";
   if (passphrase_required_reason_ == syncer::REASON_ENCRYPTION) {
@@ -1744,7 +1791,6 @@ void ProfileSyncService::EnableEncryptEverything() {
   // problems around cancelling encryption in the background (crbug.com/119649).
   if (!encrypt_everything_)
     encryption_pending_ = true;
-  UMA_HISTOGRAM_BOOLEAN("Sync.EncryptAllData", true);
 }
 
 bool ProfileSyncService::encryption_pending() const {

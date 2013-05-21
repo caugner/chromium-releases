@@ -41,7 +41,7 @@ class VariationsService
   // Creates field trials based on Variations Seed loaded from local prefs. If
   // there is a problem loading the seed data, all trials specified by the seed
   // may not be created.
-  bool CreateTrialsFromSeed(PrefService* local_prefs);
+  bool CreateTrialsFromSeed();
 
   // Calls FetchVariationsSeed once and repeats this periodically. See
   // implementation for details on the period. Must be called after
@@ -53,6 +53,11 @@ class VariationsService
   bool GetNetworkTime(base::Time* network_time,
                       base::TimeDelta* uncertainty) const;
 
+  // Returns the variations server URL, which can vary if a command-line flag is
+  // set and/or the variations restrict pref is set in |local_prefs|. Declared
+  // static for test purposes.
+  static GURL GetVariationsServerURL(PrefService* local_prefs);
+
 #if defined(OS_WIN)
   // Starts syncing Google Update Variation IDs with the registry.
   void StartGoogleUpdateRegistrySync();
@@ -61,11 +66,14 @@ class VariationsService
   // Exposed for testing.
   void SetCreateTrialsFromSeedCalledForTesting(bool called);
 
+  // Exposed for testing.
+  static std::string GetDefaultVariationsServerURLForTesting();
+
   // Register Variations related prefs in Local State.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Factory method for creating a VariationsService.
-  static VariationsService* Create();
+  static VariationsService* Create(PrefService* local_state);
 
  protected:
   // Starts the fetching process once, where |OnURLFetchComplete| is called with
@@ -90,10 +98,12 @@ class VariationsService
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, LoadSeed);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, StoreSeed);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, ValidateStudy);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedStoredWhenOKStatus);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedNotStoredWhenNonOKStatus);
 
-  // Default constructor is private. Use the |Create| factory method to create a
-  // VariationsService.
-  VariationsService();
+  // Creates the VariationsService with the given |local_state| prefs service.
+  // Use the |Create| factory method to create a VariationsService.
+  explicit VariationsService(PrefService* local_state);
 
   // Checks if prerequisites for fetching the Variations seed are met, and if
   // so, performs the actual fetch using |DoActualFetch|.
@@ -161,6 +171,12 @@ class VariationsService
   // trial if IsStudyExpired(study, reference_date) is true.
   void CreateTrialFromStudy(const Study& study,
                             const base::Time& reference_date);
+
+  // Record the time of the most recent successful fetch.
+  void RecordLastFetchTime();
+
+  // The pref service used to store persist the variations seed.
+  PrefService* local_state_;
 
   // Contains the current seed request. Will only have a value while a request
   // is pending, and will be reset by |OnURLFetchComplete|.

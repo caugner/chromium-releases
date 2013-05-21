@@ -13,6 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_error.h"
 #include "chrome/browser/chromeos/drive/search_metadata.h"
 #include "chrome/browser/chromeos/extensions/file_browser_event_router.h"
@@ -62,6 +63,19 @@ class FileBrowserPrivateAPI : public ProfileKeyedService {
 
  private:
   scoped_refptr<FileBrowserEventRouter> event_router_;
+};
+
+// Implements the chrome.fileBrowserPrivate.logoutUser method.
+class LogoutUserFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.logoutUser",
+                             FILEBROWSERPRIVATE_LOGOUTUSER)
+
+ protected:
+  virtual ~LogoutUserFunction() {}
+
+  // SyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
 };
 
 // Implements the chrome.fileBrowserPrivate.requestLocalFileSystem method.
@@ -233,13 +247,12 @@ class SetDefaultTaskFileBrowserFunction : public SyncExtensionFunction {
  protected:
   virtual ~SetDefaultTaskFileBrowserFunction();
 
-  // AsyncExtensionFunction overrides.
+  // SyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 };
 
 // Parent class for the chromium extension APIs for the file dialog.
-class FileBrowserFunction
-    : public AsyncExtensionFunction {
+class FileBrowserFunction : public AsyncExtensionFunction {
  public:
   FileBrowserFunction();
 
@@ -247,27 +260,38 @@ class FileBrowserFunction
   typedef std::vector<GURL> UrlList;
   typedef std::vector<ui::SelectedFileInfo> SelectedFileInfoList;
   typedef base::Callback<void(const SelectedFileInfoList&)>
-      GetLocalPathsCallback;
+      GetSelectedFileInfoCallback;
 
   virtual ~FileBrowserFunction();
 
-  // Converts virtual paths to local paths by calling GetLocalPathsOnFileThread
-  // on the file thread and call |callback| on the UI thread with the result.
-  void GetLocalPathsOnFileThreadAndRunCallbackOnUIThread(
-      const UrlList& file_urls,
-      GetLocalPathsCallback callback);
-
-  // Figure out the tab_id of the hosting tab.
+  // Figures out the tab_id of the hosting tab.
   int32 GetTabId() const;
 
+  // Returns the local FilePath associated with |url|. If the file isn't of the
+  // type CrosMountPointProvider handles, returns an empty FilePath.
+  //
+  // Local paths will look like "/home/chronos/user/Downloads/foo/bar.txt" or
+  // "/special/drive/foo/bar.txt".
+  base::FilePath GetLocalPathFromURL(const GURL& url);
+
+  // Runs |callback| with SelectedFileInfoList created from |file_urls|.
+  void GetSelectedFileInfo(const UrlList& file_urls,
+                           bool for_opening,
+                           GetSelectedFileInfoCallback callback);
+
  private:
-  // Converts virtual paths to local paths and call |callback| (on the UI
-  // thread) with the results.
-  // This method must be called from the file thread.
-  void GetLocalPathsOnFileThread(
-      scoped_refptr<fileapi::FileSystemContext> file_system_context,
-      const UrlList& file_urls,
-      GetLocalPathsCallback callback);
+  struct GetSelectedFileInfoParams;
+
+  // Used to implement GetSelectedFileInfo().
+  void GetSelectedFileInfoInternal(
+      scoped_ptr<GetSelectedFileInfoParams> params);
+
+  // Used to implement GetSelectedFileInfo().
+  void ContinueGetSelectedFileInfo(scoped_ptr<GetSelectedFileInfoParams> params,
+                                   drive::DriveFileError error,
+                                   const base::FilePath& local_file_path,
+                                   const std::string& mime_type,
+                                   drive::DriveFileType file_type);
 };
 
 // Select a single file.  Closes the dialog window.
@@ -285,9 +309,8 @@ class SelectFileFunction : public FileBrowserFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // A callback method to handle the result of
-  // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
-  void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
+  // A callback method to handle the result of GetSelectedFileInfo.
+  void GetSelectedFileInfoResponse(const SelectedFileInfoList& files);
 };
 
 // View multiple selected files.  Window stays open.
@@ -320,9 +343,8 @@ class SelectFilesFunction : public FileBrowserFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // A callback method to handle the result of
-  // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
-  void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
+  // A callback method to handle the result of GetSelectedFileInfo.
+  void GetSelectedFileInfoResponse(const SelectedFileInfoList& files);
 };
 
 // Cancel file selection Dialog.  Closes the dialog window.
@@ -355,11 +377,6 @@ class AddMountFunction : public FileBrowserFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // A callback method to handle the result of
-  // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
-  void GetLocalPathsResponseOnUIThread(const std::string& mount_type,
-                                       const SelectedFileInfoList& files);
-
   // Calls DriveCache::MarkCacheAsMounted.
   void MarkCacheAsMounted(const std::string& mount_type,
                           const base::FilePath::StringType& display_name,
@@ -388,9 +405,8 @@ class RemoveMountFunction : public FileBrowserFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // A callback method to handle the result of
-  // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
-  void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
+  // A callback method to handle the result of GetSelectedFileInfo.
+  void GetSelectedFileInfoResponse(const SelectedFileInfoList& files);
 };
 
 class GetMountPointsFunction : public AsyncExtensionFunction {
@@ -433,9 +449,6 @@ class SetLastModifiedFunction : public FileBrowserFunction {
  protected:
   virtual ~SetLastModifiedFunction();
 
-  void RunOperationOnFileThread(const base::FilePath& local_path,
-                                time_t timestamp);
-
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 };
@@ -458,9 +471,8 @@ class GetSizeStatsFunction : public FileBrowserFunction {
                                       int64 bytes_total,
                                       int64 bytes_used);
 
-  void GetSizeStatsCallbackOnUIThread(size_t total_size_kb,
-                                      size_t remaining_size_kb);
-  void CallGetSizeStatsOnFileThread(const std::string& mount_path);
+  void GetSizeStatsCallback(const size_t* total_size_kb,
+                            const size_t* remaining_size_kb);
 };
 
 // Retrieves devices meta-data. Expects volume's device path as an argument.
@@ -643,10 +655,6 @@ class GetDriveFilesFunction : public FileBrowserFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // A callback method to handle the result of
-  // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
-  void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
-
   // Gets the file on the top of the |remaining_drive_paths_| or sends the
   // response if the queue is empty.
   void GetFileOrSendResponse();
@@ -886,6 +894,21 @@ class ValidatePathNameLengthFunction : public AsyncExtensionFunction {
   virtual ~ValidatePathNameLengthFunction();
 
   void OnFilePathLimitRetrieved(size_t current_length, size_t max_length);
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+};
+
+// Implements the chrome.fileBrowserPrivate.newWindow method.
+class OpenNewWindowFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.openNewWindow",
+                             FILEBROWSERPRIVATE_OPENNEWWINDOW)
+
+  OpenNewWindowFunction();
+
+ protected:
+  virtual ~OpenNewWindowFunction();
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;

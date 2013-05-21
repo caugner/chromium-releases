@@ -5,6 +5,7 @@
 # found in the LICENSE file.
 
 import collections
+import copy
 import json
 import optparse
 import os
@@ -23,7 +24,8 @@ GLOBAL_SLAVE_PROPS = {}
 BotConfig = collections.namedtuple(
     'BotConfig', ['bot_id', 'bash_funs', 'test_obj', 'slave_props'])
 TestConfig = collections.namedtuple('Tests', ['tests', 'extra_args'])
-Command = collections.namedtuple('Command', ['step_name', 'command'])
+Command = collections.namedtuple(
+    'Command', ['step_name', 'command', 'testing_cmd'])
 
 
 def GetCommands(options, bot_config):
@@ -45,13 +47,20 @@ def GetCommands(options, bot_config):
       '--slave-properties=%s' % json.dumps(slave_props)]
 
   commands = []
-  if bot_config.bash_funs:
-    bash_base = [
+  def WrapWithBash(command):
+    """Wrap a bash command string with envsetup scripts."""
+    return ['bash', '-exc', '; '.join([
         '. build/android/buildbot/buildbot_functions.sh',
-        "bb_baseline_setup %s '%s'" %
-        (CHROME_SRC, "' '".join(property_args))]
-    commands.append(Command(
-        None, ['bash', '-exc', '; '.join(bash_base + bot_config.bash_funs)]))
+        'bb_baseline_setup %s %s' % (
+             CHROME_SRC,
+             ' '.join(map(pipes.quote, property_args))),
+        command])
+    ]
+
+  if bot_config.bash_funs:
+    # bash_funs command does not have a testing mode.
+    commands.append(
+        Command(None, WrapWithBash('; '.join(bot_config.bash_funs)), None))
 
   test_obj = bot_config.test_obj
   if test_obj:
@@ -61,7 +70,9 @@ def GetCommands(options, bot_config):
       run_test_cmd.extend(['-f', test])
     if test_obj.extra_args:
       run_test_cmd.extend(test_obj.extra_args)
-    commands.append(Command('Run tests', run_test_cmd))
+    commands.append(Command(
+        'Run tests',
+        WrapWithBash(' '.join(map(pipes.quote, run_test_cmd))), run_test_cmd))
 
   return commands
 
@@ -71,6 +82,7 @@ def GetBotStepMap():
   std_build_steps = ['bb_compile', 'bb_zip_build']
   std_test_steps = ['bb_extract_build']
   std_tests = ['ui', 'unit']
+  flakiness_server = '--upload-to-flakiness-server'
 
   B = BotConfig
   def T(tests, extra_args=None):
@@ -85,22 +97,23 @@ def GetBotStepMap():
         ['bb_compile', 'bb_zip_build'], None, None),
       B('main-clang-builder', compile_step, None, None),
       B('main-clobber', compile_step, None, None),
-      B('main-tests', std_test_steps, T(std_tests), None),
+      B('main-tests', std_test_steps, T(std_tests, [flakiness_server]),
+        None),
 
       # Other waterfalls
       B('asan-builder', std_build_steps, None, None),
       B('asan-tests', std_test_steps + ['bb_asan_tests_setup'],
         T(std_tests, ['--asan']), None),
+      B('chromedriver-fyi-tests-dbg', std_test_steps, T(['chromedriver']),
+        None),
       B('fyi-builder-dbg',
         ['bb_check_webview_licenses', 'bb_compile', 'bb_compile_experimental',
          'bb_run_findbugs', 'bb_zip_build'], None, None),
       B('fyi-builder-rel',
         ['bb_compile', 'bb_compile_experimental', 'bb_zip_build'], None, None),
       B('fyi-tests', std_test_steps,
-        T(std_tests, ['--experimental', '--upload-to-flakiness-server']), None),
+        T(std_tests, ['--experimental', flakiness_server]), None),
       B('perf-tests-rel', std_test_steps, T([], ['--install=ContentShell']),
-        None),
-      B('try-fyi-tests', std_test_steps, T(std_tests, ['--experimental']),
         None),
       B('webkit-latest-webkit-tests', std_test_steps,
         T(['webkit_layout', 'webkit']), None),
@@ -119,13 +132,21 @@ def GetBotStepMap():
       ('try-clang-builder', 'main-clang-builder'),
       ('try-fyi-builder-dbg', 'fyi-builder-dbg'),
       ('try-tests', 'main-tests'),
+      ('try-fyi-tests', 'fyi-tests'),
       ('webkit-latest-tests', 'main-tests'),
   ]
   for to_id, from_id in copy_map:
     assert to_id not in bot_map
     # pylint: disable=W0212
-    bot_map[to_id] = bot_map[from_id]._replace(bot_id=to_id)
+    bot_map[to_id] = copy.deepcopy(bot_map[from_id])._replace(bot_id=to_id)
 
+    # Trybots do not upload to flakiness dashboard. They should be otherwise
+    # identical in configuration to their trunk building counterparts.
+    test_obj = bot_map[to_id].test_obj
+    if to_id.startswith('try') and test_obj:
+      extra_args = test_obj.extra_args
+      if extra_args and flakiness_server in extra_args:
+        extra_args.remove(flakiness_server)
   return bot_map
 
 
@@ -178,7 +199,6 @@ def main(argv):
   for command_obj in command_objs:
     print 'Will run:', CommandToString(command_obj.command)
 
-  return_code = 0
   for command_obj in command_objs:
     if command_obj.step_name:
       buildbot_report.PrintNamedStep(command_obj.step_name)
@@ -187,14 +207,16 @@ def main(argv):
     sys.stdout.flush()
     env = None
     if options.TESTING:
-      # The bash command doesn't yet support the testing option.
-      if command[0] == 'bash':
+      if not command_obj.testing_cmd:
         continue
-      env = dict(os.environ)
-      env['BUILDBOT_TESTING'] = '1'
-
-    return_code |= subprocess.call(command, cwd=CHROME_SRC, env=env)
-  return return_code
+      return_code = subprocess.call(
+          command_obj.testing_cmd,
+          cwd=CHROME_SRC,
+          env=dict(os.environ, BUILDBOT_TESTING='1'))
+    else:
+      return_code = subprocess.call(command, cwd=CHROME_SRC, env=env)
+    if return_code != 0:
+      return return_code
 
 
 if __name__ == '__main__':

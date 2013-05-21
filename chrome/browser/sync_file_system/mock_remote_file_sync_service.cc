@@ -20,7 +20,8 @@ namespace sync_file_system {
 
 const char MockRemoteFileSyncService::kServiceName[] = "mock_sync_service";
 
-MockRemoteFileSyncService::MockRemoteFileSyncService() {
+MockRemoteFileSyncService::MockRemoteFileSyncService()
+    : conflict_resolution_policy_(CONFLICT_RESOLUTION_MANUAL) {
   typedef MockRemoteFileSyncService self;
   ON_CALL(*this, AddServiceObserver(_))
       .WillByDefault(Invoke(this, &self::AddServiceObserverStub));
@@ -31,7 +32,10 @@ MockRemoteFileSyncService::MockRemoteFileSyncService() {
   ON_CALL(*this, UnregisterOriginForTrackingChanges(_, _))
       .WillByDefault(
           Invoke(this, &self::UnregisterOriginForTrackingChangesStub));
-  ON_CALL(*this, ProcessRemoteChange(_, _))
+  ON_CALL(*this, UninstallOrigin(_, _))
+      .WillByDefault(
+          Invoke(this, &self::DeleteOriginDirectoryStub));
+  ON_CALL(*this, ProcessRemoteChange(_))
       .WillByDefault(Invoke(this, &self::ProcessRemoteChangeStub));
   ON_CALL(*this, GetLocalChangeProcessor())
       .WillByDefault(Return(&mock_local_change_processor_));
@@ -43,6 +47,10 @@ MockRemoteFileSyncService::MockRemoteFileSyncService() {
       .WillByDefault(Return(REMOTE_SERVICE_OK));
   ON_CALL(*this, GetServiceName())
       .WillByDefault(Return(kServiceName));
+  ON_CALL(*this, SetConflictResolutionPolicy(_))
+      .WillByDefault(Invoke(this, &self::SetConflictResolutionPolicyStub));
+  ON_CALL(*this, GetConflictResolutionPolicy())
+      .WillByDefault(Invoke(this, &self::GetConflictResolutionPolicyStub));
 }
 
 MockRemoteFileSyncService::~MockRemoteFileSyncService() {
@@ -63,12 +71,12 @@ void MockRemoteFileSyncService::NotifyRemoteServiceStateUpdated(
 
 void MockRemoteFileSyncService::NotifyFileStatusChanged(
     const fileapi::FileSystemURL& url,
-    SyncDirection direction,
-    fileapi::SyncFileStatus sync_status,
-    fileapi::SyncAction action_taken) {
+    SyncFileStatus sync_status,
+    SyncAction action_taken,
+    SyncDirection direction) {
   FOR_EACH_OBSERVER(FileStatusObserver, file_status_observers_,
-                    OnFileStatusChanged(url, direction,
-                                        sync_status, action_taken));
+                    OnFileStatusChanged(url, sync_status,
+                                        action_taken, direction));
 }
 
 void MockRemoteFileSyncService::AddServiceObserverStub(Observer* observer) {
@@ -82,42 +90,60 @@ void MockRemoteFileSyncService::AddFileStatusObserverStub(
 
 void MockRemoteFileSyncService::RegisterOriginForTrackingChangesStub(
     const GURL& origin,
-    const fileapi::SyncStatusCallback& callback) {
+    const SyncStatusCallback& callback) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(callback, fileapi::SYNC_STATUS_OK));
+      base::Bind(callback, SYNC_STATUS_OK));
 }
 
 void MockRemoteFileSyncService::UnregisterOriginForTrackingChangesStub(
     const GURL& origin,
-    const fileapi::SyncStatusCallback& callback) {
+    const SyncStatusCallback& callback) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(callback, fileapi::SYNC_STATUS_OK));
+      base::Bind(callback, SYNC_STATUS_OK));
+}
+
+void MockRemoteFileSyncService::DeleteOriginDirectoryStub(
+    const GURL& origin,
+    const SyncStatusCallback& callback) {
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(callback, SYNC_STATUS_OK));
 }
 
 void MockRemoteFileSyncService::ProcessRemoteChangeStub(
-    RemoteChangeProcessor* processor,
-    const fileapi::SyncFileCallback& callback) {
+    const SyncFileCallback& callback) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(callback, fileapi::SYNC_STATUS_NO_CHANGE_TO_SYNC,
+      base::Bind(callback, SYNC_STATUS_NO_CHANGE_TO_SYNC,
                  fileapi::FileSystemURL()));
 }
 
 void MockRemoteFileSyncService::GetRemoteFileMetadataStub(
     const fileapi::FileSystemURL& url,
-    const fileapi::SyncFileMetadataCallback& callback) {
+    const SyncFileMetadataCallback& callback) {
   FileMetadataMap::iterator iter = conflict_file_metadata_.find(url);
   if (iter == conflict_file_metadata_.end()) {
     base::MessageLoopProxy::current()->PostTask(
         FROM_HERE,
-        base::Bind(callback, fileapi::SYNC_FILE_ERROR_NOT_FOUND,
-                   fileapi::SyncFileMetadata()));
+        base::Bind(callback, SYNC_FILE_ERROR_NOT_FOUND,
+                   SyncFileMetadata()));
     return;
   }
   base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE, base::Bind(callback, fileapi::SYNC_STATUS_OK, iter->second));
+      FROM_HERE, base::Bind(callback, SYNC_STATUS_OK, iter->second));
+}
+
+SyncStatusCode MockRemoteFileSyncService::SetConflictResolutionPolicyStub(
+    ConflictResolutionPolicy policy) {
+  conflict_resolution_policy_ = policy;
+  return SYNC_STATUS_OK;
+}
+
+ConflictResolutionPolicy
+MockRemoteFileSyncService::GetConflictResolutionPolicyStub() const {
+  return conflict_resolution_policy_;
 }
 
 }  // namespace sync_file_system

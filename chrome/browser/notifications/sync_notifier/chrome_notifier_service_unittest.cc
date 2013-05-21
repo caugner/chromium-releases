@@ -18,7 +18,6 @@
 
 using sync_pb::SyncedNotificationSpecifics;
 using sync_pb::EntitySpecifics;
-using sync_pb::SyncedNotificationRenderInfo_Layout_LayoutType_TITLE_AND_SUBTEXT;
 using syncer::SyncData;
 using syncer::SyncChange;
 using syncer::SyncChangeList;
@@ -36,32 +35,24 @@ const char kAppId4[] = "fbcmoldooppoahjhfflnmljoanccek44";
 const char kAppId5[] = "fbcmoldooppoahjhfflnmljoanccek55";
 const char kAppId6[] = "fbcmoldooppoahjhfflnmljoanccek66";
 const char kAppId7[] = "fbcmoldooppoahjhfflnmljoanccek77";
-const char kCoalescingKey1[] = "foo";
-const char kCoalescingKey2[] = "bar";
-const char kCoalescingKey3[] = "bat";
-const char kCoalescingKey4[] = "baz";
-const char kCoalescingKey5[] = "foobar";
-const char kCoalescingKey6[] = "fu";
-const char kCoalescingKey7[] = "meta";
-const char kNotificationId1[] = "fboilmbenheemaomgaeehigklolhkhnf/foo";
-const char kNotificationId2[] = "fbcmoldooppoahjhfflnmljoanccekpf/bar";
-const char kNotificationId3[] = "fbcmoldooppoahjhfflnmljoanccek33/bat";
-const char kNotificationId4[] = "fbcmoldooppoahjhfflnmljoanccek44/baz";
-const char kNotificationId5[] = "fbcmoldooppoahjhfflnmljoanccek55/foobar";
-const char kNotificationId6[] = "fbcmoldooppoahjhfflnmljoanccek66/fu";
-const char kNotificationId7[] = "fbcmoldooppoahjhfflnmljoanccek77/meta";
-
+const char kKey1[] = "foo";
+const char kKey2[] = "bar";
+const char kKey3[] = "bat";
+const char kKey4[] = "baz";
+const char kKey5[] = "foobar";
+const char kKey6[] = "fu";
+const char kKey7[] = "meta";
 const int64 kFakeCreationTime = 42;
+const sync_pb::CoalescedSyncedNotification_ReadState kDismissed =
+    sync_pb::CoalescedSyncedNotification_ReadState_DISMISSED;
+const sync_pb::CoalescedSyncedNotification_ReadState kUnread =
+    sync_pb::CoalescedSyncedNotification_ReadState_UNREAD;
 
 // Extract notification id from syncer::SyncData.
 std::string GetNotificationId(const SyncData& sync_data) {
   SyncedNotificationSpecifics specifics = sync_data.GetSpecifics().
       synced_notification();
-  std::string notification_id = specifics.
-      coalesced_notification().id().app_id();
-  notification_id += "/";
-  notification_id += specifics.coalesced_notification().id().coalescing_key();
-  return notification_id;
+  return specifics.coalesced_notification().key();
 }
 
 // Stub out the NotificationUIManager for unit testing.
@@ -76,7 +67,7 @@ class StubNotificationUIManager : public NotificationUIManager {
 
   // Returns true if any notifications match the supplied ID, either currently
   // displayed or in the queue.
-  virtual bool DoesIdExist(const std::string& id) {
+  virtual bool DoesIdExist(const std::string& id) OVERRIDE {
     return true;
   }
 
@@ -174,7 +165,7 @@ class ChromeNotifierServiceTest : public testing::Test {
       : sync_processor_(new TestChangeProcessor),
         sync_processor_delegate_(new SyncChangeProcessorDelegate(
             sync_processor_.get())) {}
-  ~ChromeNotifierServiceTest() {}
+  virtual ~ChromeNotifierServiceTest() {}
 
   // Methods from testing::Test.
   virtual void SetUp() {}
@@ -188,12 +179,14 @@ class ChromeNotifierServiceTest : public testing::Test {
     return sync_processor_delegate_.Pass();
   }
 
-  SyncedNotification* CreateNotification(const std::string& message,
-                                         const std::string& app_id,
-                                         const std::string& coalescing_key,
-                                         const std::string& external_id) {
-    SyncData sync_data = CreateSyncData(message, app_id, coalescing_key,
-                                        external_id);
+  SyncedNotification* CreateNotification(
+      const std::string& message,
+      const std::string& app_id,
+      const std::string& key,
+      const std::string& external_id,
+      sync_pb::CoalescedSyncedNotification_ReadState read_state) {
+    SyncData sync_data = CreateSyncData(message, app_id, key,
+                                        external_id, read_state);
     // Set enough fields in sync_data, including specifics, for our tests
     // to pass.
     return new SyncedNotification(sync_data);
@@ -213,10 +206,12 @@ class ChromeNotifierServiceTest : public testing::Test {
   }
 
   // Helper to create syncer::SyncData.
-  static SyncData CreateSyncData(const std::string& message,
-                                 const std::string& app_id,
-                                 const std::string& coalescing_key,
-                                 const std::string& external_id) {
+  static SyncData CreateSyncData(
+      const std::string& message,
+      const std::string& app_id,
+      const std::string& key,
+      const std::string& external_id,
+      sync_pb::CoalescedSyncedNotification_ReadState read_state) {
     // CreateLocalData makes a copy of this, so this can safely live
     // on the stack.
     EntitySpecifics entity_specifics;
@@ -225,32 +220,32 @@ class ChromeNotifierServiceTest : public testing::Test {
         entity_specifics.mutable_synced_notification();
 
     specifics->mutable_coalesced_notification()->
-        mutable_render_info()->
-        mutable_layout()->
-        set_layout_type(
-            SyncedNotificationRenderInfo_Layout_LayoutType_TITLE_AND_SUBTEXT);
-
-    specifics->mutable_coalesced_notification()->
-        mutable_id()->
         set_app_id(app_id);
 
     specifics->mutable_coalesced_notification()->
-        mutable_id()->
-        set_coalescing_key(coalescing_key);
+        set_key(key);
 
     specifics->mutable_coalesced_notification()->
         mutable_render_info()->
-        mutable_layout()->
-        mutable_title_and_subtext_data()->
+        mutable_expanded_info()->
+        mutable_simple_expanded_layout()->
         set_title(message);
 
-    specifics->mutable_coalesced_notification()->
+    specifics->
+        mutable_coalesced_notification()->
         set_creation_time_msec(kFakeCreationTime);
 
-    specifics->mutable_coalesced_notification()->
+    specifics->
+        mutable_coalesced_notification()->
         add_notification();
-    specifics->mutable_coalesced_notification()->
+
+    specifics->
+        mutable_coalesced_notification()->
         mutable_notification(0)->set_external_id(external_id);
+
+    specifics->
+        mutable_coalesced_notification()->
+        set_read_state(read_state);
 
     SyncData sync_data = SyncData::CreateLocalData(
         "syncer::SYNCED_NOTIFICATIONS",
@@ -267,17 +262,20 @@ class ChromeNotifierServiceTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(ChromeNotifierServiceTest);
 };
 
+// TODO(petewil): Add more tests as I add functionalty.  Tests are based on
+// chrome/browser/extensions/app_notification_manager_sync_unittest.cc
+
 // Create a Notification, convert it to SyncData and convert it back.
 TEST_F(ChromeNotifierServiceTest, NotificationToSyncDataToNotification) {
-  // TODO(petewil): Add more properties to this test.
   scoped_ptr<SyncedNotification> notification1(
-      CreateNotification("1", kAppId1, kCoalescingKey1, "11"));
+      CreateNotification("1", kAppId1, kKey1, "11", kUnread));
   SyncData sync_data =
       ChromeNotifierService::CreateSyncDataFromNotification(*notification1);
   scoped_ptr<SyncedNotification> notification2(
       ChromeNotifierService::CreateNotificationFromSyncData(sync_data));
   EXPECT_TRUE(notification2.get());
-  EXPECT_TRUE(notification1->Equals(*notification2));
+  EXPECT_TRUE(notification1->EqualsIgnoringReadState(*notification2));
+  EXPECT_EQ(notification1->read_state(), notification2->read_state());
 }
 
 // Model assocation:  We have no local data, and no remote data.
@@ -311,13 +309,13 @@ TEST_F(ChromeNotifierServiceTest, ProcessSyncChangesEmptyModel) {
   SyncChangeList changes;
   changes.push_back(CreateSyncChange(
       SyncChange::ACTION_ADD, CreateNotification(
-          "1", kAppId1, kCoalescingKey1, "11")));
+          "1", kAppId1, kKey1, "11", kUnread)));
   changes.push_back(CreateSyncChange(
       SyncChange::ACTION_ADD, CreateNotification(
-          "2", kAppId2, kCoalescingKey2, "22")));
+          "2", kAppId2, kKey2, "22", kUnread)));
   changes.push_back(CreateSyncChange(
       SyncChange::ACTION_ADD, CreateNotification(
-          "3", kAppId3, kCoalescingKey3, "33")));
+          "3", kAppId3, kKey3, "33", kUnread)));
 
   notifier.ProcessSyncChanges(FROM_HERE, changes);
 
@@ -334,21 +332,25 @@ TEST_F(ChromeNotifierServiceTest, LocalRemoteBothNonEmptyNoOverlap) {
 
   // Create some local fake data.
   scoped_ptr<SyncedNotification> n1(CreateNotification(
-      "1", kAppId1, kCoalescingKey1, "11"));
+      "1", kAppId1, kKey1, "11", kUnread));
   notifier.AddForTest(n1.Pass());
   scoped_ptr<SyncedNotification> n2(CreateNotification(
-      "2", kAppId2, kCoalescingKey2, "22"));
+      "2", kAppId2, kKey2, "22", kUnread));
   notifier.AddForTest(n2.Pass());
   scoped_ptr<SyncedNotification> n3(CreateNotification(
-      "3", kAppId3, kCoalescingKey3, "33"));
+      "3", kAppId3, kKey3, "33", kUnread));
   notifier.AddForTest(n3.Pass());
 
   // Create some remote fake data.
   SyncDataList initial_data;
-  initial_data.push_back(CreateSyncData("4", kAppId4, kCoalescingKey4, "44"));
-  initial_data.push_back(CreateSyncData("5", kAppId5, kCoalescingKey5, "55"));
-  initial_data.push_back(CreateSyncData("6", kAppId6, kCoalescingKey6, "66"));
-  initial_data.push_back(CreateSyncData("7", kAppId7, kCoalescingKey7, "77"));
+  initial_data.push_back(CreateSyncData("4", kAppId4, kKey4,
+                                        "44", kUnread));
+  initial_data.push_back(CreateSyncData("5", kAppId5, kKey5,
+                                        "55", kUnread));
+  initial_data.push_back(CreateSyncData("6", kAppId6, kKey6,
+                                        "66", kUnread));
+  initial_data.push_back(CreateSyncData("7", kAppId7, kKey7,
+                                        "77", kUnread));
 
   // Merge the local and remote data.
   notifier.MergeDataAndStartSyncing(
@@ -359,6 +361,15 @@ TEST_F(ChromeNotifierServiceTest, LocalRemoteBothNonEmptyNoOverlap) {
 
   // Ensure the local store now has all local and remote notifications.
   EXPECT_EQ(7U, notifier.GetAllSyncData(SYNCED_NOTIFICATIONS).size());
+  EXPECT_TRUE(notifier.FindNotificationById(kKey1));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey2));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey3));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey4));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey5));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey6));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey7));
+
+  // Test the type conversion and construction functions.
   for (SyncDataList::const_iterator iter = initial_data.begin();
       iter != initial_data.end(); ++iter) {
     scoped_ptr<SyncedNotification> notification1(
@@ -367,23 +378,132 @@ TEST_F(ChromeNotifierServiceTest, LocalRemoteBothNonEmptyNoOverlap) {
     const std::string& id = notification1->notification_id();
     const SyncedNotification* notification2 = notifier.FindNotificationById(id);
     EXPECT_TRUE(NULL != notification2);
-    EXPECT_TRUE(notification1->Equals(*notification2));
+    EXPECT_TRUE(notification1->EqualsIgnoringReadState(*notification2));
+    EXPECT_EQ(notification1->read_state(), notification2->read_state());
   }
-  EXPECT_TRUE(notifier.FindNotificationById(kNotificationId1));
-  EXPECT_TRUE(notifier.FindNotificationById(kNotificationId2));
-  EXPECT_TRUE(notifier.FindNotificationById(kNotificationId3));
-
-  // Verify the changes made it up to the remote service.
-  EXPECT_EQ(3U, processor()->change_list_size());
-  EXPECT_TRUE(processor()->ContainsId(kNotificationId1));
-  EXPECT_EQ(SyncChange::ACTION_ADD, processor()->GetChangeById(
-      kNotificationId1).change_type());
-  EXPECT_FALSE(processor()->ContainsId(kNotificationId4));
-  EXPECT_TRUE(processor()->ContainsId(kNotificationId3));
-  EXPECT_EQ(SyncChange::ACTION_ADD, processor()->GetChangeById(
-      kNotificationId3).change_type());
+  EXPECT_TRUE(notifier.FindNotificationById(kKey1));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey2));
+  EXPECT_TRUE(notifier.FindNotificationById(kKey3));
 }
 
-// TODO(petewil): There are more tests to add, such as when an item in
-// the local store matches up with one from the server, with and without
-// merge conflicts.
+// Test the local store having the read bit unset, the remote store having
+// it set.
+TEST_F(ChromeNotifierServiceTest, ModelAssocBothNonEmptyReadMismatch1) {
+  StubNotificationUIManager notification_manager;
+  ChromeNotifierService notifier(NULL, &notification_manager);
+
+  // Create some local fake data.
+  scoped_ptr<SyncedNotification> n1(CreateNotification(
+      "1", kAppId1, kKey1, "11", kUnread));
+  notifier.AddForTest(n1.Pass());
+  scoped_ptr<SyncedNotification> n2(CreateNotification(
+      "2", kAppId2, kKey2, "22", kUnread));
+  notifier.AddForTest(n2.Pass());
+
+  // Create some remote fake data, item 1 matches except for the read state.
+  syncer::SyncDataList initial_data;
+  initial_data.push_back(CreateSyncData("1", kAppId1, kKey1,
+                                        "11", kDismissed));
+  // Merge the local and remote data.
+  notifier.MergeDataAndStartSyncing(
+      syncer::SYNCED_NOTIFICATIONS,
+      initial_data,
+      PassProcessor(),
+      scoped_ptr<syncer::SyncErrorFactory>(new syncer::SyncErrorFactoryMock()));
+
+  // Ensure the local store still has only two notifications, and the read
+  // state of the first is now read.
+  EXPECT_EQ(2U, notifier.GetAllSyncData(syncer::SYNCED_NOTIFICATIONS).size());
+  SyncedNotification* notification1 =
+      notifier.FindNotificationById(kKey1);
+  EXPECT_FALSE(NULL == notification1);
+  EXPECT_EQ(SyncedNotification::kDismissed, notification1->read_state());
+  EXPECT_TRUE(notifier.FindNotificationById(kKey2));
+  EXPECT_FALSE(notifier.FindNotificationById(kKey3));
+
+  // Ensure no new data will be sent to the remote store for notification1.
+  EXPECT_EQ(0U, processor()->change_list_size());
+  EXPECT_FALSE(processor()->ContainsId(kKey1));
+}
+
+// Test when the local store has the read bit set, and the remote store has
+// it unset.
+TEST_F(ChromeNotifierServiceTest, ModelAssocBothNonEmptyReadMismatch2) {
+  StubNotificationUIManager notification_manager;
+  ChromeNotifierService notifier(NULL, &notification_manager);
+
+  // Create some local fake data.
+  scoped_ptr<SyncedNotification> n1(CreateNotification(
+      "1", kAppId1, kKey1, "11", kDismissed));
+  notifier.AddForTest(n1.Pass());
+  scoped_ptr<SyncedNotification> n2(CreateNotification(
+      "2", kAppId2, kKey2, "22", kUnread));
+  notifier.AddForTest(n2.Pass());
+
+  // Create some remote fake data, item 1 matches except for the read state.
+  syncer::SyncDataList initial_data;
+  initial_data.push_back(CreateSyncData("1", kAppId1, kKey1,
+                                        "11", kUnread));
+  // Merge the local and remote data.
+  notifier.MergeDataAndStartSyncing(
+      syncer::SYNCED_NOTIFICATIONS,
+      initial_data,
+      PassProcessor(),
+      scoped_ptr<syncer::SyncErrorFactory>(new syncer::SyncErrorFactoryMock()));
+
+  // Ensure the local store still has only two notifications, and the read
+  // state of the first is now read.
+  EXPECT_EQ(2U, notifier.GetAllSyncData(syncer::SYNCED_NOTIFICATIONS).size());
+  SyncedNotification* notification1 =
+      notifier.FindNotificationById(kKey1);
+  EXPECT_FALSE(NULL == notification1);
+  EXPECT_EQ(SyncedNotification::kDismissed, notification1->read_state());
+  EXPECT_TRUE(notifier.FindNotificationById(kKey2));
+  EXPECT_FALSE(notifier.FindNotificationById(kKey3));
+
+  // Ensure the new data will be sent to the remote store for notification1.
+  EXPECT_EQ(1U, processor()->change_list_size());
+  EXPECT_TRUE(processor()->ContainsId(kKey1));
+  EXPECT_EQ(SyncChange::ACTION_UPDATE, processor()->GetChangeById(
+      kKey1).change_type());
+}
+
+// We have a notification in the local store, we get an updated version
+// of the same notification remotely, it should take precedence.
+TEST_F(ChromeNotifierServiceTest, ModelAssocBothNonEmptyWithUpdate) {
+  StubNotificationUIManager notification_manager;
+  ChromeNotifierService notifier(NULL, &notification_manager);
+
+  // Create some local fake data.
+  scoped_ptr<SyncedNotification> n1(CreateNotification(
+      "1", kAppId1, kKey1, "11", kDismissed));
+  notifier.AddForTest(n1.Pass());
+
+  // Create some remote fake data, item 1 matches the ID, but has different data
+  syncer::SyncDataList initial_data;
+  initial_data.push_back(CreateSyncData("One", kAppId1, kKey1,
+                                        "Eleven", kUnread));
+  // Merge the local and remote data.
+  notifier.MergeDataAndStartSyncing(
+      syncer::SYNCED_NOTIFICATIONS,
+      initial_data,
+      PassProcessor(),
+      scoped_ptr<syncer::SyncErrorFactory>(new syncer::SyncErrorFactoryMock()));
+
+  // Ensure the local store still has only one notification
+  EXPECT_EQ(1U, notifier.GetAllSyncData(syncer::SYNCED_NOTIFICATIONS).size());
+  SyncedNotification* notification1 =
+      notifier.FindNotificationById(kKey1);
+  EXPECT_FALSE(NULL == notification1);
+  EXPECT_EQ(SyncedNotification::kUnread, notification1->read_state());
+  EXPECT_EQ("One", notification1->title());
+  EXPECT_EQ("Eleven", notification1->first_external_id());
+
+  // Ensure no new data will be sent to the remote store for notification1.
+  EXPECT_EQ(0U, processor()->change_list_size());
+  EXPECT_FALSE(processor()->ContainsId(kKey1));
+}
+
+// TODO(petewil): There are more tests to add, such as when we add an API
+// to allow data entry from the client, we might have a more up to date
+// item on the client than the server, or we might have a merge conflict.

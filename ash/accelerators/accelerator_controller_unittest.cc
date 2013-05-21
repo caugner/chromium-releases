@@ -14,6 +14,7 @@
 #include "ash/system/keyboard_brightness/keyboard_brightness_control_delegate.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/display_manager_test_api.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/window_util.h"
@@ -313,8 +314,8 @@ class AcceleratorControllerTest : public test::AshTestBase {
 
  protected:
   void EnableInternalDisplay() {
-    Shell::GetInstance()->display_manager()->
-        SetFirstDisplayAsInternalDisplayForTest();
+    test::DisplayManagerTestApi(Shell::GetInstance()->display_manager()).
+        SetFirstDisplayAsInternalDisplay();
   }
 
   static AcceleratorController* GetController();
@@ -437,6 +438,8 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
     gfx::Rect snap_left = window->bounds();
     GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
     EXPECT_NE(window->bounds().ToString(), snap_left.ToString());
+    GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
+    EXPECT_NE(window->bounds().ToString(), snap_left.ToString());
 
     // It should cycle back to the first snapped position.
     GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
@@ -445,6 +448,8 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
   {
     GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
     gfx::Rect snap_right = window->bounds();
+    GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
+    EXPECT_NE(window->bounds().ToString(), snap_right.ToString());
     GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
     EXPECT_NE(window->bounds().ToString(), snap_right.ToString());
 
@@ -843,9 +848,6 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
 #endif
 
 #if !defined(NDEBUG)
-  // RotateScreen
-  EXPECT_TRUE(ProcessWithContext(
-      ui::Accelerator(ui::VKEY_HOME, ui::EF_CONTROL_DOWN)));
   // ToggleDesktopBackgroundMode
   EXPECT_TRUE(ProcessWithContext(
       ui::Accelerator(ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)));
@@ -856,9 +858,11 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
 #endif //  OS_LINUX
 #endif //  !NDEBUG
 
+#if !defined(OS_WIN)
   // Exit
   EXPECT_TRUE(ProcessWithContext(
       ui::Accelerator(ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN)));
+#endif
 
   // New tab
   EXPECT_TRUE(ProcessWithContext(
@@ -881,9 +885,13 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
       ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN)));
 
 #if defined(OS_CHROMEOS)
-  // Open file manager dialog
+  // Open 'open file' dialog
   EXPECT_TRUE(ProcessWithContext(
       ui::Accelerator(ui::VKEY_O, ui::EF_CONTROL_DOWN)));
+
+  // Open file manager
+  EXPECT_TRUE(ProcessWithContext(
+      ui::Accelerator(ui::VKEY_M, ui::EF_SHIFT_DOWN  | ui::EF_ALT_DOWN)));
 
   // Lock screen
   // NOTE: Accelerators that do not work on the lock screen need to be

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Object representing an image item (a photo or a video).
  *
@@ -121,7 +123,7 @@ Gallery.Item.prototype.createCopyName_ = function(dirEntry, callback) {
  * @param {boolean} overwrite True if overwrite, false if copy.
  * @param {HTMLCanvasElement} canvas Source canvas.
  * @param {ImageEncoder.MetadataEncoder} metadataEncoder MetadataEncoder.
- * @param {function(boolean)} opt_callback Callback accepting true for success.
+ * @param {function(boolean)=} opt_callback Callback accepting true for success.
  */
 Gallery.Item.prototype.saveToFile = function(
     overrideDir, overwrite, canvas, metadataEncoder, opt_callback) {

@@ -4,10 +4,10 @@
 
 #include "base/string_util.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -121,17 +121,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
   InstallThemeAndVerify("theme", "camo theme");
 }
 
-// Disabled: http://crbug.com/174399
-#if defined(OS_WIN) && defined(USE_AURA)
-#define MAYBE_AppInstallConfirmation DISABLED_AppInstallConfirmation
-#define MAYBE_AppInstallConfirmation_Incognito DISABLED_AppInstallConfirmation_Incognito
-#else
-#define MAYBE_AppInstallConfirmation AppInstallConfirmation
-#define MAYBE_AppInstallConfirmation_Incognito AppInstallConfirmation_Incognito
-#endif
-
 IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
-                       MAYBE_AppInstallConfirmation) {
+                       AppInstallConfirmation) {
   int num_tabs = browser()->tab_strip_model()->count();
 
   base::FilePath app_dir = test_data_dir_.AppendASCII("app");
@@ -150,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
-                       MAYBE_AppInstallConfirmation_Incognito) {
+                       AppInstallConfirmation_Incognito) {
   Browser* incognito_browser = CreateIncognitoBrowser();
 
   int num_incognito_tabs = incognito_browser->tab_strip_model()->count();

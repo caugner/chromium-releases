@@ -4,17 +4,17 @@
 
 #include "cc/test/render_pass_test_common.h"
 
-#include "cc/checkerboard_draw_quad.h"
-#include "cc/debug_border_draw_quad.h"
-#include "cc/io_surface_draw_quad.h"
-#include "cc/render_pass_draw_quad.h"
-#include "cc/solid_color_draw_quad.h"
-#include "cc/shared_quad_state.h"
-#include "cc/stream_video_draw_quad.h"
-#include "cc/texture_draw_quad.h"
-#include "cc/tile_draw_quad.h"
-#include "cc/yuv_video_draw_quad.h"
-#include "cc/resource_provider.h"
+#include "cc/quads/checkerboard_draw_quad.h"
+#include "cc/quads/debug_border_draw_quad.h"
+#include "cc/quads/io_surface_draw_quad.h"
+#include "cc/quads/render_pass_draw_quad.h"
+#include "cc/quads/shared_quad_state.h"
+#include "cc/quads/solid_color_draw_quad.h"
+#include "cc/quads/stream_video_draw_quad.h"
+#include "cc/quads/texture_draw_quad.h"
+#include "cc/quads/tile_draw_quad.h"
+#include "cc/quads/yuv_video_draw_quad.h"
+#include "cc/resources/resource_provider.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
@@ -29,51 +29,52 @@ void TestRenderPass::AppendSharedQuadState(
 }
 
 void TestRenderPass::AppendOneOfEveryQuadType(
-    cc::ResourceProvider* resourceProvider, RenderPass::Id child_pass) {
+    cc::ResourceProvider* resource_provider, RenderPass::Id child_pass) {
   gfx::Rect rect(0, 0, 100, 100);
   gfx::Rect opaque_rect(10, 10, 80, 80);
   const float vertex_opacity[] = {1.0f, 1.0f, 1.0f, 1.0f};
   cc::ResourceProvider::ResourceId texture_resource =
-      resourceProvider->createResource(
+      resource_provider->CreateResource(
           gfx::Size(20, 12),
-          resourceProvider->bestTextureFormat(),
+          resource_provider->best_texture_format(),
           ResourceProvider::TextureUsageAny);
-  resourceProvider->allocateForTesting(texture_resource);
+  resource_provider->AllocateForTesting(texture_resource);
   unsigned texture_id = ResourceProvider::ScopedReadLockGL(
-      resourceProvider, texture_resource).textureId();
+      resource_provider, texture_resource).texture_id();
   cc::ResourceProvider::ResourceId resource1 =
-      resourceProvider->createResource(
+      resource_provider->CreateResource(
           gfx::Size(45, 5),
-          resourceProvider->bestTextureFormat(),
+          resource_provider->best_texture_format(),
           ResourceProvider::TextureUsageAny);
-  resourceProvider->allocateForTesting(resource1);
+  resource_provider->AllocateForTesting(resource1);
   cc::ResourceProvider::ResourceId resource2 =
-      resourceProvider->createResource(
+      resource_provider->CreateResource(
           gfx::Size(346, 61),
-          resourceProvider->bestTextureFormat(),
+          resource_provider->best_texture_format(),
           ResourceProvider::TextureUsageAny);
-  resourceProvider->allocateForTesting(resource2);
+  resource_provider->AllocateForTesting(resource2);
   cc::ResourceProvider::ResourceId resource3 =
-      resourceProvider->createResource(
+      resource_provider->CreateResource(
           gfx::Size(12, 134),
-          resourceProvider->bestTextureFormat(),
+          resource_provider->best_texture_format(),
           ResourceProvider::TextureUsageAny);
-  resourceProvider->allocateForTesting(resource3);
+  resource_provider->AllocateForTesting(resource3);
   cc::ResourceProvider::ResourceId resource4 =
-      resourceProvider->createResource(
+      resource_provider->CreateResource(
           gfx::Size(56, 12),
-          resourceProvider->bestTextureFormat(),
+          resource_provider->best_texture_format(),
           ResourceProvider::TextureUsageAny);
-  resourceProvider->allocateForTesting(resource4);
+  resource_provider->AllocateForTesting(resource4);
   cc::ResourceProvider::ResourceId resource5 =
-      resourceProvider->createResource(
+      resource_provider->CreateResource(
           gfx::Size(73, 26),
-          resourceProvider->bestTextureFormat(),
+          resource_provider->best_texture_format(),
           ResourceProvider::TextureUsageAny);
-  resourceProvider->allocateForTesting(resource5);
+  resource_provider->AllocateForTesting(resource5);
 
   scoped_ptr<cc::SharedQuadState> shared_state = cc::SharedQuadState::Create();
   shared_state->SetAll(gfx::Transform(),
+                       rect.size(),
                        rect,
                        rect,
                        false,
@@ -171,17 +172,14 @@ void TestRenderPass::AppendOneOfEveryQuadType(
                            resource2,
                            gfx::RectF(0, 0, 50, 50),
                            gfx::Size(50, 50),
-                           false,
-                           false,
-                           false,
-                           false,
                            false);
   AppendQuad(scaled_tile_quad.PassAs<DrawQuad>());
 
   scoped_ptr<cc::SharedQuadState> transformed_state = shared_state->Copy();
   gfx::Transform rotation;
   rotation.Rotate(45);
-  transformed_state->content_to_target_transform = transformed_state->content_to_target_transform * rotation;
+  transformed_state->content_to_target_transform =
+      transformed_state->content_to_target_transform * rotation;
   scoped_ptr<cc::TileDrawQuad> transformed_tile_quad =
       cc::TileDrawQuad::Create();
   transformed_tile_quad->SetNew(transformed_state.get(),
@@ -190,10 +188,6 @@ void TestRenderPass::AppendOneOfEveryQuadType(
                                 resource3,
                                 gfx::RectF(0, 0, 100, 100),
                                 gfx::Size(100, 100),
-                                false,
-                                false,
-                                false,
-                                false,
                                 false);
   AppendQuad(transformed_tile_quad.PassAs<DrawQuad>());
 
@@ -205,21 +199,17 @@ void TestRenderPass::AppendOneOfEveryQuadType(
                     resource4,
                     gfx::RectF(0, 0, 100, 100),
                     gfx::Size(100, 100),
-                    false,
-                    false,
-                    false,
-                    false,
                     false);
   AppendQuad(tile_quad.PassAs<DrawQuad>());
 
   cc::VideoLayerImpl::FramePlane planes[3];
   for (int i = 0; i < 3; ++i) {
-    planes[i].resourceId =
-        resourceProvider->createResource(
+    planes[i].resource_id =
+        resource_provider->CreateResource(
             gfx::Size(20, 12),
-            resourceProvider->bestTextureFormat(),
+            resource_provider->best_texture_format(),
             ResourceProvider::TextureUsageAny);
-    resourceProvider->allocateForTesting(planes[i].resourceId);
+    resource_provider->AllocateForTesting(planes[i].resource_id);
     planes[i].size = gfx::Size(100, 100);
     planes[i].format = GL_LUMINANCE;
   }

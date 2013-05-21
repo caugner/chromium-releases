@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/drive/drive_webapps_registry.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -75,7 +75,8 @@ class DriveWebAppsRegistryTest : public testing::Test {
 
 TEST_F(DriveWebAppsRegistryTest, LoadAndFindWebApps) {
   scoped_ptr<Value> document =
-      google_apis::test_util::LoadJSONFile("gdata/account_metadata.json");
+      google_apis::test_util::LoadJSONFile(
+          "chromeos/gdata/account_metadata.json");
   ASSERT_TRUE(document.get());
   ASSERT_TRUE(document->GetType() == Value::TYPE_DICTIONARY);
   DictionaryValue* entry_value;
@@ -84,11 +85,11 @@ TEST_F(DriveWebAppsRegistryTest, LoadAndFindWebApps) {
   ASSERT_TRUE(entry_value);
 
   // Load feed.
-  scoped_ptr<google_apis::AccountMetadataFeed> feed(
-      google_apis::AccountMetadataFeed::CreateFrom(*document));
-  ASSERT_TRUE(feed.get());
+  scoped_ptr<google_apis::AccountMetadata> metadata(
+      google_apis::AccountMetadata::CreateFrom(*document));
+  ASSERT_TRUE(metadata.get());
   scoped_ptr<DriveWebAppsRegistry> web_apps(new DriveWebAppsRegistry);
-  web_apps->UpdateFromFeed(*feed.get());
+  web_apps->UpdateFromFeed(*metadata.get());
 
   // Find by extension 'ext_1'.
   ScopedVector<DriveWebAppInfo> ext_1_results;
@@ -124,7 +125,7 @@ TEST_F(DriveWebAppsRegistryTest, LoadAndFindWebApps) {
 
 TEST_F(DriveWebAppsRegistryTest, LoadAndFindDriveWebApps) {
   scoped_ptr<Value> document =
-      google_apis::test_util::LoadJSONFile("drive/applist.json");
+      google_apis::test_util::LoadJSONFile("chromeos/drive/applist.json");
   ASSERT_TRUE(document.get());
   ASSERT_TRUE(document->GetType() == Value::TYPE_DICTIONARY);
 

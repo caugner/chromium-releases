@@ -9,11 +9,16 @@
 #include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
+
+#if defined(OS_WIN)
+#include "chrome/browser/shell_integration.h"
+#endif
 
 class ExtensionKeybindingRegistryViews;
 class Profile;
@@ -48,6 +53,12 @@ class NativeAppWindowViews : public NativeAppWindow,
   void InitializePanelWindow(const ShellWindow::CreateParams& create_params);
   void OnViewWasResized();
 
+#if defined(OS_WIN)
+  void OnShortcutInfoLoaded(
+      const ShellIntegration::ShortcutInfo& shortcut_info);
+  HWND GetNativeAppWindowHWND() const;
+#endif
+
   // BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
@@ -78,6 +89,7 @@ class NativeAppWindowViews : public NativeAppWindow,
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
   virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
   virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
+  virtual bool ShouldShowWindowIcon() const OVERRIDE;
   virtual void SaveWindowPlacement(const gfx::Rect& bounds,
                                    ui::WindowShowState show_state) OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
@@ -109,6 +121,7 @@ class NativeAppWindowViews : public NativeAppWindow,
   virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual gfx::Size GetMaximumSize() OVERRIDE;
   virtual void OnFocus() OVERRIDE;
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
   // NativeAppWindow implementation.
   virtual void SetFullscreen(bool fullscreen) OVERRIDE;
@@ -142,11 +155,14 @@ class NativeAppWindowViews : public NativeAppWindow,
   gfx::Size minimum_size_;
   gfx::Size maximum_size_;
   gfx::Size preferred_size_;
+  bool resizable_;
 
   // The class that registers for keyboard shortcuts for extension commands.
   scoped_ptr<ExtensionKeybindingRegistryViews> extension_keybinding_registry_;
 
   UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
+
+  base::WeakPtrFactory<NativeAppWindowViews> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeAppWindowViews);
 };

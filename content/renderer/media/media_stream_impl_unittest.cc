@@ -3,14 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_impl.h"
 #include "content/renderer/media/mock_media_stream_dependency_factory.h"
 #include "content/renderer/media/mock_media_stream_dispatcher.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
-#include "media/base/video_decoder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStream.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamSource.h"
@@ -102,18 +100,18 @@ class MediaStreamImplTest : public ::testing::Test {
     WebKit::WebMediaStream desc = ms_impl_->last_generated_stream();
     content::MediaStreamExtraData* extra_data =
         static_cast<content::MediaStreamExtraData*>(desc.extraData());
-    if (!extra_data || !extra_data->local_stream()) {
+    if (!extra_data || !extra_data->stream()) {
       ADD_FAILURE();
       return desc;
     }
 
     if (audio)
-      EXPECT_EQ(1u, extra_data->local_stream()->audio_tracks()->count());
+      EXPECT_EQ(1u, extra_data->stream()->GetAudioTracks().size());
     if (video)
-      EXPECT_EQ(1u, extra_data->local_stream()->video_tracks()->count());
+      EXPECT_EQ(1u, extra_data->stream()->GetVideoTracks().size());
     if (audio && video) {
-      EXPECT_NE(extra_data->local_stream()->audio_tracks()->at(0)->id(),
-                extra_data->local_stream()->video_tracks()->at(0)->id());
+      EXPECT_NE(extra_data->stream()->GetAudioTracks()[0]->id(),
+                extra_data->stream()->GetVideoTracks()[0]->id());
     }
     return desc;
   }
@@ -159,22 +157,12 @@ class MediaStreamImplTest : public ::testing::Test {
 TEST_F(MediaStreamImplTest, LocalMediaStream) {
   // Test a stream with both audio and video.
   WebKit::WebMediaStream mixed_desc = RequestLocalMediaStream(true, true);
-  // Create a renderer for the stream.
-  scoped_refptr<media::VideoDecoder> mixed_decoder(
-      ms_impl_->GetVideoDecoder(GURL(), base::MessageLoopProxy::current()));
-  EXPECT_TRUE(mixed_decoder.get() != NULL);
 
   // Test a stream with audio only.
   WebKit::WebMediaStream audio_desc = RequestLocalMediaStream(true, false);
-  scoped_refptr<media::VideoDecoder> audio_decoder(
-      ms_impl_->GetVideoDecoder(GURL(), base::MessageLoopProxy::current()));
-  EXPECT_TRUE(audio_decoder.get() == NULL);
 
   // Test a stream with video only.
   WebKit::WebMediaStream video_desc = RequestLocalMediaStream(false, true);
-  scoped_refptr<media::VideoDecoder> video_decoder(
-      ms_impl_->GetVideoDecoder(GURL(), base::MessageLoopProxy::current()));
-  EXPECT_TRUE(video_decoder.get() != NULL);
 
   // Stop generated local streams.
   ms_impl_->OnLocalMediaStreamStop(mixed_desc.label().utf8());

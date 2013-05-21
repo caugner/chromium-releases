@@ -43,7 +43,10 @@
 using content::BrowserThread;
 using extensions::Extension;
 
+namespace performance_monitor {
+
 namespace {
+
 const uint32 kAccessFlags = base::kProcessAccessDuplicateHandle |
                             base::kProcessAccessQueryInformation |
                             base::kProcessAccessTerminate |
@@ -81,9 +84,13 @@ bool MaybeGetURLFromRenderView(const content::RenderViewHost* view,
   return true;
 }
 
-}  // namespace
+// Takes ownership of and deletes |database| on the background thread, to
+// avoid destruction in the middle of an operation.
+void DeleteDatabaseOnBackgroundThread(Database* database) {
+  delete database;
+}
 
-namespace performance_monitor {
+}  // namespace
 
 bool PerformanceMonitor::initialized_ = false;
 
@@ -96,6 +103,10 @@ PerformanceMonitor::PerformanceMonitor() : database_(NULL),
 }
 
 PerformanceMonitor::~PerformanceMonitor() {
+  BrowserThread::PostBlockingPoolSequencedTask(
+      Database::kDatabaseSequenceToken,
+      FROM_HERE,
+      base::Bind(&DeleteDatabaseOnBackgroundThread, database_.release()));
 }
 
 bool PerformanceMonitor::SetDatabasePath(const base::FilePath& path) {
@@ -132,6 +143,10 @@ void PerformanceMonitor::Start() {
 void PerformanceMonitor::InitOnBackgroundThread() {
   CHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   database_ = Database::Create(database_path_);
+  if (!database_) {
+    LOG(ERROR) << "Could not initialize database; aborting initialization.";
+    return;
+  }
 
   // Initialize the io thread's performance data to the value in the database;
   // if there isn't a recording in the database, the value stays at 0.
@@ -144,6 +159,12 @@ void PerformanceMonitor::InitOnBackgroundThread() {
 
 void PerformanceMonitor::FinishInit() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // Short-circuit the initialization process if the database wasn't properly
+  // created. This will prevent PerformanceMonitor from performing any actions,
+  // including observing events.
+  if (!database_)
+    return;
+
   RegisterForNotifications();
   CheckForUncleanExits();
   BrowserThread::PostBlockingPoolSequencedTask(

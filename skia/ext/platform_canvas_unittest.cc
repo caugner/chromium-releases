@@ -196,7 +196,7 @@ const SkScalar kRadius = 2.0;
 // regular skia primitives.
 TEST(PlatformCanvas, SkLayer) {
   // Create the canvas initialized to opaque white.
-  ScopedPlatformCanvas canvas(16, 16, true);
+  RefPtr<SkCanvas> canvas = AdoptRef(CreatePlatformCanvas(16, 16, true));
   canvas->drawColor(SK_ColorWHITE);
 
   // Make a layer and fill it completely to make sure that the bounds are
@@ -213,7 +213,7 @@ TEST(PlatformCanvas, SkLayer) {
 // Test native clipping.
 TEST(PlatformCanvas, ClipRegion) {
   // Initialize a white canvas
-  ScopedPlatformCanvas canvas(16, 16, true);
+  RefPtr<SkCanvas> canvas = AdoptRef(CreatePlatformCanvas(16, 16, true));
   canvas->drawColor(SK_ColorWHITE);
   EXPECT_TRUE(VerifyCanvasColor(*canvas, SK_ColorWHITE));
 
@@ -240,7 +240,7 @@ TEST(PlatformCanvas, ClipRegion) {
 // Test the layers get filled properly by native rendering.
 TEST(PlatformCanvas, FillLayer) {
   // Create the canvas initialized to opaque white.
-  ScopedPlatformCanvas canvas(16, 16, true);
+  RefPtr<SkCanvas> canvas = AdoptRef(CreatePlatformCanvas(16, 16, true));
 
   // Make a layer and fill it completely to make sure that the bounds are
   // correct.
@@ -299,7 +299,7 @@ TEST(PlatformCanvas, FillLayer) {
 // Test that translation + make layer works properly.
 TEST(PlatformCanvas, TranslateLayer) {
   // Create the canvas initialized to opaque white.
-  ScopedPlatformCanvas canvas(16, 16, true);
+  RefPtr<SkCanvas> canvas = AdoptRef(CreatePlatformCanvas(16, 16, true));
 
   // Make a layer and fill it completely to make sure that the bounds are
   // correct.
@@ -413,7 +413,7 @@ TEST(PlatformBitmapTest, PlatformBitmap) {
   EXPECT_FALSE(platform_bitmap->GetBitmap().isNull());
   EXPECT_EQ(kWidth, platform_bitmap->GetBitmap().width());
   EXPECT_EQ(kHeight, platform_bitmap->GetBitmap().height());
-  EXPECT_LE(platform_bitmap->GetBitmap().width()*4,
+  EXPECT_LE(static_cast<size_t>(platform_bitmap->GetBitmap().width()*4),
             platform_bitmap->GetBitmap().rowBytes());
   EXPECT_EQ(SkBitmap::kARGB_8888_Config,  // Same for all platforms.
             platform_bitmap->GetBitmap().config());

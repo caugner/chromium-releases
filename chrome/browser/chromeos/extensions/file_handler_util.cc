@@ -29,6 +29,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -55,7 +56,6 @@ namespace file_handler_util {
 
 const char kTaskFile[] = "file";
 const char kTaskDrive[] = "drive";
-const char kTaskWebIntent[] = "web-intent";
 const char kTaskApp[] = "app";
 
 namespace {
@@ -104,6 +104,8 @@ int ExtractProcessFromExtensionId(Profile* profile,
 
 bool IsBuiltinTask(const FileBrowserHandler* task) {
   return (task->extension_id() == kFileBrowserExtensionId ||
+          task->extension_id() ==
+              extension_misc::kQuickOfficeComponentExtensionId ||
           task->extension_id() == extension_misc::kQuickOfficeDevExtensionId ||
           task->extension_id() == extension_misc::kQuickOfficeExtensionId);
 }
@@ -270,7 +272,6 @@ std::string MakeTaskID(const std::string& extension_id,
                        const std::string& action_id) {
   DCHECK(task_type == kTaskFile ||
          task_type == kTaskDrive ||
-         task_type == kTaskWebIntent ||
          task_type == kTaskApp);
   return base::StringPrintf("%s|%s|%s",
                             extension_id.c_str(),
@@ -321,7 +322,6 @@ bool CrackTaskID(const std::string& task_id,
     *task_type = result[1];
     DCHECK(*task_type == kTaskFile ||
            *task_type == kTaskDrive ||
-           *task_type == kTaskWebIntent ||
            *task_type == kTaskApp);
   }
 
@@ -542,27 +542,6 @@ class ExtensionTaskExecutor : public FileTaskExecutor {
   FileTaskFinishedCallback done_;
 };
 
-class WebIntentTaskExecutor : public FileTaskExecutor {
- public:
-  // FileTaskExecutor overrides.
-  virtual bool ExecuteAndNotify(const std::vector<FileSystemURL>& file_urls,
-                                const FileTaskFinishedCallback& done) OVERRIDE;
-
- private:
-  // FileTaskExecutor is the only class allowed to create one.
-  friend class FileTaskExecutor;
-
-  WebIntentTaskExecutor(Profile* profile,
-                        const GURL& source_url,
-                        const std::string& file_browser_id,
-                        const std::string& extension_id,
-                        const std::string& action_id);
-  virtual ~WebIntentTaskExecutor();
-
-  const std::string extension_id_;
-  const std::string action_id_;
-};
-
 class AppTaskExecutor : public FileTaskExecutor {
  public:
   // FileTaskExecutor overrides.
@@ -604,13 +583,6 @@ FileTaskExecutor* FileTaskExecutor::Create(Profile* profile,
     return new drive::DriveTaskExecutor(profile,
                                         extension_id,  // really app_id
                                         action_id);
-
-  if (task_type == kTaskWebIntent)
-    return new WebIntentTaskExecutor(profile,
-                                     source_url,
-                                     file_browser_id,
-                                     extension_id,
-                                     action_id);
 
   if (task_type == kTaskApp)
     return new AppTaskExecutor(profile,
@@ -851,7 +823,7 @@ bool ExtensionTaskExecutor::ExecuteAndNotify(
 
   int handler_pid = ExtractProcessFromExtensionId(profile(), handler->id());
   if (handler_pid <= 0) {
-    if (!handler->has_lazy_background_page())
+    if (!extensions::BackgroundInfo::HasLazyBackgroundPage(handler))
       return false;
   }
 
@@ -1010,35 +982,6 @@ void ExtensionTaskExecutor::SetupHandlerHostFileAccessPermissions(
         iter->absolute_path,
         GetAccessPermissionsForFileBrowserHandler(extension, action_id_));
   }
-}
-
-WebIntentTaskExecutor::WebIntentTaskExecutor(
-    Profile* profile,
-    const GURL& source_url,
-    const std::string& file_browser_id,
-    const std::string& extension_id,
-    const std::string& action_id)
-    : FileTaskExecutor(profile, source_url, file_browser_id, extension_id),
-      action_id_(action_id) {
-}
-
-WebIntentTaskExecutor::~WebIntentTaskExecutor() {}
-
-bool WebIntentTaskExecutor::ExecuteAndNotify(
-    const std::vector<FileSystemURL>& file_urls,
-    const FileTaskFinishedCallback& done) {
-  if (!FileBrowserHasAccessPermissionForFiles(file_urls))
-    return false;
-
-  for (size_t i = 0; i != file_urls.size(); ++i) {
-    extensions::LaunchPlatformAppWithPath(profile(), GetExtension(),
-                                          file_urls[i].path());
-  }
-
-  if (!done.is_null())
-    done.Run(true);
-
-  return true;
 }
 
 AppTaskExecutor::AppTaskExecutor(

@@ -28,11 +28,9 @@
            BECAUSE YOUR RESOURCES ARE FUNCTIONALLY RELATED OR FALL UNDER THE
            SAME CONDITIONALS. -->
       <structure type="chrome_scaled_image" name="IDR_ACCESSED_COOKIES" file="accessed_cookies.png" />
-      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON" file="action_box_button.png" />
-      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON_HOVER" file="action_box_button_hover.png" />
-      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON_NORMAL" file="action_box_button_normal.png" />
-      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON_PRESSED" file="action_box_button_pressed.png" />
-      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON_PUSHED" file="action_box_button_pushed.png" />
+      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON_HOVER" file="common/action_box_button_hover.png" />
+      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON_NORMAL" file="common/action_box_button_normal.png" />
+      <structure type="chrome_scaled_image" name="IDR_ACTION_BOX_BUTTON_PRESSED" file="common/action_box_button_pressed.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_FULLSCREEN" file="allowed_fullscreen.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_IMAGES" file="allowed_images.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_MOUSE_CURSOR" file="allowed_mouse_cursor.png" />
@@ -48,14 +46,12 @@
       <if expr="pp_ifdef('enable_app_list') and not pp_ifdef('chromeos')">
         <structure type="chrome_scaled_image" name="IDR_APP_LIST_TAB_OVERLAY" file="app_list_tab_overlay.png" />
       </if>
-      <structure type="chrome_scaled_image" name="IDR_APP_NOTIFICATION_NUB" file="nub.png" />
-      <structure type="chrome_scaled_image" name="IDR_APP_NOTIFICATION_NUB_MASK" file="nub_mask.png" />
-      <structure type="chrome_scaled_image" name="IDR_APP_NOTIFICATION_SMALL_BUBBLE" file="small_bubble.png" />
       <structure type="chrome_scaled_image" name="IDR_ASK_MEDIA" file="ask_media.png" />
       <if expr="pp_ifdef('toolkit_views')">
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_CLOSE" file="win/app_window_close.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_CLOSE_H" file="win/app_window_close_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_CLOSE_P" file="win/app_window_close_active.png" />
+        <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_CLOSE_U" file="win/app_window_close_unfocused.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_RESTORE" file="win/app_window_restore.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_RESTORE_H" file="win/app_window_restore_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_RESTORE_P" file="win/app_window_restore_active.png" />
@@ -67,6 +63,7 @@
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_MINIMIZE_H" file="win/app_window_minimize_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_MINIMIZE_P" file="win/app_window_minimize_active.png" />
       </if>
+      <structure type="chrome_scaled_image" name="IDR_AUDIO_EQUALIZER_COLUMN" file="common/audio_equalizer_column.png" />
       <!-- TODO(estade): Replace these placeholder resources with real ones. -->
       <structure type="chrome_scaled_image" name="IDR_AUTOFILL_DIALOG_MENU_BUTTON" file="autofill_dialog_menu_button_normal.png" />
       <structure type="chrome_scaled_image" name="IDR_AUTOFILL_DIALOG_MENU_BUTTON_P" file="autofill_dialog_menu_button_pressed.png" />
@@ -175,6 +172,7 @@
       <structure type="chrome_scaled_image" name="IDR_CONTROLLED_SETTING_RECOMMENDED_LARGE" file="controlled_setting_recommended_large.png" />
       <structure type="chrome_scaled_image" name="IDR_COOKIE_ICON" file="cookie.png" />
       <structure type="chrome_scaled_image" name="IDR_COOKIE_STORAGE_ICON" file="cookie_storage.png" />
+      <structure type="chrome_scaled_image" name="IDR_CREDIT_CARD_CVC_HINT" file="credit_card_cvc_hint.png" />
       <if expr="pp_ifdef('chromeos')">
         <structure type="chrome_scaled_image" name="IDR_CRITICAL_ERROR" file="cros/critical_error.png" />
       </if>
@@ -247,6 +245,9 @@
       <structure type="chrome_scaled_image" name="IDR_EXTENSIONS_SECTION_SMALL" file="extensions_section_small.png" />
       <structure type="chrome_scaled_image" name="IDR_EXTENSION_COMMAND_CLOSE" file="extension_command_close.png" />
       <structure type="chrome_scaled_image" name="IDR_EXTENSION_DEFAULT_ICON" file="extension_default_icon.png" />
+      <if expr="pp_ifdef('chromeos')">
+        <structure type="chrome_scaled_image" name="IDR_FATAL_ERROR" file="cros/fatal_error.png" />
+      </if>
       <structure type="chrome_scaled_image" name="IDR_FEEDBACK" file="feedback.png" />
       <structure type="chrome_scaled_image" name="IDR_FEEDBACK_H" file="feedback_hover.png" />
       <structure type="chrome_scaled_image" name="IDR_FEEDBACK_P" file="feedback_pressed.png" />
@@ -488,6 +489,7 @@
       <structure type="chrome_scaled_image" name="IDR_MOBILE_LIT" file="mobile_lit.png" />
       <if expr="pp_ifdef('chromeos')">
         <structure type="chrome_scaled_image" name="IDR_NETWORK_ADD_CONNECTION" file="cros/network_add_connection.png" />
+        <structure type="chrome_scaled_image" name="IDR_NETWORK_ERROR" file="cros/network_error.png" />
         <structure type="chrome_scaled_image" name="IDR_NETWORK_HIDE_PASSWORD" file="cros/network_hide_password.png" />
         <structure type="chrome_scaled_image" name="IDR_NETWORK_HIDE_PASSWORD_HOVER" file="cros/network_hide_password_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_NETWORK_SHOW_PASSWORD" file="cros/network_show_password.png" />
@@ -504,8 +506,6 @@
         <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON_H" file="common/newtab_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON_MASK" file="common/newtab_button_mask.png" />
         <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON_P" file="common/newtab_pressed.png" />
-        <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON_PLUS" file="common/newtab_plus.png" />
-        <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON_P_PLUS" file="common/newtab_plus_pressed.png" />
       </if>
       <if expr="pp_ifdef('chromeos')">
         <structure type="chrome_scaled_image" name="IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL" file="cros/ntp_welcome_thumb.png" />
@@ -569,6 +569,7 @@
       <if expr="not context.startswith('default_')">
         <structure type="chrome_scaled_image" name="IDR_OTR_ICON_FULLSCREEN" file="otr_icon_fullscreen.png" />
       </if>
+      <structure type="chrome_scaled_image" name="IDR_OVERLAY_DROP_SHADOW" file="common/overlay_drop_shadow.png" />
       <structure type="chrome_scaled_image" name="IDR_PAGEINFO_BAD" file="pageinfo_bad.png" />
       <structure type="chrome_scaled_image" name="IDR_PAGEINFO_GOOD" file="pageinfo_good.png" />
       <structure type="chrome_scaled_image" name="IDR_PAGEINFO_INFO" file="pageinfo_info.png" />
@@ -586,7 +587,6 @@
       <structure type="chrome_scaled_image" name="IDR_PHONE_FAVICON" file="common/favicon_phone.png" />
       <structure type="chrome_scaled_image" name="IDR_PLUGINS_FAVICON" file="common/favicon_extensions.png" />
       <structure type="chrome_scaled_image" name="IDR_PRERENDER" file="prerender_succeed_icon.png" />
-      <structure type="chrome_scaled_image" name="IDR_PREVIEW_DROP_SHADOW" file="common/preview_drop_shadow.png" />
       <if expr="not pp_ifdef('_google_chrome')">
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO" file="chromium/product_logo.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_16" file="chromium/product_logo_16.png" />
@@ -841,6 +841,7 @@
       <structure type="chrome_scaled_image" name="IDR_THROBBER_WAITING" file="throbber_waiting.png" />
       <structure type="chrome_scaled_image" name="IDR_THROBBER_WAITING_LIGHT" file="throbber_waiting_light.png" />
       <structure type="chrome_scaled_image" name="IDR_TAB_RECORDING" file="tab_recording.png" />
+      <structure type="chrome_scaled_image" name="IDR_TAB_RECORDING_MASK" file="common/tab_recording_mask.png" />
       <structure type="chrome_scaled_image" name="IDR_TAB_CAPTURE" file="tab_capture.png" />
       <structure type="chrome_scaled_image" name="IDR_TAB_CAPTURE_GLOW" file="tab_capture_glow.png" />
       <if expr="pp_ifdef('use_ash')">
@@ -891,6 +892,7 @@
         <structure type="chrome_scaled_image" name="IDR_USER_IMAGE_NO_VIDEO" file="no_video.png" />
         <structure type="chrome_scaled_image" name="IDR_USER_IMAGE_RECYCLE" file="discard_wide.png" />
       </if>
+      <structure type="chrome_scaled_image" name="IDR_WALLET_ICON" file="wallet.png" />
       <structure type="chrome_scaled_image" name="IDR_WARNING" file="alert_small.png" />
       <structure type="chrome_scaled_image" name="IDR_WEB_INTENT_PROGRESS_BACKGROUND" file="common/web_intent_progress_background.png" />
       <structure type="chrome_scaled_image" name="IDR_WEB_INTENT_PROGRESS_FOREGROUND" file="common/web_intent_progress_foreground.png" />
@@ -918,8 +920,7 @@
       </if>
       <structure type="chrome_scaled_image" name="IDR_ZOOM_MINUS" file="zoom_minus.png" />
       <structure type="chrome_scaled_image" name="IDR_ZOOM_PLUS" file="zoom_plus.png" />
-      <!-- Audio playing indicator. Favicon-sized with equalizer-like animation frames -->
-      <structure type="chrome_scaled_image" name="IDR_AUDIO_ANIMATION" file="common/audio_animation.png" />
+      <structure type="chrome_scaled_image" name="IDR_ZOOM_NORMAL" file="zoom_reset.png" />
     </structures>
   </release>
 </grit>

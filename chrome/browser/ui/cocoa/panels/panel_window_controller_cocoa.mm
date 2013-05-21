@@ -15,8 +15,6 @@
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/themes/theme_service_factory.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/event_utils.h"
@@ -169,25 +167,39 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 
   NSPoint point = [self convertPoint:pointInWindow fromView:nil];
   BOOL flipped = [self isFlipped];
-  if (NSMouseInRect(point, leftCursorRect_, flipped))
-    return panel::RESIZE_LEFT;
-  if (NSMouseInRect(point, rightCursorRect_, flipped))
-    return panel::RESIZE_RIGHT;
-  if (NSMouseInRect(point, topCursorRect_, flipped))
-    return panel::RESIZE_TOP;
-  if (NSMouseInRect(point, topLeftCursorRect_, flipped))
-    return panel::RESIZE_TOP_LEFT;
-  if (NSMouseInRect(point, topRightCursorRect_, flipped))
-    return panel::RESIZE_TOP_RIGHT;
 
-  // Bottom edge is not always resizable.
-  if (panel::RESIZABLE_ALL_SIDES == resizability) {
-    if (NSMouseInRect(point, bottomCursorRect_, flipped))
-      return panel::RESIZE_BOTTOM;
-    if (NSMouseInRect(point, bottomLeftCursorRect_, flipped))
-      return panel::RESIZE_BOTTOM_LEFT;
-    if (NSMouseInRect(point, bottomRightCursorRect_, flipped))
-      return panel::RESIZE_BOTTOM_RIGHT;
+  if ((resizability & panel::RESIZABLE_TOP_LEFT) &&
+      NSMouseInRect(point, topLeftCursorRect_, flipped)) {
+    return panel::RESIZE_TOP_LEFT;
+  }
+  if ((resizability & panel::RESIZABLE_TOP_RIGHT) &&
+      NSMouseInRect(point, topRightCursorRect_, flipped)) {
+    return panel::RESIZE_TOP_RIGHT;
+  }
+  if ((resizability & panel::RESIZABLE_BOTTOM_LEFT) &&
+      NSMouseInRect(point, bottomLeftCursorRect_, flipped)) {
+    return panel::RESIZE_BOTTOM_LEFT;
+  }
+  if ((resizability & panel::RESIZABLE_BOTTOM_RIGHT) &&
+      NSMouseInRect(point, bottomRightCursorRect_, flipped)) {
+    return panel::RESIZE_BOTTOM_RIGHT;
+  }
+
+  if ((resizability & panel::RESIZABLE_LEFT) &&
+      NSMouseInRect(point, leftCursorRect_, flipped)) {
+    return panel::RESIZE_LEFT;
+  }
+  if ((resizability & panel::RESIZABLE_RIGHT) &&
+      NSMouseInRect(point, rightCursorRect_, flipped)) {
+    return panel::RESIZE_RIGHT;
+  }
+  if ((resizability & panel::RESIZABLE_TOP) &&
+      NSMouseInRect(point, topCursorRect_, flipped)) {
+    return panel::RESIZE_TOP;
+  }
+  if ((resizability & panel::RESIZABLE_BOTTOM) &&
+      NSMouseInRect(point, bottomCursorRect_, flipped)) {
+    return panel::RESIZE_BOTTOM;
   }
 
   return panel::RESIZE_NONE;
@@ -278,54 +290,68 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   NSRect bounds = [self bounds];
 
   // Left vertical edge.
-  leftCursorRect_ = NSMakeRect(NSMinX(bounds),
-                               NSMinY(bounds) + kWidthOfMouseResizeArea,
-                               kWidthOfMouseResizeArea,
-                               NSHeight(bounds) - 2 * kWidthOfMouseResizeArea);
-  [self addCursorRect:leftCursorRect_ cursor:eastWestCursor_];
+  if (resizability & panel::RESIZABLE_LEFT) {
+    leftCursorRect_ = NSMakeRect(
+        NSMinX(bounds),
+        NSMinY(bounds) + kWidthOfMouseResizeArea,
+        kWidthOfMouseResizeArea,
+        NSHeight(bounds) - 2 * kWidthOfMouseResizeArea);
+    [self addCursorRect:leftCursorRect_ cursor:eastWestCursor_];
+  }
 
   // Right vertical edge.
-  rightCursorRect_ = leftCursorRect_;
-  rightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
-  [self addCursorRect:rightCursorRect_ cursor:eastWestCursor_];
+  if (resizability & panel::RESIZABLE_RIGHT) {
+    rightCursorRect_ = leftCursorRect_;
+    rightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
+    [self addCursorRect:rightCursorRect_ cursor:eastWestCursor_];
+  }
 
   // Top horizontal edge.
-  topCursorRect_ = NSMakeRect(NSMinX(bounds) + kWidthOfMouseResizeArea,
-                              NSMaxY(bounds) - kWidthOfMouseResizeArea,
-                              NSWidth(bounds) - 2 * kWidthOfMouseResizeArea,
-                              kWidthOfMouseResizeArea);
-  [self addCursorRect:topCursorRect_ cursor:northSouthCursor_];
+  if (resizability & panel::RESIZABLE_TOP) {
+    topCursorRect_ = NSMakeRect(NSMinX(bounds) + kWidthOfMouseResizeArea,
+                                NSMaxY(bounds) - kWidthOfMouseResizeArea,
+                                NSWidth(bounds) - 2 * kWidthOfMouseResizeArea,
+                                kWidthOfMouseResizeArea);
+    [self addCursorRect:topCursorRect_ cursor:northSouthCursor_];
+  }
 
   // Top left corner.
-  topLeftCursorRect_ = NSMakeRect(NSMinX(bounds),
-                                  NSMaxY(bounds) - kWidthOfMouseResizeArea,
-                                  kWidthOfMouseResizeArea,
-                                  NSMaxY(bounds));
-  [self addCursorRect:topLeftCursorRect_ cursor:northWestSouthEastCursor_];
+  if (resizability & panel::RESIZABLE_TOP_LEFT) {
+    topLeftCursorRect_ = NSMakeRect(NSMinX(bounds),
+                                    NSMaxY(bounds) - kWidthOfMouseResizeArea,
+                                    kWidthOfMouseResizeArea,
+                                    NSMaxY(bounds));
+    [self addCursorRect:topLeftCursorRect_ cursor:northWestSouthEastCursor_];
+  }
 
   // Top right corner.
-  topRightCursorRect_ = topLeftCursorRect_;
-  topRightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
-  [self addCursorRect:topRightCursorRect_ cursor:northEastSouthWestCursor_];
-
-  // Bottom edge is not always resizable.
-  if (panel::RESIZABLE_ALL_SIDES_EXCEPT_BOTTOM == resizability)
-    return;
+  if (resizability & panel::RESIZABLE_TOP_RIGHT) {
+    topRightCursorRect_ = topLeftCursorRect_;
+    topRightCursorRect_.origin.x = NSMaxX(bounds) - kWidthOfMouseResizeArea;
+    [self addCursorRect:topRightCursorRect_ cursor:northEastSouthWestCursor_];
+  }
 
   // Bottom horizontal edge.
-  bottomCursorRect_ = topCursorRect_;
-  bottomCursorRect_.origin.y = NSMinY(bounds);
-  [self addCursorRect:bottomCursorRect_ cursor:northSouthCursor_];
+  if (resizability & panel::RESIZABLE_BOTTOM) {
+    bottomCursorRect_ = topCursorRect_;
+    bottomCursorRect_.origin.y = NSMinY(bounds);
+    [self addCursorRect:bottomCursorRect_ cursor:northSouthCursor_];
+  }
 
   // Bottom right corner.
-  bottomRightCursorRect_ = topRightCursorRect_;
-  bottomRightCursorRect_.origin.y = NSMinY(bounds);
-  [self addCursorRect:bottomRightCursorRect_ cursor:northWestSouthEastCursor_];
+  if (resizability & panel::RESIZABLE_BOTTOM_RIGHT) {
+    bottomRightCursorRect_ = topRightCursorRect_;
+    bottomRightCursorRect_.origin.y = NSMinY(bounds);
+    [self addCursorRect:bottomRightCursorRect_
+                 cursor:northWestSouthEastCursor_];
+  }
 
   // Bottom left corner.
-  bottomLeftCursorRect_ = bottomRightCursorRect_;
-  bottomLeftCursorRect_.origin.x = NSMinX(bounds);
-  [self addCursorRect:bottomLeftCursorRect_ cursor:northEastSouthWestCursor_];
+  if (resizability & panel::RESIZABLE_BOTTOM_LEFT) {
+    bottomLeftCursorRect_ = bottomRightCursorRect_;
+    bottomLeftCursorRect_.origin.x = NSMinX(bounds);
+    [self addCursorRect:bottomLeftCursorRect_ cursor:northEastSouthWestCursor_];
+  }
 }
 @end
 
@@ -362,23 +388,6 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   return self;
 }
 
-- (ui::ThemeProvider*)themeProvider {
-  return ThemeServiceFactory::GetForProfile(
-      windowShim_->panel()->profile());
-}
-
-- (ThemedWindowStyle)themedWindowStyle {
-  ThemedWindowStyle style = THEMED_POPUP;
-  if (windowShim_->panel()->profile()->IsOffTheRecord())
-    style |= THEMED_INCOGNITO;
-  return style;
-}
-
-- (NSPoint)themePatternPhase {
-  NSView* windowView = [[[self window] contentView] superview];
-  return [BrowserWindowUtils themePatternPhaseFor:windowView withTabStrip:nil];
-}
-
 - (void)awakeFromNib {
   NSWindow* window = [self window];
 
@@ -388,7 +397,7 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 
   [self updateWindowLevel];
 
-  [window setCollectionBehavior:NSWindowCollectionBehaviorParticipatesInCycle];
+  [self updateWindowCollectionBehavior];
 
   [titlebar_view_ attach];
 
@@ -596,7 +605,6 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 // processing required to get us to the closing state and (by watching for
 // the web content going away) will again call to close the window when it's
 // finally ready.
-// This callback is only called if the standard Close button is enabled in XIB.
 - (BOOL)windowShouldClose:(id)sender {
   Panel* panel = windowShim_->panel();
   // Give beforeunload handlers the chance to cancel the close before we hide
@@ -770,12 +778,6 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
   return NSHeight([titlebar convertRect:[titlebar bounds] toView:nil]);
 }
 
-- (void)ensureFullyVisible {
-  // Shows the window without making it key, on top of its layer, even if
-  // Chromium is not an active app.
-  [[self window] orderFrontRegardless];
-}
-
 // TODO(dcheng): These two selectors are almost copy-and-paste from
 // BrowserWindowController. Figure out the appropriate way of code sharing,
 // whether it's refactoring more things into BrowserWindowUtils or making a
@@ -840,11 +842,16 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 - (void)fullScreenModeChanged:(bool)isFullScreen {
   [self updateWindowLevel];
 
-  // The full-screen window is in normal level and changing the panel window to
-  // same normal level will not move it below the full-screen window. Thus we
-  // need to reorder the panel window.
+  // If the panel is not always on top, its z-order should not be affected if
+  // some other window enters fullscreen mode.
+  if (!windowShim_->panel()->IsAlwaysOnTop())
+    return;
+
+  // The full-screen window is in normal level and changing the panel window
+  // to same normal level will not move it below the full-screen window. Thus
+  // we need to reorder the panel window.
   if (isFullScreen)
-    [[self window] orderBack:nil];
+    [[self window] orderOut:nil];
   else
     [[self window] orderFrontRegardless];
 }
@@ -873,10 +880,8 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 - (void)updateWindowLevel:(BOOL)panelIsMinimized {
   if (![self isWindowLoaded])
     return;
-  // Make sure we don't draw on top of a window in full screen mode.
   Panel* panel = windowShim_->panel();
-  if (panel->manager()->display_settings_provider()->is_full_screen() ||
-      !panel->IsAlwaysOnTop()) {
+  if (!panel->IsAlwaysOnTop()) {
     [[self window] setLevel:NSNormalWindowLevel];
     return;
   }
@@ -900,6 +905,16 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
     return;
   }
   [[self window] setLevel:NSDockWindowLevel];
+}
+
+- (void)updateWindowCollectionBehavior {
+  if (![self isWindowLoaded])
+    return;
+  NSWindowCollectionBehavior collectionBehavior =
+      NSWindowCollectionBehaviorParticipatesInCycle;
+  if (windowShim_->panel()->IsAlwaysOnTop())
+    collectionBehavior |= NSWindowCollectionBehaviorCanJoinAllSpaces;
+  [[self window] setCollectionBehavior:collectionBehavior];
 }
 
 - (void)enableResizeByMouse:(BOOL)enable {

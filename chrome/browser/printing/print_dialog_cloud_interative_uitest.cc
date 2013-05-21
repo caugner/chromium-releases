@@ -8,8 +8,8 @@
 #include <functional>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
@@ -212,7 +212,7 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
         test_data_directory_.AppendASCII("printing/cloud_print_uitest.pdf");
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&internal_cloud_print_helpers::CreateDialogFullImpl,
+        base::Bind(&print_dialog_cloud::CreatePrintDialogForFile,
                    browser()->profile(), browser()->window()->GetNativeWindow(),
                    path_to_pdf, string16(), string16(),
                    std::string("application/pdf"), false));
@@ -255,12 +255,7 @@ net::URLRequestJob* PrintDialogCloudTest::Factory(
                                     true);
 }
 
-#if defined(OS_WIN)
-#define MAYBE_HandlersRegistered DISABLED_HandlersRegistered
-#else
-#define MAYBE_HandlersRegistered HandlersRegistered
-#endif
-IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, MAYBE_HandlersRegistered) {
+IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, HandlersRegistered) {
   AddTestHandlers();
 
   TestController::GetInstance()->set_use_delegate(true);

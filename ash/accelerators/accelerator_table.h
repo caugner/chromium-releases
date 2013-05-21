@@ -44,9 +44,13 @@ enum AcceleratorAction {
   PREVIOUS_IME,
   POWER_PRESSED,
   POWER_RELEASED,
+  PRINT_UI_HIERARCHIES,
   RESTORE_TAB,
   ROTATE_SCREEN,
-  ROTATE_WINDOWS,
+  ROTATE_WINDOW,
+  SCALE_UI_DOWN,
+  SCALE_UI_RESET,
+  SCALE_UI_UP,
   SELECT_LAST_WIN,
   SELECT_WIN_0,
   SELECT_WIN_1,
@@ -86,7 +90,8 @@ enum AcceleratorAction {
   CYCLE_DISPLAY_MODE,
   LOCK_SCREEN,
   OPEN_CROSH,
-  OPEN_FILE_MANAGER_DIALOG,
+  OPEN_FILE_DIALOG,  // Open 'Open file' dialog.
+  OPEN_FILE_MANAGER,
   DISABLE_GPU_WATCHDOG,
 #endif
 #if !defined(NDEBUG)
@@ -147,6 +152,12 @@ ASH_EXPORT extern const AcceleratorAction kNonrepeatableActions[];
 
 // The number of elements in kNonrepeatableActions.
 ASH_EXPORT extern const size_t kNonrepeatableActionsLength;
+
+// Actions allowed in app mode.
+ASH_EXPORT extern const AcceleratorAction kActionsAllowedInAppMode[];
+
+// The number of elements in kActionsAllowedInAppMode.
+ASH_EXPORT extern const size_t kActionsAllowedInAppModeLength;
 
 }  // namespace ash
 

@@ -36,13 +36,16 @@ namespace chromeos {
 
 class CaptivePortalWindowProxy;
 class ErrorScreenActor;
+class LocallyManagedUserCreationScreenHandler;
 class NativeWindowDelegate;
 class User;
+struct UserCredentials;
 
 // An interface for WebUILoginDisplay to call SigninScreenHandler.
 class LoginDisplayWebUIHandler {
  public:
   virtual void ClearAndEnablePassword() = 0;
+  virtual void ClearUserPodPassword() = 0;
   virtual void OnLoginSuccess(const std::string& username) = 0;
   virtual void OnUserRemoved(const std::string& username) = 0;
   virtual void OnUserImageChanged(const User& user) = 0;
@@ -54,6 +57,7 @@ class LoginDisplayWebUIHandler {
                          HelpAppLauncher::HelpTopic help_topic_id) = 0;
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) = 0;
   virtual void ShowGaiaPasswordChanged(const std::string& username) = 0;
+  virtual void ShowSigninUI(const std::string& email) = 0;
   virtual void ShowPasswordChangedDialog(bool show_password_error) = 0;
   // Show siginin screen for the given credentials.
   virtual void ShowSigninScreenForCreds(const std::string& username,
@@ -73,13 +77,11 @@ class SigninScreenHandlerDelegate {
 
   // Confirms sign up by provided |username| and |password| specified.
   // Used for new user login via GAIA extension.
-  virtual void CompleteLogin(const std::string& username,
-                             const std::string& password) = 0;
+  virtual void CompleteLogin(const UserCredentials& credentials) = 0;
 
   // Sign in using |username| and |password| specified.
   // Used for both known and new users.
-  virtual void Login(const std::string& username,
-                     const std::string& password) = 0;
+  virtual void Login(const UserCredentials& credentials) = 0;
 
   // Sign in into a retail mode session.
   virtual void LoginAsRetailModeUser() = 0;
@@ -104,6 +106,9 @@ class SigninScreenHandlerDelegate {
   // Loads the default sign-in wallpaper.
   virtual void LoadSigninWallpaper() = 0;
 
+  // Notify the delegate when the sign-in UI is finished loading.
+  virtual void OnSigninScreenReady() = 0;
+
   // Attempts to remove given user.
   virtual void RemoveUser(const std::string& username) = 0;
 
@@ -116,6 +121,9 @@ class SigninScreenHandlerDelegate {
 
   // Shows Reset screen.
   virtual void ShowResetScreen() = 0;
+
+  // Show wrong hwid screen.
+  virtual void ShowWrongHWIDScreen() = 0;
 
   // Let the delegate know about the handler it is supposed to be using.
   virtual void SetWebUIHandler(LoginDisplayWebUIHandler* webui_handler) = 0;
@@ -192,6 +200,7 @@ class SigninScreenHandler
   typedef base::hash_set<std::string> WebUIObservers;
 
   friend class ReportDnsCacheClearedOnUIThread;
+  friend class LocallyManagedUserCreationScreenHandler;
 
   // Updates current UI of the signin screen according to |ui_state|
   // argument.  Optionally it can pass screen initialization data via
@@ -203,8 +212,19 @@ class SigninScreenHandler
                            ConnectionType connection_type,
                            const std::string reason,
                            bool force_update);
+  void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
+                                  const std::string& service_path,
+                                  ConnectionType connection_type,
+                                  const std::string& reason,
+                                  bool is_proxy_error,
+                                  bool is_under_captive_portal,
+                                  bool is_gaia_loading_timeout);
+  void HideOfflineMessage(NetworkStateInformer::State state,
+                          const std::string& service_path,
+                          const std::string& reason,
+                          bool is_gaia_signin,
+                          bool is_gaia_reloaded);
   void ReloadGaiaScreen();
-  void ScheduleGaiaFrameReload();
 
   // BaseScreenHandler implementation:
   virtual void GetLocalizedStrings(
@@ -217,6 +237,7 @@ class SigninScreenHandler
 
   // BaseLoginUIHandler implementation:
   virtual void ClearAndEnablePassword() OVERRIDE;
+  virtual void ClearUserPodPassword() OVERRIDE;
   virtual void OnLoginSuccess(const std::string& username) OVERRIDE;
   virtual void OnUserRemoved(const std::string& username) OVERRIDE;
   virtual void OnUserImageChanged(const User& user) OVERRIDE;
@@ -227,6 +248,7 @@ class SigninScreenHandler
                          const std::string& help_link_text,
                          HelpAppLauncher::HelpTopic help_topic_id) OVERRIDE;
   virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
+  virtual void ShowSigninUI(const std::string& email) OVERRIDE;
   virtual void ShowPasswordChangedDialog(bool show_password_error) OVERRIDE;
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) OVERRIDE;
   virtual void ShowSigninScreenForCreds(const std::string& username,
@@ -259,6 +281,7 @@ class SigninScreenHandler
   void UpdateAddButtonStatus();
 
   // WebUI message handlers.
+  void HandleCompleteAuthentication(const base::ListValue* args);
   void HandleCompleteLogin(const base::ListValue* args);
   void HandleGetUsers(const base::ListValue* args);
   void HandleAuthenticateUser(const base::ListValue* args);
@@ -268,6 +291,7 @@ class SigninScreenHandler
   void HandleOfflineLogin(const base::ListValue* args);
   void HandleShutdownSystem(const base::ListValue* args);
   void HandleLoadWallpaper(const base::ListValue* args);
+  void HandleRebootSystem(const base::ListValue* args);
   void HandleRemoveUser(const base::ListValue* args);
   void HandleShowAddUser(const base::ListValue* args);
   void HandleToggleEnrollmentScreen(const base::ListValue* args);
@@ -293,13 +317,11 @@ class SigninScreenHandler
   void HandleShowLoadingTimeoutError(const base::ListValue* args);
   void HandleUpdateOfflineLogin(const base::ListValue* args);
   void HandleShowLocallyManagedUserCreationScreen(const base::ListValue* args);
-  void HandleCheckLocallyManagedUserName(const base::ListValue* args);
-  void HandleTryCreateLocallyManagedUser(const base::ListValue* args);
 
   // Fills |user_dict| with information about |user|.
-  void FillUserDictionary(User* user,
-                          bool is_owner,
-                          DictionaryValue* user_dict);
+  static void FillUserDictionary(User* user,
+                                 bool is_owner,
+                                 DictionaryValue* user_dict);
 
   // Sends user list to account picker.
   void SendUserList(bool animated);

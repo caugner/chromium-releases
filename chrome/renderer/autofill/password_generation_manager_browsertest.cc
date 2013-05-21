@@ -7,9 +7,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/common/autofill_messages.h"
-#include "chrome/renderer/autofill/password_generation_manager.h"
 #include "chrome/test/base/chrome_render_view_test.h"
+#include "components/autofill/common/autofill_messages.h"
+#include "components/autofill/renderer/password_generation_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
@@ -82,7 +82,7 @@ class PasswordGenerationManagerTest : public ChromeRenderViewTest {
   void SetNotBlacklistedMessage(const char* form_str) {
     content::PasswordForm form;
     form.origin =
-        GURL(StringPrintf("data:text/html;charset=utf-8,%s", form_str));
+        GURL(base::StringPrintf("data:text/html;charset=utf-8,%s", form_str));
     AutofillMsg_FormNotBlacklisted msg(0, form);
     generation_manager_->OnMessageReceived(msg);
   }

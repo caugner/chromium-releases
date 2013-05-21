@@ -11,6 +11,8 @@
 #include "ash/volume_control_delegate.h"
 #include "base/utf_string_conversions.h"
 #include "base/message_loop.h"
+#include "base/string16.h"
+#include "base/time.h"
 
 namespace ash {
 namespace test {
@@ -65,6 +67,9 @@ TestSystemTrayDelegate::~TestSystemTrayDelegate() {
 void TestSystemTrayDelegate::Initialize() {
 }
 
+void TestSystemTrayDelegate::Shutdown() {
+}
+
 bool TestSystemTrayDelegate::GetTrayVisibilityOnStartup() {
   return true;
 }
@@ -92,6 +97,10 @@ user::LoginStatus TestSystemTrayDelegate::GetUserLoginStatus() const {
   // TODO(nkostylev): Support LOGGED_IN_OWNER, LOGGED_IN_GUEST, LOGGED_IN_KIOSK,
   //                  LOGGED_IN_PUBLIC.
   return user::LOGGED_IN_USER;
+}
+
+bool TestSystemTrayDelegate::IsOobeCompleted() const {
+  return true;
 }
 
 void TestSystemTrayDelegate::ChangeProfilePicture() {
@@ -327,12 +336,27 @@ void TestSystemTrayDelegate::SetVolumeControlDelegate(
   volume_control_delegate_ = delegate.Pass();
 }
 
-base::Time TestSystemTrayDelegate::GetSessionStartTime() {
-  return base::Time();
+bool TestSystemTrayDelegate::GetSessionStartTime(
+    base::TimeTicks* session_start_time) {
+  return false;
 }
 
-base::TimeDelta TestSystemTrayDelegate::GetSessionLengthLimit() {
-  return base::TimeDelta();
+bool TestSystemTrayDelegate::GetSessionLengthLimit(
+     base::TimeDelta* session_length_limit) {
+  return false;
+}
+
+int TestSystemTrayDelegate::GetSystemTrayMenuWidth() {
+  // This is the default width for English languages.
+  return 300;
+}
+
+string16 TestSystemTrayDelegate::FormatTimeDuration(
+    const base::TimeDelta& delta) const {
+  return string16();
+}
+
+void TestSystemTrayDelegate::MaybeSpeak(const std::string& utterance) const {
 }
 
 }  // namespace test

@@ -112,7 +112,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 186
+#   For your editing convenience: highest ID currently used: 198
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -435,6 +435,31 @@
       If this setting is enabled, browsing history is not saved.
 
       If this setting is disabled or not set, browsing history is saved.''',
+    },
+    {
+      'name': 'AllowDeletingBrowserHistory',
+      'future': True,
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      # TODO(pamg): Restore the correct 'supported' line when the UI properly
+      # shows that deleting browser history is disabled. Also fix the 'os' line
+      # in policy_test_cases.json.
+      # 'supported_on': ['chrome.*:27-', 'chrome_os:0.27-'],
+      'supported_on': [],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 187,
+      'caption': '''Enable deleting browser and download history''',
+      'desc': '''Enables deleting browser history and download history in <ph name="PRODUCT_NAME">$<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
+
+      Note that even with this policy disabled, the browsing and download history are not guaranteed to be retained: users may be able to edit or delete the history database files directly, and the browser itself may expire or archive any or all history items at any time.
+
+      If this setting is enabled or not set, browsing and download history can be deleted.
+
+      If this setting is disabled, browsing and download history cannot be deleted.''',
     },
     {
       'name': 'RemoteAccess',
@@ -843,6 +868,22 @@
       If you enable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
       If this policy is left not set Google Sync will be available for the user to choose whether to use it or not.''',
+    },
+    {
+      'name': 'SigninAllowed',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:26-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 190,
+      'caption': '''Allows sign in to Chrome''',
+      'desc': '''Allows the user to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
+
+      If you set this policy, you can configure if a user is allowed to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> or not.''',
     },
     {
       'name': 'UserDataDir',
@@ -1282,7 +1323,7 @@
 
           Separate multiple server names with commas. Wildcards (*) are allowed.
 
-          If you leave this policy not set any server will be accepted for integrated authentication.''',
+          If you leave this policy not set Chrome will try to detect if a server is on the Intranet and only then will it respond to IWA requests.  If a server is detected as Internet then IWA requests from it will be ignored by Chrome.''',
         },
         {
           'name': 'AuthNegotiateDelegateWhitelist',
@@ -1300,7 +1341,7 @@
 
           Separate multiple server names with commas. Wildcards (*) are allowed.
 
-          If you leave this policy not set any server will be accepted for integrated authentication.''',
+          If you leave this policy not set Chrome will not delegate user credentials even if a server is detected as Intranet.''',
         },
         {
           'name': 'GSSAPILibraryName',
@@ -2972,12 +3013,15 @@
         'dynamic_refresh': True,
         'per_profile': True,
       },
+      'deprecated': True,
       'example_value': 'http://company-intranet/chromeapps',
       'id': 112,
       'caption': '''Enterprise web store URL''',
       'desc': '''Specifies the URL for the enterprise web store. When this setting is enabled, an app will appear on the new tab page which, when clicked, will take the user to the specified URL. To actually allow extension installation from the configured website, the ExtensionInstallSources policy must be configured to allow installation from the appropriate extension download URLs. If this policy is set, the EnterpriseWebStoreName setting should also be set.
 
-      If this setting is disabled, no enterprise web store app will appear on the new tab page.''',
+      If this setting is disabled, no enterprise web store app will appear on the new tab page.
+
+      This setting is deprecated as of version 27 and will be removed for future versions. The recommended way to set up organization-hosted extension/app collections is to include the site hosting the CRX packages in ExtensionInstallSources and put direct download links to the packages on a web page. A launcher for that web page can be created using the ExtensionInstallForcelist policy.''',
     },
     {
       'name': 'EnterpriseWebStoreName',
@@ -2988,12 +3032,15 @@
         'dynamic_refresh': True,
         'per_profile': True,
       },
+      'deprecated': True,
       'example_value': 'WidgCo Chrome Apps',
       'id': 113,
       'caption': '''Enterprise web store name''',
       'desc': '''The name of the enterprise web store, which will appear underneath the app icon on the new tab page. This setting has no effect if EnterpriseWebStoreURL is not set.
 
-      If this setting is disabled, the enterprise web store app (if it exists) will be labeled with its URL.''',
+      If this setting is disabled, the enterprise web store app (if it exists) will be labeled with its URL.
+
+      This setting is deprecated as of version 27 and will be removed for future versions. The recommended way to set up organization-hosted extension/app collections is to include the site hosting the CRX packages in ExtensionInstallSources and put direct download links to the packages on a web page. A launcher for that web page can be created using the ExtensionInstallForcelist policy.''',
     },
     {
       'name': 'EnableOriginBoundCerts',
@@ -3502,6 +3549,46 @@
       Every list entry specifies an identifier, which is used internally to tell the different device-local accounts apart.''',
     },
     {
+      'name': 'DeviceLocalAccountAutoLoginId',
+      'type': 'string',
+      'schema': { 'type': 'string' },
+      'supported_on': ['chrome_os:26-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': "public@example.com",
+      'id': 194,
+      'caption': '''Public session for auto-login''',
+      'desc': '''A public session to auto-login after a delay.
+
+      If this policy is set, the specified session will be automatically logged in after a period of time has elapsed at the login screen without user interaction. The public session must already be configured (see |DeviceLocalAccounts|).
+
+      If this policy is unset, there will be no auto-login.''',
+    },
+    {
+      'name': 'DeviceLocalAccountAutoLoginDelay',
+      'type': 'int',
+      'schema': { 'type': 'integer' },
+      'supported_on': ['chrome_os:26-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': 180000,
+      'id': 195,
+      'caption': '''Public session auto-login timer''',
+      'desc': '''The public session auto-login delay.
+
+      If the |DeviceLocalAccountAutoLoginId| policy is unset, this policy has no effect. Otherwise:
+
+      If this policy is set, it determines the amount of time without user activity that should elapse before automatically logging into the public session specified by the |DeviceLocalAccountAutoLoginId| policy.
+
+      If this policy is unset, 0 milliseconds will be used as the timeout.
+
+      This policy is specified in milliseconds.'''
+    },
+    {
       'name': 'BackgroundModeEnabled',
       'type': 'main',
       'schema': { 'type': 'boolean' },
@@ -3745,7 +3832,7 @@
       'example_value': 'America/Los_Angeles',
       'id': 158,
       'caption': '''Timezone''',
-      'desc': '''Specifies the timezone to be used for the device. Users can override the specified timezone for the current session. However, on logout it is set back to the specified timezone. If an invalid value is provided, the policy is still activated using "GMT" instead.
+      'desc': '''Specifies the timezone to be used for the device. Users can override the specified timezone for the current session. However, on logout it is set back to the specified timezone. If an invalid value is provided, the policy is still activated using "GMT" instead. If an empty string is provided, the policy is ignored.
 
       If this policy is not used, the currently active timezone will remain in use however users can change the timezone and the change is persistent. Thus a change by one user affects the login-screen and all other users.
 
@@ -3951,6 +4038,26 @@
           The policy value should be specified in milliseconds. Values are clamped to be less than the idle delay.''',
         },
         {
+          'name': 'IdleWarningDelayAC',
+          'type': 'int',
+          'schema': { 'type': 'integer' },
+          'supported_on': ['chrome_os:27-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': False,
+          },
+          'example_value': 545000,
+          'id': 197,
+          'caption': '''Idle warning delay when running on AC power''',
+          'desc': '''Specifies the length of time without user input after which a warning dialog is shown when running on AC power.
+
+          When this policy is set, it specifies the length of time that the user must remain idle before <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> shows a warning dialog telling the user that the idle action is about to be taken.
+
+          When this policy is unset, no warning dialog is shown.
+
+          The policy value should be specified in milliseconds. Values are clamped to be less than or equal the idle delay.''',
+        },
+        {
           'name': 'IdleDelayAC',
           'type': 'int',
           'schema': { 'type': 'integer' },
@@ -4037,6 +4144,26 @@
           The recommended way to lock the screen on idle is to enable screen locking on suspend and have <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> suspend after the idle delay. This policy should only be used when screen locking should occur a significant amount of time sooner than suspend or when suspend on idle is not desired at all.
 
           The policy value should be specified in milliseconds. Values are clamped to be less than the idle delay.''',
+        },
+        {
+          'name': 'IdleWarningDelayBattery',
+          'type': 'int',
+          'schema': { 'type': 'integer' },
+          'supported_on': ['chrome_os:27-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': False,
+          },
+          'example_value': 545000,
+          'id': 198,
+          'caption': '''Idle warning delay when running on battery power''',
+          'desc': '''Specifies the length of time without user input after which a warning dialog is shown when running on battery power.
+
+          When this policy is set, it specifies the length of time that the user must remain idle before <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> shows a warning dialog telling the user that the idle action is about to be taken.
+
+          When this policy is unset, no warning dialog is shown.
+
+          The policy value should be specified in milliseconds. Values are clamped to be less than or equal the idle delay.''',
         },
         {
           'name': 'IdleDelayBattery',
@@ -4178,7 +4305,7 @@
           'example_value': True,
           'id': 183,
           'caption': '''Specify whether video activity affects power management''',
-          'desc': '''Specifies whether vidoe activity affects power management.
+          'desc': '''Specifies whether video activity affects power management.
 
           If this policy is set to True or is unset, the user is not considered to be idle while video is playing. This prevents the idle delay, screen dim delay, screen off delay and screen lock delay from being reached and the corresponding actions from being taken.
 
@@ -4196,7 +4323,7 @@
           'example_value': 200,
           'id': 184,
           'caption': '''Percentage by which to scale the idle delay in presentation mode''',
-          'desc': '''Specifies the percentage by which the idle delay is scaled when the device is in presentation node.
+          'desc': '''Specifies the percentage by which the idle delay is scaled when the device is in presentation mode.
 
           If this policy is set, it specifies the percentage by which the idle delay is scaled when the device is in presentation mode. When the idle delay is scaled, the screen dimming, screen off and screen lock delays get adjusted to maintain the same distances from the idle delay as originally configured.
 
@@ -4243,6 +4370,135 @@
       If this policy is not set, no Terms of Service are shown.
 
       The policy should be set to a URL from which <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> can download the Terms of Service. The Terms of Service must be plain text, served as MIME type text/plain. No markup is allowed.''',
+    },
+    {
+      'name': 'Accessibility',
+      'type': 'group',
+      'caption': '''Accessibility settings''',
+      'desc': '''Configure <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> accessibility features.''',
+      'policies': [
+        {
+          'name': 'ShowAccessibilityOptionsInSystemTrayMenu',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:27-'],
+          'features': {
+            'can_be_recommended': True,
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': True,
+          'id': 188,
+          'caption': '''Show accessibility options in system tray menu''',
+          'desc': '''Show <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> accessibility options in the systenm menu.
+
+          If this policy is set to true, Accessibility options always appear in system tray menu.
+
+          If this policy is set to false, Accessibility options never appear in system tray menu.
+
+          If you set this policy, users cannot change or override it.
+
+          If this policy is left unset, Accessibility options will not appear in the system tray menu, but the user can cause the Accessibility options to appear via the Settings page.'''
+        },
+      ],
+    },
+    {
+      'name': 'HideWebStoreIcon',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:26-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 189,
+      'caption': '''Hide the web store from the new tab page and app launcher''',
+      'desc': '''Hide the Chrome Web Store app and footer link from the New Tab Page and Chrome OS app launcher.
+
+      When this policy is set to true, the icons are hidden.
+
+      When this policy is set to false or is not configured, the icons are visible.''',
+    },
+    {
+      'name': 'DeviceStartUpFlags',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' },
+      },
+      'supported_on': ['chrome_os:27-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': False,
+      },
+      'example_value': [ "enable-managed-mode", "my-cool-flag" ],
+      'id': 191,
+      'caption': '''System wide flags to be applied on Chrome start-up''',
+      'desc': '''Specifies the flags that should be applied to Chrome when it starts. The specified flags are applied before Chrome is started even for the sign-in screen.''',
+    },
+    {
+      'name': 'UptimeLimit',
+      'type': 'int',
+      'schema': { 'type': 'integer' },
+      'supported_on': ['chrome_os:27-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': 86400,
+      'id': 192,
+      'caption': '''Limit device uptime by automatically rebooting''',
+      'desc': '''Limit the device uptime by scheduling automatic reboots.
+
+      When this policy is set, it specifies the length of device uptime after which an automatic reboot is scheduled.
+
+      When this policy is not set, the device uptime is not limited.
+
+      If you set this policy, users cannot change or override it.
+
+      An automatic reboot is scheduled at the selected time but may be delayed on the device by up to 24 hours, e.g. if a user is currently using the device or an app/extension has requested reboots to be inhibited temporarily.
+
+      The policy value should be specified in seconds. Values are clamped to be at least 3600 (one hour).''',
+    },
+    {
+      'name': 'RebootAfterUpdate',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:27-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': True,
+      'id': 193,
+      'caption': '''Automatically reboot after update''',
+      'desc': '''Schedule an automatic reboot after a <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> update has been applied.
+
+      When this policy is set to true, an automatic reboot is scheduled when a <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> update has been applied and a reboot is required to complete the update process. The reboot is scheduled immediately but may be delayed on the device by up to 24 hours, e.g. if a user is currently using the device or an app/extension has requested reboots to be inhibited temporarily.
+
+      When this policy is set to false, no automatic reboot is scheduled after applying a <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> update. The update process is completed when the user next reboots the device.
+
+      If you set this policy, users cannot change or override it.''',
+    },
+    {
+      'name': 'VariationsRestrictParameter',
+      'type': 'string',
+      'schema': { 'type': 'string' },
+      'supported_on': ['chrome.*:27-', 'chrome_os:27-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': 'restricted',
+      'id': 196,
+      'future': True,
+      'caption': '''Set the restriction on the fetching of the Variations seed''',
+      'desc': '''Add a parameter to the fetching of the Variations seed in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      If specified, will add a query parameter called 'restrict' to the URL used to fetch the Variations seed. The value of the parameter will be the value specified in this policy.
+
+      If not specified, will not modify the Variations seed URL.''',
     },
   ],
   'messages': {

@@ -11,13 +11,14 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_member.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -229,6 +230,13 @@ bool ShouldShowTranslateItem(const GURL& page_url) {
 void DevToolsInspectElementAt(RenderViewHost* rvh, int x, int y) {
   DevToolsWindow::InspectElement(rvh, x, y);
 }
+
+// Helper function to escape "&" as "&&".
+void EscapeAmpersands(string16* text) {
+  const char16 ampersand[] = {'&', 0};
+  ReplaceChars(*text, ampersand, ASCIIToUTF16("&&"), text);
+}
+
 }  // namespace
 
 // static
@@ -291,9 +299,9 @@ bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
     const content::ContextMenuParams& params,
     MenuItem::ContextList contexts,
     const extensions::URLPatternSet& target_url_patterns) {
-  bool has_link = !params.link_url.is_empty();
-  bool has_selection = !params.selection_text.empty();
-  bool in_frame = !params.frame_url.is_empty();
+  const bool has_link = !params.link_url.is_empty();
+  const bool has_selection = !params.selection_text.empty();
+  const bool in_frame = !params.frame_url.is_empty();
 
   if (contexts.Contains(MenuItem::ALL) ||
       (has_selection && contexts.Contains(MenuItem::SELECTION)) ||
@@ -388,11 +396,7 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
   for (i = sorted_ids.begin();
        i != sorted_ids.end(); ++i) {
     string16 printable_selection_text = PrintableSelectionText();
-    // Escape "&" as "&&".
-    for (size_t position = printable_selection_text.find('&');
-         position != string16::npos;
-         position = printable_selection_text.find('&', position + 2))
-      printable_selection_text.insert(position, 1, '&');
+    EscapeAmpersands(&printable_selection_text);
 
     extension_items_.AppendExtensionItems(i->second, printable_selection_text,
                                           &index);
@@ -403,6 +407,11 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
 }
 
 void RenderViewContextMenu::InitMenu() {
+  if (chrome::IsRunningInForcedAppMode()) {
+    AppendAppModeItems();
+    return;
+  }
+
   chrome::ViewType view_type = chrome::GetViewType(source_web_contents_);
   if (view_type == chrome::VIEW_TYPE_APP_SHELL) {
     AppendPlatformAppItems();
@@ -415,8 +424,8 @@ void RenderViewContextMenu::InitMenu() {
     return;
   }
 
-  bool has_link = !params_.unfiltered_link_url.is_empty();
-  bool has_selection = !params_.selection_text.empty();
+  const bool has_link = !params_.unfiltered_link_url.is_empty();
+  const bool has_selection = !params_.selection_text.empty();
 
   if (AppendCustomItems()) {
     // If there's a selection, don't early return when there are custom items,
@@ -488,9 +497,9 @@ void RenderViewContextMenu::InitMenu() {
     AppendCopyItem();
 
   if (has_selection) {
+    AppendSearchProvider();
     if (!IsDevToolsURL(params_.page_url))
       AppendPrintItem();
-    AppendSearchProvider();
   }
 
   if (!IsDevToolsURL(params_.page_url))
@@ -516,6 +525,15 @@ const Extension* RenderViewContextMenu::GetExtension() const {
       source_web_contents_->GetRenderViewHost());
 }
 
+void RenderViewContextMenu::AppendAppModeItems() {
+  const bool has_selection = !params_.selection_text.empty();
+
+  if (params_.is_editable)
+    AppendEditableItems();
+  else if (has_selection)
+    AppendCopyItem();
+}
+
 void RenderViewContextMenu::AppendPlatformAppItems() {
   const Extension* platform_app = GetExtension();
 
@@ -525,7 +543,7 @@ void RenderViewContextMenu::AppendPlatformAppItems() {
 
   DCHECK(platform_app->is_platform_app());
 
-  bool has_selection = !params_.selection_text.empty();
+  const bool has_selection = !params_.selection_text.empty();
 
   // Add undo/redo, cut/copy/paste etc for text fields.
   if (params_.is_editable)
@@ -538,7 +556,7 @@ void RenderViewContextMenu::AppendPlatformAppItems() {
                                         PrintableSelectionText(), &index);
 
   // Add dev tools for unpacked extensions.
-  if (platform_app->location() == extensions::Manifest::LOAD ||
+  if (extensions::Manifest::IsUnpackedLocation(platform_app->location()) ||
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDebugPackedApps)) {
     // Add a separator if there are any items already in the menu.
@@ -555,7 +573,7 @@ void RenderViewContextMenu::AppendPlatformAppItems() {
 }
 
 void RenderViewContextMenu::AppendPopupExtensionItems() {
-  bool has_selection = !params_.selection_text.empty();
+  const bool has_selection = !params_.selection_text.empty();
 
   if (params_.is_editable)
     AppendEditableItems();
@@ -578,6 +596,8 @@ void RenderViewContextMenu::AppendPanelItems() {
     AppendEditableItems();
   else if (has_selection)
     AppendCopyItem();
+  else if (params_.unfiltered_link_url.is_valid())
+    AppendLinkItems();
 
   // Only add extension items from this extension.
   int index = 0;
@@ -823,16 +843,13 @@ void RenderViewContextMenu::AppendSearchProvider() {
 
   AutocompleteMatch match;
   AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(
-      params_.selection_text, string16(), false, false, &match, NULL);
+      params_.selection_text, false, false, &match, NULL);
   selection_navigation_url_ = match.destination_url;
   if (!selection_navigation_url_.is_valid())
     return;
 
   string16 printable_selection_text = PrintableSelectionText();
-  // Escape "&" as "&&".
-  for (size_t i = printable_selection_text.find('&'); i != string16::npos;
-       i = printable_selection_text.find('&', i + 2))
-    printable_selection_text.insert(i, 1, '&');
+  EscapeAmpersands(&printable_selection_text);
 
   if (AutocompleteMatch::IsSearchType(match.type)) {
     const TemplateURL* const default_provider =
@@ -858,7 +875,10 @@ void RenderViewContextMenu::AppendSearchProvider() {
 }
 
 void RenderViewContextMenu::AppendEditableItems() {
-  AppendSpellingSuggestionsSubMenu();
+  const bool use_spellcheck_and_search = !chrome::IsRunningInForcedAppMode();
+
+  if (use_spellcheck_and_search)
+    AppendSpellingSuggestionsSubMenu();
 
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_UNDO,
                                   IDS_CONTENT_CONTEXT_UNDO);
@@ -877,13 +897,14 @@ void RenderViewContextMenu::AppendEditableItems() {
                                   IDS_CONTENT_CONTEXT_DELETE);
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 
-  if (!params_.keyword_url.is_empty()) {
+  if (use_spellcheck_and_search && !params_.keyword_url.is_empty()) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ADDSEARCHENGINE,
                                     IDS_CONTENT_CONTEXT_ADDSEARCHENGINE);
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
 
-  AppendSpellcheckOptionsSubMenu();
+  if (use_spellcheck_and_search)
+    AppendSpellcheckOptionsSubMenu();
   AppendSpeechInputOptionsSubMenu();
   AppendPlatformEditableItems();
 
@@ -1302,10 +1323,6 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
 #endif
 
   return false;
-}
-
-void RenderViewContextMenu::ExecuteCommand(int id) {
-  ExecuteCommand(id, 0);
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
@@ -1863,7 +1880,8 @@ void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
   chrome_common_net::WriteURLToClipboard(
       url,
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
-      ui::Clipboard::GetForCurrentThread());
+      ui::Clipboard::GetForCurrentThread(),
+      content::BrowserContext::GetMarkerForOffTheRecordContext(profile_));
 }
 
 void RenderViewContextMenu::MediaPlayerActionAt(

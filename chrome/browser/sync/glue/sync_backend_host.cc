@@ -12,8 +12,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/threading/thread_restrictions.h"
@@ -152,6 +152,11 @@ class SyncBackendHost::Core
   // Called to update the given registered ids on behalf of
   // SyncBackendHost::UpdateRegisteredInvalidationIds.
   void DoUpdateRegisteredInvalidationIds(const syncer::ObjectIdSet& ids);
+
+  // Called to acknowledge an invalidation on behalf of
+  // SyncBackendHost::AcknowledgeInvalidation.
+  void DoAcknowledgeInvalidation(const invalidation::ObjectId& id,
+                                 const syncer::AckHandle& ack_handle);
 
   // Called to tell the syncapi to start syncing (generally after
   // initialization and authentication).
@@ -424,15 +429,11 @@ void SyncBackendHost::Initialize(
   registrar_->GetWorkers(&workers);
 
   InternalComponentsFactory::Switches factory_switches = {
-      InternalComponentsFactory::ENCRYPTION_LEGACY,
+      InternalComponentsFactory::ENCRYPTION_KEYSTORE,
       InternalComponentsFactory::BACKOFF_NORMAL
   };
 
   CommandLine* cl = CommandLine::ForCurrentProcess();
-  if (cl->HasSwitch(switches::kSyncKeystoreEncryption)) {
-    factory_switches.encryption_method =
-        InternalComponentsFactoryImpl::ENCRYPTION_KEYSTORE;
-  }
   if (cl->HasSwitch(switches::kSyncShortInitialRetryOverride)) {
     factory_switches.backoff_override =
         InternalComponentsFactoryImpl::BACKOFF_SHORT_INITIAL_RETRY_OVERRIDE;
@@ -475,6 +476,15 @@ void SyncBackendHost::UpdateRegisteredInvalidationIds(
   sync_thread_.message_loop()->PostTask(FROM_HERE,
       base::Bind(&SyncBackendHost::Core::DoUpdateRegisteredInvalidationIds,
                  core_.get(), ids));
+}
+
+void SyncBackendHost::AcknowledgeInvalidation(
+    const invalidation::ObjectId& id, const syncer::AckHandle& ack_handle) {
+  DCHECK_EQ(MessageLoop::current(), frontend_loop_);
+  DCHECK(sync_thread_.IsRunning());
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
+      base::Bind(&SyncBackendHost::Core::DoAcknowledgeInvalidation,
+                 core_.get(), id, ack_handle));
 }
 
 void SyncBackendHost::StartSyncingWithServer() {
@@ -1235,6 +1245,18 @@ void SyncBackendHost::Core::DoUpdateRegisteredInvalidationIds(
   // TODO(akalin): Fix this behavior (see http://crbug.com/140354).
   if (sync_manager_.get()) {
     sync_manager_->UpdateRegisteredInvalidationIds(this, ids);
+  }
+}
+
+void SyncBackendHost::Core::DoAcknowledgeInvalidation(
+    const invalidation::ObjectId& id, const syncer::AckHandle& ack_handle) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  // |sync_manager_| may end up being NULL here in tests (in
+  // synchronous initialization mode).
+  //
+  // TODO(akalin): Fix this behavior (see http://crbug.com/140354).
+  if (sync_manager_.get()) {
+    sync_manager_->AcknowledgeInvalidation(id, ack_handle);
   }
 }
 

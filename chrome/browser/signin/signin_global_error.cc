@@ -19,7 +19,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 SigninGlobalError::SigninGlobalError(SigninManager* manager, Profile* profile)
-    : auth_error_(GoogleServiceAuthError::None()),
+    : auth_error_(GoogleServiceAuthError::AuthErrorNone()),
       signin_manager_(manager),
       profile_(profile) {
 }
@@ -54,7 +54,7 @@ SigninGlobalError::AuthStatusProvider::~AuthStatusProvider() {
 
 void SigninGlobalError::AuthStatusChanged() {
   // Walk all of the status providers and collect any error.
-  GoogleServiceAuthError current_error(GoogleServiceAuthError::None());
+  GoogleServiceAuthError current_error(GoogleServiceAuthError::AuthErrorNone());
   for (std::set<const AuthStatusProvider*>::const_iterator it =
            provider_set_.begin(); it != provider_set_.end(); ++it) {
     current_error = (*it)->GetAuthStatus();
@@ -112,7 +112,7 @@ void SigninGlobalError::ExecuteMenuItem(Browser* browser) {
 #if defined(OS_CHROMEOS)
   if (auth_error_.state() != GoogleServiceAuthError::NONE) {
     DLOG(INFO) << "Signing out the user to fix a sync error.";
-    // TODO(beng): seems like this could just call browser::AttemptUserExit().
+    // TODO(beng): seems like this could just call chrome::AttemptUserExit().
     chrome::ExecuteCommand(browser, IDC_EXIT);
     return;
   }

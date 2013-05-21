@@ -7,6 +7,7 @@
 #include "base/json/json_reader.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/drive_uploader.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/google_apis/mock_drive_service.h"
@@ -46,9 +47,9 @@ class FakeDriveUploader : public google_apis::DriveUploaderInterface {
   // DriveUploaderInterface overrides.
 
   // Pretends that a new file was uploaded successfully, and returns the
-  // contents of "gdata/file_entry.json" to the caller.
+  // contents of "chromeos/gdata/file_entry.json" to the caller.
   virtual void UploadNewFile(
-      const GURL& upload_location,
+      const std::string& parent_resource_id,
       const base::FilePath& drive_file_path,
       const base::FilePath& local_file_path,
       const std::string& title,
@@ -57,7 +58,7 @@ class FakeDriveUploader : public google_apis::DriveUploaderInterface {
     DCHECK(!callback.is_null());
 
     scoped_ptr<base::Value> file_entry_data(
-        LoadJSONFile("gdata/file_entry.json").Pass());
+        LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
     scoped_ptr<ResourceEntry> file_entry(
         ResourceEntry::ExtractAndParse(*file_entry_data));
 
@@ -71,10 +72,10 @@ class FakeDriveUploader : public google_apis::DriveUploaderInterface {
   }
 
   // Pretends that an existing file ("file:resource_id") was uploaded
-  // successfully, and returns the contents of "gdata/file_entry.json" to the
-  // caller.
+  // successfully, and returns the contents of "chromeos/gdata/file_entry.json"
+  // to the caller.
   virtual void UploadExistingFile(
-      const GURL& upload_location,
+      const std::string& resource_id,
       const base::FilePath& drive_file_path,
       const base::FilePath& local_file_path,
       const std::string& content_type,
@@ -83,7 +84,7 @@ class FakeDriveUploader : public google_apis::DriveUploaderInterface {
     DCHECK(!callback.is_null());
 
     scoped_ptr<base::Value> file_entry_data(
-        LoadJSONFile("gdata/file_entry.json").Pass());
+        LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
     scoped_ptr<ResourceEntry> file_entry(
         ResourceEntry::ExtractAndParse(*file_entry_data));
 
@@ -155,12 +156,12 @@ class DriveFileSyncClientTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(DriveFileSyncClientTest);
 };
 
-// Invokes |arg0| as a GetAccountMetadataCallback.
-ACTION_P2(InvokeGetAccountMetadataCallback0, error, result) {
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata(result.Pass());
+// Invokes |arg0| as a GetAboutResourceCallback.
+ACTION_P2(InvokeGetAboutResourceCallback0, error, result) {
+  scoped_ptr<google_apis::AboutResource> about_resource(result.Pass());
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(arg0, error, base::Passed(&account_metadata)));
+      base::Bind(arg0, error, base::Passed(&about_resource)));
 }
 
 // Invokes |arg1| as a GetResourceEntryCallback.
@@ -267,8 +268,10 @@ void DidDeleteFile(bool* done_out,
 }
 
 TEST_F(DriveFileSyncClientTest, GetSyncRoot) {
+  const std::string kRootResourceId = "folder:root";
+  const std::string kSyncRootResourceId = "folder:sync_root_resource_id";
   scoped_ptr<base::Value> found_result_value(
-      LoadJSONFile("sync_file_system/sync_root_found.json").Pass());
+      LoadJSONFile("chromeos/sync_file_system/sync_root_found.json").Pass());
   scoped_ptr<google_apis::ResourceList> found_result =
       google_apis::ResourceList::ExtractAndParse(*found_result_value);
 
@@ -284,6 +287,15 @@ TEST_F(DriveFileSyncClientTest, GetSyncRoot) {
           google_apis::HTTP_SUCCESS,
           base::Passed(&found_result)));
 
+  // Expect to call GetRootResourceId and RemoveResourceFromDirectory from
+  // EnsureSyncRootIsNotInMyDrive.
+  EXPECT_CALL(*mock_drive_service(), GetRootResourceId())
+      .WillRepeatedly(Return(kRootResourceId));
+  EXPECT_CALL(*mock_drive_service(),
+              RemoveResourceFromDirectory(kRootResourceId,
+                                          kSyncRootResourceId,
+                                          _));
+
   bool done = false;
   GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
   std::string resource_id;
@@ -293,22 +305,23 @@ TEST_F(DriveFileSyncClientTest, GetSyncRoot) {
 
   EXPECT_TRUE(done);
   EXPECT_EQ(google_apis::HTTP_SUCCESS, error);
-  EXPECT_EQ("folder:sync_root_resource_id", resource_id);
+  EXPECT_EQ(kSyncRootResourceId, resource_id);
 }
 
 TEST_F(DriveFileSyncClientTest, CreateSyncRoot) {
   const std::string kRootResourceId = "folder:root";
+  const std::string kSyncRootResourceId = "folder:sync_root_resource_id";
   scoped_ptr<base::Value> not_found_result_value =
-      LoadJSONFile("sync_file_system/sync_root_not_found.json").Pass();
+      LoadJSONFile("chromeos/sync_file_system/sync_root_not_found.json").Pass();
   scoped_ptr<google_apis::ResourceList> not_found_result =
       google_apis::ResourceList::ExtractAndParse(*not_found_result_value);
   scoped_ptr<base::Value> found_result_value =
-      LoadJSONFile("sync_file_system/sync_root_found.json").Pass();
+      LoadJSONFile("chromeos/sync_file_system/sync_root_found.json").Pass();
   scoped_ptr<google_apis::ResourceList> found_result =
       google_apis::ResourceList::ExtractAndParse(*found_result_value);
 
   scoped_ptr<base::Value> created_result_value =
-      LoadJSONFile("sync_file_system/sync_root_created.json").Pass();
+      LoadJSONFile("chromeos/sync_file_system/sync_root_created.json").Pass();
   scoped_ptr<google_apis::ResourceEntry> created_result =
       google_apis::ResourceEntry::ExtractAndParse(*created_result_value);
 
@@ -328,15 +341,23 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot) {
           google_apis::HTTP_SUCCESS,
           base::Passed(&found_result)));
 
-  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot.
+  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot for the
+  // first, and from EnsureSyncRootIsNotInMyDrive for the second.
   EXPECT_CALL(*mock_drive_service(), GetRootResourceId())
-      .WillOnce(Return(kRootResourceId));
+      .WillRepeatedly(Return(kRootResourceId));
 
   // Expect to call AddNewDirectory from GetDriveDirectoryForSyncRoot.
   EXPECT_CALL(*mock_drive_service(),
               AddNewDirectory(kRootResourceId, kSyncRootDirectoryName, _))
       .WillOnce(InvokeGetResourceEntryCallback2(google_apis::HTTP_CREATED,
                                                 base::Passed(&created_result)));
+
+  // Expect to call RemoveResourceFromDirectory from
+  // EnsureSyncRootIsNotInMyDrive.
+  EXPECT_CALL(*mock_drive_service(),
+              RemoveResourceFromDirectory(kRootResourceId,
+                                          kSyncRootResourceId,
+                                          _));
 
   bool done = false;
   GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
@@ -347,22 +368,24 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot) {
 
   EXPECT_TRUE(done);
   EXPECT_EQ(google_apis::HTTP_CREATED, error);
-  EXPECT_EQ("folder:sync_root_resource_id", resource_id);
+  EXPECT_EQ(kSyncRootResourceId, resource_id);
 }
 
 TEST_F(DriveFileSyncClientTest, CreateSyncRoot_Conflict) {
   const std::string kRootResourceId = "folder:root";
+  const std::string kSyncRootResourceId = "folder:sync_root_resource_id";
   scoped_ptr<base::Value> not_found_result_value =
-      LoadJSONFile("sync_file_system/sync_root_not_found.json").Pass();
+      LoadJSONFile("chromeos/sync_file_system/sync_root_not_found.json").Pass();
   scoped_ptr<google_apis::ResourceList> not_found_result =
       google_apis::ResourceList::ExtractAndParse(*not_found_result_value);
   scoped_ptr<base::Value> duplicated_result_value =
-      LoadJSONFile("sync_file_system/sync_root_duplicated.json").Pass();
+      LoadJSONFile(
+          "chromeos/sync_file_system/sync_root_duplicated.json").Pass();
   scoped_ptr<google_apis::ResourceList> duplicated_result =
       google_apis::ResourceList::ExtractAndParse(*duplicated_result_value);
 
   scoped_ptr<base::Value> created_result_value =
-      LoadJSONFile("sync_file_system/sync_root_created.json").Pass();
+      LoadJSONFile("chromeos/sync_file_system/sync_root_created.json").Pass();
   scoped_ptr<google_apis::ResourceEntry> created_result =
       google_apis::ResourceEntry::ExtractAndParse(*created_result_value);
 
@@ -382,9 +405,10 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot_Conflict) {
           google_apis::HTTP_SUCCESS,
           base::Passed(&duplicated_result)));
 
-  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot.
+  // Expect to call GetRootResourceId from GetDriveDirectoryForSyncRoot for the
+  // first, and from EnsureSyncRootIsNotInMyDrive for the second.
   EXPECT_CALL(*mock_drive_service(), GetRootResourceId())
-      .WillOnce(Return(kRootResourceId));
+      .WillRepeatedly(Return(kRootResourceId));
 
   // Expect to call AddNewDirectory from GetDriveDirectoryForSyncRoot.
   EXPECT_CALL(*mock_drive_service(),
@@ -397,6 +421,13 @@ TEST_F(DriveFileSyncClientTest, CreateSyncRoot_Conflict) {
   EXPECT_CALL(*mock_drive_service(),
               DeleteResource("folder:sync_root_resource_id_duplicated", _, _))
       .WillOnce(InvokeEntryActionCallback2(google_apis::HTTP_SUCCESS));
+
+  // Expect to call RemoveResourceFromDirectory from
+  // EnsureSyncRootIsNotInMyDrive.
+  EXPECT_CALL(*mock_drive_service(),
+              RemoveResourceFromDirectory(kRootResourceId,
+                                          kSyncRootResourceId,
+                                          _));
 
   bool done = false;
   GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
@@ -417,7 +448,8 @@ TEST_F(DriveFileSyncClientTest, GetOriginDirectory) {
   const GURL kOrigin("chrome-extension://example");
 
   scoped_ptr<base::Value> found_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_found.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_found.json").Pass());
   scoped_ptr<google_apis::ResourceList> found_result =
       google_apis::ResourceList::ExtractAndParse(*found_result_value);
 
@@ -451,20 +483,24 @@ TEST_F(DriveFileSyncClientTest, CreateOriginDirectory) {
   const GURL kOrigin("chrome-extension://example");
 
   scoped_ptr<base::Value> not_found_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_not_found.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_not_found.json").Pass());
   scoped_ptr<google_apis::ResourceList> not_found_result =
       google_apis::ResourceList::ExtractAndParse(*not_found_result_value);
   scoped_ptr<base::Value> found_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_found.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_found.json").Pass());
   scoped_ptr<google_apis::ResourceList> found_result =
       google_apis::ResourceList::ExtractAndParse(*found_result_value);
 
   scoped_ptr<base::Value> got_parent_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_get_parent.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_get_parent.json").Pass());
   scoped_ptr<google_apis::ResourceEntry> got_parent_result
       = google_apis::ResourceEntry::ExtractAndParse(*got_parent_result_value);
   scoped_ptr<base::Value> created_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_created.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_created.json").Pass());
   scoped_ptr<google_apis::ResourceEntry> created_result =
       google_apis::ResourceEntry::ExtractAndParse(*created_result_value);
 
@@ -508,20 +544,24 @@ TEST_F(DriveFileSyncClientTest, CreateOriginDirectory_Conflict) {
   const GURL kOrigin("chrome-extension://example");
 
   scoped_ptr<base::Value> not_found_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_not_found.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_not_found.json").Pass());
   scoped_ptr<google_apis::ResourceList> not_found_result =
       google_apis::ResourceList::ExtractAndParse(*not_found_result_value);
   scoped_ptr<base::Value> duplicated_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_duplicated.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_duplicated.json").Pass());
   scoped_ptr<google_apis::ResourceList> duplicated_result =
       google_apis::ResourceList::ExtractAndParse(*duplicated_result_value);
 
   scoped_ptr<base::Value> got_parent_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_get_parent.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_get_parent.json").Pass());
   scoped_ptr<google_apis::ResourceEntry> got_parent_result
       = google_apis::ResourceEntry::ExtractAndParse(*got_parent_result_value);
   scoped_ptr<base::Value> created_result_value(
-      LoadJSONFile("sync_file_system/origin_directory_created.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/origin_directory_created.json").Pass());
   scoped_ptr<google_apis::ResourceEntry> created_result =
       google_apis::ResourceEntry::ExtractAndParse(*created_result_value);
 
@@ -570,15 +610,17 @@ TEST_F(DriveFileSyncClientTest, CreateOriginDirectory_Conflict) {
 
 TEST_F(DriveFileSyncClientTest, GetLargestChangeStamp) {
   scoped_ptr<base::Value> result(
-      LoadJSONFile("sync_file_system/account_metadata.json").Pass());
-  scoped_ptr<google_apis::AccountMetadataFeed> account_metadata(
-      google_apis::AccountMetadataFeed::CreateFrom(*result));
+      LoadJSONFile("chromeos/sync_file_system/account_metadata.json").Pass());
+  scoped_ptr<google_apis::AboutResource> about_resource(
+      google_apis::AboutResource::CreateFromAccountMetadata(
+          *google_apis::AccountMetadata::CreateFrom(*result),
+          "folder:root"));
 
-  // Expect to call GetAccountMetadata from GetLargestChangeStamp.
-  EXPECT_CALL(*mock_drive_service(), GetAccountMetadata(_))
-      .WillOnce(InvokeGetAccountMetadataCallback0(
+  // Expect to call GetAboutResource from GetLargestChangeStamp.
+  EXPECT_CALL(*mock_drive_service(), GetAboutResource(_))
+      .WillOnce(InvokeGetAboutResourceCallback0(
           google_apis::HTTP_SUCCESS,
-          base::Passed(&account_metadata)))
+          base::Passed(&about_resource)))
       .RetiresOnSaturation();
 
   bool done = false;
@@ -600,12 +642,14 @@ TEST_F(DriveFileSyncClientTest, ListFiles) {
   const GURL kFeedURL("listing_files_in_directory_first_page.json");
 
   scoped_ptr<base::Value> first_result_value(
-      LoadJSONFile("sync_file_system/listing_files_in_directory.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/listing_files_in_directory.json").Pass());
   scoped_ptr<google_apis::ResourceList> first_result =
       google_apis::ResourceList::ExtractAndParse(*first_result_value);
 
   scoped_ptr<base::Value> following_result_value(LoadJSONFile(
-      "sync_file_system/listing_files_in_directory_second_page.json").Pass());
+      "chromeos/sync_file_system/listing_files_in_directory_second_page.json")
+                                                 .Pass());
   scoped_ptr<google_apis::ResourceList> following_result =
       google_apis::ResourceList::ExtractAndParse(*following_result_value);
 
@@ -668,11 +712,13 @@ TEST_F(DriveFileSyncClientTest, ListChanges) {
   const int64 kStartChangestamp = 123456;
 
   scoped_ptr<base::Value> first_result_value(
-      LoadJSONFile("sync_file_system/listing_files_in_directory.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/listing_files_in_directory.json").Pass());
   scoped_ptr<google_apis::ResourceList> first_result =
       google_apis::ResourceList::ExtractAndParse(*first_result_value);
   scoped_ptr<base::Value> following_result_value(LoadJSONFile(
-      "sync_file_system/listing_changed_files_in_directory.json").Pass());
+      "chromeos/sync_file_system/listing_changed_files_in_directory.json")
+                                                 .Pass());
   scoped_ptr<google_apis::ResourceList> following_result =
       google_apis::ResourceList::ExtractAndParse(*following_result_value);
 
@@ -735,7 +781,7 @@ TEST_F(DriveFileSyncClientTest, DownloadFile) {
   const base::FilePath kLocalFilePath(FPL("/tmp/dir/file"));
 
   scoped_ptr<base::Value> file_entry_data(
-      LoadJSONFile("gdata/file_entry.json").Pass());
+      LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
   scoped_ptr<ResourceEntry> file_entry(
       ResourceEntry::ExtractAndParse(*file_entry_data));
   // We need another copy as |file_entry| will be passed to
@@ -783,7 +829,7 @@ TEST_F(DriveFileSyncClientTest, DownloadFileInNotModified) {
   const base::FilePath kLocalFilePath(FPL("/tmp/dir/file"));
 
   scoped_ptr<base::Value> file_entry_data(
-      LoadJSONFile("gdata/file_entry.json").Pass());
+      LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
   scoped_ptr<ResourceEntry> file_entry(
       ResourceEntry::ExtractAndParse(*file_entry_data));
   // We need another copy as |file_entry| will be passed to
@@ -824,23 +870,11 @@ TEST_F(DriveFileSyncClientTest, UploadNewFile) {
   const base::FilePath kLocalFilePath(FPL("/tmp/dir/file"));
   const std::string kTitle("testfile");
 
-  scoped_ptr<base::Value> dir_entry_data(
-      LoadJSONFile("gdata/directory_entry.json").Pass());
-  scoped_ptr<ResourceEntry> dir_entry(
-      ResourceEntry::ExtractAndParse(*dir_entry_data));
   scoped_ptr<base::Value> verifying_file_found_data(
-      LoadJSONFile("sync_file_system/verifing_file_found.json").Pass());
+      LoadJSONFile(
+          "chromeos/sync_file_system/verifing_file_found.json").Pass());
   scoped_ptr<ResourceList> verifying_file_found(
       ResourceList::ExtractAndParse(*verifying_file_found_data));
-  const GURL link_url =
-      dir_entry->GetLinkByType(Link::LINK_RESUMABLE_CREATE_MEDIA)->href();
-
-  // Expect to call GetResourceEntry from DriveFileSyncClient::UploadNewFile.
-  EXPECT_CALL(*mock_drive_service(),
-              GetResourceEntry(kDirectoryResourceId, _))
-      .WillOnce(InvokeGetResourceEntryCallback1(
-          google_apis::HTTP_SUCCESS,
-          base::Passed(&dir_entry)));
 
   // Expect to call GetResourceList from
   // DriveFileSyncClient::EnsureTitleUniqueness.
@@ -874,7 +908,7 @@ TEST_F(DriveFileSyncClientTest, UploadExistingFile) {
   const base::FilePath kLocalFilePath(FPL("/tmp/dir/file"));
 
   scoped_ptr<base::Value> file_entry_data(
-      LoadJSONFile("gdata/file_entry.json").Pass());
+      LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
   scoped_ptr<ResourceEntry> file_entry(
       ResourceEntry::ExtractAndParse(*file_entry_data));
   const std::string expected_remote_file_md5 = file_entry->file_md5();
@@ -915,7 +949,7 @@ TEST_F(DriveFileSyncClientTest, UploadExistingFileInConflict) {
   const std::string kExpectedRemoteFileMD5 = "123456";
 
   scoped_ptr<base::Value> file_entry_data(
-      LoadJSONFile("gdata/file_entry.json").Pass());
+      LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
   scoped_ptr<ResourceEntry> file_entry(
       ResourceEntry::ExtractAndParse(*file_entry_data));
 
@@ -948,7 +982,7 @@ TEST_F(DriveFileSyncClientTest, DeleteFile) {
   const std::string kResourceId = "file:2_file_resource_id";
 
   scoped_ptr<base::Value> file_entry_data(
-      LoadJSONFile("gdata/file_entry.json").Pass());
+      LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
   scoped_ptr<ResourceEntry> file_entry(
       ResourceEntry::ExtractAndParse(*file_entry_data));
   // Keep the copy of MD5 hash, because file_entry will be passed to
@@ -991,7 +1025,7 @@ TEST_F(DriveFileSyncClientTest, DeleteFileInConflict) {
   const std::string kExpectedRemoteFileMD5 = "123456";
 
   scoped_ptr<base::Value> file_entry_data(
-      LoadJSONFile("gdata/file_entry.json").Pass());
+      LoadJSONFile("chromeos/gdata/file_entry.json").Pass());
   scoped_ptr<ResourceEntry> file_entry(
       ResourceEntry::ExtractAndParse(*file_entry_data));
 

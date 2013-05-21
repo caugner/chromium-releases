@@ -8,9 +8,11 @@
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gfx/sys_color_change_listener.h"
 #include "ui/views/controls/menu/menu_config.h"
 
 namespace {
@@ -20,10 +22,17 @@ namespace {
 // MenuItem:
 const SkColor kMenuBackgroundColor = SK_ColorWHITE;
 const SkColor kMenuHighlightBackgroundColor = SkColorSetA(SK_ColorBLACK, 15);
+const SkColor kMenuInvertedSchemeHighlightBackgroundColor =
+    SkColorSetRGB(48, 48, 48);
 const SkColor kMenuBorderColor = SkColorSetRGB(0xBA, 0xBA, 0xBA);
+const SkColor kEnabledMenuButtonBorderColor = SkColorSetARGB(36, 0, 0, 0);
+const SkColor kFocusedMenuButtonBorderColor = SkColorSetARGB(72, 0, 0, 0);
+const SkColor kHoverMenuButtonBorderColor = SkColorSetARGB(72, 0, 0, 0);
 const SkColor kMenuSeparatorColor = SkColorSetRGB(0xE9, 0xE9, 0xE9);
 const SkColor kEnabledMenuItemForegroundColor = SK_ColorBLACK;
 const SkColor kDisabledMenuItemForegroundColor = SkColorSetRGB(161, 161, 146);
+const SkColor kHoverMenuItemBackgroundColor =
+    SkColorSetARGB(204, 255, 255, 255);
 
 }  // namespace
 
@@ -35,6 +44,15 @@ bool CommonThemeGetSystemColor(NativeTheme::ColorId color_id, SkColor* color) {
     case NativeTheme::kColorId_MenuBorderColor:
       *color = kMenuBorderColor;
       break;
+    case NativeTheme::kColorId_EnabledMenuButtonBorderColor:
+      *color = kEnabledMenuButtonBorderColor;
+      break;
+    case NativeTheme::kColorId_FocusedMenuButtonBorderColor:
+      *color = kFocusedMenuButtonBorderColor;
+      break;
+    case NativeTheme::kColorId_HoverMenuButtonBorderColor:
+      *color = kHoverMenuButtonBorderColor;
+      break;
     case NativeTheme::kColorId_MenuSeparatorColor:
       *color = kMenuSeparatorColor;
       break;
@@ -44,14 +62,29 @@ bool CommonThemeGetSystemColor(NativeTheme::ColorId color_id, SkColor* color) {
     case NativeTheme::kColorId_FocusedMenuItemBackgroundColor:
       *color = kMenuHighlightBackgroundColor;
       break;
+    case NativeTheme::kColorId_HoverMenuItemBackgroundColor:
+      *color = kHoverMenuItemBackgroundColor;
+      break;
     case NativeTheme::kColorId_EnabledMenuItemForegroundColor:
       *color = kEnabledMenuItemForegroundColor;
       break;
     case NativeTheme::kColorId_DisabledMenuItemForegroundColor:
       *color = kDisabledMenuItemForegroundColor;
       break;
+    case NativeTheme::kColorId_TextButtonDisabledColor:
+      *color = kDisabledMenuItemForegroundColor;
+      break;
     default:
       return false;
+  }
+  if (gfx::IsInvertedColorScheme()) {
+    switch (color_id) {
+      case NativeTheme::kColorId_FocusedMenuItemBackgroundColor:
+        *color = kMenuInvertedSchemeHighlightBackgroundColor;
+        break;
+      default:
+        *color = color_utils::InvertColor(*color);
+    }
   }
   return true;
 }
@@ -79,6 +112,8 @@ void CommonThemePaintMenuSeparator(
     SkCanvas* canvas,
     const gfx::Rect& rect,
     const NativeTheme::MenuSeparatorExtraParams& extra) {
+  SkColor color;
+  CommonThemeGetSystemColor(NativeTheme::kColorId_MenuSeparatorColor, &color);
   SkPaint paint;
   paint.setColor(kMenuSeparatorColor);
   int position_y = rect.y() + rect.height() / 2;
@@ -86,6 +121,8 @@ void CommonThemePaintMenuSeparator(
 }
 
 void CommonThemePaintMenuGutter(SkCanvas* canvas, const gfx::Rect& rect) {
+  SkColor color;
+  CommonThemeGetSystemColor(NativeTheme::kColorId_MenuSeparatorColor, &color);
   SkPaint paint;
   paint.setColor(kMenuSeparatorColor);
   int position_x = rect.x() + rect.width() / 2;
@@ -93,22 +130,29 @@ void CommonThemePaintMenuGutter(SkCanvas* canvas, const gfx::Rect& rect) {
 }
 
 void CommonThemePaintMenuBackground(SkCanvas* canvas, const gfx::Rect& rect) {
+  SkColor color;
+  CommonThemeGetSystemColor(NativeTheme::kColorId_MenuBackgroundColor, &color);
   SkPaint paint;
-  paint.setColor(kMenuBackgroundColor);
+  paint.setColor(color);
   canvas->drawRect(gfx::RectToSkRect(rect), paint);
 }
 
 void CommonThemePaintMenuItemBackground(SkCanvas* canvas,
                                         NativeTheme::State state,
                                         const gfx::Rect& rect) {
+  SkColor color;
   SkPaint paint;
   switch (state) {
     case NativeTheme::kNormal:
     case NativeTheme::kDisabled:
-      paint.setColor(kMenuBackgroundColor);
+      CommonThemeGetSystemColor(NativeTheme::kColorId_MenuBackgroundColor,
+                                &color);
+      paint.setColor(color);
       break;
     case NativeTheme::kHovered:
-      paint.setColor(kMenuHighlightBackgroundColor);
+      CommonThemeGetSystemColor(
+          NativeTheme::kColorId_FocusedMenuItemBackgroundColor, &color);
+      paint.setColor(color);
       break;
     default:
       NOTREACHED() << "Invalid state " << state;

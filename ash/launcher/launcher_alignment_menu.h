@@ -28,7 +28,7 @@ class ASH_EXPORT LauncherAlignmentMenu : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
  private:
   enum MenuItem {
@@ -36,7 +36,6 @@ class ASH_EXPORT LauncherAlignmentMenu : public ui::SimpleMenuModel,
     MENU_ALIGN_LEFT = 500,
     MENU_ALIGN_RIGHT,
     MENU_ALIGN_BOTTOM,
-    MENU_ALIGN_TOP,
   };
 
   aura::RootWindow* root_window_;

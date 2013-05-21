@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/message_center_settings_controller.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -23,7 +24,8 @@
 
 MessageCenterNotificationManager::MessageCenterNotificationManager(
     message_center::MessageCenter* message_center)
-  : message_center_(message_center) {
+  : message_center_(message_center),
+    settings_controller_(new MessageCenterSettingsController) {
   message_center_->SetDelegate(this);
 
 #if !defined(OS_CHROMEOS)
@@ -59,7 +61,7 @@ bool MessageCenterNotificationManager::CancelById(const std::string& id) {
   if (iter == profile_notifications_.end())
     return false;
 
-  RemoveProfileNotification((*iter).second);
+  RemoveProfileNotification((*iter).second, false);
   return true;
 }
 
@@ -73,7 +75,9 @@ bool MessageCenterNotificationManager::CancelAllBySourceOrigin(
        loopiter != profile_notifications_.end(); ) {
     NotificationMap::iterator curiter = loopiter++;
     if ((*curiter).second->notification().origin_url() == source) {
-      RemoveProfileNotification((*curiter).second);
+      // This action occurs when extension is unloaded. Closing notifications
+      // is not by user, so |false|.
+      RemoveProfileNotification((*curiter).second, false);
       removed = true;
     }
   }
@@ -87,8 +91,10 @@ bool MessageCenterNotificationManager::CancelAllByProfile(Profile* profile) {
   for (NotificationMap::iterator loopiter = profile_notifications_.begin();
        loopiter != profile_notifications_.end(); ) {
     NotificationMap::iterator curiter = loopiter++;
-    if ((*curiter).second->profile()->IsSameProfile(profile)) {
-      RemoveProfileNotification((*curiter).second);
+    if ((*curiter).second->profile() == profile) {
+      // This action occurs when profile is unloaded. Closing notifications is
+      // not by user, so |false|.
+      RemoveProfileNotification((*curiter).second, false);
       removed = true;
     }
   }
@@ -100,7 +106,9 @@ void MessageCenterNotificationManager::CancelAll() {
 
   for (NotificationMap::iterator loopiter = profile_notifications_.begin();
        loopiter != profile_notifications_.end(); ) {
-    RemoveProfileNotification((*loopiter++).second);
+    // This action occurs when Chrome is terminating. Closing notifications is
+    // not by user, so |false|.
+    RemoveProfileNotification((*loopiter++).second, false);
   }
 }
 
@@ -133,7 +141,7 @@ bool MessageCenterNotificationManager::UpdateNotification(
         old_notification->profile()->IsSameProfile(profile)) {
       std::string old_id =
           old_notification->notification().notification_id();
-      DCHECK(message_center_->GetNotificationList()->HasNotification(old_id));
+      DCHECK(message_center_->notification_list()->HasNotification(old_id));
 
       // Add/remove notification in the local list but just update the same
       // one in MessageCenter.
@@ -182,8 +190,9 @@ void MessageCenterNotificationManager::DisableNotificationsFromSource(
 }
 
 void MessageCenterNotificationManager::NotificationRemoved(
-    const std::string& notification_id) {
-  RemoveProfileNotification(FindProfileNotification(notification_id));
+    const std::string& notification_id,
+    bool by_user) {
+  RemoveProfileNotification(FindProfileNotification(notification_id), by_user);
 }
 
 void MessageCenterNotificationManager::ShowSettings(
@@ -202,12 +211,12 @@ void MessageCenterNotificationManager::ShowSettings(
   if (profile_notification->GetExtensionId().empty())
     chrome::ShowContentSettings(browser, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
   else
-    chrome::ShowExtensions(browser);
+    chrome::ShowExtensions(browser, std::string());
 }
 
 void MessageCenterNotificationManager::ShowSettingsDialog(
     gfx::NativeView context) {
-  NOTIMPLEMENTED();
+  settings_controller_->ShowSettingsDialog(context);
 }
 
 void MessageCenterNotificationManager::OnClicked(
@@ -246,7 +255,7 @@ void MessageCenterNotificationManager::ImageDownloads::StartDownloads(
   // Notification image.
   StartDownloadByKey(
       notification,
-      ui::notifications::kImageUrlKey,
+      message_center::kImageUrlKey,
       message_center::kNotificationPreferredImageSize,
       base::Bind(&message_center::MessageCenter::SetNotificationImage,
                  base::Unretained(message_center_),
@@ -255,13 +264,13 @@ void MessageCenterNotificationManager::ImageDownloads::StartDownloads(
   // Notification button icons.
   StartDownloadByKey(
       notification,
-      ui::notifications::kButtonOneIconUrlKey,
+      message_center::kButtonOneIconUrlKey,
       message_center::kNotificationButtonIconSize,
       base::Bind(&message_center::MessageCenter::SetNotificationButtonIcon,
                  base::Unretained(message_center_),
                  notification.notification_id(), 0));
   StartDownloadByKey(
-      notification, ui::notifications::kButtonTwoIconUrlKey,
+      notification, message_center::kButtonTwoIconUrlKey,
       message_center::kNotificationButtonIconSize,
       base::Bind(&message_center::MessageCenter::SetNotificationButtonIcon,
                  base::Unretained(message_center_),
@@ -270,12 +279,12 @@ void MessageCenterNotificationManager::ImageDownloads::StartDownloads(
 
 void MessageCenterNotificationManager::ImageDownloads::StartDownloadWithImage(
     const Notification& notification,
-    const gfx::ImageSkia* image,
+    const gfx::Image* image,
     const GURL& url,
     int size,
     const SetImageCallback& callback) {
   // Set the image directly if we have it.
-  if (image && !image->isNull()) {
+  if (image && !image->IsEmpty()) {
     callback.Run(*image);
     return;
   }
@@ -299,6 +308,7 @@ void MessageCenterNotificationManager::ImageDownloads::StartDownloadWithImage(
 
   contents->DownloadFavicon(
       url,
+      false,
       size,
       base::Bind(
           &MessageCenterNotificationManager::ImageDownloads::DownloadComplete,
@@ -327,7 +337,7 @@ void MessageCenterNotificationManager::ImageDownloads::DownloadComplete(
     const std::vector<SkBitmap>& bitmaps) {
   if (bitmaps.empty())
     return;
-  gfx::ImageSkia image = gfx::ImageSkia::CreateFrom1xBitmap(bitmaps[0]);
+  gfx::Image image = gfx::Image::CreateFrom1xBitmap(bitmaps[0]);
   callback.Run(image);
 }
 
@@ -383,8 +393,9 @@ void MessageCenterNotificationManager::AddProfileNotification(
 }
 
 void MessageCenterNotificationManager::RemoveProfileNotification(
-    ProfileNotification* profile_notification) {
-  profile_notification->notification().Close(false); // Not by user.
+    ProfileNotification* profile_notification,
+    bool by_user) {
+  profile_notification->notification().Close(by_user);
   std::string id = profile_notification->notification().notification_id();
   message_center_->RemoveNotification(id);
   profile_notifications_.erase(id);

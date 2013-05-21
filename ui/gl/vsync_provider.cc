@@ -4,7 +4,17 @@
 
 #include "ui/gl/vsync_provider.h"
 
+#include "base/logging.h"
 #include "base/time.h"
+
+namespace {
+
+// These constants define a reasonable range for a calculated refresh interval.
+// Calculating refreshes out of this range will be considered a fatal error.
+const int64 kMinVsyncIntervalUs = base::Time::kMicrosecondsPerSecond / 400;
+const int64 kMaxVsyncIntervalUs = base::Time::kMicrosecondsPerSecond / 10;
+
+}  // namespace
 
 namespace gfx {
 
@@ -58,37 +68,60 @@ void SyncControlVSyncProvider::GetVSyncParameters(
     monotonic_time.tv_sec * base::Time::kMicrosecondsPerSecond +
     monotonic_time.tv_nsec / base::Time::kNanosecondsPerMicrosecond;
 
-  if ((system_time > real_time_in_microseconds) &&
-      (system_time > monotonic_time_in_microseconds))
-    return;
-
   // We need the time according to CLOCK_MONOTONIC, so if we've been given
   // a time from CLOCK_REALTIME, we need to convert.
   bool time_conversion_needed =
-    (system_time > monotonic_time_in_microseconds) ||
-    (real_time_in_microseconds - system_time <
-     monotonic_time_in_microseconds - system_time);
+      llabs(system_time - real_time_in_microseconds) <
+      llabs(system_time - monotonic_time_in_microseconds);
 
-  if (time_conversion_needed) {
-    int64 time_difference =
-      real_time_in_microseconds - monotonic_time_in_microseconds;
-    timebase = base::TimeTicks::FromInternalValue(
-        system_time - time_difference);
-  } else {
-    timebase = base::TimeTicks::FromInternalValue(system_time);
+  if (time_conversion_needed)
+    system_time += monotonic_time_in_microseconds - real_time_in_microseconds;
+
+  // Return if |system_time| is more than 1 frames in the future.
+  int64 interval_in_microseconds = last_good_interval_.InMicroseconds();
+  if (system_time > monotonic_time_in_microseconds + interval_in_microseconds)
+    return;
+
+  // If |system_time| is slightly in the future, adjust it to the previous
+  // frame and use the last frame counter to prevent issues in the callback.
+  if (system_time > monotonic_time_in_microseconds) {
+    system_time -= interval_in_microseconds;
+    media_stream_counter--;
   }
+  if (monotonic_time_in_microseconds - system_time >
+      base::Time::kMicrosecondsPerSecond)
+    return;
+
+  timebase = base::TimeTicks::FromInternalValue(system_time);
 
   int32 numerator, denominator;
+  base::TimeDelta new_interval;
   if (GetMscRate(&numerator, &denominator)) {
-    last_good_interval_ =
+    new_interval =
         base::TimeDelta::FromSeconds(denominator) / numerator;
   } else if (!last_timebase_.is_null()) {
     base::TimeDelta timebase_diff = timebase - last_timebase_;
     uint64 counter_diff = media_stream_counter -
         last_media_stream_counter_;
     if (counter_diff > 0 && timebase > last_timebase_)
-      last_good_interval_ = timebase_diff / counter_diff;
+      new_interval = timebase_diff / counter_diff;
   }
+  if (new_interval.InMicroseconds() < kMinVsyncIntervalUs ||
+      new_interval.InMicroseconds() > kMaxVsyncIntervalUs) {
+    LOG(ERROR) << "Calculated bogus refresh interval of "
+               << new_interval.InMicroseconds() << " us. "
+               << "Last time base of "
+               << last_timebase_.ToInternalValue() << " us. "
+               << "Current time base of "
+               << timebase.ToInternalValue() << " us. "
+               << "Last media stream count of "
+               << last_media_stream_counter_ << ". "
+               << "Current media stream count of "
+               << media_stream_counter << ".";
+  } else {
+    last_good_interval_ = new_interval;
+  }
+
   last_timebase_ = timebase;
   last_media_stream_counter_ = media_stream_counter;
   callback.Run(timebase, last_good_interval_);

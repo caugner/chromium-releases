@@ -67,8 +67,8 @@ class NotificationPromo {
 
   // Register preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
-  static void RegisterUserPrefs(PrefService* prefs,
-                                PrefRegistrySyncable* registry);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
+  static void MigrateUserPrefs(PrefService* user_prefs);
 
  private:
   // For testing.
@@ -92,12 +92,15 @@ class NotificationPromo {
   // When max_views_ is 0, we don't cap the number of views.
   bool ExceedsMaxViews() const;
 
+  // Returns false if this promo should not be displayed because it is a promo
+  // for the app launcher, and the user has already enabled the app launcher.
+  bool CheckAppLauncher() const;
+
   PrefService* prefs_;
 
   PromoType promo_type_;
   std::string promo_text_;
 
-  // Note that promo_payload_ isn't currently used for desktop promos.
   scoped_ptr<const base::DictionaryValue> promo_payload_;
 
   double start_;

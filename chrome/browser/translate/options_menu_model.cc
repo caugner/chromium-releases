@@ -6,7 +6,7 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/common/url_constants.h"
@@ -96,7 +96,7 @@ bool OptionsMenuModel::GetAcceleratorForCommandId(
   return false;
 }
 
-void OptionsMenuModel::ExecuteCommand(int command_id) {
+void OptionsMenuModel::ExecuteCommand(int command_id, int event_flags) {
   switch (command_id) {
     case IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_LANG:
       UMA_HISTOGRAM_COUNTS("Translate.NeverTranslateLang", 1);

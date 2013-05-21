@@ -11,10 +11,12 @@
 #include "chrome/browser/extensions/script_bubble_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/extension_resource.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -80,9 +82,10 @@ ScriptBubbleView::ScriptBubbleView(views::View* anchor_view,
     entries_.push_back(entry);
 
     int size = extension_misc::EXTENSION_ICON_BITTY;
-    ExtensionResource image =
-        extension->GetIconResource(size,
-                                   ExtensionIconSet::MATCH_BIGGER);
+    extensions::ExtensionResource image =
+        extensions::IconsInfo::GetIconResource(extension,
+                                               size,
+                                               ExtensionIconSet::MATCH_BIGGER);
     extensions::ImageLoader::Get(profile)->LoadImageAsync(
         extension, image, gfx::Size(size, size),
         base::Bind(&ScriptBubbleView::OnImageLoaded, AsWeakPtr(), i));
@@ -162,7 +165,8 @@ void ScriptBubbleView::Init() {
     views::ImageView* image_view = new views::ImageView();
     entries_[i].extension_imageview = image_view;
     image_view->SetImageSize(gfx::Size(16, 16));
-    image_view->SetImage(Extension::GetDefaultIcon(false));
+    image_view->SetImage(
+        extensions::IconsInfo::GetDefaultExtensionIcon());
     layout->AddView(image_view);
 
     views::Link* link = new views::Link(entries_[i].extension_name);

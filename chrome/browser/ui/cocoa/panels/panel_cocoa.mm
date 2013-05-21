@@ -115,7 +115,15 @@ void PanelCocoa::ClosePanel() {
       return;
 
   NSWindow* window = [controller_ window];
-  [window performClose:controller_];
+  // performClose: contains a nested message loop which can cause reentrancy
+  // if the browser is terminating and closing all the windows.
+  // Use this version that corresponds to protocol of performClose: but does not
+  // spin a nested loop.
+  // TODO(dimich): refactor similar method from BWC and reuse here.
+  if ([controller_ windowShouldClose:window]) {
+    [window orderOut:nil];
+    [window close];
+  }
 }
 
 void PanelCocoa::ActivatePanel() {
@@ -156,10 +164,6 @@ void PanelCocoa::UpdatePanelTitleBar() {
 
 void PanelCocoa::UpdatePanelLoadingAnimations(bool should_animate) {
   [controller_ updateThrobber:should_animate];
-}
-
-void PanelCocoa::NotifyPanelOnUserChangedTheme() {
-  NOTIMPLEMENTED();
 }
 
 void PanelCocoa::PanelWebContentsFocused(content::WebContents* contents) {
@@ -214,8 +218,22 @@ void PanelCocoa::HandlePanelKeyboardEvent(
   [event_window redispatchKeyEvent:event.os_event];
 }
 
-void PanelCocoa::FullScreenModeChanged(
-    bool is_full_screen) {
+void PanelCocoa::FullScreenModeChanged(bool is_full_screen) {
+  if (!is_shown_) {
+    // If the panel window is not shown due to that a Chrome tab window is in
+    // fullscreen mode when the panel is being created, we need to show the
+    // panel window now. In addition, its titlebar needs to be updated since it
+    // is not done at the panel creation time.
+    if (!is_full_screen) {
+      ShowPanelInactive();
+      UpdatePanelTitleBar();
+    }
+
+    // No need to proceed when the panel window was not shown previously.
+    // We either show the panel window or do not show it depending on current
+    // full screen state.
+    return;
+  }
   [controller_ fullScreenModeChanged:is_full_screen];
 }
 
@@ -228,6 +246,7 @@ void PanelCocoa::SetPanelAlwaysOnTop(bool on_top) {
     return;
   always_on_top_ = on_top;
   [controller_ updateWindowLevel];
+  [controller_ updateWindowCollectionBehavior];
 }
 
 void PanelCocoa::EnableResizeByMouse(bool enable) {
@@ -242,6 +261,15 @@ void PanelCocoa::SetWindowCornerStyle(panel::CornerStyle corner_style) {
   corner_style_ = corner_style;
 
   // TODO(dimich): investigate how to support it on Mac.
+}
+
+void PanelCocoa::MinimizePanelBySystem() {
+  NOTIMPLEMENTED();
+}
+
+bool PanelCocoa::IsPanelMinimizedBySystem() const {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 void PanelCocoa::PanelExpansionStateChanging(

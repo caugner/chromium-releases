@@ -117,6 +117,8 @@ class CommandNames {
 
   // Custom Chrome commands:
   static const char kQuitAll[];
+  static const char kGetSessionCapabilities[];
+  static const char kIsLoading[];
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_COMMAND_NAMES_H_

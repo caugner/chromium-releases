@@ -6,6 +6,7 @@
 
 #include "ash/launcher/launcher.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/wm/maximize_bubble_controller.h"
@@ -82,7 +83,7 @@ FrameMaximizeButton::FrameMaximizeButton(views::ButtonListener* listener,
       frame_(frame),
       is_snap_enabled_(false),
       exceeded_drag_threshold_(false),
-      window_(NULL),
+      widget_(NULL),
       press_is_gesture_(false),
       snap_type_(SNAP_NONE),
       bubble_appearance_delay_ms_(kBubbleAppearanceDelayMS) {
@@ -94,8 +95,8 @@ FrameMaximizeButton::~FrameMaximizeButton() {
   // Before the window gets destroyed, the maximizer dialog needs to be shut
   // down since it would otherwise call into a deleted object.
   maximizer_.reset();
-  if (window_)
-    OnWindowDestroying(window_);
+  if (widget_)
+    OnWindowDestroying(widget_->GetNativeWindow());
 }
 
 void FrameMaximizeButton::SnapButtonHovered(SnapType type) {
@@ -169,11 +170,19 @@ void FrameMaximizeButton::OnWindowPropertyChanged(aura::Window* window,
 
 void FrameMaximizeButton::OnWindowDestroying(aura::Window* window) {
   maximizer_.reset();
-  if (window_) {
-    CHECK_EQ(window_, window);
-    window_->RemoveObserver(this);
-    window_ = NULL;
+  if (widget_) {
+    CHECK_EQ(widget_->GetNativeWindow(), window);
+    widget_->GetNativeWindow()->RemoveObserver(this);
+    widget_->RemoveObserver(this);
+    widget_ = NULL;
   }
+}
+
+void FrameMaximizeButton::OnWidgetActivationChanged(views::Widget* widget,
+                                                    bool active) {
+  // Upon losing focus, the control bubble should hide.
+  if (!active && maximizer_.get())
+    maximizer_.reset();
 }
 
 bool FrameMaximizeButton::OnMousePressed(const ui::MouseEvent& event) {
@@ -194,9 +203,10 @@ void FrameMaximizeButton::OnMouseEntered(const ui::MouseEvent& event) {
   ImageButton::OnMouseEntered(event);
   if (!maximizer_.get()) {
     DCHECK(GetWidget());
-    if (!window_) {
-      window_ = frame_->GetWidget()->GetNativeWindow();
-      window_->AddObserver(this);
+    if (!widget_) {
+      widget_ = frame_->GetWidget();
+      widget_->GetNativeWindow()->AddObserver(this);
+      widget_->AddObserver(this);
     }
     maximizer_.reset(new MaximizeBubbleController(
         this,
@@ -471,7 +481,7 @@ gfx::Rect FrameMaximizeButton::ScreenBoundsForType(
         item_rect.Inset(-8, -8);
         return item_rect;
       }
-      return launcher->widget()->GetWindowBoundsInScreen();
+      return launcher->shelf_widget()->GetWindowBoundsInScreen();
     }
     case SNAP_RESTORE: {
       const gfx::Rect* restore = GetRestoreBoundsInScreen(window);

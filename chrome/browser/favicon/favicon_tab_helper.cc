@@ -10,6 +10,7 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/favicon_status.h"
@@ -36,7 +37,8 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(FaviconTabHelper);
 
 FaviconTabHelper::FaviconTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())) {
+      profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
+      should_fetch_icons_(true) {
   favicon_handler_.reset(new FaviconHandler(profile_, this,
                                             FaviconHandler::FAVICON));
   if (chrome::kEnableTouchIcon)
@@ -48,6 +50,9 @@ FaviconTabHelper::~FaviconTabHelper() {
 }
 
 void FaviconTabHelper::FetchFavicon(const GURL& url) {
+  if (!should_fetch_icons_)
+    return;
+
   favicon_handler_->FetchFavicon(url);
   if (touch_icon_handler_.get())
     touch_icon_handler_->FetchFavicon(url);
@@ -86,6 +91,10 @@ bool FaviconTabHelper::ShouldDisplayFavicon() {
   if (controller.GetLastCommittedEntry() && controller.GetPendingEntry())
     return true;
 
+  // No favicon on Instant New Tab Pages.
+  if (chrome::search::IsInstantNTP(web_contents()))
+    return false;
+
   content::WebUI* web_ui = web_contents()->GetWebUIForCurrentState();
   if (web_ui)
     return !web_ui->ShouldHideFavicon();
@@ -123,16 +132,18 @@ NavigationEntry* FaviconTabHelper::GetActiveEntry() {
 }
 
 int FaviconTabHelper::StartDownload(const GURL& url, int image_size) {
-  return web_contents()->DownloadFavicon(url, image_size,
-      base::Bind(&FaviconTabHelper::DidDownloadFavicon,
-                 base::Unretained(this)));
+  return web_contents()->DownloadFavicon(
+      url,
+      true,
+      image_size,
+      base::Bind(&FaviconTabHelper::DidDownloadFavicon,base::Unretained(this)));
 }
 
-void FaviconTabHelper::NotifyFaviconUpdated() {
+void FaviconTabHelper::NotifyFaviconUpdated(bool icon_url_changed) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_FAVICON_UPDATED,
       content::Source<WebContents>(web_contents()),
-      content::NotificationService::NoDetails());
+      content::Details<bool>(&icon_url_changed));
   web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
 }
 

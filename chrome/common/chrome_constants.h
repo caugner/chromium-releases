@@ -7,7 +7,7 @@
 #ifndef CHROME_COMMON_CHROME_CONSTANTS_H_
 #define CHROME_COMMON_CHROME_CONSTANTS_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 
 namespace chrome {
 
@@ -67,6 +67,7 @@ extern const base::FilePath::CharType kFirstRunSentinel[];
 extern const base::FilePath::CharType kHistoryFilename[];
 extern const base::FilePath::CharType kJumpListIconDirname[];
 extern const base::FilePath::CharType kLocalStateFilename[];
+extern const base::FilePath::CharType kLocalStorePoolName[];
 extern const base::FilePath::CharType kLoginDataFileName[];
 extern const base::FilePath::CharType kManagedModePolicyFilename[];
 extern const base::FilePath::CharType kMediaCacheDirname[];
@@ -85,7 +86,6 @@ extern const base::FilePath::CharType kThemePackFilename[];
 extern const base::FilePath::CharType kThumbnailsFilename[];
 extern const base::FilePath::CharType kTopSitesFilename[];
 extern const base::FilePath::CharType kWebAppDirname[];
-extern const base::FilePath::CharType kWebDataFilename[];
 
 // File name of the Pepper Flash plugin on different platforms.
 extern const base::FilePath::CharType kPepperFlashPluginFilename[];

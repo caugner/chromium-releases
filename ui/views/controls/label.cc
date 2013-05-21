@@ -11,8 +11,8 @@
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -27,14 +27,16 @@
 
 namespace {
 
-const char kViewClassName[] = "views/Label";
-
 // The padding for the focus border when rendering focused text.
 const int kFocusBorderPadding = 1;
+const int kCachedSizeLimit = 10;
 
 }  // namespace
 
 namespace views {
+
+// static
+const char Label::kViewClassName[] = "views/Label";
 
 Label::Label() {
   Init(string16(), GetDefaultFont());
@@ -53,7 +55,7 @@ Label::~Label() {
 
 void Label::SetFont(const gfx::Font& font) {
   font_ = font;
-  text_size_valid_ = false;
+  ResetCachedSize();
   PreferredSizeChanged();
   SchedulePaint();
 }
@@ -62,7 +64,7 @@ void Label::SetText(const string16& text) {
   if (text == text_)
     return;
   text_ = text;
-  text_size_valid_ = false;
+  ResetCachedSize();
   PreferredSizeChanged();
   SchedulePaint();
 }
@@ -123,7 +125,7 @@ void Label::SetMultiLine(bool multi_line) {
   DCHECK(!multi_line || elide_behavior_ != ELIDE_IN_MIDDLE);
   if (multi_line != is_multi_line_) {
     is_multi_line_ = multi_line;
-    text_size_valid_ = false;
+    ResetCachedSize();
     PreferredSizeChanged();
     SchedulePaint();
   }
@@ -132,7 +134,7 @@ void Label::SetMultiLine(bool multi_line) {
 void Label::SetAllowCharacterBreak(bool allow_character_break) {
   if (allow_character_break != allow_character_break_) {
     allow_character_break_ = allow_character_break;
-    text_size_valid_ = false;
+    ResetCachedSize();
     PreferredSizeChanged();
     SchedulePaint();
   }
@@ -142,7 +144,7 @@ void Label::SetElideBehavior(ElideBehavior elide_behavior) {
   DCHECK(elide_behavior != ELIDE_IN_MIDDLE || !is_multi_line_);
   if (elide_behavior != elide_behavior_) {
     elide_behavior_ = elide_behavior;
-    text_size_valid_ = false;
+    ResetCachedSize();
     PreferredSizeChanged();
     SchedulePaint();
   }
@@ -176,7 +178,7 @@ void Label::SizeToFit(int max_width) {
 void Label::SetHasFocusBorder(bool has_focus_border) {
   has_focus_border_ = has_focus_border;
   if (is_multi_line_) {
-    text_size_valid_ = false;
+    ResetCachedSize();
     PreferredSizeChanged();
   }
 }
@@ -214,8 +216,19 @@ int Label::GetHeightForWidth(int w) {
     return View::GetHeightForWidth(w);
 
   w = std::max(0, w - GetInsets().width());
+
+  for (size_t i = 0; i < cached_heights_.size(); ++i) {
+    const gfx::Size& s = cached_heights_[i];
+    if (s.width() == w)
+      return s.height() + GetInsets().height();
+  }
+
+  int cache_width = w;
+
   int h = font_.GetHeight();
   gfx::Canvas::SizeStringInt(text_, font_, &w, &h, ComputeDrawStringFlags());
+  cached_heights_[cached_heights_cursor_] = gfx::Size(cache_width, h);
+  cached_heights_cursor_ = (cached_heights_cursor_ + 1) % kCachedSizeLimit;
   return h + GetInsets().height();
 }
 
@@ -321,7 +334,6 @@ gfx::Font Label::GetDefaultFont() {
 
 void Label::Init(const string16& text, const gfx::Font& font) {
   font_ = font;
-  text_size_valid_ = false;
   enabled_color_set_ = disabled_color_set_ = background_color_set_ = false;
   auto_color_readability_ = true;
   UpdateColorsFromTheme(ui::NativeTheme::instance());
@@ -336,6 +348,8 @@ void Label::Init(const string16& text, const gfx::Font& font) {
   disabled_shadow_color_ = 0;
   shadow_offset_.SetPoint(1, 1);
   has_shadow_ = false;
+  cached_heights_.resize(kCachedSizeLimit);
+  ResetCachedSize();
 
   SetText(text);
 }
@@ -469,6 +483,13 @@ void Label::UpdateColorsFromTheme(const ui::NativeTheme* theme) {
         ui::NativeTheme::kColorId_LabelBackgroundColor);
   }
   RecalculateColors();
+}
+
+void Label::ResetCachedSize() {
+  text_size_valid_ = false;
+  cached_heights_cursor_ = 0;
+  for (int i = 0; i < kCachedSizeLimit; ++i)
+    cached_heights_[i] = gfx::Size();
 }
 
 }  // namespace views

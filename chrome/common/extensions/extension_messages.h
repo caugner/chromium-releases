@@ -30,6 +30,24 @@
 
 IPC_ENUM_TRAITS(chrome::ViewType)
 
+// Parameters structure for ExtensionHostMsg_AddDOMActionToActivityLog.
+IPC_STRUCT_BEGIN(ExtensionHostMsg_DOMAction_Params)
+  // URL of the page.
+  IPC_STRUCT_MEMBER(GURL, url)
+
+  // Title of the page.
+  IPC_STRUCT_MEMBER(string16, url_title)
+
+  // API name.
+  IPC_STRUCT_MEMBER(std::string, api_call)
+
+  // List of arguments.
+  IPC_STRUCT_MEMBER(ListValue, arguments)
+
+  // Extra logging information.
+  IPC_STRUCT_MEMBER(std::string, extra)
+IPC_STRUCT_END()
+
 // Parameters structure for ExtensionHostMsg_Request.
 IPC_STRUCT_BEGIN(ExtensionHostMsg_Request_Params)
   // Message name.
@@ -335,21 +353,21 @@ IPC_MESSAGE_CONTROL3(ExtensionMsg_UsingWebRequestAPI,
                      bool /* adblock_plus */,
                      bool /* other_webrequest */)
 
-// Ask the lazy background page if it is ready to unload. This is sent when the
-// page is considered idle. The renderer will reply with the same sequence_id
-// so that we can tell which message it is responding to.
-IPC_MESSAGE_CONTROL2(ExtensionMsg_ShouldUnload,
+// Ask the lazy background page if it is ready to be suspended. This is sent
+// when the page is considered idle. The renderer will reply with the same
+// sequence_id so that we can tell which message it is responding to.
+IPC_MESSAGE_CONTROL2(ExtensionMsg_ShouldSuspend,
                      std::string /* extension_id */,
                      int /* sequence_id */)
 
-// If we complete a round of ShouldUnload->ShouldUnloadAck messages without the
-// lazy background page becoming active again, we are ready to unload. This
-// message tells the page to dispatch the unload event.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_Unload,
+// If we complete a round of ShouldSuspend->ShouldSuspendAck messages without
+// the lazy background page becoming active again, we are ready to unload. This
+// message tells the page to dispatch the suspend event.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_Suspend,
                      std::string /* extension_id */)
 
-// The browser changed its mind about unloading this extension.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_CancelUnload,
+// The browser changed its mind about suspending this extension.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_CancelSuspend,
                      std::string /* extension_id */)
 
 // Send to renderer once the installation mentioned on
@@ -358,12 +376,6 @@ IPC_MESSAGE_ROUTED3(ExtensionMsg_InlineWebstoreInstallResponse,
                     int32 /* install id */,
                     bool /* whether the install was successful */,
                     std::string /* error */)
-
-// Response to the renderer for ExtensionHostMsg_GetAppNotifyChannel.
-IPC_MESSAGE_ROUTED3(ExtensionMsg_GetAppNotifyChannelResponse,
-                    std::string /* channel_id */,
-                    std::string /* error */,
-                    int32 /* callback_id */)
 
 // Response to the renderer for ExtensionHostMsg_GetAppInstallState.
 IPC_MESSAGE_ROUTED2(ExtensionMsg_GetAppInstallStateResponse,
@@ -386,7 +398,7 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_DeliverMessage,
 // Dispatch the Port.onDisconnect event for message channels.
 IPC_MESSAGE_ROUTED2(ExtensionMsg_DispatchOnDisconnect,
                     int /* port_id */,
-                    bool /* connection_error */)
+                    std::string /* error_message */)
 
 // Informs the renderer what channel (dev, beta, stable, etc) is running.
 IPC_MESSAGE_CONTROL1(ExtensionMsg_SetChannel,
@@ -498,7 +510,7 @@ IPC_MESSAGE_ROUTED2(ExtensionHostMsg_PostMessage,
 // by ViewHostMsg_OpenChannelTo*.
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_CloseChannel,
                      int /* port_id */,
-                     bool /* connection_error */)
+                     std::string /* error_message */)
 
 // Used to get the extension message bundle.
 IPC_SYNC_MESSAGE_CONTROL1_1(ExtensionHostMsg_GetMessageBundle,
@@ -529,24 +541,12 @@ IPC_MESSAGE_ROUTED2(ExtensionHostMsg_DidGetApplicationInfo,
                     int32 /* page_id */,
                     WebApplicationInfo)
 
-// Sent by the renderer to implement chrome.app.install().
-IPC_MESSAGE_ROUTED1(ExtensionHostMsg_InstallApplication,
-                    WebApplicationInfo)
-
 // Sent by the renderer to implement chrome.webstore.install().
 IPC_MESSAGE_ROUTED4(ExtensionHostMsg_InlineWebstoreInstall,
                     int32 /* install id */,
                     int32 /* return route id */,
                     std::string /* Web Store item ID */,
                     GURL /* requestor URL */)
-
-// Sent by the renderer when an App is requesting permission to send server
-// pushed notifications.
-IPC_MESSAGE_ROUTED4(ExtensionHostMsg_GetAppNotifyChannel,
-                    GURL /* requestor_url */,
-                    std::string /* client_id */,
-                    int32 /* return_route_id */,
-                    int32 /* callback_id */)
 
 // Sent by the renderer when a web page is checking if its app is installed.
 IPC_MESSAGE_ROUTED3(ExtensionHostMsg_GetAppInstallState,
@@ -559,13 +559,13 @@ IPC_MESSAGE_ROUTED3(ExtensionHostMsg_GetAppInstallState,
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_ResponseAck,
                     int /* request_id */)
 
-// Response to ExtensionMsg_ShouldUnload.
-IPC_MESSAGE_CONTROL2(ExtensionHostMsg_ShouldUnloadAck,
+// Response to ExtensionMsg_ShouldSuspend.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_ShouldSuspendAck,
                      std::string /* extension_id */,
                      int /* sequence_id */)
 
-// Response to ExtensionMsg_Unload, after we dispatch the unload event.
-IPC_MESSAGE_CONTROL1(ExtensionHostMsg_UnloadAck,
+// Response to ExtensionMsg_Suspend, after we dispatch the suspend event.
+IPC_MESSAGE_CONTROL1(ExtensionHostMsg_SuspendAck,
                      std::string /* extension_id */)
 
 // Informs the browser to increment the keepalive count for the lazy background
@@ -587,6 +587,11 @@ IPC_MESSAGE_CONTROL1(ExtensionHostMsg_ResumeRequests, int /* route_id */)
 // Sent by the renderer when the draggable regions are updated.
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_UpdateDraggableRegions,
                     std::vector<extensions::DraggableRegion> /* regions */)
+
+// Sent by the renderer to log a DOM action on the extension activity log.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddDOMActionToActivityLog,
+                     std::string /* extension_id */,
+                     ExtensionHostMsg_DOMAction_Params)
 
 // Notifies the browser process that a tab has started or stopped matching
 // certain conditions.  This message is sent in response to several events:

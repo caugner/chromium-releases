@@ -5,7 +5,7 @@
 #include "content/shell/shell_main_delegate.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "content/public/browser/browser_main_runner.h"
@@ -16,9 +16,11 @@
 #include "content/shell/shell_content_renderer_client.h"
 #include "content/shell/shell_switches.h"
 #include "content/shell/webkit_test_platform_support.h"
+#include "content/public/test/layouttest_support.h"
 #include "net/cookies/cookie_monster.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gl/gl_switches.h"
 
 #include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
@@ -41,8 +43,8 @@
 #endif  // OS_MACOSX
 
 #if defined(OS_WIN)
-#include "base/logging_win.h"
 #include <initguid.h>
+#include "base/logging_win.h"
 #endif
 
 namespace {
@@ -92,6 +94,12 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
   // Enable trace control and transport through event tracing for Windows.
   logging::LogEventProvider::Initialize(kContentShellProviderName);
 #endif
+#if defined(OS_MACOSX)
+  // Needs to happen before InitializeResourceBundle() and before
+  // WebKitTestPlatformInitialize() are called.
+  OverrideFrameworkBundlePath();
+  OverrideChildProcessPath();
+#endif  // OS_MACOSX
 
   InitLogging();
   CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -99,9 +107,12 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     command_line.AppendSwitch(switches::kAllowFileAccessFromFiles);
     command_line.AppendSwitchASCII(
         switches::kUseGL, gfx::kGLImplementationOSMesaName);
-    command_line.AppendSwitch(switches::kIgnoreGpuBlacklist);
+    SetAllowOSMesaImageTransportForTesting();
+    command_line.AppendSwitch(switches::kSkipGpuDataLoading);
     command_line.AppendSwitch(switches::kEnableExperimentalWebKitFeatures);
     command_line.AppendSwitch(switches::kEnableCssShaders);
+    command_line.AppendSwitchASCII(switches::kTouchEvents,
+                                   switches::kTouchEventsEnabled);
     if (command_line.HasSwitch(switches::kEnableSoftwareCompositing))
       command_line.AppendSwitch(switches::kEnableSoftwareCompositingGLAdapter);
 
@@ -117,10 +128,6 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 }
 
 void ShellMainDelegate::PreSandboxStartup() {
-#if defined(OS_MACOSX)
-  OverrideFrameworkBundlePath();
-  OverrideChildProcessPath();
-#endif  // OS_MACOSX
   InitializeResourceBundle();
 }
 

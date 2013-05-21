@@ -12,7 +12,6 @@
 #include "ash/wm/workspace/frame_maximize_button.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "base/command_line.h"
-#include "ui/aura/aura_switches.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/test/event_generator.h"
@@ -152,8 +151,15 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonToggleMaximize) {
   widget->Close();
 }
 
+#if defined(OS_WIN)
+// RootWindow and Display can't resize on Windows Ash. http://crbug.com/165962
+#define MAYBE_ResizeButtonDrag DISABLED_ResizeButtonDrag
+#else
+#define MAYBE_ResizeButtonDrag ResizeButtonDrag
+#endif
+
 // Tests that click+dragging on the resize-button tiles or minimizes the window.
-TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
+TEST_F(CustomFrameViewAshTest, MAYBE_ResizeButtonDrag) {
   views::Widget* widget = CreateWidget();
   aura::Window* window = widget->GetNativeWindow();
   CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
@@ -266,9 +272,19 @@ TEST_F(CustomFrameViewAshTest, ResizeButtonDrag) {
   widget->Close();
 }
 
+#if defined(OS_WIN)
+// RootWindow and Display can't resize on Windows Ash. http://crbug.com/165962
+#define MAYBE_TouchDragResizeCloseToCornerDiffersFromMouse \
+        DISABLED_TouchDragResizeCloseToCornerDiffersFromMouse
+#else
+#define MAYBE_TouchDragResizeCloseToCornerDiffersFromMouse \
+        TouchDragResizeCloseToCornerDiffersFromMouse
+#endif
+
 // Tests Left/Right snapping with resize button touch dragging - which should
 // trigger dependent on the available drag distance.
-TEST_F(CustomFrameViewAshTest, TouchDragResizeCloseToCornerDiffersFromMouse) {
+TEST_F(CustomFrameViewAshTest,
+       MAYBE_TouchDragResizeCloseToCornerDiffersFromMouse) {
   views::Widget* widget = CreateWidget();
   aura::Window* window = widget->GetNativeWindow();
   CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
@@ -345,6 +361,29 @@ TEST_F(CustomFrameViewAshTest, MaximizeButtonExternalShutDown) {
   // Even though the widget is closing the bubble menu should not crash upon
   // its delayed destruction.
   widget->CloseNow();
+}
+
+// Test that maximizing the browser after hovering in does not crash the system
+// when the observer gets removed in the bubble destruction process.
+TEST_F(CustomFrameViewAshTest, MaximizeOnHoverThenClick) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  ash::FrameMaximizeButton* maximize_button = test.maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_TRUE(ash::wm::IsWindowNormal(window));
+
+  // Move the mouse cursor over the button to bring up the maximizer bubble.
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+  generator.ClickLeftButton();
+  EXPECT_TRUE(ash::wm::IsWindowMaximized(window));
 }
 
 // Test that hovering over a button in the balloon dialog will show the phantom

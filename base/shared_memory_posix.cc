@@ -42,20 +42,20 @@ LazyInstance<Lock>::Leaky g_thread_lock_ = LAZY_INSTANCE_INITIALIZER;
 
 SharedMemory::SharedMemory()
     : mapped_file_(-1),
-      mapped_size_(0),
       inode_(0),
+      mapped_size_(0),
       memory_(NULL),
       read_only_(false),
-      created_size_(0) {
+      requested_size_(0) {
 }
 
 SharedMemory::SharedMemory(SharedMemoryHandle handle, bool read_only)
     : mapped_file_(handle.fd),
-      mapped_size_(0),
       inode_(0),
+      mapped_size_(0),
       memory_(NULL),
       read_only_(read_only),
-      created_size_(0) {
+      requested_size_(0) {
   struct stat st;
   if (fstat(handle.fd, &st) == 0) {
     // If fstat fails, then the file descriptor is invalid and we'll learn this
@@ -67,11 +67,11 @@ SharedMemory::SharedMemory(SharedMemoryHandle handle, bool read_only)
 SharedMemory::SharedMemory(SharedMemoryHandle handle, bool read_only,
                            ProcessHandle process)
     : mapped_file_(handle.fd),
-      mapped_size_(0),
       inode_(0),
+      mapped_size_(0),
       memory_(NULL),
       read_only_(read_only),
-      created_size_(0) {
+      requested_size_(0) {
   // We don't handle this case yet (note the ignored parameter); let's die if
   // someone comes calling.
   NOTREACHED();
@@ -164,7 +164,7 @@ bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
         return false;
       }
     }
-    created_size_ = options.size;
+    requested_size_ = options.size;
   }
   if (fp == NULL) {
 #if !defined(OS_MACOSX)
@@ -224,18 +224,14 @@ bool SharedMemory::MapAt(off_t offset, size_t bytes) {
     return false;
 
 #if defined(OS_ANDROID)
+  // On Android, Map can be called with a size and offset of zero to use the
+  // ashmem-determined size.
   if (bytes == 0) {
+    DCHECK_EQ(0, offset);
     int ashmem_bytes = ashmem_get_size_region(mapped_file_);
     if (ashmem_bytes < 0)
       return false;
-
-    DCHECK_GE(static_cast<uint32>(ashmem_bytes), bytes);
-    // The caller wants to determine the map region size from ashmem.
-    bytes = ashmem_bytes - offset;
-    // TODO(port): we set the created size here so that it is available in
-    // transport_dib_android.cc. We should use ashmem_get_size_region()
-    // in transport_dib_android.cc.
-    created_size_ = ashmem_bytes;
+    bytes = ashmem_bytes;
   }
 #endif
 

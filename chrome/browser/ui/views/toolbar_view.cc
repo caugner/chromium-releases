@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/toolbar_view.h"
 
+#include "base/debug/trace_event.h"
 #include "base/i18n/number_formatting.h"
 #include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
@@ -30,6 +31,7 @@
 #include "chrome/browser/ui/views/home_button.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
+#include "chrome/browser/ui/views/outdated_upgrade_bubble_view.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -120,6 +122,22 @@ int location_bar_vert_spacing() {
   return value;
 }
 
+// The buttons to the left of the omnibox are close together.
+int button_spacing() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_DESKTOP:
+        value = kButtonSpacing;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = kButtonSpacing + 3;
+        break;
+    }
+  }
+  return value;
+}
+
 class BadgeImageSource: public gfx::CanvasImageSource {
  public:
   BadgeImageSource(const gfx::ImageSkia& icon, const gfx::ImageSkia& badge)
@@ -186,6 +204,10 @@ ToolbarView::ToolbarView(Browser* browser)
 
   registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                  content::NotificationService::AllSources());
+  if (OutdatedUpgradeBubbleView::IsAvailable()) {
+    registrar_.Add(this, chrome::NOTIFICATION_OUTDATED_INSTALL,
+                   content::NotificationService::AllSources());
+  }
 #if defined(OS_WIN)
   registrar_.Add(this, chrome::NOTIFICATION_CRITICAL_UPGRADE_INSTALLED,
                  content::NotificationService::AllSources());
@@ -262,9 +284,7 @@ void ToolbarView::Init() {
   app_menu_->set_border(NULL);
   app_menu_->EnableCanvasFlippingForRTLUI(true);
   app_menu_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_APP));
-  app_menu_->SetTooltipText(l10n_util::GetStringFUTF16(
-      IDS_APPMENU_TOOLTIP,
-      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  app_menu_->SetTooltipText(l10n_util::GetStringUTF16(IDS_APPMENU_TOOLTIP));
   app_menu_->set_id(VIEW_ID_APP_MENU);
 
   // Add any necessary badges to the menu item based on the system state.
@@ -418,6 +438,7 @@ bool ToolbarView::GetAcceleratorInfo(int id, ui::Accelerator* accel) {
 
 void ToolbarView::OnMenuButtonClicked(views::View* source,
                                       const gfx::Point& point) {
+  TRACE_EVENT0("ui::views", "ToolbarView::OnMenuButtonClicked");
   DCHECK_EQ(VIEW_ID_APP_MENU, source->id());
 
   bool use_new_menu = false;
@@ -546,6 +567,9 @@ void ToolbarView::Observe(int type,
     case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
       UpdateAppMenuState();
       break;
+    case chrome::NOTIFICATION_OUTDATED_INSTALL:
+      ShowOutdatedInstallNotification();
+      break;
 #if defined(OS_WIN)
     case chrome::NOTIFICATION_CRITICAL_UPGRADE_INSTALLED:
       ShowCriticalNotification();
@@ -561,46 +585,6 @@ void ToolbarView::Observe(int type,
 
 bool ToolbarView::GetAcceleratorForCommandId(int command_id,
     ui::Accelerator* accelerator) {
-  // The standard Ctrl-X, Ctrl-V and Ctrl-C are not defined as accelerators
-  // anywhere so we need to check for them explicitly here.
-  // TODO(cpu) Bug 1109102. Query WebKit land for the actual bindings.
-  switch (command_id) {
-    case IDC_CUT:
-      *accelerator = ui::Accelerator(ui::VKEY_X, ui::EF_CONTROL_DOWN);
-      return true;
-    case IDC_COPY:
-      *accelerator = ui::Accelerator(ui::VKEY_C, ui::EF_CONTROL_DOWN);
-      return true;
-    case IDC_PASTE:
-      *accelerator = ui::Accelerator(ui::VKEY_V, ui::EF_CONTROL_DOWN);
-      return true;
-#if defined(USE_ASH)
-    // When USE_ASH is defined, the commands listed here are handled outside
-    // Chrome, in ash/accelerators/accelerator_table.cc (crbug.com/120196).
-    case IDC_CLEAR_BROWSING_DATA:
-      *accelerator = ui::Accelerator(ui::VKEY_BACK,
-                                     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
-      return true;
-    case IDC_NEW_TAB:
-      *accelerator = ui::Accelerator(ui::VKEY_T, ui::EF_CONTROL_DOWN);
-      return true;
-    case IDC_NEW_WINDOW:
-      *accelerator = ui::Accelerator(ui::VKEY_N, ui::EF_CONTROL_DOWN);
-      return true;
-    case IDC_NEW_INCOGNITO_WINDOW:
-      *accelerator = ui::Accelerator(ui::VKEY_N,
-                                     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
-      return true;
-    case IDC_TASK_MANAGER:
-      *accelerator = ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN);
-      return true;
-    case IDC_FEEDBACK:
-      *accelerator = ui::Accelerator(ui::VKEY_I,
-                                     ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN);
-      return true;
-#endif
-  }
-  // Else, we retrieve the accelerator information from the frame.
   return GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
@@ -610,11 +594,11 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
 gfx::Size ToolbarView::GetPreferredSize() {
   if (is_display_mode_normal()) {
     int min_width = kLeftEdgeSpacing +
-        back_->GetPreferredSize().width() + kButtonSpacing +
-        forward_->GetPreferredSize().width() + kButtonSpacing +
+        back_->GetPreferredSize().width() + button_spacing() +
+        forward_->GetPreferredSize().width() + button_spacing() +
         reload_->GetPreferredSize().width() + kStandardSpacing +
         (show_home_button_.GetValue() ?
-            (home_->GetPreferredSize().width() + kButtonSpacing) : 0) +
+            (home_->GetPreferredSize().width() + button_spacing()) : 0) +
         location_bar_->GetPreferredSize().width() +
         browser_actions_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kRightEdgeSpacing;
@@ -668,16 +652,16 @@ void ToolbarView::Layout() {
   else
     back_->SetBounds(kLeftEdgeSpacing, child_y, back_width, child_height);
 
-  forward_->SetBounds(back_->x() + back_->width() + kButtonSpacing,
+  forward_->SetBounds(back_->x() + back_->width() + button_spacing(),
       child_y, forward_->GetPreferredSize().width(), child_height);
 
-  reload_->SetBounds(forward_->x() + forward_->width() + kButtonSpacing,
+  reload_->SetBounds(forward_->x() + forward_->width() + button_spacing(),
       child_y, reload_->GetPreferredSize().width(), child_height);
 
   if (show_home_button_.GetValue()) {
     home_->SetVisible(true);
-    home_->SetBounds(reload_->x() + reload_->width() + kButtonSpacing, child_y,
-                     home_->GetPreferredSize().width(), child_height);
+    home_->SetBounds(reload_->x() + reload_->width() + button_spacing(),
+                     child_y, home_->GetPreferredSize().width(), child_height);
   } else {
     home_->SetVisible(false);
     home_->SetBounds(reload_->x() + reload_->width(), child_y, 0, child_height);
@@ -884,6 +868,11 @@ void ToolbarView::ShowCriticalNotification() {
   views::BubbleDelegateView::CreateBubble(bubble_delegate);
   bubble_delegate->StartFade(true);
 #endif
+}
+
+void ToolbarView::ShowOutdatedInstallNotification() {
+  if (OutdatedUpgradeBubbleView::IsAvailable())
+    OutdatedUpgradeBubbleView::ShowBubble(app_menu_, browser_);
 }
 
 void ToolbarView::UpdateAppMenuState() {

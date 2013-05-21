@@ -12,11 +12,11 @@ namespace cc {
 
 class FakeWebScrollbar : public WebKit::WebScrollbar {
  public:
-  static scoped_ptr<FakeWebScrollbar> create() {
+  static scoped_ptr<FakeWebScrollbar> Create() {
     return make_scoped_ptr(new FakeWebScrollbar());
   }
 
-  void setOverlay(bool isOverlay);
+  void set_overlay(bool is_overlay) { is_overlay_ = is_overlay; }
 
   // WebScrollbar implementation
   virtual bool isOverlay() const OVERRIDE;
@@ -28,7 +28,8 @@ class FakeWebScrollbar : public WebKit::WebScrollbar {
   virtual int totalSize() const OVERRIDE;
   virtual bool isScrollViewScrollbar() const OVERRIDE;
   virtual bool isScrollableAreaActive() const OVERRIDE;
-  virtual void getTickmarks(WebKit::WebVector<WebKit::WebRect>&) const OVERRIDE {}
+  virtual void getTickmarks(WebKit::WebVector<WebKit::WebRect>& tickmarks) const
+      OVERRIDE {}
   virtual ScrollbarControlSize controlSize() const OVERRIDE;
   virtual ScrollbarPart pressedPart() const OVERRIDE;
   virtual ScrollbarPart hoveredPart() const OVERRIDE;
@@ -39,7 +40,7 @@ class FakeWebScrollbar : public WebKit::WebScrollbar {
  private:
   FakeWebScrollbar();
 
-  bool m_isOverlay;
+  bool is_overlay_;
 };
 
 }  // namespace cc

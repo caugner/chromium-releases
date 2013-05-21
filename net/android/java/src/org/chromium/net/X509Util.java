@@ -6,14 +6,20 @@ package org.chromium.net;
 
 import android.util.Log;
 
+import org.chromium.net.CertVerifyResultAndroid;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
+import java.security.cert.CertificateExpiredException;
+import java.security.cert.CertificateNotYetValidException;
 import java.security.cert.CertificateFactory;
+import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
+import java.util.List;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -24,6 +30,14 @@ public class X509Util {
     private static final String TAG = X509Util.class.getName();
 
     private static CertificateFactory sCertificateFactory;
+
+    private static final String OID_TLS_SERVER_AUTH = "1.3.6.1.5.5.7.3.1";
+    private static final String OID_ANY_EKU = "2.5.29.37.0";
+    // Server-Gated Cryptography (necessary to support a few legacy issuers):
+    //    Netscape:
+    private static final String OID_SERVER_GATED_NETSCAPE = "2.16.840.1.113730.4.1";
+    //    Microsoft:
+    private static final String OID_SERVER_GATED_MICROSOFT = "1.3.6.1.4.1.311.10.3.3";
 
     /**
      * Trust manager backed up by the read-only system certificate store.
@@ -107,7 +121,7 @@ public class X509Util {
             KeyStoreException, NoSuchAlgorithmException {
         ensureInitialized();
         X509Certificate rootCert = createCertificateFromBytes(rootCertBytes);
-        synchronized(sLock) {
+        synchronized (sLock) {
             sTestKeyStore.setCertificateEntry(
                     "root_cert_" + Integer.toString(sTestKeyStore.size()), rootCert);
             reloadTestTrustManager();
@@ -117,45 +131,95 @@ public class X509Util {
     public static void clearTestRootCertificates() throws NoSuchAlgorithmException,
             CertificateException, KeyStoreException {
         ensureInitialized();
-        synchronized(sLock) {
+        synchronized (sLock) {
             try {
                 sTestKeyStore.load(null);
                 reloadTestTrustManager();
-            } catch(IOException e) {}  // No IO operation is attempted.
+            } catch (IOException e) {}  // No IO operation is attempted.
         }
     }
 
-    public static boolean verifyServerCertificates(byte[][] certChain, String authType)
-            throws CertificateException, KeyStoreException, NoSuchAlgorithmException {
+    /**
+     * If an EKU extension is present in the end-entity certificate, it MUST contain either the
+     * anyEKU or serverAuth or netscapeSGC or Microsoft SGC EKUs.
+     *
+     * @return true if there is no EKU extension or if any of the EKU extensions is one of the valid
+     * OIDs for web server certificates.
+     *
+     * TODO(palmer): This can be removed after the equivalent change is made to the Android default
+     * TrustManager and that change is shipped to a large majority of Android users.
+     */
+    static boolean verifyKeyUsage(X509Certificate certificate) throws CertificateException {
+        List<String> ekuOids = certificate.getExtendedKeyUsage();
+        if (ekuOids == null)
+            return true;
+
+        for (String ekuOid : ekuOids) {
+            if (ekuOid.equals(OID_TLS_SERVER_AUTH) ||
+                ekuOid.equals(OID_ANY_EKU) ||
+                ekuOid.equals(OID_SERVER_GATED_NETSCAPE) ||
+                ekuOid.equals(OID_SERVER_GATED_MICROSOFT)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static int verifyServerCertificates(byte[][] certChain, String authType)
+            throws KeyStoreException, NoSuchAlgorithmException {
         if (certChain == null || certChain.length == 0 || certChain[0] == null) {
             throw new IllegalArgumentException("Expected non-null and non-empty certificate " +
                     "chain passed as |certChain|. |certChain|=" + certChain);
         }
 
-        ensureInitialized();
+        try {
+            ensureInitialized();
+        } catch (CertificateException e) {
+            return CertVerifyResultAndroid.VERIFY_FAILED;
+        }
+
         X509Certificate[] serverCertificates = new X509Certificate[certChain.length];
-        for (int i = 0; i < certChain.length; ++i) {
-            serverCertificates[i] = createCertificateFromBytes(certChain[i]);
+        try {
+            for (int i = 0; i < certChain.length; ++i) {
+                serverCertificates[i] = createCertificateFromBytes(certChain[i]);
+            }
+        } catch (CertificateException e) {
+            return CertVerifyResultAndroid.VERIFY_UNABLE_TO_PARSE;
+        }
+
+        // Expired and not yet valid certificates would be rejected by the trust managers, but the
+        // trust managers report all certificate errors using the general CertificateException. In
+        // order to get more granular error information, cert validity time range is being checked
+        // separately.
+        try {
+            serverCertificates[0].checkValidity();
+            if (!verifyKeyUsage(serverCertificates[0]))
+                return CertVerifyResultAndroid.VERIFY_FAILED;
+        } catch (CertificateExpiredException e) {
+            return CertVerifyResultAndroid.VERIFY_EXPIRED;
+        } catch (CertificateNotYetValidException e) {
+            return CertVerifyResultAndroid.VERIFY_NOT_YET_VALID;
+        } catch (CertificateException e) {
+            return CertVerifyResultAndroid.VERIFY_FAILED;
         }
 
         synchronized (sLock) {
             try {
                 sDefaultTrustManager.checkServerTrusted(serverCertificates, authType);
-                return true;
+                return CertVerifyResultAndroid.VERIFY_OK;
             } catch (CertificateException eDefaultManager) {
                 try {
                     sTestTrustManager.checkServerTrusted(serverCertificates, authType);
-                    return true;
+                    return CertVerifyResultAndroid.VERIFY_OK;
                 } catch (CertificateException eTestManager) {
-                    /*
-                     *  Neither of the trust managers confirms the validity of the certificate
-                     *  chain, we emit the error message returned by the system trust manager.
-                     */
-                    Log.i(TAG, "failed to validate the certificate chain, error: " +
-                               eDefaultManager.getMessage());
+                    // Neither of the trust managers confirms the validity of the certificate chain,
+                    // log the error message returned by the system trust manager.
+                    Log.i(TAG, "Failed to validate the certificate chain, error: " +
+                              eDefaultManager.getMessage());
+                    return CertVerifyResultAndroid.VERIFY_NO_TRUSTED_ROOT;
                 }
             }
         }
-        return false;
     }
 }

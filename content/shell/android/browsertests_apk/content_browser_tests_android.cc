@@ -13,14 +13,16 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_tokenizer.h"
 #include "content/public/app/android_library_loader_hooks.h"
 #include "content/public/app/content_main.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/test/test_launcher.h"
 #include "content/shell/android/shell_jni_registrar.h"
 #include "content/shell/shell_main_delegate.h"
 #include "content/test/browser_test_message_pump_android.h"
@@ -69,12 +71,17 @@ static void RunTests(JNIEnv* env,
   int argc = ArgsToArgv(args, &argv);
 
   // Fully initialize command line with arguments.
-  CommandLine::ForCurrentProcess()->AppendArguments(
-      CommandLine(argc, &argv[0]), false);
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  command_line->AppendArguments(CommandLine(argc, &argv[0]), false);
+
+  // Append required switches.
+  command_line->AppendSwitch(content::kSingleProcessTestsFlag);
+  command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
 
   // Create fifo and redirect stdout and stderr to it.
-  FilePath files_dir(base::android::ConvertJavaStringToUTF8(env, jfiles_dir));
-  FilePath fifo_path(files_dir.Append(FilePath("test.fifo")));
+  base::FilePath files_dir(
+      base::android::ConvertJavaStringToUTF8(env, jfiles_dir));
+  base::FilePath fifo_path(files_dir.Append(base::FilePath("test.fifo")));
   CreateFIFO(fifo_path.value().c_str());
   RedirectStream(stdout, fifo_path.value().c_str(), "w");
   dup2(STDOUT_FILENO, STDERR_FILENO);

@@ -17,7 +17,7 @@
 #include "ipc/ipc_platform_file.h"
 #include "media/video/capture/screen/screen_capturer.h"
 #include "media/video/capture/screen/shared_buffer.h"
-#include "remoting/host/mouse_move_observer.h"
+#include "remoting/host/client_session_control.h"
 #include "remoting/host/ui_strings.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "third_party/skia/include/core/SkRect.h"
@@ -33,11 +33,13 @@ namespace remoting {
 class AudioCapturer;
 class AudioPacket;
 class AutoThreadTaskRunner;
+class DesktopEnvironment;
 class DesktopEnvironmentFactory;
 class DisconnectWindow;
-class EventExecutor;
-class LocalInputMonitor;
+class InputInjector;
 class RemoteInputFilter;
+class ScreenControls;
+class ScreenResolution;
 
 namespace protocol {
 class InputEventTracker;
@@ -48,8 +50,8 @@ class InputEventTracker;
 class DesktopSessionAgent
     : public base::RefCountedThreadSafe<DesktopSessionAgent>,
       public IPC::Listener,
-      public MouseMoveObserver,
-      public media::ScreenCapturer::Delegate {
+      public media::ScreenCapturer::Delegate,
+      public ClientSessionControl {
  public:
   class Delegate {
    public:
@@ -74,9 +76,6 @@ class DesktopSessionAgent
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
-
-  // MouseMoveObserver implementation.
-  virtual void OnLocalMouseMoved(const SkIPoint& new_pos) OVERRIDE;
 
   // media::ScreenCapturer::Delegate implementation.
   virtual scoped_refptr<media::SharedBuffer> CreateSharedBuffer(
@@ -115,6 +114,12 @@ class DesktopSessionAgent
   friend class base::RefCountedThreadSafe<DesktopSessionAgent>;
   virtual ~DesktopSessionAgent();
 
+  // ClientSessionControl interface.
+  virtual const std::string& client_jid() const OVERRIDE;
+  virtual void DisconnectSession() OVERRIDE;
+  virtual void OnLocalMouseMoved(const SkIPoint& position) OVERRIDE;
+  virtual void SetDisableInputs(bool disable_inputs) OVERRIDE;
+
   // Creates a connected IPC channel to be used to access the screen/audio
   // recorders and input stubs.
   virtual bool CreateChannelForNetworkProcess(
@@ -122,7 +127,8 @@ class DesktopSessionAgent
       scoped_ptr<IPC::ChannelProxy>* server_out) = 0;
 
   // Handles StartSessionAgent request from the client.
-  void OnStartSessionAgent(const std::string& authenticated_jid);
+  void OnStartSessionAgent(const std::string& authenticated_jid,
+                           const ScreenResolution& resolution);
 
   // Handles CaptureFrame requests from the client.
   void OnCaptureFrame();
@@ -138,8 +144,9 @@ class DesktopSessionAgent
   void OnInjectKeyEvent(const std::string& serialized_event);
   void OnInjectMouseEvent(const std::string& serialized_event);
 
-  // Sends DisconnectSession request to the host.
-  void DisconnectSession();
+  // Handles ChromotingNetworkDesktopMsg_SetScreenResolution request from
+  // the client.
+  void SetScreenResolution(const ScreenResolution& resolution);
 
   // Sends a message to the network process.
   void SendToNetwork(IPC::Message* message);
@@ -204,23 +211,30 @@ class DesktopSessionAgent
   // Captures audio output.
   scoped_ptr<AudioCapturer> audio_capturer_;
 
+  std::string client_jid_;
+
+  // Used to disable callbacks to |this|.
+  base::WeakPtrFactory<ClientSessionControl> control_factory_;
+
   base::WeakPtr<Delegate> delegate_;
+
+  // The DesktopEnvironment instance used by this agent.
+  scoped_ptr<DesktopEnvironment> desktop_environment_;
 
   // Provides a user interface allowing the local user to close the connection.
   scoped_ptr<DisconnectWindow> disconnect_window_;
 
   // Executes keyboard, mouse and clipboard events.
-  scoped_ptr<EventExecutor> event_executor_;
-
-  // Monitor local inputs to allow remote inputs to be blocked while the local
-  // user is trying to do something.
-  scoped_ptr<LocalInputMonitor> local_input_monitor_;
+  scoped_ptr<InputInjector> input_injector_;
 
   // Tracker used to release pressed keys and buttons when disconnecting.
   scoped_ptr<protocol::InputEventTracker> input_tracker_;
 
   // Filter used to disable remote inputs during local input activity.
   scoped_ptr<RemoteInputFilter> remote_input_filter_;
+
+  // Used to apply client-requested changes in screen resolution.
+  scoped_ptr<ScreenControls> screen_controls_;
 
   // IPC channel connecting the desktop process with the network process.
   scoped_ptr<IPC::ChannelProxy> network_channel_;

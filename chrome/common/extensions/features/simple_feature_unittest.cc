@@ -74,19 +74,22 @@ TEST_F(ExtensionSimpleFeatureTest, IsAvailableNullCase) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, Whitelist) {
+  const std::string kIdFoo("fooabbbbccccddddeeeeffffgggghhhh");
+  const std::string kIdBar("barabbbbccccddddeeeeffffgggghhhh");
+  const std::string kIdBaz("bazabbbbccccddddeeeeffffgggghhhh");
   SimpleFeature feature;
-  feature.whitelist()->insert("foo");
-  feature.whitelist()->insert("bar");
+  feature.whitelist()->insert(kIdFoo);
+  feature.whitelist()->insert(kIdBar);
 
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
-      "foo", Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
+      kIdFoo, Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
       Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
-      "bar", Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
+      kIdBar, Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
       Feature::UNSPECIFIED_PLATFORM).result());
 
   EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
-      "baz", Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
+      kIdBaz, Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
       Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
       "", Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
@@ -94,7 +97,33 @@ TEST_F(ExtensionSimpleFeatureTest, Whitelist) {
 
   feature.extension_types()->insert(Manifest::TYPE_LEGACY_PACKAGED_APP);
   EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
-      "baz", Manifest::TYPE_LEGACY_PACKAGED_APP,
+      kIdBaz, Manifest::TYPE_LEGACY_PACKAGED_APP,
+      Feature::UNSPECIFIED_LOCATION, -1,
+      Feature::UNSPECIFIED_PLATFORM).result());
+}
+
+TEST_F(ExtensionSimpleFeatureTest, HashedIdWhitelist) {
+  // echo -n "fooabbbbccccddddeeeeffffgggghhhh" |
+  //   sha1sum | tr '[:lower:]' '[:upper:]'
+  const std::string kIdFoo("fooabbbbccccddddeeeeffffgggghhhh");
+  const std::string kIdFooHashed("55BC7228A0D502A2A48C9BB16B07062A01E62897");
+  SimpleFeature feature;
+
+  feature.whitelist()->insert(kIdFooHashed);
+
+  EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
+      kIdFoo, Manifest::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
+      Feature::UNSPECIFIED_PLATFORM).result());
+  EXPECT_NE(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
+      kIdFooHashed, Manifest::TYPE_UNKNOWN,
+      Feature::UNSPECIFIED_LOCATION, -1,
+      Feature::UNSPECIFIED_PLATFORM).result());
+  EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
+      "slightlytoooolongforanextensionid", Manifest::TYPE_UNKNOWN,
+      Feature::UNSPECIFIED_LOCATION, -1,
+      Feature::UNSPECIFIED_PLATFORM).result());
+  EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
+      "tooshortforanextensionid", Manifest::TYPE_UNKNOWN,
       Feature::UNSPECIFIED_LOCATION, -1,
       Feature::UNSPECIFIED_PLATFORM).result());
 }
@@ -127,7 +156,7 @@ TEST_F(ExtensionSimpleFeatureTest, Context) {
   feature.set_min_manifest_version(21);
   feature.set_max_manifest_version(25);
 
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString("name", "test");
   manifest.SetString("version", "1");
   manifest.SetInteger("manifest_version", 21);
@@ -252,7 +281,7 @@ TEST_F(ExtensionSimpleFeatureTest, Version) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, ParseNull) {
-  scoped_ptr<DictionaryValue> value(new DictionaryValue());
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
   scoped_ptr<SimpleFeature> feature(new SimpleFeature());
   feature->Parse(value.get());
   EXPECT_TRUE(feature->whitelist()->empty());
@@ -265,10 +294,10 @@ TEST_F(ExtensionSimpleFeatureTest, ParseNull) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, ParseWhitelist) {
-  scoped_ptr<DictionaryValue> value(new DictionaryValue());
-  ListValue* whitelist = new ListValue();
-  whitelist->Append(Value::CreateStringValue("foo"));
-  whitelist->Append(Value::CreateStringValue("bar"));
+  scoped_ptr<base::DictionaryValue> value(new DictionaryValue());
+  base::ListValue* whitelist = new base::ListValue();
+  whitelist->Append(new base::StringValue("foo"));
+  whitelist->Append(new base::StringValue("bar"));
   value->Set("whitelist", whitelist);
   scoped_ptr<SimpleFeature> feature(new SimpleFeature());
   feature->Parse(value.get());
@@ -278,13 +307,13 @@ TEST_F(ExtensionSimpleFeatureTest, ParseWhitelist) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, ParsePackageTypes) {
-  scoped_ptr<DictionaryValue> value(new DictionaryValue());
-  ListValue* extension_types = new ListValue();
-  extension_types->Append(Value::CreateStringValue("extension"));
-  extension_types->Append(Value::CreateStringValue("theme"));
-  extension_types->Append(Value::CreateStringValue("packaged_app"));
-  extension_types->Append(Value::CreateStringValue("hosted_app"));
-  extension_types->Append(Value::CreateStringValue("platform_app"));
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
+  base::ListValue* extension_types = new base::ListValue();
+  extension_types->Append(new base::StringValue("extension"));
+  extension_types->Append(new base::StringValue("theme"));
+  extension_types->Append(new base::StringValue("packaged_app"));
+  extension_types->Append(new base::StringValue("hosted_app"));
+  extension_types->Append(new base::StringValue("platform_app"));
   value->Set("extension_types", extension_types);
   scoped_ptr<SimpleFeature> feature(new SimpleFeature());
   feature->Parse(value.get());
@@ -303,12 +332,12 @@ TEST_F(ExtensionSimpleFeatureTest, ParsePackageTypes) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, ParseContexts) {
-  scoped_ptr<DictionaryValue> value(new DictionaryValue());
-  ListValue* contexts = new ListValue();
-  contexts->Append(Value::CreateStringValue("blessed_extension"));
-  contexts->Append(Value::CreateStringValue("unblessed_extension"));
-  contexts->Append(Value::CreateStringValue("content_script"));
-  contexts->Append(Value::CreateStringValue("web_page"));
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
+  base::ListValue* contexts = new base::ListValue();
+  contexts->Append(new base::StringValue("blessed_extension"));
+  contexts->Append(new base::StringValue("unblessed_extension"));
+  contexts->Append(new base::StringValue("content_script"));
+  contexts->Append(new base::StringValue("web_page"));
   value->Set("contexts", contexts);
   scoped_ptr<SimpleFeature> feature(new SimpleFeature());
   feature->Parse(value.get());
@@ -329,7 +358,7 @@ TEST_F(ExtensionSimpleFeatureTest, ParseContexts) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, ParseLocation) {
-  scoped_ptr<DictionaryValue> value(new DictionaryValue());
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
   value->SetString("location", "component");
   scoped_ptr<SimpleFeature> feature(new SimpleFeature());
   feature->Parse(value.get());
@@ -337,7 +366,7 @@ TEST_F(ExtensionSimpleFeatureTest, ParseLocation) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, ParsePlatform) {
-  scoped_ptr<DictionaryValue> value(new DictionaryValue());
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
   value->SetString("platform", "chromeos");
   scoped_ptr<SimpleFeature> feature(new SimpleFeature());
   feature->Parse(value.get());
@@ -345,7 +374,7 @@ TEST_F(ExtensionSimpleFeatureTest, ParsePlatform) {
 }
 
 TEST_F(ExtensionSimpleFeatureTest, ManifestVersion) {
-  scoped_ptr<DictionaryValue> value(new DictionaryValue());
+  scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
   value->SetInteger("min_manifest_version", 1);
   value->SetInteger("max_manifest_version", 5);
   scoped_ptr<SimpleFeature> feature(new SimpleFeature());
@@ -367,22 +396,22 @@ TEST_F(ExtensionSimpleFeatureTest, Inheritance) {
   SimpleFeature feature2 = feature;
   EXPECT_TRUE(feature2.Equals(feature));
 
-  DictionaryValue definition;
+  base::DictionaryValue definition;
   feature2.Parse(&definition);
   EXPECT_TRUE(feature2.Equals(feature));
 
-  ListValue* whitelist = new ListValue();
-  ListValue* extension_types = new ListValue();
-  ListValue* contexts = new ListValue();
-  whitelist->Append(Value::CreateStringValue("bar"));
-  extension_types->Append(Value::CreateStringValue("extension"));
-  contexts->Append(Value::CreateStringValue("unblessed_extension"));
+  base::ListValue* whitelist = new base::ListValue();
+  base::ListValue* extension_types = new base::ListValue();
+  base::ListValue* contexts = new base::ListValue();
+  whitelist->Append(new base::StringValue("bar"));
+  extension_types->Append(new base::StringValue("extension"));
+  contexts->Append(new base::StringValue("unblessed_extension"));
   definition.Set("whitelist", whitelist);
   definition.Set("extension_types", extension_types);
   definition.Set("contexts", contexts);
   // Can't test location or platform because we only have one value so far.
-  definition.Set("min_manifest_version", Value::CreateIntegerValue(2));
-  definition.Set("max_manifest_version", Value::CreateIntegerValue(3));
+  definition.Set("min_manifest_version", new base::FundamentalValue(2));
+  definition.Set("max_manifest_version", new base::FundamentalValue(3));
 
   feature2.Parse(&definition);
   EXPECT_FALSE(feature2.Equals(feature));
@@ -444,7 +473,7 @@ Feature::AvailabilityResult IsAvailableInChannel(
 
   SimpleFeature feature;
   if (!channel.empty()) {
-    DictionaryValue feature_value;
+    base::DictionaryValue feature_value;
     feature_value.SetString("channel", channel);
     feature.Parse(&feature_value);
   }

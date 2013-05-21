@@ -96,6 +96,9 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
       const ObjectIdSet& ids) OVERRIDE;
   virtual void UnregisterInvalidationHandler(
       InvalidationHandler* handler) OVERRIDE;
+  virtual void AcknowledgeInvalidation(
+      const invalidation::ObjectId& id,
+      const syncer::AckHandle& ack_handle) OVERRIDE;
   virtual void StartSyncingNormally(
       const ModelSafeRoutingInfo& routing_info) OVERRIDE;
   virtual void ConfigureSyncer(
@@ -134,10 +137,6 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
   virtual void OnPassphraseTypeChanged(
       PassphraseType type,
       base::Time explicit_passphrase_time) OVERRIDE;
-
-  // Return the currently active (validated) username for use with syncable
-  // types.
-  const std::string& username_for_share() const;
 
   static int GetDefaultNudgeDelay();
   static int GetPreferencesNudgeDelay();
@@ -235,8 +234,8 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl :
       const syncable::EntryKernelMutation& mutation,
       Cryptographer* cryptographer) const;
 
-  // Open the directory named with username_for_share
-  bool OpenDirectory();
+  // Open the directory named with |username|.
+  bool OpenDirectory(const std::string& username);
 
   // Purge those types from |previously_enabled_types| that are no longer
   // enabled in |currently_enabled_types|.

@@ -6,10 +6,12 @@
 
 #include <algorithm>
 
+#include "grit/ui_resources.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_box_view_delegate.h"
 #include "ui/base/events/event.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 
@@ -22,21 +24,35 @@ const int kIconDimension = 32;
 const int kPreferredWidth = 360;
 const int kPreferredHeight = 48;
 const int kEditHeight = 19;
+const int kMenuButtonDimension = 29;
 
 const SkColor kHintTextColor = SkColorSetRGB(0xA0, 0xA0, 0xA0);
 
 }  // namespace
 
-SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate)
+SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate,
+                             AppListViewDelegate* view_delegate)
     : delegate_(delegate),
       model_(NULL),
+      menu_(view_delegate),
       icon_view_(new views::ImageView),
       search_box_(new views::Textfield),
       contents_view_(NULL) {
   AddChildView(icon_view_);
 
-  search_box_->RemoveBorder();
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+
+#if !defined(OS_CHROMEOS)
+  menu_button_ = new views::MenuButton(NULL, string16(), this, false);
+  menu_button_->set_border(NULL);
+  menu_button_->SetIcon(*rb.GetImageSkiaNamed(IDR_APP_LIST_TOOLS_NORMAL));
+  menu_button_->SetHoverIcon(*rb.GetImageSkiaNamed(IDR_APP_LIST_TOOLS_HOVER));
+  menu_button_->SetPushedIcon(*rb.GetImageSkiaNamed(
+      IDR_APP_LIST_TOOLS_PRESSED));
+  AddChildView(menu_button_);
+#endif
+
+  search_box_->RemoveBorder();
   search_box_->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   search_box_->set_placeholder_text_color(kHintTextColor);
   search_box_->SetController(this);
@@ -72,14 +88,25 @@ void SearchBoxView::Layout() {
   if (rect.IsEmpty())
     return;
 
-  gfx::Size icon_size(kIconDimension, kIconDimension);
   gfx::Rect icon_frame(rect);
-  icon_frame.set_width(icon_size.width() + 2 * kPadding);
+  icon_frame.set_width(kIconDimension + 2 * kPadding);
   icon_view_->SetBoundsRect(icon_frame);
+
+  gfx::Rect menu_button_frame(rect);
+#if !defined(OS_CHROMEOS)
+  menu_button_frame.set_width(kMenuButtonDimension);
+  menu_button_frame.set_x(rect.right() - menu_button_frame.width() - kPadding);
+  menu_button_frame.ClampToCenteredSize(gfx::Size(menu_button_frame.width(),
+                                                  kMenuButtonDimension));
+  menu_button_->SetBoundsRect(menu_button_frame);
+#else
+  menu_button_frame.set_width(0);
+#endif
 
   gfx::Rect edit_frame(rect);
   edit_frame.set_x(icon_frame.right());
-  edit_frame.set_width(rect.width() - icon_frame.width() - kPadding);
+  edit_frame.set_width(
+      rect.width() - icon_frame.width() - kPadding - menu_button_frame.width());
   edit_frame.ClampToCenteredSize(gfx::Size(edit_frame.width(), kEditHeight));
   search_box_->SetBoundsRect(edit_frame);
 }
@@ -95,10 +122,7 @@ void SearchBoxView::UpdateModel() {
   // Temporarily remove from observer to ignore notifications caused by us.
   model_->RemoveObserver(this);
   model_->SetText(search_box_->text());
-
-  gfx::SelectionModel sel;
-  search_box_->GetSelectionModel(&sel);
-  model_->SetSelectionModel(sel);
+  model_->SetSelectionModel(search_box_->GetSelectionModel());
   model_->AddObserver(this);
 }
 
@@ -132,6 +156,11 @@ bool SearchBoxView::HandleKeyEvent(views::Textfield* sender,
     handled = contents_view_->OnKeyPressed(key_event);
 
   return handled;
+}
+
+void SearchBoxView::OnMenuButtonClicked(View* source, const gfx::Point& point) {
+  menu_.RunMenuAt(menu_button_,
+                  menu_button_->GetBoundsInScreen().bottom_right());
 }
 
 void SearchBoxView::IconChanged() {

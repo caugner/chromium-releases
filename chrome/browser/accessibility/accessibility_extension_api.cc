@@ -8,13 +8,13 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/accessibility/accessibility_extension_api_constants.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
@@ -171,7 +171,7 @@ void ExtensionAccessibilityEventRouter::DispatchEvent(
   }
 }
 
-bool SetAccessibilityEnabledFunction::RunImpl() {
+bool AccessibilitySetAccessibilityEnabledFunction::RunImpl() {
   bool enabled;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &enabled));
   ExtensionAccessibilityEventRouter::GetInstance()
@@ -179,7 +179,7 @@ bool SetAccessibilityEnabledFunction::RunImpl() {
   return true;
 }
 
-bool GetFocusedControlFunction::RunImpl() {
+bool AccessibilityGetFocusedControlFunction::RunImpl() {
   // Get the serialized dict from the last focused control and return it.
   // However, if the dict is empty, that means we haven't seen any focus
   // events yet, so return null instead.
@@ -195,7 +195,7 @@ bool GetFocusedControlFunction::RunImpl() {
   return true;
 }
 
-bool GetAlertsForTabFunction::RunImpl() {
+bool AccessibilityGetAlertsForTabFunction::RunImpl() {
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &tab_id));
 

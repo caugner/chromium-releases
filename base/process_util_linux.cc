@@ -683,14 +683,14 @@ bool GetSystemMemoryInfo(SystemMemoryInfoKB* meminfo) {
       break;
     }
   }
-#endif
 
-  // Check for graphics memory data and report if present. Synchronously
-  // reading files in /sys is fast.
+  // Report on Chrome OS GEM object graphics memory. /var/run/debugfs_gpu is a
+  // bind mount into /sys/kernel/debug and synchronously reading the in-memory
+  // files in /sys is fast.
 #if defined(ARCH_CPU_ARM_FAMILY)
-  FilePath geminfo_file("/sys/kernel/debug/dri/0/exynos_gem_objects");
+  FilePath geminfo_file("/var/run/debugfs_gpu/exynos_gem_objects");
 #else
-  FilePath geminfo_file("/sys/kernel/debug/dri/0/i915_gem_objects");
+  FilePath geminfo_file("/var/run/debugfs_gpu/i915_gem_objects");
 #endif
   std::string geminfo_data;
   meminfo->gem_objects = -1;
@@ -718,6 +718,7 @@ bool GetSystemMemoryInfo(SystemMemoryInfoKB* meminfo) {
       meminfo->gem_size += mali_size;
   }
 #endif  // defined(ARCH_CPU_ARM_FAMILY)
+#endif  // defined(OS_CHROMEOS)
 
   return true;
 }
@@ -747,9 +748,9 @@ void OnNoMemory() {
 
 }  // namespace
 
-extern "C" {
-#if !defined(USE_TCMALLOC) && !defined(ADDRESS_SANITIZER) && \
-    !defined(OS_ANDROID) && !defined(THREAD_SANITIZER)
+#if !defined(OS_ANDROID) && !defined(USE_TCMALLOC) && \
+    !defined(ADDRESS_SANITIZER) && !defined(MEMORY_SANITIZER) && \
+    !defined(THREAD_SANITIZER)
 
 extern "C" {
 void* __libc_malloc(size_t size);
@@ -758,7 +759,6 @@ void* __libc_calloc(size_t nmemb, size_t size);
 void* __libc_valloc(size_t size);
 void* __libc_pvalloc(size_t size);
 void* __libc_memalign(size_t alignment, size_t size);
-}  // extern "C"
 
 // Overriding the system memory allocation functions:
 //
@@ -828,8 +828,8 @@ int posix_memalign(void** ptr, size_t alignment, size_t size) {
   return 0;
 }
 
-#endif  // !defined(USE_TCMALLOC)
 }  // extern C
+#endif  // ANDROID, TCMALLOC, *_SANITIZER
 
 void EnableTerminationOnHeapCorruption() {
   // On Linux, there nothing to do AFAIK.

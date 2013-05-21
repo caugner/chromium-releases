@@ -9,18 +9,23 @@
 
 // TODO(kochi): Further split gdata_operations.h and include only necessary
 // headers. http://crbug.com/141469
-// DownloadActionCallback/InitiateUploadParams/ResulmeUploadParams
+// DownloadActionCallback
 #include "chrome/browser/google_apis/base_operations.h"
-#include "chrome/browser/google_apis/gdata_wapi_operations.h"
 
 class Profile;
 
+namespace net {
+class IOBuffer;
+}  // namespace net
+
 namespace google_apis {
 
+class AboutResource;
+class AccountMetadata;
 class AppList;
-class AccountMetadataFeed;
-class ResourceList;
 class OperationRegistry;
+class ResourceEntry;
+class ResourceList;
 
 // Observer interface for DriveServiceInterface.
 class DriveServiceObserver {
@@ -50,13 +55,23 @@ typedef base::Callback<void(GDataErrorCode error,
 
 // Callback used for GetAccountMetadata().
 typedef base::Callback<void(GDataErrorCode error,
-                            scoped_ptr<AccountMetadataFeed> account_metadata)>
+                            scoped_ptr<AccountMetadata> account_metadata)>
     GetAccountMetadataCallback;
 
+// Callback used for GetAboutResource().
+typedef base::Callback<void(GDataErrorCode error,
+                            scoped_ptr<AboutResource> about_resource)>
+    GetAboutResourceCallback;
+
 // Callback used for GetApplicationInfo().
-typedef base::Callback<void(GDataErrorCode erro,
+typedef base::Callback<void(GDataErrorCode error,
                             scoped_ptr<AppList> app_list)>
     GetAppListCallback;
+
+// Callback used for ResumeUpload() and GetUploadStatus().
+typedef base::Callback<void(
+    const UploadRangeResponse& response,
+    scoped_ptr<ResourceEntry> new_entry)> UploadRangeCallback;
 
 // Callback used for AuthorizeApp(). |open_url| is used to open the target
 // file with the authorized app.
@@ -116,11 +131,12 @@ class DriveServiceInterface {
   // Returns the resource id for the root directory.
   virtual std::string GetRootResourceId() const = 0;
 
-  // Fetches a feed from |feed_url|. If this URL is empty, the call will fetch
-  // from the default URL. When |start_changestamp| is 0, the default behavior
-  // is to fetch the resource list feed containing the list of all entries. If
-  // |start_changestamp| > 0, the default is to fetch the change list feed
-  // containing the updates from the specified changestamp.
+  // Fetches a resource list or a change list from |url|. If this URL is
+  // empty, the call will fetch from the default URL. When
+  // |start_changestamp| is 0, the default behavior is to fetch the resource
+  // list containing the list of all entries. If |start_changestamp| > 0, the
+  // default is to fetch the change list containing the updates from the
+  // specified changestamp.
   //
   // |search_query| specifies search query to be sent to the server. It will be
   // used only if |start_changestamp| is 0. If empty string is passed,
@@ -133,7 +149,7 @@ class DriveServiceInterface {
   // Upon completion, invokes |callback| with results on the calling thread.
   // TODO(haruki): Refactor this function: crbug.com/160932
   // |callback| must not be null.
-  virtual void GetResourceList(const GURL& feed_url,
+  virtual void GetResourceList(const GURL& url,
                                int64 start_changestamp,
                                const std::string& search_query,
                                bool shared_with_me,
@@ -153,6 +169,11 @@ class DriveServiceInterface {
   // |callback| must not be null.
   virtual void GetAccountMetadata(
       const GetAccountMetadataCallback& callback) = 0;
+
+  // Gets the about resource information from the server.
+  // Upon completion, invokes |callback| with results on the calling thread.
+  // |callback| must not be null.
+  virtual void GetAboutResource(const GetAboutResourceCallback& callback) = 0;
 
   // Gets the application information from the server.
   // Upon completion, invokes |callback| with results on the calling thread.
@@ -232,15 +253,42 @@ class DriveServiceInterface {
       const DownloadActionCallback& download_action_callback,
       const GetContentCallback& get_content_callback) = 0;
 
-  // Initiates uploading of a document/file.
+  // Initiates uploading of a new document/file.
+  // |content_type| and |content_length| should be the ones of the file to be
+  // uploaded.
   // |callback| must not be null.
-  virtual void InitiateUpload(const InitiateUploadParams& params,
-                              const InitiateUploadCallback& callback) = 0;
+  virtual void InitiateUploadNewFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const InitiateUploadCallback& callback) = 0;
+
+  // Initiates uploading of an existing document/file.
+  // |content_type| and |content_length| should be the ones of the file to be
+  // uploaded.
+  // |callback| must not be null.
+  virtual void InitiateUploadExistingFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const std::string& etag,
+      const InitiateUploadCallback& callback) = 0;
 
   // Resumes uploading of a document/file on the calling thread.
   // |callback| must not be null.
-  virtual void ResumeUpload(const ResumeUploadParams& params,
-                            const UploadRangeCallback& callback) = 0;
+  virtual void ResumeUpload(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 start_position,
+      int64 end_position,
+      int64 content_length,
+      const std::string& content_type,
+      const scoped_refptr<net::IOBuffer>& buf,
+      const UploadRangeCallback& callback) = 0;
 
   // Gets the current status of the uploading to |upload_url| from the server.
   // |upload_mode|, |drive_file_path| and |content_length| should be set to
@@ -256,7 +304,7 @@ class DriveServiceInterface {
   // Authorizes a Drive app with the id |app_id| to open the given file.
   // Upon completion, invokes |callback| with the link to open the file with
   // the provided app. |callback| must not be null.
-  virtual void AuthorizeApp(const GURL& edit_url,
+  virtual void AuthorizeApp(const std::string& resource_id,
                             const std::string& app_id,
                             const AuthorizeAppCallback& callback) = 0;
 };

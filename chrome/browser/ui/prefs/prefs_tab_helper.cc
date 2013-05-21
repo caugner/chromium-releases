@@ -12,12 +12,13 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_font_webkit_names.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_names_util.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -119,16 +120,34 @@ const char* kPrefsToObserve[] = {
 
 const int kPrefsToObserveLength = arraysize(kPrefsToObserve);
 
-// Registers a preference under the path |map_name| for each script used for
-// per-script font prefs.  For example, if |map_name| is "fonts.serif", then
+// Registers a preference under the path |pref_name| for each script used for
+// per-script font prefs.
+// For example, for WEBKIT_WEBPREFS_FONTS_SERIF ("fonts.serif"):
 // "fonts.serif.Arab", "fonts.serif.Hang", etc. are registered.
-void RegisterFontFamilyMap(PrefRegistrySyncable* registry,
-                           const char* map_name,
-                           const std::set<std::string>& fonts_with_defaults) {
-  for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
-    const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
-    std::string pref_name_str = base::StringPrintf("%s.%s", map_name, script);
-    const char* pref_name = pref_name_str.c_str();
+// |fonts_with_defaults| contains all |pref_names| already registered since they
+// have a specified default value.
+void RegisterFontFamilyPrefs(PrefRegistrySyncable* registry,
+                             const std::set<std::string>& fonts_with_defaults) {
+
+  // Expand the font concatenated with script name so this stays at RO memory
+  // rather than allocated in heap.
+  static const char* const kFontFamilyMap[] = {
+#define EXPAND_SCRIPT_FONT(map_name, script_name) map_name "." script_name,
+
+#include "chrome/common/pref_font_script_names-inl.h"
+ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_CURSIVE)
+ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_FANTASY)
+ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_FIXED)
+ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_PICTOGRAPH)
+ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_SANSERIF)
+ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_SERIF)
+ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_STANDARD)
+
+#undef EXPAND_SCRIPT_FONT
+  };
+
+  for (size_t i = 0; i < arraysize(kFontFamilyMap); ++i) {
+    const char* pref_name = kFontFamilyMap[i];
     if (fonts_with_defaults.find(pref_name) == fonts_with_defaults.end()) {
       // We haven't already set a default value for this font preference, so set
       // an empty string as the default.
@@ -138,7 +157,11 @@ void RegisterFontFamilyMap(PrefRegistrySyncable* registry,
   }
 }
 
+#if !defined(OS_ANDROID)
 // Registers |obs| to observe per-script font prefs under the path |map_name|.
+// On android, there's no exposed way to change these prefs, so we can save
+// ~715KB of heap and some startup cycles by avoiding observing these prefs
+// since they will never change.
 void RegisterFontFamilyMapObserver(
     PrefChangeRegistrar* registrar,
     const char* map_name,
@@ -150,6 +173,7 @@ void RegisterFontFamilyMapObserver(
     registrar->Add(pref_name.c_str(), obs);
   }
 }
+#endif  // !defined(OS_ANDROID)
 
 struct FontDefault {
   const char* pref_name;
@@ -387,6 +411,7 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
       pref_change_registrar_.Add(pref_name, webkit_callback);
     }
 
+#if !defined(OS_ANDROID)
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
                                   prefs::kWebKitStandardFontFamilyMap,
                                   webkit_callback);
@@ -408,6 +433,7 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
                                   prefs::kWebKitPictographFontFamilyMap,
                                   webkit_callback);
+#endif  // !defined(OS_ANDROID)
   }
 
   renderer_preferences_util::UpdateFromSystemSettings(
@@ -437,9 +463,9 @@ void PrefsTabHelper::InitIncognitoUserPrefStore(
   // profile.  All preferences that store information about the browsing history
   // or behavior of the user should have this property.
   pref_store->RegisterOverlayPref(prefs::kBrowserWindowPlacement);
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
   pref_store->RegisterOverlayPref(prefs::kProxy);
-#endif
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 }
 
 // static
@@ -539,20 +565,7 @@ void PrefsTabHelper::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   }
 
   // Register font prefs that don't have defaults.
-  RegisterFontFamilyMap(registry, prefs::kWebKitStandardFontFamilyMap,
-                        fonts_with_defaults);
-  RegisterFontFamilyMap(registry, prefs::kWebKitFixedFontFamilyMap,
-                        fonts_with_defaults);
-  RegisterFontFamilyMap(registry, prefs::kWebKitSerifFontFamilyMap,
-                        fonts_with_defaults);
-  RegisterFontFamilyMap(registry, prefs::kWebKitSansSerifFontFamilyMap,
-                        fonts_with_defaults);
-  RegisterFontFamilyMap(registry, prefs::kWebKitCursiveFontFamilyMap,
-                        fonts_with_defaults);
-  RegisterFontFamilyMap(registry, prefs::kWebKitFantasyFontFamilyMap,
-                        fonts_with_defaults);
-  RegisterFontFamilyMap(registry, prefs::kWebKitPictographFontFamilyMap,
-                        fonts_with_defaults);
+  RegisterFontFamilyPrefs(registry, fonts_with_defaults);
 
   registry->RegisterLocalizedIntegerPref(prefs::kWebKitDefaultFontSize,
                                          IDS_DEFAULT_FONT_SIZE,
@@ -576,20 +589,18 @@ void PrefsTabHelper::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   registry->RegisterStringPref(prefs::kRecentlySelectedEncoding,
                                "",
                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  RegisterPrefsToMigrate(registry);
 }
 
-void PrefsTabHelper::MigrateUserPrefs(PrefService* prefs,
-                                      PrefRegistrySyncable* registry) {
-  RegisterPrefsToMigrate(registry);
+void PrefsTabHelper::MigrateUserPrefs(PrefService* prefs) {
   for (int i = 0; i < kPrefsToMigrateLength; ++i) {
     const PrefService::Preference* pref =
         prefs->FindPreference(kPrefNamesToMigrate[i].from);
-    if (!pref) continue;
-    if (!pref->IsDefaultValue()) {
+    if (pref && !pref->IsDefaultValue()) {
       prefs->Set(kPrefNamesToMigrate[i].to, *pref->GetValue());
+      prefs->ClearPref(kPrefNamesToMigrate[i].from);
     }
-    prefs->ClearPref(kPrefNamesToMigrate[i].from);
-    registry->DeprecatedUnregisterPreference(kPrefNamesToMigrate[i].from);
   }
 }
 

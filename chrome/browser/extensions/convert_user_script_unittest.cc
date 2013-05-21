@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -14,6 +14,9 @@
 #include "chrome/browser/extensions/convert_user_script.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest_handler.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
+#include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -27,7 +30,20 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 
 }
 
-TEST(ExtensionFromUserScript, Basic) {
+class ExtensionFromUserScript : public testing::Test {
+ public:
+  virtual void SetUp() OVERRIDE {
+    testing::Test::SetUp();
+    (new ContentScriptsHandler)->Register();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    testing::Test::TearDown();
+    ManifestHandler::ClearRegistryForTesting();
+  }
+};
+
+TEST_F(ExtensionFromUserScript, Basic) {
   base::ScopedTempDir extensions_dir;
   ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
 
@@ -55,8 +71,9 @@ TEST(ExtensionFromUserScript, Basic) {
   EXPECT_EQ("IhCFCg9PMQTAcJdc9ytUP99WME+4yh6aMnM1uupkovo=",
             extension->public_key());
 
-  ASSERT_EQ(1u, extension->content_scripts().size());
-  const UserScript& script = extension->content_scripts()[0];
+  ASSERT_EQ(1u, ContentScriptsInfo::GetContentScripts(extension).size());
+  const UserScript& script =
+      ContentScriptsInfo::GetContentScripts(extension)[0];
   EXPECT_EQ(UserScript::DOCUMENT_IDLE, script.run_location());
   ASSERT_EQ(2u, script.globs().size());
   EXPECT_EQ("http://www.google.com/*", script.globs().at(0));
@@ -74,10 +91,10 @@ TEST(ExtensionFromUserScript, Basic) {
   EXPECT_TRUE(file_util::PathExists(
       extension->path().Append(script.js_scripts()[0].relative_path())));
   EXPECT_TRUE(file_util::PathExists(
-      extension->path().Append(Extension::kManifestFilename)));
+      extension->path().Append(kManifestFilename)));
 }
 
-TEST(ExtensionFromUserScript, NoMetdata) {
+TEST_F(ExtensionFromUserScript, NoMetdata) {
   base::ScopedTempDir extensions_dir;
   ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
 
@@ -105,8 +122,9 @@ TEST(ExtensionFromUserScript, NoMetdata) {
   EXPECT_EQ("k1WxKx54hX6tfl5gQaXD/m4d9QUMwRdXWM4RW+QkWcY=",
             extension->public_key());
 
-  ASSERT_EQ(1u, extension->content_scripts().size());
-  const UserScript& script = extension->content_scripts()[0];
+  ASSERT_EQ(1u, ContentScriptsInfo::GetContentScripts(extension).size());
+  const UserScript& script =
+      ContentScriptsInfo::GetContentScripts(extension)[0];
   ASSERT_EQ(1u, script.globs().size());
   EXPECT_EQ("*", script.globs()[0]);
   EXPECT_EQ(0u, script.exclude_globs().size());
@@ -120,10 +138,10 @@ TEST(ExtensionFromUserScript, NoMetdata) {
   EXPECT_TRUE(file_util::PathExists(
       extension->path().Append(script.js_scripts()[0].relative_path())));
   EXPECT_TRUE(file_util::PathExists(
-      extension->path().Append(Extension::kManifestFilename)));
+      extension->path().Append(kManifestFilename)));
 }
 
-TEST(ExtensionFromUserScript, NotUTF8) {
+TEST_F(ExtensionFromUserScript, NotUTF8) {
   base::ScopedTempDir extensions_dir;
   ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
 
@@ -141,7 +159,7 @@ TEST(ExtensionFromUserScript, NotUTF8) {
   EXPECT_EQ(ASCIIToUTF16("User script must be UTF8 encoded."), error);
 }
 
-TEST(ExtensionFromUserScript, RunAtDocumentStart) {
+TEST_F(ExtensionFromUserScript, RunAtDocumentStart) {
   base::ScopedTempDir extensions_dir;
   ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
 
@@ -169,12 +187,13 @@ TEST(ExtensionFromUserScript, RunAtDocumentStart) {
             extension->public_key());
 
   // Validate run location.
-  ASSERT_EQ(1u, extension->content_scripts().size());
-  const UserScript& script = extension->content_scripts()[0];
+  ASSERT_EQ(1u, ContentScriptsInfo::GetContentScripts(extension).size());
+  const UserScript& script =
+      ContentScriptsInfo::GetContentScripts(extension)[0];
   EXPECT_EQ(UserScript::DOCUMENT_START, script.run_location());
 }
 
-TEST(ExtensionFromUserScript, RunAtDocumentEnd) {
+TEST_F(ExtensionFromUserScript, RunAtDocumentEnd) {
   base::ScopedTempDir extensions_dir;
   ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
 
@@ -202,12 +221,13 @@ TEST(ExtensionFromUserScript, RunAtDocumentEnd) {
             extension->public_key());
 
   // Validate run location.
-  ASSERT_EQ(1u, extension->content_scripts().size());
-  const UserScript& script = extension->content_scripts()[0];
+  ASSERT_EQ(1u, ContentScriptsInfo::GetContentScripts(extension).size());
+  const UserScript& script =
+      ContentScriptsInfo::GetContentScripts(extension)[0];
   EXPECT_EQ(UserScript::DOCUMENT_END, script.run_location());
 }
 
-TEST(ExtensionFromUserScript, RunAtDocumentIdle) {
+TEST_F(ExtensionFromUserScript, RunAtDocumentIdle) {
   base::ScopedTempDir extensions_dir;
   ASSERT_TRUE(extensions_dir.CreateUniqueTempDir());
 
@@ -236,8 +256,9 @@ TEST(ExtensionFromUserScript, RunAtDocumentIdle) {
             extension->public_key());
 
   // Validate run location.
-  ASSERT_EQ(1u, extension->content_scripts().size());
-  const UserScript& script = extension->content_scripts()[0];
+  ASSERT_EQ(1u, ContentScriptsInfo::GetContentScripts(extension).size());
+  const UserScript& script =
+      ContentScriptsInfo::GetContentScripts(extension)[0];
   EXPECT_EQ(UserScript::DOCUMENT_IDLE, script.run_location());
 }
 

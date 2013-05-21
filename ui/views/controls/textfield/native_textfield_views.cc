@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <set>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
@@ -19,9 +20,11 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/range/range.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
@@ -37,12 +40,17 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/controls/textfield/textfield_views_model.h"
+#include "ui/views/drag_utils.h"
 #include "ui/views/ime/input_method.h"
 #include "ui/views/metrics.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
 #include "ui/base/cursor/cursor.h"
+#endif
+
+#if defined(OS_WIN) && defined(USE_AURA)
+#include "base/win/win_util.h"
 #endif
 
 namespace {
@@ -69,8 +77,7 @@ NativeTextfieldViews::NativeTextfieldViews(Textfield* parent)
       initiating_drag_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(cursor_timer_(this)),
       aggregated_clicks_(0),
-      ALLOW_THIS_IN_INITIALIZER_LIST(touch_selection_controller_(
-          TouchSelectionController::create(this))) {
+      touch_selection_controller_(NULL) {
   set_border(text_border_);
 
 #if defined(OS_CHROMEOS)
@@ -96,14 +103,13 @@ bool NativeTextfieldViews::OnMousePressed(const ui::MouseEvent& event) {
   TrackMouseClicks(event);
 
   TextfieldController* controller = textfield_->GetController();
-  if (!(controller && controller->HandleMouseEvent(textfield_, event)) ||
-      // TODO: Remove once NativeTextfield implementations are consolidated to
-      // Textfield.
+  if (!(controller && controller->HandleMouseEvent(textfield_, event)) &&
       !textfield_->OnMousePressed(event)) {
     HandleMousePressEvent(event);
   }
 
   OnAfterUserAction();
+  touch_selection_controller_.reset();
   return true;
 }
 
@@ -157,22 +163,67 @@ void NativeTextfieldViews::OnGestureEvent(ui::GestureEvent* event) {
         SchedulePaint();
       OnAfterUserAction();
       event->SetHandled();
-      return;
-    case ui::ET_GESTURE_DOUBLE_TAP:
-      SelectAll(false);
-      event->SetHandled();
-      return;
+      break;
     case ui::ET_GESTURE_SCROLL_UPDATE:
       OnBeforeUserAction();
       if (MoveCursorTo(event->location(), true))
         SchedulePaint();
       OnAfterUserAction();
       event->SetHandled();
-      return;
-    default:
       break;
+    case ui::ET_GESTURE_TAP:
+      if (event->details().tap_count() == 1) {
+        CreateTouchSelectionControllerAndNotifyIt();
+      } else {
+        OnBeforeUserAction();
+        SelectAll(false);
+        OnAfterUserAction();
+        event->SetHandled();
+      }
+      break;
+    case ui::ET_GESTURE_LONG_PRESS:
+      // If long press happens outside selection, select word and show context
+      // menu (If touch selection is enabled, context menu is shown by the
+      // |touch_selection_controller_|, hence we mark the event handled.
+      // Otherwise, the regular context menu will be shown by views).
+      // If long press happens in selected text and touch drag drop is enabled,
+      // we will turn off touch selection (if one exists) and let views do drag
+      // drop.
+      if (!GetRenderText()->IsPointInSelection(event->location())) {
+        OnBeforeUserAction();
+        model_->SelectWord();
+        touch_selection_controller_.reset(
+            ui::TouchSelectionController::create(this));
+        OnCaretBoundsChanged();
+        SchedulePaint();
+        OnAfterUserAction();
+        if (touch_selection_controller_.get())
+          event->SetHandled();
+      } else if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableTouchDragDrop)) {
+        touch_selection_controller_.reset();
+      } else {
+        if (!touch_selection_controller_.get())
+          CreateTouchSelectionControllerAndNotifyIt();
+        if (touch_selection_controller_.get())
+          event->SetHandled();
+      }
+      return;
+    case ui::ET_GESTURE_LONG_TAP:
+      if (!touch_selection_controller_.get())
+        CreateTouchSelectionControllerAndNotifyIt();
+
+      // If touch selection is enabled, the context menu on long tap will be
+      // shown by the |touch_selection_controller_|, hence we mark the event
+      // handled so views does not try to show context menu on it.
+      if (touch_selection_controller_.get())
+        event->SetHandled();
+      break;
+    default:
+      View::OnGestureEvent(event);
+      return;
   }
-  TouchSelectionClientView::OnGestureEvent(event);
+  PlatformGestureEventHandling(event);
 }
 
 bool NativeTextfieldViews::OnKeyPressed(const ui::KeyEvent& event) {
@@ -246,17 +297,14 @@ int NativeTextfieldViews::OnPerformDrop(const ui::DropTargetEvent& event) {
   event.data().GetString(&text);
   text = GetTextForDisplay(text);
 
-  // We'll delete the current selection for a drag and drop within this view.
-  bool move = initiating_drag_ && !event.IsControlDown() &&
-              event.source_operations() & ui::DragDropTypes::DRAG_MOVE;
+  // Delete the current selection for a drag and drop within this view.
+  const bool move = initiating_drag_ && !event.IsControlDown() &&
+                    event.source_operations() & ui::DragDropTypes::DRAG_MOVE;
   if (move) {
-    gfx::SelectionModel selected;
-    model_->GetSelectionModel(&selected);
     // Adjust the drop destination if it is on or after the current selection.
-    size_t drop_destination = drop_destination_model.caret_pos();
-    drop_destination -=
-        selected.selection().Intersect(ui::Range(0, drop_destination)).length();
-    model_->DeleteSelectionAndInsertTextAt(text, drop_destination);
+    size_t drop = drop_destination_model.caret_pos();
+    drop -= GetSelectedRange().Intersect(ui::Range(0, drop)).length();
+    model_->DeleteSelectionAndInsertTextAt(text, drop);
   } else {
     model_->MoveCursorTo(drop_destination_model);
     // Drop always inserts text even if the textfield is not in insert mode.
@@ -311,6 +359,45 @@ void NativeTextfieldViews::SelectRect(const gfx::Point& start,
   OnAfterUserAction();
 }
 
+void NativeTextfieldViews::MoveCaretTo(const gfx::Point& point) {
+  SelectRect(point, point);
+}
+
+void NativeTextfieldViews::GetSelectionEndPoints(gfx::Rect* p1,
+                                                 gfx::Rect* p2) {
+  gfx::RenderText* render_text = GetRenderText();
+  const gfx::SelectionModel& sel = render_text->selection_model();
+  gfx::SelectionModel start_sel =
+      render_text->GetSelectionModelForSelectionStart();
+  *p1 = render_text->GetCursorBounds(start_sel, true);
+  *p2 = render_text->GetCursorBounds(sel, true);
+}
+
+gfx::Rect NativeTextfieldViews::GetBounds() {
+  return bounds();
+}
+
+gfx::NativeView NativeTextfieldViews::GetNativeView() {
+  return GetWidget()->GetNativeView();
+}
+
+void NativeTextfieldViews::ConvertPointToScreen(gfx::Point* point) {
+  View::ConvertPointToScreen(this, point);
+}
+
+void NativeTextfieldViews::ConvertPointFromScreen(gfx::Point* point) {
+  View::ConvertPointFromScreen(this, point);
+}
+
+bool NativeTextfieldViews::DrawsHandles() {
+  return false;
+}
+
+void NativeTextfieldViews::OpenContextMenu(const gfx::Point anchor) {
+  touch_selection_controller_.reset();
+  ShowContextMenu(anchor, false);
+}
+
 gfx::NativeCursor NativeTextfieldViews::GetCursor(const ui::MouseEvent& event) {
   bool in_selection = GetRenderText()->IsPointInSelection(event.location());
   bool drag_event = event.type() == ui::ET_MOUSE_DRAGGED;
@@ -344,6 +431,12 @@ void NativeTextfieldViews::WriteDragDataForView(views::View* sender,
   DCHECK_NE(ui::DragDropTypes::DRAG_NONE,
             GetDragOperationsForView(sender, press_pt));
   data->SetString(GetSelectedText());
+  scoped_ptr<gfx::Canvas> canvas(
+      views::GetCanvasForDragImage(textfield_->GetWidget(), size()));
+  GetRenderText()->DrawSelectedText(canvas.get());
+  drag_utils::SetDragImageOnDataObject(*canvas, size(),
+                                       press_pt.OffsetFromOrigin(),
+                                       data);
   TextfieldController* controller = textfield_->GetController();
   if (controller)
     controller->OnWriteDragData(data);
@@ -405,19 +498,15 @@ string16 NativeTextfieldViews::GetSelectedText() const {
 }
 
 void NativeTextfieldViews::SelectAll(bool reversed) {
-  OnBeforeUserAction();
   model_->SelectAll(reversed);
   OnCaretBoundsChanged();
   SchedulePaint();
-  OnAfterUserAction();
 }
 
 void NativeTextfieldViews::ClearSelection() {
-  OnBeforeUserAction();
   model_->ClearSelection();
   OnCaretBoundsChanged();
   SchedulePaint();
-  OnAfterUserAction();
 }
 
 void NativeTextfieldViews::UpdateBorder() {
@@ -519,8 +608,8 @@ bool NativeTextfieldViews::IsIMEComposing() const {
   return model_->HasCompositionText();
 }
 
-void NativeTextfieldViews::GetSelectedRange(ui::Range* range) const {
-  *range = GetRenderText()->selection();
+ui::Range NativeTextfieldViews::GetSelectedRange() const {
+  return GetRenderText()->selection();
 }
 
 void NativeTextfieldViews::SelectRange(const ui::Range& range) {
@@ -531,8 +620,8 @@ void NativeTextfieldViews::SelectRange(const ui::Range& range) {
       textfield_, ui::AccessibilityTypes::EVENT_SELECTION_CHANGED, true);
 }
 
-void NativeTextfieldViews::GetSelectionModel(gfx::SelectionModel* sel) const {
-  model_->GetSelectionModel(sel);
+gfx::SelectionModel NativeTextfieldViews::GetSelectionModel() const {
+  return GetRenderText()->selection_model();
 }
 
 void NativeTextfieldViews::SelectSelectionModel(
@@ -559,6 +648,7 @@ bool NativeTextfieldViews::HandleKeyPressed(const ui::KeyEvent& e) {
   bool handled = false;
   if (controller)
     handled = controller->HandleKeyEvent(textfield_, e);
+  touch_selection_controller_.reset();
   return handled || HandleKeyEvent(e);
 }
 
@@ -588,8 +678,7 @@ void NativeTextfieldViews::HandleBlur() {
     RepaintCursor();
   }
 
-  if (touch_selection_controller_.get())
-    touch_selection_controller_->ClientViewLostFocus();
+  touch_selection_controller_.reset();
 
   ClearSelection();
 }
@@ -611,7 +700,7 @@ int NativeTextfieldViews::GetTextfieldBaseline() const {
 }
 
 void NativeTextfieldViews::ExecuteTextCommand(int command_id) {
-  ExecuteCommand(command_id);
+  ExecuteCommand(command_id, 0);
 }
 
 /////////////////////////////////////////////////////////////////
@@ -636,7 +725,7 @@ bool NativeTextfieldViews::IsCommandIdEnabled(int command_id) const {
     case IDS_APP_DELETE:
       return editable && model_->HasSelection();
     case IDS_APP_SELECT_ALL:
-      return true;
+      return !model_->GetText().empty();
     default:
       return textfield_->GetController()->IsCommandIdEnabled(command_id);
   }
@@ -657,41 +746,51 @@ string16 NativeTextfieldViews::GetLabelForCommandId(int command_id) const {
   return controller ? controller->GetLabelForCommandId(command_id) : string16();
 }
 
-void NativeTextfieldViews::ExecuteCommand(int command_id) {
+void NativeTextfieldViews::ExecuteCommand(int command_id, int event_flags) {
+  touch_selection_controller_.reset();
   if (!IsCommandIdEnabled(command_id))
     return;
 
-  bool text_changed = false;
-  OnBeforeUserAction();
   TextfieldController* controller = textfield_->GetController();
   if (controller && controller->HandlesCommand(command_id)) {
-    controller->ExecuteCommand(command_id);
+    controller->ExecuteCommand(command_id, 0);
   } else {
+    bool text_changed = false;
     switch (command_id) {
       case IDS_APP_CUT:
+        OnBeforeUserAction();
         text_changed = Cut();
+        UpdateAfterChange(text_changed, text_changed);
+        OnAfterUserAction();
         break;
       case IDS_APP_COPY:
+        OnBeforeUserAction();
         Copy();
+        OnAfterUserAction();
         break;
       case IDS_APP_PASTE:
+        OnBeforeUserAction();
         text_changed = Paste();
+        UpdateAfterChange(text_changed, text_changed);
+        OnAfterUserAction();
         break;
       case IDS_APP_DELETE:
+        OnBeforeUserAction();
         text_changed = model_->Delete();
+        UpdateAfterChange(text_changed, text_changed);
+        OnAfterUserAction();
         break;
       case IDS_APP_SELECT_ALL:
+        OnBeforeUserAction();
         SelectAll(false);
+        UpdateAfterChange(false, true);
+        OnAfterUserAction();
         break;
       default:
-        controller->ExecuteCommand(command_id);
+        controller->ExecuteCommand(command_id, 0);
         break;
     }
   }
-
-  // The cursor must have changed if text changed during cut/paste/delete.
-  UpdateAfterChange(text_changed, text_changed);
-  OnAfterUserAction();
 }
 
 void NativeTextfieldViews::SetColor(SkColor value) {
@@ -863,7 +962,7 @@ bool NativeTextfieldViews::GetCompositionTextRange(ui::Range* range) {
 bool NativeTextfieldViews::GetSelectionRange(ui::Range* range) {
   if (!ImeEditingAllowed())
     return false;
-  GetSelectedRange(range);
+  *range = GetSelectedRange();
   return true;
 }
 
@@ -992,8 +1091,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const ui::KeyEvent& key_event) {
   // TODO(oshima): Refactor and consolidate with ExecuteCommand.
   if (key_event.type() == ui::ET_KEY_PRESSED) {
     ui::KeyboardCode key_code = key_event.key_code();
-    // TODO(oshima): shift-tab does not work. Figure out why and fix.
-    if (key_code == ui::VKEY_TAB)
+    if (key_code == ui::VKEY_TAB || key_event.IsUnicodeKeyCode())
       return false;
 
     OnBeforeUserAction();
@@ -1173,17 +1271,8 @@ void NativeTextfieldViews::OnCaretBoundsChanged() {
     textfield_->GetInputMethod()->OnCaretBoundsChanged(textfield_);
 
   // Notify selection controller
-  if (!touch_selection_controller_.get())
-    return;
-  gfx::RenderText* render_text = GetRenderText();
-  const gfx::SelectionModel& sel = render_text->selection_model();
-  gfx::SelectionModel start_sel =
-      render_text->GetSelectionModelForSelectionStart();
-  gfx::Rect start_cursor = render_text->GetCursorBounds(start_sel, true);
-  gfx::Rect end_cursor = render_text->GetCursorBounds(sel, true);
-  gfx::Point start(start_cursor.x(), start_cursor.bottom() - 1);
-  gfx::Point end(end_cursor.x(), end_cursor.bottom() - 1);
-  touch_selection_controller_->SelectionChanged(start, end);
+  if (touch_selection_controller_.get())
+    touch_selection_controller_->SelectionChanged();
 }
 
 void NativeTextfieldViews::OnBeforeUserAction() {
@@ -1269,6 +1358,7 @@ void NativeTextfieldViews::HandleMousePressEvent(const ui::MouseEvent& event) {
           MoveCursorTo(event.location(), event.IsShiftDown());
         break;
       case 1:
+        MoveCursorTo(event.location(), false);
         model_->SelectWord();
         OnCaretBoundsChanged();
         break;
@@ -1299,6 +1389,21 @@ bool NativeTextfieldViews::ShouldInsertChar(char16 ch, int flags) {
   // flag that we don't care about.
   return ((ch >= 0x20 && ch < 0x7F) || ch > 0x9F) &&
       (flags & ~(ui::EF_SHIFT_DOWN | ui::EF_CAPS_LOCK_DOWN)) != ui::EF_ALT_DOWN;
+}
+
+void NativeTextfieldViews::CreateTouchSelectionControllerAndNotifyIt() {
+  touch_selection_controller_.reset(
+      ui::TouchSelectionController::create(this));
+  if (touch_selection_controller_.get())
+    touch_selection_controller_->SelectionChanged();
+}
+
+void NativeTextfieldViews::PlatformGestureEventHandling(
+    const ui::GestureEvent* event) {
+#if defined(OS_WIN) && defined(USE_AURA)
+  if (event->type() == ui::ET_GESTURE_TAP_DOWN && !textfield_->read_only())
+    base::win::DisplayVirtualKeyboard();
+#endif
 }
 
 }  // namespace views

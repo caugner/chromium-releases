@@ -8,8 +8,9 @@
 #include <vector>
 
 #include "base/string16.h"
-#include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
+#include "components/autofill/browser/field_types.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -38,12 +39,12 @@ class AutofillDialogController {
   // Strings -------------------------------------------------------------------
 
   virtual string16 DialogTitle() const = 0;
+  virtual string16 AccountChooserText() const = 0;
+  virtual string16 SignInLinkText() const = 0;
   virtual string16 EditSuggestionText() const = 0;
   virtual string16 UseBillingForShippingText() const = 0;
-  virtual string16 WalletOptionText() const = 0;
   virtual string16 CancelButtonText() const = 0;
   virtual string16 ConfirmButtonText() const = 0;
-  virtual string16 SignInText() const = 0;
   virtual string16 CancelSignInText() const = 0;
   virtual string16 SaveLocallyText() const = 0;
   virtual string16 ProgressBarText() const = 0;
@@ -53,7 +54,30 @@ class AutofillDialogController {
   // Whether the user is known to be signed in.
   virtual DialogSignedInState SignedInState() const = 0;
 
+  // Whether to show the checkbox to save data locally (in Autofill).
+  virtual bool ShouldOfferToSaveInChrome() const = 0;
+
+  // Returns the model for the account chooser. It will return NULL if the
+  // account chooser should not show a menu. In this case, clicking on the
+  // account chooser should initiate sign-in.
+  virtual ui::MenuModel* MenuModelForAccountChooser() = 0;
+
+  // Returns the icon that should be shown in the account chooser.
+  virtual gfx::Image AccountChooserImage() = 0;
+
+  // Whether or not an Autocheckout flow is running.
+  virtual bool AutocheckoutIsRunning() const = 0;
+
+  // Whether or not there was an error in an Autocheckout flow.
+  virtual bool HadAutocheckoutError() const = 0;
+
+  // Whether or not the |button| should be enabled.
+  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const = 0;
+
   // Detail inputs -------------------------------------------------------------
+
+  // Whether the section is currently active (i.e. should be shown).
+  virtual bool SectionIsActive(DialogSection section) const = 0;
 
   // Returns the set of inputs the page has requested which fall under
   // |section|.
@@ -72,8 +96,20 @@ class AutofillDialogController {
   virtual string16 SuggestionTextForSection(DialogSection section) = 0;
   virtual gfx::Image SuggestionIconForSection(DialogSection section) = 0;
   virtual void EditClickedForSection(DialogSection section) = 0;
+
+  // Returns an icon to be displayed along with the input for the given type.
+  // |user_input| is the current text in the textfield.
+  virtual gfx::Image IconForField(AutofillFieldType type,
+                                  const string16& user_input) const = 0;
+
+  // Decides whether input of |value| is valid for a field of type |type|.
   virtual bool InputIsValid(AutofillFieldType type,
                             const string16& value) = 0;
+
+  // Decides whether the combination of all |inputs| is valid, returns a
+  // vector of all invalid fields.
+  virtual std::vector<AutofillFieldType> InputsAreValid(
+      const DetailOutputMap& inputs) = 0;
 
   // Called when the user changes the contents of a text field or activates it
   // (by focusing and then clicking it). |was_edit| is true when the function
@@ -95,18 +131,24 @@ class AutofillDialogController {
 
   // Miscellany ----------------------------------------------------------------
 
-  // Called when the view has been closed. The value for |action| indicates
-  // whether the Autofill operation should be aborted.
-  virtual void ViewClosed(DialogAction action) = 0;
+  // Called when the view has been closed.
+  virtual void ViewClosed() = 0;
 
-  // Returns any dialog notification that should currently be showing.
-  virtual DialogNotification CurrentNotification() const = 0;
+  // Returns dialog notifications that the view should currently be showing in
+  // order from top to bottom.
+  virtual std::vector<DialogNotification> CurrentNotifications() const = 0;
 
   // Begins the flow to sign into Wallet.
   virtual void StartSignInFlow() = 0;
 
   // Marks the signin flow into Wallet complete.
   virtual void EndSignInFlow() = 0;
+
+  // Called when the view has been cancelled.
+  virtual void OnCancel() = 0;
+
+  // Called when the view has been accepted.
+  virtual void OnSubmit() = 0;
 
   // Returns the profile for this dialog.
   virtual Profile* profile() = 0;

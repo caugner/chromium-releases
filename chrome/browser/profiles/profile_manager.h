@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
 #include "base/memory/linked_ptr.h"
@@ -128,11 +128,6 @@ class ProfileManager : public base::NonThreadSafe,
   // Returns true if the given command line indicates that this is a short-lived
   // profile import process.
   static bool IsImportProcess(const CommandLine& command_line);
-
-  // Whether a first-run import was triggered before the browser mainloop began.
-  // This is used in testing to verify import startup actions that occur before
-  // an observer can be registered in the test.
-  static bool DidPerformProfileImport();
 
   // Indicate that an import process will run for the next created Profile.
   void SetWillImport();

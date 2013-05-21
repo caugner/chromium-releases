@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/browser/sync_file_system/conflict_resolution_policy.h"
 #include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/syncable/sync_callbacks.h"
 
@@ -88,7 +89,7 @@ class RemoteFileSyncService {
   // |callback| was retriable ones.
   virtual void RegisterOriginForTrackingChanges(
       const GURL& origin,
-      const fileapi::SyncStatusCallback& callback) = 0;
+      const SyncStatusCallback& callback) = 0;
 
   // Unregisters |origin| to track remote side changes for the |origin|.
   // Upon completion, invokes |callback|.
@@ -97,14 +98,32 @@ class RemoteFileSyncService {
   // |callback| was retriable ones.
   virtual void UnregisterOriginForTrackingChanges(
       const GURL& origin,
-      const fileapi::SyncStatusCallback& callback) = 0;
+      const SyncStatusCallback& callback) = 0;
+
+  virtual void EnableOriginForTrackingChanges(
+      const GURL& origin,
+      const SyncStatusCallback& callback) = 0;
+
+  virtual void DisableOriginForTrackingChanges(
+      const GURL& origin,
+      const SyncStatusCallback& callback) = 0;
+
+  // Uninstalls the |origin| by deleting its remote data copy and then removing
+  // the origin from the metadata store.
+  virtual void UninstallOrigin(
+      const GURL& origin,
+      const SyncStatusCallback& callback) = 0;
 
   // Called by the sync engine to process one remote change.
   // After a change is processed |callback| will be called (to return
   // the control to the sync engine).
-  virtual void ProcessRemoteChange(
-      RemoteChangeProcessor* processor,
-      const fileapi::SyncFileCallback& callback) = 0;
+  // It is invalid to call this before calling SetRemoteChangeProcessor().
+  virtual void ProcessRemoteChange(const SyncFileCallback& callback) = 0;
+
+  // Sets a remote change processor.  This must be called before any
+  // ProcessRemoteChange().
+  virtual void SetRemoteChangeProcessor(
+      RemoteChangeProcessor* processor) = 0;
 
   // Returns a LocalChangeProcessor that applies a local change to the remote
   // storage backed by this service.
@@ -116,7 +135,7 @@ class RemoteFileSyncService {
   // Returns the metadata of a remote file pointed by |url|.
   virtual void GetRemoteFileMetadata(
       const fileapi::FileSystemURL& url,
-      const fileapi::SyncFileMetadataCallback& callback) = 0;
+      const SyncFileMetadataCallback& callback) = 0;
 
   // Returns the current remote service state (should equal to the value
   // returned by the last OnRemoteServiceStateUpdated notification.
@@ -132,6 +151,15 @@ class RemoteFileSyncService {
   // (for example if Chrome is offline the service state will become
   // REMOTE_SERVICE_TEMPORARY_UNAVAILABLE).
   virtual void SetSyncEnabled(bool enabled) = 0;
+
+  // Sets the conflict resolution policy. Returns SYNC_STATUS_OK on success,
+  // or returns an error code if the given policy is not supported or had
+  // an error.
+  virtual SyncStatusCode SetConflictResolutionPolicy(
+      ConflictResolutionPolicy policy) = 0;
+
+  // Gets the conflict resolution policy.
+  virtual ConflictResolutionPolicy GetConflictResolutionPolicy() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoteFileSyncService);

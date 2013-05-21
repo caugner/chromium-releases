@@ -4,28 +4,25 @@
 //
 // This file implements a standalone host process for Me2Me.
 
-#include "remoting/host/remoting_me2me_host.h"
-
 #include <string>
 
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/debug/alias.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_native_library.h"
 #include "base/single_thread_task_runner.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/strings/stringize_macros.h"
+#include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "ipc/ipc_channel.h"
@@ -33,10 +30,11 @@
 #include "ipc/ipc_listener.h"
 #include "net/base/network_change_notifier.h"
 #include "net/socket/ssl_server_socket.h"
+#include "net/url_request/url_fetcher.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/constants.h"
-#include "remoting/host/basic_desktop_environment.h"
+#include "remoting/base/util.h"
 #include "remoting/host/branding.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
@@ -45,24 +43,24 @@
 #include "remoting/host/curtain_mode.h"
 #include "remoting/host/curtaining_host_observer.h"
 #include "remoting/host/desktop_environment.h"
-#include "remoting/host/desktop_resizer.h"
 #include "remoting/host/desktop_session_connector.h"
 #include "remoting/host/dns_blackhole_checker.h"
-#include "remoting/host/event_executor.h"
 #include "remoting/host/heartbeat_sender.h"
 #include "remoting/host/host_change_notification_listener.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/host_exit_codes.h"
+#include "remoting/host/host_main.h"
 #include "remoting/host/host_user_interface.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_desktop_environment.h"
+#include "remoting/host/ipc_host_event_logger.h"
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
 #include "remoting/host/logging.h"
+#include "remoting/host/me2me_desktop_environment.h"
 #include "remoting/host/network_settings.h"
 #include "remoting/host/policy_hack/policy_watcher.h"
-#include "remoting/host/resizing_host_observer.h"
 #include "remoting/host/service_urls.h"
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
@@ -72,7 +70,6 @@
 #include "remoting/protocol/me2me_host_authenticator_factory.h"
 
 #if defined(OS_POSIX)
-#include <pwd.h>
 #include <signal.h>
 #include "base/file_descriptor_posix.h"
 #include "remoting/host/pam_authorization_factory_posix.h"
@@ -81,7 +78,6 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_cftyperef.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #endif  // defined(OS_MACOSX)
 
 #if defined(OS_LINUX)
@@ -103,44 +99,12 @@ namespace {
 // This is used for tagging system event logs.
 const char kApplicationName[] = "chromoting";
 
-// The command line switch used to get version of the daemon.
-const char kVersionSwitchName[] = "version";
-
 // The command line switch used to pass name of the pipe to capture audio on
 // linux.
 const char kAudioPipeSwitchName[] = "audio-pipe-name";
 
 void QuitMessageLoop(MessageLoop* message_loop) {
   message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-}
-
-// Returns true if GetUsername() is implemented on this platform.
-bool CanGetUsername() {
-#if defined(OS_POSIX)
-  return true;
-#else  // !defined(OS_POSIX)
-  return false;
-#endif  // defined(OS_POSIX)
-}  // namespace
-
-// Returns the username associated with this process, or the empty string on
-// error.
-std::string GetUsername() {
-#if defined(OS_POSIX)
-  long buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-  if (buf_size <= 0)
-    return "";
-  scoped_array<char> buf(new char[buf_size]);
-  struct passwd passwd;
-  struct passwd* passwd_result = NULL;
-  getpwuid_r(getuid(), &passwd, buf.get(), buf_size, &passwd_result);
-  if (!passwd_result)
-    return "";
-  return std::string(passwd_result->pw_name);
-#else  // !defined(OS_POSIX)
-  NOTREACHED();
-  return "";
-#endif  // defined(OS_POSIX)
 }
 
 }  // namespace
@@ -291,7 +255,7 @@ class HostProcess
 
   std::string host_id_;
   protocol::SharedSecretHash host_secret_hash_;
-  HostKeyPair key_pair_;
+  scoped_refptr<RsaKeyPair> key_pair_;
   std::string oauth_refresh_token_;
   std::string serialized_config_;
   std::string xmpp_login_;
@@ -305,8 +269,6 @@ class HostProcess
   scoped_ptr<CurtainingHostObserver> curtaining_host_observer_;
   bool curtain_required_;
 
-  scoped_ptr<DesktopResizer> desktop_resizer_;
-  scoped_ptr<ResizingHostObserver> resizing_host_observer_;
   scoped_ptr<XmppSignalStrategy> signal_strategy_;
   scoped_ptr<SignalingConnector> signaling_connector_;
   scoped_ptr<HeartbeatSender> heartbeat_sender_;
@@ -335,15 +297,11 @@ HostProcess::HostProcess(scoped_ptr<ChromotingHostContext> context,
       state_(HOST_INITIALIZING),
       allow_nat_traversal_(true),
       curtain_required_(false),
-      desktop_resizer_(DesktopResizer::Create()),
 #if defined(REMOTING_MULTI_PROCESS)
       desktop_session_connector_(NULL),
 #endif  // defined(REMOTING_MULTI_PROCESS)
       ALLOW_THIS_IN_INITIALIZER_LIST(self_(this)),
       exit_code_out_(exit_code_out) {
-  // Create a NetworkChangeNotifier for use by the signalling connector.
-  network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
-
   // Create the platform-specific curtain-mode implementation.
   // TODO(wez): Create this on the network thread?
   curtain_ = CurtainMode::Create(
@@ -418,6 +376,9 @@ bool HostProcess::InitWithCommandLine(const CommandLine* cmd_line) {
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
   ServiceUrls* service_urls = ServiceUrls::GetInstance();
+  if (service_urls->ignore_urlfetcher_cert_requests()) {
+    net::URLFetcher::SetIgnoreCertificateRequests(true);
+  }
   bool xmpp_server_valid = net::ParseHostAndPort(
       service_urls->xmpp_server_address(),
       &xmpp_server_config_.host, &xmpp_server_config_.port);
@@ -514,7 +475,7 @@ void HostProcess::CreateAuthenticatorFactory() {
   if (state_ != HOST_STARTED)
     return;
 
-  std::string local_certificate = key_pair_.GenerateCertificate();
+  std::string local_certificate = key_pair_->GenerateCertificate();
   if (local_certificate.empty()) {
     LOG(ERROR) << "Failed to generate host certificate.";
     ShutdownHost(kInitializationFailed);
@@ -523,7 +484,7 @@ void HostProcess::CreateAuthenticatorFactory() {
 
   scoped_ptr<protocol::AuthenticatorFactory> factory(
       new protocol::Me2MeHostAuthenticatorFactory(
-          local_certificate, *key_pair_.private_key(), host_secret_hash_));
+          local_certificate, key_pair_, host_secret_hash_));
 #if defined(OS_POSIX)
   // On Linux and Mac, perform a PAM authorization step after authentication.
   factory.reset(new PamAuthorizationFactory(factory.Pass()));
@@ -538,8 +499,7 @@ bool HostProcess::OnMessageReceived(const IPC::Message& message) {
 #if defined(REMOTING_MULTI_PROCESS)
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(HostProcess, message)
-    IPC_MESSAGE_HANDLER(ChromotingDaemonNetworkMsg_Crash,
-                        OnCrash)
+    IPC_MESSAGE_HANDLER(ChromotingDaemonMsg_Crash, OnCrash)
     IPC_MESSAGE_HANDLER(ChromotingDaemonNetworkMsg_Configuration,
                         OnConfigUpdated)
     IPC_MESSAGE_FORWARD(
@@ -551,7 +511,10 @@ bool HostProcess::OnMessageReceived(const IPC::Message& message) {
                         DesktopSessionConnector::OnTerminalDisconnected)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+  CHECK(handled) << "Received unexpected IPC type: " << message.type();
   return handled;
+
 #else  // !defined(REMOTING_MULTI_PROCESS)
   return false;
 #endif  // !defined(REMOTING_MULTI_PROCESS)
@@ -570,7 +533,10 @@ void HostProcess::StartOnUiThread() {
   DCHECK(context_->ui_task_runner()->BelongsToCurrentThread());
 
   if (!InitWithCommandLine(CommandLine::ForCurrentProcess())) {
-    OnConfigWatcherError();
+    // Shutdown the host if the command line is invalid.
+    context_->network_task_runner()->PostTask(
+        FROM_HERE, base::Bind(&HostProcess::ShutdownHost, this,
+                              kInvalidHostConfigurationExitCode));
     return;
   }
 
@@ -592,19 +558,27 @@ void HostProcess::StartOnUiThread() {
 #if defined(REMOTING_MULTI_PROCESS)
   IpcDesktopEnvironmentFactory* desktop_environment_factory =
       new IpcDesktopEnvironmentFactory(
+          context_->audio_task_runner(),
           context_->network_task_runner(),
+          context_->video_capture_task_runner(),
           context_->network_task_runner(),
           daemon_channel_.get());
   desktop_session_connector_ = desktop_environment_factory;
 #else // !defined(REMOTING_MULTI_PROCESS)
   DesktopEnvironmentFactory* desktop_environment_factory =
       new SessionDesktopEnvironmentFactory(
+          context_->network_task_runner(),
+          context_->input_task_runner(),
+          context_->ui_task_runner(),
           base::Bind(&HostProcess::SendSasToConsole, this));
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
 #else  // !defined(OS_WIN)
   DesktopEnvironmentFactory* desktop_environment_factory =
-      new BasicDesktopEnvironmentFactory(true);
+      new Me2MeDesktopEnvironmentFactory(
+          context_->network_task_runner(),
+          context_->input_task_runner(),
+          context_->ui_task_runner());
 #endif  // !defined(OS_WIN)
 
   desktop_environment_factory_.reset(desktop_environment_factory);
@@ -685,7 +659,15 @@ bool HostProcess::ApplyConfig(scoped_ptr<JsonHostConfig> config) {
     return false;
   }
 
-  if (!key_pair_.Load(*config)) {
+  std::string key_base64;
+  if (!config->GetString(kPrivateKeyConfigPath, &key_base64)) {
+    LOG(ERROR) << "Private key couldn't be read from the config file.";
+    return false;
+  }
+
+  key_pair_ = RsaKeyPair::FromString(key_base64);
+  if (!key_pair_) {
+    LOG(ERROR) << "Invalid private key in the config file.";
     return false;
   }
 
@@ -787,8 +769,9 @@ bool HostProcess::OnUsernamePolicyUpdate(bool host_username_match_required) {
 
   if (host_username_match_required) {
     LOG(INFO) << "Policy requires host username match.";
-    bool shutdown = !CanGetUsername() ||
-        !StartsWithASCII(xmpp_login_, GetUsername() + std::string("@"),
+    std::string username = GetUsername();
+    bool shutdown = username.empty() ||
+        !StartsWithASCII(xmpp_login_, username + std::string("@"),
                          false);
 
 #if defined(OS_MACOSX)
@@ -801,6 +784,7 @@ bool HostProcess::OnUsernamePolicyUpdate(bool host_username_match_required) {
 #endif
 
     if (shutdown) {
+      LOG(ERROR) << "The host username does not match.";
       ShutdownHost(kUsernameMismatchExitCode);
     }
   } else {
@@ -841,6 +825,8 @@ bool HostProcess::OnCurtainPolicyUpdate(bool curtain_required) {
     // TODO(jamiewalch): Fix this once we have implemented the multi-process
     // daemon architecture (crbug.com/134894)
     if (getuid() == 0) {
+      LOG(ERROR) << "Running the host in the console login session is yet not "
+                    "supported.";
       ShutdownHost(kLoginScreenNotSupportedExitCode);
       return false;
     }
@@ -849,12 +835,18 @@ bool HostProcess::OnCurtainPolicyUpdate(bool curtain_required) {
 
   if (curtain_required_ != curtain_required) {
     if (curtain_required)
-      LOG(ERROR) << "Policy requires curtain-mode.";
+      LOG(INFO) << "Policy requires curtain-mode.";
     else
-      LOG(ERROR) << "Policy does not require curtain-mode.";
+      LOG(INFO) << "Policy does not require curtain-mode.";
     curtain_required_ = curtain_required;
     if (curtaining_host_observer_)
       curtaining_host_observer_->SetEnableCurtaining(curtain_required_);
+
+    // The current Windows curtain mode implementation relies on this code
+    // restarting the host when the curtain mode policy changes. For example if
+    // the policy is enabled while someone is already connected to the console
+    // that session should be either curtained or disconnected. This code makes
+    // sure that the session will be disconnected by restarting the host.
     return true;
   }
   return false;
@@ -889,6 +881,9 @@ void HostProcess::StartHost() {
   scoped_ptr<DnsBlackholeChecker> dns_blackhole_checker(
       new DnsBlackholeChecker(context_->url_request_context_getter(),
                               talkgadget_prefix_));
+
+  // Create a NetworkChangeNotifier for use by the signaling connector.
+  network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
 
   signaling_connector_.reset(new SignalingConnector(
       signal_strategy_.get(),
@@ -930,23 +925,37 @@ void HostProcess::StartHost() {
 #endif
 
   heartbeat_sender_.reset(new HeartbeatSender(
-      this, host_id_, signal_strategy_.get(), &key_pair_, directory_bot_jid_));
+      this, host_id_, signal_strategy_.get(), key_pair_,
+      directory_bot_jid_));
 
   host_change_notification_listener_.reset(new HostChangeNotificationListener(
       this, host_id_, signal_strategy_.get(), directory_bot_jid_));
 
   log_to_server_.reset(
-      new LogToServer(host_, ServerLogEntry::ME2ME, signal_strategy_.get(),
-                      directory_bot_jid_));
-  host_event_logger_ = HostEventLogger::Create(host_, kApplicationName);
+      new LogToServer(host_->AsWeakPtr(), ServerLogEntry::ME2ME,
+                      signal_strategy_.get(), directory_bot_jid_));
 
-  resizing_host_observer_.reset(
-      new ResizingHostObserver(desktop_resizer_.get(), host_));
+  // Set up repoting the host status notifications.
+#if defined(REMOTING_MULTI_PROCESS)
+  host_event_logger_.reset(
+      new IpcHostEventLogger(host_->AsWeakPtr(), daemon_channel_.get()));
+#else  // !defined(REMOTING_MULTI_PROCESS)
+  host_event_logger_ =
+      HostEventLogger::Create(host_->AsWeakPtr(), kApplicationName);
+#endif  // !defined(REMOTING_MULTI_PROCESS)
+
+#if defined(REMOTING_RDP_SESSION)
+  // TODO(alexeypa): do not create |curtain_| in this case.
+  CurtainMode* curtain = static_cast<IpcDesktopEnvironmentFactory*>(
+      desktop_environment_factory_.get());
+#else  // !defined(REMOTING_RDP_SESSION)
+  CurtainMode* curtain = curtain_.get();
+#endif  // !defined(REMOTING_RDP_SESSION)
 
   // Create a host observer to enable/disable curtain mode as clients connect
   // and disconnect.
   curtaining_host_observer_.reset(new CurtainingHostObserver(
-                                  curtain_.get(), host_));
+      curtain, host_->AsWeakPtr()));
   curtaining_host_observer_->SetEnableCurtaining(curtain_required_);
 
   if (host_user_interface_.get()) {
@@ -1035,7 +1044,7 @@ void HostProcess::ShutdownOnNetworkThread() {
   host_change_notification_listener_.reset();
   signaling_connector_.reset();
   signal_strategy_.reset();
-  resizing_host_observer_.reset();
+  network_change_notifier_.reset();
 
   if (state_ == HOST_STOPPING_TO_RESTART) {
     StartHost();
@@ -1065,65 +1074,22 @@ void HostProcess::ShutdownOnNetworkThread() {
 void HostProcess::OnCrash(const std::string& function_name,
                           const std::string& file_name,
                           const int& line_number) {
-  CHECK(false);
+  char message[1024];
+  base::snprintf(message, sizeof(message),
+                 "Requested by %s at %s, line %d.",
+                 function_name.c_str(), file_name.c_str(), line_number);
+  base::debug::Alias(message);
+
+  // The daemon requested us to crash the process.
+  CHECK(false) << message;
 }
 
-int HostProcessMain(int argc, char** argv) {
-#if defined(OS_MACOSX)
-  // Needed so we don't leak objects when threads are created.
-  base::mac::ScopedNSAutoreleasePool pool;
-#endif
-
-  CommandLine::Init(argc, argv);
-
-  // Initialize Breakpad as early as possible. On Mac the command-line needs to
-  // be initialized first, so that the preference for crash-reporting can be
-  // looked up in the config file.
-#if defined(OFFICIAL_BUILD) && (defined(MAC_BREAKPAD) || defined(OS_WIN))
-  if (IsUsageStatsAllowed()) {
-    InitializeCrashReporting();
-  }
-#endif  // defined(OFFICIAL_BUILD) && (defined(MAC_BREAKPAD) || defined(OS_WIN))
-
-  // This object instance is required by Chrome code (for example,
-  // LazyInstance, MessageLoop).
-  base::AtExitManager exit_manager;
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(kVersionSwitchName)) {
-    printf("%s\n", STRINGIZE(VERSION));
-    return 0;
-  }
-
-  InitHostLogging();
-
-#if defined(OS_WIN)
-  // Register and initialize common controls.
-  INITCOMMONCONTROLSEX info;
-  info.dwSize = sizeof(info);
-  info.dwICC = ICC_STANDARD_CLASSES;
-  InitCommonControlsEx(&info);
-
-  // Mark the process as DPI-aware, so Windows won't scale coordinates in APIs.
-  // N.B. This API exists on Vista and above.
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-    FilePath path(base::GetNativeLibraryName(UTF8ToUTF16("user32")));
-    base::ScopedNativeLibrary user32(path);
-    CHECK(user32.is_valid());
-
-    typedef BOOL (WINAPI * SetProcessDPIAwareFn)();
-    SetProcessDPIAwareFn set_process_dpi_aware =
-        static_cast<SetProcessDPIAwareFn>(
-            user32.GetFunctionPointer("SetProcessDPIAware"));
-    set_process_dpi_aware();
-  }
-#endif  // defined(OS_WIN)
-
+int HostProcessMain() {
 #if defined(TOOLKIT_GTK)
   // Required for any calls into GTK functions, such as the Disconnect and
   // Continue windows, though these should not be used for the Me2Me case
   // (crbug.com/104377).
-  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-  gfx::GtkInitFromCommandLine(*cmd_line);
+  gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 #endif  // TOOLKIT_GTK
 
   // Enable support for SSL server sockets, which must be done while still
@@ -1155,6 +1121,6 @@ int HostProcessMain(int argc, char** argv) {
 
 #if !defined(OS_WIN)
 int main(int argc, char** argv) {
-  return remoting::HostProcessMain(argc, argv);
+  return remoting::HostMain(argc, argv);
 }
 #endif  // !defined(OS_WIN)

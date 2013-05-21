@@ -14,6 +14,10 @@ namespace aura {
 class Window;
 }
 
+namespace extensions {
+class Extension;
+}
+
 class ChromeLauncherController;
 
 // Item controller for an app shortcut. Shortcuts track app and launcher ids,
@@ -30,6 +34,7 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   virtual string16 GetTitle() OVERRIDE;
   virtual bool HasWindow(aura::Window* window) const OVERRIDE;
   virtual bool IsOpen() const OVERRIDE;
+  virtual bool IsVisible() const OVERRIDE;
   virtual void Launch(int event_flags) OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Close() OVERRIDE;
@@ -48,6 +53,16 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   void set_refocus_url(const GURL& refocus_url) { refocus_url_ = refocus_url; }
 
  private:
+  // Get the last running application.
+  content::WebContents* GetLRUApplication();
+
+  // Returns true if this app matches the given |web_contents|. To accelerate
+  // the matching, the app managing |extension| as well as the parsed
+  // |refocus_pattern| get passed.
+  bool WebContentMatchesApp(const extensions::Extension* extension,
+                            const URLPattern& refocus_pattern,
+                            content::WebContents* web_contents);
+
   GURL refocus_url_;
   ChromeLauncherControllerPerApp* app_controller_;
 

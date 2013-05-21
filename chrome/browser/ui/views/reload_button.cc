@@ -7,7 +7,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "grit/generated_resources.h"
@@ -203,10 +203,6 @@ bool ReloadButton::GetAcceleratorForCommandId(int command_id,
   return GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
-void ReloadButton::ExecuteCommand(int command_id) {
-  ExecuteCommand(command_id, 0);
-}
-
 void ReloadButton::ExecuteCommand(int command_id, int event_flags) {
   int browser_command = 0;
   switch (command_id) {
@@ -229,12 +225,11 @@ void ReloadButton::ExecuteCommand(int command_id, int event_flags) {
 // ReloadButton, private:
 
 ui::SimpleMenuModel* ReloadButton::CreateMenuModel() {
-  ui::SimpleMenuModel* menu_model_ = new ui::SimpleMenuModel(this);
-  for (size_t i = 0; i < arraysize(kReloadMenuItems); i++) {
-    menu_model_->AddItemWithStringId(kReloadMenuItems[i],
-                                     kReloadMenuItems[i]);
-  }
-  return menu_model_;
+  ui::SimpleMenuModel* menu_model = new ui::SimpleMenuModel(this);
+  for (size_t i = 0; i < arraysize(kReloadMenuItems); ++i)
+    menu_model->AddItemWithStringId(kReloadMenuItems[i], kReloadMenuItems[i]);
+
+  return menu_model;
 }
 
 void ReloadButton::ExecuteBrowserCommand(int command, int event_flags) {

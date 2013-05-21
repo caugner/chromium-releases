@@ -11,6 +11,7 @@
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
+#include "chromeos/dbus/cros_disks_client.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
@@ -57,6 +58,19 @@ CrosMountPointProvider::CrosMountPointProvider(
           new fileapi::IsolatedFileUtil())),
       mount_points_(mount_points),
       system_mount_points_(system_mount_points) {
+  // Add default system mount points.
+  system_mount_points_->RegisterFileSystem(
+      "archive",
+      fileapi::kFileSystemTypeNativeLocal,
+      chromeos::CrosDisksClient::GetArchiveMountPoint());
+  system_mount_points_->RegisterFileSystem(
+      "removable",
+      fileapi::kFileSystemTypeNativeLocal,
+      chromeos::CrosDisksClient::GetRemovableDiskMountPoint());
+  system_mount_points_->RegisterFileSystem(
+      "oem",
+      fileapi::kFileSystemTypeRestrictedNativeLocal,
+      base::FilePath(FILE_PATH_LITERAL("/usr/share/oem")));
 }
 
 CrosMountPointProvider::~CrosMountPointProvider() {
@@ -89,8 +103,22 @@ base::FilePath CrosMountPointProvider::GetFileSystemRootPathOnFileThread(
   return root_path.DirName();
 }
 
+fileapi::FileSystemQuotaUtil* CrosMountPointProvider::GetQuotaUtil() {
+  // No quota support.
+  return NULL;
+}
+
+void CrosMountPointProvider::DeleteFileSystem(
+    const GURL& origin_url,
+    fileapi::FileSystemType type,
+    fileapi::FileSystemContext* context,
+    const DeleteFileSystemCallback& callback) {
+  NOTREACHED();
+  callback.Run(base::PLATFORM_FILE_ERROR_INVALID_OPERATION);
+}
+
 bool CrosMountPointProvider::IsAccessAllowed(
-    const fileapi::FileSystemURL& url) {
+    const fileapi::FileSystemURL& url) const {
   if (!url.is_valid())
     return false;
 
@@ -113,26 +141,6 @@ bool CrosMountPointProvider::IsAccessAllowed(
 
   return file_access_permissions_->HasAccessPermission(extension_id,
                                                        url.virtual_path());
-}
-
-// TODO(zelidrag): Share this code with SandboxMountPointProvider impl.
-bool CrosMountPointProvider::IsRestrictedFileName(
-    const base::FilePath& path) const {
-  return false;
-}
-
-fileapi::FileSystemQuotaUtil* CrosMountPointProvider::GetQuotaUtil() {
-  // No quota support.
-  return NULL;
-}
-
-void CrosMountPointProvider::DeleteFileSystem(
-    const GURL& origin_url,
-    fileapi::FileSystemType type,
-    fileapi::FileSystemContext* context,
-    const DeleteFileSystemCallback& callback) {
-  NOTREACHED();
-  callback.Run(base::PLATFORM_FILE_ERROR_INVALID_OPERATION);
 }
 
 void CrosMountPointProvider::GrantFullAccessToExtension(
@@ -208,11 +216,27 @@ fileapi::AsyncFileUtil* CrosMountPointProvider::GetAsyncFileUtil(
 
 fileapi::FilePermissionPolicy CrosMountPointProvider::GetPermissionPolicy(
     const fileapi::FileSystemURL& url, int permissions) const {
+  if (url.type() == fileapi::kFileSystemTypeRestrictedNativeLocal &&
+      (permissions & ~fileapi::kReadFilePermissions)) {
+    // Restricted file system is read-only.
+    return fileapi::FILE_PERMISSION_ALWAYS_DENY;
+  }
+
+  if (!IsAccessAllowed(url))
+    return fileapi::FILE_PERMISSION_ALWAYS_DENY;
+
+  // Permit access to mount points from internal WebUI.
+  const GURL& origin_url = url.origin();
+  if (origin_url.SchemeIs(kChromeUIScheme))
+    return fileapi::FILE_PERMISSION_ALWAYS_ALLOW;
+
   if (url.mount_type() == fileapi::kFileSystemTypeIsolated) {
     // Permissions in isolated filesystems should be examined with
     // FileSystem permission.
     return fileapi::FILE_PERMISSION_USE_FILESYSTEM_PERMISSION;
   }
+
+  // Also apply system's file permission by default.
   return fileapi::FILE_PERMISSION_USE_FILE_PERMISSION;
 }
 
@@ -273,8 +297,9 @@ fileapi::FileStreamWriter* CrosMountPointProvider::CreateFileStreamWriter(
   return new fileapi::LocalFileStreamWriter(url.path(), offset);
 }
 
-bool CrosMountPointProvider::GetVirtualPath(const base::FilePath& filesystem_path,
-                                           base::FilePath* virtual_path) {
+bool CrosMountPointProvider::GetVirtualPath(
+    const base::FilePath& filesystem_path,
+    base::FilePath* virtual_path) {
   return mount_points_->GetVirtualPath(filesystem_path, virtual_path) ||
          system_mount_points_->GetVirtualPath(filesystem_path, virtual_path);
 }

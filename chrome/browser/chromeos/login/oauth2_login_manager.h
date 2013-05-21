@@ -17,6 +17,7 @@
 #include "net/url_request/url_request_context_getter.h"
 
 class GoogleServiceAuthError;
+class PrefRegistrySyncable;
 class Profile;
 class TokenService;
 
@@ -31,13 +32,17 @@ class OAuth2LoginManager : public OAuthLoginManager,
   explicit OAuth2LoginManager(OAuthLoginManager::Delegate* delegate);
   virtual ~OAuth2LoginManager();
 
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
+
   // OAuthLoginManager overrides.
   virtual void RestorePolicyTokens(
       net::URLRequestContextGetter* auth_request_context) OVERRIDE;
   virtual void RestoreSession(
       Profile* user_profile,
       net::URLRequestContextGetter* auth_request_context,
-      bool restore_from_auth_cookies) OVERRIDE;
+      SessionRestoreStrategy restore_strategy,
+      const std::string& oauth2_refresh_token,
+      const std::string& auth_code) OVERRIDE;
   virtual void ContinueSessionRestore() OVERRIDE;
   virtual void Stop() OVERRIDE;
 
@@ -73,7 +78,7 @@ class OAuth2LoginManager : public OAuthLoginManager,
   // observer events.
   TokenService* SetupTokenService();
 
-  // Removes legacy tokens form OAuth1 flow.
+  // Removes legacy tokens from OAuth1 flow.
   void RemoveLegacyTokens();
 
   // Records OAuth2 tokens fetched through either policy fetcher or cookies-to-
@@ -115,6 +120,8 @@ class OAuth2LoginManager : public OAuthLoginManager,
   scoped_ptr<OAuth2PolicyFetcher> oauth2_policy_fetcher_;
   // OAuth2 refresh token.
   std::string refresh_token_;
+  // Authorization code for fetching OAuth2 tokens.
+  std::string auth_code_;
 
   DISALLOW_COPY_AND_ASSIGN(OAuth2LoginManager);
 };

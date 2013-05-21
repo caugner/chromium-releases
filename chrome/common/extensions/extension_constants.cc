@@ -111,6 +111,7 @@ namespace extension_info_keys {
   const char kHomepageUrlKey[] = "homepageUrl";
   const char kIdKey[] = "id";
   const char kNameKey[] = "name";
+  const char kKioskEnabledKey[] = "kioskEnabled";
   const char kOfflineEnabledKey[] = "offlineEnabled";
   const char kOptionsUrlKey[] = "optionsUrl";
   const char kDetailsUrlKey[] = "detailsUrl";
@@ -128,12 +129,18 @@ const char kEnterpriseWebStoreAppId[] = "afchcafgojfnemjkcbhfekplkmjaldaa";
 const char kHTermAppId[] = "pnhechapfaindjhompbnflcldabbghjo";
 const char kHTermDevAppId[] = "okddffdblfhhnmhodogpojmfkjmhinfp";
 const char kCroshBuiltinAppId[] = "nkoccljplnhpfnfiajclkommnmllphnl";
-const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
+const char kQuickOfficeComponentExtensionId[] =
+    "bpmcpldpdmajfigpchkicefoigmkfalc";
 const char kQuickOfficeDevExtensionId[] = "ionpfmkccalenbmnddpbmocokhaknphg";
+const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
+const char kStreamsPrivateTestExtensionId[] =
+    "oickdpebdnfbgkcaoklfcdhjniefkcji";
 const char kWebStoreAppId[] = "ahfgeienlihckogmohjhadlkjgocpleb";
 const char kCloudPrintAppId[] = "mfehgcgbbipciphmccgaenjidiccnmng";
 const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
+const char kSettingsAppId[] = "ennkphjdgehloodpbhlhldgbnhmacadg";
 const char kAppLaunchHistogram[] = "Extensions.AppLaunch";
+const char kPlatformAppLaunchHistogram[] = "Apps.AppLaunch";
 #if defined(OS_CHROMEOS)
 const char kChromeVoxExtensionPath[] =
     "/usr/share/chromeos-assets/accessibility/extensions/access_chromevox";
@@ -152,10 +159,6 @@ const char kAppStateCannotRun[] = "cannot_run";
 const char kAppStateReadyToRun[] = "ready_to_run";
 
 const char kMediaFileSystemPathPart[] = "_";
-
-const char kAppNotificationsIncognitoError[] =
-    "This API is not accessible by 'split' mode "
-    "extensions in incognito windows.";
 
 const int kExtensionIconSizes[] = {
   EXTENSION_ICON_GIGANTOR,  // 512

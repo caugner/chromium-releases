@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -132,9 +132,8 @@ class WebRTCAudioDeviceTest : public ::testing::Test, public IPC::Listener {
   void CreateChannel(const char* name);
   void DestroyChannel();
 
-  void OnGetAudioHardwareConfig(int* output_buffer_size,
-                                int* output_sample_rate, int* input_sample_rate,
-                                media::ChannelLayout* input_channel_layout);
+  void OnGetAudioHardwareConfig(media::AudioParameters* input_params,
+                                media::AudioParameters* output_params);
 
   // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;

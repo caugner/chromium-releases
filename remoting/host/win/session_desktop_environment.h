@@ -9,23 +9,28 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "remoting/host/basic_desktop_environment.h"
+#include "remoting/host/me2me_desktop_environment.h"
 
 namespace remoting {
 
 // Used to create audio/video capturers and event executor that are compatible
 // with Windows sessions.
-class SessionDesktopEnvironment : public BasicDesktopEnvironment {
+class SessionDesktopEnvironment : public Me2MeDesktopEnvironment {
  public:
-  explicit SessionDesktopEnvironment(const base::Closure& inject_sas);
   virtual ~SessionDesktopEnvironment();
 
   // DesktopEnvironment implementation.
-  virtual scoped_ptr<EventExecutor> CreateEventExecutor(
-      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) OVERRIDE;
+  virtual scoped_ptr<InputInjector> CreateInputInjector() OVERRIDE;
 
  private:
+  friend class SessionDesktopEnvironmentFactory;
+  SessionDesktopEnvironment(
+      scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+      base::WeakPtr<ClientSessionControl> client_session_control,
+      const base::Closure& inject_sas);
+
   // Used to ask the daemon to inject Secure Attention Sequence.
   base::Closure inject_sas_;
 
@@ -33,15 +38,18 @@ class SessionDesktopEnvironment : public BasicDesktopEnvironment {
 };
 
 // Used to create |SessionDesktopEnvironment| instances.
-class SessionDesktopEnvironmentFactory : public BasicDesktopEnvironmentFactory {
+class SessionDesktopEnvironmentFactory : public Me2MeDesktopEnvironmentFactory {
  public:
-  explicit SessionDesktopEnvironmentFactory(const base::Closure& inject_sas);
+  SessionDesktopEnvironmentFactory(
+      scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+      const base::Closure& inject_sas);
   virtual ~SessionDesktopEnvironmentFactory();
 
   // DesktopEnvironmentFactory implementation.
   virtual scoped_ptr<DesktopEnvironment> Create(
-      const std::string& client_jid,
-      const base::Closure& disconnect_callback) OVERRIDE;
+      base::WeakPtr<ClientSessionControl> client_session_control) OVERRIDE;
 
  private:
   // Used to ask the daemon to inject Secure Attention Sequence.

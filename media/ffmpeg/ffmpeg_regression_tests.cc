@@ -117,7 +117,7 @@ FFMPEG_TEST_CASE(Cr108416, "security/108416.webm", PIPELINE_OK, PIPELINE_OK,
                  "5cb3a934795cd552753dec7687928291",
                  "3e576c21f83f3c00719dbe62998d71cb");
 FFMPEG_TEST_CASE(Cr110849, "security/110849.mkv",
-                 DEMUXER_ERROR_NO_SUPPORTED_STREAMS,
+                 DEMUXER_ERROR_COULD_NOT_OPEN,
                  DEMUXER_ERROR_NO_SUPPORTED_STREAMS, kNullHash, kNullHash);
 FFMPEG_TEST_CASE(Cr112384, "security/112384.webm",
                  DEMUXER_ERROR_COULD_NOT_PARSE, DEMUXER_ERROR_COULD_NOT_PARSE,
@@ -151,6 +151,8 @@ FFMPEG_TEST_CASE(Cr152691, "security/152691.mp3", PIPELINE_ERROR_DECODE,
                  "59adb24ef3cdbe0297f05b395827453f");
 FFMPEG_TEST_CASE(Cr161639, "security/161639.m4a", PIPELINE_OK, PIPELINE_OK,
                  kNullHash, "97ae2fa2a2e9ff3c2cf17be96b08bbe8");
+FFMPEG_TEST_CASE(Cr222754, "security/222754.mp4", PIPELINE_ERROR_DECODE,
+                 PIPELINE_ERROR_DECODE, kNullHash, kNullHash);
 
 // General MKV test cases.
 FFMPEG_TEST_CASE(MKV_0, "security/nested_tags_lang.mka.627.628", PIPELINE_OK,

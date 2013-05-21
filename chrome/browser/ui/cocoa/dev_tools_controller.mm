@@ -15,6 +15,7 @@
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 
 using content::WebContents;
 
@@ -142,7 +143,7 @@ using content::WebContents;
   // |devToolsView| is a TabContentsViewCocoa object, whose ViewID was
   // set to VIEW_ID_TAB_CONTAINER initially, so we need to change it to
   // VIEW_ID_DEV_TOOLS_DOCKED here.
-  NSView* devToolsView = devToolsContents->GetNativeView();
+  NSView* devToolsView = devToolsContents->GetView()->GetNativeView();
   view_id_util::SetID(devToolsView, VIEW_ID_DEV_TOOLS_DOCKED);
   [devToolsView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
@@ -198,7 +199,8 @@ using content::WebContents;
 }
 
 - (void)updateDevToolsViewFrame {
-  NSView* devToolsView = devToolsWindow_->web_contents()->GetNativeView();
+  NSView* devToolsView =
+      devToolsWindow_->web_contents()->GetView()->GetNativeView();
   NSRect devToolsRect = [[devToolsView superview] bounds];
   if (devToolsWindow_->dock_side() == DEVTOOLS_DOCK_SIDE_RIGHT)
     devToolsRect.size.height -= [splitView_ topContentOffset];
@@ -225,6 +227,18 @@ using content::WebContents;
     return [splitView_ topContentOffset];
   }
   return proposedPosition;
+}
+
+- (CGFloat)splitView:(NSSplitView*)splitView
+    constrainMaxCoordinate:(CGFloat)proposedMax
+               ofSubviewAt:(NSInteger)dividerIndex {
+  if ([splitView_ isVertical]) {
+    return NSWidth([splitView_ frame]) - [splitView_ dividerThickness] -
+        devToolsWindow_->GetMinimumWidth();
+  } else {
+    return NSHeight([splitView_ frame]) - [splitView_ dividerThickness] -
+        devToolsWindow_->GetMinimumHeight();
+  }
 }
 
 -(void)splitViewWillResizeSubviews:(NSNotification *)notification {

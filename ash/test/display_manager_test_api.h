@@ -27,6 +27,13 @@ class DisplayManagerTestApi {
   // the format of the display spec.
   void UpdateDisplay(const std::string& display_specs);
 
+  // Set the 1st display as an internal display and returns the display Id for
+  // the internal display.
+  int64 SetFirstDisplayAsInternalDisplay();
+
+  // Don't update the display when the root window's size was changed.
+  void DisableChangeDisplayUponHostResize();
+
  private:
   internal::DisplayManager* display_manager_;  // not owned
 

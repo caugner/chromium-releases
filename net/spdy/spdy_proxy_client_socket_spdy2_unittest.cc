@@ -11,21 +11,22 @@
 #include "net/base/capturing_net_log.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/winsock_init.h"
-#include "net/http/http_response_info.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_response_info.h"
 #include "net/socket/client_socket_factory.h"
-#include "net/socket/tcp_client_socket.h"
 #include "net/socket/socket_test_util.h"
+#include "net/socket/tcp_client_socket.h"
 #include "net/spdy/buffered_spdy_framer.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session_pool.h"
+#include "net/spdy/spdy_test_util_common.h"
 #include "net/spdy/spdy_test_util_spdy2.h"
-#include "testing/platform_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
 using namespace net::test_spdy2;
 
@@ -199,10 +200,9 @@ void SpdyProxyClientSocketSpdy2Test::Initialize(MockRead* reads,
   spdy_session_->InitializeWithSocket(connection.release(), false, OK);
 
   // Create the SPDY Stream.
-  ASSERT_EQ(
-      OK,
-      spdy_session_->CreateStream(url_, LOWEST, &spdy_stream_, net_log_.bound(),
-                                  CompletionCallback()));
+  spdy_stream_ =
+      CreateStreamSynchronously(spdy_session_, url_, LOWEST, net_log_.bound());
+  ASSERT_TRUE(spdy_stream_.get() != NULL);
 
   // Create the SpdyProxyClientSocket.
   sock_.reset(
@@ -337,7 +337,7 @@ SpdyProxyClientSocketSpdy2Test::ConstructConnectRequestFrame() {
     "user-agent", kUserAgent,
     "version", "HTTP/1.1",
   };
-  return ConstructSpdyPacket(
+  return ConstructSpdyFrame(
       kSynStartHeader, NULL, 0, kConnectHeaders, arraysize(kConnectHeaders)/2);
 }
 
@@ -365,7 +365,7 @@ SpdyProxyClientSocketSpdy2Test::ConstructConnectAuthRequestFrame() {
     "version", "HTTP/1.1",
     "proxy-authorization", "Basic Zm9vOmJhcg==",
   };
-  return ConstructSpdyPacket(
+  return ConstructSpdyFrame(
       kSynStartHeader, NULL, 0, kConnectHeaders, arraysize(kConnectHeaders)/2);
 }
 

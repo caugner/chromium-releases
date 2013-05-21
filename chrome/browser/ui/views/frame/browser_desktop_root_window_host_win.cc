@@ -9,12 +9,14 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
+#include "chrome/browser/ui/views/frame/browser_frame_common_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "grit/theme_resources.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/win/dpi.h"
 #include "ui/views/controls/menu/native_menu_win.h"
 
 #pragma comment(lib, "dwmapi.lib")
@@ -39,7 +41,6 @@ class DesktopThemeProvider : public ui::ThemeProvider {
     return delegate_->GetImageSkiaNamed(
         chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
   }
-
   virtual SkColor GetColor(int id) const OVERRIDE {
     return delegate_->GetColor(id);
   }
@@ -50,8 +51,9 @@ class DesktopThemeProvider : public ui::ThemeProvider {
     return delegate_->ShouldUseNativeFrame();
   }
   virtual bool HasCustomImage(int id) const OVERRIDE {
-    return delegate_->HasCustomImage(chrome::MapThemeImage(
-                                         chrome::HOST_DESKTOP_TYPE_NATIVE, id));
+    return delegate_->HasCustomImage(
+        chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
+
   }
   virtual base::RefCountedMemory* GetRawData(
       int id,
@@ -165,7 +167,7 @@ bool BrowserDesktopRootWindowHostWin::PreHandleMSG(UINT message,
         minimize_button_metrics_.OnHWNDActivated();
       return false;
     case WM_ENDSESSION:
-      browser::SessionEnding();
+      chrome::SessionEnding();
       return true;
     case WM_INITMENUPOPUP:
       GetSystemMenu()->UpdateStates();
@@ -223,6 +225,17 @@ bool BrowserDesktopRootWindowHostWin::IsUsingCustomFrame() const {
   return !GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
 }
 
+bool BrowserDesktopRootWindowHostWin::ShouldUseNativeFrame() {
+  if (!views::DesktopRootWindowHostWin::ShouldUseNativeFrame())
+    return false;
+  // This function can get called when the Browser window is closed i.e. in the
+  // context of the BrowserView destructor.
+  if (!browser_view_->browser())
+    return false;
+  return chrome::ShouldUseNativeFrame(browser_view_,
+                                      GetWidget()->GetThemeProvider());
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserDesktopRootWindowHostWin, private:
 
@@ -258,6 +271,7 @@ void BrowserDesktopRootWindowHostWin::UpdateDWMFrame() {
     if (!browser_view_->IsFullscreen()) {
       gfx::Rect tabstrip_bounds(
           browser_frame_->GetBoundsForTabStrip(browser_view_->tabstrip()));
+      tabstrip_bounds = ui::win::DIPToScreenRect(tabstrip_bounds);
       margins.cyTopHeight = tabstrip_bounds.bottom() + kDWMFrameTopOffset;
     }
   }

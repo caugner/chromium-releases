@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 
 using extensions::APIPermission;
 using extensions::APIPermissionSet;
@@ -154,4 +154,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OptionalPermissionsFileAccess) {
   // that the extension actually has file access, since that'd be the bug
   // that this is supposed to be testing).
   //EXPECT_TRUE(prefs->AllowFileAccess("hlonmbgfjccgolnaboonlakjckinmhmd"));
+}
+
+// Test requesting, querying, and removing host permissions for host
+// permissions that are a subset of the optional permissions.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, HostSubsets) {
+  PermissionsRequestFunction::SetAutoConfirmForTests(true);
+  PermissionsRequestFunction::SetIgnoreUserGestureForTests(true);
+  EXPECT_TRUE(RunExtensionTest("permissions/host_subsets")) << message_;
 }

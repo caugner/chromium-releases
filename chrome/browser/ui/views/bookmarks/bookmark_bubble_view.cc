@@ -22,7 +22,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
@@ -86,8 +86,7 @@ void BookmarkBubbleView::ShowBubble(views::View* anchor_view,
 
   bookmark_bubble_ = new BookmarkBubbleView(anchor_view, observer, profile, url,
                                             newly_bookmarked);
-  views::BubbleDelegateView::CreateBubble(bookmark_bubble_);
-  bookmark_bubble_->Show();
+  views::BubbleDelegateView::CreateBubble(bookmark_bubble_)->Show();
   // Select the entire title textfield contents when the bubble is first shown.
   bookmark_bubble_->title_tf_->SelectAll(true);
 
@@ -151,18 +150,19 @@ void BookmarkBubbleView::Init() {
       IDS_BOOKMARK_BUBBLE_REMOVE_BOOKMARK));
   remove_link_->set_listener(this);
 
-  edit_button_ = new views::NativeTextButton(
+  edit_button_ = new views::LabelButton(
       this, l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_OPTIONS));
+  edit_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
 
-  close_button_ = new views::NativeTextButton(
+  close_button_ = new views::LabelButton(
       this, l10n_util::GetStringUTF16(IDS_DONE));
+  close_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
   close_button_->SetIsDefault(true);
 
   views::Label* combobox_label = new views::Label(
       l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_FOLDER_TEXT));
 
   parent_combobox_ = new views::Combobox(&parent_model_);
-  parent_combobox_->SetSelectedIndex(parent_model_.node_parent_index());
   parent_combobox_->set_listener(this);
   parent_combobox_->SetAccessibleName(combobox_label->text());
 

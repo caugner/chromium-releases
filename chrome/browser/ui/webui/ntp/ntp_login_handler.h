@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_NTP_LOGIN_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_NTP_LOGIN_HANDLER_H_
 
-#include "base/prefs/public/pref_member.h"
+#include "base/prefs/pref_member.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -69,6 +69,7 @@ class NTPLoginHandler : public content::WebUIMessageHandler,
   void UpdateLogin();
 
   StringPrefMember username_pref_;
+  BooleanPrefMember signin_allowed_pref_;
   content::NotificationRegistrar registrar_;
 };
 

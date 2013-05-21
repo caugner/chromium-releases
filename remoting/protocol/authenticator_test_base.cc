@@ -4,13 +4,14 @@
 
 #include "remoting/protocol/authenticator_test_base.h"
 
-#include "base/file_path.h"
+#include "base/base64.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/timer.h"
-#include "crypto/rsa_private_key.h"
 #include "net/base/test_data_directory.h"
+#include "remoting/base/rsa_key_pair.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/channel_authenticator.h"
 #include "remoting/protocol/fake_session.h"
@@ -43,53 +44,47 @@ AuthenticatorTestBase::AuthenticatorTestBase() {}
 AuthenticatorTestBase::~AuthenticatorTestBase() {}
 
 void AuthenticatorTestBase::SetUp() {
-  FilePath certs_dir(net::GetTestCertsDirectory());
+  base::FilePath certs_dir(net::GetTestCertsDirectory());
 
-  FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
+  base::FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
   ASSERT_TRUE(file_util::ReadFileToString(cert_path, &host_cert_));
 
-  FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
+  base::FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
   std::string key_string;
   ASSERT_TRUE(file_util::ReadFileToString(key_path, &key_string));
-  std::vector<uint8> key_vector(
-      reinterpret_cast<const uint8*>(key_string.data()),
-      reinterpret_cast<const uint8*>(key_string.data() +
-                                     key_string.length()));
-  private_key_.reset(
-      crypto::RSAPrivateKey::CreateFromPrivateKeyInfo(key_vector));
+  std::string key_base64;
+  ASSERT_TRUE(base::Base64Encode(key_string, &key_base64));
+  key_pair_ = RsaKeyPair::FromString(key_base64);
+  ASSERT_TRUE(key_pair_);
+  host_public_key_ = key_pair_->GetPublicKey();
 }
 
 void AuthenticatorTestBase::RunAuthExchange() {
-  do {
-    scoped_ptr<buzz::XmlElement> message;
+  ContinueAuthExchangeWith(client_.get(), host_.get());
+}
 
-    // Pass message from client to host.
-    ASSERT_EQ(Authenticator::MESSAGE_READY, client_->state());
-    message = client_->GetNextMessage();
-    ASSERT_TRUE(message.get());
-    ASSERT_NE(Authenticator::MESSAGE_READY, client_->state());
+void AuthenticatorTestBase::RunHostInitiatedAuthExchange() {
+  ContinueAuthExchangeWith(host_.get(), client_.get());
+}
 
-    ASSERT_EQ(Authenticator::WAITING_MESSAGE, host_->state());
-    host_->ProcessMessage(message.get());
-    ASSERT_NE(Authenticator::WAITING_MESSAGE, host_->state());
+// static
+void AuthenticatorTestBase::ContinueAuthExchangeWith(Authenticator* sender,
+                                                     Authenticator* receiver) {
+  scoped_ptr<buzz::XmlElement> message;
+  ASSERT_NE(Authenticator::WAITING_MESSAGE, sender->state());
+  if (sender->state() == Authenticator::ACCEPTED ||
+      sender->state() == Authenticator::REJECTED)
+    return;
+  // Pass message from client to host.
+  ASSERT_EQ(Authenticator::MESSAGE_READY, sender->state());
+  message = sender->GetNextMessage();
+  ASSERT_TRUE(message.get());
+  ASSERT_NE(Authenticator::MESSAGE_READY, sender->state());
 
-    // Are we done yet?
-    if (host_->state() == Authenticator::ACCEPTED ||
-        host_->state() == Authenticator::REJECTED) {
-      break;
-    }
-
-    // Pass message from host to client.
-    ASSERT_EQ(Authenticator::MESSAGE_READY, host_->state());
-    message = host_->GetNextMessage();
-    ASSERT_TRUE(message.get());
-    ASSERT_NE(Authenticator::MESSAGE_READY, host_->state());
-
-    ASSERT_EQ(Authenticator::WAITING_MESSAGE, client_->state());
-    client_->ProcessMessage(message.get());
-    ASSERT_NE(Authenticator::WAITING_MESSAGE, client_->state());
-  } while (client_->state() != Authenticator::ACCEPTED &&
-           client_->state() != Authenticator::REJECTED);
+  ASSERT_EQ(Authenticator::WAITING_MESSAGE, receiver->state());
+  receiver->ProcessMessage(message.get(), base::Bind(
+      &AuthenticatorTestBase::ContinueAuthExchangeWith,
+      base::Unretained(receiver), base::Unretained(sender)));
 }
 
 void AuthenticatorTestBase::RunChannelAuth(bool expected_fail) {

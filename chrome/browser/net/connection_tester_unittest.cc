@@ -4,12 +4,11 @@
 
 #include "chrome/browser/net/connection_tester.h"
 
-#include "chrome/test/base/testing_pref_service.h"
+#include "base/prefs/testing_pref_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/mock_cert_verifier.h"
-#include "net/base/mock_host_resolver.h"
-#include "net/base/ssl_config_service_defaults.h"
 #include "net/cookies/cookie_monster.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_layer.h"
@@ -17,6 +16,7 @@
 #include "net/http/http_server_properties_impl.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
+#include "net/ssl/ssl_config_service_defaults.h"
 #include "net/test/test_server.h"
 #include "net/url_request/url_request_context.h"
 #include "testing/gtest/include/gtest/gtest.h"

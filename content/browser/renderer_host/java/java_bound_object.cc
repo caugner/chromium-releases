@@ -192,12 +192,10 @@ bool CallJNIMethod(
       }
       std::string str =
           base::android::ConvertJavaStringToUTF8(scoped_java_string);
-      // Take a copy and pass ownership to the variant. We must allocate using
-      // NPN_MemAlloc, to match NPN_ReleaseVariant, which uses NPN_MemFree.
       size_t length = str.length();
-      // TODO(thakis): This causes linker errors in a components build. Figure
-      // out what to do.
-      char* buffer = static_cast<char*>(NPN_MemAlloc(length));
+      // This pointer is freed in _NPN_ReleaseVariantValue in
+      // third_party/WebKit/Source/WebCore/bindings/v8/npruntime.cpp.
+      char* buffer = static_cast<char*>(malloc(length));
       str.copy(buffer, length, 0);
       STRINGN_TO_NPVARIANT(buffer, length, *result);
       break;
@@ -273,9 +271,9 @@ jvalue CoerceJavaScriptNumberToJavaValue(const NPVariant& variant,
       result.l = coerce_to_string ?
           ConvertUTF8ToJavaString(
               AttachCurrentThread(),
-              is_double ? StringPrintf("%.6lg", NPVARIANT_TO_DOUBLE(variant)) :
-                          base::Int64ToString(NPVARIANT_TO_INT32(variant))).
-                              Release() :
+              is_double ?
+                  base::StringPrintf("%.6lg", NPVARIANT_TO_DOUBLE(variant)) :
+                  base::Int64ToString(NPVARIANT_TO_INT32(variant))).Release() :
           NULL;
       break;
     case JavaType::TypeBoolean:

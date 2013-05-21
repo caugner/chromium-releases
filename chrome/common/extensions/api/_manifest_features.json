@@ -147,6 +147,10 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
+  "media_galleries_handlers": {
+    "channel": "stable",
+    "extension_types": ["packaged_app", "platform_app"]
+  },
   "file_handlers": {
     "channel": "stable",
     "extension_types": ["platform_app"]
@@ -161,7 +165,7 @@
   },
   "incognito": {
     "channel": "stable",
-    "extension_types": ["extension", "packaged_app", "platform_app"]
+    "extension_types": ["extension", "packaged_app"]
   },
   "input_components": {
     "channel": "stable",
@@ -181,6 +185,17 @@
     "channel": "stable",
     "extension_types": "all"
   },
+  "mime_types": {
+    "channel": "stable",
+    "extension_types": [ "extension", "packaged_app", "platform_app" ],
+    "whitelist": [
+      "oickdpebdnfbgkcaoklfcdhjniefkcji",  // browser_tests
+      "gbkeegbaiigmenfmjfclcdgdpimamgkj",  // QuickOffice
+      "ionpfmkccalenbmnddpbmocokhaknphg",  // QuickOffice Dev
+      "bpmcpldpdmajfigpchkicefoigmkfalc",  // Quickoffice component extension
+      "ehibbfinohgbchlgdbfpikodjaojhccn"   // Editor
+    ]
+  },
   "minimum_chrome_version": {
     "channel": "stable",
     "extension_types": [
@@ -196,6 +211,12 @@
   "name": {
     "channel": "stable",
     "extension_types": "all"
+  },
+  "kiosk_enabled": {
+    "channel": "stable",
+    "extension_types": [
+      "platform_app"
+    ]
   },
   "offline_enabled": {
     "channel": "stable",

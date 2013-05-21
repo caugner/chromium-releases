@@ -1,43 +1,53 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gesture_prefs_observer_factory_aura.h"
 
+#include <vector>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/overscroll_configuration.h"
 #include "content/public/common/renderer_preferences.h"
 #include "ui/base/gestures/gesture_configuration.h"
 
+#if defined(USE_ASH)
+#include "ash/wm/workspace/workspace_cycler_configuration.h"
+#endif  // USE_ASH
+
+#if defined(USE_ASH)
+using ash::WorkspaceCyclerConfiguration;
+#endif  // USE_ASH
+
 using ui::GestureConfiguration;
 
 namespace {
+
+// TODO(rjkroege): Remove this deprecated pref in M29. http://crbug.com/160243.
+const char kTouchScreenFlingAccelerationAdjustment[] =
+    "gesture.touchscreen_fling_acceleration_adjustment";
 
 struct OverscrollPref {
   const char* pref_name;
   content::OverscrollConfig config;
 };
 
-// This class manages gesture configuration preferences.
-class GesturePrefsObserver : public ProfileKeyedService {
- public:
-  explicit GesturePrefsObserver(PrefService* prefs);
-  virtual ~GesturePrefsObserver();
-
-  static const OverscrollPref* GetOverscrollPrefs() {
+const std::vector<OverscrollPref>& GetOverscrollPrefs() {
+  CR_DEFINE_STATIC_LOCAL(std::vector<OverscrollPref>, overscroll_prefs, ());
+  if (overscroll_prefs.empty()) {
     using namespace content;
-    static OverscrollPref overscroll_prefs[] = {
+    const OverscrollPref kOverscrollPrefs[] = {
       { prefs::kOverscrollHorizontalThresholdComplete,
         OVERSCROLL_CONFIG_HORIZ_THRESHOLD_COMPLETE },
       { prefs::kOverscrollVerticalThresholdComplete,
@@ -48,12 +58,64 @@ class GesturePrefsObserver : public ProfileKeyedService {
         OVERSCROLL_CONFIG_HORIZ_RESIST_AFTER },
       { prefs::kOverscrollVerticalResistThreshold,
         OVERSCROLL_CONFIG_VERT_RESIST_AFTER },
-      { NULL,
-        OVERSCROLL_CONFIG_NONE },
     };
-
-    return overscroll_prefs;
+    overscroll_prefs.assign(kOverscrollPrefs,
+                            kOverscrollPrefs + arraysize(kOverscrollPrefs));
   }
+  return overscroll_prefs;
+}
+
+#if defined(USE_ASH)
+struct WorkspaceCyclerPref {
+  const char* pref_name;
+  WorkspaceCyclerConfiguration::Property property;
+};
+
+const std::vector<WorkspaceCyclerPref>& GetWorkspaceCyclerPrefs() {
+  CR_DEFINE_STATIC_LOCAL(std::vector<WorkspaceCyclerPref>, cycler_prefs, ());
+  if (cycler_prefs.empty()) {
+    const WorkspaceCyclerPref kCyclerPrefs[] = {
+      { prefs::kWorkspaceCyclerShallowerThanSelectedYOffsets,
+        WorkspaceCyclerConfiguration::SHALLOWER_THAN_SELECTED_Y_OFFSETS },
+      { prefs::kWorkspaceCyclerDeeperThanSelectedYOffsets,
+        WorkspaceCyclerConfiguration::DEEPER_THAN_SELECTED_Y_OFFSETS },
+      { prefs::kWorkspaceCyclerSelectedYOffset,
+        WorkspaceCyclerConfiguration::SELECTED_Y_OFFSET },
+      { prefs::kWorkspaceCyclerSelectedScale,
+        WorkspaceCyclerConfiguration::SELECTED_SCALE },
+      { prefs::kWorkspaceCyclerMinScale,
+        WorkspaceCyclerConfiguration::MIN_SCALE },
+      { prefs::kWorkspaceCyclerMaxScale,
+        WorkspaceCyclerConfiguration::MAX_SCALE },
+      { prefs::kWorkspaceCyclerMinBrightness,
+        WorkspaceCyclerConfiguration::MIN_BRIGHTNESS },
+      { prefs::kWorkspaceCyclerBackgroundOpacity,
+        WorkspaceCyclerConfiguration::BACKGROUND_OPACITY },
+      { prefs::kWorkspaceCyclerDesktopWorkspaceBrightness,
+        WorkspaceCyclerConfiguration::DESKTOP_WORKSPACE_BRIGHTNESS },
+      { prefs::kWorkspaceCyclerDistanceToInitiateCycling,
+        WorkspaceCyclerConfiguration::DISTANCE_TO_INITIATE_CYCLING },
+      { prefs::kWorkspaceCyclerScrollDistanceToCycleToNextWorkspace,
+        WorkspaceCyclerConfiguration::
+            SCROLL_DISTANCE_TO_CYCLE_TO_NEXT_WORKSPACE },
+      { prefs::kWorkspaceCyclerCyclerStepAnimationDurationRatio,
+        WorkspaceCyclerConfiguration::CYCLER_STEP_ANIMATION_DURATION_RATIO },
+      { prefs::kWorkspaceCyclerStartCyclerAnimationDuration,
+        WorkspaceCyclerConfiguration::START_CYCLER_ANIMATION_DURATION },
+      { prefs::kWorkspaceCyclerStopCyclerAnimationDuration,
+        WorkspaceCyclerConfiguration::STOP_CYCLER_ANIMATION_DURATION },
+    };
+    cycler_prefs.assign(kCyclerPrefs, kCyclerPrefs + arraysize(kCyclerPrefs));
+  }
+  return cycler_prefs;
+}
+#endif  // USE_ASH
+
+// This class manages gesture configuration preferences.
+class GesturePrefsObserver : public ProfileKeyedService {
+ public:
+  explicit GesturePrefsObserver(PrefService* prefs);
+  virtual ~GesturePrefsObserver();
 
   // ProfileKeyedService implementation.
   virtual void Shutdown() OVERRIDE;
@@ -71,6 +133,7 @@ class GesturePrefsObserver : public ProfileKeyedService {
   // Notification helper to push overscroll preferences into
   // content.
   void UpdateOverscrollPrefs();
+  void UpdateWorkspaceCyclerPrefs();
 
   PrefChangeRegistrar registrar_;
   PrefService* prefs_;
@@ -88,6 +151,7 @@ const char* kPrefsToObserve[] = {
   prefs::kFlingAccelerationCurveCoefficient3,
   prefs::kFlingMaxCancelToDownTimeInMs,
   prefs::kFlingMaxTapGapTimeInMs,
+  prefs::kTabScrubActivationDelayInMS,
   prefs::kFlingVelocityCap,
   prefs::kLongPressTimeInSeconds,
   prefs::kMaxDistanceForTwoFingerTapInPixels,
@@ -109,14 +173,6 @@ const char* kPrefsToObserve[] = {
   prefs::kSemiLongPressTimeInSeconds,
 };
 
-const char* kOverscrollPrefs[] = {
-  prefs::kOverscrollHorizontalThresholdComplete,
-  prefs::kOverscrollVerticalThresholdComplete,
-  prefs::kOverscrollMinimumThresholdStart,
-  prefs::kOverscrollHorizontalResistThreshold,
-  prefs::kOverscrollVerticalResistThreshold,
-};
-
 const char* kFlingTouchpadPrefs[] = {
   prefs::kFlingCurveTouchpadAlpha,
   prefs::kFlingCurveTouchpadBeta,
@@ -131,6 +187,9 @@ const char* kFlingTouchscreenPrefs[] = {
 
 GesturePrefsObserver::GesturePrefsObserver(PrefService* prefs)
     : prefs_(prefs) {
+  // Clear for migration.
+  prefs->ClearPref(kTouchScreenFlingAccelerationAdjustment);
+
   registrar_.Init(prefs);
   registrar_.RemoveAll();
   base::Closure callback = base::Bind(&GesturePrefsObserver::Update,
@@ -141,13 +200,23 @@ GesturePrefsObserver::GesturePrefsObserver(PrefService* prefs)
 
   for (size_t i = 0; i < arraysize(kPrefsToObserve); ++i)
     registrar_.Add(kPrefsToObserve[i], callback);
-  for (size_t i = 0; i < arraysize(kOverscrollPrefs); ++i)
-    registrar_.Add(kOverscrollPrefs[i], callback);
+
+  const std::vector<OverscrollPref>& overscroll_prefs = GetOverscrollPrefs();
+  for (size_t i = 0; i < overscroll_prefs.size(); ++i)
+    registrar_.Add(overscroll_prefs[i].pref_name, callback);
 
   for (size_t i = 0; i < arraysize(kFlingTouchpadPrefs); ++i)
     registrar_.Add(kFlingTouchpadPrefs[i], notify_callback);
   for (size_t i = 0; i < arraysize(kFlingTouchscreenPrefs); ++i)
     registrar_.Add(kFlingTouchscreenPrefs[i], notify_callback);
+
+#if defined(USE_ASH)
+  const std::vector<WorkspaceCyclerPref>& cycler_prefs =
+      GetWorkspaceCyclerPrefs();
+  for (size_t i = 0; i < cycler_prefs.size(); ++i)
+    registrar_.Add(cycler_prefs[i].pref_name, callback);
+#endif  // USE_ASH
+  Update();
 }
 
 GesturePrefsObserver::~GesturePrefsObserver() {}
@@ -169,6 +238,8 @@ void GesturePrefsObserver::Update() {
       prefs_->GetInteger(prefs::kFlingMaxCancelToDownTimeInMs));
   GestureConfiguration::set_fling_max_tap_gap_time_in_ms(
       prefs_->GetInteger(prefs::kFlingMaxTapGapTimeInMs));
+  GestureConfiguration::set_tab_scrub_activation_delay_in_ms(
+      prefs_->GetInteger(prefs::kTabScrubActivationDelayInMS));
   GestureConfiguration::set_fling_velocity_cap(
       prefs_->GetDouble(prefs::kFlingVelocityCap));
   GestureConfiguration::set_long_press_time_in_seconds(
@@ -230,15 +301,33 @@ void GesturePrefsObserver::Update() {
           prefs::kRailStartProportion));
 
   UpdateOverscrollPrefs();
+  UpdateWorkspaceCyclerPrefs();
 }
 
 void GesturePrefsObserver::UpdateOverscrollPrefs() {
-  const OverscrollPref* overscroll_prefs =
-      GesturePrefsObserver::GetOverscrollPrefs();
-  for (int i = 0; overscroll_prefs[i].pref_name; ++i) {
+  const std::vector<OverscrollPref>& overscroll_prefs = GetOverscrollPrefs();
+  for (size_t i = 0; i < overscroll_prefs.size(); ++i) {
     content::SetOverscrollConfig(overscroll_prefs[i].config,
         static_cast<float>(prefs_->GetDouble(overscroll_prefs[i].pref_name)));
   }
+}
+
+void GesturePrefsObserver::UpdateWorkspaceCyclerPrefs() {
+#if defined(USE_ASH)
+  const std::vector<WorkspaceCyclerPref>& cycler_prefs =
+      GetWorkspaceCyclerPrefs();
+  for (size_t i = 0; i < cycler_prefs.size(); ++i) {
+    WorkspaceCyclerConfiguration::Property property =
+        cycler_prefs[i].property;
+    if (WorkspaceCyclerConfiguration::IsListProperty(property)) {
+      WorkspaceCyclerConfiguration::SetListValue(property,
+          *prefs_->GetList(cycler_prefs[i].pref_name));
+    } else {
+      WorkspaceCyclerConfiguration::SetDouble(property,
+          prefs_->GetDouble(cycler_prefs[i].pref_name));
+    }
+  }
+#endif  // USE_ASH
 }
 
 void GesturePrefsObserver::Notify() {
@@ -271,10 +360,9 @@ ProfileKeyedService* GesturePrefsObserverFactoryAura::BuildServiceInstanceFor(
 
 void GesturePrefsObserverFactoryAura::RegisterOverscrollPrefs(
     PrefRegistrySyncable* registry) {
-  const OverscrollPref* overscroll_prefs =
-      GesturePrefsObserver::GetOverscrollPrefs();
+  const std::vector<OverscrollPref>& overscroll_prefs = GetOverscrollPrefs();
 
-  for (int i = 0; overscroll_prefs[i].pref_name; ++i) {
+  for (size_t i = 0; i < overscroll_prefs.size(); ++i) {
     registry->RegisterDoublePref(
         overscroll_prefs[i].pref_name,
         content::GetOverscrollConfig(overscroll_prefs[i].config),
@@ -297,8 +385,30 @@ void GesturePrefsObserverFactoryAura::RegisterFlingCurveParameters(
                                  PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
-void GesturePrefsObserverFactoryAura::DeprecatedRegisterUserPrefs(
-    PrefService* prefs,
+void GesturePrefsObserverFactoryAura::RegisterWorkspaceCyclerPrefs(
+    PrefRegistrySyncable* registry) {
+#if defined(USE_ASH)
+  const std::vector<WorkspaceCyclerPref>& cycler_prefs =
+      GetWorkspaceCyclerPrefs();
+  for (size_t i = 0; i < cycler_prefs.size(); ++i) {
+    WorkspaceCyclerConfiguration::Property property =
+        cycler_prefs[i].property;
+    if (WorkspaceCyclerConfiguration::IsListProperty(property)) {
+      registry->RegisterListPref(
+          cycler_prefs[i].pref_name,
+          WorkspaceCyclerConfiguration::GetListValue(property).DeepCopy(),
+          PrefRegistrySyncable::UNSYNCABLE_PREF);
+    } else {
+      registry->RegisterDoublePref(
+          cycler_prefs[i].pref_name,
+          WorkspaceCyclerConfiguration::GetDouble(property),
+          PrefRegistrySyncable::UNSYNCABLE_PREF);
+    }
+  }
+#endif  // USE_ASH
+}
+
+void GesturePrefsObserverFactoryAura::RegisterUserPrefs(
     PrefRegistrySyncable* registry) {
   registry->RegisterDoublePref(
       prefs::kFlingAccelerationCurveCoefficient0,
@@ -323,6 +433,10 @@ void GesturePrefsObserverFactoryAura::DeprecatedRegisterUserPrefs(
   registry->RegisterIntegerPref(
       prefs::kFlingMaxTapGapTimeInMs,
       GestureConfiguration::fling_max_tap_gap_time_in_ms(),
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kTabScrubActivationDelayInMS,
+      GestureConfiguration::tab_scrub_activation_delay_in_ms(),
       PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDoublePref(
       prefs::kFlingVelocityCap,
@@ -405,16 +519,14 @@ void GesturePrefsObserverFactoryAura::DeprecatedRegisterUserPrefs(
       GestureConfiguration::rail_start_proportion(),
       PrefRegistrySyncable::UNSYNCABLE_PREF);
 
-  // TODO(rjkroege): Remove this in M29. http://crbug.com/160243.
-  const char kTouchScreenFlingAccelerationAdjustment[] =
-      "gesture.touchscreen_fling_acceleration_adjustment";
+  // Register for migration.
   registry->RegisterDoublePref(kTouchScreenFlingAccelerationAdjustment,
                                0.0,
                                PrefRegistrySyncable::UNSYNCABLE_PREF);
-  prefs->ClearPref(kTouchScreenFlingAccelerationAdjustment);
 
   RegisterOverscrollPrefs(registry);
   RegisterFlingCurveParameters(registry);
+  RegisterWorkspaceCyclerPrefs(registry);
 }
 
 bool GesturePrefsObserverFactoryAura::ServiceIsCreatedWithProfile() const {

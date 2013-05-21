@@ -151,15 +151,11 @@ class TestingProfile : public Profile {
   // recreating the BookmarkModel.
   //
   // NOTE: this does not block until the bookmarks are loaded. For that use
-  // BlockUntilBookmarkModelLoaded.
+  // ui_test_utils::WaitForBookmarkModelToLoad.
   void CreateBookmarkModel(bool delete_file);
 
   // Creates a WebDataService. If not invoked, the web data service is NULL.
   void CreateWebDataService();
-
-  // Blocks until the BookmarkModel finishes loaded. This is NOT invoked from
-  // CreateBookmarkModel.
-  void BlockUntilBookmarkModelLoaded();
 
   // Blocks until the HistoryService finishes restoring its in-memory cache.
   // This is NOT invoked from CreateHistoryService.
@@ -186,16 +182,7 @@ class TestingProfile : public Profile {
   // the CookieMonster. See implementation comments for more details.
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* CreateRequestContext(
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          blob_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          file_system_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          developer_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_devtools_protocol_handler) OVERRIDE;
+      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
@@ -210,6 +197,7 @@ class TestingProfile : public Profile {
   void set_incognito(bool incognito) { incognito_ = incognito; }
   // Assumes ownership.
   virtual void SetOffTheRecordProfile(Profile* profile);
+  virtual void SetOriginalProfile(Profile* profile);
   virtual Profile* GetOffTheRecordProfile() OVERRIDE;
   virtual void DestroyOffTheRecordProfile() OVERRIDE {}
   virtual bool HasOffTheRecordProfile() OVERRIDE;
@@ -250,16 +238,7 @@ class TestingProfile : public Profile {
   virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
       const base::FilePath& partition_path,
       bool in_memory,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          blob_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          file_system_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          developer_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_devtools_protocol_handler) OVERRIDE;
+      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
   virtual std::wstring GetName();
@@ -340,6 +319,7 @@ class TestingProfile : public Profile {
 
   bool incognito_;
   scoped_ptr<Profile> incognito_profile_;
+  Profile* original_profile_;
 
   // Did the last session exit cleanly? Default is true.
   bool last_session_exited_cleanly_;

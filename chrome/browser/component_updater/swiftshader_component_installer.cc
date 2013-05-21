@@ -4,12 +4,12 @@
 
 #include "chrome/browser/component_updater/swiftshader_component_installer.h"
 
-#include "base/bind.h"
 #include "base/base_paths.h"
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/cpu.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -165,9 +165,6 @@ class UpdateChecker : public content::GpuDataManagerObserver {
   explicit UpdateChecker(ComponentUpdateService* cus);
 
   virtual void OnGpuInfoUpdate() OVERRIDE;
-  virtual void OnVideoMemoryUsageStatsUpdate(
-      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats)
-          OVERRIDE {}
 
  private:
   ComponentUpdateService* cus_;

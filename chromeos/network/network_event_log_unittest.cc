@@ -9,8 +9,8 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
-#include "base/string_split.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -98,7 +98,8 @@ TEST_F(NetworkEventLogTest, TestMaxNetworkEvents) {
   const size_t entries_to_add =
       network_event_log::kMaxNetworkEventLogEntries + 3;
   for (size_t i = 0; i < entries_to_add; ++i)
-    network_event_log::AddEntry("test", StringPrintf("event_%"PRIuS, i), "");
+    network_event_log::AddEntry("test",
+                                base::StringPrintf("event_%"PRIuS, i), "");
 
   std::string output = GetAsString(network_event_log::OLDEST_FIRST, 0);
   size_t output_lines = CountLines(output);

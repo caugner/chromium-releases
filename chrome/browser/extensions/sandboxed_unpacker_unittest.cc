@@ -13,9 +13,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/unpacker.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/common/constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -67,9 +68,7 @@ class SandboxedUnpackerTest : public testing::Test {
     // It will delete itself.
     client_ = new MockSandboxedUnpackerClient;
     client_->DelegateToFake();
-    extensions::ManifestHandler::Register(
-        extension_manifest_keys::kDefaultLocale,
-        make_linked_ptr(new extensions::DefaultLocaleHandler));
+    (new extensions::DefaultLocaleHandler)->Register();
   }
 
   virtual void TearDown() {
@@ -77,6 +76,7 @@ class SandboxedUnpackerTest : public testing::Test {
     // it posts a task to it.
     sandboxed_unpacker_ = NULL;
     loop_.RunUntilIdle();
+    ManifestHandler::ClearRegistryForTesting();
   }
 
   void SetupUnpacker(const std::string& crx_name) {
@@ -178,7 +178,7 @@ TEST_F(SandboxedUnpackerTest, NoCatalogsSuccess) {
 
   // Check that there is no _locales folder.
   base::FilePath install_path =
-    GetInstallPath().Append(Extension::kLocaleFolder);
+    GetInstallPath().Append(kLocaleFolder);
   EXPECT_FALSE(file_util::PathExists(install_path));
 
   OnUnpackSucceeded();
@@ -200,9 +200,9 @@ TEST_F(SandboxedUnpackerTest, WithCatalogsSuccess) {
 
   // Set timestamp on _locales/en_US/messages.json into the past.
   base::FilePath messages_file;
-  messages_file = GetInstallPath().Append(Extension::kLocaleFolder)
+  messages_file = GetInstallPath().Append(kLocaleFolder)
       .AppendASCII("en_US")
-      .Append(Extension::kMessagesFilename);
+      .Append(kMessagesFilename);
   base::PlatformFileInfo old_info;
   EXPECT_TRUE(file_util::GetFileInfo(messages_file, &old_info));
   base::Time old_time =

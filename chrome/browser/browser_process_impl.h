@@ -16,7 +16,7 @@
 #include "base/debug/stack_trace.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
 #include "chrome/browser/browser_process.h"
@@ -43,6 +43,10 @@ class PolicyService;
 
 #if defined(OS_WIN) && defined(USE_AURA)
 class MetroViewerProcessHost;
+#endif
+
+#if defined(OS_MACOSX)
+class AppShimHostManager;
 #endif
 
 // Real implementation of BrowserProcess that creates and returns the services.
@@ -92,10 +96,12 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
   virtual GLStringManager* gl_string_manager() OVERRIDE;
+  virtual GpuModeManager* gpu_mode_manager() OVERRIDE;
   virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
   virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
+      chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
       int port,
       const std::string& frontend_url) OVERRIDE;
@@ -131,6 +137,7 @@ class BrowserProcessImpl : public BrowserProcess,
       media_file_system_registry() OVERRIDE;
   virtual void PlatformSpecificCommandLineProcessing(
       const CommandLine& command_line) OVERRIDE;
+  virtual bool created_local_state() const OVERRIDE;
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -146,9 +153,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateIconManager();
   void CreateIntranetRedirectDetector();
   void CreateNotificationUIManager();
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-  void CreateMessageCenter();
-#endif
   void CreateStatusTrayManager();
   void CreatePrintPreviewDialogController();
   void CreateBackgroundPrintingManager();
@@ -191,6 +195,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<GLStringManager> gl_string_manager_;
 
+  scoped_ptr<GpuModeManager> gpu_mode_manager_;
+
   scoped_refptr<extensions::EventRouterForwarder>
       extension_event_router_forwarder_;
 
@@ -213,12 +219,6 @@ class BrowserProcessImpl : public BrowserProcess,
   // Manager for desktop notification UI.
   bool created_notification_ui_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
-
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-  // MessageCenter keeps currently displayed UI notifications.
-  scoped_ptr<message_center::MessageCenter> message_center_;
-  bool created_message_center_;
-#endif
 
 #if defined(ENABLE_AUTOMATION)
   scoped_ptr<AutomationProviderList> automation_provider_list_;
@@ -302,6 +302,11 @@ class BrowserProcessImpl : public BrowserProcess,
   // Hosts the channel for the Windows 8 metro viewer process which runs in
   // the ASH environment.
   scoped_ptr<MetroViewerProcessHost> metro_viewer_process_host_;
+#endif
+
+#if defined(OS_MACOSX)
+  // Hosts the IPC channel factory that App Shims connect to on Mac.
+  scoped_ptr<AppShimHostManager> app_shim_host_manager_;
 #endif
 
   // TODO(eroman): Remove this when done debugging 113031. This tracks

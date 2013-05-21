@@ -12,8 +12,8 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -21,10 +21,10 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/save_page_type.h"
@@ -40,6 +40,20 @@ using content::DownloadManager;
 
 DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
   PrefService* prefs = profile->GetPrefs();
+
+  // If the download path is dangerous we forcefully reset it. But if we do
+  // so we set a flag to make sure we only do it once, to avoid fighting
+  // the user if he really wants it on an unsafe place such as the desktop.
+  if (!prefs->GetBoolean(prefs::kDownloadDirUpgraded)) {
+    base::FilePath current_download_dir = prefs->GetFilePath(
+        prefs::kDownloadDefaultDirectory);
+    if (download_util::DownloadPathIsDangerous(current_download_dir)) {
+      prefs->SetFilePath(prefs::kDownloadDefaultDirectory,
+                         download_util::GetDefaultDownloadDirectory());
+    }
+    prefs->SetBoolean(prefs::kDownloadDirUpgraded, true);
+  }
+
   prompt_for_download_.Init(prefs::kPromptForDownload, prefs);
   download_path_.Init(prefs::kDownloadDefaultDirectory, prefs);
   save_file_type_.Init(prefs::kSaveFileType, prefs);
@@ -64,12 +78,10 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
 }
 
 DownloadPrefs::~DownloadPrefs() {
-  SaveAutoOpenState();
 }
 
 // static
-void DownloadPrefs::RegisterUserPrefs(PrefService* prefs,
-                                      PrefRegistrySyncable* registry) {
+void DownloadPrefs::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kPromptForDownload,
                                 false,
                                 PrefRegistrySyncable::SYNCABLE_PREF);
@@ -97,21 +109,6 @@ void DownloadPrefs::RegisterUserPrefs(PrefService* prefs,
       base::Bind(base::IgnoreResult(&file_util::CreateDirectory),
                  default_download_path));
 #endif  // defined(OS_CHROMEOS)
-
-  // TODO(joi): Move this out, and get rid of PrefService param above.
-
-  // If the download path is dangerous we forcefully reset it. But if we do
-  // so we set a flag to make sure we only do it once, to avoid fighting
-  // the user if he really wants it on an unsafe place such as the desktop.
-  if (!prefs->GetBoolean(prefs::kDownloadDirUpgraded)) {
-    base::FilePath current_download_dir = prefs->GetFilePath(
-        prefs::kDownloadDefaultDirectory);
-    if (download_util::DownloadPathIsDangerous(current_download_dir)) {
-      prefs->SetFilePath(prefs::kDownloadDefaultDirectory,
-                         default_download_path);
-    }
-    prefs->SetBoolean(prefs::kDownloadDirUpgraded, true);
-  }
 }
 
 // static

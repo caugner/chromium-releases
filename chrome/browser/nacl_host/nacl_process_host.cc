@@ -13,10 +13,10 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
@@ -27,6 +27,7 @@
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
@@ -43,7 +44,7 @@
 #include "extensions/common/url_pattern.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_switches.h"
-#include "native_client/src/shared/imc/nacl_imc.h"
+#include "native_client/src/shared/imc/nacl_imc_c.h"
 #include "net/base/net_util.h"
 #include "net/base/tcp_listen_socket.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -61,6 +62,7 @@
 #include "chrome/browser/nacl_host/nacl_broker_service_win.h"
 #include "chrome/common/nacl_debug_exception_handler_win.h"
 #include "content/public/common/sandbox_init.h"
+#include "content/public/common/sandboxed_process_launcher_delegate.h"
 #endif
 
 using content::BrowserThread;
@@ -75,9 +77,38 @@ bool RunningOnWOW64() {
   return (base::win::OSInfo::GetInstance()->wow64_status() ==
           base::win::OSInfo::WOW64_ENABLED);
 }
-#endif
 
-void SetCloseOnExec(nacl::Handle fd) {
+// NOTE: changes to this class need to be reviewed by the security team.
+class NaClSandboxedProcessLauncherDelegate
+    : public content::SandboxedProcessLauncherDelegate {
+ public:
+  NaClSandboxedProcessLauncherDelegate() {}
+  virtual ~NaClSandboxedProcessLauncherDelegate() {}
+
+  virtual void PostSpawnTarget(base::ProcessHandle process) {
+#if !defined(NACL_WIN64)
+    // For Native Client sel_ldr processes on 32-bit Windows, reserve 1 GB of
+    // address space to prevent later failure due to address space fragmentation
+    // from .dll loading. The NaCl process will attempt to locate this space by
+    // scanning the address space using VirtualQuery.
+    // TODO(bbudge) Handle the --no-sandbox case.
+    // http://code.google.com/p/nativeclient/issues/detail?id=2131
+    const SIZE_T kOneGigabyte = 1 << 30;
+    void* nacl_mem = VirtualAllocEx(process,
+                                    NULL,
+                                    kOneGigabyte,
+                                    MEM_RESERVE,
+                                    PAGE_NOACCESS);
+    if (!nacl_mem) {
+      DLOG(WARNING) << "Failed to reserve address space for Native Client";
+    }
+#endif  // !defined(NACL_WIN64)
+  }
+};
+
+#endif  // OS_WIN
+
+void SetCloseOnExec(NaClHandle fd) {
 #if defined(OS_POSIX)
   int flags = fcntl(fd, F_GETFD);
   CHECK_NE(flags, -1);
@@ -88,7 +119,7 @@ void SetCloseOnExec(nacl::Handle fd) {
 
 bool ShareHandleToSelLdr(
     base::ProcessHandle processh,
-    nacl::Handle sourceh,
+    NaClHandle sourceh,
     bool close_source,
     std::vector<nacl::FileDescriptor> *handles_for_sel_ldr) {
 #if defined(OS_WIN)
@@ -128,12 +159,12 @@ ppapi::PpapiPermissions GetNaClPermissions(uint32 permission_bits) {
 }  // namespace
 
 struct NaClProcessHost::NaClInternal {
-  nacl::Handle socket_for_renderer;
-  nacl::Handle socket_for_sel_ldr;
+  NaClHandle socket_for_renderer;
+  NaClHandle socket_for_sel_ldr;
 
   NaClInternal()
-    : socket_for_renderer(nacl::kInvalidHandle),
-      socket_for_sel_ldr(nacl::kInvalidHandle) { }
+    : socket_for_renderer(NACL_INVALID_HANDLE),
+      socket_for_sel_ldr(NACL_INVALID_HANDLE) { }
 };
 
 // -----------------------------------------------------------------------------
@@ -172,7 +203,7 @@ NaClProcessHost::NaClProcessHost(const GURL& manifest_url,
       ALLOW_THIS_IN_INITIALIZER_LIST(ipc_plugin_listener_(this)),
       render_view_id_(render_view_id) {
   process_.reset(content::BrowserChildProcessHost::Create(
-      content::PROCESS_TYPE_NACL_LOADER, this));
+      PROCESS_TYPE_NACL_LOADER, this));
 
   // Set the display name so the user knows what plugin the process is running.
   // We aren't on the UI thread so getting the pref locale for language
@@ -203,15 +234,15 @@ NaClProcessHost::~NaClProcessHost() {
     LOG(ERROR) << message;
   }
 
-  if (internal_->socket_for_renderer != nacl::kInvalidHandle) {
-    if (nacl::Close(internal_->socket_for_renderer) != 0) {
-      NOTREACHED() << "nacl::Close() failed";
+  if (internal_->socket_for_renderer != NACL_INVALID_HANDLE) {
+    if (NaClClose(internal_->socket_for_renderer) != 0) {
+      NOTREACHED() << "NaClClose() failed";
     }
   }
 
-  if (internal_->socket_for_sel_ldr != nacl::kInvalidHandle) {
-    if (nacl::Close(internal_->socket_for_sel_ldr) != 0) {
-      NOTREACHED() << "nacl::Close() failed";
+  if (internal_->socket_for_sel_ldr != NACL_INVALID_HANDLE) {
+    if (NaClClose(internal_->socket_for_sel_ldr) != 0) {
+      NOTREACHED() << "NaClClose() failed";
     }
   }
 
@@ -278,9 +309,9 @@ void NaClProcessHost::Launch(
   // This means the sandboxed renderer cannot send handles to the
   // browser process.
 
-  nacl::Handle pair[2];
+  NaClHandle pair[2];
   // Create a connected socket
-  if (nacl::SocketPair(pair) == -1) {
+  if (NaClSocketPair(pair) == -1) {
     LOG(ERROR) << "NaCl process launch failed: could not create a socket pair";
     delete this;
     return;
@@ -572,7 +603,8 @@ bool NaClProcessHost::LaunchSelLdr() {
       return false;
     }
   } else {
-    process_->Launch(base::FilePath(), cmd_line.release());
+    process_->Launch(new NaClSandboxedProcessLauncherDelegate,
+                     cmd_line.release());
   }
 #elif defined(OS_POSIX)
   process_->Launch(nacl_loader_prefix.empty(),  // use_zygote
@@ -667,7 +699,7 @@ bool NaClProcessHost::ReplyToRenderer(
   chrome_render_message_filter_->Send(reply_msg_);
   chrome_render_message_filter_ = NULL;
   reply_msg_ = NULL;
-  internal_->socket_for_renderer = nacl::kInvalidHandle;
+  internal_->socket_for_renderer = NACL_INVALID_HANDLE;
   return true;
 }
 
@@ -768,7 +800,7 @@ bool NaClProcessHost::StartNaClExecution() {
 
   process_->Send(new NaClProcessMsg_Start(params));
 
-  internal_->socket_for_sel_ldr = nacl::kInvalidHandle;
+  internal_->socket_for_sel_ldr = NACL_INVALID_HANDLE;
   return true;
 }
 
@@ -790,7 +822,7 @@ void NaClProcessHost::OnPpapiChannelCreated(
   // If the proxy channel is null, this must be the initial NaCl-Browser IPC
   // channel.
   if (!ipc_proxy_channel_.get()) {
-    DCHECK_EQ(content::PROCESS_TYPE_NACL_LOADER, process_->GetData().type);
+    DCHECK_EQ(PROCESS_TYPE_NACL_LOADER, process_->GetData().process_type);
 
     ipc_proxy_channel_.reset(
         new IPC::ChannelProxy(channel_handle,

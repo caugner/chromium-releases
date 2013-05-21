@@ -37,7 +37,6 @@ def IncludeCompareKey(line):
   """Sorting comparator key used for comparing two #include lines.
   Returns the filename without the #include/#import prefix.
   """
-  line = line.lower()
   for prefix in ('#include ', '#import '):
     if line.startswith(prefix):
       line = line[len(prefix):]
@@ -48,15 +47,17 @@ def IncludeCompareKey(line):
   # other headers.
   if line.startswith('<windows.h>'):  # Must be before e.g. shellapi.h
     return '0'
+  if line.startswith('<atlbase.h>'):  # Must be before atlapp.h.
+    return '1' + line
   if line.startswith('<unknwn.h>'):  # Must be before e.g. intshcut.h
-    return '1'
+    return '1' + line
 
   # C++ system headers should come after C system headers.
   if line.startswith('<'):
     if line.find('.h>') != -1:
-      return '2' + line
+      return '2' + line.lower()
     else:
-      return '3' + line
+      return '3' + line.lower()
 
   return '4' + line
 

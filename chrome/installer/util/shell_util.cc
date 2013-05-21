@@ -16,8 +16,8 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/md5.h"
@@ -25,9 +25,9 @@
 #include "base/memory/scoped_vector.h"
 #include "base/path_service.h"
 #include "base/string16.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/registry.h"
@@ -641,7 +641,8 @@ bool AreEntriesRegistered(const ScopedVector<RegistryEntry>& entries,
 }
 
 // Checks that all required registry entries for Chrome are already present
-// on this computer.
+// on this computer. See RegistryEntry::ExistsInRegistry for the behavior of
+// |look_for_in|.
 // Note: between r133333 and r154145 we were registering parts of Chrome in HKCU
 // and parts in HKLM for user-level installs; we now always register everything
 // under a single registry root. Not doing so caused http://crbug.com/144910 for
@@ -651,22 +652,25 @@ bool AreEntriesRegistered(const ScopedVector<RegistryEntry>& entries,
 // registry roots).
 bool IsChromeRegistered(BrowserDistribution* dist,
                         const string16& chrome_exe,
-                        const string16& suffix) {
+                        const string16& suffix,
+                        uint32 look_for_in) {
   ScopedVector<RegistryEntry> entries;
   RegistryEntry::GetProgIdEntries(dist, chrome_exe, suffix, &entries);
   RegistryEntry::GetShellIntegrationEntries(dist, chrome_exe, suffix, &entries);
   RegistryEntry::GetAppRegistrationEntries(chrome_exe, suffix, &entries);
-  return AreEntriesRegistered(entries, RegistryEntry::LOOK_IN_HKCU_THEN_HKLM);
+  return AreEntriesRegistered(entries, look_for_in);
 }
 
 // This method checks if Chrome is already registered on the local machine
 // for the requested protocol. It just checks the one value required for this.
+// See RegistryEntry::ExistsInRegistry for the behavior of |look_for_in|.
 bool IsChromeRegisteredForProtocol(BrowserDistribution* dist,
                                    const string16& suffix,
-                                   const string16& protocol) {
+                                   const string16& protocol,
+                                   uint32 look_for_in) {
   ScopedVector<RegistryEntry> entries;
   RegistryEntry::GetProtocolCapabilityEntries(dist, suffix, protocol, &entries);
-  return AreEntriesRegistered(entries, RegistryEntry::LOOK_IN_HKCU_THEN_HKLM);
+  return AreEntriesRegistered(entries, look_for_in);
 }
 
 // This method registers Chrome on Vista by launching an elevated setup.exe.
@@ -1737,12 +1741,19 @@ bool ShellUtil::RegisterChromeBrowser(BrowserDistribution* dist,
 
   RemoveRunVerbOnWindows8(dist, chrome_exe);
 
-  // Check if Chromium is already registered with this suffix.
-  if (IsChromeRegistered(dist, chrome_exe, suffix))
-    return true;
-
   bool user_level = InstallUtil::IsPerUserInstall(chrome_exe.c_str());
   HKEY root = DetermineRegistrationRoot(user_level);
+
+  // Look only in HKLM for system-level installs (otherwise, if a user-level
+  // install is also present, it will lead IsChromeRegistered() to think this
+  // system-level install isn't registered properly as it is shadowed by the
+  // user-level install's registrations).
+  uint32 look_for_in = user_level ?
+      RegistryEntry::LOOK_IN_HKCU_THEN_HKLM : RegistryEntry::LOOK_IN_HKLM;
+
+  // Check if chrome is already registered with this suffix.
+  if (IsChromeRegistered(dist, chrome_exe, suffix, look_for_in))
+    return true;
 
   bool result = true;
   if (root == HKEY_CURRENT_USER || IsUserAnAdmin()) {
@@ -1812,12 +1823,19 @@ bool ShellUtil::RegisterChromeForProtocol(BrowserDistribution* dist,
     return false;
   }
 
-  // Check if Chromium is already registered with this suffix.
-  if (IsChromeRegisteredForProtocol(dist, suffix, protocol))
-    return true;
+  bool user_level = InstallUtil::IsPerUserInstall(chrome_exe.c_str());
+  HKEY root = DetermineRegistrationRoot(user_level);
 
-  HKEY root = DetermineRegistrationRoot(
-      InstallUtil::IsPerUserInstall(chrome_exe.c_str()));
+  // Look only in HKLM for system-level installs (otherwise, if a user-level
+  // install is also present, it could lead IsChromeRegisteredForProtocol() to
+  // think this system-level install isn't registered properly as it may be
+  // shadowed by the user-level install's registrations).
+  uint32 look_for_in = user_level ?
+      RegistryEntry::LOOK_IN_HKCU_THEN_HKLM : RegistryEntry::LOOK_IN_HKLM;
+
+  // Check if chrome is already registered with this suffix.
+  if (IsChromeRegisteredForProtocol(dist, suffix, protocol, look_for_in))
+    return true;
 
   if (root == HKEY_CURRENT_USER || IsUserAnAdmin()) {
     // We can do this operation directly.

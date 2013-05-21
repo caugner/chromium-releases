@@ -23,9 +23,9 @@
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/capturing_net_log.h"
 #include "net/base/cert_test_util.h"
@@ -33,13 +33,11 @@
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
-#include "net/base/ssl_connection_status_flags.h"
 #include "net/base/test_data_directory.h"
 #include "net/base/test_root_certs.h"
 #include "net/base/upload_bytes_element_reader.h"
@@ -48,6 +46,7 @@
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store_test_helpers.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
@@ -57,6 +56,7 @@
 #include "net/ocsp/nss_ocsp.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 #include "net/test/test_server.h"
 #include "net/url_request/ftp_protocol_handler.h"
 #include "net/url_request/static_http_user_agent_settings.h"
@@ -1361,8 +1361,8 @@ TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
 TEST_F(URLRequestTest, Identifiers) {
   TestDelegate d;
   TestURLRequestContext context;
-  TestURLRequest req(GURL("http://example.com"), &d, &context);
-  TestURLRequest other_req(GURL("http://example.com"), &d, &context);
+  TestURLRequest req(GURL("http://example.com"), &d, &context, NULL);
+  TestURLRequest other_req(GURL("http://example.com"), &d, &context, NULL);
 
   ASSERT_NE(req.identifier(), other_req.identifier());
 }
@@ -1402,6 +1402,60 @@ TEST_F(URLRequestTest, RequestCompletionForEmptyResponse) {
   MessageLoop::current()->Run();
   EXPECT_EQ("", d.data_received());
   EXPECT_EQ(1, default_network_delegate_.completed_requests());
+}
+
+// Make sure that SetPriority actually sets the URLRequest's priority
+// correctly, both before and after start.
+TEST_F(URLRequestTest, SetPriorityBasic) {
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  EXPECT_EQ(DEFAULT_PRIORITY, req.priority());
+
+  req.SetPriority(LOW);
+  EXPECT_EQ(LOW, req.priority());
+
+  req.Start();
+  EXPECT_EQ(LOW, req.priority());
+
+  req.SetPriority(MEDIUM);
+  EXPECT_EQ(MEDIUM, req.priority());
+}
+
+// Make sure that URLRequest calls SetPriority on a job before calling
+// Start on it.
+TEST_F(URLRequestTest, SetJobPriorityBeforeJobStart) {
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  EXPECT_EQ(DEFAULT_PRIORITY, req.priority());
+
+  scoped_refptr<URLRequestTestJob> job =
+      new URLRequestTestJob(&req, &default_network_delegate_);
+  AddTestInterceptor()->set_main_intercept_job(job);
+  EXPECT_EQ(DEFAULT_PRIORITY, job->priority());
+
+  req.SetPriority(LOW);
+
+  req.Start();
+  EXPECT_EQ(LOW, job->priority());
+}
+
+// Make sure that URLRequest passes on its priority updates to its
+// job.
+TEST_F(URLRequestTest, SetJobPriority) {
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+
+  scoped_refptr<URLRequestTestJob> job =
+      new URLRequestTestJob(&req, &default_network_delegate_);
+  AddTestInterceptor()->set_main_intercept_job(job);
+
+  req.SetPriority(LOW);
+  req.Start();
+  EXPECT_EQ(LOW, job->priority());
+
+  req.SetPriority(MEDIUM);
+  EXPECT_EQ(MEDIUM, req.priority());
+  EXPECT_EQ(MEDIUM, job->priority());
 }
 
 // TODO(droger): Support TestServer on iOS (see http://crbug.com/148666).
@@ -2131,9 +2185,7 @@ TEST_F(URLRequestTestHTTP, ProxyTunnelRedirectTest) {
 
 // This is the same as the previous test, but checks that the network delegate
 // registers the error.
-// This test was disabled because it made chrome_frame_net_tests hang
-// (see bug 102991).
-TEST_F(URLRequestTestHTTP, DISABLED_NetworkDelegateTunnelConnectionFailed) {
+TEST_F(URLRequestTestHTTP, NetworkDelegateTunnelConnectionFailed) {
   ASSERT_TRUE(test_server_.Start());
 
   TestNetworkDelegate network_delegate;  // Must outlive URLRequest.
@@ -2811,7 +2863,13 @@ TEST_F(URLRequestTestHTTP, GetTest_NoCache) {
 // search is used to estimate that maximum number of cookies that are accepted
 // by the browser. Beyond the maximum number, the request will fail with
 // ERR_RESPONSE_HEADERS_TOO_BIG.
-TEST_F(URLRequestTestHTTP, GetTest_ManyCookies) {
+#if defined(OS_WIN)
+// http://crbug.com/177916
+#define MAYBE_GetTest_ManyCookies DISABLED_GetTest_ManyCookies
+#else
+#define MAYBE_GetTest_ManyCookies GetTest_ManyCookies
+#endif  // defined(OS_WIN)
+TEST_F(URLRequestTestHTTP, MAYBE_GetTest_ManyCookies) {
   ASSERT_TRUE(test_server_.Start());
 
   int lower_bound = 0;
@@ -2942,9 +3000,7 @@ TEST_F(URLRequestTestHTTP, GetZippedTest) {
   }
 }
 
-// This test was disabled because it made chrome_frame_net_tests hang
-// (see bug 102991).
-TEST_F(URLRequestTestHTTP, DISABLED_HTTPSToHTTPRedirectNoRefererTest) {
+TEST_F(URLRequestTestHTTP, HTTPSToHTTPRedirectNoRefererTest) {
   ASSERT_TRUE(test_server_.Start());
 
   TestServer https_test_server(
@@ -3879,7 +3935,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost302RedirectGet) {
   req.SetExtraRequestHeaders(headers);
 
   URLRequestRedirectJob* job = new URLRequestRedirectJob(
-      &req, default_context_.network_delegate(), test_server_.GetURL("echo"),
+      &req, &default_network_delegate_, test_server_.GetURL("echo"),
       URLRequestRedirectJob::REDIRECT_302_FOUND);
   AddTestInterceptor()->set_main_intercept_job(job);
 
@@ -3903,7 +3959,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost307RedirectPost) {
   req.SetExtraRequestHeaders(headers);
 
   URLRequestRedirectJob* job = new URLRequestRedirectJob(
-      &req, default_context_.network_delegate(), test_server_.GetURL("echo"),
+      &req, &default_network_delegate_, test_server_.GetURL("echo"),
       URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT);
   AddTestInterceptor()->set_main_intercept_job(job);
 
@@ -3917,7 +3973,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost307RedirectPost) {
 TEST_F(URLRequestTestHTTP, DefaultAcceptLanguage) {
   ASSERT_TRUE(test_server_.Start());
 
-  StaticHttpUserAgentSettings settings("en", EmptyString(), EmptyString());
+  StaticHttpUserAgentSettings settings("en", EmptyString());
   TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
   TestURLRequestContext context(true);
   context.set_network_delegate(&network_delegate);
@@ -3936,8 +3992,7 @@ TEST_F(URLRequestTestHTTP, DefaultAcceptLanguage) {
 TEST_F(URLRequestTestHTTP, EmptyAcceptLanguage) {
   ASSERT_TRUE(test_server_.Start());
 
-  StaticHttpUserAgentSettings settings(
-      EmptyString(), EmptyString(), EmptyString());
+  StaticHttpUserAgentSettings settings(EmptyString(), EmptyString());
   TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
   TestURLRequestContext context(true);
   context.set_network_delegate(&network_delegate);
@@ -4004,52 +4059,8 @@ TEST_F(URLRequestTestHTTP, OverrideAcceptEncoding) {
   EXPECT_TRUE(ContainsString(d.data_received(), "identity"));
 }
 
-// Check that default A-C header is sent.
-TEST_F(URLRequestTestHTTP, DefaultAcceptCharset) {
-  ASSERT_TRUE(test_server_.Start());
-
-  StaticHttpUserAgentSettings settings(EmptyString(), "en", EmptyString());
-  TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.set_http_user_agent_settings(&settings);
-  context.Init();
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
-                 &d,
-                 &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("en", d.data_received());
-}
-
-// Check that an empty A-C header is not sent. http://crbug.com/77365.
-TEST_F(URLRequestTestHTTP, EmptyAcceptCharset) {
-  ASSERT_TRUE(test_server_.Start());
-
-  StaticHttpUserAgentSettings settings(
-      EmptyString(), EmptyString(), EmptyString());
-  TestNetworkDelegate network_delegate;  // Must outlive URLRequests.
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.Init();
-  // We override the accepted charset after initialization because empty
-  // entries get overridden otherwise.
-  context.set_http_user_agent_settings(&settings);
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
-                 &d,
-                 &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("None", d.data_received());
-}
-
-// Check that if request overrides the A-C header, the default is not appended.
-// See http://crbug.com/20894
-TEST_F(URLRequestTestHTTP, OverrideAcceptCharset) {
+// Check that setting the A-C header sends the proper header.
+TEST_F(URLRequestTestHTTP, SetAcceptCharset) {
   ASSERT_TRUE(test_server_.Start());
 
   TestDelegate d;
@@ -4128,6 +4139,34 @@ TEST_F(URLRequestTestHTTP, EmptyHttpUserAgentSettings) {
   }
 }
 
+// Make sure that URLRequest passes on its priority updates to
+// newly-created jobs after the first one.
+TEST_F(URLRequestTestHTTP, SetSubsequentJobPriority) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("empty.html"), &d, &default_context_);
+  EXPECT_EQ(DEFAULT_PRIORITY, req.priority());
+
+  scoped_refptr<URLRequestRedirectJob> redirect_job =
+      new URLRequestRedirectJob(
+          &req, &default_network_delegate_, test_server_.GetURL("echo"),
+          URLRequestRedirectJob::REDIRECT_302_FOUND);
+  AddTestInterceptor()->set_main_intercept_job(redirect_job);
+
+  req.SetPriority(LOW);
+  req.Start();
+  EXPECT_TRUE(req.is_pending());
+
+  scoped_refptr<URLRequestTestJob> job =
+      new URLRequestTestJob(&req, &default_network_delegate_);
+  AddTestInterceptor()->set_main_intercept_job(job);
+
+  // Should trigger |job| to be started.
+  MessageLoop::current()->Run();
+  EXPECT_EQ(LOW, job->priority());
+}
+
 class HTTPSRequestTest : public testing::Test {
  public:
   HTTPSRequestTest() : default_context_(true) {
@@ -4141,9 +4180,7 @@ class HTTPSRequestTest : public testing::Test {
   TestURLRequestContext default_context_;
 };
 
-// This test was disabled because it made chrome_frame_net_tests hang
-// (see bug 102991).
-TEST_F(HTTPSRequestTest, DISABLED_HTTPSGetTest) {
+TEST_F(HTTPSRequestTest, HTTPSGetTest) {
   TestServer test_server(TestServer::TYPE_HTTPS,
                          TestServer::kLocalhost,
                          base::FilePath(FILE_PATH_LITERAL("net/data/ssl")));
@@ -4298,8 +4335,8 @@ TEST_F(HTTPSRequestTest, HTTPSPreloadedHSTSTest) {
   context.Init();
 
   TestDelegate d;
-  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
-                                 test_server.host_port_pair().port())),
+  URLRequest r(GURL(base::StringPrintf("https://www.google.com:%d",
+                                       test_server.host_port_pair().port())),
                &d,
                &context);
 
@@ -4345,8 +4382,8 @@ TEST_F(HTTPSRequestTest, HTTPSErrorsNoClobberTSSTest) {
   context.Init();
 
   TestDelegate d;
-  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
-                                 test_server.host_port_pair().port())),
+  URLRequest r(GURL(base::StringPrintf("https://www.google.com:%d",
+                                       test_server.host_port_pair().port())),
                &d,
                &context);
 
@@ -4393,10 +4430,10 @@ TEST_F(HTTPSRequestTest, HSTSPreservesPosts) {
 
   // Force https for www.somewhere.com.
   TransportSecurityState transport_security_state;
-  net::TransportSecurityState::DomainState domain_state;
-  domain_state.upgrade_expiry =
-      domain_state.created + base::TimeDelta::FromDays(1000);
-  transport_security_state.EnableHost("www.somewhere.com", domain_state);
+  base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
+  bool include_subdomains = false;
+  transport_security_state.AddHSTS("www.somewhere.com", expiry,
+                                   include_subdomains);
 
   TestNetworkDelegate network_delegate;  // Must outlive URLRequest.
 
@@ -4411,8 +4448,8 @@ TEST_F(HTTPSRequestTest, HSTSPreservesPosts) {
   // cause a certificate error.  Ignore the error.
   d.set_allow_certificate_errors(true);
 
-  URLRequest req(GURL(StringPrintf("http://www.somewhere.com:%d/echo",
-                                   test_server.host_port_pair().port())),
+  URLRequest req(GURL(base::StringPrintf("http://www.somewhere.com:%d/echo",
+                                         test_server.host_port_pair().port())),
                  &d,
                  &context);
   req.set_method("POST");
@@ -4612,7 +4649,7 @@ TEST_F(HTTPSRequestTest, SSLSessionCacheShardTest) {
   params.ssl_config_service = default_context_.ssl_config_service();
   params.http_auth_handler_factory =
       default_context_.http_auth_handler_factory();
-  params.network_delegate = default_context_.network_delegate();
+  params.network_delegate = &default_network_delegate_;
   params.http_server_properties = default_context_.http_server_properties();
   params.ssl_session_cache_shard = "alternate";
 

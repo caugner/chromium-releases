@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -212,7 +212,7 @@ void CoreChromeOSOptionsHandler::Observe(
 }
 
 void CoreChromeOSOptionsHandler::OnPreferenceChanged(
-    PrefServiceBase* service,
+    PrefService* service,
     const std::string& pref_name) {
   // Special handling for preferences kUseSharedProxies and kProxy, the latter
   // controls the former and decides if it's managed by policy/extension.

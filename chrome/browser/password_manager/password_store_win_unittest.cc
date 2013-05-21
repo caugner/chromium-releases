@@ -20,7 +20,9 @@
 #include "chrome/browser/password_manager/password_form_data.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
 #include "chrome/browser/password_manager/password_store_win.h"
+#include "chrome/browser/webdata/logins_table.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_database_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
@@ -114,16 +116,23 @@ class PasswordStoreWinTest : public testing::Test {
     login_db_.reset(new LoginDatabase());
     ASSERT_TRUE(login_db_->Init(temp_dir_.path().Append(
         FILE_PATH_LITERAL("login_test"))));
-
-    wds_ = new WebDataService();
-    ASSERT_TRUE(wds_->Init(temp_dir_.path()));
+    base::FilePath path = temp_dir_.path().AppendASCII("web_data_test");
+    wdbs_ = new WebDatabaseService(path);
+    // Need to add at least one table so the database gets created.
+    wdbs_->AddTable(scoped_ptr<WebDatabaseTable>(new LoginsTable()));
+    wdbs_->LoadDatabase(WebDatabaseService::InitCallback());
+    wds_ = new WebDataService(wdbs_,
+                              WebDataServiceBase::ProfileErrorCallback());
+    wds_->Init();
   }
 
   virtual void TearDown() {
     if (store_.get())
       store_->ShutdownOnUIThread();
     wds_->ShutdownOnUIThread();
+    wdbs_->ShutdownDatabase();
     wds_ = NULL;
+    wdbs_ = NULL;
     base::WaitableEvent done(false, false);
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
         base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
@@ -141,6 +150,7 @@ class PasswordStoreWinTest : public testing::Test {
   scoped_ptr<LoginDatabase> login_db_;
   scoped_ptr<TestingProfile> profile_;
   scoped_refptr<WebDataService> wds_;
+  scoped_refptr<WebDatabaseService> wdbs_;
   scoped_refptr<PasswordStore> store_;
   base::ScopedTempDir temp_dir_;
 };

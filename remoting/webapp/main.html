@@ -8,9 +8,8 @@ found in the LICENSE file.
 <html>
   <head>
     <meta charset="utf-8">
-    <link href="https://fonts.googleapis.com/css?family=Open+Sans&amp;v1"
-          rel="stylesheet" type="text/css">
     <link rel="icon" type="image/png" href="chromoting16.webp">
+    <link rel="stylesheet" href="open_sans.css">
     <link rel="stylesheet" href="connection_stats.css">
     <link rel="stylesheet" href="connection_history.css">
     <link rel="stylesheet" href="main.css">
@@ -26,8 +25,10 @@ found in the LICENSE file.
     <script src="error.js"></script>
     <script src="event_handlers.js"></script>
     <script src="format_iq.js"></script>
+    <script src="host.js"></script>
     <script src="host_controller.js"></script>
     <script src="host_list.js"></script>
+    <script src="host_native_messaging.js"></script>
     <script src="host_screen.js"></script>
     <script src="host_session.js"></script>
     <script src="host_settings.js"></script>
@@ -43,6 +44,7 @@ found in the LICENSE file.
     <script src="server_log_entry.js"></script>
     <script src="stats_accumulator.js"></script>
     <script src="storage.js"></script>
+    <script src="survey.js"></script>
     <script src="toolbar.js"></script>
     <script src="ui_mode.js"></script>
     <script src="xhr.js"></script>
@@ -83,6 +85,19 @@ found in the LICENSE file.
       </div>
     </header>
 
+    <div id="survey-opt-in" class="butter-bar" hidden>
+      <p>
+        <span i18n-content="SURVEY_INVITATION"></span>
+        <a id="survey-accept"
+           href="http://goo.gl/njH2q"
+           target="_blank"
+           i18n-content="SIGN_ME_UP"></a>
+        <a id="survey-decline" href="#">
+          <img src="icon_cross.webp" class="close-icon"></img>
+        </a>
+      </p>
+    </div>
+
     <div data-ui-mode="home" hidden>
 
       <section>
@@ -102,7 +117,7 @@ found in the LICENSE file.
         <div id="it2me-content">
           <p id="webapp-description"
              i18n-content="DESCRIPTION_HOME"
-             i18n-value-1="<a href='https://chrome.google.com/remotedesktop'>chrome.google.com/remotedesktop</a>"></p>
+             i18n-value-1="<a href='https://chrome.google.com/remotedesktop' target='_blank'>chrome.google.com/remotedesktop</a>"></p>
           <div>
             <div class="section-row">
               <div class="box-spacer">
@@ -171,9 +186,11 @@ found in the LICENSE file.
             <div id="this-host-connect"
                  class="section-row clickable no-non-local-hosts"
                  data-daemon-state="enabled">
-              <img id="this-host-icon"
-                   src="icon_host.webp"
-                   class="host-list-main-icon">
+              <div class="host-list-main-icon">
+                <span id="this-host-warning"></span>
+                <img id="this-host-icon"
+                     src="icon_host.webp">
+              </div>
               <div id="this-host-name" class="box-spacer"></div>
               <span id="this-host-rename"
                     class="host-list-edit"
@@ -478,6 +495,30 @@ found in the LICENSE file.
           <div class="box-spacer"></div>
           <button id="cancel-connect-button" i18n-content="CANCEL"></button>
         </div> <!-- client.connecting -->
+
+        <div data-ui-mode="home.client.host-needs-upgrade">
+          <div id="host-needs-update-message"
+               class="message error-state multi-line-error-state">
+          </div>
+          <div class="message">
+            <span i18n-content="HOST_NEEDS_UPDATE_DETAIL"></span>
+            <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
+               target="_blank"
+               i18n-content="LEARN_HOW"></a>
+          </div>
+          <div class="box">
+            <div class="box-spacer"></div>
+            <button id="host-needs-update-connect-button"
+                    type="button"
+                    i18n-content="CONNECT_ANYWAY"
+                    autofocus="autofocus">
+            </button>
+            <button id="host-needs-update-cancel-button"
+                    type="button"
+                    i18n-content="CANCEL">
+            </button>
+          </div>
+        </div> <!-- home.client.host-needs-upgrade -->
 
         <div data-ui-mode="home.client.pin-prompt" class="centered">
           <div id="pin-message"

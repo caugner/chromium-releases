@@ -8,11 +8,11 @@
 
 #include "base/prefs/pref_service.h"
 #include "build/build_config.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
@@ -104,10 +104,12 @@ void Profile::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kDevToolsRemoteEnabled,
                                 false,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(prefs::kSpdyProxyEnabled,
-                                true,
-                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  registry->RegisterBooleanPref(prefs::kSpdyProxyAuthEnabled,
+                                false,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 }
 
 

@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/prefs/public/pref_member.h"
+#include "base/prefs/pref_member.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -44,7 +44,7 @@ class ZoomController : public content::WebContentsObserver,
   friend class content::WebContentsUserData<ZoomController>;
   friend class ZoomControllerTest;
 
-  void OnZoomLevelChanged(const std::string& host);
+  void OnZoomLevelChanged(const content::HostZoomMap::ZoomLevelChange& change);
 
   // Updates the zoom icon and zoom percentage based on current values and
   // notifies the observer if changes have occurred. |host| may be empty,

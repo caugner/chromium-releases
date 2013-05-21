@@ -26,20 +26,31 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 
+#if defined(ENABLE_MESSAGE_CENTER)
+#include "base/command_line.h"
+#include "ui/message_center/message_center.h"
+#include "ui/message_center/message_center_switches.h"
+#include "ui/message_center/notification_list.h"
+#endif
+
 using content::NavigationController;
 using content::WebContents;
 using extensions::Extension;
 
 // Tests are timing out waiting for extension to crash.
 // http://crbug.com/174705
-#if defined(OS_MAC) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA)
 #define MAYBE_ExtensionCrashRecoveryTest DISABLED_ExtensionCrashRecoveryTest
 #else
 #define MAYBE_ExtensionCrashRecoveryTest ExtensionCrashRecoveryTest
-#endif  // defined(OS_MAC) || defined(USE_AURA)
+#endif  // defined(OS_MACOSX) || defined(USE_AURA)
 
-class MAYBE_ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
+class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
  protected:
+  virtual void AcceptNotification(size_t index) = 0;
+  virtual void CancelNotification(size_t index) = 0;
+  virtual size_t CountBalloons() = 0;
+
   ExtensionService* GetExtensionService() {
     return browser()->profile()->GetExtensionService();
   }
@@ -47,29 +58,6 @@ class MAYBE_ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
   ExtensionProcessManager* GetExtensionProcessManager() {
     return extensions::ExtensionSystem::Get(browser()->profile())->
         process_manager();
-  }
-
-  void AcceptNotification(size_t index) {
-    Balloon* balloon = GetNotificationDelegate(index);
-    ASSERT_TRUE(balloon);
-    balloon->OnClick();
-    WaitForExtensionLoad();
-  }
-
-  void CancelNotification(size_t index) {
-    Balloon* balloon = GetNotificationDelegate(index);
-    ASSERT_TRUE(balloon);
-    BalloonNotificationUIManager* manager =
-        BalloonNotificationUIManager::GetInstanceForTesting();
-    ASSERT_TRUE(manager->CancelById(balloon->notification().notification_id()));
-  }
-
-  size_t CountBalloons() {
-    BalloonNotificationUIManager* manager =
-        BalloonNotificationUIManager::GetInstanceForTesting();
-    BalloonCollection::Balloons balloons =
-        manager->balloon_collection()->GetActiveBalloons();
-    return balloons.size();
   }
 
   void CrashExtension(std::string extension_id) {
@@ -127,6 +115,80 @@ class MAYBE_ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
   std::string first_extension_id_;
   std::string second_extension_id_;
 
+};
+
+// TODO(rsesek): Implement and enable these tests. http://crbug.com/179904
+#if defined(ENABLE_MESSAGE_CENTER) && !defined(OS_MACOSX)
+
+class MessageCenterExtensionCrashRecoveryTest
+    : public ExtensionCrashRecoveryTestBase {
+ protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    ExtensionCrashRecoveryTestBase::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(
+        message_center::switches::kEnableRichNotifications);
+  }
+
+  virtual void AcceptNotification(size_t index) OVERRIDE {
+    message_center::MessageCenter* message_center =
+        message_center::MessageCenter::Get();
+    ASSERT_GT(message_center->NotificationCount(), index);
+    message_center::NotificationList::Notifications::reverse_iterator it =
+        message_center->notification_list()->GetNotifications().rbegin();
+    for (size_t i=0; i < index; ++i)
+      it++;
+    std::string id = (*it)->id();
+    message_center->OnClicked(id);
+    WaitForExtensionLoad();
+  }
+
+  virtual void CancelNotification(size_t index) OVERRIDE {
+    message_center::MessageCenter* message_center =
+        message_center::MessageCenter::Get();
+    ASSERT_GT(message_center->NotificationCount(), index);
+    message_center::NotificationList::Notifications::reverse_iterator it =
+        message_center->notification_list()->GetNotifications().rbegin();
+    for (size_t i=0; i < index; i++) { it++; }
+    ASSERT_TRUE(
+        g_browser_process->notification_ui_manager()->CancelById((*it)->id()));
+  }
+
+  virtual size_t CountBalloons() OVERRIDE {
+    message_center::MessageCenter* message_center =
+        message_center::MessageCenter::Get();
+    return message_center->NotificationCount();
+  }
+};
+
+typedef MessageCenterExtensionCrashRecoveryTest
+    MAYBE_ExtensionCrashRecoveryTest;
+
+#else  // defined(ENABLED_MESSAGE_CENTER)
+
+class BalloonExtensionCrashRecoveryTest
+    : public ExtensionCrashRecoveryTestBase {
+ protected:
+  virtual void AcceptNotification(size_t index) OVERRIDE {
+    Balloon* balloon = GetNotificationDelegate(index);
+    ASSERT_TRUE(balloon);
+    balloon->OnClick();
+    WaitForExtensionLoad();
+  }
+
+  virtual void CancelNotification(size_t index) OVERRIDE {
+    Balloon* balloon = GetNotificationDelegate(index);
+    ASSERT_TRUE(balloon);
+    std::string id = balloon->notification().notification_id();
+    ASSERT_TRUE(g_browser_process->notification_ui_manager()->CancelById(id));
+  }
+
+  virtual size_t CountBalloons() OVERRIDE {
+    BalloonNotificationUIManager* manager =
+        BalloonNotificationUIManager::GetInstanceForTesting();
+    BalloonCollection::Balloons balloons =
+        manager->balloon_collection()->GetActiveBalloons();
+    return balloons.size();
+  }
  private:
   Balloon* GetNotificationDelegate(size_t index) {
     BalloonNotificationUIManager* manager =
@@ -136,6 +198,9 @@ class MAYBE_ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
     return index < balloons.size() ? balloons.at(index) : NULL;
   }
 };
+
+typedef BalloonExtensionCrashRecoveryTest MAYBE_ExtensionCrashRecoveryTest;
+#endif  // defined(ENABLE_MESSAGE_CENTER)
 
 IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, Basic) {
   const size_t size_before = GetExtensionService()->extensions()->size();
@@ -225,7 +290,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 }
 
 IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       ReloadIndependentlyNavigatePage) {
+                       DISABLED_ReloadIndependentlyNavigatePage) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);

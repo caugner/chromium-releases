@@ -3,8 +3,9 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/tabs/tab.h"
-
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
+
+#include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/views/test/views_test_base.h"
@@ -41,7 +42,7 @@ class FakeTabController : public TabController {
       const ui::LocatedEvent& event,
       const ui::ListSelectionModel& original_selection) OVERRIDE {}
   virtual void ContinueDrag(views::View* view,
-                            const gfx::Point& location) OVERRIDE {}
+                            const ui::LocatedEvent& event) OVERRIDE {}
   virtual bool EndDrag(EndDragReason reason) OVERRIDE { return false; }
   virtual Tab* GetTabAt(Tab* tab,
                         const gfx::Point& tab_in_tab_coordinates) OVERRIDE {
@@ -66,8 +67,12 @@ class TabTest : public views::ViewsTestBase {
   TabTest() {}
   virtual ~TabTest() {}
 
-  static SkColor GetIconDominantColor(const Tab& tab) {
-    return tab.icon_dominant_color_;
+  static bool IconAnimationInvariant(const Tab& tab) {
+    bool capture_invariant =
+        tab.data().CaptureActive() == (tab.icon_animation_.get() != NULL);
+    bool audio_invariant =
+        !tab.data().AudioActive() || tab.tab_audio_indicator_->IsAnimating();
+    return capture_invariant && audio_invariant;
   }
 };
 
@@ -101,49 +106,89 @@ TEST_F(TabTest, HitTestTopPixel) {
   EXPECT_FALSE(tab.HitTestPoint(gfx::Point(tab.width() - 1, 0)));
 }
 
-TEST_F(TabTest, IconDominantColor) {
+TEST_F(TabTest, ActivityIndicators) {
   FakeTabController controller;
   Tab tab(&controller);
 
-  // Dominant color defaults to white.
-  EXPECT_EQ(SK_ColorWHITE, GetIconDominantColor(tab));
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
+  bitmap.allocPixels();
 
-  // Make a red favicon.
-  SkBitmap red_bitmap;
-  red_bitmap.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
-  red_bitmap.allocPixels();
-  red_bitmap.eraseColor(SK_ColorRED);
+  TabRendererData data;
+  data.favicon = gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
+  tab.SetData(data);
 
-  // Update the tab's renderer data with the red icon.
-  TabRendererData red_data;
-  red_data.favicon = gfx::ImageSkia::CreateFrom1xBitmap(red_bitmap);
-  tab.SetData(red_data);
+  // Audio starts and stops.
+  data.audio_state = TabRendererData::AUDIO_STATE_PLAYING;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_PLAYING, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_NONE, tab.data().capture_state);
+  data.audio_state = TabRendererData::AUDIO_STATE_NONE;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_NONE, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_NONE, tab.data().capture_state);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
 
-  // Since we're not using immersive style yet, the color is not updated.
-  EXPECT_EQ(SK_ColorWHITE, GetIconDominantColor(tab));
+  // Capture starts and stops.
+  data.capture_state = TabRendererData::CAPTURE_STATE_RECORDING;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_NONE, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_RECORDING, tab.data().capture_state);
+  data.capture_state = TabRendererData::CAPTURE_STATE_NONE;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_NONE, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_NONE, tab.data().capture_state);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
 
-  // Switch to immersive style and make an arbitrary change to the data.
-  controller.set_immersive_style(true);
-  red_data.mini = true;
-  tab.SetData(red_data);
+  // Audio starts then capture starts, then audio stops then capture stops.
+  data.audio_state = TabRendererData::AUDIO_STATE_PLAYING;
+  tab.SetData(data);
+  data.capture_state = TabRendererData::CAPTURE_STATE_RECORDING;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_PLAYING, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_RECORDING, tab.data().capture_state);
 
-  // Color is not updated because the new data has the same image as before.
-  EXPECT_EQ(SK_ColorWHITE, GetIconDominantColor(tab));
+  data.title = ASCIIToUTF16("test X");
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
 
-  // Forcing an update makes it red.
-  tab.UpdateIconDominantColor();
-  EXPECT_EQ(SK_ColorRED, GetIconDominantColor(tab));
+  data.audio_state = TabRendererData::AUDIO_STATE_NONE;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_RECORDING, tab.data().capture_state);
+  data.capture_state = TabRendererData::CAPTURE_STATE_NONE;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_NONE, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_NONE, tab.data().capture_state);
 
-  // Change the favicon to a green icon.
-  SkBitmap green_bitmap;
-  green_bitmap.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
-  green_bitmap.allocPixels();
-  green_bitmap.eraseColor(SK_ColorGREEN);
-  TabRendererData green_data;
-  green_data.favicon = gfx::ImageSkia::CreateFrom1xBitmap(green_bitmap);
-  tab.SetData(green_data);
+  // Audio starts then capture starts, then capture stops then audio stops.
+  data.audio_state = TabRendererData::AUDIO_STATE_PLAYING;
+  tab.SetData(data);
+  data.capture_state = TabRendererData::CAPTURE_STATE_RECORDING;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_PLAYING, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_RECORDING, tab.data().capture_state);
 
-  // Icon updates automatically since we're in immersive mode and the image
-  // changed.
-  EXPECT_EQ(SK_ColorGREEN, GetIconDominantColor(tab));
+  data.title = ASCIIToUTF16("test Y");
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+
+  data.capture_state = TabRendererData::CAPTURE_STATE_NONE;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_NONE, tab.data().capture_state);
+
+  data.audio_state = TabRendererData::AUDIO_STATE_NONE;
+  tab.SetData(data);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
+  EXPECT_EQ(TabRendererData::AUDIO_STATE_NONE, tab.data().audio_state);
+  EXPECT_EQ(TabRendererData::CAPTURE_STATE_NONE, tab.data().capture_state);
+  EXPECT_TRUE(IconAnimationInvariant(tab));
 }

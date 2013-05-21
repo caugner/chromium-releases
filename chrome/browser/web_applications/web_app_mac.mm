@@ -10,7 +10,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
+#include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -78,10 +80,23 @@ bool AddBitmapImageRepToIconFamily(IconFamily* icon_family,
   }
 }
 
+base::FilePath GetWritableApplicationsDirectory() {
+  base::FilePath path;
+  if (base::mac::GetLocalDirectory(NSApplicationDirectory, &path) &&
+      file_util::PathIsWritable(path)) {
+    return path;
+  }
+  if (base::mac::GetUserDirectory(NSApplicationDirectory, &path))
+    return path;
+  return base::FilePath();
+}
+
 }  // namespace
 
 
 namespace web_app {
+
+const char kChromeAppDirName[] = "Chrome Apps.localized";
 
 WebAppShortcutCreator::WebAppShortcutCreator(
     const base::FilePath& user_data_dir,
@@ -117,7 +132,15 @@ bool WebAppShortcutCreator::CreateShortcut() {
   if (!UpdateIcon(staging_path))
     return false;
 
-  base::FilePath dst_path = GetDestinationPath(app_file_name);
+  base::FilePath dst_path = GetDestinationPath();
+  if (dst_path.empty() || !file_util::DirectoryExists(dst_path.DirName())) {
+    LOG(ERROR) << "Couldn't find an Applications directory to copy app to.";
+    return false;
+  }
+  if (!file_util::CreateDirectory(dst_path)) {
+    LOG(ERROR) << "Creating directory " << dst_path.value() << " failed.";
+    return false;
+  }
   if (!file_util::CopyDirectory(staging_path, dst_path, true)) {
     LOG(ERROR) << "Copying app to dst path: " << dst_path.value() << " failed";
     return false;
@@ -135,18 +158,11 @@ base::FilePath WebAppShortcutCreator::GetAppLoaderPath() const {
       base::mac::NSToCFCast(@"app_mode_loader.app"));
 }
 
-base::FilePath WebAppShortcutCreator::GetDestinationPath(
-    const base::FilePath& app_file_name) const {
-  base::FilePath path;
-  if (base::mac::GetLocalDirectory(NSApplicationDirectory, &path) &&
-      file_util::PathIsWritable(path)) {
+base::FilePath WebAppShortcutCreator::GetDestinationPath() const {
+  base::FilePath path = GetWritableApplicationsDirectory();
+  if (path.empty())
     return path;
-  }
-
-  if (base::mac::GetUserDirectory(NSApplicationDirectory, &path))
-    return path;
-
-  return base::FilePath();
+  return path.Append(kChromeAppDirName);
 }
 
 bool WebAppShortcutCreator::UpdatePlist(const base::FilePath& app_path) const {
@@ -256,9 +272,29 @@ namespace web_app {
 
 namespace internals {
 
+base::FilePath GetAppBundleByExtensionId(std::string extension_id) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
+  // This matches APP_MODE_APP_BUNDLE_ID in chrome/chrome.gyp.
+  std::string bundle_id =
+      base::mac::BaseBundleID() + std::string(".app.") + extension_id;
+  base::mac::ScopedCFTypeRef<CFStringRef> bundle_id_cf(
+      base::SysUTF8ToCFStringRef(bundle_id));
+  CFURLRef url_ref = NULL;
+  OSStatus status = LSFindApplicationForInfo(
+      kLSUnknownCreator, bundle_id_cf.get(), NULL, NULL, &url_ref);
+  base::mac::ScopedCFTypeRef<CFURLRef> url(url_ref);
+
+  if (status != noErr)
+    return base::FilePath();
+
+  NSString* path_string = [base::mac::CFToNSCast(url.get()) path];
+  return base::FilePath([path_string fileSystemRepresentation]);
+}
+
 bool CreatePlatformShortcuts(
     const base::FilePath& web_app_path,
-    const ShellIntegration::ShortcutInfo& shortcut_info) {
+    const ShellIntegration::ShortcutInfo& shortcut_info,
+    const ShellIntegration::ShortcutLocations& /*creation_locations*/) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
   string16 bundle_id = UTF8ToUTF16(base::mac::BaseBundleID());
   WebAppShortcutCreator shortcut_creator(web_app_path, shortcut_info,
@@ -268,9 +304,11 @@ bool CreatePlatformShortcuts(
 
 void DeletePlatformShortcuts(
     const base::FilePath& web_app_path,
-    const ShellIntegration::ShortcutInfo& shortcut_info) {
-  // TODO(benwells): Implement this when shortcuts / weblings are enabled on
-  // mac.
+    const ShellIntegration::ShortcutInfo& info) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
+
+  base::FilePath bundle_path = GetAppBundleByExtensionId(info.extension_id);
+  file_util::Delete(bundle_path, true);
 }
 
 void UpdatePlatformShortcuts(

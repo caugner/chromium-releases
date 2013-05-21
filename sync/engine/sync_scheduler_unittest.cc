@@ -128,7 +128,8 @@ class SyncSchedulerTest : public testing::Test {
             connection_.get(), directory(), workers,
             &extensions_activity_monitor_, throttled_data_type_tracker_.get(),
             std::vector<SyncEngineEventListener*>(), NULL, NULL,
-            true  /* enable keystore encryption */));
+            true,  // enable keystore encryption
+            "fake_invalidator_client_id"));
     context_->set_routing_info(routing_info_);
     context_->set_notifications_enabled(true);
     context_->set_account_name("Test");
@@ -581,8 +582,8 @@ TEST_F(SyncSchedulerTest, NudgeWithStatesCoalescing) {
   ASSERT_EQ(1U, r.snapshots.size());
   EXPECT_GE(r.times[0], optimal_time);
   ModelTypeInvalidationMap coalesced_types;
-  CoalesceStates(&coalesced_types, types1);
-  CoalesceStates(&coalesced_types, types2);
+  CoalesceStates(types1, &coalesced_types);
+  CoalesceStates(types2, &coalesced_types);
   EXPECT_THAT(coalesced_types, Eq(r.snapshots[0].source().types));
   EXPECT_EQ(GetUpdatesCallerInfo::LOCAL,
             r.snapshots[0].source().updates_source);
@@ -1191,9 +1192,9 @@ TEST_F(SyncSchedulerTest, StartWhenNotConnected) {
   // Should save the nudge for until after the server is reachable.
   MessageLoop::current()->RunUntilIdle();
 
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   MessageLoop::current()->RunUntilIdle();
 }
 
@@ -1219,9 +1220,9 @@ TEST_F(SyncSchedulerTest, ServerConnectionChangeDuringBackoff) {
   ASSERT_TRUE(scheduler()->IsBackingOff());
 
   // Before we run the scheduled canary, trigger a server connection change.
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   MessageLoop::current()->RunUntilIdle();
 }
 
@@ -1247,12 +1248,38 @@ TEST_F(SyncSchedulerTest, ConnectionChangeCanaryPreemptedByNudge) {
   ASSERT_TRUE(scheduler()->IsBackingOff());
 
   // Before we run the scheduled canary, trigger a server connection change.
+  scheduler()->OnConnectionStatusChange();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
-  scheduler()->OnConnectionStatusChange();
   scheduler()->ScheduleNudgeAsync(
       zero(), NUDGE_SOURCE_LOCAL, ModelTypeSet(BOOKMARKS), FROM_HERE);
   MessageLoop::current()->RunUntilIdle();
+}
+
+// Tests that we don't crash trying to run two canaries at once if we receive
+// extra connection status change notifications.  See crbug.com/190085.
+TEST_F(SyncSchedulerTest, DoubleCanaryInConfigure) {
+  EXPECT_CALL(*syncer(), SyncShare(_, DOWNLOAD_UPDATES, APPLY_UPDATES))
+      .WillRepeatedly(DoAll(
+              Invoke(sessions::test_util::SimulateConnectionFailure),
+              Return(true)));
+  StartSyncScheduler(SyncScheduler::CONFIGURATION_MODE);
+  connection()->SetServerNotReachable();
+  connection()->UpdateConnectionStatus();
+
+  ModelTypeSet model_types(BOOKMARKS);
+  CallbackCounter counter;
+  ConfigurationParams params(
+      GetUpdatesCallerInfo::RECONFIGURATION,
+      model_types,
+      TypesToRoutingInfo(model_types),
+      base::Bind(&CallbackCounter::Callback, base::Unretained(&counter)));
+  scheduler()->ScheduleConfiguration(params);
+
+  scheduler()->OnConnectionStatusChange();
+  scheduler()->OnConnectionStatusChange();
+
+  PumpLoop();  // Run the nudge, that will fail and schedule a quick retry.
 }
 
 }  // namespace syncer

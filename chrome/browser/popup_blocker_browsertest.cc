@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -70,20 +70,21 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
     ui_test_utils::NavigateToURL(browser, url);
     observer.Wait();
 
-    ASSERT_EQ(2u, chrome::GetBrowserCount(browser->profile()));
+    ASSERT_EQ(2u, chrome::GetBrowserCount(browser->profile(),
+                                          browser->host_desktop_type()));
 
     std::vector<WebContents*> blocked_contents = GetBlockedContents(browser);
     ASSERT_TRUE(blocked_contents.empty());
   }
 
-  void BasicTest(Browser* browser) {
-    GURL url(GetTestURL());
+  void BasicTest(Browser* browser, const GURL& url) {
     ui_test_utils::NavigateToURL(browser, url);
 
     // If the popup blocker blocked the blank post, there should be only one
     // tab in only one browser window and the URL of current tab must be equal
     // to the original URL.
-    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile(),
+                                          browser->host_desktop_type()));
     EXPECT_EQ(1, browser->tab_strip_model()->count());
     WebContents* web_contents =
         browser->tab_strip_model()->GetActiveWebContents();
@@ -105,12 +106,19 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, PopupBlockedPostBlank) {
-  BasicTest(browser());
+  BasicTest(browser(), GetTestURL());
 }
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        PopupBlockedPostBlankIncognito) {
-  BasicTest(CreateIncognitoBrowser());
+  BasicTest(CreateIncognitoBrowser(), GetTestURL());
+}
+
+IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, PopupBlockedFakeClickOnAnchor) {
+  GURL url(ui_test_utils::GetTestUrl(
+      base::FilePath(kTestDir),
+      base::FilePath(FILE_PATH_LITERAL("popup-fake-click-on-anchor.html"))));
+  BasicTest(browser(), url);
 }
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, MultiplePopups) {

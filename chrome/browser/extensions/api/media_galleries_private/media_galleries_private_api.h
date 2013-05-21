@@ -12,7 +12,9 @@
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/media_gallery/media_galleries_preferences.h"
+#include "chrome/browser/media_galleries/media_galleries_preferences.h"
+#include "chrome/browser/storage_monitor/storage_monitor.h"
+#include "chrome/common/extensions/api/media_galleries_private.h"
 
 class Profile;
 
@@ -122,6 +124,38 @@ class MediaGalleriesPrivateRemoveAllGalleryWatchFunction
   virtual ~MediaGalleriesPrivateRemoveAllGalleryWatchFunction();
 
   // SyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+};
+
+// Implements the chrome.mediaGalleriesPrivate.ejectDevice method.
+class MediaGalleriesPrivateEjectDeviceFunction
+    : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("mediaGalleriesPrivate.ejectDevice",
+                             MEDIAGALLERIESPRIVATE_EJECTDEVICE);
+
+ protected:
+  virtual ~MediaGalleriesPrivateEjectDeviceFunction();
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  // Eject device request handler.
+  void HandleResponse(chrome::StorageMonitor::EjectStatus status);
+};
+
+// Implements the chrome.mediaGalleriesPrivate.getHandlers method.
+class MediaGalleriesPrivateGetHandlersFunction
+    : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("mediaGalleriesPrivate.getHandlers",
+                             MEDIAGALLERIESPRIVATE_GETHANDLERS);
+
+ protected:
+  virtual ~MediaGalleriesPrivateGetHandlersFunction();
+
+  // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 };
 

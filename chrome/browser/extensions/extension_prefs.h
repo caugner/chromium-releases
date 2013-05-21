@@ -16,7 +16,7 @@
 #include "chrome/browser/extensions/api/content_settings/content_settings_store.h"
 #include "chrome/browser/extensions/extension_prefs_scope.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
-#include "chrome/browser/media_gallery/media_galleries_preferences.h"
+#include "chrome/browser/media_galleries/media_galleries_preferences.h"
 #include "chrome/common/extensions/extension.h"
 #include "extensions/common/url_pattern_set.h"
 #include "sync/api/string_ordinal.h"
@@ -30,6 +30,10 @@ namespace extensions {
 class ExtensionPrefsUninstallExtension;
 class URLPatternSet;
 struct ExtensionOmniboxSuggestion;
+
+namespace app_file_handler_util {
+struct SavedFileEntry;
+}
 
 // Class for managing global and per-extension preferences.
 //
@@ -132,10 +136,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   ExtensionIdList GetToolbarOrder();
   void SetToolbarOrder(const ExtensionIdList& extension_ids);
 
-  // Get/Set the order that the browser actions appear in the action box.
-  ExtensionIdList GetActionBoxOrder();
-  void SetActionBoxOrder(const ExtensionIdList& extension_ids);
-
   // Called when an extension is installed, so that prefs get created.
   // If |page_ordinal| is an invalid ordinal, then a page will be found
   // for the App.
@@ -229,15 +229,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // reset it. Don't call it unless you mean it!
   bool SetAlertSystemFirstRun();
 
-  // The oauth client id used for app notification setup, if any.
-  std::string GetAppNotificationClientId(const std::string& extension_id) const;
-  void SetAppNotificationClientId(const std::string& extension_id,
-                                  const std::string& oauth_client_id);
-
-  // Whether app notifications are disabled for the given app.
-  bool IsAppNotificationDisabled(const std::string& extension_id) const;
-  void SetAppNotificationDisabled(const std::string& extension_id, bool value);
-
   // Checks if extensions are blacklisted by default, by policy.
   // The ManagementPolicy::Provider methods also take this into account, and
   // should be used instead when the extension ID is known.
@@ -321,6 +312,15 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Returns whether or not this extension is marked as running. This is used to
   // restart apps across browser restarts.
   bool IsExtensionRunning(const std::string& extension_id);
+
+  void AddSavedFileEntry(const std::string& extension_id,
+                         const std::string& id,
+                         const base::FilePath& file_path,
+                         bool writable);
+  void ClearSavedFileEntries(const std::string& extension_id);
+  void GetSavedFileEntries(
+      const std::string& extension_id,
+      std::vector<app_file_handler_util::SavedFileEntry>* out);
 
   // Controls the omnibox default suggestion as set by the extension.
   ExtensionOmniboxSuggestion GetOmniboxDefaultSuggestion(

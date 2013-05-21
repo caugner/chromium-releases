@@ -2,19 +2,19 @@
 <!-- ChromeOS-specific strings (included from generated_resources.grd).
      Everything in this file is wrapped in <if expr="pp_ifdef('chromeos')">. -->
 <grit-part>
-  <!-- Idle Logout Dialog Strings -->
-  <message name="IDS_IDLE_LOGOUT_TITLE" desc="Dialog title for the idle logout dialog">
+  <!-- Idle logout dialog for retail mode -->
+  <message name="IDS_IDLE_LOGOUT_TITLE" desc="Dialog title for the idle logout dialog. Used in retail mode only.">
     Are you still there?
   </message>
-  <message name="IDS_IDLE_LOGOUT_WARNING_RESTART" desc="Restart label for the idle logout dialog">
+  <message name="IDS_IDLE_LOGOUT_WARNING_RESTART" desc="Restart label for the idle logout dialog. Used in retail mode only..">
     This computer will reset in <ph name="LOGOUT_TIME_LEFT">$1<ex>20</ex></ph> seconds.
 Press any key to continue exploring.
   </message>
-  <message name="IDS_IDLE_LOGOUT_WARNING_RESTART_1S" desc="Restart label for the idle logout dialog at 1 second left">
+  <message name="IDS_IDLE_LOGOUT_WARNING_RESTART_1S" desc="Restart label for the idle logout dialog at 1 second left. Used in retail mode only.">
     This computer will reset in 1 second.
 Press any key to continue exploring.
   </message>
-  <message name="IDS_IDLE_LOGOUT_WARNING_RESTART_NOW" desc="Restart label for the idle logout dialog with no time left">
+  <message name="IDS_IDLE_LOGOUT_WARNING_RESTART_NOW" desc="Restart label for the idle logout dialog with no time left. Used in retail mode only.">
     Going.. Going... Gone.
   </message>
 
@@ -129,13 +129,16 @@ Press any key to continue exploring.
   </message>
 
   <!-- Chrome OS Strings -->
-  <message name="IDS_OFFERS_CONSENT_INFOBAR_LABEL_ALT" desc="Butter bar text when prompting user for sending coupon code. Prefixed with the site name.">
-    wants to confirm you are browsing on a Chrome OS device by requesting Google to verify your coupon code.
+  <message name="IDS_ECHO_CONSENT_DIALOG_TEXT" desc="Dialog text shown when user is asked to give consent to proceed with redeeming ECHO offer.">
+    <ph name="SERVICE_NAME">$1<ex>Google Drive</ex></ph> wants to verify that you are using an eligible Chrome OS device. <ph name="MORE_INFO_LINK">$2<ex>More info</ex></ph>
   </message>
-  <message name="IDS_OFFERS_CONSENT_INFOBAR_LABEL" desc="Butter bar text when prompting user for sending coupon code. Prefixed with the site name.">
-    wants to confirm you are browsing on a Chrome OS device.
+  <message name="IDS_ECHO_DISABLED_CONSENT_DIALOG_TEXT" desc="Dialog text shown when user is informed that redeeming offers is disabled for the device.">
+    Your IT administrator has disabled Chrome Goodies for your device. <ph name="MORE_INFO_LINK">$1<ex>More info</ex></ph>
   </message>
-  <message name="IDS_OFFERS_CONSENT_INFOBAR_LABEL_LEARN_MORE" desc="Text of the Learn More link on the offer butter bar.">
+  <message name="IDS_ECHO_CONSENT_DISMISS_BUTTON" desc="Dismiss dialog button label for disabled echo dialog.">
+    Dismiss
+  </message>
+  <message name="IDS_OFFERS_CONSENT_INFOBAR_LABEL_LEARN_MORE" desc="Text of the Learn More link in the echo dialog.">
     Learn More
   </message>
   <message name="IDS_OFFERS_CONSENT_INFOBAR_ENABLE_BUTTON" desc="Enable button label.">
@@ -162,17 +165,17 @@ Press any key to continue exploring.
   <message name="IDS_NETWORK_ENROLLMENT_HANDLER_BUTTON" desc="Text of the accept button for generating a new network certificate.">
     Get new certificate
   </message>
-  <message name="IDS_NETWORK_CONNECTION_ERROR_TITLE" desc="Title for network connection error notification">
-    Network Connection Error
-  </message>
-  <message name="IDS_NETWORK_CONNECTION_ERROR_MESSAGE_WITH_DETAILS" desc="Message for network connection error notification with details">
-    Failed to connect to network '<ph name="name">$1<ex>GoogleGuest</ex></ph>': <ph name="details">$2<ex>Unrecognized error</ex></ph>
-  </message>
   <message name="IDS_NETWORK_ACTIVATION_ERROR_TITLE" desc="Title for network connection error notification">
     Network Activation Error
   </message>
   <message name="IDS_NETWORK_ACTIVATION_NEEDS_CONNECTION" desc="Message when attempting to activate a mobile network that requries a connection">
     Activation of '<ph name="name">$1<ex>Generic Wireless</ex></ph>' requires a network connection.
+  </message>
+  <message name="IDS_NETWORK_CELLULAR_ACTIVATED_TITLE" desc="Title for cellular activated notification">
+    Cellular Activated
+  </message>
+  <message name="IDS_NETWORK_CELLULAR_ACTIVATED" desc="Text of the cellular activated notification">
+    Congratulations! Your '<ph name="name">$1<ex>Generic Wireless</ex></ph>' data service has been activated and is ready to go.
   </message>
   <message name="IDS_LOW_BATTERY_TITLE" desc="Title for low battery notification">
     Battery Low
@@ -253,10 +256,10 @@ Press any key to continue exploring.
     What is your language?
   </message>
   <message name="IDS_NETWORK_SELECTION_SELECT" desc="Label for network selection dropdown">
-    Select a network:
+    Select a network
   </message>
   <message name="IDS_ANOTHER_NETWORK_SELECTION_SELECT" desc="Label for network selection dropdown on the network error screen.">
-    Or select another network:
+    Or, select a new network
   </message>
   <message name="IDS_LANGUAGE_SELECTION_SELECT" desc="Label for language selection dropdown">
     Select your language:
@@ -324,17 +327,20 @@ Press any key to continue exploring.
   <message name="IDS_ENTER_GUEST_SESSION_BUTTON_ACCESSIBLE_NAME">
     Browse as guest
   </message>
-  <message name="IDS_LOGIN_REMOVE">
-    Remove
-  </message>
   <message name="IDS_DISABLED_ADD_USER_TOOLTIP" desc="Tooltip over disabled Add user button">
     The owner of this device has disabled new users from being added
   </message>
   <message name="IDS_DISABLED_ADD_USER_TOOLTIP_ENTERPRISE" desc="Tooltip over disabled Add user button">
     The administrator of this device has disabled new users from being added
   </message>
-  <message name="IDS_APP_START_MESSAGE" desc="Message displayed while installing and/or launching web application in kiosk mode.">
-    Installing application...
+  <message name="IDS_APP_START_NETWORK_WAIT_MESSAGE" desc="Message displayed while installing and/or launching web application in kiosk mode.">
+    Waiting for network connection...
+  </message>
+  <message name="IDS_APP_START_APP_WAIT_MESSAGE" desc="Message displayed while installing and/or launching web application in kiosk mode.">
+    Initializing application...
+  </message>
+  <message name="IDS_APP_START_BAILOUT_SHORTCUT_FORMAT" desc="Message displayed at the bottom of app launch splash screen to show user the shortcut key to bailout the launch.">
+  Press Ctrl + Alt + S to switch to <ph name="IDS_SHORT_PRODUCT_OS_NAME">$1<ex>Chrome OS</ex></ph>
   </message>
   <message name="IDS_KIOSK_MODE_LOGIN_MESSAGE">
     Click to start
@@ -422,7 +428,7 @@ Press any key to continue exploring.
     If you don't have a Google Account you can <ph name="LINK_START">$1<ex>&gt;a&lt;</ex></ph>Create a Google Account<ph name="LINK_END">$2<ex>&gt;/a&lt;</ex></ph> now.
   </message>
   <message name="IDS_BROWSE_WITHOUT_SIGNING_IN_HTML" desc="Text shown on side of Google sign-in UI.">
-    You may also skip sign in and <ph name="LINK_START">$1<ex>&gt;a&lt;</ex></ph>Browse as Guest<ph name="LINK_END">$2<ex>&gt;/a&lt;</ex></ph>.
+    You may also skip signing in and <ph name="LINK_START">$1<ex>&gt;a&lt;</ex></ph>browse as guest<ph name="LINK_END">$2<ex>&gt;/a&lt;</ex></ph>.
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_HTML" desc="Text shown on side of Google sign-in UI to create a locally managed user.">
     <ph name="LINK_START">$1<ex>&gt;a&lt;</ex></ph>Create managed user<ph name="LINK_END">$2<ex>&gt;/a&lt;</ex></ph>
@@ -456,6 +462,45 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_PASSWORD_TOO_SHORT" desc="Error text shown in locally managed user creation dialog when typed password is too short.">
     Password is too short.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_MANAGER_PASSWORD_ERROR" desc="Error text shown in locally managed user creation dialog when manager password is incorrect.">
+    Incorrect manager password.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_MANAGER_INCONSISTENT_STATE" desc="Error text shown in locally managed user creation dialog when account is in inconsistent state.">
+    Manager account is in inconsistent state. Please log in to manager account first and then try creating locally managed user again.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_TITLE" desc="Text shown when locally managed user was successfully created">
+    Setup is complete! Now learn what features are available to the manager of this account.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_IMAGE_TEXT" desc="Text shown when locally managed user was successfully created">
+    Text explaining feature(s).
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_EMAIL_INSTRUCTIONS" desc="Text shown when locally managed user was successfully created">
+    Email instructions to the manager of this account
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_SUCCESS_BUTTON_TITLE" desc="Text for button on a screen with successful locally managed user creation text">
+    Got it
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_TITLE" desc="Text shown in a title when locally managed user creation has failed for some reason">
+    Locally managed user creation failed.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_TPM_ERROR" desc="Text shown in a title when locally managed user creation has failed in case of TPM error">
+    TPM error.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_NOT_CONNECTED" desc="Text shown in a title when locally managed user creation has failed in case when device is offline">
+    You need to have internet access to create locally managed user.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_TIMED_OUT" desc="Text shown in a title when locally managed user creation has failed in case when network timed out">
+    Network timeout. Please check your internet connection and try again.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_SERVER_ERROR" desc="Text shown in a title when locally managed user creation has failed in case when there was server error on a remote side">
+    Server error. Please try again later.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_CANCEL_BUTTON_TITLE" desc="Text for button on an error reporting screen for locally managed user creation, that is used to abort whole operation">
+    Cancel
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_ERROR_RETRY_BUTTON_TITLE" desc="Text for button on an error reporting screen for locally managed user creation, that is used to retry failed operation">
+    Retry
   </message>
   <message name="IDS_OFFLINE_LOGIN_HTML" desc="Text which suggests enter as an existing user when valid network isn't presented.">
     If you've already registered on this device, you can <ph name="LINK2_START">$1<ex>&gt;a&lt;</ex></ph>sign in as an existing user<ph name="LINK2_END">$2<ex>&gt;/a&lt;</ex></ph>.
@@ -901,17 +946,8 @@ Press any key to continue exploring.
   <message name="IDS_SET_WALLPAPER_BUTTON" desc="The button to set wallpaper.">
     Set wallpaper...
   </message>
-  <message name="IDS_OPTIONS_SET_WALLPAPER_DIALOG_TITLE" desc="Title of the dialog shown when user wants to change his/her wallpaper.">
-    Set Wallpaper
-  </message>
-  <message name="IDS_OPTIONS_SET_WALLPAPER_DIALOG_TEXT" desc="Text with description of what to do on Change Wallpaper dialog.">
-    Choose a picture to display on your background.
-  </message>
   <message name="IDS_OPTIONS_SET_WALLPAPER_AUTHOR_TEXT" desc="Author label.">
     Photo by
-  </message>
-  <message name="IDS_OPTIONS_SET_WALLPAPER_DAILY" desc="Label for option to change wallpaper daily.">
-    Change wallpaper daily
   </message>
   <message name="IDS_OPTIONS_WALLPAPER_CENTER_LAYOUT" desc="Label for option to center a customized wallpaper.">
     Center
@@ -921,9 +957,6 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_WALLPAPER_STRETCH_LAYOUT" desc="Label for option to stretch a customized wallpaper.">
     Stretch
-  </message>
-  <message name="IDS_OPTIONS_CUSTOME_WALLPAPER" desc="Label for option to choose a customized wallpaper.">
-    Browse...
   </message>
   <message name="IDS_OPTIONS_CHANGE_PICTURE" desc="In the settings tab, the text on the button to change picture for the current user.">
     Change picture...
@@ -1172,7 +1205,7 @@ Press any key to continue exploring.
     Automatic name servers
   </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_GOOGLE_NAME_SERVERS" desc="In the name server type radio for static ip configuration, labels the Google DNS selection.">
-    Google name servers
+    Google name servers - <ph name="BEGIN_LINK">&lt;a href="https://developers.google.com/speed/public-dns" target="_blank"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
   </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_USER_NAME_SERVERS" desc="In the name server type radio for static ip configuration, labels the user DNS selection.">
     Custom name servers
@@ -2518,47 +2551,6 @@ Battery full
     Unable to connect.
   </message>
 
-  <!-- Network state strings for ChromeOS -->
-  <message name="IDS_CHROMEOS_NETWORK_STATE_UNKNOWN" desc="Network state in about:network: UNKNOWN">
-    Unknown
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_IDLE" desc="Network state in about:network: IDLE">
-    Idle
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_CARRIER" desc="Network state in about:network: CARRIER">
-    Carrier
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_ASSOCIATION" desc="Network state in about:network: ASSOCIATION">
-    Association
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_CONFIGURATION" desc="Network state in about:network: CONFIGURATION">
-    Configuration
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_READY" desc="Network state in about:network: READY">
-    Connected
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_DISCONNECT" desc="Network state in about:network: DISCONNECT">
-    Disconnect
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_FAILURE" desc="Network state in about:network: FAILURE">
-    Failure
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_ACTIVATION_FAILURE" desc="Network state in about:network: ACTIVATION_FAILURE">
-    Activation failure
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED" desc="Network state in about:network: Unrecognized">
-    Unrecognized state
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_PORTAL" desc="Network state in about:network: Portal">
-    Portal state
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_ONLINE" desc="Network state in about:network: Online">
-    Online state
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_STATE_CONNECT_REQUESTED" desc="Network state in about:network: Connect Requested">
-    Connect Requested
-  </message>
-
   <!-- Captive Portal state strings for ChromeOS -->
   <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_UNKNOWN" desc="Captive Portal status in about:network: Unknown">
     Unknown
@@ -2577,65 +2569,6 @@ Battery full
   </message>
   <message name="IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_UNRECOGNIZED" desc="Captive Portal status in about:network: Unrecognized">
     Unrecognized
-  </message>
-
-  <!-- Network error strings for ChromeOS -->
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN" desc="Network error in about:network: UNKNOWN">
-    Unknown network error
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_OUT_OF_RANGE" desc="Network error in about:network: OUT_OF_RANGE">
-    Out of range
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_PIN_MISSING" desc="Network error in about:network: PIN_MISSING">
-    PIN missing
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED" desc="Network error in about:network: DHCP_FAILED">
-    DHCP lookup failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED" desc="Network error in about:network: CONNECT_FAILED">
-    Connect failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE" desc="Network error in about:network: BAD_PASSPHRASE">
-    Bad passphrase
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY" desc="Network error in about:network: BAD_WEPKEY">
-    Bad WEP key
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_ACTIVATION_FAILED" desc="Network error in about:network: ACTIVATION_FAILED">
-    Activation failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_EVDO" desc="Network error in about:network: NEED_EVDO">
-    Need EVDO
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_HOME_NETWORK" desc="Network error in about:network: NEED_HOME_NETWORK">
-    Need home network
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_OTASP_FAILED" desc="Network error in about:network: OTASP_FAILED">
-    OTASP failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_AAA_FAILED" desc="Network error in about:network: AAA_FAILED">
-    AAA check failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_INTERNAL" desc="Network error in about:network: INTERNAL">
-    Internal error
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_DNS_LOOKUP_FAILED" desc="Network error in about:network: DNS_LOOKUP_FAILED">
-    DNS lookup failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_HTTP_GET_FAILED" desc="Network error in about:network: HTTP_GET_FAILED">
-    HTTP get failed
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_IPSEC_PSK_AUTH_FAILED" desc="Network error in about:network: IPSEC_PSK_AUTH_FAILED">
-    Failed to authenticate with provided pre-shared key
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_IPSEC_CERT_AUTH_FAILED" desc="Network error in about:network: IPSEC_CERT_AUTH_FAILED">
-    Failed to authenticate with provided certificate
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_PPP_AUTH_FAILED" desc="Network error in about:network: PPP_AUTH_FAILED">
-    Failed to authenticate with provided username or password
-  </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNRECOGNIZED" desc="Network error in about:network: Unrecognized">
-    Unrecognized error
   </message>
 
   <!-- Cellular network technology description strings for ChromeOS -->
@@ -3045,8 +2978,14 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_REPORT_ISSUE" desc="The text in the keyboard overlay to explain the shortcut (report an issue).">
     Report issue
   </message>
+  <message name="IDS_KEYBOARD_OVERLAY_RESET_SCREEN_ZOOM" desc="The text in the keyboard overlay to explain the shortcut (reset the screen zoom).">
+    Reset screen zoom
+  </message>
   <message name="IDS_KEYBOARD_OVERLAY_RESET_ZOOM" desc="The text in the keyboard overlay to explain the shortcut.">
     Reset zoom
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ROTATE_SCREEN" desc="The text in the keyboard overlay to explain the shortcut (rotate the screen).">
+    Rotate screen
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SAVE" desc="The text in the keyboard overlay to explain the shortcut (save page as a file).">
     Save
@@ -3065,6 +3004,9 @@ Battery full
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SELECT_WORD_AT_A_TIME" desc="The text in the keyboard overlay to explain the shortcut.">
     Select "word at a time"
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SHOW_MESSAGE_CENTER" desc="The text in the keyboard overlay to explain the shortcut (Show the message center).">
+    Show message center
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_SHOW_STATUS_MENU" desc="The text in the keyboard overlay to explain the shortcut (show the status menu).">
     Show status menu
@@ -3110,6 +3052,12 @@ Battery full
   </message>
   <message name="IDS_KEYBOARD_OVERLAY_ZOOM_OUT" desc="The text in the keyboard overlay to explain the shortcut.">
     Zoom out
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ZOOM_SCREEN_IN" desc="The text in the keyboard overlay to explain the shortcut (zoom in the screen).">
+    Zoom screen in
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ZOOM_SCREEN_OUT" desc="The text in the keyboard overlay to explain the shortcut (zoom out the screen).">
+    Zoom screen out
   </message>
   <!-- END GENERATED KEYBOARD OVERLAY STRINGS -->
   <if expr="lang == 'ja'">
@@ -3524,17 +3472,23 @@ Battery full
   <message name="IDS_LOGIN_ERROR_OWNER_KEY_LOST" desc="Couldn't sign in because the owner key has been lost, device settings corruption or incorrect local time.">
     Login failed, please connect to the internet and try again.
   </message>
-  <message name="IDS_LOGIN_ERROR_TPM_FAILURE" desc="Couldn't sign in because of the critical TPM error.">
-    Oops, something went wrong with signing in.
+  <message name="IDS_LOGIN_ERROR_TPM_FAILURE_TITLE" desc="Title of the screen notifying user about TPM error.">
+    Something went wrong with signing in
   </message>
-  <message name="IDS_LOGIN_ERROR_TPM_FAILURE_REBOOT" desc="Notify user that Chrome OS will reboot">
-    <ph name="PRODUCT_NAME">$1<ex>Chrome</ex></ph> will automatically reboot to fix this error.
+  <message name="IDS_LOGIN_ERROR_TPM_FAILURE_REBOOT" desc="Suggestion to restart device in case of the TPM error.">
+    Please restart your device to fix this error.
+  </message>
+  <message name="IDS_LOGIN_ERROR_TPM_FAILURE_REBOOT_BUTTON" desc="Label on button that restarts device.">
+    Restart
   </message>
   <message name="IDS_LOGIN_FIX_CAPTIVE_PORTAL" desc="An link text to fix Internet connection (captive portal) in guest mode.">
     Enter as Guest
   </message>
+  <message name="IDS_LOGIN_PROXY_ERROR_TITLE" desc="A title of screen containing a message about proxy error.">
+    Oops, something went wrong with signing in
+  </message>
   <message name="IDS_LOGIN_PROXY_ERROR_MESSAGE" desc="An offline message shown when a proxy error has appeared.">
-    The sign-in page failed to load using the current proxy settings. Please <ph name="GAIA_RELOAD_LINK_START">$1<ex>&gt;a&lt;</ex></ph>try to sign in again<ph name="GAIA_RELOAD_LINK_END">$2<ex>&gt;/a&lt;</ex></ph> or use different <ph name="PROXY_SETTINGS_LINK_START">$3<ex>&gt;a&lt;</ex></ph>proxy settings<ph name="PROXY_SETTINGS_LINK_END">$4<ex>&gt;/a&lt;</ex></ph>.
+    The sign-in page failed to load using the current proxy settings. Please <ph name="GAIA_RELOAD_LINK_START">$1<ex>&gt;a&lt;</ex></ph>try to sign in again<ph name="GAIA_RELOAD_LINK_END">$2<ex>&gt;/a&lt;</ex></ph>, or use different <ph name="PROXY_SETTINGS_LINK_START">$3<ex>&gt;a&lt;</ex></ph>proxy settings<ph name="PROXY_SETTINGS_LINK_END">$4<ex>&gt;/a&lt;</ex></ph>.
   </message>
   <message name="IDS_LOGIN_CAPTIVE_PORTAL_WINDOW_TITLE" desc="Title of the window which is opened to sign in to the captive portal.">
     To use the network <ph name="NETWORK_ID">$1<ex>Adelaide Airport Wireless</ex></ph>, first complete your connection to the Internet below.
@@ -3543,11 +3497,11 @@ Battery full
     Network not available
   </message>
   <message name="IDS_LOGIN_MAYBE_CAPTIVE_PORTAL" desc="An offline message shown when we suggest that user may be behind the captive portal. Translation note: enter as Guest - could also be said enter as Guest user. Word user may be added to the translation if needed.">
-    To use <ph name="NETWORK_ID">$1<ex>&gt;b&lt;Public Wifi&gt;/b&lt;</ex></ph> you may first need to <ph name="LINK_START">$2<ex>&gt;a&lt;</ex></ph>visit the network's sign-in page<ph name="LINK_END">$3<ex>&gt;/a&lt;</ex></ph>, which will open automatically in a few seconds. If it didn't happen, network can't be used for the Internet connection.
+    To use <ph name="NETWORK_ID">$1<ex>&gt;b&lt;Public Wifi&gt;/b&lt;</ex></ph> you may first need to <ph name="LINK_START">$2<ex>&gt;a&lt;</ex></ph>visit the network's sign-in page<ph name="LINK_END">$3<ex>&gt;/a&lt;</ex></ph>, which will open automatically in a few seconds. If it doesn't happen, the network can't be used.
   </message>
   <message name="IDS_LOGIN_MAYBE_CAPTIVE_PORTAL_PROXY" desc="An offline mssage shown when we suggest that user should configure the proxy.">
-    If you use a proxy server, check your proxy settings or
-    contact your network administrator to make sure the proxy
+    If you are using a proxy server, check your proxy settings or
+    contact your network administrator to check that the proxy
     server is working. If you don't believe you should be using a
     proxy server, adjust your <ph name="LINK_START">$1<ex>&gt;a&lt;</ex></ph>proxy settings<ph name="LINK_END">$2<ex>&gt;/a&lt;</ex></ph>.
   </message>
@@ -3557,9 +3511,6 @@ Battery full
   <message name="IDS_LOGIN_ERROR_CAPTIVE_PORTAL_NO_GUEST_MODE" desc="An error message shown when we suggest that user may be behind the captive portal but Guest mode is disabled.">
     Your password cannot be verified on this current network. Please select another network.
   </message>
-  <message name="IDS_LOGIN_TIMEOUT_TITLE" desc="An offline message title shown when Gaia frame loading is timed out.">
-    Gaia loading timeout
-  </message>
   <message name="IDS_NOTIFICATION_PANEL_TITLE" desc="Text for the title of the notification panel.">
     Notifications
   </message>
@@ -3567,7 +3518,7 @@ Battery full
     You are currently offline
   </message>
   <message name="IDS_LOGIN_OFFLINE_MESSAGE" desc="An offline message that shows up in OOBE sign-in screen.">
-    Please connect to the Internet to signin into your Chromebook.
+    Please connect to the Internet to sign in to your Chromebook.
   </message>
   <message name="IDS_GUEST" desc="Shown in login panel for users that would like to browse without signing in.">
     Guest
@@ -3584,8 +3535,11 @@ Battery full
   <message name="IDS_LOGIN_POD_PASSWORD_FIELD_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the password field of a user pod on the login screen.">
     Password for <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
   </message>
-  <message name="IDS_LOGIN_POD_REMOVE_BUTTON_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the remove button of a user pod on the login screen.">
-    Remove user <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
+  <message name="IDS_LOGIN_POD_MENU_BUTTON_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the menu button of the user pod on the login screen.">
+    Options menu for <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
+  </message>
+  <message name="IDS_LOGIN_POD_MENU_REMOVE_ITEM_ACCESSIBLE_NAME" desc="Text to be spoken when 'Remove user' item is selected on the pod menu.">
+    Remove this user
   </message>
   <message name="IDS_LOGIN_POD_OWNER_USER" desc="Login screen user pod menu title for a user who owns the device.">
     <ph name="USER_NAME">$1<ex>Ivan Arbuzov</ex></ph> (owner)
@@ -3610,5 +3564,25 @@ Battery full
   </message>
   <message name="IDS_LOGIN_PUBLIC_ACCOUNT_ENTER_ACCESSIBLE_NAME" desc="Text to be spoken when focus is set to the sign-in button in the public account user pod.">
     Enter public session
+  </message>
+
+  <!-- Idle warning dialog -->
+  <message name="IDS_IDLE_WARNING_TITLE" desc="Title of the warning dialog shown when the user becomes idle and is about to get logged out.">
+    Are you still there?
+  </message>
+  <message name="IDS_IDLE_WARNING_LOGOUT_WARNING" desc="Content of the warning dialog shown when the user becomes idle and is about to get logged out.">
+    If you keep doing nothing, you'll be logged out in a few moments.
+  </message>
+  <message name="IDS_KIOSK_APP_FAILED_TO_LAUNCH" desc="Generic error message used when a kiosk app fails to launch.">
+    Darn, the kiosk application could not be launched.
+  </message>
+  <message name="IDS_KIOSK_APP_ERROR_UNABLE_TO_MOUNT" desc="Error message used when a kiosk app fails to launch due to cryptohome error.">
+    Kryptonite! The cryptohome for the kiosk application could not be mounted.
+  </message>
+  <message name="IDS_KIOSK_APP_ERROR_UNABLE_TO_INSTALL" desc="Error message used when a kiosk app fails to launch due to install failure.">
+    Kiosk application could not be installed.
+  </message>
+  <message name="IDS_KIOSK_APP_ERROR_USER_CANCEL" desc="Error message used when a kiosk app launch is canceled by user.">
+    Kiosk application launch canceled.
   </message>
 </grit-part>

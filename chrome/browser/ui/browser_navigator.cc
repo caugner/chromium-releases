@@ -165,7 +165,8 @@ Browser* GetBrowserForDisposition(chrome::NavigateParams* params) {
       }
 
       return new Browser(Browser::CreateParams::CreateForApp(
-          Browser::TYPE_POPUP, app_name, params->window_bounds, profile));
+          Browser::TYPE_POPUP, app_name, params->window_bounds, profile,
+          params->host_desktop_type));
     }
     case NEW_WINDOW: {
       // Make a new normal browser window.
@@ -436,6 +437,18 @@ NavigateParams::NavigateParams(Profile* a_profile,
 
 NavigateParams::~NavigateParams() {}
 
+void FillNavigateParamsFromOpenURLParams(chrome::NavigateParams* nav_params,
+                                         const content::OpenURLParams& params) {
+  nav_params->referrer = params.referrer;
+  nav_params->extra_headers = params.extra_headers;
+  nav_params->disposition = params.disposition;
+  nav_params->override_encoding = params.override_encoding;
+  nav_params->is_renderer_initiated = params.is_renderer_initiated;
+  nav_params->transferred_global_request_id =
+      params.transferred_global_request_id;
+  nav_params->is_cross_site_redirect = params.is_cross_site_redirect;
+}
+
 void Navigate(NavigateParams* params) {
   Browser* source_browser = params->browser;
   if (source_browser)
@@ -575,7 +588,7 @@ void Navigate(NavigateParams* params) {
       (params->disposition == NEW_FOREGROUND_TAB ||
        params->disposition == NEW_WINDOW) &&
       (params->tabstrip_add_types & TabStripModel::ADD_INHERIT_OPENER))
-    params->source_contents->Focus();
+    params->source_contents->GetView()->Focus();
 
   if (params->source_contents == params->target_contents ||
       (swapped_in_instant && params->disposition == CURRENT_TAB)) {

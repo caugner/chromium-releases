@@ -50,9 +50,11 @@ public abstract class WebContentsObserverAndroid {
      * Called when the main frame of the page has committed.
      * @param url The validated url for the page.
      * @param baseUrl The validated base url for the page.
+     * @param isNavigationToDifferentPage Whether the main frame navigated to a different page.
      */
     @CalledByNative
-    public void didNavigateMainFrame(String url, String baseUrl) {
+    public void didNavigateMainFrame(String url, String baseUrl,
+            boolean isNavigationToDifferentPage) {
     }
 
     /**
@@ -86,6 +88,21 @@ public abstract class WebContentsObserverAndroid {
     }
 
     /**
+     * Notifies that the provisional load was successfully committed. The RenderViewHost is now
+     * the current RenderViewHost of the WebContents.
+     * @param frameId A positive, non-zero integer identifying the navigating frame.
+     * @param isMainFrame Whether the load is happening for the main frame.
+     * @param url The committed URL being navigated to.
+     * @param transitionType The transition type as defined in
+     *                      {@link org.chromium.content.browser.PageTransitionTypes} for the load.
+     */
+    @CalledByNative
+    public void didCommitProvisionalLoadForFrame(
+            long frameId, boolean isMainFrame, String url, int transitionType) {
+
+    }
+
+    /**
      * Notifies that a load has finished for a given frame.
      * @param frameId A positive, non-zero integer identifying the navigating frame.
      * @param validatedUrl The validated URL that is being navigated to.
@@ -93,6 +110,13 @@ public abstract class WebContentsObserverAndroid {
      */
     @CalledByNative
     public void didFinishLoad(long frameId, String validatedUrl, boolean isMainFrame) {
+    }
+
+    /**
+     * Invoked when visible SSL state changes.
+     */
+    @CalledByNative
+    public void didChangeVisibleSSLState() {
     }
 
     /**

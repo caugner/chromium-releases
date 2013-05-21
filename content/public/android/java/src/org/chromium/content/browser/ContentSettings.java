@@ -90,7 +90,11 @@ public class ContentSettings {
     private PluginState mPluginState = PluginState.OFF;
     private boolean mAppCacheEnabled = false;
     private boolean mDomStorageEnabled = false;
+    private boolean mDatabaseEnabled = false;
     private boolean mUseWideViewport = false;
+    private boolean mLoadWithOverviewMode = false;
+    private boolean mMediaPlaybackRequiresUserGesture = true;
+    private String mDefaultVideoPosterURL;
 
     // Not accessed by the native side.
     private boolean mSupportZoom = true;
@@ -373,6 +377,22 @@ public class ContentSettings {
 
     boolean shouldDisplayZoomControls() {
         return supportsMultiTouchZoom() && mDisplayZoomControls;
+    }
+
+    public void setLoadWithOverviewMode(boolean overview) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mLoadWithOverviewMode != overview) {
+                mLoadWithOverviewMode = overview;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    public boolean getLoadWithOverviewMode() {
+        synchronized (mContentSettingsLock) {
+            return mLoadWithOverviewMode;
+        }
     }
 
     /**
@@ -1122,6 +1142,33 @@ public class ContentSettings {
     }
 
     /**
+     * Sets whether the WebSQL storage API is enabled. The default value is false.
+     *
+     * @param flag true if the ContentView should use the WebSQL storage API
+     */
+    public void setDatabaseEnabled(boolean flag) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mDatabaseEnabled != flag) {
+                mDatabaseEnabled = flag;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Gets whether the WebSQL Storage APIs are enabled.
+     *
+     * @return true if the WebSQL Storage APIs are enabled
+     * @see #setDatabaseEnabled
+     */
+    public boolean getDatabaseEnabled() {
+       synchronized (mContentSettingsLock) {
+           return mDatabaseEnabled;
+       }
+    }
+
+    /**
      * Set the default text encoding name to use when decoding html pages.
      * @param encoding The text encoding name.
      */
@@ -1145,6 +1192,54 @@ public class ContentSettings {
         }
     }
 
+    /**
+     * Set whether the user gesture is required for media playback.
+     * @param require true if the user gesture is required.
+     */
+    public void setMediaPlaybackRequiresUserGesture(boolean require) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mMediaPlaybackRequiresUserGesture != require) {
+                mMediaPlaybackRequiresUserGesture = require;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Get whether the user gesture is required for Media Playback.
+     * @return true if the user gesture is required.
+     */
+    public boolean getMediaPlaybackRequiresUserGesture() {
+        synchronized (mContentSettingsLock) {
+            return mMediaPlaybackRequiresUserGesture;
+        }
+    }
+
+    /**
+     * Set the default video poster URL.
+     * @param url The url of default video poster.
+     */
+    public void setDefaultVideoPosterURL(String url) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mDefaultVideoPosterURL != null && !mDefaultVideoPosterURL.equals(url) ||
+                    mDefaultVideoPosterURL == null && url != null) {
+                mDefaultVideoPosterURL = url;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Get the default video poster URL.
+     */
+    public String getDefaultVideoPosterURL() {
+        synchronized (mContentSettingsLock) {
+            return mDefaultVideoPosterURL;
+        }
+    }
+
     private int clipFontSize(int size) {
         if (size < MINIMUM_FONT_SIZE) {
             return MINIMUM_FONT_SIZE;
@@ -1163,6 +1258,7 @@ public class ContentSettings {
      */
     public void initFrom(ContentSettings settings) {
         setLayoutAlgorithm(settings.getLayoutAlgorithm());
+        setLoadWithOverviewMode(settings.getLoadWithOverviewMode());
         setTextZoom(settings.getTextZoom());
         setStandardFontFamily(settings.getStandardFontFamily());
         setFixedFontFamily(settings.getFixedFontFamily());
@@ -1187,9 +1283,12 @@ public class ContentSettings {
         setPluginState(settings.getPluginState());
         setAppCacheEnabled(settings.mAppCacheEnabled);
         setDomStorageEnabled(settings.getDomStorageEnabled());
+        setDatabaseEnabled(settings.getDatabaseEnabled());
         setSupportZoom(settings.supportZoom());
         setBuiltInZoomControls(settings.getBuiltInZoomControls());
         setDisplayZoomControls(settings.getDisplayZoomControls());
+        setMediaPlaybackRequiresUserGesture(settings.getMediaPlaybackRequiresUserGesture());
+        setDefaultVideoPosterURL(settings.getDefaultVideoPosterURL());
     }
 
     /**

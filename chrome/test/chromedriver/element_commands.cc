@@ -10,14 +10,14 @@
 #include "base/third_party/icu/icu_utf.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/basic_types.h"
-#include "chrome/test/chromedriver/chrome.h"
+#include "chrome/test/chromedriver/chrome/chrome.h"
+#include "chrome/test/chromedriver/chrome/js.h"
+#include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/chrome/ui_events.h"
+#include "chrome/test/chromedriver/chrome/web_view.h"
 #include "chrome/test/chromedriver/element_util.h"
-#include "chrome/test/chromedriver/js.h"
 #include "chrome/test/chromedriver/key_converter.h"
 #include "chrome/test/chromedriver/session.h"
-#include "chrome/test/chromedriver/status.h"
-#include "chrome/test/chromedriver/ui_events.h"
-#include "chrome/test/chromedriver/web_view.h"
 #include "third_party/webdriver/atoms.h"
 
 namespace {
@@ -74,7 +74,8 @@ Status SendKeysToElement(
   base::ListValue args;
   args.Append(CreateElement(element_id));
   scoped_ptr<base::Value> result;
-  status = web_view->CallFunction(session->frame, kFocusScript, args, &result);
+  status = web_view->CallFunction(
+      session->GetCurrentFrameId(), kFocusScript, args, &result);
   if (status.IsError())
     return status;
   return SendKeysOnWindow(web_view, keys, true);
@@ -83,7 +84,7 @@ Status SendKeysToElement(
 }  // namespace
 
 Status ExecuteElementCommand(
-    ElementCommand command,
+    const ElementCommand& command,
     Session* session,
     WebView* web_view,
     const base::DictionaryValue& params,
@@ -124,7 +125,7 @@ Status ExecuteHoverOverElement(
     scoped_ptr<base::Value>* value) {
   WebPoint location;
   Status status = GetElementClickableLocation(
-      session, web_view, element_id, &location, NULL);
+      session, web_view, element_id, &location);
   if (status.IsError())
     return status;
 
@@ -160,13 +161,10 @@ Status ExecuteClickElement(
       return SetOptionElementSelected(session, web_view, element_id, true);
   } else {
     WebPoint location;
-    bool is_clickable;
     status = GetElementClickableLocation(
-        session, web_view, element_id, &location, &is_clickable);
+        session, web_view, element_id, &location);
     if (status.IsError())
       return status;
-    if (!is_clickable)
-      return Status(kUnknownError, status.message());
 
     std::list<MouseEvent> events;
     events.push_back(
@@ -195,7 +193,7 @@ Status ExecuteClearElement(
   args.Append(CreateElement(element_id));
   scoped_ptr<base::Value> result;
   return web_view->CallFunction(
-      session->frame,
+      session->GetCurrentFrameId(),
       webdriver::atoms::asString(webdriver::atoms::CLEAR),
       args, &result);
 }
@@ -230,4 +228,194 @@ Status ExecuteSendKeysToElement(
       return status;
     return SendKeysToElement(session, web_view, element_id, keys);
   }
+}
+
+Status ExecuteSubmitElement(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::SUBMIT),
+      args,
+      value);
+}
+
+Status ExecuteGetElementText(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::GET_TEXT),
+      args,
+      value);
+}
+
+Status ExecuteGetElementValue(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      "function(elem) { return elem['value'] }",
+      args,
+      value);
+}
+
+Status ExecuteGetElementTagName(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      "function(elem) { return elem.tagName.toLowerCase() }",
+      args,
+      value);
+}
+
+Status ExecuteIsElementSelected(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::IS_SELECTED),
+      args,
+      value);
+}
+
+Status ExecuteIsElementEnabled(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::IS_ENABLED),
+      args,
+      value);
+}
+
+Status ExecuteIsElementDisplayed(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::IS_DISPLAYED),
+      args,
+      value);
+}
+
+Status ExecuteGetElementLocation(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::GET_LOCATION),
+      args,
+      value);
+}
+
+Status ExecuteGetElementLocationOnceScrolledIntoView(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::GET_LOCATION_IN_VIEW),
+      args,
+      value);
+}
+
+Status ExecuteGetElementSize(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::GET_SIZE),
+      args,
+      value);
+}
+
+Status ExecuteGetElementAttribute(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  std::string name;
+  if (!params.GetString("name", &name))
+    return Status(kUnknownError, "missing 'name'");
+  return GetElementAttribute(session, web_view, element_id, name, value);
+}
+
+Status ExecuteGetElementValueOfCSSProperty(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::GET_EFFECTIVE_STYLE),
+      args,
+      value);
+}
+
+Status ExecuteElementEquals(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  std::string other_element_id;
+  if (!params.GetString("other", &other_element_id))
+    return Status(kUnknownError, "'other' must be a string");
+  value->reset(new base::FundamentalValue(element_id == other_element_id));
+  return Status(kOk);
 }

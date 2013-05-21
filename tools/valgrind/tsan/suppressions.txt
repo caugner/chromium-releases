@@ -93,6 +93,32 @@
   fun:PR_ExitMonitor
 }
 
+{
+  False positive on strncasecmp OOB read
+  ThreadSanitizer:Race
+  fun:__strncasecmp_l_ssse3
+  fun:base::strncasecmp
+}
+{
+  False positive on strcasecmp OOB read
+  ThreadSanitizer:Race
+  fun:__strcasecmp_l_ssse3
+  fun:base::strcasecmp
+}
+
+{
+  Benign race in get_nprocs, uses barriers
+  ThreadSanitizer:Race
+  fun:get_nprocs
+}
+
+{
+  False positives, glibc just uses internal atomics
+  ThreadSanitizer:Race
+  ...
+  fun:getaddrinfo
+}
+
 ############################
 # 1.2 Benign races in ICU
 {
@@ -258,6 +284,13 @@
   fun:qsort_r
   fun:qsort
   fun:_cairo_bentley_ottmann_tessellate_polygon
+}
+
+{
+  bug_177061
+  ThreadSanitizer:Race
+  ...
+  fun:*cairo*
 }
 
 # 2. intentional unit test errors, or stuff that is somehow a false positive
@@ -903,16 +936,23 @@
    fun:_vsnprintf_helper
 }
 {
-   bug_137973_a
-   ThreadSanitizer:Race
-   fun:media::Pipeline::OnVideoTimeUpdate
-   fun:base::internal::RunnableAdapter::Run
+  bug_137973_a
+  ThreadSanitizer:Race
+  fun:media::Pipeline::OnVideoTimeUpdate
+  fun:base::internal::RunnableAdapter::Run
 }
 {
   bug_137973_b
   ThreadSanitizer:Race
   fun:media::Pipeline::SetState
   fun:media::Pipeline::StopTask
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_137973_c
+  ThreadSanitizer:Race
+  fun:media::Pipeline::SetState
+  fun:media::Pipeline::SeekTask
   fun:base::internal::RunnableAdapter::Run
 }
 {
@@ -1010,4 +1050,63 @@
   fun:StartupBrowserCreatorImpl::ProcessStartupURLs
   fun:StartupBrowserCreatorImpl::ProcessLaunchURLs
   fun:StartupBrowserCreatorImpl::Launch
+}
+{
+   bug_178433a
+   ThreadSanitizer:Race
+   fun:scoped_refptr::operator->
+   fun:base::WaitableEvent::Signal
+   fun:base::debug::TraceSamplingThread::ThreadMain
+   fun:base::::ThreadFunc
+}
+{
+   bug_178433b
+   ThreadSanitizer:Race
+   fun:base::internal::scoped_ptr_impl::get
+   ...
+   fun:base::debug::TraceSamplingThread::ThreadMain
+}
+{
+   bug_222601a
+   ThreadSanitizer:Race
+   fun:XFixesFindDisplay
+   fun:XFixesQueryExtension
+   fun:media::::ScreenCapturerLinux::Init
+}
+{
+   bug_222601b
+   ThreadSanitizer:Race
+   fun:XextFindDisplay
+   ...
+   fun:XShmQueryVersion
+   fun:media::XServerPixelBuffer::InitShm
+   fun:media::XServerPixelBuffer::Init
+   fun:media::::ScreenCapturerLinux::Init
+}
+{
+   bug_222601c
+   ThreadSanitizer:Race
+   fun:XextAddDisplay
+   ...
+   fun:media::XServerPixelBuffer::InitShm
+   fun:media::XServerPixelBuffer::Init
+   fun:media::::ScreenCapturerLinux::Init
+}
+{
+   bug_222684a
+   ThreadSanitizer:Race
+   ...
+   fun:WebCore::shouldTreatAsUniqueOrigin
+   fun:WebCore::SecurityOrigin::create
+   fun:WebCore::SecurityOrigin::createFromString
+   fun:WebKit::WebSecurityOrigin::createFromString
+}
+{
+   bug_222684b
+   ThreadSanitizer:Race
+   ...
+   fun:WebCore::SecurityOrigin::SecurityOrigin
+   fun:WebCore::SecurityOrigin::create
+   fun:WebCore::SecurityOrigin::createFromString
+   fun:WebKit::WebSecurityOrigin::createFromString
 }

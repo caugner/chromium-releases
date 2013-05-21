@@ -5,6 +5,9 @@
 #include "chrome/browser/devtools/browser_list_tabcontents_provider.h"
 
 #include "base/path_service.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -12,7 +15,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_list_impl.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
@@ -27,8 +29,9 @@ using content::DevToolsHttpHandlerDelegate;
 using content::RenderViewHost;
 
 BrowserListTabContentsProvider::BrowserListTabContentsProvider(
-    Profile* profile)
-    : profile_(profile) {
+    Profile* profile,
+    chrome::HostDesktopType host_desktop_type)
+    : profile_(profile), host_desktop_type_(host_desktop_type) {
 }
 
 BrowserListTabContentsProvider::~BrowserListTabContentsProvider() {
@@ -83,16 +86,15 @@ std::string BrowserListTabContentsProvider::GetPageThumbnailData(
 }
 
 RenderViewHost* BrowserListTabContentsProvider::CreateNewTarget() {
-  if (BrowserList::empty())
-    chrome::NewEmptyWindow(profile_);
+  const BrowserList* browser_list =
+      BrowserList::GetInstance(host_desktop_type_);
 
-  if (BrowserList::empty())
+  if (browser_list->empty())
+    chrome::NewEmptyWindow(profile_, host_desktop_type_);
+
+  if (browser_list->empty())
     return NULL;
 
-  // TODO(gab): Do not hardcode HOST_DESKTOP_TYPE_NATIVE below once
-  // chrome::NewEmptyWindow() above has been made multi-desktop friendly.
-  const chrome::BrowserListImpl* browser_list =
-      chrome::BrowserListImpl::GetInstance(chrome::HOST_DESKTOP_TYPE_NATIVE);
   content::WebContents* web_contents = chrome::AddSelectedTabWithURL(
       browser_list->get(0),
       GURL(chrome::kAboutBlankURL),
@@ -107,4 +109,26 @@ BrowserListTabContentsProvider::GetTargetType(content::RenderViewHost* rvh) {
       return kTargetTypeTab;
 
   return kTargetTypeOther;
+}
+
+std::string BrowserListTabContentsProvider::GetViewDescription(
+    content::RenderViewHost* rvh) {
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderViewHost(rvh);
+  if (!web_contents)
+    return "";
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  if (!profile)
+    return "";
+
+  extensions::ExtensionHost* extension_host =
+      extensions::ExtensionSystem::Get(profile)->process_manager()->
+          GetBackgroundHostForExtension(web_contents->GetURL().host());
+
+  if (!extension_host || extension_host->host_contents() != web_contents)
+    return "";
+
+  return extension_host->extension()->name();
 }

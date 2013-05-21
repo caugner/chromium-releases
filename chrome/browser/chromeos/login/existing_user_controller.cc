@@ -23,7 +23,6 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -31,7 +30,9 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/policy/policy_service.h"
@@ -143,7 +144,8 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
       offline_failed_(false),
       is_login_in_progress_(false),
       password_changed_(false),
-      do_auto_enrollment_(false) {
+      do_auto_enrollment_(false),
+      signin_screen_ready_(false) {
   DCHECK(current_controller_ == NULL);
   current_controller_ = this;
 
@@ -163,11 +165,18 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
   cros_settings_->AddSettingsObserver(kAccountsPrefAllowNewUser, this);
   cros_settings_->AddSettingsObserver(kAccountsPrefAllowGuest, this);
   cros_settings_->AddSettingsObserver(kAccountsPrefUsers, this);
+  cros_settings_->AddSettingsObserver(
+      kAccountsPrefDeviceLocalAccountAutoLoginId,
+      this);
+  cros_settings_->AddSettingsObserver(
+      kAccountsPrefDeviceLocalAccountAutoLoginDelay,
+      this);
 }
 
 void ExistingUserController::Init(const UserList& users) {
   time_init_ = base::Time::Now();
   UpdateLoginDisplay(users);
+  ConfigurePublicSessionAutoLogin();
 
   LoginUtils::Get()->PrewarmAuthentication();
   DBusThreadManager::Get()->GetSessionManagerClient()->EmitLoginPromptReady();
@@ -210,6 +219,15 @@ void ExistingUserController::ResumeLogin() {
   // This means the user signed-in, then auto-enrollment used his credentials
   // to enroll and succeeded.
   resume_login_callback_.Run();
+  resume_login_callback_.Reset();
+}
+
+void ExistingUserController::PrepareKioskAppLaunch() {
+  // Disable login UI while waiting for the kiosk app launch. There is no
+  // balanced UI enable call because this very login screen will not be
+  // accessed again. If app is launched, it will be destroyed. If app fails to
+  // launch, chrome is restarted to go back to a new login screen.
+  login_display_->SetUIEnabled(false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -227,6 +245,14 @@ void ExistingUserController::Observe(
     // http://crbug.com/125276
     registrar_.RemoveAll();
     return;
+  }
+  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED) {
+    const std::string setting = *content::Details<const std::string>(
+        details).ptr();
+    if (setting == kAccountsPrefDeviceLocalAccountAutoLoginId ||
+        setting == kAccountsPrefDeviceLocalAccountAutoLoginDelay) {
+      ConfigurePublicSessionAutoLogin();
+    }
   }
   if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED ||
       type == chrome::NOTIFICATION_USER_LIST_CHANGED) {
@@ -277,6 +303,12 @@ ExistingUserController::~ExistingUserController() {
   cros_settings_->RemoveSettingsObserver(kAccountsPrefAllowNewUser, this);
   cros_settings_->RemoveSettingsObserver(kAccountsPrefAllowGuest, this);
   cros_settings_->RemoveSettingsObserver(kAccountsPrefUsers, this);
+  cros_settings_->RemoveSettingsObserver(
+      kAccountsPrefDeviceLocalAccountAutoLoginId,
+      this);
+  cros_settings_->RemoveSettingsObserver(
+      kAccountsPrefDeviceLocalAccountAutoLoginDelay,
+      this);
 
   if (current_controller_ == this) {
     current_controller_ = NULL;
@@ -293,6 +325,7 @@ ExistingUserController::~ExistingUserController() {
 void ExistingUserController::CancelPasswordChangedFlow() {
   login_performer_.reset(NULL);
   login_display_->SetUIEnabled(true);
+  StartPublicSessionAutoLoginTimer();
 }
 
 void ExistingUserController::CreateAccount() {
@@ -310,6 +343,7 @@ void ExistingUserController::CreateLocallyManagedUser(
     return;
 
   // Disable clicking on other windows.
+  StopPublicSessionAutoLoginTimer();
   login_display_->SetUIEnabled(false);
 
   LoginPerformer::Delegate* delegate = this;
@@ -324,12 +358,14 @@ void ExistingUserController::CreateLocallyManagedUser(
   // TODO(nkostylev): A11y message.
 }
 
-void ExistingUserController::CompleteLogin(const std::string& username,
-                                           const std::string& password) {
+void ExistingUserController::CompleteLogin(const UserCredentials& credentials) {
   if (!host_) {
     // Complete login event was generated already from UI. Ignore notification.
     return;
   }
+
+  // Stop the auto-login timer when attempting login.
+  StopPublicSessionAutoLoginTimer();
 
   // Disable UI while loading user profile.
   login_display_->SetUIEnabled(false);
@@ -347,12 +383,11 @@ void ExistingUserController::CompleteLogin(const std::string& username,
   DeviceSettingsService::Get()->GetOwnershipStatusAsync(
       base::Bind(&ExistingUserController::CompleteLoginInternal,
                  weak_factory_.GetWeakPtr(),
-                 username, password));
+                 credentials));
 }
 
 void ExistingUserController::CompleteLoginInternal(
-    const std::string& username,
-    const std::string& password,
+    const UserCredentials& credentials,
     DeviceSettingsService::OwnershipStatus ownership_status,
     bool is_owner) {
   // Auto-enrollment must have made a decision by now. It's too late to enroll
@@ -364,18 +399,18 @@ void ExistingUserController::CompleteLoginInternal(
     // complete enrollment, or opt-out of it. So this controller shouldn't force
     // enrollment again if it is reused for another sign-in.
     do_auto_enrollment_ = false;
-    auto_enrollment_username_ = username;
+    auto_enrollment_username_ = credentials.username;
     resume_login_callback_ = base::Bind(
         &ExistingUserController::PerformLogin,
         weak_factory_.GetWeakPtr(),
-        username, password, LoginPerformer::AUTH_MODE_EXTENSION);
-    ShowEnrollmentScreen(true, username);
+        credentials, LoginPerformer::AUTH_MODE_EXTENSION);
+    ShowEnrollmentScreen(true, credentials.username);
     // Enable UI for the enrollment screen. SetUIEnabled(true) will post a
     // request to show the sign-in screen again when invoked at the sign-in
     // screen; invoke SetUIEnabled() after navigating to the enrollment screen.
     login_display_->SetUIEnabled(true);
   } else {
-    PerformLogin(username, password, LoginPerformer::AUTH_MODE_EXTENSION);
+    PerformLogin(credentials, LoginPerformer::AUTH_MODE_EXTENSION);
   }
 }
 
@@ -383,33 +418,35 @@ string16 ExistingUserController::GetConnectedNetworkName() {
   return GetCurrentNetworkName();
 }
 
-void ExistingUserController::Login(const std::string& username,
-                                   const std::string& password) {
-  if (username.empty() || password.empty())
+void ExistingUserController::Login(const UserCredentials& credentials) {
+  if ((credentials.username.empty() || credentials.password.empty()) &&
+      credentials.auth_code.empty())
     return;
+
+  // Stop the auto-login timer when attempting login.
+  StopPublicSessionAutoLoginTimer();
+
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
 
   BootTimesLoader::Get()->RecordLoginAttempted();
 
-  if (last_login_attempt_username_ != username) {
-    last_login_attempt_username_ = username;
+  if (last_login_attempt_username_ != credentials.username) {
+    last_login_attempt_username_ = credentials.username;
     num_login_attempts_ = 0;
     // Also reset state variables, which are used to determine password change.
     offline_failed_ = false;
     online_succeeded_for_.clear();
   }
   num_login_attempts_++;
-  PerformLogin(username, password, LoginPerformer::AUTH_MODE_INTERNAL);
+  PerformLogin(credentials, LoginPerformer::AUTH_MODE_INTERNAL);
 }
 
 void ExistingUserController::PerformLogin(
-    std::string username,
-    std::string password,
+    const UserCredentials& credentials,
     LoginPerformer::AuthorizationMode auth_mode) {
   // Disable UI while loading user profile.
   login_display_->SetUIEnabled(false);
-  resume_login_callback_.Reset();
 
   // Use the same LoginPerformer for subsequent login as it has state
   // such as Authenticator instance.
@@ -423,17 +460,23 @@ void ExistingUserController::PerformLogin(
   }
 
   is_login_in_progress_ = true;
-  if (gaia::ExtractDomainName(username) ==
+  if (gaia::ExtractDomainName(credentials.username) ==
           UserManager::kLocallyManagedUserDomain) {
-    login_performer_->LoginAsLocallyManagedUser(username, password);
+    login_performer_->LoginAsLocallyManagedUser(
+        UserCredentials(credentials.username,
+                        credentials.password,
+                        std::string()));  // auth_code
   } else {
-    login_performer_->PerformLogin(username, password, auth_mode);
+    login_performer_->PerformLogin(credentials, auth_mode);
   }
   accessibility::MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN));
 }
 
 void ExistingUserController::LoginAsRetailModeUser() {
+  // Stop the auto-login timer when attempting login.
+  StopPublicSessionAutoLoginTimer();
+
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
   // TODO(rkc): Add a CHECK to make sure retail mode logins are allowed once
@@ -449,6 +492,12 @@ void ExistingUserController::LoginAsRetailModeUser() {
 }
 
 void ExistingUserController::LoginAsGuest() {
+  if (is_login_in_progress_ || UserManager::Get()->IsUserLoggedIn())
+    return;
+
+  // Stop the auto-login timer when attempting login.
+  StopPublicSessionAutoLoginTimer();
+
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
 
@@ -462,6 +511,7 @@ void ExistingUserController::LoginAsGuest() {
                               HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
     // Reenable clicking on other windows and status area.
     login_display_->SetUIEnabled(true);
+    StartPublicSessionAutoLoginTimer();
     display_email_.clear();
     return;
   } else if (status != CrosSettingsProvider::TRUSTED) {
@@ -480,6 +530,7 @@ void ExistingUserController::LoginAsGuest() {
                               HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
     // Reenable clicking on other windows and status area.
     login_display_->SetUIEnabled(true);
+    StartPublicSessionAutoLoginTimer();
     display_email_.clear();
     return;
   }
@@ -494,11 +545,19 @@ void ExistingUserController::LoginAsGuest() {
 }
 
 void ExistingUserController::MigrateUserData(const std::string& old_password) {
-  RecoverEncryptedData(old_password);
+  // LoginPerformer instance has state of the user so it should exist.
+  if (login_performer_.get())
+    login_performer_->RecoverEncryptedData(old_password);
 }
 
 void ExistingUserController::LoginAsPublicAccount(
     const std::string& username) {
+  if (is_login_in_progress_ || UserManager::Get()->IsUserLoggedIn())
+    return;
+
+  // Stop the auto-login timer when attempting login.
+  StopPublicSessionAutoLoginTimer();
+
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
 
@@ -528,6 +587,7 @@ void ExistingUserController::LoginAsPublicAccount(
   if (!user || user->GetType() != User::USER_TYPE_PUBLIC_ACCOUNT) {
     // Re-enable clicking on other windows.
     login_display_->SetUIEnabled(true);
+    StartPublicSessionAutoLoginTimer();
     return;
   }
 
@@ -538,6 +598,11 @@ void ExistingUserController::LoginAsPublicAccount(
   login_performer_->LoginAsPublicAccount(username);
   accessibility::MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_PUBLIC_ACCOUNT));
+}
+
+void ExistingUserController::OnSigninScreenReady() {
+  signin_screen_ready_ = true;
+  StartPublicSessionAutoLoginTimer();
 }
 
 void ExistingUserController::OnUserSelected(const std::string& username) {
@@ -563,6 +628,11 @@ void ExistingUserController::ResyncUserData() {
 
 void ExistingUserController::SetDisplayEmail(const std::string& email) {
   display_email_ = email;
+}
+
+void ExistingUserController::ShowWrongHWIDScreen() {
+  host_->StartWizard(WizardController::kWrongHWIDScreenName, NULL);
+  login_display_->OnFadeOut();
 }
 
 void ExistingUserController::Signout() {
@@ -608,18 +678,9 @@ void ExistingUserController::ShowResetScreen() {
   login_display_->OnFadeOut();
 }
 
-void ExistingUserController::ShowTPMErrorAndScheduleReboot() {
+void ExistingUserController::ShowTPMError() {
   login_display_->SetUIEnabled(false);
   login_display_->ShowErrorScreen(LoginDisplay::TPM_ERROR);
-  reboot_timer_.Start(
-      FROM_HERE,
-      base::TimeDelta::FromMilliseconds(kCriticalErrorRebootDelayMs),
-      this,
-      &ExistingUserController::OnRebootTimeElapsed);
-}
-
-void ExistingUserController::OnRebootTimeElapsed() {
-  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -633,6 +694,11 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
   guest_mode_url_ = GURL::EmptyGURL();
   std::string error = failure.GetErrorString();
 
+  if (UserManager::Get()->GetUserFlow(last_login_attempt_username_)->
+          HandleLoginFailure(failure, host_)) {
+    return;
+  }
+
   if (failure.reason() == LoginFailure::OWNER_REQUIRED) {
     ShowError(IDS_LOGIN_ERROR_OWNER_REQUIRED, error);
     content::BrowserThread::PostDelayedTask(
@@ -642,7 +708,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
                                     GetSessionManagerClient())),
         base::TimeDelta::FromMilliseconds(kSafeModeRestartUiDelayMs));
   } else if (failure.reason() == LoginFailure::TPM_ERROR) {
-    ShowTPMErrorAndScheduleReboot();
+    ShowTPMError();
   } else if (!online_succeeded_for_.empty()) {
     ShowGaiaPasswordChanged(online_succeeded_for_);
   } else {
@@ -650,10 +716,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
     // cached locally or the local admin account.
     bool is_known_user =
         UserManager::Get()->IsKnownUser(last_login_attempt_username_);
-    NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
-    if (!network) {
-      ShowError(IDS_LOGIN_ERROR_NO_NETWORK_LIBRARY, error);
-    } else if (!network->Connected()) {
+    if (!ConnectivityStateHelper::Get()->IsConnected()) {
       if (is_known_user)
         ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
       else
@@ -673,7 +736,12 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
     }
     // Reenable clicking on other windows and status area.
     login_display_->SetUIEnabled(true);
+    StartPublicSessionAutoLoginTimer();
   }
+
+  // Reset user flow to default, so that special flow will not affect next
+  // attempt.
+  UserManager::Get()->ResetUserFlow(last_login_attempt_username_);
 
   if (login_status_consumer_)
     login_status_consumer_->OnLoginFailure(failure);
@@ -683,15 +751,17 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
 }
 
 void ExistingUserController::OnLoginSuccess(
-    const std::string& username,
-    const std::string& password,
+    const UserCredentials& credentials,
     bool pending_requests,
     bool using_oauth) {
   is_login_in_progress_ = false;
   offline_failed_ = false;
 
+  StopPublicSessionAutoLoginTimer();
+
   bool has_cookies =
-      login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION;
+      login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION &&
+      credentials.auth_code.empty();
 
   // Login performer will be gone so cache this value to use
   // once profile is loaded.
@@ -706,9 +776,8 @@ void ExistingUserController::OnLoginSuccess(
   ignore_result(login_performer_.release());
 
   // Will call OnProfilePrepared() in the end.
-  LoginUtils::Get()->PrepareProfile(username,
+  LoginUtils::Get()->PrepareProfile(credentials,
                                     display_email_,
-                                    password,
                                     using_oauth,
                                     has_cookies,
                                     this);
@@ -716,7 +785,7 @@ void ExistingUserController::OnLoginSuccess(
   display_email_.clear();
 
   // Notify LoginDisplay to allow it provide visual feedback to user.
-  login_display_->OnLoginSuccess(username);
+  login_display_->OnLoginSuccess(credentials.username);
 }
 
 void ExistingUserController::OnProfilePrepared(Profile* profile) {
@@ -726,6 +795,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
   login_display_->SetUIEnabled(true);
 
   if (UserManager::Get()->IsCurrentUserNew() &&
+      !UserManager::Get()->GetCurrentUserFlow()->ShouldSkipPostLoginScreens() &&
       !WizardController::default_controller()->skip_post_login_screens()) {
     // Don't specify start URLs if the administrator has configured the start
     // URLs via policy.
@@ -751,7 +821,9 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
   // Inform |login_status_consumer_| about successful login. Set most
   // parameters to empty since they're not needed.
   if (login_status_consumer_)
-    login_status_consumer_->OnLoginSuccess("", "", false, false);
+    login_status_consumer_->OnLoginSuccess(UserCredentials(),
+                                           false,    // pending_requests
+                                           false);   // using_oauth
   login_display_->OnFadeOut();
 }
 
@@ -784,28 +856,21 @@ void ExistingUserController::OnPasswordChangeDetected() {
     return;
   }
 
+  if (UserManager::Get()->GetUserFlow(last_login_attempt_username_)->
+          HandlePasswordChangeDetected(host_)) {
+    return;
+  }
+
   // True if user has already made an attempt to enter old password and failed.
   bool show_invalid_old_password_error =
       login_performer_->password_changed_callback_count() > 1;
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableNewPasswordChangedDialog)) {
-    // Passing 'false' here enables "full sync" mode in the dialog,
-    // which disables the requirement for the old owner password,
-    // allowing us to recover from a lost owner password/homedir.
-    // TODO(gspencer): We shouldn't have to erase stateful data when
-    // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
-    PasswordChangedView* view = new PasswordChangedView(
-        this,
-        false,  // Allow removal of existing cryptohome, perform full migration.
-        show_invalid_old_password_error);
-    views::Widget* window = views::Widget::CreateWindowWithParent(
-        view, GetNativeWindow());
-    window->SetAlwaysOnTop(true);
-    window->Show();
-  } else {
-    login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error);
-  }
+  // Note: We allow owner using "full sync" mode which will recreate
+  // cryptohome and deal with owner private key being lost. This also allows
+  // us to recover from a lost owner password/homedir.
+  // TODO(gspencer): We shouldn't have to erase stateful data when
+  // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
+  login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error);
 
   if (login_status_consumer_)
     login_status_consumer_->OnPasswordChangeDetected();
@@ -818,6 +883,7 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
 
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
+  login_display_->ShowSigninUI(email);
 
   if (login_status_consumer_) {
     login_status_consumer_->OnLoginFailure(LoginFailure(
@@ -825,6 +891,8 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
   }
 
   display_email_.clear();
+
+  StartPublicSessionAutoLoginTimer();
 }
 
 void ExistingUserController::PolicyLoadFailed() {
@@ -834,6 +902,9 @@ void ExistingUserController::PolicyLoadFailed() {
   login_display_->SetUIEnabled(true);
 
   display_email_.clear();
+
+  // Policy load failure stops login attempts -- restart the timer.
+  StartPublicSessionAutoLoginTimer();
 }
 
 void ExistingUserController::OnOnlineChecked(const std::string& username,
@@ -847,23 +918,6 @@ void ExistingUserController::OnOnlineChecked(const std::string& username,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ExistingUserController, PasswordChangedView::Delegate implementation:
-//
-
-void ExistingUserController::RecoverEncryptedData(
-    const std::string& old_password) {
-  // LoginPerformer instance has state of the user so it should exist.
-  if (login_performer_.get())
-    login_performer_->RecoverEncryptedData(old_password);
-}
-
-void ExistingUserController::ResyncEncryptedData() {
-  // LoginPerformer instance has state of the user so it should exist.
-  if (login_performer_.get())
-    login_performer_->ResyncEncryptedData();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // ExistingUserController, private:
 
 void ExistingUserController::ActivateWizard(const std::string& screen_name) {
@@ -873,6 +927,64 @@ void ExistingUserController::ActivateWizard(const std::string& screen_name) {
     params->SetString("start_url", guest_mode_url_.spec());
   }
   host_->StartWizard(screen_name, params);
+}
+
+void ExistingUserController::ConfigurePublicSessionAutoLogin() {
+  if (!cros_settings_->GetString(
+          kAccountsPrefDeviceLocalAccountAutoLoginId,
+          &public_session_auto_login_username_)) {
+    public_session_auto_login_username_.clear();
+  }
+  if (!cros_settings_->GetInteger(
+          kAccountsPrefDeviceLocalAccountAutoLoginDelay,
+          &public_session_auto_login_delay_)) {
+    public_session_auto_login_delay_ = 0;
+  }
+
+  if (!public_session_auto_login_username_.empty())
+    StartPublicSessionAutoLoginTimer();
+  else
+    StopPublicSessionAutoLoginTimer();
+}
+
+void ExistingUserController::ResetPublicSessionAutoLoginTimer() {
+  // Only restart the auto-login timer if it's already running.
+  if (auto_login_timer_ && auto_login_timer_->IsRunning()) {
+    StopPublicSessionAutoLoginTimer();
+    StartPublicSessionAutoLoginTimer();
+  }
+}
+
+void ExistingUserController::OnPublicSessionAutoLoginTimerFire() {
+  CHECK(signin_screen_ready_ &&
+        !is_login_in_progress_ &&
+        !public_session_auto_login_username_.empty());
+  LoginAsPublicAccount(public_session_auto_login_username_);
+}
+
+void ExistingUserController::StopPublicSessionAutoLoginTimer() {
+  if (auto_login_timer_)
+    auto_login_timer_->Stop();
+}
+
+void ExistingUserController::StartPublicSessionAutoLoginTimer() {
+  if (!signin_screen_ready_ ||
+      is_login_in_progress_ ||
+      public_session_auto_login_username_.empty()) {
+    return;
+  }
+
+  // Start the auto-login timer.
+  if (!auto_login_timer_)
+    auto_login_timer_.reset(new base::OneShotTimer<ExistingUserController>);
+
+  auto_login_timer_->Start(
+      FROM_HERE,
+      base::TimeDelta::FromMilliseconds(
+          public_session_auto_login_delay_),
+      base::Bind(
+          &ExistingUserController::OnPublicSessionAutoLoginTimerFire,
+          weak_factory_.GetWeakPtr()));
 }
 
 gfx::NativeWindow ExistingUserController::GetNativeWindow() const {
@@ -935,6 +1047,8 @@ void ExistingUserController::OptionallyShowReleaseNotes(
   // TODO(nkostylev): Fix WizardControllerFlowTest case.
   if (!profile || KioskModeSettings::Get()->IsKioskModeEnabled())
     return;
+  if (UserManager::Get()->GetCurrentUserFlow()->ShouldSkipPostLoginScreens())
+    return;
   PrefService* prefs = profile->GetPrefs();
   chrome::VersionInfo version_info;
   // New users would get this info with default getting started guide.
@@ -985,8 +1099,7 @@ void ExistingUserController::ShowError(int error_id,
   // for end users, developers can see details string in Chrome logs.
   VLOG(1) << details;
   HelpAppLauncher::HelpTopic help_topic_id;
-  NetworkLibrary* network_library = CrosLibrary::Get()->GetNetworkLibrary();
-  bool is_offline = !network_library || !network_library->Connected();
+  bool is_offline = !ConnectivityStateHelper::Get()->IsConnected();
   switch (login_performer_->error().state()) {
     case GoogleServiceAuthError::CONNECTION_FAILED:
       help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT_OFFLINE;

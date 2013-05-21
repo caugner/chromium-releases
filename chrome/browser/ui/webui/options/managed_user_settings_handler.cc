@@ -8,13 +8,18 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/google_chrome_strings.h"
 #include "grit/locale_settings.h"
 
 using content::UserMetricsAction;
@@ -27,7 +32,27 @@ ManagedUserSettingsHandler::ManagedUserSettingsHandler() {
 ManagedUserSettingsHandler::~ManagedUserSettingsHandler() {
 }
 
+void ManagedUserSettingsHandler::InitializeHandler() {
+  pref_change_registrar_.Init(Profile::FromWebUI(web_ui())->GetPrefs());
+  pref_change_registrar_.Add(
+      prefs::kManagedModeLocalPassphrase,
+      base::Bind(&ManagedUserSettingsHandler::OnLocalPassphraseChanged,
+                 base::Unretained(this)));
+}
+
 void ManagedUserSettingsHandler::InitializePage() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableManagedUsers)) {
+    PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
+    base::FundamentalValue is_passphrase_set(!pref_service->GetString(
+        prefs::kManagedModeLocalPassphrase).empty());
+    web_ui()->CallJavascriptFunction(
+        "ManagedUserSettings.passphraseChanged",
+        is_passphrase_set);
+  }
+}
+
+void ManagedUserSettingsHandler::HandlePageOpened(const base::ListValue* args) {
   start_time_ = base::TimeTicks::Now();
   content::RecordAction(UserMetricsAction("ManagedMode_OpenSettings"));
 }
@@ -37,6 +62,9 @@ void ManagedUserSettingsHandler::GetLocalizedValues(
   DCHECK(localized_strings);
 
   static OptionsStringResource resources[] = {
+    // Unlock the settings page to allow editing.
+    { "unlockSettings", IDS_UNLOCK_PASSPHRASE_BUTTON },
+    { "lockSettings", IDS_LOCK_MANAGED_USER_BUTTON },
     // Installed content packs.
     { "installedContentPacks", IDS_INSTALLED_CONTENT_PACKS_LABEL },
     { "getContentPacks", IDS_GET_CONTENT_PACKS_BUTTON },
@@ -49,7 +77,7 @@ void ManagedUserSettingsHandler::GetLocalizedValues(
     // Other managed user settings
     { "advancedManagedUserSettings", IDS_ADVANCED_MANAGED_USER_LABEL },
     { "enableSafeSearch", IDS_SAFE_SEARCH_ENABLED },
-    { "disableProfileSignIn", IDS_SIGNIN_SYNC_DISABLED },
+    { "allowSignIn", IDS_SIGNIN_SYNC_ALLOWED },
     { "disableHistoryDeletion", IDS_HISTORY_DELETION_DISABLED },
     { "usePassphrase", IDS_USE_PASSPHRASE_LABEL },
     { "setPassphrase", IDS_SET_PASSPHRASE_BUTTON }
@@ -70,6 +98,10 @@ void ManagedUserSettingsHandler::RegisterMessages() {
       "confirmManagedUserSettings",
       base::Bind(&ManagedUserSettingsHandler::SaveMetrics,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "settingsPageOpened",
+      base::Bind(&ManagedUserSettingsHandler::HandlePageOpened,
+                 base::Unretained(this)));
 }
 
 void ManagedUserSettingsHandler::SaveMetrics(const ListValue* args) {
@@ -80,6 +112,14 @@ void ManagedUserSettingsHandler::SaveMetrics(const ListValue* args) {
     UMA_HISTOGRAM_LONG_TIMES("ManagedMode.UserSettingsModifyTime",
                              base::TimeTicks::Now() - start_time_);
   }
+}
+
+void ManagedUserSettingsHandler::OnLocalPassphraseChanged() {
+  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
+  base::FundamentalValue is_passphrase_set(!pref_service->GetString(
+      prefs::kManagedModeLocalPassphrase).empty());
+  web_ui()->CallJavascriptFunction("ManagedUserSettings.passphraseChanged",
+                                   is_passphrase_set);
 }
 
 }  // namespace options

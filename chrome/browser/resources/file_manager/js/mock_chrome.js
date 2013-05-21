@@ -1,6 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+'use strict';
 
 function MockEventSource() {
   this.listeners_ = [];
@@ -28,7 +30,7 @@ MockEventSource.prototype.removeListener = function(listener) {
 
 /**
  * Notify listeners in a fresh call stack.
- * @param {Object...} var_args Arguments.
+ * @param {...Object} var_args Arguments.
  */
 MockEventSource.prototype.notify = function(var_args) {
   setTimeout(function(args) {
@@ -45,6 +47,12 @@ function cloneShallow(object) {
       clone[key] = object[key];
   return clone;
 }
+
+
+/**
+ * Mock for |chrome| namespace.
+ */
+var chrome = window.chrome || {};
 
 /**
  * Mock out the chrome.fileBrowserPrivate API for use in the harness.
@@ -68,7 +76,7 @@ chrome.fileBrowserPrivate = {
    * --allow-file-access-from-files in order for this to work.
    */
   requestLocalFileSystem: function(callback) {
-    window.webkitRequestFileSystem(this.FS_TYPE,
+    window.webkitRequestFileSystem(chrome.fileBrowserPrivate.FS_TYPE,
         16 * 1024 * 1024, callback, util.ferr('Error requesting filesystem'));
   },
 
@@ -91,16 +99,19 @@ chrome.fileBrowserPrivate = {
   /**
    * Select multiple files.
    */
-  selectFiles: function(selectedFiles) {
+  selectFiles: function(selectedFiles, shouldReturnLocalPath, callback) {
     console.log('selectFiles called: ' + selectedFiles.length +
                 ' files selected');
+    callback();
   },
 
   /**
    * Select a single file.
    */
-  selectFile: function(selectedFile, index) {
+  selectFile: function(selectedFile, index, forOpening, shouldReturnLocalPath,
+                       callback) {
     console.log('selectFile called: ' + selectedFile + ', ' + index);
+    callback();
   },
 
   /**
@@ -157,7 +168,8 @@ chrome.fileBrowserPrivate = {
       {
         taskId: internalTaskPrefix + '|gallery',
         title: 'View',
-        regexp: /\.(bmp|gif|jpe?g|png|webp|3gp|avi|m4v|mov|mp4|mpeg4?|mpg4?|ogm|ogv|ogx|webm)$/i,
+        regexp: new RegExp('\.(bmp|gif|jpe?g|png|webp|3gp|avi|m4v|mov|mp4|' +
+            'mpeg4?|mpg4?|ogm|ogv|ogx|webm)$', 'i'),
         iconUrl: emptyIcon
       },
       {
@@ -169,7 +181,8 @@ chrome.fileBrowserPrivate = {
       {
         taskId: 'fake-extension-id|file|fake-item',
         title: 'External action',
-        regexp: /\.(bmp|gif|jpe?g|png|webp|3gp|avi|m4v|mov|mp4|mpeg4?|mpg4?|ogm|ogv|ogx|webm)$/i,
+        regexp: new RegExp('\.(bmp|gif|jpe?g|png|webp|3gp|avi|m4v|mov|mp4|' +
+            'mpeg4?|mpg4?|ogm|ogv|ogx|webm)$', 'i'),
         iconUrl: 'chrome://theme/IDR_FILE_MANAGER_IMG_FILETYPE_GENERIC'
       },
       {
@@ -188,6 +201,12 @@ chrome.fileBrowserPrivate = {
         taskId: internalTaskPrefix + '|view-pdf',
         title: 'View',
         regexp: /\.pdf$/i,
+        iconUrl: emptyIcon
+      },
+      {
+        taskId: internalTaskPrefix + '|view-swf',
+        title: 'View',
+        regexp: /\.swf$/i,
         iconUrl: emptyIcon
       }
     ];
@@ -279,6 +298,10 @@ chrome.fileBrowserPrivate = {
 
   archiveCount_: 0,
 
+  /**
+   * Get the list of mount points.
+   * @param {function(Array.<MountPointInfo>)} callback Callback
+   */
   getMountPoints: function(callback) {
     callback([].concat(chrome.fileBrowserPrivate.mountPoints_));
   },
@@ -335,7 +358,7 @@ chrome.fileBrowserPrivate = {
         mountPath: mountPath,
         sourcePath: sourceUrl
       });
-    }
+    };
 
     window.webkitResolveLocalFileSystemURL(sourceUrl, function(entry) {
       util.removeFileOrDirectory(
@@ -399,11 +422,20 @@ chrome.fileBrowserPrivate = {
 
   onPreferencesChanged: new MockEventSource(),
 
+  /**
+   * Retrieves file manager preferencves.
+   *
+   * @param {function(Object.<string, boolean>)} callback Return the result
+   */
   getPreferences: function(callback) {
     setTimeout(callback, 0, cloneShallow(
-        chrome.fileBrowserPrivate.drivePreferences_));
+        chrome.fileBrowserPrivate.preferences_));
   },
 
+  /**
+   * Sets fuke nabager preferences.
+   * @param {Object.<string, boolean>} preferences Preferences.
+   */
   setPreferences: function(preferences) {
     for (var prop in preferences) {
       chrome.fileBrowserPrivate.preferences_[prop] = preferences[prop];
@@ -411,21 +443,25 @@ chrome.fileBrowserPrivate = {
     chrome.fileBrowserPrivate.onPreferencesChanged.notify();
   },
 
-  networkConnectionState_: {
-    type: 'cellular',
+  driveConnectionState_: {
+    type: 'metered',
     online: true
   },
 
   onDriveConnectionStatusChanged: new MockEventSource(),
 
+  /**
+   * Retrieves the state of the current drive connection.
+   * @param {function(Object)} callback Callback
+   */
   getDriveConnectionState: function(callback) {
     setTimeout(callback, 0, cloneShallow(
-        chrome.fileBrowserPrivate.networkConnectionState_));
+        chrome.fileBrowserPrivate.driveConnectionState_));
   },
 
   setConnectionState_: function(state) {
-    chrome.fileBrowserPrivate.networkConnectionState_ = state;
-    chrome.fileBrowserPrivate.onNetworkConnectionChanged.notify();
+    chrome.fileBrowserPrivate.driveConnectionState_ = state;
+    chrome.fileBrowserPrivate.onDriveConnectionStatusChanged.notify();
   },
 
   pinDriveFile: function(urls, on, callback) {
@@ -468,12 +504,19 @@ chrome.fileBrowserPrivate = {
       CHROMEOS_RELEASE_BOARD: 'stumpy',
 
       DRIVE_DIRECTORY_LABEL: 'Google Drive',
+      DRIVE_OFFLINE_COLLECTION_LABEL: 'Offline',
+      DRIVE_SHARED_WITH_ME_COLLECTION_LABEL: 'Shared with me',
+      DRIVE_DIRECTORY_LABEL: 'Google Drive',
       ENABLE_DRIVE: true,
       PDF_VIEW_ENABLED: true,
+      SWF_VIEW_ENABLED: true,
 
       ROOT_DIRECTORY_LABEL: 'Files',
       DOWNLOADS_DIRECTORY_LABEL: 'Downloads',
-      DOWNLOADS_DIRECTORY_WARNING: "&lt;strong&gt;Caution:&lt;/strong&gt; These files are temporary and may be automatically deleted to free up disk space.  &lt;a href='javascript://'&gt;Learn More&lt;/a&gt;",
+      DOWNLOADS_DIRECTORY_WARNING:
+          '&lt;strong&gt;Caution:&lt;/strong&gt; These files are temporary ' +
+          'and may be automatically deleted to free up disk space.  ' +
+          "&lt;a href='javascript://'&gt;Learn More&lt;/a&gt;",
       NAME_COLUMN_LABEL: 'Name',
       SIZE_COLUMN_LABEL: 'Size',
       SIZE_BYTES: '$ bytes',
@@ -499,6 +542,8 @@ chrome.fileBrowserPrivate = {
       ERROR_WHITESPACE_NAME: 'Invalid name',
       ERROR_NEW_FOLDER_EMPTY_NAME: 'Please specify a folder name',
       NEW_FOLDER_BUTTON_LABEL: 'New folder',
+      NEW_WINDOW_BUTTON_LABEL: 'New window',
+      CHANGE_DEFAULT_APP_BUTTON_LABEL: 'Change default app...',
       FILENAME_LABEL: 'File Name',
       PREPARING_LABEL: 'Preparing',
       DRAGGING_MULTIPLE_ITEMS: '$1 items',
@@ -548,11 +593,13 @@ chrome.fileBrowserPrivate = {
       GALLERY_OVERWRITE_BUBBLE: 'Your edits are saved automatically.<br><br>' +
           'To keep a copy of the original image, uncheck "Overwrite original"',
       GALLERY_UNSAVED_CHANGES: 'Changes are not saved yet.',
-      GALLERY_READONLY_WARNING: '$1 is read only. Edited images will be saved in the Downloads folder.',
+      GALLERY_READONLY_WARNING: '$1 is read only. Edited images will be ' +
+          'saved in the Downloads folder.',
       GALLERY_IMAGE_ERROR: 'This file could not be displayed',
       GALLERY_IMAGE_TOO_BIG_ERROR: 'This file is too large to be opened.',
       GALLERY_VIDEO_ERROR: 'This file could not be played.',
-      GALLERY_VIDEO_DECODING_ERROR: 'An error occurred. Click to restart from the beginning.',
+      GALLERY_VIDEO_DECODING_ERROR:
+          'An error occurred. Click to restart from the beginning.',
 
       GALLERY_ITEMS_SELECTED: '$1 items selected',
       GALLERY_NO_IMAGES: 'No images in this directory.',
@@ -568,9 +615,12 @@ chrome.fileBrowserPrivate = {
 
       AUDIO_ERROR: 'This file could not be played',
 
-      CONFIRM_OVERWRITE_FILE: 'A file named "$1" already exists. Do you want to replace it?',
-      FILE_ALREADY_EXISTS: 'The file named "$1" already exists. Please choose a different name.',
-      DIRECTORY_ALREADY_EXISTS: 'The folder named "$1" already exists. Please choose a different name.',
+      CONFIRM_OVERWRITE_FILE:
+          'A file named "$1" already exists. Do you want to replace it?',
+      FILE_ALREADY_EXISTS:
+          'The file named "$1" already exists. Please choose a different name.',
+      DIRECTORY_ALREADY_EXISTS: 'The folder named "$1" already exists. ' +
+                                'Please choose a different name.',
       ERROR_RENAMING: 'Unable to rename "$1". $2',
       RENAME_PROMPT: 'Enter a new name',
       RENAME_BUTTON_LABEL: 'Rename',
@@ -608,30 +658,38 @@ chrome.fileBrowserPrivate = {
       DRIVE_LEARN_MORE: 'Learn more',
       DRIVE_CANNOT_REACH: '$1 cannot be reached at this time',
 
+      DRIVE_NOT_REACHED: 'Google Drive could not be reached. Please ' +
+          '<a href="javascript://">log out</a> and log back in.',
       DRIVE_WELCOME_TITLE: 'Welcome to Google Drive!',
       DRIVE_WELCOME_TITLE_ALTERNATIVE: 'Get 100 GB free with Google Drive',
       DRIVE_WELCOME_TEXT_SHORT:
           'All files saved in this folder are backed up online automatically',
       DRIVE_WELCOME_TEXT_LONG:
           '<p><strong>Access files from everywhere, even offline.</strong> ' +
-          'Files in Google Drive are up-to-date and available from any device.</p>' +
+          'Files in Google Drive are up-to-date and available from any ' +
+          'device.</p>' +
           '<p><strong>Keep your files safe.</strong> ' +
           'No matter what happens to your device, your files are ' +
           'safely stored in Google Drive .</p>' +
           '<p><strong>Share, create and collaborate</strong> ' +
           'on files with others all in one place .</p>',
-      DRIVE_WELCOME_GET_STARTED: 'Get started',
+      DRIVE_WELCOME_CHECK_ELIGIBILITY: 'Check eligibility',
       DRIVE_WELCOME_DISMISS: 'Dismiss',
       DRIVE_LOADING_PROGRESS: '$1 files fetched',
 
       OFFLINE_HEADER: 'You are offline',
-      OFFLINE_MESSAGE: 'To save this file for offline use, get back online and<br>select the \'$1\' checkbox for this file.',
-      OFFLINE_MESSAGE_PLURAL: 'To save these files for offline use, get back online and<br>select the \'$1\' checkbox for this file.',
+      OFFLINE_MESSAGE: 'To save this file for offline use, get back online ' +
+          'and<br>select the \'$1\' checkbox for this file.',
+      OFFLINE_MESSAGE_PLURAL: 'To save these files for offline use, get back ' +
+          'online and<br>select the \'$1\' checkbox for this file.',
       HOSTED_OFFLINE_MESSAGE: 'You must be online to access this file.',
-      HOSTED_OFFLINE_MESSAGE_PLURAL: 'You must be online to access these files.',
+      HOSTED_OFFLINE_MESSAGE_PLURAL:
+          'You must be online to access these files.',
 
-      CONFIRM_MOBILE_DATA_USE: 'Fetching this file will use approximately $1 of mobile data.',
-      CONFIRM_MOBILE_DATA_USE_PLURAL: 'Fetching these files will use approximately $1 of mobile data.',
+      CONFIRM_MOBILE_DATA_USE:
+          'Fetching this file will use approximately $1 of mobile data.',
+      CONFIRM_MOBILE_DATA_USE_PLURAL:
+          'Fetching these files will use approximately $1 of mobile data.',
 
       GDOC_DOCUMENT_FILE_TYPE: 'Google document',
       GSHEET_DOCUMENT_FILE_TYPE: 'Google spreadsheet',
@@ -731,7 +789,8 @@ chrome.fileBrowserPrivate = {
       EXCEL_FILE_TYPE: 'Excel spreadsheet',
 
       SEARCH_TEXT_LABEL: 'Search',
-      SEARCH_NO_MATCHING_FILES: 'No files match <b>"$1"</b>',
+      SEARCH_DRIVE_HTML: '<b>\'$1\'</b> - search Drive',
+      SEARCH_NO_MATCHING_FILES_HTML: 'No files match <b>"$1"</b>',
       SEARCH_SPINNER: 'Searching...',
 
       TIME_TODAY: 'Today $1',
@@ -751,7 +810,109 @@ chrome.fileBrowserPrivate = {
       THUMBNAIL_VIEW_TOOLTIP: 'Thumbnail view',
       textdirection: ''
     });
+  },
+
+  /**
+   * Checks whether the path name length fits in the limit of the filesystem.
+   *
+   * @param {string} parent_directory_url The URL of the parent directory entry.
+   * @param {string} name The name of the file.
+   * @param {function(boolean)} callback true if the length is in the valid
+   *     range, false otherwise.
+   */
+  validatePathNameLength: function(parent_directory_url, name, callback) {
+    callback(true);
+  },
+
+  /**
+   * Logout the current user.
+   */
+  logoutUser: function() {},
+
+  onFileTransfersUpdated: new MockEventSource(),
+
+  /**
+   * Sets the default task for the supplied MIME types and suffixes of the
+   * supplied file URLs. Lists of MIME types and URLs may contain duplicates.
+   *
+   * @param {string} taskId The unique identifier of task to mark as default.
+   * @param {Array.<string>} fileURLs Array of selected file URLs to extract
+   *     suffixes from.
+   * @param {Array.<string>=} opt_mimeTypes Array of selected file MIME types.
+   * @param {function()=} opt_callback Returns The list of matched file URL
+   *     patterns for this task.
+   */
+  setDefaultTask: function(taskId, fileURLs, opt_mimeTypes, opt_callback) {
+    if (opt_callback)
+      opt_callback();
+  },
+
+  /**
+   * Get Drive files
+   * @param {Array.<string>} array Array of Drive file URLs to get.
+   * @param {function(Array.<string>)} callback Returns the local file pathes.
+   */
+  getDriveFiles: function(array, callback) {
+    callback([]);
+  },
+
+  /*
+   * Cancels ongoing file transfers for selected files.
+   * @param {Array.<string>} array Array of files for which ongoing transfer
+   *     should be canceled.
+   * @param {function(Array.<FileTransferCancelStatus>)} callback Return the
+   *     list of FileTransferCancelStatus.
+   */
+  cancelFileTransfers: function(array, callback) {
+    callback([]);
+  },
+
+  /**
+   * Performs drive metadata search.
+   * @param {string} searchQuery Search query.
+   * @param {function(Array.<Object>)} callback Callback
+   */
+  searchDriveMetadata: function(searchQuery, callback) {
+    callback([]);
+  },
+
+  /**
+   * Formats a mounted device.
+   * @param {string} mountPath Device's mount path.
+   */
+  formatDevice: function(mountPath) {},
+
+  /**
+   * Opens a new window of the Files.app.
+   * @param {string} url Internal url to be opened.
+   */
+  openNewWindow: function(url) {},
+
+  /**
+   * Clear all Drive local caches.
+   */
+  clearDriveCache: function() {},
+
+  /**
+   * Reload the filesystem metadata from the server immediately.
+   */
+  reloadDrive: function() {},
+
+  /**
+   * Requests a refresh of a directory.
+   * @param {string} fileURL URL of the target directory.
+   */
+  requestDirectoryRefresh: function(fileURL) {},
+
+  /**
+   * Performs drive content search.
+   * @param {Object} searchParams Param of the search
+   * @param {function(Array.<Object>)} searchCallback Callback
+   */
+  searchDrive: function(searchParams, searchCallback) {
+    searchCallback([]);
   }
+
 };
 
 /**
@@ -776,6 +937,13 @@ chrome.extension = {
 
   getViews: function() {
     return [window];
+  },
+
+  /**
+   * Attempts to connect to other listeners within the app.
+   * @param {string=} extensionId The ID of the app you want to connect to.
+   */
+  connect: function(extensionId) {
   }
 };
 

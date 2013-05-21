@@ -22,8 +22,6 @@ class AutocompleteInput {
   enum Type {
     INVALID,        // Empty input
     UNKNOWN,        // Valid input whose type cannot be determined
-    REQUESTED_URL,  // Input autodetected as UNKNOWN, which the user wants to
-                    // treat as an URL by specifying a desired_tld
     URL,            // Input autodetected as a URL
     QUERY,          // Input autodetected as a query
     FORCED_QUERY,   // Input forced to be a query by an initial '?'
@@ -52,7 +50,16 @@ class AutocompleteInput {
   // string16::npos if the input |text| doesn't come directly from the user's
   // typing.
   //
-  // See AutocompleteInput::desired_tld() for meaning of |desired_tld|.
+  // |desired_tld| is the user's desired TLD, if one is not already present in
+  // the text to autocomplete.  When this is non-empty, it also implies that
+  // "www." should be prepended to the domain where possible. The |desired_tld|
+  // should not contain a leading '.' (use "com" instead of ".com").
+  //
+  // If |current_url| is set to a valid search result page URL, providers can
+  // use it to perform query refinement. For example, if it is set to an image
+  // search result page, the search provider may generate an image search URL.
+  // Query refinement is only used by mobile ports, so only these set
+  // |current_url| to a non-empty string.
   //
   // |prevent_inline_autocomplete| is true if the generated result set should
   // not require inline autocomplete for the default match.  This is difficult
@@ -75,6 +82,7 @@ class AutocompleteInput {
   AutocompleteInput(const string16& text,
                     size_t cursor_position,
                     const string16& desired_tld,
+                    const GURL& current_url,
                     bool prevent_inline_autocomplete,
                     bool prefer_keyword,
                     bool allow_exact_keyword_match,
@@ -104,7 +112,6 @@ class AutocompleteInput {
   // is view-source, this function returns the positions of scheme and host
   // in the URL qualified by "view-source:" prefix.
   static void ParseForEmphasizeComponents(const string16& text,
-                                          const string16& desired_tld,
                                           url_parse::Component* scheme,
                                           url_parse::Component* host);
 
@@ -135,11 +142,8 @@ class AutocompleteInput {
                   size_t cursor_position,
                   const url_parse::Parsed& parts);
 
-  // User's desired TLD, if one is not already present in the text to
-  // autocomplete.  When this is non-empty, it also implies that "www." should
-  // be prepended to the domain where possible.  This should not have a leading
-  // '.' (use "com" instead of ".com").
-  const string16& desired_tld() const { return desired_tld_; }
+  // The current URL, or an invalid GURL if query refinement is not desired.
+  const GURL& current_url() const { return current_url_; }
 
   // The type of input supplied.
   Type type() const { return type_; }
@@ -179,7 +183,7 @@ class AutocompleteInput {
   // method.
   string16 text_;
   size_t cursor_position_;
-  string16 desired_tld_;
+  GURL current_url_;
   Type type_;
   url_parse::Parsed parts_;
   string16 scheme_;

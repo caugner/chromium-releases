@@ -37,7 +37,7 @@ class QuicReliableTestStream : public ReliableQuicStream {
 class ReliableQuicStreamTest : public ::testing::TestWithParam<bool> {
  public:
   ReliableQuicStreamTest()
-      : connection_(new MockConnection(1, IPEndPoint())),
+      : connection_(new MockConnection(1, IPEndPoint(), false)),
         session_(connection_, true),
         stream_(1, &session_) {
   }
@@ -49,7 +49,7 @@ class ReliableQuicStreamTest : public ::testing::TestWithParam<bool> {
 
 TEST_F(ReliableQuicStreamTest, WriteAllData) {
   connection_->options()->max_packet_length =
-      1 + QuicUtils::StreamFramePacketOverhead(1);
+      1 + QuicPacketCreator::StreamFramePacketOverhead(1, !kIncludeVersion);
   // TODO(rch): figure out how to get StrEq working here.
   //EXPECT_CALL(session_, WriteData(_, StrEq(kData1), _, _)).WillOnce(
   EXPECT_CALL(session_, WriteData(1, _, _, _)).WillOnce(
@@ -59,7 +59,8 @@ TEST_F(ReliableQuicStreamTest, WriteAllData) {
 
 TEST_F(ReliableQuicStreamTest, WriteData) {
   connection_->options()->max_packet_length =
-      1 + QuicUtils::StreamFramePacketOverhead(1);
+      1 + QuicPacketCreator::StreamFramePacketOverhead(1, !kIncludeVersion);
+  // TODO(rch): figure out how to get StrEq working here.
   //EXPECT_CALL(session_, WriteData(_, StrEq(kData1), _, _)).WillOnce(
   EXPECT_CALL(session_, WriteData(_, _, _, _)).WillOnce(
       Return(QuicConsumedData(kDataLen - 1, false)));

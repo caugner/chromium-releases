@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -108,7 +108,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, AcceptPermissions) {
   ASSERT_TRUE(GetExtensionDisabledGlobalError());
   const size_t size_before = service_->extensions()->size();
 
-  service_->GrantPermissionsAndEnableExtension(extension, false);
+  service_->GrantPermissionsAndEnableExtension(extension);
   EXPECT_EQ(size_before + 1, service_->extensions()->size());
   EXPECT_EQ(0u, service_->disabled_extensions()->size());
   ASSERT_FALSE(GetExtensionDisabledGlobalError());

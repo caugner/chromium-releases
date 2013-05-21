@@ -10,10 +10,10 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -56,7 +56,7 @@ base::FilePath GetFirefoxProfilePath() {
 
   base::FilePath source_path;
   for (int i = 0; ; ++i) {
-    std::string current_profile = StringPrintf("Profile%d", i);
+    std::string current_profile = base::StringPrintf("Profile%d", i);
     if (!root.HasKey(current_profile)) {
       // Profiles are continuously numbered. So we exit when we can't
       // find the i-th one.

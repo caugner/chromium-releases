@@ -363,6 +363,7 @@ SyncerError SyncerProtoUtil::PostClientToServerMessage(
   AddBagOfChips(session->context()->directory(), msg);
   msg->set_api_key(google_apis::GetAPIKey());
   msg->mutable_client_status()->CopyFrom(session->context()->client_status());
+  msg->set_invalidator_client_id(session->context()->invalidator_client_id());
 
   syncable::Directory* dir = session->context()->directory();
 
@@ -573,7 +574,7 @@ std::string SyncerProtoUtil::SyncEntityDebugString(
       GetTimeDebugString(ProtoTimeToTime(entry.ctime()));
   return base::StringPrintf(
       "id: %s, parent_id: %s, "
-      "version: %"PRId64"d, "
+      "version: %" PRId64"d, "
       "mtime: %" PRId64"d (%s), "
       "ctime: %" PRId64"d (%s), "
       "name: %s, sync_timestamp: %" PRId64"d, "

@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/views/frame/browser_frame_common_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
@@ -37,6 +38,7 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/win/dpi.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/font.h"
 #include "ui/views/controls/menu/native_menu_win.h"
@@ -231,7 +233,7 @@ bool BrowserFrameWin::PreHandleMSG(UINT message,
     }
     return false;
   case WM_ENDSESSION:
-    browser::SessionEnding();
+    chrome::SessionEnding();
     return true;
   case WM_INITMENUPOPUP:
     GetSystemMenu()->UpdateStates();
@@ -270,27 +272,11 @@ void BrowserFrameWin::PostHandleMSG(UINT message,
   }
 }
 
-void BrowserFrameWin::OnScreenReaderDetected() {
-  content::BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
-  NativeWidgetWin::OnScreenReaderDetected();
-}
-
 bool BrowserFrameWin::ShouldUseNativeFrame() const {
-  // App panel windows draw their own frame.
-  if (browser_view_->IsPanel())
+  if (!NativeWidgetWin::ShouldUseNativeFrame())
     return false;
-
-  // We don't theme popup or app windows, so regardless of whether or not a
-  // theme is active for normal browser windows, we don't want to use the custom
-  // frame for popups/apps.
-  if (!browser_view_->IsBrowserTypeNormal() &&
-      NativeWidgetWin::ShouldUseNativeFrame()) {
-    return true;
-  }
-
-  // Otherwise, we use the native frame when we're told we should by the theme
-  // provider (e.g. no custom theme is active).
-  return GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
+  return chrome::ShouldUseNativeFrame(browser_view_,
+                                      GetWidget()->GetThemeProvider());
 }
 
 void BrowserFrameWin::Show() {
@@ -456,6 +442,7 @@ void BrowserFrameWin::UpdateDWMFrame() {
     if (!IsFullscreen()) {
       gfx::Rect tabstrip_bounds(
           browser_frame_->GetBoundsForTabStrip(browser_view_->tabstrip()));
+      tabstrip_bounds = ui::win::DIPToScreenRect(tabstrip_bounds);
       margins.cyTopHeight = tabstrip_bounds.bottom() + kDWMFrameTopOffset;
     }
   }

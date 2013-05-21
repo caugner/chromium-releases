@@ -8,17 +8,17 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -259,7 +259,7 @@ void AutomatedUITest::RunReproduction() {
     LogSuccessResult();
   }
 
-  AppendToTestLog(StringPrintf("total_duration_seconds=%f",
+  AppendToTestLog(base::StringPrintf("total_duration_seconds=%f",
                   CalculateTestDuration(test_start_time_)));
   WriteReportToFile();
 }
@@ -360,7 +360,7 @@ void AutomatedUITest::RunAutomatedUITest() {
     }
   }
 
-  AppendToTestLog(StringPrintf("total_duration_seconds=%f",
+  AppendToTestLog(base::StringPrintf("total_duration_seconds=%f",
                   CalculateTestDuration(test_start_time_)));
 
   // The test is finished so write our report.
@@ -662,7 +662,7 @@ bool AutomatedUITest::FuzzyTestDialog(int num_actions) {
 
 bool AutomatedUITest::ForceCrash() {
   scoped_refptr<TabProxy> tab(GetActiveTab());
-  GURL test_url(chrome::kChromeUICrashURL);
+  GURL test_url(content::kChromeUICrashURL);
   AutomationMsg_NavigationResponseValues result = tab->NavigateToURL(test_url);
   if (result != AUTOMATION_MSG_NAVIGATION_SUCCESS) {
     AddErrorAttribute("navigation_failed");

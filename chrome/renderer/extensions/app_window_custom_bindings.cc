@@ -9,6 +9,7 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/dispatcher.h"
+#include "chrome/renderer/extensions/scoped_persistent.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_observer.h"
@@ -49,8 +50,9 @@ class DidCreateDocumentElementObserver : public content::RenderViewObserver {
   Dispatcher* dispatcher_;
 };
 
-AppWindowCustomBindings::AppWindowCustomBindings(Dispatcher* dispatcher)
-    : ChromeV8Extension(dispatcher) {
+AppWindowCustomBindings::AppWindowCustomBindings(
+    Dispatcher* dispatcher,
+    v8::Handle<v8::Context> context) : ChromeV8Extension(dispatcher, context) {
   RouteFunction("GetView",
       base::Bind(&AppWindowCustomBindings::GetView,
                  base::Unretained(this)));
@@ -66,8 +68,7 @@ class LoadWatcher : public content::RenderViewObserver {
               content::RenderView* view,
               v8::Handle<v8::Function> cb)
       : content::RenderViewObserver(view),
-        isolate_(isolate),
-        callback_(v8::Persistent<v8::Function>::New(isolate, cb)) {
+        callback_(cb) {
   }
 
   virtual void DidCreateDocumentElement(WebKit::WebFrame* frame) OVERRIDE {
@@ -80,13 +81,8 @@ class LoadWatcher : public content::RenderViewObserver {
     CallbackAndDie(frame, false);
   }
 
-  virtual ~LoadWatcher() {
-    callback_.Dispose(isolate_);
-  }
-
  private:
-  v8::Isolate* isolate_;
-  v8::Persistent<v8::Function> callback_;
+  ScopedPersistent<v8::Function> callback_;
 
   void CallbackAndDie(WebKit::WebFrame* frame, bool succeeded) {
     v8::HandleScope handle_scope;
@@ -158,7 +154,7 @@ v8::Handle<v8::Value> AppWindowCustomBindings::GetView(
   // need to make sure the security origin is set up before returning the DOM
   // reference. A better way to do this would be to have the browser pass the
   // opener through so opener_id is set in RenderViewImpl's constructor.
-  content::RenderView* render_view = GetCurrentRenderView();
+  content::RenderView* render_view = GetRenderView();
   if (!render_view)
     return v8::Undefined();
   WebKit::WebFrame* opener = render_view->GetWebView()->mainFrame();

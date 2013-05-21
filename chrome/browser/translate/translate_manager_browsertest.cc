@@ -9,15 +9,15 @@
 
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/infobars/infobar.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -49,9 +49,9 @@
 #include "ipc/ipc_test_sink.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "third_party/cld/languages/public/languages.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/cld/languages/public/languages.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -482,7 +482,7 @@ TEST_F(TranslateManagerTest, TranslateUnknownLanguage) {
   scoped_ptr<TestRenderViewContextMenu> menu(
       TestRenderViewContextMenu::CreateContextMenu(web_contents()));
   menu->Init();
-  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE);
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE, 0);
 
   // To test that bug #49018 if fixed, make sure we deal correctly with errors.
   // Simulate a failure to fetch the translate script.
@@ -514,7 +514,7 @@ TEST_F(TranslateManagerTest, TranslateUnknownLanguage) {
   SimulateNavigation(GURL("http://www.google.com"), "und", true);
   menu.reset(TestRenderViewContextMenu::CreateContextMenu(web_contents()));
   menu->Init();
-  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE);
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE, 0);
   RenderViewHostTester::TestOnMessageReceived(
       rvh(),
       ChromeViewHostMsg_PageTranslated(
@@ -530,7 +530,7 @@ TEST_F(TranslateManagerTest, TranslateUnknownLanguage) {
   SimulateNavigation(GURL("http://www.google.com"), "und", true);
   menu.reset(TestRenderViewContextMenu::CreateContextMenu(web_contents()));
   menu->Init();
-  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE);
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE, 0);
   RenderViewHostTester::TestOnMessageReceived(
       rvh(),
       ChromeViewHostMsg_PageTranslated(
@@ -1233,7 +1233,7 @@ TEST_F(TranslateManagerTest, ContextMenu) {
   EXPECT_TRUE(menu->IsCommandIdEnabled(IDC_CONTENT_CONTEXT_TRANSLATE));
 
   // Use the menu to translate the page.
-  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE);
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE, 0);
 
   // That should have triggered a translation.
   // The "translating..." infobar should be showing.
@@ -1277,7 +1277,7 @@ TEST_F(TranslateManagerTest, ContextMenu) {
   menu.reset(TestRenderViewContextMenu::CreateContextMenu(web_contents()));
   menu->Init();
   EXPECT_TRUE(menu->IsCommandIdEnabled(IDC_CONTENT_CONTEXT_TRANSLATE));
-  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE);
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE, 0);
   // No message expected since the translation should have been ignored.
   EXPECT_FALSE(GetTranslateMessage(&page_id, &original_lang, &target_lang));
 
@@ -1296,7 +1296,7 @@ TEST_F(TranslateManagerTest, ContextMenu) {
       rvh(),
       ChromeViewHostMsg_PageTranslated(
           0, 0, "de", "en", TranslateErrors::NONE));
-  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE);
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_TRANSLATE, 0);
   // No message expected since the translation should have been ignored.
   EXPECT_FALSE(GetTranslateMessage(&page_id, &original_lang, &target_lang));
 

@@ -8,7 +8,7 @@
 #include <map>
 
 #include "base/gtest_prod_util.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
@@ -102,7 +102,7 @@ class BackgroundModeManager
     virtual bool GetAcceleratorForCommandId(int command_id,
                                             ui::Accelerator* accelerator)
                                             OVERRIDE;
-    virtual void ExecuteCommand(int command_id) OVERRIDE;
+    virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
     // Returns a browser window, or creates one if none are open. Used by
     // operations (like displaying the preferences dialog) that require a
@@ -183,7 +183,7 @@ class BackgroundModeManager
   virtual bool GetAcceleratorForCommandId(int command_id,
                                           ui::Accelerator* accelerator)
                                           OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
   // Invoked when an extension is installed so we can ensure that
   // launch-on-startup is enabled if appropriate. |extension| can be NULL when

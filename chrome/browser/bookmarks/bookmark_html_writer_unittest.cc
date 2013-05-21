@@ -21,6 +21,7 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -151,8 +152,9 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   profile.BlockUntilHistoryProcessesPendingRequests();
   profile.CreateFaviconService();
   profile.CreateBookmarkModel(true);
-  profile.BlockUntilBookmarkModelLoaded();
+
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(&profile);
+  ui_test_utils::WaitForBookmarkModelToLoad(model);
 
   // Create test PNG representing favicon for url1.
   SkBitmap bitmap;
@@ -176,6 +178,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   //       url1
   // Mobile
   //   url1
+  //   <bookmark without a title.  Not supported by Firefox 2 import>
   string16 f1_title = ASCIIToUTF16("F\"&;<1\"");
   string16 f2_title = ASCIIToUTF16("F2");
   string16 f3_title = ASCIIToUTF16("F 3");
@@ -184,11 +187,13 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   string16 url2_title = ASCIIToUTF16("url&2");
   string16 url3_title = ASCIIToUTF16("url\"3");
   string16 url4_title = ASCIIToUTF16("url\"&;");
+  string16 unnamed_bookmark_title = ASCIIToUTF16("");
   GURL url1("http://url1");
   GURL url1_favicon("http://url1/icon.ico");
   GURL url2("http://url2");
   GURL url3("http://url3");
   GURL url4("javascript:alert(\"Hello!\");");
+  GURL unnamed_bookmark_url("about:blank");
   base::Time t1(base::Time::Now());
   base::Time t2(t1 + base::TimeDelta::FromHours(1));
   base::Time t3(t1 + base::TimeDelta::FromHours(1));
@@ -216,6 +221,8 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   model->AddURLWithCreationTime(model->bookmark_bar_node(), 2, url4_title,
                                 url4, t4);
   model->AddURLWithCreationTime(model->mobile_node(), 0, url1_title, url1, t1);
+  model->AddURLWithCreationTime(model->mobile_node(), 1, unnamed_bookmark_title,
+                                unnamed_bookmark_url, t2);
 
   // Write to a temp file.
   BookmarksObserver observer(&message_loop);

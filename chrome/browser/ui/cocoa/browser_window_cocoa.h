@@ -72,6 +72,7 @@ class BrowserWindowCocoa :
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) OVERRIDE;
+  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual bool IsFullscreenBubbleVisible() const OVERRIDE;
   virtual LocationBar* GetLocationBar() const OVERRIDE;
@@ -93,8 +94,6 @@ class BrowserWindowCocoa :
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
   virtual void ShowUpdateChromeDialog() OVERRIDE;
-  virtual void ShowTaskManager() OVERRIDE;
-  virtual void ShowBackgroundPages() OVERRIDE;
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE;
   virtual void ShowChromeToMobileBubble() OVERRIDE;
@@ -148,8 +147,9 @@ class BrowserWindowCocoa :
       GetActiveTabPermissionGranter() OVERRIDE;
 
   // Overridden from chrome::search::SearchModelObserver:
-  virtual void ModeChanged(const chrome::search::Mode& old_mode,
-                           const chrome::search::Mode& new_mode) OVERRIDE;
+  virtual void ModelChanged(
+      const chrome::search::SearchModel::State& old_state,
+      const chrome::search::SearchModel::State& new_state) OVERRIDE;
 
   // Adds the given FindBar cocoa controller to this browser window.
   void AddFindBar(FindBarCocoaController* find_bar_cocoa_controller);

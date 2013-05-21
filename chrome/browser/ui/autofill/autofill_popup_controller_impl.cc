@@ -9,8 +9,8 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/ui/autofill/autofill_popup_delegate.h"
 #include "chrome/browser/ui/autofill/autofill_popup_view.h"
+#include "components/autofill/browser/autofill_popup_delegate.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/webkit_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
@@ -48,8 +48,6 @@ const size_t kMaxTextLength = 15;
 #if !defined(OS_ANDROID)
 const size_t kIconPadding = AutofillPopupView::kIconPadding;
 const size_t kEndPadding = AutofillPopupView::kEndPadding;
-const size_t kDeleteIconHeight = AutofillPopupView::kDeleteIconHeight;
-const size_t kDeleteIconWidth = AutofillPopupView::kDeleteIconWidth;
 const size_t kAutofillIconWidth = AutofillPopupView::kAutofillIconWidth;
 #endif
 
@@ -102,9 +100,6 @@ AutofillPopupControllerImpl::AutofillPopupControllerImpl(
       container_view_(container_view),
       element_bounds_(element_bounds),
       selected_line_(kNoSelection),
-      delete_icon_hovered_(false),
-      is_hiding_(false),
-      inform_delegate_of_destruction_(true),
       weak_ptr_factory_(this) {
 #if !defined(OS_ANDROID)
   subtext_font_ = name_font_.DeriveFont(kLabelFontSizeDelta);
@@ -171,8 +166,21 @@ void AutofillPopupControllerImpl::Show(
 }
 
 void AutofillPopupControllerImpl::Hide() {
-  inform_delegate_of_destruction_ = false;
-  HideInternal();
+  SetSelectedLine(kNoSelection);
+
+  delegate_->OnPopupHidden(this);
+
+  if (view_)
+    view_->Hide();
+
+  delete this;
+}
+
+void AutofillPopupControllerImpl::ViewDestroyed() {
+  // The view has already been destroyed so clear the reference to it.
+  view_ = NULL;
+
+  Hide();
 }
 
 bool AutofillPopupControllerImpl::HandleKeyPressEvent(
@@ -191,7 +199,7 @@ bool AutofillPopupControllerImpl::HandleKeyPressEvent(
       SetSelectedLine(names().size() - 1);
       return true;
     case ui::VKEY_ESCAPE:
-      HideInternal();
+      Hide();
       return true;
     case ui::VKEY_DELETE:
       return (event.modifiers & content::NativeWebKeyboardEvent::ShiftKey) &&
@@ -201,10 +209,6 @@ bool AutofillPopupControllerImpl::HandleKeyPressEvent(
     default:
       return false;
   }
-}
-
-void AutofillPopupControllerImpl::ViewDestroyed() {
-  delete this;
 }
 
 void AutofillPopupControllerImpl::UpdateBoundsAndRedrawPopup() {
@@ -221,21 +225,11 @@ void AutofillPopupControllerImpl::UpdateBoundsAndRedrawPopup() {
 
 void AutofillPopupControllerImpl::MouseHovered(int x, int y) {
   SetSelectedLine(LineFromY(y));
-
-  bool delete_icon_hovered = DeleteIconIsUnder(x, y);
-  if (delete_icon_hovered != delete_icon_hovered_) {
-    delete_icon_hovered_ = delete_icon_hovered;
-    InvalidateRow(selected_line());
-  }
 }
 
 void AutofillPopupControllerImpl::MouseClicked(int x, int y) {
   MouseHovered(x, y);
-
-  if (delete_icon_hovered_)
-    RemoveSelectedLine();
-  else
-    AcceptSelectedLine();
+  AcceptSelectedLine();
 }
 
 void AutofillPopupControllerImpl::MouseExitedPopup() {
@@ -257,8 +251,8 @@ int AutofillPopupControllerImpl::GetIconResourceID(
 }
 
 bool AutofillPopupControllerImpl::CanDelete(size_t index) const {
-  // TODO(isherman): AddressBook suggestions on Mac should not be drawn as
-  // deleteable.
+  // TODO(isherman): Native AddressBook suggestions on Mac and Android should
+  // not be considered to be deleteable.
   int id = identifiers_[index];
   return id > 0 ||
       id == WebAutofillClient::MenuItemIDAutocompleteEntry ||
@@ -327,26 +321,6 @@ const gfx::Font& AutofillPopupControllerImpl::subtext_font() const {
 
 int AutofillPopupControllerImpl::selected_line() const {
   return selected_line_;
-}
-
-bool AutofillPopupControllerImpl::delete_icon_hovered() const {
-  return delete_icon_hovered_;
-}
-
-void AutofillPopupControllerImpl::HideInternal() {
-  if (is_hiding_)
-    return;
-  is_hiding_ = true;
-
-  SetSelectedLine(kNoSelection);
-
-  if (inform_delegate_of_destruction_)
-    delegate_->OnPopupHidden(this);
-
-  if (view_)
-    view_->Hide();
-  else
-    delete this;
 }
 
 void AutofillPopupControllerImpl::SetSelectedLine(int selected_line) {
@@ -437,7 +411,7 @@ bool AutofillPopupControllerImpl::RemoveSelectedLine() {
     delegate_->ClearPreviewedForm();
     UpdateBoundsAndRedrawPopup();
   } else {
-    HideInternal();
+    Hide();
   }
 
   return true;
@@ -462,28 +436,6 @@ int AutofillPopupControllerImpl::GetRowHeightFromId(int identifier) const {
     return kSeparatorHeight;
 
   return kRowHeight;
-}
-
-bool AutofillPopupControllerImpl::DeleteIconIsUnder(int x, int y) {
-#if defined(OS_ANDROID)
-  return false;
-#else
-  if (!CanDelete(selected_line()))
-    return false;
-
-  int row_start_y = 0;
-  for (int i = 0; i < selected_line(); ++i) {
-    row_start_y += GetRowHeightFromId(identifiers()[i]);
-  }
-
-  gfx::Rect delete_icon_bounds = gfx::Rect(
-      popup_bounds().width() - kDeleteIconWidth - kIconPadding,
-      row_start_y + ((kRowHeight - kDeleteIconHeight) / 2),
-      kDeleteIconWidth,
-      kDeleteIconHeight);
-
-  return delete_icon_bounds.Contains(x, y);
-#endif
 }
 
 bool AutofillPopupControllerImpl::CanAccept(int id) {
@@ -546,10 +498,6 @@ int AutofillPopupControllerImpl::RowWidthWithoutText(int row) const {
   if (!icons_[row].empty())
     row_size += kAutofillIconWidth + kIconPadding;
 
-  // Add the delete icon size, if required.
-  if (CanDelete(row))
-    row_size += kDeleteIconWidth + kIconPadding;
-
   // Add the padding at the end
   row_size += kEndPadding;
 
@@ -595,7 +543,7 @@ WeakPtr<AutofillPopupControllerImpl> AutofillPopupControllerImpl::GetWeakPtr() {
 }
 
 const gfx::Rect AutofillPopupControllerImpl::RoundedElementBounds() const {
-  return gfx::ToNearestRect(element_bounds_);
+  return gfx::ToEnclosingRect(element_bounds_);
 }
 
 gfx::Display AutofillPopupControllerImpl::GetDisplayNearestPoint(

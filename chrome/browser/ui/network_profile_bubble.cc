@@ -12,20 +12,20 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace {
@@ -175,11 +175,8 @@ void NetworkProfileBubble::RecordUmaEvent(MetricNetworkedProfileCheck event) {
 
 // static
 void NetworkProfileBubble::NotifyNetworkProfileDetected() {
-  // TODO(robertshield): Eventually, we will need to figure out the correct
-  //                     desktop type for this for platforms that can have
-  //                     multiple desktop types (win8/metro).
   Browser* browser = chrome::FindLastActiveWithHostDesktopType(
-      chrome::HOST_DESKTOP_TYPE_NATIVE);
+      chrome::GetActiveDesktop());
 
   if (browser)
     ShowNotification(browser);

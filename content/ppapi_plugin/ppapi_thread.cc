@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
@@ -16,6 +17,7 @@
 #include "base/utf_string_conversions.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
+#include "content/common/sandbox_util.h"
 #include "content/ppapi_plugin/broker_process_dispatcher.h"
 #include "content/ppapi_plugin/plugin_process_dispatcher.h"
 #include "content/ppapi_plugin/ppapi_webkitplatformsupport_impl.h"
@@ -227,6 +229,10 @@ void PpapiThread::Unregister(uint32 plugin_dispatcher_id) {
 
 void PpapiThread::OnLoadPlugin(const base::FilePath& path,
                                const ppapi::PpapiPermissions& permissions) {
+  // In case of crashes, the crash dump doesn't indicate which plugin
+  // it came from.
+  base::debug::SetCrashKeyValue("ppapi_path", path.MaybeAsASCII());
+
   SavePluginName(path);
 
   // This must be set before calling into the plugin so it can get the
@@ -405,7 +411,8 @@ bool PpapiThread::SetupRendererChannel(base::ProcessId renderer_pid,
   DCHECK(is_broker_ == (connect_instance_func_ != NULL));
   IPC::ChannelHandle plugin_handle;
   plugin_handle.name = IPC::Channel::GenerateVerifiedChannelID(
-      StringPrintf("%d.r%d", base::GetCurrentProcId(), renderer_child_id));
+      base::StringPrintf(
+          "%d.r%d", base::GetCurrentProcId(), renderer_child_id));
 
   ppapi::proxy::ProxyChannel* dispatcher = NULL;
   bool init_result = false;

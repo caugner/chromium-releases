@@ -55,7 +55,7 @@ cr.define('login', function() {
      * Updates localized content of the screen that is not updated via template.
      */
     updateLocalizedContent_: function() {
-      $('captive-portal-message-text').innerHTML = localStrings.getStringF(
+      $('captive-portal-message-text').innerHTML = loadTimeData.getStringF(
         'captivePortalMessage',
         '<b id="' + CURRENT_NETWORK_NAME_ID + '"></b>',
         '<a id="' + FIX_CAPTIVE_PORTAL_ID + '" class="signin-link" href="#">',
@@ -65,7 +65,7 @@ cr.define('login', function() {
       };
 
       $('captive-portal-proxy-message-text').innerHTML =
-        localStrings.getStringF(
+        loadTimeData.getStringF(
           'captivePortalProxyMessage',
           '<a id="' + FIX_PROXY_SETTINGS_ID + '" class="signin-link" href="#">',
           '</a>');
@@ -73,7 +73,7 @@ cr.define('login', function() {
         chrome.send('openProxySettings');
       };
 
-      $('proxy-message-text').innerHTML = localStrings.getStringF(
+      $('proxy-message-text').innerHTML = loadTimeData.getStringF(
           'proxyMessageText',
           '<a id="' + RELOAD_PAGE_ID + '" class="signin-link" href="#">',
           '</a>',
@@ -88,7 +88,7 @@ cr.define('login', function() {
         chrome.send('openProxySettings');
       };
 
-      $('error-guest-signin').innerHTML = localStrings.getStringF(
+      $('error-guest-signin').innerHTML = loadTimeData.getStringF(
           'guestSignin',
           '<a id="error-guest-signin-link" class="signin-link" href="#">',
           '</a>');
@@ -96,13 +96,14 @@ cr.define('login', function() {
         chrome.send('launchIncognito');
       };
 
-      $('error-offline-login').innerHTML = localStrings.getStringF(
+      $('error-offline-login').innerHTML = loadTimeData.getStringF(
           'offlineLogin',
           '<a id="error-offline-login-link" class="signin-link" href="#">',
           '</a>');
       $('error-offline-login-link').onclick = function() {
         chrome.send('offlineLogin');
       };
+      this.onContentChange_();
     },
 
     /**
@@ -123,8 +124,17 @@ cr.define('login', function() {
     },
 
     /**
+     * Method called after content of the screen changed.
+     * @private
+     */
+    onContentChange_: function() {
+      if (Oobe.getInstance().currentScreen === this)
+        Oobe.getInstance().updateScreenSize(this);
+    },
+
+    /**
       * Sets current state of the error screen.
-      * @param {String} state New state of the error screen.
+      * @param {string} state New state of the error screen.
       * @private
       */
     setState_: function(state) {
@@ -137,6 +147,7 @@ cr.define('login', function() {
           this.classList.remove(states[i]);
       }
       this.classList.add(state);
+      this.onContentChange_();
     },
 
     /**
@@ -145,8 +156,6 @@ cr.define('login', function() {
      */
     showProxyError_: function() {
       this.setState_(SCREEN_STATE.PROXY_ERROR);
-      if (Oobe.getInstance().currentScreen === this)
-        Oobe.getInstance().updateScreenSize(this);
     },
 
     /**
@@ -157,18 +166,14 @@ cr.define('login', function() {
     showCaptivePortalError_: function(network) {
       $(CURRENT_NETWORK_NAME_ID).textContent = network;
       this.setState_(SCREEN_STATE.CAPTIVE_PORTAL_ERROR);
-      if (Oobe.getInstance().currentScreen === this)
-        Oobe.getInstance().updateScreenSize(this);
     },
 
     /**
-     * Prepares error screen to show gaia loading timeout error.
-     * @private
-     */
+    * Prepares error screen to show gaia loading timeout error.
+    * @private
+    */
     showTimeoutError_: function() {
       this.setState_(SCREEN_STATE.TIMEOUT_ERROR);
-      if (Oobe.getInstance().currentScreen === this)
-        Oobe.getInstance().updateScreenSize(this);
     },
 
     /**
@@ -177,8 +182,6 @@ cr.define('login', function() {
      */
     showOfflineError_: function() {
       this.setState_(SCREEN_STATE.OFFLINE_ERROR);
-      if (Oobe.getInstance().currentScreen === this)
-        Oobe.getInstance().updateScreenSize(this);
     },
 
     /**
@@ -187,6 +190,7 @@ cr.define('login', function() {
      */
     allowGuestSignin_: function(allowed) {
       this.classList[allowed ? 'add' : 'remove']('allow-guest-signin');
+      this.onContentChange_();
     },
 
     /**
@@ -195,6 +199,7 @@ cr.define('login', function() {
      */
     allowOfflineLogin_: function(allowed) {
       this.classList[allowed ? 'add' : 'remove']('allow-offline-login');
+      this.onContentChange_();
     },
   };
 

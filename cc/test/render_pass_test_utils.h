@@ -5,8 +5,8 @@
 #ifndef CC_TEST_RENDER_PASS_TEST_UTILS_H_
 #define CC_TEST_RENDER_PASS_TEST_UTILS_H_
 
-#include "cc/render_pass.h"
-#include "cc/scoped_ptr_vector.h"
+#include "cc/base/scoped_ptr_vector.h"
+#include "cc/quads/render_pass.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace gfx {
@@ -21,25 +21,25 @@ class TestRenderPass;
 
 // Adds a new render pass with the provided properties to the given
 // render pass list.
-TestRenderPass* addRenderPass(
-    RenderPassList& passList,
+TestRenderPass* AddRenderPass(
+    RenderPassList& pass_list,
     RenderPass::Id id,
-    const gfx::Rect& outputRect,
-    const gfx::Transform& rootTransform);
+    gfx::Rect output_rect,
+    const gfx::Transform& root_transform);
 
 // Adds a solid quad to a given render pass.
-SolidColorDrawQuad* addQuad(TestRenderPass* pass,
-                            const gfx::Rect& rect,
+SolidColorDrawQuad* AddQuad(TestRenderPass* pass,
+                            gfx::Rect rect,
                             SkColor color);
 
 // Adds a solid quad to a given render pass and sets is_clipped=true.
-SolidColorDrawQuad* addClippedQuad(TestRenderPass* pass,
-                                   const gfx::Rect& rect,
+SolidColorDrawQuad* AddClippedQuad(TestRenderPass* pass,
+                                   gfx::Rect rect,
                                    SkColor color);
 
 // Adds a render pass quad to an existing render pass.
-void addRenderPassQuad(TestRenderPass* toPass,
-                       TestRenderPass* contributingPass);
+void AddRenderPassQuad(TestRenderPass* to_pass,
+                       TestRenderPass* contributing_pass);
 
 }  // namespace cc
 

@@ -8,9 +8,9 @@
 
 #include "base/environment.h"
 #include "base/file_util.h"
-#include "base/string_split.h"
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/test/test_file_util.h"
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
@@ -55,7 +55,7 @@ void UpdateHistoryDates(const base::FilePath& user_data_dir) {
   ASSERT_TRUE(db.Open(history));
   base::Time yesterday = base::Time::Now() - base::TimeDelta::FromDays(1);
   std::string yesterday_str = base::Int64ToString(yesterday.ToInternalValue());
-  std::string query = StringPrintf(
+  std::string query = base::StringPrintf(
       "UPDATE segment_usage "
       "SET time_slot = %s "
       "WHERE id IN (SELECT id FROM segment_usage WHERE time_slot > 0);",
@@ -155,8 +155,9 @@ void ProxyLauncher::CloseBrowserAndServer() {
   // the UI tests in single-process mode.
   // TODO(jhughes): figure out why this is necessary at all, and fix it
   AssertAppNotRunning(
-      StringPrintf("Unable to quit all browser processes. Original PID %d",
-                   process_id_));
+      base::StringPrintf(
+          "Unable to quit all browser processes. Original PID %d",
+          process_id_));
 
   DisconnectFromRunningBrowser();
 }
@@ -315,7 +316,7 @@ void ProxyLauncher::AssertAppNotRunning(const std::string& error_message) {
     final_error_message += " Leftover PIDs: [";
     for (ChromeProcessList::const_iterator it = processes.begin();
          it != processes.end(); ++it) {
-      final_error_message += StringPrintf(" %d", *it);
+      final_error_message += base::StringPrintf(" %d", *it);
     }
     final_error_message += " ]";
   }

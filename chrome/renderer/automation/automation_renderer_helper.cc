@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/json/json_writer.h"
 #include "base/stringprintf.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/automation_events.h"
@@ -67,7 +67,8 @@ bool AutomationRendererHelper::SnapshotEntirePage(
   view->layout();
   frame->setScrollOffset(WebSize(0, 0));
 
-  skia::ScopedPlatformCanvas canvas(new_size.width, new_size.height, true);
+  skia::RefPtr<SkCanvas> canvas = skia::AdoptRef(
+      skia::CreatePlatformCanvas(new_size.width, new_size.height, true));
 
   view->paint(webkit_glue::ToWebCanvas(canvas.get()),
               gfx::Rect(0, 0, new_size.width, new_size.height));

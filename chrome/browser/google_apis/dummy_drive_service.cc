@@ -41,7 +41,7 @@ std::string DummyDriveService::GetRootResourceId() const {
 }
 
 void DummyDriveService::GetResourceList(
-    const GURL& feed_url,
+    const GURL& url,
     int64 start_changestamp,
     const std::string& search_query,
     bool shared_with_me,
@@ -54,6 +54,9 @@ void DummyDriveService::GetResourceEntry(
 
 void DummyDriveService::GetAccountMetadata(
     const GetAccountMetadataCallback& callback) {}
+
+void DummyDriveService::GetAboutResource(
+    const GetAboutResourceCallback& callback) {}
 
 void DummyDriveService::GetAppList(const GetAppListCallback& callback) {}
 
@@ -92,12 +95,32 @@ void DummyDriveService::AddNewDirectory(
     const std::string& directory_name,
     const GetResourceEntryCallback& callback) {}
 
-void DummyDriveService::InitiateUpload(const InitiateUploadParams& params,
-                                       const InitiateUploadCallback& callback) {
-}
+void DummyDriveService::InitiateUploadNewFile(
+    const base::FilePath& drive_file_path,
+    const std::string& content_type,
+    int64 content_length,
+    const std::string& parent_resource_id,
+    const std::string& title,
+    const InitiateUploadCallback& callback) {}
 
-void DummyDriveService::ResumeUpload(const ResumeUploadParams& params,
-                                     const UploadRangeCallback& callback) {}
+void DummyDriveService::InitiateUploadExistingFile(
+    const base::FilePath& drive_file_path,
+    const std::string& content_type,
+    int64 content_length,
+    const std::string& resource_id,
+    const std::string& etag,
+    const InitiateUploadCallback& callback) {}
+
+void DummyDriveService::ResumeUpload(
+    UploadMode upload_mode,
+    const base::FilePath& drive_file_path,
+    const GURL& upload_url,
+    int64 start_position,
+    int64 end_position,
+    int64 content_length,
+    const std::string& content_type,
+    const scoped_refptr<net::IOBuffer>& buf,
+    const UploadRangeCallback& callback) {}
 
 void DummyDriveService::GetUploadStatus(
     UploadMode upload_mode,
@@ -106,7 +129,7 @@ void DummyDriveService::GetUploadStatus(
     int64 content_length,
     const UploadRangeCallback& callback) {}
 
-void DummyDriveService::AuthorizeApp(const GURL& edit_url,
+void DummyDriveService::AuthorizeApp(const std::string& resource_id,
                                      const std::string& app_id,
                                      const AuthorizeAppCallback& callback) {}
 

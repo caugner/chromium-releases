@@ -13,10 +13,13 @@
 #include "base/time.h"
 #include "content/browser/android/content_video_view.h"
 #include "content/public/browser/render_view_host_observer.h"
+#include "googleurl/src/gurl.h"
 #include "media/base/android/media_player_bridge.h"
 #include "media/base/android/media_player_bridge_manager.h"
 
 namespace content {
+
+class WebContents;
 
 // This class manages all the MediaPlayerBridge objects. It receives
 // control operations from the the render process, and forwards
@@ -61,6 +64,9 @@ class MediaPlayerManagerAndroid
   // Release all the players managed by this object.
   void DestroyAllMediaPlayers();
 
+  void AttachExternalVideoSurface(int player_id, jobject surface);
+  void DetachExternalVideoSurface(int player_id);
+
   media::MediaPlayerBridge* GetFullscreenPlayer();
   media::MediaPlayerBridge* GetPlayer(int player_id);
 
@@ -68,13 +74,14 @@ class MediaPlayerManagerAndroid
   // Message handlers.
   void OnEnterFullscreen(int player_id);
   void OnExitFullscreen(int player_id);
-  void OnInitialize(int player_id, const std::string& url,
-                    const std::string& first_party_for_cookies);
+  void OnInitialize(int player_id, const GURL& url,
+                    const GURL& first_party_for_cookies);
   void OnStart(int player_id);
   void OnSeek(int player_id, base::TimeDelta time);
   void OnPause(int player_id);
   void OnReleaseResources(int player_id);
   void OnDestroyPlayer(int player_id);
+  void OnRequestExternalSurface(int player_id);
 
   // An array of managed players.
   ScopedVector<media::MediaPlayerBridge> players_;
@@ -84,6 +91,8 @@ class MediaPlayerManagerAndroid
 
   // Player ID of the fullscreen media player.
   int fullscreen_player_id_;
+
+  WebContents* web_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaPlayerManagerAndroid);
 };

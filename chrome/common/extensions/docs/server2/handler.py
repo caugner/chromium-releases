@@ -201,6 +201,10 @@ class Handler(webapp.RequestHandler):
   def _HandleGet(self, path):
     channel_name, real_path = BRANCH_UTILITY.SplitChannelNameFromPath(path)
 
+    if channel_name == _DEFAULT_CHANNEL:
+      self.redirect('/%s' % real_path)
+      return
+
     # TODO: Detect that these are directories and serve index.html out of them.
     if real_path.strip('/') == 'apps':
       real_path = 'apps/index.html'
@@ -343,7 +347,7 @@ class Handler(webapp.RequestHandler):
     path = path.split('/')
     if len(path) > 0 and path[0] == 'chrome':
       path.pop(0)
-    for channel in BRANCH_UTILITY.GetAllBranchNames():
+    for channel in BranchUtility.GetAllBranchNames():
       if channel in path:
         position = path.index(channel)
         path.pop(position)

@@ -45,7 +45,6 @@ class NativePanel {
   virtual gfx::NativeWindow GetNativePanelWindow() = 0;
   virtual void UpdatePanelTitleBar() = 0;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) = 0;
-  virtual void NotifyPanelOnUserChangedTheme() = 0;
   virtual void PanelWebContentsFocused(content::WebContents* contents) = 0;
   virtual void PanelCut() = 0;
   virtual void PanelCopy() = 0;
@@ -81,6 +80,13 @@ class NativePanel {
 
   // Sets how the panel window displays its 4 corners, rounded or not.
   virtual void SetWindowCornerStyle(panel::CornerStyle corner_style) = 0;
+
+  // Performs the system minimize for the panel, i.e. becoming iconic.
+  virtual void MinimizePanelBySystem() = 0;
+
+  // Returns true if the panel has been minimized by the system, i.e. becoming
+  // iconic.
+  virtual bool IsPanelMinimizedBySystem() const = 0;
 
   // Create testing interface for native panel. (Keep this last to separate
   // it from regular API.)

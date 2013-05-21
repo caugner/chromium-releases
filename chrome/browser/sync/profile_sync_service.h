@@ -7,6 +7,8 @@
 
 #include <list>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -18,8 +20,6 @@
 #include "base/string16.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/api/sync/profile_sync_service_base.h"
-#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/signin/signin_global_error.h"
 #include "chrome/browser/sync/backend_unrecoverable_error_handler.h"
@@ -30,6 +30,8 @@
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/invalidation_frontend.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
+#include "chrome/browser/sync/profile_sync_service_base.h"
+#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -382,6 +384,9 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Returns a user-friendly string form of last synced time (in minutes).
   virtual string16 GetLastSyncedTimeString() const;
 
+  // Returns a human readable string describing backend initialization state.
+  std::string GetBackendInitializationStateString() const;
+
   // Returns true if startup is suppressed (i.e. user has stopped syncing via
   // the google dashboard).
   virtual bool IsStartSuppressed() const;
@@ -599,6 +604,10 @@ class ProfileSyncService : public ProfileSyncServiceBase,
       const syncer::ObjectIdSet& ids) OVERRIDE;
   virtual void UnregisterInvalidationHandler(
       syncer::InvalidationHandler* handler) OVERRIDE;
+  virtual void AcknowledgeInvalidation(
+      const invalidation::ObjectId& id,
+      const syncer::AckHandle& ack_handle) OVERRIDE;
+
   virtual syncer::InvalidatorState GetInvalidatorState() const OVERRIDE;
 
   // ProfileKeyedService implementation.  This must be called exactly
@@ -617,8 +626,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Helper to install and configure a data type manager.
   void ConfigureDataTypeManager();
 
-  // Starts up the backend sync components.
-  virtual void StartUp();
   // Shuts down the backend sync components.
   // |sync_disabled| indicates if syncing is being disabled or not.
   void ShutdownImpl(bool sync_disabled);
@@ -673,6 +680,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
     ERROR_REASON_ACTIONABLE_ERROR,
     ERROR_REASON_LIMIT
   };
+  typedef std::vector<std::pair<invalidation::ObjectId,
+                                syncer::AckHandle> > AckHandleReplayQueue;
   friend class ProfileSyncServicePasswordTest;
   friend class SyncTest;
   friend class TestProfileSyncService;
@@ -717,6 +726,17 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   void ClearStaleErrors();
 
   void ClearUnrecoverableError();
+
+  enum StartUpDeferredOption {
+    STARTUP_BACKEND_DEFERRED,
+    STARTUP_IMMEDIATE
+  };
+  void StartUp(StartUpDeferredOption deferred_option);
+
+  // Starts up the backend sync components. |deferred_option| specifies whether
+  // this is being called as part of an immediate startup or startup was
+  // originally deferred and we're finally getting around to finishing.
+  void StartUpSlowBackendComponents(StartUpDeferredOption deferred_option);
 
   // About-flags experiment names for datatypes that aren't enabled by default
   // yet.
@@ -900,6 +920,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Dispatches invalidations to handlers.  Set in Initialize() and
   // unset in Shutdown().
   scoped_ptr<syncer::InvalidatorRegistrar> invalidator_registrar_;
+  // Queues any acknowledgements received while the backend is uninitialized.
+  AckHandleReplayQueue ack_replay_queue_;
 
   // Sync's internal debug info listener. Used to record datatype configuration
   // and association information.

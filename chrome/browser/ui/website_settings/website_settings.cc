@@ -14,7 +14,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_database_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
@@ -25,6 +24,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/ui/website_settings/website_settings_infobar_delegate.h"
@@ -39,9 +39,9 @@
 #include "grit/generated_resources.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
-#include "net/base/ssl_cipher_suite_names.h"
-#include "net/base/ssl_connection_status_flags.h"
 #include "net/base/x509_certificate.h"
+#include "net/ssl/ssl_cipher_suite_names.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -411,20 +411,6 @@ void WebsiteSettings::Init(Profile* profile,
     site_connection_details_ += l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS,
         ASCIIToUTF16(cipher), ASCIIToUTF16(mac), ASCIIToUTF16(key_exchange));
-
-    site_connection_details_ += ASCIIToUTF16("\n\n");
-    uint8 compression_id =
-        net::SSLConnectionStatusToCompression(ssl.connection_status);
-    if (compression_id) {
-      const char* compression;
-      net::SSLCompressionToString(&compression, compression_id);
-      site_connection_details_ += l10n_util::GetStringFUTF16(
-          IDS_PAGE_INFO_SECURITY_TAB_COMPRESSION_DETAILS,
-          ASCIIToUTF16(compression));
-    } else {
-      site_connection_details_ += l10n_util::GetStringUTF16(
-          IDS_PAGE_INFO_SECURITY_TAB_NO_COMPRESSION);
-    }
 
     if (did_fallback) {
       // For now, only SSLv3 fallback will trigger a warning icon.

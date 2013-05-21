@@ -98,7 +98,8 @@ cr.define('options', function() {
         else if (!$('bluetooth-pairing-pincode-entry').hidden)
           args.push($('bluetooth-pincode').value);
         chrome.send('updateBluetoothDevice', args);
-        OptionsPage.closeOverlay();
+        // Prevent sending a 'connect' command twice.
+        $('bluetooth-pair-device-connect-button').disabled = true;
       };
       $('bluetooth-pair-device-accept-button').onclick = function() {
         chrome.send('updateBluetoothDevice',
@@ -345,7 +346,7 @@ cr.define('options', function() {
     if (name.length == 0)
       return;
     var dialog = BluetoothPairing.getInstance();
-    if (name == dialog.device_.address &&
+    if (dialog.device_ && name == dialog.device_.address &&
         dialog.device_.pairing == PAIRING.CANCELED) {
       // Do not show any error message after cancelation of the pairing.
       return;

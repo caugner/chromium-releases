@@ -78,26 +78,26 @@ TEST_F(RenderbufferManagerTest, Basic) {
   EXPECT_EQ(kMaxSamples, manager_->max_samples());
   EXPECT_FALSE(manager_->HaveUnclearedRenderbuffers());
   // Check we can create renderbuffer.
-  manager_->CreateRenderbufferInfo(kClient1Id, kService1Id);
+  manager_->CreateRenderbuffer(kClient1Id, kService1Id);
   // Check renderbuffer got created.
-  RenderbufferManager::RenderbufferInfo* info1 =
-      manager_->GetRenderbufferInfo(kClient1Id);
-  ASSERT_TRUE(info1 != NULL);
+  Renderbuffer* renderbuffer1 =
+      manager_->GetRenderbuffer(kClient1Id);
+  ASSERT_TRUE(renderbuffer1 != NULL);
   EXPECT_FALSE(manager_->HaveUnclearedRenderbuffers());
   GLuint client_id = 0;
-  EXPECT_TRUE(manager_->GetClientId(info1->service_id(), &client_id));
+  EXPECT_TRUE(manager_->GetClientId(renderbuffer1->service_id(), &client_id));
   EXPECT_EQ(kClient1Id, client_id);
   // Check we get nothing for a non-existent renderbuffer.
-  EXPECT_TRUE(manager_->GetRenderbufferInfo(kClient2Id) == NULL);
+  EXPECT_TRUE(manager_->GetRenderbuffer(kClient2Id) == NULL);
   // Check trying to a remove non-existent renderbuffers does not crash.
-  manager_->RemoveRenderbufferInfo(kClient2Id);
+  manager_->RemoveRenderbuffer(kClient2Id);
   // Check that the renderbuffer is deleted when the last ref is released.
   EXPECT_CALL(*gl_, DeleteRenderbuffersEXT(1, ::testing::Pointee(kService1Id)))
       .Times(1)
       .RetiresOnSaturation();
   // Check we can't get the renderbuffer after we remove it.
-  manager_->RemoveRenderbufferInfo(kClient1Id);
-  EXPECT_TRUE(manager_->GetRenderbufferInfo(kClient1Id) == NULL);
+  manager_->RemoveRenderbuffer(kClient1Id);
+  EXPECT_TRUE(manager_->GetRenderbuffer(kClient1Id) == NULL);
   EXPECT_FALSE(manager_->HaveUnclearedRenderbuffers());
 }
 
@@ -105,63 +105,63 @@ TEST_F(RenderbufferManagerTest, Destroy) {
   const GLuint kClient1Id = 1;
   const GLuint kService1Id = 11;
   // Check we can create renderbuffer.
-  manager_->CreateRenderbufferInfo(kClient1Id, kService1Id);
+  manager_->CreateRenderbuffer(kClient1Id, kService1Id);
   // Check renderbuffer got created.
-  RenderbufferManager::RenderbufferInfo* info1 =
-      manager_->GetRenderbufferInfo(kClient1Id);
-  ASSERT_TRUE(info1 != NULL);
+  Renderbuffer* renderbuffer1 =
+      manager_->GetRenderbuffer(kClient1Id);
+  ASSERT_TRUE(renderbuffer1 != NULL);
   EXPECT_CALL(*gl_, DeleteRenderbuffersEXT(1, ::testing::Pointee(kService1Id)))
       .Times(1)
       .RetiresOnSaturation();
   manager_->Destroy(true);
-  info1 = manager_->GetRenderbufferInfo(kClient1Id);
-  ASSERT_TRUE(info1 == NULL);
+  renderbuffer1 = manager_->GetRenderbuffer(kClient1Id);
+  ASSERT_TRUE(renderbuffer1 == NULL);
 }
 
-TEST_F(RenderbufferManagerTest, RenderbufferInfo) {
+TEST_F(RenderbufferManagerTest, Renderbuffer) {
   const GLuint kClient1Id = 1;
   const GLuint kService1Id = 11;
   // Check we can create renderbuffer.
-  manager_->CreateRenderbufferInfo(kClient1Id, kService1Id);
+  manager_->CreateRenderbuffer(kClient1Id, kService1Id);
   // Check renderbuffer got created.
-  RenderbufferManager::RenderbufferInfo* info1 =
-      manager_->GetRenderbufferInfo(kClient1Id);
-  ASSERT_TRUE(info1 != NULL);
-  EXPECT_EQ(kService1Id, info1->service_id());
-  EXPECT_EQ(0, info1->samples());
-  EXPECT_EQ(static_cast<GLenum>(GL_RGBA4), info1->internal_format());
-  EXPECT_EQ(0, info1->width());
-  EXPECT_EQ(0, info1->height());
-  EXPECT_TRUE(info1->cleared());
-  EXPECT_EQ(0u, info1->EstimatedSize());
+  Renderbuffer* renderbuffer1 =
+      manager_->GetRenderbuffer(kClient1Id);
+  ASSERT_TRUE(renderbuffer1 != NULL);
+  EXPECT_EQ(kService1Id, renderbuffer1->service_id());
+  EXPECT_EQ(0, renderbuffer1->samples());
+  EXPECT_EQ(static_cast<GLenum>(GL_RGBA4), renderbuffer1->internal_format());
+  EXPECT_EQ(0, renderbuffer1->width());
+  EXPECT_EQ(0, renderbuffer1->height());
+  EXPECT_TRUE(renderbuffer1->cleared());
+  EXPECT_EQ(0u, renderbuffer1->EstimatedSize());
 
   // Check if we set the info it gets marked as not cleared.
   const GLsizei kSamples = 4;
   const GLenum kFormat = GL_RGBA4;
   const GLsizei kWidth = 128;
   const GLsizei kHeight = 64;
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
-  EXPECT_EQ(kSamples, info1->samples());
-  EXPECT_EQ(kFormat, info1->internal_format());
-  EXPECT_EQ(kWidth, info1->width());
-  EXPECT_EQ(kHeight, info1->height());
-  EXPECT_FALSE(info1->cleared());
-  EXPECT_FALSE(info1->IsDeleted());
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight);
+  EXPECT_EQ(kSamples, renderbuffer1->samples());
+  EXPECT_EQ(kFormat, renderbuffer1->internal_format());
+  EXPECT_EQ(kWidth, renderbuffer1->width());
+  EXPECT_EQ(kHeight, renderbuffer1->height());
+  EXPECT_FALSE(renderbuffer1->cleared());
+  EXPECT_FALSE(renderbuffer1->IsDeleted());
   EXPECT_TRUE(manager_->HaveUnclearedRenderbuffers());
-  EXPECT_EQ(kWidth * kHeight * 4u * 4u, info1->EstimatedSize());
+  EXPECT_EQ(kWidth * kHeight * 4u * 4u, renderbuffer1->EstimatedSize());
 
-  manager_->SetCleared(info1, true);
-  EXPECT_TRUE(info1->cleared());
+  manager_->SetCleared(renderbuffer1, true);
+  EXPECT_TRUE(renderbuffer1->cleared());
   EXPECT_FALSE(manager_->HaveUnclearedRenderbuffers());
 
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight);
   EXPECT_TRUE(manager_->HaveUnclearedRenderbuffers());
 
   // Check that the renderbuffer is deleted when the last ref is released.
   EXPECT_CALL(*gl_, DeleteRenderbuffersEXT(1, ::testing::Pointee(kService1Id)))
       .Times(1)
       .RetiresOnSaturation();
-  manager_->RemoveRenderbufferInfo(kClient1Id);
+  manager_->RemoveRenderbuffer(kClient1Id);
   EXPECT_FALSE(manager_->HaveUnclearedRenderbuffers());
 }
 
@@ -169,10 +169,10 @@ TEST_F(RenderbufferManagerMemoryTrackerTest, Basic) {
   const GLuint kClient1Id = 1;
   const GLuint kService1Id = 11;
   EXPECT_MEMORY_ALLOCATION_CHANGE(0, 0, MemoryTracker::kUnmanaged);
-  manager_->CreateRenderbufferInfo(kClient1Id, kService1Id);
-  RenderbufferManager::RenderbufferInfo* info1 =
-      manager_->GetRenderbufferInfo(kClient1Id);
-  ASSERT_TRUE(info1 != NULL);
+  manager_->CreateRenderbuffer(kClient1Id, kService1Id);
+  Renderbuffer* renderbuffer1 =
+      manager_->GetRenderbuffer(kClient1Id);
+  ASSERT_TRUE(renderbuffer1 != NULL);
 
   const GLsizei kSamples = 4;
   const GLenum kFormat = GL_RGBA4;
@@ -187,12 +187,12 @@ TEST_F(RenderbufferManagerMemoryTrackerTest, Basic) {
       kWidth, kHeight2, kSamples, kFormat, &expected_size_2);
   EXPECT_MEMORY_ALLOCATION_CHANGE(
       0, expected_size_1, MemoryTracker::kUnmanaged);
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight1);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight1);
   EXPECT_MEMORY_ALLOCATION_CHANGE(
       expected_size_1, 0, MemoryTracker::kUnmanaged);
   EXPECT_MEMORY_ALLOCATION_CHANGE(
       0, expected_size_2, MemoryTracker::kUnmanaged);
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight2);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight2);
   EXPECT_MEMORY_ALLOCATION_CHANGE(
       expected_size_2, 0, MemoryTracker::kUnmanaged);
   EXPECT_CALL(*gl_, DeleteRenderbuffersEXT(1, ::testing::Pointee(kService1Id)))
@@ -203,27 +203,27 @@ TEST_F(RenderbufferManagerMemoryTrackerTest, Basic) {
 TEST_F(RenderbufferManagerTest, UseDeletedRenderbufferInfo) {
   const GLuint kClient1Id = 1;
   const GLuint kService1Id = 11;
-  manager_->CreateRenderbufferInfo(kClient1Id, kService1Id);
-  RenderbufferManager::RenderbufferInfo::Ref info1(
-      manager_->GetRenderbufferInfo(kClient1Id));
-  ASSERT_TRUE(info1 != NULL);
+  manager_->CreateRenderbuffer(kClient1Id, kService1Id);
+  scoped_refptr<Renderbuffer> renderbuffer1(
+      manager_->GetRenderbuffer(kClient1Id));
+  ASSERT_TRUE(renderbuffer1 != NULL);
   // Remove it.
-  manager_->RemoveRenderbufferInfo(kClient1Id);
+  manager_->RemoveRenderbuffer(kClient1Id);
   // Use after removing.
   const GLsizei kSamples = 4;
   const GLenum kFormat = GL_RGBA4;
   const GLsizei kWidth = 128;
   const GLsizei kHeight = 64;
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight);
   // See that it still affects manager.
   EXPECT_TRUE(manager_->HaveUnclearedRenderbuffers());
-  manager_->SetCleared(info1, true);
+  manager_->SetCleared(renderbuffer1, true);
   EXPECT_FALSE(manager_->HaveUnclearedRenderbuffers());
   // Check that the renderbuffer is deleted when the last ref is released.
   EXPECT_CALL(*gl_, DeleteRenderbuffersEXT(1, ::testing::Pointee(kService1Id)))
       .Times(1)
       .RetiresOnSaturation();
-  info1 = NULL;
+  renderbuffer1 = NULL;
 }
 
 namespace {
@@ -239,46 +239,46 @@ bool InSet(std::set<std::string>* string_set, const std::string& str) {
 TEST_F(RenderbufferManagerTest, AddToSignature) {
   const GLuint kClient1Id = 1;
   const GLuint kService1Id = 11;
-  manager_->CreateRenderbufferInfo(kClient1Id, kService1Id);
-  RenderbufferManager::RenderbufferInfo::Ref info1(
-      manager_->GetRenderbufferInfo(kClient1Id));
-  ASSERT_TRUE(info1 != NULL);
+  manager_->CreateRenderbuffer(kClient1Id, kService1Id);
+  scoped_refptr<Renderbuffer> renderbuffer1(
+      manager_->GetRenderbuffer(kClient1Id));
+  ASSERT_TRUE(renderbuffer1 != NULL);
   const GLsizei kSamples = 4;
   const GLenum kFormat = GL_RGBA4;
   const GLsizei kWidth = 128;
   const GLsizei kHeight = 64;
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight);
   std::string signature1;
   std::string signature2;
-  info1->AddToSignature(&signature1);
+  renderbuffer1->AddToSignature(&signature1);
 
   std::set<std::string> string_set;
   EXPECT_FALSE(InSet(&string_set, signature1));
 
   // change things and see that the signatures change.
-  manager_->SetInfo(info1, kSamples +  1, kFormat, kWidth, kHeight);
-  info1->AddToSignature(&signature2);
+  manager_->SetInfo(renderbuffer1, kSamples +  1, kFormat, kWidth, kHeight);
+  renderbuffer1->AddToSignature(&signature2);
   EXPECT_FALSE(InSet(&string_set, signature2));
 
-  manager_->SetInfo(info1, kSamples, kFormat + 1, kWidth, kHeight);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat + 1, kWidth, kHeight);
   signature2.clear();
-  info1->AddToSignature(&signature2);
+  renderbuffer1->AddToSignature(&signature2);
   EXPECT_FALSE(InSet(&string_set, signature2));
 
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth + 1, kHeight);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth + 1, kHeight);
   signature2.clear();
-  info1->AddToSignature(&signature2);
+  renderbuffer1->AddToSignature(&signature2);
   EXPECT_FALSE(InSet(&string_set, signature2));
 
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight + 1);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight + 1);
   signature2.clear();
-  info1->AddToSignature(&signature2);
+  renderbuffer1->AddToSignature(&signature2);
   EXPECT_FALSE(InSet(&string_set, signature2));
 
   // put it back to the same and it should be the same.
-  manager_->SetInfo(info1, kSamples, kFormat, kWidth, kHeight);
+  manager_->SetInfo(renderbuffer1, kSamples, kFormat, kWidth, kHeight);
   signature2.clear();
-  info1->AddToSignature(&signature2);
+  renderbuffer1->AddToSignature(&signature2);
   EXPECT_EQ(signature1, signature2);
 
   // Check the set was acutally getting different signatures.

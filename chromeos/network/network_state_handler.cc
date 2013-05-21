@@ -19,7 +19,7 @@
 
 namespace {
 
-const char kLogModule[] = "NetworkPropertyHandler";
+const char kLogModule[] = "NetworkStateHandler";
 
 // Returns true if |network->type()| == |match_type|, or it matches one of the
 // following special match types:
@@ -57,11 +57,11 @@ std::string ValueAsString(const base::Value& value) {
   } else if (value.GetType() == base::Value::TYPE_INTEGER) {
     int intval = 0;
     value.GetAsInteger(&intval);
-    return StringPrintf("%d", intval);
+    return base::StringPrintf("%d", intval);
   } else if (value.GetType() == base::Value::TYPE_DOUBLE) {
     double dval = 0;
     value.GetAsDouble(&dval);
-    return StringPrintf("%g", dval);
+    return base::StringPrintf("%g", dval);
   } else if (value.GetType() == base::Value::TYPE_STRING) {
     std::string vstr;
     value.GetAsString(&vstr);
@@ -99,6 +99,11 @@ void NetworkStateHandler::Initialize() {
   CHECK(!g_network_state_handler);
   g_network_state_handler = new NetworkStateHandler();
   g_network_state_handler->InitShillPropertyHandler();
+}
+
+// static
+bool NetworkStateHandler::IsInitialized() {
+  return g_network_state_handler != NULL;
 }
 
 // static
@@ -295,6 +300,23 @@ void NetworkStateHandler::RequestScan() const {
   shill_property_handler_->RequestScan();
 }
 
+void NetworkStateHandler::SetConnectingNetwork(
+    const std::string& service_path) {
+  connecting_network_ = service_path;
+  network_event_log::AddEntry(
+      kLogModule, "SetConnectingNetwork", service_path);
+}
+
+void NetworkStateHandler::GetNetworkStatePropertiesForTest(
+    base::DictionaryValue* dictionary) const {
+  for (ManagedStateList::const_iterator iter = network_list_.begin();
+       iter != network_list_.end(); ++iter) {
+    base::DictionaryValue* network_dict = new base::DictionaryValue;
+    (*iter)->AsNetworkState()->GetProperties(network_dict);
+    dictionary->SetWithoutPathExpansion((*iter)->path(), network_dict);
+  }
+}
+
 //------------------------------------------------------------------------------
 // ShillPropertyHandler::Delegate overrides
 
@@ -371,12 +393,11 @@ void NetworkStateHandler::UpdateManagedStateProperties(
     // Signal connection state changed after all properties have been updated.
     if (network->connection_state() != prev_connection_state)
       OnNetworkConnectionStateChanged(network);
-    FOR_EACH_OBSERVER(NetworkStateHandlerObserver, observers_,
-                      NetworkPropertiesUpdated(network));
+    NetworkPropertiesUpdated(network);
   }
   network_event_log::AddEntry(
       kLogModule, "PropertiesReceived",
-      StringPrintf("%s (%s)", path.c_str(), managed->name().c_str()));
+      base::StringPrintf("%s (%s)", path.c_str(), managed->name().c_str()));
 }
 
 void NetworkStateHandler::UpdateNetworkServiceProperty(
@@ -392,8 +413,7 @@ void NetworkStateHandler::UpdateNetworkServiceProperty(
   if (network->connection_state() != prev_connection_state)
     OnNetworkConnectionStateChanged(network);
 
-  FOR_EACH_OBSERVER(NetworkStateHandlerObserver, observers_,
-                    NetworkPropertiesUpdated(network));
+  NetworkPropertiesUpdated(network);
 
   std::string detail = network->name() + "." + key;
   std::string vstr = ValueAsString(value);
@@ -411,9 +431,7 @@ void NetworkStateHandler::UpdateNetworkServiceIPAddress(
   std::string detail = network->name() + ".IPAddress = " + ip_address;
   network_event_log::AddEntry(kLogModule, "NetworkIPChanged", detail);
   network->set_ip_address(ip_address);
-  FOR_EACH_OBSERVER(
-      NetworkStateHandlerObserver, observers_,
-      NetworkPropertiesUpdated(network));
+  NetworkPropertiesUpdated(network);
 }
 
 void NetworkStateHandler::UpdateDeviceProperty(const std::string& device_path,
@@ -446,7 +464,7 @@ void NetworkStateHandler::ManagedStateListChanged(
     // Notify observers that the list of networks has changed.
     network_event_log::AddEntry(
         kLogModule, "NetworkListChanged",
-        StringPrintf("Size: %"PRIuS, network_list_.size()));
+        base::StringPrintf("Size: %"PRIuS, network_list_.size()));
     FOR_EACH_OBSERVER(NetworkStateHandlerObserver, observers_,
                       NetworkListChanged());
     // The list order may have changed, so check if the default network changed.
@@ -455,7 +473,7 @@ void NetworkStateHandler::ManagedStateListChanged(
   } else if (type == ManagedState::MANAGED_TYPE_DEVICE) {
     network_event_log::AddEntry(
         kLogModule, "DeviceListChanged",
-        StringPrintf("Size: %"PRIuS, device_list_.size()));
+        base::StringPrintf("Size: %"PRIuS, device_list_.size()));
     FOR_EACH_OBSERVER(NetworkStateHandlerObserver, observers_,
                       DeviceListChanged());
   } else {
@@ -510,7 +528,7 @@ NetworkStateHandler::ManagedStateList* NetworkStateHandler::GetManagedList(
 void NetworkStateHandler::OnNetworkConnectionStateChanged(
     NetworkState* network) {
   DCHECK(network);
-  std::string desc = StringPrintf(
+  std::string desc = base::StringPrintf(
       "%s: %s", network->path().c_str(), network->connection_state().c_str());
   network_event_log::AddEntry(
       kLogModule, "NetworkConnectionStateChanged", desc);
@@ -538,6 +556,23 @@ void NetworkStateHandler::OnDefaultNetworkChanged() {
       default_network ? default_network->path() : "None");
   FOR_EACH_OBSERVER(NetworkStateHandlerObserver, observers_,
                     DefaultNetworkChanged(default_network));
+}
+
+void NetworkStateHandler::NetworkPropertiesUpdated(
+    const NetworkState* network) {
+  FOR_EACH_OBSERVER(NetworkStateHandlerObserver, observers_,
+                    NetworkPropertiesUpdated(network));
+  // If |connecting_network_| transitions to a non-idle, non-connecting state,
+  // clear it *after* signalling observers.
+  if (network->path() == connecting_network_ &&
+      !network->IsConnectingState() &&
+      network->connection_state() != flimflam::kStateIdle) {
+    connecting_network_.clear();
+    network_event_log::AddEntry(
+        kLogModule, "ClearConnectingNetwork",
+        base::StringPrintf("%s: %s", network->path().c_str(),
+                           network->connection_state().c_str()));
+  }
 }
 
 }  // namespace chromeos

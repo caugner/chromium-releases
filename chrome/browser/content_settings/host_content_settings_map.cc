@@ -23,12 +23,12 @@
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -77,8 +77,11 @@ bool SupportsResourceIdentifier(ContentSettingsType content_type) {
 
 HostContentSettingsMap::HostContentSettingsMap(
     PrefService* prefs,
-    bool incognito)
-    : prefs_(prefs),
+    bool incognito) :
+#ifndef NDEBUG
+      used_from_thread_id_(base::PlatformThread::CurrentId()),
+#endif
+      prefs_(prefs),
       is_off_the_record_(incognito) {
   content_settings::ObservableProvider* policy_provider =
       new content_settings::PolicyProvider(prefs_);
@@ -121,6 +124,11 @@ void HostContentSettingsMap::RegisterExtensionService(
   custom_extension_provider->AddObserver(this);
   content_settings_providers_[CUSTOM_EXTENSION_PROVIDER] =
       custom_extension_provider;
+
+#ifndef NDEBUG
+  DCHECK(used_from_thread_id_ != base::kInvalidThreadId)
+      << "Used from multiple threads before initialization complete.";
+#endif
 
   OnContentSettingChanged(ContentSettingsPattern(),
                           ContentSettingsPattern(),
@@ -167,6 +175,8 @@ ContentSetting HostContentSettingsMap::GetDefaultContentSettingFromProvider(
 ContentSetting HostContentSettingsMap::GetDefaultContentSetting(
     ContentSettingsType content_type,
     std::string* provider_id) const {
+  UsedContentSettingsProviders();
+
   // Iterate through the list of providers and return the first non-NULL value
   // that matches |primary_url| and |secondary_url|.
   for (ConstProviderIterator provider = content_settings_providers_.begin();
@@ -208,6 +218,7 @@ void HostContentSettingsMap::GetSettingsForOneType(
   DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
   DCHECK(settings);
+  UsedContentSettingsProviders();
 
   settings->clear();
   for (ConstProviderIterator provider = content_settings_providers_.begin();
@@ -257,6 +268,8 @@ void HostContentSettingsMap::SetWebsiteSetting(
   DCHECK(IsValueAllowedForType(prefs_, value, content_type));
   DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
+  UsedContentSettingsProviders();
+
   for (ProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
@@ -316,6 +329,7 @@ void HostContentSettingsMap::AddExceptionForURL(
 
 void HostContentSettingsMap::ClearSettingsForOneType(
     ContentSettingsType content_type) {
+  UsedContentSettingsProviders();
   for (ProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
        ++provider) {
@@ -495,6 +509,16 @@ void HostContentSettingsMap::AddSettingsForOneType(
         kProviderNames[provider_type],
         incognito));
   }
+}
+
+void HostContentSettingsMap::UsedContentSettingsProviders() const {
+#ifndef NDEBUG
+  if (used_from_thread_id_ == base::kInvalidThreadId)
+    return;
+
+  if (base::PlatformThread::CurrentId() != used_from_thread_id_)
+    used_from_thread_id_ = base::kInvalidThreadId;
+#endif
 }
 
 bool HostContentSettingsMap::ShouldAllowAllContent(

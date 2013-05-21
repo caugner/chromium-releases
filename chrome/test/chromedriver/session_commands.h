@@ -35,6 +35,13 @@ Status ExecuteSessionCommand(
     scoped_ptr<base::Value>* out_value,
     std::string* out_session_id);
 
+// Gets the capabilities of a particular session.
+Status ExecuteGetSessionCapabilities(
+    SessionMap* session_map,
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
 // Quits a particular session.
 Status ExecuteQuit(
     SessionMap* session_map,
@@ -42,8 +49,15 @@ Status ExecuteQuit(
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
 
-// Retrieve the current window handle.
+// Retrieve the handle of the target window.
 Status ExecuteGetCurrentWindowHandle(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Close the target window.
+Status ExecuteClose(
+    SessionMap* session_map,
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
@@ -54,9 +68,63 @@ Status ExecuteGetWindowHandles(
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
 
+// Change target window to another. The window to target at may be specified by
+// its server assigned window handle, or by the value of its name attribute.
+Status ExecuteSwitchToWindow(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
 // Configure the amount of time that a particular type of operation can execute
 // for before they are aborted and a timeout error is returned to the client.
 Status ExecuteSetTimeout(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Set the timeout for asynchronous scripts.
+Status ExecuteSetScriptTimeout(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Set the amount of time the driver should wait when searching for elements.
+Status ExecuteImplicitlyWait(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns whether an alert is open.
+Status ExecuteGetAlert(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns the text of the open alert.
+Status ExecuteGetAlertText(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Sets the value of the alert prompt.
+Status ExecuteSetAlertValue(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Accepts the open alert.
+Status ExecuteAcceptAlert(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Dismisses the open alert.
+Status ExecuteDismissAlert(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteIsLoading(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);

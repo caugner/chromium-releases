@@ -267,15 +267,15 @@ class MockMediaSource {
     DCHECK(chunk_demuxer_.get());
     DCHECK_LT(current_position_, file_data_->GetDataSize());
     DCHECK_LE(current_position_ + size, file_data_->GetDataSize());
-    CHECK(chunk_demuxer_->AppendData(
-        kSourceId, file_data_->GetData() + current_position_, size));
+    chunk_demuxer_->AppendData(
+        kSourceId, file_data_->GetData() + current_position_, size);
     current_position_ += size;
   }
 
   void AppendAtTime(const base::TimeDelta& timestampOffset,
                     const uint8* pData, int size) {
     CHECK(chunk_demuxer_->SetTimestampOffset(kSourceId, timestampOffset));
-    CHECK(chunk_demuxer_->AppendData(kSourceId, pData, size));
+    chunk_demuxer_->AppendData(kSourceId, pData, size);
     CHECK(chunk_demuxer_->SetTimestampOffset(kSourceId, base::TimeDelta()));
   }
 
@@ -313,6 +313,7 @@ class MockMediaSource {
                       scoped_array<uint8> init_data, int init_data_size) {
     DCHECK(init_data.get());
     DCHECK_GT(init_data_size, 0);
+    CHECK(!need_key_cb_.is_null());
     need_key_cb_.Run("", "", type, init_data.Pass(), init_data_size);
   }
 
@@ -341,7 +342,8 @@ class PipelineIntegrationTest
         base::Bind(&PipelineIntegrationTest::OnError, base::Unretained(this)),
         QuitOnStatusCB(PIPELINE_OK),
         base::Bind(&PipelineIntegrationTest::OnBufferingState,
-                   base::Unretained(this)));
+                   base::Unretained(this)),
+        base::Closure());
 
     message_loop_.Run();
   }
@@ -359,7 +361,8 @@ class PipelineIntegrationTest
         base::Bind(&PipelineIntegrationTest::OnError, base::Unretained(this)),
         QuitOnStatusCB(PIPELINE_OK),
         base::Bind(&PipelineIntegrationTest::OnBufferingState,
-                   base::Unretained(this)));
+                   base::Unretained(this)),
+        base::Closure());
 
     source->set_need_key_cb(base::Bind(&FakeEncryptedMedia::NeedKey,
                                        base::Unretained(encrypted_media)));
@@ -415,11 +418,24 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed) {
 
   ASSERT_TRUE(WaitUntilOnEnded());
 
-  EXPECT_EQ(GetVideoHash(), "f0be120a90a811506777c99a2cdf7cc1");
+  EXPECT_EQ("f0be120a90a811506777c99a2cdf7cc1", GetVideoHash());
+  EXPECT_EQ("-3.59,-2.06,-0.43,2.15,0.77,-0.95,", GetAudioHash());
+}
 
-  // TODO(dalecurtis): Audio decoded in float does not have a consistent hash
-  // across platforms.  Fix this: http://crbug.com/168204
-  // EXPECT_EQ(GetAudioHash(), "");
+// TODO(fgalligan): Enable test when code to parse encrypted WebM files lands
+// in Chromium's FFmpeg. crbug.com/189221
+TEST_F(PipelineIntegrationTest, DISABLED_BasicPlaybackEncrypted) {
+  FakeEncryptedMedia encrypted_media(new KeyProvidingApp());
+  set_need_key_cb(base::Bind(&FakeEncryptedMedia::NeedKey,
+                             base::Unretained(&encrypted_media)));
+
+  ASSERT_TRUE(Start(GetTestDataFilePath("bear-320x240-av_enc-av.webm"),
+                    encrypted_media.decryptor()));
+
+  Play();
+
+  ASSERT_TRUE(WaitUntilOnEnded());
+  Stop();
 }
 
 TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource) {

@@ -87,7 +87,7 @@
           },
           {
             "title": "Desktop Notifications",
-            "fileName": "notifications.html"
+            "fileName": "desktop_notifications.html"
           }
         ]
       },
@@ -146,6 +146,10 @@
         "fileName": "api_index.html"
       },
       {
+        "title": "Webview Tag API",
+        "fileName": "webview_tag.html"
+      },
+      {
         "title": "Supported Libraries",
         "fileName": "api_other.html"
       },
@@ -156,11 +160,16 @@
     ]
   },
   {
-    "title": "Samples",
-    "fileName": "samples.html"
-  },
-  {
-    "title": "Known Issues",
-    "fileName": "app_known_issues.html"
+    "title": "More",
+    "items": [
+      {
+        "title": "FAQ",
+        "fileName": "faq.html"
+      },
+      {
+        "title": "Samples",
+        "fileName": "samples.html"
+      }
+    ]
   }
 ]

@@ -54,7 +54,8 @@ bool ZoomController::IsAtDefaultZoom() const {
 }
 
 int ZoomController::GetResourceForZoomLevel() const {
-  DCHECK(!IsAtDefaultZoom());
+  if (IsAtDefaultZoom())
+    return IDR_ZOOM_NORMAL;
   double zoom = web_contents()->GetZoomLevel();
   return zoom > default_zoom_level_.GetValue() ? IDR_ZOOM_PLUS : IDR_ZOOM_MINUS;
 }
@@ -67,8 +68,10 @@ void ZoomController::DidNavigateMainFrame(
   UpdateState(std::string());
 }
 
-void ZoomController::OnZoomLevelChanged(const std::string& host) {
-  UpdateState(host);
+void ZoomController::OnZoomLevelChanged(
+    const content::HostZoomMap::ZoomLevelChange& change) {
+  if (change.mode != content::HostZoomMap::ZOOM_CHANGED_TEMPORARY_ZOOM)
+    UpdateState(change.host);
 }
 
 void ZoomController::UpdateState(const std::string& host) {

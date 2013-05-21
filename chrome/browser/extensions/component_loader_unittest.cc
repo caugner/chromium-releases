@@ -10,15 +10,19 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "chrome/browser/extensions/test_extension_service.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/incognito_handler.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service_syncable.h"
+#include "components/user_prefs/pref_registry_syncable.h"
+#include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using extensions::Extension;
+namespace extensions {
 
 namespace {
 
@@ -70,8 +74,6 @@ class MockExtensionService : public TestExtensionService {
 
 }  // namespace
 
-namespace extensions {
-
 class ComponentLoaderTest : public testing::Test {
  public:
   ComponentLoaderTest() :
@@ -80,7 +82,10 @@ class ComponentLoaderTest : public testing::Test {
       component_loader_(&extension_service_, &prefs_, &local_state_) {
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
+    (new BackgroundManifestHandler)->Register();
+    (new IncognitoHandler)->Register();
+
     extension_path_ =
         GetBasePath().AppendASCII("good")
                      .AppendASCII("Extensions")
@@ -89,8 +94,8 @@ class ComponentLoaderTest : public testing::Test {
 
     // Read in the extension manifest.
     ASSERT_TRUE(file_util::ReadFileToString(
-        extension_path_.Append(Extension::kManifestFilename),
-                               &manifest_contents_));
+        extension_path_.Append(kManifestFilename),
+        &manifest_contents_));
 
     // Register the user prefs that ComponentLoader will read.
     prefs_.registry()->RegisterStringPref(
@@ -107,6 +112,11 @@ class ComponentLoaderTest : public testing::Test {
     local_state_.registry()->RegisterBooleanPref(
         prefs::kSpokenFeedbackEnabled, false);
 #endif
+  }
+
+  virtual void TearDown() OVERRIDE {
+    ManifestHandler::ClearRegistryForTesting();
+    testing::Test::TearDown();
   }
 
  protected:

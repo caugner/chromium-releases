@@ -14,7 +14,7 @@
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "extensions/common/matcher/url_matcher.h"
 
 class GURL;
@@ -23,6 +23,10 @@ class PrefRegistrySyncable;
 
 namespace base {
 class ListValue;
+}
+
+namespace net {
+class URLRequest;
 }
 
 namespace policy {
@@ -128,6 +132,13 @@ class URLBlacklistManager {
   // Returns true if |url| is blocked by the current blacklist. Must be called
   // from the IO thread.
   bool IsURLBlocked(const GURL& url) const;
+
+  // Returns true if |request| is blocked by the current blacklist.
+  // Only main frame and sub frame requests may be blocked; other sub resources
+  // or background downloads (e.g. extensions updates, sync, etc) are not
+  // filtered. The sync signin page is also not filtered.
+  // Must be called from the IO thread.
+  bool IsRequestBlocked(const net::URLRequest& request) const;
 
   // Replaces the current blacklist. Must be called on the IO thread.
   // Virtual for testing.

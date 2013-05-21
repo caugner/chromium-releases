@@ -9,9 +9,10 @@
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/public/pref_member.h"
-#include "base/string_split.h"
+#include "base/prefs/pref_member.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
@@ -24,10 +25,8 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system/drm_settings.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
-#include "chrome/browser/chromeos/system/power_manager_settings.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -35,6 +34,7 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_policy_controller.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/icu/public/i18n/unicode/timezone.h"
 #include "ui/base/events/event_constants.h"
@@ -58,9 +58,16 @@ Preferences::~Preferences() {
 }
 
 // static
-void Preferences::RegisterUserPrefs(PrefService* prefs,
-                                    PrefRegistrySyncable* registry) {
-  // TODO(joi): Get rid of need for PrefService parameter.
+void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kHighContrastEnabled, false);
+  registry->RegisterBooleanPref(prefs::kOwnerPrimaryMouseButtonRight, false);
+  registry->RegisterBooleanPref(prefs::kOwnerTapToClickEnabled, true);
+  registry->RegisterBooleanPref(prefs::kSpokenFeedbackEnabled, false);
+  registry->RegisterBooleanPref(prefs::kVirtualKeyboardEnabled, false);
+}
+
+// static
+void Preferences::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   std::string hardware_keyboard_id;
   // TODO(yusukes): Remove the runtime hack.
   if (base::chromeos::IsRunningOnChromeOS()) {
@@ -100,24 +107,6 @@ void Preferences::RegisterUserPrefs(PrefService* prefs,
   registry->RegisterBooleanPref(prefs::kLabsAdvancedFilesystemEnabled,
                                 false,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
-  // Check if the accessibility prefs are already registered, which can happen
-  // in WizardController::RegisterPrefs. We still want to try to register
-  // the prefs here in case of Chrome/Linux with ChromeOS=1.
-  if (prefs->FindPreference(prefs::kSpokenFeedbackEnabled) == NULL) {
-    registry->RegisterBooleanPref(prefs::kSpokenFeedbackEnabled,
-                                  false,
-                                  PrefRegistrySyncable::UNSYNCABLE_PREF);
-  }
-  if (prefs->FindPreference(prefs::kHighContrastEnabled) == NULL) {
-    registry->RegisterBooleanPref(prefs::kHighContrastEnabled,
-                                  false,
-                                  PrefRegistrySyncable::UNSYNCABLE_PREF);
-  }
-  if (prefs->FindPreference(prefs::kVirtualKeyboardEnabled) == NULL) {
-    registry->RegisterBooleanPref(prefs::kVirtualKeyboardEnabled,
-                                  false,
-                                  PrefRegistrySyncable::UNSYNCABLE_PREF);
-  }
   registry->RegisterBooleanPref(prefs::kScreenMagnifierEnabled,
                                 false,
                                 PrefRegistrySyncable::SYNCABLE_PREF);
@@ -309,6 +298,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs,
   registry->RegisterIntegerPref(prefs::kPowerAcScreenLockDelayMs,
                                 600000,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kPowerAcIdleWarningDelayMs,
+                                0,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterIntegerPref(prefs::kPowerAcIdleDelayMs,
                                 1800000,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -320,6 +312,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterIntegerPref(prefs::kPowerBatteryScreenLockDelayMs,
                                 600000,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kPowerBatteryIdleWarningDelayMs,
+                                0,
                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterIntegerPref(prefs::kPowerBatteryIdleDelayMs,
                                 600000,
@@ -358,7 +353,6 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
   three_finger_swipe_enabled_.Init(prefs::kEnableTouchpadThreeFingerSwipe,
       prefs, callback);
   natural_scroll_.Init(prefs::kNaturalScroll, prefs, callback);
-  accessibility_enabled_.Init(prefs::kSpokenFeedbackEnabled, prefs, callback);
   screen_magnifier_enabled_.Init(prefs::kScreenMagnifierEnabled,
                                  prefs, callback);
   screen_magnifier_type_.Init(prefs::kScreenMagnifierType, prefs, callback);
@@ -442,6 +436,8 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
       prefs::kPowerAcScreenOffDelayMs, prefs, callback);
   power_ac_screen_lock_delay_ms_.Init(
       prefs::kPowerAcScreenLockDelayMs, prefs, callback);
+  power_ac_idle_warning_delay_ms_.Init(
+      prefs::kPowerAcIdleWarningDelayMs, prefs, callback);
   power_ac_idle_delay_ms_.Init(prefs::kPowerAcIdleDelayMs, prefs, callback);
   power_battery_screen_dim_delay_ms_.Init(
       prefs::kPowerBatteryScreenDimDelayMs, prefs, callback);
@@ -449,6 +445,8 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
       prefs::kPowerBatteryScreenOffDelayMs, prefs, callback);
   power_battery_screen_lock_delay_ms_.Init(
       prefs::kPowerBatteryScreenLockDelayMs, prefs, callback);
+  power_battery_idle_warning_delay_ms_.Init(
+      prefs::kPowerBatteryIdleWarningDelayMs, prefs, callback);
   power_battery_idle_delay_ms_.Init(
       prefs::kPowerBatteryIdleDelayMs, prefs, callback);
   power_idle_action_.Init(prefs::kPowerIdleAction, prefs, callback);
@@ -581,6 +579,12 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     }
   }
   if (!pref_name || *pref_name == prefs::kDownloadDefaultDirectory) {
+    const base::FilePath pref_path = download_default_directory_.GetValue();
+    if (drive::util::NeedsNamespaceMigration(pref_path)) {
+      prefs_->SetFilePath(prefs::kDownloadDefaultDirectory,
+                          drive::util::ConvertToMyDriveNamespace(pref_path));
+    }
+
     const bool default_download_to_drive = drive::util::IsUnderDriveMountPoint(
         download_default_directory_.GetValue());
     if (pref_name)
@@ -727,12 +731,6 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     }
   }
 
-  // Init or update power manager config.
-  if (!pref_name || *pref_name == prefs::kEnableScreenLock) {
-    system::power_manager_settings::EnableScreenLock(
-        enable_screen_lock_.GetValue());
-  }
-
   // Init or update protected content (DRM) support.
   if (!pref_name || *pref_name == prefs::kEnableCrosDRM) {
     system::ToggleDrm(enable_drm_.GetValue());
@@ -754,10 +752,12 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       *pref_name == prefs::kPowerAcScreenDimDelayMs ||
       *pref_name == prefs::kPowerAcScreenOffDelayMs ||
       *pref_name == prefs::kPowerAcScreenLockDelayMs ||
+      *pref_name == prefs::kPowerAcIdleWarningDelayMs ||
       *pref_name == prefs::kPowerAcIdleDelayMs ||
       *pref_name == prefs::kPowerBatteryScreenDimDelayMs ||
       *pref_name == prefs::kPowerBatteryScreenOffDelayMs ||
       *pref_name == prefs::kPowerBatteryScreenLockDelayMs ||
+      *pref_name == prefs::kPowerBatteryIdleWarningDelayMs ||
       *pref_name == prefs::kPowerBatteryIdleDelayMs ||
       *pref_name == prefs::kPowerIdleAction ||
       *pref_name == prefs::kPowerLidClosedAction ||
@@ -768,10 +768,12 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
         *prefs_->FindPreference(prefs::kPowerAcScreenDimDelayMs),
         *prefs_->FindPreference(prefs::kPowerAcScreenOffDelayMs),
         *prefs_->FindPreference(prefs::kPowerAcScreenLockDelayMs),
+        *prefs_->FindPreference(prefs::kPowerAcIdleWarningDelayMs),
         *prefs_->FindPreference(prefs::kPowerAcIdleDelayMs),
         *prefs_->FindPreference(prefs::kPowerBatteryScreenDimDelayMs),
         *prefs_->FindPreference(prefs::kPowerBatteryScreenOffDelayMs),
         *prefs_->FindPreference(prefs::kPowerBatteryScreenLockDelayMs),
+        *prefs_->FindPreference(prefs::kPowerBatteryIdleWarningDelayMs),
         *prefs_->FindPreference(prefs::kPowerBatteryIdleDelayMs),
         *prefs_->FindPreference(prefs::kPowerIdleAction),
         *prefs_->FindPreference(prefs::kPowerLidClosedAction),

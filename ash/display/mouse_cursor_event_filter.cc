@@ -9,7 +9,6 @@
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/wm/coordinate_conversion.h"
-#include "ash/wm/cursor_manager.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
@@ -150,10 +149,11 @@ bool MouseCursorEventFilter::WarpMouseCursorIfNecessary(
 
 void MouseCursorEventFilter::UpdateHorizontalIndicatorWindowBounds() {
   bool from_primary = Shell::GetPrimaryRootWindow() == drag_source_root_;
-
-  const gfx::Rect& primary_bounds =
+  // GetPrimaryDisplay returns an object on stack, so copy the bounds
+  // instead of using reference.
+  const gfx::Rect primary_bounds =
       Shell::GetScreen()->GetPrimaryDisplay().bounds();
-  const gfx::Rect& secondary_bounds = ScreenAsh::GetSecondaryDisplay().bounds();
+  const gfx::Rect secondary_bounds = ScreenAsh::GetSecondaryDisplay().bounds();
   DisplayLayout::Position position = Shell::GetInstance()->
       display_controller()->GetCurrentDisplayLayout().position;
 
@@ -178,10 +178,11 @@ void MouseCursorEventFilter::UpdateHorizontalIndicatorWindowBounds() {
 
 void MouseCursorEventFilter::UpdateVerticalIndicatorWindowBounds() {
   bool in_primary = Shell::GetPrimaryRootWindow() == drag_source_root_;
-
-  const gfx::Rect& primary_bounds =
+  // GetPrimaryDisplay returns an object on stack, so copy the bounds
+  // instead of using reference.
+  const gfx::Rect primary_bounds =
       Shell::GetScreen()->GetPrimaryDisplay().bounds();
-  const gfx::Rect& secondary_bounds = ScreenAsh::GetSecondaryDisplay().bounds();
+  const gfx::Rect secondary_bounds = ScreenAsh::GetSecondaryDisplay().bounds();
   DisplayLayout::Position position = Shell::GetInstance()->
       display_controller()->GetCurrentDisplayLayout().position;
 

@@ -6,6 +6,8 @@
 
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/system/tray/fixed_sized_scroll_view.h"
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
@@ -324,7 +326,7 @@ void NetworkListDetailedViewBase::ButtonPressed(views::Button* sender,
     CustomButtonPressed(sender, event);
 }
 
-void NetworkListDetailedViewBase::ClickedOn(views::View* sender) {
+void NetworkListDetailedViewBase::OnViewClicked(views::View* sender) {
   SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
   // If the info bubble was visible, close it when some other item is clicked
   // on.
@@ -402,8 +404,7 @@ void NetworkListDetailedViewBase::ToggleInfoBubble() {
 
   info_bubble_ = new NonActivatableSettingsBubble(
       info_icon_, CreateNetworkInfoView());
-  views::BubbleDelegateView::CreateBubble(info_bubble_);
-  info_bubble_->Show();
+  views::BubbleDelegateView::CreateBubble(info_bubble_)->Show();
 }
 
   // Returns whether an existing info-bubble was closed.

@@ -12,23 +12,23 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/common/pepper_flash.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pepper_flash.h"
 #include "chrome/common/pepper_flash.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
@@ -84,7 +84,7 @@ base::FilePath GetPepperFlashBaseDirectory() {
   return result;
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_LINUX)
 // Pepper Flash plugins have the version encoded in the path itself
 // so we need to enumerate the directories to find the full path.
 // On success, |latest_dir| returns something like:
@@ -150,7 +150,7 @@ bool MakePepperFlashPluginInfo(const base::FilePath& flash_path,
   plugin_info->permissions = kPepperFlashPermissions;
 
   // The description is like "Shockwave Flash 10.2 r154".
-  plugin_info->description = StringPrintf("%s %d.%d r%d",
+  plugin_info->description = base::StringPrintf("%s %d.%d r%d",
       kFlashPluginName, ver_nums[0], ver_nums[1], ver_nums[2]);
 
   plugin_info->version = flash_version.GetString();
@@ -188,10 +188,12 @@ void RegisterPepperFlashWithChrome(const base::FilePath& path,
     if (!IsPepperFlash(*it))
       continue;
 
-    // If the version we're trying to register is older than the existing one,
-    // don't do it.
-    if (version.IsOlderThan(UTF16ToUTF8(it->version)))
+    // Do it only if the version we're trying to register is newer.
+    Version registered_version(UTF16ToUTF8(it->version));
+    if (registered_version.IsValid() &&
+        version.CompareTo(registered_version) <= 0) {
       return;
+    }
 
     // If the version is newer, remove the old one first.
     PluginService::GetInstance()->UnregisterInternalPlugin(it->path);
@@ -330,7 +332,7 @@ bool CheckPepperFlashManifest(base::DictionaryValue* manifest,
 
 namespace {
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_LINUX)
 void FinishPepperFlashUpdateRegistration(ComponentUpdateService* cus,
                                          const Version& version) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -377,12 +379,12 @@ void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
     file_util::Delete(*iter, true);
   }
 }
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // defined(GOOGLE_CHROME_BUILD) && !defined(OS_LINUX)
 
 }  // namespace
 
 void RegisterPepperFlashComponent(ComponentUpdateService* cus) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_LINUX)
   // Component updated flash supersedes bundled flash therefore if that one
   // is disabled then this one should never install.
   CommandLine* cmd_line = CommandLine::ForCurrentProcess();

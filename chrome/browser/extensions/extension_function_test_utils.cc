@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "extensions/common/id_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::WebContents;
@@ -135,7 +136,7 @@ scoped_refptr<Extension> CreateExtension(
   const base::FilePath test_extension_path;
   std::string id;
   if (!id_input.empty())
-    CHECK(Extension::GenerateId(id_input, &id));
+    id = extensions::id_util::GenerateId(id_input);
   scoped_refptr<Extension> extension(Extension::Create(
       test_extension_path,
       location,

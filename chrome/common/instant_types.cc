@@ -11,10 +11,12 @@ InstantSuggestion::InstantSuggestion()
 
 InstantSuggestion::InstantSuggestion(const string16& in_text,
                                      InstantCompleteBehavior in_behavior,
-                                     InstantSuggestionType in_type)
+                                     InstantSuggestionType in_type,
+                                     const string16& in_query)
     : text(in_text),
       behavior(in_behavior),
-      type(in_type) {
+      type(in_type),
+      query(in_query) {
 }
 
 InstantSuggestion::~InstantSuggestion() {
@@ -36,7 +38,8 @@ ThemeBackgroundInfo::ThemeBackgroundInfo()
       image_horizontal_alignment(THEME_BKGRND_IMAGE_ALIGN_CENTER),
       image_vertical_alignment(THEME_BKGRND_IMAGE_ALIGN_CENTER),
       image_tiling(THEME_BKGRND_IMAGE_NO_REPEAT),
-      image_height(0) {
+      image_height(0),
+      has_attribution(false) {
 }
 
 ThemeBackgroundInfo::~ThemeBackgroundInfo() {

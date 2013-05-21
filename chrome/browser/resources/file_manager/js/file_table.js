@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Namespace for utility functions.
  */
@@ -301,8 +303,8 @@ FileTable.prototype.updateDate_ = function(div, filesystemProps) {
 /**
  * Updates the file metadata in the table item.
  *
- * @param {Element} item Table item,
- * @param {Entry} entry File entry,
+ * @param {Element} item Table item.
+ * @param {Entry} entry File entry.
  */
 FileTable.prototype.updateFileMetadata = function(item, entry) {
   var props = this.metadataCache_.getCached(entry, 'filesystem');
@@ -505,11 +507,10 @@ FileTable.prototype.renderNameColumnHeader_ = function(name) {
   this.updateSelectAllCheckboxState_(input);
 
   input.addEventListener('click', function(event) {
-      if (input.checked)
+    if (input.checked)
       this.selectionModel.selectAll();
     else
       this.selectionModel.unselectAll();
-    event.preventDefault();
     event.stopPropagation();
   }.bind(this));
 
@@ -553,15 +554,19 @@ filelist.decorateCheckbox = function(input) {
   input.addEventListener('mousedown', stopEventPropagation);
   input.addEventListener('mouseup', stopEventPropagation);
 
-  var self = this;
-  input.addEventListener('click', function(event) {
-    // Revert default action and swallow the event
-    // if this is a multiple click or Shift is pressed.
-    if (event.detail > 1 || event.shiftKey) {
-      this.checked = !this.checked;
-      stopEventPropagation(event);
-    }
-  });
+  input.addEventListener(
+      'click',
+      /**
+       * @this {HTMLInputElement}
+       */
+      function(event) {
+        // Revert default action and swallow the event
+        // if this is a multiple click or Shift is pressed.
+        if (event.detail > 1 || event.shiftKey) {
+          this.checked = !this.checked;
+          stopEventPropagation(event);
+        }
+      });
 };
 
 /**

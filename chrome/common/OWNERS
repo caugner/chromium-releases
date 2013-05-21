@@ -13,6 +13,7 @@ per-file nacl_loader.sb=jeremy@chromium.org
 # new sandbox escapes.
 per-file *_messages.h=set noparent
 per-file *_messages.h=cdn@chromium.org
+per-file *_messages.h=cevans@chromium.org
 per-file *_messages.h=jln@chromium.org
 per-file *_messages.h=jschuh@chromium.org
 per-file *_messages.h=palmer@chromium.org
@@ -27,3 +28,13 @@ per-file spellcheck_result.h=gbillock@chromium.org
 per-file spellcheck_result.h=groby@chromium.org
 per-file spellcheck_result.h=rlp@chromium.org
 per-file spellcheck_result.h=rouslan@chromium.org
+
+# Instant/Search files.
+per-file instant_types.*=dhollowa@chromium.org
+per-file instant_types.*=jered@chromium.org
+per-file instant_types.*=samarth@chromium.org
+per-file instant_types.*=sreeram@chromium.org
+per-file search_types.*=dhollowa@chromium.org
+per-file search_types.*=jered@chromium.org
+per-file search_types.*=samarth@chromium.org
+per-file search_types.*=sreeram@chromium.org

@@ -57,7 +57,7 @@ bool WebMediaPlayerImplAndroid::canEnterFullscreen() const {
 void WebMediaPlayerImplAndroid::InitializeMediaPlayer(GURL url) {
   GURL first_party_url = frame_->document().firstPartyForCookies();
   if (proxy_) {
-    proxy_->Initialize(player_id(), url.spec(), first_party_url.spec());
+    proxy_->Initialize(player_id(), url, first_party_url);
     if (manager()->IsInFullscreen(frame_))
       proxy_->EnterFullscreen(player_id());
   }
@@ -127,6 +127,11 @@ void WebMediaPlayerImplAndroid::OnMediaPlayerPause() {
 
 void WebMediaPlayerImplAndroid::Destroy() {
   proxy_ = NULL;
+}
+
+void WebMediaPlayerImplAndroid::RequestExternalSurface() {
+  if (proxy_)
+    proxy_->RequestExternalSurface(player_id());
 }
 
 void WebMediaPlayerImplAndroid::SetVideoSurface(jobject j_surface) {}

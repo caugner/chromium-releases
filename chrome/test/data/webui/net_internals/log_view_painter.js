@@ -151,7 +151,8 @@ TEST_F('NetInternalsTest', 'netInternalsLogViewPainterPrintAsText', function() {
   runTestCase(painterTestNetError());
   runTestCase(painterTestHexEncodedBytes());
   runTestCase(painterTestCertVerifierJob());
-  runTestCase(painterTestProxyConfig());
+  runTestCase(painterTestProxyConfigOneProxyAllSchemes());
+  runTestCase(painterTestProxyConfigTwoProxiesAllSchemes());
   runTestCase(painterTestDontStripCookiesURLRequest());
   runTestCase(painterTestStripCookiesURLRequest());
   runTestCase(painterTestDontStripCookiesSPDYSession());
@@ -189,7 +190,7 @@ function painterTestURLRequest() {
     },
     {
       'params': {
-        'load_flags': 68223104,
+        'load_flags': 136446208,
         'method': 'GET',
         'priority': 4,
         'url': 'http://www.google.com/'
@@ -213,7 +214,7 @@ function painterTestURLRequest() {
     },
     {
       'params': {
-        'load_flags': 68223104,
+        'load_flags': 136446208,
         'method': 'GET',
         'priority': 4,
         'url': 'http://www.google.com/'
@@ -311,7 +312,7 @@ function painterTestURLRequest() {
       'params': {
         'source_dependency': {
           'id': 149,
-          'type': 11
+          'type': EventSourceType.HTTP_STREAM_JOB
         }
       },
       'phase': EventPhase.PHASE_NONE,
@@ -720,14 +721,14 @@ function painterTestURLRequest() {
   testCase.expectedText =
 't=1338864633224 [st=  0] +REQUEST_ALIVE  [dt=789]\n' +
 't=1338864633238 [st= 14]    URL_REQUEST_START_JOB  [dt=8]\n' +
-'                            --> load_flags = 68223104 ' +
+'                            --> load_flags = 136446208 ' +
     '(ENABLE_LOAD_TIMING | MAIN_FRAME | MAYBE_USER_GESTURE ' +
     '| VERIFY_EV_CERT)\n' +
 '                            --> method = "GET"\n' +
 '                            --> priority = 4\n' +
 '                            --> url = "http://www.google.com/"\n' +
 't=1338864633248 [st= 24]   +URL_REQUEST_START_JOB  [dt=279]\n' +
-'                            --> load_flags = 68223104 ' +
+'                            --> load_flags = 136446208 ' +
     '(ENABLE_LOAD_TIMING | MAIN_FRAME | MAYBE_USER_GESTURE ' +
     '| VERIFY_EV_CERT)\n' +
 '                            --> method = "GET"\n' +
@@ -806,7 +807,7 @@ function painterTestURLRequestIncomplete() {
     },
     {
       'params': {
-        'load_flags': 128,
+        'load_flags': 256,
         'method': 'GET',
         'priority': 4,
         'url': 'http://www.google.com/'
@@ -833,7 +834,7 @@ function painterTestURLRequestIncomplete() {
   testCase.expectedText =
 't=1338864633224 [st=  0] +REQUEST_ALIVE  [dt=?]\n' +
 't=1338864633356 [st=132]    URL_REQUEST_START_JOB  [dt=60]\n' +
-'                            --> load_flags = 128 (ENABLE_LOAD_TIMING)\n' +
+'                            --> load_flags = 256 (ENABLE_LOAD_TIMING)\n' +
 '                            --> method = "GET"\n' +
 '                            --> priority = 4\n' +
 '                            --> url = "http://www.google.com/"';
@@ -851,7 +852,7 @@ function painterTestURLRequestIncompleteFromLoadedLog() {
   testCase.expectedText =
 't=1338864633224 [st=  0] +REQUEST_ALIVE  [dt=789+]\n' +
 't=1338864633356 [st=132]    URL_REQUEST_START_JOB  [dt=60]\n' +
-'                            --> load_flags = 128 (ENABLE_LOAD_TIMING)\n' +
+'                            --> load_flags = 256 (ENABLE_LOAD_TIMING)\n' +
 '                            --> method = "GET"\n' +
 '                            --> priority = 4\n' +
 '                            --> url = "http://www.google.com/"\n' +
@@ -879,7 +880,7 @@ function painterTestNetError() {
     },
     {
       'params': {
-        'load_flags': 68223104,
+        'load_flags': 136446208,
         'method': 'GET',
         'priority': 4,
         'url': 'http://www.doesnotexistdomain.com/'
@@ -903,7 +904,7 @@ function painterTestNetError() {
     },
     {
       'params': {
-        'load_flags': 68223104,
+        'load_flags': 136446208,
         'method': 'GET',
         'priority': 4,
         'url': 'http://www.doesnotexistdomain.com/'
@@ -1038,14 +1039,16 @@ function painterTestNetError() {
   testCase.expectedText =
 't=1338864773894 [st=  0] +REQUEST_ALIVE  [dt=475]\n' +
 't=1338864773901 [st=  7]    URL_REQUEST_START_JOB  [dt=5]\n' +
-'                            --> load_flags = 68223104 (ENABLE_LOAD_TIMING | ' +
-    'MAIN_FRAME | MAYBE_USER_GESTURE | VERIFY_EV_CERT)\n' +
+'                            --> load_flags = 136446208 (' +
+        'ENABLE_LOAD_TIMING | MAIN_FRAME | MAYBE_USER_GESTURE ' +
+        '| VERIFY_EV_CERT)\n' +
 '                            --> method = "GET"\n' +
 '                            --> priority = 4\n' +
 '                            --> url = "http://www.doesnotexistdomain.com/"\n' +
 't=1338864773906 [st= 12]   +URL_REQUEST_START_JOB  [dt=245]\n' +
-'                            --> load_flags = 68223104 (ENABLE_LOAD_TIMING | ' +
-    'MAIN_FRAME | MAYBE_USER_GESTURE | VERIFY_EV_CERT)\n' +
+'                            --> load_flags = 136446208 (' +
+        'ENABLE_LOAD_TIMING | MAIN_FRAME | MAYBE_USER_GESTURE ' +
+        '| VERIFY_EV_CERT)\n' +
 '                            --> method = "GET"\n' +
 '                            --> priority = 4\n' +
 '                            --> url = "http://www.doesnotexistdomain.com/"\n' +
@@ -1077,7 +1080,7 @@ function painterTestHexEncodedBytes() {
       'params': {
         'source_dependency': {
           'id': 634,
-          'type': 4
+          'type': EventSourceType.CONNECT_JOB
         }
       },
       'phase': EventPhase.PHASE_BEGIN,
@@ -1139,7 +1142,7 @@ function painterTestHexEncodedBytes() {
       'params': {
         'source_dependency': {
           'id': 628,
-          'type': 11
+          'type': EventSourceType.HTTP_STREAM_JOB
         }
       },
       'phase': EventPhase.PHASE_BEGIN,
@@ -1264,9 +1267,10 @@ function painterTestCertVerifierJob() {
 }
 
 /**
- * Tests the formatting of proxy configurations.
+ * Tests the formatting of proxy configurations when using one proxy server for
+ * all URL schemes.
  */
-function painterTestProxyConfig() {
+function painterTestProxyConfigOneProxyAllSchemes() {
   var testCase = {};
   testCase.tickOffset = '1337911098481';
 
@@ -1306,6 +1310,60 @@ function painterTestProxyConfig() {
     '                               (1) Auto-detect\n' +
     '                               (2) PAC script: https://config/wpad.dat\n' +
     '                               (3) Proxy server: cache-proxy:3128\n' +
+    '                                   Bypass list: \n' +
+    '                                     *.local\n' +
+    '                                     foo\n' +
+    '                                     <local>\n' +
+    '                               Source: SYSTEM';
+
+  return testCase;
+}
+
+/**
+ * Tests the formatting of proxy configurations when using two proxy servers for
+ * all URL schemes.
+ */
+function painterTestProxyConfigTwoProxiesAllSchemes() {
+  var testCase = {};
+  testCase.tickOffset = '1337911098481';
+
+  testCase.logEntries = [
+    {
+      'params': {
+        'new_config': {
+          'auto_detect': true,
+          'bypass_list': [
+            '*.local',
+            'foo',
+            '<local>'
+          ],
+          'pac_url': 'https://config/wpad.dat',
+          'single_proxy': ['cache-proxy:3128', 'socks4://other:999'],
+          'source': 'SYSTEM'
+        },
+        'old_config': {
+          'auto_detect': true
+        }
+      },
+      'phase': EventPhase.PHASE_NONE,
+      'source': {
+        'id': 814,
+        'type': EventSourceType.NONE
+      },
+      'time': '954443578',
+      'type': EventType.PROXY_CONFIG_CHANGED
+    }
+  ];
+
+  testCase.expectedText =
+    't=1338865542059 [st=0]  PROXY_CONFIG_CHANGED\n' +
+    '                        --> old_config =\n' +
+    '                               Auto-detect\n' +
+    '                        --> new_config =\n' +
+    '                               (1) Auto-detect\n' +
+    '                               (2) PAC script: https://config/wpad.dat\n' +
+    '                               (3) Proxy server: [cache-proxy:3128, ' +
+        'socks4://other:999]\n' +
     '                                   Bypass list: \n' +
     '                                     *.local\n' +
     '                                     foo\n' +
@@ -1715,7 +1773,7 @@ function painterTestInProgressURLRequest() {
   testCase.logEntries = [
     {
       'params': {
-        'load_flags': 68223104,
+        'load_flags': 136446208,
         'load_state': LoadState.READING_RESPONSE,
         'method': 'GET',
         'url': 'http://www.MagicPonyShopper.com'
@@ -1759,7 +1817,7 @@ function painterTestInProgressURLRequest() {
 
   testCase.expectedText =
 't=1338864773994 [st=  0] +REQUEST_ALIVE  [dt=375]\n' +
-'                          --> load_flags = 68223104 ' +
+'                          --> load_flags = 136446208 ' +
     '(ENABLE_LOAD_TIMING | MAIN_FRAME | MAYBE_USER_GESTURE ' +
     '| VERIFY_EV_CERT)\n' +
 '                          --> load_state = ' + LoadState.READING_RESPONSE +

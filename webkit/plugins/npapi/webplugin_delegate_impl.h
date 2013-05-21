@@ -135,7 +135,9 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
       unsigned long resource_id, int range_request_id) OVERRIDE;
   // End of WebPluginDelegate implementation.
 
-  bool IsWindowless() const { return windowless_ ; }
+  gfx::PluginWindowHandle windowed_handle() const { return windowed_handle_; }
+  bool IsWindowless() const { return windowless_; }
+  PluginInstance* instance() { return instance_.get(); }
   gfx::Rect GetRect() const { return window_rect_; }
   gfx::Rect GetClipRect() const { return clip_rect_; }
 
@@ -197,16 +199,6 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
   // and all callers will use the Paint defined above.
   void CGPaint(CGContextRef context, const gfx::Rect& rect);
 #endif  // OS_MACOSX && !USE_AURA
-
-  gfx::PluginWindowHandle windowed_handle() const {
-    return windowed_handle_;
-  }
-
-#if defined(OS_MACOSX)
-  // Allow setting a "fake" window handle to associate this plug-in with
-  // an IOSurface in the browser. Used for accelerated drawing surfaces.
-  void set_windowed_handle(gfx::PluginWindowHandle handle);
-#endif
 
 #if defined(USE_X11)
   void SetWindowlessShmPixmap(XID shm_pixmap) {
@@ -295,8 +287,6 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
   // to HandleInputEvent.
   bool PlatformHandleInputEvent(const WebKit::WebInputEvent& event,
                                 WebKit::WebCursorInfo* cursor_info);
-
-  PluginInstance* instance() { return instance_.get(); }
 
   // Closes down and destroys our plugin instance.
   void DestroyInstance();
@@ -431,7 +421,6 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
 
   CALayer* layer_;  // Used for CA drawing mode. Weak, retained by plug-in.
   WebPluginAcceleratedSurface* surface_;  // Weak ref.
-  bool composited_;  // If CA plugin, whether it's rendering via compositor.
   CARenderer* renderer_;  // Renders layer_ to surface_.
   scoped_ptr<base::RepeatingTimer<WebPluginDelegateImpl> > redraw_timer_;
 

@@ -9,12 +9,14 @@
     // TODO(vadimt): Replace <all_urls> with real URL patterns once we know
     // them.
     "<all_urls>",
-    "experimental",
-    "alarms"
+    "notifications",
+    "alarms",
+    "storage",
+    "tabs"
   ],
   "manifest_version": 2,
   "background": {
-    "scripts": ["background.js"],
+    "scripts": ["utility.js", "background.js"],
     "persistent": false
   }
 }

@@ -126,7 +126,8 @@ MessageType GetStatusInfo(ProfileSyncService* service,
   if (signin.GetAuthenticatedUsername().empty())
     return PRE_SYNCED;
 
-  if (!service || service->IsManaged() || service->HasSyncSetupCompleted()) {
+  if (!service || service->IsManaged() || service->HasSyncSetupCompleted() ||
+      service->IsStartSuppressed()) {
     // The order or priority is going to be: 1. Unrecoverable errors.
     // 2. Auth errors. 3. Protocol errors. 4. Passphrase errors.
 
@@ -171,7 +172,7 @@ MessageType GetStatusInfo(ProfileSyncService* service,
         return SYNC_ERROR;
       }
 
-      // Now finally passphrase error.
+      // Check for a passphrase error.
       if (service->IsPassphraseRequired()) {
         if (service->IsPassphraseRequiredForDecryption()) {
           // TODO(lipalani) : Ask tim if this is still needed.
@@ -187,6 +188,18 @@ MessageType GetStatusInfo(ProfileSyncService* service,
           }
           return SYNC_PROMO;
         }
+      }
+
+      // Check to see if sync has been disabled via the dasboard and needs to be
+      // set up once again.
+      if (service->IsStartSuppressed() &&
+          status.sync_protocol_error.error_type == syncer::NOT_MY_BIRTHDAY) {
+        if (status_label) {
+          status_label->assign(GetSyncedStateStatusLabel(service,
+                                                         signin,
+                                                         style));
+        }
+        return PRE_SYNCED;
       }
     }
 

@@ -61,8 +61,6 @@ class VIEWS_EXPORT WidgetDelegate {
 
   virtual ui::AccessibilityTypes::Role GetAccessibleWindowRole() const;
 
-  virtual ui::AccessibilityTypes::State GetAccessibleWindowState() const;
-
   // Returns the title to be read with screen readers.
   virtual string16 GetAccessibleWindowTitle() const;
 
@@ -71,6 +69,10 @@ class VIEWS_EXPORT WidgetDelegate {
 
   // Returns true if the window should show a title in the title bar.
   virtual bool ShouldShowWindowTitle() const;
+
+  // Returns true if the window should handle standard system commands, such as
+  // close, minimize, maximize.
+  virtual bool ShouldHandleSystemCommands() const;
 
   // Returns the app icon for the window. On Windows, this is the ICON_BIG used
   // in Alt-Tab list and Win7's taskbar.

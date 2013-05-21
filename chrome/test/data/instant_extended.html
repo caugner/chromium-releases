@@ -3,12 +3,17 @@
     <script>
 
 var apiHandle;
-var onnativesuggestioncalls = 0;
-var onsubmitcalls = 0;
+var newTabPageHandle;
 var savedUserText = null;
 var suggestionIndex = -1;
 var suggestions = ["result 1", "result 2", "result 3"];
 var suggestion;
+var behavior = 2;
+var onMostVisitedChangedCalls = 0;
+var mostVisitedItemsCount = 0;
+var firstMostVisitedItemId = 0;
+var onNativeSuggestionsCalls = 0;
+var onChangeCalls = 0;
 
 function getApiHandle() {
   if (window.navigator && window.navigator.searchBox)
@@ -18,21 +23,32 @@ function getApiHandle() {
   return null;
 }
 
+function getNewTabPageHandle() {
+  if (window.navigator && window.navigator.embeddedSearch &&
+      window.navigator.embeddedSearch.newTabPage)
+    return window.navigator.embeddedSearch.newTabPage;
+  if (window.chrome && window.chrome.embeddedSearch &&
+      window.chrome.embeddedSearch.newTabPage)
+    return window.chrome.embeddedSearch.newTabPage;
+  return null;
+}
+
 function handleNativeSuggestions() {
-  onnativesuggestioncalls++;
+  onNativeSuggestionsCalls++;
   // Showing the loader at 100% height.
-  apiHandle.show(2 /* QUERY_SUGGESTIONS */);
+  apiHandle.showOverlay();
 }
 
 function handleSubmit() {
-  onsubmitcalls++;
+  location.hash = 'q=' + encodeURIComponent(apiHandle.value);
 }
 
 function handleOnChange() {
+  onChangeCalls++;
   savedUserText = apiHandle.value;
   suggestionIndex = -1;
   if (suggestion) {
-    apiHandle.setAutocompleteText(suggestion, 2);
+    apiHandle.setAutocompleteText(suggestion, behavior);
     // Ensure this is only called once for this suggestion.
     suggestion = null;
   }
@@ -67,15 +83,29 @@ function handleKeyPress(event) {
   }
 }
 
+function handleMostVisitedChange() {
+  onMostVisitedChangedCalls++;
+  var items = newTabPageHandle.mostVisited;
+  if (items) {
+    mostVisitedItemsCount = items.length;
+    firstMostVisitedItemId = items[0] ? items[0].rid : 0;
+  }
+}
+
 function setUp() {
   apiHandle = getApiHandle();
+  newTabPageHandle = getNewTabPageHandle();
   apiHandle.onnativesuggestions = handleNativeSuggestions;
   apiHandle.onsubmit = handleSubmit;
   apiHandle.onchange = handleOnChange;
   apiHandle.onkeypress = handleKeyPress;
+  newTabPageHandle.onmostvisitedchange = handleMostVisitedChange;
   if (apiHandle.value) {
     handleNativeSuggestions();
     handleOnChange();
+  }
+  if (newTabPageHandle.mostVisited && newTabPageHandle.mostVisited.length) {
+    handleMostVisitedChange();
   }
 }
 

@@ -18,7 +18,9 @@
 #include "chrome/browser/chromeos/cros/network_library_impl_stub.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "chromeos/network/cros_network_functions.h"
+#include "chromeos/network/network_state_handler.h"
 #include "content/public/browser/browser_thread.h"
+#include "grit/ash_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/url_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -91,12 +93,6 @@ namespace {
 // retries count once cellular device with SIM card is initialized.
 // If cellular device doesn't have SIM card, then retries are never used.
 const int kDefaultSimUnlockRetriesCount = 999;
-
-// Redirect extension url for POST-ing url parameters to mobile account status
-// sites.
-const char kRedirectExtensionPage[] =
-    "chrome-extension://iadeocfgjdjdmpenejdbfeaocpbikmab/redirect.html?"
-    "autoPost=1";
 
 ////////////////////////////////////////////////////////////////////////////////
 // Misc.
@@ -448,6 +444,13 @@ void Network::AttemptConnection(const base::Closure& closure) {
   // By default, just invoke the closure right away.  Some subclasses
   // (Wifi, VPN, etc.) override to do more work.
   closure.Run();
+}
+
+void Network::set_connecting() {
+  state_ = STATE_CONNECT_REQUESTED;
+  // Set the connecting network in NetworkStateHandler for the status area UI.
+  if (NetworkStateHandler::IsInitialized())
+    NetworkStateHandler::Get()->SetConnectingNetwork(service_path());
 }
 
 void Network::SetProfilePath(const std::string& profile_path) {
@@ -856,6 +859,7 @@ void CellularApn::Set(const DictionaryValue& dict) {
 CellularNetwork::CellularNetwork(const std::string& service_path)
     : WirelessNetwork(service_path, TYPE_CELLULAR),
       activate_over_non_cellular_network_(false),
+      out_of_credits_(false),
       activation_state_(ACTIVATION_STATE_UNKNOWN),
       network_technology_(NETWORK_TECHNOLOGY_UNKNOWN),
       roaming_state_(ROAMING_STATE_UNKNOWN),
@@ -875,6 +879,12 @@ bool CellularNetwork::StartActivation() {
   // the process hasn't started yet.
   activation_state_ = ACTIVATION_STATE_ACTIVATING;
   return true;
+}
+
+void CellularNetwork::CompleteActivation() {
+  if (!EnsureCrosLoaded())
+    return;
+  CrosCompleteCellularActivation(service_path());
 }
 
 void CellularNetwork::SetApn(const CellularApn& apn) {
@@ -897,22 +907,8 @@ bool CellularNetwork::SupportsActivation() const {
 }
 
 bool CellularNetwork::NeedsActivation() const {
-  return (activation_state() != ACTIVATION_STATE_ACTIVATED &&
-          activation_state() != ACTIVATION_STATE_UNKNOWN);
-}
-
-GURL CellularNetwork::GetAccountInfoUrl() const {
-  if (!post_data_.length())
-    return GURL(payment_url());
-
-  GURL base_url(kRedirectExtensionPage);
-  GURL temp_url = net::AppendQueryParameter(base_url,
-                                            "post_data",
-                                            post_data_);
-  GURL redir_url = net::AppendQueryParameter(temp_url,
-                                             "formUrl",
-                                             payment_url());
-  return redir_url;
+  return (activation_state() == ACTIVATION_STATE_NOT_ACTIVATED ||
+          activation_state() == ACTIVATION_STATE_PARTIALLY_ACTIVATED);
 }
 
 std::string CellularNetwork::GetNetworkTechnologyString() const {

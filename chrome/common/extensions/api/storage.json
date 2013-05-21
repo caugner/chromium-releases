@@ -6,9 +6,6 @@
   {
     "namespace": "storage",
     "unprivileged": true,
-    "compiler_options": {
-      "generate_type_functions": true
-    },
     "types": [
       {
         "id": "StorageChange",
@@ -29,6 +26,7 @@
       {
         "id": "StorageArea",
         "type": "object",
+        "js_module": "StorageArea",
         "functions": [
           {
             "name": "get",

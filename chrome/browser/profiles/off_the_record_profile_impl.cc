@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
@@ -23,7 +23,6 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -42,19 +41,20 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
-#include "net/base/transport_security_state.h"
 #include "net/http/http_server_properties.h"
+#include "net/http/transport_security_state.h"
 #include "webkit/database/database_tracker.h"
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#endif
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/preferences.h"
@@ -88,6 +88,8 @@ OffTheRecordProfileImpl::OffTheRecordProfileImpl(Profile* real_profile)
       start_time_(Time::Now()),
       zoom_callback_(base::Bind(&OffTheRecordProfileImpl::OnZoomLevelChanged,
                                 base::Unretained(this))) {
+  // Register on BrowserContext.
+  components::UserPrefs::Set(this, prefs_);
 }
 
 void OffTheRecordProfileImpl::Init() {
@@ -98,9 +100,9 @@ void OffTheRecordProfileImpl::Init() {
   DCHECK_NE(IncognitoModePrefs::DISABLED,
             IncognitoModePrefs::GetAvailability(profile_->GetPrefs()));
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
   UseSystemProxy();
-#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
   // TODO(oshima): Remove the need to eagerly initialize the request context
   // getter. chromeos::OnlineAttempt is illegally trying to access this
@@ -137,13 +139,6 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
     io_data_.GetResourceContextNoInit());
 #endif
 
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(this)->extension_service();
-  if (extension_service && extension_service->extensions_enabled()) {
-    extension_service->extension_prefs()->
-        ClearIncognitoSessionOnlyContentSettings();
-  }
-
   ProfileDependencyManager::GetInstance()->DestroyProfileServices(this);
 
   BrowserThread::PostTask(
@@ -171,7 +166,7 @@ void OffTheRecordProfileImpl::InitHostZoomMap() {
   parent_host_zoom_map->AddZoomLevelChangedCallback(zoom_callback_);
 }
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
 void OffTheRecordProfileImpl::UseSystemProxy() {
   // Force the use of the system-assigned proxy when off the record.
   const char kProxyMode[] = "mode";
@@ -185,7 +180,7 @@ void OffTheRecordProfileImpl::UseSystemProxy() {
   dict->SetString(kProxyServer, "");
   dict->SetString(kProxyBypassList, "");
 }
-#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 std::string OffTheRecordProfileImpl::GetProfileName() {
   // Incognito profile should not return the profile name.
@@ -258,19 +253,8 @@ net::URLRequestContextGetter* OffTheRecordProfileImpl::GetRequestContext() {
 }
 
 net::URLRequestContextGetter* OffTheRecordProfileImpl::CreateRequestContext(
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        blob_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        file_system_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        developer_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_protocol_handler,
-    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-        chrome_devtools_protocol_handler) {
-  return io_data_.CreateMainRequestContextGetter(blob_protocol_handler.Pass(),
-      file_system_protocol_handler.Pass(), developer_protocol_handler.Pass(),
-      chrome_protocol_handler.Pass(), chrome_devtools_protocol_handler.Pass());
+    content::ProtocolHandlerMap* protocol_handlers) {
+  return io_data_.CreateMainRequestContextGetter(protocol_handlers);
 }
 
 net::URLRequestContextGetter*
@@ -310,20 +294,9 @@ net::URLRequestContextGetter*
     OffTheRecordProfileImpl::CreateRequestContextForStoragePartition(
         const base::FilePath& partition_path,
         bool in_memory,
-        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-            blob_protocol_handler,
-        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-            file_system_protocol_handler,
-        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-            developer_protocol_handler,
-        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-            chrome_protocol_handler,
-        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-            chrome_devtools_protocol_handler) {
+        content::ProtocolHandlerMap* protocol_handlers) {
   return io_data_.CreateIsolatedAppRequestContextGetter(
-      partition_path, in_memory, blob_protocol_handler.Pass(),
-      file_system_protocol_handler.Pass(), developer_protocol_handler.Pass(),
-      chrome_protocol_handler.Pass(), chrome_devtools_protocol_handler.Pass());
+      partition_path, in_memory, protocol_handlers);
 }
 
 content::ResourceContext* OffTheRecordProfileImpl::GetResourceContext() {
@@ -491,13 +464,19 @@ Profile* Profile::CreateOffTheRecordProfile() {
   return profile;
 }
 
-void OffTheRecordProfileImpl::OnZoomLevelChanged(const std::string& host) {
-  if (host.empty())
-    return;
-
+void OffTheRecordProfileImpl::OnZoomLevelChanged(
+    const HostZoomMap::ZoomLevelChange& change) {
   HostZoomMap* host_zoom_map = HostZoomMap::GetForBrowserContext(this);
-  HostZoomMap* parent_host_zoom_map =
-      HostZoomMap::GetForBrowserContext(profile_);
-  double level = parent_host_zoom_map->GetZoomLevel(host);
-  host_zoom_map->SetZoomLevel(host, level);
+  switch (change.mode) {
+    case HostZoomMap::ZOOM_CHANGED_TEMPORARY_ZOOM:
+       return;
+    case HostZoomMap::ZOOM_CHANGED_FOR_HOST:
+       host_zoom_map->SetZoomLevelForHost(change.host, change.zoom_level);
+       return;
+    case HostZoomMap::ZOOM_CHANGED_FOR_SCHEME_AND_HOST:
+       host_zoom_map->SetZoomLevelForHostAndScheme(change.scheme,
+           change.host,
+           change.zoom_level);
+       return;
+  }
 }

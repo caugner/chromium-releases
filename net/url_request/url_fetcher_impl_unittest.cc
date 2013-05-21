@@ -15,8 +15,8 @@
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/network_change_notifier.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
 #include "net/test/test_server.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -235,6 +235,22 @@ class URLFetcherPostTest : public URLFetcherTest {
 
   // URLFetcherDelegate:
   virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+};
+
+// Version of URLFetcherTest that does a POST of a file using
+// SetUploadDataStream
+class URLFetcherPostFileTest : public URLFetcherTest {
+ public:
+  URLFetcherPostFileTest();
+
+  // URLFetcherTest:
+  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+
+  // URLFetcherDelegate:
+  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+
+ private:
+  base::FilePath path_;
 };
 
 // Version of URLFetcherTest that does a POST instead with empty upload body
@@ -466,7 +482,7 @@ class URLFetcherMultipleAttemptTest : public URLFetcherTest {
 class URLFetcherFileTest : public URLFetcherTest {
  public:
   URLFetcherFileTest() : take_ownership_of_file_(false),
-                         expected_file_error_(base::PLATFORM_FILE_OK) {}
+                         expected_file_error_(OK) {}
 
   void CreateFetcherForFile(const GURL& url, const base::FilePath& file_path);
   void CreateFetcherForTempFile(const GURL& url);
@@ -483,9 +499,8 @@ class URLFetcherFileTest : public URLFetcherTest {
   // disowning prevents the file from being deleted.
   bool take_ownership_of_file_;
 
-  // Expected file error code for the test.
-  // PLATFORM_FILE_OK when expecting success.
-  base::PlatformFileError expected_file_error_;
+  // Expected file error code for the test.  OK when expecting success.
+  int expected_file_error_;
 };
 
 void URLFetcherPostTest::CreateFetcher(const GURL& url) {
@@ -501,6 +516,36 @@ void URLFetcherPostTest::OnURLFetchComplete(const URLFetcher* source) {
   std::string data;
   EXPECT_TRUE(source->GetResponseAsString(&data));
   EXPECT_EQ(std::string("bobsyeruncle"), data);
+  URLFetcherTest::OnURLFetchComplete(source);
+}
+
+URLFetcherPostFileTest::URLFetcherPostFileTest() {
+  PathService::Get(base::DIR_SOURCE_ROOT, &path_);
+  path_ = path_.Append(FILE_PATH_LITERAL("net"));
+  path_ = path_.Append(FILE_PATH_LITERAL("data"));
+  path_ = path_.Append(FILE_PATH_LITERAL("url_request_unittest"));
+  path_ = path_.Append(FILE_PATH_LITERAL("BullRunSpeech.txt"));
+}
+
+void URLFetcherPostFileTest::CreateFetcher(const GURL& url) {
+  fetcher_ = new URLFetcherImpl(url, URLFetcher::POST, this);
+  fetcher_->SetRequestContext(new ThrottlingTestURLRequestContextGetter(
+      io_message_loop_proxy(), request_context()));
+  fetcher_->SetUploadFilePath("application/x-www-form-urlencoded",
+                              path_,
+                              base::MessageLoopProxy::current());
+  fetcher_->Start();
+}
+
+void URLFetcherPostFileTest::OnURLFetchComplete(const URLFetcher* source) {
+  int64 size = 0;
+  ASSERT_EQ(true, file_util::GetFileSize(path_, &size));
+  scoped_array<char> expected(new char[size]);
+  ASSERT_EQ(size, file_util::ReadFile(path_, expected.get(), size));
+
+  std::string data;
+  EXPECT_TRUE(source->GetResponseAsString(&data));
+  EXPECT_EQ(std::string(&expected[0], size), data);
   URLFetcherTest::OnURLFetchComplete(source);
 }
 
@@ -806,11 +851,11 @@ void URLFetcherFileTest::CreateFetcherForTempFile(const GURL& url) {
 }
 
 void URLFetcherFileTest::OnURLFetchComplete(const URLFetcher* source) {
-  if (expected_file_error_ == base::PLATFORM_FILE_OK) {
+  if (expected_file_error_ == OK) {
     EXPECT_TRUE(source->GetStatus().is_success());
     EXPECT_EQ(source->GetResponseCode(), 200);
 
-    base::PlatformFileError error_code = base::PLATFORM_FILE_OK;
+    int error_code = OK;
     EXPECT_FALSE(fetcher_->FileErrorOccurred(&error_code));
 
     EXPECT_TRUE(source->GetResponseAsFilePath(
@@ -818,7 +863,7 @@ void URLFetcherFileTest::OnURLFetchComplete(const URLFetcher* source) {
 
     EXPECT_TRUE(file_util::ContentsEqual(expected_file_, file_path_));
   } else {
-    base::PlatformFileError error_code = base::PLATFORM_FILE_OK;
+    int error_code = OK;
     EXPECT_TRUE(fetcher_->FileErrorOccurred(&error_code));
     EXPECT_EQ(expected_file_error_, error_code);
   }
@@ -994,6 +1039,16 @@ TEST_F(URLFetcherMockDnsTest, RetryOnNetworkChangedAndSucceed) {
 }
 
 TEST_F(URLFetcherPostTest, Basic) {
+  TestServer test_server(TestServer::TYPE_HTTP,
+                         TestServer::kLocalhost,
+                         base::FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  CreateFetcher(test_server.GetURL("echo"));
+  MessageLoop::current()->Run();
+}
+
+TEST_F(URLFetcherPostFileTest, Basic) {
   TestServer test_server(TestServer::TYPE_HTTP,
                          TestServer::kLocalhost,
                          base::FilePath(kDocRoot));
@@ -1356,7 +1411,7 @@ TEST_F(URLFetcherFileTest, TryToOverwriteDirectory) {
   ASSERT_TRUE(file_util::PathExists(file_path_));
 
   // Get a small file.
-  expected_file_error_ = base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
+  expected_file_error_ = ERR_ACCESS_DENIED;
   expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
   CreateFetcherForFile(
       test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),

@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -20,8 +20,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/value_conversions.h"
 #include "build/build_config.h"
-
-using content::BrowserContext;
 
 namespace {
 
@@ -58,9 +56,6 @@ PrefService::PrefService(
   pref_registry_->SetRegistrationCallback(
       base::Bind(&PrefService::AddRegisteredPreference,
                  base::Unretained(this)));
-  pref_registry_->SetUnregistrationCallback(
-      base::Bind(&PrefService::RemoveRegisteredPreference,
-                 base::Unretained(this)));
   AddInitialPreferences();
 
   InitFromStorage(async);
@@ -69,10 +64,8 @@ PrefService::PrefService(
 PrefService::~PrefService() {
   DCHECK(CalledOnValidThread());
 
-  // Remove our callbacks, setting NULL ones.
+  // Remove our callback, setting a NULL one.
   pref_registry_->SetRegistrationCallback(PrefRegistry::RegistrationCallback());
-  pref_registry_->SetUnregistrationCallback(
-      PrefRegistry::UnregistrationCallback());
 
   // Reset pointers so accesses after destruction reliably crash.
   pref_value_store_.reset();
@@ -278,6 +271,12 @@ const base::Value* PrefService::GetUserPrefValue(const char* path) const {
   return value;
 }
 
+void PrefService::SetDefaultPrefValue(const char* path,
+                                      base::Value* value) {
+  DCHECK(CalledOnValidThread());
+  pref_registry_->SetDefaultPrefValue(path, value);
+}
+
 const base::Value* PrefService::GetDefaultPrefValue(const char* path) const {
   DCHECK(CalledOnValidThread());
   // Lookup the preference in the default store.
@@ -354,14 +353,6 @@ void PrefService::AddRegisteredPreference(const char* path,
   }
   if (needs_empty_value)
     user_pref_store_->MarkNeedsEmptyValue(path);
-}
-
-// TODO(joi): We can get rid of this once the ability to unregister
-// prefs has been removed.
-void PrefService::RemoveRegisteredPreference(const char* path) {
-  DCHECK(CalledOnValidThread());
-
-  prefs_map_.erase(path);
 }
 
 void PrefService::ClearPref(const char* path) {

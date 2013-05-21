@@ -25,7 +25,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/base/accelerators/accelerator.h"
-#include "ui/views/widget/native_widget_win.h"
+#include "ui/views/widget/widget_observer.h"
 
 class AutomationProvider;
 class Browser;
@@ -39,7 +39,9 @@ class ViewProp;
 }
 
 namespace views {
+class View;
 class WebView;
+class Widget;
 }
 
 // This class serves as the container window for an external tab.
@@ -50,7 +52,7 @@ class ExternalTabContainerWin : public ExternalTabContainer,
                                 public content::WebContentsDelegate,
                                 public content::WebContentsObserver,
                                 public content::NotificationObserver,
-                                public views::NativeWidgetWin,
+                                public views::WidgetObserver,
                                 public ui::AcceleratorTarget,
                                 public InfoBarContainer::Delegate,
                                 public BlockedContentTabHelperDelegate {
@@ -79,9 +81,10 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual void Uninitialize() OVERRIDE;
   virtual bool Reinitialize(AutomationProvider* automation_provider,
                             AutomationResourceMessageFilter* filter,
-                            gfx::NativeWindow parent_window) OVERRIDE;
+                            HWND parent_window) OVERRIDE;
   virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual gfx::NativeView GetExternalTabNativeView() const OVERRIDE;
+  virtual HWND GetExternalTabHWND() const OVERRIDE;
+  virtual HWND GetContentHWND() const OVERRIDE;
   virtual void SetTabHandle(int handle) OVERRIDE;
   virtual int GetTabHandle() const OVERRIDE;
   virtual bool ExecuteContextMenuCommand(int command) OVERRIDE;
@@ -89,16 +92,6 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual void ProcessUnhandledAccelerator(const MSG& msg) OVERRIDE;
   virtual void FocusThroughTabTraversal(bool reverse,
                                         bool restore_focus_to_view) OVERRIDE;
-
-  // A helper method that tests whether the given window is an
-  // ExternalTabContainerWin window.
-  static bool IsExternalTabContainer(HWND window);
-
-  // A helper function that returns a pointer to the ExternalTabContainerWin
-  // instance associated with a native view.  Returns NULL if the window
-  // is not an ExternalTabContainerWin.
-  static ExternalTabContainer* GetExternalContainerFromNativeWindow(
-      gfx::NativeView native_window);
 
   // Overridden from content::WebContentsDelegate:
   virtual content::WebContents* OpenURLFromTab(
@@ -122,6 +115,7 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual void ContentsZoomChange(bool zoom_in) OVERRIDE;
   virtual void WebContentsCreated(content::WebContents* source_contents,
                                   int64 source_frame_id,
+                                  const string16& frame_name,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
@@ -177,7 +171,9 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   void UnregisterRenderViewHost(content::RenderViewHost* render_view_host);
 
   // Overridden from content::WebContentsObserver:
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual void RenderViewDeleted(
+      content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidFailProvisionalLoad(
       int64 frame_id,
       bool is_main_frame,
@@ -219,15 +215,10 @@ class ExternalTabContainerWin : public ExternalTabContainer,
  protected:
   virtual ~ExternalTabContainerWin();
 
-  // Overridden from views::NativeWidgetWin:
-  virtual bool PreHandleMSG(UINT message,
-                            WPARAM w_param,
-                            LPARAM l_param,
-                            LRESULT* result) OVERRIDE;
-  virtual void PostHandleMSG(UINT message,
-                             WPARAM w_param,
-                             LPARAM l_param) OVERRIDE;
-  virtual void OnFinalMessage(HWND window);
+  // WidgetObserver overrides.
+  virtual void OnWidgetCreated(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroyed(views::Widget* widget) OVERRIDE;
 
   bool InitNavigationInfo(NavigationInfo* nav_info,
                           content::NavigationType nav_type,
@@ -257,6 +248,7 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   // ExternalTabContainerWin.
   void SetupExternalTabView();
 
+  views::Widget* widget_;
   scoped_ptr<content::WebContents> web_contents_;
   scoped_refptr<AutomationProvider> automation_;
 
@@ -283,6 +275,11 @@ class ExternalTabContainerWin : public ExternalTabContainer,
 
   // whether top level URL requests are to be handled by the automation client.
   bool handle_top_level_requests_;
+
+  // Set to true if the host needs to get notified of all top level navigations
+  // in this page. This typically applies to hosts which would render the new
+  // page without chrome frame.
+  bool route_all_top_level_navigations_;
 
   // Contains ExternalTabContainers that have not been connected to as yet.
   static base::LazyInstance<PendingTabs> pending_tabs_;
@@ -321,11 +318,6 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   views::View* external_tab_view_;
 
   IPC::Message* unload_reply_message_;
-
-  // set to true if the host needs to get notified of all top level navigations
-  // in this page. This typically applies to hosts which would render the new
-  // page without chrome frame.
-  bool route_all_top_level_navigations_;
 
   scoped_ptr<ui::ViewProp> prop_;
 

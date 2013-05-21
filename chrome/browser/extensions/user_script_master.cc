@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/pickle.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -23,11 +23,12 @@
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/message_bundle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "extensions/common/extension_resource.h"
 
 using content::BrowserThread;
 
@@ -117,12 +118,12 @@ bool UserScriptMaster::ScriptReloader::ParseMetadataHeader(
       } else if (GetDeclarationValue(line, kDescriptionDeclaration, &value)) {
         script->set_description(value);
       } else if (GetDeclarationValue(line, kMatchDeclaration, &value)) {
-        URLPattern pattern(UserScript::kValidUserScriptSchemes);
+        URLPattern pattern(UserScript::ValidUserScriptSchemes());
         if (URLPattern::PARSE_SUCCESS != pattern.Parse(value))
           return false;
         script->add_url_pattern(pattern);
       } else if (GetDeclarationValue(line, kExcludeMatchDeclaration, &value)) {
-        URLPattern exclude(UserScript::kValidUserScriptSchemes);
+        URLPattern exclude(UserScript::ValidUserScriptSchemes());
         if (URLPattern::PARSE_SUCCESS != exclude.Parse(value))
           return false;
         script->add_exclude_url_pattern(exclude);
@@ -363,7 +364,8 @@ void UserScriptMaster::Observe(int type,
               extension->path(), LocaleInfo::GetDefaultLocale(extension));
       bool incognito_enabled = extensions::ExtensionSystem::Get(profile_)->
           extension_service()->IsIncognitoEnabled(extension->id());
-      const UserScriptList& scripts = extension->content_scripts();
+      const UserScriptList& scripts =
+          ContentScriptsInfo::GetContentScripts(extension);
       for (UserScriptList::const_iterator iter = scripts.begin();
            iter != scripts.end(); ++iter) {
         user_scripts_.push_back(*iter);

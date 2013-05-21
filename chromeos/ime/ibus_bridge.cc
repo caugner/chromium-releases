@@ -4,10 +4,15 @@
 
 #include "chromeos/ime/ibus_bridge.h"
 
+#include <map>
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 
 namespace chromeos {
+
+namespace {
+void NoOpCreateEngineReply(const dbus::ObjectPath& unused_path) {}
+}  // namespace
 
 static IBusBridge* g_ibus_bridge = NULL;
 
@@ -31,40 +36,64 @@ class IBusBridgeImpl : public IBusBridge {
   }
 
   // IBusBridge override.
-  void SetInputContextHandler(
+  virtual void SetInputContextHandler(
       IBusInputContextHandlerInterface* handler) OVERRIDE {
     input_context_handler_ = handler;
   }
 
   // IBusBridge override.
-  IBusEngineHandlerInterface* GetEngineHandler() const {
+  virtual IBusEngineHandlerInterface* GetEngineHandler() const OVERRIDE {
     return engine_handler_;
   }
 
   // IBusBridge override.
-  void SetEngineHandler(IBusEngineHandlerInterface* handler) {
+  virtual void SetEngineHandler(IBusEngineHandlerInterface* handler) OVERRIDE {
     engine_handler_ = handler;
   }
 
   // IBusBridge override.
-  IBusPanelCandidateWindowHandlerInterface* GetCandidateWindowHandler() const {
+  virtual IBusPanelCandidateWindowHandlerInterface*
+  GetCandidateWindowHandler() const OVERRIDE {
     return candidate_window_handler_;
   }
 
   // IBusBridge override.
-  void SetCandidateWindowHandler(
-      IBusPanelCandidateWindowHandlerInterface* handler) {
+  virtual void SetCandidateWindowHandler(
+      IBusPanelCandidateWindowHandlerInterface* handler) OVERRIDE {
     candidate_window_handler_ = handler;
   }
 
   // IBusBridge override.
-  IBusPanelPropertyHandlerInterface* GetPanelHandler() const {
+  virtual IBusPanelPropertyHandlerInterface*
+      GetPropertyHandler() const OVERRIDE {
     return panel_handler_;
   }
 
   // IBusBridge override.
-  void SetPanelHandler(IBusPanelPropertyHandlerInterface* handler) {
+  virtual void SetPropertyHandler(
+      IBusPanelPropertyHandlerInterface* handler) OVERRIDE {
     panel_handler_ = handler;
+  }
+
+  virtual void SetCreateEngineHandler(
+      const std::string& engine_id,
+      const IBusEngineFactoryService::CreateEngineHandler& handler) OVERRIDE {
+    create_engine_handler_map_[engine_id] = handler;
+  }
+
+  // IBusBridge override.
+  virtual void UnsetCreateEngineHandler(const std::string& engine_id) OVERRIDE {
+    create_engine_handler_map_.erase(engine_id);
+  }
+
+  // IBusBridge override.
+  virtual void CreateEngine(const std::string& engine_id) OVERRIDE {
+    // TODO(nona): Change following condition to DCHECK once all legacy IME is
+    // migrated to extension IME.
+    if (create_engine_handler_map_[engine_id].is_null())
+      return;
+    create_engine_handler_map_[engine_id].Run(
+        base::Bind(&NoOpCreateEngineReply));
   }
 
  private:
@@ -72,6 +101,8 @@ class IBusBridgeImpl : public IBusBridge {
   IBusEngineHandlerInterface* engine_handler_;
   IBusPanelCandidateWindowHandlerInterface* candidate_window_handler_;
   IBusPanelPropertyHandlerInterface* panel_handler_;
+  std::map<std::string, IBusEngineFactoryService::CreateEngineHandler>
+      create_engine_handler_map_;
 
   DISALLOW_COPY_AND_ASSIGN(IBusBridgeImpl);
 };
@@ -99,8 +130,6 @@ void IBusBridge::Shutdown() {
 
 // static.
 IBusBridge* IBusBridge::Get() {
-  CHECK(g_ibus_bridge)
-      << "IBusBrige::Get() called before Initialized() or after Shutdown().";
   return g_ibus_bridge;
 }
 

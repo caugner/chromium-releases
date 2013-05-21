@@ -138,7 +138,8 @@ cr.define('options.internet', function() {
       });
 
       $('view-account-details').addEventListener('click', function(event) {
-        chrome.send('showMorePlanInfo');
+        var data = $('connection-state').data;
+        chrome.send('showMorePlanInfo', [data.servicePath]);
         OptionsPage.closeOverlay();
       });
 
@@ -274,6 +275,18 @@ cr.define('options.internet', function() {
         this.handleNameServerTypeChange_);
       $('user-dns-radio').addEventListener('click',
         this.handleNameServerTypeChange_);
+
+      // We only load this string if we have the string data available
+      // because the proxy settings page on the login screen re-uses the
+      // proxy sub-page from the internet options, and it doesn't ever
+      // show the DNS settings, so we don't need this string there.
+      // The string isn't available because
+      // chrome://settings-frame/strings.js (where the string is
+      // stored) is not accessible from the login screen.
+      if (loadTimeData.data) {
+        $('google-dns-label').innerHTML =
+          loadTimeData.getString('googleNameServers');
+      }
     },
 
     /**
@@ -386,7 +399,7 @@ cr.define('options.internet', function() {
      * @private
      */
     updateProxyBannerVisibility_: function() {
-      var bannerDiv = $('info-banner');
+      var bannerDiv = $('network-proxy-info-banner');
       // Show banner and determine its message if necessary.
       var controlledBy = $('direct-proxy').controlledBy;
       if (!controlledBy || controlledBy == '') {
@@ -448,21 +461,21 @@ cr.define('options.internet', function() {
     enableManualProxy_: function(e) {
       $('advanced-config').hidden = false;
       $('ignored-host-list').redraw();
-      var all_disabled = $('manual-proxy').disabled;
-      $('new-host').disabled = all_disabled;
-      $('remove-host').disabled = all_disabled;
-      $('add-host').disabled = all_disabled;
-      $('proxy-all-protocols').disabled = all_disabled;
-      $('proxy-host-name').disabled = all_disabled;
-      $('proxy-host-port').disabled = all_disabled;
-      $('proxy-host-single-name').disabled = all_disabled;
-      $('proxy-host-single-port').disabled = all_disabled;
-      $('secure-proxy-host-name').disabled = all_disabled;
-      $('secure-proxy-port').disabled = all_disabled;
-      $('ftp-proxy').disabled = all_disabled;
-      $('ftp-proxy-port').disabled = all_disabled;
-      $('socks-host').disabled = all_disabled;
-      $('socks-port').disabled = all_disabled;
+      var allDisabled = $('manual-proxy').disabled;
+      $('new-host').disabled = allDisabled;
+      $('remove-host').disabled = allDisabled;
+      $('add-host').disabled = allDisabled;
+      $('proxy-all-protocols').disabled = allDisabled;
+      $('proxy-host-name').disabled = allDisabled;
+      $('proxy-host-port').disabled = allDisabled;
+      $('proxy-host-single-name').disabled = allDisabled;
+      $('proxy-host-single-port').disabled = allDisabled;
+      $('secure-proxy-host-name').disabled = allDisabled;
+      $('secure-proxy-port').disabled = allDisabled;
+      $('ftp-proxy').disabled = allDisabled;
+      $('ftp-proxy-port').disabled = allDisabled;
+      $('socks-host').disabled = allDisabled;
+      $('socks-port').disabled = allDisabled;
       $('proxy-config').disabled = true;
     },
   };

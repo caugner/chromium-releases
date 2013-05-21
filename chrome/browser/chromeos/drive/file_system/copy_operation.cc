@@ -15,6 +15,7 @@
 #include "chrome/browser/chromeos/drive/drive_scheduler.h"
 #include "chrome/browser/chromeos/drive/file_system/move_operation.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
+#include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
 #include "chrome/browser/google_apis/drive_upload_error.h"
 #include "chrome/browser/google_apis/drive_uploader.h"
 #include "content/public/browser/browser_thread.h"
@@ -227,16 +228,14 @@ void CopyOperation::OnCopyHostedDocumentCompleted(
   }
   DCHECK(resource_entry);
 
-  // |entry| was added in the root directory on the server, so we should
-  // first add it to |root_| to mirror the state and then move it to the
+  // The entry was added in the root directory on the server, so we should
+  // first add it to the root to mirror the state and then move it to the
   // destination directory by MoveEntryFromRootDirectory().
-  metadata_->AddEntryToDirectory(
-      base::FilePath(kDriveRootDirectory),
-      resource_entry.Pass(),
-      base::Bind(&CopyOperation::MoveEntryFromRootDirectory,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 dir_path,
-                 callback));
+  metadata_->AddEntry(ConvertResourceEntryToDriveEntryProto(*resource_entry),
+                      base::Bind(&CopyOperation::MoveEntryFromRootDirectory,
+                                 weak_ptr_factory_.GetWeakPtr(),
+                                 dir_path,
+                                 callback));
 }
 
 void CopyOperation::MoveEntryFromRootDirectory(
@@ -246,11 +245,11 @@ void CopyOperation::MoveEntryFromRootDirectory(
     const base::FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
-  DCHECK_EQ(kDriveRootDirectory, file_path.DirName().value());
+  DCHECK_EQ(util::kDriveMyDriveRootPath, file_path.DirName().value());
 
   // Return if there is an error or |dir_path| is the root directory.
   if (error != DRIVE_FILE_OK ||
-      directory_path == base::FilePath(kDriveRootDirectory)) {
+      directory_path == util::GetDriveMyDriveRootPath()) {
     callback.Run(error);
     return;
   }
@@ -363,7 +362,7 @@ void CopyOperation::StartFileUploadAfterGetEntryInfo(
   }
   DCHECK(entry_proto.get());
 
-  uploader_->UploadNewFile(GURL(entry_proto->upload_url()),
+  uploader_->UploadNewFile(entry_proto->resource_id(),
                            params.remote_file_path,
                            params.local_file_path,
                            params.remote_file_path.BaseName().value(),
@@ -383,8 +382,7 @@ void CopyOperation::OnTransferCompleted(
   DCHECK(!callback.is_null());
 
   if (error == google_apis::DRIVE_UPLOAD_OK && resource_entry.get()) {
-    drive_file_system_->AddUploadedFile(drive_path.DirName(),
-                                        resource_entry.Pass(),
+    drive_file_system_->AddUploadedFile(resource_entry.Pass(),
                                         file_path,
                                         callback);
   } else {

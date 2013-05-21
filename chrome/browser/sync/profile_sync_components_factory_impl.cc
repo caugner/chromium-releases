@@ -4,9 +4,9 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "chrome/browser/api/webdata/autofill_web_data_service.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/extensions/api/storage/settings_frontend.h"
-#include "chrome/browser/extensions/app_notification_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
@@ -25,7 +25,6 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
-#include "chrome/browser/sync/glue/app_notification_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
@@ -39,6 +38,7 @@
 #include "chrome/browser/sync/glue/password_change_processor.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
 #include "chrome/browser/sync/glue/password_model_associator.h"
+#include "chrome/browser/sync/glue/proxy_data_type_controller.h"
 #include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
@@ -52,25 +52,24 @@
 #include "chrome/browser/sync/glue/ui_data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
-#include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/syncable_service.h"
 
-using browser_sync::AppNotificationDataTypeController;
 using browser_sync::AutofillDataTypeController;
 using browser_sync::AutofillProfileDataTypeController;
 using browser_sync::BookmarkChangeProcessor;
 using browser_sync::BookmarkDataTypeController;
 using browser_sync::BookmarkModelAssociator;
 using browser_sync::DataTypeController;
+using browser_sync::DataTypeErrorHandler;
 using browser_sync::DataTypeManager;
 using browser_sync::DataTypeManagerImpl;
 using browser_sync::DataTypeManagerObserver;
@@ -80,6 +79,7 @@ using browser_sync::GenericChangeProcessor;
 using browser_sync::PasswordChangeProcessor;
 using browser_sync::PasswordDataTypeController;
 using browser_sync::PasswordModelAssociator;
+using browser_sync::ProxyDataTypeController;
 using browser_sync::SearchEngineDataTypeController;
 using browser_sync::SessionChangeProcessor;
 using browser_sync::SessionDataTypeController;
@@ -91,7 +91,6 @@ using browser_sync::TypedUrlChangeProcessor;
 using browser_sync::TypedUrlDataTypeController;
 using browser_sync::TypedUrlModelAssociator;
 using browser_sync::UIDataTypeController;
-using browser_sync::DataTypeErrorHandler;
 using content::BrowserThread;
 
 ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
@@ -100,8 +99,7 @@ ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
       command_line_(command_line),
       extension_system_(
           extensions::ExtensionSystemFactory::GetForProfile(profile)),
-      web_data_service_(WebDataServiceFactory::GetForProfile(
-          profile_, Profile::IMPLICIT_ACCESS)) {
+      web_data_service_(AutofillWebDataService::FromBrowserContext(profile_)) {
 }
 
 ProfileSyncComponentsFactoryImpl::~ProfileSyncComponentsFactoryImpl() {
@@ -146,26 +144,42 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
         new TypedUrlDataTypeController(this, profile_, pss));
   }
 
+  // Unless it is explicitly disabled, history delete directive sync is
+  // enabled whenever full history sync is enabled.
+  if (command_line_->HasSwitch(switches::kHistoryEnableFullHistorySync) &&
+      !command_line_->HasSwitch(
+          switches::kDisableSyncHistoryDeleteDirectives)) {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(
+            syncer::HISTORY_DELETE_DIRECTIVES, this, profile_, pss));
+  }
+
   // Session sync is enabled by default.  Register unless explicitly disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncTabs)) {
     pss->RegisterDataTypeController(
+        new ProxyDataTypeController(syncer::PROXY_TABS));
+    pss->RegisterDataTypeController(
         new SessionDataTypeController(this, profile_, pss));
+  }
+
+  if (command_line_->HasSwitch(switches::kEnableSyncFavicons)) {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(syncer::FAVICON_IMAGES,
+                                 this,
+                                 profile_,
+                                 pss));
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(syncer::FAVICON_TRACKING,
+                                 this,
+                                 profile_,
+                                 pss));
   }
 
   // Password sync is enabled by default.  Register unless explicitly
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncPasswords)) {
-#if !defined(OS_ANDROID)
     pss->RegisterDataTypeController(
         new PasswordDataTypeController(this, profile_, pss));
-#else
-    // On Android, enable password sync only when Keystore encryption
-    // is enabled.
-    if (command_line_->HasSwitch(switches::kSyncKeystoreEncryption)) {
-      pss->RegisterDataTypeController(
-          new PasswordDataTypeController(this, profile_, pss));
-    }
-#endif
   }
 }
 
@@ -222,23 +236,6 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
     pss->RegisterDataTypeController(
         new ExtensionSettingDataTypeController(
             syncer::APP_SETTINGS, this, profile_, pss));
-  }
-
-  // App notifications sync is enabled by default.  Register unless explicitly
-  // disabled.
-  if (!command_line_->HasSwitch(switches::kDisableSyncAppNotifications)) {
-    pss->RegisterDataTypeController(
-        new AppNotificationDataTypeController(this, profile_, pss));
-  }
-
-  // Unless it is explicitly disabled, history delete directive sync is
-  // enabled whenever full history sync is enabled.
-  if (command_line_->HasSwitch(switches::kHistoryEnableFullHistorySync) &&
-      !command_line_->HasSwitch(
-          switches::kDisableSyncHistoryDeleteDirectives)) {
-    pss->RegisterDataTypeController(
-        new UIDataTypeController(
-            syncer::HISTORY_DELETE_DIRECTIVES, this, profile_, pss));
   }
 
   // Synced Notifications sync is disabled by default.
@@ -307,10 +304,11 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       if (!web_data_service_.get())
         return base::WeakPtr<syncer::SyncableService>();
       if (type == syncer::AUTOFILL) {
-        return web_data_service_->GetAutocompleteSyncableService()->AsWeakPtr();
+        return AutocompleteSyncableService::FromWebDataService(
+            web_data_service_)->AsWeakPtr();
       } else {
-        return web_data_service_->
-                   GetAutofillProfileSyncableService()->AsWeakPtr();
+        return AutofillProfileSyncableService::FromWebDataService(
+            web_data_service_)->AsWeakPtr();
       }
     }
     case syncer::APPS:
@@ -322,9 +320,6 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
     case syncer::EXTENSION_SETTINGS:
       return extension_system_->extension_service()->settings_frontend()->
           GetBackendForSync(type)->AsWeakPtr();
-    case syncer::APP_NOTIFICATIONS:
-      return extension_system_->extension_service()->
-          app_notification_manager()->AsWeakPtr();
 #if defined(ENABLE_THEMES)
     case syncer::THEMES:
       return ThemeServiceFactory::GetForProfile(profile_)->
@@ -336,7 +331,6 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
               profile_, Profile::EXPLICIT_ACCESS);
       return history ? history->AsWeakPtr() : base::WeakPtr<HistoryService>();
     }
-
 #if !defined(OS_ANDROID)
     case syncer::SYNCED_NOTIFICATIONS: {
       notifier::ChromeNotifierService* notifier_service =
@@ -346,11 +340,13 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
           : base::WeakPtr<syncer::SyncableService>();
     }
 #endif
-
     case syncer::DICTIONARY:
       return SpellcheckServiceFactory::GetForProfile(profile_)->
           GetCustomDictionary()->AsWeakPtr();
-
+    case syncer::FAVICON_IMAGES:
+    case syncer::FAVICON_TRACKING:
+      return ProfileSyncServiceFactory::GetForProfile(profile_)->
+          GetSessionModelAssociator()->GetFaviconCache()->AsWeakPtr();
     default:
       // The following datatypes still need to be transitioned to the
       // syncer::SyncableService API:

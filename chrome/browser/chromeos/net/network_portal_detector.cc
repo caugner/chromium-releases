@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -32,15 +33,13 @@ const int kMaxRequestAttempts = 3;
 const int kMinTimeBetweenAttemptsSec = 3;
 
 // Timeout for a portal check.
-const int kRequestTimeoutSec = 10;
+const int kRequestTimeoutSec = 5;
 
 // Delay before portal detection caused by changes in proxy settings.
-const int kProxyChangeDelayMs = 1000;
+const int kProxyChangeDelaySec = 1;
 
 // Delay between consecutive portal checks for a network in lazy mode.
-// TODO (ygorshenin@): use exponential backoff or normally distributed
-// random variable instead of this.
-const int kLazyCheckIntervalSec = 30;
+const int kLazyCheckIntervalSec = 5;
 
 std::string CaptivePortalStatusString(
     NetworkPortalDetector::CaptivePortalStatus status) {
@@ -60,6 +59,8 @@ std::string CaptivePortalStatusString(
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED:
       return l10n_util::GetStringUTF8(
           IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED);
+    case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_COUNT:
+      NOTREACHED();
   }
   return l10n_util::GetStringUTF8(
       IDS_CHROMEOS_CAPTIVE_PORTAL_STATUS_UNRECOGNIZED);
@@ -203,7 +204,7 @@ void NetworkPortalDetector::OnNetworkChanged(chromeos::NetworkLibrary* cros,
 void NetworkPortalDetector::EnableLazyDetection() {
   if (lazy_detection_enabled_)
     return;
-  VLOG(1) << "Lazy detection mode enabled";
+  VLOG(1) << "Lazy detection mode enabled.";
   lazy_detection_enabled_ = true;
   if (!IsPortalCheckPending() && !IsCheckingForPortal())
     DetectCaptivePortal(base::TimeDelta());
@@ -212,9 +213,7 @@ void NetworkPortalDetector::EnableLazyDetection() {
 void NetworkPortalDetector::DisableLazyDetection() {
   if (!lazy_detection_enabled_)
     return;
-  VLOG(1) << "Lazy detection mode disabled";
-  if (attempt_count_ == kMaxRequestAttempts)
-    CancelPortalDetection();
+  VLOG(1) << "Lazy detection mode disabled.";
   lazy_detection_enabled_ = false;
 }
 
@@ -264,6 +263,8 @@ void NetworkPortalDetector::DetectCaptivePortal(const base::TimeDelta& delay) {
         delay_between_attempts - elapsed_time > next_attempt_delay_) {
       next_attempt_delay_ = delay_between_attempts - elapsed_time;
     }
+  } else {
+    detection_start_time_ = GetCurrentTimeTicks();
   }
   detection_task_.Reset(
       base::Bind(&NetworkPortalDetector::DetectCaptivePortalTask,
@@ -315,12 +316,11 @@ void NetworkPortalDetector::PortalDetectionTimeout() {
 }
 
 void NetworkPortalDetector::CancelPortalDetection() {
-  if (IsPortalCheckPending()) {
+  if (IsPortalCheckPending())
     detection_task_.Cancel();
-    detection_timeout_.Cancel();
-  } else if (IsCheckingForPortal()) {
+  else if (IsCheckingForPortal())
     captive_portal_detector_->Cancel();
-  }
+  detection_timeout_.Cancel();
   state_ = STATE_IDLE;
 }
 
@@ -386,7 +386,6 @@ void NetworkPortalDetector::OnPortalDetectionCompleted(
 void NetworkPortalDetector::TryLazyDetection() {
   if (!IsPortalCheckPending() && !IsCheckingForPortal() &&
       lazy_detection_enabled_) {
-    attempt_count_ = kMaxRequestAttempts;
     DetectCaptivePortal(base::TimeDelta());
   }
 }
@@ -398,11 +397,12 @@ void NetworkPortalDetector::Observe(
   if (type == chrome::NOTIFICATION_LOGIN_PROXY_CHANGED ||
       type == chrome::NOTIFICATION_AUTH_SUPPLIED ||
       type == chrome::NOTIFICATION_AUTH_CANCELLED) {
-    if (!IsCheckingForPortal() && !IsPortalCheckPending()) {
-      attempt_count_ = 0;
-      DetectCaptivePortal(
-          base::TimeDelta::FromMilliseconds(kProxyChangeDelayMs));
-    }
+    VLOG(1) << "Restarting portal detection due to proxy change.";
+    attempt_count_ = 0;
+    if (IsPortalCheckPending())
+      return;
+    CancelPortalDetection();
+    DetectCaptivePortal(base::TimeDelta::FromSeconds(kProxyChangeDelaySec));
   }
 }
 
@@ -419,6 +419,11 @@ void NetworkPortalDetector::SetCaptivePortalState(
     const CaptivePortalState& state) {
   DCHECK(network);
 
+  if (!detection_start_time_.is_null()) {
+    UMA_HISTOGRAM_TIMES("CaptivePortal.OOBE.DetectionDuration",
+                        GetCurrentTimeTicks() - detection_start_time_);
+  }
+
   CaptivePortalStateMap::const_iterator it =
       portal_state_map_.find(network->service_path());
   if (it == portal_state_map_.end() ||
@@ -429,14 +434,15 @@ void NetworkPortalDetector::SetCaptivePortalState(
             << "status=" << CaptivePortalStatusString(state.status) << ", "
             << "response_code=" << state.response_code;
     portal_state_map_[network->service_path()] = state;
-    NotifyPortalStateChanged(network, state);
   }
+  NotifyPortalDetectionCompleted(network, state);
 }
 
-void NetworkPortalDetector::NotifyPortalStateChanged(
+void NetworkPortalDetector::NotifyPortalDetectionCompleted(
     const Network* network,
     const CaptivePortalState& state) {
-  FOR_EACH_OBSERVER(Observer, observers_, OnPortalStateChanged(network, state));
+  FOR_EACH_OBSERVER(Observer, observers_,
+                    OnPortalDetectionCompleted(network, state));
 }
 
 base::TimeTicks NetworkPortalDetector::GetCurrentTimeTicks() const {
@@ -444,6 +450,10 @@ base::TimeTicks NetworkPortalDetector::GetCurrentTimeTicks() const {
     return base::TimeTicks::Now();
   else
     return time_ticks_for_testing_;
+}
+
+bool NetworkPortalDetector::DetectionTimeoutIsCancelledForTesting() const {
+  return detection_timeout_.IsCancelled();
 }
 
 }  // namespace chromeos

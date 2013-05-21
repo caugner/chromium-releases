@@ -16,6 +16,7 @@
 
 class AvatarMenuModel;
 class Browser;
+class ProfileItemView;
 
 namespace views {
 class CustomButton;
@@ -77,12 +78,21 @@ class AvatarMenuBubbleView : public views::BubbleDelegateView,
                        const gfx::Rect& anchor_rect,
                        Browser* browser);
 
-  views::Link* add_profile_link_;
+  // Sets the colors on all the |item_views_|. Called after the
+  // BubbleDelegateView is created and has loaded the colors from the
+  // NativeTheme.
+  void SetBackgroundColors();
+
   scoped_ptr<AvatarMenuModel> avatar_menu_model_;
   gfx::Rect anchor_rect_;
   Browser* browser_;
-  std::vector<views::CustomButton*> item_views_;
+  std::vector<ProfileItemView*> item_views_;
+
+  // These will be non-NULL iff
+  // avatar_menu_model_->ShouldShowAddNewProfileLink() returns true.  See
+  // OnAvatarMenuModelChanged().
   views::Separator* separator_;
+  views::Link* add_profile_link_;
 
   static AvatarMenuBubbleView* avatar_bubble_;
 

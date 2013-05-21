@@ -7,6 +7,7 @@
 #include <cmath>
 #include <vector>
 
+#include "apps/pref_names.h"
 #include "base/bind.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
@@ -18,10 +19,10 @@
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/user_metrics.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/url_util.h"
@@ -143,7 +144,8 @@ base::Value* DeepCopyAndResolveStrings(
       const base::ListValue* list = static_cast<const base::ListValue*>(node);
       base::ListValue* copy = new base::ListValue;
       for (base::ListValue::const_iterator it = list->begin();
-           it != list->end(); ++it) {
+           it != list->end();
+           ++it) {
         base::Value* child_copy = DeepCopyAndResolveStrings(*it, strings);
         copy->Append(child_copy);
       }
@@ -154,13 +156,12 @@ base::Value* DeepCopyAndResolveStrings(
       const base::DictionaryValue* dict =
           static_cast<const base::DictionaryValue*>(node);
       base::DictionaryValue* copy = new base::DictionaryValue;
-      for (base::DictionaryValue::key_iterator it = dict->begin_keys();
-           it != dict->end_keys(); ++it) {
-        const base::Value* child = NULL;
-        bool rv = dict->GetWithoutPathExpansion(*it, &child);
-        DCHECK(rv);
-        base::Value* child_copy = DeepCopyAndResolveStrings(child, strings);
-        copy->SetWithoutPathExpansion(*it, child_copy);
+      for (base::DictionaryValue::Iterator it(*dict);
+           !it.IsAtEnd();
+           it.Advance()) {
+        base::Value* child_copy = DeepCopyAndResolveStrings(&it.value(),
+                                                            strings);
+        copy->SetWithoutPathExpansion(it.key(), child_copy);
       }
       return copy;
     }
@@ -315,14 +316,17 @@ void NotificationPromo::RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 // static
-void NotificationPromo::RegisterUserPrefs(PrefService* prefs,
-                                          PrefRegistrySyncable* registry) {
-  // TODO(dbeam): Remove in M28 when we're reasonably sure all prefs are gone.
+void NotificationPromo::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  // TODO(dbeam): Registered only for migration. Remove in M28 when
+  // we're reasonably sure all prefs are gone.
   // http://crbug.com/168887
-  // TODO(joi): Remove PrefService parameter; move this to migration code.
   registry->RegisterDictionaryPref(kPrefPromoObject,
                                    PrefRegistrySyncable::UNSYNCABLE_PREF);
-  prefs->ClearPref(kPrefPromoObject);
+}
+
+// static
+void NotificationPromo::MigrateUserPrefs(PrefService* user_prefs) {
+  user_prefs->ClearPref(kPrefPromoObject);
 }
 
 void NotificationPromo::WritePrefs() {
@@ -392,11 +396,21 @@ void NotificationPromo::InitFromPrefs(PromoType promo_type) {
   ntp_promo->GetBoolean(kPrefPromoClosed, &closed_);
 }
 
+bool NotificationPromo::CheckAppLauncher() const {
+  bool is_app_launcher_promo = false;
+  if (!promo_payload_->GetBoolean("is_app_launcher_promo",
+                                  &is_app_launcher_promo))
+    return true;
+  return !is_app_launcher_promo ||
+         !prefs_->GetBoolean(apps::prefs::kAppLauncherIsEnabled);
+}
+
 bool NotificationPromo::CanShow() const {
   return !closed_ &&
          !promo_text_.empty() &&
          !ExceedsMaxGroup() &&
          !ExceedsMaxViews() &&
+         CheckAppLauncher() &&
          base::Time::FromDoubleT(StartTimeForGroup()) < base::Time::Now() &&
          base::Time::FromDoubleT(EndTime()) > base::Time::Now();
 }

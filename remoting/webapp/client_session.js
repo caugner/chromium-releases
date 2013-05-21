@@ -27,26 +27,33 @@ var remoting = remoting || {};
  * @param {string} clientJid The jid of the WCS client.
  * @param {string} hostPublicKey The base64 encoded version of the host's
  *     public key.
- * @param {string} sharedSecret The access code for IT2Me or the PIN
- *     for Me2Me.
+ * @param {string} accessCode The IT2Me access code. Blank for Me2Me.
+ * @param {function(function(string): void): void} fetchPin Called by Me2Me
+ *     connections when a PIN needs to be obtained interactively.
  * @param {string} authenticationMethods Comma-separated list of
  *     authentication methods the client should attempt to use.
  * @param {string} hostId The host identifier for Me2Me, or empty for IT2Me.
  *     Mixed into authentication hashes for some authentication methods.
  * @param {remoting.ClientSession.Mode} mode The mode of this connection.
+ * @param {string} hostDisplayName The name of the host for display purposes.
  * @constructor
  */
-remoting.ClientSession = function(hostJid, clientJid,
-                                  hostPublicKey, sharedSecret,
-                                  authenticationMethods, hostId, mode) {
+remoting.ClientSession = function(hostJid, clientJid, hostPublicKey, accessCode,
+                                  fetchPin, authenticationMethods, hostId,
+                                  mode, hostDisplayName) {
   this.state = remoting.ClientSession.State.CREATED;
 
   this.hostJid = hostJid;
   this.clientJid = clientJid;
   this.hostPublicKey = hostPublicKey;
-  this.sharedSecret = sharedSecret;
+  /** @private */
+  this.accessCode_ = accessCode;
+  /** @private */
+  this.fetchPin_ = fetchPin;
   this.authenticationMethods = authenticationMethods;
   this.hostId = hostId;
+  /** @type {string} */
+  this.hostDisplayName = hostDisplayName;
   /** @type {remoting.ClientSession.Mode} */
   this.mode = mode;
   this.sessionId = '';
@@ -64,7 +71,7 @@ remoting.ClientSession = function(hostJid, clientJid,
   this.onStateChange_ = null;
 
   /** @type {number?} @private */
-  this.notifyClientDimensionsTimer_ = null;
+  this.notifyClientResolutionTimer_ = null;
   /** @type {number?} @private */
   this.bumpScrollTimer_ = null;
 
@@ -290,14 +297,20 @@ remoting.ClientSession.prototype.onHostSettingsLoaded_ = function(options) {
         options[remoting.ClientSession.KEY_SHRINK_TO_FIT];
   }
 
-  this.plugin.element().focus();
-
   /** @param {boolean} result */
   this.plugin.initialize(this.onPluginInitialized_.bind(this));
+};
+
+/**
+ * Constrains the focus to the plugin element.
+ * @private
+ */
+remoting.ClientSession.prototype.setFocusHandlers_ = function() {
   this.plugin.element().addEventListener(
       'focus', this.callPluginGotFocus_, false);
   this.plugin.element().addEventListener(
       'blur', this.callPluginLostFocus_, false);
+  this.plugin.element().focus();
 };
 
 /**
@@ -423,7 +436,7 @@ remoting.ClientSession.prototype.getError = function() {
     case remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL:
       return remoting.Error.INCOMPATIBLE_PROTOCOL;
     case remoting.ClientSession.ConnectionError.NETWORK_FAILURE:
-      return remoting.Error.NETWORK_FAILURE;
+      return remoting.Error.P2P_FAILURE;
     case remoting.ClientSession.ConnectionError.HOST_OVERLOAD:
       return remoting.Error.HOST_OVERLOAD;
     default:
@@ -504,7 +517,9 @@ remoting.ClientSession.prototype.setScreenMode_ =
     function(shrinkToFit, resizeToClient) {
 
   if (resizeToClient && !this.resizeToClient_) {
-    this.plugin.notifyClientDimensions(window.innerWidth, window.innerHeight);
+    this.plugin.notifyClientResolution(window.innerWidth,
+                                       window.innerHeight,
+                                       window.devicePixelRatio);
   }
 
   // If enabling shrink, reset bump-scroll offsets.
@@ -586,6 +601,7 @@ remoting.ClientSession.prototype.sendIq_ = function(msg) {
  */
 remoting.ClientSession.prototype.connectPluginToWcs_ = function() {
   remoting.formatIq.setJids(this.clientJid, this.hostJid);
+  /** @type {remoting.ClientPlugin} */
   var plugin = this.plugin;
   var forwardIq = plugin.onIncomingIq.bind(plugin);
   /** @param {string} stanza The IQ stanza received. */
@@ -607,10 +623,41 @@ remoting.ClientSession.prototype.connectPluginToWcs_ = function() {
     console.log(remoting.timestamp(),
                 remoting.formatIq.prettifyReceiveIq(stanza));
     forwardIq(stanza);
-  }
+  };
   remoting.wcsSandbox.setOnIq(onIncomingIq);
+
+  if (this.accessCode_) {
+    // Shared secret was already supplied before connecting (It2Me case).
+    this.connectToHost_(this.accessCode_);
+
+  } else if (plugin.hasFeature(
+      remoting.ClientPlugin.Feature.ASYNC_PIN)) {
+    // Plugin supports asynchronously asking for the PIN.
+    plugin.useAsyncPinDialog();
+    /** @type remoting.ClientSession */
+    var that = this;
+    var fetchPin = function() {
+      that.fetchPin_(plugin.onPinFetched.bind(plugin));
+    };
+    plugin.fetchPinHandler = fetchPin;
+    this.connectToHost_('');
+
+  } else {
+    // Plugin doesn't support asynchronously asking for the PIN, ask now.
+    this.fetchPin_(this.connectToHost_.bind(this));
+  }
+};
+
+/**
+ * Connects to the host.
+ *
+ * @param {string} sharedSecret Shared secret for SPAKE negotiation.
+ * @return {void} Nothing.
+ * @private
+ */
+remoting.ClientSession.prototype.connectToHost_ = function(sharedSecret) {
   this.plugin.connect(this.hostJid, this.hostPublicKey, this.clientJid,
-                      this.sharedSecret, this.authenticationMethods,
+                      sharedSecret, this.authenticationMethods,
                       this.hostId);
 };
 
@@ -625,9 +672,12 @@ remoting.ClientSession.prototype.connectPluginToWcs_ = function() {
 remoting.ClientSession.prototype.onConnectionStatusUpdate_ =
     function(status, error) {
   if (status == remoting.ClientSession.State.CONNECTED) {
+    this.setFocusHandlers_();
     this.onDesktopSizeChanged_();
     if (this.resizeToClient_) {
-      this.plugin.notifyClientDimensions(window.innerWidth, window.innerHeight);
+      this.plugin.notifyClientResolution(window.innerWidth,
+                                         window.innerHeight,
+                                         window.devicePixelRatio);
     }
   } else if (status == remoting.ClientSession.State.FAILED) {
     this.error_ = /** @type {remoting.ClientSession.ConnectionError} */ (error);
@@ -688,18 +738,19 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
 remoting.ClientSession.prototype.onResize = function() {
   this.updateDimensions();
 
-  if (this.notifyClientDimensionsTimer_) {
-    window.clearTimeout(this.notifyClientDimensionsTimer_);
-    this.notifyClientDimensionsTimer_ = null;
+  if (this.notifyClientResolutionTimer_) {
+    window.clearTimeout(this.notifyClientResolutionTimer_);
+    this.notifyClientResolutionTimer_ = null;
   }
 
   // Defer notifying the host of the change until the window stops resizing, to
   // avoid overloading the control channel with notifications.
   if (this.resizeToClient_) {
-    this.notifyClientDimensionsTimer_ = window.setTimeout(
-        this.plugin.notifyClientDimensions.bind(this.plugin,
+    this.notifyClientResolutionTimer_ = window.setTimeout(
+        this.plugin.notifyClientResolution.bind(this.plugin,
                                                 window.innerWidth,
-                                                window.innerHeight),
+                                                window.innerHeight,
+                                                window.devicePixelRatio),
         1000);
   }
 
@@ -949,7 +1000,8 @@ remoting.ClientSession.prototype.scroll_ = function(dx, dy) {
 }
 
 /**
- * Enable or disable bump-scrolling.
+ * Enable or disable bump-scrolling. When disabling bump scrolling, also reset
+ * the scroll offsets to (0, 0).
  * @private
  * @param {boolean} enable True to enable bump-scrolling, false to disable it.
  */
@@ -963,6 +1015,8 @@ remoting.ClientSession.prototype.enableBumpScroll_ = function(enable) {
     this.plugin.element().removeEventListener('mousemove', this.onMouseMoveRef_,
                                               false);
     this.onMouseMoveRef_ = null;
+    this.plugin.element().style.marginLeft = 0;
+    this.plugin.element().style.marginTop = 0;
   }
 };
 

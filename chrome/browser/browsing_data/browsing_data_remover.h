@@ -10,7 +10,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
-#include "base/prefs/public/pref_member.h"
+#include "base/prefs/pref_member.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "base/time.h"
@@ -82,6 +82,10 @@ class BrowsingDataRemover : public content::NotificationObserver
     REMOVE_WEBSQL = 1 << 11,
     REMOVE_SERVER_BOUND_CERTS = 1 << 12,
     REMOVE_CONTENT_LICENSES = 1 << 13,
+    // The following flag is used only in tests. In normal usage, hosted app
+    // data is controlled by the REMOVE_COOKIES flag, applied to the
+    // protected-web origin.
+    REMOVE_HOSTED_APP_DATA_TESTONLY = 1 << 31,
 
     // "Site data" includes cookies, appcache, file systems, indexedDBs, local
     // storage, webSQL, and plugin data.

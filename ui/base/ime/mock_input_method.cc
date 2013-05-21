@@ -24,19 +24,23 @@ TextInputClient* MockInputMethod::GetTextInputClient() const {
   return text_input_client_;
 }
 
-void MockInputMethod::DispatchKeyEvent(const base::NativeEvent& native_event) {
+bool MockInputMethod::DispatchKeyEvent(const base::NativeEvent& native_event) {
+  return false;
 }
 
-void MockInputMethod::DispatchFabricatedKeyEvent(const ui::KeyEvent& event) {
+bool MockInputMethod::DispatchFabricatedKeyEvent(const ui::KeyEvent& event) {
+  return false;
 }
 
 void MockInputMethod::Init(bool focused) {
 }
 
 void MockInputMethod::OnFocus() {
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnFocus());
 }
 
 void MockInputMethod::OnBlur() {
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnBlur());
 }
 
 void MockInputMethod::OnTextInputTypeChanged(const TextInputClient* client) {
@@ -44,6 +48,7 @@ void MockInputMethod::OnTextInputTypeChanged(const TextInputClient* client) {
 }
 
 void MockInputMethod::OnCaretBoundsChanged(const TextInputClient* client) {
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnCaretBoundsChanged(client));
 }
 
 void MockInputMethod::CancelComposition(const TextInputClient* client) {

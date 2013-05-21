@@ -10,6 +10,8 @@
 
 //<include src="../metrics.js">
 
+//<include src="../../../image_loader/client.js"/>
+
 //<include src="../../../../../../ui/webui/resources/js/cr.js">
 //<include src="../../../../../../ui/webui/resources/js/event_tracker.js">
 //<include src="../../../../../../ui/webui/resources/js/load_time_data.js">
@@ -25,6 +27,9 @@
 //<include src="../../../../../../ui/webui/resources/js/cr/ui/list_selection_controller.js">
 //<include src="../../../../../../ui/webui/resources/js/cr/ui/list.js">
 //<include src="../../../../../../ui/webui/resources/js/cr/ui/grid.js">
+
+(function() {
+// 'strict mode' is invoked for this scope.
 
 //<include src="../file_type.js">
 //<include src="../util.js">
@@ -55,3 +60,9 @@
 //<include src="ribbon.js">
 
 //<include src="gallery_testapi.js">
+
+// Exports
+window.ImageUtil = ImageUtil;
+window.Gallery = Gallery;
+
+})();

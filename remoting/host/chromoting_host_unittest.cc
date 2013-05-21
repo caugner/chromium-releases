@@ -70,8 +70,7 @@ class MockIt2MeHostUserInterface : public It2MeHostUserInterface {
 
   void InitFrom(
       scoped_ptr<DisconnectWindow> disconnect_window,
-      scoped_ptr<ContinueWindow> continue_window,
-      scoped_ptr<LocalInputMonitor> local_input_monitor);
+      scoped_ptr<ContinueWindow> continue_window);
 
   // A test-only version of Start that does not register a HostStatusObserver.
   // TODO(rmsousa): Make the unit tests work with the regular Start().
@@ -87,13 +86,11 @@ MockIt2MeHostUserInterface::MockIt2MeHostUserInterface(
 
 void MockIt2MeHostUserInterface::InitFrom(
     scoped_ptr<DisconnectWindow> disconnect_window,
-    scoped_ptr<ContinueWindow> continue_window,
-    scoped_ptr<LocalInputMonitor> local_input_monitor) {
+    scoped_ptr<ContinueWindow> continue_window) {
   DCHECK(ui_task_runner()->BelongsToCurrentThread());
 
   disconnect_window_ = disconnect_window.Pass();
   continue_window_ = continue_window.Pass();
-  local_input_monitor_ = local_input_monitor.Pass();
 }
 
 void MockIt2MeHostUserInterface::Start(
@@ -141,13 +138,11 @@ class ChromotingHostTest : public testing::Test {
 
     disconnect_window_ = new MockDisconnectWindow();
     continue_window_ = new MockContinueWindow();
-    local_input_monitor_ = new MockLocalInputMonitor();
     it2me_host_user_interface_.reset(
         new MockIt2MeHostUserInterface(ui_task_runner_, ui_task_runner_));
     it2me_host_user_interface_->InitFrom(
         scoped_ptr<DisconnectWindow>(disconnect_window_),
-        scoped_ptr<ContinueWindow>(continue_window_),
-        scoped_ptr<LocalInputMonitor>(local_input_monitor_));
+        scoped_ptr<ContinueWindow>(continue_window_));
 
     it2me_host_user_interface_->Start(
         host_, base::Bind(&ChromotingHost::Shutdown, host_, base::Closure()));
@@ -237,7 +232,7 @@ class ChromotingHostTest : public testing::Test {
         ((connection_index == 0) ? owned_connection1_ : owned_connection2_).
         PassAs<protocol::ConnectionToClient>();
     protocol::ConnectionToClient* connection_ptr = connection.get();
-    scoped_refptr<ClientSession> client = new ClientSession(
+    scoped_ptr<ClientSession> client(new ClientSession(
         host_.get(),
         ui_task_runner_,  // Audio
         ui_task_runner_,  // Input
@@ -247,31 +242,33 @@ class ChromotingHostTest : public testing::Test {
         ui_task_runner_,  // UI
         connection.Pass(),
         desktop_environment_factory_.get(),
-        base::TimeDelta());
-    connection_ptr->set_host_stub(client);
+        base::TimeDelta()));
+
+    ClientSession* client_raw = client.get();
+    connection_ptr->set_host_stub(client_raw);
 
     ui_task_runner_->PostTask(
         FROM_HERE, base::Bind(&ChromotingHostTest::AddClientToHost,
-                              host_, client));
+                              host_, base::Passed(&client)));
 
     if (authenticate) {
       ui_task_runner_->PostTask(
           FROM_HERE, base::Bind(&ClientSession::OnConnectionAuthenticated,
-                                client, connection_ptr));
+                                base::Unretained(client_raw), connection_ptr));
       if (!reject) {
         ui_task_runner_->PostTask(
             FROM_HERE,
             base::Bind(&ClientSession::OnConnectionChannelsConnected,
-                       client, connection_ptr));
+                       base::Unretained(client_raw), connection_ptr));
       }
     } else {
       ui_task_runner_->PostTask(
           FROM_HERE, base::Bind(&ClientSession::OnConnectionClosed,
-                                client, connection_ptr,
+                                base::Unretained(client_raw), connection_ptr,
                                 protocol::AUTHENTICATION_FAILED));
     }
 
-    get_client(connection_index) = client;
+    get_client(connection_index) = client_raw;
   }
 
   virtual void TearDown() OVERRIDE {
@@ -289,33 +286,31 @@ class ChromotingHostTest : public testing::Test {
   // DesktopEnvironmentFactory::Create().
   DesktopEnvironment* CreateDesktopEnvironment() {
     MockDesktopEnvironment* desktop_environment = new MockDesktopEnvironment();
-    EXPECT_CALL(*desktop_environment, CreateAudioCapturerPtr(_))
+    EXPECT_CALL(*desktop_environment, CreateAudioCapturerPtr())
         .Times(0);
-    EXPECT_CALL(*desktop_environment, CreateEventExecutorPtr(_, _))
+    EXPECT_CALL(*desktop_environment, CreateInputInjectorPtr())
         .Times(AnyNumber())
-        .WillRepeatedly(Invoke(this, &ChromotingHostTest::CreateEventExecutor));
-    EXPECT_CALL(*desktop_environment, CreateVideoCapturerPtr(_, _))
+        .WillRepeatedly(Invoke(this, &ChromotingHostTest::CreateInputInjector));
+    EXPECT_CALL(*desktop_environment, CreateScreenControlsPtr())
+        .Times(AnyNumber());
+    EXPECT_CALL(*desktop_environment, CreateVideoCapturerPtr())
         .Times(AnyNumber())
         .WillRepeatedly(Invoke(this, &ChromotingHostTest::CreateVideoCapturer));
 
     return desktop_environment;
   }
 
-  // Creates a dummy EventExecutor, to mock
-  // DesktopEnvironment::CreateEventExecutor().
-  EventExecutor* CreateEventExecutor(
-      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
-    MockEventExecutor* event_executor = new MockEventExecutor();
-    EXPECT_CALL(*event_executor, StartPtr(_));
-    return event_executor;
+  // Creates a dummy InputInjector, to mock
+  // DesktopEnvironment::CreateInputInjector().
+  InputInjector* CreateInputInjector() {
+    MockInputInjector* input_injector = new MockInputInjector();
+    EXPECT_CALL(*input_injector, StartPtr(_));
+    return input_injector;
   }
 
   // Creates a fake media::ScreenCapturer, to mock
   // DesktopEnvironment::CreateVideoCapturer().
-  media::ScreenCapturer* CreateVideoCapturer(
-      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner) {
+  media::ScreenCapturer* CreateVideoCapturer() {
     return new media::ScreenCapturerFake();
   }
 
@@ -350,8 +345,9 @@ class ChromotingHostTest : public testing::Test {
   }
 
   static void AddClientToHost(scoped_refptr<ChromotingHost> host,
-                              ClientSession* session) {
-    host->clients_.push_back(session);
+                              scoped_ptr<ClientSession> client) {
+    // |host| is responsible for deleting |client| from now on.
+    host->clients_.push_back(client.release());
   }
 
   void ShutdownHost() {
@@ -498,7 +494,6 @@ class ChromotingHostTest : public testing::Test {
   // Owned by |host_|.
   MockDisconnectWindow* disconnect_window_;
   MockContinueWindow* continue_window_;
-  MockLocalInputMonitor* local_input_monitor_;
 
   MockConnectionToClient*& get_connection(int connection_index) {
     return (connection_index == 0) ? connection1_ : connection2_;

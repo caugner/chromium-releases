@@ -30,7 +30,7 @@ class DummyDriveService : public DriveServiceInterface {
   virtual void ClearRefreshToken() OVERRIDE;
   virtual std::string GetRootResourceId() const OVERRIDE;
   virtual void GetResourceList(
-      const GURL& feed_url,
+      const GURL& url,
       int64 start_changestamp,
       const std::string& search_query,
       bool shared_with_me,
@@ -41,6 +41,8 @@ class DummyDriveService : public DriveServiceInterface {
       const GetResourceEntryCallback& callback) OVERRIDE;
   virtual void GetAccountMetadata(
       const GetAccountMetadataCallback& callback) OVERRIDE;
+  virtual void GetAboutResource(
+      const GetAboutResourceCallback& callback) OVERRIDE;
   virtual void GetAppList(const GetAppListCallback& callback) OVERRIDE;
   virtual void DeleteResource(const std::string& resource_id,
                               const std::string& etag,
@@ -70,17 +72,37 @@ class DummyDriveService : public DriveServiceInterface {
       const std::string& parent_resource_id,
       const std::string& directory_name,
       const GetResourceEntryCallback& callback) OVERRIDE;
-  virtual void InitiateUpload(const InitiateUploadParams& params,
-                              const InitiateUploadCallback& callback) OVERRIDE;
-  virtual void ResumeUpload(const ResumeUploadParams& params,
-                            const UploadRangeCallback& callback) OVERRIDE;
+  virtual void InitiateUploadNewFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const InitiateUploadCallback& callback) OVERRIDE;
+  virtual void InitiateUploadExistingFile(
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const std::string& etag,
+      const InitiateUploadCallback& callback) OVERRIDE;
+  virtual void ResumeUpload(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 start_position,
+      int64 end_position,
+      int64 content_length,
+      const std::string& content_type,
+      const scoped_refptr<net::IOBuffer>& buf,
+      const UploadRangeCallback& callback) OVERRIDE;
   virtual void GetUploadStatus(
       UploadMode upload_mode,
       const base::FilePath& drive_file_path,
       const GURL& upload_url,
       int64 content_length,
       const UploadRangeCallback& callback) OVERRIDE;
-  virtual void AuthorizeApp(const GURL& edit_url,
+  virtual void AuthorizeApp(const std::string& resource_id,
                             const std::string& app_id,
                             const AuthorizeAppCallback& callback) OVERRIDE;
 };

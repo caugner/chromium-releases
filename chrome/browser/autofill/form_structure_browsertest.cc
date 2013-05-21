@@ -4,18 +4,16 @@
 
 #include <vector>
 
-#include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_manager.h"
-#include "chrome/browser/autofill/data_driven_test.h"
-#include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/autofill/browser/autofill_manager.h"
+#include "components/autofill/browser/data_driven_test.h"
+#include "components/autofill/browser/form_structure.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -38,9 +36,6 @@ class FormStructureBrowserTest : public InProcessBrowserTest,
   FormStructureBrowserTest();
   virtual ~FormStructureBrowserTest();
 
-  // InProcessBrowserTest:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
-
   // DataDrivenTest:
   virtual void GenerateResults(const std::string& input,
                                std::string* output) OVERRIDE;
@@ -56,11 +51,6 @@ FormStructureBrowserTest::FormStructureBrowserTest() {
 }
 
 FormStructureBrowserTest::~FormStructureBrowserTest() {
-}
-
-void FormStructureBrowserTest::SetUpCommandLine(CommandLine* command_line) {
-  // Include new field types and heuristics in the regression test.
-  command_line->AppendSwitch(switches::kEnableNewAutofillHeuristics);
 }
 
 void FormStructureBrowserTest::GenerateResults(const std::string& input,
@@ -97,8 +87,8 @@ std::string FormStructureBrowserTest::FormStructuresToString(
 }
 
 // Heuristics tests timeout on Windows.  See http://crbug.com/85276
-// Also on ChromeOS. See crbug.com/173621
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+// Also on ChromeOS/Aura. See crbug.com/173621
+#if defined(OS_WIN) || defined(USE_AURA)
 #define MAYBE_DataDrivenHeuristics(n) DISABLED_DataDrivenHeuristics##n
 #else
 #define MAYBE_DataDrivenHeuristics(n) DataDrivenHeuristics##n

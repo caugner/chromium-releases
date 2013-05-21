@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -105,12 +105,12 @@ class GpuPixelBrowserTest : public ContentBrowserTest {
         ref_img_option_(kReferenceImageNone) {
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitchASCII(switches::kTestGLLib,
                                     "libllvmpipe.so");
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     ContentBrowserTest::SetUpInProcessBrowserTestFixture();
 
     CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -499,7 +499,7 @@ IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, MANUAL_Canvas2DRedBoxHD) {
 
 class GpuPixelTestCanvas2DSD : public GpuPixelBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     GpuPixelBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
   }
@@ -522,6 +522,37 @@ IN_PROC_BROWSER_TEST_F(GpuPixelTestCanvas2DSD, MANUAL_Canvas2DRedBoxSD) {
   gfx::Size container_size(400, 300);
   base::FilePath url =
       test_data_dir().AppendASCII("pixel_canvas2d.html");
+  RunPixelTest(container_size, url, ref_img_revision_update,
+               ref_pixels, ref_pixel_count);
+}
+
+class GpuPixelTestBrowserPlugin : public GpuPixelBrowserTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    GpuPixelBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnableBrowserPluginForAllViewTypes);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(GpuPixelTestBrowserPlugin, MANUAL_BrowserPluginBlueBox) {
+  // If test baseline needs to be updated after a given revision, update the
+  // following number. If no revision requirement, then 0.
+  const int64 ref_img_revision_update = 123489;
+
+  const ReferencePixel ref_pixels[] = {
+    // x, y, r, g, b
+    {70, 50, 0, 0, 255},
+    {150, 50, 0, 0, 0},
+    {70, 90, 0, 0, 255},
+    {150, 90, 0, 0, 255},
+    {70, 125, 0, 0, 255},
+    {150, 125, 0, 0, 0}
+  };
+  const size_t ref_pixel_count = sizeof(ref_pixels) / sizeof(ReferencePixel);
+
+  gfx::Size container_size(400, 300);
+  base::FilePath url =
+      test_data_dir().AppendASCII("pixel_browser_plugin.html");
   RunPixelTest(container_size, url, ref_img_revision_update,
                ref_pixels, ref_pixel_count);
 }

@@ -7,16 +7,24 @@
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
 #include "android_webview/native/android_protocol_handler.h"
 #include "android_webview/native/cookie_manager.h"
-#include "net/url_request/url_request_job_factory.h"
+#include "base/logging.h"
 
 namespace android_webview {
 class AwURLRequestJobFactory;
 
-scoped_ptr<net::URLRequestJobFactory> CreateAndroidJobFactoryAndCookieMonster(
-    net::URLRequestContext* context,
-    scoped_ptr<AwURLRequestJobFactory> job_factory) {
-  SetCookieMonsterOnNetworkStackInit(context);
-  return CreateAndroidRequestJobFactory(job_factory.Pass());
+void DidCreateCookieMonster(net::CookieMonster* cookie_monster) {
+  DCHECK(cookie_monster);
+  SetCookieMonsterOnNetworkStackInit(cookie_monster);
+}
+
+scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+CreateAndroidAssetFileProtocolHandler() {
+  return CreateAssetFileProtocolHandler();
+}
+
+scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+CreateAndroidContentProtocolHandler() {
+  return CreateContentSchemeProtocolHandler();
 }
 
 }  // namespace android_webview

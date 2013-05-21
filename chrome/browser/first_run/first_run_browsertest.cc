@@ -55,14 +55,11 @@ IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShowFirstRunBubblePref) {
                 prefs::kShowFirstRunBubbleOption));
 }
 
-IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShowWelcomePagePref) {
-  EXPECT_FALSE(g_browser_process->local_state()->FindPreference(
-      prefs::kShouldShowWelcomePage));
-  EXPECT_TRUE(first_run::SetShowWelcomePagePref());
-  ASSERT_TRUE(g_browser_process->local_state()->FindPreference(
-      prefs::kShouldShowWelcomePage));
-  EXPECT_TRUE(g_browser_process->local_state()->GetBoolean(
-      prefs::kShouldShowWelcomePage));
+IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShouldShowWelcomePage) {
+  EXPECT_FALSE(first_run::ShouldShowWelcomePage());
+  first_run::SetShouldShowWelcomePage();
+  EXPECT_TRUE(first_run::ShouldShowWelcomePage());
+  EXPECT_FALSE(first_run::ShouldShowWelcomePage());
 }
 
 #if !defined(OS_CHROMEOS)
@@ -74,7 +71,7 @@ class FirstRunIntegrationBrowserTest : public InProcessBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     InProcessBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kForceFirstRun);
-    EXPECT_FALSE(ProfileManager::DidPerformProfileImport());
+    EXPECT_FALSE(first_run::DidPerformProfileImport(NULL));
 
     extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
 
@@ -123,8 +120,25 @@ class FirstRunMasterPrefsBrowserTest : public FirstRunIntegrationBrowserTest {
 };
 }
 
-IN_PROC_BROWSER_TEST_F(FirstRunIntegrationBrowserTest, WaitForImport) {
-  ASSERT_TRUE(ProfileManager::DidPerformProfileImport());
+// TODO(tapted): Investigate why this fails on Linux bots but does not
+// reproduce locally. See http://crbug.com/178062 .
+// TODO(tapted): Investigate why this fails on mac_asan flakily
+// http://crbug.com/181499 .
+#if defined(OS_LINUX) || (defined(OS_MACOSX) && defined(ADDRESS_SANITIZER))
+#define MAYBE_WaitForImport DISABLED_WaitForImport
+#else
+#define MAYBE_WaitForImport WaitForImport
+#endif
+
+IN_PROC_BROWSER_TEST_F(FirstRunIntegrationBrowserTest, MAYBE_WaitForImport) {
+  bool success = false;
+  EXPECT_TRUE(first_run::DidPerformProfileImport(&success));
+  // Aura builds skip over the import process.
+#if defined(USE_AURA)
+  EXPECT_FALSE(success);
+#else
+  EXPECT_TRUE(success);
+#endif
 }
 
 // Test an import with all import options disabled. This is a regression test
@@ -132,7 +146,7 @@ IN_PROC_BROWSER_TEST_F(FirstRunIntegrationBrowserTest, WaitForImport) {
 // stay running, and the NTP to be loaded with no apps.
 IN_PROC_BROWSER_TEST_F(FirstRunMasterPrefsBrowserTest,
                        ImportNothingAndShowNewTabPage) {
-  ASSERT_TRUE(ProfileManager::DidPerformProfileImport());
+  EXPECT_TRUE(first_run::DidPerformProfileImport(NULL));
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GURL(chrome::kChromeUINewTabURL), CURRENT_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);

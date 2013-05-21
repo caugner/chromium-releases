@@ -4,13 +4,8 @@
 
 #include "chrome/browser/chrome_browser_main_linux.h"
 
-#include "base/message_loop_proxy.h"
-#include "chrome/browser/system_monitor/media_transfer_protocol_device_observer_linux.h"
-#include "chrome/common/chrome_switches.h"
-#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
-
 #if !defined(OS_CHROMEOS)
-#include "chrome/browser/system_monitor/removable_device_notifications_linux.h"
+#include "chrome/browser/storage_monitor/storage_monitor_linux.h"
 #include "content/public/browser/browser_thread.h"
 #endif
 
@@ -21,6 +16,7 @@
 #include "base/linux_util.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/app/breakpad_linux.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/pref_names.h"
 
@@ -108,13 +104,10 @@ bool IsCrashReportingEnabled(const PrefService* local_state) {
 
 ChromeBrowserMainPartsLinux::ChromeBrowserMainPartsLinux(
     const content::MainFunctionParams& parameters)
-    : ChromeBrowserMainPartsPosix(parameters),
-      initialized_media_transfer_protocol_manager_(false) {
+    : ChromeBrowserMainPartsPosix(parameters) {
 }
 
 ChromeBrowserMainPartsLinux::~ChromeBrowserMainPartsLinux() {
-  if (initialized_media_transfer_protocol_manager_)
-    device::MediaTransferProtocolManager::Shutdown();
 }
 
 void ChromeBrowserMainPartsLinux::PreProfileInit() {
@@ -133,32 +126,16 @@ void ChromeBrowserMainPartsLinux::PreProfileInit() {
 
 #if !defined(OS_CHROMEOS)
   const base::FilePath kDefaultMtabPath("/etc/mtab");
-  removable_device_notifications_linux_ =
-      new chrome::RemovableDeviceNotificationsLinux(kDefaultMtabPath);
-  removable_device_notifications_linux_->Init();
+  storage_monitor_ = new chrome::StorageMonitorLinux(kDefaultMtabPath);
 #endif
-
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType)) {
-    scoped_refptr<base::MessageLoopProxy> loop_proxy;
-#if !defined(OS_CHROMEOS)
-    loop_proxy = content::BrowserThread::GetMessageLoopProxyForThread(
-        content::BrowserThread::FILE);
-#endif
-    device::MediaTransferProtocolManager::Initialize(loop_proxy);
-    initialized_media_transfer_protocol_manager_ = true;
-  }
 
   ChromeBrowserMainPartsPosix::PreProfileInit();
 }
 
 void ChromeBrowserMainPartsLinux::PostProfileInit() {
-  // TODO(gbillock): Make this owned by RemovableDeviceNotificationsLinux.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType)) {
-    media_transfer_protocol_device_observer_.reset(
-        new chrome::MediaTransferProtocolDeviceObserverLinux());
-    media_transfer_protocol_device_observer_->SetNotifications(
-      chrome::RemovableStorageNotifications::GetInstance()->receiver());
-  }
+#if !defined(OS_CHROMEOS)
+  storage_monitor_->Init();
+#endif
 
   ChromeBrowserMainPartsPosix::PostProfileInit();
 }
@@ -168,10 +145,8 @@ void ChromeBrowserMainPartsLinux::PostMainMessageLoopRun() {
   // Release it now. Otherwise the FILE thread would be gone when we try to
   // release it in the dtor and Valgrind would report a leak on almost ever
   // single browser_test.
-  removable_device_notifications_linux_ = NULL;
+  storage_monitor_ = NULL;
 #endif
-
-  media_transfer_protocol_device_observer_.reset();
 
   ChromeBrowserMainPartsPosix::PostMainMessageLoopRun();
 }

@@ -5,18 +5,18 @@
 #ifndef REMOTING_HOST_CHROMOTING_HOST_H_
 #define REMOTING_HOST_CHROMOTING_HOST_H_
 
+#include <list>
 #include <string>
-#include <vector>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread.h"
 #include "net/base/backoff_entry.h"
 #include "remoting/host/client_session.h"
-#include "remoting/host/host_key_pair.h"
+#include "remoting/host/host_status_monitor.h"
 #include "remoting/host/host_status_observer.h"
-#include "remoting/host/mouse_move_observer.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/session_manager.h"
 #include "remoting/protocol/connection_to_client.h"
@@ -62,7 +62,7 @@ class DesktopEnvironmentFactory;
 class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
                        public ClientSession::EventHandler,
                        public protocol::SessionManager::Listener,
-                       public MouseMoveObserver {
+                       public HostStatusMonitor {
  public:
   // The caller must ensure that |signal_strategy| and
   // |desktop_environment_factory| remain valid at least until the
@@ -90,10 +90,9 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // called after shutdown is completed.
   void Shutdown(const base::Closure& shutdown_task);
 
-  // Add/Remove |observer| to/from the list of status observers. Both
-  // methods can be called on the network thread only.
-  void AddStatusObserver(HostStatusObserver* observer);
-  void RemoveStatusObserver(HostStatusObserver* observer);
+  // HostStatusMonitor interface.
+  virtual void AddStatusObserver(HostStatusObserver* observer) OVERRIDE;
+  virtual void RemoveStatusObserver(HostStatusObserver* observer) OVERRIDE;
 
   // This method may be called only from
   // HostStatusObserver::OnClientAuthenticated() to reject the new
@@ -125,17 +124,12 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
       ClientSession* session,
       const std::string& channel_name,
       const protocol::TransportRoute& route) OVERRIDE;
-  virtual void OnClientDimensionsChanged(ClientSession* session,
-                                         const SkISize& size) OVERRIDE;
 
   // SessionManager::Listener implementation.
   virtual void OnSessionManagerReady() OVERRIDE;
   virtual void OnIncomingSession(
       protocol::Session* session,
       protocol::SessionManager::IncomingSessionResponse* response) OVERRIDE;
-
-  // MouseMoveObserver interface.
-  virtual void OnLocalMouseMoved(const SkIPoint& new_pos) OVERRIDE;
 
   // Sets desired configuration for the protocol. Must be called before Start().
   void set_protocol_config(scoped_ptr<protocol::CandidateSessionConfig> config);
@@ -150,11 +144,15 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // clients that were not connected when this method is called.
   void DisconnectAllClients();
 
+  base::WeakPtr<ChromotingHost> AsWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
  private:
   friend class base::RefCountedThreadSafe<ChromotingHost>;
   friend class ChromotingHostTest;
 
-  typedef std::vector<scoped_refptr<ClientSession> > ClientList;
+  typedef std::list<ClientSession*> ClientList;
 
   enum State {
     kInitial,
@@ -209,6 +207,8 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   // The maximum duration of any session.
   base::TimeDelta max_session_duration_;
+
+  base::WeakPtrFactory<ChromotingHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);
 };

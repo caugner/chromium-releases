@@ -148,6 +148,12 @@ class GoogleUpdateSettings {
   // active users. Returns false if writting to the registry failed.
   static bool UpdateDidRunState(bool did_run, bool system_level);
 
+  // Set did_run "dr" in the client state value for |dist|. This is used to
+  // measure active users. Returns false if writting to the registry failed.
+  static bool UpdateDidRunStateForDistribution(BrowserDistribution* dist,
+                                               bool did_run,
+                                               bool system_level);
+
   // Returns only the channel name: "" (stable), "dev", "beta", "canary", or
   // "unknown" if unknown. This value will not be modified by "-m" for a
   // multi-install. See kChromeChannel* in util_constants.h
@@ -265,10 +271,6 @@ class GoogleUpdateSettings {
   // label did not exist, or was successfully read.
   static bool ReadExperimentLabels(bool system_install,
                                    string16* experiment_labels);
-
-  // Constructs a date string in the format understood by Google Update for the
-  // current time plus one year.
-  static string16 BuildExperimentDateString();
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);

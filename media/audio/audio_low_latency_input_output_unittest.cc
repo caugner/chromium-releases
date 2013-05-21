@@ -14,7 +14,6 @@
 #include "build/build_config.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager_base.h"
-#include "media/audio/audio_util.h"
 #include "media/base/seekable_buffer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -51,7 +50,7 @@ static const size_t kMaxDelayMeasurements = 1000;
 // Example: \src\build\Debug\audio_delay_values_ms.txt.
 // See comments for the WASAPIAudioInputOutputFullDuplex test for more details
 // about the file format.
-static const char* kDelayValuesFileName = "audio_delay_values_ms.txt";
+static const char kDelayValuesFileName[] = "audio_delay_values_ms.txt";
 
 // Contains delay values which are reported during the full-duplex test.
 // Total delay = |buffer_delay_ms| + |input_delay_ms| + |output_delay_ms|.
@@ -210,7 +209,7 @@ class FullDuplexAudioSinkSource
   }
 
   virtual void OnClose(AudioInputStream* stream) OVERRIDE {}
-  virtual void OnError(AudioInputStream* stream, int code) OVERRIDE {}
+  virtual void OnError(AudioInputStream* stream) OVERRIDE {}
 
   // AudioOutputStream::AudioSourceCallback.
   virtual int OnMoreData(AudioBus* audio_bus,
@@ -258,7 +257,7 @@ class FullDuplexAudioSinkSource
     return 0;
   }
 
-  virtual void OnError(AudioOutputStream* stream, int code) OVERRIDE {}
+  virtual void OnError(AudioOutputStream* stream) OVERRIDE {}
   virtual void WaitTillDataReady() OVERRIDE {}
 
  protected:
@@ -286,14 +285,10 @@ class AudioInputStreamTraits {
  public:
   typedef AudioInputStream StreamType;
 
-  static int HardwareSampleRate() {
-    return static_cast<int>(media::GetAudioInputHardwareSampleRate(
-        AudioManagerBase::kDefaultDeviceId));
-  }
-
-  // TODO(henrika): add support for GetAudioInputHardwareBufferSize in media.
-  static int HardwareBufferSize() {
-    return static_cast<int>(media::GetAudioHardwareBufferSize());
+  static AudioParameters GetDefaultAudioStreamParameters(
+      AudioManager* audio_manager) {
+    return audio_manager->GetInputStreamParameters(
+        AudioManagerBase::kDefaultDeviceId);
   }
 
   static StreamType* CreateStream(AudioManager* audio_manager,
@@ -307,12 +302,9 @@ class AudioOutputStreamTraits {
  public:
   typedef AudioOutputStream StreamType;
 
-  static int HardwareSampleRate() {
-    return static_cast<int>(media::GetAudioHardwareSampleRate());
-  }
-
-  static int HardwareBufferSize() {
-    return static_cast<int>(media::GetAudioHardwareBufferSize());
+  static AudioParameters GetDefaultAudioStreamParameters(
+      AudioManager* audio_manager) {
+    return audio_manager->GetDefaultOutputStreamParameters();
   }
 
   static StreamType* CreateStream(AudioManager* audio_manager,
@@ -339,11 +331,13 @@ class StreamWrapper {
 #endif
         bits_per_sample_(16) {
     // Use the preferred sample rate.
-    sample_rate_ = StreamTraits::HardwareSampleRate();
+    const AudioParameters& params =
+        StreamTraits::GetDefaultAudioStreamParameters(audio_manager_);
+    sample_rate_ = params.sample_rate();
 
     // Use the preferred buffer size. Note that the input side uses the same
     // size as the output side in this implementation.
-    samples_per_packet_ = StreamTraits::HardwareBufferSize();
+    samples_per_packet_ = params.frames_per_buffer();
   }
 
   virtual ~StreamWrapper() {}

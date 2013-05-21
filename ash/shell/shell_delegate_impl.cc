@@ -4,11 +4,13 @@
 
 #include "ash/shell/shell_delegate_impl.h"
 
+#include <limits>
+
 #include "ash/caps_lock_delegate_stub.h"
 #include "ash/host/root_window_host_factory.h"
+#include "ash/shell/context_menu.h"
 #include "ash/shell/example_factory.h"
 #include "ash/shell/launcher_delegate_impl.h"
-#include "ash/shell/context_menu.h"
 #include "ash/shell/toplevel_window.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/window_util.h"
@@ -45,7 +47,15 @@ bool ShellDelegateImpl::IsSessionStarted() const {
   return true;
 }
 
+bool ShellDelegateImpl::IsGuestSession() const {
+  return false;
+}
+
 bool ShellDelegateImpl::IsFirstRunAfterBoot() const {
+  return false;
+}
+
+bool ShellDelegateImpl::IsRunningInForcedAppMode() const {
   return false;
 }
 
@@ -66,6 +76,9 @@ void ShellDelegateImpl::UnlockScreen() {
 
 bool ShellDelegateImpl::IsScreenLocked() const {
   return locked_;
+}
+
+void ShellDelegateImpl::PreInit() {
 }
 
 void ShellDelegateImpl::Shutdown() {
@@ -91,7 +104,7 @@ void ShellDelegateImpl::ToggleMaximized() {
     ash::wm::ToggleMaximizedWindow(window);
 }
 
-void ShellDelegateImpl::OpenFileManager() {
+void ShellDelegateImpl::OpenFileManager(bool as_dialog) {
 }
 
 void ShellDelegateImpl::OpenCrosh() {

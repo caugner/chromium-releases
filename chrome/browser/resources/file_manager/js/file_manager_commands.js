@@ -2,30 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 var CommandUtil = {};
 
 /**
  * Extracts root on which command event was dispatched.
  *
  * @param {Event} event Command event for which to retrieve root to operate on.
- * @param {cr.ui.List} rootsList Root list to extract root node.
+ * @param {DirectoryTree} directoryTree Directory tree to extract root node.
  * @return {DirectoryEntry} Found root.
  */
-CommandUtil.getCommandRoot = function(event, rootsList) {
-  var result = rootsList.dataModel.item(
-                   rootsList.getIndexOfListItem(event.target)) ||
-               rootsList.selectedItem;
+CommandUtil.getCommandRoot = function(event, directoryTree) {
+  var entry = directoryTree.selectedItem;
 
-  return result;
+  if (entry && PathUtil.isRootPath(entry.fullPath))
+    return entry;
+  else
+    return null;
 };
 
 /**
  * @param {Event} event Command event for which to retrieve root type.
- * @param {cr.ui.List} rootsList Root list to extract root node.
- * @return {string} Found root.
+ * @param {DirectoryTree} directoryTree Directory tree to extract root node.
+ * @return {?string} Found root.
  */
-CommandUtil.getCommandRootType = function(event, rootsList) {
-  var root = CommandUtil.getCommandRoot(event, rootsList);
+CommandUtil.getCommandRootType = function(event, directoryTree) {
+  var root = CommandUtil.getCommandRoot(event, directoryTree);
 
   return root && PathUtil.getRootType(root.fullPath);
 };
@@ -71,7 +74,7 @@ CommandUtil.getSingleEntry = function(event, fileManager) {
  * @param {Node} node Node to register command handler on.
  * @param {string} commandId Command id to respond to.
  * @param {{execute:function, canExecute:function}} handler Handler to use.
- * @param {Object...} var_args Additional arguments to pass to handler.
+ * @param {...Object} var_args Additional arguments to pass to handler.
  */
 CommandUtil.registerCommand = function(node, commandId, handler, var_args) {
   var args = Array.prototype.slice.call(arguments, 3);
@@ -128,23 +131,21 @@ Commands.defaultCommand = {
  * Unmounts external drive.
  */
 Commands.unmountCommand = {
-  execute: function(event, rootsList, fileManager) {
-    var root = CommandUtil.getCommandRoot(event, rootsList);
-    if (!root) return;
-
-    var doUnmount = function() {
+  /**
+   * @param {Event} event Command event.
+   * @param {DirectoryTree} directoryTree Target directory tree.
+   */
+  execute: function(event, directoryTree, fileManager) {
+    var root = CommandUtil.getCommandRoot(event, directoryTree);
+    if (root)
       fileManager.unmountVolume(PathUtil.getRootPath(root.fullPath));
-    };
-
-    if (fileManager.butterBar_.forceDeleteAndHide()) {
-      // TODO(dgozman): add completion callback to file copy manager.
-      setTimeout(doUnmount, 1000);
-    } else {
-      doUnmount();
-    }
   },
-  canExecute: function(event, rootsList) {
-    var rootType = CommandUtil.getCommandRootType(event, rootsList);
+  /**
+   * @param {Event} event Command event.
+   * @param {DirectoryTree} directoryTree Target directory tree.
+   */
+  canExecute: function(event, directoryTree) {
+    var rootType = CommandUtil.getCommandRootType(event, directoryTree);
 
     event.canExecute = (rootType == RootType.ARCHIVE ||
                         rootType == RootType.REMOVABLE);
@@ -158,8 +159,12 @@ Commands.unmountCommand = {
  * Formats external drive.
  */
 Commands.formatCommand = {
-  execute: function(event, rootsList, fileManager) {
-    var root = CommandUtil.getCommandRoot(event, rootsList);
+  /**
+   * @param {Event} event Command event.
+   * @param {DirectoryTree} directoryTree Target directory tree.
+   */
+  execute: function(event, directoryTree, fileManager) {
+    var root = CommandUtil.getCommandRoot(event, directoryTree);
 
     if (root) {
       var url = util.makeFilesystemUrl(PathUtil.getRootPath(root.fullPath));
@@ -168,8 +173,12 @@ Commands.formatCommand = {
           chrome.fileBrowserPrivate.formatDevice.bind(null, url));
     }
   },
-  canExecute: function(event, rootsList, fileManager, directoryModel) {
-    var root = CommandUtil.getCommandRoot(event, rootsList);
+  /**
+   * @param {Event} event Command event.
+   * @param {DirectoryTree} directoryTree Target directory tree.
+   */
+  canExecute: function(event, directoryTree, fileManager, directoryModel) {
+    var root = CommandUtil.getCommandRoot(event, directoryTree);
     var removable = root &&
                     PathUtil.getRootType(root.fullPath) == RootType.REMOVABLE;
     var isReadOnly = root && directoryModel.isPathReadOnly(root.fullPath);
@@ -182,17 +191,29 @@ Commands.formatCommand = {
  * Imports photos from external drive
  */
 Commands.importCommand = {
-  execute: function(event, rootsList) {
-    var root = CommandUtil.getCommandRoot(event, rootsList);
+  /**
+   * @param {Event} event Command event.
+   * @param {DirectoryTree} directoryTree Target directory tree.
+   */
+  execute: function(event, directoryTree) {
+    var root = CommandUtil.getCommandRoot(event, directoryTree);
+    if (!root)
+      return;
 
-    if (root) {
-      chrome.windows.create({url: chrome.extension.getURL('photo_import.html') +
-          '#' + PathUtil.getRootPath(root.fullPath), type: 'popup'});
-    }
+    chrome.windows.getCurrent(undefined, function(window) {
+      chrome.windows.create(
+          { url: chrome.extension.getURL('photo_import.html') +
+                 '?' + window.id + '#' + PathUtil.getRootPath(root.fullPath),
+            type: 'popup' });
+    }.bind(this));
   },
-  canExecute: function(event, rootsList) {
-    event.canExecute =
-        (CommandUtil.getCommandRootType(event, rootsList) != RootType.DRIVE);
+  /**
+   * @param {Event} event Command event.
+   * @param {DirectoryTree} directoryTree Target directory tree.
+   */
+  canExecute: function(event, directoryTree) {
+    var rootType = CommandUtil.getCommandRootType(event, directoryTree);
+    event.canExecute = (rootType != RootType.DRIVE);
   }
 };
 
@@ -207,6 +228,30 @@ Commands.newFolderCommand = {
     event.canExecute = !fileManager.isOnReadonlyDirectory() &&
                        !directoryModel.isSearching() &&
                        !fileManager.isRenamingInProgress();
+  }
+};
+
+/**
+ * Initiates new window creation.
+ */
+Commands.newWindowCommand = {
+  execute: function(event, fileManager) {
+    chrome.fileBrowserPrivate.openNewWindow(document.location.href);
+  },
+  canExecute: function(event, fileManager) {
+    event.canExecute = true;
+  }
+};
+
+/**
+ * Changed the default app handling inserted media.
+ */
+Commands.changeDefaultAppCommand = {
+  execute: function(event, fileManager) {
+    fileManager.showChangeDefaultAppPicker();
+  },
+  canExecute: function(event, fileManager) {
+    event.canExecute = true;
   }
 };
 

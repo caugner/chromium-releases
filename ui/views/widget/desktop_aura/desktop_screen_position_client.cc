@@ -31,8 +31,8 @@ void DesktopScreenPositionClient::ConvertPointFromScreen(
   aura::Window::ConvertPointToTarget(root_window, window, point);
 }
 
-void DesktopScreenPositionClient::ConvertNativePointToScreen(
-    aura::Window* window, gfx::Point* point) {
+void DesktopScreenPositionClient::ConvertHostPointToScreen(
+    aura::RootWindow* window, gfx::Point* point) {
   ConvertPointToScreen(window, point);
 }
 
@@ -48,7 +48,8 @@ void DesktopScreenPositionClient::SetBounds(
   if  (window->type() == aura::client::WINDOW_TYPE_CONTROL) {
     window->SetBounds(gfx::Rect(origin, bounds.size()));
     return;
-  } else if (window->type() == aura::client::WINDOW_TYPE_POPUP) {
+  } else if (window->type() == aura::client::WINDOW_TYPE_POPUP ||
+             window->type() == aura::client::WINDOW_TYPE_TOOLTIP) {
     // The caller expects windows we consider "embedded" to be placed in the
     // screen coordinate system. So we need to offset the root window's
     // position (which is in screen coordinates) from these bounds.

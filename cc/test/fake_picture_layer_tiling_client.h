@@ -5,11 +5,12 @@
 #ifndef CC_TEST_FAKE_PICTURE_LAYER_TILING_CLIENT_H_
 #define CC_TEST_FAKE_PICTURE_LAYER_TILING_CLIENT_H_
 
-#include "cc/picture_layer_tiling.h"
-#include "cc/picture_pile_impl.h"
+#include "cc/resources/picture_layer_tiling.h"
+#include "cc/resources/picture_pile_impl.h"
+#include "cc/resources/tile.h"
+#include "cc/resources/tile_manager.h"
+#include "cc/test/fake_rendering_stats_instrumentation.h"
 #include "cc/test/fake_tile_manager_client.h"
-#include "cc/tile.h"
-#include "cc/tile_manager.h"
 #include "ui/gfx/rect.h"
 
 namespace cc {
@@ -32,6 +33,7 @@ class FakePictureLayerTilingClient : public PictureLayerTilingClient {
 
  protected:
   FakeTileManagerClient tile_manager_client_;
+  FakeRenderingStatsInstrumentation stats_instrumentation_;
   TileManager tile_manager_;
   scoped_refptr<PicturePileImpl> pile_;
   gfx::Size tile_size_;

@@ -28,6 +28,7 @@ class DriveScheduler
  public:
   // Enum representing the type of job.
   enum JobType {
+    TYPE_GET_ABOUT_RESOURCE,
     TYPE_GET_ACCOUNT_METADATA,
     TYPE_GET_APP_LIST,
     TYPE_GET_RESOURCE_LIST,
@@ -95,6 +96,10 @@ class DriveScheduler
   // |callback| must not be null.
   void GetAppList(const google_apis::GetAppListCallback& callback);
 
+  // Adds a GetAboutResource operation to the queue.
+  // |callback| must not be null.
+  void GetAboutResource(const google_apis::GetAboutResourceCallback& callback);
+
   // Adds a GetResourceList operation to the queue.
   // |callback| must not be null.
   void GetResourceList(const GURL& feed_url,
@@ -153,7 +158,7 @@ class DriveScheduler
 
   // Adds an UploadExistingFile operation to the queue.
   void UploadExistingFile(
-      const GURL& upload_location,
+      const std::string& resource_id,
       const base::FilePath& drive_file_path,
       const base::FilePath& local_file_path,
       const std::string& content_type,
@@ -169,6 +174,8 @@ class DriveScheduler
     FILE_QUEUE,
     NUM_QUEUES
   };
+
+  static const int kMaxJobCount[NUM_QUEUES];
 
   // Represents a single entry in the job queue.
   struct QueueEntry {
@@ -188,6 +195,7 @@ class DriveScheduler
     //   TYPE_DELETE_RESOURCE
     //   TYPE_RENAME_RESOURCE
     //   TYPE_ADD_RESOURCE_TO_DIRECTORY
+    //   TYPE_UPLOAD_EXISTING_FILE
     std::string resource_id;
 
     // URL to access the contents of the operation's target.
@@ -241,6 +249,11 @@ class DriveScheduler
     //   TYPE_GET_ACCOUNT_METADATA,
     google_apis::GetAccountMetadataCallback get_account_metadata_callback;
 
+    // Callback for operations that take a GetAboutResourceCallback.
+    // Used by:
+    //   TYPE_GET_ABOUT_RESOURCE,
+    google_apis::GetAboutResourceCallback get_about_resource_callback;
+
     // Callback for operations that take a GetAppListCallback.
     // Used by:
     //   TYPE_GET_APP_LIST,
@@ -267,7 +280,6 @@ class DriveScheduler
     // Parameters for UploadExistingFile
     // Used by:
     //   TYPE_UPLOAD_EXISTING_FILE
-    GURL upload_location;
     base::FilePath drive_file_path;
     base::FilePath local_file_path;
     std::string content_type;
@@ -315,11 +327,17 @@ class DriveScheduler
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::ResourceEntry> entry);
 
+  // Callback for job finishing with a GetAboutResourceCallback.
+  void OnGetAboutResourceJobDone(
+      scoped_ptr<QueueEntry> queue_entry,
+      google_apis::GDataErrorCode error,
+      scoped_ptr<google_apis::AboutResource> about_resource);
+
   // Callback for job finishing with a GetAccountMetadataCallback.
   void OnGetAccountMetadataJobDone(
       scoped_ptr<QueueEntry> queue_entry,
       google_apis::GDataErrorCode error,
-      scoped_ptr<google_apis::AccountMetadataFeed> account_metadata);
+      scoped_ptr<google_apis::AccountMetadata> account_metadata);
 
   // Callback for job finishing with a GetAppListCallback.
   void OnGetAppListJobDone(
@@ -354,9 +372,8 @@ class DriveScheduler
   // For testing only.  Disables throttling so that testing is faster.
   void SetDisableThrottling(bool disable) { disable_throttling_ = disable; }
 
-  // True when there is a job running.  Indicates that new jobs should wait to
-  // be executed.
-  bool job_loop_is_running_[NUM_QUEUES];
+  // Number of jobs in flight for each queue.
+  int jobs_running_[NUM_QUEUES];
 
   // Next value that should be assigned as a job id.
   int next_job_id_;
@@ -377,13 +394,12 @@ class DriveScheduler
 
   Profile* profile_;
 
-  // Note: This should remain the last member so it'll be destroyed and
-  // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<DriveScheduler> weak_ptr_factory_;
-
   // Whether this instance is initialized or not.
   bool initialized_;
 
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<DriveScheduler> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(DriveScheduler);
 };
 

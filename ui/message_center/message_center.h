@@ -11,8 +11,9 @@
 #include "base/observer_list.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center_export.h"
+#include "ui/message_center/notification_change_observer.h"
 #include "ui/message_center/notification_list.h"
-#include "ui/notifications/notification_types.h"
+#include "ui/message_center/notification_types.h"
 
 namespace base {
 class DictionaryValue;
@@ -28,8 +29,18 @@ class DictionaryValue;
 
 namespace message_center {
 
-class MESSAGE_CENTER_EXPORT MessageCenter : public NotificationList::Delegate {
+class MESSAGE_CENTER_EXPORT MessageCenter : public NotificationChangeObserver,
+                                            public NotificationList::Delegate {
  public:
+  // Creates the global message center object.
+  static void Initialize();
+
+  // Returns the global message center object. Initialize must be called first.
+  static MessageCenter* Get();
+
+  // Destroys the global message_center object.
+  static void Shutdown();
+
   // Class that hosts the message center.
   class MESSAGE_CENTER_EXPORT Observer {
    public:
@@ -42,9 +53,12 @@ class MESSAGE_CENTER_EXPORT MessageCenter : public NotificationList::Delegate {
 
   class MESSAGE_CENTER_EXPORT Delegate {
    public:
+    virtual ~Delegate();
+
     // Called when the notification associated with |notification_id| is
     // removed (i.e. closed by the user).
-    virtual void NotificationRemoved(const std::string& notification_id) = 0;
+    virtual void NotificationRemoved(const std::string& notification_id,
+                                     bool by_user) = 0;
 
     // Request to disable the extension associated with |notification_id|.
     virtual void DisableExtension(const std::string& notification_id) = 0;
@@ -71,14 +85,8 @@ class MESSAGE_CENTER_EXPORT MessageCenter : public NotificationList::Delegate {
     // TODO(miket): consider providing default implementations for the pure
     // virtuals above, to avoid changing so many files in disparate parts of
     // the codebase each time we enhance this interface.
-    virtual void OnButtonClicked(const std::string& id, int button_index);
-
-   protected:
-    virtual ~Delegate() {}
+    virtual void OnButtonClicked(const std::string& id, int button_index) = 0;
   };
-
-  MessageCenter();
-  virtual ~MessageCenter();
 
   // Called to set the delegate.  Generally called only once, except in tests.
   // Changing the delegate does not affect notifications in its
@@ -106,7 +114,7 @@ class MESSAGE_CENTER_EXPORT MessageCenter : public NotificationList::Delegate {
   // from the extension. Otherwise if |display_source| is provided, a menu item
   // showing the source and allowing notifications from that source to be
   // disabled will be shown. All actual disabling is handled by the Delegate.
-  void AddNotification(ui::notifications::NotificationType type,
+  void AddNotification(NotificationType type,
                        const std::string& id,
                        const string16& title,
                        const string16& message,
@@ -126,32 +134,46 @@ class MESSAGE_CENTER_EXPORT MessageCenter : public NotificationList::Delegate {
   void RemoveNotification(const std::string& id);
 
   void SetNotificationIcon(const std::string& notification_id,
-                           const gfx::ImageSkia& image);
+                           const gfx::Image& image);
 
   void SetNotificationImage(const std::string& notification_id,
-                            const gfx::ImageSkia& image);
+                            const gfx::Image& image);
 
   void SetNotificationButtonIcon(const std::string& notification_id,
                                  int button_index,
-                                 const gfx::ImageSkia& image);
+                                 const gfx::Image& image);
 
   NotificationList* notification_list() { return notification_list_.get(); }
   bool quiet_mode() const { return notification_list_->quiet_mode(); }
 
-  // Overridden from NotificationList::Delegate.
-  virtual void SendRemoveNotification(const std::string& id) OVERRIDE;
-  virtual void SendRemoveAllNotifications() OVERRIDE;
-  virtual void DisableNotificationByExtension(const std::string& id) OVERRIDE;
-  virtual void DisableNotificationByUrl(const std::string& id) OVERRIDE;
-  virtual void ShowNotificationSettings(const std::string& id) OVERRIDE;
-  virtual void ShowNotificationSettingsDialog(gfx::NativeView context) OVERRIDE;
-  virtual void OnNotificationClicked(const std::string& id) OVERRIDE;
-  virtual void OnQuietModeChanged(bool quiet_mode) OVERRIDE;
+  // Overridden from NotificationChangeObserver:
+  virtual void OnRemoveNotification(const std::string& id, bool by_user)
+      OVERRIDE;
+  virtual void OnRemoveAllNotifications(bool by_user) OVERRIDE;
+  virtual void OnDisableNotificationsByExtension(const std::string& id)
+      OVERRIDE;
+  virtual void OnDisableNotificationsByUrl(const std::string& id) OVERRIDE;
+  virtual void OnShowNotificationSettings(const std::string& id) OVERRIDE;
+  virtual void OnShowNotificationSettingsDialog(gfx::NativeView context)
+      OVERRIDE;
+  virtual void OnExpanded(const std::string& id) OVERRIDE;
+  virtual void OnClicked(const std::string& id) OVERRIDE;
   virtual void OnButtonClicked(const std::string& id, int button_index)
       OVERRIDE;
-  virtual NotificationList* GetNotificationList() OVERRIDE;
+
+  // Overridden from NotificationList::Delegate:
+  virtual void SendRemoveNotification(const std::string& id,
+                                      bool by_user) OVERRIDE;
+  virtual void OnQuietModeChanged(bool quiet_mode) OVERRIDE;
+
+ protected:
+  MessageCenter();
+  virtual ~MessageCenter();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayWinTest,
+                           ManyMessageCenterNotifications);
+  FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayWinTest, ManyPopupNotifications);
   // Calls OnMessageCenterChanged on each observer.
   void NotifyMessageCenterChanged(bool new_notification);
 

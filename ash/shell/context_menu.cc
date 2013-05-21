@@ -6,7 +6,7 @@
 
 #include "ash/launcher/launcher.h"
 #include "ash/root_window_controller.h"
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_types.h"
 #include "ash/shell.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -50,7 +50,7 @@ bool ContextMenu::GetAcceleratorForCommandId(
   return false;
 }
 
-void ContextMenu::ExecuteCommand(int command_id) {
+void ContextMenu::ExecuteCommand(int command_id, int event_flags) {
   Shell* shell = Shell::GetInstance();
   switch (static_cast<MenuItem>(command_id)) {
     case MENU_AUTO_HIDE:

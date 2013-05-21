@@ -5,12 +5,12 @@
 package org.chromium.android_webview;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 
 import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.content.app.LibraryLoader;
 import org.chromium.content.browser.AndroidBrowserProcess;
-import org.chromium.content.browser.ResourceExtractor;
 import org.chromium.content.common.ProcessInitException;
 
 /**
@@ -32,13 +32,18 @@ public abstract class AwBrowserProcess {
     public static void loadLibrary() {
         PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
         LibraryLoader.setLibraryToLoad(NATIVE_LIBRARY);
-        LibraryLoader.loadNow();
+        try {
+            LibraryLoader.loadNow();
+        } catch (ProcessInitException e) {
+            throw new RuntimeException("Cannot load WebView", e);
+        }
     }
 
     /**
      * Starts the chromium browser process running within this process. Creates threads
      * and performs other per-app resource allocations; must not be called from zygote.
      * Note: it is up to the caller to ensure this is only called once.
+     * @param context The Android application context
      */
     public static void start(final Context context) {
         // We must post to the UI thread to cover the case that the user

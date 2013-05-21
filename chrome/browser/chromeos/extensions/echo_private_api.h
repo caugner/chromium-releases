@@ -8,12 +8,12 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_function.h"
 
-class GetRegistrationCodeFunction : public AsyncExtensionFunction {
+class EchoPrivateGetRegistrationCodeFunction : public SyncExtensionFunction {
  public:
-  GetRegistrationCodeFunction();
+  EchoPrivateGetRegistrationCodeFunction();
 
  protected:
-  virtual ~GetRegistrationCodeFunction();
+  virtual ~EchoPrivateGetRegistrationCodeFunction();
   virtual bool RunImpl() OVERRIDE;
 
  private:
@@ -22,12 +22,12 @@ class GetRegistrationCodeFunction : public AsyncExtensionFunction {
                              ECHOPRIVATE_GETREGISTRATIONCODE)
 };
 
-class GetOobeTimestampFunction : public AsyncExtensionFunction {
+class EchoPrivateGetOobeTimestampFunction : public AsyncExtensionFunction {
  public:
-  GetOobeTimestampFunction();
+  EchoPrivateGetOobeTimestampFunction();
 
  protected:
-  virtual ~GetOobeTimestampFunction();
+  virtual ~EchoPrivateGetOobeTimestampFunction();
   virtual bool RunImpl() OVERRIDE;
 
  private:
@@ -36,12 +36,15 @@ class GetOobeTimestampFunction : public AsyncExtensionFunction {
                              ECHOPRIVATE_GETOOBETIMESTAMP)
 };
 
-class CheckAllowRedeemOffersFunction : public AsyncExtensionFunction {
+// TODO(tbarzic): Remove this once echo.getUserConsent function is up and
+// running.
+class EchoPrivateCheckAllowRedeemOffersFunction
+    : public AsyncExtensionFunction {
  public:
-  CheckAllowRedeemOffersFunction();
+  EchoPrivateCheckAllowRedeemOffersFunction();
 
  protected:
-  virtual ~CheckAllowRedeemOffersFunction();
+  virtual ~EchoPrivateCheckAllowRedeemOffersFunction();
   virtual bool RunImpl() OVERRIDE;
 
  private:
@@ -49,4 +52,40 @@ class CheckAllowRedeemOffersFunction : public AsyncExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("echoPrivate.checkAllowRedeemOffers",
                              ECHOPRIVATE_CHECKALLOWREDEEMOFFERS)
 };
+
+// The function first checks if offers redeeming is allowed by the device
+// policy. It should then show a dialog that, depending on the check result,
+// either asks user's consent to verify the device's eligibility for the offer,
+// or informs the user that the offers redeeming is disabled.
+// It returns whether the user consent was given.
+//
+// NOTE: Currently only the first part is implemented, and its result is kept in
+// |redeem_offers_allowed_|. The function itself always returns false.
+class EchoPrivateGetUserConsentFunction : public AsyncExtensionFunction {
+ public:
+  EchoPrivateGetUserConsentFunction();
+
+  bool redeem_offers_allowed() const { return redeem_offers_allowed_; }
+
+ protected:
+  virtual ~EchoPrivateGetUserConsentFunction();
+
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  // Checks whether "allow redeem ChromeOS registration offers" setting is
+  // disabled in cros settings. It may be asynchronous if the needed settings
+  // provider is not yet trusted.
+  // Upon completion |OnRedeemOffersAllowed| is called.
+  void CheckRedeemOffersAllowed();
+  void OnRedeemOffersAllowedChecked(bool is_allowed);
+
+  // Used only for test, and only until the rest of functionality is
+  // implemented.
+  bool redeem_offers_allowed_;
+
+  DECLARE_EXTENSION_FUNCTION("echoPrivate.getUserConsent",
+                             ECHOPRIVATE_GETUSERCONSENT)
+};
+
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_ECHO_PRIVATE_API_H_

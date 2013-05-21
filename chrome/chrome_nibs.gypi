@@ -18,6 +18,7 @@
       'app/nibs/ChromeToMobileBubble.xib',
       'app/nibs/CollectedCookies.xib',
       'app/nibs/ContentBlockedCookies.xib',
+      'app/nibs/ContentBlockedMedia.xib',
       'app/nibs/ContentBlockedMixedScript.xib',
       'app/nibs/ContentBlockedPlugins.xib',
       'app/nibs/ContentBlockedPopups.xib',
@@ -61,6 +62,7 @@
       'app/nibs/InfoBarContainer.xib',
       'app/nibs/Notification.xib',
       'app/nibs/Panel.xib',
+      'app/nibs/ScreenCaptureNotification.xib',
     ],  # mac_untranslated_xibs
     'mac_all_xibs': [
       '<@(mac_translated_xibs)',

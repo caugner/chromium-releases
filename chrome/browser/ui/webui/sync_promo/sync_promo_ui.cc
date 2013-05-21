@@ -13,7 +13,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -29,6 +28,7 @@
 #include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -56,8 +56,8 @@ const char kSyncPromoQueryKeySource[] = "source";
 
 // Gaia cannot support about:blank as a continue URL, so using a hosted blank
 // page instead.
-const char kContinueUrl[] =
-    "https://www.google.com/intl/%s/chrome/blank.html?%s=%d";
+const char kContinueUrlPrefix[] =
+    "https://www.google.com/intl/%s/chrome/blank.html";
 
 // The maximum number of times we want to show the sync promo at startup.
 const int kSyncPromoShowAtStartupMaximum = 10;
@@ -129,10 +129,15 @@ bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
   if (net::NetworkChangeNotifier::IsOffline())
     return false;
 
+  // Don't show if the profile is an incognito.
+  if (profile->IsOffTheRecord())
+    return false;
+
   // Display the signin promo if the user is not signed in.
   SigninManager* signin = SigninManagerFactory::GetForProfile(
       profile->GetOriginalProfile());
-  return signin->GetAuthenticatedUsername().empty();
+  return !signin->AuthInProgress() && signin->IsSigninAllowed() &&
+      signin->GetAuthenticatedUsername().empty();
 #endif
 }
 
@@ -234,8 +239,10 @@ GURL SyncPromoUI::GetSyncPromoURL(const GURL& next_page,
     url_string.append("?service=chromiumsync&sarp=1&rm=hide");
 
     const std::string& locale = g_browser_process->GetApplicationLocale();
-    std::string continue_url = base::StringPrintf(kContinueUrl, locale.c_str(),
-        kSyncPromoQueryKeySource, static_cast<int>(source));
+    std::string continue_url = base::StringPrintf(kContinueUrlPrefix,
+                                                  locale.c_str());
+    base::StringAppendF(&continue_url, "?%s=%d", kSyncPromoQueryKeySource,
+                        static_cast<int>(source));
 
     base::StringAppendF(&url_string, "&%s=%s", kSyncPromoQueryKeyContinue,
                         net::EscapeQueryParamValue(
@@ -302,6 +309,15 @@ bool SyncPromoUI::UseWebBasedSigninFlow() {
 #else
   return false;
 #endif
+}
+
+// static
+bool SyncPromoUI::IsContinueUrlForWebBasedSigninFlow(const GURL& url) {
+  GURL::Replacements replacements;
+  replacements.ClearQuery();
+  const std::string& locale = g_browser_process->GetApplicationLocale();
+  return url.ReplaceComponents(replacements) ==
+      GURL(base::StringPrintf(kContinueUrlPrefix, locale.c_str()));
 }
 
 // static

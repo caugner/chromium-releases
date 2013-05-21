@@ -25,6 +25,8 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
   virtual bool HasAudioInputDevices() OVERRIDE;
   virtual void GetAudioInputDeviceNames(media::AudioDeviceNames* device_names)
       OVERRIDE;
+  virtual AudioParameters GetInputStreamParameters(
+      const std::string& device_id) OVERRIDE;
 
   // Implementation of AudioManagerBase.
   virtual AudioOutputStream* MakeLinearOutputStream(
@@ -35,11 +37,22 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
       const AudioParameters& params, const std::string& device_id) OVERRIDE;
   virtual AudioInputStream* MakeLowLatencyInputStream(
       const AudioParameters& params, const std::string& device_id) OVERRIDE;
-  virtual AudioParameters GetPreferredLowLatencyOutputStreamParameters(
-      const AudioParameters& input_params) OVERRIDE;
+
+  static bool GetDefaultOutputDevice(AudioDeviceID* device);
+
+  static bool GetDefaultOutputChannels(int* channels,
+                                       int* channels_per_frame);
+
+  static bool GetDeviceChannels(AudioDeviceID device,
+                                AudioObjectPropertyScope scope,
+                                int* channels,
+                                int* channels_per_frame);
 
  protected:
   virtual ~AudioManagerMac();
+
+  virtual AudioParameters GetPreferredOutputStreamParameters(
+      const AudioParameters& input_params) OVERRIDE;
 
  private:
   // Helper methods for constructing AudioDeviceListenerMac on the audio thread.

@@ -8,8 +8,8 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
@@ -400,7 +400,9 @@ void MetroPinTabHelper::TogglePinnedToStartScreen() {
        iter != favicon_url_candidates_.end();
        ++iter) {
     favicon_chooser_->AddPendingRequest(
-        web_contents()->DownloadFavicon(iter->icon_url, image_size,
+        web_contents()->DownloadFavicon(iter->icon_url,
+            true,
+            image_size,
             base::Bind(&MetroPinTabHelper::DidDownloadFavicon,
                        base::Unretained(this))));
   }

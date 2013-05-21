@@ -11,6 +11,7 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
+#include "chrome/renderer/extensions/dispatcher.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 
@@ -18,22 +19,28 @@ using content::V8ValueConverter;
 
 namespace extensions {
 
-RuntimeCustomBindings::RuntimeCustomBindings(ChromeV8Context* context)
-    : ChromeV8Extension(NULL), context_(context) {
+RuntimeCustomBindings::RuntimeCustomBindings(Dispatcher* dispatcher,
+                                             ChromeV8Context* context)
+    : ChromeV8Extension(dispatcher, context->v8_context()),
+      context_(context) {
   RouteFunction("GetManifest",
-      base::Bind(&RuntimeCustomBindings::GetManifest, base::Unretained(this)));
-  RouteStaticFunction("OpenChannelToExtension", &OpenChannelToExtension);
-  RouteStaticFunction("OpenChannelToNativeApp", &OpenChannelToNativeApp);
+                base::Bind(&RuntimeCustomBindings::GetManifest,
+                           base::Unretained(this)));
+  RouteFunction("OpenChannelToExtension",
+                base::Bind(&RuntimeCustomBindings::OpenChannelToExtension,
+                           base::Unretained(this)));
+  RouteFunction("OpenChannelToNativeApp",
+                base::Bind(&RuntimeCustomBindings::OpenChannelToNativeApp,
+                           base::Unretained(this)));
 }
 
 RuntimeCustomBindings::~RuntimeCustomBindings() {}
 
-// static
 v8::Handle<v8::Value> RuntimeCustomBindings::OpenChannelToExtension(
     const v8::Arguments& args) {
   // Get the current RenderView so that we can send a routed IPC message from
   // the correct source.
-  content::RenderView* renderview = GetCurrentRenderView();
+  content::RenderView* renderview = GetRenderView();
   if (!renderview)
     return v8::Undefined();
 
@@ -56,12 +63,17 @@ v8::Handle<v8::Value> RuntimeCustomBindings::OpenChannelToExtension(
   return v8::Integer::New(port_id);
 }
 
-// static
 v8::Handle<v8::Value> RuntimeCustomBindings::OpenChannelToNativeApp(
     const v8::Arguments& args) {
+  // Verify that the extension has permission to use native messaging.
+  if (!dispatcher()->CheckContextAccessToExtensionAPI(
+          "nativeMessaging", context_)) {
+    return v8::Undefined();
+  }
+
   // Get the current RenderView so that we can send a routed IPC message from
   // the correct source.
-  content::RenderView* renderview = GetCurrentRenderView();
+  content::RenderView* renderview = GetRenderView();
   if (!renderview)
     return v8::Undefined();
 

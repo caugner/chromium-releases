@@ -15,6 +15,7 @@
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "grit/generated_resources.h"
+#include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
@@ -24,15 +25,15 @@ namespace {
 // Html output helper functions
 
 std::string WrapWithH3(const std::string& text) {
-  return "<h3>" + text + "</h3>";
+  return "<h3>" + net::EscapeForHTML(text) + "</h3>";
 }
 
 std::string WrapWithTH(const std::string& text) {
-  return "<th>" + text + "</th>";
+  return "<th>" + net::EscapeForHTML(text) + "</th>";
 }
 
 std::string WrapWithTD(const std::string& text) {
-  return "<td>" + text + "</td>";
+  return "<td>" + net::EscapeForHTML(text) + "</td>";
 }
 
 std::string WrapWithTR(const std::string& text) {
@@ -231,12 +232,17 @@ std::string NetworkStateToHtmlTableHeader() {
       WrapWithTH("Type") +
       WrapWithTH("State") +
       WrapWithTH("Path") +
+      WrapWithTH("Error") +
       WrapWithTH("IP Addr") +
       WrapWithTH("Security") +
       WrapWithTH("Technology") +
       WrapWithTH("Activation") +
       WrapWithTH("Romaing") +
-      WrapWithTH("Strength");
+      WrapWithTH("OOC") +
+      WrapWithTH("Strength") +
+      WrapWithTH("Auto") +
+      WrapWithTH("Fav") +
+      WrapWithTH("Pri");
   return WrapWithTR(str);
 }
 
@@ -246,12 +252,17 @@ std::string NetworkStateToHtmlTableRow(const NetworkState* network) {
       WrapWithTD(network->type()) +
       WrapWithTD(network->connection_state()) +
       WrapWithTD(network->path()) +
+      WrapWithTD(network->error()) +
       WrapWithTD(network->ip_address()) +
       WrapWithTD(network->security()) +
       WrapWithTD(network->technology()) +
       WrapWithTD(network->activation_state()) +
       WrapWithTD(network->roaming()) +
-      WrapWithTD(base::IntToString(network->signal_strength()));
+      WrapWithTD(base::IntToString(network->cellular_out_of_credits())) +
+      WrapWithTD(base::IntToString(network->signal_strength())) +
+      WrapWithTD(base::IntToString(network->auto_connect())) +
+      WrapWithTD(base::IntToString(network->favorite())) +
+      WrapWithTD(base::IntToString(network->priority()));
   return WrapWithTR(str);
 }
 
@@ -284,8 +295,8 @@ std::string AboutNetwork(const std::string& query) {
   std::string output = GetHeaderHtmlInfo(refresh);
   if (network_event_log::IsInitialized())
     output += GetHeaderEventLogInfo();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          ash::switches::kAshEnableNewNetworkStatusArea)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          ash::switches::kAshDisableNewNetworkStatusArea)) {
     output += GetNetworkStateHtmlInfo();
   } else {
     output += GetCrosNetworkHtmlInfo();

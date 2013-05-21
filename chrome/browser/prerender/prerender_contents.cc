@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
@@ -59,8 +60,8 @@ class PrerenderContentsFactoryImpl : public PrerenderContents::Factory {
 class PrerenderContents::WebContentsDelegateImpl
     : public content::WebContentsDelegate {
  public:
-  explicit WebContentsDelegateImpl(PrerenderContents* prerender_contents) :
-      prerender_contents_(prerender_contents) {
+  explicit WebContentsDelegateImpl(PrerenderContents* prerender_contents)
+      : prerender_contents_(prerender_contents) {
   }
 
   // content::WebContentsDelegate implementation:
@@ -83,12 +84,6 @@ class PrerenderContents::WebContentsDelegateImpl
     prerender_contents_->Destroy(FINAL_STATUS_DOWNLOAD);
     // Cancel the download.
     return false;
-  }
-
-  virtual void OnStartDownload(WebContents* source,
-                               DownloadItem* download) OVERRIDE {
-    // Prerendered pages should never be able to download files.
-    NOTREACHED();
   }
 
   virtual bool ShouldCreateWebContents(
@@ -164,11 +159,12 @@ PrerenderContents::PendingPrerenderInfo::PendingPrerenderInfo(
     Origin origin,
     const GURL& url,
     const content::Referrer& referrer,
-    const gfx::Size& size) : weak_prerender_handle(weak_prerender_handle),
-                             origin(origin),
-                             url(url),
-                             referrer(referrer),
-                             size(size) {
+    const gfx::Size& size)
+    : weak_prerender_handle(weak_prerender_handle),
+      origin(origin),
+      url(url),
+      referrer(referrer),
+      size(size) {
 }
 
 PrerenderContents::PendingPrerenderInfo::~PendingPrerenderInfo() {
@@ -278,6 +274,12 @@ void PrerenderContents::StartPrerendering(
 
   prerender_contents_.reset(CreateWebContents(session_storage_namespace));
   BrowserTabContents::AttachTabHelpers(prerender_contents_.get());
+#if defined(OS_ANDROID)
+  // Delay icon fetching until the contents are getting swapped in
+  // to conserve network usage in mobile devices.
+  FaviconTabHelper::FromWebContents(
+      prerender_contents_.get())->set_should_fetch_icons(false);
+#endif  // defined(OS_ANDROID)
   content::WebContentsObserver::Observe(prerender_contents_.get());
 
   web_contents_delegate_.reset(new WebContentsDelegateImpl(this));
@@ -510,7 +512,7 @@ void PrerenderContents::DidUpdateFaviconURL(
 bool PrerenderContents::AddAliasURL(const GURL& url) {
   const bool http = url.SchemeIs(chrome::kHttpScheme);
   const bool https = url.SchemeIs(chrome::kHttpsScheme);
-  if (!(http || https)) {
+  if (!http && !https) {
     DCHECK_NE(MATCH_COMPLETE_REPLACEMENT_PENDING, match_complete_status_);
     Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
     return false;
@@ -536,8 +538,9 @@ bool PrerenderContents::Matches(
     const SessionStorageNamespace* session_storage_namespace) const {
   DCHECK(child_id_ == -1 || session_storage_namespace);
   if (session_storage_namespace &&
-      session_storage_namespace_id_ != session_storage_namespace->id())
+      session_storage_namespace_id_ != session_storage_namespace->id()) {
     return false;
+  }
   return std::count_if(alias_urls_.begin(), alias_urls_.end(),
                        std::bind2nd(std::equal_to<GURL>(), url)) != 0;
 }
@@ -651,7 +654,7 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
   size_t private_bytes, shared_bytes;
   if (metrics->GetMemoryBytes(&private_bytes, &shared_bytes) &&
       private_bytes > prerender_manager_->config().max_bytes) {
-      Destroy(FINAL_STATUS_MEMORY_LIMIT_EXCEEDED);
+    Destroy(FINAL_STATUS_MEMORY_LIMIT_EXCEEDED);
   }
 }
 

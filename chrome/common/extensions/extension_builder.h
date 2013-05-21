@@ -5,7 +5,7 @@
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_BUILDER_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_BUILDER_H_
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/extensions/manifest.h"
@@ -29,7 +29,7 @@ class ExtensionBuilder {
   // Defaults to FilePath().
   ExtensionBuilder& SetPath(const base::FilePath& path);
 
-  // Defaults to Manifest::LOAD.
+  // Defaults to Manifest::UNPACKED.
   ExtensionBuilder& SetLocation(Manifest::Location location);
 
   ExtensionBuilder& SetManifest(scoped_ptr<base::DictionaryValue> manifest);

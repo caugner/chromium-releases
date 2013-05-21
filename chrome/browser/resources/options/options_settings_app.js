@@ -33,8 +33,11 @@
       $(whitelistedSections[i]).hidden = false;
 
     // Hide irrelevant parts of privacy section.
-    document.querySelector(
-        '#privacy-section > div > .checkbox').hidden = true;
+    var hiddenPrivacyNodeList = document.querySelectorAll(
+        '#privacy-section > div > .checkbox');
+    for (var i = 0; i < hiddenPrivacyNodeList.length; i++)
+      hiddenPrivacyNodeList[i].hidden = true;
+
     document.querySelector(
         '#privacy-section > div > #privacy-explanation').
             hidden = true;
@@ -46,6 +49,9 @@
     $('profiles-create').hidden = true;
     $('profiles-delete').hidden = true;
     $('profiles-manage').hidden = true;
+
+    // Remove the 'X'es on profiles in the profile list.
+    $('profiles-list').canDeleteItems = false;
   });
 
   loadTimeData.overrideValues(loadTimeData.getValue('settingsApp'));

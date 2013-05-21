@@ -12,6 +12,8 @@
 #include "base/pending_task.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_operations.h"
@@ -62,7 +64,6 @@ base::FilePath GetTestFilePath(const std::string& relative_path) {
   path = path.AppendASCII("chrome")
              .AppendASCII("test")
              .AppendASCII("data")
-             .AppendASCII("chromeos")
              .Append(base::FilePath::FromUTF8Unsafe(relative_path));
   return path;
 }
@@ -84,6 +85,11 @@ void RunBlockingPoolTask() {
   }
 }
 
+void RunAndQuit(const base::Closure& closure) {
+  closure.Run();
+  MessageLoop::current()->Quit();
+}
+
 scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path) {
   base::FilePath path = GetTestFilePath(relative_path);
 
@@ -93,97 +99,6 @@ scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path) {
   LOG_IF(WARNING, !value.get()) << "Failed to parse " << path.value()
                                 << ": " << error;
   return value.Pass();
-}
-
-void CopyResultsFromEntryActionCallback(GDataErrorCode* error_out,
-                                        GDataErrorCode error_in) {
-  *error_out = error_in;
-}
-
-void CopyResultFromEntryActionCallbackAndQuit(GDataErrorCode* error_out,
-                                              GDataErrorCode error_in) {
-  *error_out = error_in;
-  MessageLoop::current()->Quit();
-}
-
-void CopyResultsFromGetDataCallback(GDataErrorCode* error_out,
-                                    scoped_ptr<base::Value>* value_out,
-                                    GDataErrorCode error_in,
-                                    scoped_ptr<base::Value> value_in) {
-  value_out->swap(value_in);
-  *error_out = error_in;
-}
-
-void CopyResultsFromGetDataCallbackAndQuit(GDataErrorCode* error_out,
-                                           scoped_ptr<base::Value>* value_out,
-                                           GDataErrorCode error_in,
-                                           scoped_ptr<base::Value> value_in) {
-  *error_out = error_in;
-  *value_out = value_in.Pass();
-  MessageLoop::current()->Quit();
-}
-
-void CopyResultsFromGetResourceEntryCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<ResourceEntry>* resource_entry_out,
-    GDataErrorCode error_in,
-    scoped_ptr<ResourceEntry> resource_entry_in) {
-  resource_entry_out->swap(resource_entry_in);
-  *error_out = error_in;
-}
-
-void CopyResultsFromGetResourceListCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<ResourceList>* resource_list_out,
-    GDataErrorCode error_in,
-    scoped_ptr<ResourceList> resource_list_in) {
-  resource_list_out->swap(resource_list_in);
-  *error_out = error_in;
-}
-
-void CopyResultsFromGetAccountMetadataCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<AccountMetadataFeed>* account_metadata_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AccountMetadataFeed> account_metadata_in) {
-  account_metadata_out->swap(account_metadata_in);
-  *error_out = error_in;
-}
-
-void CopyResultsFromGetAppListCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<AppList>* app_list_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AppList> app_list_in) {
-  *app_list_out = app_list_in.Pass();
-  *error_out = error_in;
-}
-
-void CopyResultsFromDownloadActionCallback(
-    GDataErrorCode* error_out,
-    base::FilePath* temp_file_out,
-    GDataErrorCode error_in,
-    const base::FilePath& temp_file_in) {
-  *error_out = error_in;
-  *temp_file_out = temp_file_in;
-}
-
-void CopyResultsFromInitiateUploadCallback(
-    GDataErrorCode* error_out,
-    GURL* url_out,
-    GDataErrorCode error_in,
-    const GURL& url_in) {
-  *error_out = error_in;
-  *url_out = url_in;
-}
-
-void CopyResultsFromUploadRangeCallback(
-    UploadRangeResponse* response_out,
-    scoped_ptr<ResourceEntry>* entry_out,
-    const UploadRangeResponse& response_in,
-    scoped_ptr<ResourceEntry> entry_in) {
-  *response_out = response_in;
-  *entry_out = entry_in.Pass();
 }
 
 // Returns a HttpResponse created from the given file path.
@@ -249,6 +164,36 @@ bool VerifyJsonData(const base::FilePath& expected_json_file_path,
   }
 
   return true;
+}
+
+bool ParseContentRangeHeader(const std::string& value,
+                             int64* start_position,
+                             int64* end_position,
+                             int64* length) {
+  DCHECK(start_position);
+  DCHECK(end_position);
+  DCHECK(length);
+
+  std::string remaining;
+  if (!RemovePrefix(value, "bytes ", &remaining))
+    return false;
+
+  std::vector<std::string> parts;
+  base::SplitString(remaining, '/', &parts);
+  if (parts.size() != 2U)
+    return false;
+
+  const std::string range = parts[0];
+  if (!base::StringToInt64(parts[1], length))
+    return false;
+
+  parts.clear();
+  base::SplitString(range, '-', &parts);
+  if (parts.size() != 2U)
+    return false;
+
+  return (base::StringToInt64(parts[0], start_position) &&
+          base::StringToInt64(parts[1], end_position));
 }
 
 }  // namespace test_util

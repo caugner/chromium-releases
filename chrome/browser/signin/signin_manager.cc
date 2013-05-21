@@ -7,22 +7,23 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/about_signin_internals.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/signin_global_error.h"
 #include "chrome/browser/signin/signin_internals_util.h"
+#include "chrome/browser/signin/signin_manager_cookie_helper.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -30,23 +31,25 @@
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/webui/signin/profile_signin_confirmation_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "net/cookies/cookie_monster.h"
+#include "net/base/escape.h"
 #include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "third_party/icu/public/i18n/unicode/regex.h"
 
 #if defined(ENABLE_CONFIGURATION_POLICY) && !defined(OS_CHROMEOS)
-#include "chrome/browser/policy/user_policy_signin_service.h"
-#include "chrome/browser/policy/user_policy_signin_service_factory.h"
+#include "chrome/browser/policy/cloud/user_policy_signin_service.h"
+#include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
 #endif
 
 using namespace signin_internals_util;
@@ -60,89 +63,35 @@ const char kGetInfoEmailKey[] = "email";
 
 const char kGoogleAccountsUrl[] = "https://accounts.google.com";
 
+const int kInvalidProcessId = -1;
+
+const char kChromiumSyncService[] = "service=chromiumsync";
+
 }  // namespace
 
-// This class fetches GAIA cookie on IO thread on behalf of SigninManager which
-// only lives on the UI thread.
-class SigninManagerCookieHelper
-    : public base::RefCountedThreadSafe<SigninManagerCookieHelper> {
- public:
-  explicit SigninManagerCookieHelper(
-      net::URLRequestContextGetter* request_context_getter);
+// Under the covers, we use a dummy chrome-extension ID to serve the purposes
+// outlined in the .h file comment for this string.
+const char* SigninManager::kChromeSigninEffectiveSite =
+    "chrome-extension://acfccoigjajmmgbhpfbjnpckhjjegnih";
 
-  // Starts the fetching process, which will notify its completion via
-  // callback.
-  void StartFetchingGaiaCookiesOnUIThread(
-      const base::Callback<void(const net::CookieList& cookies)>& callback);
-
- private:
-  friend class base::RefCountedThreadSafe<SigninManagerCookieHelper>;
-  ~SigninManagerCookieHelper();
-
-  // Fetch the GAIA cookies. This must be called in the IO thread.
-  void FetchGaiaCookiesOnIOThread();
-
-  // Callback for fetching cookies. This must be called in the IO thread.
-  void OnGaiaCookiesFetched(const net::CookieList& cookies);
-
-  // Notifies the completion callback. This must be called in the UI thread.
-  void NotifyOnUIThread(const net::CookieList& cookies);
-
-  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
-  // This only mutates on the UI thread.
-  base::Callback<void(const net::CookieList& cookies)> completion_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(SigninManagerCookieHelper);
-};
-
-SigninManagerCookieHelper::SigninManagerCookieHelper(
-    net::URLRequestContextGetter* request_context_getter)
-    : request_context_getter_(request_context_getter) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-}
-
-SigninManagerCookieHelper::~SigninManagerCookieHelper() {
-}
-
-void SigninManagerCookieHelper::StartFetchingGaiaCookiesOnUIThread(
-    const base::Callback<void(const net::CookieList& cookies)>& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-  DCHECK(completion_callback_.is_null());
-
-  completion_callback_ = callback;
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&SigninManagerCookieHelper::FetchGaiaCookiesOnIOThread, this));
-}
-
-void SigninManagerCookieHelper::FetchGaiaCookiesOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  scoped_refptr<net::CookieMonster> cookie_monster =
-      request_context_getter_->GetURLRequestContext()->
-      cookie_store()->GetCookieMonster();
-  if (cookie_monster) {
-    cookie_monster->GetAllCookiesForURLAsync(
-        GURL(GaiaUrls::GetInstance()->gaia_origin_url()),
-        base::Bind(&SigninManagerCookieHelper::OnGaiaCookiesFetched, this));
-  } else {
-    OnGaiaCookiesFetched(net::CookieList());
+// static
+bool SigninManager::IsWebBasedSigninFlowURL(const GURL& url) {
+  GURL effective(kChromeSigninEffectiveSite);
+  if (url.SchemeIs(effective.scheme().c_str()) &&
+      url.host() == effective.host()) {
+    return true;
   }
-}
 
-void SigninManagerCookieHelper::OnGaiaCookiesFetched(
-    const net::CookieList& cookies) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&SigninManagerCookieHelper::NotifyOnUIThread, this, cookies));
-}
+  GURL service_login(GaiaUrls::GetInstance()->service_login_url());
+  if (url.GetOrigin() != service_login.GetOrigin())
+    return false;
 
-void SigninManagerCookieHelper::NotifyOnUIThread(
-    const net::CookieList& cookies) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  base::ResetAndReturn(&completion_callback_).Run(cookies);
+  // Any login UI URLs with signin=chromiumsync should be considered a web
+  // URL (relies on GAIA keeping the "service=chromiumsync" query string
+  // fragment present even when embedding inside a "continue" parameter).
+  return net::UnescapeURLComponent(
+      url.query(), net::UnescapeRule::URL_SPECIAL_CHARS)
+          .find(kChromiumSyncService) != std::string::npos;
 }
 
 // static
@@ -194,9 +143,33 @@ bool SigninManager::IsAllowedUsername(const std::string& username,
 
 SigninManager::SigninManager()
     : profile_(NULL),
+      prohibit_signout_(false),
       had_two_factor_error_(false),
       type_(SIGNIN_TYPE_NONE),
-      weak_pointer_factory_(this) {
+      weak_pointer_factory_(this),
+      signin_process_id_(kInvalidProcessId) {
+}
+
+void SigninManager::SetSigninProcess(int process_id) {
+  if (process_id == signin_process_id_)
+    return;
+  DLOG_IF(WARNING, signin_process_id_ != kInvalidProcessId) <<
+      "Replacing in-use signin process.";
+  signin_process_id_ = process_id;
+  const content::RenderProcessHost* process =
+      content::RenderProcessHost::FromID(process_id);
+  DCHECK(process);
+  registrar_.Add(this,
+                 content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                 content::Source<content::RenderProcessHost>(process));
+}
+
+bool SigninManager::IsSigninProcess(int process_id) const {
+  return process_id == signin_process_id_;
+}
+
+bool SigninManager::HasSigninProcess() const {
+  return signin_process_id_ != kInvalidProcessId;
 }
 
 SigninManager::~SigninManager() {
@@ -220,6 +193,9 @@ void SigninManager::Initialize(Profile* profile) {
         base::Bind(&SigninManager::OnGoogleServicesUsernamePatternChanged,
                    weak_pointer_factory_.GetWeakPtr()));
   }
+  signin_allowed_.Init(prefs::kSigninAllowed, profile_->GetPrefs(),
+                       base::Bind(&SigninManager::OnSigninAllowedPrefChanged,
+                                  base::Unretained(this)));
 
   // If the user is clearing the token service from the command line, then
   // clear their login info also (not valid to be logged in without any
@@ -246,7 +222,7 @@ void SigninManager::Initialize(Profile* profile) {
     }
 #endif
   }
-  if (!user.empty() && !IsAllowedUsername(user)) {
+  if ((!user.empty() && !IsAllowedUsername(user)) || !IsSigninAllowed()) {
     // User is signed in, but the username is invalid - the administrator must
     // have changed the policy since the last signin, so sign out the user.
     SignOut();
@@ -265,6 +241,16 @@ bool SigninManager::IsAllowedUsername(const std::string& username) const {
   std::string pattern = local_state->GetString(
       prefs::kGoogleServicesUsernamePattern);
   return IsAllowedUsername(username, pattern);
+}
+
+bool SigninManager::IsSigninAllowed() const {
+  return signin_allowed_.GetValue();
+}
+
+// static
+bool SigninManager::IsSigninAllowedOnIOThread(ProfileIOData* io_data) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  return io_data->signin_allowed()->GetValue();
 }
 
 void SigninManager::CleanupNotificationRegistration() {
@@ -542,6 +528,10 @@ void SigninManager::HandleAuthError(const GoogleServiceAuthError& error,
 
 void SigninManager::SignOut() {
   DCHECK(IsInitialized());
+  if (prohibit_signout_) {
+    DVLOG(1) << "Ignoring attempt to sign out while signout is prohibited";
+    return;
+  }
   if (authenticated_username_.empty() && !client_login_.get()) {
     // Clean up our transient data and exit if we aren't signed in (or in the
     // process of signing in). This avoids a perf regression from clearing out
@@ -722,23 +712,25 @@ void SigninManager::OnRegisteredForPolicy(
 
   DVLOG(1) << "Policy registration succeeded: dm_token="
            << policy_client_->dm_token();
-  // TODO(dconnelly): Prompt user for whether they want to create a new profile
-  // or not (http://crbug.com/171236), and either call SignOut() if they cancel,
-  // TransferCredentialsToNewProfile() to create a new profile, or
-  // LoadPolicyWithCachedClient() if they want to sign in for the current
-  // profile.
-  // For now, just call LoadPolicyWithCachedClient() to immediately load policy
-  // into the current profile and finish signing in.
-  LoadPolicyWithCachedClient(policy_client_.Pass());
+
+  // Allow user to create a new profile before continuing with sign-in.
+  ProfileSigninConfirmationDialog::ShowDialog(
+      profile_,
+      possibly_invalid_username_,
+      base::Bind(&SigninManager::SignOut,
+                 weak_pointer_factory_.GetWeakPtr()),
+      base::Bind(&SigninManager::TransferCredentialsToNewProfile,
+                 weak_pointer_factory_.GetWeakPtr()),
+      base::Bind(&SigninManager::LoadPolicyWithCachedClient,
+                 weak_pointer_factory_.GetWeakPtr()));
 }
 
-void SigninManager::LoadPolicyWithCachedClient(
-    scoped_ptr<policy::CloudPolicyClient> client) {
-  DCHECK(client);
+void SigninManager::LoadPolicyWithCachedClient() {
+  DCHECK(policy_client_);
   policy::UserPolicySigninService* policy_service =
       policy::UserPolicySigninServiceFactory::GetForProfile(profile_);
   policy_service->FetchPolicyForSignedInUser(
-      client.Pass(),
+      policy_client_.Pass(),
       base::Bind(&SigninManager::OnPolicyFetchComplete,
                  weak_pointer_factory_.GetWeakPtr()));
 }
@@ -762,7 +754,7 @@ void SigninManager::TransferCredentialsToNewProfile() {
       UTF8ToUTF16(ProfileInfoCache::GetDefaultAvatarIconUrl(1)),
       base::Bind(&SigninManager::CompleteSigninForNewProfile,
                  weak_pointer_factory_.GetWeakPtr()),
-      chrome::HOST_DESKTOP_TYPE_NATIVE,
+      chrome::GetActiveDesktop(),
       false);
 }
 
@@ -788,7 +780,8 @@ void SigninManager::CompleteSigninForNewProfile(
     signin_manager->possibly_invalid_username_ = possibly_invalid_username_;
     signin_manager->last_result_ = last_result_;
     signin_manager->temp_oauth_login_tokens_ = temp_oauth_login_tokens_;
-    signin_manager->LoadPolicyWithCachedClient(policy_client_.Pass());
+    signin_manager->policy_client_.reset(policy_client_.release());
+    signin_manager->LoadPolicyWithCachedClient();
     // Allow sync to start up if it is not overridden by policy.
     browser_sync::SyncPrefs prefs(profile->GetPrefs());
     prefs.SetSyncSetupCompleted();
@@ -875,6 +868,20 @@ void SigninManager::Observe(int type,
       }
       break;
     }
+    case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
+      // It's possible we're listening to a "stale" renderer because it was
+      // replaced with a new process by process-per-site. In either case,
+      // stop listening to it, but only reset signin_process_id_ tracking
+      // if this was from the current signin process.
+      registrar_.Remove(this,
+                        content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                        source);
+      if (signin_process_id_ ==
+          content::Source<content::RenderProcessHost>(source)->GetID()) {
+        signin_process_id_ = kInvalidProcessId;
+      }
+      break;
+    }
 #endif
     default:
       NOTREACHED();
@@ -889,6 +896,14 @@ void SigninManager::Shutdown() {
   }
 }
 
+void SigninManager::ProhibitSignout() {
+  prohibit_signout_ = true;
+}
+
+bool SigninManager::IsSignoutProhibited() const {
+  return prohibit_signout_;
+}
+
 void SigninManager::OnGoogleServicesUsernamePatternChanged() {
   if (!authenticated_username_.empty() &&
       !IsAllowedUsername(authenticated_username_)) {
@@ -896,6 +911,11 @@ void SigninManager::OnGoogleServicesUsernamePatternChanged() {
     // the user out.
     SignOut();
   }
+}
+
+void SigninManager::OnSigninAllowedPrefChanged() {
+  if (!IsSigninAllowed())
+    SignOut();
 }
 
 void SigninManager::AddSigninDiagnosticsObserver(

@@ -8,12 +8,12 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,13 +25,13 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/dom_operation_notification_details.h"
-#include "content/public/test/test_renderer_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_renderer_host.h"
 #include "net/base/net_util.h"
 #include "net/base/test_data_directory.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
@@ -200,7 +200,7 @@ void PPAPITestBase::RunTestWithSSLServer(const std::string& test_case) {
   uint16_t port = ssl_server.host_port_pair().port();
   RunTestURL(GetTestURL(http_server,
                         test_case,
-                        StringPrintf("ssl_server_port=%d", port)));
+                        base::StringPrintf("ssl_server_port=%d", port)));
 }
 
 void PPAPITestBase::RunTestWithWebSocketServer(const std::string& test_case) {
@@ -219,10 +219,14 @@ void PPAPITestBase::RunTestWithWebSocketServer(const std::string& test_case) {
   ASSERT_TRUE(http_server.BlockUntilStarted());
   ASSERT_TRUE(ws_server.BlockUntilStarted());
 
+  std::string host = ws_server.host_port_pair().HostForURL();
   uint16_t port = ws_server.host_port_pair().port();
   RunTestURL(GetTestURL(http_server,
                         test_case,
-                        StringPrintf("websocket_port=%d", port)));
+                        base::StringPrintf(
+                            "websocket_host=%s&websocket_port=%d",
+                            host.c_str(),
+                            port)));
 }
 
 void PPAPITestBase::RunTestIfAudioOutputAvailable(
@@ -267,12 +271,12 @@ GURL PPAPITestBase::GetTestURL(
     const std::string& extra_params) {
   std::string query = BuildQuery("files/test_case.html?", test_case);
   if (!extra_params.empty())
-    query = StringPrintf("%s&%s", query.c_str(), extra_params.c_str());
+    query = base::StringPrintf("%s&%s", query.c_str(), extra_params.c_str());
 
   return http_server.GetURL(query);
 }
 
-PPAPITest::PPAPITest() {
+PPAPITest::PPAPITest() : in_process_(true) {
 }
 
 void PPAPITest::SetUpCommandLine(CommandLine* command_line) {
@@ -291,21 +295,22 @@ void PPAPITest::SetUpCommandLine(CommandLine* command_line) {
   command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
                                    pepper_plugin);
   command_line->AppendSwitchASCII(switches::kAllowNaClSocketAPI, "127.0.0.1");
+
+  if (in_process_)
+    command_line->AppendSwitch(switches::kPpapiInProcess);
 }
 
 std::string PPAPITest::BuildQuery(const std::string& base,
                                   const std::string& test_case){
-  return StringPrintf("%stestcase=%s", base.c_str(), test_case.c_str());
+  return base::StringPrintf("%stestcase=%s", base.c_str(), test_case.c_str());
 }
 
 OutOfProcessPPAPITest::OutOfProcessPPAPITest() {
+  in_process_ = false;
 }
 
 void OutOfProcessPPAPITest::SetUpCommandLine(CommandLine* command_line) {
   PPAPITest::SetUpCommandLine(command_line);
-
-  // Run PPAPI out-of-process to exercise proxy implementations.
-  command_line->AppendSwitch(switches::kPpapiOutOfProcess);
 }
 
 void PPAPINaClTest::SetUpCommandLine(CommandLine* command_line) {
@@ -317,21 +322,29 @@ void PPAPINaClTest::SetUpCommandLine(CommandLine* command_line) {
 
   // Enable running NaCl outside of the store.
   command_line->AppendSwitch(switches::kEnableNaCl);
+  command_line->AppendSwitch(switches::kEnablePnacl);
   command_line->AppendSwitchASCII(switches::kAllowNaClSocketAPI, "127.0.0.1");
 }
 
 // Append the correct mode and testcase string
 std::string PPAPINaClNewlibTest::BuildQuery(const std::string& base,
-                                      const std::string& test_case) {
-  return StringPrintf("%smode=nacl_newlib&testcase=%s", base.c_str(),
-                      test_case.c_str());
+                                            const std::string& test_case) {
+  return base::StringPrintf("%smode=nacl_newlib&testcase=%s", base.c_str(),
+                            test_case.c_str());
 }
 
 // Append the correct mode and testcase string
 std::string PPAPINaClGLibcTest::BuildQuery(const std::string& base,
-                                      const std::string& test_case) {
-  return StringPrintf("%smode=nacl_glibc&testcase=%s", base.c_str(),
-                      test_case.c_str());
+                                           const std::string& test_case) {
+  return base::StringPrintf("%smode=nacl_glibc&testcase=%s", base.c_str(),
+                            test_case.c_str());
+}
+
+// Append the correct mode and testcase string
+std::string PPAPINaClPNaClTest::BuildQuery(const std::string& base,
+                                           const std::string& test_case) {
+  return base::StringPrintf("%smode=nacl_pnacl&testcase=%s", base.c_str(),
+                            test_case.c_str());
 }
 
 void PPAPINaClTestDisallowedSockets::SetUpCommandLine(
@@ -344,14 +357,15 @@ void PPAPINaClTestDisallowedSockets::SetUpCommandLine(
 
   // Enable running NaCl outside of the store.
   command_line->AppendSwitch(switches::kEnableNaCl);
+  command_line->AppendSwitch(switches::kEnablePnacl);
 }
 
 // Append the correct mode and testcase string
 std::string PPAPINaClTestDisallowedSockets::BuildQuery(
     const std::string& base,
     const std::string& test_case) {
-  return StringPrintf("%smode=nacl_newlib&testcase=%s", base.c_str(),
-                      test_case.c_str());
+  return base::StringPrintf("%smode=nacl_newlib&testcase=%s", base.c_str(),
+                            test_case.c_str());
 }
 
 void PPAPIBrokerInfoBarTest::SetUpOnMainThread() {

@@ -19,11 +19,14 @@
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/tab_contents/spelling_bubble_model.h"
 #include "chrome/browser/ui/confirm_bubble.h"
+#include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_result.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/context_menu_params.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -34,7 +37,8 @@ using content::BrowserThread;
 SpellingMenuObserver::SpellingMenuObserver(RenderViewContextMenuProxy* proxy)
     : proxy_(proxy),
       loading_frame_(0),
-      succeeded_(false) {
+      succeeded_(false),
+      client_(new SpellingServiceClient) {
   if (proxy && proxy->GetProfile()) {
     integrate_spelling_service_.Init(prefs::kSpellCheckUseSpellingService,
                                      proxy->GetProfile()->GetPrefs());
@@ -101,7 +105,6 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
     SpellingServiceClient::ServiceType type = SpellingServiceClient::SUGGEST;
     if (useSpellingService)
       type = SpellingServiceClient::SPELLCHECK;
-    client_.reset(new SpellingServiceClient);
     bool result = client_->RequestTextCheck(
         profile, type, params.misspelled_word,
         base::Bind(&SpellingMenuObserver::OnTextCheckComplete,
@@ -137,8 +140,16 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
   proxy_->AddMenuItem(IDC_SPELLCHECK_ADD_TO_DICTIONARY,
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_ADD_TO_DICTIONARY));
 
-  proxy_->AddCheckItem(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
-      l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE));
+#if defined(TOOLKIT_GTK)
+  chrome::ViewType view_type =
+      chrome::GetViewType(proxy_->GetWebContents());
+  if (view_type != chrome::VIEW_TYPE_PANEL) {
+#endif
+    proxy_->AddCheckItem(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
+        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE));
+#if defined(TOOLKIT_GTK)
+  }
+#endif
 
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableSpellingAutoCorrect)) {
@@ -216,7 +227,7 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
 
   if (command_id >= IDC_SPELLCHECK_SUGGESTION_0 &&
       command_id <= IDC_SPELLCHECK_SUGGESTION_LAST) {
-    proxy_->GetRenderViewHost()->Replace(
+    proxy_->GetRenderViewHost()->ReplaceMisspelling(
         suggestions_[command_id - IDC_SPELLCHECK_SUGGESTION_0]);
     // GetSpellCheckHost() can return null when the suggested word is
     // provided by Web SpellCheck API.
@@ -234,7 +245,7 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
   // the misspelled word with the suggestion and add it to our custom-word
   // dictionary so this word is not marked as misspelled any longer.
   if (command_id == IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION) {
-    proxy_->GetRenderViewHost()->Replace(result_);
+    proxy_->GetRenderViewHost()->ReplaceMisspelling(result_);
     misspelled_word_ = result_;
   }
 
@@ -265,12 +276,16 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
     if (!integrate_spelling_service_.GetValue()) {
       content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
       gfx::Rect rect = rvh->GetView()->GetViewBounds();
-      chrome::ShowConfirmBubble(rvh->GetView()->GetNativeView(),
-                                gfx::Point(rect.CenterPoint().x(), rect.y()),
-                                new SpellingBubbleModel(
-                                    proxy_->GetProfile(),
-                                    proxy_->GetWebContents(),
-                                    false));
+      chrome::ShowConfirmBubble(
+#if defined(TOOLKIT_VIEWS)
+          proxy_->GetWebContents()->GetView()->GetTopLevelNativeWindow(),
+#else
+          rvh->GetView()->GetNativeView(),
+#endif
+          gfx::Point(rect.CenterPoint().x(), rect.y()),
+          new SpellingBubbleModel(proxy_->GetProfile(),
+                                  proxy_->GetWebContents(),
+                                  false));
     } else {
       Profile* profile = proxy_->GetProfile();
       if (profile)

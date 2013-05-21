@@ -39,6 +39,34 @@ struct SearchResultInfo {
   DriveEntryProto entry_proto;
 };
 
+// Struct to represent a search result for SearchMetadata().
+struct MetadataSearchResult {
+  MetadataSearchResult(const base::FilePath& in_path,
+                       const DriveEntryProto& in_entry_proto,
+                       const std::string& in_highlighted_base_name)
+      : path(in_path),
+        entry_proto(in_entry_proto),
+        highlighted_base_name(in_highlighted_base_name) {
+  }
+
+  // The two members are used to create FileEntry object.
+  base::FilePath path;
+  DriveEntryProto entry_proto;
+
+  // The base name to be displayed in the UI. The parts matched the search
+  // query are highlighted with <b> tag. Meta characters are escaped like &lt;
+  //
+  // Why HTML? we could instead provide matched ranges using pairs of
+  // integers, but this is fragile as we'll eventually converting strings
+  // from UTF-8 (StringValue in base/values.h uses std::string) to UTF-16
+  // when sending strings from C++ to JavaScript.
+  //
+  // Why <b> instead of <strong>? Because <b> is shorter.
+  std::string highlighted_base_name;
+};
+
+typedef std::vector<MetadataSearchResult> MetadataSearchResultVector;
+
 // Used to get files from the file system.
 typedef base::Callback<void(DriveFileError error,
                             const base::FilePath& file_path,
@@ -62,6 +90,12 @@ typedef base::Callback<void(
     const GURL& next_feed,
     scoped_ptr<std::vector<SearchResultInfo> > result_paths)> SearchCallback;
 
+// Callback for SearchMetadata(). On success, |error| is DRIVE_FILE_OK, and
+// |result| contains the search result.
+typedef base::Callback<void(
+    DriveFileError error,
+    scoped_ptr<MetadataSearchResultVector> result)> SearchMetadataCallback;
+
 // Used to open files from the file system. |file_path| is the path on the local
 // file system for the opened file.
 typedef base::Callback<void(DriveFileError error,
@@ -80,6 +114,7 @@ typedef base::Callback<void(const DriveFileSystemMetadata&)>
 enum ContextType {
   USER_INITIATED,
   BACKGROUND,
+  PREFETCH,
 };
 
 struct DriveClientContext {
@@ -264,6 +299,20 @@ class DriveFileSystemInterface {
       const GetFileCallback& get_file_callback,
       const google_apis::GetContentCallback& get_content_callback) = 0;
 
+  // Cancels the file fetch of |drive_file_path|, which can be retieved by
+  // GetEntryInfoByResourceId.
+  // The currently the running task is identified by file path on drive,
+  // so this method takes it as a task identifier.
+  // Note that we will moving tha task managing into DriveScheduler, and
+  // currently it is planned to use some task ID at that time.
+  // Once it is done, we can use the ID from this method.
+  // Also note that the interface looks a little bit weird because the task
+  // is started by GetFileByResourceId, which identifies a file by
+  // |resource_id|, but this method does by |drive_file_path|. This
+  // inconsistency is introduced to work with the existing code and should be
+  // cleaned up.
+  virtual void CancelGetFile(const base::FilePath& drive_file_path) = 0;
+
   // Updates a file by the given |resource_id| on the Drive server by
   // uploading an updated version. Used for uploading dirty files. The file
   // should already be present in the cache.
@@ -292,19 +341,24 @@ class DriveFileSystemInterface {
       const base::FilePath& file_path,
       const ReadDirectoryWithSettingCallback& callback) = 0;
 
-  // Requests a refresh of the directory pointed by |file_path| (i.e. fetches
-  // the latest metadata of files in the target directory).
+  // Refreshes the directory pointed by |file_path| (i.e. fetches the latest
+  // metadata of files in the target directory).
   //
   // In particular, this function is used to get the latest thumbnail
   // URLs. Thumbnail URLs change periodically even if contents of files are
   // not changed, hence we should get the new thumbnail URLs manually if we
   // detect that the existing thumbnail URLs are stale.
   //
-  // Upon success, the metadata of files in the target directory is updated,
-  // and the change is notified via Observer::OnDirectoryChanged(). Note that
-  // this function ignores changes in directories in the target
-  // directory. Changes in directories are handled via the delta feeds.
-  virtual void RequestDirectoryRefresh(const base::FilePath& file_path) = 0;
+  // Upon success, the metadata of files in the target directory is updated
+  // and the change is notified via Observer::OnDirectoryChanged().
+  // |callback| is called with an error code regardless of whether the
+  // refresh was success or not. Note that this function ignores changes in
+  // directories in the target directory. Changes in directories are handled
+  // via the change lists.
+  //
+  // |callback| must not be null.
+  virtual void RefreshDirectory(const base::FilePath& file_path,
+                                const FileOperationCallback& callback) = 0;
 
   // Does server side content search for |search_query|.
   // If |shared_with_me| is true, it searches for the files shared to the user,
@@ -319,17 +373,24 @@ class DriveFileSystemInterface {
                       const GURL& next_feed,
                       const SearchCallback& callback) = 0;
 
+  // Searches the local resource metadata, and returns the entries
+  // |at_most_num_matches| that contain |query| in their base names. Search is
+  // done in a case-insensitive fashion. |callback| must not be null. Must be
+  // called on UI thread. No entries are returned if |query| is empty.
+  virtual void SearchMetadata(const std::string& query,
+                              int at_most_num_matches,
+                              const SearchMetadataCallback& callback) = 0;
+
   // Fetches the user's Account Metadata to find out current quota information
   // and returns it to the callback.
   virtual void GetAvailableSpace(const GetAvailableSpaceCallback& callback) = 0;
 
-  // Adds a file entry from |doc_entry| under |directory_path|, and modifies
-  // the cache state. Adds a new file entry, and store its content from
-  // |file_content_path| into the cache.
+  // Adds a file entry from |doc_entry|, and modifies the cache state.
+  // Adds a new file entry, and store its content from |file_content_path| into
+  // the cache.
   //
   // |callback| must not be null.
-  virtual void AddUploadedFile(const base::FilePath& directory_path,
-                               scoped_ptr<google_apis::ResourceEntry> doc_entry,
+  virtual void AddUploadedFile(scoped_ptr<google_apis::ResourceEntry> doc_entry,
                                const base::FilePath& file_content_path,
                                const FileOperationCallback& callback) = 0;
 

@@ -23,6 +23,10 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(USE_AURA)
+#include "ui/aura/window.h"
+#endif
+
 namespace app_list {
 
 namespace {
@@ -59,7 +63,8 @@ void AppListView::InitAsBubble(
     PaginationModel* pagination_model,
     views::View* anchor,
     const gfx::Point& anchor_point,
-    views::BubbleBorder::ArrowLocation arrow_location) {
+    views::BubbleBorder::ArrowLocation arrow_location,
+    bool border_accepts_events) {
 
   app_list_main_view_ = new AppListMainView(delegate_.get(),
                                             model_.get(),
@@ -87,15 +92,16 @@ void AppListView::InitAsBubble(
   set_close_on_esc(false);
   set_anchor_insets(gfx::Insets(kArrowOffset, kArrowOffset,
                                 kArrowOffset, kArrowOffset));
+  set_border_accepts_events(border_accepts_events);
   set_shadow(views::BubbleBorder::BIG_SHADOW);
   views::BubbleDelegateView::CreateBubble(this);
   SetBubbleArrowLocation(arrow_location);
 
 #if defined(USE_AURA)
+  GetWidget()->GetNativeWindow()->layer()->SetMasksToBounds(true);
   GetBubbleFrameView()->set_background(new AppListBackground(
       GetBubbleFrameView()->bubble_border()->GetBorderCornerRadius(),
       app_list_main_view_->search_box_view()));
-
   set_background(NULL);
 #else
   set_background(new AppListBackground(
@@ -135,6 +141,14 @@ void AppListView::UpdateBounds() {
 
 gfx::Size AppListView::GetPreferredSize() {
   return app_list_main_view_->GetPreferredSize();
+}
+
+bool AppListView::ShouldHandleSystemCommands() const {
+  return true;
+}
+
+void AppListView::Prerender() {
+  app_list_main_view_->Prerender();
 }
 
 views::View* AppListView::GetInitiallyFocusedView() {

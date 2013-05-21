@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/gtk/password_generation_bubble_gtk.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/password_generator.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -14,10 +13,12 @@
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/common/autofill_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/autofill/browser/password_generator.h"
+#include "components/autofill/common/autofill_messages.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
@@ -88,7 +89,7 @@ PasswordGenerationBubbleGtk::PasswordGenerationBubbleGtk(
   GtkThemeService* theme_service = GtkThemeService::GetFrom(
       Profile::FromBrowserContext(web_contents->GetBrowserContext()));
 
-  bubble_ = BubbleGtk::Show(web_contents->GetContentNativeView(),
+  bubble_ = BubbleGtk::Show(web_contents->GetView()->GetContentNativeView(),
                             &anchor_rect,
                             content,
                             BubbleGtk::ANCHOR_TOP_LEFT,

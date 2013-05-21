@@ -3,17 +3,21 @@
 # found in the LICENSE file.
 
 import copy
+import fnmatch
 import logging
 import os
 
 from pylib import android_commands
 from pylib import cmd_helper
+from pylib import constants
 from pylib import ports
+from pylib.base import shard
 from pylib.utils import emulator
+from pylib.utils import report_results
 from pylib.utils import xvfb
 
 import gtest_config
-import test_sharder
+import test_runner
 
 
 def _FullyQualifiedTestSuites(exe, option_test_suite, build_type):
@@ -30,28 +34,72 @@ def _FullyQualifiedTestSuites(exe, option_test_suite, build_type):
           '/tmp/chrome/src/out/Debug/content_unittests_apk/'
           'content_unittests-debug.apk')
   """
+  def GetQualifiedSuite(suite):
+    if suite.is_suite_exe:
+      relpath = suite.name
+    else:
+      # out/(Debug|Release)/$SUITE_apk/$SUITE-debug.apk
+      relpath = os.path.join(suite.name + '_apk', suite.name + '-debug.apk')
+    return suite.name, os.path.join(test_suite_dir, relpath)
+
   test_suite_dir = os.path.join(cmd_helper.OutDirectory.get(), build_type)
   if option_test_suite:
-    all_test_suites = [option_test_suite]
+    all_test_suites = [gtest_config.Suite(exe, option_test_suite)]
   else:
     all_test_suites = gtest_config.STABLE_TEST_SUITES
 
-  if exe:
-    qualified_test_suites = [os.path.join(test_suite_dir, t)
-                             for t in all_test_suites]
-  else:
-    # out/(Debug|Release)/$SUITE_apk/$SUITE-debug.apk
-    qualified_test_suites = [os.path.join(test_suite_dir,
-                                          t + '_apk',
-                                          t + '-debug.apk')
-                             for t in all_test_suites]
-  for t, q in zip(all_test_suites, qualified_test_suites):
+  # List of tuples (suite_name, suite_path)
+  qualified_test_suites = map(GetQualifiedSuite, all_test_suites)
+
+  for t, q in qualified_test_suites:
     if not os.path.exists(q):
       raise Exception('Test suite %s not found in %s.\n'
                       'Supported test suites:\n %s\n'
                       'Ensure it has been built.\n' %
                       (t, q, gtest_config.STABLE_TEST_SUITES))
-  return zip(all_test_suites, qualified_test_suites)
+  return qualified_test_suites
+
+
+def GetTestsFromDevice(runner):
+  """Get a list of tests from a device, excluding disabled tests.
+
+  Args:
+    runner: a TestRunner.
+  """
+  # The executable/apk needs to be copied before we can call GetAllTests.
+  runner.test_package.StripAndCopyExecutable()
+  all_tests = runner.test_package.GetAllTests()
+  # Only includes tests that do not have any match in the disabled list.
+  disabled_list = runner.GetDisabledTests()
+  return filter(lambda t: not any([fnmatch.fnmatch(t, disabled_pattern)
+                                   for disabled_pattern in disabled_list]),
+                all_tests)
+
+
+def GetAllEnabledTests(runner_factory, devices):
+  """Get all enabled tests.
+
+  Obtains a list of enabled tests from the test package on the device,
+  then filters it again using the disabled list on the host.
+
+  Args:
+    runner_factory: callable that takes a devices and returns a TestRunner.
+    devices: list of devices.
+
+  Returns:
+    List of all enabled tests.
+
+  Raises Exception if all devices failed.
+  """
+  for device in devices:
+    try:
+      logging.info('Obtaining tests from %s', device)
+      runner = runner_factory(device, 0)
+      return GetTestsFromDevice(runner)
+    except Exception as e:
+      logging.warning('Failed obtaining tests from %s with exception: %s',
+                      device, e)
+  raise Exception('No device available to get the list of tests.')
 
 
 def _RunATestSuite(options, suite_name):
@@ -90,33 +138,46 @@ def _RunATestSuite(options, suite_name):
   if not ports.ResetTestServerPortAllocation():
     raise Exception('Failed to reset test server port.')
 
+  # Constructs a new TestRunner with the current options.
+  def RunnerFactory(device, shard_index):
+    return test_runner.TestRunner(
+        device,
+        options.test_suite,
+        options.test_arguments,
+        options.timeout,
+        options.cleanup_test_files,
+        options.tool,
+        options.build_type,
+        options.webkit,
+        constants.GTEST_TEST_PACKAGE_NAME,
+        constants.GTEST_TEST_ACTIVITY_NAME,
+        constants.GTEST_COMMAND_LINE_FILE)
+
+  # Get tests and split them up based on the number of devices.
   if options.gtest_filter:
-    logging.warning('Sharding is not possible with these configurations.')
-    attached_devices = [attached_devices[0]]
+    all_tests = [t for t in options.gtest_filter.split(':') if t]
+  else:
+    all_tests = GetAllEnabledTests(RunnerFactory, attached_devices)
+  num_devices = len(attached_devices)
+  tests = [':'.join(all_tests[i::num_devices]) for i in xrange(num_devices)]
+  tests = [t for t in tests if t]
 
-  sharder = test_sharder.TestSharder(
-      attached_devices,
-      options.test_suite,
-      options.gtest_filter,
-      options.test_arguments,
-      options.timeout,
-      options.cleanup_test_files,
-      options.tool,
-      options.build_type,
-      options.webkit)
+  # Run tests.
+  test_results = shard.ShardAndRunTests(RunnerFactory, attached_devices, tests,
+                                        options.build_type)
 
-  test_results = sharder.RunShardedTests()
-  test_results.LogFull(
+  report_results.LogFull(
+      results=test_results,
       test_type='Unit test',
       test_package=suite_name,
       build_type=options.build_type,
       flakiness_server=options.flakiness_dashboard_server)
-  test_results.PrintAnnotation()
+  report_results.PrintAnnotation(test_results)
 
   for buildbot_emulator in buildbot_emulators:
     buildbot_emulator.Shutdown()
 
-  return len(test_results.GetAllBroken())
+  return len(test_results.GetNotPass())
 
 
 def _ListTestSuites():

@@ -21,7 +21,6 @@ namespace signin_internals_util {
 const char kSigninPrefPrefix[] = "google.services.signin.";
 const char kTokenPrefPrefix[] = "google.services.signin.tokens.";
 const char kChromeToMobileToken[] = "ChromeToMobile";
-const char kAppNotifyChannelSetupToken[] = "AppNotifyChannelSetup";
 const char kOperationsBaseToken[] = "OperationsBase";
 const char kUserPolicySigninServiceToken[] = "UserCloudPolicyManagerToken";
 const char kProfileDownloaderToken[] = "ProfileDownloader";
@@ -32,12 +31,9 @@ const char kObfuscatedGaiaIdFetcherToken[] = "ObfuscatedGaiaIdFetcher";
 const char kOAuth2MintTokenFlowToken[] = "OAuth2MintTokenFlow";
 const char* kTokenPrefsArray[] = {
   GaiaConstants::kSyncService,
-  GaiaConstants::kDeviceManagementService,
   GaiaConstants::kLSOService,
   GaiaConstants::kGaiaOAuth2LoginRefreshToken,
-  GaiaConstants::kGaiaOAuth2LoginAccessToken,
   kChromeToMobileToken,
-  kAppNotifyChannelSetupToken,
   kOperationsBaseToken,
   kUserPolicySigninServiceToken,
   kProfileDownloaderToken,

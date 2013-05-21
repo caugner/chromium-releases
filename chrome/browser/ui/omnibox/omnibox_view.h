@@ -106,7 +106,8 @@ class OmniboxView {
                            const string16& display_text,
                            bool update_popup);
 
-  // Sets the window text and the caret position.
+  // Sets the window text and the caret position. |notify_text_changed| is true
+  // if the model should be notified of the change.
   virtual void SetWindowTextAndCaretPos(const string16& text,
                                         size_t caret_pos,
                                         bool update_popup,
@@ -160,9 +161,11 @@ class OmniboxView {
   // Called when the temporary text in the model may have changed.
   // |display_text| is the new text to show; |save_original_selection| is true
   // when there wasn't previously a temporary text and thus we need to save off
-  // the user's existing selection.
+  // the user's existing selection. |notify_text_changed| is true if the model
+  // should be notified of the change.
   virtual void OnTemporaryTextMaybeChanged(const string16& display_text,
-                                           bool save_original_selection) = 0;
+                                           bool save_original_selection,
+                                           bool notify_text_changed) = 0;
 
   // Called when the inline autocomplete text in the model may have changed.
   // |display_text| is the new text to show; |user_text_length| is the length of
@@ -175,9 +178,10 @@ class OmniboxView {
   // reset the user's original selection.
   virtual void OnRevertTemporaryText() = 0;
 
-  // Every piece of code that can change the edit should call these functions
-  // before and after the change.  These functions determine if anything
-  // meaningful changed, and do any necessary updating and notification.
+  // Checkpoints the current edit state before an operation that might trigger
+  // a new autocomplete run to open or modify the popup. Call this before
+  // user-initiated edit actions that trigger autocomplete, but *not* for
+  // automatic changes to the textfield that should not affect autocomplete.
   virtual void OnBeforePossibleChange() = 0;
   // OnAfterPossibleChange() returns true if there was a change that caused it
   // to call UpdatePopup().

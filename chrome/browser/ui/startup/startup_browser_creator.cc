@@ -12,26 +12,26 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_split.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_list.h"
-#include "chrome/browser/automation/chrome_frame_automation_provider.h"
 #include "chrome/browser/automation/testing_automation_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/startup_helper.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/url_fixer_upper.h"
@@ -67,6 +67,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/app_mode/startup_app_launcher.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/profile_startup.h"
@@ -77,6 +78,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "chrome/browser/automation/chrome_frame_automation_provider_win.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_win.h"
 #endif
 
@@ -393,7 +395,7 @@ std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
     }
     // Exclude dangerous schemes.
     if (url.is_valid()) {
-      ChildProcessSecurityPolicy *policy =
+      ChildProcessSecurityPolicy* policy =
           ChildProcessSecurityPolicy::GetInstance();
       if (policy->IsWebSafeScheme(url.scheme()) ||
           url.SchemeIs(chrome::kFileScheme) ||
@@ -496,7 +498,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
       silent_launch = true;
 
     if (command_line.HasSwitch(switches::kChromeFrame)) {
-#if !defined(USE_AURA)
+#if defined(OS_WIN)
       if (!CreateAutomationProvider<ChromeFrameAutomationProvider>(
           automation_channel_id, last_used_profile, expected_tabs))
         return false;
@@ -533,27 +535,34 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   }
 
   if (command_line.HasSwitch(switches::kInstallFromWebstore)) {
-    int64 start_time = ShowAppInstallUI();
     extensions::StartupHelper helper;
-    bool app_installed =
-        helper.InstallFromWebstore(command_line, last_used_profile);
-    // Nothing more needs to be done if we also don't want to run an app, so
-    // return false to stop launching and quit.
-    if (!chrome::IsRunningInAppMode())
-      return false;
+    helper.InstallFromWebstore(command_line, last_used_profile);
+    // Nothing more needs to be done, so return false to stop launching and
+    // quit.
+    return false;
+  }
 
-    HideAppInstallUI(start_time);
-    if (!app_installed) {
-      // TODO(zelidrag): Signal somehow to the session manager that app launch
-      // attempt had failed.
-      return false;
-    }
+  if (command_line.HasSwitch(switches::kLimitedInstallFromWebstore)) {
+    extensions::StartupHelper helper;
+    helper.LimitedInstallFromWebstore(command_line, last_used_profile,
+                                      base::Bind(&base::DoNothing));
   }
 
 #if defined(OS_CHROMEOS)
   // The browser will be launched after the user logs in.
   if (command_line.HasSwitch(switches::kLoginManager) ||
       command_line.HasSwitch(switches::kLoginPassword)) {
+    silent_launch = true;
+  }
+
+  if (chrome::IsRunningInAppMode() &&
+      command_line.HasSwitch(switches::kAppId)) {
+    // StartupAppLauncher deletes itself when done.
+    (new chromeos::StartupAppLauncher(
+        last_used_profile,
+        command_line.GetSwitchValueASCII(switches::kAppId)))->Start();
+
+    // Skip browser launch since app mode launches its app window.
     silent_launch = true;
   }
 #endif
@@ -564,72 +573,81 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
 
   // If we don't want to launch a new browser window or tab (in the case
   // of an automation request), we are done here.
-  if (!silent_launch) {
-    chrome::startup::IsProcessStartup is_process_startup = process_startup ?
-        chrome::startup::IS_PROCESS_STARTUP :
-        chrome::startup::IS_NOT_PROCESS_STARTUP;
-    chrome::startup::IsFirstRun is_first_run = first_run::IsChromeFirstRun() ?
-        chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
-    // |last_opened_profiles| will be empty in the following circumstances:
-    // - This is the first launch. |last_used_profile| is the initial profile.
-    // - The user exited the browser by closing all windows for all
-    // profiles. |last_used_profile| is the profile which owned the last open
-    // window.
-    // - Only incognito windows were open when the browser exited.
-    // |last_used_profile| is the last used incognito profile. Restoring it will
-    // create a browser window for the corresponding original profile.
-    if (last_opened_profiles.empty()) {
-      if (!browser_creator->LaunchBrowser(command_line, last_used_profile,
-                                          cur_dir, is_process_startup,
-                                          is_first_run, return_code)) {
-        return false;
-      }
-    } else {
-      // Launch the last used profile with the full command line, and the other
-      // opened profiles without the URLs to launch.
-      CommandLine command_line_without_urls(command_line.GetProgram());
-      const CommandLine::SwitchMap& switches = command_line.GetSwitches();
-      for (CommandLine::SwitchMap::const_iterator switch_it = switches.begin();
-           switch_it != switches.end(); ++switch_it) {
-        command_line_without_urls.AppendSwitchNative(switch_it->first,
-                                                     switch_it->second);
-      }
-      // Launch the profiles in the order they became active.
-      for (Profiles::const_iterator it = last_opened_profiles.begin();
-           it != last_opened_profiles.end(); ++it) {
-        // Don't launch additional profiles which would only open a new tab
-        // page. When restarting after an update, all profiles will reopen last
-        // open pages.
-        SessionStartupPref startup_pref =
-            GetSessionStartupPref(command_line, *it);
-        if (*it != last_used_profile &&
-            startup_pref.type == SessionStartupPref::DEFAULT &&
-            !HasPendingUncleanExit(*it))
-          continue;
-        if (!browser_creator->LaunchBrowser((*it == last_used_profile) ?
-            command_line : command_line_without_urls, *it, cur_dir,
-            is_process_startup, is_first_run, return_code))
-          return false;
-        // We've launched at least one browser.
-        is_process_startup = chrome::startup::IS_NOT_PROCESS_STARTUP;
-      }
-      // This must be done after all profiles have been launched so the observer
-      // knows about all profiles to wait for before activating this one.
-      profile_launch_observer.Get().set_profile_to_activate(last_used_profile);
+  if (silent_launch)
+    return true;
+
+  // Check for --load-and-launch-app.
+  if (command_line.HasSwitch(switches::kLoadAndLaunchApp) &&
+      !IncognitoModePrefs::ShouldLaunchIncognito(
+          command_line, last_used_profile->GetPrefs())) {
+    CommandLine::StringType path = command_line.GetSwitchValueNative(
+        switches::kLoadAndLaunchApp);
+    extensions::UnpackedInstaller::Create(
+        last_used_profile->GetExtensionService())->
+            LoadFromCommandLine(base::FilePath(path), true);
+    // Return early here since we don't want to open a browser window.
+    // The exception is when there are no browser windows, since we don't want
+    // chrome to shut down.
+    // TODO(jackhou): Do this properly once keep-alive is handled by the
+    // background page of apps. Tracked at http://crbug.com/175381
+    if (chrome::GetTotalBrowserCountForProfile(last_used_profile) != 0)
+      return true;
+  }
+
+  chrome::startup::IsProcessStartup is_process_startup = process_startup ?
+      chrome::startup::IS_PROCESS_STARTUP :
+      chrome::startup::IS_NOT_PROCESS_STARTUP;
+  chrome::startup::IsFirstRun is_first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
+  // |last_opened_profiles| will be empty in the following circumstances:
+  // - This is the first launch. |last_used_profile| is the initial profile.
+  // - The user exited the browser by closing all windows for all
+  // profiles. |last_used_profile| is the profile which owned the last open
+  // window.
+  // - Only incognito windows were open when the browser exited.
+  // |last_used_profile| is the last used incognito profile. Restoring it will
+  // create a browser window for the corresponding original profile.
+  if (last_opened_profiles.empty()) {
+    if (!browser_creator->LaunchBrowser(command_line, last_used_profile,
+                                        cur_dir, is_process_startup,
+                                        is_first_run, return_code)) {
+      return false;
     }
+  } else {
+    // Launch the last used profile with the full command line, and the other
+    // opened profiles without the URLs to launch.
+    CommandLine command_line_without_urls(command_line.GetProgram());
+    const CommandLine::SwitchMap& switches = command_line.GetSwitches();
+    for (CommandLine::SwitchMap::const_iterator switch_it = switches.begin();
+         switch_it != switches.end(); ++switch_it) {
+      command_line_without_urls.AppendSwitchNative(switch_it->first,
+                                                   switch_it->second);
+    }
+    // Launch the profiles in the order they became active.
+    for (Profiles::const_iterator it = last_opened_profiles.begin();
+         it != last_opened_profiles.end(); ++it) {
+      // Don't launch additional profiles which would only open a new tab
+      // page. When restarting after an update, all profiles will reopen last
+      // open pages.
+      SessionStartupPref startup_pref =
+          GetSessionStartupPref(command_line, *it);
+      if (*it != last_used_profile &&
+          startup_pref.type == SessionStartupPref::DEFAULT &&
+          !HasPendingUncleanExit(*it))
+        continue;
+      if (!browser_creator->LaunchBrowser((*it == last_used_profile) ?
+          command_line : command_line_without_urls, *it, cur_dir,
+          is_process_startup, is_first_run, return_code))
+        return false;
+      // We've launched at least one browser.
+      is_process_startup = chrome::startup::IS_NOT_PROCESS_STARTUP;
+    }
+    // This must be done after all profiles have been launched so the observer
+    // knows about all profiles to wait for before activating this one.
+    profile_launch_observer.Get().set_profile_to_activate(last_used_profile);
   }
   return true;
 }
-
-#if !defined(OS_CHROMEOS)
-int64 StartupBrowserCreator::ShowAppInstallUI() {
-  return base::TimeTicks::Now().ToInternalValue();
-}
-
-void StartupBrowserCreator::HideAppInstallUI(
-    int64 start_time) {
-}
-#endif
 
 template <class AutomationProviderClass>
 bool StartupBrowserCreator::CreateAutomationProvider(

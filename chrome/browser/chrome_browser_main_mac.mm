@@ -9,7 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
@@ -22,8 +22,7 @@
 #include "chrome/browser/mac/keychain_reauthorize.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/system_monitor/image_capture_device_manager.h"
-#include "chrome/browser/system_monitor/removable_device_notifications_mac.h"
+#include "chrome/browser/storage_monitor/storage_monitor_mac.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/common/main_function_params.h"
@@ -190,8 +189,8 @@ void ChromeBrowserMainPartsMac::PreEarlyInitialization() {
     //
     // This is kicked off by a special stub executable during an automatic
     // update. See chrome/installer/mac/keychain_reauthorize_main.cc.
-    chrome::browser::mac::KeychainReauthorizeIfNeeded(
-        kKeychainReauthorizeAtUpdatePref, kKeychainReauthorizeAtUpdateMaxTries);
+    chrome::KeychainReauthorizeIfNeeded(kKeychainReauthorizeAtUpdatePref,
+                                        kKeychainReauthorizeAtUpdateMaxTries);
 
     exit(0);
   }
@@ -282,17 +281,15 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
 }
 
 void ChromeBrowserMainPartsMac::PreProfileInit() {
-  removable_device_notifications_mac_ =
-      new chrome::RemovableDeviceNotificationsMac();
-  // TODO(gbillock): Make the ImageCapture manager owned by
-  // RemovableDeviceNotificationsMac.
-  if (base::mac::IsOSLionOrLater()) {
-    image_capture_device_manager_.reset(new chrome::ImageCaptureDeviceManager);
-    image_capture_device_manager_->SetNotifications(
-        removable_device_notifications_mac_->receiver());
-  }
+  storage_monitor_ = new chrome::StorageMonitorMac();
 
   ChromeBrowserMainPartsPosix::PreProfileInit();
+}
+
+void ChromeBrowserMainPartsMac::PostProfileInit() {
+  storage_monitor_->Init();
+
+  ChromeBrowserMainPartsPosix::PostProfileInit();
 }
 
 void ChromeBrowserMainPartsMac::DidEndMainMessageLoop() {

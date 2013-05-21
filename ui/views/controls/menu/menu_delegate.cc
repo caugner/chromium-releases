@@ -27,6 +27,12 @@ bool MenuDelegate::GetBackgroundColor(int command_id,
   return false;
 }
 
+bool MenuDelegate::GetForegroundColor(int command_id,
+                                      bool is_hovered,
+                                      SkColor* override_color) const {
+  return false;
+}
+
 string16 MenuDelegate::GetTooltipText(int id,
                                       const gfx::Point& screen_loc) const {
   return string16();
@@ -144,6 +150,10 @@ void MenuDelegate::GetHorizontalIconMargins(int command_id,
                                             int* right_margin) const {
   *left_margin = 0;
   *right_margin = 0;
+}
+
+bool MenuDelegate::ShouldReserveSpaceForSubmenuIndicator() const {
+  return true;
 }
 
 }  // namespace views

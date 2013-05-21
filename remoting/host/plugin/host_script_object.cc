@@ -18,12 +18,12 @@
 #include "net/base/net_util.h"
 #include "remoting/base/auth_token_util.h"
 #include "remoting/base/auto_thread.h"
+#include "remoting/base/rsa_key_pair.h"
 #include "remoting/host/basic_desktop_environment.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/host_event_logger.h"
-#include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_secret.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/host/it2me_host_user_interface.h"
@@ -162,7 +162,7 @@ class HostNPScriptObject::It2MeImpl
 
   State state_;
 
-  HostKeyPair host_key_pair_;
+  scoped_refptr<RsaKeyPair> host_key_pair_;
   scoped_ptr<SignalStrategy> signal_strategy_;
   scoped_ptr<RegisterSupportHostRequest> register_request_;
   scoped_ptr<LogToServer> log_to_server_;
@@ -227,9 +227,10 @@ void HostNPScriptObject::It2MeImpl::Connect(
     return;
   }
 
-  // Create the desktop environment factory. Do not use X DAMAGE, since it is
-  // broken on many systems - see http://crbug.com/73423.
-  desktop_environment_factory_.reset(new BasicDesktopEnvironmentFactory(false));
+  desktop_environment_factory_.reset(new BasicDesktopEnvironmentFactory(
+      host_context_->network_task_runner(),
+      host_context_->input_task_runner(),
+      host_context_->ui_task_runner()));
 
   // Start monitoring configured policies.
   policy_watcher_.reset(
@@ -344,7 +345,7 @@ void HostNPScriptObject::It2MeImpl::FinishConnect(
 
   // Generate a key pair for the Host to use.
   // TODO(wez): Move this to the worker thread.
-  host_key_pair_.Generate();
+  host_key_pair_ = RsaKeyPair::Generate();
 
   // Create XMPP connection.
   scoped_ptr<SignalStrategy> signal_strategy(
@@ -355,7 +356,7 @@ void HostNPScriptObject::It2MeImpl::FinishConnect(
   // Request registration of the host for support.
   scoped_ptr<RegisterSupportHostRequest> register_request(
       new RegisterSupportHostRequest(
-          signal_strategy.get(), &host_key_pair_, directory_bot_jid_,
+          signal_strategy.get(), host_key_pair_, directory_bot_jid_,
           base::Bind(&It2MeImpl::OnReceivedSupportID,
                      base::Unretained(this))));
 
@@ -388,8 +389,8 @@ void HostNPScriptObject::It2MeImpl::FinishConnect(
       host_context_->ui_task_runner());
   host_->AddStatusObserver(this);
   log_to_server_.reset(
-      new LogToServer(host_, ServerLogEntry::IT2ME, signal_strategy_.get(),
-                      directory_bot_jid_));
+      new LogToServer(host_->AsWeakPtr(), ServerLogEntry::IT2ME,
+                      signal_strategy_.get(), directory_bot_jid_));
 
   // Disable audio by default.
   // TODO(sergeyu): Add UI to enable it.
@@ -403,7 +404,8 @@ void HostNPScriptObject::It2MeImpl::FinishConnect(
                                     base::Bind(&It2MeImpl::Disconnect, this));
 
   // Create event logger.
-  host_event_logger_ = HostEventLogger::Create(host_, kApplicationName);
+  host_event_logger_ =
+      HostEventLogger::Create(host_->AsWeakPtr(), kApplicationName);
 
   // Connect signaling and start the host.
   signal_strategy_->Connect();
@@ -641,7 +643,7 @@ void HostNPScriptObject::It2MeImpl::OnReceivedSupportID(
   std::string host_secret = GenerateSupportHostSecret();
   std::string access_code = support_id + host_secret;
 
-  std::string local_certificate = host_key_pair_.GenerateCertificate();
+  std::string local_certificate = host_key_pair_->GenerateCertificate();
   if (local_certificate.empty()) {
     LOG(ERROR) << "Failed to generate host certificate.";
     SetState(kError);
@@ -651,7 +653,7 @@ void HostNPScriptObject::It2MeImpl::OnReceivedSupportID(
 
   scoped_ptr<protocol::AuthenticatorFactory> factory(
       new protocol::It2MeHostAuthenticatorFactory(
-          local_certificate, *host_key_pair_.private_key(), access_code));
+          local_certificate, host_key_pair_, access_code));
   host_->SetAuthenticatorFactory(factory.Pass());
 
   // Pass the Access Code to the script object before changing state.
@@ -1447,10 +1449,9 @@ bool HostNPScriptObject::LocalizeStringWithSubstitution(
 }
 
 void HostNPScriptObject::DoGenerateKeyPair(const ScopedRefNPObject& callback) {
-  HostKeyPair key_pair;
-  key_pair.Generate();
-  InvokeGenerateKeyPairCallback(callback, key_pair.GetAsString(),
-                                key_pair.GetPublicKey());
+  scoped_refptr<RsaKeyPair> key_pair = RsaKeyPair::Generate();
+  InvokeGenerateKeyPairCallback(callback, key_pair->ToString(),
+                                key_pair->GetPublicKey());
 }
 
 void HostNPScriptObject::InvokeGenerateKeyPairCallback(

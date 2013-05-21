@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/gtk/tabstrip_origin_provider.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,11 +38,13 @@ class BookmarkBarGtkUnittest : public testing::Test {
   virtual void SetUp() OVERRIDE {
     profile_.reset(new TestingProfile());
     profile_->CreateBookmarkModel(true);
-    profile_->BlockUntilBookmarkModelLoaded();
     model_ = BookmarkModelFactory::GetForProfile(profile_.get());
+    ui_test_utils::WaitForBookmarkModelToLoad(model_);
 
+    Browser::CreateParams native_params(profile_.get(),
+                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
     browser_.reset(
-        chrome::CreateBrowserWithTestWindowForProfile(profile_.get()));
+        chrome::CreateBrowserWithTestWindowForParams(&native_params));
     origin_provider_.reset(new EmptyTabstripOriginProvider);
     bookmark_bar_.reset(new BookmarkBarGtk(NULL, browser_.get(),
                                            origin_provider_.get()));

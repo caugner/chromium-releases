@@ -25,7 +25,7 @@ import java.util.concurrent.Callable;
 /**
  * A test suite for zooming-related methods and settings.
  */
-public class ContentViewZoomTest extends AndroidWebViewTestBase {
+public class ContentViewZoomTest extends AwTestBase {
     private static final long TEST_TIMEOUT_MS = 20000L;
     private static final int CHECK_INTERVAL_MS = 100;
 
@@ -194,6 +194,7 @@ public class ContentViewZoomTest extends AndroidWebViewTestBase {
 
     private void runMagnificationTest(boolean supportZoom) throws Throwable {
         getContentSettingsOnUiThread(mAwContents).setUseWideViewPort(true);
+        mAwContents.getSettings().setEnableFixedLayoutMode(true);
         loadDataSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
                 getZoomableHtml(), "text/html", false);
         // It takes some time for scaling to settle down.
@@ -240,6 +241,7 @@ public class ContentViewZoomTest extends AndroidWebViewTestBase {
     public void testZoomUsingMultiTouch() throws Throwable {
         ContentSettings webSettings = getContentSettingsOnUiThread(mAwContents);
         webSettings.setUseWideViewPort(true);
+        mAwContents.getSettings().setEnableFixedLayoutMode(true);
         loadDataSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
                 getZoomableHtml(), "text/html", false);
 
@@ -263,6 +265,7 @@ public class ContentViewZoomTest extends AndroidWebViewTestBase {
     public void testZoomControls() throws Throwable {
         ContentSettings webSettings = getContentSettingsOnUiThread(mAwContents);
         webSettings.setUseWideViewPort(true);
+        mAwContents.getSettings().setEnableFixedLayoutMode(true);
         loadDataSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
                 getZoomableHtml(), "text/html", false);
 
@@ -288,6 +291,7 @@ public class ContentViewZoomTest extends AndroidWebViewTestBase {
     public void testZoomControlsOnNonZoomableContent() throws Throwable {
         ContentSettings webSettings = getContentSettingsOnUiThread(mAwContents);
         webSettings.setUseWideViewPort(true);
+        mAwContents.getSettings().setEnableFixedLayoutMode(true);
         loadDataSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
                 getNonZoomableHtml(), "text/html", false);
 
@@ -312,6 +316,7 @@ public class ContentViewZoomTest extends AndroidWebViewTestBase {
     public void testZoomControlsOnOrientationChange() throws Throwable {
         ContentSettings webSettings = getContentSettingsOnUiThread(mAwContents);
         webSettings.setUseWideViewPort(true);
+        mAwContents.getSettings().setEnableFixedLayoutMode(true);
         loadDataSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
                 getZoomableHtml(), "text/html", false);
 

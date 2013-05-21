@@ -140,6 +140,7 @@
     'chrome_browser.gypi',
     'chrome_browser_ui.gypi',
     'chrome_common.gypi',
+    'chrome_installer_util.gypi',
     'chrome_tests_unit.gypi',
     'version.gypi',
   ],
@@ -151,7 +152,6 @@
         'chrome_dll.gypi',
         'chrome_exe.gypi',
         'chrome_installer.gypi',
-        'chrome_installer_util.gypi',
         'chrome_renderer.gypi',
         'chrome_tests.gypi',
         'nacl.gypi',
@@ -175,9 +175,9 @@
             ['OS=="linux" and chromeos==1 and branding=="Chrome"', {
               'copies': [
                 {
-                  'destination': '<(PRODUCT_DIR)/extensions',
+                  'destination': '<(PRODUCT_DIR)',
                   'files': [
-                    '>!@(ls browser/extensions/default_extensions/chromeos/cache/*)'
+                    'browser/extensions/default_extensions/chromeos/extensions/'
                   ]
                 }
               ],
@@ -207,13 +207,19 @@
             '..',
           ],
           'sources': [
+            'browser/devtools/adb_client_socket.cc',
+            'browser/devtools/adb_client_socket.h',
             'browser/devtools/browser_list_tabcontents_provider.cc',
             'browser/devtools/browser_list_tabcontents_provider.h',
+            'browser/devtools/devtools_adb_bridge.cc',
+            'browser/devtools/devtools_adb_bridge.h',
             'browser/devtools/devtools_file_helper.cc',
             'browser/devtools/devtools_file_helper.h',
             'browser/devtools/devtools_toggle_action.h',
             'browser/devtools/devtools_window.cc',
             'browser/devtools/devtools_window.h',
+            'browser/devtools/protocol_http_request.cc',
+            'browser/devtools/protocol_http_request.h',
             'browser/devtools/remote_debugging_server.cc',
             'browser/devtools/remote_debugging_server.h',
           ],
@@ -343,6 +349,8 @@
             'service/cloud_print/print_system.h',
             'service/cloud_print/printer_job_handler.cc',
             'service/cloud_print/printer_job_handler.h',
+            'service/cloud_print/printer_job_queue_handler.cc',
+            'service/cloud_print/printer_job_queue_handler.h',
             'service/gaia/service_gaia_authenticator.cc',
             'service/gaia/service_gaia_authenticator.h',
             'service/net/service_url_request_context.cc',
@@ -876,7 +884,7 @@
             '../ui/ui.gyp:ui_unittests',
           ],
           'conditions': [
-            ['use_aura==1', {
+            ['use_aura==1 or target_arch=="x64"', {
               'dependencies!': [
                 '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
                 '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
@@ -994,7 +1002,6 @@
           'target_name': 'crash_service',
           'type': 'executable',
           'dependencies': [
-            'app/policy/cloud_policy_codegen.gyp:policy',
             'installer_util',
             '../base/base.gyp:base',
             '../breakpad/breakpad.gyp:breakpad_handler',
@@ -1078,6 +1085,8 @@
           'target_name': 'chrome_java',
           'type': 'none',
           'dependencies': [
+            'profile_sync_service_model_type_selection_java',
+            'toolbar_model_security_levels_java',
             '../base/base.gyp:base',
             '../components/components.gyp:navigation_interception_java',
             '../components/components.gyp:web_contents_delegate_android_java',
@@ -1087,7 +1096,6 @@
             '../ui/ui.gyp:ui_java',
           ],
           'variables': {
-            'package_name': 'chrome',
             'java_in_dir': '../chrome/android/java',
             'has_java_resources': 1,
             'R_package': 'org.chromium.chrome',

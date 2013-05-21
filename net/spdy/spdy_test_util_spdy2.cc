@@ -59,9 +59,7 @@ MockWrite* ChopWriteFrame(const char* data, int length, int num_chunks) {
 // |frame| is the frame to chop.
 // |num_chunks| is the number of chunks to create.
 MockWrite* ChopWriteFrame(const SpdyFrame& frame, int num_chunks) {
-  return ChopWriteFrame(frame.data(),
-                        frame.length() + SpdyFrame::kHeaderSize,
-                        num_chunks);
+  return ChopWriteFrame(frame.data(), frame.size(), num_chunks);
 }
 
 // Chop a frame into an array of MockReads.
@@ -84,9 +82,7 @@ MockRead* ChopReadFrame(const char* data, int length, int num_chunks) {
 // |frame| is the frame to chop.
 // |num_chunks| is the number of chunks to create.
 MockRead* ChopReadFrame(const SpdyFrame& frame, int num_chunks) {
-  return ChopReadFrame(frame.data(),
-                       frame.length() + SpdyFrame::kHeaderSize,
-                       num_chunks);
+  return ChopReadFrame(frame.data(), frame.size(), num_chunks);
 }
 
 // Adds headers and values to a map.
@@ -94,9 +90,9 @@ MockRead* ChopReadFrame(const SpdyFrame& frame, int num_chunks) {
 // where the even entries are the header names, and the odd entries are the
 // header values.
 // |headers| gets filled in from |extra_headers|.
-void AppendHeadersToSpdyFrame(const char* const extra_headers[],
-                              int extra_header_count,
-                              SpdyHeaderBlock* headers) {
+void AppendToHeaderBlock(const char* const extra_headers[],
+                         int extra_header_count,
+                         SpdyHeaderBlock* headers) {
   std::string this_header;
   std::string this_value;
 
@@ -136,6 +132,39 @@ void AppendHeadersToSpdyFrame(const char* const extra_headers[],
   }
 }
 
+scoped_ptr<SpdyHeaderBlock> ConstructGetHeaderBlock(base::StringPiece url) {
+  std::string scheme, host, path;
+  ParseUrl(url.data(), &scheme, &host, &path);
+  const char* const headers[] = {
+    "method",  "GET",
+    "url",     path.c_str(),
+    "host",    host.c_str(),
+    "scheme",  scheme.c_str(),
+    "version", "HTTP/1.1"
+  };
+  scoped_ptr<SpdyHeaderBlock> header_block(new SpdyHeaderBlock());
+  AppendToHeaderBlock(headers, arraysize(headers) / 2, header_block.get());
+  return header_block.Pass();
+}
+
+scoped_ptr<SpdyHeaderBlock> ConstructPostHeaderBlock(base::StringPiece url,
+                                                     int64 content_length) {
+  std::string scheme, host, path;
+  ParseUrl(url.data(), &scheme, &host, &path);
+  std::string length_str = base::Int64ToString(content_length);
+  const char* const headers[] = {
+    "method",  "POST",
+    "url",     path.c_str(),
+    "host",    host.c_str(),
+    "scheme",  scheme.c_str(),
+    "version", "HTTP/1.1",
+    "content-length", length_str.c_str()
+  };
+  scoped_ptr<SpdyHeaderBlock> header_block(new SpdyHeaderBlock());
+  AppendToHeaderBlock(headers, arraysize(headers) / 2, header_block.get());
+  return header_block.Pass();
+}
+
 // Writes |val| to a location of size |len|, in big-endian format.
 // in the buffer pointed to by |buffer_handle|.
 // Updates the |*buffer_handle| pointer by |len|
@@ -161,44 +190,27 @@ int AppendToBuffer(int val,
   return len;
 }
 
-// Construct a SPDY packet.
-// |head| is the start of the packet, up to but not including
-// the header value pairs.
-// |extra_headers| are the extra header-value pairs, which typically
-// will vary the most between calls.
-// |tail| is any (relatively constant) header-value pairs to add.
-// |buffer| is the buffer we're filling in.
-// Returns a SpdyFrame.
-SpdyFrame* ConstructSpdyPacket(const SpdyHeaderInfo& header_info,
-                               const char* const extra_headers[],
-                               int extra_header_count,
-                               const char* const tail[],
-                               int tail_header_count) {
-  BufferedSpdyFramer framer(2, header_info.compressed);
-  SpdyHeaderBlock headers;
-  // Copy in the extra headers to our map.
-  AppendHeadersToSpdyFrame(extra_headers, extra_header_count, &headers);
-  // Copy in the tail headers to our map.
-  if (tail && tail_header_count)
-    AppendHeadersToSpdyFrame(tail, tail_header_count, &headers);
+SpdyFrame* ConstructSpdyFrame(const SpdyHeaderInfo& header_info,
+                              scoped_ptr<SpdyHeaderBlock> headers) {
+  BufferedSpdyFramer framer(kSpdyVersion2, header_info.compressed);
   SpdyFrame* frame = NULL;
   switch (header_info.kind) {
     case SYN_STREAM:
       frame = framer.CreateSynStream(header_info.id, header_info.assoc_id,
                                      header_info.priority, 0,
                                      header_info.control_flags,
-                                     header_info.compressed, &headers);
+                                     header_info.compressed, headers.get());
       break;
     case SYN_REPLY:
       frame = framer.CreateSynReply(header_info.id, header_info.control_flags,
-                                    header_info.compressed, &headers);
+                                    header_info.compressed, headers.get());
       break;
     case RST_STREAM:
       frame = framer.CreateRstStream(header_info.id, header_info.status);
       break;
     case HEADERS:
       frame = framer.CreateHeaders(header_info.id, header_info.control_flags,
-                                   header_info.compressed, &headers);
+                                   header_info.compressed, headers.get());
       break;
     default:
       frame = framer.CreateDataFrame(header_info.id, header_info.data,
@@ -207,6 +219,18 @@ SpdyFrame* ConstructSpdyPacket(const SpdyHeaderInfo& header_info,
       break;
   }
   return frame;
+}
+
+SpdyFrame* ConstructSpdyFrame(const SpdyHeaderInfo& header_info,
+                              const char* const extra_headers[],
+                              int extra_header_count,
+                              const char* const tail[],
+                              int tail_header_count) {
+  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock());
+  AppendToHeaderBlock(extra_headers, extra_header_count, headers.get());
+  if (tail && tail_header_count)
+    AppendToHeaderBlock(tail, tail_header_count, headers.get());
+  return ConstructSpdyFrame(header_info, headers.Pass());
 }
 
 // Construct an expected SPDY SETTINGS frame.
@@ -340,14 +364,14 @@ SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
     0,                            // Length
     DATA_FLAG_NONE                // Data Flags
   };
-  return ConstructSpdyPacket(kSynStartHeader,
-                             extra_headers,
-                             extra_header_count,
-                             kHeaders,
-                             kHeadersSize / 2);
+  return ConstructSpdyFrame(kSynStartHeader,
+                            extra_headers,
+                            extra_header_count,
+                            kHeaders,
+                            kHeadersSize / 2);
 }
 
-// Constructs a standard SPDY GET SYN packet, optionally compressed
+// Constructs a standard SPDY GET SYN frame, optionally compressed
 // for the url |url|.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
@@ -369,25 +393,10 @@ SpdyFrame* ConstructSpdyGet(const char* const url,
     0,                      // Length
     DATA_FLAG_NONE          // Data Flags
   };
-
-  std::string scheme, host, path;
-  ParseUrl(url, &scheme, &host, &path);
-  const char* const headers[] = {
-    "method",  "GET",
-    "url",     path.c_str(),
-    "host",    host.c_str(),
-    "scheme",  scheme.c_str(),
-    "version", "HTTP/1.1"
-  };
-  return ConstructSpdyPacket(
-      kSynStartHeader,
-      NULL,
-      0,
-      headers,
-      arraysize(headers) / 2);
+  return ConstructSpdyFrame(kSynStartHeader, ConstructGetHeaderBlock(url));
 }
 
-// Constructs a standard SPDY GET SYN packet, optionally compressed.
+// Constructs a standard SPDY GET SYN frame, optionally compressed.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -400,7 +409,7 @@ SpdyFrame* ConstructSpdyGet(const char* const extra_headers[],
                           stream_id, request_priority, true);
 }
 
-// Constructs a standard SPDY GET SYN packet, optionally compressed.
+// Constructs a standard SPDY GET SYN frame, optionally compressed.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -449,7 +458,7 @@ SpdyFrame* ConstructSpdyConnect(const char* const extra_headers[],
                                    arraysize(kConnectHeaders));
 }
 
-// Constructs a standard SPDY push SYN packet.
+// Constructs a standard SPDY push SYN frame.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -559,7 +568,7 @@ SpdyFrame* ConstructSpdyPushHeaders(int stream_id,
                                    arraysize(kStandardGetHeaders));
 }
 
-// Constructs a standard SPDY SYN_REPLY packet with the specified status code.
+// Constructs a standard SPDY SYN_REPLY frame with the specified status code.
 // Returns a SpdyFrame.
 SpdyFrame* ConstructSpdySynReplyError(const char* const status,
                                       const char* const* const extra_headers,
@@ -581,7 +590,7 @@ SpdyFrame* ConstructSpdySynReplyError(const char* const status,
                                    arraysize(kStandardGetHeaders));
 }
 
-// Constructs a standard SPDY SYN_REPLY packet to match the SPDY GET.
+// Constructs a standard SPDY SYN_REPLY frame to match the SPDY GET.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -593,14 +602,14 @@ SpdyFrame* ConstructSpdyGetSynReplyRedirect(int stream_id) {
                                     arraysize(kExtraHeaders)/2, stream_id);
 }
 
-// Constructs a standard SPDY SYN_REPLY packet with an Internal Server
+// Constructs a standard SPDY SYN_REPLY frame with an Internal Server
 // Error status code.
 // Returns a SpdyFrame.
 SpdyFrame* ConstructSpdySynReplyError(int stream_id) {
   return ConstructSpdySynReplyError("500 Internal Server Error", NULL, 0, 1);
 }
 
-// Constructs a standard SPDY SYN_REPLY packet to match the SPDY GET.
+// Constructs a standard SPDY SYN_REPLY frame to match the SPDY GET.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -623,35 +632,33 @@ SpdyFrame* ConstructSpdyGetSynReply(const char* const extra_headers[],
                                    arraysize(kStandardGetHeaders));
 }
 
-// Constructs a standard SPDY POST SYN packet.
+// Constructs a standard SPDY POST SYN frame.
 // |content_length| is the size of post data.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
-SpdyFrame* ConstructSpdyPost(int64 content_length,
+SpdyFrame* ConstructSpdyPost(const char* url,
+                             int64 content_length,
                              const char* const extra_headers[],
                              int extra_header_count) {
-  std::string length_str = base::Int64ToString(content_length);
-  const char* post_headers[] = {
-    "method", "POST",
-    "url", "/",
-    "host", "www.google.com",
-    "scheme", "http",
-    "version", "HTTP/1.1",
-    "content-length", length_str.c_str()
+  const SpdyHeaderInfo kSynStartHeader = {
+    SYN_STREAM,             // Kind = Syn
+    1,                      // Stream ID
+    0,                      // Associated stream ID
+    ConvertRequestPriorityToSpdyPriority(LOWEST, 2),
+                            // Priority
+    CONTROL_FLAG_NONE,      // Control Flags
+    false,                  // Compressed
+    RST_STREAM_INVALID,     // Status
+    NULL,                   // Data
+    0,                      // Length
+    DATA_FLAG_NONE          // Data Flags
   };
-  return ConstructSpdyControlFrame(extra_headers,
-                                   extra_header_count,
-                                   false,
-                                   1,
-                                   LOWEST,
-                                   SYN_STREAM,
-                                   CONTROL_FLAG_NONE,
-                                   post_headers,
-                                   arraysize(post_headers));
+  return ConstructSpdyFrame(
+      kSynStartHeader, ConstructPostHeaderBlock(url, content_length));
 }
 
-// Constructs a chunked transfer SPDY POST SYN packet.
+// Constructs a chunked transfer SPDY POST SYN frame.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -675,7 +682,7 @@ SpdyFrame* ConstructChunkedSpdyPost(const char* const extra_headers[],
                                    arraysize(post_headers));
 }
 
-// Constructs a standard SPDY SYN_REPLY packet to match the SPDY POST.
+// Constructs a standard SPDY SYN_REPLY frame to match the SPDY POST.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -718,8 +725,7 @@ SpdyFrame* ConstructSpdyBodyFrame(int stream_id, const char* data,
 SpdyFrame* ConstructWrappedSpdyFrame(const scoped_ptr<SpdyFrame>& frame,
                                      int stream_id) {
   return ConstructSpdyBodyFrame(stream_id, frame->data(),
-                                frame->length() + SpdyFrame::kHeaderSize,
-                                false);
+                                frame->size(), false);
 }
 
 // Construct an expected SPDY reply string.
@@ -731,14 +737,14 @@ int ConstructSpdyReplyString(const char* const extra_headers[],
                              int extra_header_count,
                              char* buffer,
                              int buffer_length) {
-  int packet_size = 0;
+  int frame_size = 0;
   char* buffer_write = buffer;
   int buffer_left = buffer_length;
   SpdyHeaderBlock headers;
   if (!buffer || !buffer_length)
     return 0;
   // Copy in the extra headers.
-  AppendHeadersToSpdyFrame(extra_headers, extra_header_count, &headers);
+  AppendToHeaderBlock(extra_headers, extra_header_count, &headers);
   // The iterator gets us the list of header/value pairs in sorted order.
   SpdyHeaderBlock::iterator next = headers.begin();
   SpdyHeaderBlock::iterator last = headers.end();
@@ -746,14 +752,14 @@ int ConstructSpdyReplyString(const char* const extra_headers[],
     // Write the header.
     int value_len, current_len, offset;
     const char* header_string = next->first.c_str();
-    packet_size += AppendToBuffer(header_string,
-                                  next->first.length(),
-                                  &buffer_write,
-                                  &buffer_left);
-    packet_size += AppendToBuffer(": ",
-                                  strlen(": "),
-                                  &buffer_write,
-                                  &buffer_left);
+    frame_size += AppendToBuffer(header_string,
+                                 next->first.length(),
+                                 &buffer_write,
+                                 &buffer_left);
+    frame_size += AppendToBuffer(": ",
+                                 strlen(": "),
+                                 &buffer_write,
+                                 &buffer_left);
     // Write the value(s).
     const char* value_string = next->second.c_str();
     // Check if it's split among two or more values.
@@ -763,45 +769,44 @@ int ConstructSpdyReplyString(const char* const extra_headers[],
     // Handle the first N-1 values.
     while (current_len < value_len) {
       // Finish this line -- write the current value.
-      packet_size += AppendToBuffer(value_string + offset,
-                                    current_len - offset,
-                                    &buffer_write,
-                                    &buffer_left);
-      packet_size += AppendToBuffer("\n",
-                                    strlen("\n"),
-                                    &buffer_write,
-                                    &buffer_left);
+      frame_size += AppendToBuffer(value_string + offset,
+                                   current_len - offset,
+                                   &buffer_write,
+                                   &buffer_left);
+      frame_size += AppendToBuffer("\n",
+                                   strlen("\n"),
+                                   &buffer_write,
+                                   &buffer_left);
       // Advance to next value.
       offset = current_len + 1;
       current_len += 1 + strlen(value_string + offset);
       // Start another line -- add the header again.
-      packet_size += AppendToBuffer(header_string,
-                                    next->first.length(),
-                                    &buffer_write,
-                                    &buffer_left);
-      packet_size += AppendToBuffer(": ",
-                                    strlen(": "),
-                                    &buffer_write,
-                                    &buffer_left);
+      frame_size += AppendToBuffer(header_string,
+                                   next->first.length(),
+                                   &buffer_write,
+                                   &buffer_left);
+      frame_size += AppendToBuffer(": ",
+                                   strlen(": "),
+                                   &buffer_write,
+                                   &buffer_left);
     }
     EXPECT_EQ(value_len, current_len);
     // Copy the last (or only) value.
-    packet_size += AppendToBuffer(value_string + offset,
-                                  value_len - offset,
-                                  &buffer_write,
-                                  &buffer_left);
-    packet_size += AppendToBuffer("\n",
-                                  strlen("\n"),
-                                  &buffer_write,
-                                  &buffer_left);
+    frame_size += AppendToBuffer(value_string + offset,
+                                 value_len - offset,
+                                 &buffer_write,
+                                 &buffer_left);
+    frame_size += AppendToBuffer("\n",
+                                 strlen("\n"),
+                                 &buffer_write,
+                                 &buffer_left);
   }
-  return packet_size;
+  return frame_size;
 }
 
 // Create a MockWrite from the given SpdyFrame.
 MockWrite CreateMockWrite(const SpdyFrame& req) {
-  return MockWrite(
-      ASYNC, req.data(), req.length() + SpdyFrame::kHeaderSize);
+  return MockWrite(ASYNC, req.data(), req.size());
 }
 
 // Create a MockWrite from the given SpdyFrame and sequence number.
@@ -811,14 +816,12 @@ MockWrite CreateMockWrite(const SpdyFrame& req, int seq) {
 
 // Create a MockWrite from the given SpdyFrame and sequence number.
 MockWrite CreateMockWrite(const SpdyFrame& req, int seq, IoMode mode) {
-  return MockWrite(
-      mode, req.data(), req.length() + SpdyFrame::kHeaderSize, seq);
+  return MockWrite(mode, req.data(), req.size(), seq);
 }
 
 // Create a MockRead from the given SpdyFrame.
 MockRead CreateMockRead(const SpdyFrame& resp) {
-  return MockRead(
-      ASYNC, resp.data(), resp.length() + SpdyFrame::kHeaderSize);
+  return MockRead(ASYNC, resp.data(), resp.size());
 }
 
 // Create a MockRead from the given SpdyFrame and sequence number.
@@ -828,8 +831,7 @@ MockRead CreateMockRead(const SpdyFrame& resp, int seq) {
 
 // Create a MockRead from the given SpdyFrame and sequence number.
 MockRead CreateMockRead(const SpdyFrame& resp, int seq, IoMode mode) {
-  return MockRead(
-      mode, resp.data(), resp.length() + SpdyFrame::kHeaderSize, seq);
+  return MockRead(mode, resp.data(), resp.size(), seq);
 }
 
 // Combines the given SpdyFrames into the given char array and returns
@@ -838,12 +840,12 @@ int CombineFrames(const SpdyFrame** frames, int num_frames,
                   char* buff, int buff_len) {
   int total_len = 0;
   for (int i = 0; i < num_frames; ++i) {
-    total_len += frames[i]->length() + SpdyFrame::kHeaderSize;
+    total_len += frames[i]->size();
   }
   DCHECK_LE(total_len, buff_len);
   char* ptr = buff;
   for (int i = 0; i < num_frames; ++i) {
-    int len = frames[i]->length() + SpdyFrame::kHeaderSize;
+    int len = frames[i]->size();
     memcpy(ptr, frames[i]->data(), len);
     ptr += len;
   }

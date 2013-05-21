@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-package org.chromium.chrome.testshell;
+package org.chromium.chrome.browser.test;
 
 import android.app.Activity;
 import android.content.ContentProvider;
@@ -31,7 +31,6 @@ import org.chromium.content.browser.ContainerViewDelegate;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.content.browser.test.util.UiUtils;
-import org.chromium.content.browser.test.util.TouchUtils;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.ui.gfx.ActivityNativeWindow;
@@ -95,7 +94,7 @@ public class AutofillTest extends ChromiumTestShellTestBase {
         }
 
         @Override
-        public void dismissed() {
+        public void requestHide() {
         }
     }
 

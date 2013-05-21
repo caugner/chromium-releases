@@ -14,14 +14,16 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/autofill/autofill_country.h"
-#include "chrome/browser/autofill/autofill_profile.h"
-#include "chrome/browser/autofill/credit_card.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
-#include "chrome/browser/autofill/phone_number_i18n.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/autofill/country_combobox_model.h"
 #include "chrome/common/url_constants.h"
+#include "components/autofill/browser/autofill_country.h"
+#include "components/autofill/browser/autofill_profile.h"
+#include "components/autofill/browser/credit_card.h"
+#include "components/autofill/browser/personal_data_manager.h"
+#include "components/autofill/browser/phone_number_i18n.h"
+#include "components/autofill/common/autofill_constants.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -29,25 +31,39 @@
 
 namespace {
 
-// Returns a dictionary that maps country codes to data for the country.
-DictionaryValue* GetCountryData() {
+// Sets data related to the country <select>.
+void SetCountryData(DictionaryValue* localized_strings) {
   std::string app_locale = AutofillCountry::ApplicationLocale();
-  std::vector<std::string> country_codes;
-  AutofillCountry::GetAvailableCountries(&country_codes);
+  std::string default_country_code =
+      AutofillCountry::CountryCodeForLocale(app_locale);
+  localized_strings->SetString("defaultCountryCode", default_country_code);
 
-  DictionaryValue* country_data = new DictionaryValue();
-  for (size_t i = 0; i < country_codes.size(); ++i) {
-    const AutofillCountry country(country_codes[i], app_locale);
+  autofill::CountryComboboxModel model;
+  const std::vector<AutofillCountry*>& countries = model.countries();
 
-    DictionaryValue* details = new DictionaryValue();
-    details->SetString("name", country.name());
-    details->SetString("postalCodeLabel", country.postal_code_label());
-    details->SetString("stateLabel", country.state_label());
+  // An ordered list of options to show in the <select>.
+  scoped_ptr<ListValue> country_list(new ListValue());
+  // A dictionary of postal code and state info, keyed on country code.
+  scoped_ptr<DictionaryValue> country_data(new DictionaryValue());
+  for (size_t i = 0; i < countries.size(); ++i) {
+    scoped_ptr<DictionaryValue> option_details(new DictionaryValue());
+    option_details->SetString("name", model.GetItemAt(i));
+    option_details->SetString(
+        "value",
+        countries[i] ? countries[i]->country_code() : "separator");
+    country_list->Append(option_details.release());
 
-    country_data->Set(country.country_code(), details);
+    if (!countries[i])
+      continue;
+
+    scoped_ptr<DictionaryValue> details(new DictionaryValue());
+    details->SetString("postalCodeLabel", countries[i]->postal_code_label());
+    details->SetString("stateLabel", countries[i]->state_label());
+    country_data->Set(countries[i]->country_code(), details.release());
+
   }
-
-  return country_data;
+  localized_strings->Set("autofillCountrySelectList", country_list.release());
+  localized_strings->Set("autofillCountryData", country_data.release());
 }
 
 // Get the multi-valued element for |type| and return it in |ListValue| form.
@@ -251,7 +267,7 @@ void AutofillOptionsHandler::GetLocalizedValues(
   RegisterTitle(localized_strings, "autofillOptionsPage",
                 IDS_AUTOFILL_OPTIONS_TITLE);
 
-  localized_strings->SetString("helpUrl", chrome::kAutofillHelpURL);
+  localized_strings->SetString("helpUrl", components::autofill::kHelpURL);
   SetAddressOverlayStrings(localized_strings);
   SetCreditCardOverlayStrings(localized_strings);
 }
@@ -335,12 +351,7 @@ void AutofillOptionsHandler::SetAddressOverlayStrings(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_PHONE));
   localized_strings->SetString("autofillAddEmailPlaceholder",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_EMAIL));
-
-  std::string app_locale = AutofillCountry::ApplicationLocale();
-  std::string default_country_code =
-      AutofillCountry::CountryCodeForLocale(app_locale);
-  localized_strings->SetString("defaultCountryCode", default_country_code);
-  localized_strings->Set("autofillCountryData", GetCountryData());
+  SetCountryData(localized_strings);
 }
 
 void AutofillOptionsHandler::SetCreditCardOverlayStrings(

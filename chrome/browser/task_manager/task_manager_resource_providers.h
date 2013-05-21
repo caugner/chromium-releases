@@ -12,9 +12,11 @@
 #include "base/compiler_specific.h"
 #include "base/process_util.h"
 #include "chrome/browser/task_manager/task_manager.h"
+#include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_view_host_observer.h"
 #include "content/public/common/process_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
@@ -36,7 +38,8 @@ class Extension;
 
 // Base class for various types of render process resources that provides common
 // functionality like stats tracking.
-class TaskManagerRendererResource : public TaskManager::Resource {
+class TaskManagerRendererResource : public TaskManager::Resource,
+                                    public content::RenderViewHostObserver {
  public:
   TaskManagerRendererResource(base::ProcessHandle process,
                               content::RenderViewHost* render_view_host);
@@ -75,6 +78,10 @@ class TaskManagerRendererResource : public TaskManager::Resource {
   virtual void NotifyV8HeapStats(size_t v8_memory_allocated,
                                  size_t v8_memory_used) OVERRIDE;
 
+  // content::RenderViewHostObserver implementation.
+  virtual void RenderViewHostDestroyed(
+      content::RenderViewHost* render_view_host) OVERRIDE;
+
   content::RenderViewHost* render_view_host() const {
     return render_view_host_;
   }
@@ -105,7 +112,7 @@ class TaskManagerRendererResource : public TaskManager::Resource {
   DISALLOW_COPY_AND_ASSIGN(TaskManagerRendererResource);
 };
 
-// Tracks a single tab contents, prerendered page, instant page, or background
+// Tracks a single tab contents, prerendered page, Instant page, or background
 // printing page.
 class TaskManagerTabContentsResource : public TaskManagerRendererResource {
  public:
@@ -113,7 +120,7 @@ class TaskManagerTabContentsResource : public TaskManagerRendererResource {
   virtual ~TaskManagerTabContentsResource();
 
   // Called when the underlying web_contents has been committed and is no
-  // longer an Instant preview.
+  // longer an Instant overlay.
   void InstantCommitted();
 
   // TaskManager::Resource methods:
@@ -131,12 +138,12 @@ class TaskManagerTabContentsResource : public TaskManagerRendererResource {
   static gfx::ImageSkia* prerender_icon_;
   content::WebContents* web_contents_;
   Profile* profile_;
-  bool is_instant_preview_;
+  bool is_instant_overlay_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResource);
 };
 
-// Provides resources for tab contents, prerendered pages, instant pages, and
+// Provides resources for tab contents, prerendered pages, Instant pages, and
 // background printing pages.
 class TaskManagerTabContentsResourceProvider
     : public TaskManager::ResourceProvider,
@@ -317,7 +324,7 @@ class TaskManagerBackgroundContentsResourceProvider
 
 class TaskManagerChildProcessResource : public TaskManager::Resource {
  public:
-  TaskManagerChildProcessResource(content::ProcessType type,
+  TaskManagerChildProcessResource(int process_type,
                                   const string16& name,
                                   base::ProcessHandle handle,
                                   int unique_process_id);
@@ -341,7 +348,7 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
   // process would be "Plug-in: Flash" when name is "Flash".
   string16 GetLocalizedTitle() const;
 
-  content::ProcessType type_;
+  int process_type_;
   string16 name_;
   base::ProcessHandle handle_;
   int pid_;
@@ -359,7 +366,7 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
 
 class TaskManagerChildProcessResourceProvider
     : public TaskManager::ResourceProvider,
-      public content::NotificationObserver {
+      public content::BrowserChildProcessObserver {
  public:
   explicit TaskManagerChildProcessResourceProvider(TaskManager* task_manager);
 
@@ -369,10 +376,11 @@ class TaskManagerChildProcessResourceProvider
   virtual void StartUpdating() OVERRIDE;
   virtual void StopUpdating() OVERRIDE;
 
-  // content::NotificationObserver method:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // content::BrowserChildProcessObserver methods:
+  virtual void BrowserChildProcessHostConnected(
+      const content::ChildProcessData& data) OVERRIDE;
+  virtual void BrowserChildProcessHostDisconnected(
+      const content::ChildProcessData& data) OVERRIDE;
 
  private:
   virtual ~TaskManagerChildProcessResourceProvider();
@@ -385,9 +393,6 @@ class TaskManagerChildProcessResourceProvider
   // retrieved.
   virtual void ChildProcessDataRetreived(
       const std::vector<content::ChildProcessData>& child_processes);
-
-  void Add(const content::ChildProcessData& child_process_data);
-  void Remove(const content::ChildProcessData& child_process_data);
 
   void AddToTaskManager(const content::ChildProcessData& child_process_data);
 
@@ -623,7 +628,6 @@ class TaskManagerBrowserProcessResourceProvider
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerBrowserProcessResourceProvider);
 };
-
 
 class TaskManagerGuestResource : public TaskManagerRendererResource {
  public:

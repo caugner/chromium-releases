@@ -214,7 +214,7 @@ cr.define('ntp', function() {
           a.textContent = tab.title;
           a.href = tab.url;
           a.style.backgroundImage =
-              getFaviconImageSet(tab.url, 16, /* session-favicon */ true);
+              getFaviconImageSet(tab.url, 16, 'session-favicon');
 
           var clickHandler = this.makeClickHandler_(
               session.tag, String(window.sessionId), String(tab.sessionId));
@@ -247,7 +247,7 @@ cr.define('ntp', function() {
       }
 
       // The menu button is shown iff tab sync is enabled.
-      this.hidden = !isTabSyncEnabled;
+      this.classList.toggle('invisible', !isTabSyncEnabled);
     },
 
     /**
@@ -259,7 +259,7 @@ cr.define('ntp', function() {
       if (signedIn)
         chrome.send('getForeignSessions');
       else
-        this.hidden = true;
+        this.classList.add('invisible');
     },
   };
 

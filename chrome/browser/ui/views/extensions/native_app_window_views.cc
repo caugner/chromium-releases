@@ -4,11 +4,19 @@
 
 #include "chrome/browser/ui/views/extensions/native_app_window_views.h"
 
+#include "base/command_line.h"
+#include "base/file_util.h"
+#include "base/path_service.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/extensions/shell_window_frame_view.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -18,9 +26,9 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "ui/base/win/shell.h"
 #endif
@@ -29,18 +37,58 @@
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/wm/custom_frame_view_ash.h"
-#include "ash/wm/panel_frame_view.h"
+#include "ash/wm/panels/panel_frame_view.h"
+#include "ash/wm/window_properties.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "ui/aura/root_window.h"
 #endif
 
 namespace {
+
 const int kMinPanelWidth = 100;
 const int kMinPanelHeight = 100;
 const int kDefaultPanelWidth = 200;
 const int kDefaultPanelHeight = 300;
 const int kResizeInsideBoundsSize = 5;
+
+struct AcceleratorMapping {
+  ui::KeyboardCode keycode;
+  int modifiers;
+  int command_id;
+};
+const AcceleratorMapping kAppWindowAcceleratorMap[] = {
+  { ui::VKEY_W, ui::EF_CONTROL_DOWN, IDC_CLOSE_WINDOW },
+  { ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_CLOSE_WINDOW },
+  { ui::VKEY_F4, ui::EF_ALT_DOWN, IDC_CLOSE_WINDOW },
+};
+
+const std::map<ui::Accelerator, int>& GetAcceleratorTable() {
+  typedef std::map<ui::Accelerator, int> AcceleratorMap;
+  CR_DEFINE_STATIC_LOCAL(AcceleratorMap, accelerators, ());
+  if (accelerators.empty()) {
+    for (size_t i = 0; i < arraysize(kAppWindowAcceleratorMap); ++i) {
+      ui::Accelerator accelerator(kAppWindowAcceleratorMap[i].keycode,
+                                  kAppWindowAcceleratorMap[i].modifiers);
+      accelerators[accelerator] = kAppWindowAcceleratorMap[i].command_id;
+    }
+  }
+  return accelerators;
 }
+
+#if defined(OS_WIN)
+void CreateIconForApp(const base::FilePath web_app_path,
+                      const base::FilePath icon_file,
+                      const SkBitmap& image) {
+  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  if (!file_util::PathExists(web_app_path) &&
+      !file_util::CreateDirectory(web_app_path)) {
+    return;
+  }
+  web_app::internals::CheckAndSaveIcon(icon_file, image);
+}
+#endif
+
+}  // namespace
 
 NativeAppWindowViews::NativeAppWindowViews(
     ShellWindow* shell_window,
@@ -50,17 +98,20 @@ NativeAppWindowViews::NativeAppWindowViews(
       window_(NULL),
       is_fullscreen_(false),
       frameless_(create_params.frame == ShellWindow::FRAME_NONE),
-      transparent_background_(create_params.transparent_background) {
-  Observe(shell_window_->web_contents());
-  minimum_size_ = create_params.minimum_size;
-  maximum_size_ = create_params.maximum_size;
+      transparent_background_(create_params.transparent_background),
+      minimum_size_(create_params.minimum_size),
+      maximum_size_(create_params.maximum_size),
+      resizable_(create_params.resizable),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+  Observe(web_contents());
 
   window_ = new views::Widget;
-  if (create_params.window_type == ShellWindow::WINDOW_TYPE_PANEL)
+  if (create_params.window_type == ShellWindow::WINDOW_TYPE_PANEL ||
+      create_params.window_type == ShellWindow::WINDOW_TYPE_V1_PANEL) {
     InitializePanelWindow(create_params);
-  else
+  } else {
     InitializeDefaultWindow(create_params);
-
+  }
   extension_keybinding_registry_.reset(
       new ExtensionKeybindingRegistryViews(
           profile(),
@@ -92,19 +143,86 @@ void NativeAppWindowViews::InitializeDefaultWindow(
   if (create_params.bounds.x() == INT_MIN ||
       create_params.bounds.y() == INT_MIN) {
     window_->CenterWindow(window_bounds.size());
-  } else {
+  } else if (!window_bounds.IsEmpty()) {
     window_->SetBounds(window_bounds);
   }
 
-#if defined(OS_WIN) && !defined(USE_AURA)
-  std::string app_name = web_app::GenerateApplicationNameFromExtensionId(
-      extension()->id());
-  ui::win::SetAppIdForWindow(
-      ShellIntegration::GetAppModelIdForProfile(
-          UTF8ToWide(app_name), shell_window_->profile()->GetPath()),
-      GetWidget()->GetTopLevelWidget()->GetNativeWindow());
+  // Register accelarators supported by app windows.
+  // TODO(jeremya/stevenjb): should these be registered for panels too?
+  views::FocusManager* focus_manager = GetFocusManager();
+  const std::map<ui::Accelerator, int>& accelerator_table =
+      GetAcceleratorTable();
+  for (std::map<ui::Accelerator, int>::const_iterator iter =
+           accelerator_table.begin();
+       iter != accelerator_table.end(); ++iter) {
+    focus_manager->RegisterAccelerator(
+        iter->first, ui::AcceleratorManager::kNormalPriority, this);
+  }
+
+#if defined(OS_WIN)
+  string16 app_name = UTF8ToWide(
+      web_app::GenerateApplicationNameFromExtensionId(extension()->id()));
+  HWND hwnd = GetNativeAppWindowHWND();
+  ui::win::SetAppIdForWindow(ShellIntegration::GetAppModelIdForProfile(
+      app_name, profile()->GetPath()), hwnd);
+
+  web_app::UpdateShortcutInfoAndIconForApp(
+      *extension(), profile(),
+      base::Bind(&NativeAppWindowViews::OnShortcutInfoLoaded,
+                 weak_ptr_factory_.GetWeakPtr()));
 #endif
 }
+
+#if defined(OS_WIN)
+void NativeAppWindowViews::OnShortcutInfoLoaded(
+    const ShellIntegration::ShortcutInfo& shortcut_info) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  HWND hwnd = GetNativeAppWindowHWND();
+
+  // Set window's icon to the one we're about to create/update in the web app
+  // path. The icon cache will refresh on icon creation.
+  base::FilePath web_app_path = web_app::GetWebAppDataDirectory(
+      shortcut_info.profile_path, shortcut_info.extension_id,
+      shortcut_info.url);
+  base::FilePath icon_file = web_app_path
+      .Append(web_app::internals::GetSanitizedFileName(shortcut_info.title))
+      .ReplaceExtension(FILE_PATH_LITERAL(".ico"));
+  ui::win::SetAppIconForWindow(icon_file.value(), hwnd);
+
+  // Set the relaunch data so "Pin this program to taskbar" has the app's
+  // information.
+  CommandLine command_line = ShellIntegration::CommandLineArgsForLauncher(
+      shortcut_info.url,
+      shortcut_info.extension_id,
+      shortcut_info.profile_path);
+
+  // TODO(benwells): Change this to use app_host.exe.
+  base::FilePath chrome_exe;
+  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
+     NOTREACHED();
+     return;
+  }
+  command_line.SetProgram(CommandLine::ForCurrentProcess()->GetProgram());
+  ui::win::SetRelaunchDetailsForWindow(command_line.GetCommandLineString(),
+      shortcut_info.title, hwnd);
+
+  content::BrowserThread::PostBlockingPoolTask(
+      FROM_HERE,
+      base::Bind(&CreateIconForApp, web_app_path, icon_file,
+                 *shortcut_info.favicon.ToSkBitmap()));
+}
+
+HWND NativeAppWindowViews::GetNativeAppWindowHWND() const {
+#if defined(USE_AURA)
+  gfx::NativeWindow window =
+      GetWidget()->GetTopLevelWidget()->GetNativeWindow();
+  return window->GetRootWindow()->GetAcceleratedWidget();
+#else
+  return GetWidget()->GetTopLevelWidget()->GetNativeWindow();
+#endif
+}
+#endif
 
 void NativeAppWindowViews::InitializePanelWindow(
     const ShellWindow::CreateParams& create_params) {
@@ -123,11 +241,15 @@ void NativeAppWindowViews::InitializePanelWindow(
   else if (preferred_size_.height() < kMinPanelHeight)
     preferred_size_.set_height(kMinPanelHeight);
 #if defined(USE_ASH)
-  // Open a new panel on the active root window where
-  // a current active/focused window is on.
-  aura::RootWindow* active = ash::Shell::GetActiveRootWindow();
-  params.bounds = ash::ScreenAsh::ConvertRectToScreen(
-      active, gfx::Rect(preferred_size_));
+  if (ash::Shell::HasInstance()) {
+    // Open a new panel on the active root window where
+    // a current active/focused window is on.
+    aura::RootWindow* active = ash::Shell::GetActiveRootWindow();
+    params.bounds = ash::ScreenAsh::ConvertRectToScreen(
+        active, gfx::Rect(preferred_size_));
+  } else {
+    params.bounds = gfx::Rect(preferred_size_);
+  }
 #else
   params.bounds = gfx::Rect(preferred_size_);
 #endif
@@ -135,6 +257,7 @@ void NativeAppWindowViews::InitializePanelWindow(
   // could plumb context through to here in some cases.
   params.top_level = true;
   window_->Init(params);
+  window_->set_focus_on_creation(create_params.focused);
 
 #if !defined(USE_ASH)
   // TODO(oshima|stevenjb): Ideally, we should be able to just pre-determine
@@ -230,7 +353,14 @@ void NativeAppWindowViews::FlashFrame(bool flash) {
 }
 
 bool NativeAppWindowViews::IsAlwaysOnTop() const {
-  return shell_window_->window_type() == ShellWindow::WINDOW_TYPE_PANEL;
+  if (!shell_window_->window_type_is_panel())
+    return false;
+#if defined(USE_ASH)
+  return window_->GetNativeWindow()->GetProperty(
+      ash::internal::kPanelAttachedKey);
+#else
+  return true;
+#endif
 }
 
 gfx::Insets NativeAppWindowViews::GetFrameInsets() const {
@@ -282,7 +412,8 @@ void NativeAppWindowViews::OnViewWasResized() {
     path.lineTo(0, height - radius - 1);
     path.close();
   }
-  SetWindowRgn(web_contents()->GetNativeView(), path.CreateNativeRegion(), 1);
+  SetWindowRgn(web_contents()->GetView()->GetNativeView(),
+               path.CreateNativeRegion(), 1);
 
   SkRegion* rgn = new SkRegion;
   if (!window_->IsFullscreen()) {
@@ -314,11 +445,12 @@ views::View* NativeAppWindowViews::GetInitiallyFocusedView() {
 }
 
 bool NativeAppWindowViews::CanResize() const {
-  return maximum_size_.IsEmpty() || minimum_size_ != maximum_size_;
+  return resizable_ &&
+      (maximum_size_.IsEmpty() || minimum_size_ != maximum_size_);
 }
 
 bool NativeAppWindowViews::CanMaximize() const {
-  return maximum_size_.IsEmpty();
+  return resizable_ && maximum_size_.IsEmpty();
 }
 
 string16 NativeAppWindowViews::GetWindowTitle() const {
@@ -326,7 +458,7 @@ string16 NativeAppWindowViews::GetWindowTitle() const {
 }
 
 bool NativeAppWindowViews::ShouldShowWindowTitle() const {
-  return false;
+  return shell_window_->window_type() == ShellWindow::WINDOW_TYPE_V1_PANEL;
 }
 
 gfx::ImageSkia NativeAppWindowViews::GetWindowAppIcon() {
@@ -347,6 +479,10 @@ gfx::ImageSkia NativeAppWindowViews::GetWindowIcon() {
       return *app_icon.ToImageSkia();
   }
   return gfx::ImageSkia();
+}
+
+bool NativeAppWindowViews::ShouldShowWindowIcon() const {
+  return shell_window_->window_type() == ShellWindow::WINDOW_TYPE_V1_PANEL;
 }
 
 void NativeAppWindowViews::SaveWindowPlacement(const gfx::Rect& bounds,
@@ -372,7 +508,7 @@ views::NonClientFrameView* NativeAppWindowViews::CreateNonClientFrameView(
     views::Widget* widget) {
 #if defined(USE_ASH)
   if (chrome::IsNativeViewInAsh(widget->GetNativeView())) {
-    if (shell_window_->window_type() == ShellWindow::WINDOW_TYPE_PANEL) {
+    if (shell_window_->window_type_is_panel()) {
       ash::PanelFrameView::FrameType frame_type = frameless_ ?
           ash::PanelFrameView::FRAME_NONE : ash::PanelFrameView::FRAME_ASH;
       return new ash::PanelFrameView(widget, frame_type);
@@ -468,11 +604,29 @@ void NativeAppWindowViews::OnFocus() {
   web_view_->RequestFocus();
 }
 
+bool NativeAppWindowViews::AcceleratorPressed(
+    const ui::Accelerator& accelerator) {
+  const std::map<ui::Accelerator, int>& accelerator_table =
+      GetAcceleratorTable();
+  std::map<ui::Accelerator, int>::const_iterator iter =
+      accelerator_table.find(accelerator);
+  DCHECK(iter != accelerator_table.end());
+  int command_id = iter->second;
+  switch (command_id) {
+    case IDC_CLOSE_WINDOW:
+      Close();
+      return true;
+    default:
+      NOTREACHED() << "Unknown accelerator sent to app window.";
+  }
+  return false;
+}
+
 // NativeAppWindow implementation.
 
 void NativeAppWindowViews::SetFullscreen(bool fullscreen) {
   // Fullscreen not supported by panels.
-  if (shell_window_->window_type() == ShellWindow::WINDOW_TYPE_PANEL)
+  if (shell_window_->window_type_is_panel())
     return;
   is_fullscreen_ = fullscreen;
   window_->SetFullscreen(fullscreen);

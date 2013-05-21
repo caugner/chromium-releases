@@ -13,8 +13,8 @@
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "content/public/browser/notification_source.h"
@@ -34,23 +34,9 @@ void ExtensionFunctionDeleteTraits::Destruct(const ExtensionFunction* x) {
 }
 
 UIThreadExtensionFunction::RenderViewHostTracker::RenderViewHostTracker(
-    UIThreadExtensionFunction* function,
-    RenderViewHost* render_view_host)
-    : content::RenderViewHostObserver(render_view_host),
+    UIThreadExtensionFunction* function)
+    : content::RenderViewHostObserver(function->render_view_host()),
       function_(function) {
-  registrar_.Add(this,
-                 content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
-                 content::Source<RenderViewHost>(function->render_view_host()));
-}
-
-void UIThreadExtensionFunction::RenderViewHostTracker::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  CHECK(type == content::NOTIFICATION_RENDER_VIEW_HOST_DELETED);
-  CHECK(content::Source<RenderViewHost>(source).ptr() ==
-        function_->render_view_host());
-  function_->SetRenderViewHost(NULL);
 }
 
 void UIThreadExtensionFunction::RenderViewHostTracker::RenderViewHostDestroyed(
@@ -58,6 +44,8 @@ void UIThreadExtensionFunction::RenderViewHostTracker::RenderViewHostDestroyed(
   // Overidding the default behavior of RenderViewHostObserver which is to
   // delete this. In our case, we'll be deleted when the
   // UIThreadExtensionFunction that contains us goes away.
+
+  function_->SetRenderViewHost(NULL);
 }
 
 bool UIThreadExtensionFunction::RenderViewHostTracker::OnMessageReceived(
@@ -192,8 +180,7 @@ void UIThreadExtensionFunction::Destruct() const {
 void UIThreadExtensionFunction::SetRenderViewHost(
     RenderViewHost* render_view_host) {
   render_view_host_ = render_view_host;
-  tracker_.reset(render_view_host ?
-      new RenderViewHostTracker(this, render_view_host) : NULL);
+  tracker_.reset(render_view_host ? new RenderViewHostTracker(this) : NULL);
 }
 
 // TODO(stevenjb): Replace this with GetExtensionWindowController().

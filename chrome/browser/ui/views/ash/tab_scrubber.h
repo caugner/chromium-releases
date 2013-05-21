@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_ASH_TAB_SCRUBBER_H_
 
 #include "base/timer.h"
+#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -38,10 +39,11 @@ class TabScrubber : public ui::EventHandler,
                                   int index,
                                   TabScrubber::Direction direction);
 
-  void set_activation_delay(base::TimeDelta activation_delay) {
+  void set_activation_delay(int activation_delay) {
     activation_delay_ = activation_delay;
+    use_default_activation_delay_ = false;
   }
-  base::TimeDelta activation_delay() const { return activation_delay_; }
+  int activation_delay() const { return activation_delay_; }
   int highlighted_tab() const { return highlighted_tab_; }
   bool IsActivationPending();
 
@@ -67,7 +69,6 @@ class TabScrubber : public ui::EventHandler,
 
   Browser* GetActiveBrowser();
   void FinishScrub(bool activate);
-  void CancelImmersiveReveal();
 
   // Are we currently scrubbing?.
   bool scrubbing_;
@@ -84,13 +85,12 @@ class TabScrubber : public ui::EventHandler,
   int highlighted_tab_;
   // Timer to control a delayed activation of the |highlighted_tab_|.
   base::Timer activate_timer_;
-  // Time to wait before newly selected tab becomes active.
-  base::TimeDelta activation_delay_;
-  // Indicates if we were in immersive mode and forced the tabs to be
-  // revealed.
-  bool should_cancel_immersive_reveal_;
-  // Timer to control the cancel of an immersive reveal.
-  base::Timer cancel_immersive_reveal_timer_;
+  // Time to wait in ms before newly selected tab becomes active.
+  int activation_delay_;
+  // Set if activation_delay had been explicitly set.
+  bool use_default_activation_delay_;
+  // Forces the tabs to be revealed if we are in immersive fullscreen.
+  scoped_ptr<ImmersiveModeController::RevealedLock> immersive_reveal_lock_;
 
   content::NotificationRegistrar registrar_;
   base::WeakPtrFactory<TabScrubber> weak_ptr_factory_;

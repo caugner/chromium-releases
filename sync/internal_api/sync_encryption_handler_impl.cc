@@ -356,6 +356,10 @@ void SyncEncryptionHandlerImpl::SetEncryptionPassphrase(
     // Will fail if we already have an explicit passphrase or we have pending
     // keys.
     SetCustomPassphrase(passphrase, &trans, &node);
+
+    // When keystore migration occurs, the "CustomEncryption" UMA stat must be
+    // logged as true.
+    UMA_HISTOGRAM_BOOLEAN("Sync.CustomEncryption", true);
     return;
   }
 
@@ -403,6 +407,15 @@ void SyncEncryptionHandlerImpl::SetEncryptionPassphrase(
           DVLOG(1) << "Setting implicit passphrase for encryption.";
         }
         cryptographer->GetBootstrapToken(&bootstrap_token);
+
+        // With M26, sync accounts can be in only one of two encryption states:
+        // 1) Encrypt only passwords with an implicit passphrase.
+        // 2) Encrypt all sync datatypes with an explicit passphrase.
+        // We deprecate the "EncryptAllData" and "CustomPassphrase" histograms,
+        // and keep track of an account's encryption state via the
+        // "CustomEncryption" histogram. See http://crbug.com/131478.
+        UMA_HISTOGRAM_BOOLEAN("Sync.CustomEncryption", is_explicit);
+
         success = true;
       } else {
         NOTREACHED() << "Failed to add key to cryptographer.";
@@ -1284,11 +1297,9 @@ bool SyncEncryptionHandlerImpl::ShouldTriggerMigration(
     const sync_pb::NigoriSpecifics& nigori,
     const Cryptographer& cryptographer) const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // TODO(zea): once we're willing to have the keystore key be the only
-  // encryption key, change this to !has_pending_keys(). For now, we need the
-  // cryptographer to be initialized with the current GAIA pass so that older
-  // clients (that don't have keystore support) can decrypt the keybag.
-  if (!cryptographer.is_ready())
+  // Don't migrate if there are pending encryption keys (because data
+  // encrypted with the pending keys will not be decryptable).
+  if (cryptographer.has_pending_keys())
     return false;
   if (IsNigoriMigratedToKeystore(nigori)) {
     // If the nigori is already migrated but does not reflect the explicit
@@ -1377,18 +1388,28 @@ bool SyncEncryptionHandlerImpl::AttemptToMigrateNigoriToKeystore(
 
   if (!keystore_key_.empty()) {
     KeyParams key_params = {"localhost", "dummy", keystore_key_};
-    if (old_keystore_keys_.size() > 0 &&
-        new_passphrase_type == KEYSTORE_PASSPHRASE) {
-      // At least one key rotation has been performed, so we no longer care
-      // about backwards compatibility. Ensure the keystore key is the default
-      // key.
+    if ((old_keystore_keys_.size() > 0 &&
+         new_passphrase_type == KEYSTORE_PASSPHRASE) ||
+        !cryptographer->is_initialized()) {
+      // Either at least one key rotation has been performed, so we no longer
+      // care about backwards compatibility, or we're generating keystore-based
+      // encryption keys without knowing the GAIA password (and therefore the
+      // cryptographer is not initialized), so we can't support backwards
+      // compatibility. Ensure the keystore key is the default key.
       DVLOG(1) << "Migrating keybag to keystore key.";
+      bool cryptographer_was_ready = cryptographer->is_ready();
       if (!cryptographer->AddKey(key_params)) {
         LOG(ERROR) << "Failed to add keystore key as default key";
         UMA_HISTOGRAM_ENUMERATION("Sync.AttemptNigoriMigration",
                                   FAILED_TO_SET_DEFAULT_KEYSTORE,
                                   MIGRATION_RESULT_SIZE);
         return false;
+      }
+      if (!cryptographer_was_ready && cryptographer->is_ready()) {
+        FOR_EACH_OBSERVER(
+            SyncEncryptionHandler::Observer,
+            observers_,
+            OnPassphraseAccepted());
       }
     } else {
       // We're in backwards compatible mode -- either the account has an

@@ -20,13 +20,15 @@
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
+#include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/extension_resource.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -152,8 +154,9 @@ void BackgroundApplicationListModel::Application::OnImageLoaded(
 
 void BackgroundApplicationListModel::Application::RequestIcon(
     extension_misc::ExtensionIcons size) {
-  ExtensionResource resource = extension_->GetIconResource(
-      size, ExtensionIconSet::MATCH_BIGGER);
+  extensions::ExtensionResource resource =
+      extensions::IconsInfo::GetIconResource(
+          extension_, size, ExtensionIconSet::MATCH_BIGGER);
   extensions::ImageLoader::Get(model_->profile_)->LoadImageAsync(
       extension_, resource, gfx::Size(size, size),
       base::Bind(&Application::OnImageLoaded, AsWeakPtr()));
@@ -286,7 +289,7 @@ bool BackgroundApplicationListModel::IsBackgroundApp(
     return true;
 
   // Hosted apps with manifest-provided background pages are background apps.
-  if (extension.has_background_page())
+  if (extensions::BackgroundInfo::HasBackgroundPage(&extension))
     return true;
 
   BackgroundContentsService* service =

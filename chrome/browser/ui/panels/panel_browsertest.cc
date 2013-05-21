@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/panels/base_panel_browser_test.h"
 #include "chrome/browser/ui/panels/docked_panel_collection.h"
@@ -303,8 +303,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CheckDockedPanelProperties) {
   EXPECT_TRUE(panel2_testing->IsButtonVisible(panel::RESTORE_BUTTON));
   EXPECT_TRUE(panel3_testing->IsButtonVisible(panel::RESTORE_BUTTON));
 
-  EXPECT_EQ(panel::RESIZABLE_ALL_SIDES_EXCEPT_BOTTOM,
-            panel1->CanResizeByMouse());
+  // Expanded panel cannot be resized at the bottom.
+  EXPECT_EQ(panel::RESIZABLE_EXCEPT_BOTTOM, panel1->CanResizeByMouse());
   EXPECT_EQ(panel::NOT_RESIZABLE, panel2->CanResizeByMouse());
   EXPECT_EQ(panel::NOT_RESIZABLE, panel3->CanResizeByMouse());
 
@@ -342,7 +342,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreatePanel) {
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateBigPanel) {
   gfx::Rect work_area = PanelManager::GetInstance()->
-      display_settings_provider()->GetDisplayArea();
+      display_settings_provider()->GetPrimaryWorkArea();
   Panel* panel = CreatePanelWithBounds("BigPanel", work_area);
   gfx::Rect bounds = panel->GetBounds();
   EXPECT_EQ(panel->max_size().width(), bounds.width());
@@ -409,7 +409,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_AutoResize) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   panel_manager->enable_auto_sizing(true);
   // Bigger space is needed by this test.
-  SetTestingAreas(gfx::Rect(0, 0, 1200, 900), gfx::Rect());
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      gfx::Rect(0, 0, 1200, 900), gfx::Rect(0, 0, 1200, 900));
 
   // Create a test panel with web contents loaded.
   CreatePanelParams params("PanelTest1", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -502,8 +503,10 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ResizePanel) {
   panel->Close();
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_WIN)
 // There is no animations on Linux, by design (http://crbug.com/144074).
+// And there are intermittent/flaky failures on windows try bots
+// (http://crbug.com/179069).
 #define MAYBE_AnimateBounds DISABLED_AnimateBounds
 #else
 #define MAYBE_AnimateBounds AnimateBounds
@@ -833,7 +836,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
                        MinimizeRestoreOnAutoHidingDesktopBar) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   DockedPanelCollection* docked_collection = panel_manager->docked_collection();
-  int expected_bottom_on_expanded = docked_collection->display_area().bottom();
+  int expected_bottom_on_expanded = docked_collection->work_area().bottom();
   int expected_bottom_on_title_only = expected_bottom_on_expanded;
   int expected_bottom_on_minimized = expected_bottom_on_expanded;
 
@@ -888,15 +891,14 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ChangeAutoHideTaskBarThickness) {
       DisplaySettingsProvider::DESKTOP_BAR_ALIGNED_RIGHT,
       true,
       right_bar_thickness);
-  EXPECT_EQ(initial_starting_right_position -
-                docked_collection->StartingRightPosition(),
-            right_bar_thickness);
+  EXPECT_EQ(initial_starting_right_position,
+            docked_collection->StartingRightPosition());
 
   Panel* panel = CreatePanel("PanelTest");
   panel->SetExpansionState(Panel::TITLE_ONLY);
   WaitForBoundsAnimationFinished(panel);
 
-  EXPECT_EQ(docked_collection->display_area().bottom() - bottom_bar_thickness,
+  EXPECT_EQ(docked_collection->work_area().bottom() - bottom_bar_thickness,
             panel->GetBounds().bottom());
   EXPECT_EQ(docked_collection->StartingRightPosition(),
             panel->GetBounds().right());
@@ -913,10 +915,9 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ChangeAutoHideTaskBarThickness) {
       DisplaySettingsProvider::DESKTOP_BAR_ALIGNED_RIGHT,
       right_bar_thickness);
   MessageLoopForUI::current()->RunUntilIdle();
-  EXPECT_EQ(initial_starting_right_position -
-                docked_collection->StartingRightPosition(),
-            right_bar_thickness_delta);
-  EXPECT_EQ(docked_collection->display_area().bottom() - bottom_bar_thickness,
+  EXPECT_EQ(initial_starting_right_position,
+            docked_collection->StartingRightPosition());
+  EXPECT_EQ(docked_collection->work_area().bottom() - bottom_bar_thickness,
             panel->GetBounds().bottom());
   EXPECT_EQ(docked_collection->StartingRightPosition(),
             panel->GetBounds().right());
@@ -933,10 +934,9 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ChangeAutoHideTaskBarThickness) {
       DisplaySettingsProvider::DESKTOP_BAR_ALIGNED_RIGHT,
       right_bar_thickness);
   MessageLoopForUI::current()->RunUntilIdle();
-  EXPECT_EQ(docked_collection->StartingRightPosition() -
-                initial_starting_right_position,
-            right_bar_thickness_delta);
-  EXPECT_EQ(docked_collection->display_area().bottom() - bottom_bar_thickness,
+  EXPECT_EQ(docked_collection->StartingRightPosition(),
+            initial_starting_right_position);
+  EXPECT_EQ(docked_collection->work_area().bottom() - bottom_bar_thickness,
             panel->GetBounds().bottom());
   EXPECT_EQ(docked_collection->StartingRightPosition(),
             panel->GetBounds().right());
@@ -980,8 +980,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivatePanelOrTabbedWindow) {
 }
 
 // TODO(jianli): To be enabled for other platforms.
-// http://crbug.com/164976 for USE_AURA.
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
 #define MAYBE_ActivateDeactivateBasic ActivateDeactivateBasic
 #else
 #define MAYBE_ActivateDeactivateBasic DISABLED_ActivateDeactivateBasic
@@ -1132,9 +1131,18 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_DrawAttentionWhileMinimized) {
   panel3->Close();
 }
 
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_StopDrawingAttentionWhileMinimized \
+  DISABLED_StopDrawingAttentionWhileMinimized
+#else
+#define MAYBE_StopDrawingAttentionWhileMinimized \
+  StopDrawingAttentionWhileMinimized
+#endif
 // Verify that minimized state of a panel is correct after draw attention
 // is stopped when there are other minimized panels.
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, StopDrawingAttentionWhileMinimized) {
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
+                       MAYBE_StopDrawingAttentionWhileMinimized) {
   Panel* panel1 = CreatePanel("panel1");
   Panel* panel2 = CreatePanel("panel2");
 
@@ -1322,8 +1330,15 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_DrawAttentionResetOnClick) {
   panel2->Close();
 }
 
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_MinimizeImmediatelyAfterRestore \
+  DISABLED_MinimizeImmediatelyAfterRestore
+#else
+#define MAYBE_MinimizeImmediatelyAfterRestore MinimizeImmediatelyAfterRestore
+#endif
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
-                       MinimizeImmediatelyAfterRestore) {
+                       MAYBE_MinimizeImmediatelyAfterRestore) {
   CreatePanelParams params("Panel Test", gfx::Rect(), SHOW_AS_ACTIVE);
   Panel* panel = CreatePanelWithParams(params);
   scoped_ptr<NativePanelTesting> native_panel_testing(
@@ -1515,7 +1530,13 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, OnBeforeUnloadOnClose) {
   EXPECT_EQ(0, panel_manager->num_panels());
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, SizeClamping) {
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_SizeClamping DISABLED_SizeClamping
+#else
+#define MAYBE_SizeClamping SizeClamping
+#endif
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_SizeClamping) {
   // Using '0' sizes is equivalent of not providing sizes in API and causes
   // minimum sizes to be applied to facilitate auto-sizing.
   CreatePanelParams params("Panel", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -1547,8 +1568,17 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, SizeClamping) {
   panel->Close();
 }
 
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+// http://crbug.com/179890; TightAutosizeAroundSingleLine broken on Windows by
+// WebKit roll.
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#define MAYBE_TightAutosizeAroundSingleLine \
+        DISABLED_TightAutosizeAroundSingleLine
+#else
+#define MAYBE_TightAutosizeAroundSingleLine TightAutosizeAroundSingleLine
+#endif
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
-                       TightAutosizeAroundSingleLine) {
+                       MAYBE_TightAutosizeAroundSingleLine) {
   PanelManager::GetInstance()->enable_auto_sizing(true);
   // Using 0 sizes triggers auto-sizing.
   CreatePanelParams params("Panel", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -1579,21 +1609,29 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   panel->Close();
 }
 
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_DefaultMaxSizeOnDisplaySettingsChange \
+        DISABLED_DefaultMaxSizeOnDisplaySettingsChange
+#else
+#define MAYBE_DefaultMaxSizeOnDisplaySettingsChange \
+        DefaultMaxSizeOnDisplaySettingsChange
+#endif
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
-                       DefaultMaxSizeOnDisplaySettingsChange) {
+                       MAYBE_DefaultMaxSizeOnDisplaySettingsChange) {
   Panel* panel = CreatePanelWithBounds("1", gfx::Rect(0, 0, 240, 220));
 
   gfx::Size old_max_size = panel->max_size();
   gfx::Size old_full_size = panel->full_size();
 
   // Shrink the work area. Expect max size and full size become smaller.
-  gfx::Size smaller_work_area_size = gfx::Size(500, 300);
-  SetTestingAreas(gfx::Rect(gfx::Point(0, 0), smaller_work_area_size),
-                  gfx::Rect());
+  gfx::Rect smaller_work_area(0, 0, 500, 300);
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      smaller_work_area, smaller_work_area);
   EXPECT_GT(old_max_size.width(), panel->max_size().width());
   EXPECT_GT(old_max_size.height(), panel->max_size().height());
-  EXPECT_GT(smaller_work_area_size.width(), panel->max_size().width());
-  EXPECT_GT(smaller_work_area_size.height(), panel->max_size().height());
+  EXPECT_GT(smaller_work_area.width(), panel->max_size().width());
+  EXPECT_GT(smaller_work_area.height(), panel->max_size().height());
   EXPECT_GT(old_full_size.width(), panel->full_size().width());
   EXPECT_GT(old_full_size.height(), panel->full_size().height());
   EXPECT_GE(panel->max_size().width(), panel->full_size().width());
@@ -1602,8 +1640,16 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   panel->Close();
 }
 
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_CustomMaxSizeOnDisplaySettingsChange \
+        DISABLED_CustomMaxSizeOnDisplaySettingsChange
+#else
+#define MAYBE_CustomMaxSizeOnDisplaySettingsChange \
+        CustomMaxSizeOnDisplaySettingsChange
+#endif
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
-                       CustomMaxSizeOnDisplaySettingsChange) {
+                       MAYBE_CustomMaxSizeOnDisplaySettingsChange) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   Panel* panel = CreatePanelWithBounds("1", gfx::Rect(0, 0, 240, 220));
 
@@ -1624,22 +1670,28 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   EXPECT_EQ(bigger_size, old_full_size);
 
   // Shrink the work area. Expect max size and full size become smaller.
-  gfx::Size smaller_work_area_size = gfx::Size(500, 300);
-  SetTestingAreas(gfx::Rect(gfx::Point(0, 0), smaller_work_area_size),
-                  gfx::Rect());
+  gfx::Rect smaller_work_area(0, 0, 500, 300);
+  mock_display_settings_provider()->SetPrimaryDisplay(
+      smaller_work_area, smaller_work_area);
   EXPECT_GT(old_max_size.width(), panel->max_size().width());
   EXPECT_GT(old_max_size.height(), panel->max_size().height());
-  EXPECT_GE(smaller_work_area_size.width(), panel->max_size().width());
-  EXPECT_EQ(smaller_work_area_size.height(), panel->max_size().height());
+  EXPECT_GE(smaller_work_area.width(), panel->max_size().width());
+  EXPECT_EQ(smaller_work_area.height(), panel->max_size().height());
   EXPECT_GT(old_full_size.width(), panel->full_size().width());
   EXPECT_GT(old_full_size.height(), panel->full_size().height());
   EXPECT_GE(panel->max_size().width(), panel->full_size().width());
   EXPECT_GE(panel->max_size().height(), panel->full_size().height());
-  EXPECT_EQ(smaller_work_area_size.height(), panel->full_size().height());
+  EXPECT_EQ(smaller_work_area.height(), panel->full_size().height());
 
   panel->Close();
 }
 
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_DevTools DISABLED_DevTools
+#else
+#define MAYBE_DevTools DevTools
+#endif
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DevTools) {
   // Create a test panel with web contents loaded.
   CreatePanelParams params("1", gfx::Rect(0, 0, 200, 220), SHOW_AS_ACTIVE);
@@ -1651,7 +1703,9 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DevTools) {
 
   // Open devtools.
   size_t num_browsers = 1;
-  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(browser()->profile()));
+  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(
+                              browser()->profile(),
+                              browser()->host_desktop_type()));
   content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_BROWSER_WINDOW_READY,
       content::NotificationService::AllSources());
@@ -1660,9 +1714,10 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DevTools) {
 
   // Check that the new browser window that opened is dev tools window.
   ++num_browsers;
-  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(browser()->profile()));
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end(); ++iter) {
+  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(
+                              browser()->profile(),
+                              browser()->host_desktop_type()));
+  for (chrome::BrowserIterator iter; !iter.done(); iter.Next()) {
     if (*iter == browser())
       continue;
     ASSERT_TRUE((*iter)->is_devtools());
@@ -1671,6 +1726,12 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DevTools) {
   panel->Close();
 }
 
+// http://crbug.com/175760; several panel tests failing regularly on mac.
+#if defined(OS_MACOSX)
+#define MAYBE_DevToolsConsole DISABLED_DevToolsConsole
+#else
+#define MAYBE_DevToolsConsole DevToolsConsole
+#endif
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DevToolsConsole) {
   // Create a test panel with web contents loaded.
   CreatePanelParams params("1", gfx::Rect(0, 0, 200, 220), SHOW_AS_ACTIVE);
@@ -1682,7 +1743,9 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DevToolsConsole) {
 
   // Open devtools console.
   size_t num_browsers = 1;
-  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(browser()->profile()));
+  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(
+                              browser()->profile(),
+                              browser()->host_desktop_type()));
   content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_BROWSER_WINDOW_READY,
       content::NotificationService::AllSources());
@@ -1691,9 +1754,10 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DevToolsConsole) {
 
   // Check that the new browser window that opened is dev tools window.
   ++num_browsers;
-  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(browser()->profile()));
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end(); ++iter) {
+  EXPECT_EQ(num_browsers, chrome::GetBrowserCount(
+                              browser()->profile(),
+                              browser()->host_desktop_type()));
+  for (chrome::BrowserIterator iter; !iter.done(); iter.Next()) {
     if (*iter == browser())
       continue;
     ASSERT_TRUE((*iter)->is_devtools());
@@ -1751,7 +1815,8 @@ class PanelExtensionApiTest : public ExtensionApiTest {
   }
 };
 
-#if defined(OS_LINUX) || defined(USE_AURA)
+#if defined(OS_LINUX) || (!defined(OS_WIN) && defined(USE_AURA)) || \
+    defined(OS_MACOSX)
 // Focus test fails if there is no window manager on Linux.
 // Aura panels have different behavior that do not apply to this test.
 #define MAYBE_FocusChangeEventOnMinimize DISABLED_FocusChangeEventOnMinimize

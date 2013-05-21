@@ -135,7 +135,7 @@ void CloudPrintProxy::EnableForUserWithRobot(
   if (!printer_blacklist.empty()) {
     scoped_ptr<base::ListValue> printers(new base::ListValue());
     printers->AppendStrings(printer_blacklist);
-    service_prefs_->SetValue(prefs::kCloudPrintConnectNewPrinters,
+    service_prefs_->SetValue(prefs::kCloudPrintPrinterBlacklist,
                              printers.release());
   }
   service_prefs_->WritePrefs();
@@ -229,6 +229,15 @@ void CloudPrintProxy::OnAuthenticated(
   enabled_ = true;
   DCHECK(!user_email_.empty());
   service_prefs_->WritePrefs();
+  // When this switch used we don't want connector continue running, we just
+  // need authentication.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kCloudPrintSetupProxy)) {
+    ShutdownBackend();
+    if (client_) {
+      client_->OnCloudPrintProxyDisabled(false);
+    }
+  }
 }
 
 void CloudPrintProxy::OnAuthenticationFailed() {

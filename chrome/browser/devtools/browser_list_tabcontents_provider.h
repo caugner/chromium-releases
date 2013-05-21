@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "content/public/browser/devtools_http_handler_delegate.h"
 
 class Profile;
@@ -17,7 +18,8 @@ class Profile;
 class BrowserListTabContentsProvider
     : public content::DevToolsHttpHandlerDelegate {
  public:
-  explicit BrowserListTabContentsProvider(Profile* profile);
+  BrowserListTabContentsProvider(Profile* profile,
+                                 chrome::HostDesktopType host_desktop_type);
   virtual ~BrowserListTabContentsProvider();
 
   // DevToolsHttpProtocolHandler::Delegate overrides.
@@ -27,9 +29,11 @@ class BrowserListTabContentsProvider
   virtual std::string GetPageThumbnailData(const GURL& url) OVERRIDE;
   virtual content::RenderViewHost* CreateNewTarget() OVERRIDE;
   virtual TargetType GetTargetType(content::RenderViewHost*) OVERRIDE;
+  virtual std::string GetViewDescription(content::RenderViewHost*) OVERRIDE;
 
  private:
   Profile* profile_;
+  chrome::HostDesktopType host_desktop_type_;
   DISALLOW_COPY_AND_ASSIGN(BrowserListTabContentsProvider);
 };
 

@@ -12,6 +12,7 @@ import android.util.Log;
 import org.chromium.base.JNINamespace;
 import org.chromium.content.app.ContentMain;
 import org.chromium.content.app.LibraryLoader;
+import org.chromium.content.browser.PepperPluginManager;
 import org.chromium.content.common.CommandLine;
 import org.chromium.content.common.ProcessInitException;
 
@@ -54,7 +55,7 @@ public class AndroidBrowserProcess {
     // - 1: The incognito New Tab Page
     // - 1: A regular incognito tab
     public static final int MAX_RENDERERS_LIMIT =
-        SandboxedProcessLauncher.MAX_REGISTERED_SERVICES - 3;
+        ChildProcessLauncher.MAX_REGISTERED_SANDBOXED_SERVICES - 3;
 
     /**
      * Initialize the process as a ContentView host. This must be called from the main UI thread.
@@ -96,7 +97,8 @@ public class AndroidBrowserProcess {
         // Now we really need to have the resources ready.
         resourceExtractor.waitForCompletion();
 
-        nativeSetCommandLineFlags(maxRenderers);
+        nativeSetCommandLineFlags(maxRenderers,
+                nativeIsPluginEnabled() ? getPlugins(context) : null);
         ContentMain.initApplicationContext(appContext);
         int result = ContentMain.start();
         if (result > 0) throw new ProcessInitException(result);
@@ -113,13 +115,20 @@ public class AndroidBrowserProcess {
 
         // Having a single renderer should be sufficient for tests.
         // We can't have more than MAX_RENDERERS_LIMIT.
-        nativeSetCommandLineFlags(1 /* maxRenderers */);
+        nativeSetCommandLineFlags(1 /* maxRenderers */, null);
     }
 
-    private static native void nativeSetCommandLineFlags(int maxRenderProcesses);
+    private static String getPlugins(final Context context) {
+        return PepperPluginManager.getPlugins(context);
+    }
+
+    private static native void nativeSetCommandLineFlags(int maxRenderProcesses,
+            String pluginDescriptor);
 
     // Is this an official build of Chrome?  Only native code knows
     // for sure.  Official build knowledge is needed very early in
     // process startup.
     private static native boolean nativeIsOfficialBuild();
+
+    private static native boolean nativeIsPluginEnabled();
 }

@@ -11,7 +11,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-
+#include "sync/internal_api/public/base/model_type.h"
 
 using content::BrowserThread;
 using syncer::ModelTypeSet;
@@ -28,6 +28,7 @@ static const syncer::ModelType kStartOrder[] = {
   syncer::NIGORI,               //  Listed for completeness.
   syncer::DEVICE_INFO,          //  Listed for completeness.
   syncer::EXPERIMENTS,          //  Listed for completeness.
+  syncer::PROXY_TABS,           //  Listed for completeness.
   syncer::BOOKMARKS,            //  UI thread datatypes.
   syncer::PREFERENCES,
   syncer::PRIORITY_PREFERENCES,
@@ -38,6 +39,8 @@ static const syncer::ModelType kStartOrder[] = {
   syncer::SESSIONS,
   syncer::APP_NOTIFICATIONS,
   syncer::DICTIONARY,
+  syncer::FAVICON_IMAGES,
+  syncer::FAVICON_TRACKING,
   syncer::AUTOFILL,             // Non-UI thread datatypes.
   syncer::AUTOFILL_PROFILE,
   syncer::EXTENSION_SETTINGS,
@@ -297,7 +300,7 @@ void ModelAssociationManager::AppendToFailedDatatypesAndLogError(
   LOG(ERROR) << "Failed to associate models for "
              << syncer::ModelTypeToString(error.type());
   UMA_HISTOGRAM_ENUMERATION("Sync.ConfigureFailed",
-                            error.type(),
+                            ModelTypeToHistogramInt(error.type()),
                             syncer::MODEL_TYPE_COUNT);
 }
 

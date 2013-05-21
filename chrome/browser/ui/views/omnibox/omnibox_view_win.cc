@@ -32,11 +32,11 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/missing_system_file_dialog_win.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
@@ -51,8 +51,8 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
-#include "ui/base/dragdrop/drag_source.h"
-#include "ui/base/dragdrop/drop_target.h"
+#include "ui/base/dragdrop/drag_source_win.h"
+#include "ui/base/dragdrop/drop_target_win.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #include "ui/base/events/event.h"
@@ -63,6 +63,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/win/mouse_wheel_util.h"
+#include "ui/base/win/touch_input.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/button_drag_utils.h"
@@ -130,17 +131,19 @@ bool IsDrag(const POINT& origin, const POINT& current) {
 }
 
 // Copies |selected_text| as text to the primary clipboard.
-void DoCopyText(const string16& selected_text) {
+void DoCopyText(const string16& selected_text, Profile* profile) {
   ui::ScopedClipboardWriter scw(ui::Clipboard::GetForCurrentThread(),
-                                ui::Clipboard::BUFFER_STANDARD);
+                                ui::Clipboard::BUFFER_STANDARD,
+                                content::BrowserContext::
+                                    GetMarkerForOffTheRecordContext(profile));
   scw.WriteText(selected_text);
 }
 
 // Writes |url| and |text| to the clipboard as a well-formed URL.
-void DoCopyURL(const GURL& url, const string16& text) {
+void DoCopyURL(const GURL& url, const string16& text, Profile* profile) {
   BookmarkNodeData data;
   data.ReadFromTuple(url, text);
-  data.WriteToClipboard(NULL);
+  data.WriteToClipboard(profile);
 }
 
 }  // namespace
@@ -151,7 +154,7 @@ void DoCopyURL(const GURL& url, const string16& text) {
 // URL. A drop of plain text from the same edit either copies or moves the
 // selected text, and a drop of plain text from a source other than the edit
 // does a paste and go.
-class OmniboxViewWin::EditDropTarget : public ui::DropTarget {
+class OmniboxViewWin::EditDropTarget : public ui::DropTargetWin {
  public:
   explicit EditDropTarget(OmniboxViewWin* edit);
 
@@ -192,7 +195,7 @@ class OmniboxViewWin::EditDropTarget : public ui::DropTarget {
 };
 
 OmniboxViewWin::EditDropTarget::EditDropTarget(OmniboxViewWin* edit)
-    : ui::DropTarget(edit->m_hWnd),
+    : ui::DropTargetWin(edit->m_hWnd),
       edit_(edit),
       drag_has_url_(false),
       drag_has_string_(false) {
@@ -296,7 +299,6 @@ void OmniboxViewWin::EditDropTarget::ResetDropHighlights() {
   if (drag_has_string_)
     edit_->SetDropHighlightPosition(-1);
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helper classes
@@ -509,11 +511,19 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
   SetReadOnly(popup_window_mode_);
   SetFont(font_.GetNativeFont());
 
-  // Disable auto font changing. Otherwise, characters come from
-  // auto-completion and characters come from keyboard may be rendered with
-  // different fonts. See http://crbug.com/168480 for details.
-  const LRESULT lang_option = SendMessage(m_hWnd, EM_GETLANGOPTIONS, 0, 0);
-  SendMessage(m_hWnd, EM_SETLANGOPTIONS, 0, lang_option & ~IMF_AUTOFONT);
+  // IMF_DUALFONT (on by default) is supposed to use one font for ASCII text
+  // and a different one for Asian text.  In some cases, ASCII characters may
+  // be mis-marked as Asian, e.g. because input from the keyboard may be
+  // auto-stamped with the keyboard language.  As a result adjacent characters
+  // can render in different fonts, which looks bizarre.  To fix this we
+  // disable dual-font mode, which forces the control to use a single font for
+  // everything.
+  // Note that we should not disable the very similar IMF_AUTOFONT flag, which
+  // allows the control to hunt for fonts that can display all the current
+  // characters; doing this results in "missing glyph" boxes when the user
+  // enters characters not available in the currently-chosen font.
+  const LRESULT lang_options = SendMessage(m_hWnd, EM_GETLANGOPTIONS, 0, 0);
+  SendMessage(m_hWnd, EM_SETLANGOPTIONS, 0, lang_options & ~IMF_DUALFONT);
 
   // NOTE: Do not use SetWordBreakProcEx() here, that is no longer supported as
   // of Rich Edit 2.0 onward.
@@ -860,7 +870,8 @@ void OmniboxViewWin::InsertText(int position, const string16& text) {
 }
 
 void OmniboxViewWin::OnTemporaryTextMaybeChanged(const string16& display_text,
-                                                 bool save_original_selection) {
+                                                 bool save_original_selection,
+                                                 bool notify_text_changed) {
   if (save_original_selection)
     GetSelection(original_selection_);
 
@@ -872,7 +883,8 @@ void OmniboxViewWin::OnTemporaryTextMaybeChanged(const string16& display_text,
   // text and then arrowed to another entry with the same text, we'd still want
   // to move the caret.
   ScopedFreeze freeze(this, GetTextObjectModel());
-  SetWindowTextAndCaretPos(display_text, display_text.length(), false, true);
+  SetWindowTextAndCaretPos(display_text, display_text.length(), false,
+                           notify_text_changed);
 }
 
 bool OmniboxViewWin::OnInlineAutocompleteTextMaybeChanged(
@@ -898,7 +910,6 @@ bool OmniboxViewWin::OnInlineAutocompleteTextMaybeChanged(
 
 void OmniboxViewWin::OnRevertTemporaryText() {
   SetSelectionRange(original_selection_);
-  TextChanged();
 }
 
 void OmniboxViewWin::OnBeforePossibleChange() {
@@ -1113,16 +1124,14 @@ int OmniboxViewWin::OnPerformDropImpl(const ui::DropTargetEvent& event,
 }
 
 void OmniboxViewWin::CopyURL() {
-  DoCopyURL(toolbar_model()->GetURL(), toolbar_model()->GetText(false));
+  DoCopyURL(toolbar_model()->GetURL(),
+            toolbar_model()->GetText(false),
+            model()->profile());
 }
 
 bool OmniboxViewWin::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
-  ui::KeyboardCode key = event.key_code();
-  // We don't process ALT + numpad digit as accelerators, they are used for
-  // entering special characters.  We do translate alt-home.
-  if (event.IsAltDown() && (key != ui::VKEY_HOME) &&
-      views::NativeTextfieldWin::IsNumPadDigit(key,
-          (event.flags() & ui::EF_EXTENDED) != 0))
+  // Skip processing of [Alt]+<num-pad digit> Unicode alt key codes.
+  if (event.IsUnicodeKeyCode())
     return true;
 
   // Skip accelerators for key combinations omnibox wants to crack. This list
@@ -1132,7 +1141,7 @@ bool OmniboxViewWin::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
   // We cannot return true for all keys because we still need to handle some
   // accelerators (e.g., F5 for reload the page should work even when the
   // Omnibox gets focused).
-  switch (key) {
+  switch (event.key_code()) {
     case ui::VKEY_ESCAPE: {
       ScopedFreeze freeze(this, GetTextObjectModel());
       return model()->OnEscapeKeyPressed();
@@ -1224,7 +1233,7 @@ string16 OmniboxViewWin::GetLabelForCommandId(int command_id) const {
       IDS_PASTE_AND_SEARCH : IDS_PASTE_AND_GO);
 }
 
-void OmniboxViewWin::ExecuteCommand(int command_id) {
+void OmniboxViewWin::ExecuteCommand(int command_id, int event_flags) {
   ScopedFreeze freeze(this, GetTextObjectModel());
   if (command_id == IDS_PASTE_AND_GO) {
     // This case is separate from the switch() below since we don't want to wrap
@@ -1448,9 +1457,9 @@ void OmniboxViewWin::OnCopy() {
   // the smaller value.
   model()->AdjustTextForCopy(sel.cpMin, IsSelectAll(), &text, &url, &write_url);
   if (write_url)
-    DoCopyURL(url, text);
+    DoCopyURL(url, text, model()->profile());
   else
-    DoCopyText(text);
+    DoCopyText(text, model()->profile());
 }
 
 LRESULT OmniboxViewWin::OnCreate(const CREATESTRUCTW* /*create_struct*/) {
@@ -1517,7 +1526,6 @@ LRESULT OmniboxViewWin::OnImeComposition(UINT message,
   return result;
 }
 
-
 LRESULT OmniboxViewWin::OnImeEndComposition(UINT message, WPARAM wparam,
                                             LPARAM lparam) {
   // The edit control auto-clears the selection on WM_IME_ENDCOMPOSITION, which
@@ -1571,8 +1579,8 @@ LRESULT OmniboxViewWin::OnTouchEvent(UINT message,
   // single-point tap on an unfocused model.
   if ((wparam == 1) && !model()->has_focus()) {
     TOUCHINPUT point = {0};
-    if (GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(lparam), 1,
-                          &point, sizeof(TOUCHINPUT))) {
+    if (ui::GetTouchInputInfoWrapper(reinterpret_cast<HTOUCHINPUT>(lparam), 1,
+                                     &point, sizeof(TOUCHINPUT))) {
       if (point.dwFlags & TOUCHEVENTF_DOWN)
         SetCapture();
       else if (point.dwFlags & TOUCHEVENTF_UP)
@@ -1748,7 +1756,6 @@ void OmniboxViewWin::OnLButtonDown(UINT keys, const CPoint& point) {
 
   if (!gaining_focus_.get() && !is_triple_click)
     OnPossibleDrag(point);
-
 
   // Modifying the selection counts as accepting any inline autocompletion, so
   // track "changes" made by clicking the mouse button.
@@ -2457,12 +2464,8 @@ void OmniboxViewWin::EmphasizeURLComponents() {
   // be treated as a search or a navigation, and is the same method the Paste
   // And Go system uses.
   url_parse::Component scheme, host;
-  AutocompleteInput::ParseForEmphasizeComponents(
-      GetText(), model()->GetDesiredTLD(), &scheme, &host);
+  AutocompleteInput::ParseForEmphasizeComponents(GetText(), &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
-
-  bool instant_extended_api_enabled =
-      chrome::search::IsInstantExtendedAPIEnabled(parent_view_->profile());
 
   // Set the baseline emphasis.
   CHARFORMAT cf = {0};
@@ -2588,9 +2591,6 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
       SkIntToScalar(PosFromChar(sel.cpMax).x - scheme_rect.left),
       SkIntToScalar(scheme_rect.Height()) };
 
-  bool instant_extended_api_enabled =
-      chrome::search::IsInstantExtendedAPIEnabled(parent_view_->profile());
-
   // Draw the unselected portion of the stroke.
   sk_canvas->save();
   if (selection_rect.isEmpty() ||
@@ -2713,7 +2713,7 @@ void OmniboxViewWin::StartDragIfNecessary(const CPoint& point) {
 
   data.SetString(text_to_write);
 
-  scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
+  scoped_refptr<ui::DragSourceWin> drag_source(new ui::DragSourceWin);
   DWORD dropped_mode;
   base::AutoReset<bool> auto_reset_in_drag(&in_drag_, true);
   if (DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
@@ -2800,7 +2800,7 @@ void OmniboxViewWin::BuildContextMenu() {
     context_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
     context_menu_contents_->AddItemWithStringId(IDC_CUT, IDS_CUT);
     context_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
-    if (chrome::search::IsQueryExtractionEnabled(parent_view_->profile()))
+    if (chrome::search::IsQueryExtractionEnabled())
       context_menu_contents_->AddItemWithStringId(IDC_COPY_URL, IDS_COPY_URL);
     context_menu_contents_->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
     // GetContextualLabel() will override this next label with the

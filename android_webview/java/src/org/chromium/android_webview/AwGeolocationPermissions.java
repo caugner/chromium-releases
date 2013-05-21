@@ -28,6 +28,9 @@ public final class AwGeolocationPermissions {
         mSharedPreferences = sharedPreferences;
     }
 
+    /**
+     * Set one origin to be allowed.
+     */
     public void allow(String origin) {
         String key = getOriginKey(origin);
         if (key != null) {
@@ -35,6 +38,9 @@ public final class AwGeolocationPermissions {
         }
     }
 
+    /**
+     * Set one origin to be denied.
+     */
     public void deny(String origin) {
         String key = getOriginKey(origin);
         if (key != null) {
@@ -42,6 +48,9 @@ public final class AwGeolocationPermissions {
         }
     }
 
+    /**
+     * Clear the stored permission for a particular origin.
+     */
     public void clear(String origin) {
         String key = getOriginKey(origin);
         if (key != null) {
@@ -49,6 +58,9 @@ public final class AwGeolocationPermissions {
         }
     }
 
+    /**
+     * Clear stored permissions for all origins.
+     */
     public void clearAll() {
         SharedPreferences.Editor editor = null;
         for (String name : mSharedPreferences.getAll().keySet()) {
@@ -64,17 +76,25 @@ public final class AwGeolocationPermissions {
         }
     }
 
+    /**
+     * Synchronous method to get if an origin is set to be allowed.
+     */
+    public boolean isOriginAllowed(String origin) {
+        return mSharedPreferences.getBoolean(getOriginKey(origin), false);
+    }
+
+    /**
+     * Returns true if the origin is either set to allowed or denied.
+     */
+    public boolean hasOrigin(String origin) {
+        return mSharedPreferences.contains(getOriginKey(origin));
+    }
+
+    /**
+     * Asynchronous method to get if an origin set to be allowed.
+     */
     public void getAllowed(String origin, final ValueCallback<Boolean> callback) {
-        boolean allowed = false;
-        try {
-            String key = getOriginKey(origin);
-            if (key != null) {
-                allowed = mSharedPreferences.getBoolean(key, false);
-            }
-        } catch (ClassCastException e) {
-            // Want to return false in this case, do nothing here
-        }
-        final boolean finalAllowed = allowed;
+        final boolean finalAllowed = isOriginAllowed(origin);
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -83,6 +103,9 @@ public final class AwGeolocationPermissions {
         });
     }
 
+    /**
+     * Async method to get the domains currently allowed or denied.
+     */
     public void getOrigins(final ValueCallback<Set<String>> callback) {
         final Set<String> origins = new HashSet<String>();
         for (String name : mSharedPreferences.getAll().keySet()) {
@@ -98,6 +121,9 @@ public final class AwGeolocationPermissions {
         });
     }
 
+    /**
+     * Get the domain of an URL using the GURL library.
+     */
     private String getOriginKey(String url) {
         String origin = GURLUtils.getOrigin(url);
         if (origin.isEmpty()) {

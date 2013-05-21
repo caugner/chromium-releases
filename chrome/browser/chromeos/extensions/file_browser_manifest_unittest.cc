@@ -6,7 +6,6 @@
 #include "chrome/browser/chromeos/extensions/file_browser_handler.h"
 #include "chrome/common/extensions/extension_builder.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/value_builder.h"
@@ -25,12 +24,8 @@ namespace {
 class FileBrowserHandlerManifestTest : public ExtensionManifestTest {
   virtual void SetUp() OVERRIDE {
     ExtensionManifestTest::SetUp();
-    extensions::ManifestHandler::Register(
-        extension_manifest_keys::kFileBrowserHandlers,
-        make_linked_ptr(new FileBrowserHandlerParser));
-    extensions::ManifestHandler::Register(
-        extension_manifest_keys::kChromeURLOverrides,
-        make_linked_ptr(new extensions::URLOverridesHandler));
+    (new FileBrowserHandlerParser)->Register();
+    (new extensions::URLOverridesHandler)->Register();
   }
 };
 
@@ -96,7 +91,6 @@ TEST_F(FileBrowserHandlerManifestTest, ValidFileBrowserHandler) {
   EXPECT_FALSE(action->HasCreateAccessPermission());
   EXPECT_TRUE(action->CanRead());
   EXPECT_TRUE(action->CanWrite());
-  EXPECT_FALSE(action->CanHandleMIMEType("plain/text"));
 }
 
 TEST_F(FileBrowserHandlerManifestTest, ValidFileBrowserHandlerMIMETypes) {
@@ -113,9 +107,7 @@ TEST_F(FileBrowserHandlerManifestTest, ValidFileBrowserHandlerMIMETypes) {
                            .Set("default_title", "Default title")
                            .Set("default_icon", "icon.png")
                            .Set("file_filters", ListBuilder()
-                               .Append("filesystem:*.txt"))
-                           .Set("mime_types", ListBuilder()
-                               .Append("plain/text")))))
+                               .Append("filesystem:*.txt")))))
       .Build();
 
   ASSERT_TRUE(extension.get());
@@ -125,35 +117,10 @@ TEST_F(FileBrowserHandlerManifestTest, ValidFileBrowserHandlerMIMETypes) {
   ASSERT_EQ(handlers->size(), 1U);
   const FileBrowserHandler* action = handlers->at(0).get();
 
-  EXPECT_FALSE(action->CanHandleMIMEType("plain/html"));
-  EXPECT_TRUE(action->CanHandleMIMEType("plain/text"));
-
   const extensions::URLPatternSet& patterns = action->file_url_patterns();
   ASSERT_EQ(patterns.patterns().size(), 1U);
   EXPECT_TRUE(action->MatchesURL(
       GURL("filesystem:chrome-extension://foo/local/test.txt")));
-}
-
-TEST_F(FileBrowserHandlerManifestTest,
-       FileBrowserHandlerMIMETypesNotWhitelisted) {
-  scoped_ptr<DictionaryValue> manifest_value =
-      DictionaryBuilder()
-          .Set("name", "MIME types test")
-          .Set("version", "1.0.0")
-          .Set("manifest_version", 2)
-          .Set("file_browser_handlers", ListBuilder()
-              .Append(DictionaryBuilder()
-                  .Set("id", "ID")
-                  .Set("default_title", "Default title")
-                  .Set("default_icon", "icon.png")
-                  .Set("file_filters", ListBuilder()
-                      .Append("filesystem:*.txt"))
-                  .Set("mime_types", ListBuilder()
-                      .Append("plain/text"))))
-      .Build();
-
-  LoadAndExpectError(Manifest(manifest_value.get(), "MIME types test"),
-                     errors::kNoPermissionForFileBrowserHandlerMIMETypes);
 }
 
 TEST_F(FileBrowserHandlerManifestTest, ValidFileBrowserHandlerWithCreate) {

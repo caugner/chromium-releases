@@ -48,25 +48,9 @@ const char kTestCaptcha[] = "pizzamyheart";
 const char kTestCaptchaImageUrl[] = "http://pizzamyheart/image";
 const char kTestCaptchaUnlockUrl[] = "http://pizzamyheart/unlock";
 
-// List of all the types a user can select in the sync config dialog.
-const syncer::ModelType kUserSelectableTypes[] = {
-  syncer::APPS,
-  syncer::AUTOFILL,
-  syncer::BOOKMARKS,
-  syncer::EXTENSIONS,
-  syncer::PASSWORDS,
-  syncer::PREFERENCES,
-  syncer::SESSIONS,
-  syncer::THEMES,
-  syncer::TYPED_URLS
-};
-
 // Returns a ModelTypeSet with all user selectable types set.
 syncer::ModelTypeSet GetAllTypes() {
-  syncer::ModelTypeSet types;
-  for (size_t i = 0; i < arraysize(kUserSelectableTypes); ++i)
-    types.Put(kUserSelectableTypes[i]);
-  return types;
+  return syncer::UserSelectableTypes();
 }
 
 enum SyncAllDataConfig {
@@ -102,7 +86,7 @@ std::string GetConfiguration(const DictionaryValue* extra_values,
   result.SetBoolean("extensionsSynced", types.Has(syncer::EXTENSIONS));
   result.SetBoolean("passwordsSynced", types.Has(syncer::PASSWORDS));
   result.SetBoolean("preferencesSynced", types.Has(syncer::PREFERENCES));
-  result.SetBoolean("sessionsSynced", types.Has(syncer::SESSIONS));
+  result.SetBoolean("tabsSynced", types.Has(syncer::PROXY_TABS));
   result.SetBoolean("themesSynced", types.Has(syncer::THEMES));
   result.SetBoolean("typedUrlsSynced", types.Has(syncer::TYPED_URLS));
   std::string args;
@@ -201,7 +185,7 @@ void CheckConfigDataTypeArguments(DictionaryValue* dictionary,
   CheckBool(dictionary, "extensionsSynced", types.Has(syncer::EXTENSIONS));
   CheckBool(dictionary, "passwordsSynced", types.Has(syncer::PASSWORDS));
   CheckBool(dictionary, "preferencesSynced", types.Has(syncer::PREFERENCES));
-  CheckBool(dictionary, "sessionsSynced", types.Has(syncer::SESSIONS));
+  CheckBool(dictionary, "tabsSynced", types.Has(syncer::PROXY_TABS));
   CheckBool(dictionary, "themesSynced", types.Has(syncer::THEMES));
   CheckBool(dictionary, "typedUrlsSynced", types.Has(syncer::TYPED_URLS));
 }
@@ -376,7 +360,7 @@ class SyncSetupHandlerTest : public testing::TestWithParam<bool> {
           switches::kUseClientLoginSigninFlow));
     }
 
-    error_ = GoogleServiceAuthError::None();
+    error_ = GoogleServiceAuthError::AuthErrorNone();
     profile_.reset(ProfileSyncServiceMock::MakeSignedInTestingProfile());
     mock_pss_ = static_cast<ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -387,6 +371,8 @@ class SyncSetupHandlerTest : public testing::TestWithParam<bool> {
     ON_CALL(*mock_pss_, GetPassphraseType()).WillByDefault(
         Return(syncer::IMPLICIT_PASSPHRASE));
     ON_CALL(*mock_pss_, GetPassphraseTime()).WillByDefault(
+        Return(base::Time()));
+    ON_CALL(*mock_pss_, GetExplicitPassphraseTime()).WillByDefault(
         Return(base::Time()));
     mock_signin_ = static_cast<SigninManagerMock*>(
         SigninManagerFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -531,7 +517,7 @@ TEST_P(SyncSetupHandlerTest, DisplayConfigureWithBackendDisabledAndCancel) {
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, HasSyncSetupCompleted())
       .WillRepeatedly(Return(false));
-  error_ = GoogleServiceAuthError::None();
+  error_ = GoogleServiceAuthError::AuthErrorNone();
   EXPECT_CALL(*mock_pss_, GetAuthError()).WillRepeatedly(ReturnRef(error_));
   EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(false));
 
@@ -573,7 +559,7 @@ TEST_P(SyncSetupHandlerTest,
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, HasSyncSetupCompleted())
       .WillRepeatedly(Return(false));
-  error_ = GoogleServiceAuthError::None();
+  error_ = GoogleServiceAuthError::AuthErrorNone();
   EXPECT_CALL(*mock_pss_, GetAuthError()).WillRepeatedly(ReturnRef(error_));
   // Sync backend is stopped initially, and will start up.
   EXPECT_CALL(*mock_pss_, sync_initialized())
@@ -630,7 +616,7 @@ TEST_P(SyncSetupHandlerTest,
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, HasSyncSetupCompleted())
       .WillRepeatedly(Return(false));
-  error_ = GoogleServiceAuthError::None();
+  error_ = GoogleServiceAuthError::AuthErrorNone();
   EXPECT_CALL(*mock_pss_, GetAuthError()).WillRepeatedly(ReturnRef(error_));
   EXPECT_CALL(*mock_pss_, sync_initialized())
       .WillOnce(Return(false))
@@ -660,7 +646,7 @@ TEST_P(SyncSetupHandlerTest,
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, HasSyncSetupCompleted())
       .WillRepeatedly(Return(false));
-  error_ = GoogleServiceAuthError::None();
+  error_ = GoogleServiceAuthError::AuthErrorNone();
   EXPECT_CALL(*mock_pss_, GetAuthError()).WillRepeatedly(ReturnRef(error_));
   EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(false));
 
@@ -999,9 +985,11 @@ TEST_P(SyncSetupHandlerTest, UnsuccessfullySetPassphrase) {
 // Walks through each user selectable type, and tries to sync just that single
 // data type.
 TEST_P(SyncSetupHandlerTest, TestSyncIndividualTypes) {
-  for (size_t i = 0; i < arraysize(kUserSelectableTypes); ++i) {
+  syncer::ModelTypeSet user_selectable_types = GetAllTypes();
+  syncer::ModelTypeSet::Iterator it;
+  for (it = user_selectable_types.First(); it.Good(); it.Inc()) {
     syncer::ModelTypeSet type_to_set;
-    type_to_set.Put(kUserSelectableTypes[i]);
+    type_to_set.Put(it.Get());
     std::string args = GetConfiguration(
         NULL, CHOOSE_WHAT_TO_SYNC, type_to_set, "", ENCRYPT_PASSWORDS);
     ListValue list_args;
@@ -1120,7 +1108,7 @@ TEST_P(SyncSetupHandlerTest, ShowSetupSyncEverything) {
   CheckBool(dictionary, "extensionsRegistered", true);
   CheckBool(dictionary, "passwordsRegistered", true);
   CheckBool(dictionary, "preferencesRegistered", true);
-  CheckBool(dictionary, "sessionsRegistered", true);
+  CheckBool(dictionary, "tabsRegistered", true);
   CheckBool(dictionary, "themesRegistered", true);
   CheckBool(dictionary, "typedUrlsRegistered", true);
   CheckBool(dictionary, "showPassphrase", false);
@@ -1150,7 +1138,9 @@ TEST_P(SyncSetupHandlerTest, ShowSetupManuallySyncAll) {
 }
 
 TEST_P(SyncSetupHandlerTest, ShowSetupSyncForAllTypesIndividually) {
-  for (size_t i = 0; i < arraysize(kUserSelectableTypes); ++i) {
+  syncer::ModelTypeSet user_selectable_types = GetAllTypes();
+  syncer::ModelTypeSet::Iterator it;
+  for (it = user_selectable_types.First(); it.Good(); it.Inc()) {
     EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
         .WillRepeatedly(Return(false));
     EXPECT_CALL(*mock_pss_, IsUsingSecondaryPassphrase())
@@ -1160,7 +1150,7 @@ TEST_P(SyncSetupHandlerTest, ShowSetupSyncForAllTypesIndividually) {
     sync_prefs.SetKeepEverythingSynced(false);
     SetDefaultExpectationsForConfigPage();
     syncer::ModelTypeSet types;
-    types.Put(kUserSelectableTypes[i]);
+    types.Put(it.Get());
     EXPECT_CALL(*mock_pss_, GetPreferredDataTypes()).
         WillRepeatedly(Return(types));
 

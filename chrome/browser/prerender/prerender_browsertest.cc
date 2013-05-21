@@ -56,7 +56,7 @@
 #include "content/public/test/test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -289,7 +289,7 @@ class TestPrerenderContents : public PrerenderContents {
   virtual bool AddAliasURL(const GURL& url) OVERRIDE {
     // Prevent FINAL_STATUS_UNSUPPORTED_SCHEME when navigating to about:crash in
     // the PrerenderRendererCrash test.
-    if (url.spec() != chrome::kChromeUICrashURL)
+    if (url.spec() != content::kChromeUICrashURL)
       return PrerenderContents::AddAliasURL(url);
     return true;
   }
@@ -1154,7 +1154,7 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
       // We don't expect to pick up a running prerender, so instead
       // observe one navigation.
       content::TestNavigationObserver observer(
-          content::NotificationService::AllSources(), NULL, 1);
+          content::NotificationService::AllSources(), 1);
       base::RunLoop run_loop;
       observer.WaitForObservation(
           base::Bind(&content::RunThisRunLoop,
@@ -1813,7 +1813,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 // See crbug.com/131836.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, DISABLED_PrerenderTaskManager) {
   // Show the task manager. This populates the model.
-  current_browser()->window()->ShowTaskManager();
+  chrome::OpenTaskManager(current_browser(), false);
   // Wait for the model of task manager to start.
   TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
 
@@ -1965,7 +1965,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderRendererCrash) {
   ASSERT_TRUE(GetPrerenderContents()->prerender_contents());
   GetPrerenderContents()->prerender_contents()->GetController().
       LoadURL(
-          GURL(chrome::kChromeUICrashURL),
+          GURL(content::kChromeUICrashURL),
           content::Referrer(),
           content::PAGE_TRANSITION_TYPED,
           std::string());
@@ -2461,6 +2461,20 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderEvents) {
   EXPECT_FALSE(HadPrerenderEventErrors());
 }
 
+// Cancels the prerender of a page with its own prerender.  The second prerender
+// should never be started.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       PrerenderCancelPrerenderWithPrerender) {
+  PrerenderTestURL("files/prerender/prerender_infinite_a.html",
+                   FINAL_STATUS_CANCELLED,
+                   1);
+  // Post a task to cancel all the prerenders.
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&CancelAllPrerenders, GetPrerenderManager()));
+  content::RunMessageLoop();
+  EXPECT_TRUE(GetPrerenderContents() == NULL);
+}
+
 // PrerenderBrowserTest.PrerenderEventsNoLoad may pass flakily on regression,
 // so please be aggressive about filing bugs when this test is failing.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderEventsNoLoad) {
@@ -2548,7 +2562,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   DisableJavascriptCalls();
   WebContents* web_contents =
       current_browser()->tab_strip_model()->GetActiveWebContents();
-  scoped_refptr<DevToolsAgentHost> agent(DevToolsAgentHost::GetFor(
+  scoped_refptr<DevToolsAgentHost> agent(DevToolsAgentHost::GetOrCreateFor(
       web_contents->GetRenderViewHost()));
   DevToolsManager* manager = DevToolsManager::GetInstance();
   FakeDevToolsClientHost client_host;
@@ -2729,6 +2743,48 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions, TabsApi) {
 
   ASSERT_TRUE(IsEmptyPrerenderLinkManager());
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// Checks that non-http/https subresource cancels the prerender.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       PrerenderCancelSubresourceUnsupportedScheme) {
+  GURL image_url = GURL("invalidscheme://www.google.com/test.jpg");
+  std::vector<net::TestServer::StringPair> replacement_text;
+  replacement_text.push_back(
+      std::make_pair("REPLACE_WITH_IMAGE_URL", image_url.spec()));
+  std::string replacement_path;
+  ASSERT_TRUE(net::TestServer::GetFilePathWithReplacements(
+      "files/prerender/prerender_with_image.html",
+      replacement_text,
+      &replacement_path));
+  PrerenderTestURL(replacement_path, FINAL_STATUS_UNSUPPORTED_SCHEME, 1);
+  NavigateToDestURL();
+}
+
+// Checks that non-http/https subresource cancels the prerender on redirect.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       PrerenderCancelSubresourceRedirectUnsupportedScheme) {
+  GURL image_url = test_server()->GetURL(
+      CreateServerRedirect("invalidscheme://www.google.com/test.jpg"));
+  std::vector<net::TestServer::StringPair> replacement_text;
+  replacement_text.push_back(
+      std::make_pair("REPLACE_WITH_IMAGE_URL", image_url.spec()));
+  std::string replacement_path;
+  ASSERT_TRUE(net::TestServer::GetFilePathWithReplacements(
+      "files/prerender/prerender_with_image.html",
+      replacement_text,
+      &replacement_path));
+  PrerenderTestURL(replacement_path, FINAL_STATUS_UNSUPPORTED_SCHEME, 1);
+  NavigateToDestURL();
+}
+
+// Checks that non-http/https main page redirects cancel the prerender.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       PrerenderCancelMainFrameRedirectUnsupportedScheme) {
+  GURL url = test_server()->GetURL(
+      CreateServerRedirect("invalidscheme://www.google.com/test.html"));
+  PrerenderTestURL(url, FINAL_STATUS_UNSUPPORTED_SCHEME, 1);
+  NavigateToDestURL();
 }
 
 }  // namespace prerender

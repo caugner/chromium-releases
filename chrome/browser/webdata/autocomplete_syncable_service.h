@@ -12,10 +12,11 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/supports_user_data.h"
 #include "base/threading/non_thread_safe.h"
+#include "chrome/browser/api/webdata/autofill_web_data_service.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
-#include "chrome/browser/webdata/web_data_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "sync/api/sync_change.h"
@@ -40,12 +41,19 @@ class AutofillSpecifics;
 // TODO(georgey) : remove reliance on the notifications and make it to be called
 // from web_data_service directly.
 class AutocompleteSyncableService
-    : public syncer::SyncableService,
+    : public base::SupportsUserData::Data,
+      public syncer::SyncableService,
       public content::NotificationObserver,
       public base::NonThreadSafe {
  public:
-  explicit AutocompleteSyncableService(WebDataService* web_data_service);
   virtual ~AutocompleteSyncableService();
+
+  // Creates a new AutocompleteSyncableService and hangs it off of
+  // |web_data_service|, which takes ownership.
+  static void CreateForWebDataService(AutofillWebDataService* web_data_service);
+  // Retrieves the AutocompleteSyncableService stored on |web_data|.
+  static AutocompleteSyncableService* FromWebDataService(
+      AutofillWebDataService* web_data_service);
 
   static syncer::ModelType model_type() { return syncer::AUTOFILL; }
 
@@ -73,6 +81,9 @@ class AutocompleteSyncableService
   bool cull_expired_entries() const { return cull_expired_entries_; }
 
  protected:
+  explicit AutocompleteSyncableService(
+      AutofillWebDataService* web_data_service);
+
   // Helper to query WebDatabase for the current autocomplete state.
   // Made virtual for ease of mocking in the unit-test.
   virtual bool LoadAutofillData(std::vector<AutofillEntry>* entries) const;
@@ -136,7 +147,7 @@ class AutocompleteSyncableService
 
   // Lifetime of AutocompleteSyncableService object is shorter than
   // |web_data_service_| passed to it.
-  WebDataService* web_data_service_;
+  AutofillWebDataService* web_data_service_;
 
   content::NotificationRegistrar notification_registrar_;
 

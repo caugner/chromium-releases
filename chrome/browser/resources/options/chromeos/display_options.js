@@ -212,10 +212,10 @@ cr.define('options', function() {
       // position changes slightly even though the user doesn't think to move
       // the finger, very small move is just ignored.
       /** @const */ var IGNORABLE_TOUCH_MOVE_PX = 1;
-      var x_diff = Math.abs(touchLocation.x - this.lastTouchLocation_.x);
-      var y_diff = Math.abs(touchLocation.y - this.lastTouchLocation_.y);
-      if (x_diff <= IGNORABLE_TOUCH_MOVE_PX &&
-          y_diff <= IGNORABLE_TOUCH_MOVE_PX) {
+      var xDiff = Math.abs(touchLocation.x - this.lastTouchLocation_.x);
+      var yDiff = Math.abs(touchLocation.y - this.lastTouchLocation_.y);
+      if (xDiff <= IGNORABLE_TOUCH_MOVE_PX &&
+          yDiff <= IGNORABLE_TOUCH_MOVE_PX) {
         return true;
       }
 
@@ -356,22 +356,22 @@ cr.define('options', function() {
         height: baseDiv.offsetHeight
       };
       switch (getPositionToRectangle(baseBounds, newCenter)) {
-      case SecondaryDisplayLayout.RIGHT:
-        this.layout_ = this.dragging_.display.isPrimary ?
-            SecondaryDisplayLayout.LEFT : SecondaryDisplayLayout.RIGHT;
-        break;
-      case SecondaryDisplayLayout.LEFT:
-        this.layout_ = this.dragging_.display.isPrimary ?
-            SecondaryDisplayLayout.RIGHT : SecondaryDisplayLayout.LEFT;
-        break;
-      case SecondaryDisplayLayout.TOP:
-        this.layout_ = this.dragging_.display.isPrimary ?
-            SecondaryDisplayLayout.BOTTOM : SecondaryDisplayLayout.TOP;
-        break;
-      case SecondaryDisplayLayout.BOTTOM:
-        this.layout_ = this.dragging_.display.isPrimary ?
-            SecondaryDisplayLayout.TOP : SecondaryDisplayLayout.BOTTOM;
-        break;
+        case SecondaryDisplayLayout.RIGHT:
+          this.layout_ = this.dragging_.display.isPrimary ?
+              SecondaryDisplayLayout.LEFT : SecondaryDisplayLayout.RIGHT;
+          break;
+        case SecondaryDisplayLayout.LEFT:
+          this.layout_ = this.dragging_.display.isPrimary ?
+              SecondaryDisplayLayout.RIGHT : SecondaryDisplayLayout.LEFT;
+          break;
+        case SecondaryDisplayLayout.TOP:
+          this.layout_ = this.dragging_.display.isPrimary ?
+              SecondaryDisplayLayout.BOTTOM : SecondaryDisplayLayout.TOP;
+          break;
+        case SecondaryDisplayLayout.BOTTOM:
+          this.layout_ = this.dragging_.display.isPrimary ?
+              SecondaryDisplayLayout.TOP : SecondaryDisplayLayout.BOTTOM;
+          break;
       }
 
       if (this.layout_ == SecondaryDisplayLayout.LEFT ||
@@ -393,47 +393,47 @@ cr.define('options', function() {
               SecondaryDisplayLayout.RIGHT : SecondaryDisplayLayout.LEFT;
       }
 
-      var layout_to_base;
+      var layoutToBase;
       if (!this.dragging_.display.isPrimary) {
-        layout_to_base = this.layout_;
+        layoutToBase = this.layout_;
       } else {
         switch (this.layout_) {
-        case SecondaryDisplayLayout.RIGHT:
-          layout_to_base = SecondaryDisplayLayout.LEFT;
-          break;
-        case SecondaryDisplayLayout.LEFT:
-          layout_to_base = SecondaryDisplayLayout.RIGHT;
-          break;
-        case SecondaryDisplayLayout.TOP:
-          layout_to_base = SecondaryDisplayLayout.BOTTOM;
-          break;
-        case SecondaryDisplayLayout.BOTTOM:
-          layout_to_base = SecondaryDisplayLayout.TOP;
-          break;
+          case SecondaryDisplayLayout.RIGHT:
+            layoutToBase = SecondaryDisplayLayout.LEFT;
+            break;
+          case SecondaryDisplayLayout.LEFT:
+            layoutToBase = SecondaryDisplayLayout.RIGHT;
+            break;
+          case SecondaryDisplayLayout.TOP:
+            layoutToBase = SecondaryDisplayLayout.BOTTOM;
+            break;
+          case SecondaryDisplayLayout.BOTTOM:
+            layoutToBase = SecondaryDisplayLayout.TOP;
+            break;
         }
       }
 
-      switch (layout_to_base) {
-      case SecondaryDisplayLayout.RIGHT:
-        draggingDiv.style.left =
-            baseDiv.offsetLeft + baseDiv.offsetWidth + 'px';
-        draggingDiv.style.top = newPosition.y + 'px';
-        break;
-      case SecondaryDisplayLayout.LEFT:
-        draggingDiv.style.left =
-            baseDiv.offsetLeft - draggingDiv.offsetWidth + 'px';
-        draggingDiv.style.top = newPosition.y + 'px';
-        break;
-      case SecondaryDisplayLayout.TOP:
-        draggingDiv.style.top =
-            baseDiv.offsetTop - draggingDiv.offsetHeight + 'px';
-        draggingDiv.style.left = newPosition.x + 'px';
-        break;
-      case SecondaryDisplayLayout.BOTTOM:
-        draggingDiv.style.top =
-            baseDiv.offsetTop + baseDiv.offsetHeight + 'px';
-        draggingDiv.style.left = newPosition.x + 'px';
-        break;
+      switch (layoutToBase) {
+        case SecondaryDisplayLayout.RIGHT:
+          draggingDiv.style.left =
+              baseDiv.offsetLeft + baseDiv.offsetWidth + 'px';
+          draggingDiv.style.top = newPosition.y + 'px';
+          break;
+        case SecondaryDisplayLayout.LEFT:
+          draggingDiv.style.left =
+              baseDiv.offsetLeft - draggingDiv.offsetWidth + 'px';
+          draggingDiv.style.top = newPosition.y + 'px';
+          break;
+        case SecondaryDisplayLayout.TOP:
+          draggingDiv.style.top =
+              baseDiv.offsetTop - draggingDiv.offsetHeight + 'px';
+          draggingDiv.style.left = newPosition.x + 'px';
+          break;
+        case SecondaryDisplayLayout.BOTTOM:
+          draggingDiv.style.top =
+              baseDiv.offsetTop + baseDiv.offsetHeight + 'px';
+          draggingDiv.style.left = newPosition.x + 'px';
+          break;
       }
 
       return false;
@@ -523,27 +523,34 @@ cr.define('options', function() {
      * @private
      */
     updateSelectedDisplayDescription_: function() {
+      if (this.mirroring_) {
+        $('display-configuration-arrow').hidden = true;
+        $('display-options-set-primary').hidden = true;
+        $('display-options-toggle-mirroring').hidden = false;
+        $('selected-display-data-container').hidden = false;
+        var display = this.displays_[0];
+        $('selected-display-name').textContent = '';
+        $('selected-display-resolution').textContent =
+            display.width + 'x' + display.height;
+        return;
+      }
+
       if (this.focusedIndex_ == null ||
           this.displays_[this.focusedIndex_] == null) {
         $('selected-display-data-container').hidden = true;
         $('display-configuration-arrow').hidden = true;
         $('display-options-set-primary').hidden = true;
-        $('display-options-toggle-mirroring').hidden = !this.mirroring_;
+        $('display-options-toggle-mirroring').hidden = true;
         return;
       }
 
       $('selected-display-data-container').hidden = false;
       var display = this.displays_[this.focusedIndex_];
       var nameElement = $('selected-display-name');
-      while (nameElement.childNodes.length > 0)
-        nameElement.removeChild(nameElement.firstChild);
-      nameElement.appendChild(document.createTextNode(display.name));
+      nameElement.textContent = display.name;
 
-      var resolutionData = display.width + 'x' + display.height;
       var resolutionElement = $('selected-display-resolution');
-      while (resolutionElement.childNodes.length > 0)
-        resolutionElement.removeChild(resolutionElement.firstChild);
-      resolutionElement.appendChild(document.createTextNode(resolutionData));
+      resolutionElement.textContent = display.width + 'x' + display.height;
 
       $('start-calibrating-overscan-control').hidden = display.isInternal;
 
@@ -590,12 +597,6 @@ cr.define('options', function() {
       display.div.style.height = newHeight + 'px';
       display.nameContainer.style.marginTop =
             (newHeight - display.nameContainer.offsetHeight) / 2 + 'px';
-      if (display.isPrimary) {
-        var launcher = display.div.firstChild;
-        if (launcher && launcher.id == 'display-launcher') {
-          launcher.style.width = display.div.style.width;
-        }
-      }
     },
 
     /**
@@ -697,11 +698,6 @@ cr.define('options', function() {
           div.classList.add('displays-focused');
 
         if (display.isPrimary) {
-          // Put a grey rectangle to the primary display to denote launcher
-          // below.
-          var launcher = document.createElement('div');
-          launcher.id = 'display-launcher';
-          div.appendChild(launcher);
           this.primaryDisplay_ = display;
         } else {
           this.secondaryDisplay_ = display;

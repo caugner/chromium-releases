@@ -5,12 +5,13 @@
 #include "ash/wm/gestures/shelf_gesture_handler.h"
 
 #include "ash/root_window_controller.h"
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_types.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/wm/gestures/tray_gesture_handler.h"
-#include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
@@ -42,7 +43,8 @@ bool ShelfGestureHandler::ProcessGestureEvent(const ui::GestureEvent& event) {
     return false;
 
   // TODO(oshima): Find the root window controller from event's location.
-  ShelfLayoutManager* shelf = Shell::GetPrimaryRootWindowController()->shelf();
+  ShelfLayoutManager* shelf =
+      Shell::GetPrimaryRootWindowController()->GetShelfLayoutManager();
   if (event.type() == ui::ET_GESTURE_SCROLL_BEGIN) {
     drag_in_progress_ = true;
     shelf->StartGestureDrag(event);

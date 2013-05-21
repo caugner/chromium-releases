@@ -19,10 +19,10 @@
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/string16.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
@@ -313,7 +313,8 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
                                                  const std::wstring& type,
                                                  const std::wstring& channel) {
   scoped_ptr<FileVersionInfo>
-      version_info(FileVersionInfo::CreateFileVersionInfo(FilePath(exe_path)));
+      version_info(FileVersionInfo::CreateFileVersionInfo(
+          base::FilePath(exe_path)));
 
   std::wstring version, product;
   std::wstring special_build;
@@ -508,9 +509,11 @@ bool DumpDoneCallbackWhenNoCrash(const wchar_t*, const wchar_t*, void*,
 bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
                       EXCEPTION_POINTERS* ex_info,
                       MDRawAssertionInfo*, bool) {
-  // If the exception is because there was a problem loading a delay-loaded
-  // module, then show the user a dialog explaining the problem and then exit.
-  if (DelayLoadFailureExceptionMessageBox(ex_info))
+  // Check if the exception is one of the kind which would not be solved
+  // by simply restarting chrome. In this case we show a message box with
+  // and exit silently. Remember that chrome is in a crashed state so we
+  // can't show our own UI from this process.
+  if (HardErrorHandler(ex_info))
     return true;
 
   // We set CHROME_CRASHED env var. If the CHROME_RESTART is present.

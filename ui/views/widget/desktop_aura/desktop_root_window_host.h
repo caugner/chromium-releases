@@ -45,6 +45,7 @@ class VIEWS_EXPORT DesktopRootWindowHost {
   // Caller takes ownership of returned RootWindow.
   virtual aura::RootWindow* Init(aura::Window* content_window,
                                  const Widget::InitParams& params) = 0;
+  virtual void InitFocus(aura::Window* window) = 0;
 
   virtual void Close() = 0;
   virtual void CloseNow() = 0;
@@ -86,7 +87,8 @@ class VIEWS_EXPORT DesktopRootWindowHost {
   virtual void ClearNativeFocus() = 0;
 
   virtual Widget::MoveLoopResult RunMoveLoop(
-      const gfx::Vector2d& drag_offset) = 0;
+      const gfx::Vector2d& drag_offset,
+      Widget::MoveLoopSource source) = 0;
   virtual void EndMoveLoop() = 0;
 
   virtual void SetVisibilityChangedAnimationsEnabled(bool value) = 0;
@@ -102,10 +104,6 @@ class VIEWS_EXPORT DesktopRootWindowHost {
 
   virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
                               const gfx::ImageSkia& app_icon) = 0;
-
-  virtual void SetAccessibleName(const string16& name) = 0;
-  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) = 0;
-  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) = 0;
 
   virtual void InitModalType(ui::ModalType modal_type) = 0;
 

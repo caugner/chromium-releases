@@ -54,26 +54,25 @@ enum ModelType {
   FIRST_USER_MODEL_TYPE = BOOKMARKS,  // Declared 2nd, for debugger prettiness.
   FIRST_REAL_MODEL_TYPE = FIRST_USER_MODEL_TYPE,
 
-  // A preference folder or a preference object.
+  // A preference object.
   PREFERENCES,
-  // A password folder or password object.
+  // A password object.
   PASSWORDS,
-    // An AutofillProfile Object
+  // An AutofillProfile Object
   AUTOFILL_PROFILE,
-  // An autofill folder or an autofill object.
+  // An autofill object.
   AUTOFILL,
-
-  // A themes folder or a themes object.
+  // A themes object.
   THEMES,
-  // A typed_url folder or a typed_url object.
+  // A typed_url object.
   TYPED_URLS,
-  // An extension folder or an extension object.
+  // An extension object.
   EXTENSIONS,
   // An object representing a custom search engine.
   SEARCH_ENGINES,
   // An object representing a browser session.
   SESSIONS,
-  // An app folder or an app object.
+  // An app object.
   APPS,
   // An app setting from the extension settings API.
   APP_SETTINGS,
@@ -87,8 +86,26 @@ enum ModelType {
   SYNCED_NOTIFICATIONS,
   // Custom spelling dictionary.
   DICTIONARY,
-  LAST_USER_MODEL_TYPE = DICTIONARY,
+  // Favicon images.
+  FAVICON_IMAGES,
+  // Favicon tracking information.
+  FAVICON_TRACKING,
 
+  // ---- Proxy types ----
+  // Proxy types are excluded from the sync protocol, but are still considered
+  // real user types. By convention, we prefix them with 'PROXY_' to distinguish
+  // them from normal protocol types.
+
+  // Tab sync. This is a placeholder type, so that Sessions can be implicitly
+  // enabled for history sync and tabs sync.
+  PROXY_TABS,
+
+  FIRST_PROXY_TYPE = PROXY_TABS,
+  LAST_PROXY_TYPE = PROXY_TABS,
+
+  LAST_USER_MODEL_TYPE = PROXY_TABS,
+
+  // ---- Control Types ----
   // An object representing a set of Nigori keys.
   NIGORI,
   FIRST_CONTROL_MODEL_TYPE = NIGORI,
@@ -107,6 +124,8 @@ enum ModelType {
   // sync preferences UI, be sure to update the list in
   // chrome/browser/sync/user_selectable_sync_type.h so that the UMA histograms
   // for sync include your new type.
+  // In this case, be sure to also update the UserSelectableTypes() definition
+  // in sync/syncable/model_type.cc.
 
   MODEL_TYPE_COUNT,
 };
@@ -148,9 +167,14 @@ bool ShouldMaintainPosition(ModelType model_type);
 // protocol representation and are never sent to the server.
 SYNC_EXPORT ModelTypeSet ProtocolTypes();
 
-// These are the user-selectable data types.  Note that some of these share a
+// These are the normal user-controlled types. This is to distinguish from
+// ControlTypes which are always enabled.  Note that some of these share a
 // preference flag, so not all of them are individually user-selectable.
 SYNC_EXPORT ModelTypeSet UserTypes();
+
+// These are the user-selectable data types.
+SYNC_EXPORT ModelTypeSet UserSelectableTypes();
+SYNC_EXPORT bool IsUserSelectableType(ModelType model_type);
 
 // This is the subset of UserTypes() that can be encrypted.
 SYNC_EXPORT_PRIVATE ModelTypeSet EncryptableUserTypes();
@@ -215,6 +239,11 @@ FullModelTypeSet ToFullModelTypeSet(ModelTypeSet in);
 // the name of |model_type|.
 SYNC_EXPORT const char* ModelTypeToString(ModelType model_type);
 
+// Some histograms take an integer parameter that represents a model type.
+// The mapping from ModelType to integer is defined here.  It should match
+// the mapping from integer to labels defined in histograms.xml.
+SYNC_EXPORT int ModelTypeToHistogramInt(ModelType model_type);
+
 // Handles all model types, and not just real ones.
 //
 // Caller takes ownership of returned value.
@@ -252,6 +281,12 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
 
 // Returns true if |model_type| is a real datatype
 SYNC_EXPORT bool IsRealDataType(ModelType model_type);
+
+// Returns true if |model_type| is an act-once type. Act once types drop
+// entities after applying them. Drops are deletes that are not synced to other
+// clients.
+// TODO(haitaol): Make entries of act-once data types immutable.
+SYNC_EXPORT bool IsActOnceDataType(ModelType model_type);
 
 }  // namespace syncer
 

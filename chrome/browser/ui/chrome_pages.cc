@@ -42,8 +42,8 @@ void OpenBookmarkManagerWithHash(Browser* browser,
   NavigateParams params(GetSingletonTabNavigateParams(
       browser,
       GURL(kChromeUIBookmarksURL).Resolve(
-      StringPrintf("/#%s%s", action.c_str(),
-      base::Int64ToString(node_id).c_str()))));
+          base::StringPrintf("/#%s%s", action.c_str(),
+              base::Int64ToString(node_id).c_str()))));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
   ShowSingletonTabOverwritingNTP(browser, params);
 }
@@ -88,11 +88,19 @@ void ShowDownloads(Browser* browser) {
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIDownloadsURL)));
 }
 
-void ShowExtensions(Browser* browser) {
+void ShowExtensions(Browser* browser,
+                    const std::string& extension_to_highlight) {
   content::RecordAction(UserMetricsAction("ShowExtensions"));
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIExtensionsURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
+  if (!extension_to_highlight.empty()) {
+    GURL::Replacements replacements;
+    std::string query("id=");
+    query += extension_to_highlight;
+    replacements.SetQueryStr(query);
+    params.url = params.url.ReplaceComponents(replacements);
+  }
   ShowSingletonTabOverwritingNTP(browser, params);
 }
 
@@ -185,6 +193,7 @@ void ShowBrowserSignin(Browser* browser, SyncPromoUI::Source source) {
   Profile* original_profile = browser->profile()->GetOriginalProfile();
   SigninManager* manager =
       SigninManagerFactory::GetForProfile(original_profile);
+  DCHECK(manager->IsSigninAllowed());
   // If we're signed in, just show settings.
   if (!manager->GetAuthenticatedUsername().empty()) {
     ShowSettings(browser);

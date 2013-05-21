@@ -55,7 +55,6 @@ SERVER_WEBSOCKET = 5
 # Default request queue size for WebSocketServer.
 _DEFAULT_REQUEST_QUEUE_SIZE = 128
 
-
 class WebSocketOptions:
   """Holds options for WebSocketServer."""
 
@@ -158,6 +157,7 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
     """Creates the SSL connection."""
 
     try:
+      self.tlsConnection = tlsConnection
       tlsConnection.handshakeServer(certChain=self.cert_chain,
                                     privateKey=self.private_key,
                                     sessionCache=self.session_cache,
@@ -223,6 +223,10 @@ class UDPEchoServer(testserver_base.ClientRestrictingServerMixIn,
 
 
 class TestPageHandler(testserver_base.BasePageHandler):
+  # Class variables to allow for persistence state between page handler
+  # invocations
+  rst_limits = {}
+  fail_precondition = {}
 
   def __init__(self, request, client_address, socket_server):
     connect_handlers = [
@@ -265,13 +269,14 @@ class TestPageHandler(testserver_base.BasePageHandler):
       self.MultipartHandler,
       self.MultipartSlowHandler,
       self.GetSSLSessionCacheHandler,
+      self.SSLManySmallRecords,
+      self.GetChannelID,
       self.CloseSocketHandler,
       self.RangeResetHandler,
       self.DefaultResponseHandler]
     post_handlers = [
       self.EchoTitleHandler,
       self.EchoHandler,
-      self.DeviceManagementHandler,
       self.PostOnlyFileHandler] + get_handlers
     put_handlers = [
       self.EchoTitleHandler,
@@ -1408,6 +1413,37 @@ class TestPageHandler(testserver_base.BasePageHandler):
                        ' this request')
     return True
 
+  def SSLManySmallRecords(self):
+    """Sends a reply consisting of a variety of small writes. These will be
+    translated into a series of small SSL records when used over an HTTPS
+    server."""
+
+    if not self._ShouldHandleRequest('/ssl-many-small-records'):
+      return False
+
+    self.send_response(200)
+    self.send_header('Content-Type', 'text/plain')
+    self.end_headers()
+
+    # Write ~26K of data, in 1350 byte chunks
+    for i in xrange(20):
+      self.wfile.write('*' * 1350)
+      self.wfile.flush()
+    return True
+
+  def GetChannelID(self):
+    """Send a reply containing the hashed ChannelID that the client provided."""
+
+    if not self._ShouldHandleRequest('/channel-id'):
+      return False
+
+    self.send_response(200)
+    self.send_header('Content-Type', 'text/plain')
+    self.end_headers()
+    channel_id = self.server.tlsConnection.channel_id.tostring()
+    self.wfile.write(hashlib.sha256(channel_id).digest().encode('base64'))
+    return True
+
   def CloseSocketHandler(self):
     """Closes the socket without sending anything."""
 
@@ -1422,6 +1458,13 @@ class TestPageHandler(testserver_base.BasePageHandler):
     Support range requests.  If the data requested doesn't straddle a reset
     boundary, it will all be sent.  Used for testing resuming downloads."""
 
+    def DataForRange(start, end):
+      """Data to be provided for a particular range of bytes."""
+      # Offset and scale to avoid too obvious (and hence potentially
+      # collidable) data.
+      return ''.join([chr(y % 256)
+                      for y in range(start * 2 + 15, end * 2 + 15, 2)])
+
     if not self._ShouldHandleRequest('/rangereset'):
       return False
 
@@ -1433,6 +1476,10 @@ class TestPageHandler(testserver_base.BasePageHandler):
     rst_boundary = 4000
     respond_to_range = True
     hold_for_signal = False
+    rst_limit = -1
+    token = 'DEFAULT'
+    fail_precondition = 0
+    send_verifiers = True
 
     # Parse the query
     qdict = urlparse.parse_qs(query, True)
@@ -1440,10 +1487,31 @@ class TestPageHandler(testserver_base.BasePageHandler):
       size = int(qdict['size'][0])
     if 'rst_boundary' in qdict:
       rst_boundary = int(qdict['rst_boundary'][0])
+    if 'token' in qdict:
+      # Identifying token for stateful tests.
+      token = qdict['token'][0]
+    if 'rst_limit' in qdict:
+      # Max number of rsts for a given token.
+      rst_limit = int(qdict['rst_limit'][0])
     if 'bounce_range' in qdict:
       respond_to_range = False
     if 'hold' in qdict:
+      # Note that hold_for_signal will not work with null range requests;
+      # see TODO below.
       hold_for_signal = True
+    if 'no_verifiers' in qdict:
+      send_verifiers = False
+    if 'fail_precondition' in qdict:
+      fail_precondition = int(qdict['fail_precondition'][0])
+
+    # Record already set information, or set it.
+    rst_limit = TestPageHandler.rst_limits.setdefault(token, rst_limit)
+    if rst_limit != 0:
+      TestPageHandler.rst_limits[token] -= 1
+    fail_precondition = TestPageHandler.fail_precondition.setdefault(
+      token, fail_precondition)
+    if fail_precondition != 0:
+      TestPageHandler.fail_precondition[token] -= 1
 
     first_byte = 0
     last_byte = size - 1
@@ -1464,10 +1532,12 @@ class TestPageHandler(testserver_base.BasePageHandler):
       if last_byte < first_byte:
         return False
 
-    # Set socket send buf high enough that we don't need to worry
-    # about asynchronous closes when sending RSTs.
-    self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF,
-                               16284)
+    if (fail_precondition and
+        (self.headers.getheader('If-Modified-Since') or
+         self.headers.getheader('If-Match'))):
+      self.send_response(412)
+      self.end_headers()
+      return True
 
     if range_response:
       self.send_response(206)
@@ -1477,13 +1547,16 @@ class TestPageHandler(testserver_base.BasePageHandler):
       self.send_response(200)
     self.send_header('Content-Type', 'application/octet-stream')
     self.send_header('Content-Length', last_byte - first_byte + 1)
+    if send_verifiers:
+      self.send_header('Etag', '"XYZZY"')
+      self.send_header('Last-Modified', 'Tue, 19 Feb 2013 14:32 EST')
     self.end_headers()
 
     if hold_for_signal:
       # TODO(rdsmith/phajdan.jr): http://crbug.com/169519: Without writing
       # a single byte, the self.server.handle_request() below hangs
       # without processing new incoming requests.
-      self.wfile.write('X')
+      self.wfile.write(DataForRange(first_byte, first_byte + 1))
       first_byte = first_byte + 1
       # handle requests until one of them clears this flag.
       self.server.wait_for_download = True
@@ -1491,11 +1564,11 @@ class TestPageHandler(testserver_base.BasePageHandler):
         self.server.handle_request()
 
     possible_rst = ((first_byte / rst_boundary) + 1) * rst_boundary
-    if possible_rst >= last_byte:
+    if possible_rst >= last_byte or rst_limit == 0:
       # No RST has been requested in this range, so we don't need to
       # do anything fancy; just write the data and let the python
       # infrastructure close the connection.
-      self.wfile.write('X' * (last_byte - first_byte + 1))
+      self.wfile.write(DataForRange(first_byte, last_byte + 1))
       self.wfile.flush()
       return True
 
@@ -1505,7 +1578,8 @@ class TestPageHandler(testserver_base.BasePageHandler):
     # sent when using the linger semantics to hard close a socket,
     # we send the data and then wait for our peer to release us
     # before sending the reset.
-    self.wfile.write('X' * (possible_rst - first_byte))
+    data = DataForRange(first_byte, possible_rst)
+    self.wfile.write(data)
     self.wfile.flush()
     self.server.wait_for_download = True
     while self.server.wait_for_download:
@@ -1580,31 +1654,6 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.send_header('Content-Length', len(contents))
     self.end_headers()
     self.wfile.write(contents)
-    return True
-
-  def DeviceManagementHandler(self):
-    """Delegates to the device management service used for cloud policy."""
-
-    if not self._ShouldHandleRequest("/device_management"):
-      return False
-
-    raw_request = self.ReadRequestBody()
-
-    if not self.server._device_management_handler:
-      import device_management
-      policy_path = os.path.join(self.server.data_dir, 'device_management')
-      self.server._device_management_handler = (
-          device_management.TestServer(policy_path, self.server.policy_keys))
-
-    http_response, raw_reply = (
-        self.server._device_management_handler.HandleRequest(self.path,
-                                                             self.headers,
-                                                             raw_request))
-    self.send_response(http_response)
-    if (http_response == 200):
-      self.send_header('Content-Type', 'application/x-protobuffer')
-    self.end_headers()
-    self.wfile.write(raw_reply)
     return True
 
   # called by the redirect handling function when there is no parameter
@@ -1882,8 +1931,6 @@ class ServerRunner(testserver_base.TestServerRunner):
       server.data_dir = self.__make_data_dir()
       server.file_root_url = self.options.file_root_url
       server_data['port'] = server.server_port
-      server._device_management_handler = None
-      server.policy_keys = self.options.policy_keys
     elif self.options.server_type == SERVER_WEBSOCKET:
       # Launch pywebsocket via WebSocketServer.
       logger = logging.getLogger()
@@ -2036,17 +2083,6 @@ class ServerRunner(testserver_base.TestServerRunner):
                                   'multiple algorithms should be enabled.');
     self.option_parser.add_option('--file-root-url', default='/files/',
                                   help='Specify a root URL for files served.')
-    self.option_parser.add_option('--policy-key', action='append',
-                                  dest='policy_keys',
-                                  help='Specify a path to a PEM-encoded '
-                                  'private key to use for policy signing. May '
-                                  'be specified multiple times in order to '
-                                  'load multipe keys into the server. If the '
-                                  'server has multiple keys, it will rotate '
-                                  'through them in at each request a '
-                                  'round-robin fashion. The server will '
-                                  'generate a random key if none is specified '
-                                  'on the command line.')
 
 
 if __name__ == '__main__':

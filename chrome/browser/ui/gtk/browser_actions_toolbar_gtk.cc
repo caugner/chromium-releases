@@ -37,7 +37,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
@@ -807,7 +806,7 @@ bool BrowserActionsToolbarGtk::GetAcceleratorForCommandId(
   return false;
 }
 
-void BrowserActionsToolbarGtk::ExecuteCommand(int command_id) {
+void BrowserActionsToolbarGtk::ExecuteCommand(int command_id, int event_flags) {
   const Extension* extension = model_->toolbar_items()[command_id];
   GURL popup_url;
 

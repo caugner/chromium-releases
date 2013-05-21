@@ -10,7 +10,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
@@ -23,9 +23,11 @@
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/label.h"
@@ -462,6 +464,23 @@ bool FindBarView::HandleKeyEvent(views::Textfield* sender,
   return false;
 }
 
+void FindBarView::OnAfterCutOrCopy() {
+  Profile* profile = host()->browser_view()->browser()->profile();
+  ui::Clipboard::SourceTag source_tag =
+      content::BrowserContext::GetMarkerForOffTheRecordContext(profile);
+  if (source_tag != ui::Clipboard::SourceTag()) {
+    // Overwrite the clipboard with the correct SourceTag
+    ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+    string16 text;
+    clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &text);
+
+    ui::ScopedClipboardWriter scw(clipboard,
+                                  ui::Clipboard::BUFFER_STANDARD,
+                                  source_tag);
+    scw.WriteText(text);
+  }
+}
+
 void FindBarView::UpdateMatchCountAppearance(bool no_match) {
   if (no_match) {
     match_count_text_->SetBackgroundColor(kBackgroundColorNoMatch);
@@ -474,10 +493,8 @@ void FindBarView::UpdateMatchCountAppearance(bool no_match) {
 
 bool FindBarView::FocusForwarderView::OnMousePressed(
     const ui::MouseEvent& event) {
-  if (view_to_focus_on_mousedown_) {
-    view_to_focus_on_mousedown_->ClearSelection();
+  if (view_to_focus_on_mousedown_)
     view_to_focus_on_mousedown_->RequestFocus();
-  }
   return true;
 }
 
@@ -502,7 +519,7 @@ void FindBarView::OnThemeChanged() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (GetThemeProvider()) {
     close_button_->SetBackground(
-        GetThemeProvider()->GetColor(ThemeService::COLOR_TAB_TEXT),
+        GetThemeProvider()->GetColor(ThemeProperties::COLOR_TAB_TEXT),
         rb.GetImageSkiaNamed(IDR_TAB_CLOSE),
         rb.GetImageSkiaNamed(IDR_TAB_CLOSE_MASK));
   }

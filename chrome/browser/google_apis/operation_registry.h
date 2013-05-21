@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/id_map.h"
 #include "base/observer_list.h"
 #include "base/time.h"
@@ -158,6 +158,9 @@ class OperationRegistry {
   // Sends notifications to the observers after checking that the frequency is
   // not too high by ShouldNotifyStatusNow.
   void NotifyStatusToObservers();
+
+  // Cancels the specified operation.
+  void CancelOperation(Operation* operation);
 
   typedef IDMap<Operation, IDMapOwnPointer> OperationIDMap;
   OperationIDMap in_flight_operations_;

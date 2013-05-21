@@ -44,7 +44,8 @@ class NetworkPortalDetector
     CAPTIVE_PORTAL_STATUS_OFFLINE  = 1,
     CAPTIVE_PORTAL_STATUS_ONLINE   = 2,
     CAPTIVE_PORTAL_STATUS_PORTAL   = 3,
-    CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED = 4
+    CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED = 4,
+    CAPTIVE_PORTAL_STATUS_COUNT
   };
 
   struct CaptivePortalState {
@@ -59,9 +60,10 @@ class NetworkPortalDetector
 
   class Observer {
    public:
-    // Called when portal state is changed for |network|.
-    virtual void OnPortalStateChanged(const Network* network,
-                                      const CaptivePortalState& state) = 0;
+    // Called when portal detection is completed for |network|.
+    virtual void OnPortalDetectionCompleted(
+        const Network* network,
+        const CaptivePortalState& state) = 0;
 
    protected:
     virtual ~Observer() {}
@@ -154,9 +156,9 @@ class NetworkPortalDetector
   void SetCaptivePortalState(const Network* network,
                              const CaptivePortalState& results);
 
-  // Notifies observers that portal state is changed for a |network|.
-  void NotifyPortalStateChanged(const Network* network,
-                                const CaptivePortalState& state);
+  // Notifies observers that portal detection is completed for a |network|.
+  void NotifyPortalDetectionCompleted(const Network* network,
+                                      const CaptivePortalState& state);
 
   // Returns the current TimeTicks.
   base::TimeTicks GetCurrentTimeTicks() const;
@@ -199,6 +201,10 @@ class NetworkPortalDetector
     time_ticks_for_testing_ += delta;
   }
 
+  // Returns true if detection timeout callback isn't fired or
+  // cancelled.
+  bool DetectionTimeoutIsCancelledForTesting() const;
+
   // Unique identifier of the active network.
   std::string active_network_id_;
 
@@ -236,6 +242,9 @@ class NetworkPortalDetector
   // Minimum time between consecutive portal checks for the same
   // active network.
   base::TimeDelta min_time_between_attempts_;
+
+  // Start time of portal detection.
+  base::TimeTicks detection_start_time_;
 
   // Start time of portal detection attempt.
   base::TimeTicks attempt_start_time_;

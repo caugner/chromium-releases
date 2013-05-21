@@ -24,9 +24,10 @@ import os
 import time
 
 from pylib import android_commands
-from pylib.base.test_result import SingleTestResult, TestResults
-from pylib.instrumentation import apk_info
-from pylib.instrumentation.run_java_tests import TestRunner
+from pylib.base import base_test_result
+from pylib.instrumentation import test_package
+from pylib.instrumentation import test_result
+from pylib.instrumentation import test_runner
 
 
 # aka the parent of com.google.android
@@ -72,16 +73,20 @@ class PythonTestBase(object):
       test: name of the test method to run (e.g. testFooBar)
 
     Returns:
-      TestResults object with a single test result.
+      TestRunResults object with a single test result.
     """
     test = self._ComposeFullTestName(fname, suite, test)
-    apks = [apk_info.ApkInfo(self.options.test_apk_path,
-            self.options.test_apk_jar_path)]
-    java_test_runner = TestRunner(self.options, self.device_id, [test], False,
-                                  self.shard_index,
-                                  apks,
-                                  self.ports_to_forward)
-    return java_test_runner.Run()
+    test_pkg = test_package.TestPackage(
+        self.options.test_apk_path, self.options.test_apk_jar_path)
+    java_test_runner = test_runner.TestRunner(self.options, self.device_id,
+                                              self.shard_index, False,
+                                              test_pkg,
+                                              self.ports_to_forward)
+    try:
+      java_test_runner.SetUp()
+      return java_test_runner.RunTest(test)[0]
+    finally:
+      java_test_runner.TearDown()
 
   def _RunJavaTests(self, fname, tests):
     """Calls a list of tests and stops at the first test failure.
@@ -94,72 +99,30 @@ class PythonTestBase(object):
       tests: a list of Java test names which will be run
 
     Returns:
-      A TestResults object containing a result for this Python test.
+      A TestRunResults object containing a result for this Python test.
     """
+    test_type = base_test_result.ResultType.PASS
+    log = ''
+
     start_ms = int(time.time()) * 1000
-
-    result = None
     for test in tests:
-      # We're only running one test at a time, so this TestResults object will
-      # hold only one result.
+      # We're only running one test at a time, so this TestRunResults object
+      # will hold only one result.
       suite, test_name = test.split('.')
-      result = self._RunJavaTest(fname, suite, test_name)
-      # A non-empty list means the test did not pass.
-      if result.GetAllBroken():
+      java_results = self._RunJavaTest(fname, suite, test_name)
+      assert len(java_results.GetAll()) == 1
+      if not java_results.DidRunPass():
+        result = java_results.GetNotPass().pop()
+        log = result.GetLog()
+        test_type = result.GetType()
         break
-
     duration_ms = int(time.time()) * 1000 - start_ms
 
-    # Do something with result.
-    return self._ProcessResults(result, start_ms, duration_ms)
-
-  def _ProcessResults(self, result, start_ms, duration_ms):
-    """Translates a Java test result into a Python result for this test.
-
-    The TestRunner class that we use under the covers will return a test result
-    for that specific Java test. However, to make reporting clearer, we have
-    this method to abstract that detail and instead report that as a failure of
-    this particular test case while still including the Java stack trace.
-
-    Args:
-      result: TestResults with a single Java test result
-      start_ms: the time the test started
-      duration_ms: the length of the test
-
-    Returns:
-      A TestResults object containing a result for this Python test.
-    """
-    test_results = TestResults()
-
-    # If our test is in broken, then it crashed/failed.
-    broken = result.GetAllBroken()
-    if broken:
-      # Since we have run only one test, take the first and only item.
-      single_result = broken[0]
-
-      log = single_result.log
-      if not log:
-        log = 'No logging information.'
-
-      python_result = SingleTestResult(self.qualified_name, start_ms,
-                                       duration_ms,
-                                       log)
-
-      # Figure out where the test belonged. There's probably a cleaner way of
-      # doing this.
-      if single_result in result.crashed:
-        test_results.crashed = [python_result]
-      elif single_result in result.failed:
-        test_results.failed = [python_result]
-      elif single_result in result.unknown:
-        test_results.unknown = [python_result]
-
-    else:
-      python_result = SingleTestResult(self.qualified_name, start_ms,
-                                       duration_ms)
-      test_results.ok = [python_result]
-
-    return test_results
+    python_results = base_test_result.TestRunResults()
+    python_results.AddResult(
+        test_result.InstrumentationTestResult(
+            self.qualified_name, test_type, start_ms, duration_ms, log=log))
+    return python_results
 
   def _ComposeFullTestName(self, fname, suite, test):
     package_name = self._GetPackageName(fname)

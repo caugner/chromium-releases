@@ -4,10 +4,10 @@
 
 #include "content/browser/android/content_startup_flags.h"
 
-#include "base/string_number_conversions.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "cc/switches.h"
+#include "base/string_number_conversions.h"
+#include "cc/base/switches.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
@@ -15,7 +15,8 @@
 
 namespace content {
 
-void SetContentCommandLineFlags(int max_render_process_count) {
+void SetContentCommandLineFlags(int max_render_process_count,
+                                const std::string& plugin_descriptor) {
   // May be called multiple times, to cover all possible program entry points.
   static bool already_initialized = false;
   if (already_initialized)
@@ -23,8 +24,6 @@ void SetContentCommandLineFlags(int max_render_process_count) {
   already_initialized = true;
 
   CommandLine* parsed_command_line = CommandLine::ForCurrentProcess();
-
-  parsed_command_line->AppendSwitch(cc::switches::kEnableImplSidePainting);
 
   if (parsed_command_line->HasSwitch(switches::kRendererProcessLimit)) {
     std::string limit = parsed_command_line->GetSwitchValueASCII(
@@ -69,9 +68,13 @@ void SetContentCommandLineFlags(int max_render_process_count) {
   parsed_command_line->AppendSwitch(switches::kEnableFixedLayout);
   parsed_command_line->AppendSwitch(switches::kEnableViewport);
 
-  // FIXME(aelias): Commented out due to flaky tests.
-//  parsed_command_line->AppendSwitch(
-//      cc::switches::kEnableCompositorFrameMessage);
+  parsed_command_line->AppendSwitch(
+      cc::switches::kEnableCompositorFrameMessage);
+
+  if (!plugin_descriptor.empty()) {
+    parsed_command_line->AppendSwitchNative(
+      switches::kRegisterPepperPlugins, plugin_descriptor);
+  }
 }
 
 }  // namespace content

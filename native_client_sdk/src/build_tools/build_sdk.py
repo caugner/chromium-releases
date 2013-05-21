@@ -3,7 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Entry point for both build and try bots
+"""Entry point for both build and try bots.
 
 This script is invoked from XXX, usually without arguments
 to package an SDK. It automatically determines whether
@@ -64,7 +64,7 @@ MAKE = 'nacl_sdk/make_3_81/make.exe'
 CYGTAR = os.path.join(NACL_DIR, 'build', 'cygtar.py')
 
 NACLPORTS_URL = 'https://naclports.googlecode.com/svn/trunk/src'
-NACLPORTS_REV = 695
+NACLPORTS_REV = 712
 
 options = None
 
@@ -176,7 +176,7 @@ def BuildStepCopyTextFiles(pepperdir, pepper_ver, revision):
   oshelpers.Copy(['-v'] + files + [pepperdir])
 
   # Replace a few placeholders in README
-  readme_text = open(os.path.join(SDK_SRC_DIR, 'README'), 'rt').read()
+  readme_text = open(os.path.join(SDK_SRC_DIR, 'README')).read()
   readme_text = readme_text.replace('${VERSION}', pepper_ver)
   readme_text = readme_text.replace('${REVISION}', revision)
 
@@ -185,7 +185,7 @@ def BuildStepCopyTextFiles(pepperdir, pepper_ver, revision):
   readme_text = readme_text.replace('${DATE}',
       datetime.datetime.now().strftime(time_format))
 
-  open(os.path.join(pepperdir, 'README'), 'wt').write(readme_text)
+  open(os.path.join(pepperdir, 'README'), 'w').write(readme_text)
 
 
 def BuildStepUntarToolchains(pepperdir, platform, arch, toolchains):
@@ -288,12 +288,16 @@ def InstallCommonHeaders(inc_path):
   ppapi = os.path.join(inc_path, 'ppapi')
   buildbot_common.RemoveDir(ppapi)
 
-  # Copy in c and c/dev headers
+  # Copy in c, c/dev and c/extensions/dev headers
   buildbot_common.MakeDir(os.path.join(ppapi, 'c', 'dev'))
   buildbot_common.CopyDir(os.path.join(PPAPI_DIR, 'c', '*.h'),
           os.path.join(ppapi, 'c'))
   buildbot_common.CopyDir(os.path.join(PPAPI_DIR, 'c', 'dev', '*.h'),
           os.path.join(ppapi, 'c', 'dev'))
+  buildbot_common.MakeDir(os.path.join(ppapi, 'c', 'extensions', 'dev'))
+  buildbot_common.CopyDir(
+          os.path.join(PPAPI_DIR, 'c', 'extensions', 'dev', '*.h'),
+          os.path.join(ppapi, 'c', 'extensions', 'dev'))
 
   # Remove private and trusted interfaces
   buildbot_common.RemoveDir(os.path.join(ppapi, 'c', 'private'))
@@ -305,6 +309,12 @@ def InstallCommonHeaders(inc_path):
           os.path.join(ppapi, 'cpp'))
   buildbot_common.CopyDir(os.path.join(PPAPI_DIR, 'cpp', 'dev', '*.h'),
           os.path.join(ppapi, 'cpp', 'dev'))
+  buildbot_common.MakeDir(os.path.join(ppapi, 'cpp', 'extensions', 'dev'))
+  buildbot_common.CopyDir(os.path.join(PPAPI_DIR, 'cpp', 'extensions', '*.h'),
+          os.path.join(ppapi, 'cpp', 'extensions'))
+  buildbot_common.CopyDir(
+          os.path.join(PPAPI_DIR, 'cpp', 'extensions', 'dev', '*.h'),
+          os.path.join(ppapi, 'cpp', 'extensions', 'dev'))
   buildbot_common.MakeDir(os.path.join(ppapi, 'utility', 'graphics'))
   buildbot_common.MakeDir(os.path.join(ppapi, 'utility', 'threading'))
   buildbot_common.MakeDir(os.path.join(ppapi, 'utility', 'websocket'))
@@ -741,27 +751,26 @@ def BuildStepMakeAll(pepperdir, platform, directory, step_name,
                      clean=False, deps=True, config='Debug'):
   buildbot_common.BuildStep(step_name)
   make_dir = os.path.join(pepperdir, directory)
-  makefile = os.path.join(make_dir, 'Makefile')
-  if os.path.isfile(makefile):
-    print "\n\nMake: " + make_dir
-    if platform == 'win':
-      # We need to modify the environment to build host on Windows.
-      env = GetWindowsEnvironment()
-      make = os.path.join(make_dir, 'make.bat')
-    else:
-      env = os.environ
-      make = 'make'
 
-    extra_args = ['CONFIG='+config]
-    if not deps:
-      extra_args += ['IGNORE_DEPS=1']
+  print "\n\nMake: " + make_dir
+  if platform == 'win':
+    # We need to modify the environment to build host on Windows.
+    env = GetWindowsEnvironment()
+    make = os.path.join(make_dir, 'make.bat')
+  else:
+    env = os.environ
+    make = 'make'
 
-    buildbot_common.Run([make, '-j8', 'all_versions'] + extra_args,
-                        cwd=os.path.abspath(make_dir), env=env)
-    if clean:
-      # Clean to remove temporary files but keep the built libraries.
-      buildbot_common.Run([make, '-j8', 'clean'] + extra_args,
-                          cwd=os.path.abspath(make_dir))
+  extra_args = ['CONFIG='+config]
+  if not deps:
+    extra_args += ['IGNORE_DEPS=1']
+
+  buildbot_common.Run([make, '-j8', 'all_versions'] + extra_args,
+                      cwd=make_dir, env=env)
+  if clean:
+    # Clean to remove temporary files but keep the built libraries.
+    buildbot_common.Run([make, '-j8', 'clean'] + extra_args,
+                        cwd=make_dir, env=env)
 
 
 def BuildStepBuildLibraries(pepperdir, platform, directory, clean=True):
@@ -771,20 +780,24 @@ def BuildStepBuildLibraries(pepperdir, platform, directory, clean=True):
       clean=clean, config='Release')
 
 
-def BuildStepGenerateNotice(pepperdir):
+def GenerateNotice(fileroot, output_filename='NOTICE', extra_files=None):
   # Look for LICENSE files
-  license_filenames_re = re.compile('LICENSE|COPYING')
+  license_filenames_re = re.compile('LICENSE|COPYING|COPYRIGHT')
 
   license_files = []
-  for root, _, files in os.walk(pepperdir):
+  for root, _, files in os.walk(fileroot):
     for filename in files:
       if license_filenames_re.match(filename):
         path = os.path.join(root, filename)
         license_files.append(path)
+
+  if extra_files:
+    license_files += [os.path.join(fileroot, f) for f in extra_files]
   print '\n'.join(license_files)
 
-  notice_filename = os.path.join(pepperdir, 'NOTICE')
-  generate_notice.Generate(notice_filename, pepperdir, license_files)
+  if not os.path.isabs(output_filename):
+    output_filename = os.path.join(fileroot, output_filename)
+  generate_notice.Generate(output_filename, fileroot, license_files)
 
 
 def BuildStepTarBundle(pepper_ver, tarfile):
@@ -897,7 +910,19 @@ def BuildStepBuildNaClPorts(pepper_ver, pepperdir):
 
   out_dir = os.path.join(bundle_dir, 'pepper_XX')
   out_dir_final = os.path.join(bundle_dir, 'pepper_%s' % pepper_ver)
+  buildbot_common.RemoveDir(out_dir_final)
   buildbot_common.Move(out_dir, out_dir_final)
+
+  # Some naclports do not include a standalone LICENSE/COPYING file
+  # so we explicitly list those here for inclusion.
+  extra_licenses = ('tinyxml/readme.txt',
+                    'jpeg-8d/README',
+                    'zlib-1.2.3/README')
+  src_root = os.path.join(NACLPORTS_DIR, 'out', 'repository-i686')
+  output_license = os.path.join(out_dir_final, 'ports', 'LICENSE')
+  GenerateNotice(src_root , output_license, extra_licenses)
+  readme = os.path.join(out_dir_final, 'ports', 'README')
+  oshelpers.Copy(['-v', os.path.join(SDK_SRC_DIR, 'README.naclports'), readme])
 
 
 def BuildStepTarNaClPorts(pepper_ver, tarfile):
@@ -905,8 +930,7 @@ def BuildStepTarNaClPorts(pepper_ver, tarfile):
   buildbot_common.BuildStep('Tar naclports Bundle')
   buildbot_common.MakeDir(os.path.dirname(tarfile))
   pepper_dir = 'pepper_%s' % pepper_ver
-  archive_dirs = [os.path.join(pepper_dir, 'ports', 'lib'),
-                  os.path.join(pepper_dir, 'ports', 'include')]
+  archive_dirs = [os.path.join(pepper_dir, 'ports')]
 
   ports_out = os.path.join(NACLPORTS_DIR, 'out', 'sdk_bundle')
   cmd = [sys.executable, CYGTAR, '-C', ports_out, '-cjf', tarfile]
@@ -964,11 +988,12 @@ def main(args):
   if options.archive and options.skip_tar:
     parser.error('Incompatible arguments with archive.')
 
-  pepper_ver = str(int(build_utils.ChromeMajorVersion()))
-  pepper_old = str(int(build_utils.ChromeMajorVersion()) - 1)
+  chrome_version = int(build_utils.ChromeMajorVersion())
+  clnumber = build_utils.ChromeRevision()
+  pepper_ver = str(chrome_version)
+  pepper_old = str(chrome_version - 1)
   pepperdir = os.path.join(OUT_DIR, 'pepper_' + pepper_ver)
   pepperdir_old = os.path.join(OUT_DIR, 'pepper_' + pepper_old)
-  clnumber = build_utils.ChromeRevision()
   tarname = 'naclsdk_' + platform + '.tar.bz2'
   tarfile = os.path.join(OUT_DIR, tarname)
 
@@ -999,7 +1024,7 @@ def main(args):
 
   # Ship with libraries prebuilt, so run that first.
   BuildStepBuildLibraries(pepperdir, platform, 'src')
-  BuildStepGenerateNotice(pepperdir)
+  GenerateNotice(pepperdir)
 
   if not options.skip_tar:
     BuildStepTarBundle(pepper_ver, tarfile)

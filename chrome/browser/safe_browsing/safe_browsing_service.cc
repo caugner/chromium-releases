@@ -11,8 +11,8 @@
 #include "base/debug/leak_tracker.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
@@ -305,7 +305,12 @@ void SafeBrowsingService::InitURLRequestContextOnIOThread(
   DCHECK(!url_request_context_.get());
 
   scoped_refptr<net::CookieStore> cookie_store = new net::CookieMonster(
-      new SQLitePersistentCookieStore(CookieFilePath(), false, NULL),
+      new SQLitePersistentCookieStore(
+          CookieFilePath(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+          false,
+          NULL),
       NULL);
 
   url_request_context_.reset(new net::URLRequestContext);

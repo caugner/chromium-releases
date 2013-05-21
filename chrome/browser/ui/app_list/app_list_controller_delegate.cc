@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 
 #include "base/logging.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "ui/gfx/image/image_skia.h"
 
 AppListControllerDelegate::~AppListControllerDelegate() {}
@@ -29,6 +31,11 @@ void AppListControllerDelegate::ShowCreateShortcutsDialog(
     Profile* profile,
     const std::string& extension_id) {}
 
-void AppListControllerDelegate::CreateNewWindow(bool incognito) {
+void AppListControllerDelegate::CreateNewWindow(Profile* profile,
+                                                bool incognito) {
   NOTREACHED();
+}
+
+bool AppListControllerDelegate::ShouldShowUserIcon() {
+  return g_browser_process->profile_manager()->GetNumberOfProfiles() > 1;
 }

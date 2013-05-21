@@ -9,7 +9,6 @@
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/test_shell_delegate.h"
-#include "ash/wm/cursor_manager.h"
 #include "ash/wm/power_button_controller.h"
 #include "ash/wm/session_state_animator.h"
 #include "ash/wm/session_state_controller.h"
@@ -20,6 +19,7 @@
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/compositor/test/compositor_test_support.h"
 #include "ui/gfx/rect.h"
@@ -113,13 +113,15 @@ class SessionStateControllerImpl2Test : public AshTestBase {
     AshTestBase::SetUp();
 
     // We would control animations in a fine way:
-    ui::LayerAnimator::set_disable_animations_for_test(false);
+    animation_duration_mode_.reset(new ui::ScopedAnimationDurationScaleMode(
+        ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION));
     // TODO(antrim) : restore
     // animator_helper_ = ui::test::CreateLayerAnimatorHelperForTest();
 
     // Temporary disable animations so that observer is always called, and
     // no leaks happen during tests.
-    ui::LayerAnimator::set_disable_animations_for_test(true);
+    animation_duration_mode_.reset(new ui::ScopedAnimationDurationScaleMode(
+        ui::ScopedAnimationDurationScaleMode::ZERO_DURATION));
     // TODO(antrim): once there is a way to mock time and run animations, make
     // sure that animations are finished even in simple tests.
 
@@ -398,6 +400,7 @@ class SessionStateControllerImpl2Test : public AshTestBase {
   TestSessionStateControllerDelegate* delegate_;  // not owned
   TestShellDelegate* shell_delegate_;  // not owned
 
+  scoped_ptr<ui::ScopedAnimationDurationScaleMode> animation_duration_mode_;
   scoped_ptr<SessionStateControllerImpl2::TestApi> test_api_;
   scoped_ptr<SessionStateAnimator::TestApi> animator_api_;
   // TODO(antrim) : restore
@@ -720,7 +723,8 @@ TEST_F(SessionStateControllerImpl2Test, CancelLockToShutdown) {
 // TODO(antrim): Reenable this: http://crbug.com/167048
 TEST_F(SessionStateControllerImpl2Test, DISABLED_Lock) {
   // We require animations to have a duration for this test.
-  ui::LayerAnimator::set_disable_animations_for_test(false);
+  ui::ScopedAnimationDurationScaleMode normal_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
 
   Initialize(false, user::LOGGED_IN_USER);
 

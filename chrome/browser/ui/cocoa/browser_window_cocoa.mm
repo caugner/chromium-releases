@@ -51,6 +51,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/password_form.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -91,7 +92,7 @@ namespace {
 NSPoint GetPointForBubble(content::WebContents* web_contents,
                           int x_offset,
                           int y_offset) {
-  NSView* view = web_contents->GetNativeView();
+  NSView* view = web_contents->GetView()->GetNativeView();
   NSRect bounds = [view bounds];
   NSPoint point;
   point.x = NSMinX(bounds) + x_offset;
@@ -100,6 +101,12 @@ NSPoint GetPointForBubble(content::WebContents* web_contents,
   point = [view convertPoint:point toView:nil];
   point = [[view window] convertBaseToScreen:point];
   return point;
+}
+
+void CreateShortcuts(const ShellIntegration::ShortcutInfo& shortcut_info) {
+  // creation_locations will be ignored by CreatePlatformShortcuts on Mac.
+  ShellIntegration::ShortcutLocations creation_locations;
+  web_app::CreateShortcuts(shortcut_info, creation_locations);
 }
 
 }  // namespace
@@ -354,6 +361,11 @@ void BrowserWindowCocoa::UpdateFullscreenExitBubbleContent(
   [controller_ updateFullscreenExitBubbleURL:url bubbleType:bubble_type];
 }
 
+bool BrowserWindowCocoa::ShouldHideUIForFullscreen() const {
+  // On Mac, fullscreen mode has most normal things (in a slide-down panel).
+  return false;
+}
+
 bool BrowserWindowCocoa::IsFullscreen() const {
   if ([controller_ inPresentationMode])
     CHECK([controller_ isFullscreen]);  // Presentation mode must be fullscreen.
@@ -413,7 +425,6 @@ void BrowserWindowCocoa::FocusBookmarksToolbar() {
   // Not needed on the Mac.
 }
 
-
 bool BrowserWindowCocoa::IsBookmarkBarVisible() const {
   return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
 }
@@ -457,14 +468,6 @@ void BrowserWindowCocoa::AddFindBar(
 
 void BrowserWindowCocoa::ShowUpdateChromeDialog() {
   restart_browser::RequestRestart(window());
-}
-
-void BrowserWindowCocoa::ShowTaskManager() {
-  TaskManagerMac::Show(false);
-}
-
-void BrowserWindowCocoa::ShowBackgroundPages() {
-  TaskManagerMac::Show(true);
 }
 
 void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
@@ -576,7 +579,7 @@ void BrowserWindowCocoa::ShowCreateChromeAppShortcutsDialog(
   // Normally we would show a dialog, but since we always create the app
   // shortcut in /Applications there are no options for the user to choose.
   web_app::UpdateShortcutInfoAndIconForApp(*app, profile,
-      base::Bind(&web_app::CreateShortcuts));
+                                           base::Bind(&CreateShortcuts));
 }
 
 void BrowserWindowCocoa::Cut() {
@@ -634,7 +637,7 @@ FindBar* BrowserWindowCocoa::CreateFindBar() {
   // constructor or the FindBarCocoaController init, but that makes
   // unit testing difficult, since we would also require a
   // BrowserWindow object.
-  FindBarBridge* bridge = new FindBarBridge();
+  FindBarBridge* bridge = new FindBarBridge(browser_);
   AddFindBar(bridge->find_bar_cocoa_controller());
   return bridge;
 }
@@ -654,10 +657,10 @@ extensions::ActiveTabPermissionGranter*
   return tab_helper ? tab_helper->active_tab_permission_granter() : NULL;
 }
 
-void BrowserWindowCocoa::ModeChanged(
-    const chrome::search::Mode& old_mode,
-    const chrome::search::Mode& new_mode) {
-  [controller_ updateBookmarkBarStateForInstantPreview];
+void BrowserWindowCocoa::ModelChanged(
+    const chrome::search::SearchModel::State& old_state,
+    const chrome::search::SearchModel::State& new_state) {
+  [controller_ updateBookmarkBarStateForInstantOverlay];
 }
 
 void BrowserWindowCocoa::DestroyBrowser() {

@@ -4,10 +4,10 @@
 
 import logging
 
-from telemetry import multi_page_benchmark
-from telemetry import util
+from telemetry.core import util
+from telemetry.page import page_benchmark
 
-class SpaceportBenchmark(multi_page_benchmark.MultiPageBenchmark):
+class SpaceportBenchmark(page_benchmark.PageBenchmark):
   def CustomizeBrowserOptions(self, options):
     options.extra_browser_args.extend(['--disable-gpu-vsync'])
 
@@ -43,5 +43,5 @@ class SpaceportBenchmark(multi_page_benchmark.MultiPageBenchmark):
       chart, trace = key.split('.', 1)
       results.Add(trace, 'objects (bigger is better)', float(result_dict[key]),
                   chart_name=chart, data_type='unimportant')
-    results.Add('Overall', 'objects (bigger is better)',
+    results.Add('Score', 'objects (bigger is better)',
                 [float(x) for x in result_dict.values()])

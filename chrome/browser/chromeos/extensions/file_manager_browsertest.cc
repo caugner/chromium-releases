@@ -12,8 +12,8 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
 #include "base/platform_file.h"
 #include "base/threading/platform_thread.h"
@@ -23,8 +23,10 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_context.h"
@@ -39,7 +41,10 @@ const char kKeyboardTestFileName[] = "world.mpeg";
 const int kKeyboardTestFileSize = 1000;
 const char kKeyboardTestFileCopyName[] = "world (1).mpeg";
 
-class FileManagerBrowserTest : public ExtensionApiTest {
+// The boolean parameter, retrieved by GetParam(), is true if testing in the
+// guest mode. See SetUpCommandLine() below for details.
+class FileManagerBrowserTest : public ExtensionApiTest,
+                               public ::testing::WithParamInterface<bool> {
  public:
   virtual void SetUp() OVERRIDE {
     extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
@@ -58,6 +63,15 @@ class FileManagerBrowserTest : public ExtensionApiTest {
     CreateTestDirectory(".warez", "26 Oct 1985 13:39");
 
     ExtensionApiTest::SetUp();
+  }
+
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    bool in_guest_mode = GetParam();
+    if (in_guest_mode) {
+      command_line->AppendSwitch(switches::kGuestSession);
+      command_line->AppendSwitch(switches::kIncognito);
+    }
+    ExtensionApiTest::SetUpCommandLine(command_line);
   }
 
  protected:
@@ -91,6 +105,14 @@ class FileManagerBrowserTest : public ExtensionApiTest {
  private:
   base::ScopedTempDir tmp_dir_;
 };
+
+INSTANTIATE_TEST_CASE_P(InGuestMode,
+                        FileManagerBrowserTest,
+                        ::testing::Values(true));
+
+INSTANTIATE_TEST_CASE_P(InNonGuestMode,
+                        FileManagerBrowserTest,
+                        ::testing::Values(false));
 
 void FileManagerBrowserTest::CreateTestFile(
     const std::string& name,
@@ -280,7 +302,7 @@ bool DeletedFileGone(const base::FilePath& path) {
   return !file_util::PathExists(path);
 };
 
-IN_PROC_BROWSER_TEST_F(FileManagerBrowserTest, TestFileDisplay) {
+IN_PROC_BROWSER_TEST_P(FileManagerBrowserTest, TestFileDisplay) {
   StartFileManager();
   SetShorterRefreshInterval();
 
@@ -296,7 +318,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerBrowserTest, TestFileDisplay) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(FileManagerBrowserTest, TestKeyboardCopy) {
+IN_PROC_BROWSER_TEST_P(FileManagerBrowserTest, TestKeyboardCopy) {
   StartFileManager();
   SetShorterRefreshInterval();
 
@@ -318,7 +340,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerBrowserTest, TestKeyboardCopy) {
   ASSERT_TRUE(file_util::PathExists(source_path));
 }
 
-IN_PROC_BROWSER_TEST_F(FileManagerBrowserTest, TestKeyboardDelete) {
+IN_PROC_BROWSER_TEST_P(FileManagerBrowserTest, TestKeyboardDelete) {
   StartFileManager();
   SetShorterRefreshInterval();
 

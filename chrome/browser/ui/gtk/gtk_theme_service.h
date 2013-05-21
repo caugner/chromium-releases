@@ -11,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
@@ -169,6 +169,10 @@ class GtkThemeService : public ThemeService {
 
   // Additionally frees the CairoCachedSurfaces.
   virtual void FreePlatformCaches() OVERRIDE;
+
+  // Gets the name of the current icon theme and passes it to our low level XDG
+  // integration.
+  void SetXDGIconTheme();
 
   // Extracts colors and tints from the GTK theme, both for the
   // ThemeService interface and the colors we send to webkit.

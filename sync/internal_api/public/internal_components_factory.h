@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 
@@ -76,7 +76,8 @@ class SYNC_EXPORT InternalComponentsFactory {
       ThrottledDataTypeTracker* throttled_data_type_tracker,
       const std::vector<SyncEngineEventListener*>& listeners,
       sessions::DebugInfoGetter* debug_info_getter,
-      TrafficRecorder* traffic_recorder) = 0;
+      TrafficRecorder* traffic_recorder,
+      const std::string& invalidator_client_id) = 0;
 
   virtual scoped_ptr<syncable::DirectoryBackingStore>
   BuildDirectoryBackingStore(

@@ -23,6 +23,7 @@ namespace chromeos {
 class BaseScreenHandler;
 class CoreOobeHandler;
 class ErrorScreenHandler;
+class KioskAppMenuHandler;
 class NativeWindowDelegate;
 class NetworkStateInformer;
 class SigninScreenHandler;
@@ -50,8 +51,10 @@ class OobeUI : public OobeDisplay,
     SCREEN_USER_IMAGE_PICKER,
     SCREEN_TPM_ERROR,
     SCREEN_PASSWORD_CHANGED,
-    SCREEN_CREATE_MANAGED_USER,
+    SCREEN_CREATE_MANAGED_USER_DIALOG,
+    SCREEN_CREATE_MANAGED_USER_FLOW,
     SCREEN_TERMS_OF_SERVICE,
+    SCREEN_WRONG_HWID,
     SCREEN_UNKNOWN
   };
 
@@ -66,8 +69,10 @@ class OobeUI : public OobeDisplay,
   static const char kScreenUserImagePicker[];
   static const char kScreenTpmError[];
   static const char kScreenPasswordChanged[];
-  static const char kScreenManagedUserCreation[];
+  static const char kScreenManagedUserCreationDialog[];
+  static const char kScreenManagedUserCreationFlow[];
   static const char kScreenTermsOfService[];
+  static const char kScreenWrongHWID[];
 
   explicit OobeUI(content::WebUI* web_ui);
   virtual ~OobeUI();
@@ -85,7 +90,9 @@ class OobeUI : public OobeDisplay,
       GetTermsOfServiceScreenActor() OVERRIDE;
   virtual UserImageScreenActor* GetUserImageScreenActor() OVERRIDE;
   virtual ViewScreenDelegate* GetRegistrationScreenActor() OVERRIDE;
-  virtual ViewScreenDelegate* GetHTMLPageScreenActor() OVERRIDE;
+  virtual WrongHWIDScreenActor* GetWrongHWIDScreenActor() OVERRIDE;
+  virtual LocallyManagedUserCreationScreenHandler*
+      GetLocallyManagedUserCreationScreenActor() OVERRIDE;
 
   // Collects localized strings from the owned handlers.
   void GetLocalizedStrings(base::DictionaryValue* localized_strings);
@@ -134,6 +141,9 @@ class OobeUI : public OobeDisplay,
   EulaScreenActor* eula_screen_actor_;
   EnterpriseEnrollmentScreenActor* enterprise_enrollment_screen_actor_;
   ResetScreenActor* reset_screen_actor_;
+  WrongHWIDScreenActor* wrong_hwid_screen_actor_;
+  LocallyManagedUserCreationScreenHandler*
+      locally_managed_user_creation_screen_actor_;
 
   // Reference to ErrorScreenHandler that handles error screen
   // requests and forward calls from native code to JS side.
@@ -147,6 +157,8 @@ class OobeUI : public OobeDisplay,
   UserImageScreenActor* user_image_screen_actor_;
 
   std::vector<BaseScreenHandler*> handlers_;  // Non-owning pointers.
+
+  KioskAppMenuHandler* kiosk_app_menu_handler_;  // Non-owning pointers.
 
   // Id of the current oobe/login screen.
   Screen current_screen_;

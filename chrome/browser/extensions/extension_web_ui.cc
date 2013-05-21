@@ -16,22 +16,22 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/favicon/favicon_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/incognito_handler.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
+#include "extensions/common/extension_resource.h"
 #include "net/base/file_stream.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -196,7 +196,7 @@ bool ExtensionWebUI::HandleChromeURLOverride(
   const DictionaryValue* overrides =
       profile->GetPrefs()->GetDictionary(kExtensionURLOverrides);
   std::string page = url->host();
-  const ListValue* url_list;
+  const ListValue* url_list = NULL;
   if (!overrides || !overrides->GetList(page, &url_list))
     return false;
 
@@ -242,7 +242,7 @@ bool ExtensionWebUI::HandleChromeURLOverride(
     // We can't handle chrome-extension URLs in incognito mode unless the
     // extension uses split mode.
     bool incognito_override_allowed =
-        extension->incognito_split_mode() &&
+        extensions::IncognitoInfo::IsSplitMode(extension) &&
         service->IsIncognitoEnabled(extension->id());
     if (profile->IsOffTheRecord() && !incognito_override_allowed) {
       ++i;
@@ -268,20 +268,19 @@ bool ExtensionWebUI::HandleChromeURLOverrideReverse(
   // internal URL
   // chrome-extension://eemcgdkfndhakfknompkggombfjjjeno/main.html#1 to
   // chrome://bookmarks/#1 for display in the omnibox.
-  for (DictionaryValue::key_iterator it = overrides->begin_keys(),
-       end = overrides->end_keys(); it != end; ++it) {
-    const ListValue* url_list;
-    if (!overrides->GetList(*it, &url_list))
+  for (DictionaryValue::Iterator it(*overrides); !it.IsAtEnd(); it.Advance()) {
+    const ListValue* url_list = NULL;
+    if (!it.value().GetAsList(&url_list))
       continue;
 
-    for (ListValue::const_iterator it2 = url_list->begin(),
-         end2 = url_list->end(); it2 != end2; ++it2) {
+    for (ListValue::const_iterator it2 = url_list->begin();
+         it2 != url_list->end(); ++it2) {
       std::string override;
       if (!(*it2)->GetAsString(&override))
         continue;
       if (StartsWithASCII(url->spec(), override, true)) {
-        GURL original_url(chrome::kChromeUIScheme + std::string("://") + *it +
-                          url->spec().substr(override.length()));
+        GURL original_url(chrome::kChromeUIScheme + std::string("://") +
+                          it.key() + url->spec().substr(override.length()));
         *url = original_url;
         return true;
       }
@@ -306,7 +305,7 @@ void ExtensionWebUI::RegisterChromeURLOverrides(
   URLOverrides::URLOverrideMap::const_iterator iter = overrides.begin();
   for (; iter != overrides.end(); ++iter) {
     const std::string& key = iter->first;
-    ListValue* page_overrides;
+    ListValue* page_overrides = NULL;
     if (!all_overrides->GetList(key, &page_overrides)) {
       page_overrides = new ListValue();
       all_overrides->Set(key, page_overrides);
@@ -359,7 +358,7 @@ void ExtensionWebUI::UnregisterChromeURLOverride(const std::string& page,
   PrefService* prefs = profile->GetPrefs();
   DictionaryPrefUpdate update(prefs, kExtensionURLOverrides);
   DictionaryValue* all_overrides = update.Get();
-  ListValue* page_overrides;
+  ListValue* page_overrides = NULL;
   if (!all_overrides->GetList(page, &page_overrides)) {
     // If it's being unregistered, it should already be in the list.
     NOTREACHED();
@@ -380,7 +379,7 @@ void ExtensionWebUI::UnregisterChromeURLOverrides(
   URLOverrides::URLOverrideMap::const_iterator iter = overrides.begin();
   for (; iter != overrides.end(); ++iter) {
     const std::string& page = iter->first;
-    ListValue* page_overrides;
+    ListValue* page_overrides = NULL;
     if (!all_overrides->GetList(page, &page_overrides)) {
       // If it's being unregistered, it should already be in the list.
       NOTREACHED();
@@ -421,9 +420,10 @@ void ExtensionWebUI::GetFaviconForURL(
   for (size_t i = 0; i < scale_factors.size(); ++i) {
     float scale = ui::GetScaleFactorScale(scale_factors[i]);
     int pixel_size = static_cast<int>(gfx::kFaviconSize * scale);
-    ExtensionResource icon_resource =
-        extension->GetIconResource(pixel_size,
-                                   ExtensionIconSet::MATCH_BIGGER);
+    extensions::ExtensionResource icon_resource =
+        extensions::IconsInfo::GetIconResource(extension,
+                                               pixel_size,
+                                               ExtensionIconSet::MATCH_BIGGER);
 
     info_list.push_back(
         extensions::ImageLoader::ImageRepresentation(

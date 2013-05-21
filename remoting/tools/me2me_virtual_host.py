@@ -18,6 +18,7 @@ import logging
 import optparse
 import os
 import pipes
+import psutil
 import signal
 import socket
 import subprocess
@@ -54,16 +55,21 @@ HOME_DIR = os.environ["HOME"]
 X_LOCK_FILE_TEMPLATE = "/tmp/.X%d-lock"
 FIRST_X_DISPLAY_NUMBER = 20
 
-# Minimum amount of time to wait between relaunching processes.
-BACKOFF_TIME = 60
+# Amount of time to wait between relaunching processes.
+SHORT_BACKOFF_TIME = 5
+LONG_BACKOFF_TIME = 60
 
-# Maximum allowed consecutive times that a child process runs for less than
-# BACKOFF_TIME. This script exits if this limit is exceeded.
-MAX_LAUNCH_FAILURES = 10
+# How long a process must run in order not to be counted against the restart
+# thresholds.
+MINIMUM_PROCESS_LIFETIME = 60
+
+# Thresholds for switching from fast- to slow-restart and for giving up
+# trying to restart entirely.
+SHORT_BACKOFF_THRESHOLD = 5
+MAX_LAUNCH_FAILURES = SHORT_BACKOFF_THRESHOLD + 10
 
 # Globals needed by the atexit cleanup() handler.
 g_desktops = []
-g_pidfile = None
 g_host_hash = hashlib.md5(socket.gethostname()).hexdigest()
 
 class Config:
@@ -103,9 +109,9 @@ class Config:
       os.umask(old_umask)
 
   def save_and_log_errors(self):
-    """Calls save(self), trapping and logging any errors."""
+    """Calls self.save(), trapping and logging any errors."""
     try:
-      save(self)
+      self.save()
     except (IOError, TypeError) as e:
       logging.error("Failed to save config: " + str(e))
 
@@ -310,14 +316,23 @@ class Desktop:
       xvfb = "Xvfb"
       self.server_supports_exact_resize = False
 
+    # Disable the Composite extension iff the X session is the default
+    # Unity-2D, since it uses Metacity which fails to generate DAMAGE
+    # notifications correctly. See crbug.com/166468.
+    x_session = choose_x_session();
+    if (len(x_session) == 2 and
+        x_session[1] == "/usr/bin/gnome-session --session=ubuntu-2d"):
+      extra_x_args.extend(["-extension", "Composite"])
+
     logging.info("Starting %s on display :%d" % (xvfb, display))
     screen_option = "%dx%dx24" % (max_width, max_height)
-    self.x_proc = subprocess.Popen([xvfb, ":%d" % display,
-                                    "-noreset",
-                                    "-auth", x_auth_file,
-                                    "-nolisten", "tcp",
-                                    "-screen", "0", screen_option
-                                    ] + extra_x_args)
+    self.x_proc = subprocess.Popen(
+        [xvfb, ":%d" % display,
+         "-auth", x_auth_file,
+         "-nolisten", "tcp",
+         "-noreset",
+         "-screen", "0", screen_option
+        ] + extra_x_args)
     if not self.x_proc.pid:
       raise Exception("Could not start Xvfb.")
 
@@ -415,87 +430,39 @@ class Desktop:
     self.host_proc.stdin.close()
 
 
-class PidFile:
-  """Class to allow creating and deleting a file which holds the PID of the
-  running process.  This is used to detect if a process is already running, and
-  inform the user of the PID.  On process termination, the PID file is
-  deleted.
+def get_daemon_pid():
+  """Checks if there is already an instance of this script running, and returns
+  its PID.
 
-  Note that PID files are not truly atomic or reliable, see
-  http://mywiki.wooledge.org/ProcessManagement for more discussion on this.
-
-  So this class is just to prevent the user from accidentally running two
-  instances of this script, and to report which PID may be the other running
-  instance.
+  Returns:
+    The process ID of the existing daemon process, or 0 if the daemon is not
+    running.
   """
+  uid = os.getuid()
+  this_pid = os.getpid()
 
-  def __init__(self, filename):
-    """Create an object to manage a PID file.  This does not create the PID
-    file itself."""
-    self.filename = filename
-    self.created = False
+  for process in psutil.process_iter():
+    # Skip any processes that raise an exception, as processes may terminate
+    # during iteration over the list.
+    try:
+      # Skip other users' processes.
+      if process.uids.real != uid:
+        continue
 
-  def check(self):
-    """Checks current status of the process.
+      # Skip the process for this instance.
+      if process.pid == this_pid:
+        continue
 
-    Returns:
-      Tuple (running, pid):
-      |running| is True if the daemon is running.
-      |pid| holds the process ID of the running instance if |running| is True.
-      If the PID file exists but the PID couldn't be read from the file
-      (perhaps if the data hasn't been written yet), 0 is returned.
+      # |cmdline| will be [python-interpreter, script-file, other arguments...]
+      cmdline = process.cmdline
+      if len(cmdline) < 2:
+        continue
+      if cmdline[0] == sys.executable and cmdline[1] == sys.argv[0]:
+        return process.pid
+    except psutil.error.Error:
+      continue
 
-    Raises:
-      IOError: Filesystem error occurred.
-    """
-    if os.path.exists(self.filename):
-      pid_file = open(self.filename, 'r')
-      file_contents = pid_file.read()
-      pid_file.close()
-
-      try:
-        pid = int(file_contents)
-      except ValueError:
-        return True, 0
-
-      # Test to see if there's a process currently running with that PID.
-      # If there is no process running, the existing PID file is definitely
-      # stale and it is safe to overwrite it.  Otherwise, report the PID as
-      # possibly a running instance of this script.
-      if os.path.exists("/proc/%d" % pid):
-        return True, pid
-
-    return False, 0
-
-  def create(self):
-    """Creates an empty PID file."""
-    pid_file = open(self.filename, 'w')
-    pid_file.close()
-    self.created = True
-
-  def write_pid(self):
-    """Write the current process's PID to the PID file.
-
-    This is done separately from create() as this needs to be called
-    after any daemonization, when the correct PID becomes known.  But
-    check() and create() has to happen before daemonization, so that
-    if another instance is already running, this fact can be reported
-    to the user's terminal session.  This also avoids corrupting the
-    log file of the other process, since daemonize() would create a
-    new log file.
-    """
-    pid_file = open(self.filename, 'w')
-    pid_file.write('%d\n' % os.getpid())
-    pid_file.close()
-    self.created = True
-
-  def delete_file(self):
-    """Delete the PID file if it was created by this instance.
-
-    This is called on process termination.
-    """
-    if self.created:
-      os.remove(self.filename)
+  return 0
 
 
 def choose_x_session():
@@ -540,20 +507,18 @@ def choose_x_session():
     "/etc/X11/Xsession" ]
   for session_wrapper in SESSION_WRAPPERS:
     if os.path.exists(session_wrapper):
-      break
-  else:
-    # No session wrapper found.
-    return None
-
-  # On Ubuntu 12.04, the default session relies on 3D-accelerated hardware.
-  # Trying to run this with a virtual X display produces weird results on some
-  # systems (for example, upside-down and corrupt displays).  So if the
-  # ubuntu-2d session is available, choose it explicitly.
-  if os.path.exists("/usr/bin/unity-2d-panel"):
-    return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
-
-  # Use the session wrapper by itself, and let the system choose a session.
-  return session_wrapper
+      if os.path.exists("/usr/bin/unity-2d-panel"):
+        # On Ubuntu 12.04, the default session relies on 3D-accelerated
+        # hardware. Trying to run this with a virtual X display produces
+        # weird results on some systems (for example, upside-down and
+        # corrupt displays).  So if the ubuntu-2d session is available,
+        # choose it explicitly.
+        return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
+      else:
+        # Use the session wrapper by itself, and let the system choose a
+        # session.
+        return [session_wrapper]
+  return None
 
 
 def locate_executable(exe_name):
@@ -607,10 +572,10 @@ def daemonize(log_filename):
       pass
     else:
       # Child process
-      os._exit(0)
+      os._exit(0)  # pylint: disable=W0212
   else:
     # Parent process
-    os._exit(0)
+    os._exit(0)  # pylint: disable=W0212
 
   logging.info("Daemon process running, logging to '%s'" % log_filename)
 
@@ -630,14 +595,6 @@ def daemonize(log_filename):
 
 def cleanup():
   logging.info("Cleanup.")
-
-  global g_pidfile
-  if g_pidfile:
-    try:
-      g_pidfile.delete_file()
-      g_pidfile = None
-    except Exception, e:
-      logging.error("Unexpected error deleting PID file: " + str(e))
 
   global g_desktops
   for desktop in g_desktops:
@@ -693,22 +650,24 @@ class RelaunchInhibitor:
     self.label = label
     self.running = False
     self.earliest_relaunch_time = 0
+    self.earliest_successful_termination = 0
     self.failures = 0
 
   def is_inhibited(self):
     return (not self.running) and (time.time() < self.earliest_relaunch_time)
 
-  def record_started(self, timeout):
+  def record_started(self, minimum_lifetime, relaunch_delay):
     """Record that the process was launched, and set the inhibit time to
     |timeout| seconds in the future."""
-    self.earliest_relaunch_time = time.time() + timeout
+    self.earliest_relaunch_time = time.time() + relaunch_delay
+    self.earliest_successful_termination = time.time() + minimum_lifetime
     self.running = True
 
   def record_stopped(self):
     """Record that the process was stopped, and adjust the failure count
     depending on whether the process ran long enough."""
     self.running = False
-    if time.time() < self.earliest_relaunch_time:
+    if time.time() < self.earliest_successful_termination:
       self.failures += 1
     else:
       self.failures = 0
@@ -828,16 +787,15 @@ Web Store: https://chrome.google.com/remotedesktop"""
   # Determine the filename of the host configuration and PID files.
   if not options.config:
     options.config = os.path.join(CONFIG_DIR, "host#%s.json" % g_host_hash)
-  pid_filename = os.path.splitext(options.config)[0] + ".pid"
 
   # Check for a modal command-line option (start, stop, etc.)
   if options.check_running:
-    running, pid = PidFile(pid_filename).check()
-    return 0 if (running and pid != 0) else 1
+    pid = get_daemon_pid()
+    return 0 if pid != 0 else 1
 
   if options.stop:
-    running, pid = PidFile(pid_filename).check()
-    if not running:
+    pid = get_daemon_pid()
+    if pid == 0:
       print "The daemon is not currently running"
     else:
       print "Killing process %s" % pid
@@ -845,8 +803,8 @@ Web Store: https://chrome.google.com/remotedesktop"""
     return 0
 
   if options.reload:
-    running, pid = PidFile(pid_filename).check()
-    if not running:
+    pid = get_daemon_pid()
+    if pid == 0:
       return 1
     os.kill(pid, signal.SIGHUP)
     return 0
@@ -878,7 +836,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
     default_sizes = DEFAULT_SIZES
     if os.environ.has_key(DEFAULT_SIZES_ENV_VAR):
       default_sizes = os.environ[DEFAULT_SIZES_ENV_VAR]
-    options.size = default_sizes.split(",");
+    options.size = default_sizes.split(",")
 
   sizes = []
   for size in options.size:
@@ -925,17 +883,12 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
   # Determine whether a desktop is already active for the specified host
   # host configuration.
-  global g_pidfile
-  g_pidfile = PidFile(pid_filename)
-  running, pid = g_pidfile.check()
-  if running:
+  pid = get_daemon_pid()
+  if pid != 0:
     # Debian policy requires that services should "start" cleanly and return 0
     # if they are already running.
     print "Service already running."
     return 0
-
-  # Record that we are running a desktop against for this configuration.
-  g_pidfile.create()
 
   # Detach a separate "daemon" process to run the session, unless specifically
   # requested to run in the foreground.
@@ -945,8 +898,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
           prefix="chrome_remote_desktop_", delete=False)
       os.environ[LOG_FILE_ENV_VAR] = log_file.name
     daemonize(os.environ[LOG_FILE_ENV_VAR])
-
-  g_pidfile.write_pid()
 
   logging.info("Using host_id: " + host.host_id)
 
@@ -966,12 +917,15 @@ Web Store: https://chrome.google.com/remotedesktop"""
   allow_relaunch_self = False
 
   while True:
-    # Exit if a process failed too many times.
+    # Set the backoff interval and exit if a process failed too many times.
+    backoff_time = SHORT_BACKOFF_TIME
     for inhibitor in all_inhibitors:
       if inhibitor.failures >= MAX_LAUNCH_FAILURES:
         logging.error("Too many launch failures of '%s', exiting."
                       % inhibitor.label)
         return 1
+      elif inhibitor.failures >= SHORT_BACKOFF_THRESHOLD:
+        backoff_time = LONG_BACKOFF_TIME
 
     relaunch_times = []
 
@@ -1002,7 +956,8 @@ Web Store: https://chrome.google.com/remotedesktop"""
         else:
           logging.info("Launching X server and X session.")
           desktop.launch_session(args)
-          x_server_inhibitor.record_started(BACKOFF_TIME)
+          x_server_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                            backoff_time)
           allow_relaunch_self = True
 
     if desktop.host_proc is None:
@@ -1012,7 +967,8 @@ Web Store: https://chrome.google.com/remotedesktop"""
       else:
         logging.info("Launching host process")
         desktop.launch_host(host_config)
-        host_inhibitor.record_started(BACKOFF_TIME)
+        host_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                      backoff_time)
 
     deadline = min(relaunch_times) if relaunch_times else 0
     pid, status = waitpid_handle_exceptions(-1, deadline)

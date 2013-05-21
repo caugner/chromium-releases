@@ -18,7 +18,7 @@
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
         '<(DEPTH)/ui/gl/gl.gyp:gl',
         '<(DEPTH)/ui/ui.gyp:ui',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_gpu',
+        '<(DEPTH)/webkit/gpu/webkit_gpu.gyp:webkit_gpu',
       ],
       'defines': [
         'COMPOSITOR_IMPLEMENTATION',
@@ -52,6 +52,8 @@
         'layer_owner.cc',
         'layer_owner.h',
         'layer_type.h',
+        'scoped_animation_duration_scale_mode.cc',
+        'scoped_animation_duration_scale_mode.h',
         'scoped_layer_animation_settings.cc',
         'scoped_layer_animation_settings.h',
         # UI tests need TestWebGraphicsContext3D, so we always build it.
@@ -118,6 +120,8 @@
         'layer_animator_unittest.cc',
         'layer_unittest.cc',
         'run_all_unittests.cc',
+        'test/layer_animator_test_controller.cc',
+        'test/layer_animator_test_controller.h',
         'test/test_compositor_host.h',
         'test/test_compositor_host_linux.cc',
         'test/test_compositor_host_mac.mm',

@@ -5,8 +5,13 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_MESSAGING_NATIVE_PROCESS_LAUNCHER_H_
 #define CHROME_BROWSER_EXTENSIONS_API_MESSAGING_NATIVE_PROCESS_LAUNCHER_H_
 
+#include "base/callback_forward.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/platform_file.h"
 #include "base/process.h"
-#include "chrome/browser/extensions/api/messaging/native_message_process_host.h"
+
+class CommandLine;
+class GURL;
 
 namespace base {
 class FilePath;
@@ -14,12 +19,22 @@ class FilePath;
 
 namespace extensions {
 
+class NativeMessagingHostManifest;
+
 class NativeProcessLauncher {
  public:
-  // Callback that's called after the process has been launched.
-  // |native_process_handle| is set to base::kNullProcessHandle in case of a
-  // failure.
-  typedef base::Callback<void (base::ProcessHandle native_process_handle,
+  enum LaunchResult {
+    RESULT_SUCCESS,
+    RESULT_INVALID_NAME,
+    RESULT_NOT_FOUND,
+    RESULT_FORBIDDEN,
+    RESULT_FAILED_TO_START,
+  };
+
+  // Callback that's called after the process has been launched. |result| is
+  // set to false in case of a failure. Handler must take ownership of the IO
+  // handles.
+  typedef base::Callback<void (LaunchResult result,
                                base::PlatformFile read_file,
                                base::PlatformFile write_file)> LaunchedCallback;
 
@@ -28,17 +43,28 @@ class NativeProcessLauncher {
   NativeProcessLauncher() {}
   virtual ~NativeProcessLauncher() {}
 
-  // Launches native host with the specified name asynchronously. |callback| is
-  // called after the process has been started. If the launcher is destroyed
-  // before the callback is called then the call is canceled and the process is
-  // killed if it has been started already.
-  virtual void Launch(const std::string& native_host_name,
+  // Finds native messaging host with the specified name and launches it
+  // asynchronously. Also checks that the specified |origin| is permitted to
+  // access the host. |callback| is called after the process has been started.
+  // If the launcher is destroyed before the callback is called then the call is
+  // canceled and the process is stopped if it has been started already (by
+  // closing IO pipes).
+  virtual void Launch(const GURL& origin,
+                      const std::string& native_host_name,
                       LaunchedCallback callback) const = 0;
 
  protected:
+  // The following two methods are platform specific and are implemented in
+  // platform-specific .cc files.
+
+  // Loads manifest for the native messaging host |name|.
+  static scoped_ptr<NativeMessagingHostManifest> FindAndLoadManifest(
+      const std::string& native_host_name,
+      std::string* error_message);
+
+  // Launches native messaging process.
   static bool LaunchNativeProcess(
-      const base::FilePath& path,
-      base::ProcessHandle* native_process_handle,
+      const CommandLine& command_line,
       base::PlatformFile* read_file,
       base::PlatformFile* write_file);
 

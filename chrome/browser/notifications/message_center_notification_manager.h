@@ -15,6 +15,7 @@
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_tray_delegate.h"
 
+class MessageCenterSettingsController;
 class Notification;
 class Profile;
 
@@ -42,7 +43,8 @@ class MessageCenterNotificationManager
                                   Profile* profile) OVERRIDE;
 
   // MessageCenter::Delegate
-  virtual void NotificationRemoved(const std::string& notification_id) OVERRIDE;
+  virtual void NotificationRemoved(const std::string& notification_id,
+                                   bool by_user) OVERRIDE;
   virtual void DisableExtension(const std::string& notification_id) OVERRIDE;
   virtual void DisableNotificationsFromSource(
       const std::string& notification_id) OVERRIDE;
@@ -53,7 +55,7 @@ class MessageCenterNotificationManager
                                int button_index) OVERRIDE;
 
  private:
-  typedef base::Callback<void(const gfx::ImageSkia&)> SetImageCallback;
+  typedef base::Callback<void(const gfx::Image&)> SetImageCallback;
   class ImageDownloads
       : public base::SupportsWeakPtr<ImageDownloads> {
    public:
@@ -62,7 +64,7 @@ class MessageCenterNotificationManager
 
     void StartDownloads(const Notification& notification);
     void StartDownloadWithImage(const Notification& notification,
-                                const gfx::ImageSkia* image,
+                                const gfx::Image* image,
                                 const GURL& url,
                                 int size,
                                 const SetImageCallback& callback);
@@ -127,10 +129,13 @@ class MessageCenterNotificationManager
   typedef std::map<std::string, ProfileNotification*> NotificationMap;
   NotificationMap profile_notifications_;
 
+  scoped_ptr<MessageCenterSettingsController> settings_controller_;
+
   // Helpers that add/remove the notification from local map and MessageCenter.
   // They take ownership of profile_notification object.
   void AddProfileNotification(ProfileNotification* profile_notification);
-  void RemoveProfileNotification(ProfileNotification* profile_notification);
+  void RemoveProfileNotification(ProfileNotification* profile_notification,
+                                 bool by_user);
 
   ProfileNotification* FindProfileNotification(const std::string& id) const;
 

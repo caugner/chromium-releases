@@ -6,11 +6,11 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "net/test/python_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -52,7 +52,7 @@ TEST(PythonUtils, PythonRunTime) {
   // we want.
   cmd_line.AppendArg("-c");
   std::string input("PythonUtilsTest");
-  std::string python_cmd = StringPrintf("print '%s';", input.c_str());
+  std::string python_cmd = base::StringPrintf("print '%s';", input.c_str());
   cmd_line.AppendArg(python_cmd);
   std::string output;
   EXPECT_TRUE(base::GetAppOutput(cmd_line, &output));

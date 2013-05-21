@@ -207,6 +207,8 @@ class XCursorCache {
   DISALLOW_COPY_AND_ASSIGN(XCursorCache);
 };
 
+XCursorCache* cursor_cache = NULL;
+
 #if defined(USE_AURA)
 // A process wide singleton cache for custom X cursors.
 class XCustomCursorCache {
@@ -480,8 +482,14 @@ int GetDefaultScreen(Display* display) {
 }
 
 ::Cursor GetXCursor(int cursor_shape) {
-  CR_DEFINE_STATIC_LOCAL(XCursorCache, cache, ());
-  return cache.GetCursor(cursor_shape);
+  if (!cursor_cache)
+    cursor_cache = new XCursorCache;
+  return cursor_cache->GetCursor(cursor_shape);
+}
+
+void ResetXCursorCache() {
+  delete cursor_cache;
+  cursor_cache = NULL;
 }
 
 #if defined(USE_AURA)
@@ -576,7 +584,8 @@ int CoalescePendingMotionEvents(const XEvent* xev,
 
     if (next_event.type == GenericEvent &&
         next_event.xgeneric.evtype == event_type &&
-        !ui::GetScrollOffsets(&next_event, NULL, NULL, NULL)) {
+        !ui::GetScrollOffsets(&next_event, NULL, NULL, NULL, NULL, NULL) &&
+        !ui::GetFlingData(&next_event, NULL, NULL, NULL, NULL, NULL)) {
       XIDeviceEvent* next_xievent =
           static_cast<XIDeviceEvent*>(next_event.xcookie.data);
 #if defined(USE_XI2_MT)
@@ -1273,24 +1282,6 @@ void FreePixmap(Display* display, XID pixmap) {
   XFreePixmap(display, pixmap);
 }
 
-bool GetOutputDeviceHandles(std::vector<XID>* outputs) {
-  DCHECK(outputs);
-  outputs->clear();
-
-  if (!IsRandRAvailable())
-    return false;
-
-  Display* display = GetXDisplay();
-
-  Window root_window = DefaultRootWindow(display);
-  XRRScreenResources* screen_resources =
-      XRRGetScreenResources(display, root_window);
-  for (int i = 0; i < screen_resources->noutput; ++i)
-    outputs->push_back(screen_resources->outputs[i]);
-  XRRFreeScreenResources(screen_resources);
-  return true;
-}
-
 bool GetOutputDeviceData(XID output,
                          uint16* manufacturer_id,
                          uint16* product_code,
@@ -1479,33 +1470,6 @@ bool ParseOutputOverscanFlag(const unsigned char* prop,
   return false;
 }
 
-std::vector<std::string> GetDisplayNames(const std::vector<XID>& output_ids) {
-  std::vector<std::string> names;
-  for (size_t i = 0; i < output_ids.size(); ++i) {
-    std::string display_name;
-    if (GetOutputDeviceData(output_ids[i], NULL, NULL, &display_name))
-      names.push_back(display_name);
-  }
-  return names;
-}
-
-std::vector<std::string> GetOutputNames(const std::vector<XID>& output_ids) {
-  std::vector<std::string> names;
-  Display* display = GetXDisplay();
-  Window root_window = DefaultRootWindow(display);
-  XRRScreenResources* screen_resources =
-      XRRGetScreenResources(display, root_window);
-  for (std::vector<XID>::const_iterator iter = output_ids.begin();
-       iter != output_ids.end(); ++iter) {
-    XRROutputInfo* output =
-        XRRGetOutputInfo(display, screen_resources, *iter);
-    names.push_back(std::string(output->name));
-    XRRFreeOutputInfo(output);
-  }
-  XRRFreeScreenResources(screen_resources);
-  return names;
-}
-
 bool GetWindowManagerName(std::string* wm_name) {
   DCHECK(wm_name);
   int wm_window = 0;
@@ -1545,26 +1509,28 @@ WindowManagerName GuessWindowManager() {
   std::string name;
   if (GetWindowManagerName(&name)) {
     // These names are taken from the WMs' source code.
-    if (name == "Compiz" || name == "compiz")
-      return WM_COMPIZ;
-    if (name == "KWin")
-      return WM_KWIN;
-    if (name == "Metacity")
-      return WM_METACITY;
-    if (name == "Mutter")
-      return WM_MUTTER;
-    if (name == "Xfwm4")
-      return WM_XFWM4;
-    if (name == "chromeos-wm")
-      return WM_CHROME_OS;
     if (name == "Blackbox")
       return WM_BLACKBOX;
+    if (name == "chromeos-wm")
+      return WM_CHROME_OS;
+    if (name == "Compiz" || name == "compiz")
+      return WM_COMPIZ;
     if (name == "e16")
       return WM_ENLIGHTENMENT;
     if (StartsWithASCII(name, "IceWM", true))
       return WM_ICE_WM;
+    if (name == "KWin")
+      return WM_KWIN;
+    if (name == "Metacity")
+      return WM_METACITY;
+    if (name == "Mutter (Muffin)")
+      return WM_MUFFIN;
+    if (name == "Mutter")
+      return WM_MUTTER;
     if (name == "Openbox")
       return WM_OPENBOX;
+    if (name == "Xfwm4")
+      return WM_XFWM4;
   }
   return WM_UNKNOWN;
 }
@@ -1809,7 +1775,7 @@ void LogErrorEventDescription(Display* dpy,
       int ext_code, first_event, first_error;
       XQueryExtension(dpy, ext_list[i], &ext_code, &first_event, &first_error);
       if (error_event.request_code == ext_code) {
-        std::string msg = StringPrintf(
+        std::string msg = base::StringPrintf(
             "%s.%d", ext_list[i], error_event.minor_code);
         XGetErrorDatabaseText(
             dpy, "XRequest", msg.c_str(), "Unknown", request_str,

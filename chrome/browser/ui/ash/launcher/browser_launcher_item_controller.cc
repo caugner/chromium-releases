@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/ui_resources.h"
 #include "ui/aura/client/aura_constants.h"
@@ -49,6 +50,14 @@ BrowserLauncherItemController::~BrowserLauncherItemController() {
   window_->RemoveObserver(this);
   if (launcher_id() > 0)
     launcher_controller()->CloseLauncherItem(launcher_id());
+  if (type() == TYPE_WINDOWED_APP)
+    launcher_controller()->UnlockV1AppWithID(LauncherItemController::app_id());
+}
+
+const std::string& BrowserLauncherItemController::app_id() const {
+  if (type() == TYPE_WINDOWED_APP)
+    return empty_app_id_;
+  return LauncherItemController::app_id();
 }
 
 void BrowserLauncherItemController::Init() {
@@ -56,7 +65,7 @@ void BrowserLauncherItemController::Init() {
   ash::LauncherItemStatus app_status =
       ash::wm::IsActiveWindow(window_) ?
       ash::STATUS_ACTIVE : ash::STATUS_RUNNING;
-  if (type() != TYPE_TABBED) {
+  if (type() != TYPE_TABBED && type() != TYPE_WINDOWED_APP) {
     launcher_controller()->CreateAppLauncherItem(this, app_id(), app_status);
   } else {
     launcher_controller()->CreateTabbedLauncherItem(
@@ -64,6 +73,8 @@ void BrowserLauncherItemController::Init() {
         is_incognito_ ? ChromeLauncherController::STATE_INCOGNITO :
                         ChromeLauncherController::STATE_NOT_INCOGNITO,
         app_status);
+    if (type() == TYPE_WINDOWED_APP)
+      launcher_controller()->LockV1AppWithID(LauncherItemController::app_id());
   }
   // In testing scenarios we can get tab strips with no active contents.
   if (tab_model_->active_index() != TabStripModel::kNoTab)
@@ -81,6 +92,17 @@ BrowserLauncherItemController* BrowserLauncherItemController::Create(
   std::string app_id;
   if (browser->is_type_tabbed() || browser->is_type_popup()) {
     type = TYPE_TABBED;
+    if (!browser->is_type_tabbed() &&
+        browser->is_type_popup() &&
+        browser->is_app() &&
+        ChromeLauncherController::instance()->GetPerAppInterface()) {
+      app_id = web_app::GetExtensionIdFromApplicationName(
+                    browser->app_name());
+      // Only allow this for known applications. Some unit tests for example
+      // do not have one.
+      if (!app_id.empty())
+        type = TYPE_WINDOWED_APP;
+    }
   } else if (browser->is_app()) {
     if (browser->is_type_panel()) {
       if (browser->app_type() == Browser::APP_TYPE_CHILD)
@@ -128,6 +150,10 @@ bool BrowserLauncherItemController::HasWindow(aura::Window* window) const {
 
 bool BrowserLauncherItemController::IsOpen() const {
   return true;
+}
+
+bool BrowserLauncherItemController::IsVisible() const {
+  return window_->IsVisible();
 }
 
 void BrowserLauncherItemController::Launch(int event_flags) {
@@ -293,7 +319,7 @@ void BrowserLauncherItemController::UpdateLauncher(content::WebContents* tab) {
     if (!new_image.isNull())
       item.image = new_image;
     else if (item.image.isNull())
-      item.image = extensions::Extension::GetDefaultIcon(true);
+      item.image = extensions::IconsInfo::GetDefaultAppIcon();
   } else {
     DCHECK_EQ(TYPE_TABBED, type());
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();

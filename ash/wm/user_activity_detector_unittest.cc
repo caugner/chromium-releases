@@ -94,26 +94,53 @@ TEST_F(UserActivityDetectorTest, Basic) {
   SetEventTarget(window.get(), &key_event);
   detector_->OnKeyEvent(&key_event);
   EXPECT_FALSE(key_event.handled());
+  EXPECT_EQ(now_.ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
   EXPECT_EQ(1, observer_->num_invocations());
   observer_->reset_stats();
 
-  base::TimeDelta advance_delta =
-      base::TimeDelta::FromSeconds(UserActivityDetector::kNotifyIntervalMs);
+  base::TimeDelta advance_delta = base::TimeDelta::FromMilliseconds(
+      UserActivityDetector::kNotifyIntervalMs);
   AdvanceTime(advance_delta);
   ui::MouseEvent mouse_event(
       ui::ET_MOUSE_MOVED, gfx::Point(), gfx::Point(), ui::EF_NONE);
   SetEventTarget(window.get(), &mouse_event);
   detector_->OnMouseEvent(&mouse_event);
   EXPECT_FALSE(mouse_event.handled());
+  EXPECT_EQ(now_.ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
   EXPECT_EQ(1, observer_->num_invocations());
   observer_->reset_stats();
 
-  // Ignore one mouse event when all displays are turned off.
-  detector_->OnAllOutputsTurnedOff();
-  AdvanceTime(advance_delta);
+  base::TimeTicks time_before_ignore = now_;
+
+  // Temporarily ignore mouse events when displays are turned on or off.
+  detector_->OnDisplayPowerChanging();
   detector_->OnMouseEvent(&mouse_event);
   EXPECT_FALSE(mouse_event.handled());
+  EXPECT_EQ(time_before_ignore.ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
   EXPECT_EQ(0, observer_->num_invocations());
+  observer_->reset_stats();
+
+  const base::TimeDelta kIgnoreMouseTime =
+      base::TimeDelta::FromMilliseconds(
+          UserActivityDetector::kDisplayPowerChangeIgnoreMouseMs);
+  AdvanceTime(kIgnoreMouseTime / 2);
+  detector_->OnMouseEvent(&mouse_event);
+  EXPECT_FALSE(mouse_event.handled());
+  EXPECT_EQ(time_before_ignore.ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
+  EXPECT_EQ(0, observer_->num_invocations());
+  observer_->reset_stats();
+
+  // After enough time has passed, mouse events should be reported again.
+  AdvanceTime(std::max(kIgnoreMouseTime, advance_delta));
+  detector_->OnMouseEvent(&mouse_event);
+  EXPECT_FALSE(mouse_event.handled());
+  EXPECT_EQ(now_.ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
+  EXPECT_EQ(1, observer_->num_invocations());
   observer_->reset_stats();
 
   AdvanceTime(advance_delta);
@@ -122,6 +149,8 @@ TEST_F(UserActivityDetectorTest, Basic) {
   SetEventTarget(window.get(), &touch_event);
   detector_->OnTouchEvent(&touch_event);
   EXPECT_FALSE(touch_event.handled());
+  EXPECT_EQ(now_.ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
   EXPECT_EQ(1, observer_->num_invocations());
   observer_->reset_stats();
 
@@ -133,6 +162,8 @@ TEST_F(UserActivityDetectorTest, Basic) {
   SetEventTarget(window.get(), &gesture_event);
   detector_->OnGestureEvent(&gesture_event);
   EXPECT_FALSE(gesture_event.handled());
+  EXPECT_EQ(now_.ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
   EXPECT_EQ(1, observer_->num_invocations());
   observer_->reset_stats();
 }
@@ -183,6 +214,8 @@ TEST_F(UserActivityDetectorTest, IgnoreSyntheticMouseEvents) {
   SetEventTarget(window.get(), &mouse_event);
   detector_->OnMouseEvent(&mouse_event);
   EXPECT_FALSE(mouse_event.handled());
+  EXPECT_EQ(base::TimeTicks().ToInternalValue(),
+            detector_->last_activity_time().ToInternalValue());
   EXPECT_EQ(0, observer_->num_invocations());
 }
 

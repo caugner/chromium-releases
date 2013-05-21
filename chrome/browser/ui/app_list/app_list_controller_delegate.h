@@ -58,7 +58,7 @@ class AppListControllerDelegate {
 
   // Handle the "create window" context menu items of Chrome App.
   // |incognito| is true to create an incognito window.
-  virtual void CreateNewWindow(bool incognito);
+  virtual void CreateNewWindow(Profile* profile, bool incognito);
 
   // Show the app's most recent window, or launch it if it is not running.
   virtual void ActivateApp(Profile* profile,
@@ -69,6 +69,10 @@ class AppListControllerDelegate {
   virtual void LaunchApp(Profile* profile,
                          const extensions::Extension* extension,
                          int event_flags) = 0;
+
+  // Whether or not the icon indicating which user is logged in should be
+  // visible.
+  virtual bool ShouldShowUserIcon();
 };
 
 #endif  // CHROME_BROWSER_UI_APP_LIST_APP_LIST_CONTROLLER_DELEGATE_H_

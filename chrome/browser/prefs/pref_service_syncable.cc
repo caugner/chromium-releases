@@ -5,7 +5,7 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/prefs/default_pref_store.h"
 #include "base/prefs/overlay_user_pref_store.h"
 #include "base/prefs/pref_notifier_impl.h"
@@ -14,10 +14,10 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/value_conversions.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 // static
 PrefServiceSyncable* PrefServiceSyncable::FromProfile(Profile* profile) {
@@ -130,13 +130,6 @@ void PrefServiceSyncable::UpdateCommandLinePrefStore(
 void PrefServiceSyncable::AddRegisteredSyncablePreference(const char* path) {
   DCHECK(FindPreference(path));
   pref_sync_associator_.RegisterPref(path);
-}
-
-void PrefServiceSyncable::RemoveRegisteredPreference(const char* path) {
-  PrefService::RemoveRegisteredPreference(path);
-
-  if (pref_sync_associator_.IsPrefRegistered(path))
-    pref_sync_associator_.UnregisterPref(path);
 }
 
 void PrefServiceSyncable::OnIsSyncingChanged() {

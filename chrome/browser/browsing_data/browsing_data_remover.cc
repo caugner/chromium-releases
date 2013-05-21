@@ -13,8 +13,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
-#include "base/prefs/public/pref_member.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -43,10 +42,10 @@
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/autofill/browser/personal_data_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/download_manager.h"
@@ -55,13 +54,13 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/net_errors.h"
-#include "net/base/server_bound_cert_service.h"
-#include "net/base/server_bound_cert_store.h"
-#include "net/base/transport_security_state.h"
 #include "net/cookies/cookie_store.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/infinite_cache.h"
+#include "net/http/transport_security_state.h"
+#include "net/ssl/server_bound_cert_service.h"
+#include "net/ssl/server_bound_cert_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "webkit/dom_storage/dom_storage_types.h"
@@ -199,6 +198,15 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   remove_origin_ = origin;
   origin_set_mask_ = origin_set_mask;
 
+  PrefService* prefs = profile_->GetPrefs();
+  bool may_delete_history = prefs->GetBoolean(
+      prefs::kAllowDeletingBrowserHistory);
+
+  // All the UI entry points into the BrowsingDataRemover should be disabled,
+  // but this will fire if something was missed or added.
+  DCHECK(may_delete_history ||
+      (!(remove_mask & REMOVE_HISTORY) && !(remove_mask & REMOVE_DOWNLOADS)));
+
   if (origin_set_mask_ & BrowsingDataHelper::UNPROTECTED_WEB) {
     content::RecordAction(
         UserMetricsAction("ClearBrowsingData_MaskContainsUnprotectedWeb"));
@@ -219,7 +227,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
                                   BrowsingDataHelper::EXTENSION),
       forgotten_to_add_origin_mask_type);
 
-  if (remove_mask & REMOVE_HISTORY) {
+  if ((remove_mask & REMOVE_HISTORY) && may_delete_history) {
     HistoryService* history_service = HistoryServiceFactory::GetForProfile(
         profile_, Profile::EXPLICIT_ACCESS);
     if (history_service) {
@@ -229,18 +237,8 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
       content::RecordAction(UserMetricsAction("ClearBrowsingData_History"));
       waiting_for_clear_history_ = true;
 
-      // The HistoryService special-cases an end time of base::Time() to
-      // efficiently remove the whole history database. Support that here by
-      // passing base::Time() into HistoryService::ExpireHistoryBetween rather
-      // than base::Time::Max().
-      //
-      // TODO(sky?): Adjust HistoryService so that it understands Time::Max()
-      //     and deals well with non-max/non-null time periods: see
-      //     http://crbug.com/145680 for details.
-      base::Time history_end_ = delete_end_ == base::Time::Max() ?
-            base::Time() : delete_end_;
-      history_service->ExpireHistoryBetween(restrict_urls,
-          delete_begin_, history_end_,
+      history_service->ExpireLocalAndRemoteHistoryBetween(
+          restrict_urls, delete_begin_, delete_end_,
           base::Bind(&BrowsingDataRemover::OnHistoryDeletionDone,
                      base::Unretained(this)),
           &history_task_tracker_);
@@ -312,7 +310,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     }
   }
 
-  if (remove_mask & REMOVE_DOWNLOADS) {
+  if ((remove_mask & REMOVE_DOWNLOADS) && may_delete_history) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Downloads"));
     DownloadManager* download_manager =
         BrowserContext::GetDownloadManager(profile_);
@@ -438,8 +436,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   if (remove_mask & REMOVE_FORM_DATA) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Autofill"));
     scoped_refptr<WebDataService> web_data_service =
-        WebDataServiceFactory::GetForProfile(profile_,
-                                             Profile::EXPLICIT_ACCESS);
+        WebDataService::FromBrowserContext(profile_);
 
     if (web_data_service.get()) {
       waiting_for_clear_form_ = true;
@@ -701,15 +698,18 @@ void BrowsingDataRemover::DoClearCache(int rv) {
         net::HttpTransactionFactory* factory =
             getter->GetURLRequestContext()->http_transaction_factory();
 
+        next_cache_state_ = (next_cache_state_ == STATE_CREATE_MAIN) ?
+                                STATE_DELETE_MAIN : STATE_DELETE_MEDIA;
         rv = factory->GetCache()->GetBackend(
             &cache_, base::Bind(&BrowsingDataRemover::DoClearCache,
                                 base::Unretained(this)));
-        next_cache_state_ = (next_cache_state_ == STATE_CREATE_MAIN) ?
-                                STATE_DELETE_MAIN : STATE_DELETE_MEDIA;
         break;
       }
       case STATE_DELETE_MAIN:
       case STATE_DELETE_MEDIA: {
+        next_cache_state_ = (next_cache_state_ == STATE_DELETE_MAIN) ?
+                                STATE_CREATE_MEDIA : STATE_DELETE_EXPERIMENT;
+
         // |cache_| can be null if it cannot be initialized.
         if (cache_) {
           if (delete_begin_.is_null()) {
@@ -724,12 +724,12 @@ void BrowsingDataRemover::DoClearCache(int rv) {
           }
           cache_ = NULL;
         }
-        next_cache_state_ = (next_cache_state_ == STATE_DELETE_MAIN) ?
-                                STATE_CREATE_MEDIA : STATE_DELETE_EXPERIMENT;
         break;
       }
       case STATE_DELETE_EXPERIMENT: {
         cache_ = NULL;
+        next_cache_state_ = STATE_DONE;
+
         // Get a pointer to the experiment.
         net::HttpTransactionFactory* factory =
             main_context_getter_->GetURLRequestContext()->
@@ -747,25 +747,23 @@ void BrowsingDataRemover::DoClearCache(int rv) {
               base::Bind(&BrowsingDataRemover::DoClearCache,
                          base::Unretained(this)));
         }
-        next_cache_state_ = STATE_DONE;
         break;
       }
       case STATE_DONE: {
         cache_ = NULL;
+        next_cache_state_ = STATE_NONE;
 
         // Notify the UI thread that we are done.
         BrowserThread::PostTask(
             BrowserThread::UI, FROM_HERE,
             base::Bind(&BrowsingDataRemover::ClearedCache,
                        base::Unretained(this)));
-
-        next_cache_state_ = STATE_NONE;
-        break;
+        return;
       }
       default: {
         NOTREACHED() << "bad state";
         next_cache_state_ = STATE_NONE;  // Stop looping.
-        break;
+        return;
       }
     }
   }

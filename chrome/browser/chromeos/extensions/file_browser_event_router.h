@@ -14,9 +14,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_observer.h"
 #include "chrome/browser/chromeos/drive/drive_resource_metadata.h"
+#include "chrome/browser/chromeos/net/connectivity_state_helper_observer.h"
 #include "chrome/browser/google_apis/drive_service_interface.h"
 #include "chrome/browser/google_apis/operation_registry.h"
 #include "chromeos/disks/disk_mount_manager.h"
@@ -35,7 +35,7 @@ class DriveFileSystemInterface;
 class FileBrowserEventRouter
     : public base::RefCountedThreadSafe<FileBrowserEventRouter>,
       public chromeos::disks::DiskMountManager::Observer,
-      public chromeos::NetworkLibrary::NetworkManagerObserver,
+      public chromeos::ConnectivityStateHelperObserver,
       public drive::DriveFileSystemObserver,
       public google_apis::DriveServiceObserver {
  public:
@@ -88,9 +88,8 @@ class FileBrowserEventRouter
       chromeos::FormatError error_code,
       const std::string& device_path) OVERRIDE;
 
-  // chromeos::NetworkLibrary::NetworkManagerObserver override.
-  virtual void OnNetworkManagerChanged(
-      chromeos::NetworkLibrary* network_library) OVERRIDE;
+  // chromeos::ConnectivityStateHelperObserver override.
+  virtual void NetworkManagerChanged() OVERRIDE;
 
   // drive::DriveServiceObserver overrides.
   virtual void OnProgressUpdate(
@@ -176,8 +175,11 @@ class FileBrowserEventRouter
       const chromeos::disks::DiskMountManager::MountPointInfo& mount_info);
 
   // If needed, opens a file manager window for the removable device mounted at
-  // |mount_path|.
-  void ShowRemovableDeviceInFileManager(const std::string& mount_path);
+  // |mount_path|. Disk.mount_path() is empty, since it is being filled out
+  // after calling notifying observers by DiskMountManager.
+  void ShowRemovableDeviceInFileManager(
+      const chromeos::disks::DiskMountManager::Disk& disk,
+      const base::FilePath& mount_path);
 
   // Returns the DriveFileSystem for the current profile.
   drive::DriveFileSystemInterface* GetRemoteFileSystem() const;

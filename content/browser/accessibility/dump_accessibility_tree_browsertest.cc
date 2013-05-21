@@ -9,35 +9,42 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/string16.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
+#include "content/browser/accessibility/accessibility_tree_formatter.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/browser/accessibility/dump_accessibility_tree_helper.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/port/browser/render_widget_host_view_port.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/test/test_utils.h"
+#include "content/shell/shell.h"
 #include "content/test/content_browser_test.h"
 #include "content/test/content_browser_test_utils.h"
-#include "content/shell/shell.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace {
-  static const char kCommentToken = '#';
-  static const char* kMarkSkipFile = "#<skip";
-  static const char* kMarkEndOfFile = "<-- End-of-file -->";
-  static const char* kSignalDiff = "*";
-} // namespace
+// TODO(dmazzoni): Disabled accessibility tests on Win64. crbug.com/179717
+#if defined(OS_WIN) && defined(ARCH_CPU_X86_64)
+#define MAYBE(x) DISABLED_##x
+#else
+#define MAYBE(x) x
+#endif
 
 namespace content {
 
-typedef DumpAccessibilityTreeHelper::Filter Filter;
+namespace {
+
+const char kCommentToken = '#';
+const char kMarkSkipFile[] = "#<skip";
+const char kMarkEndOfFile[] = "<-- End-of-file -->";
+const char kSignalDiff[] = "*";
+
+}  // namespace
+
+typedef AccessibilityTreeFormatter::Filter Filter;
 
 // This test takes a snapshot of the platform BrowserAccessibility tree and
 // tests it against an expected baseline.
@@ -91,9 +98,12 @@ class DumpAccessibilityTreeTest : public ContentBrowserTest {
          iter != lines.end();
          ++iter) {
       const std::string& line = *iter;
-      const std::string& allow_empty_str = helper_.GetAllowEmptyString();
-      const std::string& allow_str = helper_.GetAllowString();
-      const std::string& deny_str = helper_.GetDenyString();
+      const std::string& allow_empty_str =
+          AccessibilityTreeFormatter::GetAllowEmptyString();
+      const std::string& allow_str =
+          AccessibilityTreeFormatter::GetAllowString();
+      const std::string& deny_str =
+          AccessibilityTreeFormatter::GetDenyString();
       if (StartsWithASCII(line, allow_empty_str, true)) {
         filters->push_back(
           Filter(UTF8ToUTF16(line.substr(allow_empty_str.size())),
@@ -109,8 +119,6 @@ class DumpAccessibilityTreeTest : public ContentBrowserTest {
   }
 
   void RunTest(const base::FilePath::CharType* file_path);
-
-  DumpAccessibilityTreeHelper helper_;
 };
 
 void DumpAccessibilityTreeTest::RunTest(
@@ -140,20 +148,12 @@ void DumpAccessibilityTreeTest::RunTest(
   std::string html_contents;
   file_util::ReadFileToString(html_file, &html_contents);
 
-  // Parse filters in the test file.
-  std::vector<Filter> filters;
-  AddDefaultFilters(&filters);
-  ParseFilters(html_contents, &filters);
-  helper_.SetFilters(filters);
-
   // Read the expected file.
   std::string expected_contents_raw;
   base::FilePath expected_file =
     base::FilePath(html_file.RemoveExtension().value() +
-             helper_.GetExpectedFileSuffix());
-  file_util::ReadFileToString(
-      expected_file,
-      &expected_contents_raw);
+                   AccessibilityTreeFormatter::GetExpectedFileSuffix());
+  file_util::ReadFileToString(expected_file, &expected_contents_raw);
 
   // Tolerate Windows-style line endings (\r\n) in the expected file:
   // normalize by deleting all \r from the file (if any) to leave only \n.
@@ -166,23 +166,30 @@ void DumpAccessibilityTreeTest::RunTest(
   }
 
   // Load the page.
-  WindowedNotificationObserver tree_updated_observer(
-      NOTIFICATION_ACCESSIBILITY_LOAD_COMPLETE,
-      NotificationService::AllSources());
   string16 html_contents16;
   html_contents16 = UTF8ToUTF16(html_contents);
   GURL url = GetTestUrl("accessibility",
                         html_file.BaseName().MaybeAsASCII().c_str());
+  scoped_refptr<MessageLoopRunner> loop_runner(new MessageLoopRunner);
+  view_host->SetAccessibilityLoadCompleteCallbackForTesting(
+      loop_runner->QuitClosure());
   NavigateToURL(shell(), url);
 
   // Wait for the tree.
-  tree_updated_observer.Wait();
+  loop_runner->Run();
+
+  AccessibilityTreeFormatter formatter(
+      host_view->GetBrowserAccessibilityManager()->GetRoot());
+
+  // Parse filters in the test file.
+  std::vector<Filter> filters;
+  AddDefaultFilters(&filters);
+  ParseFilters(html_contents, &filters);
+  formatter.SetFilters(filters);
 
   // Perform a diff (or write the initial baseline).
   string16 actual_contents_utf16;
-  helper_.DumpAccessibilityTree(
-      host_view->GetBrowserAccessibilityManager()->GetRoot(),
-      &actual_contents_utf16);
+  formatter.FormatAccessibilityTree(&actual_contents_utf16);
   std::string actual_contents = UTF16ToUTF8(actual_contents_utf16);
   std::vector<std::string> actual_lines, expected_lines;
   Tokenize(actual_contents, "\n", &actual_lines);
@@ -219,7 +226,7 @@ void DumpAccessibilityTreeTest::RunTest(
   if (!file_util::PathExists(expected_file)) {
     base::FilePath actual_file =
         base::FilePath(html_file.RemoveExtension().value() +
-                       helper_.GetActualFileSuffix());
+                       AccessibilityTreeFormatter::GetActualFileSuffix());
 
     EXPECT_TRUE(file_util::WriteFile(
         actual_file, actual_contents.c_str(), actual_contents.size()));
@@ -264,7 +271,8 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaInvalid) {
   RunTest(FILE_PATH_LITERAL("aria-invalid.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaLevel) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       MAYBE(AccessibilityAriaLevel)) {
   RunTest(FILE_PATH_LITERAL("aria-level.html"));
 }
 
@@ -335,8 +343,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityDiv) {
   RunTest(FILE_PATH_LITERAL("div.html"));
 }
 
-// http://crbug.com/172640
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, DISABLED_AccessibilityDl) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityDl) {
   RunTest(FILE_PATH_LITERAL("dl.html"));
 }
 
@@ -366,7 +373,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityHR) {
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityIframeCoordinates) {
+                       MAYBE(AccessibilityIframeCoordinates)) {
   RunTest(FILE_PATH_LITERAL("iframe-coordinates.html"));
 }
 

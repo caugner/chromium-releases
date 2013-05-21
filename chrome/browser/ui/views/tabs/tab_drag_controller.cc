@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -31,6 +32,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/animation.h"
 #include "ui/base/animation/animation_delegate.h"
@@ -441,6 +443,9 @@ void TabDragController::Init(
   last_point_in_screen_ = start_point_in_screen_;
   last_move_screen_loc_ = start_point_in_screen_.x();
   initial_tab_positions_ = source_tabstrip->GetTabXCoordinates();
+  if (detach_behavior == NOT_DETACHABLE)
+    detach_into_browser_ = false;
+
   if (detach_into_browser_)
     GetModel(source_tabstrip_)->AddObserver(this);
 
@@ -1339,6 +1344,7 @@ void TabDragController::RunMoveLoop(const gfx::Vector2d& drag_offset) {
 
   move_loop_widget_ = GetAttachedBrowserWidget();
   DCHECK(move_loop_widget_);
+  SetTrackedByWorkspace(move_loop_widget_->GetNativeView(), false);
   move_loop_widget_->AddObserver(this);
   is_dragging_window_ = true;
   bool destroyed = false;
@@ -1351,8 +1357,12 @@ void TabDragController::RunMoveLoop(const gfx::Vector2d& drag_offset) {
     attached_tabstrip_->GetWidget()->ReleaseCapture();
     attached_tabstrip_->OwnDragController(this);
   }
+  const views::Widget::MoveLoopSource move_loop_source =
+      event_source_ == EVENT_SOURCE_MOUSE ?
+      views::Widget::MOVE_LOOP_SOURCE_MOUSE :
+      views::Widget::MOVE_LOOP_SOURCE_TOUCH;
   views::Widget::MoveLoopResult result =
-      move_loop_widget_->RunMoveLoop(drag_offset);
+      move_loop_widget_->RunMoveLoop(drag_offset, move_loop_source);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_DRAG_LOOP_DONE,
       content::NotificationService::AllBrowserContextsAndSources(),
@@ -1844,11 +1854,11 @@ void TabDragController::CreateDraggedView(
 
   // Set up the photo booth to start capturing the contents of the dragged
   // WebContents.
-  NativeViewPhotobooth* photobooth =
-      NativeViewPhotobooth::Create(source_dragged_contents()->GetNativeView());
+  NativeViewPhotobooth* photobooth = NativeViewPhotobooth::Create(
+      source_dragged_contents()->GetView()->GetNativeView());
 
   gfx::Rect content_bounds;
-  source_dragged_contents()->GetContainerBounds(&content_bounds);
+  source_dragged_contents()->GetView()->GetContainerBounds(&content_bounds);
 
   std::vector<views::View*> renderers;
   for (size_t i = 0; i < drag_data_.size(); ++i) {

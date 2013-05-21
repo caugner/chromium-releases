@@ -51,8 +51,9 @@ ui::MenuModel* LauncherDelegateImpl::CreateContextMenu(
   return NULL;
 }
 
-ui::MenuModel* LauncherDelegateImpl::CreateApplicationMenu(
-    const ash::LauncherItem& item) {
+ash::LauncherMenuModel* LauncherDelegateImpl::CreateApplicationMenu(
+    const ash::LauncherItem& item,
+    int event_flags) {
   return NULL;
 }
 
@@ -61,6 +62,10 @@ ash::LauncherID LauncherDelegateImpl::GetIDByWindow(aura::Window* window) {
 }
 
 bool LauncherDelegateImpl::IsDraggable(const ash::LauncherItem& item) {
+  return true;
+}
+
+bool LauncherDelegateImpl::ShouldShowTooltip(const ash::LauncherItem& item) {
   return true;
 }
 

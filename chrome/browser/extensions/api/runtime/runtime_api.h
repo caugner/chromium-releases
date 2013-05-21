@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_EXTENSIONS_API_RUNTIME_RUNTIME_API_H_
 
 #include "chrome/browser/extensions/extension_function.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class Profile;
 class Version;
@@ -31,6 +33,9 @@ class RuntimeEventRouter {
       Profile* profile,
       const std::string& extension_id,
       const base::DictionaryValue* manifest);
+
+  // Dispatches the onBrowserUpdateAvailable event to all extensions.
+  static void DispatchOnBrowserUpdateAvailableEvent(Profile* profile);
 };
 
 class RuntimeGetBackgroundPageFunction : public AsyncExtensionFunction {

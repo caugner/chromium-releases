@@ -24,7 +24,8 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
+#include "base/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/signin/signin_internals_util.h"
@@ -37,6 +38,7 @@
 
 class CookieSettings;
 class GaiaAuthFetcher;
+class ProfileIOData;
 class PrefService;
 class SigninGlobalError;
 
@@ -83,6 +85,17 @@ class SigninManager : public GaiaAuthConsumer,
   static bool IsAllowedUsername(const std::string& username,
                                 const std::string& policy);
 
+  // Returns true if |url| is a web signin URL and should be hosted in an
+  // isolated, privileged signin process.
+  static bool IsWebBasedSigninFlowURL(const GURL& url);
+
+  // This is used to distinguish URLs belonging to the special web signin flow
+  // running in the special signin process from other URLs on the same domain.
+  // We do not grant WebUI privilieges / bindings to this process or to URLs of
+  // this scheme; enforcement of privileges is handled separately by
+  // OneClickSigninHelper.
+  static const char* kChromeSigninEffectiveSite;
+
   SigninManager();
   virtual ~SigninManager();
 
@@ -93,6 +106,14 @@ class SigninManager : public GaiaAuthConsumer,
   // Returns true if the passed username is allowed by policy. Virtual for
   // mocking in tests.
   virtual bool IsAllowedUsername(const std::string& username) const;
+
+  // Returns true if a signin to Chrome is allowed (by policy or pref).
+  bool IsSigninAllowed() const;
+
+  // Checks if signin is allowed for the profile that owns |io_data|. This must
+  // be invoked on the IO thread, and can be used to check if signin is enabled
+  // on that thread.
+  static bool IsSigninAllowedOnIOThread(ProfileIOData* io_data);
 
   // If a user has previously established a username and SignOut has not been
   // called, this will return the username.
@@ -188,6 +209,22 @@ class SigninManager : public GaiaAuthConsumer,
   // ProfileKeyedService implementation.
   virtual void Shutdown() OVERRIDE;
 
+  // Tells the SigninManager to prohibit signout for this profile.
+  void ProhibitSignout();
+
+  // If true, signout is prohibited for this profile (calls to SignOut() are
+  // ignored).
+  bool IsSignoutProhibited() const;
+
+  // Allows the SigninManager to track the privileged signin process
+  // identified by |process_id| so that we can later ask (via IsSigninProcess)
+  // if it is safe to sign the user in from the current context (see
+  // OneClickSigninHelper).  All of this tracking state is reset once the
+  // renderer process terminates.
+  void SetSigninProcess(int process_id);
+  bool IsSigninProcess(int process_id) const;
+  bool HasSigninProcess() const;
+
  protected:
   // Weak pointer to parent profile (protected so FakeSigninManager can access
   // it).
@@ -197,6 +234,9 @@ class SigninManager : public GaiaAuthConsumer,
   // different than most GlobalErrors in that its lifetime is controlled by
   // SigninManager (so we can expose a reference for use in the wrench menu).
   scoped_ptr<SigninGlobalError> signin_global_error_;
+
+  // Flag saying whether signing out is allowed.
+  bool prohibit_signout_;
 
  private:
   enum SigninType {
@@ -257,7 +297,7 @@ class SigninManager : public GaiaAuthConsumer,
 
   // Helper function that loads policy with the passed CloudPolicyClient, then
   // completes the signin process.
-  void LoadPolicyWithCachedClient(scoped_ptr<policy::CloudPolicyClient> client);
+  void LoadPolicyWithCachedClient();
 
   // Callback invoked once a profile is created, so we can complete the
   // credentials transfer and load policy.
@@ -276,6 +316,8 @@ class SigninManager : public GaiaAuthConsumer,
   void CleanupNotificationRegistration();
 
   void OnGoogleServicesUsernamePatternChanged();
+
+  void OnSigninAllowedPrefChanged();
 
   // Helper methods to notify all registered diagnostics observers with.
   void NotifyDiagnosticsObservers(
@@ -302,6 +344,9 @@ class SigninManager : public GaiaAuthConsumer,
   // profile-specific local prefs (like kGoogleServicesUsernamePattern).
   PrefChangeRegistrar local_state_pref_registrar_;
 
+  // Helper object to listen for changes to the signin allowed preference.
+  BooleanPrefMember signin_allowed_;
+
   // Actual username after successful authentication.
   std::string authenticated_username_;
 
@@ -321,6 +366,9 @@ class SigninManager : public GaiaAuthConsumer,
 
   base::WeakPtrFactory<SigninManager> weak_pointer_factory_;
 
+  // See SetSigninProcess.  Tracks the currently active signin process
+  // by ID, if there is one.
+  int signin_process_id_;
 
 #if defined(ENABLE_CONFIGURATION_POLICY) && !defined(OS_CHROMEOS)
   // CloudPolicyClient reference we keep while determining whether to create

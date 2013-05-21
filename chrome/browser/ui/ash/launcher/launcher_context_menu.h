@@ -49,7 +49,7 @@ class LauncherContextMenu : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(
@@ -71,7 +71,9 @@ class LauncherContextMenu : public ui::SimpleMenuModel,
     MENU_NEW_WINDOW,
     MENU_NEW_INCOGNITO_WINDOW,
     MENU_ALIGNMENT_MENU,
+#if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
     MENU_CHANGE_WALLPAPER,
+#endif
   };
 
   // Does |item_| represent a valid item? See description of constructor for

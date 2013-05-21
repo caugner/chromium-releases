@@ -5,8 +5,8 @@
 #include "chrome/browser/google_apis/mock_drive_service.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/location.h"
 #include "base/message_loop_proxy.h"
@@ -46,23 +46,24 @@ MockDriveService::MockDriveService() {
   ON_CALL(*this, DownloadFile(_, _, _, _, _))
       .WillByDefault(Invoke(this, &MockDriveService::DownloadFileStub));
 
-  // Fill in the default values for mock feeds.
+  // Fill in the default values for mock data.
   account_metadata_data_ =
-      test_util::LoadJSONFile("gdata/account_metadata.json");
-  feed_data_ = test_util::LoadJSONFile("gdata/basic_feed.json");
+      test_util::LoadJSONFile("chromeos/gdata/account_metadata.json");
+  resource_list_data_ =
+      test_util::LoadJSONFile("chromeos/gdata/basic_feed.json");
   directory_data_ =
-      test_util::LoadJSONFile("gdata/new_folder_entry.json");
+      test_util::LoadJSONFile("chromeos/gdata/new_folder_entry.json");
 }
 
 MockDriveService::~MockDriveService() {}
 
 void MockDriveService::set_search_result(
-    const std::string& search_result_feed) {
-  search_result_ = test_util::LoadJSONFile(search_result_feed);
+    const std::string& search_result_file) {
+  search_result_ = test_util::LoadJSONFile(search_result_file);
 }
 
 void MockDriveService::GetResourceListStub(
-    const GURL& feed_url,
+    const GURL& url,
     int64 start_changestamp,
     const std::string& search_string,
     bool shared_with_me,
@@ -70,7 +71,7 @@ void MockDriveService::GetResourceListStub(
     const GetResourceListCallback& callback) {
   if (search_string.empty()) {
     scoped_ptr<ResourceList> resource_list =
-        ResourceList::ExtractAndParse(*feed_data_);
+        ResourceList::ExtractAndParse(*resource_list_data_);
     base::MessageLoopProxy::current()->PostTask(
         FROM_HERE,
         base::Bind(callback, HTTP_SUCCESS,
@@ -87,8 +88,8 @@ void MockDriveService::GetResourceListStub(
 
 void MockDriveService::GetAccountMetadataStub(
     const GetAccountMetadataCallback& callback) {
-  scoped_ptr<AccountMetadataFeed> account_metadata =
-      AccountMetadataFeed::CreateFrom(*account_metadata_data_);
+  scoped_ptr<AccountMetadata> account_metadata =
+      AccountMetadata::CreateFrom(*account_metadata_data_);
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
       base::Bind(callback, HTTP_SUCCESS,

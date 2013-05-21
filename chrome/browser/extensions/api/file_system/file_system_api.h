@@ -32,9 +32,10 @@ class FileSystemEntryFunction : public AsyncExtensionFunction {
 
   bool HasFileSystemWritePermission();
 
-  // Called on the FILE thread. This is called when a writable file entry is
-  // being returned. The function will ensure the file exists, creating it if
-  // necessary, and also check that the file is not a link.
+  // This is called when a writable file entry is being returned. The function
+  // will ensure the file exists, creating it if necessary, and also check that
+  // the file is not a link. If it succeeds it proceeds to
+  // RegisterFileSystemAndSendResponse, otherwise to HandleWritableFileError.
   void CheckWritableFile(const base::FilePath& path);
 
   // This will finish the choose file process. This is either called directly
@@ -73,6 +74,11 @@ class FileSystemChooseEntryFunction : public FileSystemEntryFunction {
   static void SkipPickerAndAlwaysSelectPathForTest(base::FilePath* path);
   static void SkipPickerAndAlwaysCancelForTest();
   static void StopSkippingPickerForTest();
+  // Call this with the directory for test file paths. On Chrome OS, accessed
+  // path needs to be explicitly registered for smooth integration with Google
+  // Drive support.
+  static void RegisterTempExternalFileSystemForTest(const std::string& name,
+                                                    const base::FilePath& path);
 
   DECLARE_EXTENSION_FUNCTION("fileSystem.chooseEntry", FILESYSTEM_CHOOSEENTRY)
 

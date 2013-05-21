@@ -15,6 +15,7 @@
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_shelf_context_menu.h"
 #include "chrome/browser/download/download_util.h"
+#import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/download/download_item_button.h"
 #import "chrome/browser/ui/cocoa/download/download_item_cell.h"
@@ -230,7 +231,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
   NSEvent* event = [NSApp currentEvent];
   if ([event modifierFlags] & NSCommandKeyMask) {
     // Let cmd-click show the file in Finder, like e.g. in Safari and Spotlight.
-    menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::SHOW_IN_FOLDER);
+    menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::SHOW_IN_FOLDER, 0);
   } else {
     DownloadItem* download = bridge_->download_model()->download();
     download->OpenDownload();
@@ -295,7 +296,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
     return;
 
   NSColor* color =
-      themeProvider->GetNSColor(ThemeService::COLOR_TAB_TEXT, true);
+      themeProvider->GetNSColor(ThemeProperties::COLOR_TAB_TEXT, true);
   [dangerousDownloadLabel_ setTextColor:color];
 }
 
@@ -351,20 +352,20 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 
 - (IBAction)handleOpen:(id)sender {
   menuBridge_->ExecuteCommand(
-      DownloadShelfContextMenuMac::OPEN_WHEN_COMPLETE);
+      DownloadShelfContextMenuMac::OPEN_WHEN_COMPLETE, 0);
 }
 
 - (IBAction)handleAlwaysOpen:(id)sender {
   menuBridge_->ExecuteCommand(
-      DownloadShelfContextMenuMac::ALWAYS_OPEN_TYPE);
+      DownloadShelfContextMenuMac::ALWAYS_OPEN_TYPE, 0);
 }
 
 - (IBAction)handleReveal:(id)sender {
-  menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::SHOW_IN_FOLDER);
+  menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::SHOW_IN_FOLDER, 0);
 }
 
 - (IBAction)handleCancel:(id)sender {
-  menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::CANCEL);
+  menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::CANCEL, 0);
 }
 
 - (IBAction)handleTogglePause:(id)sender {
@@ -375,7 +376,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
     [sender setTitle:l10n_util::GetNSStringWithFixup(
         IDS_DOWNLOAD_MENU_RESUME_ITEM)];
   }
-  menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::TOGGLE_PAUSE);
+  menuBridge_->ExecuteCommand(DownloadShelfContextMenuMac::TOGGLE_PAUSE, 0);
 }
 
 @end

@@ -5,10 +5,10 @@
 #include "chrome/browser/bookmarks/bookmark_prompt_prefs.h"
 
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
-BookmarkPromptPrefs::BookmarkPromptPrefs(PrefServiceBase* user_prefs)
+BookmarkPromptPrefs::BookmarkPromptPrefs(PrefService* user_prefs)
     : prefs_(user_prefs) {
 }
 

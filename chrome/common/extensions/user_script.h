@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_piece.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
@@ -26,17 +26,13 @@ class UserScript {
   // The file extension for standalone user scripts.
   static const char kFileExtension[];
 
-  // The bitmask for valid user script injectable schemes used by URLPattern.
-  enum {
-    kValidUserScriptSchemes = URLPattern::SCHEME_HTTP |
-                              URLPattern::SCHEME_HTTPS |
-                              URLPattern::SCHEME_FILE |
-                              URLPattern::SCHEME_FTP
-  };
-
   // Check if a URL should be treated as a user script and converted to an
   // extension.
   static bool IsURLUserScript(const GURL& url, const std::string& mime_type);
+
+  // Get the valid user script schemes for the current process. If
+  // canExecuteScriptEverywhere is true, this will return ALL_SCHEMES.
+  static int ValidUserScriptSchemes(bool canExecuteScriptEverywhere = false);
 
   // Locations that user scripts can be run inside the document.
   enum RunLocation {

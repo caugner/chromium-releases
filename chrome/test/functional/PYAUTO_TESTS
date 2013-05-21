@@ -37,14 +37,12 @@
       'autofill',
       'codesign',
       'crash_reporter',
-      'downloads',
       'execute_javascript',
       'extensions',
       'fullscreen_mouselock',
       'gtalk.test_basic',
       'imports',
       'infobars',
-      'instant',
       'media.media_basic_playback',
       'multiprofile',
       'nacl_sdk',
@@ -71,8 +69,6 @@
       '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
       # crbug.com/171828
       '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
-      # crbug.com/124280
-      '-downloads.DownloadsTest.testPauseAndResume',
       # The source is behind.  Waiting for dev to automate the update.
       # crbug.com/109160
       '-execute_javascript.ExecuteJavascriptTest.testExecuteJavascriptInExtension',
@@ -87,17 +83,24 @@
       '-fullscreen_mouselock.FullscreenMouselockTest.testNoTabFSExitWhenJSExitMouseLock',
       # crosbug.com/136875
       '-fullscreen_mouselock.FullscreenMouselockTest.testTabFSDoesNotExitForAnchorLinks',
+      # crbug.com/179263
+      '-gtalk.test_basic.BasicTest.testCurrentVersion',
+      '-gtalk.test_basic.BasicTest.testRCVersion',
       # crbug.com/165796
       '-infobars.OneClickInfobarTest',
       # crbug.com/131874
       '-infobars.OneClickInfobarTest.testNoOneClickInfobarAfterCancel',
       # crbug.com/133315
       '-infobars.OneClickInfobarTest.testDisplayOneClickInfobarAfterDismiss',
-      # crbug.com/165843
-      '-instant.InstantTest.testInstantWithNonInstantSearchEngine',
       # Mysteriously broken?
       # crbug.com/138857
       '-multiprofile.MultiprofileTest.testMakeSearchEngineDefaultInMultiprofile',
+      # crbug.com/179268
+      '-ntp.NTPTest.testCannotUninstallWebStore',
+      '-ntp.NTPTest.testGetAppsInNewProfile',
+      '-ntp.NTPTest.testGetAppsWhenInstallApp',
+      '-ntp.NTPTest.testGetAppsWhenInstallNonApps',
+      '-ntp.NTPTest.testUninstallApp',
       # crbug.com/143308
       '-omnibox.OmniboxLiveTest.testGoogleSearch',
       # crbug.com/71715
@@ -146,8 +149,6 @@
       # ==================================================
       # crbug.com/105948
       '-autofill.AutofillTest.testPostalCodeAndStateLabelsBasedOnCountry',
-      # crbug.com/169512
-      '-downloads.DownloadsTest.testDownloadsPersistence',
       # crbug.com/111289
       '-extensions.ExtensionsTest.testAllowAccessFileURLs',
       # crbug.com/113090
@@ -160,8 +161,6 @@
       # -imports.ImportsTest.testFirefoxImportFromPrefs
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testImportFirefoxPasswordsFromPrefs
-      # crbug.com/168809
-      '-instant.InstantTest.testInstantCaseSensitivity',
       # crbug.com/171490
       '-passwords.PasswordTest.testPasswdInfoNotStoredWhenAutocompleteOff',
       # crbug.com/117569
@@ -192,8 +191,6 @@
       '-fullscreen_mouselock.FullscreenMouselockTest.testNoMouseLockWhenCancelFS',
       # crbug.com/114244
       '-imports.ImportsTest.testImportSafariDataTwice',
-      # crbug.com/168809
-      '-instant.InstantTest.testInstantCaseSensitivity',
       # crbug.com/121484
       '-multiprofile.MultiprofileTest.test20NewProfiles',
       '-ntp.NTPTest.testLaunchAppNewWindow',  # crbug.com/79812
@@ -267,9 +264,6 @@
       # ==================================================
       # crbug.com/132337
       '-autofill.AutofillTest.testTabOrderForEditAddress',
-      # Downloads panel stays even after declining a download.
-      # crosbug.com/14728
-      '-downloads.DownloadsTest.testDeclineDangerousDownload',
       # crosbug.com/19556
       '-extensions.ExtensionsTest.testAllowAccessFileURLs',
       '-extensions.ExtensionsTest.testAllowIncognitoExtension',
@@ -296,7 +290,6 @@
       '-prefs.PrefsTest.testSessionRestoreURLs',
       '-prefs.PrefsTest.testSessionRestore',
       # Deal with i18n chars.  crosbug.com/12639
-      '-downloads.DownloadsTest.testCrazyFilenames',
       '-omnibox.OmniboxTest.testCrazyFilenames',
       # crosbug.com/16977
       '-chromeos_wifi_sanity.ChromeosWifiSanity.testConnectToHiddenWiFiNonExistent',
@@ -512,11 +505,17 @@
     ],
   },
 
-  # WebRTC quality tests. Requires webcam, an audio device and a special setup
-  # where the webcam is playing a barcode-encoded video.
+  # WebRTC quality tests. The video quality test requires a webcam, an audio
+  # device and a special setup where the webcam plays a barcode-encoded video.
+  # The webrtc_audio_quality test requires additional configuration as described
+  # in the test's class comments.
   'WEBRTC_QUALITY': {
     'all': [
       'webrtc_video_quality',
+      'webrtc_audio_quality',
+    ],
+    'mac': [
+      '-webrtc_audio_quality',  # Not implemented.
     ],
   },
 

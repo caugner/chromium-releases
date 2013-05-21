@@ -10,6 +10,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_MOCKS_H_
 #define GPU_COMMAND_BUFFER_SERVICE_MOCKS_H_
 
+#include <string>
 #include <vector>
 
 #include "base/logging.h"
@@ -99,15 +100,18 @@ class MockProgramCache : public ProgramCache {
 
   MOCK_CONST_METHOD4(LoadLinkedProgram, ProgramLoadResult(
       GLuint program,
-      ShaderManager::ShaderInfo* shader_a,
-      ShaderManager::ShaderInfo* shader_b,
+      Shader* shader_a,
+      Shader* shader_b,
       const LocationMap* bind_attrib_location_map));
 
-  MOCK_METHOD4(SaveLinkedProgram, void(
+  MOCK_METHOD5(SaveLinkedProgram, void(
       GLuint program,
-      const ShaderManager::ShaderInfo* shader_a,
-      const ShaderManager::ShaderInfo* shader_b,
-      const LocationMap* bind_attrib_location_map));
+      const Shader* shader_a,
+      const Shader* shader_b,
+      const LocationMap* bind_attrib_location_map,
+      const ShaderCacheCallback& callback));
+  MOCK_METHOD1(LoadProgram, void(const std::string&));
+
  private:
   MOCK_METHOD0(ClearBackend, void());
 };

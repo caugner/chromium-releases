@@ -27,6 +27,12 @@
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/test_server.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/views/controls/textfield/textfield.h"
+
+// TODO(kbr): remove: http://crbug.com/222296
+#if defined(OS_MACOSX)
+#import "base/mac/mac_util.h"
+#endif
 
 using content::DomOperationNotificationDetails;
 using content::NavigationController;
@@ -638,11 +644,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
   // TODO(isherman): This is an experimental change to help diagnose
   // http://crbug.com/55713
   content::RunAllPendingInMessageLoop();
-#if defined(USE_AURA)
   EXPECT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
-#else
-  EXPECT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
-#endif
   // No element should be focused, as Alt+D was handled by the browser.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
 
@@ -758,6 +760,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
 
 #if defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
+  // TODO(kbr): re-enable: http://crbug.com/222296
+  if (base::mac::IsOSMountainLionOrLater())
+    return;
+
   static const KeyEventTestData kTestCtrlA = {
     ui::VKEY_A, true, false, false, false,
     false, false, false, false, 4,

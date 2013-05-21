@@ -34,7 +34,7 @@
 #include "content/public/browser/browser_ipc_logging.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -218,9 +218,9 @@ void AboutIPCDialog::SetupControls() {
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
-  track_toggle_ = new views::TextButton(this, kStartTrackingLabel);
-  clear_button_ = new views::TextButton(this, kClearLabel);
-  filter_button_ = new views::TextButton(this, kFilterLabel);
+  track_toggle_ = new views::LabelButton(this, kStartTrackingLabel);
+  clear_button_ = new views::LabelButton(this, kClearLabel);
+  filter_button_ = new views::LabelButton(this, kFilterLabel);
 
   table_ = new views::NativeViewHost;
 
@@ -296,7 +296,7 @@ void AboutIPCDialog::Log(const IPC::LogData& data) {
   if (exploded.hour > 12)
     exploded.hour -= 12;
 
-  std::wstring sent_str = StringPrintf(L"%02d:%02d:%02d.%03d",
+  std::wstring sent_str = base::StringPrintf(L"%02d:%02d:%02d.%03d",
       exploded.hour, exploded.minute, exploded.second, exploded.millisecond);
 
   int count = message_list_.GetItemCount();
@@ -317,13 +317,13 @@ void AboutIPCDialog::Log(const IPC::LogData& data) {
       sent).InMilliseconds();
   // time can go backwards by a few ms (see Time), don't show that.
   time_to_send = std::max(static_cast<int>(time_to_send), 0);
-  std::wstring temp = StringPrintf(L"%d", time_to_send);
+  std::wstring temp = base::StringPrintf(L"%d", time_to_send);
   message_list_.SetItemText(index, kDispatchColumn, temp.c_str());
 
   int64 time_to_process = (base::Time::FromInternalValue(data.dispatch) -
       base::Time::FromInternalValue(data.receive)).InMilliseconds();
   time_to_process = std::max(static_cast<int>(time_to_process), 0);
-  temp = StringPrintf(L"%d", time_to_process);
+  temp = base::StringPrintf(L"%d", time_to_process);
   message_list_.SetItemText(index, kProcessColumn, temp.c_str());
 
   message_list_.SetItemText(index, kParamsColumn,

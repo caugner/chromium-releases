@@ -40,6 +40,12 @@ class ManagedModeNavigationObserver
   // observer state after adding the URLs.
   void AddSavedURLsToWhitelistAndClearState();
 
+  // Returns the elevation state for the corresponding WebContents.
+  bool is_elevated() const;
+
+  // Set the elevation state for the corresponding WebContents.
+  void set_elevated(bool is_elevated);
+
  private:
   // An observer can be in one of the following states:
   // - RECORDING_URLS_BEFORE_PREVIEW: This is the initial state when the user
@@ -50,12 +56,9 @@ class ManagedModeNavigationObserver
   // still recorded while the page redirects. The Observer moves to the next
   // state after the page finished redirecting (DidNavigateMainFrame gets
   // called).
-  // - NOT_RECORDING_URLS: The redirects have completed and blocked URLs are
-  // no longer being recorded.
   enum ObserverState {
     RECORDING_URLS_BEFORE_PREVIEW,
     RECORDING_URLS_AFTER_PREVIEW,
-    NOT_RECORDING_URLS,
   };
 
   friend class content::WebContentsUserData<ManagedModeNavigationObserver>;
@@ -66,10 +69,11 @@ class ManagedModeNavigationObserver
   // an interstitial for this RenderView. This allows the user to navigate
   // around on the website after clicking preview.
   void AddTemporaryException();
+  // Updates the ResourceThrottle with the latest user navigation status.
+  void UpdateExceptionNavigationStatus();
   void RemoveTemporaryException();
 
   void AddURLToPatternList(const GURL& url);
-  void AddURLAsLastPattern(const GURL& url);
 
   // content::WebContentsObserver implementation.
   // An example regarding the order in which these events take place for
@@ -89,14 +93,6 @@ class ManagedModeNavigationObserver
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
-      int64 frame_id,
-      int64 parent_frame_id,
-      bool is_main_frame,
-      const GURL& validated_url,
-      bool is_error_page,
-      bool is_iframe_srcdoc,
-      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void ProvisionalChangeToMainFrameUrl(
       const GURL& url,
       content::RenderViewHost* render_view_host) OVERRIDE;
@@ -106,6 +102,11 @@ class ManagedModeNavigationObserver
       const GURL& url,
       content::PageTransition transition_type,
       content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidGetUserGesture() OVERRIDE;
+
+  // Returns whether the user would stay in elevated state if he visits this
+  // URL.
+  bool ShouldStayElevatedForURL(const GURL& url);
 
   // Owned by the profile, so outlives us.
   ManagedUserService* managed_user_service_;
@@ -117,9 +118,19 @@ class ManagedModeNavigationObserver
   InfoBarDelegate* warn_infobar_delegate_;
   InfoBarDelegate* preview_infobar_delegate_;
 
+  // Whether we received a user gesture.
+  // The goal is to allow automatic redirects (in order not to break the flow
+  // or show too many interstitials) while not allowing the user to navigate
+  // to blocked pages. We consider a redirect to be automatic if we did
+  // not get a user gesture.
+  bool got_user_gesture_;
   ObserverState state_;
   std::set<GURL> navigated_urls_;
   GURL last_url_;
+
+  // The elevation state corresponding to the current WebContents.
+  // Will be set to true for non-managed users.
+  bool is_elevated_;
 
   int last_allowed_page_;
 

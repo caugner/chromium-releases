@@ -7,10 +7,11 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/command_executor.h"
+#include "chrome/test/chromedriver/command_names.h"
 #include "chrome/test/chromedriver/server/http_handler.h"
 #include "chrome/test/chromedriver/server/http_response.h"
-#include "chrome/test/chromedriver/status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -29,7 +30,7 @@ class DummyExecutor : public CommandExecutor {
                               scoped_ptr<base::Value>* value,
                               std::string* out_session_id) OVERRIDE {
     *status = status_;
-    value->reset(base::Value::CreateIntegerValue(1));
+    value->reset(new base::FundamentalValue(1));
     *out_session_id = "session_id";
   }
 
@@ -37,7 +38,7 @@ class DummyExecutor : public CommandExecutor {
   StatusCode status_;
 };
 
-}
+}  // namespace
 
 TEST(HttpHandlerTest, HandleOutsideOfBaseUrl) {
   HttpHandler handler(
@@ -63,11 +64,11 @@ TEST(HttpHandlerTest, HandleUnknownCommand) {
 
 TEST(HttpHandlerTest, HandleNewSession) {
   scoped_ptr<HttpHandler::CommandMap> map(new HttpHandler::CommandMap());
-  map->push_back(CommandMapping(kPost, "new", internal::kNewSessionIdCommand));
+  map->push_back(CommandMapping(kPost, "session", CommandNames::kNewSession));
   HttpHandler handler(
       scoped_ptr<CommandExecutor>(new DummyExecutor()),
       map.Pass(), "/base/");
-  HttpRequest request(kPost, "/base/new", "");
+  HttpRequest request(kPost, "/base/session", "");
   HttpResponse response;
   handler.Handle(request, &response);
   ASSERT_EQ(HttpResponse::kSeeOther, response.status());

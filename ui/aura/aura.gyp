@@ -23,14 +23,14 @@
         'AURA_IMPLEMENTATION',
       ],
       'sources': [
-        'aura_switches.cc',
-        'aura_switches.h',
         'client/activation_change_observer.h',
         'client/activation_change_observer.cc',
         'client/activation_client.cc',
         'client/activation_client.h',
         'client/activation_delegate.cc',
         'client/activation_delegate.h',
+        'client/animation_host.cc',
+        'client/animation_host.h',
         'client/aura_constants.cc',
         'client/aura_constants.h',
         'client/capture_client.cc',
@@ -68,8 +68,6 @@
         'device_list_updater_aurax11.cc',
         'device_list_updater_aurax11.h',
         'dispatcher_win.cc',
-        'display_util.cc',
-        'display_util.h',
         'env.cc',
         'env.h',
         'env_observer.h',
@@ -96,6 +94,8 @@
         'window.cc',
         'window.h',
         'window_delegate.h',
+        'window_destruction_observer.cc',
+        'window_destruction_observer.h',
         'window_observer.h',
         'window_tracker.cc',
         'window_tracker.h',
@@ -107,7 +107,7 @@
             ['exclude', 'client/dispatcher_client.h'],
           ],
         }],
-        ['OS=="linux"', {
+        ['use_x11==1', {
           'link_settings': {
             'libraries': [
               '-lX11',
@@ -163,6 +163,8 @@
         'test/window_test_api.cc',
         'test/window_test_api.h',
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     {
       # We build a minimal set of resources required for aura_test_support.

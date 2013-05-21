@@ -7,11 +7,12 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -76,13 +77,13 @@ TEST_F(BrowserCommandsTest, DuplicateTab) {
   EXPECT_EQ(3, orig_controller.GetEntryCount());
   EXPECT_TRUE(orig_controller.GetPendingEntry());
 
-  size_t initial_window_count = BrowserList::size();
+  size_t initial_window_count = chrome::GetTotalBrowserCount();
 
   // Duplicate the tab.
   chrome::ExecuteCommand(browser(), IDC_DUPLICATE_TAB);
 
   // The duplicated tab should not end up in a new window.
-  size_t window_count = BrowserList::size();
+  size_t window_count = chrome::GetTotalBrowserCount();
   ASSERT_EQ(initial_window_count, window_count);
 
   // And we should have a newly duplicated tab.
@@ -113,13 +114,13 @@ TEST_F(BrowserCommandsTest, ViewSource) {
   EXPECT_EQ(1, orig_controller.GetEntryCount());
   EXPECT_TRUE(orig_controller.GetPendingEntry());
 
-  size_t initial_window_count = BrowserList::size();
+  size_t initial_window_count = chrome::GetTotalBrowserCount();
 
   // View Source.
   chrome::ExecuteCommand(browser(), IDC_VIEW_SOURCE);
 
   // The view source tab should not end up in a new window.
-  size_t window_count = BrowserList::size();
+  size_t window_count = chrome::GetTotalBrowserCount();
   ASSERT_EQ(initial_window_count, window_count);
 
   // And we should have a newly duplicated tab.
@@ -139,7 +140,9 @@ TEST_F(BrowserCommandsTest, ViewSource) {
 TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
   // We use profile() here, since it's a TestingProfile.
   profile()->CreateBookmarkModel(true);
-  profile()->BlockUntilBookmarkModelLoaded();
+
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  ui_test_utils::WaitForBookmarkModelToLoad(model);
 
   // Navigate to a url.
   GURL url1("http://foo/1");
@@ -151,8 +154,7 @@ TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
 
   // It should now be bookmarked in the bookmark model.
   EXPECT_EQ(profile(), browser()->profile());
-  EXPECT_TRUE(BookmarkModelFactory::GetForProfile(
-      browser()->profile())->IsBookmarked(url1));
+  EXPECT_TRUE(model->IsBookmarked(url1));
 }
 
 // Tests back/forward in new tab (Control + Back/Forward button in the UI).

@@ -2,18 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
 #include "chrome/browser/prerender/prerender_link_manager_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/test_launcher_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/fake_speech_recognition_manager.h"
 #include "ui/compositor/compositor_setup.h"
@@ -21,6 +25,38 @@
 
 using prerender::PrerenderLinkManager;
 using prerender::PrerenderLinkManagerFactory;
+
+// This class intercepts media access request from the embedder. The request
+// should be triggered only if the embedder API (from tests) allows the request
+// in Javascript.
+// We do not issue the actual media request; the fact that the request reached
+// embedder's WebContents is good enough for our tests. This is also to make
+// the test run successfully on trybots.
+class MockWebContentsDelegate : public content::WebContentsDelegate {
+ public:
+  MockWebContentsDelegate() : requested_(false) {}
+  virtual ~MockWebContentsDelegate() {}
+
+  virtual void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE {
+    requested_ = true;
+    if (message_loop_runner_)
+      message_loop_runner_->Quit();
+  }
+
+  void WaitForSetMediaPermission() {
+    if (requested_)
+      return;
+    message_loop_runner_ = new content::MessageLoopRunner;
+    message_loop_runner_->Run();
+  }
+
+ private:
+  bool requested_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
+};
 
 class WebViewTest : public extensions::PlatformAppBrowserTest {
  protected:
@@ -59,6 +95,16 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
       content::SpeechRecognitionManager::SetManagerForTests(NULL);
 
     extensions::PlatformAppBrowserTest::TearDown();
+  }
+
+  virtual void SetUpOnMainThread() OVERRIDE {
+    const testing::TestInfo* const test_info =
+        testing::UnitTest::GetInstance()->current_test_info();
+    // Mock out geolocation for geolocation specific tests.
+    if (!strncmp(test_info->name(), "GeolocationAPI",
+            strlen("GeolocationAPI"))) {
+      ui_test_utils::OverrideGeolocation(10, 20);
+    }
   }
 
   // This method is responsible for initializing a packaged app, which contains
@@ -242,7 +288,14 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
       fake_speech_recognition_manager_;
 };
 
-IN_PROC_BROWSER_TEST_F(WebViewTest, Shim) {
+// http://crbug.com/176122: This test is flaky on Windows.
+#if defined(OS_WIN)
+#define MAYBE_Shim DISABLED_Shim
+#else
+#define MAYBE_Shim Shim
+#endif
+IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_Shim) {
+  ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/shim")) << message_;
 }
 
@@ -669,6 +722,61 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, IndexedDBIsolation) {
   ExecuteScriptWaitForTitle(default_tag_contents1, script, "db not found");
 }
 
+// This test ensures that closing app window on 'loadcommit' does not crash.
+// The test launches an app with guest and closes the window on loadcommit. It
+// then launches the app window again. The process is repeated 3 times.
+IN_PROC_BROWSER_TEST_F(WebViewTest, CloseOnLoadcommit) {
+  ExtensionTestMessageListener done_test_listener(
+      "done-close-on-loadcommit", false);
+  LoadAndLaunchPlatformApp("web_view/close_on_loadcommit");
+  ASSERT_TRUE(done_test_listener.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIDeny) {
+  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTest(
+      "platform_apps/web_view/media_access/deny")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIAllow) {
+  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ExtensionTestMessageListener launched_listener("Launched", false);
+  LoadAndLaunchPlatformApp("web_view/media_access/allow");
+  ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+
+  content::WebContents* embedder_web_contents =
+      GetFirstShellWindowWebContents();
+  ASSERT_TRUE(embedder_web_contents);
+  MockWebContentsDelegate* mock = new MockWebContentsDelegate;
+  embedder_web_contents->SetDelegate(mock);
+
+  const size_t num_tests = 4;
+  std::string test_names[num_tests] = {
+    "testAllow",
+    "testAllowAndThenDeny",
+    "testAllowTwice",
+    "testAllowAsync",
+  };
+  for (size_t i = 0; i < num_tests; ++i) {
+    ExtensionTestMessageListener done_listener("DoneMediaTest", false);
+    EXPECT_TRUE(
+        content::ExecuteScript(
+            embedder_web_contents,
+            base::StringPrintf("startAllowTest('%s')",
+                               test_names[i].c_str())));
+    done_listener.WaitUntilSatisfied();
+
+    std::string result;
+    EXPECT_TRUE(
+        content::ExecuteScriptAndExtractString(
+            embedder_web_contents,
+            "window.domAutomationController.send(getTestStatus())", &result));
+    ASSERT_EQ(std::string("PASSED"), result);
+
+    mock->WaitForSetMediaPermission();
+  }
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognition) {
   ASSERT_TRUE(StartTestServer());
   std::string host_str("localhost");  // Must stay in scope with replace_host.
@@ -701,4 +809,54 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognition) {
   content::TitleWatcher title_watcher(guest_web_contents, expected_title);
   title_watcher.AlsoWaitForTitle(error_title);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, TearDownTest) {
+  ExtensionTestMessageListener first_loaded_listener("guest-loaded", false);
+  const extensions::Extension* extension =
+      LoadAndLaunchPlatformApp("web_view/teardown");
+  ASSERT_TRUE(first_loaded_listener.WaitUntilSatisfied());
+  ShellWindow* window = NULL;
+  if (!GetShellWindowCount())
+    window = CreateShellWindow(extension);
+  else
+    window = GetFirstShellWindow();
+  CloseShellWindow(window);
+
+  // Load the app again.
+  ExtensionTestMessageListener second_loaded_listener("guest-loaded", false);
+  LoadAndLaunchPlatformApp("web_view/teardown");
+  ASSERT_TRUE(second_loaded_listener.WaitUntilSatisfied());
+}
+
+// Embedder does not have geolocation permission for this test.
+// No matter what the API does, geolocation permission would be denied.
+// Note that the test name prefix must be "GeolocationAPI".
+IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasNoAccess) {
+  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTest(
+      "platform_apps/web_view/geolocation/embedder_has_no_permission"))
+          << message_;
+}
+
+// Embedder has geolocation permission for this test.
+// Note that the test name prefix must be "GeolocationAPI".
+IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasAccess) {
+  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTest(
+      "platform_apps/web_view/geolocation/embedder_has_permission"))
+          << message_;
+}
+
+// Disabled on win debug bots due to flaky timeouts.
+// See http://crbug.com/222618 .
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_NewWindow DISABLED_NewWindow
+#else
+#define MAYBE_NewWindow NewWindow
+#endif
+IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_NewWindow) {
+  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/newwindow"))
+      << message_;
 }

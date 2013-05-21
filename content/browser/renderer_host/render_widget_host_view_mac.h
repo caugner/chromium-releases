@@ -17,10 +17,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "content/browser/accessibility/browser_accessibility_delegate_mac.h"
-#include "content/browser/renderer_host/accelerated_surface_container_manager_mac.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/edit_command.h"
 #import "content/public/browser/render_widget_host_view_mac_base.h"
+#include "ipc/ipc_sender.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "ui/base/cocoa/base_view.h"
 #include "webkit/glue/webcursor.h"
@@ -31,7 +31,6 @@ class RenderWidgetHostViewMac;
 class RenderWidgetHostViewMacEditCommandHelper;
 }
 
-@class AcceleratedPluginView;
 @class FullscreenWindowManager;
 @protocol RenderWidgetHostViewMacDelegate;
 @class ToolTip;
@@ -192,7 +191,8 @@ class RenderWidgetHostImpl;
 //     references to it must become NULL."
 //
 // RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
-class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
+class RenderWidgetHostViewMac : public RenderWidgetHostViewBase,
+                                public IPC::Sender {
  public:
   virtual ~RenderWidgetHostViewMac();
 
@@ -202,6 +202,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   void SetAllowOverlappingViews(bool overlapping);
 
   // RenderWidgetHostView implementation.
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
   virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
@@ -243,8 +244,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void TextInputStateChanged(
       const ViewHostMsg_TextInputState_Params& params) OVERRIDE;
-  virtual void SelectionBoundsChanged(
-      const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void ImeCompositionRangeChanged(
       const ui::Range& range,
@@ -260,6 +259,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   virtual void SelectionChanged(const string16& text,
                                 size_t offset,
                                 const ui::Range& range) OVERRIDE;
+  virtual void SelectionBoundsChanged(
+      const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE;
+  virtual void ScrollOffsetChanged() OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
@@ -270,44 +272,17 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
       const scoped_refptr<media::VideoFrame>& target,
       const base::Callback<void(bool)>& callback) OVERRIDE;
   virtual bool CanCopyToVideoFrame() const OVERRIDE;
+  virtual bool CanSubscribeFrame() const OVERRIDE;
+  virtual void BeginFrameSubscription(
+      scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) OVERRIDE;
+  virtual void EndFrameSubscription() OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
-
   virtual void OnAccessibilityNotifications(
       const std::vector<AccessibilityHostMsg_NotificationParams>& params
       ) OVERRIDE;
-
-  virtual void PluginFocusChanged(bool focused, int plugin_id) OVERRIDE;
-  virtual void StartPluginIme() OVERRIDE;
   virtual bool PostProcessEventForPluginIme(
       const NativeWebKeyboardEvent& event) OVERRIDE;
 
-  // Methods associated with GPU-accelerated plug-in instances and the
-  // accelerated compositor.
-  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(
-      bool opaque, bool root) OVERRIDE;
-  virtual void DestroyFakePluginWindowHandle(
-      gfx::PluginWindowHandle window) OVERRIDE;
-
-  // Exposed for testing.
-  CONTENT_EXPORT AcceleratedPluginView* ViewForPluginWindowHandle(
-      gfx::PluginWindowHandle window);
-
-  // Helper to do the actual cleanup after a plugin handle has been destroyed.
-  // Required because DestroyFakePluginWindowHandle() isn't always called for
-  // all handles (it's e.g. not called on navigation, when the RWHVMac gets
-  // destroyed anyway).
-  void DeallocFakePluginWindowHandle(gfx::PluginWindowHandle window);
-
-  virtual void AcceleratedSurfaceSetIOSurface(
-      gfx::PluginWindowHandle window,
-      int32 width,
-      int32 height,
-      uint64 io_surface_identifier) OVERRIDE;
-  virtual void AcceleratedSurfaceSetTransportDIB(
-      gfx::PluginWindowHandle window,
-      int32 width,
-      int32 height,
-      TransportDIB::Handle transport_dib) OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
       int gpu_host_id) OVERRIDE;
@@ -315,20 +290,12 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
-  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void AcceleratedSurfaceRelease() OVERRIDE;
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void AboutToWaitForBackingStoreMsg() OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
   virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
-
-  void DrawAcceleratedSurfaceInstance(
-      CGLContextObj context,
-      gfx::PluginWindowHandle plugin_handle,
-      NSSize size);
-  // Forces the textures associated with any accelerated plugin instances
-  // to be reloaded.
-  void ForceTextureReload();
 
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
@@ -338,6 +305,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   virtual void UnlockMouse() OVERRIDE;
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+
+  // IPC::Sender implementation.
+  virtual bool Send(IPC::Message* message) OVERRIDE;
 
   // Forwards the mouse event to the renderer.
   void ForwardMouseEvent(const WebKit::WebMouseEvent& event);
@@ -419,13 +389,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   ui::TextInputType text_input_type_;
   bool can_compose_inline_;
 
-  typedef std::map<gfx::PluginWindowHandle, AcceleratedPluginView*>
-      PluginViewMap;
-  PluginViewMap plugin_views_;  // Weak values.
-
-  // Helper class for managing instances of accelerated plug-ins.
-  AcceleratedSurfaceContainerManagerMac plugin_container_manager_;
-
   scoped_ptr<CompositingIOSurfaceMac> compositing_iosurface_;
 
   // Whether to allow overlapping views.
@@ -435,12 +398,19 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
     return pepper_fullscreen_window_;
   }
 
+  CONTENT_EXPORT void release_pepper_fullscreen_window_for_testing();
+
   RenderWidgetHostViewMac* fullscreen_parent_host_view() const {
     return fullscreen_parent_host_view_;
   }
 
+  RenderWidgetHostViewFrameSubscriber* frame_subscriber() const {
+    return frame_subscriber_.get();
+  }
+
  private:
   friend class RenderWidgetHostView;
+  friend class RenderWidgetHostViewMacTest;
 
   // The view will associate itself with the given widget. The native view must
   // be hooked up immediately to the view hierarchy, or else when it is
@@ -458,6 +428,24 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
   void GotAcceleratedFrame();
   // Called when a software DIB is received.
   void GotSoftwareFrame();
+
+  void OnPluginFocusChanged(bool focused, int plugin_id);
+  void OnStartPluginIme();
+  CONTENT_EXPORT void OnAcceleratedSurfaceSetIOSurface(
+      gfx::PluginWindowHandle window,
+      int32 width,
+      int32 height,
+      uint64 mach_port);
+  void OnAcceleratedSurfaceSetTransportDIB(gfx::PluginWindowHandle window,
+                                           int32 width,
+                                           int32 height,
+                                           TransportDIB::Handle transport_dib);
+  void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window,
+                                          uint64 surface_handle);
+
+  // Convert |rect| from the views coordinate (upper-left origin) into
+  // the OpenGL coordinate (lower-left origin) and scale for HiDPI displays.
+  gfx::Rect GetScaledOpenGLPixelRect(const gfx::Rect& rect);
 
   // The associated view. This is weak and is inserted into the view hierarchy
   // to own this RenderWidgetHostViewMac object.
@@ -497,6 +485,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase {
 
   // The current caret bounds.
   gfx::Rect caret_rect_;
+
+  // Subscriber that listens to frame presentation events.
+  scoped_ptr<RenderWidgetHostViewFrameSubscriber> frame_subscriber_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewMac);
 };

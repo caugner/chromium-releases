@@ -10,8 +10,8 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_member.h"
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
@@ -24,6 +24,8 @@
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_path_reservation_tracker.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/download/save_package_file_picker.h"
@@ -34,16 +36,15 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
@@ -52,11 +53,6 @@
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
-#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/drive/drive_download_handler.h"
@@ -139,6 +135,36 @@ void VisitCountsToVisitedBefore(
       (first_visit.LocalMidnight() < base::Time::Now().LocalMidnight()));
 }
 
+base::FilePath GetIntermediatePath(const base::FilePath& target_path,
+                                   content::DownloadDangerType danger_type,
+                                   bool is_forced_path) {
+  // If the download is not dangerous, just append .crdownload to the target
+  // path.
+  if (danger_type == content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS) {
+    if (is_forced_path)
+      return target_path;
+    return download_util::GetCrDownloadPath(target_path);
+  }
+
+  // If the download is potentially dangerous we create a filename of the form
+  // 'Unconfirmed <random>.crdownload'.
+  base::FilePath::StringType file_name;
+  base::FilePath dir = target_path.DirName();
+#if defined(OS_WIN)
+  string16 unconfirmed_prefix =
+      l10n_util::GetStringUTF16(IDS_DOWNLOAD_UNCONFIRMED_PREFIX);
+#else
+  std::string unconfirmed_prefix =
+      l10n_util::GetStringUTF8(IDS_DOWNLOAD_UNCONFIRMED_PREFIX);
+#endif
+  base::SStringPrintf(
+      &file_name,
+      unconfirmed_prefix.append(
+          FILE_PATH_LITERAL(" %d.crdownload")).c_str(),
+      base::RandInt(0, 1000000));
+  return dir.Append(file_name);
+}
+
 // Returns a file path in the form that is expected by
 // platform_util::OpenItem/ShowItemInFolder, including any transformation
 // required for download abstractions layered on top of the core system,
@@ -157,6 +183,16 @@ base::FilePath GetPlatformDownloadPath(Profile* profile,
 
 }  // namespace
 
+// static
+void ChromeDownloadManagerDelegate::RegisterUserPrefs(
+    PrefRegistrySyncable* registry) {
+  const base::FilePath& default_download_path =
+      download_util::GetDefaultDownloadDirectory();
+  registry->RegisterFilePathPref(prefs::kSaveFileDefaultDirectory,
+                                 default_download_path,
+                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
+}
+
 ChromeDownloadManagerDelegate::ChromeDownloadManagerDelegate(Profile* profile)
     : profile_(profile),
       next_download_id_(0),
@@ -168,17 +204,10 @@ ChromeDownloadManagerDelegate::~ChromeDownloadManagerDelegate() {
 
 void ChromeDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
   download_manager_ = dm;
-#if !defined(OS_ANDROID)
-  extension_event_router_.reset(new ExtensionDownloadsEventRouter(
-      profile_, download_manager_));
-#endif
 }
 
 void ChromeDownloadManagerDelegate::Shutdown() {
   download_prefs_.reset();
-#if !defined(OS_ANDROID)
-  extension_event_router_.reset();
-#endif
 }
 
 DownloadId ChromeDownloadManagerDelegate::GetNextId() {
@@ -198,7 +227,7 @@ bool ChromeDownloadManagerDelegate::DetermineDownloadTarget(
     VLOG(2) << __FUNCTION__ << "() Start SB URL check for download = "
             << download->DebugString(false);
     service->CheckDownloadUrl(
-        DownloadProtectionService::DownloadInfo::FromDownloadItem(*download),
+        *download,
         base::Bind(
             &ChromeDownloadManagerDelegate::CheckDownloadUrlDone,
             this,
@@ -225,49 +254,6 @@ void ChromeDownloadManagerDelegate::ChooseDownloadPath(
 #endif
   file_picker->Init(download_manager_, item, suggested_path,
                     file_selected_callback);
-}
-
-base::FilePath ChromeDownloadManagerDelegate::GetIntermediatePath(
-    const base::FilePath& target_path,
-    content::DownloadDangerType danger_type) {
-  // If the download is not dangerous, just append .crdownload to the target
-  // path.
-  if (danger_type == content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS)
-    return download_util::GetCrDownloadPath(target_path);
-
-  // If the download is potentially dangerous we create a filename of the form
-  // 'Unconfirmed <random>.crdownload'.
-  base::FilePath::StringType file_name;
-  base::FilePath dir = target_path.DirName();
-#if defined(OS_WIN)
-  string16 unconfirmed_prefix =
-      l10n_util::GetStringUTF16(IDS_DOWNLOAD_UNCONFIRMED_PREFIX);
-#else
-  std::string unconfirmed_prefix =
-      l10n_util::GetStringUTF8(IDS_DOWNLOAD_UNCONFIRMED_PREFIX);
-#endif
-  base::SStringPrintf(
-      &file_name,
-      unconfirmed_prefix.append(
-          FILE_PATH_LITERAL(" %d.crdownload")).c_str(),
-      base::RandInt(0, 1000000));
-  return dir.Append(file_name);
-}
-
-WebContents* ChromeDownloadManagerDelegate::
-    GetAlternativeWebContentsToNotifyForDownload() {
-#if defined(OS_ANDROID)
-  // Android does not implement BrowserList or any other way to get an
-  // alternate web contents.
-  return NULL;
-#else
-  // Start the download in the last active browser. This is not ideal but better
-  // than fully hiding the download from the user.
-  Browser* last_active = chrome::FindLastActiveWithProfile(profile_,
-      chrome::GetActiveDesktop());
-  return last_active ? last_active->tab_strip_model()->GetActiveWebContents()
-                     : NULL;
-#endif
 }
 
 bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
@@ -314,7 +300,7 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
       state->set_callback(internal_complete_callback);
       item->SetUserData(&safe_browsing_id, state);
       service->CheckClientDownload(
-          DownloadProtectionService::DownloadInfo::FromDownloadItem(*item),
+          item,
           base::Bind(
               &ChromeDownloadManagerDelegate::CheckClientDownloadDone,
               this,
@@ -389,19 +375,17 @@ void ChromeDownloadManagerDelegate::GetSaveDir(
   Profile* profile = Profile::FromBrowserContext(browser_context);
   PrefService* prefs = profile->GetPrefs();
 
-  // Check whether the preference has the preferred directory for saving file.
-  // If not, initialize it with default directory.
-  if (!prefs->FindPreference(prefs::kSaveFileDefaultDirectory)) {
-    DCHECK(prefs->FindPreference(prefs::kDownloadDefaultDirectory));
-    base::FilePath default_save_path = prefs->GetFilePath(
-        prefs::kDownloadDefaultDirectory);
-
-    // TODO(joi): All registration should be done up front.
-    scoped_refptr<PrefRegistrySyncable> registry(
-        static_cast<PrefRegistrySyncable*>(prefs->DeprecatedGetPrefRegistry()));
-    registry->RegisterFilePathPref(prefs::kSaveFileDefaultDirectory,
-                                   default_save_path,
-                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
+  // Check whether the preference for the preferred directory for
+  // saving file has been explicitly set. If not, and the preference
+  // for the default download directory has been set, initialize it
+  // with the latter. Note that the defaults for both are the same.
+  const PrefService::Preference* download_default_directory =
+      prefs->FindPreference(prefs::kDownloadDefaultDirectory);
+  if (!download_default_directory->IsDefaultValue() &&
+      prefs->FindPreference(
+          prefs::kSaveFileDefaultDirectory)->IsDefaultValue()) {
+    prefs->Set(prefs::kSaveFileDefaultDirectory,
+               *(download_default_directory->GetValue()));
   }
 
   // Get the directory from preference.
@@ -424,10 +408,19 @@ void ChromeDownloadManagerDelegate::ChooseSavePath(
     const content::SavePackagePathPickedCallback& callback) {
   // Deletes itself.
 #if defined(OS_CHROMEOS)
-  new SavePackageFilePickerChromeOS(web_contents, suggested_path, callback);
+  new SavePackageFilePickerChromeOS(
+      web_contents,
+      suggested_path,
+      can_save_as_complete,
+      callback);
 #else
-  new SavePackageFilePicker(web_contents, suggested_path, default_extension,
-      can_save_as_complete, download_prefs_.get(), callback);
+  new SavePackageFilePicker(
+      web_contents,
+      suggested_path,
+      default_extension,
+      can_save_as_complete,
+      download_prefs_.get(),
+      callback);
 #endif
 }
 
@@ -480,12 +473,22 @@ bool ChromeDownloadManagerDelegate::IsDangerousFile(
     const base::FilePath& suggested_path,
     bool visited_referrer_before) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  const bool is_extension_download =
+      download_crx_util::IsExtensionDownload(download);
+
+  // User-initiated extension downloads from pref-whitelisted sources are not
+  // considered dangerous.
+  if (download.HasUserGesture() &&
+      is_extension_download &&
+      download_crx_util::OffStoreInstallAllowedByPrefs(profile_, download)) {
+    return false;
+  }
 
   // Extensions that are not from the gallery are considered dangerous.
   // When off-store install is disabled we skip this, since in this case, we
   // will not offer to install the extension.
   if (extensions::FeatureSwitch::easy_off_store_install()->IsEnabled() &&
-      download_crx_util::IsExtensionDownload(download) &&
+      is_extension_download &&
       !extensions::WebstoreInstaller::GetAssociatedApproval(download)) {
     return true;
   }
@@ -610,6 +613,22 @@ void ChromeDownloadManagerDelegate::Observe(
   callback.Run(installer->did_handle_successfully());
 }
 
+struct ChromeDownloadManagerDelegate::ContinueFilenameDeterminationInfo {
+  ContinueFilenameDeterminationInfo();
+  ~ContinueFilenameDeterminationInfo();
+
+  int32 download_id;
+  content::DownloadTargetCallback callback;
+  content::DownloadDangerType danger_type;
+  bool visited_referrer_before;
+  bool should_prompt;
+};
+
+ChromeDownloadManagerDelegate::ContinueFilenameDeterminationInfo::
+    ContinueFilenameDeterminationInfo() {}
+ChromeDownloadManagerDelegate::ContinueFilenameDeterminationInfo::
+    ~ContinueFilenameDeterminationInfo() {}
+
 void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
     int32 download_id,
     const content::DownloadTargetCallback& callback,
@@ -625,12 +644,12 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
   bool should_prompt = (download->GetTargetDisposition() ==
                         DownloadItem::TARGET_DISPOSITION_PROMPT);
   bool is_forced_path = !download->GetForcedFilePath().empty();
+  base::FilePath generated_name;
   base::FilePath suggested_path;
 
   // Check whether this download is for an extension install or not.
   // Allow extensions to be explicitly saved.
   if (!is_forced_path) {
-    base::FilePath generated_name;
     GenerateFileNameFromRequest(
         *download,
         &generated_name,
@@ -667,6 +686,78 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
     suggested_path = download->GetForcedFilePath();
   }
 
+  ContinueFilenameDeterminationInfo continue_info;
+  continue_info.download_id = download_id;
+  continue_info.callback = callback;
+  continue_info.danger_type = danger_type;
+  continue_info.visited_referrer_before = visited_referrer_before;
+  continue_info.should_prompt = should_prompt;
+
+  base::Closure filename_determined = base::Bind(
+      &ChromeDownloadManagerDelegate::ContinueDeterminingFilename,
+      this, continue_info, suggested_path, is_forced_path);
+#if defined(OS_ANDROID)
+  filename_determined.Run();
+#else
+  if (is_forced_path ||
+      !DownloadServiceFactory::GetForProfile(profile_)
+        ->GetExtensionEventRouter()) {
+    filename_determined.Run();
+  } else {
+    DownloadService* service = DownloadServiceFactory::GetForProfile(profile_);
+    ExtensionDownloadsEventRouter* router = service->GetExtensionEventRouter();
+    ExtensionDownloadsEventRouter::FilenameChangedCallback overriding =
+      base::Bind(&ChromeDownloadManagerDelegate::OnExtensionOverridingFilename,
+                 this, continue_info);
+    router->OnDeterminingFilename(
+        download, generated_name, filename_determined, overriding);
+  }
+#endif
+}
+
+void ChromeDownloadManagerDelegate::OnExtensionOverridingFilename(
+    const ContinueFilenameDeterminationInfo& continue_info,
+    const base::FilePath& changed_filename,
+    bool overwrite) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DownloadItem* download =
+      download_manager_->GetDownload(continue_info.download_id);
+  if (!download || (download->GetState() != DownloadItem::IN_PROGRESS))
+    return;
+  // If an extension overrides the filename, then the target directory will be
+  // forced to download_prefs_->DownloadPath() since extensions cannot place
+  // downloaded files anywhere except there. This prevents subdirectories from
+  // accumulating: if an extension is allowed to say that a file should go in
+  // last_download_path/music/foo.mp3, then last_download_path will accumulate
+  // the subdirectory /music/ so that the next download may end up in
+  // Downloads/music/music/music/bar.mp3.
+  base::FilePath temp_filename(download_prefs_->DownloadPath().Append(
+      changed_filename).NormalizePathSeparators());
+  // Do not pass a mime type to GenerateSafeFileName so that it does not force
+  // the filename to have an extension if the (chrome) extension does not
+  // suggest it.
+  net::GenerateSafeFileName(std::string(), false, &temp_filename);
+  // If |is_forced_path| were true, then extensions would not have been
+  // consulted, so use |overwrite| instead of |is_forced_path|. This does NOT
+  // set DownloadItem::GetForcedFilePath()!
+  ContinueDeterminingFilename(continue_info, temp_filename, overwrite);
+}
+
+void ChromeDownloadManagerDelegate::ContinueDeterminingFilename(
+    const ContinueFilenameDeterminationInfo& continue_info,
+    const base::FilePath& suggested_path,
+    bool is_forced_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  int32 download_id = continue_info.download_id;
+  const content::DownloadTargetCallback& callback = continue_info.callback;
+  content::DownloadDangerType danger_type = continue_info.danger_type;
+  bool visited_referrer_before = continue_info.visited_referrer_before;
+  bool should_prompt = continue_info.should_prompt;
+  DownloadItem* download =
+      download_manager_->GetDownload(download_id);
+  if (!download || (download->GetState() != DownloadItem::IN_PROGRESS))
+    return;
+
   // If the download hasn't already been marked dangerous (could be
   // DANGEROUS_URL), check if it is a dangerous file.
   if (danger_type == content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS) {
@@ -681,13 +772,10 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
     // protection, mark it as potentially dangerous content until we are done
     // with scanning it.
     if (service && service->enabled()) {
-      DownloadProtectionService::DownloadInfo info =
-          DownloadProtectionService::DownloadInfo::FromDownloadItem(*download);
-      info.target_file = suggested_path;
       // TODO(noelutz): if the user changes the extension name in the UI to
       // something like .exe SafeBrowsing will currently *not* check if the
       // download is malicious.
-      if (service->IsSupportedDownload(info))
+      if (service->IsSupportedDownload(*download, suggested_path))
         danger_type = content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT;
     }
 #endif
@@ -793,7 +881,8 @@ void ChromeDownloadManagerDelegate::OnTargetPathDetermined(
   // If |target_path| is empty, then that means that the user wants to cancel
   // the download.
   if (!target_path.empty()) {
-    intermediate_path = GetIntermediatePath(target_path, danger_type);
+    intermediate_path = GetIntermediatePath(
+        target_path, danger_type, !download->GetForcedFilePath().empty());
 
     // Retain the last directory. Exclude temporary downloads since the path
     // likely points at the location of a temporary file.

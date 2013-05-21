@@ -18,6 +18,7 @@
 #include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/view_prop.h"
+#include "ui/gfx/insets.h"
 #include "ui/metro_viewer/metro_viewer_messages.h"
 
 namespace aura {
@@ -28,6 +29,29 @@ const char* kRootWindowHostWinKey = "__AURA_REMOTE_ROOT_WINDOW_HOST_WIN__";
 
 // The touch id to be used for touch events coming in from Windows Ash.
 const int kRemoteWindowTouchId = 10;
+
+// Sets the keystate for the virtual key passed in to down or up.
+void SetKeyState(uint8* key_states, bool key_down, uint32 virtual_key_code) {
+  DCHECK(key_states);
+
+  if (key_down)
+    key_states[virtual_key_code] |= 0x80;
+  else
+    key_states[virtual_key_code] &= 0x7F;
+}
+
+// Sets the keyboard states for the Shift/Control/Alt/Caps lock keys.
+void SetVirtualKeyStates(uint32 flags) {
+  uint8 keyboard_state[256] = {0};
+  ::GetKeyboardState(keyboard_state);
+
+  SetKeyState(keyboard_state, !!(flags & ui::EF_SHIFT_DOWN), VK_SHIFT);
+  SetKeyState(keyboard_state, !!(flags & ui::EF_CONTROL_DOWN), VK_CONTROL);
+  SetKeyState(keyboard_state, !!(flags & ui::EF_ALT_DOWN), VK_MENU);
+  SetKeyState(keyboard_state, !!(flags & ui::EF_CAPS_LOCK_DOWN), VK_CAPITAL);
+
+  ::SetKeyboardState(keyboard_state);
+}
 
 }  // namespace
 
@@ -223,6 +247,13 @@ void RemoteRootWindowHostWin::SetBounds(const gfx::Rect& bounds) {
   delegate_->OnHostResized(bounds.size());
 }
 
+gfx::Insets RemoteRootWindowHostWin::GetInsets() const {
+  return gfx::Insets();
+}
+
+void RemoteRootWindowHostWin::SetInsets(const gfx::Insets& insets) {
+}
+
 gfx::Point RemoteRootWindowHostWin::GetLocationOnNativeScreen() const {
   return gfx::Point(0, 0);
 }
@@ -317,33 +348,24 @@ void RemoteRootWindowHostWin::OnKeyDown(uint32 vkey,
                                         uint32 repeat_count,
                                         uint32 scan_code,
                                         uint32 flags) {
-  ui::KeyEvent event(ui::ET_KEY_PRESSED,
-                     ui::KeyboardCodeForWindowsKeyCode(vkey),
-                     flags,
-                     false);
-  delegate_->OnHostKeyEvent(&event);
+  DispatchKeyboardMessage(ui::ET_KEY_PRESSED, vkey, repeat_count, scan_code,
+                          flags, false);
 }
 
 void RemoteRootWindowHostWin::OnKeyUp(uint32 vkey,
                                       uint32 repeat_count,
                                       uint32 scan_code,
                                       uint32 flags) {
-  ui::KeyEvent event(ui::ET_KEY_RELEASED,
-                     ui::KeyboardCodeForWindowsKeyCode(vkey),
-                     flags,
-                     false);
-  delegate_->OnHostKeyEvent(&event);
+  DispatchKeyboardMessage(ui::ET_KEY_RELEASED, vkey, repeat_count, scan_code,
+                          flags, false);
 }
 
 void RemoteRootWindowHostWin::OnChar(uint32 key_code,
                                      uint32 repeat_count,
                                      uint32 scan_code,
                                      uint32 flags) {
-  ui::KeyEvent event(ui::ET_KEY_PRESSED,
-                     ui::KeyboardCodeForWindowsKeyCode(key_code),
-                     flags,
-                     true);
-  delegate_->OnHostKeyEvent(&event);
+  DispatchKeyboardMessage(ui::ET_KEY_PRESSED, key_code, repeat_count,
+                          scan_code, flags, true);
 }
 
 void RemoteRootWindowHostWin::OnVisibilityChanged(bool visible) {
@@ -403,6 +425,30 @@ void RemoteRootWindowHostWin::OnMultiFileOpenDone(
     multi_file_open_completion_callback_.Run(files, NULL);
   }
   multi_file_open_completion_callback_.Reset();
+}
+
+void RemoteRootWindowHostWin::DispatchKeyboardMessage(ui::EventType type,
+                                                      uint32 vkey,
+                                                      uint32 repeat_count,
+                                                      uint32 scan_code,
+                                                      uint32 flags,
+                                                      bool is_character) {
+  if (MessageLoop::current()->IsNested()) {
+    SetVirtualKeyStates(flags);
+
+    uint32 message = is_character ? WM_CHAR :
+        (type == ui::ET_KEY_PRESSED ? WM_KEYDOWN : WM_KEYUP);
+    ::PostThreadMessage(::GetCurrentThreadId(),
+                        message,
+                        vkey,
+                        repeat_count | scan_code >> 15);
+  } else {
+    ui::KeyEvent event(type,
+                       ui::KeyboardCodeForWindowsKeyCode(vkey),
+                       flags,
+                       is_character);
+    delegate_->OnHostKeyEvent(&event);
+  }
 }
 
 }  // namespace aura

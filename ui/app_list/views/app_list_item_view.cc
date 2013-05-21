@@ -7,8 +7,11 @@
 #include <algorithm>
 
 #include "base/utf_string_conversions.h"
+#include "grit/ui_resources.h"
+#include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/views/apps_grid_view.h"
+#include "ui/app_list/views/cached_label.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -31,14 +34,13 @@ namespace {
 const int kTopBottomPadding = 10;
 const int kTopPadding = 20;
 const int kIconTitleSpacing = 7;
-const int kProgressBarHorizontalPadding = 8;
+const int kProgressBarHorizontalPadding = 12;
 const int kProgressBarVerticalPadding = 4;
 const int kProgressBarHeight = 4;
 
 const SkColor kTitleColor = SkColorSetRGB(0x5A, 0x5A, 0x5A);
 const SkColor kTitleHoverColor = SkColorSetRGB(0x3C, 0x3C, 0x3C);
 
-const SkColor kHoverAndPushedColor = SkColorSetARGB(0x19, 0, 0, 0);
 const SkColor kSelectedColor = SkColorSetARGB(0x0D, 0, 0, 0);
 const SkColor kHighlightedColor = kHoverAndPushedColor;
 const SkColor kDownloadProgressBackgroundColor =
@@ -64,7 +66,7 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
       model_(model),
       apps_grid_view_(apps_grid_view),
       icon_(new views::ImageView),
-      title_(new views::Label),
+      title_(new CachedLabel),
       ui_state_(UI_STATE_NORMAL),
       touch_dragging_(false) {
   icon_->set_interactive(false);
@@ -73,8 +75,10 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   title_->SetBackgroundColor(0);
   title_->SetAutoColorReadabilityEnabled(false);
   title_->SetEnabledColor(kTitleColor);
-  title_->SetFont(rb.GetFont(ui::ResourceBundle::SmallBoldFont));
+  title_->SetFont(rb.GetFont(kItemTextFontStyle));
   title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  title_->SetVisible(!model_->is_installing());
+  title_->Invalidate();
 
   const gfx::ShadowValue kIconShadows[] = {
     gfx::ShadowValue(gfx::Point(0, 2), 2, SkColorSetARGB(0x24, 0, 0, 0)),
@@ -90,6 +94,8 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
 
   set_context_menu_controller(this);
   set_request_focus_on_press(false);
+
+  SetAnimationDuration(0);
 }
 
 AppListItemView::~AppListItemView() {
@@ -118,10 +124,15 @@ void AppListItemView::UpdateIcon() {
 
   gfx::ImageSkia resized(gfx::ImageSkiaOperations::CreateResizedImage(icon,
       skia::ImageOperations::RESIZE_BEST, icon_size_));
-  gfx::ImageSkia shadow(
-      gfx::ImageSkiaOperations::CreateImageWithDropShadow(resized,
-                                                          icon_shadows_));
-  icon_->SetImage(shadow);
+  if (model_->has_shadow()) {
+    gfx::ImageSkia shadow(
+        gfx::ImageSkiaOperations::CreateImageWithDropShadow(resized,
+                                                            icon_shadows_));
+    icon_->SetImage(shadow);
+    return;
+  };
+
+  icon_->SetImage(resized);
 }
 
 void AppListItemView::SetUIState(UIState state) {
@@ -161,12 +172,17 @@ void AppListItemView::OnMouseDragTimer() {
   SetUIState(UI_STATE_DRAGGING);
 }
 
+void AppListItemView::Prerender() {
+  title_->PaintToBackingImage();
+}
+
 void AppListItemView::ItemIconChanged() {
   UpdateIcon();
 }
 
 void AppListItemView::ItemTitleChanged() {
   title_->SetText(UTF8ToUTF16(model_->title()));
+  title_->Invalidate();
 }
 
 void AppListItemView::ItemHighlightedChanged() {
@@ -177,6 +193,7 @@ void AppListItemView::ItemHighlightedChanged() {
 void AppListItemView::ItemIsInstallingChanged() {
   if (model_->is_installing())
     apps_grid_view_->EnsureViewVisible(this);
+  title_->SetVisible(!model_->is_installing());
   SchedulePaint();
 }
 
@@ -215,7 +232,7 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
 
   gfx::Rect rect(GetContentsBounds());
 
-  if (model_->highlighted()) {
+  if (model_->highlighted() && !model_->is_installing()) {
     canvas->FillRect(rect, kHighlightedColor);
   } else if (hover_animation_->is_animating()) {
     int alpha = SkColorGetA(kHoverAndPushedColor) *
@@ -228,21 +245,29 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
   }
 
   if (model_->is_installing()) {
-    gfx::Rect progress_bar_background(
-        rect.x() + kProgressBarHorizontalPadding,
-        rect.bottom() - kProgressBarVerticalPadding - kProgressBarHeight,
-        rect.width() - 2 * kProgressBarHorizontalPadding,
-        kProgressBarHeight);
-    canvas->FillRect(progress_bar_background, kDownloadProgressBackgroundColor);
+    gfx::ImageSkia background = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_BACKGROUND);
+    gfx::ImageSkia left = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_LEFT);
+    gfx::ImageSkia center = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_CENTER);
+    gfx::ImageSkia right = *ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_APP_LIST_ITEM_PROGRESS_RIGHT);
 
+    int bar_x = rect.x() + kProgressBarHorizontalPadding;
+    int bar_y = icon_->bounds().bottom() + kIconTitleSpacing;
+
+    canvas->DrawImageInt(background, bar_x, bar_y);
     if (model_->percent_downloaded() != -1) {
       float percent = model_->percent_downloaded() / 100.0;
-      gfx::Rect progress_bar(
-          progress_bar_background.x(),
-          progress_bar_background.y(),
-          progress_bar_background.width() * percent,
-          progress_bar_background.height());
-      canvas->FillRect(progress_bar, kDownloadProgressColor);
+      int bar_width = percent *
+          (background.width() - (left.width() + right.width()));
+
+      canvas->DrawImageInt(left, bar_x, bar_y);
+      int x = bar_x + left.width();
+      canvas->TileImageInt(center, x, bar_y, bar_width, center.height());
+      x += bar_width;
+      canvas->DrawImageInt(right, x, bar_y);
     }
   }
 }
@@ -278,6 +303,7 @@ void AppListItemView::StateChanged() {
     model_->SetHighlighted(false);
     title_->SetEnabledColor(kTitleColor);
   }
+  title_->Invalidate();
 }
 
 bool AppListItemView::ShouldEnterPushedState(const ui::Event& event) {

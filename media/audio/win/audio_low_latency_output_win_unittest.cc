@@ -46,7 +46,7 @@ static const size_t kFileDurationMs = 20000;
 static const size_t kNumFileSegments = 2;
 static const int kBitsPerSample = 16;
 static const size_t kMaxDeltaSamples = 1000;
-static const char* kDeltaTimeMsFileName = "delta_times_ms.txt";
+static const char kDeltaTimeMsFileName[] = "delta_times_ms.txt";
 
 MATCHER_P(HasValidDelay, value, "") {
   // It is difficult to come up with a perfect test condition for the delay
@@ -68,7 +68,7 @@ class MockAudioSourceCallback : public AudioOutputStream::AudioSourceCallback {
   MOCK_METHOD3(OnMoreIOData, int(AudioBus* source,
                                  AudioBus* dest,
                                  AudioBuffersState buffers_state));
-  MOCK_METHOD2(OnError, void(AudioOutputStream* stream, int code));
+  MOCK_METHOD1(OnError, void(AudioOutputStream* stream));
 };
 
 // This audio source implementation should be used for manual tests only since
@@ -146,7 +146,7 @@ class ReadFromFileAudioSource : public AudioOutputStream::AudioSourceCallback {
     return 0;
   }
 
-  virtual void OnError(AudioOutputStream* stream, int code) {}
+  virtual void OnError(AudioOutputStream* stream) {}
 
   int file_size() { return file_->GetDataSize(); }
 
@@ -297,7 +297,7 @@ TEST(WASAPIAudioOutputStreamTest, OpenStartAndClose) {
   AudioOutputStream* aos = CreateDefaultAudioOutputStream(audio_manager.get());
   EXPECT_TRUE(aos->Open());
   MockAudioSourceCallback source;
-  EXPECT_CALL(source, OnError(aos, _))
+  EXPECT_CALL(source, OnError(aos))
       .Times(0);
   aos->Start(&source);
   aos->Close();
@@ -311,7 +311,7 @@ TEST(WASAPIAudioOutputStreamTest, OpenStartStopAndClose) {
   AudioOutputStream* aos = CreateDefaultAudioOutputStream(audio_manager.get());
   EXPECT_TRUE(aos->Open());
   MockAudioSourceCallback source;
-  EXPECT_CALL(source, OnError(aos, _))
+  EXPECT_CALL(source, OnError(aos))
       .Times(0);
   aos->Start(&source);
   aos->Stop();

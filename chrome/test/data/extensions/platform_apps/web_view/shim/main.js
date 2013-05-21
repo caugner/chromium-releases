@@ -9,17 +9,22 @@ var util = {};
 // sure that the <object> shim is created (asynchronously at this point) for the
 // <webview> tag. This makes the <webview> tag ready for add/removeEventListener
 // calls.
-util.createWebViewTagInDOM = function() {
+util.createWebViewTagInDOM = function(partitionName) {
   var webview = document.createElement('webview');
   webview.style.width = '300px';
   webview.style.height = '200px';
-  document.body.appendChild(webview);
   var urlDummy = 'data:text/html,<body>Initial dummy guest</body>';
   webview.setAttribute('src', urlDummy);
+  webview.setAttribute('partition', partitionName);
+  document.body.appendChild(webview);
   return webview;
 };
 
-onload = function() {
+chrome.test.getConfig(function(config) {
+  var windowOpenGuestURL = 'http://localhost:' + config.testServer.port +
+      '/files/extensions/platform_apps/web_view/shim/guest.html';
+  var noReferrerGuestURL = 'http://localhost:' + config.testServer.port +
+      '/files/extensions/platform_apps/web_view/shim/guest_noreferrer.html';
   chrome.test.runTests([
     function webView() {
       var webview = document.querySelector('webview');
@@ -69,6 +74,7 @@ onload = function() {
         'terminate'
       ];
       var webview = document.createElement('webview');
+      webview.setAttribute('partition', arguments.callee.name);
       webview.addEventListener('loadstop', function(e) {
         for (var i = 0; i < apiMethodsToCheck.length; ++i) {
           chrome.test.assertEq('function',
@@ -79,7 +85,6 @@ onload = function() {
         chrome.test.assertEq('object', typeof webview.contentWindow);
         chrome.test.assertEq('function',
                              typeof webview.contentWindow.postMessage);
-
         chrome.test.succeed();
       });
       webview.setAttribute('src', 'data:text/html,webview check api');
@@ -88,8 +93,7 @@ onload = function() {
 
     function webViewEventName() {
       var webview = document.createElement('webview');
-      webview.setAttribute('src', 'data:text/html,webview check api');
-      document.body.appendChild(webview);
+      webview.setAttribute('partition', arguments.callee.name);
 
       webview.addEventListener('loadstart', function(evt) {
         chrome.test.assertEq('loadstart', evt.type);
@@ -106,6 +110,7 @@ onload = function() {
       });
 
       webview.setAttribute('src', 'data:text/html,trigger navigation');
+      document.body.appendChild(webview);
     },
 
     // This test registers two listeners on an event (loadcommit) and removes
@@ -113,7 +118,7 @@ onload = function() {
     // Current expected behavior is that the second event listener will still
     // fire without crashing.
     function webviewDestroyOnEventListener() {
-      var webview = util.createWebViewTagInDOM();
+      var webview = util.createWebViewTagInDOM(arguments.callee.name);
       var url = 'data:text/html,<body>Destroy test</body>';
 
       var loadCommitCount = 0;
@@ -123,8 +128,6 @@ onload = function() {
           return;
         ++loadCommitCount;
         if (loadCommitCount == 1) {
-          webview.parentNode.removeChild(webview);
-          webview = null;
           setTimeout(function() {
             chrome.test.succeed();
           }, 0);
@@ -135,6 +138,7 @@ onload = function() {
 
       // The test starts from here, by setting the src to |url|.
       webview.addEventListener('loadcommit', function(e) {
+        webview.parentNode.removeChild(webview);
         loadCommitCommon(e);
       });
       webview.addEventListener('loadcommit', function(e) {
@@ -147,7 +151,7 @@ onload = function() {
     // Each of the listener tries to change some properties on the event param,
     // which should not be possible.
     function cannotMutateEventName() {
-      var webview = util.createWebViewTagInDOM();
+      var webview = util.createWebViewTagInDOM(arguments.callee.name);
       var url = 'data:text/html,<body>Two</body>';
 
       var loadCommitACalled = false;
@@ -195,6 +199,7 @@ onload = function() {
     // been set raises an exception.
     function partitionRaisesException() {
       var webview = document.createElement('webview');
+      webview.setAttribute('partition', arguments.callee.name);
       webview.setAttribute('src', 'data:text/html,trigger navigation');
       document.body.appendChild(webview);
       setTimeout(function() {
@@ -209,6 +214,7 @@ onload = function() {
 
     function webViewExecuteScript() {
       var webview = document.createElement('webview');
+      webview.setAttribute('partition', arguments.callee.name);
       webview.addEventListener('loadstop', function() {
         webview.executeScript(
           {code:'document.body.style.backgroundColor = "red";'},
@@ -225,11 +231,8 @@ onload = function() {
     // This test calls terminate() on guest after it has already been
     // terminated. This makes sure we ignore the call gracefully.
     function webViewTerminateAfterExitDoesntCrash() {
-      var webview = document.querySelector('webview');
-      webview.addEventListener('loadstart', function(evt) {
-        chrome.test.assertEq('loadstart', evt.type);
-      });
-
+      var webview = document.createElement('webview');
+      webview.setAttribute('partition', arguments.callee.name);
       var loadstopSucceedsTest = false;
       webview.addEventListener('loadstop', function(evt) {
         chrome.test.assertEq('loadstop', evt.type);
@@ -255,6 +258,145 @@ onload = function() {
       });
 
       webview.setAttribute('src', 'data:text/html,test terminate() crash.');
-    }
+      document.body.appendChild(webview);
+    },
+
+    // This test verifies that assigning the src attribute the same value it had
+    // prior to a crash spawns off a new guest process.
+    function webViewAssignSrcAfterCrash() {
+      var webview = document.createElement('webview');
+      webview.setAttribute('partition', arguments.callee.name);
+      var terminated = false;
+      webview.addEventListener('loadstop', function(evt) {
+        if (!terminated) {
+          webview.terminate();
+          return;
+        }
+        // The guest has recovered after being terminated.
+        chrome.test.succeed();
+      });
+      webview.addEventListener('exit', function(evt) {
+        terminated = true;
+        webview.setAttribute('src', 'data:text/html,test page');
+      });
+      webview.setAttribute('src', 'data:text/html,test page');
+      document.body.appendChild(webview);
+    },
+
+    // This test verifies that <webview> restores the src attribute if it is
+    // removed after navigation.
+    function webViewRemoveSrcAttribute() {
+      var dataUrl = 'data:text/html,test page';
+      var webview = document.createElement('webview');
+      webview.setAttribute('partition', arguments.callee.name);
+      var terminated = false;
+      webview.addEventListener('loadstop', function(evt) {
+        webview.removeAttribute('src');
+        setTimeout(function() {
+          chrome.test.assertEq(dataUrl, webview.getAttribute('src'));
+          chrome.test.succeed();
+        }, 0);
+      });
+      webview.setAttribute('src', dataUrl);
+      document.body.appendChild(webview);
+    },
+
+    function browserPluginObjectInstantiationIsNotAllowed() {
+      var container = document.getElementById('object-container');
+      if (!container) {
+        chrome.test.fail('Container for object not found.');
+        return;
+      }
+      container.innerHTML = '<object type="application/browser-plugin"' +
+          ' id="object-plugin"' +
+          ' src="data:text/html,<body>You should not see this</body>">' +
+          '</object>';
+      var objectElement = document.getElementById('object-plugin');
+      // Check that bindings are not registered.
+      chrome.test.assertTrue(objectElement.canGoBack === undefined);
+      chrome.test.succeed();
+    },
+
+    function webViewNewWindow() {
+      var webview = document.createElement('webview');
+      webview.addEventListener('newwindow', function(e) {
+        e.preventDefault();
+        var newwebview = document.createElement('webview');
+        newwebview.addEventListener('loadstop', function(evt) {
+          // If the new window finishes loading, the test is successful.
+          chrome.test.succeed();
+        });
+        document.body.appendChild(newwebview);
+        // Attach the new window to the new <webview>.
+        e.window.attach(newwebview);
+      });
+      webview.setAttribute('src', windowOpenGuestURL);
+      document.body.appendChild(webview);
+    },
+
+    // This test verifies "first-call-wins" semantics. That is, the first call
+    // to perform an action on the new window takes the action and all
+    // subsequent calls throw an exception.
+    function webViewNewWindowTwoListeners() {
+      var webview = document.createElement('webview');
+      var error = false;
+      webview.addEventListener('newwindow', function(e) {
+        e.preventDefault();
+        var newwebview = document.createElement('webview');
+        document.body.appendChild(newwebview);
+        try {
+          e.window.attach(newwebview);
+        } catch (err) {
+          chrome.test.fail();
+        }
+      });
+      webview.addEventListener('newwindow', function(e) {
+        e.preventDefault();
+        try {
+          e.window.discard();
+        } catch (err) {
+          chrome.test.succeed();
+        }
+      });
+      webview.setAttribute('src', windowOpenGuestURL);
+      document.body.appendChild(webview);
+    },
+
+    // This test verifies that the attach can be called inline without
+    // preventing default.
+    function webViewNewWindowNoPreventDefault() {
+      var webview = document.createElement('webview');
+      webview.addEventListener('newwindow', function(e) {
+        var newwebview = document.createElement('webview');
+        document.body.appendChild(newwebview);
+        // Attach the new window to the new <webview>.
+        try {
+          e.window.attach(newwebview);
+          chrome.test.succeed();
+        } catch (err) {
+          chrome.test.fail();
+        }
+      });
+      webview.setAttribute('src', windowOpenGuestURL);
+      document.body.appendChild(webview);
+    },
+
+    function webViewNoReferrerLink() {
+      var webview = document.createElement('webview');
+      webview.addEventListener('newwindow', function(e) {
+        e.preventDefault();
+        var newwebview = document.createElement('webview');
+        newwebview.addEventListener('loadstop', function(evt) {
+          // If the new window finishes loading, the test is successful.
+          chrome.test.succeed();
+        });
+        document.body.appendChild(newwebview);
+        // Attach the new window to the new <webview>.
+        e.window.attach(newwebview);
+      });
+      webview.setAttribute('src', noReferrerGuestURL);
+      document.body.appendChild(webview);
+    },
+
   ]);
-};
+});

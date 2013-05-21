@@ -29,6 +29,7 @@ class GLContextCGL : public GLContext {
   virtual void* GetHandle() OVERRIDE;
   virtual void SetSwapInterval(int interval) OVERRIDE;
   virtual bool GetTotalGpuMemory(size_t* bytes) OVERRIDE;
+  virtual void SetSafeToForceGpuSwitch() OVERRIDE;
 
  protected:
   virtual ~GLContextCGL();
@@ -40,6 +41,10 @@ class GLContextCGL : public GLContext {
   GpuPreference gpu_preference_;
 
   CGLPixelFormatObj discrete_pixelformat_;
+
+  int screen_;
+  int renderer_id_;
+  bool safe_to_force_gpu_switch_;
 
   DISALLOW_COPY_AND_ASSIGN(GLContextCGL);
 };

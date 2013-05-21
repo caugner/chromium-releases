@@ -61,6 +61,9 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // Sets the global instance. Must be called before any calls to Get().
   static void Initialize();
 
+  // Returns true if the global instance has been initialized.
+  static bool IsInitialized();
+
   // Destroys the global instance.
   static void Shutdown();
 
@@ -116,7 +119,7 @@ class CHROMEOS_EXPORT NetworkStateHandler
 
   // Like ConnectedNetworkByType() but returns any matching network or NULL.
   // Mostly useful for mobile networks where there is generally only one
-  // netowrk. Note: O(N).
+  // network. Note: O(N).
   const NetworkState* FirstNetworkByType(const std::string& type) const;
 
   // Returns the hardware (MAC) address for the first connected network
@@ -135,6 +138,16 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // Requests a network scan. This may trigger updates to the network
   // list, which will trigger the appropriate observer calls.
   void RequestScan() const;
+
+  // Set the user initiated connecting network.
+  void SetConnectingNetwork(const std::string& service_path);
+
+  const std::string& connecting_network() const { return connecting_network_; }
+
+  // Generates a DictionaryValue of all NetworkState properties. Currently
+  // provided for debugging purposes only.
+  void GetNetworkStatePropertiesForTest(
+      base::DictionaryValue* dictionary) const;
 
   static const char kMatchTypeDefault[];
   static const char kMatchTypeWireless[];
@@ -215,6 +228,9 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // Logs an event and notifies observers.
   void OnDefaultNetworkChanged();
 
+  // Notifies observers and updates connecting_network_.
+  void NetworkPropertiesUpdated(const NetworkState* network);
+
   // Shill property handler instance, owned by this class.
   scoped_ptr<internal::ShillPropertyHandler> shill_property_handler_;
 
@@ -227,6 +243,12 @@ class CHROMEOS_EXPORT NetworkStateHandler
 
   // Keeps track of the default network for notifying observers when it changes.
   std::string default_network_path_;
+
+  // Convenience member to track the user initiated connecting network. Set
+  // externally when a connection is requested and cleared here when the state
+  // changes to something other than Connecting (after observers are notified).
+  // TODO(stevenjb): Move this to NetworkConfigurationHandler.
+  std::string connecting_network_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkStateHandler);
 };

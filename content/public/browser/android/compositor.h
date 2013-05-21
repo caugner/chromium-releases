@@ -60,6 +60,9 @@ class CONTENT_EXPORT Compositor {
   // Attaches the layer tree.
   virtual void SetRootLayer(scoped_refptr<cc::Layer> root) = 0;
 
+  // Set the scale factor from DIP to pixel.
+  virtual void setDeviceScaleFactor(float factor) = 0;
+
   // Set the output surface bounds.
   virtual void SetWindowBounds(const gfx::Size& size) = 0;
 
@@ -69,7 +72,11 @@ class CONTENT_EXPORT Compositor {
   virtual void SetVisible(bool visible) = 0;
 
   // Set the output surface handle which the compositor renders into.
+  // DEPRECATED: Use SetSurface() which takes a Java Surface object.
   virtual void SetWindowSurface(ANativeWindow* window) = 0;
+
+  // Set the output surface which the compositor renders into.
+  virtual void SetSurface(jobject surface) = 0;
 
   // Tells the view tree to assume a transparent background when rendering.
   virtual void SetHasTransparentBackground(bool flag) = 0;

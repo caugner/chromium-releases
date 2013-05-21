@@ -9,11 +9,11 @@
 #include <utility>
 #include <vector>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/public/browser/browser_thread.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
+#include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
 
@@ -146,7 +146,7 @@ std::set<std::string> DriveWebAppsRegistry::GetExtensionsForWebStoreApp(
 }
 
 void DriveWebAppsRegistry::UpdateFromFeed(
-    const google_apis::AccountMetadataFeed& metadata) {
+    const google_apis::AccountMetadata& metadata) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   url_to_name_map_.clear();

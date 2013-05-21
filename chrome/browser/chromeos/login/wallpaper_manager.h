@@ -8,7 +8,7 @@
 #include <string>
 
 #include "ash/desktop_background/desktop_background_controller.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -128,6 +128,14 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   void RemoveUserWallpaperInfo(const std::string& email);
 
   // Resizes |wallpaper| to a resolution which is nearest to |preferred_width|
+  // and |preferred_height| while maintaining aspect ratio.
+  bool ResizeWallpaper(const UserImage& wallpaper,
+                       ash::WallpaperLayout layout,
+                       int preferred_width,
+                       int preferred_height,
+                       scoped_refptr<base::RefCountedBytes>* output);
+
+  // Resizes |wallpaper| to a resolution which is nearest to |preferred_width|
   // and |preferred_height| while maintaining aspect ratio. And saves the
   // resized wallpaper to |path|.
   void ResizeAndSaveWallpaper(const UserImage& wallpaper,
@@ -143,6 +151,7 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // Saves custom wallpaper to file, post task to generate thumbnail and updates
   // local state preferences.
   void SetCustomWallpaper(const std::string& username,
+                          const std::string& file,
                           ash::WallpaperLayout layout,
                           User::WallpaperType type,
                           const UserImage& wallpaper);
@@ -203,6 +212,9 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
 
   // Clears all obsolete wallpaper prefs from old version wallpaper pickers.
   void ClearObsoleteWallpaperPrefs();
+
+  // Deletes everything else except |path| in the same directory.
+  void DeleteAllExcept(const base::FilePath& path);
 
   // Deletes a list of wallpaper files in |file_list|.
   void DeleteWallpaperInList(const std::vector<base::FilePath>& file_list);

@@ -26,11 +26,14 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // Creates a new match with a raw score calculated for the history item given
   // in |row|. First determines if the row qualifies by seeing if all of the
   // terms in |terms_vector| occur in |row|. If so, calculates a raw score.
-  // This raw score allows the results to be ordered and can be used to
+  // This raw score allows the matches to be ordered and can be used to
   // influence the final score calculated by the client of this index.
   // If the row does not qualify the raw score will be 0. |bookmark_service| is
   // used to determine if the match's URL is referenced by any bookmarks.
+  // |languages| is used to help parse/format the URL before looking for
+  // the terms.
   ScoredHistoryMatch(const URLRow& row,
+                     const std::string& languages,
                      const string16& lower_string,
                      const String16Vector& terms_vector,
                      const RowWordStarts& word_starts,
@@ -125,11 +128,10 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // field trial state.
   static void InitializeNewScoringField();
 
-  // Sets only_count_matches_at_word_boundaries based on the field trial state.
-  static void InitializeOnlyCountMatchesAtWordBoundariesField();
-
-  // Sets also_do_hup_like_scoring based on the field trial state.
-  static void InitializeAlsoDoHUPLikeScoringField();
+  // Sets also_do_hup_like_scoring and
+  // max_assigned_score_for_non_inlineable_matches based on the field
+  // trial state.
+  static void InitializeAlsoDoHUPLikeScoringFieldAndMaxScoreField();
 
   // End of functions used only in "new" scoring --------------------------
 
@@ -171,14 +173,19 @@ struct ScoredHistoryMatch : public history::HistoryMatch {
   // class as well (see boolean below).
   static bool use_new_scoring;
 
-  // If true, we ignore all matches that are in the middle of a word.
-  static bool only_count_matches_at_word_boundaries;
-
   // If true, assign raw scores to be max(whatever it normally would be,
   // a score that's similar to the score HistoryURL provider would assign).
   // This variable is set in the constructor by examining the field trial
   // state.
   static bool also_do_hup_like_scoring;
+
+  // The maximum score that can be assigned to non-inlineable matches.
+  // This is useful because often we want inlineable matches to come
+  // first (even if they don't sometimes score as well as non-inlineable
+  // matches) because if a non-inlineable match comes first than all matches
+  // will get demoted later in HistoryQuickProvider to non-inlineable scores.
+  // Set to -1 to indicate no maximum score.
+  static int max_assigned_score_for_non_inlineable_matches;
 };
 typedef std::vector<ScoredHistoryMatch> ScoredHistoryMatches;
 

@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
 
 namespace chromeos {
@@ -38,7 +38,7 @@ class CoreChromeOSOptionsHandler : public ::options::CoreOptionsHandler {
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  virtual void OnPreferenceChanged(PrefServiceBase* service,
+  virtual void OnPreferenceChanged(PrefService* service,
                                    const std::string& pref_name) OVERRIDE;
 
   // Notifies registered JS callbacks on ChromeOS setting change.

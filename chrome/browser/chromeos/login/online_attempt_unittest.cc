@@ -35,14 +35,14 @@ class OnlineAttemptTest : public testing::Test {
   OnlineAttemptTest()
       : message_loop_(MessageLoop::TYPE_UI),
         ui_thread_(BrowserThread::UI, &message_loop_),
-        state_("", "", "", "", "", User::USER_TYPE_REGULAR, false),
+        state_(UserCredentials(), "", "", "", User::USER_TYPE_REGULAR, false),
         resolver_(new MockAuthAttemptStateResolver) {
   }
 
   virtual ~OnlineAttemptTest() {}
 
   virtual void SetUp() {
-    attempt_.reset(new OnlineAttempt(false, &state_, resolver_.get()));
+    attempt_.reset(new OnlineAttempt(&state_, resolver_.get()));
   }
 
   virtual void TearDown() {
@@ -168,9 +168,9 @@ TEST_F(OnlineAttemptTest, HostedLoginRejected) {
   // This is how we inject fake URLFetcher objects, with a factory.
   MockURLFetcherFactory<HostedFetcher> factory;
 
-  TestAttemptState local_state("", "", "", "", "",
+  TestAttemptState local_state(UserCredentials(), "", "", "",
                                User::USER_TYPE_REGULAR, true);
-  attempt_.reset(new OnlineAttempt(false, &local_state, resolver_.get()));
+  attempt_.reset(new OnlineAttempt(&local_state, resolver_.get()));
   attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -193,9 +193,9 @@ TEST_F(OnlineAttemptTest, FullLogin) {
   // This is how we inject fake URLFetcher objects, with a factory.
   MockURLFetcherFactory<SuccessFetcher> factory;
 
-  TestAttemptState local_state("", "", "", "", "",
+  TestAttemptState local_state(UserCredentials(), "", "", "",
                                User::USER_TYPE_REGULAR, true);
-  attempt_.reset(new OnlineAttempt(false, &local_state, resolver_.get()));
+  attempt_.reset(new OnlineAttempt(&local_state, resolver_.get()));
   attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -203,7 +203,7 @@ TEST_F(OnlineAttemptTest, FullLogin) {
 
   MessageLoop::current()->Run();
 
-  EXPECT_EQ(LoginFailure::None(), local_state.online_outcome());
+  EXPECT_EQ(LoginFailure::LoginFailureNone(), local_state.online_outcome());
 }
 
 TEST_F(OnlineAttemptTest, LoginNetFailure) {
@@ -253,7 +253,7 @@ TEST_F(OnlineAttemptTest, TwoFactorSuccess) {
 
   // Force UI thread to finish tasks so I can verify |state_|.
   message_loop_.RunUntilIdle();
-  EXPECT_TRUE(GoogleServiceAuthError::None() ==
+  EXPECT_TRUE(GoogleServiceAuthError::AuthErrorNone() ==
               state_.online_outcome().error());
 }
 

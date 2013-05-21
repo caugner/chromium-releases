@@ -28,6 +28,10 @@ class EventGenerator;
 }  // namespace test
 }  // namespace aura
 
+namespace ui {
+class ScopedAnimationDurationScaleMode;
+}  // namespace ui
+
 namespace ash {
 namespace internal {
 class DisplayManager;
@@ -56,10 +60,6 @@ class AshTestBase : public testing::Test {
   // testing::Test:
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
-
-  // Change the primary display's configuration to use |bounds|
-  // and |scale|.
-  void ChangeDisplayConfig(float scale, const gfx::Rect& bounds);
 
   // Update the display configuration as given in |display_specs|.
   // See ash::test::DisplayManagerTestApi::UpdateDisplay for more details.
@@ -113,6 +113,8 @@ class AshTestBase : public testing::Test {
 #if defined(OS_WIN)
   scoped_ptr<TestMetroViewerProcessHost> metro_viewer_host_;
 #endif
+
+  scoped_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(AshTestBase);
 };

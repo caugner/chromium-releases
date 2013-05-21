@@ -21,7 +21,6 @@
 #include "chromeos/network/network_ip_config.h"
 #include "chromeos/network/network_util.h"
 #include "chromeos/network/onc/onc_constants.h"
-#include "googleurl/src/gurl.h"
 
 namespace base {
 class DictionaryValue;
@@ -563,9 +562,7 @@ class Network {
   }
   void set_name(const std::string& name) { name_ = name; }
   void set_mode(ConnectionMode mode) { mode_ = mode; }
-  void set_connecting() {
-    state_ = STATE_CONNECT_REQUESTED;
-  }
+  void set_connecting();
   void set_is_behind_portal_for_testing(bool value) {
     is_behind_portal_for_testing_ = value;
   }
@@ -875,6 +872,7 @@ class CellularNetwork : public WirelessNetwork {
   // Starts device activation process. Returns false if the device state does
   // not permit activation.
   virtual bool StartActivation();
+  virtual void CompleteActivation();
 
   bool activate_over_non_cellular_network() const {
     return activate_over_non_cellular_network_;
@@ -890,6 +888,7 @@ class CellularNetwork : public WirelessNetwork {
   const std::string& operator_name() const { return operator_name_; }
   const std::string& operator_code() const { return operator_code_; }
   const std::string& operator_country() const { return operator_country_; }
+  bool out_of_credits() const { return out_of_credits_; }
   const std::string& payment_url() const { return payment_url_; }
   const std::string& usage_url() const { return usage_url_; }
   const std::string& post_data() const { return post_data_; }
@@ -909,8 +908,6 @@ class CellularNetwork : public WirelessNetwork {
   // Returns whether the network needs to be activated.
   bool NeedsActivation() const;
 
-  // Return a URL for account info page.
-  GURL GetAccountInfoUrl() const;
   // Return a string representation of network technology.
   std::string GetNetworkTechnologyString() const;
   // Return a string representation of activation state.
@@ -959,6 +956,9 @@ class CellularNetwork : public WirelessNetwork {
   void set_operator_country(const std::string& operator_country) {
     operator_country_ = operator_country;
   }
+  void set_out_of_credits(bool out_of_credits) {
+    out_of_credits_ = out_of_credits;
+  }
   void set_payment_url(const std::string& payment_url) {
     payment_url_ = payment_url;
   }
@@ -975,6 +975,7 @@ class CellularNetwork : public WirelessNetwork {
   }
 
   bool activate_over_non_cellular_network_;
+  bool out_of_credits_;
   ActivationState activation_state_;
   NetworkTechnology network_technology_;
   NetworkRoamingState roaming_state_;
