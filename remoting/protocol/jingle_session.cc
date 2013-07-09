@@ -226,6 +226,20 @@ void JingleSession::Close() {
   CloseInternal(OK);
 }
 
+void JingleSession::AddPendingRemoteCandidates(Transport* channel,
+                                               const std::string& name) {
+  std::list<JingleMessage::NamedCandidate>::iterator it =
+      pending_remote_candidates_.begin();
+  while(it != pending_remote_candidates_.end()) {
+    if (it->name == name) {
+      channel->AddRemoteCandidate(it->candidate);
+      it = pending_remote_candidates_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
 void JingleSession::CreateStreamChannel(
       const std::string& name,
       const StreamChannelCallback& callback) {
@@ -237,6 +251,7 @@ void JingleSession::CreateStreamChannel(
       session_manager_->transport_factory_->CreateStreamTransport();
   channel->Initialize(name, this, channel_authenticator.Pass());
   channel->Connect(callback);
+  AddPendingRemoteCandidates(channel.get(), name);
   channels_[name] = channel.release();
 }
 
@@ -251,6 +266,7 @@ void JingleSession::CreateDatagramChannel(
       session_manager_->transport_factory_->CreateDatagramTransport();
   channel->Initialize(name, this, channel_authenticator.Pass());
   channel->Connect(callback);
+  AddPendingRemoteCandidates(channel.get(), name);
   channels_[name] = channel.release();
 }
 
@@ -323,7 +339,8 @@ void JingleSession::OnMessageResponse(
     CloseInternal(SIGNALING_TIMEOUT);
     return;
   } else {
-    const std::string& type = response->Attr(buzz::QName("", "type"));
+    const std::string& type =
+        response->Attr(buzz::QName(std::string(), "type"));
     if (type != "result") {
       LOG(ERROR) << "Received error in response to " << type_str
                  << " message: \"" << response->Str()
@@ -383,7 +400,7 @@ void JingleSession::OnTransportInfoResponse(IqRequest* request,
     return;
   }
 
-  const std::string& type = response->Attr(buzz::QName("", "type"));
+  const std::string& type = response->Attr(buzz::QName(std::string(), "type"));
   if (type != "result") {
     LOG(ERROR) << "Received error in response to transport-info message: \""
                << response->Str() << "\". Terminating the session.";
@@ -436,8 +453,7 @@ void JingleSession::OnAccept(const JingleMessage& message,
   const buzz::XmlElement* auth_message =
       message.description->authenticator_message();
   if (!auth_message) {
-    DLOG(WARNING) << "Received session-accept without authentication message "
-                  << auth_message->Str();
+    DLOG(WARNING) << "Received session-accept without authentication message ";
     CloseInternal(INCOMPATIBLE_PROTOCOL);
     return;
   }
@@ -485,11 +501,13 @@ void JingleSession::ProcessTransportInfo(const JingleMessage& message) {
            message.candidates.begin();
        it != message.candidates.end(); ++it) {
     ChannelsMap::iterator channel = channels_.find(it->name);
-    if (channel == channels_.end()) {
-      LOG(WARNING) << "Received candidate for unknown channel " << it->name;
-      continue;
+    if (channel != channels_.end()) {
+      channel->second->AddRemoteCandidate(it->candidate);
+    } else {
+      // Transport info was received before the channel was created.
+      // This could happen due to messages being reordered on the wire.
+      pending_remote_candidates_.push_back(*it);
     }
-    channel->second->AddRemoteCandidate(it->candidate);
   }
 }
 
@@ -553,8 +571,14 @@ bool JingleSession::InitializeConfigFromDescription(
 
 void JingleSession::ProcessAuthenticationStep() {
   DCHECK(CalledOnValidThread());
-  DCHECK_EQ(state_, CONNECTED);
   DCHECK_NE(authenticator_->state(), Authenticator::PROCESSING_MESSAGE);
+
+  if (state_ != CONNECTED) {
+    DCHECK(state_ == FAILED || state_ == CLOSED);
+    // The remote host closed the connection while the authentication was being
+    // processed asynchronously, nothing to do.
+    return;
+  }
 
   if (authenticator_->state() == Authenticator::MESSAGE_READY) {
     JingleMessage message(peer_jid_, JingleMessage::SESSION_INFO, session_id_);

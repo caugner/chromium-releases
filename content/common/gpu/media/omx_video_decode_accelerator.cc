@@ -28,14 +28,6 @@ enum { kNumPictureBuffers = 8 };
 // for more difficult frames.
 enum { kSyncPollDelayMs = 5 };
 
-// TODO(ihf): Remove this delay once issue 225563 is fixed.
-// This extra delay is added to wait after the (unreliable) sync object has
-// signaled completion (and before a picture buffer is returned to the decoder).
-// Experimentally tearing gets smaller and is mostly gone as we approach 20 ms.
-// I wanted to use 60ms, but that sometimes confuses html5 when switching to
-// 1080p. (Video stops.)
-enum { kExtraSyncDelayMs = 20 };
-
 void* omx_handle = NULL;
 
 typedef OMX_ERRORTYPE (*OMXInit)();
@@ -143,7 +135,7 @@ OmxVideoDecodeAccelerator::OmxVideoDecodeAccelerator(
     EGLDisplay egl_display, EGLContext egl_context,
     media::VideoDecodeAccelerator::Client* client,
     const base::Callback<bool(void)>& make_context_current)
-    : message_loop_(MessageLoop::current()),
+    : message_loop_(base::MessageLoop::current()),
       component_handle_(NULL),
       weak_this_(base::AsWeakPtr(this)),
       init_begun_(false),
@@ -158,7 +150,8 @@ OmxVideoDecodeAccelerator::OmxVideoDecodeAccelerator(
       egl_display_(egl_display),
       egl_context_(egl_context),
       make_context_current_(make_context_current),
-      client_(client),
+      client_ptr_factory_(client),
+      client_(client_ptr_factory_.GetWeakPtr()),
       codec_(UNKNOWN),
       h264_profile_(OMX_VIDEO_AVCProfileMax),
       component_name_is_nvidia_(false) {
@@ -170,7 +163,7 @@ OmxVideoDecodeAccelerator::OmxVideoDecodeAccelerator(
 }
 
 OmxVideoDecodeAccelerator::~OmxVideoDecodeAccelerator() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK(free_input_buffers_.empty());
   DCHECK_EQ(0, input_buffers_at_component_);
   DCHECK_EQ(0, output_buffers_at_component_);
@@ -186,7 +179,7 @@ static void InitParam(const OmxVideoDecodeAccelerator& dec, T* param) {
 }
 
 bool OmxVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   if (profile >= media::H264PROFILE_MIN && profile <= media::H264PROFILE_MAX) {
     codec_ = H264;
@@ -227,7 +220,7 @@ bool OmxVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile) {
 }
 
 bool OmxVideoDecodeAccelerator::CreateComponent() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   OMX_CALLBACKTYPE omx_accelerator_callbacks = {
     &OmxVideoDecodeAccelerator::EventHandler,
     &OmxVideoDecodeAccelerator::EmptyBufferCallback,
@@ -340,7 +333,7 @@ void OmxVideoDecodeAccelerator::Decode(
     const media::BitstreamBuffer& bitstream_buffer) {
   TRACE_EVENT1("Video Decoder", "OVDA::Decode",
                "Buffer id", bitstream_buffer.id());
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   if (current_state_change_ == RESETTING ||
       !queued_bitstream_buffers_.empty() ||
@@ -403,7 +396,7 @@ void OmxVideoDecodeAccelerator::Decode(
 
 void OmxVideoDecodeAccelerator::AssignPictureBuffers(
     const std::vector<media::PictureBuffer>& buffers) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   // If we are resetting/destroying/erroring, don't bother, as
   // OMX_FillThisBuffer will fail anyway. In case we're in the middle of
@@ -416,6 +409,9 @@ void OmxVideoDecodeAccelerator::AssignPictureBuffers(
     return;
 
   RETURN_ON_FAILURE(CanFillBuffer(), "Can't fill buffer", ILLEGAL_STATE,);
+  RETURN_ON_FAILURE((kNumPictureBuffers == buffers.size()),
+      "Failed to provide requested picture buffers. (Got " << buffers.size() <<
+      ", requested " << kNumPictureBuffers << ")", INVALID_ARGUMENT,);
 
   DCHECK_EQ(output_buffers_at_component_, 0);
   DCHECK_EQ(fake_output_buffers_.size(), 0U);
@@ -434,10 +430,6 @@ void OmxVideoDecodeAccelerator::AssignPictureBuffers(
         buffers[i].id(), OutputPicture(buffers[i], NULL, egl_image))).second);
   }
 
-  if (pictures_.size() < kNumPictureBuffers)
-    return;  // get all the buffers first.
-  DCHECK_EQ(pictures_.size(), kNumPictureBuffers);
-
   // These do their own RETURN_ON_FAILURE dances.
   if (!AllocateOutputBuffers())
     return;
@@ -446,7 +438,7 @@ void OmxVideoDecodeAccelerator::AssignPictureBuffers(
 }
 
 void OmxVideoDecodeAccelerator::ReusePictureBuffer(int32 picture_buffer_id) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   TRACE_EVENT1("Video Decoder", "OVDA::ReusePictureBuffer",
                "Picture id", picture_buffer_id);
   scoped_ptr<PictureSyncObject> egl_sync_obj(
@@ -459,30 +451,26 @@ void OmxVideoDecodeAccelerator::ReusePictureBuffer(int32 picture_buffer_id) {
 void OmxVideoDecodeAccelerator::CheckPictureStatus(
     int32 picture_buffer_id,
     scoped_ptr<PictureSyncObject> egl_sync_obj) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   // It's possible for this task to never run if the message loop is
   // stopped. In that case we may never call QueuePictureBuffer().
   // This is fine though, because all pictures, irrespective of their state,
   // are in pictures_ map and that's what will be used to do the clean up.
   if (!egl_sync_obj->IsSynced()) {
-    MessageLoop::current()->PostDelayedTask(FROM_HERE, base::Bind(
+    base::MessageLoop::current()->PostDelayedTask(FROM_HERE, base::Bind(
         &OmxVideoDecodeAccelerator::CheckPictureStatus, weak_this_,
         picture_buffer_id, base::Passed(&egl_sync_obj)),
         base::TimeDelta::FromMilliseconds(kSyncPollDelayMs));
     return;
   }
-  // TODO(ihf): Directly call again once the driver in issue 225563 is fixed.
-  // Synced successfully. Queue the buffer for reuse with some delay to cover
-  // for bad sync object signaling.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE, base::Bind(
-      &OmxVideoDecodeAccelerator::QueuePictureBuffer, weak_this_,
-      picture_buffer_id),
-      base::TimeDelta::FromMilliseconds(kExtraSyncDelayMs));
+
+  // Synced successfully. Queue the buffer for reuse.
+  QueuePictureBuffer(picture_buffer_id);
 }
 
 void OmxVideoDecodeAccelerator::QueuePictureBuffer(int32 picture_buffer_id) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   // During port-flushing, do not call OMX FillThisBuffer.
   if (current_state_change_ == RESETTING) {
@@ -510,7 +498,7 @@ void OmxVideoDecodeAccelerator::QueuePictureBuffer(int32 picture_buffer_id) {
 }
 
 void OmxVideoDecodeAccelerator::Flush() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK_EQ(current_state_change_, NO_TRANSITION);
   DCHECK_EQ(client_state_, OMX_StateExecuting);
   current_state_change_ = FLUSHING;
@@ -519,7 +507,7 @@ void OmxVideoDecodeAccelerator::Flush() {
 }
 
 void OmxVideoDecodeAccelerator::OnReachedEOSInFlushing() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK_EQ(client_state_, OMX_StateExecuting);
   current_state_change_ = NO_TRANSITION;
   if (client_)
@@ -527,7 +515,7 @@ void OmxVideoDecodeAccelerator::OnReachedEOSInFlushing() {
 }
 
 void OmxVideoDecodeAccelerator::FlushIOPorts() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   // Flush input port first.
   if (!SendCommandToPort(OMX_CommandFlush, input_port_))
@@ -535,20 +523,20 @@ void OmxVideoDecodeAccelerator::FlushIOPorts() {
 }
 
 void OmxVideoDecodeAccelerator::InputPortFlushDone() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK_EQ(input_buffers_at_component_, 0);
   if (!SendCommandToPort(OMX_CommandFlush, output_port_))
     return;
 }
 
 void OmxVideoDecodeAccelerator::OutputPortFlushDone() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK_EQ(output_buffers_at_component_, 0);
   BeginTransitionToState(OMX_StateExecuting);
 }
 
 void OmxVideoDecodeAccelerator::Reset() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK_EQ(current_state_change_, NO_TRANSITION);
   DCHECK_EQ(client_state_, OMX_StateExecuting);
   current_state_change_ = RESETTING;
@@ -556,9 +544,10 @@ void OmxVideoDecodeAccelerator::Reset() {
 }
 
 void OmxVideoDecodeAccelerator::Destroy() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   scoped_ptr<OmxVideoDecodeAccelerator> deleter(this);
+  client_ptr_factory_.InvalidateWeakPtrs();
 
   if (current_state_change_ == ERRORING ||
       current_state_change_ == DESTROYING) {
@@ -581,14 +570,13 @@ void OmxVideoDecodeAccelerator::Destroy() {
          client_state_ == OMX_StateIdle ||
          client_state_ == OMX_StatePause);
   current_state_change_ = DESTROYING;
-  client_ = NULL;
   BeginTransitionToState(OMX_StateIdle);
   BusyLoopInDestroying(deleter.Pass());
 }
 
 void OmxVideoDecodeAccelerator::BeginTransitionToState(
     OMX_STATETYPE new_state) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   if (new_state != OMX_StateInvalid)
     DCHECK_NE(current_state_change_, NO_TRANSITION);
   if (current_state_change_ == ERRORING)
@@ -708,7 +696,7 @@ void OmxVideoDecodeAccelerator::BusyLoopInDestroying(
   // Can't use PostDelayedTask here because MessageLoop doesn't drain delayed
   // tasks.  Instead we sleep for 5ms.  Really.
   base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(5));
-  MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+  base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
       &OmxVideoDecodeAccelerator::BusyLoopInDestroying,
       base::Unretained(this), base::Passed(&self)));
 }
@@ -753,14 +741,14 @@ void OmxVideoDecodeAccelerator::ShutdownComponent() {
 
 void OmxVideoDecodeAccelerator::StopOnError(
     media::VideoDecodeAccelerator::Error error) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   if (current_state_change_ == ERRORING)
     return;
 
   if (client_ && init_begun_)
     client_->NotifyError(error);
-  client_ = NULL;
+  client_ptr_factory_.InvalidateWeakPtrs();
 
   if (client_state_ == OMX_StateInvalid || client_state_ == OMX_StateMax)
       return;
@@ -770,7 +758,7 @@ void OmxVideoDecodeAccelerator::StopOnError(
 }
 
 bool OmxVideoDecodeAccelerator::AllocateInputBuffers() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   for (int i = 0; i < input_buffer_count_; ++i) {
     OMX_BUFFERHEADERTYPE* buffer;
     // While registering the buffer header we use fake buffer information
@@ -810,7 +798,7 @@ bool OmxVideoDecodeAccelerator::AllocateFakeOutputBuffers() {
 }
 
 bool OmxVideoDecodeAccelerator::AllocateOutputBuffers() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   DCHECK(!pictures_.empty());
   for (OutputPictureById::iterator it = pictures_.begin();
@@ -832,7 +820,7 @@ bool OmxVideoDecodeAccelerator::AllocateOutputBuffers() {
 }
 
 void OmxVideoDecodeAccelerator::FreeOMXBuffers() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   bool failure_seen = false;
   while (!free_input_buffers_.empty()) {
     OMX_BUFFERHEADERTYPE* omx_buffer = free_input_buffers_.front();
@@ -877,15 +865,17 @@ void OmxVideoDecodeAccelerator::FreeOMXBuffers() {
   fake_output_buffers_.clear();
 
   // Dequeue pending queued_picture_buffer_ids_
-  for (size_t i = 0; i < queued_picture_buffer_ids_.size(); ++i)
-    client_->DismissPictureBuffer(queued_picture_buffer_ids_[i]);
+  if (client_) {
+    for (size_t i = 0; i < queued_picture_buffer_ids_.size(); ++i)
+      client_->DismissPictureBuffer(queued_picture_buffer_ids_[i]);
+  }
   queued_picture_buffer_ids_.clear();
 
   RETURN_ON_FAILURE(!failure_seen, "OMX_FreeBuffer", PLATFORM_FAILURE,);
 }
 
 void OmxVideoDecodeAccelerator::OnOutputPortDisabled() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   OMX_PARAM_PORTDEFINITIONTYPE port_format;
   InitParam(*this, &port_format);
   port_format.nPortIndex = output_port_;
@@ -913,7 +903,7 @@ void OmxVideoDecodeAccelerator::OnOutputPortDisabled() {
 }
 
 void OmxVideoDecodeAccelerator::OnOutputPortEnabled() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   if (current_state_change_ == RESETTING) {
     for (OutputPictureById::iterator it = pictures_.begin();
@@ -952,7 +942,7 @@ void OmxVideoDecodeAccelerator::FillBufferDoneTask(
   TRACE_EVENT2("Video Decoder", "OVDA::FillBufferDoneTask",
                "Buffer id", buffer->nTimeStamp,
                "Picture id", picture_buffer_id);
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK_GT(output_buffers_at_component_, 0);
   --output_buffers_at_component_;
 
@@ -1001,7 +991,7 @@ void OmxVideoDecodeAccelerator::EmptyBufferDoneTask(
     OMX_BUFFERHEADERTYPE* buffer) {
   TRACE_EVENT1("Video Decoder", "OVDA::EmptyBufferDoneTask",
                "Buffer id", buffer->nTimeStamp);
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   DCHECK_GT(input_buffers_at_component_, 0);
   free_input_buffers_.push(buffer);
   input_buffers_at_component_--;
@@ -1022,7 +1012,7 @@ void OmxVideoDecodeAccelerator::EmptyBufferDoneTask(
 }
 
 void OmxVideoDecodeAccelerator::DispatchStateReached(OMX_STATETYPE reached) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   switch (current_state_change_) {
     case INITIALIZING:
       switch (reached) {
@@ -1086,7 +1076,7 @@ void OmxVideoDecodeAccelerator::DispatchStateReached(OMX_STATETYPE reached) {
 void OmxVideoDecodeAccelerator::EventHandlerCompleteTask(OMX_EVENTTYPE event,
                                                          OMX_U32 data1,
                                                          OMX_U32 data2) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   switch (event) {
     case OMX_EventCmdComplete:
       switch (data1) {
@@ -1249,7 +1239,7 @@ OMX_ERRORTYPE OmxVideoDecodeAccelerator::FillBufferCallback(
 }
 
 bool OmxVideoDecodeAccelerator::CanFillBuffer() {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   const CurrentStateChange csc = current_state_change_;
   const OMX_STATETYPE cs = client_state_;
   return (csc != DESTROYING && csc != ERRORING && csc != RESETTING) &&
@@ -1258,7 +1248,7 @@ bool OmxVideoDecodeAccelerator::CanFillBuffer() {
 
 bool OmxVideoDecodeAccelerator::SendCommandToPort(
     OMX_COMMANDTYPE cmd, int port_index) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
+  DCHECK_EQ(message_loop_, base::MessageLoop::current());
   OMX_ERRORTYPE result = OMX_SendCommand(component_handle_,
                                          cmd, port_index, 0);
   RETURN_ON_OMX_FAILURE(result, "SendCommand() failed" << cmd,

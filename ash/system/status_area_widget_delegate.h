@@ -38,7 +38,6 @@ class ASH_EXPORT StatusAreaWidgetDelegate : public views::AccessiblePaneView,
   virtual View* GetDefaultFocusableChild() OVERRIDE;
 
   // Overridden from views::View:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
 
@@ -51,7 +50,8 @@ class ASH_EXPORT StatusAreaWidgetDelegate : public views::AccessiblePaneView,
 
  protected:
   // Overridden from views::View:
-  virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
+  virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
+  virtual void ChildVisibilityChanged(views::View* child) OVERRIDE;
 
  private:
   void UpdateWidgetSize();

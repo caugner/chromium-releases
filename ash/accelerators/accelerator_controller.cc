@@ -12,6 +12,7 @@
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/ash_switches.h"
 #include "ash/caps_lock_delegate.h"
+#include "ash/debug.h"
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/desktop_background/user_wallpaper_delegate.h"
 #include "ash/display/display_controller.h"
@@ -26,6 +27,7 @@
 #include "ash/root_window_controller.h"
 #include "ash/rotator/screen_rotation.h"
 #include "ash/screenshot_delegate.h"
+#include "ash/session_state_delegate.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
@@ -59,6 +61,7 @@
 #include "ui/compositor/layer_animator.h"
 #include "ui/gfx/screen.h"
 #include "ui/oak/oak.h"
+#include "ui/views/controls/webview/webview.h"
 #include "ui/views/debug_utils.h"
 #include "ui/views/widget/widget.h"
 
@@ -71,11 +74,6 @@ namespace ash {
 namespace {
 
 using internal::DisplayInfo;
-
-// Factor of magnification scale. For example, when this value is 1.189, scale
-// value will be changed x1.000, x1.189, x1.414, x1.681, x2.000, ...
-// Note: this value is 2.0 ^ (1 / 4).
-const float kMagnificationFactor = 1.18920712f;
 
 bool DebugShortcutsEnabled() {
 #if defined(NDEBUG)
@@ -99,9 +97,39 @@ void HandleCycleWindowLinear(CycleDirection direction) {
         window_cycle_controller()->HandleLinearCycleWindow();
 }
 
+bool HandleAccessibleFocusCycle(bool reverse) {
+  if (!Shell::GetInstance()->delegate()->IsSpokenFeedbackEnabled())
+    return false;
+  aura::Window* active_window = ash::wm::GetActiveWindow();
+  if (!active_window)
+    return false;
+  views::Widget* widget =
+      views::Widget::GetWidgetForNativeWindow(active_window);
+  if (!widget)
+    return false;
+  views::FocusManager* focus_manager = widget->GetFocusManager();
+  if (!focus_manager)
+    return false;
+  views::View* view = focus_manager->GetFocusedView();
+  if (!view)
+    return false;
+  if (view->GetClassName() == views::WebView::kViewClassName)
+    return false;
+
+  focus_manager->AdvanceFocus(reverse);
+  return true;
+}
+
+void HandleSilenceSpokenFeedback() {
+  if (!Shell::GetInstance()->delegate()->IsSpokenFeedbackEnabled())
+    return;
+
+  Shell::GetInstance()->delegate()->SilenceSpokenFeedback();
+}
+
 #if defined(OS_CHROMEOS)
 bool HandleLock() {
-  Shell::GetInstance()->delegate()->LockScreen();
+  Shell::GetInstance()->session_state_delegate()->LockScreen();
   return true;
 }
 
@@ -124,17 +152,14 @@ bool HandleToggleSpokenFeedback() {
 #endif  // defined(OS_CHROMEOS)
 
 bool HandleRotatePaneFocus(Shell::Direction direction) {
-  if (!Shell::GetInstance()->delegate()->RotatePaneFocus(direction)) {
-    // No browser window is available. Focus the launcher.
-    Shell* shell = Shell::GetInstance();
-    switch (direction) {
-      case Shell::FORWARD:
-        shell->focus_cycler()->RotateFocus(internal::FocusCycler::FORWARD);
-        break;
-      case Shell::BACKWARD:
-        shell->focus_cycler()->RotateFocus(internal::FocusCycler::BACKWARD);
-        break;
-    }
+  Shell* shell = Shell::GetInstance();
+  switch (direction) {
+    case Shell::FORWARD:
+      shell->focus_cycler()->RotateFocus(internal::FocusCycler::FORWARD);
+      break;
+    case Shell::BACKWARD:
+      shell->focus_cycler()->RotateFocus(internal::FocusCycler::BACKWARD);
+      break;
   }
   return true;
 }
@@ -179,7 +204,7 @@ bool HandleScaleUI(bool up) {
     return false;
   const DisplayInfo& display_info = display_manager->GetDisplayInfo(display_id);
   float next_scale =
-      internal::DisplayManager::GetNextUIScale(display_info.ui_scale(), up);
+      internal::DisplayManager::GetNextUIScale(display_info, up);
   display_manager->SetDisplayUIScale(display_id, next_scale);
   return true;
 }
@@ -227,18 +252,17 @@ bool HandleToggleRootWindowFullScreen() {
 // Magnify the screen
 bool HandleMagnifyScreen(int delta_index) {
   if (ash::Shell::GetInstance()->magnification_controller()->IsEnabled()) {
-    // TODO(yoshiki): Create the class like MagnifierStepScaleController, and
-    // move the following scale control to it.
+    // TODO(yoshiki): Move the following logic to MagnificationController.
     float scale =
         ash::Shell::GetInstance()->magnification_controller()->GetScale();
-    // Calculate rounded logarithm (base kMagnificationFactor) of scale.
+    // Calculate rounded logarithm (base kMagnificationScaleFactor) of scale.
     int scale_index =
-        std::floor(std::log(scale) / std::log(kMagnificationFactor) + 0.5);
+        std::floor(std::log(scale) / std::log(kMagnificationScaleFactor) + 0.5);
 
     int new_scale_index = std::max(0, std::min(8, scale_index + delta_index));
 
     ash::Shell::GetInstance()->magnification_controller()->
-        SetScale(std::pow(kMagnificationFactor, new_scale_index), true);
+        SetScale(std::pow(kMagnificationScaleFactor, new_scale_index), true);
   } else if (ash::Shell::GetInstance()->
              partial_magnification_controller()->is_enabled()) {
     float scale = delta_index > 0 ? kDefaultPartialMagnifiedScale : 1;
@@ -373,6 +397,10 @@ void AcceleratorController::Init() {
 
   RegisterAccelerators(kAcceleratorData, kAcceleratorDataLength);
 
+#if !defined(NDEBUG)
+  RegisterAccelerators(kDesktopAcceleratorData, kDesktopAcceleratorDataLength);
+#endif
+
   if (DebugShortcutsEnabled())
     RegisterAccelerators(kDebugAcceleratorData, kDebugAcceleratorDataLength);
 
@@ -399,7 +427,7 @@ void AcceleratorController::UnregisterAll(ui::AcceleratorTarget* target) {
 }
 
 bool AcceleratorController::Process(const ui::Accelerator& accelerator) {
-  if (ime_control_delegate_.get()) {
+  if (ime_control_delegate_) {
     return accelerator_manager_->Process(
         ime_control_delegate_->RemapAccelerator(accelerator));
   }
@@ -427,16 +455,12 @@ bool AcceleratorController::IsReservedAccelerator(
 bool AcceleratorController::PerformAction(int action,
                                           const ui::Accelerator& accelerator) {
   ash::Shell* shell = ash::Shell::GetInstance();
-  bool at_login_screen = false;
-#if defined(OS_CHROMEOS)
-  at_login_screen = !shell->delegate()->IsSessionStarted();
-#endif
-  if (at_login_screen &&
+  if (!shell->session_state_delegate()->IsActiveUserSessionStarted() &&
       actions_allowed_at_login_screen_.find(action) ==
       actions_allowed_at_login_screen_.end()) {
     return false;
   }
-  if (shell->IsScreenLocked() &&
+  if (shell->session_state_delegate()->IsScreenLocked() &&
       actions_allowed_at_lock_screen_.find(action) ==
       actions_allowed_at_lock_screen_.end()) {
     return false;
@@ -478,6 +502,10 @@ bool AcceleratorController::PerformAction(int action,
   // function might be called *twice*, via BrowserView::PreHandleKeyboardEvent
   // and BrowserView::HandleKeyboardEvent, for a single accelerator press.
   switch (action) {
+    case ACCESSIBLE_FOCUS_NEXT:
+      return HandleAccessibleFocusCycle(false);
+    case ACCESSIBLE_FOCUS_PREVIOUS:
+      return HandleAccessibleFocusCycle(true);
     case CYCLE_BACKWARD_MRU:
       if (key_code == ui::VKEY_TAB)
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_PREVWINDOW_TAB);
@@ -512,6 +540,9 @@ bool AcceleratorController::PerformAction(int action,
       return HandleFileManager(false /* as_dialog */);
     case OPEN_CROSH:
       return HandleCrosh();
+    case SILENCE_SPOKEN_FEEDBACK:
+      HandleSilenceSpokenFeedback();
+      break;
     case SWAP_PRIMARY_DISPLAY:
       Shell::GetInstance()->display_controller()->SwapPrimaryDisplay();
       return true;
@@ -520,18 +551,24 @@ bool AcceleratorController::PerformAction(int action,
     case TOGGLE_WIFI:
       Shell::GetInstance()->system_tray_delegate()->ToggleWifi();
       return true;
-    case TOUCH_HUD_CLEAR:
-      if (Shell::GetInstance()->touch_observer_hud()) {
-        Shell::GetInstance()->touch_observer_hud()->Clear();
+    case TOUCH_HUD_CLEAR: {
+      internal::RootWindowController* controller =
+          internal::RootWindowController::ForActiveRootWindow();
+      if (controller->touch_observer_hud()) {
+        controller->touch_observer_hud()->Clear();
         return true;
       }
       return false;
-    case TOUCH_HUD_MODE_CHANGE:
-      if (Shell::GetInstance()->touch_observer_hud()) {
-        Shell::GetInstance()->touch_observer_hud()->ChangeToNextMode();
+    }
+    case TOUCH_HUD_MODE_CHANGE: {
+      internal::RootWindowController* controller =
+          internal::RootWindowController::ForActiveRootWindow();
+      if (controller->touch_observer_hud()) {
+        controller->touch_observer_hud()->ChangeToNextMode();
         return true;
       }
       return false;
+    }
     case DISABLE_GPU_WATCHDOG:
       content::GpuDataManager::GetInstance()->DisableGpuWatchdog();
       return true;
@@ -564,7 +601,7 @@ bool AcceleratorController::PerformAction(int action,
       // Return true to prevent propagation of the key event.
       return true;
     case TAKE_PARTIAL_SCREENSHOT:
-      if (screenshot_delegate_.get()) {
+      if (screenshot_delegate_) {
         ash::PartialScreenshotView::StartPartialScreenshot(
             screenshot_delegate_.get());
       }
@@ -616,20 +653,20 @@ bool AcceleratorController::PerformAction(int action,
       shell->caps_lock_delegate()->ToggleCapsLock();
       return true;
     case BRIGHTNESS_DOWN:
-      if (brightness_control_delegate_.get())
+      if (brightness_control_delegate_)
         return brightness_control_delegate_->HandleBrightnessDown(accelerator);
       break;
     case BRIGHTNESS_UP:
-      if (brightness_control_delegate_.get())
+      if (brightness_control_delegate_)
         return brightness_control_delegate_->HandleBrightnessUp(accelerator);
       break;
     case KEYBOARD_BRIGHTNESS_DOWN:
-      if (keyboard_brightness_control_delegate_.get())
+      if (keyboard_brightness_control_delegate_)
         return keyboard_brightness_control_delegate_->
             HandleKeyboardBrightnessDown(accelerator);
       break;
     case KEYBOARD_BRIGHTNESS_UP:
-      if (keyboard_brightness_control_delegate_.get())
+      if (keyboard_brightness_control_delegate_)
         return keyboard_brightness_control_delegate_->
             HandleKeyboardBrightnessUp(accelerator);
       break;
@@ -708,17 +745,17 @@ bool AcceleratorController::PerformAction(int action,
         // TODO(mazda): Fix crbug.com/158217
         return false;
       }
-      if (ime_control_delegate_.get())
+      if (ime_control_delegate_)
         return ime_control_delegate_->HandleNextIme();
       break;
     case PREVIOUS_IME:
-      if (ime_control_delegate_.get())
+      if (ime_control_delegate_)
         return ime_control_delegate_->HandlePreviousIme();
       break;
     case PRINT_UI_HIERARCHIES:
       return HandlePrintUIHierarchies();
     case SWITCH_IME:
-      if (ime_control_delegate_.get())
+      if (ime_control_delegate_)
         return ime_control_delegate_->HandleSwitchIme(accelerator);
       break;
     case SELECT_WIN_0:
@@ -774,10 +811,20 @@ bool AcceleratorController::PerformAction(int action,
       // crbug.com/131709, which is a crashing issue related to minimizing
       // full screen pepper window.
       if (!wm::IsWindowFullscreen(window) && wm::CanMinimizeWindow(window)) {
+        ash::Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+            ash::UMA_MINIMIZE_PER_KEY);
         wm::MinimizeWindow(window);
         return true;
       }
       break;
+    }
+    case TOGGLE_FULLSCREEN: {
+      if (key_code == ui::VKEY_MEDIA_LAUNCH_APP2) {
+        shell->delegate()->RecordUserMetricsAction(
+            UMA_ACCEL_FULLSCREEN_F4);
+      }
+      shell->delegate()->ToggleFullscreen();
+      return true;
     }
     case TOGGLE_MAXIMIZED: {
       if (key_code == ui::VKEY_MEDIA_LAUNCH_APP2) {
@@ -809,8 +856,17 @@ bool AcceleratorController::PerformAction(int action,
       return HandleToggleDesktopBackgroundMode();
     case TOGGLE_ROOT_WINDOW_FULL_SCREEN:
       return HandleToggleRootWindowFullScreen();
-    case DISPLAY_TOGGLE_SCALE:
+    case DEBUG_TOGGLE_DEVICE_SCALE_FACTOR:
       internal::DisplayManager::ToggleDisplayScaleFactor();
+      return true;
+    case DEBUG_TOGGLE_SHOW_DEBUG_BORDERS:
+      ash::debug::ToggleShowDebugBorders();
+      return true;
+    case DEBUG_TOGGLE_SHOW_FPS_COUNTER:
+      ash::debug::ToggleShowFpsCounter();
+      return true;
+    case DEBUG_TOGGLE_SHOW_PAINT_RECTS:
+      ash::debug::ToggleShowPaintRects();
       return true;
     case MAGNIFY_SCREEN_ZOOM_IN:
       return HandleMagnifyScreen(1);

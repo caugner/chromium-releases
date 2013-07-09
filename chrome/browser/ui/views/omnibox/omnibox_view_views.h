@@ -17,7 +17,7 @@
 #include "ui/views/controls/textfield/textfield_controller.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#include "chromeos/ime/input_method_manager.h"
 #endif
 
 class LocationBarView;
@@ -107,7 +107,6 @@ class OmniboxViewViews
   virtual views::View* AddToView(views::View* parent) OVERRIDE;
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
   virtual gfx::Font GetFont() OVERRIDE;
-  virtual int WidthOfTextAfterCursor() OVERRIDE;
 
   // views::TextfieldController:
   virtual void ContentsChanged(views::Textfield* sender,
@@ -118,6 +117,7 @@ class OmniboxViewViews
   virtual void OnAfterUserAction(views::Textfield* sender) OVERRIDE;
   virtual void OnAfterCutOrCopy() OVERRIDE;
   virtual void OnWriteDragData(ui::OSExchangeData* data) OVERRIDE;
+  virtual void OnGetDragOperationsForTextfield(int* drag_operations) OVERRIDE;
   virtual void AppendDropFormats(
       int* formats,
       std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
@@ -170,8 +170,7 @@ class OmniboxViewViews
 
   ToolbarModel::SecurityLevel security_level_;
 
-  // Selection at the point where the user started using the
-  // arrows to move around in the popup.
+  // Selection persisted across temporary text changes, like popup suggestions.
   ui::Range saved_temporary_selection_;
 
   // Tracking state before and after a possible change.

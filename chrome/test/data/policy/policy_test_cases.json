@@ -1715,6 +1715,14 @@
     ]
   },
 
+  "AllowScreenWakeLocks": {
+    "os": ["chromeos"],
+    "test_policy": { "AllowScreenWakeLocks": false },
+    "pref_mappings": [
+      { "pref": "power.allow_screen_wake_locks" }
+    ]
+  },
+
   "TermsOfServiceURL": {
     "os": ["chromeos"],
     "test_policy": { "TermsOfServiceURL": "http://www.example.com/terms_of_service.txt" },
@@ -1733,6 +1741,31 @@
         ]
       }
     ]
+  },
+
+  "AttestationEnabledForUser": {
+    "os": ["chromeos"],
+    "test_policy": { "AttestationEnabledForUser": true },
+    "pref_mappings": [
+      { "pref": "attestation.enabled" }
+    ]
+  },
+
+  "AttestationExtensionWhitelist": {
+    "os": ["chromeos"],
+    "test_policy": { "AttestationExtensionWhitelist": ["test_ext_id1", "test_ext_id2"] },
+    "pref_mappings": [
+      { "pref": "attestation.extension_whitelist" }
+    ]
+  },
+
+  "ContentPackDefaultFilteringBehavior": {
+  },
+
+  "ContentPackManualBehaviorHosts": {
+  },
+
+  "ContentPackManualBehaviorURLs": {
   },
 
   "----- Chrome OS device policies ---------------------------------------": {},
@@ -1843,16 +1876,25 @@
   "DeviceLocalAccountAutoLoginDelay": {
   },
 
+  "DeviceLocalAccountAutoLoginBailoutEnabled": {
+  },
+
   "DeviceAllowRedeemChromeOsRegistrationOffers": {
   },
 
   "DeviceStartUpFlags": {
   },
 
+  "DeviceVariationsRestrictParameter" : {
+  },
+
   "UptimeLimit": {
   },
 
   "RebootAfterUpdate": {
+  },
+
+  "AttestationEnabledForDevice": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

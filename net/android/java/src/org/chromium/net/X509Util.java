@@ -150,7 +150,15 @@ public class X509Util {
      * TrustManager and that change is shipped to a large majority of Android users.
      */
     static boolean verifyKeyUsage(X509Certificate certificate) throws CertificateException {
-        List<String> ekuOids = certificate.getExtendedKeyUsage();
+        List<String> ekuOids;
+        try {
+            ekuOids = certificate.getExtendedKeyUsage();
+        } catch (NullPointerException e) {
+            // getExtendedKeyUsage() can crash due to an Android platform bug. This probably
+            // happens when the EKU extension data is malformed so return false here.
+            // See http://crbug.com/233610
+            return false;
+        }
         if (ekuOids == null)
             return true;
 
@@ -195,7 +203,7 @@ public class X509Util {
         try {
             serverCertificates[0].checkValidity();
             if (!verifyKeyUsage(serverCertificates[0]))
-                return CertVerifyResultAndroid.VERIFY_FAILED;
+                return CertVerifyResultAndroid.VERIFY_INCORRECT_KEY_USAGE;
         } catch (CertificateExpiredException e) {
             return CertVerifyResultAndroid.VERIFY_EXPIRED;
         } catch (CertificateNotYetValidException e) {

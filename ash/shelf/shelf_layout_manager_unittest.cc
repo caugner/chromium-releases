@@ -13,9 +13,9 @@
 #include "ash/launcher/launcher_view.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
+#include "ash/session_state_delegate.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
@@ -98,6 +98,11 @@ class ShelfDragCallback {
     gfx::Rect shelf_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
     EXPECT_EQ(not_visible_bounds_.bottom(), shelf_bounds.bottom());
     EXPECT_EQ(visible_bounds_.bottom(), shelf_bounds.bottom());
+
+    // if the shelf is being dimmed test dimmer bounds as well.
+    if (GetShelfWidget()->GetDimsShelf())
+      EXPECT_EQ(GetShelfWidget()->GetWindowBoundsInScreen(),
+                GetShelfWidget()->GetDimmerBoundsForTest());
 
     // The shelf should never be smaller than the hidden state.
     EXPECT_GE(shelf_bounds.height(), not_visible_bounds_.height());
@@ -497,12 +502,12 @@ TEST_F(ShelfLayoutManagerTest, VisibleWhenLockScreenShowing) {
   lock_widget->Show();
 
   // Lock the screen.
-  Shell::GetInstance()->delegate()->LockScreen();
+  Shell::GetInstance()->session_state_delegate()->LockScreen();
   shelf->UpdateVisibilityState();
   // Showing a widget in the lock screen should force the shelf to be visibile.
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
 
-  Shell::GetInstance()->delegate()->UnlockScreen();
+  Shell::GetInstance()->session_state_delegate()->UnlockScreen();
   shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
 }
@@ -550,6 +555,150 @@ TEST_F(ShelfLayoutManagerTest, SetAutoHideBehavior) {
   EXPECT_EQ(Shell::GetScreen()->GetDisplayNearestWindow(
                 window).work_area().bottom(),
             widget->GetWorkAreaBoundsInScreen().bottom());
+}
+
+// Basic assertions around the dimming of the shelf.
+TEST_F(ShelfLayoutManagerTest, TestDimmingBehavior) {
+  // Since ShelfLayoutManager queries for mouse location, move the mouse so
+  // it isn't over the shelf.
+  aura::test::EventGenerator generator(
+      Shell::GetPrimaryRootWindow(), gfx::Point());
+  generator.MoveMouseTo(0, 0);
+
+  ShelfLayoutManager* shelf = GetShelfLayoutManager();
+  shelf->shelf_widget()->DisableDimmingAnimationsForTest();
+
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.context = CurrentContext();
+  // Widget is now owned by the parent window.
+  widget->Init(params);
+  widget->Show();
+  aura::Window* window = widget->GetNativeWindow();
+  gfx::Rect display_bounds(
+      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds());
+
+  gfx::Point off_shelf = display_bounds.CenterPoint();
+  gfx::Point on_shelf =
+      shelf->shelf_widget()->GetWindowBoundsInScreen().CenterPoint();
+
+  // Test there is no dimming object active at this point.
+  generator.MoveMouseTo(on_shelf.x(), on_shelf.y());
+  EXPECT_EQ(-1, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.MoveMouseTo(off_shelf.x(), off_shelf.y());
+  EXPECT_EQ(-1, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // After maximization, the shelf should be visible and the dimmer created.
+  widget->Maximize();
+
+  on_shelf = shelf->shelf_widget()->GetWindowBoundsInScreen().CenterPoint();
+  EXPECT_LT(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // Moving the mouse off the shelf should dim the bar.
+  generator.MoveMouseTo(off_shelf.x(), off_shelf.y());
+  EXPECT_LT(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // Adding touch events outside the shelf should still keep the shelf in
+  // dimmed state.
+  generator.PressTouch();
+  generator.MoveTouch(off_shelf);
+  EXPECT_LT(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  // Move the touch into the shelf area should undim.
+  generator.MoveTouch(on_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.ReleaseTouch();
+  // And a release dims again.
+  EXPECT_LT(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // Moving the mouse on the shelf should undim the bar.
+  generator.MoveMouseTo(on_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // No matter what the touch events do, the shelf should stay undimmed.
+  generator.PressTouch();
+  generator.MoveTouch(off_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.MoveTouch(on_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.MoveTouch(off_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.MoveTouch(on_shelf);
+  generator.ReleaseTouch();
+
+  // After restore, the dimming object should be deleted again.
+  widget->Restore();
+  EXPECT_EQ(-1, shelf->shelf_widget()->GetDimmingAlphaForTest());
+}
+
+// Assertions around the dimming of the shelf in conjunction with menus.
+TEST_F(ShelfLayoutManagerTest, TestDimmingBehaviorWithMenus) {
+  // Since ShelfLayoutManager queries for mouse location, move the mouse so
+  // it isn't over the shelf.
+  aura::test::EventGenerator generator(
+      Shell::GetPrimaryRootWindow(), gfx::Point());
+  generator.MoveMouseTo(0, 0);
+
+  ShelfLayoutManager* shelf = GetShelfLayoutManager();
+  shelf->shelf_widget()->DisableDimmingAnimationsForTest();
+
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.context = CurrentContext();
+  // Widget is now owned by the parent window.
+  widget->Init(params);
+  widget->Show();
+  aura::Window* window = widget->GetNativeWindow();
+  gfx::Rect display_bounds(
+      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds());
+
+  // After maximization, the shelf should be visible and the dimmer created.
+  widget->Maximize();
+
+  gfx::Point off_shelf = display_bounds.CenterPoint();
+  gfx::Point on_shelf =
+      shelf->shelf_widget()->GetWindowBoundsInScreen().CenterPoint();
+
+  // Moving the mouse on the shelf should undim the bar.
+  generator.MoveMouseTo(on_shelf.x(), on_shelf.y());
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // Simulate a menu opening.
+  shelf->shelf_widget()->ForceUndimming(true);
+
+  // Moving the mouse off the shelf should not dim the bar.
+  generator.MoveMouseTo(off_shelf.x(), off_shelf.y());
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // No matter what the touch events do, the shelf should stay undimmed.
+  generator.PressTouch();
+  generator.MoveTouch(off_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.MoveTouch(on_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.MoveTouch(off_shelf);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.ReleaseTouch();
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // "Closing the menu" should now turn off the menu since no event is inside
+  // the shelf any longer.
+  shelf->shelf_widget()->ForceUndimming(false);
+  EXPECT_LT(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+
+  // Moving the mouse again on the shelf which should undim the bar again.
+  // This time we check that the bar stays undimmed when the mouse remains on
+  // the bar and the "menu gets closed".
+  generator.MoveMouseTo(on_shelf.x(), on_shelf.y());
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  shelf->shelf_widget()->ForceUndimming(true);
+  generator.MoveMouseTo(off_shelf.x(), off_shelf.y());
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  generator.MoveMouseTo(on_shelf.x(), on_shelf.y());
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
+  shelf->shelf_widget()->ForceUndimming(true);
+  EXPECT_EQ(0, shelf->shelf_widget()->GetDimmingAlphaForTest());
 }
 
 // Verifies the shelf is visible when status/launcher is focused.
@@ -852,6 +1001,8 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_GestureDrag) {
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
   EXPECT_EQ(bounds_shelf.ToString(), window->bounds().ToString());
+  EXPECT_EQ(GetShelfWidget()->GetDimmerBoundsForTest(),
+            GetShelfWidget()->GetWindowBoundsInScreen());
   EXPECT_EQ(shelf_shown.ToString(),
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
@@ -895,7 +1046,56 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_GestureDrag) {
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
+  EXPECT_EQ(GetShelfWidget()->GetDimmerBoundsForTest(), gfx::Rect());
   EXPECT_EQ(bounds_noshelf.ToString(), window->bounds().ToString());
+  EXPECT_EQ(shelf_hidden.ToString(),
+            GetShelfWidget()->GetWindowBoundsInScreen().ToString());
+
+  // Swipe up in extended hit region to show it.
+  gfx::Point extended_start = gfx::Point(
+      (GetShelfWidget()->GetWindowBoundsInScreen().x() +
+       GetShelfWidget()->GetWindowBoundsInScreen().right())/2,
+      GetShelfWidget()->GetWindowBoundsInScreen().y() - 1);
+  end.set_y(extended_start.y() - 100);
+  generator.GestureScrollSequenceWithCallback(extended_start, end,
+      base::TimeDelta::FromMilliseconds(10), kNumScrollSteps,
+      base::Bind(&ShelfDragCallback::ProcessScroll,
+                 base::Unretained(&handler)));
+  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
+  EXPECT_EQ(bounds_shelf.ToString(), window->bounds().ToString());
+  EXPECT_EQ(GetShelfWidget()->GetDimmerBoundsForTest(),
+            GetShelfWidget()->GetWindowBoundsInScreen());
+  EXPECT_EQ(shelf_shown.ToString(),
+            GetShelfWidget()->GetWindowBoundsInScreen().ToString());
+
+  // Swipe down again to hide.
+  end.set_y(start.y() + 100);
+  generator.GestureScrollSequenceWithCallback(start, end,
+      base::TimeDelta::FromMilliseconds(10), kNumScrollSteps,
+      base::Bind(&ShelfDragCallback::ProcessScroll,
+                 base::Unretained(&handler)));
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
+  EXPECT_EQ(GetShelfWidget()->GetDimmerBoundsForTest(), gfx::Rect());
+  EXPECT_EQ(bounds_noshelf.ToString(), window->bounds().ToString());
+  EXPECT_EQ(shelf_hidden.ToString(),
+            GetShelfWidget()->GetWindowBoundsInScreen().ToString());
+
+  // Swipe up outside the hit area. This should not change anything.
+  gfx::Point outside_start = gfx::Point(
+      (GetShelfWidget()->GetWindowBoundsInScreen().x() +
+       GetShelfWidget()->GetWindowBoundsInScreen().right())/2,
+      GetShelfWidget()->GetWindowBoundsInScreen().y() - 50);
+  end.set_y(outside_start.y() - 100);
+  generator.GestureScrollSequence(outside_start,
+                                  end,
+                                  base::TimeDelta::FromMilliseconds(10),
+                                  kNumScrollSteps);
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
   EXPECT_EQ(shelf_hidden.ToString(),
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
@@ -917,6 +1117,7 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_GestureDrag) {
 }
 
 TEST_F(ShelfLayoutManagerTest, WindowVisibilityDisablesAutoHide) {
+  UpdateDisplay("800x600,800x600");
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
   shelf->LayoutShelf();
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
@@ -930,12 +1131,10 @@ TEST_F(ShelfLayoutManagerTest, WindowVisibilityDisablesAutoHide) {
 
   // Window minimized => auto hide disabled.
   dummy->Minimize();
-  shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
 
   // Window closed => auto hide disabled.
   dummy->CloseNow();
-  shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
 
   // Multiple window test
@@ -943,22 +1142,28 @@ TEST_F(ShelfLayoutManagerTest, WindowVisibilityDisablesAutoHide) {
   views::Widget* window2 = CreateTestWidget();
 
   // both visible => normal autohide
-  shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
 
   // either minimzed => normal autohide
   window2->Minimize();
-  shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
   window2->Restore();
   window1->Minimize();
-  shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
 
   // both minimzed => disable auto hide
   window2->Minimize();
-  shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+
+  // Test moving windows to/from other display.
+  window2->Restore();
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+  // Move to second display.
+  window2->SetBounds(gfx::Rect(850, 50, 50, 50));
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+  // Move back to primary display.
+  window2->SetBounds(gfx::Rect(50, 50, 50, 50));
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
 }
 
 #if defined(OS_WIN)
@@ -1167,7 +1372,7 @@ TEST_F(ShelfLayoutManagerTest, BubbleEnlargesShelfMouseHitArea) {
     }
     // Move the pointer over the edge of the shelf.
     generator.MoveMouseTo(
-        center.x(), status_area_widget->GetWindowBoundsInScreen().y() - 8);
+        center.x(), status_area_widget->GetWindowBoundsInScreen().y() - 12);
     shelf->UpdateVisibilityState();
     if (i) {
       EXPECT_TRUE(shelf->IsVisible());

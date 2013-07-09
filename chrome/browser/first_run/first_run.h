@@ -18,12 +18,14 @@
 
 class CommandLine;
 class GURL;
-class PrefRegistrySyncable;
 class Profile;
-class ProcessSingleton;
 
 namespace base {
 class FilePath;
+}
+
+namespace user_prefs {
+class PrefRegistrySyncable;
 }
 
 // This namespace contains the chrome first-run installation actions needed to
@@ -89,7 +91,7 @@ bool CreateSentinel();
 std::string GetPingDelayPrefName();
 
 // Register user preferences used by the MasterPrefs structure.
-void RegisterUserPrefs(PrefRegistrySyncable* registry);
+void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
 
 // Removes the sentinel file created in ConfigDone(). Returns false if the
 // sentinel file could not be removed.
@@ -141,8 +143,7 @@ const CommandLine& GetExtraArgumentsForImportProcess();
 void AutoImport(Profile* profile,
                 bool homepage_defined,
                 int import_items,
-                int dont_import_items,
-                ProcessSingleton* process_singleton);
+                int dont_import_items);
 
 // Does remaining first run tasks for |profile| and makes Chrome default browser
 // if |make_chrome_default|. This can pop the first run consent dialog on linux.
@@ -158,9 +159,6 @@ bool DidPerformProfileImport(bool* exited_successfully);
 // This function might or might not show a visible UI depending on the
 // cmdline parameters.
 int ImportNow(Profile* profile, const CommandLine& cmdline);
-
-// Returns the path for the master preferences file.
-base::FilePath MasterPrefsPath();
 
 // Set a master preferences file path that overrides platform defaults.
 void SetMasterPrefsPathForTesting(const base::FilePath& master_prefs);

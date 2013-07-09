@@ -8,7 +8,6 @@
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_provider.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 #include "chrome/browser/policy/cloud/cloud_policy_client.h"
 #include "chrome/browser/policy/cloud/cloud_policy_constants.h"
@@ -16,6 +15,7 @@
 #include "chrome/browser/policy/cloud/mock_device_management_service.h"
 #include "chrome/browser/policy/cloud/policy_builder.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
+#include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
 #include "chromeos/dbus/power_policy_controller.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -82,8 +82,11 @@ class DeviceLocalAccountPolicyServiceTest
         PolicyBuilder::kFakeUsername);
     device_local_account_policy_.Build();
 
-    device_policy_.payload().mutable_device_local_accounts()->add_account()->
-        set_id(PolicyBuilder::kFakeUsername);
+    em::DeviceLocalAccountInfoProto* account =
+        device_policy_.payload().mutable_device_local_accounts()->add_account();
+    account->set_account_id(PolicyBuilder::kFakeUsername);
+    account->set_type(
+        em::DeviceLocalAccountInfoProto::ACCOUNT_TYPE_PUBLIC_SESSION);
     device_policy_.Build();
 
     service_.AddObserver(&service_observer_);
@@ -261,8 +264,11 @@ TEST_F(DeviceLocalAccountPolicyServiceTest, DuplicateAccounts) {
   ASSERT_TRUE(broker);
 
   // Add a second entry with a duplicate account name to device policy.
-  device_policy_.payload().mutable_device_local_accounts()->add_account()->
-      set_id(PolicyBuilder::kFakeUsername);
+  em::DeviceLocalAccountInfoProto* account =
+      device_policy_.payload().mutable_device_local_accounts()->add_account();
+  account->set_account_id(PolicyBuilder::kFakeUsername);
+  account->set_type(
+      em::DeviceLocalAccountInfoProto::ACCOUNT_TYPE_PUBLIC_SESSION);
   device_policy_.Build();
   device_settings_test_helper_.set_device_local_account_policy_blob(
       PolicyBuilder::kFakeUsername, device_local_account_policy_.GetBlob());

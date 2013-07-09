@@ -7,19 +7,48 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "chrome/browser/chromeos/net/managed_network_configuration_handler.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
 #include "chrome/common/extensions/api/networking_private.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_manager_client.h"
+#include "chromeos/network/managed_network_configuration_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_translator.h"
 
-using namespace chromeos;
 namespace api = extensions::api::networking_private;
+namespace onc = chromeos::onc;
+using chromeos::DBusThreadManager;
+using chromeos::ManagedNetworkConfigurationHandler;
+using chromeos::NetworkState;
+using chromeos::NetworkStateHandler;
+using chromeos::ShillManagerClient;
+
+namespace {
+
+// Helper function that converts between the two types of verification
+// properties. They should always have the same fields, but we do this here to
+// prevent ShillManagerClient from depending directly on the extension API.
+ShillManagerClient::VerificationProperties ConvertVerificationProperties(
+    const api::VerificationProperties& input) {
+  ShillManagerClient::VerificationProperties output;
+  COMPILE_ASSERT(sizeof(api::VerificationProperties) ==
+                     sizeof(ShillManagerClient::VerificationProperties),
+                 verification_properties_no_longer_match);
+
+  output.certificate = input.certificate;
+  output.public_key = input.public_key;
+  output.nonce = input.nonce;
+  output.signed_data = input.signed_data;
+  output.device_serial = input.device_serial;
+  output.device_ssid = input.device_ssid;
+  output.device_bssid = input.device_bssid;
+  return output;
+}
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkingPrivateGetPropertiesFunction
@@ -32,14 +61,11 @@ bool NetworkingPrivateGetPropertiesFunction::RunImpl() {
   scoped_ptr<api::GetProperties::Params> params =
       api::GetProperties::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
-  // The |network_guid| parameter is storing the service path.
-  std::string service_path = params->network_guid;
 
   ManagedNetworkConfigurationHandler::Get()->GetProperties(
-      service_path,
-      base::Bind(
-          &NetworkingPrivateGetPropertiesFunction::GetPropertiesSuccess,
-          this),
+      params->network_guid,  // service path
+      base::Bind(&NetworkingPrivateGetPropertiesFunction::GetPropertiesSuccess,
+                 this),
       base::Bind(&NetworkingPrivateGetPropertiesFunction::GetPropertiesFailed,
                  this));
   return true;
@@ -56,6 +82,44 @@ void NetworkingPrivateGetPropertiesFunction::GetPropertiesSuccess(
 }
 
 void NetworkingPrivateGetPropertiesFunction::GetPropertiesFailed(
+    const std::string& error_name,
+    scoped_ptr<base::DictionaryValue> error_data) {
+  error_ = error_name;
+  SendResponse(false);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateGetManagedPropertiesFunction
+
+NetworkingPrivateGetManagedPropertiesFunction::
+  ~NetworkingPrivateGetManagedPropertiesFunction() {
+}
+
+bool NetworkingPrivateGetManagedPropertiesFunction::RunImpl() {
+  scoped_ptr<api::GetManagedProperties::Params> params =
+      api::GetManagedProperties::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  ManagedNetworkConfigurationHandler::Get()->GetManagedProperties(
+      params->network_guid,  // service path
+      base::Bind(&NetworkingPrivateGetManagedPropertiesFunction::Success,
+                 this),
+      base::Bind(&NetworkingPrivateGetManagedPropertiesFunction::Failure,
+                 this));
+  return true;
+}
+
+void NetworkingPrivateGetManagedPropertiesFunction::Success(
+    const std::string& service_path,
+    const base::DictionaryValue& dictionary) {
+  base::DictionaryValue* network_properties = dictionary.DeepCopy();
+  network_properties->SetStringWithoutPathExpansion(onc::network_config::kGUID,
+                                                    service_path);
+  SetResult(network_properties);
+  SendResponse(true);
+}
+
+void NetworkingPrivateGetManagedPropertiesFunction::Failure(
     const std::string& error_name,
     scoped_ptr<base::DictionaryValue> error_data) {
   error_ = error_name;
@@ -110,7 +174,7 @@ bool NetworkingPrivateSetPropertiesFunction::RunImpl() {
       params->properties.ToValue());
 
   ManagedNetworkConfigurationHandler::Get()->SetProperties(
-      params->network_guid,
+      params->network_guid,  // service path
       *properties_dict,
       base::Bind(&NetworkingPrivateSetPropertiesFunction::ResultCallback,
                  this),
@@ -176,6 +240,18 @@ bool NetworkingPrivateGetVisibleNetworksFunction::RunImpl() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateRequestNetworkScanFunction
+
+NetworkingPrivateRequestNetworkScanFunction::
+~NetworkingPrivateRequestNetworkScanFunction() {
+}
+
+bool NetworkingPrivateRequestNetworkScanFunction::RunImpl() {
+  NetworkStateHandler::Get()->RequestScan();
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // NetworkingPrivateStartConnectFunction
 
 NetworkingPrivateStartConnectFunction::
@@ -198,11 +274,8 @@ bool NetworkingPrivateStartConnectFunction::RunImpl() {
       api::StartConnect::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  // The |network_guid| parameter is storing the service path.
-  std::string service_path = params->network_guid;
-
   ManagedNetworkConfigurationHandler::Get()->Connect(
-      service_path,
+      params->network_guid,  // service path
       base::Bind(
           &NetworkingPrivateStartConnectFunction::ConnectionStartSuccess,
           this),
@@ -235,11 +308,8 @@ bool NetworkingPrivateStartDisconnectFunction::RunImpl() {
       api::StartDisconnect::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  // The |network_guid| parameter is storing the service path.
-  std::string service_path = params->network_guid;
-
   ManagedNetworkConfigurationHandler::Get()->Disconnect(
-      service_path,
+      params->network_guid,  // service path
       base::Bind(
           &NetworkingPrivateStartDisconnectFunction::DisconnectionStartSuccess,
           this),
@@ -261,12 +331,11 @@ bool NetworkingPrivateVerifyDestinationFunction::RunImpl() {
       api::VerifyDestination::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
+  ShillManagerClient::VerificationProperties verification_properties =
+      ConvertVerificationProperties(params->properties);
+
   DBusThreadManager::Get()->GetShillManagerClient()->VerifyDestination(
-      params->properties.certificate,
-      params->properties.public_key,
-      params->properties.nonce,
-      params->properties.signed_data,
-      params->properties.device_serial,
+      verification_properties,
       base::Bind(
           &NetworkingPrivateVerifyDestinationFunction::ResultCallback,
           this),
@@ -301,12 +370,12 @@ bool NetworkingPrivateVerifyAndEncryptCredentialsFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(params);
   ShillManagerClient* shill_manager_client =
       DBusThreadManager::Get()->GetShillManagerClient();
+
+  ShillManagerClient::VerificationProperties verification_properties =
+      ConvertVerificationProperties(params->properties);
+
   shill_manager_client->VerifyAndEncryptCredentials(
-      params->properties.certificate,
-      params->properties.public_key,
-      params->properties.nonce,
-      params->properties.signed_data,
-      params->properties.device_serial,
+      verification_properties,
       params->guid,
       base::Bind(
           &NetworkingPrivateVerifyAndEncryptCredentialsFunction::ResultCallback,
@@ -341,12 +410,11 @@ bool NetworkingPrivateVerifyAndEncryptDataFunction::RunImpl() {
       api::VerifyAndEncryptData::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
+  ShillManagerClient::VerificationProperties verification_properties =
+      ConvertVerificationProperties(params->properties);
+
   DBusThreadManager::Get()->GetShillManagerClient()->VerifyAndEncryptData(
-      params->properties.certificate,
-      params->properties.public_key,
-      params->properties.nonce,
-      params->properties.signed_data,
-      params->properties.device_serial,
+      verification_properties,
       params->data,
       base::Bind(
           &NetworkingPrivateVerifyAndEncryptDataFunction::ResultCallback,
@@ -368,4 +436,3 @@ void NetworkingPrivateVerifyAndEncryptDataFunction::ErrorCallback(
   error_ = error_name;
   SendResponse(false);
 }
-

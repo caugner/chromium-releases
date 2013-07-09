@@ -7,19 +7,25 @@
   min-width: 650px;
 }
 
-.show-with-proxy-error,
-.show-with-captive-portal-error,
-.show-with-timeout-error,
-.show-with-offline-error,
+.show-with-ui-state-update,
+.show-with-ui-state-signin,
+.show-with-ui-state-locally-managed,
+.show-with-error-state-portal,
+.show-with-error-state-offline,
+.show-with-error-state-proxy,
+.show-with-error-state-auth-ext-timeout,
 .guest-signin,
 .offline-login {
   display: none;
 }
 
-.show-captive-portal-error .show-with-captive-portal-error,
-.show-proxy-error .show-with-proxy-error,
-.show-timeout-error .show-with-timeout-error,
-.show-offline-error .show-with-offline-error,
+.ui-state-update .show-with-ui-state-update,
+.ui-state-signin .show-with-ui-state-signin,
+.ui-state-locally-managed .show-with-ui-state-locally-managed,
+.error-state-portal .show-with-error-state-portal,
+.error-state-offline .show-with-error-state-offline,
+.error-state-proxy .show-with-error-state-proxy,
+.error-state-auth-ext-timeout .show-with-error-state-auth-ext-timeout,
 .allow-guest-signin .guest-signin,
 .allow-offline-login .offline-login {
   display: block;
@@ -30,9 +36,10 @@
 }
 
 .error-header {
-  background: -webkit-linear-gradient(rgba(255,255,255,0.99),
-                                      rgba(255,255,255,0.97));
-  border-bottom: 1px solid #eee;
+  background-clip: padding-box;
+  background-image: -webkit-linear-gradient(rgba(255,255,255,0.99),
+                                            rgba(255,255,255,0.97));
+  border-bottom: 1px solid rgba(238,238,238,0.97);
   padding: 71px 20px 50px;
   text-align: center;
 }
@@ -47,8 +54,8 @@
 }
 
 .error-body {
-  background: -webkit-linear-gradient(rgba(255,255,255,0.97),
-                                      rgba(255,255,255,0.95));
+  background-image: -webkit-linear-gradient(rgba(249,249,249,0.97),
+                                            rgba(249,249,249,0.95));
   padding: 20px 20px 20px;
 }
 

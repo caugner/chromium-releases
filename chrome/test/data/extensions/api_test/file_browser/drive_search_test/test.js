@@ -73,7 +73,7 @@ chrome.test.runTests([
     chrome.fileBrowserPrivate.requestLocalFileSystem(
       function (fileSystem) {
         chrome.test.assertFalse(!fileSystem, 'Failed to get file system.');
-        fileSystem.root.getDirectory('drive/test_dir', {create: false},
+        fileSystem.root.getDirectory('drive/root/test_dir', {create: false},
             // Also read a non-root directory. This will initiate loading of
             // the full resource metadata. As of now, 'search' only works
             // with the resource metadata fully loaded. crbug.com/181075
@@ -92,14 +92,15 @@ chrome.test.runTests([
     var testCases = [
       {
         nextFeed: '',
-        expectedPath: '/drive/test_dir/empty_test_dir',
+        expectedPath: '/drive/root/test_dir/empty_test_dir',
         expectedType: 'dir',
-        expectedNextFeed: 'http://localhost/?start-offset=1&max-results=1',
+        expectedNextFeed:
+            'http://localhost/?start-offset=1&max-results=1&q=empty',
       },
       {
         // The same as the previous test case's expected next feed.
-        nextFeed: 'http://localhost/?start-offset=1&max-results=1',
-        expectedPath: '/drive/test_dir/empty_test_file.foo',
+        nextFeed: 'http://localhost/?start-offset=1&max-results=1&q=empty',
+        expectedPath: '/drive/root/test_dir/empty_test_file.foo',
         expectedType: 'file',
         expectedNextFeed: '',
       }
@@ -117,12 +118,12 @@ chrome.test.runTests([
       // Each search query should return exactly one result (this should be
       // ensured by Chrome part of the test).
       chrome.fileBrowserPrivate.searchDrive(
-          {query: 'empty', sharedWithMe: false, nextFeed: testCase.nextFeed},
+          {query: 'empty', nextFeed: testCase.nextFeed},
           function(entries, nextFeed) {
             chrome.test.assertFalse(!entries);
             chrome.test.assertEq(1, entries.length);
             chrome.test.assertEq(testCase.expectedPath,
-                                 entries[0].entry.fullPath);
+                                 entries[0].fullPath);
             chrome.test.assertEq(testCase.expectedNextFeed, nextFeed);
 
             var verifyEntry = getEntryVerifier(testCase.expectedType);
@@ -130,7 +131,7 @@ chrome.test.runTests([
 
             // The callback will be called only it the entry is successfully
             // verified, otherwise the test function will fail.
-            verifyEntry(entries[0].entry, runNextQuery);
+            verifyEntry(entries[0], runNextQuery);
       });
     }
 
@@ -143,21 +144,27 @@ chrome.test.runTests([
     // sort should be decending. The comments above each expected result
     // represent their (lastAccessed, lastModified) pair. These values are set
     // in remote_file_system_api_test_root_feed.json.
-    // The API should return 5 results, even though there are more than five
+    // The API should return 4 results, even though there are more than five
     // matches in the test file system.
     var expectedResults = [
         // (2012-01-02T00:00:01.000Z, 2012-01-02T00:00:0.000Z)
-        {path: '/drive/test_dir', type: 'dir'},
+        {path: '/drive/root/test_dir', type: 'dir'},
         // (2012-01-02T00:00:00.000Z, 2012-01-01T00:00:00.005Z)
-        {path: '/drive/test_dir/test_file.xul', type: 'file'},
+        {path: '/drive/root/test_dir/test_file.xul', type: 'file'},
         // (2012-01-02T00:00:00.000Z, 2011-04-03T11:11:10.000Z)
-        {path: '/drive/test_dir/test_file.tiff', type: 'file'},
+        {path: '/drive/root/test_dir/test_file.tiff', type: 'file'},
         // (2012-01-01T11:00:00.000Z, 2012-01-01T10:00:30.00Z)
-        {path: '/drive/test_dir/test_file.xul.foo', type: 'file'},
+        {path: '/drive/root/test_dir/test_file.xul.foo', type: 'file'},
     ];
 
+    var query = {
+      'query': 'test',
+      'types': 'ALL',
+      'maxResults': 4
+    };
+
     chrome.fileBrowserPrivate.searchDriveMetadata(
-        'test',
+        query,
         function(entries) {
           chrome.test.assertFalse(!entries);
           chrome.test.assertEq(expectedResults.length, entries.length);

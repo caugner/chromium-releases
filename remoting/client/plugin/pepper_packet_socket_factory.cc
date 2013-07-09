@@ -110,7 +110,7 @@ UdpPacketSocket::UdpPacketSocket(const pp::InstanceHandle& instance)
       max_port_(0),
       send_pending_(false),
       send_queue_size_(0),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+      weak_factory_(this) {
 }
 
 UdpPacketSocket::~UdpPacketSocket() {
@@ -363,7 +363,7 @@ talk_base::AsyncPacketSocket* PepperPacketSocketFactory::CreateServerTcpSocket(
     const talk_base::SocketAddress& local_address,
     int min_port,
     int max_port,
-    bool ssl) {
+    int opts) {
   // We don't use TCP sockets for remoting connections.
   NOTREACHED();
   return NULL;
@@ -374,7 +374,7 @@ talk_base::AsyncPacketSocket* PepperPacketSocketFactory::CreateClientTcpSocket(
       const talk_base::SocketAddress& remote_address,
       const talk_base::ProxyInfo& proxy_info,
       const std::string& user_agent,
-      bool ssl) {
+      int opts) {
   // We don't use TCP sockets for remoting connections.
   NOTREACHED();
   return NULL;

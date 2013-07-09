@@ -139,7 +139,6 @@
 
     'win': [
       'gpu',
-
       # ===========================
       # Permanently-disabled tests.
       # ===========================
@@ -153,8 +152,6 @@
       '-extensions.ExtensionsTest.testAllowAccessFileURLs',
       # crbug.com/113090
       '-extensions.ExtensionsTest.testAllowIncognitoExtension',
-      # crbug.com/94682
-      '-gpu.GpuTest.test2dCanvas',
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testImportFirefoxDataTwice
       # Disabled on vista in the actual test. crbug.com/89767
@@ -375,6 +372,7 @@
       # ==================================================
       '-perf.NetflixPerfTest',  # crosbug.com/32320.
       '-perf.PageCyclerNetSimTest',  # Investigate Web Page Replay on ChromeOS.
+      '-perf.YoutubePerfTest',  # crbug.com/233706
 
       # ===========================
       # Permanently-disabled tests.
@@ -513,6 +511,9 @@
     'all': [
       'webrtc_video_quality',
       'webrtc_audio_quality',
+    ],
+    'win': [
+      '-webrtc_audio_quality',  # crbug.com/226016
     ],
     'mac': [
       '-webrtc_audio_quality',  # Not implemented.

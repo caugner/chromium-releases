@@ -137,13 +137,19 @@ FileTasks.prototype.processTasks_ = function(tasks) {
 
   for (var i = 0; i < tasks.length; i++) {
     var task = tasks[i];
+    var taskParts = task.taskId.split('|');
 
     // Skip Drive App if the file is not on Drive.
     if (!isOnDrive && task.driveApp)
       continue;
 
+    // Skip internal Files.app's handlers.
+    if (taskParts[0] == id && (taskParts[2] == 'auto-open' ||
+        taskParts[2] == 'select' || taskParts[2] == 'open')) {
+      continue;
+    }
+
     // Tweak images, titles of internal tasks.
-    var taskParts = task.taskId.split('|');
     if (taskParts[0] == id && taskParts[1] == 'file') {
       if (taskParts[2] == 'play') {
         // TODO(serya): This hack needed until task.iconUrl is working
@@ -453,7 +459,6 @@ FileTasks.prototype.mountArchivesInternal_ = function(urls) {
   fm.resolveSelectResults_(urls, function(urls) {
     for (var index = 0; index < urls.length; ++index) {
       fm.volumeManager_.mountArchive(urls[index], function(mountPath) {
-        console.log('Mounted at: ', mountPath);
         tracker.stop();
         if (!tracker.hasChanged)
           fm.directoryModel_.changeDirectory(mountPath);
@@ -508,7 +513,7 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
   // changes in the Gallery and popped when the Gallery is closed.
   util.updateAppState(false /*push*/);
 
-  var onClose = function(selectedUrls) {
+  var onBack = function(selectedUrls) {
     fm.directoryModel_.selectUrls(selectedUrls);
     if (util.platform.v2()) {
       fm.closeFilePopup_();  // Will call Gallery.unload.
@@ -518,6 +523,14 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
     } else {
       window.history.back(1);  // This will restore document.title.
     }
+  };
+
+  var onClose = function() {
+    fm.onClose();
+  };
+
+  var onMaximize = function() {
+    fm.onMaximize();
   };
 
   galleryFrame.onload = function() {
@@ -546,7 +559,10 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
       searchResults: fm.directoryModel_.isSearching(),
       metadataCache: fm.metadataCache_,
       pageState: this.params_,
+      appWindow: util.platform.v2() ? chrome.app.window.current() : null,
+      onBack: onBack,
       onClose: onClose,
+      onMaximize: onMaximize,
       onThumbnailError: function(imageURL) {
         fm.metadataCache_.refreshFileMetadata(imageURL);
       },
@@ -587,9 +603,10 @@ FileTasks.prototype.display_ = function(combobutton) {
     }
 
     combobutton.addSeparator();
-    combobutton.addDropDownItem({
-          label: loadTimeData.getString('CHANGE_DEFAULT_MENU_ITEM')
-        });
+    var changeDefaultMenuItem = combobutton.addDropDownItem({
+        label: loadTimeData.getString('CHANGE_DEFAULT_MENU_ITEM')
+    });
+    changeDefaultMenuItem.classList.add('change-default');
   }
 };
 
@@ -690,7 +707,9 @@ FileTasks.prototype.showTaskPicker = function(actionDialog, title, message,
       title,
       message,
       items, defaultIdx,
-      onSuccess);
+      function(item) {
+        onSuccess(item.task);
+      });
 };
 
 FileTasks.decorate('display');

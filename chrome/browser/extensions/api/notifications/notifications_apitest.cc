@@ -71,7 +71,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestIdUsage) {
         notification_function,
         "[\"\", "  // Empty string: ask API to generate ID
         "{"
-        "\"type\": \"simple\","
+        "\"type\": \"basic\","
         "\"iconUrl\": \"an/image/that/does/not/exist.png\","
         "\"title\": \"Attention!\","
         "\"message\": \"Check out Cirque du Soleil\""
@@ -96,7 +96,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestIdUsage) {
         notification_function,
         "[\"" + notification_id + "\", "
         "{"
-        "\"type\": \"simple\","
+        "\"type\": \"basic\","
         "\"iconUrl\": \"an/image/that/does/not/exist.png\","
         "\"title\": \"Attention!\","
         "\"message\": \"Too late! The show ended yesterday\""
@@ -128,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestIdUsage) {
         notification_function,
         "[\"xxxxxxxxxxxx\", "
         "{"
-        "\"type\": \"simple\","
+        "\"type\": \"basic\","
         "\"iconUrl\": \"an/image/that/does/not/exist.png\","
         "\"title\": \"!\","
         "\"message\": \"!\""
@@ -287,7 +287,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestByUser) {
 
   {
     ResultCatcher catcher;
-    g_browser_process->message_center()->SendRemoveNotification(
+    g_browser_process->message_center()->RemoveNotification(
         extension->id() + "-FOO",
         false);
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -295,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestByUser) {
 
   {
     ResultCatcher catcher;
-    g_browser_process->message_center()->SendRemoveNotification(
+    g_browser_process->message_center()->RemoveNotification(
         extension->id() + "-BAR",
         true);
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();

@@ -32,6 +32,7 @@ import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -171,16 +172,23 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
      * Checks whether or not touch to explore is enabled on the system.
      */
     public boolean accessibilityIsAvailable() {
-        // Need to make sure we actually have a service running that requires injecting
-        // this script.
-        List<AccessibilityServiceInfo> services =
-                getAccessibilityManager().getEnabledAccessibilityServiceList(
-                        FEEDBACK_BRAILLE | AccessibilityServiceInfo.FEEDBACK_SPOKEN);
+        if (!getAccessibilityManager().isEnabled() ||
+                mContentViewCore.getContentSettings() == null ||
+                !mContentViewCore.getContentSettings().getJavaScriptEnabled()) {
+            return false;
+        }
 
-        return getAccessibilityManager().isEnabled() &&
-                mContentViewCore.getContentSettings() != null &&
-                mContentViewCore.getContentSettings().getJavaScriptEnabled() &&
-                services.size() > 0;
+        try {
+            // Check that there is actually a service running that requires injecting this script.
+            List<AccessibilityServiceInfo> services =
+                    getAccessibilityManager().getEnabledAccessibilityServiceList(
+                            FEEDBACK_BRAILLE | AccessibilityServiceInfo.FEEDBACK_SPOKEN);
+            return services.size() > 0;
+        } catch (NullPointerException e) {
+            // getEnabledAccessibilityServiceList() can throw an NPE due to a bad
+            // AccessibilityService.
+            return false;
+        }
     }
 
     /**
@@ -404,7 +412,30 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
 
         @JavascriptInterface
         @SuppressWarnings("unused")
-        public int speak(String text, int queueMode, HashMap<String, String> params) {
+        public int speak(String text, int queueMode, String jsonParams) {
+            // Try to pull the params from the JSON string.
+            HashMap<String, String> params = null;
+            try {
+                if (jsonParams != null) {
+                    params = new HashMap<String, String>();
+                    JSONObject json = new JSONObject(jsonParams);
+
+                    // Using legacy API here.
+                    @SuppressWarnings("unchecked")
+                    Iterator<String> keyIt = json.keys();
+
+                    while (keyIt.hasNext()) {
+                        String key = keyIt.next();
+                        // Only add parameters that are raw data types.
+                        if (json.optJSONObject(key) == null && json.optJSONArray(key) == null) {
+                            params.put(key, json.getString(key));
+                        }
+                    }
+                }
+            } catch (JSONException e) {
+                params = null;
+            }
+
             return mTextToSpeech.speak(text, queueMode, params);
         }
 

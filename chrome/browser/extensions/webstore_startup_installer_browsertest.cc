@@ -148,7 +148,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, FindLink) {
 }
 
 // Crashes at random intervals on MacOS: http://crbug.com/95713.
-#if defined(OS_MACOSX)
+// Flakes on Windows: http://crbug.com/229947
+#if defined(OS_MACOSX) || defined(OS_WIN)
 #define Maybe_ArgumentValidation DISABLED_ArgumentValidation
 #else
 #define Maybe_ArgumentValidation ArgumentValidation
@@ -288,7 +289,9 @@ class CommandLineWebstoreInstall : public WebstoreStartupInstallerTest,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
     if (type == chrome::NOTIFICATION_EXTENSION_INSTALLED) {
-      const Extension* extension = content::Details<Extension>(details).ptr();
+      const Extension* extension =
+          content::Details<const extensions::InstalledExtensionInfo>(details)->
+              extension;
       ASSERT_TRUE(extension != NULL);
       EXPECT_EQ(extension->id(), kTestExtensionId);
       saw_install_ = true;

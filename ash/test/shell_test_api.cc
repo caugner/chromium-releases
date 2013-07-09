@@ -48,9 +48,13 @@ LauncherModel* ShellTestApi::launcher_model() {
   return shell_->launcher_model_.get();
 }
 
+internal::DragDropController* ShellTestApi::drag_drop_controller() {
+  return shell_->drag_drop_controller_.get();
+}
+
 void ShellTestApi::DisableOutputConfiguratorAnimation() {
 #if defined(OS_CHROMEOS)
-  if (shell_->output_configurator_animation_.get()) {
+  if (shell_->output_configurator_animation_) {
     shell_->output_configurator_->RemoveObserver(
         shell_->output_configurator_animation_.get());
     shell_->output_configurator_animation_.reset();

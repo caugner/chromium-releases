@@ -13,7 +13,9 @@ var verificationProperties = {
   "publicKey": "public_key",
   "nonce": "nonce",
   "signedData": "signed_data",
-  "deviceSerial": "device_serial"
+  "deviceSerial": "device_serial",
+  "deviceSsid": "Device 0123",
+  "deviceBssid": "00:01:02:03:04:05"
 };
 
 var privateHelpers = {
@@ -25,7 +27,7 @@ var privateHelpers = {
     var collectProperties = function(properties) {
       var finishTest = function() {
         chrome.networkingPrivate.onNetworksChanged.removeListener(
-          self.watchForConnect);
+            self.onNetworkChange);
         done();
       };
       var expectedState = expectedStates.pop();
@@ -35,18 +37,19 @@ var privateHelpers = {
     };
     this.onNetworkChange = function(changes) {
       assertEq([network], changes);
-      chrome.networkingPrivate.getProperties(network,
-                                             collectProperties.bind(undefined));
+      chrome.networkingPrivate.getProperties(
+          network,
+          callbackPass(collectProperties));
     };
     chrome.networkingPrivate.onNetworksChanged.addListener(
-      this.onNetworkChange);
+        this.onNetworkChange);
   },
   listListener: function(network, expected, done) {
     var self = this;
     this.listenForChanges = function(list) {
       assertEq(expected, list);
       chrome.networkingPrivate.onNetworkListChanged.removeListener(
-        self.listenForChanges);
+          self.listenForChanges);
       done();
     };
   }
@@ -78,7 +81,6 @@ var availableTests = [
     chrome.networkingPrivate.getVisibleNetworks(
       "All",
       callbackPass(function(result) {
-        assertTrue(!!result);
         assertEq([{
                     "ConnectionState": "Connected",
                     "GUID": "stub_ethernet",
@@ -109,6 +111,7 @@ var availableTests = [
                   },
                   {
                     "Cellular": {
+                      "ActivateOverNonCellularNetwork": false,
                       "ActivationState": "not-activated",
                       "NetworkTechnology": "GSM",
                       "RoamingState": "home"
@@ -133,7 +136,6 @@ var availableTests = [
     chrome.networkingPrivate.getVisibleNetworks(
       "WiFi",
       callbackPass(function(result) {
-        assertTrue(!!result);
         assertEq([{
                     "ConnectionState": "Connected",
                     "GUID": "stub_wifi1",
@@ -159,11 +161,23 @@ var availableTests = [
                   ], result);
       }));
   },
+  function requestNetworkScan() {
+    var network = "stub_wifi2";
+    var expected = ["stub_ethernet",
+                    "stub_wifi1",
+                    "stub_wifi2",
+                    "stub_cellular1",
+                    "stub_vpn1"];
+    var done = chrome.test.callbackAdded();
+    var listener = new privateHelpers.listListener(network, expected, done);
+    chrome.networkingPrivate.onNetworkListChanged.addListener(
+      listener.listenForChanges);
+    chrome.networkingPrivate.requestNetworkScan();
+  },
   function getProperties() {
     chrome.networkingPrivate.getProperties(
       "stub_wifi2",
       callbackPass(function(result) {
-        assertTrue(!!result);
         assertEq({
                    "ConnectionState": "NotConnected",
                    "GUID": "stub_wifi2",
@@ -177,22 +191,70 @@ var availableTests = [
                  }, result);
       }));
   },
+  function getManagedProperties() {
+    chrome.networkingPrivate.getManagedProperties(
+      "stub_wifi2",
+      callbackPass(function(result) {
+        assertEq({
+                   "ConnectionState": {
+                     "Active": "NotConnected",
+                     "Effective": "Unmanaged"
+                   },
+                   "GUID": "stub_wifi2",
+                   "Name": {
+                     "Active": "wifi2_PSK",
+                     "Effective": "UserPolicy",
+                     "UserPolicy": "My WiFi Network"
+                   },
+                   "Type": {
+                     "Active": "WiFi",
+                     "Effective": "UserPolicy",
+                     "UserPolicy": "WiFi"
+                   },
+                   "WiFi": {
+                     "AutoConnect": {
+                       "Active": false,
+                       "UserEditable": true
+                     },
+                     "Passphrase": {
+                       "Effective": "UserSetting",
+                       "UserEditable": true,
+                       "UserSetting": "FAKE_CREDENTIAL_VPaJDV9x"
+                     },
+                     "SSID": {
+                       "Active": "stub_wifi2",
+                       "Effective": "UserPolicy",
+                       "UserPolicy": "stub_wifi2"
+                     },
+                     "Security": {
+                       "Active": "WPA-PSK",
+                       "Effective": "UserPolicy",
+                       "UserPolicy": "WPA-PSK"
+                     },
+                     "SignalStrength": {
+                       "Active": 80,
+                       "Effective": "Unmanaged"
+                     }
+                   }
+                 }, result);
+      }));
+  },
   function setProperties() {
     var done = chrome.test.callbackAdded();
     chrome.networkingPrivate.getProperties(
       "stub_wifi2",
-      function(result) {
+      callbackPass(function(result) {
         result.WiFi.Security = "WEP-PSK";
         chrome.networkingPrivate.setProperties("stub_wifi2", result,
-          function() {
+          callbackPass(function() {
             chrome.networkingPrivate.getProperties(
               "stub_wifi2",
-              function(result) {
+              callbackPass(function(result) {
                 assertEq("WEP-PSK", result.WiFi.Security);
                 done();
-              });
-          });
-      });
+              }));
+          }));
+      }));
   },
   function getState() {
     chrome.networkingPrivate.getState(
@@ -200,7 +262,7 @@ var availableTests = [
       callbackPass(function(result) {
         assertEq({
           "ConnectionState": "NotConnected",
-          "GUID": "",
+          "GUID": "stub_wifi2",
           "Name": "wifi2_PSK",
           "Type": "WiFi",
           "WiFi": {

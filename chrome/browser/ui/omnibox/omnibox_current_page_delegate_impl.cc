@@ -17,6 +17,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "googleurl/src/gurl.h"
+#include "ui/base/window_open_disposition.h"
 
 OmniboxCurrentPageDelegateImpl::OmniboxCurrentPageDelegateImpl(
     OmniboxEditController* controller,
@@ -50,7 +51,8 @@ const SessionID& OmniboxCurrentPageDelegateImpl::GetSessionID() const {
 
 bool OmniboxCurrentPageDelegateImpl::ProcessExtensionKeyword(
     TemplateURL* template_url,
-    const AutocompleteMatch& match) {
+    const AutocompleteMatch& match,
+    WindowOpenDisposition disposition) {
   if (!template_url->IsExtensionKeyword())
     return false;
 
@@ -59,19 +61,23 @@ bool OmniboxCurrentPageDelegateImpl::ProcessExtensionKeyword(
   extensions::ExtensionOmniboxEventRouter::OnInputEntered(
       controller_->GetWebContents(),
       template_url->GetExtensionId(),
-      UTF16ToUTF8(match.fill_into_edit.substr(prefix_length)));
+      UTF16ToUTF8(match.fill_into_edit.substr(prefix_length)),
+      disposition);
 
   return true;
 }
 
 void OmniboxCurrentPageDelegateImpl::NotifySearchTabHelper(
     bool user_input_in_progress,
-    bool cancelling) {
+    bool cancelling,
+    bool popup_is_open,
+    bool user_text_is_empty) {
   if (!controller_->GetWebContents())
     return;
-  chrome::search::SearchTabHelper::FromWebContents(
+  SearchTabHelper::FromWebContents(
       controller_->GetWebContents())->OmniboxEditModelChanged(
-          user_input_in_progress, cancelling);
+          user_input_in_progress, cancelling, popup_is_open,
+          user_text_is_empty);
 }
 
 void OmniboxCurrentPageDelegateImpl::DoPrerender(

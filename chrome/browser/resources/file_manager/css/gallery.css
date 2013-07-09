@@ -28,7 +28,7 @@ body {
 
 /* We actually want (left,top) to be (0,0) but for some weird reason
   this triggers :hover style on page reload which is ugly. */
-.gallery > .close {
+.gallery > .back-button {
   cursor: pointer;
   left: 1px;
   position: absolute;
@@ -36,10 +36,14 @@ body {
   z-index: 200;
 }
 
+body[new-ui] .tools .gallery > .back-button {
+  opacity: 0;
+}
+
 /* The close icon is in a nested div so that its opacity can be manipulated
    independently from its parent (which can be dimmed when the crop frame
    overlaps it) */
-.gallery > .close div {
+.gallery > .back-button div {
   background-image: -webkit-image-set(
     url('../images/gallery/back_to_files.png') 1x,
     url('../images/gallery/2x/back_to_files.png') 2x);
@@ -50,11 +54,11 @@ body {
   width: 64px;
 }
 
-.gallery[tools] > .close div {
+.gallery[tools] > .back-button div {
   opacity: 0.5;
 }
 
-.gallery[tools] > .close div:hover {
+.gallery[tools] > .back-button div:hover {
   opacity: 1;
 }
 
@@ -166,25 +170,50 @@ body {
 
 /* Toolbar */
 
+body[new-ui] .gallery > .header,
 .gallery > .toolbar {
   -webkit-box-align: stretch;
   -webkit-box-orient: horizontal;
   -webkit-box-pack: start;
   -webkit-transition: opacity 300ms ease;
   background-color: rgba(18, 18, 18, 0.875);
-  border-top: 1px solid rgba(31, 31, 31, 0.875);
-  bottom: 0;
-  box-sizing: border-box;
   display: -webkit-box;
-  height: 55px;
-  min-width: 800px;
+  left: 0;
   opacity: 0;
-  padding: 0 8px;
+  padding: 0 10px;
   pointer-events: none;
   position: absolute;
-  width: 100%;
+  right: 0;
 }
 
+body[new-ui] .gallery > .header,
+body[new-ui] .gallery > .toolbar {
+  background-color: rgba(30, 30, 30, 0.8);
+}
+
+body[new-ui] .gallery > .header {
+  -webkit-box-align: center;
+  -webkit-box-pack: end;
+  border-bottom: 1px solid rgba(50, 50, 50, 0.8);
+  display: -webkit-box;
+  height: 45px;
+  top: 0;
+}
+
+.gallery > .toolbar {
+  border-top: 1px solid rgba(31, 31, 31, 0.7);
+  bottom: 0;
+  height: 55px;
+  min-width: 800px;
+}
+
+body[new-ui] .gallery > .toolbar {
+  border-top: 1px solid rgba(50, 50, 50, 0.8);
+  bottom: 0;
+  height: 55px;
+}
+
+body[new-ui] .gallery[tools]:not([slideshow]) > .header,
 .gallery[tools]:not([slideshow]) > .toolbar {
   opacity: 1;
   pointer-events: auto;
@@ -272,12 +301,15 @@ body {
 
 /* The editor marks elements with 'dimmed' attribute to get them out of the way
  of the crop frame */
-.gallery[tools][editing] *[dimmed],
-.gallery[tools][editing] *[dimmed] * {
+body:not([new-ui]) .gallery[tools][editing] *[dimmed],
+body[new-ui] .gallery[tools][editing] *[dimmed],
+body:not([new-ui]) .gallery[tools][editing] *[dimmed] *,
+body[new-ui] .gallery[tools][editing] *[dimmed] * {
   pointer-events: none;
 }
 
-.gallery[tools][editing] *[dimmed] {
+body:not([new-ui]) .gallery[tools][editing] *[dimmed],
+body[new-ui] .gallery[tools][editing] *[dimmed] {
   opacity: 0.2;
 }
 
@@ -507,6 +539,10 @@ body {
   position: absolute;
 }
 
+body[new-ui] .gallery .image-wrapper > img:not(.cached) {
+  -webkit-animation: fadeIn 500ms ease-in;
+}
+
 /* Editor buttons */
 
 .gallery .edit-bar-spacer {
@@ -539,27 +575,34 @@ body {
   visibility: visible;
 }
 
-.gallery > .toolbar button {
+body .gallery .header button,
+body .gallery .toolbar button,
+body .gallery .header button[disabled],
+body .gallery .toolbar button[disabled] {
   -webkit-box-align: center;
   -webkit-box-flex: 0;
   -webkit-box-orient: horizontal;
   -webkit-box-pack: end;
+  -webkit-box-shadow: none;
   background-color: rgba(0, 0, 0, 0);
   background-position: center;
   background-repeat: no-repeat;
   border: none;
-  box-sizing: content-box;
   color: white;
   cursor: pointer;
   display: -webkit-box;
-  height: 40px;
-  margin: 8px 0 7px 3px;
-  min-width: 40px;  /* Reset. */
   opacity: 0.99;  /* Workaround for http://crosbug.com/21065 */
-  padding: 0;
+  padding: 1px;  /* Instead of a border. */
   position: relative;
-  width: 40px;
   z-index: 10;
+}
+
+body .gallery .header button,
+body .gallery .toolbar button {
+  height: 40px;
+  margin: 6px 0;
+  min-width: 40px;  /* Reset. */
+  width: 40px;
 }
 
 /* By default, labels are hidden. */
@@ -568,29 +611,34 @@ body {
 }
 
 /* Show labels if there is enough space. */
-@media (min-width: 1000px) {
+@media (min-width: 1050px) {
 
-  .gallery .edit-main button {
+  body .gallery .edit-main button,
+  body .gallery .edit-main button[disabled] {
     background-position: 5px center;
     min-width: 0;  /* Reset. */
     padding: 0 10px 0 35px;
     width: auto;
   }
 
-  .gallery > .toolbar button span {
+  body .gallery > .toolbar button span {
     display: inline;
   }
 
 }
 
-.gallery > .toolbar button:hover {
+body .gallery .header button:hover,
+body .gallery .toolbar button:hover {
   background-color: rgba(31, 31, 31, 1);
   color: white;
 }
 
-.gallery > .toolbar button:active,
-.gallery > .toolbar button[pressed],
-.gallery > .toolbar button[pressed]:hover {
+body .gallery .header button:active,
+body .gallery .toolbar button:active,
+body .gallery .header button[pressed],
+body .gallery .toolbar button[pressed],
+body .gallery .header button[pressed]:hover,
+body .gallery .toolbar button[pressed]:hover {
   background-color: rgba(240, 240, 240, 1);
   color: black;
 }
@@ -687,12 +735,12 @@ body {
     url('../images/gallery/2x/icon_redo_selected.png') 2x);
 }
 
-.gallery > .toolbar button[disabled] {
+body .gallery > .toolbar button[disabled] {
   opacity: 0.5;
   pointer-events: none;
 }
 
-.gallery > .toolbar button[hidden] {
+body .gallery > .toolbar button[hidden] {
   display: none;
 }
 
@@ -768,13 +816,13 @@ body {
   background-color: rgba(31, 31, 31, 1);
 }
 
-.gallery[error] > .toolbar button.edit,
-.gallery[error] > .toolbar button.share {
+body .gallery[error] > .toolbar button.edit,
+body .gallery[error] > .toolbar button.share {
   opacity: 0.7;
   pointer-events: none;
 }
 
-.gallery > .toolbar > button.share[disabled] {
+body .gallery > .toolbar > button.share[disabled] {
   display: none;
 }
 
@@ -948,7 +996,7 @@ body {
   -webkit-box-align: center;
 }
 
-.gallery .prompt-wrapper[pos=center] .close {
+.gallery .prompt-wrapper[pos=center] .back-button {
   display: none;
 }
 
@@ -986,7 +1034,7 @@ body {
   padding-right: 10px;
 }
 
-.gallery .prompt .close {
+.gallery .prompt .back-button {
   background-image: -webkit-image-set(
     url('../images/gallery/butterbar_close_x.png') 1x,
     url('../images/gallery/2x/butterbar_close_x.png') 2x);
@@ -999,7 +1047,7 @@ body {
   width: 16px;
 }
 
-.gallery .prompt .close:hover {
+.gallery .prompt .back-button:hover {
   background-color: rgba(81, 81, 81, 1);
   opacity: 1.0;
 }
@@ -1313,4 +1361,22 @@ body {
     url('../images/gallery/slideshow-end.png') 1x,
     url('../images/gallery/2x/slideshow-end.png') 2x);
   margin-left: -2px;
+}
+
+body[new-ui] .gallery > .header > button {
+  height: 27px;
+  min-width: 29px;
+  width: 29px;
+}
+
+body[new-ui] .gallery > .header > .maximize-button {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/topbar_button_maximize.png') 1x,
+    url('../images/files/ui/new-ui/2x/topbar_button_maximize.png') 2x);
+}
+
+body[new-ui] .gallery > .header > .close-button {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/topbar_button_close.png') 1x,
+    url('../images/files/ui/new-ui/2x/topbar_button_close.png') 2x);
 }

@@ -45,7 +45,7 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   static void ToggleDisplayScaleFactor();
 
   // Returns next valid UI scale.
-  static float GetNextUIScale(float scale, bool up);
+  static float GetNextUIScale(const DisplayInfo& info, bool up);
 
   // When set to true, the MonitorManager calls OnDisplayBoundsChanged
   // even if the display's bounds didn't change. Used to swap primary
@@ -193,10 +193,6 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // Refer to |CreateDisplayFromSpec| API for the format of |spec|.
   void AddDisplayFromSpec(const std::string& spec);
 
-  // Checks if the mouse pointer is on one of displays, and moves to
-  // the center of the nearest display if it's outside of all displays.
-  void EnsurePointerInDisplays();
-
   // Inserts and update the DisplayInfo according to the overscan
   // state. Note that The DisplayInfo stored in the |internal_display_info_|
   // can be different from |new_info| (due to overscan state), so
@@ -215,10 +211,6 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   DisplayList displays_;
 
   int num_connected_displays_;
-
-  // An internal display info cache used when the internal display is
-  // disconnectd.
-  scoped_ptr<DisplayInfo> internal_display_info_;
 
   bool force_bounds_changed_;
 

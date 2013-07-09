@@ -212,9 +212,10 @@ void TestRenderWidgetHostView::SetClickthroughRegion(SkRegion* region) {
 #endif
 
 #if defined(OS_WIN) && defined(USE_AURA)
-void TestRenderWidgetHostView::SetParentNativeViewAccessible(
-    gfx::NativeViewAccessible accessible_parent) {
+gfx::NativeViewAccessible
+TestRenderWidgetHostView::AccessibleObjectFromChildId(long child_id) {
   NOTIMPLEMENTED();
+  return NULL;
 }
 #endif
 
@@ -240,6 +241,7 @@ TestRenderViewHost::TestRenderViewHost(
       render_view_created_(false),
       delete_counter_(NULL),
       simulate_fetch_via_proxy_(false),
+      simulate_history_list_was_cleared_(false),
       contents_mime_type_("text/html") {
   // For normal RenderViewHosts, this is freed when |Shutdown()| is
   // called.  For TestRenderViewHost, the view is explicitly
@@ -273,24 +275,41 @@ void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
   SendNavigateWithTransition(page_id, url, PAGE_TRANSITION_LINK);
 }
 
+void TestRenderViewHost::SendFailedNavigate(int page_id, const GURL& url) {
+  SendNavigateWithTransitionAndResponseCode(
+      page_id, url, PAGE_TRANSITION_LINK, 500);
+}
+
 void TestRenderViewHost::SendNavigateWithTransition(
     int page_id, const GURL& url, PageTransition transition) {
-  OnDidStartProvisionalLoadForFrame(0, -1, true, url);
-  SendNavigateWithParameters(page_id, url, transition, url);
+  SendNavigateWithTransitionAndResponseCode(page_id, url, transition, 200);
 }
 
 void TestRenderViewHost::SendNavigateWithOriginalRequestURL(
     int page_id, const GURL& url, const GURL& original_request_url) {
   OnDidStartProvisionalLoadForFrame(0, -1, true, url);
   SendNavigateWithParameters(page_id, url, PAGE_TRANSITION_LINK,
-      original_request_url);
+                             original_request_url, 200, 0);
+}
+
+void TestRenderViewHost::SendNavigateWithFile(
+    int page_id, const GURL& url, const base::FilePath& file_path) {
+  SendNavigateWithParameters(page_id, url, PAGE_TRANSITION_LINK,
+                             url, 200, &file_path);
+}
+
+void TestRenderViewHost::SendNavigateWithTransitionAndResponseCode(
+    int page_id, const GURL& url, PageTransition transition,
+    int response_code) {
+  OnDidStartProvisionalLoadForFrame(0, -1, true, url);
+  SendNavigateWithParameters(page_id, url, transition, url, response_code, 0);
 }
 
 void TestRenderViewHost::SendNavigateWithParameters(
     int page_id, const GURL& url, PageTransition transition,
-    const GURL& original_request_url) {
+    const GURL& original_request_url, int response_code,
+    const base::FilePath* file_path_for_history_item) {
   ViewHostMsg_FrameNavigate_Params params;
-
   params.page_id = page_id;
   params.frame_id = 0;
   params.url = url;
@@ -306,19 +325,35 @@ void TestRenderViewHost::SendNavigateWithParameters(
   params.contents_mime_type = contents_mime_type_;
   params.is_post = false;
   params.was_within_same_page = false;
-  params.http_status_code = 0;
+  params.http_status_code = response_code;
   params.socket_address.set_host("2001:db8::1");
   params.socket_address.set_port(80);
   params.was_fetched_via_proxy = simulate_fetch_via_proxy_;
-  params.content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
+  params.history_list_was_cleared = simulate_history_list_was_cleared_;
   params.original_request_url = original_request_url;
+
+  WebKit::WebHTTPBody http_body;
+  http_body.initialize();
+
+  WebKit::WebHistoryItem history_item;
+  history_item.initialize();
+  history_item.setURLString(WebKit::WebString::fromUTF8(url.spec()));
+  if (file_path_for_history_item) {
+    const char char_data[] = "data";
+    http_body.appendData(WebKit::WebData(char_data, arraysize(char_data)-1));
+    http_body.appendFile(WebKit::WebString::fromUTF8(
+        file_path_for_history_item->MaybeAsASCII()));
+    history_item.setHTTPBody(http_body);
+  }
+  params.content_state = webkit_glue::HistoryItemToString(history_item);
 
   ViewHostMsg_FrameNavigate msg(1, params);
   OnNavigate(msg);
 }
 
 void TestRenderViewHost::SendShouldCloseACK(bool proceed) {
-  OnShouldCloseACK(proceed, base::TimeTicks(), base::TimeTicks());
+  base::TimeTicks now = base::TimeTicks::Now();
+  OnShouldCloseACK(proceed, now, now);
 }
 
 void TestRenderViewHost::SetContentsMimeType(const std::string& mime_type) {
@@ -345,8 +380,28 @@ void TestRenderViewHost::TestOnStartDragging(
                   event_info);
 }
 
+void TestRenderViewHost::TestOnUpdateStateWithFile(
+    int process_id,
+    const base::FilePath& file_path) {
+  WebKit::WebHTTPBody http_body;
+  http_body.initialize();
+  const char char_data[] = "data";
+  http_body.appendData(WebKit::WebData(char_data, arraysize(char_data)-1));
+  http_body.appendFile(WebKit::WebString::fromUTF8(file_path.MaybeAsASCII()));
+
+  WebKit::WebHistoryItem history_item;
+  history_item.initialize();
+  history_item.setURLString("http://www.google.com");
+  history_item.setHTTPBody(http_body);
+  OnUpdateState(process_id, webkit_glue::HistoryItemToString(history_item));
+}
+
 void TestRenderViewHost::set_simulate_fetch_via_proxy(bool proxy) {
   simulate_fetch_via_proxy_ = proxy;
+}
+
+void TestRenderViewHost::set_simulate_history_list_was_cleared(bool cleared) {
+  simulate_history_list_was_cleared_ = cleared;
 }
 
 RenderViewHostImplTestHarness::RenderViewHostImplTestHarness() {

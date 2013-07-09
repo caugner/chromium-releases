@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/buffer_manager.h"
+#include "gpu/command_buffer/service/error_state_mock.h"
 #include "gpu/command_buffer/service/feature_info.h"
-#include "gpu/command_buffer/service/gles2_cmd_decoder_mock.h"
 #include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,17 +22,14 @@ class BufferManagerTestBase : public testing::Test {
   void SetUpBase(
       MemoryTracker* memory_tracker,
       FeatureInfo* feature_info,
-      const char* extensions,
-      const char* vendor,
-      const char* renderer) {
+      const char* extensions) {
     gl_.reset(new ::testing::StrictMock< ::gfx::MockGLInterface>());
     ::gfx::GLInterface::SetGLInterface(gl_.get());
     if (feature_info) {
-      TestHelper::SetupFeatureInfoInitExpectationsWithVendor(
-          gl_.get(), extensions, vendor, renderer, "");
+      TestHelper::SetupFeatureInfoInitExpectations(gl_.get(), extensions);
       feature_info->Initialize(NULL);
     }
-    decoder_.reset(new MockGLES2Decoder());
+    error_state_.reset(new MockErrorState());
     manager_.reset(new BufferManager(memory_tracker, feature_info));
   }
 
@@ -40,7 +37,7 @@ class BufferManagerTestBase : public testing::Test {
     manager_->Destroy(false);
     manager_.reset();
     ::gfx::GLInterface::SetGLInterface(NULL);
-    decoder_.reset();
+    error_state_.reset();
     gl_.reset();
   }
 
@@ -52,7 +49,7 @@ class BufferManagerTestBase : public testing::Test {
       Buffer* buffer, GLsizeiptr size, GLenum usage, const GLvoid* data,
       GLenum error) {
     TestHelper::DoBufferData(
-        gl_.get(), decoder_.get(), manager_.get(),
+        gl_.get(), error_state_.get(), manager_.get(),
         buffer, size, usage, data, error);
   }
 
@@ -61,9 +58,9 @@ class BufferManagerTestBase : public testing::Test {
       const GLvoid* data) {
     bool success = true;
     if (!buffer->CheckRange(offset, size)) {
-      EXPECT_CALL(*decoder_, SetGLError(_, _, GL_INVALID_VALUE, _, _))
-          .Times(1)
-          .RetiresOnSaturation();
+      EXPECT_CALL(*error_state_, SetGLError(_, _, GL_INVALID_VALUE, _, _))
+         .Times(1)
+         .RetiresOnSaturation();
       success = false;
     } else if (!buffer->IsClientSideArray()) {
       EXPECT_CALL(*gl_, BufferSubData(
@@ -72,20 +69,20 @@ class BufferManagerTestBase : public testing::Test {
           .RetiresOnSaturation();
     }
     manager_->DoBufferSubData(
-        decoder_.get(), buffer, offset, size, data);
+        error_state_.get(), buffer, offset, size, data);
     return success;
   }
 
   // Use StrictMock to make 100% sure we know how GL will be called.
   scoped_ptr< ::testing::StrictMock< ::gfx::MockGLInterface> > gl_;
   scoped_ptr<BufferManager> manager_;
-  scoped_ptr<MockGLES2Decoder> decoder_;
+  scoped_ptr<MockErrorState> error_state_;
 };
 
 class BufferManagerTest : public BufferManagerTestBase {
  protected:
   virtual void SetUp() {
-    SetUpBase(NULL, NULL, "", "", "");
+    SetUpBase(NULL, NULL, "");
   }
 };
 
@@ -93,7 +90,7 @@ class BufferManagerMemoryTrackerTest : public BufferManagerTestBase {
  protected:
   virtual void SetUp() {
     mock_memory_tracker_ = new StrictMock<MockMemoryTracker>();
-    SetUpBase(mock_memory_tracker_.get(), NULL, "", "", "");
+    SetUpBase(mock_memory_tracker_.get(), NULL, "");
   }
 
   scoped_refptr<MockMemoryTracker> mock_memory_tracker_;
@@ -103,7 +100,9 @@ class BufferManagerClientSideArraysTest : public BufferManagerTestBase {
  protected:
   virtual void SetUp() {
     feature_info_ = new FeatureInfo();
-    SetUpBase(NULL, feature_info_.get(), "", "Imagination Technologies", "");
+    feature_info_->workarounds_.use_client_side_arrays_for_stream_buffers =
+      true;
+    SetUpBase(NULL, feature_info_.get(), "");
   }
 
   scoped_refptr<FeatureInfo> feature_info_;
@@ -209,7 +208,7 @@ TEST_F(BufferManagerTest, DoBufferSubData) {
   EXPECT_FALSE(DoBufferSubData(buffer, 0, -1, data));
   DoBufferData(buffer, 1, GL_STATIC_DRAW, NULL, GL_NO_ERROR);
   const int size = 0x20000;
-  scoped_array<uint8> temp(new uint8[size]);
+  scoped_ptr<uint8[]> temp(new uint8[size]);
   EXPECT_FALSE(DoBufferSubData(buffer, 0 - size, size, temp.get()));
   EXPECT_FALSE(DoBufferSubData(buffer, 1, size / 2, temp.get()));
 }
@@ -387,6 +386,39 @@ TEST_F(BufferManagerClientSideArraysTest, StreamBuffersAreShadowed) {
   EXPECT_EQ(0, memcmp(data, buffer->GetRange(0, sizeof(data)), sizeof(data)));
   DoBufferData(buffer, sizeof(data), GL_DYNAMIC_DRAW, data, GL_NO_ERROR);
   EXPECT_FALSE(buffer->IsClientSideArray());
+}
+
+TEST_F(BufferManagerTest, MaxValueCacheClearedCorrectly) {
+  const GLuint kClientBufferId = 1;
+  const GLuint kServiceBufferId = 11;
+  const uint32 data1[] = {10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
+  const uint32 data2[] = {11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
+  const uint32 data3[] = {30, 29, 28};
+  manager_->CreateBuffer(kClientBufferId, kServiceBufferId);
+  Buffer* buffer = manager_->GetBuffer(kClientBufferId);
+  ASSERT_TRUE(buffer != NULL);
+  manager_->SetTarget(buffer, GL_ELEMENT_ARRAY_BUFFER);
+  GLuint max_value;
+  // Load the buffer with some initial data, and then get the maximum value for
+  // a range, which has the side effect of caching it.
+  DoBufferData(buffer, sizeof(data1), GL_STATIC_DRAW, data1, GL_NO_ERROR);
+  EXPECT_TRUE(
+      buffer->GetMaxValueForRange(0, 10, GL_UNSIGNED_INT, &max_value));
+  EXPECT_EQ(10u, max_value);
+  // Check that any cached values are invalidated if the buffer is reloaded
+  // with the same amount of data (but different content)
+  ASSERT_EQ(sizeof(data2), sizeof(data1));
+  DoBufferData(buffer, sizeof(data2), GL_STATIC_DRAW, data2, GL_NO_ERROR);
+  EXPECT_TRUE(
+      buffer->GetMaxValueForRange(0, 10, GL_UNSIGNED_INT, &max_value));
+  EXPECT_EQ(20u, max_value);
+  // Check that any cached values are invalidated if the buffer is reloaded
+  // with entirely different content.
+  ASSERT_NE(sizeof(data3), sizeof(data1));
+  DoBufferData(buffer, sizeof(data3), GL_STATIC_DRAW, data3, GL_NO_ERROR);
+  EXPECT_TRUE(
+      buffer->GetMaxValueForRange(0, 3, GL_UNSIGNED_INT, &max_value));
+  EXPECT_EQ(30u, max_value);
 }
 
 }  // namespace gles2

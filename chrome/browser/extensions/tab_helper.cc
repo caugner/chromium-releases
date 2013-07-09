@@ -26,12 +26,12 @@
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/api/icons/icons_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/feature_switch.h"
+#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -80,10 +80,8 @@ TabHelper::ScriptExecutionObserver::~ScriptExecutionObserver() {
 TabHelper::TabHelper(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       extension_app_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          extension_function_dispatcher_(
-              Profile::FromBrowserContext(web_contents->GetBrowserContext()),
-              this)),
+      extension_function_dispatcher_(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()), this),
       pending_web_app_action_(NONE),
       script_executor_(new ScriptExecutor(web_contents,
                                           &script_execution_observers_)),
@@ -91,10 +89,12 @@ TabHelper::TabHelper(content::WebContents* web_contents)
           ExtensionSystem::Get(
               Profile::FromBrowserContext(web_contents->GetBrowserContext()))->
           rules_registry_service()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_ptr_factory_(this)) {
+      image_loader_ptr_factory_(this) {
   // The ActiveTabPermissionManager requires a session ID; ensure this
   // WebContents has one.
   SessionTabHelper::CreateForWebContents(web_contents);
+  if (web_contents->GetRenderViewHost())
+    SetTabId(web_contents->GetRenderViewHost());
   active_tab_permission_granter_.reset(new ActiveTabPermissionGranter(
       web_contents,
       SessionID::IdForTab(web_contents),
@@ -187,9 +187,7 @@ SkBitmap* TabHelper::GetExtensionAppIcon() {
 }
 
 void TabHelper::RenderViewCreated(RenderViewHost* render_view_host) {
-  render_view_host->Send(
-      new ExtensionMsg_SetTabId(render_view_host->GetRoutingID(),
-                                SessionID::IdForTab(web_contents())));
+  SetTabId(render_view_host);
 }
 
 void TabHelper::DidNavigateMainFrame(
@@ -413,7 +411,7 @@ void TabHelper::OnInlineInstallComplete(int install_id,
                                         const std::string& error) {
   if (success) {
     Send(new ExtensionMsg_InlineWebstoreInstallResponse(
-        return_route_id, install_id, true, ""));
+        return_route_id, install_id, true, std::string()));
   } else {
     Send(new ExtensionMsg_InlineWebstoreInstallResponse(
         return_route_id, install_id, false, error));
@@ -452,7 +450,7 @@ void TabHelper::Observe(int type,
     }
 
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
-      if (script_bubble_controller_.get()) {
+      if (script_bubble_controller_) {
         script_bubble_controller_->OnExtensionUnloaded(
             content::Details<extensions::UnloadedExtensionInfo>(
                 details)->extension->id());
@@ -460,6 +458,12 @@ void TabHelper::Observe(int type,
       }
     }
   }
+}
+
+void TabHelper::SetTabId(RenderViewHost* render_view_host) {
+  render_view_host->Send(
+      new ExtensionMsg_SetTabId(render_view_host->GetRoutingID(),
+                                SessionID::IdForTab(web_contents())));
 }
 
 }  // namespace extensions

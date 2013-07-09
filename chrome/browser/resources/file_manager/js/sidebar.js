@@ -4,6 +4,11 @@
 
 'use strict';
 
+// TODO(yoshiki): rename this sidebar.js to directory_tree.js.
+
+////////////////////////////////////////////////////////////////////////////////
+// DirectoryTreeUtil
+
 /**
  * Utility methods. They are intended for use only in this file.
  */
@@ -19,13 +24,16 @@ var DirectoryTreeUtil = {};
  */
 DirectoryTreeUtil.updateChangedDirectoryItem = function(
     changedDirectryPath, currentDirectoryItem) {
+  if (changedDirectryPath === currentDirectoryItem.entry.fullPath) {
+    currentDirectoryItem.updateSubDirectories(false /* recursive */);
+    return;
+  }
+
   for (var i = 0; i < currentDirectoryItem.items.length; i++) {
     var item = currentDirectoryItem.items[i];
-    if (changedDirectryPath === item.entry.fullPath) {
-      item.updateSubDirectories(false /* recursive */);
-      break;
-    } else if (changedDirectryPath.indexOf(item.entry.fullPath) == 0) {
+    if (PathUtil.isParentPath(item.entry.fullPath, changedDirectryPath)) {
       DirectoryTreeUtil.updateChangedDirectoryItem(changedDirectryPath, item);
+      break;
     }
   }
 };
@@ -39,7 +47,9 @@ DirectoryTreeUtil.updateChangedDirectoryItem = function(
  * @param {function(number): DirectoryEntry} iterator Function which returns
  *     the n-th Entry in the directory.
  * @param {DirectoryModel} directoryModel Current DirectoryModel.
- * @param {boolean} recursive True if the update is recursively.
+ * @param {boolean} recursive True if the all visible sub-directories are
+ *     updated recursively including left arrows. If false, the update walks
+ *     only immediate child directories without arrows.
  */
 DirectoryTreeUtil.updateSubElementsFromList = function(
     parentElement, iterator, directoryModel, recursive) {
@@ -84,9 +94,9 @@ DirectoryTreeUtil.updateSubElementsFromList = function(
  * @param {DirectoryEntry|Object} dirEntry DirectoryEntry to be checked.
  * @return {boolean} True if the given directory entry is dummy.
  */
-function isDummyEntry(dirEntry) {
+DirectoryTreeUtil.isDummyEntry = function(dirEntry) {
   return !('createReader' in dirEntry);
-}
+};
 
 /**
  * Finds a parent directory of the {@code path} from the {@code items}, and
@@ -99,13 +109,138 @@ function isDummyEntry(dirEntry) {
 DirectoryTreeUtil.searchAndSelectPath = function(items, path) {
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    if (PathUtil.isParentPath(item.fullPath, path)) {
+    if (PathUtil.isParentPath(item.entry.fullPath, path)) {
       item.selectPath(path);
       return true;
     }
   }
   return false;
 };
+
+/**
+ * Modifies a list of the directory entries to match the new UI sepc.
+ *
+ * TODO(yoshiki): remove this after the old UI is removed.
+ *
+ * @param {Array.<DirectoryEntry>} entries The list of entty.
+ * @return {Array.<DirectoryEntries>} Modified entries.
+ */
+DirectoryTreeUtil.addAndRemoveDriveSpecialDirs = function(entries) {
+  if (!util.platform.newUI()) {
+    console.error('This function should be used only in new ui.');
+    return [];
+  }
+  var modifiedEntries = [];
+  for (var i in entries) {
+    // Removes '/drive/other'.
+    var entry = entries[i];
+    if (entry.fullPath ==
+        (RootDirectory.DRIVE + '/' + DriveSubRootDirectory.OTHER)) {
+      continue;
+    }
+
+    // Changes the label of '/drive/root' to 'My Drive'.
+    if (entry.fullPath == DirectoryModel.fakeDriveEntry_.fullPath) {
+      entry.label = str('DRIVE_MY_DRIVE_LABEL');
+    }
+
+    modifiedEntries.push(entry);
+  }
+
+  // Adds the special directories.
+  var specialDirs = DirectoryModel.FAKE_DRIVE_SPECIAL_SEARCH_ENTRIES;
+  for (var i in specialDirs) {
+    var dir = specialDirs[i];
+    dir['label'] = PathUtil.getRootLabel(dir.fullPath);
+    modifiedEntries.push(dir);
+  }
+  return modifiedEntries;
+};
+
+/**
+ * Retrieves the file list with the latest information.
+ *
+ * @param {DirectoryTree|DirectoryItem} item Parent to be reloaded.
+ * @param {DirectoryModel} dm The directory model.
+ * @param {function(Array.<Entry>)} successCallback Callback on success.
+ * @param {function()=} opt_errorCallback Callback on failure.
+ */
+DirectoryTreeUtil.updateSubDirectories = function(
+    item, dm, successCallback, opt_errorCallback) {
+  // Tries to retrieve new entry if the cached entry is dummy.
+  if (DirectoryTreeUtil.isDummyEntry(item.entry)) {
+    // Fake Drive root.
+    dm.resolveDirectory(
+        item.fullPath,
+        function(entry) {
+          item.dirEntry_ = entry;
+
+          // If the retrieved entry is dummy again, returns with an error.
+          if (DirectoryTreeUtil.isDummyEntry(entry)) {
+            if (opt_errorCallback)
+              opt_errorCallback();
+            return;
+          }
+
+          DirectoryTreeUtil.updateSubDirectories(
+              item, dm, successCallback, opt_errorCallback);
+        },
+        opt_errorCallback);
+    return;
+  }
+
+  var reader = item.entry.createReader();
+  var entries = [];
+  var readEntry = function() {
+    reader.readEntries(function(results) {
+      if (!results.length) {
+        if (item.entry.fullPath == RootDirectory.DRIVE)
+          successCallback(
+              DirectoryTreeUtil.addAndRemoveDriveSpecialDirs(entries));
+        else
+          successCallback(
+              DirectoryTreeUtil.sortEntries(item.fileFilter_, entries));
+        return;
+      }
+
+      for (var i = 0; i < results.length; i++) {
+        var entry = results[i];
+        if (entry.isDirectory)
+          entries.push(entry);
+      }
+      readEntry();
+    });
+  };
+  readEntry();
+};
+
+/**
+ * Sorts a list of entries.
+ *
+ * @param {FileFilter} fileFilter The file filter.
+ * @param {Array.<Entries>} entries Entries to be sorted.
+ * @return {Array.<Entries>} Sorted entries.
+ */
+DirectoryTreeUtil.sortEntries = function(fileFilter, entries) {
+  entries.sort(function(a, b) {
+    return (a.name.toLowerCase() > b.name.toLowerCase()) ? 1 : -1;
+  });
+  return entries.filter(fileFilter.filter.bind(fileFilter));
+};
+
+/**
+ * Checks if tre tree should be hidden on the given directory.
+ *
+ * @param {string} path Path to be checked.
+ * @return {boolean} True if the tree should NOT be visible on the given
+ *     directory. Otherwise, false.
+ */
+DirectoryTreeUtil.shouldHideTree = function(path) {
+  return !PathUtil.isDriveBasedPath(path);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// DirectoryItem
 
 /**
  * A directory in the tree. Each element represents one directory.
@@ -166,8 +301,13 @@ DirectoryItem.prototype = {
 DirectoryItem.prototype.decorate = function(
     dirEntry, parentDirItem, directoryModel) {
   var path = dirEntry.fullPath;
-  var label = PathUtil.isRootPath(path) ?
-              PathUtil.getRootLabel(path) : dirEntry.name;
+  var label;
+  if (!util.platform.newUI()) {
+    label = PathUtil.isRootPath(path) ?
+            PathUtil.getRootLabel(path) : dirEntry.name;
+  } else {
+    label = dirEntry.label ? dirEntry.label : dirEntry.name;
+  }
 
   this.className = 'tree-item';
   this.innerHTML =
@@ -195,13 +335,22 @@ DirectoryItem.prototype.decorate = function(
   this.addEventListener('expand', this.onExpand_.bind(this), false);
   var volumeManager = VolumeManager.getInstance();
   var icon = this.querySelector('.icon');
-  if (PathUtil.isRootPath(path)) {
-    icon.classList.add('volume-icon');
-    var iconType = PathUtil.getRootType(path);
-    icon.setAttribute('volume-type-icon', iconType);
+  if (!util.platform.newUI()) {
+    if (PathUtil.isRootPath(path)) {
+      icon.classList.add('volume-icon');
+      var iconType = PathUtil.getRootType(path);
+      icon.setAttribute('volume-type-icon', iconType);
 
-    if (iconType == RootType.REMOVABLE)
-      icon.setAttribute('volume-subtype', volumeManager.getDeviceType(path));
+      if (iconType == RootType.REMOVABLE)
+        icon.setAttribute('volume-subtype', volumeManager.getDeviceType(path));
+    }
+  } else {
+      icon.classList.add('volume-icon');
+      var iconType = PathUtil.getRootType(path);
+      if (iconType && PathUtil.isRootPath(path))
+        icon.setAttribute('volume-type-icon', iconType);
+      else
+        icon.setAttribute('file-type-icon', 'folder');
   }
 
   var eject = this.querySelector('.root-eject');
@@ -220,13 +369,22 @@ DirectoryItem.prototype.decorate = function(
 };
 
 /**
+ * Overrides WebKit's scrollIntoViewIfNeeded, which doesn't work well with
+ * a complex layout. This call is not necessary, so we are ignoring it.
+ *
+ * @param {boolean} unused Unused.
+ */
+DirectoryItem.prototype.scrollIntoViewIfNeeded = function(unused) {
+};
+
+/**
  * Invoked when the item is being expanded.
  * @param {!UIEvent} e Event.
  * @private
  **/
 DirectoryItem.prototype.onExpand_ = function(e) {
   this.updateSubDirectories(
-      false /* recursive */,
+      true /* recursive */,
       function() {},
       function() {
         this.expanded = false;
@@ -243,49 +401,15 @@ DirectoryItem.prototype.onExpand_ = function(e) {
  */
 DirectoryItem.prototype.updateSubDirectories = function(
     recursive, opt_successCallback, opt_errorCallback) {
-  // Tries to retrieve new entry if the cached entry is dummy.
-  if (isDummyEntry(this.dirEntry_)) {
-    // Fake Drive root.
-    this.directoryModel_.resolveDirectory(
-        this.fullPath,
-        function(entry) {
-          this.dirEntry_ = entry;
-
-          // If the retrieved entry is dummy again, returns with an error.
-          if (isDummyEntry(entry)) {
-            if (opt_errorCallback)
-              opt_errorCallback();
-            return;
-          }
-
-          this.updateSubDirectories(
-              recursive, opt_successCallback, opt_errorCallback);
-        }.bind(this),
-        opt_errorCallback);
-    return;
-  }
-
-  var reader = this.dirEntry_.createReader();
-  var entries = [];
-
-  var readEntry = function() {
-    reader.readEntries(function(results) {
-      if (!results.length) {
-        this.entries_ = entries.sort();
+  DirectoryTreeUtil.updateSubDirectories(
+      this,
+      this.directoryModel_,
+      function(entries) {
+        this.entries_ = entries;
         this.redrawSubDirectoryList_(recursive);
         opt_successCallback && opt_successCallback();
-        return;
-      }
-
-      for (var i = 0; i < results.length; i++) {
-        var entry = results[i];
-        if (entry.isDirectory)
-          entries.push(entry);
-      }
-      readEntry();
-    }.bind(this));
-  }.bind(this);
-  readEntry();
+      }.bind(this),
+      opt_errorCallback);
 };
 
 /**
@@ -295,15 +419,9 @@ DirectoryItem.prototype.updateSubDirectories = function(
  * @private
  */
 DirectoryItem.prototype.redrawSubDirectoryList_ = function(recursive) {
-  var entries = this.entries_.
-      sort(function(a, b) {
-        return a.name.toLowerCase() > b.name.toLowerCase();
-      }).
-      filter(this.fileFilter_.filter.bind(this.fileFilter_));
-
   DirectoryTreeUtil.updateSubElementsFromList(
       this,
-      function(i) { return entries[i]; },
+      function(i) { return this.entries_[i]; }.bind(this),
       this.directoryModel_,
       recursive);
 };
@@ -342,6 +460,9 @@ DirectoryItem.prototype.doAction = function() {
     this.directoryModel_.changeDirectory(this.fullPath);
 };
 
+////////////////////////////////////////////////////////////////////////////////
+// DirectoryTree
+
 /**
  * Tree of directories on the sidebar. This element is also the root of items,
  * in other words, this is the parent of the top-level items.
@@ -369,7 +490,17 @@ DirectoryTree.prototype = {
   /**
    * @param {boolean} value Not used.
    */
-  set expanded(value) {}
+  set expanded(value) {},
+
+  /**
+   * The DirectoryEntry corresponding to this DirectoryItem. This may be
+   * a dummy DirectoryEntry.
+   * @type {DirectoryEntry|Object}
+   * @override
+   **/
+  get entry() {
+      return this.dirEntry_;
+  }
 };
 
 /**
@@ -380,33 +511,53 @@ DirectoryTree.prototype.decorate = function(directoryModel) {
   cr.ui.Tree.prototype.decorate.call(this);
 
   this.directoryModel_ = directoryModel;
+  this.entries_ = [];
 
   this.fileFilter_ = this.directoryModel_.getFileFilter();
   this.fileFilter_.addEventListener('changed',
                                     this.onFilterChanged_.bind(this));
+  /**
+   * The path of the root directory.
+   * @type {string}
+   */
+  this.fullPath = '/';
+  this.dirEntry_ = null;
+  if (!util.platform.newUI()) {
+    this.rootsList_ = this.directoryModel_.getRootsList();
+    this.rootsList_.addEventListener('change',
+                                     this.onRootsListChanged_.bind(this));
+    this.rootsList_.addEventListener('permuted',
+                                     this.onRootsListChanged_.bind(this));
+  }
 
-  this.rootsList_ = this.directoryModel_.getRootsList();
-  this.rootsList_.addEventListener('change',
-                                   this.onRootsListChanged_.bind(this));
-  this.rootsList_.addEventListener('permuted',
-                                   this.onRootsListChanged_.bind(this));
-  this.onRootsListChanged_();
+  /**
+   * The path of the current directory.
+   * @type {string}
+   */
+  this.currentPath_ = null;
+
+  this.directoryModel_.addEventListener('directory-changed',
+      this.onCurrentDirectoryChanged_.bind(this));
 
   // Add a handler for directory change.
   this.addEventListener('change', function() {
-    if (this.selectedItem) {
+    if (this.selectedItem && this.currentPath_ != this.selectedItem.fullPath) {
+      this.currentPath_ = this.selectedItem;
       this.selectedItem.doAction();
       return;
     }
-
-    // Fallback to the default directory.
-    this.directoryModel_.changeDirectory(
-        this.directoryModel_.getDefaultDirectory());
   }.bind(this));
 
-  this.privateOnDirectoryChangedBound_ = this.onDirectoryChanged_.bind(this);
+  this.privateOnDirectoryChangedBound_ =
+      this.onDirectoryContentChanged_.bind(this);
   chrome.fileBrowserPrivate.onDirectoryChanged.addListener(
       this.privateOnDirectoryChangedBound_);
+
+  if (util.platform.newUI())
+    ScrollBar.createVertical(this.parentNode, this);
+
+  if (!util.platform.newUI())
+    this.onRootsListChanged_();
 };
 
 /**
@@ -416,8 +567,10 @@ DirectoryTree.prototype.decorate = function(directoryModel) {
  * @param {cr.ui.Menu} menu Context menu.
  */
 DirectoryTree.prototype.setContextMenu = function(menu) {
-  this.contextMenu_ = menu;
+  if (util.platform.newUI())
+    return;
 
+  this.contextMenu_ = menu;
   for (var i = 0; i < this.rootsList_.length; i++) {
     var item = this.rootsList_.item(i);
     var type = PathUtil.getRootType(item.fullPath);
@@ -434,18 +587,101 @@ DirectoryTree.prototype.setContextMenu = function(menu) {
  * @param {string} path Path to be selected.
  */
 DirectoryTree.prototype.selectPath = function(path) {
-  if (this.selectedItem && path == this.selectedItem.fullPath)
+  if ((this.entry && this.entry.fullPath == path) || this.currentPath_ == path)
     return;
+  this.currentPath_ = path;
+  if (DirectoryTreeUtil.shouldHideTree(path)) {
+    this.clearTree_(true);
+    return;
+  }
 
-  DirectoryTreeUtil.searchAndSelectPath(this.items, path);
+  this.selectPathInternal_(path);
 };
 
 /**
- * Invoked when the root list is changed.
+ * Select the item corresponding to the given path. This method is used
+ * internally.
+ * @param {string} path Path to be selected.
+ * @private
+ */
+DirectoryTree.prototype.selectPathInternal_ = function(path) {
+  var rootDirPath = PathUtil.getRootPath(path);
+
+  if (PathUtil.isSpecialSearchRoot(rootDirPath) ||
+      PathUtil.getRootType(rootDirPath) == RootType.DRIVE) {
+    rootDirPath = RootDirectory.DRIVE;
+  }
+
+  var onError = function() {
+    this.clearTree_(true);
+  }.bind(this);
+
+  if (this.fullPath != rootDirPath || !this.dirEntry_) {
+    this.fullPath = rootDirPath;
+
+    this.directoryModel_.resolveDirectory(
+        rootDirPath,
+        function(entry) {
+          if (this.fullPath != rootDirPath)
+            return;
+
+          this.dirEntry_ = entry;
+          this.selectPathInternal_(path);
+        }.bind(this),
+        onError);
+  } else {
+    if (this.selectedItem && path == this.selectedItem.fullPath)
+      return;
+
+    if (DirectoryTreeUtil.searchAndSelectPath(this.items, path))
+      return;
+
+    this.selectedItem = null;
+    this.updateSubDirectories(
+        false /* recursive */,
+        function() {
+          if (!DirectoryTreeUtil.searchAndSelectPath(
+              this.items, this.currentPath_))
+            this.selectedItem = null;
+          cr.dispatchSimpleEvent(this, 'content-updated');
+        }.bind(this),
+        onError);
+  }
+};
+
+/**
+ * Retrieves the latest subdirectories and update them on the tree.
+ * @param {boolean} recursive True if the update is recursively.
+ * @param {function()=} opt_successCallback Callback called on success.
+ * @param {function()=} opt_errorCallback Callback called on error.
+ */
+DirectoryTree.prototype.updateSubDirectories = function(
+    recursive, opt_successCallback, opt_errorCallback) {
+  if (!this.currentPath_)
+    return;
+
+  DirectoryTreeUtil.updateSubDirectories(
+      this,
+      this.directoryModel_,
+      function(entries) {
+        this.entries_ = entries;
+        this.redraw(recursive);
+        if (opt_successCallback)
+          opt_successCallback();
+      }.bind(this),
+      opt_errorCallback);
+};
+
+/**
+ * Invoked when the root list is changed. Redraws the list and synchronizes
+ * the selection.
  * @private
  */
 DirectoryTree.prototype.onRootsListChanged_ = function() {
-  this.redraw(false /* recursive */);
+  if (!util.platform.newUI()) {
+    this.redraw(false /* recursive */);
+    cr.dispatchSimpleEvent(this, 'content-updated');
+  }
 };
 
 /**
@@ -454,12 +690,21 @@ DirectoryTree.prototype.onRootsListChanged_ = function() {
  *     only root items are updated.
  */
 DirectoryTree.prototype.redraw = function(recursive) {
-  var rootsList = this.rootsList_;
-  DirectoryTreeUtil.updateSubElementsFromList(this,
-                                              rootsList.item.bind(rootsList),
-                                              this.directoryModel_,
-                                              recursive);
-  this.setContextMenu(this.contextMenu_);
+  if (!util.platform.newUI()) {
+    var rootsList = this.rootsList_;
+    DirectoryTreeUtil.updateSubElementsFromList(
+        this,
+        rootsList.item.bind(rootsList),
+        this.directoryModel_,
+        recursive);
+  } else {
+    DirectoryTreeUtil.updateSubElementsFromList(
+        this,
+        function(i) { return this.entries_[i]; }.bind(this),
+        this.directoryModel_,
+        recursive);
+    this.setContextMenu(this.contextMenu_);
+  }
 };
 
 /**
@@ -468,6 +713,7 @@ DirectoryTree.prototype.redraw = function(recursive) {
  */
 DirectoryTree.prototype.onFilterChanged_ = function() {
   this.redraw(true /* recursive */);
+  cr.dispatchSimpleEvent(this, 'content-updated');
 };
 
 /**
@@ -475,11 +721,20 @@ DirectoryTree.prototype.onFilterChanged_ = function() {
  * @param {!UIEvent} event Event.
  * @private
  */
-DirectoryTree.prototype.onDirectoryChanged_ = function(event) {
+DirectoryTree.prototype.onDirectoryContentChanged_ = function(event) {
   if (event.eventType == 'changed') {
     var path = util.extractFilePath(event.directoryUrl);
     DirectoryTreeUtil.updateChangedDirectoryItem(path, this);
   }
+};
+
+/**
+ * Invoked when the current directory is changed.
+ * @param {!UIEvent} event Event.
+ * @private
+ */
+DirectoryTree.prototype.onCurrentDirectoryChanged_ = function(event) {
+  this.selectPath(event.newDirEntry.fullPath);
 };
 
 /**
@@ -488,4 +743,28 @@ DirectoryTree.prototype.onDirectoryChanged_ = function(event) {
  */
 DirectoryTree.prototype.getCurrentPath = function() {
   return this.selectedItem ? this.selectedItem.fullPath : null;
+};
+
+/**
+ * Clears the tree.
+ * @param {boolean} redraw Redraw the tree if true.
+ * @private
+ */
+DirectoryTree.prototype.clearTree_ = function(redraw) {
+  this.dirEntry_ = null;
+  this.fullPath = '';
+  this.selectedItem = null;
+  this.entries_ = [];
+
+  if (redraw) {
+    this.redraw(false);
+    cr.dispatchSimpleEvent(this, 'content-updated');
+  }
+};
+
+/**
+ * Updates the UI after the layout has changed.
+ */
+DirectoryTree.prototype.relayout = function() {
+  cr.dispatchSimpleEvent(this, 'relayout');
 };

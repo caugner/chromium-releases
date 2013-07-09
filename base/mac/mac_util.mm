@@ -20,8 +20,8 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_generic_obj.h"
 #include "base/memory/scoped_nsobject.h"
-#include "base/string_piece.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/sys_string_conversions.h"
 
 namespace base {
@@ -70,10 +70,12 @@ void SetUIMode() {
                       NSApplicationPresentationHideMenuBar;
   }
 
-  // Bug-fix: if the window is fullscreened (Lion-style) and
+  // Mac OS X bug: if the window is fullscreened (Lion-style) and
   // NSApplicationPresentationDefault is requested, the result is that the menu
-  // bar doesn't auto-hide. In that case, explicitly set the presentation
-  // options to the ones that are set by the system as it fullscreens a window.
+  // bar doesn't auto-hide. rdar://13576498 http://www.openradar.me/13576498
+  //
+  // As a workaround, in that case, explicitly set the presentation options to
+  // the ones that are set by the system as it fullscreens a window.
   if (desired_options == NSApplicationPresentationDefault &&
       current_options & NSApplicationPresentationFullScreen) {
     desired_options |= NSApplicationPresentationFullScreen |
@@ -178,6 +180,9 @@ void RequestFullScreen(FullScreenMode mode) {
     return;
 
   DCHECK_GE(g_full_screen_requests[mode], 0);
+  if (mode < 0)
+    return;
+
   g_full_screen_requests[mode] = std::max(g_full_screen_requests[mode] + 1, 1);
   SetUIMode();
 }
@@ -188,7 +193,10 @@ void ReleaseFullScreen(FullScreenMode mode) {
   if (mode >= kNumFullScreenModes)
     return;
 
-  DCHECK_GT(g_full_screen_requests[mode], 0);
+  DCHECK_GE(g_full_screen_requests[mode], 0);
+  if (mode < 0)
+    return;
+
   g_full_screen_requests[mode] = std::max(g_full_screen_requests[mode] - 1, 0);
   SetUIMode();
 }

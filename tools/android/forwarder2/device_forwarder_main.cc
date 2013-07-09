@@ -13,8 +13,8 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/string_piece.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_piece.h"
 #include "base/threading/thread.h"
 #include "tools/android/forwarder2/common.h"
 #include "tools/android/forwarder2/daemon.h"
@@ -29,7 +29,6 @@ forwarder2::PipeNotifier* g_notifier = NULL;
 
 const int kBufSize = 256;
 
-const char kPIDFilePath[] = "/data/local/tmp/chrome_device_forwarder_pid";
 const char kDaemonIdentifier[] = "chrome_device_forwarder_daemon";
 
 const char kKillServerCommand[] = "kill-server";
@@ -63,7 +62,7 @@ class ServerDelegate : public Daemon::ServerDelegate {
     char buf[kBufSize];
     const int bytes_read = client_socket->Read(buf, sizeof(buf));
     if (bytes_read <= 0) {
-      if (client_socket->exited())
+      if (client_socket->DidReceiveEvent())
         return;
       PError("Read()");
       return;
@@ -161,7 +160,7 @@ int RunDeviceForwarder(int argc, char** argv) {
   ClientDelegate client_delegate(argv[1]);
   ServerDelegate daemon_delegate;
   const char kLogFilePath[] = "";  // Log to logcat.
-  Daemon daemon(kLogFilePath, kPIDFilePath, kDaemonIdentifier, &client_delegate,
+  Daemon daemon(kLogFilePath, kDaemonIdentifier, &client_delegate,
                 &daemon_delegate, &GetExitNotifierFD);
 
   if (command == kKillServerCommand)

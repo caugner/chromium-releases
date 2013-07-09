@@ -21,9 +21,15 @@
 #include "skia/ext/image_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/skia_util.h"
-#include "webkit/glue/image_decoder.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#endif
 
 using content::BrowserThread;
 
@@ -69,8 +75,7 @@ gfx::Image LoadIcon(const std::string& filename) {
       reinterpret_cast<const unsigned char*>(file_contents.data());
 
   SkBitmap bitmap;
-  webkit_glue::ImageDecoder decoder;
-  bitmap = decoder.Decode(data, file_contents.length());
+  gfx::PNGCodec::Decode(data, file_contents.length(), &bitmap);
 
   return gfx::Image::CreateFrom1xBitmap(bitmap);
 }
@@ -114,7 +119,7 @@ class ExtensionActionIconFactoryTest
       return NULL;
 
     EXPECT_TRUE(valid_value.get());
-    if (!valid_value.get())
+    if (!valid_value)
       return NULL;
 
     scoped_refptr<Extension> extension =
@@ -167,6 +172,12 @@ class ExtensionActionIconFactoryTest
   content::TestBrowserThread io_thread_;
   scoped_ptr<TestingProfile> profile_;
   ExtensionService* extension_service_;
+
+#if defined OS_CHROMEOS
+  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
+  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedTestUserManager test_user_manager_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionActionIconFactoryTest);
 };

@@ -12,11 +12,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/proto/trials_seed.pb.h"
+#include "chrome/browser/net/network_time_tracker.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/pref_names.h"
@@ -24,6 +26,7 @@
 #include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
@@ -31,6 +34,10 @@
 #include "net/http/http_util.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#endif
 
 namespace chrome_variations {
 
@@ -40,9 +47,6 @@ namespace {
 const char kDefaultVariationsServerURL[] =
     "https://clients4.google.com/chrome-variations/seed";
 const int kMaxRetrySeedFetch = 5;
-
-// Time between seed fetches, in hours.
-const int kSeedFetchPeriodHours = 5;
 
 // TODO(mad): To be removed when we stop updating the NetworkTimeTracker.
 // For the HTTP date headers, the resolution of the server time is 1 second.
@@ -95,18 +99,40 @@ chrome::VersionInfo::Channel GetChannelForVariations() {
 Study_Platform GetCurrentPlatform() {
 #if defined(OS_WIN)
   return Study_Platform_PLATFORM_WINDOWS;
+#elif defined(OS_IOS)
+  return Study_Platform_PLATFORM_IOS;
 #elif defined(OS_MACOSX)
   return Study_Platform_PLATFORM_MAC;
 #elif defined(OS_CHROMEOS)
   return Study_Platform_PLATFORM_CHROMEOS;
 #elif defined(OS_ANDROID)
   return Study_Platform_PLATFORM_ANDROID;
-#elif defined(OS_IOS)
-  return Study_Platform_PLATFORM_IOS;
 #elif defined(OS_LINUX) || defined(OS_BSD) || defined(OS_SOLARIS)
   // Default BSD and SOLARIS to Linux to not break those builds, although these
   // platforms are not officially supported by Chrome.
   return Study_Platform_PLATFORM_LINUX;
+#else
+#error Unknown platform
+#endif
+}
+
+// Returns a string that will be used for the value of the 'osname' URL param
+// to the variations server.
+std::string GetPlatformString() {
+#if defined(OS_WIN)
+  return "win";
+#elif defined(OS_IOS)
+  return "ios";
+#elif defined(OS_MACOSX)
+  return "mac";
+#elif defined(OS_CHROMEOS)
+  return "chromeos";
+#elif defined(OS_ANDROID)
+  return "android";
+#elif defined(OS_LINUX) || defined(OS_BSD) || defined(OS_SOLARIS)
+  // Default BSD and SOLARIS to Linux to not break those builds, although these
+  // platforms are not officially supported by Chrome.
+  return "linux";
 #else
 #error Unknown platform
 #endif
@@ -117,21 +143,51 @@ base::Time ConvertStudyDateToBaseTime(int64 date_time) {
   return base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(date_time);
 }
 
+// Gets the restrict parameter from |local_state| or from Chrome OS settings in
+// the case of that platform.
+std::string GetRestrictParameterPref(PrefService* local_state) {
+  std::string parameter;
+#if defined(OS_CHROMEOS)
+  chromeos::CrosSettings::Get()->GetString(
+      chromeos::kVariationsRestrictParameter, &parameter);
+#else
+  if (local_state)
+    parameter = local_state->GetString(prefs::kVariationsRestrictParameter);
+#endif
+  return parameter;
+}
+
+enum ResourceRequestsAllowedState {
+  RESOURCE_REQUESTS_ALLOWED,
+  RESOURCE_REQUESTS_NOT_ALLOWED,
+  RESOURCE_REQUESTS_ALLOWED_NOTIFIED,
+  RESOURCE_REQUESTS_ALLOWED_ENUM_SIZE,
+};
+
+// Records UMA histogram with the current resource requests allowed state.
+void RecordRequestsAllowedHistogram(ResourceRequestsAllowedState state) {
+  UMA_HISTOGRAM_ENUMERATION("Variations.ResourceRequestsAllowed", state,
+                            RESOURCE_REQUESTS_ALLOWED_ENUM_SIZE);
+}
+
 }  // namespace
 
 VariationsService::VariationsService(PrefService* local_state)
     : local_state_(local_state),
       variations_server_url_(GetVariationsServerURL(local_state)),
       create_trials_from_seed_called_(false),
+      initial_request_completed_(false),
       resource_request_allowed_notifier_(
           new ResourceRequestAllowedNotifier) {
   resource_request_allowed_notifier_->Init(this);
 }
 
-VariationsService::VariationsService(ResourceRequestAllowedNotifier* notifier)
-    : local_state_(NULL),
+VariationsService::VariationsService(ResourceRequestAllowedNotifier* notifier,
+                                     PrefService* local_state)
+    : local_state_(local_state),
       variations_server_url_(GetVariationsServerURL(NULL)),
       create_trials_from_seed_called_(false),
+      initial_request_completed_(false),
       resource_request_allowed_notifier_(notifier) {
   resource_request_allowed_notifier_->Init(this);
 }
@@ -190,17 +246,15 @@ void VariationsService::StartRepeatedVariationsSeedFetch() {
   // retrieve the serial number that will be sent to the server.
   DCHECK(create_trials_from_seed_called_);
 
-  // Perform the first fetch.
-  FetchVariationsSeed();
-
-  // Repeat this periodically.
-  timer_.Start(FROM_HERE, base::TimeDelta::FromHours(kSeedFetchPeriodHours),
-               this, &VariationsService::FetchVariationsSeed);
-}
-
-bool VariationsService::GetNetworkTime(base::Time* network_time,
-                                       base::TimeDelta* uncertainty) const {
-  return network_time_tracker_.GetNetworkTime(network_time, uncertainty);
+  DCHECK(!request_scheduler_.get());
+  // Note that the act of instantiating the scheduler will start the fetch, if
+  // the scheduler deems appropriate. Using Unretained is fine here since the
+  // lifespan of request_scheduler_ is guaranteed to be shorter than that of
+  // this service.
+  request_scheduler_.reset(VariationsRequestScheduler::Create(
+      base::Bind(&VariationsService::FetchVariationsSeed,
+          base::Unretained(this)), local_state_));
+  request_scheduler_->Start();
 }
 
 // static
@@ -210,15 +264,17 @@ GURL VariationsService::GetVariationsServerURL(PrefService* local_state) {
   if (server_url_string.empty())
     server_url_string = kDefaultVariationsServerURL;
   GURL server_url = GURL(server_url_string);
-  if (local_state) {
-    // Append the "restrict" parameter if it is found in prefs.
-    const std::string restrict_param =
-        local_state->GetString(prefs::kVariationsRestrictParameter);
-    if (!restrict_param.empty())
-      server_url = net::AppendOrReplaceQueryParameter(server_url,
-                                                      "restrict",
-                                                      restrict_param);
+
+  const std::string restrict_param = GetRestrictParameterPref(local_state);
+  if (!restrict_param.empty()) {
+    server_url = net::AppendOrReplaceQueryParameter(server_url,
+                                                    "restrict",
+                                                    restrict_param);
   }
+
+  server_url = net::AppendOrReplaceQueryParameter(server_url, "osname",
+                                                  GetPlatformString());
+
   DCHECK(server_url.is_valid());
   return server_url;
 }
@@ -250,8 +306,7 @@ void VariationsService::RegisterPrefs(PrefRegistrySimple* registry) {
 
 // static
 VariationsService* VariationsService::Create(PrefService* local_state) {
-// This is temporarily disabled for Android. See http://crbug.com/168224
-#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_ANDROID)
+#if !defined(GOOGLE_CHROME_BUILD)
   // Unless the URL was provided, unsupported builds should return NULL to
   // indicate that the service should not be used.
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
@@ -275,34 +330,57 @@ void VariationsService::DoActualFetch() {
   }
   pending_seed_request_->Start();
 
-  last_request_started_time_ = base::TimeTicks::Now();
+  const base::TimeTicks now = base::TimeTicks::Now();
+  base::TimeDelta time_since_last_fetch;
+  // Record a time delta of 0 (default value) if there was no previous fetch.
+  if (!last_request_started_time_.is_null())
+    time_since_last_fetch = now - last_request_started_time_;
+  UMA_HISTOGRAM_CUSTOM_COUNTS("Variations.TimeSinceLastFetchAttempt",
+                              time_since_last_fetch.InMinutes(), 0,
+                              base::TimeDelta::FromDays(7).InMinutes(), 50);
+  last_request_started_time_ = now;
 }
 
 void VariationsService::FetchVariationsSeed() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   if (!resource_request_allowed_notifier_->ResourceRequestsAllowed()) {
+    RecordRequestsAllowedHistogram(RESOURCE_REQUESTS_NOT_ALLOWED);
     DVLOG(1) << "Resource requests were not allowed. Waiting for notification.";
     return;
   }
 
+  RecordRequestsAllowedHistogram(RESOURCE_REQUESTS_ALLOWED);
   DoActualFetch();
 }
 
 void VariationsService::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK_EQ(pending_seed_request_.get(), source);
+
+  const bool is_first_request = !initial_request_completed_;
+  initial_request_completed_ = true;
+
   // The fetcher will be deleted when the request is handled.
   scoped_ptr<const net::URLFetcher> request(pending_seed_request_.release());
-  if (request->GetStatus().status() != net::URLRequestStatus::SUCCESS) {
-    DVLOG(1) << "Variations server request failed.";
+  const net::URLRequestStatus& request_status = request->GetStatus();
+  if (request_status.status() != net::URLRequestStatus::SUCCESS) {
+    UMA_HISTOGRAM_SPARSE_SLOWLY("Variations.FailedRequestErrorCode",
+                                -request_status.error());
+    DVLOG(1) << "Variations server request failed with error: "
+             << request_status.error() << ": "
+             << net::ErrorToString(request_status.error());
+    // It's common for the very first fetch attempt to fail (e.g. the network
+    // may not yet be available). In such a case, try again soon, rather than
+    // waiting the full time interval.
+    if (is_first_request)
+      request_scheduler_->ScheduleFetchShortly();
     return;
   }
 
   // Log the response code.
   const int response_code = request->GetResponseCode();
-  UMA_HISTOGRAM_CUSTOM_ENUMERATION("Variations.SeedFetchResponseCode",
-      net::HttpUtil::MapStatusCodeForHistogram(response_code),
-      net::HttpUtil::GetStatusCodesForHistogram());
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Variations.SeedFetchResponseCode",
+                              response_code);
 
   const base::TimeDelta latency =
       base::TimeTicks::Now() - last_request_started_time_;
@@ -314,7 +392,7 @@ void VariationsService::OnURLFetchComplete(const net::URLFetcher* source) {
     DCHECK(success || response_date.is_null());
 
     if (!response_date.is_null()) {
-      network_time_tracker_.UpdateNetworkTime(
+      NetworkTimeTracker::BuildNotifierUpdateCallback().Run(
           response_date,
           base::TimeDelta::FromMilliseconds(kServerTimeResolutionMs),
           latency);
@@ -348,10 +426,13 @@ void VariationsService::OnResourceRequestsAllowed() {
   // attempt was made earlier that fails (which implies that the period had
   // elapsed). After a successful attempt is made, the notifier will know not
   // to call this method again until another failed attempt occurs.
+  RecordRequestsAllowedHistogram(RESOURCE_REQUESTS_ALLOWED_NOTIFIED);
   DVLOG(1) << "Retrying fetch.";
   DoActualFetch();
-  if (timer_.IsRunning())
-    timer_.Reset();
+
+  // This service must have created a scheduler in order for this to be called.
+  DCHECK(request_scheduler_.get());
+  request_scheduler_->Reset();
 }
 
 bool VariationsService::StoreSeedData(const std::string& seed_data,
@@ -575,10 +656,9 @@ bool VariationsService::ValidateStudyAndComputeTotalProbability(
 bool VariationsService::LoadTrialsSeedFromPref(PrefService* local_prefs,
                                                TrialsSeed* seed) {
   std::string base64_seed_data = local_prefs->GetString(prefs::kVariationsSeed);
-  if (base64_seed_data.empty()) {
-    UMA_HISTOGRAM_BOOLEAN("Variations.SeedEmpty", true);
+  UMA_HISTOGRAM_BOOLEAN("Variations.SeedEmpty", base64_seed_data.empty());
+  if (base64_seed_data.empty())
     return false;
-  }
 
   // If the decode process fails, assume the pref value is corrupt and clear it.
   std::string seed_data;
@@ -609,7 +689,10 @@ void VariationsService::CreateTrialFromStudy(const Study& study,
 
   if (study.has_consistency() &&
       study.consistency() == Study_Consistency_PERMANENT) {
-    trial->UseOneTimeRandomization();
+    if (study.has_randomization_seed())
+      trial->UseOneTimeRandomizationWithCustomSeed(study.randomization_seed());
+    else
+      trial->UseOneTimeRandomization();
   }
 
   for (int i = 0; i < study.experiment_size(); ++i) {

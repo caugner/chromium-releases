@@ -88,12 +88,13 @@ IconSize GetIconSizeBinFromBitmapResult(const gfx::Size& pixel_size) {
   int max_size =
       (pixel_size.width() > pixel_size.height() ?
        pixel_size.width() : pixel_size.height());
+  // TODO(zea): re-enable 64p and 32p resolutions once we support them.
   if (max_size > 64)
     return SIZE_INVALID;
   else if (max_size > 32)
-    return SIZE_64;
+    return SIZE_INVALID;
   else if (max_size > 16)
-    return SIZE_32;
+    return SIZE_INVALID;
   else
     return SIZE_16;
 }
@@ -137,7 +138,7 @@ history::FaviconBitmapResult GetImageDataFromSpecifics(
 void FillSpecificsWithImageData(
     const history::FaviconBitmapResult& bitmap_result,
     sync_pb::FaviconData* favicon_data) {
-  if (!bitmap_result.bitmap_data.get())
+  if (!bitmap_result.bitmap_data)
     return;
   favicon_data->set_height(bitmap_result.pixel_size.height());
   favicon_data->set_width(bitmap_result.pixel_size.width());
@@ -218,12 +219,13 @@ FaviconCacheObserver::~FaviconCacheObserver() {}
 
 FaviconCache::FaviconCache(Profile* profile, int max_sync_favicon_limit)
     : profile_(profile),
-      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      weak_ptr_factory_(this),
       legacy_delegate_(NULL),
       max_sync_favicon_limit_(max_sync_favicon_limit) {
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_HISTORY_URLS_DELETED,
                               content::Source<Profile>(profile_));
+  DVLOG(1) << "Setting favicon limit to " << max_sync_favicon_limit;
 }
 
 FaviconCache::~FaviconCache() {}
@@ -349,7 +351,34 @@ syncer::SyncError FaviconCache::ProcessSyncChanges(
         continue;
       } else {
         DVLOG(1) << "Deleting favicon at " << favicon_url.spec();
-        DropSyncedFavicon(favicon_iter);
+        // If we only have partial data for the favicon (which implies orphaned
+        // nodes), delete the local favicon only if the type corresponds to the
+        // partial data we have. If we do have orphaned nodes, we rely on the
+        // expiration logic to remove them eventually.
+        if (type == syncer::FAVICON_IMAGES &&
+            FaviconInfoHasImages(*(favicon_iter->second)) &&
+            !FaviconInfoHasTracking(*(favicon_iter->second))) {
+          DropSyncedFavicon(favicon_iter);
+        } else if (type == syncer::FAVICON_TRACKING &&
+                   !FaviconInfoHasImages(*(favicon_iter->second)) &&
+                   FaviconInfoHasTracking(*(favicon_iter->second))) {
+          DropSyncedFavicon(favicon_iter);
+        } else {
+          // Only delete the data for the modified type.
+          if (type == syncer::FAVICON_TRACKING) {
+            recent_favicons_.erase(favicon_iter->second);
+            favicon_iter->second->last_visit_time = base::Time();
+            favicon_iter->second->is_bookmarked = false;
+            recent_favicons_.insert(favicon_iter->second);
+            DCHECK(!FaviconInfoHasTracking(*(favicon_iter->second)));
+          } else {
+            for (int i = 0; i < NUM_SIZES; ++i) {
+              favicon_iter->second->bitmap_data[i] =
+                  history::FaviconBitmapResult();
+            }
+            DCHECK(!FaviconInfoHasImages(*(favicon_iter->second)));
+          }
+        }
       }
     } else if (iter->change_type() == syncer::SyncChange::ACTION_UPDATE ||
                iter->change_type() == syncer::SyncChange::ACTION_ADD) {
@@ -471,7 +500,7 @@ bool FaviconCache::GetSyncedFaviconForFaviconURL(
     return false;
 
   // TODO(zea): support getting other resolutions.
-  if (!iter->second->bitmap_data[SIZE_16].bitmap_data.get())
+  if (!iter->second->bitmap_data[SIZE_16].bitmap_data)
     return false;
 
   *favicon_png = iter->second->bitmap_data[SIZE_16].bitmap_data;
@@ -815,19 +844,19 @@ void FaviconCache::MergeSyncFavicon(const syncer::SyncData& sync_favicon,
     if (image_specifics.has_favicon_web()) {
       favicon_info->bitmap_data[SIZE_16] = GetImageDataFromSpecifics(
           image_specifics.favicon_web());
-    } else if (favicon_info->bitmap_data[SIZE_16].bitmap_data.get()) {
+    } else if (favicon_info->bitmap_data[SIZE_16].bitmap_data) {
       needs_update = true;
     }
     if (image_specifics.has_favicon_web_32()) {
       favicon_info->bitmap_data[SIZE_32] = GetImageDataFromSpecifics(
           image_specifics.favicon_web_32());
-    } else if (favicon_info->bitmap_data[SIZE_32].bitmap_data.get()) {
+    } else if (favicon_info->bitmap_data[SIZE_32].bitmap_data) {
       needs_update = true;
     }
     if (image_specifics.has_favicon_touch_64()) {
       favicon_info->bitmap_data[SIZE_64] = GetImageDataFromSpecifics(
           image_specifics.favicon_touch_64());
-    } else if (favicon_info->bitmap_data[SIZE_64].bitmap_data.get()) {
+    } else if (favicon_info->bitmap_data[SIZE_64].bitmap_data) {
       needs_update = true;
     }
 
@@ -962,18 +991,22 @@ FaviconCache::FaviconMap::iterator FaviconCache::DeleteSyncedFavicon(
     syncer::SyncChangeList* image_changes,
     syncer::SyncChangeList* tracking_changes) {
   linked_ptr<SyncedFaviconInfo> favicon_info = favicon_iter->second;
-  image_changes->push_back(
-      syncer::SyncChange(FROM_HERE,
-                         syncer::SyncChange::ACTION_DELETE,
-                         syncer::SyncData::CreateLocalDelete(
-                             favicon_info->favicon_url.spec(),
-                             syncer::FAVICON_IMAGES)));
-  tracking_changes->push_back(
-      syncer::SyncChange(FROM_HERE,
-                         syncer::SyncChange::ACTION_DELETE,
-                         syncer::SyncData::CreateLocalDelete(
-                             favicon_info->favicon_url.spec(),
-                             syncer::FAVICON_TRACKING)));
+  if (FaviconInfoHasImages(*(favicon_iter->second))) {
+    image_changes->push_back(
+        syncer::SyncChange(FROM_HERE,
+                           syncer::SyncChange::ACTION_DELETE,
+                           syncer::SyncData::CreateLocalDelete(
+                               favicon_info->favicon_url.spec(),
+                               syncer::FAVICON_IMAGES)));
+  }
+  if (FaviconInfoHasTracking(*(favicon_iter->second))) {
+    tracking_changes->push_back(
+        syncer::SyncChange(FROM_HERE,
+                           syncer::SyncChange::ACTION_DELETE,
+                           syncer::SyncData::CreateLocalDelete(
+                               favicon_info->favicon_url.spec(),
+                               syncer::FAVICON_TRACKING)));
+  }
   FaviconMap::iterator next = favicon_iter;
   next++;
   DropSyncedFavicon(favicon_iter);

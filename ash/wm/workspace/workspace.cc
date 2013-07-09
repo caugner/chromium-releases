@@ -64,6 +64,8 @@ aura::Window* Workspace::ReleaseWindow() {
   // WorkspaceManager.
   window_->SetLayoutManager(NULL);
   window_->SetEventFilter(NULL);
+  window_->RemovePreTargetHandler(event_handler_.get());
+  window_->RemovePostTargetHandler(event_handler_.get());
   aura::Window* window = window_;
   window_ = NULL;
   return window;
@@ -78,15 +80,11 @@ bool Workspace::ShouldMoveToPending() const {
     if (!child->TargetVisibility() || wm::IsWindowMinimized(child))
       continue;
 
-    if (!GetTrackedByWorkspace(child)) {
-      // If we have a maximized window that isn't tracked don't move to
-      // pending. This handles the case of dragging a maximized window.
-      if (WorkspaceManager::IsMaximized(child))
-        return false;
-      continue;
-    }
+    // If we have a maximized window don't move to pending.
+    if (WorkspaceManager::IsMaximized(child))
+      return false;
 
-    if (!GetPersistsAcrossAllWorkspaces(child))
+    if (GetTrackedByWorkspace(child) && !GetPersistsAcrossAllWorkspaces(child))
       return false;
   }
   return true;

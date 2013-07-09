@@ -29,6 +29,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/sessions/serialized_navigation_entry.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
@@ -100,10 +101,11 @@ SessionModelAssociator::SessionModelAssociator(
       stale_session_threshold_days_(kDefaultStaleSessionThresholdDays),
       setup_for_test_(false),
       waiting_for_change_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(test_weak_factory_(this)),
+      test_weak_factory_(this),
       profile_(sync_service->profile()),
       error_handler_(error_handler),
-      favicon_cache_(profile_, kMaxSyncFavicons) {
+      favicon_cache_(profile_,
+                     sync_service->current_experiments().favicon_sync_limit) {
   DCHECK(CalledOnValidThread());
   DCHECK(sync_service_);
   DCHECK(profile_);
@@ -120,7 +122,7 @@ SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service,
       stale_session_threshold_days_(kDefaultStaleSessionThresholdDays),
       setup_for_test_(setup_for_test),
       waiting_for_change_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(test_weak_factory_(this)),
+      test_weak_factory_(this),
       profile_(sync_service->profile()),
       error_handler_(NULL),
       favicon_cache_(profile_, kMaxSyncFavicons) {
@@ -481,7 +483,8 @@ void SessionModelAssociator::SetSessionTabFromDelegate(
     DCHECK(entry);
     if (entry->GetVirtualURL().is_valid()) {
       session_tab->navigations.push_back(
-          TabNavigation::FromNavigationEntry(i, *entry));
+          ::sessions::SerializedNavigationEntry::FromNavigationEntry(i,
+                                                                     *entry));
     }
   }
   session_tab->session_storage_persistent_id.clear();
@@ -592,7 +595,7 @@ syncer::SyncError SessionModelAssociator::AssociateModels(
     // Make sure we have a machine tag.
     if (current_machine_tag_.empty())
       InitializeCurrentMachineTag(&trans);
-    if (local_device_info.get()) {
+    if (local_device_info) {
       current_session_name_ = local_device_info->client_name();
     } else {
       return error_handler_->CreateAndUploadError(

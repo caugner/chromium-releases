@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/web_contents/navigation_controller_impl.h"
+#include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/navigation_entry.h"
@@ -214,16 +216,53 @@ TEST_F(RenderViewHostTest, BadMessageHandlerRenderWidgetHost) {
 // Test that OnInputEventAck() detects bad messages.
 TEST_F(RenderViewHostTest, BadMessageHandlerInputEventAck) {
   EXPECT_EQ(0, process()->bad_msg_count());
-  // ViewHostMsg_HandleInputEvent_ACK is defined taking 0 params but
+  // InputHostMsg_HandleInputEvent_ACK is defined taking 0 params but
   // the code actually expects it to have at least one int para, this this
   // bogus message will not fail at de-serialization but should fail in
   // OnInputEventAck() processing.
-  IPC::Message message(0, ViewHostMsg_HandleInputEvent_ACK::ID,
+  IPC::Message message(0, InputHostMsg_HandleInputEvent_ACK::ID,
                        IPC::Message::PRIORITY_NORMAL);
   test_rvh()->OnMessageReceived(message);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 
 #endif
+
+TEST_F(RenderViewHostTest, MessageWithBadHistoryItemFiles) {
+  base::FilePath file_path;
+  EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &file_path));
+  file_path = file_path.AppendASCII("foo");
+  EXPECT_EQ(0, process()->bad_msg_count());
+  test_rvh()->TestOnUpdateStateWithFile(process()->GetID(), file_path);
+  EXPECT_EQ(1, process()->bad_msg_count());
+
+  ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
+      process()->GetID(), file_path,
+      base::PLATFORM_FILE_OPEN |
+      base::PLATFORM_FILE_READ |
+      base::PLATFORM_FILE_EXCLUSIVE_READ |
+      base::PLATFORM_FILE_ASYNC);
+  test_rvh()->TestOnUpdateStateWithFile(process()->GetID(), file_path);
+  EXPECT_EQ(1, process()->bad_msg_count());
+}
+
+TEST_F(RenderViewHostTest, NavigationWithBadHistoryItemFiles) {
+  GURL url("http://www.google.com");
+  base::FilePath file_path;
+  EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &file_path));
+  file_path = file_path.AppendASCII("bar");
+  EXPECT_EQ(0, process()->bad_msg_count());
+  test_rvh()->SendNavigateWithFile(1, url, file_path);
+  EXPECT_EQ(1, process()->bad_msg_count());
+
+  ChildProcessSecurityPolicyImpl::GetInstance()->GrantPermissionsForFile(
+      process()->GetID(), file_path,
+      base::PLATFORM_FILE_OPEN |
+      base::PLATFORM_FILE_READ |
+      base::PLATFORM_FILE_EXCLUSIVE_READ |
+      base::PLATFORM_FILE_ASYNC);
+  test_rvh()->SendNavigateWithFile(process()->GetID(), url, file_path);
+  EXPECT_EQ(1, process()->bad_msg_count());
+}
 
 }  // namespace content

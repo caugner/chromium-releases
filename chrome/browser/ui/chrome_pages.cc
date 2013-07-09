@@ -27,6 +27,10 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/url_util.h"
 
+#if defined(OS_WIN)
+#include "chrome/browser/enumerate_modules_model_win.h"
+#endif
+
 using content::UserMetricsAction;
 
 namespace chrome {
@@ -65,7 +69,7 @@ void ShowBookmarkManager(Browser* browser) {
 }
 
 void ShowBookmarkManagerForNode(Browser* browser, int64 node_id) {
-  OpenBookmarkManagerWithHash(browser, "", node_id);
+  OpenBookmarkManagerWithHash(browser, std::string(), node_id);
 }
 
 void ShowHistory(Browser* browser) {
@@ -80,8 +84,9 @@ void ShowDownloads(Browser* browser) {
   content::RecordAction(UserMetricsAction("ShowDownloads"));
   if (browser->window()) {
     DownloadShelf* shelf = browser->window()->GetDownloadShelf();
+    // The downloads page is always shown in response to a user action.
     if (shelf->IsShowing())
-      shelf->Close();
+      shelf->Close(DownloadShelf::USER_ACTION);
   }
   ShowSingletonTabOverwritingNTP(
       browser,
@@ -105,6 +110,19 @@ void ShowExtensions(Browser* browser,
 }
 
 void ShowConflicts(Browser* browser) {
+#if defined(OS_WIN)
+  EnumerateModulesModel* model = EnumerateModulesModel::GetInstance();
+  if (model->modules_to_notify_about() > 0) {
+    GURL help_center_url = model->GetFirstNotableConflict();
+    if (help_center_url.is_valid()) {
+      EnumerateModulesModel::RecordLearnMoreStat(true);
+      ShowSingletonTab(browser, help_center_url);
+      model->AcknowledgeConflictNotification();
+      return;
+    }
+  }
+#endif
+
   content::RecordAction(UserMetricsAction("AboutConflicts"));
   ShowSingletonTab(browser, GURL(kChromeUIConflictsURL));
 }
@@ -191,7 +209,7 @@ void ShowSearchEngineSettings(Browser* browser) {
 
 void ShowBrowserSignin(Browser* browser, SyncPromoUI::Source source) {
   Profile* original_profile = browser->profile()->GetOriginalProfile();
-  SigninManager* manager =
+  SigninManagerBase* manager =
       SigninManagerFactory::GetForProfile(original_profile);
   DCHECK(manager->IsSigninAllowed());
   // If we're signed in, just show settings.

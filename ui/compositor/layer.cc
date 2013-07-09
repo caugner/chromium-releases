@@ -487,6 +487,10 @@ void Layer::SwitchCCLayerForTest() {
 }
 
 void Layer::SetExternalTexture(Texture* texture) {
+  // Hold a ref to the old |Texture| until we have updated all
+  // compositor references to the texture id that it holds.
+  scoped_refptr<ui::Texture> old_texture = texture_;
+
   DCHECK_EQ(type_, LAYER_TEXTURED);
   DCHECK(!solid_color_layer_);
   bool has_texture = !!texture;
@@ -638,6 +642,10 @@ unsigned Layer::PrepareTexture(cc::ResourceUpdateQueue* queue) {
 WebKit::WebGraphicsContext3D* Layer::Context3d() {
   DCHECK(texture_layer_);
   return texture_->HostContext3D();
+}
+
+bool Layer::PrepareTextureMailbox(cc::TextureMailbox* mailbox) {
+  return false;
 }
 
 void Layer::SetForceRenderSurface(bool force) {
@@ -859,7 +867,7 @@ void Layer::RemoveThreadedAnimation(int animation_id) {
   }
 
   pending_threaded_animations_.erase(
-      cc::remove_if(pending_threaded_animations_,
+      cc::remove_if(&pending_threaded_animations_,
                     pending_threaded_animations_.begin(),
                     pending_threaded_animations_.end(),
                     HasAnimationId(animation_id)),

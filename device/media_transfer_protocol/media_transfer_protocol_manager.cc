@@ -12,8 +12,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop_proxy.h"
 #include "base/observer_list.h"
+#include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_checker.h"
 #include "device/media_transfer_protocol/media_transfer_protocol_daemon_client.h"
@@ -35,23 +35,23 @@ MediaTransferProtocolManager* g_media_transfer_protocol_manager = NULL;
 // The MediaTransferProtocolManager implementation.
 class MediaTransferProtocolManagerImpl : public MediaTransferProtocolManager {
  public:
-  MediaTransferProtocolManagerImpl(
-      scoped_refptr<base::MessageLoopProxy> loop_proxy)
+  explicit MediaTransferProtocolManagerImpl(
+      scoped_refptr<base::SequencedTaskRunner> task_runner)
       : weak_ptr_factory_(this) {
     dbus::Bus* bus = NULL;
 #if defined(OS_CHROMEOS)
-    DCHECK(!loop_proxy.get());
+    DCHECK(!task_runner.get());
     chromeos::DBusThreadManager* dbus_thread_manager =
         chromeos::DBusThreadManager::Get();
     bus = dbus_thread_manager->GetSystemBus();
     if (!bus)
       return;
 #else
-    DCHECK(loop_proxy.get());
+    DCHECK(task_runner.get());
     dbus::Bus::Options options;
     options.bus_type = dbus::Bus::SYSTEM;
     options.connection_type = dbus::Bus::PRIVATE;
-    options.dbus_task_runner = loop_proxy;
+    options.dbus_task_runner = task_runner;
     session_bus_ = new dbus::Bus(options);
     bus = session_bus_.get();
 #endif
@@ -71,6 +71,9 @@ class MediaTransferProtocolManagerImpl : public MediaTransferProtocolManager {
   }
 
   virtual ~MediaTransferProtocolManagerImpl() {
+    DCHECK(g_media_transfer_protocol_manager);
+    g_media_transfer_protocol_manager = NULL;
+    VLOG(1) << "MediaTransferProtocolManager Shutdown completed";
   }
 
   // MediaTransferProtocolManager override.
@@ -111,7 +114,7 @@ class MediaTransferProtocolManagerImpl : public MediaTransferProtocolManager {
                            const OpenStorageCallback& callback) OVERRIDE {
     DCHECK(thread_checker_.CalledOnValidThread());
     if (!ContainsKey(storage_info_map_, storage_name)) {
-      callback.Run("", true);
+      callback.Run(std::string(), true);
       return;
     }
     open_storage_callbacks_.push(callback);
@@ -333,13 +336,13 @@ class MediaTransferProtocolManagerImpl : public MediaTransferProtocolManager {
       open_storage_callbacks_.front().Run(handle, false);
     } else {
       NOTREACHED();
-      open_storage_callbacks_.front().Run("", true);
+      open_storage_callbacks_.front().Run(std::string(), true);
     }
     open_storage_callbacks_.pop();
   }
 
   void OnOpenStorageError() {
-    open_storage_callbacks_.front().Run("", true);
+    open_storage_callbacks_.front().Run(std::string(), true);
     open_storage_callbacks_.pop();
   }
 
@@ -434,31 +437,14 @@ class MediaTransferProtocolManagerImpl : public MediaTransferProtocolManager {
 }  // namespace
 
 // static
-void MediaTransferProtocolManager::Initialize(
-    scoped_refptr<base::MessageLoopProxy> loop_proxy) {
-  if (g_media_transfer_protocol_manager) {
-    LOG(WARNING) << "MediaTransferProtocolManager was already initialized";
-    return;
-  }
+MediaTransferProtocolManager* MediaTransferProtocolManager::Initialize(
+    scoped_refptr<base::SequencedTaskRunner> task_runner) {
+  DCHECK(!g_media_transfer_protocol_manager);
+
   g_media_transfer_protocol_manager =
-      new MediaTransferProtocolManagerImpl(loop_proxy);
+      new MediaTransferProtocolManagerImpl(task_runner);
   VLOG(1) << "MediaTransferProtocolManager initialized";
-}
 
-// static
-void MediaTransferProtocolManager::Shutdown() {
-  if (!g_media_transfer_protocol_manager) {
-    LOG(WARNING) << "MediaTransferProtocolManager::Shutdown() called with "
-                 << "NULL manager";
-    return;
-  }
-  delete g_media_transfer_protocol_manager;
-  g_media_transfer_protocol_manager = NULL;
-  VLOG(1) << "MediaTransferProtocolManager Shutdown completed";
-}
-
-// static
-MediaTransferProtocolManager* MediaTransferProtocolManager::GetInstance() {
   return g_media_transfer_protocol_manager;
 }
 

@@ -15,6 +15,7 @@
 #include "ash/system/tray/view_click_listener.h"
 #include "ash/system/user/login_status.h"
 #include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "ui/views/controls/button/button.h"
 
 namespace chromeos {
@@ -38,10 +39,12 @@ namespace tray {
 
 struct NetworkInfo;
 
-class NetworkStateListDetailedView : public NetworkDetailedView,
-                                     public views::ButtonListener,
-                                     public ViewClickListener,
-                                     public network_icon::AnimationObserver {
+class NetworkStateListDetailedView
+    : public NetworkDetailedView,
+      public views::ButtonListener,
+      public ViewClickListener,
+      public network_icon::AnimationObserver,
+      public base::SupportsWeakPtr<NetworkStateListDetailedView> {
  public:
   enum ListType {
     LIST_TYPE_NETWORK,
@@ -83,11 +86,13 @@ class NetworkStateListDetailedView : public NetworkDetailedView,
 
   // Update UI components.
   void UpdateHeaderButtons();
+  void UpdateTechnologyButton(TrayPopupHeaderButton* button,
+                              const std::string& technology);
 
   void UpdateNetworks(const NetworkStateList& networks);
   void UpdateNetworkList();
   bool CreateOrUpdateInfoLabel(
-      int index, const string16& text, views::Label** label);
+      int index, const base::string16& text, views::Label** label);
   bool UpdateNetworkChild(int index, const NetworkInfo* info);
   bool OrderChild(views::View* view, int index);
   bool UpdateNetworkListEntries(std::set<std::string>* new_service_paths);
@@ -102,8 +107,14 @@ class NetworkStateListDetailedView : public NetworkDetailedView,
   bool ResetInfoBubble();
   views::View* CreateNetworkInfoView();
 
-  // Handle click (connect) action
+  // Handle click (connect) action.
   void ConnectToNetwork(const std::string& service_path);
+
+  // Periodically request a network scan.
+  void CallRequestScan();
+
+  // Handle toggile mobile action
+  void ToggleMobile();
 
   // Type of list (all networks or vpn)
   ListType list_type_;

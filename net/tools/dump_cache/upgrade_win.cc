@@ -14,6 +14,7 @@
 #include "base/threading/thread.h"
 #include "base/win/scoped_handle.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/cache_type.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -38,8 +39,8 @@ const int kNumStreams = 4;
 #define DEBUGMSG(...) { printf(__VA_ARGS__); }
 #endif
 
-HANDLE OpenServer(const string16& pipe_number) {
-  string16 pipe_name(kPipePrefix);
+HANDLE OpenServer(const base::string16& pipe_number) {
+  base::string16 pipe_name(kPipePrefix);
   pipe_name.append(pipe_number);
   return CreateFile(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
                     OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
@@ -133,8 +134,8 @@ class BaseSM : public MessageLoopForIO::IOHandler {
   HANDLE channel_;
   int state_;
   int pending_count_;
-  scoped_array<char> in_buffer_;
-  scoped_array<char> out_buffer_;
+  scoped_ptr<char[]> in_buffer_;
+  scoped_ptr<char[]> out_buffer_;
   IoBuffer* input_;
   IoBuffer* output_;
   base::Thread cache_thread_;
@@ -318,7 +319,9 @@ bool MasterSM::DoInit() {
 
   disk_cache::Backend* cache;
   net::TestCompletionCallback cb;
-  int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE, path_, 0, false,
+  int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE,
+                                          net::CACHE_BACKEND_DEFAULT, path_, 0,
+                                          false,
                                           cache_thread_.message_loop_proxy(),
                                           NULL, &cache, cb.callback());
   if (cb.GetResult(rv) != net::OK) {
@@ -589,7 +592,9 @@ SlaveSM::SlaveSM(const base::FilePath& path, HANDLE channel)
     : BaseSM(channel), iterator_(NULL) {
   disk_cache::Backend* cache;
   net::TestCompletionCallback cb;
-  int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE, path, 0, false,
+  int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE,
+                                          net::CACHE_BACKEND_BLOCKFILE, path, 0,
+                                          false,
                                           cache_thread_.message_loop_proxy(),
                                           NULL, &cache, cb.callback());
   if (cb.GetResult(rv) != net::OK) {
@@ -867,8 +872,8 @@ void SlaveSM::Fail() {
 
 // -----------------------------------------------------------------------
 
-HANDLE CreateServer(string16* pipe_number) {
-  string16 pipe_name(kPipePrefix);
+HANDLE CreateServer(base::string16* pipe_number) {
+  base::string16 pipe_name(kPipePrefix);
   srand(static_cast<int>(base::Time::Now().ToInternalValue()));
   *pipe_number = base::IntToString16(rand());
   pipe_name.append(*pipe_number);
@@ -895,7 +900,8 @@ int UpgradeCache(const base::FilePath& output_path, HANDLE pipe) {
 }
 
 // This process will only execute commands from the controller.
-int RunSlave(const base::FilePath& input_path, const string16& pipe_number) {
+int RunSlave(const base::FilePath& input_path,
+             const base::string16& pipe_number) {
   MessageLoop loop(MessageLoop::TYPE_IO);
 
   base::win::ScopedHandle pipe(OpenServer(pipe_number));

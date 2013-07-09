@@ -49,14 +49,14 @@ class AppPackUpdater : public content::NotificationObserver,
   // Callback to listen for updates to the screensaver extension's path.
   typedef base::Callback<void(const base::FilePath&)> ScreenSaverUpdateCallback;
 
-  // Keys for the entries in the AppPack dictionary policy.
-  static const char kExtensionId[];
-  static const char kUpdateUrl[];
-
   // The |request_context| is used for the update checks.
   AppPackUpdater(net::URLRequestContextGetter* request_context,
                  EnterpriseInstallAttributes* install_attributes);
   virtual ~AppPackUpdater();
+
+  // Returns true if the ExternalLoader for the app pack has already been
+  // created.
+  bool created_external_loader() const { return created_extension_loader_; }
 
   // Creates an extensions::ExternalLoader that will load the crx files
   // downloaded by the AppPackUpdater. This can be called at most once, and the
