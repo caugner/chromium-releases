@@ -55,8 +55,7 @@ void ProfileDestroyer::DestroyProfileWhenAppropriate(Profile* const profile) {
   } else {
     // The instance will destroy itself once all render process hosts referring
     // to it are properly terminated.
-    scoped_refptr<ProfileDestroyer> profile_destroyer(
-        new ProfileDestroyer(profile, hosts));
+    new ProfileDestroyer(profile, hosts);
   }
 }
 
@@ -87,7 +86,8 @@ ProfileDestroyer::ProfileDestroyer(
     const std::vector<content::RenderProcessHost*>& hosts)
     : timer_(false, false),
       num_hosts_(0),
-      profile_(profile) {
+      profile_(profile),
+      weak_ptr_factory_(this) {
   if (pending_destroyers_ == NULL)
     pending_destroyers_ = new std::vector<ProfileDestroyer*>;
   pending_destroyers_->push_back(this);
@@ -103,7 +103,8 @@ ProfileDestroyer::ProfileDestroyer(
   if (num_hosts_) {
     timer_.Start(FROM_HERE,
                  base::TimeDelta::FromSeconds(kTimerDelaySeconds),
-                 base::Bind(&ProfileDestroyer::DestroyProfile, this));
+                 base::Bind(&ProfileDestroyer::DestroyProfile,
+                            weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -141,8 +142,9 @@ void ProfileDestroyer::Observe(int type,
   if (num_hosts_ == 0) {
     // Delay the destruction one step further in case other observers of this
     // notification need to look at the profile attached to the host.
-    MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&ProfileDestroyer::DestroyProfile, this));
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(
+            &ProfileDestroyer::DestroyProfile, weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -156,12 +158,15 @@ void ProfileDestroyer::DestroyProfile() {
   profile_ = NULL;
 
   // Don't wait for pending registrations, if any, these hosts are buggy.
-  DCHECK(registrar_.IsEmpty()) << "Some render process hosts where not "
-                               << "destroyed early enough!";
-  registrar_.RemoveAll();
+  // Note: this can happen, but if so, it's better to crash here than wait
+  // for the host to dereference a deleted Profile. http://crbug.com/248625
+  CHECK(registrar_.IsEmpty()) << "Some render process hosts were not "
+                              << "destroyed early enough!";
 
   // And stop the timer so we can be released early too.
   timer_.Stop();
+
+  delete this;
 }
 
 // static

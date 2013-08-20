@@ -10,6 +10,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/threading/thread_checker.h"
 #include "chrome/browser/google_apis/auth_service_interface.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "content/public/browser/notification_observer.h"
@@ -67,7 +68,8 @@ class AuthService : public AuthServiceInterface,
   static bool CanAuthenticate(Profile* profile);
 
  private:
-  // Callback for AuthOperation (InternalAuthStatusCallback).
+  // Called when authentication request from StartAuthentication() is
+  // completed.
   void OnAuthCompleted(const AuthStatusCallback& callback,
                        GDataErrorCode error,
                        const std::string& access_token);
@@ -78,6 +80,7 @@ class AuthService : public AuthServiceInterface,
   std::string access_token_;
   std::vector<std::string> scopes_;
   ObserverList<AuthServiceObserver> observers_;
+  base::ThreadChecker thread_checker_;
 
   content::NotificationRegistrar registrar_;
 

@@ -8,15 +8,11 @@
 #include <string>
 
 #include "base/files/file_path.h"
-#include "googleurl/src/gurl.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 class Browser;
+class GURL;
 class Profile;
-
-namespace base {
-class ListValue;
-}
 
 extern const char kFileBrowserDomain[];
 extern const char kFileBrowserGalleryTaskId[];
@@ -31,7 +27,13 @@ GURL GetFileBrowserUrl();
 GURL GetMediaPlayerUrl();
 GURL GetVideoPlayerUrl();
 
-// Converts |full_file_path| into external filesystem: url. Returns false
+// Converts |relative_path| (e.g., "drive/root" or "Downloads") into external
+// filesystem URL (e.g., filesystem://id/external/drive/root).
+GURL ConvertRelativePathToFileSystemUrl(const base::FilePath& relative_path,
+                                        const std::string& extension_id);
+
+// Converts |full_file_path| (e.g., "/special/drive/root" or
+// "/home/chronos/user/Downloads") into external filesystem URL. Returns false
 // if |full_file_path| is not managed by the external filesystem provider.
 bool ConvertFileToFileSystemUrl(Profile* profile,
                                 const base::FilePath& full_file_path,
@@ -81,9 +83,6 @@ void ViewItem(const base::FilePath& path);
 // Opens file browser on the folder containing the file, with the file selected.
 void ShowFileInFolder(const base::FilePath& path);
 
-// Opens file browser application.
-void OpenFileBrowser();
-
 // Executes the built-in File Manager handler or tries to open |file| directly
 // in the browser. Returns false if neither is possible.
 bool ExecuteBuiltinHandler(
@@ -93,6 +92,9 @@ bool ExecuteBuiltinHandler(
 
 // Checks whether a pepper plugin for |file_extension| is enabled.
 bool ShouldBeOpenedWithPlugin(Profile* profile, const char* file_extension);
+
+// Returns the MIME type of |file_path|.
+std::string GetMimeTypeForPath(const base::FilePath& file_path);
 
 }  // namespace file_manager_util
 

@@ -203,8 +203,8 @@ static AudioDeviceID GetAudioDeviceIdByUId(bool is_input,
                                         &audio_device_id);
   } else {
     // Non-default device.
-    base::mac::ScopedCFTypeRef<CFStringRef>
-        uid(base::SysUTF8ToCFStringRef(device_id));
+    base::ScopedCFTypeRef<CFStringRef> uid(
+        base::SysUTF8ToCFStringRef(device_id));
     AudioValueTranslation value;
     value.mInputData = &uid;
     value.mInputDataSize = sizeof(CFStringRef);
@@ -236,16 +236,21 @@ AudioManagerMac::AudioManagerMac()
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 
   // Task must be posted last to avoid races from handing out "this" to the
-  // audio thread.
+  // audio thread.  Always PostTask even if we're on the right thread since
+  // AudioManager creation is on the startup path and this may be slow.
   GetMessageLoop()->PostTask(FROM_HERE, base::Bind(
       &AudioManagerMac::CreateDeviceListener, base::Unretained(this)));
 }
 
 AudioManagerMac::~AudioManagerMac() {
-  // It's safe to post a task here since Shutdown() will wait for all tasks to
-  // complete before returning.
-  GetMessageLoop()->PostTask(FROM_HERE, base::Bind(
-      &AudioManagerMac::DestroyDeviceListener, base::Unretained(this)));
+  if (GetMessageLoop()->BelongsToCurrentThread()) {
+    DestroyDeviceListener();
+  } else {
+    // It's safe to post a task here since Shutdown() will wait for all tasks to
+    // complete before returning.
+    GetMessageLoop()->PostTask(FROM_HERE, base::Bind(
+        &AudioManagerMac::DestroyDeviceListener, base::Unretained(this)));
+  }
 
   Shutdown();
 }
@@ -412,20 +417,39 @@ AudioParameters AudioManagerMac::GetInputStreamParameters(
   const int buffer_size = ChooseBufferSize(
       AUAudioOutputStream::HardwareSampleRate());
 
+  AudioDeviceID device = GetAudioDeviceIdByUId(true, device_id);
+  if (device == kAudioObjectUnknown) {
+    DLOG(ERROR) << "Invalid device " << device_id;
+    return AudioParameters();
+  }
+
+  int channels = 0;
+  ChannelLayout channel_layout = CHANNEL_LAYOUT_STEREO;
+  if (GetDeviceChannels(device, kAudioDevicePropertyScopeInput, &channels) &&
+      channels <= 2) {
+    channel_layout = GuessChannelLayout(channels);
+  } else {
+    DLOG(ERROR) << "Failed to get the device channels, use stereo as default "
+                << "for device " << device_id;
+  }
+
+  int sample_rate = HardwareSampleRateForDevice(device);
+  if (!sample_rate)
+    sample_rate = kFallbackSampleRate;
+
   // TODO(xians): query the native channel layout for the specific device.
   return AudioParameters(
-      AudioParameters::AUDIO_PCM_LOW_LATENCY, CHANNEL_LAYOUT_STEREO,
-      AUAudioInputStream::HardwareSampleRate(), 16,
-      buffer_size);
+      AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout,
+      sample_rate, 16, buffer_size);
 }
 
 AudioOutputStream* AudioManagerMac::MakeLinearOutputStream(
     const AudioParameters& params) {
-  return MakeLowLatencyOutputStream(params);
+  return MakeLowLatencyOutputStream(params, std::string());
 }
 
 AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
-    const AudioParameters& params) {
+    const AudioParameters& params, const std::string& input_device_id) {
   // Handle basic output with no input channels.
   if (params.input_channels() == 0) {
     AudioDeviceID device = kAudioObjectUnknown;
@@ -462,7 +486,8 @@ AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
       LOG(INFO) << "Using AGGREGATE audio device";
   }
 
-  if (device != kAudioObjectUnknown)
+  if (device != kAudioObjectUnknown &&
+      input_device_id == AudioManagerBase::kDefaultDeviceId)
     return new AUHALStream(this, params, device);
 
   // Fallback to AudioSynchronizedStream which will handle completely
@@ -471,9 +496,13 @@ AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
   // kAudioDeviceUnknown translates to "use default" here.
   // TODO(crogers): consider tracking UMA stats on AUHALStream
   // versus AudioSynchronizedStream.
+  AudioDeviceID audio_device_id = GetAudioDeviceIdByUId(true, input_device_id);
+  if (audio_device_id == kAudioObjectUnknown)
+    return NULL;
+
   return new AudioSynchronizedStream(this,
                                      params,
-                                     kAudioDeviceUnknown,
+                                     audio_device_id,
                                      kAudioDeviceUnknown);
 }
 
@@ -545,10 +574,8 @@ void AudioManagerMac::CreateDeviceListener() {
   if (!GetDefaultOutputDevice(&current_output_device_))
     current_output_device_ = kAudioDeviceUnknown;
 
-  output_device_listener_.reset(new AudioDeviceListenerMac(BindToLoop(
-      GetMessageLoop(), base::Bind(
-          &AudioManagerMac::HandleDeviceChanges,
-          base::Unretained(this)))));
+  output_device_listener_.reset(new AudioDeviceListenerMac(base::Bind(
+      &AudioManagerMac::HandleDeviceChanges, base::Unretained(this))));
 }
 
 void AudioManagerMac::DestroyDeviceListener() {
@@ -557,6 +584,12 @@ void AudioManagerMac::DestroyDeviceListener() {
 }
 
 void AudioManagerMac::HandleDeviceChanges() {
+  if (!GetMessageLoop()->BelongsToCurrentThread()) {
+    GetMessageLoop()->PostTask(FROM_HERE, base::Bind(
+        &AudioManagerMac::HandleDeviceChanges, base::Unretained(this)));
+    return;
+  }
+
   int new_sample_rate = HardwareSampleRate();
   AudioDeviceID new_output_device;
   GetDefaultOutputDevice(&new_output_device);

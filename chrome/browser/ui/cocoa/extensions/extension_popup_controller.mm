@@ -93,7 +93,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
         devtools_callback_);
   }
 
-  ~DevtoolsNotificationBridge() {
+  virtual ~DevtoolsNotificationBridge() {
     content::DevToolsManager::GetInstance()->RemoveAgentStateCallback(
         devtools_callback_);
   }
@@ -149,12 +149,11 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
         anchoredAt:(NSPoint)anchoredAt
      arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
            devMode:(BOOL)devMode {
-  scoped_nsobject<InfoBubbleWindow> window(
-      [[InfoBubbleWindow alloc]
-          initWithContentRect:ui::kWindowSizeDeterminedLater
-                    styleMask:NSBorderlessWindowMask
-                      backing:NSBackingStoreBuffered
-                        defer:YES]);
+  base::scoped_nsobject<InfoBubbleWindow> window([[InfoBubbleWindow alloc]
+      initWithContentRect:ui::kWindowSizeDeterminedLater
+                styleMask:NSBorderlessWindowMask
+                  backing:NSBackingStoreBuffered
+                    defer:YES]);
   if (!window.get())
     return nil;
 

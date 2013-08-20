@@ -9,7 +9,7 @@
 #include <security.h>  // NOLINT
 
 #include "base/command_line.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/common/chrome_switches.h"
 
 string16 GetLocalComputerName() {
@@ -52,7 +52,7 @@ void CopyChromeSwitchesFromCurrentProcess(CommandLine* destination) {
     switches::kCloudPrintServiceURL,
     switches::kEnableLogging,
     switches::kIgnoreUrlFetcherCertRequests,
-    switches::kLsoHost,
+    switches::kLsoUrl,
     switches::kV,
   };
   destination->CopySwitchesFrom(*CommandLine::ForCurrentProcess(),

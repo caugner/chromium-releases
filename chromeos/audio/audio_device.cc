@@ -5,9 +5,9 @@
 #include "chromeos/audio/audio_device.h"
 
 #include "base/format_macros.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 
 namespace {
 
@@ -59,6 +59,8 @@ std::string GetTypeString(chromeos::AudioDeviceType type) {
 chromeos::AudioDeviceType GetAudioType(const std::string& node_type) {
   if (node_type.find("HEADPHONE") != std::string::npos)
     return chromeos::AUDIO_TYPE_HEADPHONE;
+  else if (node_type.find("INTERNAL_MIC") != std::string::npos)
+    return chromeos::AUDIO_TYPE_INTERNAL_MIC;
   else if (node_type.find("MIC") != std::string::npos)
     return chromeos::AUDIO_TYPE_MIC;
   else if (node_type.find("USB") != std::string::npos)
@@ -69,8 +71,6 @@ chromeos::AudioDeviceType GetAudioType(const std::string& node_type) {
     return chromeos::AUDIO_TYPE_HDMI;
   else if (node_type.find("INTERNAL_SPEAKER") != std::string::npos)
     return chromeos::AUDIO_TYPE_INTERNAL_SPEAKER;
-  else if (node_type.find("INTERNAL_MIC") != std::string::npos)
-    return chromeos::AUDIO_TYPE_INTERNAL_MIC;
   else
     return chromeos::AUDIO_TYPE_OTHER;
 }
@@ -92,9 +92,9 @@ AudioDevice::AudioDevice(const AudioNode& node) {
   id = node.id;
   type = GetAudioType(node.type);
   if (!node.name.empty() && node.name != "(default)")
-    display_name = UTF8ToUTF16(node.name);
+    display_name = node.name;
   else
-    display_name = UTF8ToUTF16(node.device_name);
+    display_name = node.device_name;
   priority = GetDevicePriority(type);
   active = node.active;
   plugged_time = node.plugged_time;
@@ -110,7 +110,7 @@ std::string AudioDevice::ToString() const {
                       base::Uint64ToString(id).c_str());
   base::StringAppendF(&result,
                       "display_name = %s ",
-                      UTF16ToUTF8(display_name).c_str());
+                      display_name.c_str());
   base::StringAppendF(&result,
                       "type = %s ",
                       GetTypeString(type).c_str());

@@ -10,15 +10,13 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
-#include "chrome/browser/download/chrome_download_manager_delegate.h"
-#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
@@ -47,8 +45,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/autofill/browser/personal_data_manager.h"
-#include "components/autofill/browser/webdata/autofill_webdata_service.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/download_manager.h"
@@ -65,15 +63,14 @@
 #include "net/ssl/server_bound_cert_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/dom_storage/dom_storage_types.h"
-#include "webkit/quota/quota_manager.h"
-#include "webkit/quota/quota_types.h"
-#include "webkit/quota/special_storage_policy.h"
+#include "webkit/browser/quota/quota_manager.h"
+#include "webkit/browser/quota/special_storage_policy.h"
+#include "webkit/common/dom_storage/dom_storage_types.h"
+#include "webkit/common/quota/quota_types.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DOMStorageContext;
-using content::DownloadManager;
 using content::UserMetricsAction;
 
 bool BrowsingDataRemover::is_removing_ = false;
@@ -117,6 +114,28 @@ BrowsingDataRemover* BrowsingDataRemover::CreateForRange(Profile* profile,
 // Static.
 BrowsingDataRemover* BrowsingDataRemover::CreateForPeriod(Profile* profile,
     TimePeriod period) {
+  switch (period) {
+    case LAST_HOUR:
+      content::RecordAction(
+          UserMetricsAction("ClearBrowsingData_LastHour"));
+      break;
+    case LAST_DAY:
+      content::RecordAction(
+          UserMetricsAction("ClearBrowsingData_LastDay"));
+      break;
+    case LAST_WEEK:
+      content::RecordAction(
+          UserMetricsAction("ClearBrowsingData_LastWeek"));
+      break;
+    case FOUR_WEEKS:
+      content::RecordAction(
+          UserMetricsAction("ClearBrowsingData_LastMonth"));
+      break;
+    case EVERYTHING:
+      content::RecordAction(
+          UserMetricsAction("ClearBrowsingData_Everything"));
+      break;
+  }
   return new BrowsingDataRemover(profile,
       BrowsingDataRemover::CalculateBeginDeleteTime(period),
       base::Time::Max());
@@ -136,6 +155,7 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
       main_context_getter_(profile->GetRequestContext()),
       media_context_getter_(profile->GetMediaRequestContext()),
       deauthorize_content_licenses_request_id_(0),
+      waiting_for_clear_autofill_origin_urls_(false),
       waiting_for_clear_cache_(false),
       waiting_for_clear_content_licenses_(false),
       waiting_for_clear_cookies_count_(0),
@@ -312,18 +332,40 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         session_service->DeleteLastSession();
 #endif
     }
+
+    // The saved Autofill profiles and credit cards can include the origin from
+    // which these profiles and credit cards were learned.  These are a form of
+    // history, so clear them as well.
+    scoped_refptr<autofill::AutofillWebDataService> web_data_service =
+        autofill::AutofillWebDataService::FromBrowserContext(profile_);
+    if (web_data_service.get()) {
+      waiting_for_clear_autofill_origin_urls_ = true;
+      web_data_service->RemoveOriginURLsModifiedBetween(
+          delete_begin_, delete_end_);
+      // The above calls are done on the UI thread but do their work on the DB
+      // thread. So wait for it.
+      BrowserThread::PostTaskAndReply(
+          BrowserThread::DB, FROM_HERE,
+          base::Bind(&base::DoNothing),
+          base::Bind(&BrowsingDataRemover::OnClearedAutofillOriginURLs,
+                     base::Unretained(this)));
+
+      autofill::PersonalDataManager* data_manager =
+          autofill::PersonalDataManagerFactory::GetForProfile(profile_);
+      if (data_manager)
+        data_manager->Refresh();
+    }
+
   }
 
   if ((remove_mask & REMOVE_DOWNLOADS) && may_delete_history) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Downloads"));
-    DownloadManager* download_manager =
+    content::DownloadManager* download_manager =
         BrowserContext::GetDownloadManager(profile_);
     download_manager->RemoveDownloadsBetween(delete_begin_, delete_end_);
-    DownloadService* download_service =
-        DownloadServiceFactory::GetForProfile(profile_);
-    ChromeDownloadManagerDelegate* download_manager_delegate =
-        download_service->GetDownloadManagerDelegate();
-    download_manager_delegate->ClearLastDownloadPath();
+    DownloadPrefs* download_prefs = DownloadPrefs::FromDownloadManager(
+        download_manager);
+    download_prefs->SetSaveFilePath(download_prefs->DownloadPath());
   }
 
   // We ignore the REMOVE_COOKIES request if UNPROTECTED_WEB is not set,
@@ -434,7 +476,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   if (remove_mask & REMOVE_PASSWORDS) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Passwords"));
     PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
-        profile_, Profile::EXPLICIT_ACCESS);
+        profile_, Profile::EXPLICIT_ACCESS).get();
 
     if (password_store)
       password_store->RemoveLoginsCreatedBetween(delete_begin_, delete_end_);
@@ -453,16 +495,16 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
           delete_begin_, delete_end_);
       // The above calls are done on the UI thread but do their work on the DB
       // thread. So wait for it.
-      BrowserThread::PostTask(
+      BrowserThread::PostTaskAndReply(
           BrowserThread::DB, FROM_HERE,
-          base::Bind(&BrowsingDataRemover::FormDataDBThreadHop,
+          base::Bind(&base::DoNothing),
+          base::Bind(&BrowsingDataRemover::OnClearedFormData,
                      base::Unretained(this)));
 
       autofill::PersonalDataManager* data_manager =
           autofill::PersonalDataManagerFactory::GetForProfile(profile_);
-      if (data_manager) {
+      if (data_manager)
         data_manager->Refresh();
-      }
     }
   }
 
@@ -496,6 +538,12 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
       prerender_manager->ClearData(
           prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS);
     }
+
+    // Tell the shader disk cache to clear.
+    waiting_for_clear_shader_cache_ = true;
+    content::RecordAction(UserMetricsAction("ClearBrowsingData_ShaderCache"));
+
+    ClearShaderCacheOnUIThread();
   }
 
 #if defined(ENABLE_PLUGINS)
@@ -512,13 +560,6 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         pepper_flash_settings_manager_->DeauthorizeContentLicenses(prefs);
   }
 #endif
-
-  if (remove_mask & REMOVE_SHADER_CACHE) {
-    waiting_for_clear_shader_cache_ = true;
-    content::RecordAction(UserMetricsAction("ClearBrowsingData_ShaderCache"));
-
-    ClearShaderCacheOnUIThread();
-  }
 
   // Always wipe accumulated network related data (TransportSecurityState and
   // HttpServerPropertiesManager data).
@@ -576,6 +617,7 @@ base::Time BrowsingDataRemover::CalculateBeginDeleteTime(
 
 bool BrowsingDataRemover::AllDone() {
   return registrar_.IsEmpty() &&
+      !waiting_for_clear_autofill_origin_urls_ &&
       !waiting_for_clear_cache_ &&
       !waiting_for_clear_nacl_cache_ &&
       !waiting_for_clear_cookies_count_&&
@@ -628,7 +670,7 @@ void BrowsingDataRemover::NotifyAndDeleteIfDone() {
 
   // History requests aren't happy if you delete yourself from the callback.
   // As such, we do a delete later.
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void BrowsingDataRemover::OnClearedHostnameResolutionCache() {
@@ -662,15 +704,15 @@ void BrowsingDataRemover::ClearLoggedInPredictor() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!waiting_for_clear_logged_in_predictor_);
 
- predictors::PredictorDatabase* predictor_db =
-        predictors::PredictorDatabaseFactory::GetForProfile(profile_);
- if (!predictor_db)
-   return;
+  predictors::PredictorDatabase* predictor_db =
+      predictors::PredictorDatabaseFactory::GetForProfile(profile_);
+  if (!predictor_db)
+    return;
 
- predictors::LoggedInPredictorTable* logged_in_table =
-     predictor_db->logged_in_table();
- if (!logged_in_table)
-   return;
+  predictors::LoggedInPredictorTable* logged_in_table =
+      predictor_db->logged_in_table().get();
+  if (!logged_in_table)
+    return;
 
   waiting_for_clear_logged_in_predictor_ = true;
 
@@ -724,8 +766,8 @@ void BrowsingDataRemover::ClearCacheOnIOThread() {
   // This function should be called on the IO thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(STATE_NONE, next_cache_state_);
-  DCHECK(main_context_getter_);
-  DCHECK(media_context_getter_);
+  DCHECK(main_context_getter_.get());
+  DCHECK(media_context_getter_.get());
 
   next_cache_state_ = STATE_CREATE_MAIN;
   DoClearCache(net::OK);
@@ -743,8 +785,9 @@ void BrowsingDataRemover::DoClearCache(int rv) {
       case STATE_CREATE_MEDIA: {
         // Get a pointer to the cache.
         net::URLRequestContextGetter* getter =
-            (next_cache_state_ == STATE_CREATE_MAIN) ?
-                main_context_getter_ : media_context_getter_;
+            (next_cache_state_ == STATE_CREATE_MAIN)
+                ? main_context_getter_.get()
+                : media_context_getter_.get();
         net::HttpTransactionFactory* factory =
             getter->GetURLRequestContext()->http_transaction_factory();
 
@@ -856,9 +899,8 @@ void BrowsingDataRemover::OnGotLocalStorageUsageInfo(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   for (size_t i = 0; i < infos.size(); ++i) {
-    if (!BrowsingDataHelper::DoesOriginMatchMask(infos[i].origin,
-                                                 origin_set_mask_,
-                                                 special_storage_policy_))
+    if (!BrowsingDataHelper::DoesOriginMatchMask(
+            infos[i].origin, origin_set_mask_, special_storage_policy_.get()))
       continue;
 
     if (infos[i].last_modified >= delete_begin_ &&
@@ -885,9 +927,8 @@ void BrowsingDataRemover::OnGotSessionStorageUsageInfo(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   for (size_t i = 0; i < infos.size(); ++i) {
-    if (!BrowsingDataHelper::DoesOriginMatchMask(infos[i].origin,
-                                                 origin_set_mask_,
-                                                 special_storage_policy_))
+    if (!BrowsingDataHelper::DoesOriginMatchMask(
+            infos[i].origin, origin_set_mask_, special_storage_policy_.get()))
       continue;
 
     dom_storage_context_->DeleteSessionStorage(infos[i]);
@@ -932,7 +973,6 @@ void BrowsingDataRemover::ClearQuotaManagedDataOnIOThread() {
       quota::kStorageTypeSyncable, delete_begin_,
       base::Bind(&BrowsingDataRemover::OnGotQuotaManagedOrigins,
                  base::Unretained(this)));
-
 }
 
 void BrowsingDataRemover::OnGotQuotaManagedOrigins(
@@ -948,7 +988,7 @@ void BrowsingDataRemover::OnGotQuotaManagedOrigins(
 
     if (!BrowsingDataHelper::DoesOriginMatchMask(origin->GetOrigin(),
                                                  origin_set_mask_,
-                                                 special_storage_policy_))
+                                                 special_storage_policy_.get()))
       continue;
 
     ++quota_managed_origins_to_delete_count_;
@@ -1022,7 +1062,7 @@ void BrowsingDataRemover::OnClearedCookies(int num_deleted) {
     return;
   }
 
-  DCHECK(waiting_for_clear_cookies_count_ > 0);
+  DCHECK_GT(waiting_for_clear_cookies_count_, 0);
   --waiting_for_clear_cookies_count_;
   NotifyAndDeleteIfDone();
 }
@@ -1069,16 +1109,14 @@ void BrowsingDataRemover::OnClearedServerBoundCerts() {
   NotifyAndDeleteIfDone();
 }
 
-void BrowsingDataRemover::FormDataDBThreadHop() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&BrowsingDataRemover::OnClearedFormData,
-                 base::Unretained(this)));
-}
-
 void BrowsingDataRemover::OnClearedFormData() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   waiting_for_clear_form_ = false;
+  NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::OnClearedAutofillOriginURLs() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  waiting_for_clear_autofill_origin_urls_ = false;
   NotifyAndDeleteIfDone();
 }

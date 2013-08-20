@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/foundation_util.h"
+#include "base/mac/scoped_nsobject.h"
+#include "base/strings/utf_string_conversions.h"
+#include "skia/ext/skia_utils_mac.h"
 #import "testing/gtest_mac.h"
+#include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_item_model.h"
 #import "ui/app_list/cocoa/apps_collection_view_drag_manager.h"
 #import "ui/app_list/cocoa/apps_grid_controller.h"
@@ -12,26 +16,46 @@
 #import "ui/app_list/cocoa/test/apps_grid_controller_test_helper.h"
 #include "ui/app_list/test/app_list_test_model.h"
 #include "ui/app_list/test/app_list_test_view_delegate.h"
+#include "ui/base/models/simple_menu_model.h"
 #import "ui/base/test/cocoa_test_event_utils.h"
 
 @interface TestPaginationObserver : NSObject<AppsPaginationModelObserver> {
  @private
+  NSInteger hoveredSegmentForTest_;
   int totalPagesChangedCount_;
   int selectedPageChangedCount_;
   int lastNewSelectedPage_;
+  bool visibilityDidChange_;
 }
 
+@property(assign, nonatomic) NSInteger hoveredSegmentForTest;
 @property(assign, nonatomic) int totalPagesChangedCount;
 @property(assign, nonatomic) int selectedPageChangedCount;
 @property(assign, nonatomic) int lastNewSelectedPage;
+
+- (bool)readVisibilityDidChange;
 
 @end
 
 @implementation TestPaginationObserver
 
+@synthesize hoveredSegmentForTest = hoveredSegmentForTest_;
 @synthesize totalPagesChangedCount = totalPagesChangedCount_;
 @synthesize selectedPageChangedCount = selectedPageChangedCount_;
 @synthesize lastNewSelectedPage = lastNewSelectedPage_;
+
+- (id)init {
+  if ((self = [super init]))
+    hoveredSegmentForTest_ = -1;
+
+  return self;
+}
+
+- (bool)readVisibilityDidChange {
+  bool truth = visibilityDidChange_;
+  visibilityDidChange_ = false;
+  return truth;
+}
 
 - (void)totalPagesChanged {
   ++totalPagesChangedCount_;
@@ -40,6 +64,14 @@
 - (void)selectedPageChanged:(int)newSelected {
   ++selectedPageChangedCount_;
   lastNewSelectedPage_ = newSelected;
+}
+
+- (void)pageVisibilityChanged {
+  visibilityDidChange_ = true;
+}
+
+- (NSInteger)pagerSegmentAtLocation:(NSPoint)locationInWindow {
+  return hoveredSegmentForTest_;
 }
 
 @end
@@ -53,9 +85,21 @@ class AppsGridControllerTest : public AppsGridControllerTestHelper {
  public:
   AppsGridControllerTest() {}
 
+  AppListTestViewDelegate* delegate() {
+    return owned_delegate_.get();
+  }
+
+  NSColor* ButtonTitleColorAt(size_t index) {
+    NSDictionary* attributes =
+        [[[GetItemViewAt(index) cell] attributedTitle] attributesAtIndex:0
+                                                          effectiveRange:NULL];
+    return [attributes objectForKey:NSForegroundColorAttributeName];
+  }
+
   virtual void SetUp() OVERRIDE {
     owned_apps_grid_controller_.reset([[AppsGridController alloc] init]);
-    [owned_apps_grid_controller_ setDelegate:delegate_.get()];
+    owned_delegate_.reset(new AppListTestViewDelegate);
+    [owned_apps_grid_controller_ setDelegate:owned_delegate_.get()];
     AppsGridControllerTestHelper::SetUpWithGridController(
         owned_apps_grid_controller_.get());
 
@@ -70,10 +114,48 @@ class AppsGridControllerTest : public AppsGridControllerTestHelper {
   }
 
  private:
-  scoped_nsobject<AppsGridController> owned_apps_grid_controller_;
+  base::scoped_nsobject<AppsGridController> owned_apps_grid_controller_;
+  scoped_ptr<AppListTestViewDelegate> owned_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(AppsGridControllerTest);
 };
+
+class AppListItemWithMenu : public AppListItemModel {
+ public:
+  AppListItemWithMenu(const std::string& title) : menu_model_(NULL) {
+    SetTitle(title);
+    menu_model_.AddItem(0, UTF8ToUTF16("Menu For: " + title));
+  }
+
+  virtual ui::MenuModel* GetContextMenuModel() OVERRIDE {
+    return &menu_model_;
+  }
+
+ private:
+  ui::SimpleMenuModel menu_model_;
+
+  DISALLOW_COPY_AND_ASSIGN(AppListItemWithMenu);
+};
+
+// Generate a mouse event at the centre of the view in |page| with the given
+// |index_in_page| that can be used to initiate, update and complete drag
+// operations.
+NSEvent* MouseEventInCell(NSCollectionView* page, size_t index_in_page) {
+  NSRect cell_rect = [page frameForItemAtIndex:index_in_page];
+  NSPoint point_in_view = NSMakePoint(NSMidX(cell_rect), NSMidY(cell_rect));
+  NSPoint point_in_window = [page convertPoint:point_in_view
+                                        toView:nil];
+  return cocoa_test_event_utils::LeftMouseDownAtPoint(point_in_window);
+}
+
+NSEvent* MouseEventForScroll(NSView* view, CGFloat relative_x) {
+  NSRect view_rect = [view frame];
+  NSPoint point_in_view = NSMakePoint(NSMidX(view_rect), NSMidY(view_rect));
+  point_in_view.x += point_in_view.x * relative_x;
+  NSPoint point_in_window = [view convertPoint:point_in_view
+                                        toView:nil];
+  return cocoa_test_event_utils::LeftMouseDownAtPoint(point_in_window);
+}
 
 }  // namespace
 
@@ -182,50 +264,170 @@ TEST_F(AppsGridControllerTest, Pagination) {
   EXPECT_EQ(1u, [[GetPageAt(0) content] count]);
 }
 
-// Tests basic left-right keyboard navigation on the first page, later tests
-// will test keyboard navigation across pages and other corner cases.
-TEST_F(AppsGridControllerTest, DISABLED_FirstPageKeyboardNavigation) {
-  model()->PopulateApps(3);
-  SinkEvents();
-  EXPECT_EQ(3u, [[GetPageAt(0) content] count]);
+// Tests that selecting an item changes the text color correctly.
+TEST_F(AppsGridControllerTest, SelectionChangesTextColor) {
+  model()->PopulateApps(2);
+  [apps_grid_controller_ selectItemAtIndex:0];
+  EXPECT_NSEQ(ButtonTitleColorAt(0),
+              gfx::SkColorToCalibratedNSColor(app_list::kGridTitleHoverColor));
+  EXPECT_NSEQ(ButtonTitleColorAt(1),
+              gfx::SkColorToCalibratedNSColor(app_list::kGridTitleColor));
 
-  SimulateKeyPress(NSRightArrowFunctionKey);
-  SinkEvents();
-  EXPECT_EQ(GetSelectedView(), GetItemViewAt(0));
+  [apps_grid_controller_ selectItemAtIndex:1];
+  EXPECT_NSEQ(ButtonTitleColorAt(0),
+              gfx::SkColorToCalibratedNSColor(app_list::kGridTitleColor));
+  EXPECT_NSEQ(ButtonTitleColorAt(1),
+              gfx::SkColorToCalibratedNSColor(app_list::kGridTitleHoverColor));
+}
 
-  SimulateKeyPress(NSRightArrowFunctionKey);
-  SinkEvents();
-  EXPECT_EQ(GetSelectedView(), GetItemViewAt(1));
+// Tests basic keyboard navigation on the first page.
+TEST_F(AppsGridControllerTest, FirstPageKeyboardNavigation) {
+  model()->PopulateApps(kItemsPerPage - 2);
+  EXPECT_EQ(kItemsPerPage - 2, [[GetPageAt(0) content] count]);
 
-  SimulateKeyPress(NSLeftArrowFunctionKey);
-  SinkEvents();
-  EXPECT_EQ(GetSelectedView(), GetItemViewAt(0));
+  SimulateKeyAction(@selector(moveRight:));
+  EXPECT_EQ(0u, [apps_grid_controller_ selectedItemIndex]);
 
-  // Go to the last item, and launch it.
-  SimulateKeyPress(NSRightArrowFunctionKey);
-  SimulateKeyPress(NSRightArrowFunctionKey);
-  [apps_grid_controller_ activateSelection];
-  SinkEvents();
-  EXPECT_EQ(GetSelectedView(), GetItemViewAt(2));
+  SimulateKeyAction(@selector(moveRight:));
+  EXPECT_EQ(1u, [apps_grid_controller_ selectedItemIndex]);
+
+  SimulateKeyAction(@selector(moveDown:));
+  EXPECT_EQ(5u, [apps_grid_controller_ selectedItemIndex]);
+
+  SimulateKeyAction(@selector(moveLeft:));
+  EXPECT_EQ(4u, [apps_grid_controller_ selectedItemIndex]);
+
+  SimulateKeyAction(@selector(moveUp:));
+  EXPECT_EQ(0u, [apps_grid_controller_ selectedItemIndex]);
+
+  // Go to the third item, and launch it.
+  SimulateKeyAction(@selector(moveRight:));
+  SimulateKeyAction(@selector(moveRight:));
+  EXPECT_EQ(2u, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(insertNewline:));
   EXPECT_EQ(1, delegate()->activate_count());
   EXPECT_EQ(std::string("Item 2"), delegate()->last_activated()->title());
 }
 
-// Test runtime updates: adding items, changing titles and icons.
+// Tests keyboard navigation across pages.
+TEST_F(AppsGridControllerTest, CrossPageKeyboardNavigation) {
+  model()->PopulateApps(kItemsPerPage + 10);
+  EXPECT_EQ(kItemsPerPage, [[GetPageAt(0) content] count]);
+  EXPECT_EQ(10u, [[GetPageAt(1) content] count]);
+
+  // Moving Left, Up, or PageUp from the top-left corner of the first page does
+  // nothing.
+  [apps_grid_controller_ selectItemAtIndex:0];
+  SimulateKeyAction(@selector(moveLeft:));
+  EXPECT_EQ(0u, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(moveUp:));
+  EXPECT_EQ(0u, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(scrollPageUp:));
+  EXPECT_EQ(0u, [apps_grid_controller_ selectedItemIndex]);
+
+  // Moving Right from the right side goes to the next page. Moving Left goes
+  // back to the first page.
+  [apps_grid_controller_ selectItemAtIndex:3];
+  SimulateKeyAction(@selector(moveRight:));
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(kItemsPerPage, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(moveLeft:));
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(3u, [apps_grid_controller_ selectedItemIndex]);
+
+  // Moving Down from the bottom does nothing.
+  [apps_grid_controller_ selectItemAtIndex:13];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  SimulateKeyAction(@selector(moveDown:));
+  EXPECT_EQ(13u, [apps_grid_controller_ selectedItemIndex]);
+
+  // Moving Right into a non-existent square on the next page will select the
+  // last item.
+  [apps_grid_controller_ selectItemAtIndex:15];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  SimulateKeyAction(@selector(moveRight:));
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(kItemsPerPage + 9, [apps_grid_controller_ selectedItemIndex]);
+
+  // PageDown and PageUp switches pages while maintaining the same selection
+  // position.
+  [apps_grid_controller_ selectItemAtIndex:6];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  SimulateKeyAction(@selector(scrollPageDown:));
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(kItemsPerPage + 6, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(scrollPageUp:));
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(6u, [apps_grid_controller_ selectedItemIndex]);
+
+  // PageDown into a non-existent square on the next page will select the last
+  // item.
+  [apps_grid_controller_ selectItemAtIndex:11];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  SimulateKeyAction(@selector(scrollPageDown:));
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(kItemsPerPage + 9, [apps_grid_controller_ selectedItemIndex]);
+
+  // Moving Right, Down, or PageDown from the bottom-right corner of the last
+  // page (not the last item) does nothing.
+  [apps_grid_controller_ selectItemAtIndex:kItemsPerPage + 9];
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  SimulateKeyAction(@selector(moveRight:));
+  EXPECT_EQ(kItemsPerPage + 9, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(moveDown:));
+  EXPECT_EQ(kItemsPerPage + 9, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(scrollPageDown:));
+  EXPECT_EQ(kItemsPerPage + 9, [apps_grid_controller_ selectedItemIndex]);
+
+  // After page switch, arrow keys select first item on current page.
+  [apps_grid_controller_ scrollToPage:0];
+  [apps_grid_controller_ scrollToPage:1];
+  EXPECT_EQ(NSNotFound, [apps_grid_controller_ selectedItemIndex]);
+  SimulateKeyAction(@selector(moveUp:));
+  EXPECT_EQ(kItemsPerPage, [apps_grid_controller_ selectedItemIndex]);
+}
+
+// Highlighting an item should cause the page it's on to be visible.
+TEST_F(AppsGridControllerTest, EnsureHighlightedVisible) {
+  model()->PopulateApps(3 * kItemsPerPage);
+  EXPECT_EQ(kItemsPerPage, [[GetPageAt(2) content] count]);
+
+  // First and last items of first page.
+  [apps_grid_controller_ selectItemAtIndex:0];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  [apps_grid_controller_ selectItemAtIndex:kItemsPerPage - 1];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+
+  // First item of second page.
+  [apps_grid_controller_ selectItemAtIndex:kItemsPerPage + 1];
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+
+  // Last item in model.
+  [apps_grid_controller_ selectItemAtIndex:3 * kItemsPerPage - 1];
+  EXPECT_EQ(2u, [apps_grid_controller_ visiblePage]);
+}
+
+
+// Test runtime updates: adding items, removing items, and moving items (e.g. in
+// response to app install, uninstall, and chrome sync changes. Also test
+// changing titles and icons.
 TEST_F(AppsGridControllerTest, ModelUpdates) {
   model()->PopulateApps(2);
   EXPECT_EQ(2u, [[GetPageAt(0) content] count]);
+  EXPECT_EQ(std::string("|Item 0,Item 1|"), GetViewContent());
 
   // Add an item (PopulateApps will create a duplicate "Item 0").
   model()->PopulateApps(1);
   EXPECT_EQ(3u, [[GetPageAt(0) content] count]);
   NSButton* button = GetItemViewAt(2);
   EXPECT_NSEQ(@"Item 0", [button title]);
+  EXPECT_EQ(std::string("|Item 0,Item 1,Item 0|"), GetViewContent());
 
   // Update the title via the ItemModelObserver.
   app_list::AppListItemModel* item_model = model()->apps()->GetItemAt(2);
   item_model->SetTitle("UpdatedItem");
   EXPECT_NSEQ(@"UpdatedItem", [button title]);
+  EXPECT_EQ(std::string("|Item 0,Item 1,UpdatedItem|"), GetViewContent());
 
   // Update the icon, test by changing size.
   NSSize icon_size = [[button image] size];
@@ -239,6 +441,41 @@ TEST_F(AppsGridControllerTest, ModelUpdates) {
   icon_size = [[button image] size];
   EXPECT_EQ(kTestImageSize, icon_size.width);
   EXPECT_EQ(kTestImageSize, icon_size.height);
+
+  // Test removing an item at the end.
+  model()->apps()->DeleteAt(2);
+  EXPECT_EQ(2u, [apps_grid_controller_ itemCount]);
+  EXPECT_EQ(std::string("|Item 0,Item 1|"), GetViewContent());
+
+  // Test removing in the middle.
+  model()->AddItem("Item 2");
+  EXPECT_EQ(3u, [apps_grid_controller_ itemCount]);
+  EXPECT_EQ(std::string("|Item 0,Item 1,Item 2|"), GetViewContent());
+  model()->apps()->DeleteAt(1);
+  EXPECT_EQ(2u, [apps_grid_controller_ itemCount]);
+  EXPECT_EQ(std::string("|Item 0,Item 2|"), GetViewContent());
+
+  // Test inserting in the middle.
+  model()->apps()->AddAt(1, model()->CreateItem("Item One"));
+  EXPECT_EQ(3u, [apps_grid_controller_ itemCount]);
+  EXPECT_EQ(std::string("|Item 0,Item One,Item 2|"), GetViewContent());
+
+  // Test swapping items (e.g. rearranging via sync).
+  model()->apps()->Move(1, 2);
+  EXPECT_EQ(std::string("|Item 0,Item 2,Item One|"), GetViewContent());
+
+  // Test removing multiple items via the model.
+  model()->apps()->DeleteAll();
+  EXPECT_EQ(0u, [apps_grid_controller_ itemCount]);
+  EXPECT_EQ(std::string("||"), GetViewContent());
+
+  // Test removing the last item when there is one item on the second page.
+  ReplaceTestModel(kItemsPerPage + 1);
+  EXPECT_EQ(kItemsPerPage + 1, [apps_grid_controller_ itemCount]);
+  EXPECT_EQ(2u, [apps_grid_controller_ pageCount]);
+  model()->apps()->DeleteAt(kItemsPerPage);
+  EXPECT_EQ(kItemsPerPage, [apps_grid_controller_ itemCount]);
+  EXPECT_EQ(1u, [apps_grid_controller_ pageCount]);
 }
 
 // Test mouseover selection.
@@ -265,7 +502,7 @@ TEST_F(AppsGridControllerTest, MouseoverSelects) {
 
 // Test AppsGridPaginationObserver totalPagesChanged().
 TEST_F(AppsGridControllerTest, PaginationObserverPagesChanged) {
-  scoped_nsobject<TestPaginationObserver> observer(
+  base::scoped_nsobject<TestPaginationObserver> observer(
       [[TestPaginationObserver alloc] init]);
   [apps_grid_controller_ setPaginationObserver:observer];
 
@@ -283,6 +520,7 @@ TEST_F(AppsGridControllerTest, PaginationObserverPagesChanged) {
   EXPECT_EQ(3, [observer totalPagesChangedCount]);
   EXPECT_EQ(4u, [apps_grid_controller_ pageCount]);
 
+  EXPECT_FALSE([observer readVisibilityDidChange]);
   EXPECT_EQ(0, [observer selectedPageChangedCount]);
 
   [apps_grid_controller_ setPaginationObserver:nil];
@@ -290,8 +528,7 @@ TEST_F(AppsGridControllerTest, PaginationObserverPagesChanged) {
 
 // Test AppsGridPaginationObserver selectedPageChanged().
 TEST_F(AppsGridControllerTest, PaginationObserverSelectedPageChanged) {
-  [AppsGridController setScrollAnimationDuration:0.0];
-  scoped_nsobject<TestPaginationObserver> observer(
+  base::scoped_nsobject<TestPaginationObserver> observer(
       [[TestPaginationObserver alloc] init]);
   [apps_grid_controller_ setPaginationObserver:observer];
   EXPECT_EQ(0, [[NSAnimationContext currentContext] duration]);
@@ -300,15 +537,25 @@ TEST_F(AppsGridControllerTest, PaginationObserverSelectedPageChanged) {
   EXPECT_EQ(1, [observer totalPagesChangedCount]);
   EXPECT_EQ(4u, [apps_grid_controller_ pageCount]);
 
+  EXPECT_FALSE([observer readVisibilityDidChange]);
   EXPECT_EQ(0, [observer selectedPageChangedCount]);
 
   [apps_grid_controller_ scrollToPage:1];
   EXPECT_EQ(1, [observer selectedPageChangedCount]);
   EXPECT_EQ(1, [observer lastNewSelectedPage]);
+  EXPECT_TRUE([observer readVisibilityDidChange]);
+  EXPECT_FALSE([observer readVisibilityDidChange]);  // Testing test behaviour.
+  EXPECT_EQ(0.0, [apps_grid_controller_ visiblePortionOfPage:0]);
+  EXPECT_EQ(1.0, [apps_grid_controller_ visiblePortionOfPage:1]);
+  EXPECT_EQ(0.0, [apps_grid_controller_ visiblePortionOfPage:2]);
+  EXPECT_EQ(0.0, [apps_grid_controller_ visiblePortionOfPage:3]);
 
   [apps_grid_controller_ scrollToPage:0];
   EXPECT_EQ(2, [observer selectedPageChangedCount]);
   EXPECT_EQ(0, [observer lastNewSelectedPage]);
+  EXPECT_TRUE([observer readVisibilityDidChange]);
+  EXPECT_EQ(1.0, [apps_grid_controller_ visiblePortionOfPage:0]);
+  EXPECT_EQ(0.0, [apps_grid_controller_ visiblePortionOfPage:1]);
 
   [apps_grid_controller_ scrollToPage:3];
   // Note: with no animations, there is only a single page change. However, with
@@ -316,24 +563,12 @@ TEST_F(AppsGridControllerTest, PaginationObserverSelectedPageChanged) {
   // view updates and sends out NSViewBoundsDidChangeNotification.
   EXPECT_EQ(3, [observer selectedPageChangedCount]);
   EXPECT_EQ(3, [observer lastNewSelectedPage]);
+  EXPECT_TRUE([observer readVisibilityDidChange]);
+  EXPECT_EQ(0.0, [apps_grid_controller_ visiblePortionOfPage:0]);
+  EXPECT_EQ(1.0, [apps_grid_controller_ visiblePortionOfPage:3]);
 
   [apps_grid_controller_ setPaginationObserver:nil];
 }
-
-namespace {
-
-// Generate a mouse event at the centre of the view in |page| with the given
-// |index_in_page| that can be used to initiate, update and complete drag
-// operations.
-NSEvent* MouseEventInCell(NSCollectionView* page, size_t index_in_page) {
-  NSRect cell_rect = [page frameForItemAtIndex:index_in_page];
-  NSPoint point_in_view = NSMakePoint(NSMidX(cell_rect), NSMidY(cell_rect));
-  NSPoint point_in_window = [page convertPoint:point_in_view
-                                        toView:nil];
-  return cocoa_test_event_utils::LeftMouseDownAtPoint(point_in_window);
-}
-
-}  // namespace
 
 // Test basic item moves with two items; swapping them around, dragging outside
 // of the view bounds, and dragging on the background.
@@ -442,7 +677,6 @@ TEST_F(AppsGridControllerTest, DragAndDropSimple) {
 
 // Test item moves between pages.
 TEST_F(AppsGridControllerTest, DragAndDropMultiPage) {
-  [AppsGridController setScrollAnimationDuration:0.0];
   const size_t kPagesToTest = 3;
   // Put one item on the last page to hit more edge cases.
   ReplaceTestModel(kItemsPerPage * (kPagesToTest - 1) + 1);
@@ -511,6 +745,96 @@ TEST_F(AppsGridControllerTest, DragAndDropMultiPage) {
   EXPECT_EQ(0u, GetPageIndexForItem(1));
   [drag_manager onMouseUp:mouse_at_cell_0];
   EXPECT_EQ(0u, GetPageIndexForItem(1));
+}
+
+// Test scrolling when dragging past edge or over the pager.
+TEST_F(AppsGridControllerTest, ScrollingWhileDragging) {
+  base::scoped_nsobject<TestPaginationObserver> observer(
+      [[TestPaginationObserver alloc] init]);
+  [apps_grid_controller_ setPaginationObserver:observer];
+
+  ReplaceTestModel(kItemsPerPage * 3);
+  // Start on the middle page.
+  [apps_grid_controller_ scrollToPage:1];
+  NSCollectionView* page = [apps_grid_controller_ collectionViewAtPageIndex:1];
+  NSEvent* mouse_at_cell_0 = MouseEventInCell(page, 0);
+
+  NSEvent* at_center = MouseEventForScroll([apps_grid_controller_ view], 0.0);
+  NSEvent* at_left = MouseEventForScroll([apps_grid_controller_ view], -1.1);
+  NSEvent* at_right = MouseEventForScroll([apps_grid_controller_ view], 1.1);
+
+  AppsCollectionViewDragManager* drag_manager =
+      [apps_grid_controller_ dragManager];
+  [drag_manager onMouseDownInPage:page
+                        withEvent:mouse_at_cell_0];
+  [drag_manager onMouseDragged:at_center];
+
+  // Nothing should be scheduled: target page is visible page.
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(1u, [apps_grid_controller_ scheduledScrollPage]);
+
+  // Drag to the left, should go to first page and no further.
+  [drag_manager onMouseDragged:at_left];
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(0u, [apps_grid_controller_ scheduledScrollPage]);
+  [apps_grid_controller_ scrollToPage:0];  // Commit without timer for testing.
+  [drag_manager onMouseDragged:at_left];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(0u, [apps_grid_controller_ scheduledScrollPage]);
+
+  // Drag to the right, should go to last page and no futher.
+  [drag_manager onMouseDragged:at_right];
+  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(1u, [apps_grid_controller_ scheduledScrollPage]);
+  [apps_grid_controller_ scrollToPage:1];
+  [drag_manager onMouseDragged:at_right];
+  EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(2u, [apps_grid_controller_ scheduledScrollPage]);
+  [apps_grid_controller_ scrollToPage:2];
+  [drag_manager onMouseDragged:at_right];
+  EXPECT_EQ(2u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(2u, [apps_grid_controller_ scheduledScrollPage]);
+
+  // Simulate a hover over the first pager segment.
+  [observer setHoveredSegmentForTest:0];
+  [drag_manager onMouseDragged:at_center];
+  EXPECT_EQ(2u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(0u, [apps_grid_controller_ scheduledScrollPage]);
+
+  // Drag it back, should cancel schedule.
+  [observer setHoveredSegmentForTest:-1];
+  [drag_manager onMouseDragged:at_center];
+  EXPECT_EQ(2u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(2u, [apps_grid_controller_ scheduledScrollPage]);
+
+  // Hover again, now over middle segment, and ensure a release also cancels.
+  [observer setHoveredSegmentForTest:1];
+  [drag_manager onMouseDragged:at_center];
+  EXPECT_EQ(2u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(1u, [apps_grid_controller_ scheduledScrollPage]);
+  [drag_manager onMouseUp:at_center];
+  EXPECT_EQ(2u, [apps_grid_controller_ visiblePage]);
+  EXPECT_EQ(2u, [apps_grid_controller_ scheduledScrollPage]);
+
+  [apps_grid_controller_ setPaginationObserver:nil];
+}
+
+TEST_F(AppsGridControllerTest, ContextMenus) {
+  model()->apps()->AddAt(0, new AppListItemWithMenu("Item One"));
+  model()->apps()->AddAt(1, new AppListItemWithMenu("Item Two"));
+  EXPECT_EQ(2u, [apps_grid_controller_ itemCount]);
+
+  NSCollectionView* page = [apps_grid_controller_ collectionViewAtPageIndex:0];
+  NSEvent* mouse_at_cell_0 = MouseEventInCell(page, 0);
+  NSEvent* mouse_at_cell_1 = MouseEventInCell(page, 1);
+
+  NSMenu* menu = [page menuForEvent:mouse_at_cell_0];
+  EXPECT_EQ(1, [menu numberOfItems]);
+  EXPECT_NSEQ(@"Menu For: Item One", [[menu itemAtIndex:0] title]);
+
+  menu = [page menuForEvent:mouse_at_cell_1];
+  EXPECT_EQ(1, [menu numberOfItems]);
+  EXPECT_NSEQ(@"Menu For: Item Two", [[menu itemAtIndex:0] title]);
 }
 
 }  // namespace test

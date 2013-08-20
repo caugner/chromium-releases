@@ -11,10 +11,11 @@
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/guid.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
 #include "base/prefs/testing_pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/extensions/mock_extension_special_storage_policy.h"
@@ -25,15 +26,16 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/autofill/browser/autofill_common_test.h"
-#include "components/autofill/browser/autofill_profile.h"
-#include "components/autofill/browser/credit_card.h"
-#include "components/autofill/browser/personal_data_manager.h"
-#include "components/autofill/browser/personal_data_manager_observer.h"
+#include "components/autofill/core/browser/autofill_common_test.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/ssl/server_bound_cert_service.h"
 #include "net/ssl/server_bound_cert_store.h"
@@ -41,13 +43,12 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "webkit/dom_storage/dom_storage_types.h"
-#include "webkit/glue/webkit_glue.h"
-#include "webkit/quota/mock_quota_manager.h"
-#include "webkit/quota/quota_manager.h"
-#include "webkit/quota/quota_types.h"
+#include "third_party/WebKit/public/platform/WebCString.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "webkit/browser/quota/mock_quota_manager.h"
+#include "webkit/browser/quota/quota_manager.h"
+#include "webkit/common/dom_storage/dom_storage_types.h"
+#include "webkit/common/quota/quota_types.h"
 
 using content::BrowserThread;
 
@@ -58,6 +59,10 @@ const char kTestOrigin2[] = "http://host2:1/";
 const char kTestOrigin3[] = "http://host3:1/";
 const char kTestOriginExt[] = "chrome-extension://abcdefghijklmnopqrstuvwxyz/";
 const char kTestOriginDevTools[] = "chrome-devtools://abcdefghijklmnopqrstuvw/";
+
+// For Autofill.
+const char kChromeOrigin[] = "Chrome settings";
+const char kWebOrigin[] = "https://www.example.com/";
 
 const GURL kOrigin1(kTestOrigin1);
 const GURL kOrigin2(kTestOrigin2);
@@ -128,7 +133,7 @@ class AwaitCompletionHelper : public BrowsingDataRemover::Observer {
     if (!already_quit_) {
       DCHECK(!start_);
       start_ = true;
-      MessageLoop::current()->Run();
+      base::MessageLoop::current()->Run();
     } else {
       DCHECK(!start_);
       already_quit_ = false;
@@ -138,7 +143,7 @@ class AwaitCompletionHelper : public BrowsingDataRemover::Observer {
   void Notify() {
     if (start_) {
       DCHECK(!already_quit_);
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
       start_ = false;
     } else {
       DCHECK(!already_quit_);
@@ -233,9 +238,9 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
       : browser_process_(TestingBrowserProcess::GetGlobal()) {
     scoped_refptr<SafeBrowsingService> sb_service =
         SafeBrowsingService::CreateSafeBrowsingService();
-    browser_process_->SetSafeBrowsingService(sb_service);
+    browser_process_->SetSafeBrowsingService(sb_service.get());
     sb_service->Initialize();
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
 
     // Create a cookiemonster that does not have persistant storage, and replace
     // the SafeBrowsingService created one with it.
@@ -247,7 +252,7 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
 
   virtual ~RemoveSafeBrowsingCookieTester() {
     browser_process_->safe_browsing_service()->ShutDown();
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     browser_process_->SetSafeBrowsingService(NULL);
   }
 
@@ -396,33 +401,69 @@ class RemoveAutofillTester : public autofill::PersonalDataManagerObserver {
            !personal_data_manager_->GetCreditCards().empty();
   }
 
-  void AddProfile() {
+  bool HasOrigin(const std::string& origin) {
+    const std::vector<autofill::AutofillProfile*>& profiles =
+        personal_data_manager_->GetProfiles();
+    for (std::vector<autofill::AutofillProfile*>::const_iterator it =
+             profiles.begin();
+         it != profiles.end(); ++it) {
+      if ((*it)->origin() == origin)
+        return true;
+    }
+
+    const std::vector<autofill::CreditCard*>& credit_cards =
+        personal_data_manager_->GetCreditCards();
+    for (std::vector<autofill::CreditCard*>::const_iterator it =
+             credit_cards.begin();
+         it != credit_cards.end(); ++it) {
+      if ((*it)->origin() == origin)
+        return true;
+    }
+
+    return false;
+  }
+
+  // Add two profiles and two credit cards to the database.  In each pair, one
+  // entry has a web origin and the other has a Chrome origin.
+  void AddProfilesAndCards() {
+    std::vector<autofill::AutofillProfile> profiles;
     autofill::AutofillProfile profile;
+    profile.set_guid(base::GenerateGUID());
+    profile.set_origin(kWebOrigin);
     profile.SetRawInfo(autofill::NAME_FIRST, ASCIIToUTF16("Bob"));
     profile.SetRawInfo(autofill::NAME_LAST, ASCIIToUTF16("Smith"));
     profile.SetRawInfo(autofill::ADDRESS_HOME_ZIP, ASCIIToUTF16("94043"));
     profile.SetRawInfo(autofill::EMAIL_ADDRESS,
                        ASCIIToUTF16("sue@example.com"));
     profile.SetRawInfo(autofill::COMPANY_NAME, ASCIIToUTF16("Company X"));
-
-    std::vector<autofill::AutofillProfile> profiles;
     profiles.push_back(profile);
-    personal_data_manager_->SetProfiles(&profiles);
-    MessageLoop::current()->Run();
 
-    autofill::CreditCard card;
-    card.SetRawInfo(autofill::CREDIT_CARD_NUMBER,
-                    ASCIIToUTF16("1234-5678-9012-3456"));
+    profile.set_guid(base::GenerateGUID());
+    profile.set_origin(kChromeOrigin);
+    profiles.push_back(profile);
+
+    personal_data_manager_->SetProfiles(&profiles);
+    base::MessageLoop::current()->Run();
 
     std::vector<autofill::CreditCard> cards;
+    autofill::CreditCard card;
+    card.set_guid(base::GenerateGUID());
+    card.set_origin(kWebOrigin);
+    card.SetRawInfo(autofill::CREDIT_CARD_NUMBER,
+                    ASCIIToUTF16("1234-5678-9012-3456"));
     cards.push_back(card);
+
+    card.set_guid(base::GenerateGUID());
+    card.set_origin(kChromeOrigin);
+    cards.push_back(card);
+
     personal_data_manager_->SetCreditCards(&cards);
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
  private:
   virtual void OnPersonalDataChanged() OVERRIDE {
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   autofill::PersonalDataManager* personal_data_manager_;
@@ -502,14 +543,7 @@ class BrowsingDataRemoverTest : public testing::Test,
                                 public content::NotificationObserver {
  public:
   BrowsingDataRemoverTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        db_thread_(BrowserThread::DB, &message_loop_),
-        webkit_thread_(BrowserThread::WEBKIT_DEPRECATED, &message_loop_),
-        file_thread_(BrowserThread::FILE, &message_loop_),
-        file_user_blocking_thread_(
-            BrowserThread::FILE_USER_BLOCKING, &message_loop_),
-        io_thread_(BrowserThread::IO, &message_loop_),
-        profile_(new TestingProfile()) {
+      : profile_(new TestingProfile()) {
     registrar_.Add(this, chrome::NOTIFICATION_BROWSING_DATA_REMOVED,
                    content::Source<Profile>(profile_.get()));
   }
@@ -524,7 +558,7 @@ class BrowsingDataRemoverTest : public testing::Test,
     // the message loop is cleared out, before destroying the threads and loop.
     // Otherwise we leak memory.
     profile_.reset();
-    message_loop_.RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
   }
 
   void BlockUntilBrowsingDataRemoved(BrowsingDataRemover::TimePeriod period,
@@ -582,15 +616,15 @@ class BrowsingDataRemoverTest : public testing::Test,
   }
 
   quota::MockQuotaManager* GetMockManager() {
-    if (!quota_manager_) {
+    if (!quota_manager_.get()) {
       quota_manager_ = new quota::MockQuotaManager(
-        profile_->IsOffTheRecord(),
-        profile_->GetPath(),
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
-        profile_->GetExtensionSpecialStoragePolicy());
+          profile_->IsOffTheRecord(),
+          profile_->GetPath(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get(),
+          profile_->GetExtensionSpecialStoragePolicy());
     }
-    return quota_manager_;
+    return quota_manager_.get();
   }
 
   // content::NotificationObserver implementation.
@@ -612,15 +646,7 @@ class BrowsingDataRemoverTest : public testing::Test,
   scoped_ptr<BrowsingDataRemover::NotificationDetails> called_with_details_;
   content::NotificationRegistrar registrar_;
 
-  // message_loop_, as well as all the threads associated with it must be
-  // defined before profile_ to prevent explosions. Oh how I love C++.
-  MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread db_thread_;
-  content::TestBrowserThread webkit_thread_;
-  content::TestBrowserThread file_thread_;
-  content::TestBrowserThread file_user_blocking_thread_;
-  content::TestBrowserThread io_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<TestingProfile> profile_;
   scoped_refptr<quota::MockQuotaManager> quota_manager_;
 
@@ -734,7 +760,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveUnprotectedLocalStorageForever) {
   scoped_refptr<MockExtensionSpecialStoragePolicy> mock_policy =
       new MockExtensionSpecialStoragePolicy;
   mock_policy->AddProtected(kOrigin1.GetOrigin());
-  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy);
+  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy.get());
 
   RemoveLocalStorageTester tester(GetProfile());
 
@@ -760,7 +786,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveProtectedLocalStorageForever) {
   scoped_refptr<MockExtensionSpecialStoragePolicy> mock_policy =
       new MockExtensionSpecialStoragePolicy;
   mock_policy->AddProtected(kOrigin1.GetOrigin());
-  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy);
+  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy.get());
 
   RemoveLocalStorageTester tester(GetProfile());
 
@@ -1137,7 +1163,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedUnprotectedOrigins) {
   scoped_refptr<MockExtensionSpecialStoragePolicy> mock_policy =
       new MockExtensionSpecialStoragePolicy;
   mock_policy->AddProtected(kOrigin1.GetOrigin());
-  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy);
+  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy.get());
 
   PopulateTestQuotaManagedData(GetMockManager());
 
@@ -1171,7 +1197,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedProtectedSpecificOrigin) {
   scoped_refptr<MockExtensionSpecialStoragePolicy> mock_policy =
       new MockExtensionSpecialStoragePolicy;
   mock_policy->AddProtected(kOrigin1.GetOrigin());
-  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy);
+  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy.get());
 
   PopulateTestQuotaManagedData(GetMockManager());
 
@@ -1206,7 +1232,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedProtectedOrigins) {
   scoped_refptr<MockExtensionSpecialStoragePolicy> mock_policy =
       new MockExtensionSpecialStoragePolicy;
   mock_policy->AddProtected(kOrigin1.GetOrigin());
-  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy);
+  GetProfile()->SetExtensionSpecialStoragePolicy(mock_policy.get());
 
   PopulateTestQuotaManagedData(GetMockManager());
 
@@ -1309,7 +1335,7 @@ TEST_F(BrowsingDataRemoverTest, AutofillRemovalLastHour) {
   RemoveAutofillTester tester(GetProfile());
 
   ASSERT_FALSE(tester.HasProfile());
-  tester.AddProfile();
+  tester.AddProfilesAndCards();
   ASSERT_TRUE(tester.HasProfile());
 
   BlockUntilBrowsingDataRemoved(
@@ -1326,7 +1352,7 @@ TEST_F(BrowsingDataRemoverTest, AutofillRemovalEverything) {
   RemoveAutofillTester tester(GetProfile());
 
   ASSERT_FALSE(tester.HasProfile());
-  tester.AddProfile();
+  tester.AddProfilesAndCards();
   ASSERT_TRUE(tester.HasProfile());
 
   BlockUntilBrowsingDataRemoved(
@@ -1336,4 +1362,25 @@ TEST_F(BrowsingDataRemoverTest, AutofillRemovalEverything) {
   EXPECT_EQ(BrowsingDataRemover::REMOVE_FORM_DATA, GetRemovalMask());
   EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
   ASSERT_FALSE(tester.HasProfile());
+}
+
+// Verify that clearing autofill form data works.
+TEST_F(BrowsingDataRemoverTest, AutofillOriginsRemovedWithHistory) {
+  GetProfile()->CreateWebDataService();
+  RemoveAutofillTester tester(GetProfile());
+
+  tester.AddProfilesAndCards();
+  EXPECT_FALSE(tester.HasOrigin(std::string()));
+  EXPECT_TRUE(tester.HasOrigin(kWebOrigin));
+  EXPECT_TRUE(tester.HasOrigin(kChromeOrigin));
+
+  BlockUntilBrowsingDataRemoved(
+      BrowsingDataRemover::LAST_HOUR,
+      BrowsingDataRemover::REMOVE_HISTORY, false);
+
+  EXPECT_EQ(BrowsingDataRemover::REMOVE_HISTORY, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+  EXPECT_TRUE(tester.HasOrigin(std::string()));
+  EXPECT_FALSE(tester.HasOrigin(kWebOrigin));
+  EXPECT_TRUE(tester.HasOrigin(kChromeOrigin));
 }

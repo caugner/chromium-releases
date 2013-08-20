@@ -6,7 +6,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/camera_detector.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -46,7 +46,7 @@ UserImageScreen::UserImageScreen(ScreenObserver* screen_observer,
       accept_photo_after_decoding_(false),
       selected_image_(User::kInvalidImageIndex),
       profile_picture_enabled_(false),
-      profile_picture_data_url_(chrome::kAboutBlankURL),
+      profile_picture_data_url_(content::kAboutBlankURL),
       profile_picture_absent_(false) {
   actor_->SetDelegate(this);
   SetProfilePictureEnabled(true);
@@ -166,7 +166,7 @@ void UserImageScreen::SetProfilePictureEnabled(bool profile_picture_enabled) {
 }
 
 void UserImageScreen::SetUserID(const std::string& user_id) {
-  DCHECK(!user_id_.empty());
+  DCHECK(!user_id.empty());
   user_id_ = user_id;
 }
 
@@ -199,7 +199,7 @@ void UserImageScreen::Show() {
         DownloadProfileImage(kProfileDownloadReason);
   }
 
-  accessibility::MaybeSpeak(
+  AccessibilityManager::Get()->MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_OPTIONS_CHANGE_PICTURE_DIALOG_TEXT));
 }
 

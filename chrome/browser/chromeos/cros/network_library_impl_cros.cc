@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/network/cros_network_functions.h"
+#include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -33,13 +34,6 @@ struct NetworkLibraryImplCros::IPParameterInfo {
   std::string name_servers;
   int dhcp_usage_mask;
 };
-
-namespace {
-
-// List of interfaces that have portal check enabled by default.
-const char kDefaultCheckPortalList[] = "ethernet,wifi,cellular";
-
-}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////
 
@@ -292,16 +286,6 @@ void NetworkLibraryImplCros::CallDeleteRememberedNetwork(
 
 //////////////////////////////////////////////////////////////////////////////
 // NetworkLibrary implementation.
-
-void NetworkLibraryImplCros::SetCheckPortalList(
-    const std::string& check_portal_list) {
-  base::StringValue value(check_portal_list);
-  CrosSetNetworkManagerProperty(flimflam::kCheckPortalListProperty, value);
-}
-
-void NetworkLibraryImplCros::SetDefaultCheckPortalList() {
-  SetCheckPortalList(kDefaultCheckPortalList);
-}
 
 void NetworkLibraryImplCros::ChangePin(const std::string& old_pin,
                                        const std::string& new_pin) {
@@ -1352,6 +1336,12 @@ void NetworkLibraryImplCros::SetIPParametersCallback(
 
   if (!something_changed)
     return;
+
+  // Ensure NetworkStateHandler properties are up-to-date.
+  if (NetworkHandler::IsInitialized()) {
+    NetworkHandler::Get()->network_state_handler()->RequestUpdateForNetwork(
+        service_path);
+  }
 
   // Attempt to refresh its IP parameters, so that the changes to the service
   // properties can take effect.

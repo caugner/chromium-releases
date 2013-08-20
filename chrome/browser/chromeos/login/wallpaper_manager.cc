@@ -9,15 +9,16 @@
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/worker_pool.h"
 #include "base/time.h"
 #include "base/values.h"
@@ -32,6 +33,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -253,7 +255,7 @@ void WallpaperManager::InitializeWallpaper() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   UserManager* user_manager = UserManager::Get();
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType))
+  if (CommandLine::ForCurrentProcess()->HasSwitch(::switches::kTestType))
     WizardController::SetZeroDelays();
 
   // Zero delays is also set in autotests.
@@ -488,25 +490,10 @@ void WallpaperManager::SetCustomWallpaper(const std::string& username,
 }
 
 void WallpaperManager::SetDefaultWallpaper() {
-  ash::DesktopBackgroundController* controller =
-      ash::Shell::GetInstance()->desktop_background_controller();
-  ash::WallpaperResolution resolution = controller->GetAppropriateResolution();
-  ash::WallpaperInfo info;
-  if (UserManager::Get()->IsLoggedInAsGuest()) {
-    info = (resolution == ash::WALLPAPER_RESOLUTION_LARGE) ?
-        ash::kGuestLargeWallpaper : ash::kGuestSmallWallpaper;
-  } else {
-    info = (resolution == ash::WALLPAPER_RESOLUTION_LARGE) ?
-        ash::kDefaultLargeWallpaper : ash::kDefaultSmallWallpaper;
-  }
-
-  // Prevents loading of the same wallpaper as the currently loading/loaded one.
-  if (controller->GetWallpaperIDR() == info.idr)
-    return;
-
   current_wallpaper_path_.clear();
-  loaded_wallpapers_++;
-  controller->SetDefaultWallpaper(info);
+  if (ash::Shell::GetInstance()->desktop_background_controller()->
+          SetDefaultWallpaper(UserManager::Get()->IsLoggedInAsGuest()))
+    loaded_wallpapers_++;
 }
 
 void WallpaperManager::SetInitialUserWallpaper(const std::string& username,
@@ -555,7 +542,7 @@ void WallpaperManager::SetLastSelectedUser(
 
 void WallpaperManager::SetUserWallpaper(const std::string& email) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (email == kGuestUserEMail) {
+  if (email == UserManager::kGuestUserName) {
     SetDefaultWallpaper();
     return;
   }
@@ -684,8 +671,7 @@ void WallpaperManager::ClearObsoleteWallpaperPrefs() {
 void WallpaperManager::DeleteAllExcept(const base::FilePath& path) {
   base::FilePath dir = path.DirName();
   if (file_util::DirectoryExists(dir)) {
-    file_util::FileEnumerator files(dir, false,
-                                    file_util::FileEnumerator::FILES);
+    base::FileEnumerator files(dir, false, base::FileEnumerator::FILES);
     for (base::FilePath current = files.Next(); !current.empty();
          current = files.Next()) {
       if (current != path)
@@ -1060,11 +1046,13 @@ void WallpaperManager::SaveCustomWallpaper(const std::string& email,
       GetCustomWallpaperPath(kLargeWallpaperSubDir, email, file_name);
 
   std::vector<unsigned char> image_data = wallpaper.raw_image();
-  // Saves the original file in case that resized wallpaper is not generated
-  // (i.e. chrome shutdown before resized wallpaper is saved).
-  SaveWallpaperInternal(original_path,
-                        reinterpret_cast<char*>(&*image_data.begin()),
-                        image_data.size());
+  // Re-encode orginal file to jpeg format and saves the result in case that
+  // resized wallpaper is not generated (i.e. chrome shutdown before resized
+  // wallpaper is saved).
+  ResizeAndSaveWallpaper(wallpaper, original_path,
+                         ash::WALLPAPER_LAYOUT_STRETCH,
+                         wallpaper.image().width(),
+                         wallpaper.image().height());
   DeleteAllExcept(original_path);
 
   ResizeAndSaveWallpaper(wallpaper, small_wallpaper_path, layout,
@@ -1113,4 +1101,4 @@ void WallpaperManager::TimezoneChanged(const icu::TimeZone& timezone) {
   RestartTimer();
 }
 
-}  // chromeos
+}  // namespace chromeos

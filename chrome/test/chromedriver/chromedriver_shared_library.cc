@@ -7,8 +7,9 @@
 
 #include "base/at_exit.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chromedriver.h"
 #include "chrome/test/chromedriver/command_executor.h"
 #include "chrome/test/chromedriver/command_executor_impl.h"
@@ -26,6 +27,7 @@
 namespace {
 
 base::AtExitManager* g_at_exit = NULL;
+Log* g_log = NULL;
 
 }  // namespace
 
@@ -59,7 +61,8 @@ void EXPORT Free(char* p) {
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, void* reserved) {
   if (reason == DLL_PROCESS_ATTACH) {
     g_at_exit = new base::AtExitManager();
-    Init(scoped_ptr<CommandExecutor>(new CommandExecutorImpl()));
+    g_log = new Logger();
+    Init(scoped_ptr<CommandExecutor>(new CommandExecutorImpl(g_log)));
   }
   if (reason == DLL_PROCESS_DETACH) {
     // If |reserved| is not null, the process is terminating and
@@ -68,6 +71,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, void* reserved) {
     if (reserved)
       return TRUE;
     Shutdown();
+    delete g_log;
     delete g_at_exit;
   }
   return TRUE;
@@ -75,10 +79,12 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, void* reserved) {
 #else
 void __attribute__((constructor)) OnLoad(void) {
   g_at_exit = new base::AtExitManager();
-  Init(scoped_ptr<CommandExecutor>(new CommandExecutorImpl()));
+  g_log = new Logger();
+  Init(scoped_ptr<CommandExecutor>(new CommandExecutorImpl(g_log)));
 }
 void __attribute__((destructor)) OnUnload(void) {
   Shutdown();
+  delete g_log;
   delete g_at_exit;
 }
 #endif

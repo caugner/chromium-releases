@@ -2,23 +2,37 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-#snapshot_view table {
+#snapshot-view {
+  border-spacing: 2px;
   width: 100%;
 }
 
-#snapshot_view tr:nth-child(odd) {
+#snapshot-view tr:nth-child(odd):not([class='header']) {
   background: rgb(239, 243, 255);
 }
 
-#snapshot_view td {
+#snapshot-view td {
+  padding: 0.35em 0.5em 0;
   vertical-align: top;
 }
 
-#snapshot_view td.memory {
-  text-align: right;
+#snapshot-view .header th {
+  border-bottom: 1px solid rgb(181, 198, 222);
+  padding: 0.35em 0.5em 0;
+  vertical-align: bottom;
 }
 
-#json {
-  height: 100px;
-  width: 100%;
+#snapshot-view .process-id {
+  text-align: right;
+  width: 4em;
+}
+
+#snapshot-view .process-memory {
+  border-left: 1px solid rgb(181, 198, 222);
+  text-align: right;
+  width: 7em;
+}
+
+#snapshot-view #process-template {
+  display: none;
 }

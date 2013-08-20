@@ -13,15 +13,25 @@ namespace {
 
 TEST(CipherSuiteNamesTest, Basic) {
   const char *key_exchange, *cipher, *mac;
-  SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, 0xc001);
-  EXPECT_STREQ(key_exchange, "ECDH_ECDSA");
-  EXPECT_STREQ(cipher, "NULL");
-  EXPECT_STREQ(mac, "SHA1");
+  bool is_aead;
 
-  SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, 0xff31);
-  EXPECT_STREQ(key_exchange, "???");
-  EXPECT_STREQ(cipher, "???");
-  EXPECT_STREQ(mac, "???");
+  SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, &is_aead, 0xc001);
+  EXPECT_STREQ("ECDH_ECDSA", key_exchange);
+  EXPECT_STREQ("NULL", cipher);
+  EXPECT_STREQ("SHA1", mac);
+  EXPECT_FALSE(is_aead);
+
+  SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, &is_aead, 0x009f);
+  EXPECT_STREQ("DHE_RSA", key_exchange);
+  EXPECT_STREQ("AES_256_GCM", cipher);
+  EXPECT_TRUE(is_aead);
+  EXPECT_EQ(NULL, mac);
+
+  SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, &is_aead, 0xff31);
+  EXPECT_STREQ("???", key_exchange);
+  EXPECT_STREQ("???", cipher);
+  EXPECT_STREQ("???", mac);
+  EXPECT_FALSE(is_aead);
 }
 
 TEST(CipherSuiteNamesTest, ParseSSLCipherString) {

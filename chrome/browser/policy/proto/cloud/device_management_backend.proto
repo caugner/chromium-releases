@@ -24,6 +24,7 @@ message DeviceRegisterRequest {
     USER = 1;       // Register for Chrome OS user polices.
     DEVICE = 2;     // Register for device policies.
     BROWSER = 3;    // Register for Chrome user policies.
+    ANDROID_BROWSER = 4;  // Register for Android Chrome browser user policies.
   }
   // NOTE: we also use this field to detect client version.  If this
   // field is missing, then the request comes from TT.  We will remove
@@ -44,6 +45,11 @@ message DeviceRegisterRequest {
   // that the client is to be enrolled in the correct mode.
   // Defaults to false when not present.
   optional bool auto_enrolled = 5;
+
+  // Indicates a requisition of the registering entity that the server can act
+  // upon. This allows clients to pass hints e.g. at device enrollment time
+  // about the intended use of the device.
+  optional string requisition = 6;
 }
 
 // Response from server to device register request.
@@ -128,6 +134,7 @@ message PolicyFetchRequest {
   //   google/chromeos/user => ChromeSettingsProto
   //   google/chromeos/publicaccount => ChromeSettingsProto
   //   google/chrome/extension => ExternalPolicyData
+  //   google/android/user => ChromeSettingsProto
   optional string policy_type = 1;
 
   // This is the last policy timestamp that client received from server.
@@ -231,6 +238,10 @@ message PolicyData {
   // Indicates which public account or extension/plug-in this policy data is
   // for. See PolicyFetchRequest.settings_entity_id for more details.
   optional string settings_entity_id = 11;
+
+  // Indicates the identity the device service account is associated with.
+  // This is only sent as part of device policy fetch.
+  optional string service_account_identity = 12;
 }
 
 message PolicyFetchResponse {

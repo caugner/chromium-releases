@@ -4,7 +4,7 @@
 
 #include "chrome/common/extensions/api/extension_action/page_action_handler.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -25,10 +25,10 @@ PageActionHandler::~PageActionHandler() {
 
 bool PageActionHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<ActionInfo> page_action_info;
-  const DictionaryValue* page_action_value = NULL;
+  const base::DictionaryValue* page_action_value = NULL;
 
   if (extension->manifest()->HasKey(keys::kPageActions)) {
-    const ListValue* list_value = NULL;
+    const base::ListValue* list_value = NULL;
     if (!extension->manifest()->GetList(keys::kPageActions, &list_value)) {
       *error = ASCIIToUTF16(errors::kInvalidPageActionsList);
       return false;
@@ -54,6 +54,12 @@ bool PageActionHandler::Parse(Extension* extension, string16* error) {
       *error = ASCIIToUTF16(errors::kInvalidPageAction);
       return false;
     }
+  }
+
+  // An extension cannot have both browser and page actions.
+  if (extension->manifest()->HasKey(keys::kBrowserAction)) {
+    *error = ASCIIToUTF16(errors::kOneUISurfaceOnly);
+    return false;
   }
 
   // If page_action_value is not NULL, then there was a valid page action.

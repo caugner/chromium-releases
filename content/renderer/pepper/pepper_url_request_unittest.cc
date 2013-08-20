@@ -10,13 +10,13 @@
 #include "ppapi/shared_impl/url_request_info_data.h"
 #include "ppapi/thunk/thunk.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebFrameClient.h"
+#include "third_party/WebKit/public/web/WebView.h"
+#include "webkit/common/user_agent/user_agent.h"
+#include "webkit/common/user_agent/user_agent_util.h"
 #include "webkit/plugins/ppapi/url_request_info_util.h"
-#include "webkit/user_agent/user_agent.h"
-#include "webkit/user_agent/user_agent_util.h"
 
 // This test is a end-to-end test from the resource to the WebKit request
 // object. The actual resource implementation is so simple, it makes sense to

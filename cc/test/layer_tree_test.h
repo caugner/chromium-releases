@@ -7,22 +7,23 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
-#include "cc/base/thread.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebAnimationDelegate.h"
+#include "third_party/WebKit/public/platform/WebAnimationDelegate.h"
 
 namespace Webkit {
 class WebGraphicsContext3D;
 }
 
 namespace cc {
+class FakeContextProvider;
 class FakeLayerTreeHostClient;
 class LayerImpl;
 class LayerTreeHost;
 class LayerTreeHostClient;
 class LayerTreeHostImpl;
+class FakeOutputSurface;
 
 // Used by test stubs to notify the test when something interesting happens.
 class TestHooks : public WebKit::WebAnimationDelegate {
@@ -34,7 +35,8 @@ class TestHooks : public WebKit::WebAnimationDelegate {
 
   virtual void BeginCommitOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) {}
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) {}
+  virtual void WillActivateTreeOnThread(LayerTreeHostImpl* host_impl) {}
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void InitializedRendererOnThread(LayerTreeHostImpl* host_impl,
                                            bool success) {}
   virtual bool PrepareToDrawOnThread(LayerTreeHostImpl* host_impl,
@@ -42,6 +44,7 @@ class TestHooks : public WebKit::WebAnimationDelegate {
                                      bool result);
   virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void SwapBuffersOnThread(LayerTreeHostImpl* host_impl, bool result) {}
+  virtual void SwapBuffersCompleteOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void AnimateLayers(LayerTreeHostImpl* host_impl,
                              base::TimeTicks monotonic_time) {}
   virtual void UpdateAnimationState(LayerTreeHostImpl* host_impl,
@@ -52,14 +55,15 @@ class TestHooks : public WebKit::WebAnimationDelegate {
                                    float scale) {}
   virtual void Animate(base::TimeTicks monotonic_time) {}
   virtual void Layout() {}
-  virtual void DidRecreateOutputSurface(bool succeeded) {}
+  virtual void DidInitializeOutputSurface(bool succeeded) {}
   virtual void DidFailToInitializeOutputSurface() {}
   virtual void DidAddAnimation() {}
   virtual void DidCommit() {}
   virtual void DidCommitAndDrawFrame() {}
+  virtual void DidCompleteSwapBuffers() {}
   virtual void ScheduleComposite() {}
   virtual void DidDeferCommit() {}
-  virtual bool CanActivatePendingTree();
+  virtual bool CanActivatePendingTree(LayerTreeHostImpl* host_impl);
   virtual void DidSetVisibleOnImplTree(LayerTreeHostImpl* host_impl,
                                        bool visible) {}
 
@@ -67,15 +71,11 @@ class TestHooks : public WebKit::WebAnimationDelegate {
   virtual void notifyAnimationStarted(double time) OVERRIDE {}
   virtual void notifyAnimationFinished(double time) OVERRIDE {}
 
-  virtual scoped_ptr<OutputSurface> CreateOutputSurface();
-
+  virtual scoped_ptr<OutputSurface> CreateOutputSurface() = 0;
   virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForMainThread();
+      OffscreenContextProviderForMainThread() = 0;
   virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForCompositorThread();
-
- private:
-  scoped_ptr<FakeLayerTreeHostClient> fake_client_;
+      OffscreenContextProviderForCompositorThread() = 0;
 };
 
 class BeginTask;
@@ -136,9 +136,14 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void DispatchComposite();
   void DispatchDidAddAnimation();
 
-  virtual void RunTest(bool threaded);
+  virtual void RunTest(bool threaded,
+                       bool delegating_renderer,
+                       bool impl_side_painting);
 
-  Thread* ImplThread() { return proxy() ? proxy()->ImplThread() : NULL; }
+  bool HasImplThread() { return proxy() ? proxy()->HasImplThread() : false; }
+  base::SingleThreadTaskRunner* ImplThreadTaskRunner() {
+    return proxy() ? proxy()->ImplThreadTaskRunner() : NULL;
+  }
   Proxy* proxy() const {
     return layer_tree_host_ ? layer_tree_host_->proxy() : NULL;
   }
@@ -146,11 +151,19 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   bool TestEnded() const { return ended_; }
 
   LayerTreeHost* layer_tree_host() { return layer_tree_host_.get(); }
+  bool delegating_renderer() const { return delegating_renderer_; }
+
+  virtual scoped_ptr<OutputSurface> CreateOutputSurface() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForMainThread() OVERRIDE;
+  virtual scoped_refptr<cc::ContextProvider>
+      OffscreenContextProviderForCompositorThread() OVERRIDE;
 
  private:
   LayerTreeSettings settings_;
   scoped_ptr<LayerTreeHostClientForTesting> client_;
   scoped_ptr<LayerTreeHost> layer_tree_host_;
+  FakeOutputSurface* output_surface_;
 
   bool beginning_;
   bool end_when_begin_returns_;
@@ -159,33 +172,71 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   bool schedule_when_set_visible_true_;
   bool started_;
   bool ended_;
+  bool delegating_renderer_;
 
   int timeout_seconds_;
 
-  scoped_ptr<Thread> main_ccthread_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scoped_ptr<base::Thread> impl_thread_;
   base::CancelableClosure timeout_;
   base::WeakPtr<LayerTreeTest> main_thread_weak_ptr_;
   base::WeakPtrFactory<LayerTreeTest> weak_factory_;
+  scoped_refptr<FakeContextProvider> main_thread_contexts_;
+  scoped_refptr<FakeContextProvider> compositor_thread_contexts_;
 };
 
 }  // namespace cc
 
-#define SINGLE_THREAD_TEST_F(TEST_FIXTURE_NAME)           \
-  TEST_F(TEST_FIXTURE_NAME, RunSingleThread) {            \
-    RunTest(false);                                       \
-  }                                                       \
-  class SingleThreadNeedsSemicolon##TEST_FIXTURE_NAME {}
+#define SINGLE_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME)   \
+  TEST_F(TEST_FIXTURE_NAME, RunSingleThread_DirectRenderer) {     \
+    RunTest(false, false, false);                                 \
+  }                                                               \
+  class SingleThreadDirectNeedsSemicolon##TEST_FIXTURE_NAME {}
 
+#define SINGLE_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME) \
+  TEST_F(TEST_FIXTURE_NAME, RunSingleThread_DelegatingRenderer) {   \
+    RunTest(false, true, false);                                    \
+  }                                                                 \
+  class SingleThreadDelegatingNeedsSemicolon##TEST_FIXTURE_NAME {}
 
-#define MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME)            \
-  TEST_F(TEST_FIXTURE_NAME, RunMultiThread) {             \
-    RunTest(true);                                        \
-  }                                                       \
-  class MultiThreadNeedsSemicolon##TEST_FIXTURE_NAME {}
+#define SINGLE_THREAD_TEST_F(TEST_FIXTURE_NAME)                   \
+  SINGLE_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);        \
+  SINGLE_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME)
+
+#define MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME)               \
+  TEST_F(TEST_FIXTURE_NAME, RunMultiThread_DirectRenderer_MainThreadPaint) { \
+    RunTest(true, false, false);                                             \
+  }                                                                          \
+  TEST_F(TEST_FIXTURE_NAME, RunMultiThread_DirectRenderer_ImplSidePaint) {   \
+    RunTest(true, false, true);                                              \
+  }                                                                          \
+  class MultiThreadDirectNeedsSemicolon##TEST_FIXTURE_NAME {}
+
+#define MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME) \
+  TEST_F(TEST_FIXTURE_NAME,                                        \
+         RunMultiThread_DelegatingRenderer_MainThreadPaint) {      \
+    RunTest(true, true, false);                                    \
+  }                                                                \
+  TEST_F(TEST_FIXTURE_NAME,                                        \
+         RunMultiThread_DelegatingRenderer_ImplSidePaint) {        \
+    RunTest(true, true, true);                                     \
+  }                                                                \
+  class MultiThreadDelegatingNeedsSemicolon##TEST_FIXTURE_NAME {}
+
+#define MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME)                   \
+  MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);        \
+  MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME)
+
+#define SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME) \
+  SINGLE_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);                \
+  MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME)
+
+#define SINGLE_AND_MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME) \
+  SINGLE_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME);                \
+  MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME)
 
 #define SINGLE_AND_MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME) \
-  SINGLE_THREAD_TEST_F(TEST_FIXTURE_NAME);                \
-  MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME)
+  SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);    \
+  SINGLE_AND_MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME)
 
 #endif  // CC_TEST_LAYER_TREE_TEST_H_

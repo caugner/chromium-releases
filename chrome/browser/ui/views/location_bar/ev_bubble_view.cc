@@ -3,26 +3,34 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/location_bar/ev_bubble_view.h"
+#include "grit/theme_resources.h"
+#include "ui/views/painter.h"
 
-EVBubbleView::EVBubbleView(const int background_images[],
-                           int contained_image,
-                           SkColor color,
+
+namespace {
+const int kBackgroundImages[] = IMAGE_GRID(IDR_OMNIBOX_EV_BUBBLE);
+}
+
+
+EVBubbleView::EVBubbleView(const gfx::Font& font,
+                           int font_y_offset,
+                           SkColor text_color,
+                           SkColor parent_background_color,
                            LocationBarView* location_bar)
-    : IconLabelBubbleView(background_images, contained_image, color),
+    : IconLabelBubbleView(kBackgroundImages, IDR_OMNIBOX_HTTPS_VALID, font,
+                          font_y_offset, text_color, parent_background_color,
+                          true),
       page_info_helper_(this, location_bar) {
-  SetElideInMiddle(true);
 }
 
 EVBubbleView::~EVBubbleView() {
 }
 
 gfx::Size EVBubbleView::GetMinimumSize() {
-
-  // Set the minimum size for elided EV bubbles to 150 px.
-  static const int kMinBubbleWidth = 150;
-
+  // Height will be ignored by the LocationBarView.
   gfx::Size minimum(GetPreferredSize());
-  minimum.set_width(std::min(kMinBubbleWidth, minimum.width()));
+  static const int kMinBubbleWidth = 150;
+  minimum.SetToMax(gfx::Size(kMinBubbleWidth, 0));
   return minimum;
 }
 

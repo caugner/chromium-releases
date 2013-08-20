@@ -13,7 +13,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
 
 namespace base {
@@ -93,6 +93,9 @@ class PortableDeviceWatcherWin {
   // Set the volume notifications object to be used when new
   // devices are found.
   void SetNotifications(StorageMonitor::Receiver* notifications);
+
+  void EjectDevice(const std::string& device_id,
+                   base::Callback<void(StorageMonitor::EjectStatus)> callback);
 
  private:
   friend class test::TestPortableDeviceWatcherWin;

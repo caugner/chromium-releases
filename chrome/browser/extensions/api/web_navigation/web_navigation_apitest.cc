@@ -7,8 +7,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_main.h"
@@ -37,8 +37,8 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebContextMenuData.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "webkit/glue/resource_type.h"
 
 using content::WebContents;
@@ -96,7 +96,7 @@ class TestNavigationListener
     }
     WeakThrottleList::const_iterator it;
     for (it = throttles_.begin(); it != throttles_.end(); ++it) {
-      if (*it)
+      if (it->get())
         (*it)->Resume();
     }
     throttles_.clear();
@@ -380,12 +380,24 @@ class WebNavigationApiTest : public ExtensionApiTest {
   DISALLOW_COPY_AND_ASSIGN(WebNavigationApiTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, Api) {
+// Fails often on Windows dbg bots. http://crbug.com/177163
+#if defined(OS_WIN)
+#define MAYBE_Api DISABLED_Api
+#else
+#define MAYBE_Api Api
+#endif  // defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_Api) {
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_api.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, GetFrame) {
+// Fails often on Windows dbg bots. http://crbug.com/177163
+#if defined(OS_WIN)
+#define MAYBE_GetFrame DISABLED_GetFrame
+#else
+#define MAYBE_GetFrame GetFrame
+#endif  // defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_GetFrame) {
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_getFrame.html")) << message_;
 }
@@ -402,8 +414,9 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, ServerRedirect) {
           << message_;
 }
 
-// http://crbug.com/235171
-#if defined(OS_CHROMEOS) || (defined(OS_LINUX) && defined(USE_AURA))
+// http://crbug.com/235171 and http://crbug.com/177163
+#if (defined(OS_WIN) && !defined(NDEBUG)) || \
+    (defined(OS_CHROMEOS) || (defined(OS_LINUX) && defined(USE_AURA)))
 #define MAYBE_ServerRedirectSingleProcess DISABLED_ServerRedirectSingleProcess
 #else
 #define MAYBE_ServerRedirectSingleProcess ServerRedirectSingleProcess
@@ -471,7 +484,13 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, SimpleLoad) {
       RunExtensionSubtest("webnavigation", "test_simpleLoad.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, Failures) {
+// Fails often on Windows dbg bots. http://crbug.com/177163
+#if defined(OS_WIN)
+#define MAYBE_Failures DISABLED_Failures
+#else
+#define MAYBE_Failures Failures
+#endif  // defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_Failures) {
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_failures.html")) << message_;
 }
@@ -481,7 +500,13 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, FilteredTest) {
       RunExtensionSubtest("webnavigation", "test_filtered.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, UserAction) {
+// Fails often on Windows dbg bots. http://crbug.com/177163
+#if defined(OS_WIN)
+#define MAYBE_UserAction DISABLED_UserAction
+#else
+#define MAYBE_UserAction UserAction
+#endif  // defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_UserAction) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_userAction.html")) << message_;
@@ -515,7 +540,13 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, UserAction) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, RequestOpenTab) {
+// http://crbug.com/177163
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_RequestOpenTab DISABLED_RequestOpenTab
+#else
+#define MAYBE_RequestOpenTab RequestOpenTab
+#endif
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_RequestOpenTab) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionSubtest("webnavigation", "test_requestOpenTab.html"))
       << message_;
@@ -547,7 +578,13 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, RequestOpenTab) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlank) {
+// Fails often on Windows dbg bots. http://crbug.com/177163
+#if defined(OS_WIN)
+#define MAYBE_TargetBlank DISABLED_TargetBlank
+#else
+#define MAYBE_TargetBlank TargetBlank
+#endif  // defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_TargetBlank) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionSubtest("webnavigation", "test_targetBlank.html"))
       << message_;
@@ -578,7 +615,13 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlank) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlankIncognito) {
+// http://crbug.com/177163
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_TargetBlankIncognito DISABLED_TargetBlankIncognito
+#else
+#define MAYBE_TargetBlankIncognito TargetBlankIncognito
+#endif
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_TargetBlankIncognito) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionSubtest(
       "webnavigation", "test_targetBlank.html",
@@ -700,7 +743,13 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, CrossProcessHistory) {
           << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, Crash) {
+// http://crbug.com/177163
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_Crash DISABLED_Crash
+#else
+#define MAYBE_Crash Crash
+#endif
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_Crash) {
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionSubtest("webnavigation", "test_crash.html"))
       << message_;

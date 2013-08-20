@@ -8,9 +8,9 @@
 #include "base/callback.h"
 #include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
@@ -319,12 +319,8 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download_item) {
     parent_shelf_->MaybeShowMoreDownloadItems();
   }
 
-  if (download()->GetUserVerifiedFilePath() != icon_filepath_) {
-    // Turns out the file path is "Unconfirmed %d.crdownload" for dangerous
-    // downloads. When the download is confirmed, the file is renamed on
-    // another thread, so reload the icon if the download filename changes.
+  if (download()->GetTargetFilePath() != icon_filepath_) {
     LoadIcon();
-
     UpdateTooltip();
   }
 
@@ -460,16 +456,16 @@ void DownloadItemGtk::OnLoadSmallIconComplete(gfx::Image* image) {
 
 void DownloadItemGtk::OnLoadLargeIconComplete(gfx::Image* image) {
   icon_large_ = image;
-  if (download()->IsComplete())
+  if (download()->GetState() == DownloadItem::COMPLETE)
     DownloadItemDrag::SetSource(body_.get(), download(), icon_large_);
   // Else, the download will be made draggable once an OnDownloadUpdated()
-  // notification is received with download->IsComplete().
+  // notification is received with a download in COMPLETE state.
 }
 
 void DownloadItemGtk::LoadIcon() {
   cancelable_task_tracker_.TryCancelAll();
   IconManager* im = g_browser_process->icon_manager();
-  icon_filepath_ = download()->GetUserVerifiedFilePath();
+  icon_filepath_ = download()->GetTargetFilePath();
   im->LoadIcon(icon_filepath_,
                IconLoader::SMALL,
                base::Bind(&DownloadItemGtk::OnLoadSmallIconComplete,
@@ -820,7 +816,7 @@ void DownloadItemGtk::ReenableHbox() {
 void DownloadItemGtk::OnDownloadOpened(DownloadItem* download) {
   disabled_while_opening_ = true;
   gtk_widget_set_sensitive(hbox_.get(), false);
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&DownloadItemGtk::ReenableHbox,
                  weak_ptr_factory_.GetWeakPtr()),
@@ -853,8 +849,9 @@ gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
 
   // Create a transparent canvas.
   gfx::CanvasSkiaPaint canvas(event, false);
+  DownloadItem::DownloadState state = download()->GetState();
   if (complete_animation_.is_animating()) {
-    if (download()->IsInterrupted()) {
+    if (state == DownloadItem::INTERRUPTED) {
       download_util::PaintDownloadInterrupted(&canvas,
           allocation.x, allocation.y,
           complete_animation_.GetCurrentValue(),
@@ -865,7 +862,7 @@ gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
           complete_animation_.GetCurrentValue(),
           download_util::SMALL);
     }
-  } else if (download()->IsInProgress()) {
+  } else if (state == DownloadItem::IN_PROGRESS) {
     download_util::PaintDownloadProgress(&canvas,
         allocation.x, allocation.y,
         progress_angle_,
@@ -922,13 +919,11 @@ gboolean DownloadItemGtk::OnDangerousPromptExpose(GtkWidget* widget,
 void DownloadItemGtk::OnDangerousAccept(GtkWidget* button) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
                            base::Time::Now() - creation_time_);
-  download()->DangerousDownloadValidated();
+  download()->ValidateDangerousDownload();
 }
 
 void DownloadItemGtk::OnDangerousDecline(GtkWidget* button) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
                            base::Time::Now() - creation_time_);
-  if (download()->IsPartialDownload())
-    download()->Cancel(true);
-  download()->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
+  download()->Remove();
 }

@@ -13,8 +13,8 @@
 #include "base/logging_win.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
@@ -89,12 +89,10 @@ void InitInstallerLogging(const installer::MasterPreferences& prefs) {
   base::FilePath log_file_path(GetLogFilePath(prefs));
   TruncateLogFileIfNeeded(log_file_path);
 
-  logging::InitLogging(
-      log_file_path.value().c_str(),
-      logging::LOG_ONLY_TO_FILE,
-      logging::LOCK_LOG_FILE,
-      logging::APPEND_TO_OLD_LOG_FILE,
-      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_FILE;
+  settings.log_file = log_file_path.value().c_str();
+  logging::InitLogging(settings);
 
   if (prefs.GetBool(installer::master_preferences::kVerboseLogging,
                     &value) && value) {

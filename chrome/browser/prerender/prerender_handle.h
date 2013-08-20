@@ -41,11 +41,6 @@ class PrerenderHandle : public base::NonThreadSafe,
     // Signals that the prerender has stopped running.
     virtual void OnPrerenderStop(PrerenderHandle* handle) = 0;
 
-    // Signals the discovery, through redirects, of a new alias for this
-    // prerender.
-    virtual void OnPrerenderAddAlias(PrerenderHandle* handle,
-                                     const GURL& alias_url) = 0;
-
    protected:
     Observer();
     virtual ~Observer();
@@ -74,6 +69,15 @@ class PrerenderHandle : public base::NonThreadSafe,
   // True if we started a prerender, and it has finished loading.
   bool IsFinishedLoading() const;
 
+  // Returns whether the prerender matches the URL provided.
+  bool Matches(
+      const GURL& url,
+      const content::SessionStorageNamespace* session_storage_namespace) const;
+
+  // Returns whether this PrerenderHandle represents the same prerender as
+  // the other PrerenderHandle object specified.
+  bool RepresentingSamePrerenderAs(PrerenderHandle* other) const;
+
  private:
   friend class PrerenderManager;
 
@@ -86,8 +90,6 @@ class PrerenderHandle : public base::NonThreadSafe,
   virtual void OnPrerenderStopLoading(PrerenderContents* prerender_contents)
       OVERRIDE;
   virtual void OnPrerenderStop(PrerenderContents* prerender_contents) OVERRIDE;
-  virtual void OnPrerenderAddAlias(PrerenderContents* prerender_contents,
-                                   const GURL& alias_url) OVERRIDE;
   virtual void OnPrerenderCreatedMatchCompleteReplacement(
       PrerenderContents* contents, PrerenderContents* replacement) OVERRIDE;
 

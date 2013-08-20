@@ -11,9 +11,6 @@
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/google_apis/test_server/http_request.h"
-#include "chrome/browser/google_apis/test_server/http_response.h"
-#include "chrome/browser/google_apis/test_server/http_server.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -27,11 +24,13 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "google_apis/gaia/gaia_switches.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using namespace google_apis;
-using namespace google_apis::test_server;
+using namespace net::test_server;
 
 namespace {
 
@@ -57,7 +56,6 @@ class TestBrowserMainExtraParts
   }
 
   void set_quit_task(const base::Closure& quit_task) { quit_task_ = quit_task; }
-  void set_gaia_url(const std::string& url) { gaia_url_ = url; }
 
  private:
   // Overridden from content::NotificationObserver:
@@ -94,7 +92,6 @@ class TestBrowserMainExtraParts
         static_cast<chromeos::WebUILoginDisplay*>(
             controller->login_display());
     CHECK(webui_login_display);
-    webui_login_display->SetGaiaOriginForTesting(gaia_url_);
     webui_login_display->ShowSigninScreenForCreds("username", "password");
     // TODO(glotov): mock GAIA server (test_server_) should support
     // username/password configuration.
@@ -103,7 +100,7 @@ class TestBrowserMainExtraParts
   bool webui_visible_, browsing_data_removed_, signin_screen_shown_;
   content::NotificationRegistrar registrar_;
   base::Closure quit_task_;
-  std::string gaia_url_;
+  GURL gaia_url_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserMainExtraParts);
 };
@@ -136,9 +133,11 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
-    command_line->AppendSwitch(switches::kDisableChromeCaptivePortalDetector);
+    command_line->AppendSwitch(
+        chromeos::switches::kDisableChromeCaptivePortalDetector);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
-    command_line->AppendSwitchASCII(switches::kAuthExtensionPath, "gaia_auth");
+    command_line->AppendSwitchASCII(
+        chromeos::switches::kAuthExtensionPath, "gaia_auth");
   }
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
@@ -152,20 +151,17 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
-    test_server_ = new HttpServer(
+    test_server_ = new EmbeddedTestServer(
         content::BrowserThread::GetMessageLoopProxyForThread(
             content::BrowserThread::IO));
     CHECK(test_server_->InitializeAndWaitUntilReady());
     test_server_->RegisterRequestHandler(
         base::Bind(&OobeTest::HandleRequest, base::Unretained(this)));
     LOG(INFO) << "Set up http server at " << test_server_->base_url();
-    CHECK(test_server_->port() >= 8040 && test_server_->port() < 8045)
-        << "Current manifest_test.json for gaia_login restrictions "
-        << "does not allow this port";
 
-    const std::string gaia_url =
-        "http://localhost:" + test_server_->base_url().port();
-    content_browser_client_->browser_main_extra_parts_->set_gaia_url(gaia_url);
+    const GURL gaia_url("http://localhost:" + test_server_->base_url().port());
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        ::switches::kGaiaUrl, gaia_url.spec());
   }
 
   virtual void CleanUpOnMainThread() OVERRIDE {
@@ -178,9 +174,9 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
     GURL url = test_server_->GetURL(request.relative_url);
     LOG(INFO) << "Http request: " << url.spec();
 
-    scoped_ptr<HttpResponse> http_response(new HttpResponse());
+    scoped_ptr<BasicHttpResponse> http_response(new BasicHttpResponse());
     if (url.path() == "/ServiceLogin") {
-      http_response->set_code(test_server::SUCCESS);
+      http_response->set_code(net::test_server::SUCCESS);
       http_response->set_content(service_login_response_);
       http_response->set_content_type("text/html");
     } else if (url.path() == "/ServiceLoginAuth") {
@@ -191,7 +187,7 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
       int continue_arg_end = request.content.find("&", continue_arg_begin);
       const std::string continue_url = request.content.substr(
           continue_arg_begin, continue_arg_end - continue_arg_begin);
-      http_response->set_code(test_server::SUCCESS);
+      http_response->set_code(net::test_server::SUCCESS);
       const std::string redirect_js =
           "document.location.href = unescape('" + continue_url + "');";
       http_response->set_content(
@@ -200,14 +196,14 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
     } else {
       NOTREACHED() << url.path();
     }
-    return http_response.Pass();
+    return http_response.PassAs<HttpResponse>();
   }
 
   scoped_ptr<TestContentBrowserClient> content_browser_client_;
   content::ContentBrowserClient* original_content_browser_client_;
   std::string service_login_response_;
-  HttpServer* test_server_;  // cant use scoped_ptr because destructor
-                             // needs UI thread.
+  EmbeddedTestServer* test_server_;  // cant use scoped_ptr because destructor
+                                     // needs UI thread.
 };
 
 IN_PROC_BROWSER_TEST_F(OobeTest, NewUser) {
@@ -224,4 +220,4 @@ IN_PROC_BROWSER_TEST_F(OobeTest, NewUser) {
   runner->Run();
 }
 
-}
+}  // namespace

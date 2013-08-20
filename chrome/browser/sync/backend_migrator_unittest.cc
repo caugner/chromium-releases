@@ -77,11 +77,12 @@ class SyncBackendMigratorTest : public testing::Test {
       DataTypeManager::ConfigureResult result(status, requested_types);
       migrator_->OnConfigureDone(result);
     } else {
-      std::list<syncer::SyncError> errors;
+      std::map<syncer::ModelType, syncer::SyncError> errors;
       DataTypeManager::ConfigureResult result(
           status,
           requested_types,
           errors,
+          syncer::ModelTypeSet(),
           syncer::ModelTypeSet());
       migrator_->OnConfigureDone(result);
     }
@@ -101,7 +102,7 @@ class SyncBackendMigratorTest : public testing::Test {
 
  private:
   scoped_ptr<SyncSessionSnapshot> snap_;
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   syncer::ModelTypeSet preferred_types_;
   NiceMock<ProfileSyncServiceMock> service_;
   NiceMock<DataTypeManagerMock> manager_;

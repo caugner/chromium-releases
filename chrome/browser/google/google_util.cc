@@ -8,11 +8,11 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/common/chrome_switches.h"
@@ -92,8 +92,9 @@ std::string StringAppendGoogleLocaleParam(const std::string& url) {
 
 GURL AppendGoogleTLDParam(Profile* profile, const GURL& url) {
   const std::string google_domain(
-      net::RegistryControlledDomainService::GetDomainAndRegistry(
-          GoogleURLTracker::GoogleURL(profile)));
+      net::registry_controlled_domains::GetDomainAndRegistry(
+          GoogleURLTracker::GoogleURL(profile),
+          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES));
   const size_t first_dot = google_domain.find('.');
   if (first_dot == std::string::npos) {
     NOTREACHED();
@@ -177,8 +178,10 @@ bool IsGoogleDomainUrl(const std::string& url,
 
 bool IsGoogleHostname(const std::string& host,
                       SubdomainPermission subdomain_permission) {
-  size_t tld_length =
-      net::RegistryControlledDomainService::GetRegistryLength(host, false);
+  size_t tld_length = net::registry_controlled_domains::GetRegistryLength(
+      host,
+      net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+      net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
   if ((tld_length == 0) || (tld_length == std::string::npos))
     return false;
   std::string host_minus_tld(host, 0, host.length() - tld_length);

@@ -11,10 +11,10 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
+#include "chrome/browser/invalidation/invalidator_storage.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/synced_device_tracker.h"
-#include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
@@ -53,7 +53,7 @@ ACTION_P(Signal, event) {
 }
 
 void QuitMessageLoop() {
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }
 
 class MockSyncFrontend : public SyncFrontend {
@@ -146,7 +146,7 @@ class SyncBackendHostTest : public testing::Test {
     profile_.reset(new TestingProfile());
     profile_->CreateRequestContext();
     sync_prefs_.reset(new SyncPrefs(profile_->GetPrefs()));
-    invalidator_storage_.reset(new InvalidatorStorage(
+    invalidator_storage_.reset(new invalidation::InvalidatorStorage(
         profile_->GetPrefs()));
     backend_.reset(new SyncBackendHost(
         profile_->GetDebugName(),
@@ -215,7 +215,9 @@ class SyncBackendHostTest : public testing::Test {
                           syncer::ModelTypeSet types_to_remove) {
     BackendDataTypeConfigurer::DataTypeConfigStateMap config_state_map;
     BackendDataTypeConfigurer::SetDataTypesState(
-        BackendDataTypeConfigurer::ENABLED, types_to_add,  &config_state_map);
+        BackendDataTypeConfigurer::CONFIGURE_ACTIVE,
+        types_to_add,
+        &config_state_map);
     BackendDataTypeConfigurer::SetDataTypesState(
         BackendDataTypeConfigurer::DISABLED,
         types_to_remove, &config_state_map);
@@ -247,15 +249,16 @@ class SyncBackendHostTest : public testing::Test {
   }
 
  protected:
-  void DownloadReady(syncer::ModelTypeSet types) {
-    MessageLoop::current()->Quit();
+  void DownloadReady(syncer::ModelTypeSet succeeded_types,
+                     syncer::ModelTypeSet failed_types) {
+    base::MessageLoop::current()->Quit();
   }
 
   void OnDownloadRetry() {
     NOTIMPLEMENTED();
   }
 
-  MessageLoop ui_loop_;
+  base::MessageLoop ui_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread io_thread_;
   StrictMock<MockSyncFrontend> mock_frontend_;
@@ -263,7 +266,7 @@ class SyncBackendHostTest : public testing::Test {
   syncer::TestUnrecoverableErrorHandler handler_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<SyncPrefs> sync_prefs_;
-  scoped_ptr<InvalidatorStorage> invalidator_storage_;
+  scoped_ptr<invalidation::InvalidatorStorage> invalidator_storage_;
   scoped_ptr<SyncBackendHost> backend_;
   FakeSyncManager* fake_manager_;
   FakeSyncManagerFactory fake_manager_factory_;
@@ -688,8 +691,9 @@ TEST_F(SyncBackendHostTest, DownloadControlTypes) {
   // any old types.
   InitializeBackend(true);
   EXPECT_TRUE(fake_manager_->GetAndResetDownloadedTypes().Equals(new_types));
-  EXPECT_TRUE(Intersection(fake_manager_->GetAndResetCleanedTypes(),
-                           enabled_types_).Empty());
+  EXPECT_TRUE(fake_manager_->GetAndResetCleanedTypes().Equals(
+                  Difference(syncer::ModelTypeSet::All(),
+                             enabled_types_)));
   EXPECT_TRUE(fake_manager_->InitialSyncEndedTypes().Equals(enabled_types_));
   EXPECT_TRUE(fake_manager_->GetTypesWithEmptyProgressMarkerToken(
       enabled_types_).Empty());

@@ -5,10 +5,9 @@
 #include "chrome/browser/ui/views/chrome_to_mobile_bubble_view.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/message_loop.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -171,7 +170,8 @@ void ChromeToMobileBubbleView::OnSendComplete(bool success) {
 
   if (success) {
     send_->SetText(l10n_util::GetStringUTF16(IDS_CHROME_TO_MOBILE_BUBBLE_SENT));
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+    base::MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
         base::Bind(&ChromeToMobileBubbleView::Hide),
         base::TimeDelta::FromSeconds(kAutoCloseDelay));
   } else {
@@ -251,8 +251,8 @@ void ChromeToMobileBubbleView::Init() {
       if (mobiles->GetDictionary(index, &mobile) &&
           mobile->GetString("name", &name)) {
         radio = new views::RadioButton(name, 0);
-        radio->SetEnabledColor(SK_ColorBLACK);
-        radio->SetHoverColor(SK_ColorBLACK);
+        radio->SetTextColor(views::Button::STATE_NORMAL, SK_ColorBLACK);
+        radio->SetTextColor(views::Button::STATE_HOVERED, SK_ColorBLACK);
         radio_buttons_.push_back(radio);
         layout->StartRow(0, kRadioColumnSetId);
         layout->AddView(radio);
@@ -267,8 +267,8 @@ void ChromeToMobileBubbleView::Init() {
       l10n_util::GetStringFUTF16(IDS_CHROME_TO_MOBILE_BUBBLE_SEND_COPY,
           l10n_util::GetStringUTF16(
               IDS_CHROME_TO_MOBILE_BUBBLE_SEND_COPY_GENERATING)));
-  send_copy_->SetEnabledColor(SK_ColorBLACK);
-  send_copy_->SetHoverColor(SK_ColorBLACK);
+  send_copy_->SetTextColor(views::Button::STATE_NORMAL, SK_ColorBLACK);
+  send_copy_->SetTextColor(views::Button::STATE_HOVERED, SK_ColorBLACK);
   send_copy_->SetEnabled(false);
   layout->StartRow(0, kSingleColumnSetId);
   layout->AddView(send_copy_);

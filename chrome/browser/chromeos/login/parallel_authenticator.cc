@@ -6,11 +6,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -318,7 +317,7 @@ void ParallelAuthenticator::LoginRetailMode() {
   // Note: |kRetailModeUserEMail| is used in other places to identify a retail
   // mode session.
   current_state_.reset(new AuthAttemptState(
-        UserContext(kRetailModeUserEMail,
+        UserContext(UserManager::kRetailModeUserName,
                     std::string(),   // password
                     std::string()),  // auth_code
         std::string(),  // ascii_hash
@@ -334,9 +333,9 @@ void ParallelAuthenticator::LoginRetailMode() {
 void ParallelAuthenticator::LoginOffTheRecord() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   current_state_.reset(new AuthAttemptState(
-      UserContext(std::string(),  // username
-                  std::string(),  // password
-                  std::string()),  // auth_code
+      UserContext(UserManager::kGuestUserName,  // username
+                  std::string(),                // password
+                  std::string()),               // auth_code
       std::string(),  // ascii_hash
       std::string(),  // login_token
       std::string(),  // login_captcha

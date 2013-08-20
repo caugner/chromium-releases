@@ -5,6 +5,8 @@
 #ifndef UI_MESSAGE_CENTER_MESSAGE_CENTER_OBSERVER_H_
 #define UI_MESSAGE_CENTER_MESSAGE_CENTER_OBSERVER_H_
 
+#include <string>
+
 #include "ui/message_center/message_center_export.h"
 
 namespace message_center {
@@ -39,6 +41,10 @@ class MESSAGE_CENTER_EXPORT MessageCenterObserver {
   // Called when the notification associated with |notification_id| is actually
   // displayed.
   virtual void OnNotificationDisplayed(const std::string& notification_id) {}
+
+  // Called when the notification list is no longer being displayed as a
+  // notification center.
+  virtual void OnNotificationCenterClosed() {}
 };
 
 }  // namespace message_center

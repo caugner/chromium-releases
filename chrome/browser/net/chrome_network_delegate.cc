@@ -327,7 +327,9 @@ void StoreAccumulatedContentLength(int received_content_length,
 }
 
 void RecordContentLengthHistograms(
-    int64 received_content_length, int64 original_content_length) {
+    int64 received_content_length,
+    int64 original_content_length,
+    const base::TimeDelta& freshness_lifetime) {
 #if defined(OS_ANDROID)
   // Add the current resource to these histograms only when a valid
   // X-Original-Content-Length header is present.
@@ -348,6 +350,24 @@ void RecordContentLengthHistograms(
                        original_content_length);
   UMA_HISTOGRAM_COUNTS("Net.HttpContentLengthDifference",
                        original_content_length - received_content_length);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("Net.HttpContentFreshnessLifetime",
+                              freshness_lifetime.InSeconds(),
+                              base::TimeDelta::FromHours(1).InSeconds(),
+                              base::TimeDelta::FromDays(30).InSeconds(),
+                              100);
+  if (freshness_lifetime.InSeconds() <= 0)
+    return;
+  UMA_HISTOGRAM_COUNTS("Net.HttpContentLengthCacheable",
+                       received_content_length);
+  if (freshness_lifetime.InHours() < 4)
+    return;
+  UMA_HISTOGRAM_COUNTS("Net.HttpContentLengthCacheable4Hours",
+                       received_content_length);
+
+  if (freshness_lifetime.InHours() < 24)
+    return;
+  UMA_HISTOGRAM_COUNTS("Net.HttpContentLengthCacheable24Hours",
+                       received_content_length);
 #endif
 }
 
@@ -566,10 +586,14 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
       int64 adjusted_original_content_length = original_content_length;
       if (adjusted_original_content_length == -1)
         adjusted_original_content_length = received_content_length;
+      base::TimeDelta freshness_lifetime =
+          request->response_info().headers->GetFreshnessLifetime(
+              request->response_info().response_time);
       AccumulateContentLength(received_content_length,
                               adjusted_original_content_length);
       RecordContentLengthHistograms(received_content_length,
-                                    original_content_length);
+                                    original_content_length,
+                                    freshness_lifetime);
       DVLOG(2) << __FUNCTION__
           << " received content length: " << received_content_length
           << " original content length: " << original_content_length
@@ -623,7 +647,7 @@ bool ChromeNetworkDelegate::OnCanGetCookies(
     const net::URLRequest& request,
     const net::CookieList& cookie_list) {
   // NULL during tests, or when we're running in the system context.
-  if (!cookie_settings_)
+  if (!cookie_settings_.get())
     return true;
 
   bool allow = cookie_settings_->IsReadingCookieAllowed(
@@ -648,7 +672,7 @@ bool ChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
                                            const std::string& cookie_line,
                                            net::CookieOptions* options) {
   // NULL during tests, or when we're running in the system context.
-  if (!cookie_settings_)
+  if (!cookie_settings_.get())
     return true;
 
   bool allow = cookie_settings_->IsSettingCookieAllowed(
@@ -732,6 +756,21 @@ bool ChromeNetworkDelegate::OnCanThrottleRequest(
 
   return request.first_party_for_cookies().scheme() ==
       extensions::kExtensionScheme;
+}
+
+bool ChromeNetworkDelegate::OnCanEnablePrivacyMode(
+    const GURL& url,
+    const GURL& first_party_for_cookies) const {
+  // NULL during tests, or when we're running in the system context.
+  if (!cookie_settings_.get())
+    return false;
+
+  bool reading_cookie_allowed = cookie_settings_->IsReadingCookieAllowed(
+      url, first_party_for_cookies);
+  bool setting_cookie_allowed = cookie_settings_->IsSettingCookieAllowed(
+      url, first_party_for_cookies);
+  bool privacy_mode = !(reading_cookie_allowed && setting_cookie_allowed);
+  return privacy_mode;
 }
 
 int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(

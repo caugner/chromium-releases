@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/containers/hash_tables.h"
 #include "base/gtest_prod_util.h"
-#include "base/hash_tables.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
@@ -179,6 +179,7 @@ class DialRegistry : public DialService::Observer,
   FRIEND_TEST_ALL_PREFIXES(DialRegistryTest, TestNoDevicesDiscovered);
   FRIEND_TEST_ALL_PREFIXES(DialRegistryTest, TestDevicesDiscovered);
   FRIEND_TEST_ALL_PREFIXES(DialRegistryTest, TestDeviceExpires);
+  FRIEND_TEST_ALL_PREFIXES(DialRegistryTest, TestExpiredDeviceIsRediscovered);
   FRIEND_TEST_ALL_PREFIXES(DialRegistryTest,
                            TestRemovingListenerDoesNotClearList);
   FRIEND_TEST_ALL_PREFIXES(DialRegistryTest, TestNetworkEventConnectionLost);

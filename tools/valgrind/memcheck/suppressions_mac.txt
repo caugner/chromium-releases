@@ -119,7 +119,8 @@
    fun:_CFRuntimeCreateInstance
    fun:__CFArrayInit
    fun:CFArrayCreateMutableCopy
-   fun:_ZN8Security12KeychainCore5Trust8evaluateEv
+   ...
+   fun:_ZN8Security12KeychainCore5Trust8evaluate*
 }
 # See description of bug_20653a/b in suppressions.txt.
 {
@@ -1304,27 +1305,6 @@
    fun:-[NSTrackableOutlineView dealloc]
 }
 {
-   bug_77388_e
-   Memcheck:Uninitialized
-   fun:TestAndSetClear
-   fun:TestAndSet
-   fun:_ZN5TNode17HandleSyncStartedEv
-   fun:_ZN5TNode24GetNetworkSidebarBrowserEv
-   fun:_ZN5TNode14GetNetworkNodeEm
-   fun:_ZN5TNode24GetSpecialNodeWithStatusEmRKP17OpaqueNodeRequestmR8TNodePtr
-   fun:NodeCopySpecialFolder
-   fun:+[NSNavFBENode _virtualNodeOfType:]
-   fun:+[NSNavFBENode copyStandardSidebarNodes]
-   fun:-[NSNavSidebarController load]
-   fun:-[NSNavView loadSidebar]
-   fun:-[NSSavePanel _initSidebarAndPopups]
-   fun:-[NSSavePanel _initPanelCommon]
-   fun:-[NSSavePanel initWithContentRect:styleMask:backing:defer:]
-   fun:+[NSSavePanel _crunchyRawUnbonedPanel]
-   fun:_ZN20SelectFileDialogImpl10SelectFileEN16SelectFileDialog4TypeERKSbItN4base20string16_char_traitsESaItEE*
-   fun:_ZN15DownloadManager24OnPathExistenceAvailableEP18DownloadCreateInfo
-}
-{
    bug_79655a
    Memcheck:Unaddressable
    ...
@@ -1456,7 +1436,7 @@
 {
    bug_87629
    Memcheck:Leak
-   fun:malloc
+   ...
    fun:realloc
    fun:new_sem_from_pool
 }
@@ -1664,8 +1644,8 @@
 {
    bug_96684a
    Memcheck:Uninitialized
-   fun:_ZN7content16P2PSocketHostTcp4SendERKN3net10IPEndPointERKSt6vectorIcSaIcEE
-   fun:*SocketHostTcpTest_*_Test8TestBodyEv
+   fun:_ZN7content20P2PSocketHostTcpBase4SendERKN3net10IPEndPointERKSt6vectorIcSaIcEE
+   fun:*SocketHost*TcpTest_*_Test8TestBodyEv
 }
 {
    bug_96684b
@@ -1714,9 +1694,6 @@
    fun:get_name_table
    fun:CGFontCopyPostScriptName
    fun:CGFontCreateFontsWithURL
-   fun:_ZN7TCGFontC2EPK7__CFURLb
-   fun:_ZNK12TCGFontCache8CopyFontEPK7__CFURL
-   fun:_ZNK9TBaseFont14CopyNativeFontEv
 }
 {
    bug_102327_a
@@ -2006,10 +1983,6 @@
    fun:pthread_once
    fun:_ZN16TBasicFontEntity18GetBasicPropertiesEv
    fun:XTCopyFontsWithProperties
-   fun:_ZL20CopyFaceURLsForFontsPK9__CFArrayj
-   fun:XTRegisterFonts
-   fun:XTRegisterFont
-   fun:SendActivateFontsMessage
 }
 {
    bug_105527_d
@@ -2101,13 +2074,6 @@
    fun:_ZN7WebCore23V8AbstractEventListener18invokeEventHandlerEPNS_22ScriptExecutionContextEPNS_5EventEN2v86HandleINS5_5ValueEEE
    fun:_ZN7WebCore23V8AbstractEventListener11handleEventEPNS_22ScriptExecutionContextEPNS_5EventE
    fun:_ZN7WebCore11EventTarget18fireEventListenersEPNS_5EventEPNS_15EventTargetDataERN3WTF6VectorINS_23RegisteredEventListenerELm1EEE
-}
-{
-   bug_106912
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN15tracked_objects10ThreadData23InitializeThreadContextERKSs
-   fun:_ZN4base14PlatformThread7SetNameEPKc
 }
 {
    bug_107179
@@ -2378,6 +2344,209 @@
    fun:fnmatch1
    fun:fnmatch1
    fun:fnmatch$UNIX2003
-   fun:_ZN9file_util14FileEnumerator4NextEv
-   fun:_ZN10disk_cache11SimpleIndex15RestoreFromDiskERKN4base8FilePathE
+   fun:_ZN4base14FileEnumerator4NextEv
+   fun:_ZN10disk_cache15SimpleIndexFile15RestoreFromDiskERKN4base8FilePathE
+}
+{
+   bug_244420
+   Memcheck:Uninitialized
+   ...
+   fun:_ZN9talk_baseL8ToStringIyEESsRKT_
+   fun:_ZN7content23VideoDestinationHandler4OpenEPNS_28MediaStreamDependencyFactoryEPNS_28MediaStreamRegistryInterfaceERKSsPPNS_20FrameWriterInterfaceE
+   fun:_ZN7content37VideoDestinationHandlerTest_Open_Test8TestBodyEv
+}
+{
+   bug_244437
+   Memcheck:Uninitialized
+   fun:_ZN5mediaL23FromInterleavedInternalIssLs0EEEvPKviiPNS_8AudioBusEff
+   fun:_ZN5media8AudioBus22FromInterleavedPartialEPKviii
+   fun:_ZN5media8AudioBus15FromInterleavedEPKvii
+   fun:_ZN7content19WebRtcAudioRenderer14SourceCallbackEiPN5media8AudioBusE
+}
+{
+   bug_246567
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN2v88internal24PerThreadAssertScopeBase10AssertDataEv
+   fun:_ZN2v88internal20PerThreadAssertScopeILNS0_19PerThreadAssertTypeE1ELb1EE9IsAllowedEv
+   ...
+   fun:_ZN3net15ProxyResolverV87Context6InitV8ERK13scoped_refptrINS_23ProxyResolverScriptDataEE
+   fun:_ZN3net15ProxyResolverV812SetPacScriptERK13scoped_refptrINS_23ProxyResolverScriptDataEERKN4base8CallbackIFviEEE
+   fun:_ZN3net22ProxyResolverV8Tracing3Job20ExecuteProxyResolverEv
+   fun:_ZN3net22ProxyResolverV8Tracing3Job15ExecuteBlockingEv
+}
+{
+   bug_246567b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN2v88internal24PerThreadAssertScopeBase10AssertDataEv
+   fun:_ZN2v88internal20PerThreadAssertScopeILNS0_19PerThreadAssertTypeE1ELb1EE9IsAllowedEv
+   fun:_ZN2v88internal11HandleScope12CreateHandleINS0*
+   fun:_ZN2v88internal6Handle*
+}
+# Maybe related to bug_105527_a?
+{
+   bug_247506a
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN16TCFStringUniquer19CreateStringUniquerEv
+   fun:pthread_once
+   fun:_ZN16TCFStringUniquerC1Ev
+   fun:_ZN19TCFResurrectContext17ResurrectCFStringEv
+   fun:_ZN19TCFResurrectContext9ResurrectEv
+   fun:_ZN19TCFResurrectContext21ResurrectCFDictionaryEv
+   fun:_ZN19TCFResurrectContext9ResurrectEv
+   fun:_ZNK22TGlobalFontRegistryImp20RendezvousWithServerEv
+   fun:_ZN22TGlobalFontRegistryImpC2Ev
+   fun:_ZN19TGlobalFontRegistry14CreateRegistryEv
+}
+# Maybe related to bug_105527_b ?
+{
+   bug_247506b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN18TLocalFontRegistry14CreateRegistryEv
+   fun:pthread_once
+   fun:_ZN18TLocalFontRegistryC2Ev
+   fun:XTCopyFontWithName
+   fun:_ZNK17TDescriptorSource35CopyFontDescriptorPerPostscriptNameEPK10__CFStringm
+   fun:_ZNK11TDescriptor32CreateMatchingDescriptorInternalEPK7__CFSet
+   fun:_ZN11TDescriptor12InitBaseFontEv
+}
+# Maybe related to bug_105342 ?
+{
+   bug_247506c
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN15TSessionManager20CreateSessionManagerEv
+   fun:pthread_once
+   fun:_ZN15TSessionManagerC1Ev
+   fun:_ZNK22TGlobalFontRegistryImp13GetServerPortEv
+   fun:_ZNK22TGlobalFontRegistryImp20RendezvousWithServerEv
+   fun:_ZN22TGlobalFontRegistryImpC2Ev
+   fun:_ZN19TGlobalFontRegistry14CreateRegistryEv
+   fun:pthread_once
+   fun:_ZN19TGlobalFontRegistryC2Ev
+   fun:XTCopyFontWithName
+}
+{
+   bug_247506d
+   Memcheck:Leak
+   fun:malloc_zone_calloc
+   fun:_calloc_internal
+   fun:_cache_malloc
+   fun:_cache_fill
+   fun:lookUpMethod
+   fun:_class_lookupMethodAndLoadCache
+   fun:objc_msgSend
+   ...
+   fun:_ZL17SetupMenuTrackingR14MenuSelectDatah5PointdP8MenuDatamtPK4RectS6_jS6_PK10__CFString
+   fun:_ZL19PopUpMenuSelectCoreP8MenuData5PointdS1_tjPK4RecttmS4_S4_PK10__CFStringPP13OpaqueMenuRefPt
+   fun:_HandlePopUpMenuSelection7
+}
+{
+   bug_247506e
+   Memcheck:Leak
+   fun:calloc
+   fun:_ZN11TMemoryHeap6CallocEmm
+   fun:_Z14AllocateMemorymP11TMemoryHeapb
+   fun:_Z13CacheAllocatemb
+   fun:_Z16BuildMacEncTablev
+   fun:_ZN15TParsingContext13GetParseProcsEv
+   fun:_ZN19TSFNTParsingContext13GetParseProcsEv
+   fun:_ZN18TCIDParsingContext13GetParseProcsEv
+   fun:_ZN16TType1OTFCIDFont20ParseCFFCIDFontDictsERK19TType1CFFDescriptorP32Type1ProtectionEvaluationContextRVt
+}
+{
+   bug_247506f
+   Memcheck:Leak
+   fun:malloc_zone_calloc
+   fun:_calloc_internal
+   fun:_objc_insertMethods
+   fun:_objc_read_categories_from_image
+   fun:_read_images
+   fun:map_images_nolock
+   fun:map_images
+   fun:_ZN4dyldL18notifyBatchPartialE17dyld_image_statesbPFPKcS0_jPK15dyld_image_infoE
+   fun:_ZN11ImageLoader4linkERKNS_11LinkContextEbbRKNS_10RPathChainE
+   fun:_ZN4dyld4linkEP11ImageLoaderbRKNS0_10RPathChainE
+}
+{
+   bug_247506g
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:malloc_set_zone_name
+   fun:malloc_default_purgeable_zone
+   fun:ImageIO_Malloc
+   fun:copyImageBlockSetPNG
+   fun:ImageProviderCopyImageBlockSetCallback
+   fun:CGImageProviderCopyImageBlockSet
+   fun:img_blocks_create
+   fun:img_blocks_extent
+   fun:img_data_lock
+   fun:CGSImageDataLock
+   fun:ripc_AcquireImage
+   fun:ripc_DrawImage
+   fun:CGContextDrawImage
+   fun:__-[NSImageRep drawInRect:fromRect:operation:fraction:respectFlipped:hints:]_block_invoke_1
+   fun:-[NSImageRep drawInRect:fromRect:operation:fraction:respectFlipped:hints:]
+   fun:_ZN12_GLOBAL__N_129NSImageOrNSImageRepToSkBitmapEP7NSImageP10NSImageRep7_NSSizeb
+   fun:_ZN3gfx20NSImageRepToSkBitmapEP10NSImageRep7_NSSizeb
+   fun:_ZN3gfx27ImageSkiaFromResizedNSImageEP7NSImage7_NSSize
+   fun:_ZN3gfx20ImageSkiaFromNSImageEP7NSImage
+   fun:_ZNK3gfx5Image11ToImageSkiaEv
+   fun:_ZNK3gfx5Image10ToSkBitmapEv
+}
+{
+   bug_247506h
+   Memcheck:Leak
+   fun:malloc
+   fun:_ZN11TMemoryHeap6MallocEm
+   fun:_Z14AllocateMemorymP11TMemoryHeapb
+   fun:_Z13GetGrowBufferm
+   fun:_ZN31TFractionalMetricsRenderContextC2EPK10TType1FontPKht
+   fun:_ZNK10TType1Font13GetRawMetricsERK18TType1FontInstancePKhtR10_t_CharSBW
+   fun:_ZNK10TType1Font23RenderFractionalMetricsERK15TType1TransformtPKhtR22GlyphFractionalMetrics
+   fun:_ZNK13TType1CIDFont20GetFractionalMetricsERK15TType1TransformtP22GlyphFractionalMetrics
+   fun:_ZNK12TType1Strike10GetMetricsERK21TRenderingDescriptionmPKtRK19TDestinationMapping
+   fun:_Z20Type1GetGlyphMetricsmPK18TStrikeDescriptionPK21TRenderingDescriptionmPKtPvm
+   fun:_ZNK19TConcreteFontScaler25GetGlyphIdealAdvanceWidthEt
+}
+{
+   bug_247506i
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:_CFRuntimeCreateInstance
+   fun:CFBasicHashCreate
+   fun:__CFDictionaryCreateGeneric
+   fun:CFDictionaryCreateMutable
+   fun:utDeactivateAllSelectedIMInDoc
+   fun:MyDeactivateTSMDocument
+   fun:_ReactivateTSMDocumentAfterMenuTracking
+}
+{
+   bug_247506j
+   Memcheck:Leak
+   fun:malloc_zone_calloc
+   fun:ripr_Rectangles
+   fun:ripc_DrawRects
+   fun:CGContextFillRects
+   fun:NSRectFillListWithColorsUsingOperation
+   fun:NSDrawColorTiledRects
+}
+{
+   bug_247506k
+   Memcheck:Leak
+   fun:malloc
+   fun:_ZN11TMemoryHeap6MallocEm
+   fun:_Z24Type1InterpretCharStringP11_t_FontInstP10_t_BCProcsP17_t_T1CharDataDescP9_t_CharIOP9_t_RunRecP12_t_PathProcsP6T1Args
+   fun:_ZL14ATMCharOutlineP11_t_FontInstP10_t_BCProcsPvP9_t_CharIOP12_t_PathProcsmS3_
+   fun:_ZN21MPathRenderingContext13RenderOutlineERK11_t_FontInstb
+   fun:_ZN28TPathMetricsRenderingContext11MakeOutlineERK11_t_FontInstbR10FixedPointS4_S4_
+   fun:_ZNK10TType1Font20RenderOutlineMetricsERK15TType1TransformtPKhtR21GlyphRenderingMetrics
+   fun:_ZNK13TType1CIDFont17GetOutlineMetricsERK15TType1TransformtP21GlyphRenderingMetrics
+   fun:_ZNK12TType1Strike10GetMetricsERK21TRenderingDescriptionmPKtRK19TDestinationMapping
+   fun:_Z20Type1GetGlyphMetricsmPK18TStrikeDescriptionPK21TRenderingDescriptionmPKtPvm
+   fun:_ZNK19TConcreteFontScaler19GetGlyphIdealBoundsEt
+   fun:FPFontGetGlyphIdealBounds
 }

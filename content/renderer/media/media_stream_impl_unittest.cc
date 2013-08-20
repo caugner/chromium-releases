@@ -3,18 +3,18 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_impl.h"
 #include "content/renderer/media/mock_media_stream_dependency_factory.h"
 #include "content/renderer/media/mock_media_stream_dispatcher.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStream.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamSource.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamTrack.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
+#include "third_party/WebKit/public/platform/WebMediaStream.h"
+#include "third_party/WebKit/public/platform/WebMediaStreamSource.h"
+#include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
 
 namespace content {
 
@@ -33,15 +33,10 @@ class MediaStreamImplUnderTest : public MediaStreamImpl {
         state_(REQUEST_NOT_STARTED) {
   }
 
-  void RequestUserMedia(bool audio, bool video) {
+  void RequestUserMedia() {
     WebKit::WebUserMediaRequest user_media_request;
-    WebKit::WebVector<WebKit::WebMediaStreamSource> audio_sources(
-        audio ? static_cast<size_t>(1) : 0);
-    WebKit::WebVector<WebKit::WebMediaStreamSource> video_sources(
-        video ? static_cast<size_t>(1) : 0);
     state_ = REQUEST_NOT_COMPLETE;
-    requestUserMedia(user_media_request, audio_sources,
-                     video_sources);
+    requestUserMedia(user_media_request);
   }
 
   virtual void CompleteGetUserMediaRequest(
@@ -80,14 +75,11 @@ class MediaStreamImplTest : public ::testing::Test {
                                                 dependency_factory_.get()));
   }
 
-  WebKit::WebMediaStream RequestLocalMediaStream(bool audio,
-                                                           bool video) {
-    ms_impl_->RequestUserMedia(audio, video);
+  WebKit::WebMediaStream RequestLocalMediaStream() {
+    ms_impl_->RequestUserMedia();
     FakeMediaStreamDispatcherComplete();
-    if (video)
-      ChangeVideoSourceStateToLive();
-    if (audio)
-      ChangeAudioSourceStateToLive();
+    ChangeVideoSourceStateToLive();
+    ChangeAudioSourceStateToLive();
 
     EXPECT_EQ(MediaStreamImplUnderTest::REQUEST_SUCCEEDED,
               ms_impl_->request_state());
@@ -95,22 +87,17 @@ class MediaStreamImplTest : public ::testing::Test {
     WebKit::WebMediaStream desc = ms_impl_->last_generated_stream();
     content::MediaStreamExtraData* extra_data =
         static_cast<content::MediaStreamExtraData*>(desc.extraData());
-    if (!extra_data || !extra_data->stream()) {
+    if (!extra_data || !extra_data->stream().get()) {
       ADD_FAILURE();
       return desc;
     }
 
-    if (audio)
-      EXPECT_EQ(1u, extra_data->stream()->GetAudioTracks().size());
-    if (video)
-      EXPECT_EQ(1u, extra_data->stream()->GetVideoTracks().size());
-    if (audio && video) {
-      EXPECT_NE(extra_data->stream()->GetAudioTracks()[0]->id(),
-                extra_data->stream()->GetVideoTracks()[0]->id());
-    }
+    EXPECT_EQ(1u, extra_data->stream()->GetAudioTracks().size());
+    EXPECT_EQ(1u, extra_data->stream()->GetVideoTracks().size());
+    EXPECT_NE(extra_data->stream()->GetAudioTracks()[0]->id(),
+              extra_data->stream()->GetVideoTracks()[0]->id());
     return desc;
   }
-
 
   void FakeMediaStreamDispatcherComplete() {
     ms_impl_->OnStreamGenerated(ms_dispatcher_->request_id(),
@@ -151,13 +138,13 @@ class MediaStreamImplTest : public ::testing::Test {
 
 TEST_F(MediaStreamImplTest, LocalMediaStream) {
   // Test a stream with both audio and video.
-  WebKit::WebMediaStream mixed_desc = RequestLocalMediaStream(true, true);
+  WebKit::WebMediaStream mixed_desc = RequestLocalMediaStream();
 
   // Test a stream with audio only.
-  WebKit::WebMediaStream audio_desc = RequestLocalMediaStream(true, false);
+  WebKit::WebMediaStream audio_desc = RequestLocalMediaStream();
 
   // Test a stream with video only.
-  WebKit::WebMediaStream video_desc = RequestLocalMediaStream(false, true);
+  WebKit::WebMediaStream video_desc = RequestLocalMediaStream();
 
   // Stop generated local streams.
   ms_impl_->OnLocalMediaStreamStop(mixed_desc.label().utf8());
@@ -173,7 +160,7 @@ TEST_F(MediaStreamImplTest, LocalMediaStream) {
 
 // This test what happens if a source to a MediaSteam fails to start.
 TEST_F(MediaStreamImplTest, MediaSourceFailToStart) {
-  ms_impl_->RequestUserMedia(true, true);
+  ms_impl_->RequestUserMedia();
   FakeMediaStreamDispatcherComplete();
   ChangeVideoSourceStateToEnded();
   ChangeAudioSourceStateToEnded();
@@ -186,7 +173,7 @@ TEST_F(MediaStreamImplTest, MediaSourceFailToStart) {
 // This test what happens if MediaStreamImpl is deleted while the sources of a
 // MediaStream is being started.
 TEST_F(MediaStreamImplTest, MediaStreamImplShutDown) {
-  ms_impl_->RequestUserMedia(true, true);
+  ms_impl_->RequestUserMedia();
   FakeMediaStreamDispatcherComplete();
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
   EXPECT_EQ(MediaStreamImplUnderTest::REQUEST_NOT_COMPLETE,
@@ -199,7 +186,7 @@ TEST_F(MediaStreamImplTest, MediaStreamImplShutDown) {
 // This test what happens if the WebFrame is closed while the MediaStream is
 // being generated by the MediaStreamDispatcher.
 TEST_F(MediaStreamImplTest, ReloadFrameWhileGeneratingStream) {
-  ms_impl_->RequestUserMedia(true, true);
+  ms_impl_->RequestUserMedia();
   ms_impl_->FrameWillClose(NULL);
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
   EXPECT_EQ(0, ms_dispatcher_->stop_stream_counter());
@@ -212,7 +199,7 @@ TEST_F(MediaStreamImplTest, ReloadFrameWhileGeneratingStream) {
 // This test what happens if the WebFrame is closed while the sources are being
 // started by MediaStreamDependencyFactory.
 TEST_F(MediaStreamImplTest, ReloadFrameWhileGeneratingSources) {
-  ms_impl_->RequestUserMedia(true, true);
+  ms_impl_->RequestUserMedia();
   FakeMediaStreamDispatcherComplete();
   EXPECT_EQ(0, ms_dispatcher_->stop_stream_counter());
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
@@ -227,7 +214,7 @@ TEST_F(MediaStreamImplTest, ReloadFrameWhileGeneratingSources) {
 // This test what happens if stop is called on a stream after the frame has
 // been reloaded.
 TEST_F(MediaStreamImplTest, StopStreamAfterReload) {
-  WebKit::WebMediaStream mixed_desc = RequestLocalMediaStream(true, true);
+  WebKit::WebMediaStream mixed_desc = RequestLocalMediaStream();
   EXPECT_EQ(0, ms_dispatcher_->stop_stream_counter());
   EXPECT_EQ(1, ms_dispatcher_->request_stream_counter());
   ms_impl_->FrameWillClose(NULL);

@@ -154,6 +154,10 @@ cr.define('login', function() {
           this.handleRemoveCommandKeyDown_.bind(this));
       this.actionBoxMenuRemoveElement.addEventListener('blur',
           this.handleRemoveCommandBlur_.bind(this));
+      this.actionBoxRemoveManagedUserWarningButtonElement.addEventListener(
+          'click',
+          this.handleRemoveUserConfirmationClick_.bind(this));
+
     },
 
     /**
@@ -264,6 +268,14 @@ cr.define('login', function() {
     },
 
     /**
+     * Gets action box menu title.
+     * @type {!HTMLInputElement}
+     */
+    get actionBoxMenuTitleElement() {
+      return this.querySelector('.action-box-menu-title');
+    },
+
+    /**
      * Gets action box menu title, user name item.
      * @type {!HTMLInputElement}
      */
@@ -296,6 +308,23 @@ cr.define('login', function() {
     },
 
     /**
+     * Gets action box menu, remove user command item div.
+     * @type {!HTMLInputElement}
+     */
+    get actionBoxRemoveManagedUserWarningElement() {
+      return this.querySelector('.action-box-remove-managed-user-warning');
+    },
+
+    /**
+     * Gets action box menu, remove user command item div.
+     * @type {!HTMLInputElement}
+     */
+    get actionBoxRemoveManagedUserWarningButtonElement() {
+      return this.querySelector(
+          '.remove-warning-button');
+    },
+
+    /**
      * Updates the user pod element.
      */
     update: function() {
@@ -319,6 +348,9 @@ cr.define('login', function() {
           loadTimeData.getStringF('ownerUserPattern', this.user_.displayName) :
           this.user_.displayName;
       this.actionBoxMenuTitleEmailElement.textContent = this.user_.emailAddress;
+      this.actionBoxMenuTitleEmailElement.hidden =
+          this.user_.locallyManagedUser;
+
       this.actionBoxMenuCommandElement.textContent =
           loadTimeData.getString('removeUser');
       this.passwordElement.setAttribute('aria-label', loadTimeData.getStringF(
@@ -375,6 +407,9 @@ cr.define('login', function() {
         return;
 
       if (active) {
+        this.actionBoxMenuRemoveElement.hidden = !this.user_.canRemove;
+        this.actionBoxRemoveManagedUserWarningElement.hidden = true;
+
         // Clear focus first if another pod is focused.
         if (!this.parentNode.isFocused(this)) {
           this.parentNode.focusPod(undefined, true);
@@ -471,8 +506,6 @@ cr.define('login', function() {
     handleActionAreaButtonClick_: function(e) {
       if (this.parentNode.disabled)
         return;
-      console.error('Action area clicked: ' + !this.isActionBoxMenuActive +
-                    ' at ' + e.x + ', ' + e.y);
       this.isActionBoxMenuActive = !this.isActionBoxMenuActive;
     },
 
@@ -486,11 +519,8 @@ cr.define('login', function() {
       switch (e.keyIdentifier) {
         case 'Enter':
         case 'U+0020':  // Space
-          if (this.parentNode.focusedPod_ && !this.isActionBoxMenuActive) {
-            console.error('Action area keyed: ' + !this.isActionBoxMenuActive +
-                          ' at ' + e.x + ', ' + e.y);
+          if (this.parentNode.focusedPod_ && !this.isActionBoxMenuActive)
             this.isActionBoxMenuActive = true;
-          }
           e.stopPropagation();
           break;
         case 'Up':
@@ -519,6 +549,27 @@ cr.define('login', function() {
      * @param {Event} e Click event.
      */
     handleRemoveCommandClick_: function(e) {
+      if (this.user.locallyManagedUser) {
+        this.showRemoveWarning_();
+        return;
+      }
+      if (this.isActionBoxMenuActive)
+        chrome.send('removeUser', [this.user.username]);
+    },
+
+    /**
+     * Shows remove warning for managed users.
+     */
+    showRemoveWarning_: function() {
+      this.actionBoxMenuRemoveElement.hidden = true;
+      this.actionBoxRemoveManagedUserWarningElement.hidden = false;
+    },
+
+    /**
+     * Handles a click event on remove user confirmation button.
+     * @param {Event} e Click event.
+     */
+    handleRemoveUserConfirmationClick_: function(e) {
       if (this.isActionBoxMenuActive)
         chrome.send('removeUser', [this.user.username]);
     },
@@ -1146,6 +1197,15 @@ cr.define('login', function() {
     },
 
     /**
+     * Restores input focus to current selected pod, if there is any.
+     */
+    refocusCurrentPod: function() {
+      if (this.focusedPod_) {
+        this.focusedPod_.focusInput();
+      }
+    },
+
+    /**
      * Clears focused pod password field.
      */
     clearFocusedPod: function() {
@@ -1197,9 +1257,6 @@ cr.define('login', function() {
     handleClick_: function(e) {
       if (this.disabled)
         return;
-
-      console.error('Document clicked at ' + e.x + ', ' + e.y +
-                    ', pod: ' + findAncestorByClass(e.target, 'pod'));
 
       // Clear all menus if the click is outside pod menu and its
       // button area.

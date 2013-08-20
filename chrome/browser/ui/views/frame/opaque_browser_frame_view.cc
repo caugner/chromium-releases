@@ -10,8 +10,9 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/views/avatar_label.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -40,6 +41,7 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/window/frame_background.h"
 #include "ui/views/window/window_shape.h"
@@ -178,7 +180,6 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
   // gfx::Canvas::NO_SUBPIXEL_RENDERING flag and avoid some visual artifacts.
   window_title_->SetBackgroundColor(0x00000000);
   window_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  window_title_->SetElideBehavior(views::Label::ELIDE_AT_END);
   AddChildView(window_title_);
 
   UpdateAvatarInfo();
@@ -234,9 +235,13 @@ gfx::Rect OpaqueBrowserFrameView::GetBoundsForTabStrip(
     return gfx::Rect();
 
   gfx::Rect bounds = GetBoundsForTabStripAndAvatarArea(tabstrip);
-  const int space_left_of_tabstrip = browser_view()->ShouldShowAvatar() ?
+  int space_left_of_tabstrip = browser_view()->ShouldShowAvatar() ?
       (kAvatarLeftSpacing + avatar_bounds_.width() + kAvatarRightSpacing) :
       kTabStripIndent;
+  if (avatar_label() && avatar_label()->bounds().width()) {
+    space_left_of_tabstrip += views::kRelatedControlHorizontalSpacing +
+                              avatar_label()->bounds().width();
+  }
   bounds.Inset(space_left_of_tabstrip, 0, 0, 0);
   return bounds;
 }
@@ -317,9 +322,11 @@ int OpaqueBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   if (!bounds().Contains(point))
     return HTNOWHERE;
 
-  // See if the point is within the avatar menu button.
-  if (avatar_button() &&
-      avatar_button()->GetMirroredBounds().Contains(point))
+  // See if the point is within the avatar menu button or within the avatar
+  // label.
+  if ((avatar_button() &&
+       avatar_button()->GetMirroredBounds().Contains(point)) ||
+      (avatar_label() && avatar_label()->GetMirroredBounds().Contains(point)))
     return HTCLIENT;
 
   int frame_component = frame()->client_view()->NonClientHitTest(point);
@@ -837,7 +844,6 @@ void OpaqueBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
   int image_height = client_area_bottom - image_top;
 
   // Draw the client edge images.
-  // Draw the client edge images.
   gfx::ImageSkia* right = tp->GetImageSkiaNamed(IDR_CONTENT_RIGHT_SIDE);
   canvas->TileImageInt(*right, client_area_bounds.right(), image_top,
                        right->width(), image_height);
@@ -1020,9 +1026,19 @@ void OpaqueBrowserFrameView::LayoutAvatar() {
   avatar_bounds_.SetRect(NonClientBorderThickness() + kAvatarLeftSpacing,
       avatar_y, incognito_icon.width(),
       browser_view()->ShouldShowAvatar() ? (avatar_bottom - avatar_y) : 0);
-
   if (avatar_button())
     avatar_button()->SetBoundsRect(avatar_bounds_);
+
+  if (avatar_label()) {
+    gfx::Size size = avatar_label()->GetPreferredSize();
+    int label_height = std::min(avatar_bounds_.height(), size.height());
+    gfx::Rect label_bounds(
+        avatar_bounds_.right() + views::kRelatedControlHorizontalSpacing,
+        avatar_y + (avatar_bounds_.height() - label_height) / 2,
+        size.width(),
+        browser_view()->ShouldShowAvatar() ? size.height() : 0);
+    avatar_label()->SetBoundsRect(label_bounds);
+  }
 }
 
 gfx::Rect OpaqueBrowserFrameView::CalculateClientAreaBounds(int width,

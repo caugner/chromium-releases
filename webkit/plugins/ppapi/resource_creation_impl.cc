@@ -6,6 +6,7 @@
 
 #include "ppapi/c/pp_size.h"
 #include "ppapi/shared_impl/ppb_audio_config_shared.h"
+#include "ppapi/shared_impl/ppb_image_data_shared.h"
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
 #include "ppapi/shared_impl/ppb_resource_array_shared.h"
 #include "ppapi/shared_impl/var.h"
@@ -21,7 +22,6 @@
 #include "webkit/plugins/ppapi/ppb_scrollbar_impl.h"
 #include "webkit/plugins/ppapi/ppb_tcp_server_socket_private_impl.h"
 #include "webkit/plugins/ppapi/ppb_tcp_socket_private_impl.h"
-#include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
 #include "webkit/plugins/ppapi/ppb_video_decoder_impl.h"
 #include "webkit/plugins/ppapi/ppb_x509_certificate_private_impl.h"
 #include "webkit/plugins/ppapi/resource_helper.h"
@@ -84,7 +84,14 @@ PP_Resource ResourceCreationImpl::CreateFileRef(
   return res ? res->GetReference() : 0;
 }
 
-PP_Resource ResourceCreationImpl::CreateFlashDeviceID(PP_Instance instance) {
+PP_Resource ResourceCreationImpl::CreateFileRef(
+    const ::ppapi::PPB_FileRef_CreateInfo& serialized) {
+  // When we're in-process, the host resource in the create info *is* the
+  // resource, so we don't need to do anything.
+  return serialized.resource.host_resource();
+}
+
+PP_Resource ResourceCreationImpl::CreateFlashDRM(PP_Instance instance) {
   return 0;  // Not supported in-process.
 }
 
@@ -119,24 +126,33 @@ PP_Resource ResourceCreationImpl::CreateGraphics3DRaw(
   return PPB_Graphics3D_Impl::CreateRaw(instance, share_context, attrib_list);
 }
 
+PP_Resource ResourceCreationImpl::CreateHostResolver(PP_Instance instance) {
+  return 0;  // Not supported in-process.
+}
+
 PP_Resource ResourceCreationImpl::CreateHostResolverPrivate(
     PP_Instance instance) {
   return 0;  // Not supported in-process.
 }
 
-PP_Resource ResourceCreationImpl::CreateImageData(PP_Instance instance,
-                                                  PP_ImageDataFormat format,
-                                                  const PP_Size* size,
-                                                  PP_Bool init_to_zero) {
-  return PPB_ImageData_Impl::CreatePlatform(instance, format, *size,
-                                            init_to_zero);
+PP_Resource ResourceCreationImpl::CreateImageData(
+    PP_Instance instance,
+    PP_ImageDataFormat format,
+    const PP_Size* size,
+    PP_Bool init_to_zero) {
+  return PPB_ImageData_Impl::Create(instance,
+                                    ::ppapi::PPB_ImageData_Shared::PLATFORM,
+                                    format, *size, init_to_zero);
 }
 
-PP_Resource ResourceCreationImpl::CreateImageDataNaCl(PP_Instance instance,
-                                                      PP_ImageDataFormat format,
-                                                      const PP_Size* size,
-                                                      PP_Bool init_to_zero) {
-  return PPB_ImageData_Impl::CreateNaCl(instance, format, *size, init_to_zero);
+PP_Resource ResourceCreationImpl::CreateImageDataSimple(
+    PP_Instance instance,
+    PP_ImageDataFormat format,
+    const PP_Size* size,
+    PP_Bool init_to_zero) {
+  return PPB_ImageData_Impl::Create(instance,
+                                    ::ppapi::PPB_ImageData_Shared::SIMPLE,
+                                    format, *size, init_to_zero);
 }
 
 PP_Resource ResourceCreationImpl::CreateIMEInputEvent(
@@ -152,6 +168,12 @@ PP_Resource ResourceCreationImpl::CreateIMEInputEvent(
   return PPB_InputEvent_Shared::CreateIMEInputEvent(
       ::ppapi::OBJECT_IS_IMPL, instance, type, time_stamp, text, segment_number,
       segment_offsets, target_segment, selection_start, selection_end);
+}
+
+PP_Resource ResourceCreationImpl::CreateIsolatedFileSystem(PP_Instance instance,
+                                                           const char* fsid) {
+  NOTIMPLEMENTED();  // no need to support in-process
+  return 0;
 }
 
 PP_Resource ResourceCreationImpl::CreateKeyboardInputEvent(
@@ -178,6 +200,24 @@ PP_Resource ResourceCreationImpl::CreateMouseInputEvent(
   return PPB_InputEvent_Shared::CreateMouseInputEvent(
       ::ppapi::OBJECT_IS_IMPL, instance, type, time_stamp, modifiers,
       mouse_button, mouse_position, click_count, mouse_movement);
+}
+
+PP_Resource ResourceCreationImpl::CreateNetAddressFromIPv4Address(
+    PP_Instance instance,
+    const PP_NetAddress_IPv4* ipv4_addr) {
+  return 0;  // Not supported in-process.
+}
+
+PP_Resource ResourceCreationImpl::CreateNetAddressFromIPv6Address(
+    PP_Instance instance,
+    const PP_NetAddress_IPv6* ipv6_addr) {
+  return 0;  // Not supported in-process.
+}
+
+PP_Resource ResourceCreationImpl::CreateNetAddressFromNetAddressPrivate(
+    PP_Instance instance,
+    const PP_NetAddress_Private& private_addr) {
+  return 0;  // Not supported in-process.
 }
 
 PP_Resource ResourceCreationImpl::CreateTouchInputEvent(
@@ -219,16 +259,20 @@ PP_Resource ResourceCreationImpl::CreateTCPServerSocketPrivate(
   return PPB_TCPServerSocket_Private_Impl::CreateResource(instance);
 }
 
+PP_Resource ResourceCreationImpl::CreateTCPSocket(PP_Instance instance) {
+  return 0;  // Not supported in-process.
+}
+
 PP_Resource ResourceCreationImpl::CreateTCPSocketPrivate(PP_Instance instance) {
   return PPB_TCPSocket_Private_Impl::CreateResource(instance);
 }
 
-PP_Resource ResourceCreationImpl::CreateUDPSocketPrivate(PP_Instance instance) {
+PP_Resource ResourceCreationImpl::CreateUDPSocket(PP_Instance instance) {
   return 0;  // Not supported in-process.
 }
 
-PP_Resource ResourceCreationImpl::CreateURLLoader(PP_Instance instance) {
-  return (new PPB_URLLoader_Impl(instance, false))->GetReference();
+PP_Resource ResourceCreationImpl::CreateUDPSocketPrivate(PP_Instance instance) {
+  return 0;  // Not supported in-process.
 }
 
 PP_Resource ResourceCreationImpl::CreateVideoCapture(PP_Instance instance) {

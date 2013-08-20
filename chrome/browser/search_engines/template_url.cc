@@ -11,10 +11,10 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -72,6 +72,7 @@ const char kGoogleSearchFieldtrialParameter[] =
     "google:searchFieldtrialParameter";
 const char kGoogleSourceIdParameter[] = "google:sourceId";
 const char kGoogleSuggestAPIKeyParameter[] = "google:suggestAPIKeyParameter";
+const char kGoogleSuggestClient[] = "google:suggestClient";
 const char kGoogleZeroPrefixUrlParameter[] = "google:zeroPrefixUrl";
 
 // Same as kSearchTermsParameter, with no escaping.
@@ -343,6 +344,10 @@ std::string TemplateURLRef::ReplaceSearchTermsUsingTermsData(
         // url.insert(i->index, used_www ? "gcx=w&" : "gcx=c&");
         break;
 
+      case GOOGLE_SUGGEST_CLIENT:
+        url.insert(i->index, search_terms_data.GetSuggestClient());
+        break;
+
       case GOOGLE_UNESCAPED_SEARCH_TERMS: {
         std::string unescaped_terms;
         base::UTF16ToCodepage(search_terms_args.search_terms,
@@ -606,6 +611,8 @@ bool TemplateURLRef::ParseParameter(size_t start,
     replacements->push_back(Replacement(GOOGLE_SEARCH_CLIENT, start));
   } else if (parameter == kGoogleSearchFieldtrialParameter) {
     replacements->push_back(Replacement(GOOGLE_SEARCH_FIELDTRIAL_GROUP, start));
+  } else if (parameter == kGoogleSuggestClient) {
+    replacements->push_back(Replacement(GOOGLE_SUGGEST_CLIENT, start));
   } else if (parameter == kGoogleZeroPrefixUrlParameter) {
     replacements->push_back(Replacement(GOOGLE_ZERO_PREFIX_URL, start));
   } else if (parameter == kGoogleSuggestAPIKeyParameter) {

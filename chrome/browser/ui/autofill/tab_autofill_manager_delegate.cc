@@ -20,6 +20,9 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/url_constants.h"
+#include "components/autofill/core/common/autofill_pref_names.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/rect.h"
 
@@ -62,6 +65,10 @@ void TabAutofillManagerDelegate::OnAutocheckoutError() {
   // |dialog_controller_| is a WeakPtr, but we require it to be present when
   // |OnAutocheckoutError| is called, so we intentionally do not do NULL check.
   dialog_controller_->OnAutocheckoutError();
+}
+
+void TabAutofillManagerDelegate::OnAutocheckoutSuccess() {
+  dialog_controller_->OnAutocheckoutSuccess();
 }
 
 void TabAutofillManagerDelegate::ShowAutofillSettings() {
@@ -111,7 +118,7 @@ void TabAutofillManagerDelegate::ShowAutocheckoutBubble(
 }
 
 void TabAutofillManagerDelegate::HideAutocheckoutBubble() {
-  if (autocheckout_bubble_)
+  if (autocheckout_bubble_.get())
     autocheckout_bubble_->HideBubble();
 }
 
@@ -133,6 +140,7 @@ void TabAutofillManagerDelegate::ShowRequestAutocompleteDialog(
 
 void TabAutofillManagerDelegate::ShowAutofillPopup(
     const gfx::RectF& element_bounds,
+    base::i18n::TextDirection text_direction,
     const std::vector<string16>& values,
     const std::vector<string16>& labels,
     const std::vector<string16>& icons,
@@ -149,33 +157,48 @@ void TabAutofillManagerDelegate::ShowAutofillPopup(
       popup_controller_,
       delegate,
       web_contents()->GetView()->GetNativeView(),
-      element_bounds_in_screen_space);
+      element_bounds_in_screen_space,
+      text_direction);
 
   popup_controller_->Show(values, labels, icons, identifiers);
 }
 
 void TabAutofillManagerDelegate::HideAutofillPopup() {
-  if (popup_controller_)
+  if (popup_controller_.get())
     popup_controller_->Hide();
 }
 
-void TabAutofillManagerDelegate::UpdateProgressBar(double value) {
-  // |dialog_controller_| is a WeakPtr, but we require it to be present when
-  // |UpdateProgressBar| is called, so we intentionally do not do NULL check.
-  dialog_controller_->UpdateProgressBar(value);
+void TabAutofillManagerDelegate::AddAutocheckoutStep(
+    AutocheckoutStepType step_type) {
+  dialog_controller_->AddAutocheckoutStep(step_type);
+}
+
+void TabAutofillManagerDelegate::UpdateAutocheckoutStep(
+    AutocheckoutStepType step_type,
+    AutocheckoutStepStatus step_status) {
+  dialog_controller_->UpdateAutocheckoutStep(step_type, step_status);
+}
+
+bool TabAutofillManagerDelegate::IsAutocompleteEnabled() {
+  // For browser, Autocomplete is always enabled as part of Autofill.
+  return GetPrefs()->GetBoolean(prefs::kAutofillEnabled);
 }
 
 void TabAutofillManagerDelegate::HideRequestAutocompleteDialog() {
-  if (dialog_controller_)
+  if (dialog_controller_.get())
     dialog_controller_->Hide();
 }
 
 void TabAutofillManagerDelegate::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
-  if (dialog_controller_ &&
+  // A redirect immediately after a successful Autocheckout flow shouldn't hide
+  // the dialog.
+  bool was_redirect = details.entry &&
+      content::PageTransitionIsRedirect(details.entry->GetTransitionType());
+  if (dialog_controller_.get() &&
       (dialog_controller_->dialog_type() == DIALOG_TYPE_REQUEST_AUTOCOMPLETE ||
-       !dialog_controller_->AutocheckoutIsRunning())) {
+       (!dialog_controller_->AutocheckoutIsRunning() && !was_redirect))) {
     HideRequestAutocompleteDialog();
   }
 

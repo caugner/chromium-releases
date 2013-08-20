@@ -17,6 +17,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
 #include "base/json/json_file_value_serializer.h"
@@ -51,12 +52,6 @@ class PolicyWatcherLinux : public PolicyWatcher {
       : PolicyWatcher(task_runner),
         config_dir_(config_dir),
         weak_factory_(this) {
-    // Detach the factory because we ensure that only the policy thread ever
-    // calls methods on this. Also, the API contract of having to call
-    // StopWatching() (which signals completion) after StartWatching()
-    // before this object can be destructed ensures there are no users of
-    // this object before it is destructed.
-    weak_factory_.DetachFromThread();
   }
 
   virtual ~PolicyWatcherLinux() {}
@@ -84,8 +79,12 @@ class PolicyWatcherLinux : public PolicyWatcher {
 
   virtual void StopWatchingInternal() OVERRIDE {
     DCHECK(OnPolicyWatcherThread());
-    // Cancel any inflight requests.
+
+    // Stop watching for changes to files in the policies directory.
     watcher_.reset();
+
+    // Orphan any pending OnFilePathChanged tasks.
+    weak_factory_.InvalidateWeakPtrs();
   }
 
  private:
@@ -110,9 +109,9 @@ class PolicyWatcherLinux : public PolicyWatcher {
     }
 
     // Enumerate the files and find the most recent modification timestamp.
-    file_util::FileEnumerator file_enumerator(config_dir_,
-                                              false,
-                                              file_util::FileEnumerator::FILES);
+    base::FileEnumerator file_enumerator(config_dir_,
+                                         false,
+                                         base::FileEnumerator::FILES);
     for (base::FilePath config_file = file_enumerator.Next();
          !config_file.empty();
          config_file = file_enumerator.Next()) {
@@ -131,8 +130,8 @@ class PolicyWatcherLinux : public PolicyWatcher {
     DCHECK(OnPolicyWatcherThread());
     // Enumerate the files and sort them lexicographically.
     std::set<base::FilePath> files;
-    file_util::FileEnumerator file_enumerator(config_dir_, false,
-                                              file_util::FileEnumerator::FILES);
+    base::FileEnumerator file_enumerator(config_dir_, false,
+                                         base::FileEnumerator::FILES);
     for (base::FilePath config_file_path = file_enumerator.Next();
          !config_file_path.empty(); config_file_path = file_enumerator.Next())
       files.insert(config_file_path);

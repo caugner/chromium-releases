@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "ui/gfx/native_widget_types.h"  // gfx::NativeWindow
 #include "ui/views/controls/button/button.h"  // views::ButtonListener
@@ -45,9 +45,8 @@ class NetworkConfigView : public views::DialogDelegateView,
   };
 
   // Shows a network connection dialog if none is currently visible.
-  // Returns false if a dialog is already visible.
-  static bool Show(Network* network, gfx::NativeWindow parent);
-  static bool ShowForType(ConnectionType type, gfx::NativeWindow parent);
+  static void Show(Network* network, gfx::NativeWindow parent);
+  static void ShowForType(ConnectionType type, gfx::NativeWindow parent);
 
   // Returns corresponding native window.
   gfx::NativeWindow GetNativeWindow() const;
@@ -61,6 +60,7 @@ class NetworkConfigView : public views::DialogDelegateView,
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
 
   // views::WidgetDelegate methods.
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
 
   // views::View overrides.
@@ -78,9 +78,8 @@ class NetworkConfigView : public views::DialogDelegateView,
   // views::View overrides:
   virtual void Layout() OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
  private:
   // Login dialog for known networks.
@@ -117,6 +116,9 @@ class ChildNetworkConfigView : public views::View {
   explicit ChildNetworkConfigView(NetworkConfigView* parent)
       : parent_(parent) {}
   virtual ~ChildNetworkConfigView() {}
+
+  // Get the title to show for the dialog.
+  virtual string16 GetTitle() const = 0;
 
   // Returns view that should be focused on dialog activation.
   virtual views::View* GetInitiallyFocusedView() = 0;

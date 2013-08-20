@@ -116,9 +116,11 @@ class Preferences : public PrefServiceSyncableObserver {
   BooleanPrefMember three_finger_swipe_enabled_;
   BooleanPrefMember natural_scroll_;
   BooleanPrefMember vert_edge_scroll_enabled_;
-  BooleanPrefMember screen_magnifier_enabled_;
-  IntegerPrefMember screen_magnifier_type_;
-  DoublePrefMember screen_magnifier_scale_;
+  BooleanPrefMember a11y_spoken_feedback_enabled_;
+  BooleanPrefMember a11y_high_contrast_enabled_;
+  BooleanPrefMember a11y_screen_magnifier_enabled_;
+  IntegerPrefMember a11y_screen_magnifier_type_;
+  DoublePrefMember a11y_screen_magnifier_scale_;
   IntegerPrefMember speed_factor_;
   IntegerPrefMember mouse_sensitivity_;
   IntegerPrefMember touchpad_sensitivity_;
@@ -136,7 +138,7 @@ class Preferences : public PrefServiceSyncableObserver {
   StringPrefMember preload_engines_;
   StringPrefMember current_input_method_;
   StringPrefMember previous_input_method_;
-  StringPrefMember filtered_extension_imes_;
+  StringPrefMember enabled_extension_imes_;
 
   BooleanPrefMember chewing_boolean_prefs_[
       language_prefs::kNumChewingBooleanPrefs];
@@ -183,7 +185,7 @@ class Preferences : public PrefServiceSyncableObserver {
   BooleanPrefMember power_use_audio_activity_;
   BooleanPrefMember power_use_video_activity_;
   BooleanPrefMember power_allow_screen_wake_locks_;
-  DoublePrefMember power_presentation_idle_delay_factor_;
+  DoublePrefMember power_presentation_screen_dim_delay_factor_;
   DoublePrefMember power_user_activity_screen_dim_delay_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(Preferences);

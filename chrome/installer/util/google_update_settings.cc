@@ -8,11 +8,11 @@
 
 #include "base/command_line.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -147,6 +147,7 @@ bool GetUpdatePolicyFromDword(
     case GoogleUpdateSettings::UPDATES_DISABLED:
     case GoogleUpdateSettings::AUTOMATIC_UPDATES:
     case GoogleUpdateSettings::MANUAL_UPDATES_ONLY:
+    case GoogleUpdateSettings::AUTO_UPDATES_ONLY:
       *update_policy = static_cast<GoogleUpdateSettings::UpdatePolicy>(value);
       return true;
     default:

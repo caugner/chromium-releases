@@ -43,8 +43,8 @@ void ExtensionKeybindingRegistry::Init() {
   const ExtensionSet* extensions = service->extensions();
   ExtensionSet::const_iterator iter = extensions->begin();
   for (; iter != extensions->end(); ++iter)
-    if (ExtensionMatchesFilter(*iter))
-      AddExtensionKeybinding(*iter, std::string());
+    if (ExtensionMatchesFilter(iter->get()))
+      AddExtensionKeybinding(iter->get(), std::string());
 }
 
 bool ExtensionKeybindingRegistry::ShouldIgnoreCommand(
@@ -70,7 +70,7 @@ void ExtensionKeybindingRegistry::CommandExecuted(
   if (granter)
     granter->GrantIfRequested(extension);
 
-  scoped_ptr<ListValue> args(new ListValue());
+  scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(Value::CreateStringValue(command));
 
   scoped_ptr<Event> event(new Event("commands.onCommand", args.Pass()));

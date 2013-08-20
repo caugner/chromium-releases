@@ -24,8 +24,7 @@ public class AutofillDialogUtils {
     }
 
     /**
-     * Returns the {@link Spinner} ID for the given section in the AutofillDialog
-     * layout
+     * Returns the {@link Spinner} ID for the given section in the AutofillDialog layout.
      * @param section The section to return the spinner ID for.
      * @return The Android ID for the spinner dropdown for the given section.
      */
@@ -41,6 +40,29 @@ public class AutofillDialogUtils {
                 return R.id.billing_spinner;
             case AutofillDialogConstants.SECTION_EMAIL :
                 return R.id.email_spinner;
+            default:
+                assert(false);
+                return INVALID_ID;
+        }
+    }
+
+    /**
+     * Returns the autofill menu item layout ID for the given section in the AutofillDialog layout.
+     * @param section The section to return the item layout ID for.
+     * @return The Android ID for the autofill menu item layout for the given section.
+     */
+    public static int getItemLayoutIDForSection(int section) {
+        switch (section) {
+            case AutofillDialogConstants.SECTION_CC :
+                return R.layout.autofill_menu_item;
+            case AutofillDialogConstants.SECTION_CC_BILLING :
+                return R.layout.autofill_menu_item;
+            case AutofillDialogConstants.SECTION_SHIPPING :
+                return R.layout.autofill_simple_menu_item;
+            case AutofillDialogConstants.SECTION_BILLING :
+                return R.layout.autofill_simple_menu_item;
+            case AutofillDialogConstants.SECTION_EMAIL :
+                return R.layout.autofill_simple_menu_item;
             default:
                 assert(false);
                 return INVALID_ID;
@@ -147,19 +169,19 @@ public class AutofillDialogUtils {
                 }
             case AutofillDialogConstants.SECTION_BILLING :
                 switch (field) {
-                    case AutofillDialogConstants.ADDRESS_HOME_LINE1 :
+                    case AutofillDialogConstants.ADDRESS_BILLING_LINE1 :
                         return R.id.billing_street_address_1;
-                    case AutofillDialogConstants.ADDRESS_HOME_LINE2 :
+                    case AutofillDialogConstants.ADDRESS_BILLING_LINE2 :
                         return R.id.billing_street_address_2;
-                    case AutofillDialogConstants.ADDRESS_HOME_CITY :
+                    case AutofillDialogConstants.ADDRESS_BILLING_CITY :
                         return R.id.billing_city;
-                    case AutofillDialogConstants.ADDRESS_HOME_STATE :
+                    case AutofillDialogConstants.ADDRESS_BILLING_STATE :
                         return R.id.billing_state;
-                    case AutofillDialogConstants.ADDRESS_HOME_ZIP :
+                    case AutofillDialogConstants.ADDRESS_BILLING_ZIP :
                         return R.id.billing_zip_code;
-                    case AutofillDialogConstants.ADDRESS_HOME_COUNTRY :
+                    case AutofillDialogConstants.ADDRESS_BILLING_COUNTRY :
                         return R.id.billing_country_spinner;
-                    case AutofillDialogConstants.PHONE_HOME_WHOLE_NUMBER :
+                    case AutofillDialogConstants.PHONE_BILLING_WHOLE_NUMBER:
                         return R.id.billing_phone_number;
                     default:
                         assert(false);
@@ -177,19 +199,19 @@ public class AutofillDialogUtils {
                         return R.id.cvc_code;
                     case AutofillDialogConstants.CREDIT_CARD_NAME :
                         return R.id.cardholder_name;
-                    case AutofillDialogConstants.ADDRESS_HOME_LINE1 :
+                    case AutofillDialogConstants.ADDRESS_BILLING_LINE1 :
                         return R.id.billing_street_address_1;
-                    case AutofillDialogConstants.ADDRESS_HOME_LINE2 :
+                    case AutofillDialogConstants.ADDRESS_BILLING_LINE2 :
                         return R.id.billing_street_address_2;
-                    case AutofillDialogConstants.ADDRESS_HOME_CITY :
+                    case AutofillDialogConstants.ADDRESS_BILLING_CITY :
                         return R.id.billing_city;
-                    case AutofillDialogConstants.ADDRESS_HOME_STATE :
+                    case AutofillDialogConstants.ADDRESS_BILLING_STATE :
                         return R.id.billing_state;
-                    case AutofillDialogConstants.ADDRESS_HOME_ZIP :
+                    case AutofillDialogConstants.ADDRESS_BILLING_ZIP :
                         return R.id.billing_zip_code;
-                    case AutofillDialogConstants.ADDRESS_HOME_COUNTRY :
+                    case AutofillDialogConstants.ADDRESS_BILLING_COUNTRY :
                         return R.id.billing_country_spinner;
-                    case AutofillDialogConstants.PHONE_HOME_WHOLE_NUMBER :
+                    case AutofillDialogConstants.PHONE_BILLING_WHOLE_NUMBER :
                         return R.id.billing_phone_number;
                     default:
                         assert(false);

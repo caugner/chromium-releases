@@ -57,6 +57,7 @@ class MockInputContextHandler : public IBusInputContextHandlerInterface {
   MOCK_METHOD0(HidePreeditText, void());
   MOCK_METHOD3(UpdatePreeditText,
                void(const IBusText& text, uint32 cursor_pos, bool visible));
+  MOCK_METHOD2(DeleteSurroundingText, void(int32 offset, uint32 length));
 };
 
 class MockProcessKeyEventHandler {
@@ -100,38 +101,57 @@ class IBusInputContextClientTest : public testing::Test {
     // Set an expectation so mock_bus's GetObjectProxy() for the given service
     // name and the object path will return mock_proxy_. The GetObjectProxy
     // function is called in Initialized function.
-    EXPECT_CALL(*mock_bus_, GetObjectProxy(ibus::kServiceName,
-                                           dbus::ObjectPath(kObjectPath)))
+    EXPECT_CALL(
+        *mock_bus_.get(),
+        GetObjectProxy(ibus::kServiceName, dbus::ObjectPath(kObjectPath)))
         .WillOnce(Return(mock_proxy_.get()));
 
     // Set expectations so mock_proxy's ConnectToSignal will use
     // OnConnectToSignal() to run the callback. The ConnectToSignal is called in
     // Initialize function.
-    EXPECT_CALL(*mock_proxy_, ConnectToSignal(
-        ibus::input_context::kServiceInterface,
-        ibus::input_context::kCommitTextSignal, _, _))
+    EXPECT_CALL(*mock_proxy_.get(),
+                ConnectToSignal(ibus::input_context::kServiceInterface,
+                                ibus::input_context::kCommitTextSignal,
+                                _,
+                                _))
         .WillRepeatedly(
-            Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
-    EXPECT_CALL(*mock_proxy_, ConnectToSignal(
-        ibus::input_context::kServiceInterface,
-        ibus::input_context::kForwardKeyEventSignal, _, _))
+             Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
+    EXPECT_CALL(*mock_proxy_.get(),
+                ConnectToSignal(ibus::input_context::kServiceInterface,
+                                ibus::input_context::kForwardKeyEventSignal,
+                                _,
+                                _))
         .WillRepeatedly(
-            Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
-    EXPECT_CALL(*mock_proxy_, ConnectToSignal(
-        ibus::input_context::kServiceInterface,
-        ibus::input_context::kHidePreeditTextSignal, _, _))
+             Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
+    EXPECT_CALL(*mock_proxy_.get(),
+                ConnectToSignal(ibus::input_context::kServiceInterface,
+                                ibus::input_context::kHidePreeditTextSignal,
+                                _,
+                                _))
         .WillRepeatedly(
-            Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
-    EXPECT_CALL(*mock_proxy_, ConnectToSignal(
-        ibus::input_context::kServiceInterface,
-        ibus::input_context::kShowPreeditTextSignal, _, _))
+             Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
+    EXPECT_CALL(*mock_proxy_.get(),
+                ConnectToSignal(ibus::input_context::kServiceInterface,
+                                ibus::input_context::kShowPreeditTextSignal,
+                                _,
+                                _))
         .WillRepeatedly(
-            Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
-    EXPECT_CALL(*mock_proxy_, ConnectToSignal(
-        ibus::input_context::kServiceInterface,
-        ibus::input_context::kUpdatePreeditTextSignal, _, _))
+             Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
+    EXPECT_CALL(*mock_proxy_.get(),
+                ConnectToSignal(ibus::input_context::kServiceInterface,
+                                ibus::input_context::kUpdatePreeditTextSignal,
+                                _,
+                                _))
         .WillRepeatedly(
-            Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
+             Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
+    EXPECT_CALL(
+        *mock_proxy_.get(),
+        ConnectToSignal(ibus::input_context::kServiceInterface,
+                        ibus::input_context::kDeleteSurroundingTextSignal,
+                        _,
+                        _))
+        .WillRepeatedly(
+             Invoke(this, &IBusInputContextClientTest::OnConnectToSignal));
 
     // Call Initialize to create object proxy and connect signals.
     client_->Initialize(mock_bus_.get(), dbus::ObjectPath(kObjectPath));
@@ -312,7 +332,7 @@ class IBusInputContextClientTest : public testing::Test {
   dbus::Response* response_;
   dbus::ErrorResponse* error_response_;
   // A message loop to emulate asynchronous behavior.
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   // The map from signal to signal handler.
   std::map<std::string, dbus::ObjectProxy::SignalCallback> signal_callback_map_;
   // Call count of OnSetCursorLocation.
@@ -464,7 +484,7 @@ TEST_F(IBusInputContextClientTest, UpdatePreeditTextHandlerTest) {
 
 TEST_F(IBusInputContextClientTest, FocusInTest) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
       .WillOnce(Invoke(this, &IBusInputContextClientTest::OnFocusIn));
   // Create response.
   scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
@@ -478,7 +498,7 @@ TEST_F(IBusInputContextClientTest, FocusInTest) {
 
 TEST_F(IBusInputContextClientTest, FocusOutTest) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
       .WillOnce(Invoke(this, &IBusInputContextClientTest::OnFocusOut));
   // Create response.
   scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
@@ -492,7 +512,7 @@ TEST_F(IBusInputContextClientTest, FocusOutTest) {
 
 TEST_F(IBusInputContextClientTest, ResetTest) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
       .WillOnce(Invoke(this, &IBusInputContextClientTest::OnReset));
   // Create response.
   scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
@@ -506,7 +526,7 @@ TEST_F(IBusInputContextClientTest, ResetTest) {
 
 TEST_F(IBusInputContextClientTest, SetCapabilitiesTest) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
       .WillOnce(Invoke(this, &IBusInputContextClientTest::OnSetCapabilities));
   // Create response.
   scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
@@ -540,7 +560,7 @@ TEST_F(IBusInputContextClientTest, SetCursorLocationTest) {
 
 TEST_F(IBusInputContextClientTest, OnProcessKeyEvent) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
       .WillOnce(Invoke(this, &IBusInputContextClientTest::OnProcessKeyEvent));
   MockProcessKeyEventHandler callback;
   MockProcessKeyEventErrorHandler error_callback;
@@ -567,9 +587,9 @@ TEST_F(IBusInputContextClientTest, OnProcessKeyEvent) {
 
 TEST_F(IBusInputContextClientTest, OnProcessKeyEventFail) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
-      .WillOnce(Invoke(this,
-                       &IBusInputContextClientTest::OnProcessKeyEventFail));
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
+      .WillOnce(
+           Invoke(this, &IBusInputContextClientTest::OnProcessKeyEventFail));
   MockProcessKeyEventHandler callback;
   MockProcessKeyEventErrorHandler error_callback;
 
@@ -595,9 +615,9 @@ TEST_F(IBusInputContextClientTest, OnProcessKeyEventFail) {
 
 TEST_F(IBusInputContextClientTest, SetSurroundingTextTest) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
-      .WillOnce(Invoke(this,
-                       &IBusInputContextClientTest::OnSetSurroundingText));
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
+      .WillOnce(
+           Invoke(this, &IBusInputContextClientTest::OnSetSurroundingText));
   // Create response.
   scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
   response_ = response.get();
@@ -610,9 +630,8 @@ TEST_F(IBusInputContextClientTest, SetSurroundingTextTest) {
 
 TEST_F(IBusInputContextClientTest, PropertyActivateTest) {
   // Set expectations.
-  EXPECT_CALL(*mock_proxy_, CallMethodWithErrorCallback(_, _, _, _))
-      .WillOnce(Invoke(this,
-                       &IBusInputContextClientTest::OnPropertyActivate));
+  EXPECT_CALL(*mock_proxy_.get(), CallMethodWithErrorCallback(_, _, _, _))
+      .WillOnce(Invoke(this, &IBusInputContextClientTest::OnPropertyActivate));
   // Create response.
   scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
   response_ = response.get();

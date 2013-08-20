@@ -26,7 +26,7 @@
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/mac/install_from_dmg.h"
 #include "chrome/common/chrome_switches.h"
@@ -294,7 +294,7 @@ int RelauncherMain(const content::MainFunctionParams& main_parameters) {
   // won't contain the argv[0] of the relauncher process, the
   // RelauncherTypeArg() at argv[1], kRelauncherArgSeparator, or the
   // executable path of the process to be launched.
-  base::mac::ScopedCFTypeRef<CFMutableArrayRef> relaunch_args(
+  base::ScopedCFTypeRef<CFMutableArrayRef> relaunch_args(
       CFArrayCreateMutable(NULL, argc - 4, &kCFTypeArrayCallBacks));
   if (!relaunch_args) {
     LOG(ERROR) << "CFArrayCreateMutable";
@@ -335,7 +335,7 @@ int RelauncherMain(const content::MainFunctionParams& main_parameters) {
         relaunch_executable.assign(arg);
         seen_relaunch_executable = true;
       } else {
-        base::mac::ScopedCFTypeRef<CFStringRef> arg_cf(
+        base::ScopedCFTypeRef<CFStringRef> arg_cf(
             base::SysUTF8ToCFStringRef(arg));
         if (!arg_cf) {
           LOG(ERROR) << "base::SysUTF8ToCFStringRef failed for " << arg;

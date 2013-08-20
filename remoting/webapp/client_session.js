@@ -28,8 +28,9 @@ var remoting = remoting || {};
  * @param {string} hostPublicKey The base64 encoded version of the host's
  *     public key.
  * @param {string} accessCode The IT2Me access code. Blank for Me2Me.
- * @param {function(function(string): void): void} fetchPin Called by Me2Me
- *     connections when a PIN needs to be obtained interactively.
+ * @param {function(boolean, function(string): void): void} fetchPin
+ *     Called by Me2Me connections when a PIN needs to be obtained
+ *     interactively.
  * @param {function(string, string, string,
  *                  function(string, string): void): void}
  *     fetchThirdPartyToken Called by Me2Me connections when a third party
@@ -40,12 +41,17 @@ var remoting = remoting || {};
  *     Mixed into authentication hashes for some authentication methods.
  * @param {remoting.ClientSession.Mode} mode The mode of this connection.
  * @param {string} hostDisplayName The name of the host for display purposes.
+ * @param {string} clientPairingId For paired Me2Me connections, the
+ *     pairing id for this client, as issued by the host.
+ * @param {string} clientPairedSecret For paired Me2Me connections, the
+ *     paired secret for this client, as issued by the host.
  * @constructor
  */
 remoting.ClientSession = function(hostJid, clientJid, hostPublicKey, accessCode,
                                   fetchPin, fetchThirdPartyToken,
                                   authenticationMethods, hostId,
-                                  mode, hostDisplayName) {
+                                  mode, hostDisplayName,
+                                  clientPairingId, clientPairedSecret) {
   this.state = remoting.ClientSession.State.CREATED;
 
   this.hostJid = hostJid;
@@ -58,18 +64,23 @@ remoting.ClientSession = function(hostJid, clientJid, hostPublicKey, accessCode,
   /** @private */
   this.fetchThirdPartyToken_ = fetchThirdPartyToken;
   this.authenticationMethods = authenticationMethods;
+  /** @type {string} */
   this.hostId = hostId;
   /** @type {string} */
   this.hostDisplayName = hostDisplayName;
   /** @type {remoting.ClientSession.Mode} */
   this.mode = mode;
+  /** @private */
+  this.clientPairingId_ = clientPairingId;
+  /** @private */
+  this.clientPairedSecret_ = clientPairedSecret
   this.sessionId = '';
   /** @type {remoting.ClientPlugin} */
   this.plugin = null;
   /** @private */
   this.shrinkToFit_ = true;
   /** @private */
-  this.resizeToClient_ = false;
+  this.resizeToClient_ = true;
   /** @private */
   this.remapKeys_ = '';
   /** @private */
@@ -243,7 +254,8 @@ remoting.ClientSession.Capability = {
   // When enabled this capability causes the client to send its screen
   // resolution to the host once connection has been established. See
   // this.plugin.notifyClientResolution().
-  SEND_INITIAL_RESOLUTION: 'sendInitialResolution'
+  SEND_INITIAL_RESOLUTION: 'sendInitialResolution',
+  RATE_LIMIT_RESIZE_REQUESTS: 'rateLimitResizeRequests'
 };
 
 /**
@@ -640,6 +652,14 @@ remoting.ClientSession.prototype.setScreenMode_ =
   if (needsScrollReset) {
     this.scroll_(0, 0);
   }
+
+  // TODO(jamiewalch): crbug.com/252796: Remove this once crbug.com/240772
+  // is fixed.
+  if (this.shrinkToFit_) {
+    document.body.parentNode.classList.add('no-scroll');
+  } else {
+    document.body.parentNode.classList.remove('no-scroll');
+  }
 }
 
 /**
@@ -745,14 +765,16 @@ remoting.ClientSession.prototype.connectPluginToWcs_ = function() {
       remoting.ClientPlugin.Feature.ASYNC_PIN)) {
     // Plugin supports asynchronously asking for the PIN.
     plugin.useAsyncPinDialog();
-    var fetchPin = function() {
-      that.fetchPin_(plugin.onPinFetched.bind(plugin));
+    /** @param {boolean} pairingSupported */
+    var fetchPin = function(pairingSupported) {
+      that.fetchPin_(pairingSupported, plugin.onPinFetched.bind(plugin));
     };
     plugin.fetchPinHandler = fetchPin;
     this.connectToHost_('');
   } else {
-    // Plugin doesn't support asynchronously asking for the PIN, ask now.
-    this.fetchPin_(this.connectToHost_.bind(this));
+    // Clients that don't support asking for a PIN asynchronously also don't
+    // support pairing, so request the PIN now without offering to remember it.
+    this.fetchPin_(false, this.connectToHost_.bind(this));
   }
 };
 
@@ -765,8 +787,8 @@ remoting.ClientSession.prototype.connectPluginToWcs_ = function() {
  */
 remoting.ClientSession.prototype.connectToHost_ = function(sharedSecret) {
   this.plugin.connect(this.hostJid, this.hostPublicKey, this.clientJid,
-                      sharedSecret, this.authenticationMethods,
-                      this.hostId);
+                      sharedSecret, this.authenticationMethods, this.hostId,
+                      this.clientPairingId_, this.clientPairedSecret_);
 };
 
 /**
@@ -877,12 +899,17 @@ remoting.ClientSession.prototype.onResize = function() {
   // Defer notifying the host of the change until the window stops resizing, to
   // avoid overloading the control channel with notifications.
   if (this.resizeToClient_) {
+    var kResizeRateLimitMs = 1000;
+    if (this.hasCapability_(
+        remoting.ClientSession.Capability.RATE_LIMIT_RESIZE_REQUESTS)) {
+      kResizeRateLimitMs = 250;
+    }
     this.notifyClientResolutionTimer_ = window.setTimeout(
         this.plugin.notifyClientResolution.bind(this.plugin,
                                                 window.innerWidth,
                                                 window.innerHeight,
                                                 window.devicePixelRatio),
-        1000);
+        kResizeRateLimitMs);
   }
 
   // If bump-scrolling is enabled, adjust the plugin margins to fully utilize
@@ -1052,6 +1079,19 @@ remoting.ClientSession.prototype.logStatistics = function(stats) {
  */
 remoting.ClientSession.prototype.logHostOfflineErrors = function(enable) {
   this.logHostOfflineErrors_ = enable;
+};
+
+/**
+ * Request pairing with the host for PIN-less authentication.
+ *
+ * @param {string} clientName The human-readable name of the client.
+ * @param {function(string, string):void} onDone Callback to receive the
+ *     client id and shared secret when they are available.
+ */
+remoting.ClientSession.prototype.requestPairing = function(clientName, onDone) {
+  if (this.plugin) {
+    this.plugin.requestPairing(clientName, onDone);
+  }
 };
 
 /**

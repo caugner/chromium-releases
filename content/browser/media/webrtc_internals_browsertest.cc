@@ -3,14 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/json/json_reader.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/shell/shell.h"
 #include "content/test/content_browser_test.h"
 #include "content/test/content_browser_test_utils.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 
 using std::string;
 namespace content {
@@ -114,7 +116,7 @@ class PeerConnectionEntry {
   std::map<string, StatsMap> stats_;
 };
 
-static const int64 FAKE_TIME_STAMP = 0;
+static const int64 FAKE_TIME_STAMP = 3600000;
 
 class WebRTCInternalsBrowserTest: public ContentBrowserTest {
  public:
@@ -123,11 +125,11 @@ class WebRTCInternalsBrowserTest: public ContentBrowserTest {
 
   virtual void SetUpOnMainThread() OVERRIDE {
     // We need fake devices in this test since we want to run on naked VMs. We
-    // assume this switch is set by default in content_browsertests.
+    // assume these switches are set by default in content_browsertests.
     ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kUseFakeDeviceForMediaStream));
-
-    ASSERT_TRUE(test_server()->Start());
+    ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kUseFakeUIForMediaStream));
   }
 
  protected:
@@ -219,7 +221,7 @@ class WebRTCInternalsBrowserTest: public ContentBrowserTest {
     // Adds each new value to the map of stats history.
     std::map<string, string>::iterator iter;
     for (iter = stats.values.begin(); iter != stats.values.end(); iter++) {
-      pc.stats_[type + "-" + id][iter->first].push_back(iter->second);
+      pc.stats_[id][iter->first].push_back(iter->second);
     }
     std::stringstream ss;
     ss << "{pid:" << pc.pid_ << ", lid:" << pc.lid_ << ","
@@ -235,7 +237,7 @@ class WebRTCInternalsBrowserTest: public ContentBrowserTest {
   void VerifyStatsTable(const PeerConnectionEntry& pc,
                         const StatsEntry& report) {
     string table_id =
-        pc.getIdString() + "-table-" + report.type + "-" + report.id;
+        pc.getIdString() + "-table-" + report.id;
     VerifyElementWithId(table_id);
 
     std::map<string, string>::const_iterator iter;
@@ -272,29 +274,34 @@ class WebRTCInternalsBrowserTest: public ContentBrowserTest {
       for (stats_iter = stream_iter->second.begin();
            stats_iter != stream_iter->second.end();
            stats_iter++) {
+        string graph_id = stream_iter->first + "-" + stats_iter->first;
         for (size_t i = 0; i < stats_iter->second.size(); ++i) {
-          string graph_id = pc.getIdString() + "-" +
-              stream_iter->first + "-" + stats_iter->first;
-          VerifyGraphDataPoint(graph_id, i, stats_iter->second[i]);
+          float number;
+          std::stringstream stream(stats_iter->second[i]);
+          stream >> number;
+          if (stream.fail())
+            continue;
+          VerifyGraphDataPoint(
+              pc.getIdString(), graph_id, i, stats_iter->second[i]);
         }
       }
     }
   }
 
   // Verifies that the graph data point at index |index| has value |value|.
-  void VerifyGraphDataPoint(
-      const string& graph_id, int index, const string& value) {
+  void VerifyGraphDataPoint(const string& pc_id, const string& graph_id,
+                            int index, const string& value) {
     bool result = false;
     ASSERT_TRUE(ExecuteScriptAndExtractBool(
         shell()->web_contents(),
         "window.domAutomationController.send("
-           "graphViews['" + graph_id + "'] != null)",
+           "graphViews['" + pc_id + "-" + graph_id + "'] != null)",
         &result));
     EXPECT_TRUE(result);
 
     std::stringstream ss;
-    ss << "var dp = dataSeries['" << graph_id << "']"
-              ".dataPoints_[" << index << "];"
+    ss << "var dp = peerConnectionDataStore['" << pc_id << "']"
+          ".getDataSeries('" << graph_id << "').dataPoints_[" << index << "];"
           "window.domAutomationController.send(dp.value.toString())";
     string actual_value;
     ASSERT_TRUE(ExecuteScriptAndExtractString(
@@ -311,6 +318,80 @@ class WebRTCInternalsBrowserTest: public ContentBrowserTest {
            "ssrcInfoManager.streamInfoContainer_['" + ssrc_id + "']))",
         &result));
     return result;
+  }
+
+  int GetSsrcInfoBlockCount(Shell* shell) {
+    int count = 0;
+    EXPECT_TRUE(ExecuteScriptAndExtractInt(
+        shell->web_contents(),
+        "window.domAutomationController.send("
+            "document.getElementsByClassName("
+                "ssrcInfoManager.SSRC_INFO_BLOCK_CLASS).length);",
+        &count));
+    return count;
+  }
+
+  // Verifies |dump| contains |peer_connection_number| peer connection dumps,
+  // each containing |update_number| updates and |stats_number| stats tables.
+  void VerifyPageDumpStructure(base::Value* dump,
+                               int peer_connection_number,
+                               int update_number,
+                               int stats_number) {
+    EXPECT_NE((base::Value*)NULL, dump);
+    EXPECT_EQ(base::Value::TYPE_DICTIONARY, dump->GetType());
+
+    base::DictionaryValue* dict_dump =
+        static_cast<base::DictionaryValue*>(dump);
+    EXPECT_EQ((size_t) peer_connection_number, dict_dump->size());
+
+    base::DictionaryValue::Iterator it(*dict_dump);
+    for (; !it.IsAtEnd(); it.Advance()) {
+      base::Value* value = NULL;
+      dict_dump->Get(it.key(), &value);
+      EXPECT_EQ(base::Value::TYPE_DICTIONARY, value->GetType());
+      base::DictionaryValue* pc_dump =
+          static_cast<base::DictionaryValue*>(value);
+      EXPECT_TRUE(pc_dump->HasKey("updateLog"));
+      EXPECT_TRUE(pc_dump->HasKey("stats"));
+
+      // Verifies the number of updates.
+      pc_dump->Get("updateLog", &value);
+      EXPECT_EQ(base::Value::TYPE_LIST, value->GetType());
+      base::ListValue* list = static_cast<base::ListValue*>(value);
+      EXPECT_EQ((size_t) update_number, list->GetSize());
+
+      // Verifies the number of stats tables.
+      pc_dump->Get("stats", &value);
+      EXPECT_EQ(base::Value::TYPE_DICTIONARY, value->GetType());
+      base::DictionaryValue* dict = static_cast<base::DictionaryValue*>(value);
+      EXPECT_EQ((size_t) stats_number, dict->size());
+    }
+  }
+
+  // Verifies |dump| contains the correct statsTable and statsDataSeries for
+  // |pc|.
+  void VerifyStatsDump(base::Value* dump,
+                       const PeerConnectionEntry& pc,
+                       const string& report_type,
+                       const string& report_id,
+                       const StatsUnit& stats) {
+    EXPECT_NE((base::Value*)NULL, dump);
+    EXPECT_EQ(base::Value::TYPE_DICTIONARY, dump->GetType());
+
+    base::DictionaryValue* dict_dump =
+        static_cast<base::DictionaryValue*>(dump);
+    base::Value* value = NULL;
+    dict_dump->Get(pc.getIdString(), &value);
+    base::DictionaryValue* pc_dump = static_cast<base::DictionaryValue*>(value);
+
+    // Verifies there is one data series per stats name.
+    value = NULL;
+    pc_dump->Get("stats", &value);
+    EXPECT_EQ(base::Value::TYPE_DICTIONARY, value->GetType());
+
+    base::DictionaryValue* dataSeries =
+        static_cast<base::DictionaryValue*>(value);
+    EXPECT_EQ(stats.values.size(), dataSeries->size());
   }
 };
 
@@ -381,6 +462,11 @@ IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest, UpdatePeerConnection) {
 
   EXPECT_EQ(ssrc1.GetAsJSON(), GetSsrcInfo(ssrc1.id));
   EXPECT_EQ(ssrc2.GetAsJSON(), GetSsrcInfo(ssrc2.id));
+
+  StatsUnit stats = {FAKE_TIME_STAMP};
+  stats.values["ssrc"] = ssrc1.id;
+  ExecuteAndVerifyAddStats(pc_2, "ssrc", "dummyId", stats);
+  EXPECT_GT(GetSsrcInfoBlockCount(shell()), 0);
 }
 
 // Tests that adding random named stats updates the dataSeries and graphs.
@@ -392,8 +478,9 @@ IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest, AddStats) {
   ExecuteAddPeerConnectionJs(pc);
 
   const string type = "ssrc";
-  const string id = "1234";
+  const string id = "ssrc-1234";
   StatsUnit stats = {FAKE_TIME_STAMP};
+  stats.values["trackId"] = "abcd";
   stats.values["bitrate"] = "2000";
   stats.values["framerate"] = "30";
 
@@ -427,7 +514,7 @@ IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest, BweCompoundGraph) {
   ExecuteAndVerifyAddStats(pc, stats_type, stats_id, stats);
 
   string graph_id =
-      pc.getIdString() + "-" + stats_type + "-" + stats_id + "-bweCompound";
+      pc.getIdString() + "-" + stats_id + "-bweCompound";
   bool result = false;
   // Verify that the bweCompound graph exists.
   ASSERT_TRUE(ExecuteScriptAndExtractBool(
@@ -482,17 +569,25 @@ IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest, ConvertedGraphs) {
   ExecuteAndVerifyAddStats(pc, stats_type, stats_id, stats);
 
   // Verifies the graph data matches converted_values.
-  string graph_id_prefix = pc.getIdString() + "-" + stats_type + "-" + stats_id;
   for (int i = 0; i < num_converted_stats; ++i) {
-    VerifyGraphDataPoint(
-        graph_id_prefix + "-" + converted_names[i], 1, converted_values[i]);
+    VerifyGraphDataPoint(pc.getIdString(), stats_id + "-" + converted_names[i],
+                         1, converted_values[i]);
   }
 }
 
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+// Timing out on ARM linux bot: http://crbug.com/238490
+#define MAYBE_WithRealPeerConnectionCall DISABLED_WithRealPeerConnectionCall
+#else
+#define MAYBE_WithRealPeerConnectionCall WithRealPeerConnectionCall
+#endif
+
 // Sanity check of the page content under a real PeerConnection call.
-IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest, withRealPeerConnectionCall) {
+IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest,
+                       MAYBE_WithRealPeerConnectionCall) {
   // Start a peerconnection call in the first window.
-  GURL url(test_server()->GetURL("files/media/peerconnection-call.html"));
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  GURL url(embedded_test_server()->GetURL("/media/peerconnection-call.html"));
   NavigateToURL(shell(), url);
   ASSERT_TRUE(ExecuteJavascript("call({video:true});"));
   ExpectTitle("OK");
@@ -566,6 +661,54 @@ IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest, withRealPeerConnectionCall) {
       &result));
 
   EXPECT_TRUE(result);
+
+  count = GetSsrcInfoBlockCount(shell2);
+  EXPECT_GT(count, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(WebRTCInternalsBrowserTest, CreatePageDump) {
+  GURL url("chrome://webrtc-internals");
+  NavigateToURL(shell(), url);
+
+  PeerConnectionEntry pc_0(1, 0);
+  pc_0.AddEvent("e1", "v1");
+  pc_0.AddEvent("e2", "v2");
+  PeerConnectionEntry pc_1(1, 1);
+  pc_1.AddEvent("e3", "v3");
+  pc_1.AddEvent("e4", "v4");
+  string pc_array =
+      "[" + pc_0.getAllUpdateString() + ", " + pc_1.getAllUpdateString() + "]";
+  EXPECT_TRUE(ExecuteJavascript("updateAllPeerConnections(" + pc_array + ");"));
+
+  // Verifies the peer connection data store can be created without stats.
+  string dump_json;
+  ASSERT_TRUE(ExecuteScriptAndExtractString(
+      shell()->web_contents(),
+      "window.domAutomationController.send("
+      "JSON.stringify(peerConnectionDataStore));",
+      &dump_json));
+  scoped_ptr<base::Value> dump;
+  dump.reset(base::JSONReader::Read(dump_json));
+  VerifyPageDumpStructure(dump.get(),
+                          2 /*peer_connection_number*/,
+                          2 /*update_number*/,
+                          0 /*stats_number*/);
+
+  // Adds a stats report.
+  const string type = "dummy";
+  const string id = "1234";
+  StatsUnit stats = { FAKE_TIME_STAMP };
+  stats.values["bitrate"] = "2000";
+  stats.values["framerate"] = "30";
+  ExecuteAndVerifyAddStats(pc_0, type, id, stats);
+
+  ASSERT_TRUE(ExecuteScriptAndExtractString(
+      shell()->web_contents(),
+      "window.domAutomationController.send("
+      "JSON.stringify(peerConnectionDataStore));",
+      &dump_json));
+  dump.reset(base::JSONReader::Read(dump_json));
+  VerifyStatsDump(dump.get(), pc_0, type, id, stats);
 }
 
 }  // namespace content

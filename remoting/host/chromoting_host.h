@@ -19,8 +19,9 @@
 #include "remoting/host/host_status_monitor.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/protocol/authenticator.h"
-#include "remoting/protocol/session_manager.h"
 #include "remoting/protocol/connection_to_client.h"
+#include "remoting/protocol/pairing_registry.h"
+#include "remoting/protocol/session_manager.h"
 #include "third_party/skia/include/core/SkSize.h"
 
 namespace base {
@@ -47,7 +48,7 @@ class DesktopEnvironmentFactory;
 //
 // 2. We listen for incoming connection using libjingle. We will create
 //    a ConnectionToClient object that wraps around linjingle for transport.
-//    A VideoScheduler is created with an Encoder and a media::ScreenCapturer.
+//    A VideoScheduler is created with an Encoder and a webrtc::ScreenCapturer.
 //    A ConnectionToClient is added to the ScreenRecorder for transporting
 //    the screen captures. An InputStub is created and registered with the
 //    ConnectionToClient to receive mouse / keyboard events from the remote
@@ -105,6 +106,10 @@ class ChromotingHost : public base::NonThreadSafe,
   void SetAuthenticatorFactory(
       scoped_ptr<protocol::AuthenticatorFactory> authenticator_factory);
 
+  // Enables/disables curtaining when one or more clients are connected.
+  // Takes immediate effect if clients are already connected.
+  void SetEnableCurtaining(bool enable);
+
   // Sets the maximum duration of any session. By default, a session has no
   // maximum duration.
   void SetMaximumSessionDuration(const base::TimeDelta& max_session_duration);
@@ -131,19 +136,29 @@ class ChromotingHost : public base::NonThreadSafe,
   // Sets desired configuration for the protocol. Must be called before Start().
   void set_protocol_config(scoped_ptr<protocol::CandidateSessionConfig> config);
 
-  // Immediately disconnects all active clients. Host-internal components may
-  // shutdown asynchronously, but the caller is guaranteed not to receive
-  // callbacks for disconnected clients after this call returns.
-  void DisconnectAllClients();
-
   base::WeakPtr<ChromotingHost> AsWeakPtr() {
     return weak_factory_.GetWeakPtr();
+  }
+
+  // The host uses a pairing registry to generate and store pairing information
+  // for clients for PIN-less authentication.
+  scoped_refptr<protocol::PairingRegistry> pairing_registry() const {
+    return pairing_registry_;
+  }
+  void set_pairing_registry(
+      scoped_refptr<protocol::PairingRegistry> pairing_registry) {
+    pairing_registry_ = pairing_registry;
   }
 
  private:
   friend class ChromotingHostTest;
 
   typedef std::list<ClientSession*> ClientList;
+
+  // Immediately disconnects all active clients. Host-internal components may
+  // shutdown asynchronously, but the caller is guaranteed not to receive
+  // callbacks for disconnected clients after this call returns.
+  void DisconnectAllClients();
 
   // Unless specified otherwise all members of this class must be
   // used on the network thread only.
@@ -180,8 +195,14 @@ class ChromotingHost : public base::NonThreadSafe,
   bool authenticating_client_;
   bool reject_authenticating_client_;
 
+  // True if the curtain mode is enabled.
+  bool enable_curtaining_;
+
   // The maximum duration of any session.
   base::TimeDelta max_session_duration_;
+
+  // The pairing registry for PIN-less authentication.
+  scoped_refptr<protocol::PairingRegistry> pairing_registry_;
 
   base::WeakPtrFactory<ChromotingHost> weak_factory_;
 

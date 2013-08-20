@@ -2,28 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var chrome = requireNative('chrome').GetChrome();
 var schemaRegistry = requireNative('schema_registry');
 var CHECK = requireNative('logging').CHECK;
+var WARNING = requireNative('logging').WARNING;
 
+// An object forEach. Calls |f| with each (key, value) pair of |obj|, using
+// |self| as the target.
 function forEach(obj, f, self) {
-  // For arrays, make sure the indices are numbers not strings - and in that
-  // case this method can be more efficient by assuming the array isn't sparse.
-  //
-  // Note: not (instanceof Array) because the array might come from a different
-  // context than our own.
-  //
-  // For nodelists, make sure the indices are numbers not strings because
-  // Nodelist objects have "length" and "item" properties.
-  if (obj.constructor && (obj.constructor.name == 'Array' ||
-      obj.constructor.name == 'NodeList')) {
-    for (var i = 0; i < obj.length; i++)
-      f.call(self, i, obj[i]);
-  } else {
-    for (var key in obj) {
-      if (obj.hasOwnProperty(key))
-        f.call(self, key, obj[key]);
-    }
+  for (var key in obj) {
+    if ($Object.hasOwnProperty(obj, key))
+      $Function.call(f, self, key, obj[key]);
   }
 }
 
@@ -44,13 +32,16 @@ function lookup(array_of_dictionaries, field, value) {
 }
 
 function loadTypeSchema(typeName, defaultSchema) {
-  var parts = typeName.split('.');
+  var parts = $String.split(typeName, '.');
   if (parts.length == 1) {
-    CHECK(defaultSchema, 'Trying to reference "' + typeName +
-        '" with neither namespace nor default schema.');
+    if (defaultSchema == null) {
+      WARNING('Trying to reference "' + typeName + '" ' +
+              'with neither namespace nor default schema.');
+      return null;
+    }
     var types = defaultSchema.types;
   } else {
-    var schemaName = parts.slice(0, parts.length - 1).join('.')
+    var schemaName = $Array.join($Array.slice(parts, 0, parts.length - 1), '.');
     var types = schemaRegistry.GetSchema(schemaName).types;
   }
   for (var i = 0; i < types.length; ++i) {

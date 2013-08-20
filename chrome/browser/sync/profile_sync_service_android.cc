@@ -12,8 +12,8 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/oauth2_token_service.h"
@@ -29,6 +29,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "google/cacheinvalidation/types.pb.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -59,6 +60,7 @@ enum {
 ProfileSyncServiceAndroid::ProfileSyncServiceAndroid(JNIEnv* env, jobject obj)
     : profile_(NULL),
       sync_service_(NULL),
+      sync_prefs_(NULL),
       weak_java_profile_sync_service_(env, obj) {
   if (g_browser_process == NULL ||
       g_browser_process->profile_manager() == NULL) {
@@ -71,6 +73,8 @@ ProfileSyncServiceAndroid::ProfileSyncServiceAndroid(JNIEnv* env, jobject obj)
     NOTREACHED() << "Sync Init: Profile not found.";
     return;
   }
+
+  sync_prefs_.reset(new browser_sync::SyncPrefs(profile_->GetPrefs()));
 
   sync_service_ =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_);
@@ -223,8 +227,7 @@ void ProfileSyncServiceAndroid::OAuth2TokenFetched(
 void ProfileSyncServiceAndroid::EnableSync(JNIEnv* env, jobject) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Don't need to do anything if we're already enabled.
-  browser_sync::SyncPrefs prefs(profile_->GetPrefs());
-  if (prefs.IsStartSuppressed())
+  if (sync_prefs_->IsStartSuppressed())
     sync_service_->UnsuppressAndStart();
   else
     DVLOG(2) << "Ignoring call to EnableSync() because sync is already enabled";
@@ -232,7 +235,13 @@ void ProfileSyncServiceAndroid::EnableSync(JNIEnv* env, jobject) {
 
 void ProfileSyncServiceAndroid::DisableSync(JNIEnv* env, jobject) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  sync_service_->StopAndSuppress();
+  // Don't need to do anything if we're already disabled.
+  if (!sync_prefs_->IsStartSuppressed()) {
+    sync_service_->StopAndSuppress();
+  } else {
+    DVLOG(2)
+        << "Ignoring call to DisableSync() because sync is already disabled";
+  }
 }
 
 void ProfileSyncServiceAndroid::SignInSync(
@@ -243,13 +252,13 @@ void ProfileSyncServiceAndroid::SignInSync(
   // happen normally if (for example) the user closes and reopens the sync
   // settings window quickly during initial startup.
   if (sync_service_->IsSyncEnabledAndLoggedIn() &&
-      sync_service_->IsSyncTokenAvailable() &&
+      sync_service_->IsOAuthRefreshTokenAvailable() &&
       sync_service_->HasSyncSetupCompleted()) {
     return;
   }
 
   if (!sync_service_->IsSyncEnabledAndLoggedIn() ||
-      !sync_service_->IsSyncTokenAvailable()) {
+      !sync_service_->IsOAuthRefreshTokenAvailable()) {
     // Set the currently-signed-in username, fetch an auth token if necessary,
     // and enable sync.
     std::string name = ConvertJavaStringToUTF8(env, username);
@@ -275,6 +284,12 @@ void ProfileSyncServiceAndroid::SignInSync(
       token_service->OnIssueAuthTokenSuccess(GaiaConstants::kSyncService,
                                              token);
     }
+
+    GoogleServiceSigninSuccessDetails details(name, std::string());
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
+        content::Source<Profile>(profile_),
+        content::Details<const GoogleServiceSigninSuccessDetails>(&details));
   }
 
   // Enable sync (if we don't have credentials yet, this will enable sync but
@@ -291,8 +306,7 @@ void ProfileSyncServiceAndroid::SignOutSync(JNIEnv* env, jobject) {
   SigninManagerFactory::GetForProfile(profile_)->SignOut();
 
   // Need to clear suppress start flag manually
-  browser_sync::SyncPrefs prefs(profile_->GetPrefs());
-  prefs.SetStartSuppressed(false);
+  sync_prefs_->SetStartSuppressed(false);
 }
 
 ScopedJavaLocalRef<jstring> ProfileSyncServiceAndroid::QuerySyncStatusSummary(
@@ -308,8 +322,7 @@ jboolean ProfileSyncServiceAndroid::SetSyncSessionsId(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(profile_);
   std::string machine_tag = ConvertJavaStringToUTF8(env, tag);
-  browser_sync::SyncPrefs prefs(profile_->GetPrefs());
-  prefs.SetSyncSessionsGUID(machine_tag);
+  sync_prefs_->SetSyncSessionsGUID(machine_tag);
   return true;
 }
 
@@ -356,10 +369,7 @@ jboolean ProfileSyncServiceAndroid::IsPassphraseRequiredForDecryption(
     // DataTypeManager, after configuration password datatype shall be disabled.
     const syncer::ModelTypeSet encrypted_types =
         sync_service_->GetEncryptedDataTypes();
-    const bool are_passwords_the_only_encrypted_type =
-        encrypted_types.Has(syncer::PASSWORDS) && encrypted_types.Size() == 1 &&
-        !sync_service_->ShouldEnablePasswordSyncForAndroid();
-    return !are_passwords_the_only_encrypted_type;
+    return !encrypted_types.Equals(syncer::ModelTypeSet(syncer::PASSWORDS));
   }
   return false;
 }
@@ -464,7 +474,7 @@ jboolean ProfileSyncServiceAndroid::IsSyncKeystoreMigrationDone(
 jlong ProfileSyncServiceAndroid::GetEnabledDataTypes(JNIEnv* env,
                                                      jobject obj) {
   jlong model_type_selection = 0;
-  syncer::ModelTypeSet types = sync_service_->GetPreferredDataTypes();
+  syncer::ModelTypeSet types = sync_service_->GetActiveDataTypes();
   types.PutAll(syncer::ControlTypes());
   if (types.Has(syncer::BOOKMARKS)) {
     model_type_selection |= BOOKMARK;
@@ -547,6 +557,12 @@ jboolean ProfileSyncServiceAndroid::HasSyncSetupCompleted(
   return sync_service_->HasSyncSetupCompleted();
 }
 
+jboolean ProfileSyncServiceAndroid::IsStartSuppressed(
+    JNIEnv* env, jobject obj) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return sync_prefs_->IsStartSuppressed();
+}
+
 void ProfileSyncServiceAndroid::EnableEncryptEverything(
     JNIEnv* env, jobject obj) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -556,8 +572,7 @@ void ProfileSyncServiceAndroid::EnableEncryptEverything(
 jboolean ProfileSyncServiceAndroid::HasKeepEverythingSynced(
     JNIEnv* env, jobject) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  browser_sync::SyncPrefs prefs(profile_->GetPrefs());
-  return prefs.HasKeepEverythingSynced();
+  return sync_prefs_->HasKeepEverythingSynced();
 }
 
 jboolean ProfileSyncServiceAndroid::HasUnrecoverableError(

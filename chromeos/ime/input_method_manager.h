@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "chromeos/chromeos_export.h"
 #include "chromeos/ime/input_method_config.h"
 #include "chromeos/ime/input_method_descriptor.h"
 #include "chromeos/ime/input_method_property.h"
@@ -29,7 +30,7 @@ class XKeyboard;
 // This class manages input methodshandles.  Classes can add themselves as
 // observers. Clients can get an instance of this library class by:
 // GetInputMethodManager().
-class InputMethodManager {
+class CHROMEOS_EXPORT InputMethodManager {
  public:
   enum State {
     STATE_LOGIN_SCREEN = 0,
@@ -64,6 +65,19 @@ class InputMethodManager {
   };
 
   virtual ~InputMethodManager() {}
+
+  // Gets the global instance of InputMethodManager. Initialize() must be called
+  // first.
+  static CHROMEOS_EXPORT InputMethodManager* Get();
+
+  // Sets the global instance. |instance| will be owned by the internal pointer
+  // and deleted by Shutdown().
+  // TODO(nona): Instanciate InputMethodManagerImpl inside of this function once
+  //             crbug.com/164375 is fixed.
+  static CHROMEOS_EXPORT void Initialize(InputMethodManager* instance);
+
+  // Destroy the global instance.
+  static CHROMEOS_EXPORT void Shutdown();
 
   // Adds an observer to receive notifications of input method related
   // changes as desribed in the Observer class above.
@@ -126,11 +140,13 @@ class InputMethodManager {
 
   // Adds an input method extension. This function does not takes ownership of
   // |instance|.
-  virtual void AddInputMethodExtension(const std::string& id,
-                                       const std::string& name,
-                                       const std::vector<std::string>& layouts,
-                                       const std::string& language,
-                                       InputMethodEngine* instance) = 0;
+  virtual void AddInputMethodExtension(
+      const std::string& id,
+      const std::string& name,
+      const std::vector<std::string>& layouts,
+      const std::vector<std::string>& languages,
+      const GURL& options_url,
+      InputMethodEngine* instance) = 0;
 
   // Removes an input method extension.
   virtual void RemoveInputMethodExtension(const std::string& id) = 0;
@@ -138,8 +154,8 @@ class InputMethodManager {
   // Returns a list of descriptors for all Input Method Extensions.
   virtual void GetInputMethodExtensions(InputMethodDescriptors* result) = 0;
 
-  // Sets the list of extension IME ids which should not be enabled.
-  virtual void SetFilteredExtensionImes(std::vector<std::string>* ids) = 0;
+  // Sets the list of extension IME ids which should be enabled.
+  virtual void SetEnabledExtensionImes(std::vector<std::string>* ids) = 0;
 
   // Gets the descriptor of the input method which is currently selected.
   virtual InputMethodDescriptor GetCurrentInputMethod() const = 0;

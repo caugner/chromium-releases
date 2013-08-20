@@ -8,11 +8,12 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_vector.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/cros/network_constants.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/net/onc_utils.h"
 #include "chrome/browser/chromeos/network_login_observer.h"
+#include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_ui_data.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_normalizer.h"
@@ -191,27 +192,6 @@ void NetworkLibraryImplBase::DeleteDeviceFromDeviceObserversMap(
     delete map_iter->second;
     network_device_observers_.erase(map_iter);
   }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-
-void NetworkLibraryImplBase::Lock() {
-  if (is_locked_)
-    return;
-  is_locked_ = true;
-  NotifyNetworkManagerChanged(true);  // Forced update.
-}
-
-void NetworkLibraryImplBase::Unlock() {
-  DCHECK(is_locked_);
-  if (!is_locked_)
-    return;
-  is_locked_ = false;
-  NotifyNetworkManagerChanged(true);  // Forced update.
-}
-
-bool NetworkLibraryImplBase::IsLocked() {
-  return is_locked_;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -425,26 +405,6 @@ bool NetworkLibraryImplBase::mobile_enabled() const {
   return cellular_enabled() || wimax_enabled();
 }
 
-bool NetworkLibraryImplBase::ethernet_busy() const {
-  return busy_devices_ & (1 << TYPE_ETHERNET);
-}
-
-bool NetworkLibraryImplBase::wifi_busy() const {
-  return busy_devices_ & (1 << TYPE_WIFI);
-}
-
-bool NetworkLibraryImplBase::wimax_busy() const {
-  return busy_devices_ & (1 << TYPE_WIMAX);
-}
-
-bool NetworkLibraryImplBase::cellular_busy() const {
-  return busy_devices_ & (1 << TYPE_CELLULAR);
-}
-
-bool NetworkLibraryImplBase::mobile_busy() const {
-  return cellular_busy() || wimax_busy();
-}
-
 bool NetworkLibraryImplBase::wifi_scanning() const {
   return wifi_scanning_;
 }
@@ -459,10 +419,6 @@ bool NetworkLibraryImplBase::cellular_initializing() const {
 }
 
 bool NetworkLibraryImplBase::offline_mode() const { return offline_mode_; }
-
-std::string NetworkLibraryImplBase::GetCheckPortalList() const {
-  return check_portal_list_;
-}
 
 // Returns the IP address for the active network.
 // TODO(stevenjb): Fix this for VPNs. See chromium-os:13972.
@@ -619,6 +575,11 @@ const std::string& NetworkLibraryImplBase::GetCellularHomeCarrierId() const {
   if (cellular)
     return cellular->home_provider_id();
   return EmptyString();
+}
+
+bool NetworkLibraryImplBase::CellularDeviceUsesDirectActivation() const {
+  const NetworkDevice* cellular = FindCellularDevice();
+  return cellular && (cellular->carrier() == shill::kCarrierSprint);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1160,7 +1121,7 @@ void NetworkLibraryImplBase::LoadOncNetworks(
 
     // Set the UIData.
     scoped_ptr<NetworkUIData> ui_data =
-        chromeos::CreateUIDataFromONC(source, *normalized_network);
+        NetworkUIData::CreateFromONC(source, *normalized_network);
     base::DictionaryValue ui_data_dict;
     ui_data->FillDictionary(&ui_data_dict);
     std::string ui_data_json;
@@ -1196,6 +1157,11 @@ void NetworkLibraryImplBase::LoadOncNetworks(
     ForgetNetworksById(source, network_ids, false);
   } else if (source == onc::ONC_SOURCE_USER_IMPORT && !removal_ids.empty()) {
     ForgetNetworksById(source, removal_ids, true);
+  }
+  // Ensure NetworkStateHandler properties are up-to-date.
+  if (NetworkHandler::IsInitialized()) {
+    NetworkHandler::Get()->network_state_handler()->
+        RequestUpdateForAllNetworks();
   }
 }
 

@@ -8,7 +8,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
@@ -80,9 +80,11 @@ class AutocompleteController : public AutocompleteProviderListener {
   // Begin asynchronously fetching zero-suggest suggestions for |url|.
   // |user_text| is the text entered in the omnibox, which may be non-empty if
   // the user previously focused in the omnibox during this interaction.
+  // |permanent_text| is the omnibox text for the current page.
   // TODO(jered): Rip out |user_text| once the first match is decoupled from
   // the current typing in the omnibox.
-  void StartZeroSuggest(const GURL& url, const string16& user_text);
+  void StartZeroSuggest(const GURL& url,
+                        const string16& permanent_text);
 
   // Cancels any pending zero-suggest fetch.
   void StopZeroSuggest();

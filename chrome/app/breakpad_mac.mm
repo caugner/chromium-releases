@@ -25,13 +25,14 @@
 #include "base/threading/thread_restrictions.h"
 #import "breakpad/src/client/mac/Framework/Breakpad.h"
 #include "chrome/common/child_process_logging.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/dump_without_crashing.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "components/breakpad/common/breakpad_paths.h"
+#include "components/nacl/common/nacl_switches.h"
 #include "native_client/src/trusted/service_runtime/osx/crash_filter.h"
 #include "policy/policy_constants.h"
 
@@ -138,6 +139,24 @@ class DumpHelper : public base::PlatformThread::Delegate {
   DISALLOW_COPY_AND_ASSIGN(DumpHelper);
 };
 
+void SIGABRTHandler(int signal) {
+  // The OSX abort() (link below) masks all signals for the process,
+  // and all except SIGABRT for the thread.  SIGABRT will be masked
+  // when the SIGABRT is sent, which means at this point only SIGKILL
+  // and SIGSTOP can be delivered.  Unmask others so that the code
+  // below crashes as desired.
+  //
+  // http://www.opensource.apple.com/source/Libc/Libc-825.26/stdlib/FreeBSD/abort.c
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, signal);
+  pthread_sigmask(SIG_SETMASK, &mask, NULL);
+
+  // Most interesting operations are not safe in a signal handler, just crash.
+  char* volatile death_ptr = NULL;
+  *death_ptr = '!';
+}
+
 }  // namespace
 
 bool IsCrashReporterEnabled() {
@@ -164,7 +183,7 @@ void InitCrashReporter() {
   if (is_browser) {
     // Since the configuration management infrastructure is possibly not
     // initialized when this code runs, read the policy preference directly.
-    base::mac::ScopedCFTypeRef<CFStringRef> key(
+    base::ScopedCFTypeRef<CFStringRef> key(
         base::SysUTF8ToCFStringRef(policy::key::kMetricsReportingEnabled));
     Boolean key_valid;
     Boolean metrics_reporting_enabled = CFPreferencesGetAppBooleanValue(key,
@@ -231,7 +250,7 @@ void InitCrashReporter() {
           " doesn't exist";
     } else {
       PathService::Override(
-          chrome::DIR_CRASH_DUMPS,
+          breakpad::DIR_CRASH_DUMPS,
           base::FilePath(alternate_minidump_location));
       if (is_browser) {
         // Print out confirmation message to the stdout, but only print
@@ -243,7 +262,7 @@ void InitCrashReporter() {
   }
 
   base::FilePath dir_crash_dumps;
-  PathService::Get(chrome::DIR_CRASH_DUMPS, &dir_crash_dumps);
+  PathService::Get(breakpad::DIR_CRASH_DUMPS, &dir_crash_dumps);
   [breakpad_config setObject:base::SysUTF8ToNSString(dir_crash_dumps.value())
                       forKey:@BREAKPAD_DUMP_DIRECTORY];
 
@@ -274,6 +293,14 @@ void InitCrashReporter() {
 
   logging::SetLogMessageHandler(&FatalMessageHandler);
   logging::SetDumpWithoutCrashingFunction(&DumpHelper::DumpWithoutCrashing);
+
+  // abort() sends SIGABRT, which breakpad does not intercept.
+  // Register a signal handler to crash in a way breakpad will
+  // intercept.
+  struct sigaction sigact;
+  memset(&sigact, 0, sizeof(sigact));
+  sigact.sa_handler = SIGABRTHandler;
+  CHECK(0 == sigaction(SIGABRT, &sigact, NULL));
 }
 
 void InitCrashProcessInfo() {

@@ -517,9 +517,15 @@
                      'spd_say',
                      'spd_stop',
                      'spd_close',
+                     'spd_pause',
+                     'spd_resume',
                      'spd_set_notification_on',
                      'spd_set_voice_rate',
                      'spd_set_voice_pitch',
+                     'spd_list_synthesis_voices',
+                     'spd_set_synthesis_voice',
+                     'spd_list_modules',
+                     'spd_set_output_module',
           ],
           'message': 'Generating libspeechd library loader.',
           'process_outputs_as_sources': 1,
@@ -617,19 +623,6 @@
           'link_settings': {
             'libraries': [
               '<!@(libgcrypt-config --libs)',
-            ],
-          },
-        }],
-      ],
-    },
-    {
-      'target_name': 'selinux',
-      'type': 'none',
-      'conditions': [
-        ['_toolset=="target"', {
-          'link_settings': {
-            'libraries': [
-              '-lselinux',
             ],
           },
         }],

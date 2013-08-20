@@ -11,21 +11,14 @@
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 
-class GURL;
-
 namespace base {
 class FilePath;
-}
+}  // namespace base;
 
 namespace drive {
 
-class FileCache;
 class JobScheduler;
 class ResourceEntry;
-
-namespace internal {
-class ResourceMetadata;
-}  // namespace internal
 
 namespace file_system {
 
@@ -36,24 +29,25 @@ class OperationObserver;
 // metadata to reflect the new state.
 class MoveOperation {
  public:
-  MoveOperation(JobScheduler* job_scheduler,
-                internal::ResourceMetadata* metadata,
-                OperationObserver* observer);
-  virtual ~MoveOperation();
+  MoveOperation(OperationObserver* observer,
+                JobScheduler* scheduler,
+                internal::ResourceMetadata* metadata);
+  ~MoveOperation();
 
   // Performs the move operation on the file at drive path |src_file_path|
   // with a target of |dest_file_path|.  Invokes |callback| when finished with
   // the result of the operation. |callback| must not be null.
-  virtual void Move(const base::FilePath& src_file_path,
-                    const base::FilePath& dest_file_path,
-                    const FileOperationCallback& callback);
+  void Move(const base::FilePath& src_file_path,
+            const base::FilePath& dest_file_path,
+            const FileOperationCallback& callback);
  private:
-  // Step 1 of Move(), called after the entry info of the source resource and
-  // the destination directory is obtained. It renames the resource in the
-  // source directory, before moving between directories.
-  void MoveAfterGetEntryInfoPair(const base::FilePath& dest_file_path,
-                                 const FileOperationCallback& callback,
-                                 scoped_ptr<EntryInfoPairResult> src_dest_info);
+  // Step 1 of Move(), called after the resource entry of the source and the
+  // destination directory is obtained. It renames the resource in the source
+  // directory, before moving between directories.
+  void MoveAfterGetResourceEntryPair(
+      const base::FilePath& dest_file_path,
+      const FileOperationCallback& callback,
+      scoped_ptr<EntryInfoPairResult> src_dest_info);
 
   // Step 2 of Move(), called after renaming is completed. It adds the resource
   // to the destination directory.
@@ -121,11 +115,10 @@ class MoveOperation {
   void RemoveFromDirectoryCompleted(const FileOperationCallback& callback,
                                     google_apis::GDataErrorCode status);
 
-  JobScheduler* job_scheduler_;
-  internal::ResourceMetadata* metadata_;
   OperationObserver* observer_;
+  JobScheduler* scheduler_;
+  internal::ResourceMetadata* metadata_;
 
-  // WeakPtrFactory bound to the UI thread.
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.
   base::WeakPtrFactory<MoveOperation> weak_ptr_factory_;

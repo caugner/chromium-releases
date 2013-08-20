@@ -1365,77 +1365,6 @@ public class AwSettingsTest extends AwTestBase {
             new AwSettingsDefaultFontSizeTestHelper(views.getContents1(), views.getClient1()));
     }
 
-    // The test verifies that disabling images loading by setting
-    // setLoadsImagesAutomatically to false doesn't prevent images already
-    // contained in the memory cache to be displayed.  The cache is shared among
-    // all views, so the image can be put there by another view.
-    @Feature({"AndroidWebView", "Preferences"})
-    @SmallTest
-    public void testLoadsImagesAutomaticallyWithCachedImage() throws Throwable {
-        ViewPair views = createViews();
-        AwSettings settings0 = getAwSettingsOnUiThread(views.getContents0());
-        settings0.setJavaScriptEnabled(true);
-        AwSettings settings1 = getAwSettingsOnUiThread(views.getContents1());
-        settings1.setJavaScriptEnabled(true);
-        ImagePageGenerator generator = new ImagePageGenerator(0, false);
-
-        // First disable images loading and verify it.
-        settings0.setLoadsImagesAutomatically(false);
-        settings1.setLoadsImagesAutomatically(false);
-        loadDataSync(views.getContents0(),
-                     views.getClient0().getOnPageFinishedHelper(),
-                     generator.getPageSource(),
-                     "text/html", false);
-        loadDataSync(views.getContents1(),
-                     views.getClient1().getOnPageFinishedHelper(),
-                     generator.getPageSource(),
-                     "text/html", false);
-        assertEquals(ImagePageGenerator.IMAGE_NOT_LOADED_STRING,
-                getTitleOnUiThread(views.getContents0()));
-        assertEquals(ImagePageGenerator.IMAGE_NOT_LOADED_STRING,
-                getTitleOnUiThread(views.getContents1()));
-
-        // Now enable images loading only for view 0.
-        settings0.setLoadsImagesAutomatically(true);
-        loadDataSync(views.getContents0(),
-                     views.getClient0().getOnPageFinishedHelper(),
-                     generator.getPageSource(),
-                     "text/html", false);
-        loadDataSync(views.getContents1(),
-                     views.getClient1().getOnPageFinishedHelper(),
-                     generator.getPageSource(),
-                     "text/html", false);
-
-        // Once the image has been cached by contentView0, it is available to contentView1.
-        assertEquals(ImagePageGenerator.IMAGE_LOADED_STRING,
-                getTitleOnUiThread(views.getContents0()));
-        assertEquals(ImagePageGenerator.IMAGE_LOADED_STRING,
-                getTitleOnUiThread(views.getContents1()));
-        ImagePageGenerator generator1 = new ImagePageGenerator(1, false);
-
-        // This is a new image. view 1 can't load it.
-        loadDataSync(views.getContents1(),
-                     views.getClient1().getOnPageFinishedHelper(),
-                     generator1.getPageSource(),
-                     "text/html", false);
-        assertEquals(ImagePageGenerator.IMAGE_NOT_LOADED_STRING,
-                     getTitleOnUiThread(views.getContents1()));
-        loadDataSync(views.getContents0(),
-                     views.getClient0().getOnPageFinishedHelper(),
-                     generator1.getPageSource(),
-                     "text/html", false);
-        loadDataSync(views.getContents1(),
-                     views.getClient1().getOnPageFinishedHelper(),
-                     generator1.getPageSource(),
-                     "text/html", false);
-
-        // Once the image has been cached by contentViewCore0, it is available to contentViewCore1.
-        assertEquals(ImagePageGenerator.IMAGE_LOADED_STRING,
-                getTitleOnUiThread(views.getContents0()));
-        assertEquals(ImagePageGenerator.IMAGE_LOADED_STRING,
-                getTitleOnUiThread(views.getContents1()));
-    }
-
     // The test verifies that after changing the LoadsImagesAutomatically
     // setting value from false to true previously skipped images are
     // automatically loaded.
@@ -1472,6 +1401,7 @@ public class AwSettingsTest extends AwTestBase {
         }, TEST_TIMEOUT, CHECK_INTERVAL));
         assertEquals(ImagePageGenerator.IMAGE_LOADED_STRING, getTitleOnUiThread(awContents));
     }
+
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
@@ -1844,7 +1774,7 @@ public class AwSettingsTest extends AwTestBase {
                 @Override
                 public boolean isSatisfied() {
                     try {
-                        return ImagePageGenerator.IMAGE_NOT_LOADED_STRING.equals(
+                        return ImagePageGenerator.IMAGE_LOADED_STRING.equals(
                             getTitleOnUiThread(awContents));
                     } catch (Throwable t) {
                         t.printStackTrace();
@@ -2354,8 +2284,12 @@ public class AwSettingsTest extends AwTestBase {
         assertEquals(viewportTagSpecifiedWidth, getTitleOnUiThread(awContents));
     }
 
+    /*
     @MediumTest
     @Feature({"AndroidWebView", "Preferences"})
+    http://crbug.com/239144
+    */
+    @DisabledTest
     public void testUseWideViewportControlsDoubleTabToZoom() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =
@@ -2382,8 +2316,12 @@ public class AwSettingsTest extends AwTestBase {
                 zoomedOutScale < initialScale);
     }
 
+    /*
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    http://crbug.com/239144
+    */
+    @DisabledTest
     public void testLoadWithOverviewModeWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2393,8 +2331,12 @@ public class AwSettingsTest extends AwTestBase {
                         views.getContents1(), views.getClient1(), false));
     }
 
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
+    /*
+     @SmallTest
+     @Feature({"AndroidWebView", "Preferences"})
+     http://crbug.com/239144
+     */
+    @DisabledTest
     public void testLoadWithOverviewModeViewportTagWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2493,14 +2435,22 @@ public class AwSettingsTest extends AwTestBase {
         }
     }
 
+    /*
     @LargeTest
     @Feature({"AndroidWebView", "Preferences"})
+    Disabled until video is working. crbug.com/239760
+    */
+    @DisabledTest
     public void testMediaPlaybackWithoutUserGesture() throws Throwable {
         assertTrue(runVideoTest(false, -1));
     }
 
+    /*
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    Disabled until video is working. crbug.com/239760
+    */
+    @DisabledTest
     public void testMediaPlaybackWithUserGesture() throws Throwable {
         // Wait for 5 second to see if video played.
         assertFalse(runVideoTest(true, 5000));

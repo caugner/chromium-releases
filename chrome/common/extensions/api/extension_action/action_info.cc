@@ -5,7 +5,7 @@
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -60,10 +60,10 @@ scoped_ptr<ActionInfo> ActionInfo::Load(const Extension* extension,
   if (extension->manifest_version() == 1) {
     // kPageActionIcons is obsolete, and used by very few extensions. Continue
     // loading it, but only take the first icon as the default_icon path.
-    const ListValue* icons = NULL;
+    const base::ListValue* icons = NULL;
     if (dict->HasKey(keys::kPageActionIcons) &&
         dict->GetList(keys::kPageActionIcons, &icons)) {
-      for (ListValue::const_iterator iter = icons->begin();
+      for (base::ListValue::const_iterator iter = icons->begin();
            iter != icons->end(); ++iter) {
         std::string path;
         if (!(*iter)->GetAsString(&path) ||

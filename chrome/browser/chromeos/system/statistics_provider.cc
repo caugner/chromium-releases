@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -15,14 +14,16 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_oem_manifest_parser.h"
-#include "chrome/browser/chromeos/system/name_value_pairs_parser.h"
-#include "chrome/common/child_process_logging.h"
-#include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_version_info.h"
+#include "chromeos/app_mode/kiosk_oem_manifest_parser.h"
+#include "chromeos/chromeos_constants.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/system/name_value_pairs_parser.h"
 #include "content/public/browser/browser_thread.h"
+
+#if defined(GOOGLE_CHROME_BUILD)
+// TODO(phajdan.jr): Drop that dependency, http://crbug.com/180711 .
+#include "chrome/common/chrome_version_info.h"
+#endif
 
 using content::BrowserThread;
 
@@ -73,6 +74,22 @@ const CommandLine::CharType kOemManifestFilePath[] =
     FILE_PATH_LITERAL("/usr/share/oem/oobe/manifest.json");
 
 }  // namespace
+
+// Key values for GetMachineStatistic()/GetMachineFlag() calls.
+const char kDevSwitchBootMode[] = "devsw_boot";
+const char kHardwareClass[] = "hardware_class";
+const char kMachineInfoBoard[] =
+    "CHROMEOS_RELEASE_BOARD";
+const char kOffersCouponCodeKey[] = "ubind_attribute";
+const char kOffersGroupCodeKey[] = "gbind_attribute";
+const char kOemCanExitEnterpriseEnrollmentKey[] =
+    "oem_can_exit_enrollment";
+const char kOemDeviceRequisitionKey[] =
+    "oem_device_requisition";
+const char kOemIsEnterpriseManagedKey[] =
+    "oem_enterprise_managed";
+const char kOemKeyboardDrivenOobeKey[] =
+    "oem_keyboard_driven_oobe";
 
 // The StatisticsProvider implementation used in production.
 class StatisticsProviderImpl : public StatisticsProvider {
@@ -251,13 +268,13 @@ void StatisticsProviderImpl::LoadOemManifestFromFile(
   if (!KioskOemManifestParser::Load(file, &oem_manifest))
     return;
 
-  machine_info_[chrome::kOemDeviceRequisitionKey] =
+  machine_info_[kOemDeviceRequisitionKey] =
       oem_manifest.device_requisition;
-  machine_flags_[chrome::kOemIsEnterpriseManagedKey] =
+  machine_flags_[kOemIsEnterpriseManagedKey] =
       oem_manifest.enterprise_managed;
-  machine_flags_[chrome::kOemCanExitEnterpriseEnrollmentKey] =
+  machine_flags_[kOemCanExitEnterpriseEnrollmentKey] =
       oem_manifest.can_exit_enrollment;
-  machine_flags_[chrome::kOemKeyboardDrivenOobeKey] =
+  machine_flags_[kOemKeyboardDrivenOobeKey] =
       oem_manifest.keyboard_driven_oobe;
 }
 
@@ -293,7 +310,7 @@ class StatisticsProviderStubImpl : public StatisticsProviderImpl {
     return false;
   }
 
-  virtual void LoadOemManifest() {
+  virtual void LoadOemManifest() OVERRIDE {
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (!command_line->HasSwitch(switches::kAppOemManifestFile))
       return;

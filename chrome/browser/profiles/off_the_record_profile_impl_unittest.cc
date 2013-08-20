@@ -9,12 +9,12 @@
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
 #include "content/public/browser/host_zoom_map.h"
 
 using content::HostZoomMap;
@@ -37,7 +37,7 @@ class TestingProfileWithHostZoomMap : public TestingProfile {
   }
 
   virtual Profile* GetOffTheRecordProfile() OVERRIDE {
-    if (!off_the_record_profile_.get())
+    if (!off_the_record_profile_)
       off_the_record_profile_.reset(CreateOffTheRecordProfile());
     return off_the_record_profile_.get();
   }
@@ -145,8 +145,9 @@ TEST_F(OffTheRecordProfileImplTest, GetHostZoomMap) {
       new OffTheRecordProfileImpl(parent_profile.get()));
   child_profile->InitHostZoomMap();
 
-  ProfileDependencyManager::GetInstance()->CreateProfileServices(
-      child_profile.get(), false);
+  BrowserContextDependencyManager::GetInstance()->CreateBrowserContextServices(
+      child_profile.get(),
+      true); // For testing.
 
   // Prepare child host zoom map.
   HostZoomMap* child_zoom_map =

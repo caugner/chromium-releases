@@ -7,13 +7,13 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
-#include "base/values.h"
+#include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -22,11 +22,16 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 class PrefService;
 class ProfileSyncService;
+
+namespace policy {
+struct DeviceLocalAccount;
+}
 
 namespace chromeos {
 
@@ -36,6 +41,7 @@ class SessionLengthLimiter;
 // Implementation of the UserManager.
 class UserManagerImpl
     : public UserManager,
+      public LoginUtils::Delegate,
       public ProfileSyncServiceObserver,
       public content::NotificationObserver,
       public policy::DeviceLocalAccountPolicyService::Observer {
@@ -46,11 +52,14 @@ class UserManagerImpl
   virtual void Shutdown() OVERRIDE;
   virtual UserImageManager* GetUserImageManager() OVERRIDE;
   virtual const UserList& GetUsers() const OVERRIDE;
+  virtual UserList GetUsersAdmittedForMultiProfile() const OVERRIDE;
   virtual const UserList& GetLoggedInUsers() const OVERRIDE;
+  virtual const UserList& GetLRULoggedInUsers() OVERRIDE;
   virtual void UserLoggedIn(const std::string& email,
                             const std::string& username_hash,
                             bool browser_restart) OVERRIDE;
   virtual void SwitchActiveUser(const std::string& email) OVERRIDE;
+  virtual void RestoreActiveSessions() OVERRIDE;
   virtual void SessionStarted() OVERRIDE;
   virtual void RemoveUser(const std::string& email,
                           RemoveUserDelegate* delegate) OVERRIDE;
@@ -74,6 +83,10 @@ class UserManagerImpl
                                     const std::string& display_email) OVERRIDE;
   virtual std::string GetUserDisplayEmail(
       const std::string& username) const OVERRIDE;
+  virtual string16 GetManagerDisplayNameForManagedUser(
+      const std::string& managed_user_id) const OVERRIDE;
+  virtual std::string GetManagerUserIdForManagedUser(
+      const std::string& managed_user_id) const OVERRIDE;
   virtual bool IsCurrentUserOwner() const OVERRIDE;
   virtual bool IsCurrentUserNew() const OVERRIDE;
   virtual bool IsCurrentUserNonCryptohomeDataEphemeral() const OVERRIDE;
@@ -87,6 +100,7 @@ class UserManagerImpl
   virtual bool IsLoggedInAsKioskApp() const OVERRIDE;
   virtual bool IsLoggedInAsStub() const OVERRIDE;
   virtual bool IsSessionStarted() const OVERRIDE;
+  virtual bool UserSessionsRestored() const OVERRIDE;
   virtual MergeSessionState GetMergeSessionState() const OVERRIDE;
   virtual void SetMergeSessionState(MergeSessionState status) OVERRIDE;
   virtual bool HasBrowserRestarted() const OVERRIDE;
@@ -99,9 +113,8 @@ class UserManagerImpl
   virtual void RemoveSessionStateObserver(
       UserManager::UserSessionStateObserver* obs) OVERRIDE;
   virtual void NotifyLocalStateChanged() OVERRIDE;
-  virtual std::string GetManagerForManagedUser(
-      const std::string& managed_user_id) const OVERRIDE;
   virtual const User* CreateLocallyManagedUserRecord(
+      const std::string& manager_id,
       const std::string& e_mail,
       const string16& display_name) OVERRIDE;
   virtual std::string GenerateUniqueLocallyManagedUserId() OVERRIDE;
@@ -121,6 +134,7 @@ class UserManagerImpl
   virtual void SetAppModeChromeClientOAuthInfo(
       const std::string& chrome_client_id,
       const std::string& chrome_client_secret) OVERRIDE;
+  virtual bool AreLocallyManagedUsersAllowed() const OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -131,7 +145,7 @@ class UserManagerImpl
   virtual void OnStateChanged() OVERRIDE;
 
   // policy::DeviceLocalAccountPolicyService::Observer implementation.
-  virtual void OnPolicyUpdated(const std::string& account_id) OVERRIDE;
+  virtual void OnPolicyUpdated(const std::string& user_id) OVERRIDE;
   virtual void OnDeviceLocalAccountsChanged() OVERRIDE;
 
  private:
@@ -140,6 +154,10 @@ class UserManagerImpl
   friend class UserManagerTest;
 
   UserManagerImpl();
+
+  // LoginUtils::Delegate implementation:
+  // Used when restoring user sessions after crash.
+  virtual void OnProfilePrepared(Profile* profile) OVERRIDE;
 
   // Loads |users_| from Local State if the list has not been loaded yet.
   // Subsequent calls have no effect. Must be called on the UI thread.
@@ -216,12 +234,24 @@ class UserManagerImpl
   // Also removes the user from the persistent user list.
   User* RemoveRegularOrLocallyManagedUserFromList(const std::string& username);
 
-  // Replaces the list of public accounts with |public_accounts|. Ensures that
-  // data belonging to accounts no longer on the list is removed. Returns |true|
-  // if the list has changed.
+  // If data for a public account is marked as pending removal and the user is
+  // no longer logged into that account, removes the data.
+  void CleanUpPublicAccountNonCryptohomeDataPendingRemoval();
+
+  // Removes data belonging to public accounts that are no longer found on the
+  // user list. If the user is currently logged into one of these accounts, the
+  // data for that account is not removed immediately but marked as pending
+  // removal after logout.
+  void CleanUpPublicAccountNonCryptohomeData(
+      const std::vector<std::string>& old_public_accounts);
+
+  // Replaces the list of public accounts with those found in
+  // |device_local_accounts|. Ensures that data belonging to accounts no longer
+  // on the list is removed. Returns |true| if the list has changed.
   // Public accounts are defined by policy. This method is called whenever an
   // updated list of public accounts is received from policy.
-  bool UpdateAndCleanUpPublicAccounts(const base::ListValue& public_accounts);
+  bool UpdateAndCleanUpPublicAccounts(
+      const std::vector<policy::DeviceLocalAccount>& device_local_accounts);
 
   // Updates the display name for public account |username| from policy settings
   // associated with that username.
@@ -233,8 +263,14 @@ class UserManagerImpl
   // Notifies observers that merge session state had changed.
   void NotifyMergeSessionStateChanged();
 
+  // Notifies observers that active user has changed.
+  void NotifyActiveUserChanged(const User* active_user);
+
   // Notifies observers that active user_id hash has changed.
   void NotifyActiveUserHashChanged(const std::string& hash);
+
+  // Notifies observers that user pending sessions restore has finished.
+  void NotifyPendingUserSessionsRestoreFinished();
 
   // Returns true if there is non-committed user creation transaction.
   bool HasFailedLocallyManagedUserCreationTransaction();
@@ -248,8 +284,19 @@ class UserManagerImpl
   // Update the global LoginState.
   void UpdateLoginState();
 
-  // Gets the list of public accounts defined in device settings.
-  void ReadPublicAccounts(base::ListValue* public_accounts);
+  // Insert |user| at the front of the LRU user list..
+  void SetLRUUser(User* user);
+
+  // Callback to process RetrieveActiveSessions() request results.
+  void OnRestoreActiveSessions(
+      const SessionManagerClient::ActiveSessionsMap& sessions,
+      bool success);
+
+  // Called by OnRestoreActiveSessions() when there're user sessions in
+  // |pending_user_sessions_| that has to be restored one by one.
+  // Also called after first user session from that list is restored and so on.
+  // Process continues till |pending_user_sessions_| map is not empty.
+  void RestorePendingUserSessions();
 
   // Interface to the signed settings store.
   CrosSettings* cros_settings_;
@@ -269,6 +316,14 @@ class UserManagerImpl
   // instances in |users_|. Only one of them could be marked as active.
   UserList logged_in_users_;
 
+  // A list of all users that are logged in the current session. In contrast to
+  // |logged_in_users|, the order of this list is least recently used so that
+  // the active user should always be the first one in the list.
+  UserList lru_logged_in_users_;
+
+  // The list which gets reported when the |lru_logged_in_users_| list is empty.
+  UserList temp_single_logged_in_users_;
+
   // The logged-in user that is currently active in current session.
   // NULL until a user has logged in, then points to one
   // of the User instances in |users_|, the |guest_user_| instance or an
@@ -277,6 +332,10 @@ class UserManagerImpl
 
   // True if SessionStarted() has been called.
   bool session_started_;
+
+  // True is user sessions has been restored after crash.
+  // On a normal boot then login into user sessions this will be false.
+  bool user_sessions_restored_;
 
   // Cached flag of whether currently logged-in user is owner or not.
   // May be accessed on different threads, requires locking.
@@ -298,6 +357,11 @@ class UserManagerImpl
   // Defaults to |false| if the value has not been read from trusted device
   // policy yet.
   bool ephemeral_users_enabled_;
+
+  // Cached flag indicating whether the locally managed users are enabled by
+  // policy. Defaults to |false| if the value has not been read from trusted
+  // device policy yet.
+  bool locally_managed_users_enabled_by_policy_;
 
   // Merge session state (cookie restore process state).
   MergeSessionState merge_session_state_;
@@ -334,8 +398,13 @@ class UserManagerImpl
   // Lazy-initialized default flow.
   mutable scoped_ptr<UserFlow> default_flow_;
 
-  // Specific flows by user e-mail.
+  // Specific flows by user e-mail. Keys should be canonicalized before
+  // access.
   FlowMap specific_flows_;
+
+  // User sessions that have to be restored after browser crash.
+  // [user_id] > [user_id_hash]
+  SessionManagerClient::ActiveSessionsMap pending_user_sessions_;
 
   DISALLOW_COPY_AND_ASSIGN(UserManagerImpl);
 };

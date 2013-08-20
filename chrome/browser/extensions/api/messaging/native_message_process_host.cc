@@ -197,8 +197,8 @@ void NativeMessageProcessHost::WaitRead() {
   // would always be consuming one thread in the thread pool. On Windows
   // FileStream uses overlapped IO, so that optimization isn't necessary there.
 #if defined(OS_POSIX)
-  MessageLoopForIO::current()->WatchFileDescriptor(
-    read_file_, false /* persistent */, MessageLoopForIO::WATCH_READ,
+  base::MessageLoopForIO::current()->WatchFileDescriptor(
+    read_file_, false /* persistent */, base::MessageLoopForIO::WATCH_READ,
     &read_watcher_, this);
 #else  // defined(OS_POSIX)
   DoRead();
@@ -211,9 +211,9 @@ void NativeMessageProcessHost::DoRead() {
   while (!closed_ && !read_eof_ && !read_pending_) {
     read_buffer_ = new net::IOBuffer(kReadBufferSize);
     int result = read_stream_->Read(
-        read_buffer_, kReadBufferSize,
-        base::Bind(&NativeMessageProcessHost::OnRead,
-                   base::Unretained(this)));
+        read_buffer_.get(),
+        kReadBufferSize,
+        base::Bind(&NativeMessageProcessHost::OnRead, base::Unretained(this)));
     HandleReadResult(result);
   }
 }
@@ -281,18 +281,20 @@ void NativeMessageProcessHost::DoWrite() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
 
   while (!write_pending_ && !closed_) {
-    if (!current_write_buffer_ || !current_write_buffer_->BytesRemaining()) {
+    if (!current_write_buffer_.get() ||
+        !current_write_buffer_->BytesRemaining()) {
       if (write_queue_.empty())
         return;
       current_write_buffer_ = new net::DrainableIOBuffer(
-          write_queue_.front(), write_queue_.front()->size());
+          write_queue_.front().get(), write_queue_.front()->size());
       write_queue_.pop();
     }
 
-    int result = write_stream_->Write(
-        current_write_buffer_, current_write_buffer_->BytesRemaining(),
-        base::Bind(&NativeMessageProcessHost::OnWritten,
-                   base::Unretained(this)));
+    int result =
+        write_stream_->Write(current_write_buffer_.get(),
+                             current_write_buffer_->BytesRemaining(),
+                             base::Bind(&NativeMessageProcessHost::OnWritten,
+                                        base::Unretained(this)));
     HandleWriteResult(result);
   }
 }

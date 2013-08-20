@@ -107,6 +107,8 @@ void CrasInputStream::Start(AudioInputCallback* callback) {
   if (started_)
     return;
 
+  StartAgc();
+
   callback_ = callback;
   LOG(ERROR) << "Input Start";
 
@@ -148,9 +150,7 @@ void CrasInputStream::Start(AudioInputCallback* callback) {
   bytes_per_frame_ = cras_client_format_bytes_per_frame(audio_format);
 
   // Adding the stream will start the audio callbacks.
-  if (cras_client_add_stream(client_, &stream_id_, stream_params) == 0) {
-    audio_manager_->IncreaseActiveInputStreamCount();
-  } else {
+  if (cras_client_add_stream(client_, &stream_id_, stream_params)) {
     DLOG(WARNING) << "Failed to add the stream.";
     callback_->OnError(this);
     callback_ = NULL;
@@ -169,10 +169,10 @@ void CrasInputStream::Stop() {
   if (!callback_ || !started_)
     return;
 
+  StopAgc();
+
   // Removing the stream from the client stops audio.
   cras_client_rm_stream(client_, stream_id_);
-
-  audio_manager_->DecreaseActiveInputStreamCount();
 
   started_ = false;
 }
@@ -222,7 +222,7 @@ void CrasInputStream::ReadAudio(size_t frames,
   // also updated each time SetVolume() is called through IPC by the
   // render-side AGC.
   double normalized_volume = 0.0;
-  QueryAgcVolume(&normalized_volume);
+  GetAgcVolume(&normalized_volume);
 
   callback_->OnData(this,
                     buffer,

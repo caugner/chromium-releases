@@ -7,8 +7,10 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
+
+class Profile;
 
 namespace chromeos {
 
@@ -37,6 +39,8 @@ class LocallyManagedUserCreationFlow : public ExtendedUserFlow {
   // Indicates if manager was successfully authenticated against
   // local cryptohome.
   bool logged_in_;
+
+  Profile* manager_profile_;
 
   DISALLOW_COPY_AND_ASSIGN(LocallyManagedUserCreationFlow);
 };

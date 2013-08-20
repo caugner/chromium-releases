@@ -106,14 +106,14 @@ class OmniboxResultView::MirroringContext {
 OmniboxResultView::OmniboxResultView(
     OmniboxResultViewModel* model,
     int model_index,
-    views::View* location_bar,
+    LocationBarView* location_bar_view,
     const gfx::Font& font)
     : edge_item_padding_(LocationBarView::GetItemPadding()),
       item_padding_(LocationBarView::GetItemPadding()),
       minimum_text_vertical_padding_(kMinimumTextVerticalPadding),
       model_(model),
       model_index_(model_index),
-      location_bar_(location_bar),
+      location_bar_view_(location_bar_view),
       font_(font),
       font_height_(std::max(font.GetHeight(),
                             font.DeriveFont(0, gfx::BOLD).GetHeight())),
@@ -124,9 +124,9 @@ OmniboxResultView::OmniboxResultView(
   CHECK_GE(model_index, 0);
   if (default_icon_size_ == 0) {
     default_icon_size_ =
-        location_bar_->GetThemeProvider()->GetImageSkiaNamed(
-        AutocompleteMatch::TypeToIcon(AutocompleteMatch::URL_WHAT_YOU_TYPED))->
-        width();
+        location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(
+            AutocompleteMatch::TypeToIcon(
+                AutocompleteMatchType::URL_WHAT_YOU_TYPED))->width();
   }
   keyword_icon_->set_owned_by_client();
   keyword_icon_->EnableCanvasFlippingForRTLUI(true);
@@ -221,6 +221,10 @@ OmniboxResultView::ResultViewState OmniboxResultView::GetState() const {
   return model_->IsHoveredIndex(model_index_) ? HOVERED : NORMAL;
 }
 
+int OmniboxResultView::GetTextHeight() const {
+  return font_height_;
+}
+
 void OmniboxResultView::PaintMatch(gfx::Canvas* canvas,
                                    const AutocompleteMatch& match,
                                    int x) {
@@ -245,10 +249,6 @@ void OmniboxResultView::PaintMatch(gfx::Canvas* canvas,
     DrawString(canvas, match.description, match.description_class, true, x,
                text_bounds_.y());
   }
-}
-
-int OmniboxResultView::GetTextHeight() const {
-  return font_height_;
 }
 
 // static
@@ -325,13 +325,13 @@ gfx::ImageSkia OmniboxResultView::GetIcon() const {
         break;
     }
   }
-  return *(location_bar_->GetThemeProvider()->GetImageSkiaNamed(icon));
+  return *(location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(icon));
 }
 
 const gfx::ImageSkia* OmniboxResultView::GetKeywordIcon() const {
   // NOTE: If we ever begin returning icons of varying size, then callers need
   // to ensure that |keyword_icon_| is resized each time its image is reset.
-  return location_bar_->GetThemeProvider()->GetImageSkiaNamed(
+  return location_bar_view_->GetThemeProvider()->GetImageSkiaNamed(
       (GetState() == SELECTED) ? IDR_OMNIBOX_TTS_SELECTED : IDR_OMNIBOX_TTS);
 }
 
@@ -512,8 +512,10 @@ void OmniboxResultView::Elide(Runs* runs, int remaining_width) const {
       first_classification = false;
 
       // Can we fit at least an ellipsis?
-      string16 elided_text = ui::ElideText((*j)->text(), (*j)->GetFont(),
-                                           remaining_width, ui::ELIDE_AT_END);
+      gfx::Font font((*j)->GetStyle(gfx::BOLD) ?
+          (*j)->GetFont().DeriveFont(0, gfx::Font::BOLD) : (*j)->GetFont());
+      string16 elided_text(
+          ui::ElideText((*j)->text(), font, remaining_width, ui::ELIDE_AT_END));
       Classifications::reverse_iterator prior(j + 1);
       const bool on_first_classification = (prior == i->classifications.rend());
       if (elided_text.empty() && (remaining_width >= ellipsis_width_) &&
@@ -535,12 +537,9 @@ void OmniboxResultView::Elide(Runs* runs, int remaining_width) const {
         // If we could only fit an ellipsis, then only make it bold if there was
         // an immediate prior classification in this run that was also bold, or
         // it will look orphaned.
-        if ((((*j)->GetFont().GetStyle() & gfx::BOLD) != 0) &&
-            (elided_text.length() == 1) &&
-            (on_first_classification ||
-             (((*prior)->GetFont().GetStyle() & gfx::BOLD) == 0))) {
+        if ((*j)->GetStyle(gfx::BOLD) && (elided_text.length() == 1) &&
+            (on_first_classification || !(*prior)->GetStyle(gfx::BOLD)))
           (*j)->SetStyle(gfx::BOLD, false);
-        }
 
         // Erase any other classifications that come after the elided one.
         i->classifications.erase(j.base(), i->classifications.end());

@@ -16,7 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -31,6 +31,7 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/animation_container.h"
 #include "ui/base/animation/throb_animation.h"
+#include "ui/base/default_theme_provider.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
@@ -45,7 +46,6 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/mouse_watcher_view_host.h"
 #include "ui/views/view_model_utils.h"
-#include "ui/views/widget/default_theme_provider.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
@@ -148,7 +148,7 @@ int tab_h_offset() {
         value = -26;
         break;
       case ui::LAYOUT_TOUCH:
-        value = -39;
+        value = -34;
         break;
       default:
         NOTREACHED();
@@ -327,15 +327,21 @@ class NewTabButton : public views::ImageButton {
   // The offset used to paint the background image.
   gfx::Point background_offset_;
 
+  // were we destroyed?
+  bool* destroyed_;
+
   DISALLOW_COPY_AND_ASSIGN(NewTabButton);
 };
 
 NewTabButton::NewTabButton(TabStrip* tab_strip, views::ButtonListener* listener)
     : views::ImageButton(listener),
-      tab_strip_(tab_strip) {
+      tab_strip_(tab_strip),
+      destroyed_(NULL) {
 }
 
 NewTabButton::~NewTabButton() {
+  if (destroyed_)
+    *destroyed_ = true;
 }
 
 bool NewTabButton::HasHitTestMask() const {
@@ -371,7 +377,13 @@ void NewTabButton::OnMouseReleased(const ui::MouseEvent& event) {
   if (event.IsOnlyRightMouseButton()) {
     gfx::Point point = event.location();
     views::View::ConvertPointToScreen(this, &point);
+    bool destroyed = false;
+    destroyed_ = &destroyed;
     ui::ShowSystemMenuAtPoint(GetWidget()->GetNativeView(), point);
+    if (destroyed)
+      return;
+
+    destroyed_ = NULL;
     SetState(views::CustomButton::STATE_NORMAL);
     return;
   }
@@ -1009,8 +1021,10 @@ void TabStrip::CloseTab(Tab* tab, CloseTabSource source) {
     controller_->CloseTab(model_index, source);
 }
 
-void TabStrip::ShowContextMenuForTab(Tab* tab, const gfx::Point& p) {
-  controller_->ShowContextMenuForTab(tab, p);
+void TabStrip::ShowContextMenuForTab(Tab* tab,
+                                     const gfx::Point& p,
+                                     ui::MenuSourceType source_type) {
+  controller_->ShowContextMenuForTab(tab, p, source_type);
 }
 
 bool TabStrip::IsActiveTab(const Tab* tab) const {
@@ -1046,6 +1060,11 @@ void TabStrip::MaybeStartDrag(
       controller_->HasAvailableDragActions() == 0) {
     return;
   }
+
+  // Do not do any dragging of tabs when using the super short immersive style.
+  if (IsImmersiveStyle())
+    return;
+
   int model_index = GetModelIndexOfTab(tab);
   if (!IsValidModelIndex(model_index)) {
     CHECK(false);
@@ -1099,13 +1118,14 @@ void TabStrip::MaybeStartDrag(
 
   views::Widget* widget = GetWidget();
 
-  // Don't allow detaching from maximized windows (in ash) when all the tabs are
-  // selected and only one display. Since the window is maximized we know there
-  // are no other tabbed browsers the user can drag to.
+  // Don't allow detaching from maximized or fullscreen windows (in ash) when
+  // all the tabs are selected and there is only one display. Since the window
+  // is maximized or fullscreen, we know there are no other tabbed browsers the
+  // user can drag to.
   const chrome::HostDesktopType host_desktop_type =
       chrome::GetHostDesktopTypeForNativeView(widget->GetNativeView());
   if (host_desktop_type == chrome::HOST_DESKTOP_TYPE_ASH &&
-      widget->IsMaximized() &&
+      (widget->IsMaximized() || widget->IsFullscreen()) &&
       static_cast<int>(tabs.size()) == tab_count() &&
       gfx::Screen::GetScreenFor(widget->GetNativeView())->GetNumDisplays() == 1)
     detach_behavior = TabDragController::NOT_DETACHABLE;
@@ -1338,7 +1358,7 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas) {
     active_tab->Paint(canvas);
 }
 
-std::string TabStrip::GetClassName() const {
+const char* TabStrip::GetClassName() const {
   return kViewClassName;
 }
 
@@ -1406,7 +1426,7 @@ views::View* TabStrip::GetEventHandlerForPoint(const gfx::Point& point) {
     // Return any view that isn't a Tab or this TabStrip immediately. We don't
     // want to interfere.
     views::View* v = View::GetEventHandlerForPoint(point);
-    if (v && v != this && v->GetClassName() != Tab::kViewClassName)
+    if (v && v != this && strcmp(v->GetClassName(), Tab::kViewClassName))
       return v;
 
     views::View* tab = FindTabHitByPoint(point);
@@ -1434,7 +1454,7 @@ views::View* TabStrip::GetTooltipHandlerForPoint(const gfx::Point& point) {
     // Return any view that isn't a Tab or this TabStrip immediately. We don't
     // want to interfere.
     views::View* v = View::GetTooltipHandlerForPoint(point);
-    if (v && v != this && v->GetClassName() != Tab::kViewClassName)
+    if (v && v != this && strcmp(v->GetClassName(), Tab::kViewClassName))
       return v;
 
     views::View* tab = FindTabHitByPoint(point);
@@ -1550,7 +1570,7 @@ void TabStrip::OnGestureEvent(ui::GestureEvent* event) {
       Tab* tab = FindTabForEvent(local_point);
       if (tab) {
         ConvertPointToScreen(this, &local_point);
-        ShowContextMenuForTab(tab, local_point);
+        ShowContextMenuForTab(tab, local_point, ui::MENU_SOURCE_TOUCH);
       }
       break;
     }
@@ -1910,6 +1930,9 @@ void TabStrip::UpdateTabsClosingMap(int index, int delta) {
 }
 
 void TabStrip::StartedDraggingTabs(const std::vector<Tab*>& tabs) {
+  // Let the controller know that the user started dragging tabs.
+  controller()->OnStartedDraggingTabs();
+
   // Hide the new tab button immediately if we didn't originate the drag.
   if (!drag_controller_.get())
     newtab_button_->SetVisible(false);
@@ -1938,6 +1961,9 @@ void TabStrip::StartedDraggingTabs(const std::vector<Tab*>& tabs) {
 }
 
 void TabStrip::DraggedTabsDetached() {
+  // Let the controller know that the user is not dragging this tabstrip's tabs
+  // anymore.
+  controller()->OnStoppedDraggingTabs();
   newtab_button_->SetVisible(true);
 }
 
@@ -1945,6 +1971,9 @@ void TabStrip::StoppedDraggingTabs(const std::vector<Tab*>& tabs,
                                    const std::vector<int>& initial_positions,
                                    bool move_only,
                                    bool completed) {
+  // Let the controller know that the user stopped dragging tabs.
+  controller()->OnStoppedDraggingTabs();
+
   newtab_button_->SetVisible(true);
   if (move_only && touch_layout_.get()) {
     if (completed) {

@@ -11,24 +11,27 @@
 /** @const */ var SCREEN_OOBE_EULA = 'eula';
 /** @const */ var SCREEN_OOBE_UPDATE = 'update';
 /** @const */ var SCREEN_OOBE_ENROLLMENT = 'oauth-enrollment';
+/** @const */ var SCREEN_OOBE_KIOSK_ENABLE = 'kiosk-enable';
 /** @const */ var SCREEN_GAIA_SIGNIN = 'gaia-signin';
 /** @const */ var SCREEN_ACCOUNT_PICKER = 'account-picker';
 /** @const */ var SCREEN_ERROR_MESSAGE = 'error-message';
 /** @const */ var SCREEN_USER_IMAGE_PICKER = 'user-image';
 /** @const */ var SCREEN_TPM_ERROR = 'tpm-error-message';
 /** @const */ var SCREEN_PASSWORD_CHANGED = 'password-changed';
-/** @const */ var SCREEN_CREATE_MANAGED_USER_DIALOG =
-    'managed-user-creation-dialog';
 /** @const */ var SCREEN_CREATE_MANAGED_USER_FLOW =
-    'managed-user-creation-flow';
+    'managed-user-creation';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
+/** @const */ var ACCELERATOR_KIOSK_ENABLE = 'kiosk_enable';
 /** @const */ var ACCELERATOR_VERSION = 'version';
 /** @const */ var ACCELERATOR_RESET = 'reset';
 /** @const */ var ACCELERATOR_LEFT = 'left';
 /** @const */ var ACCELERATOR_RIGHT = 'right';
+/** @const */ var ACCELERATOR_DEVICE_REQUISITION = 'device_requisition';
+/** @const */ var ACCELERATOR_DEVICE_REQUISITION_REMORA =
+    'device_requisition_remora';
 
 /* Help topic identifiers. */
 /** @const */ var HELP_TOPIC_ENTERPRISE_REPORTING = 2535613;
@@ -97,12 +100,6 @@ cr.define('cr.ui.login', function() {
     forceKeyboardFlow_: false,
 
     /**
-     * List of parameters to showScreen calls.
-     * @type {array}
-     */
-    screenParametersHistory_: [],
-
-    /**
      * Gets current screen element.
      * @type {HTMLElement}
      */
@@ -162,6 +159,12 @@ cr.define('cr.ui.login', function() {
           if (this.currentScreen.cancelAutoEnrollment)
             this.currentScreen.cancelAutoEnrollment();
         }
+      } else if (name == ACCELERATOR_KIOSK_ENABLE) {
+        var currentStepId = this.screens_[this.currentStep_];
+        if (currentStepId == SCREEN_GAIA_SIGNIN ||
+            currentStepId == SCREEN_ACCOUNT_PICKER) {
+          chrome.send('toggleKioskEnableScreen');
+        }
       } else if (name == ACCELERATOR_VERSION) {
         if (this.allowToggleVersion_)
           $('version-labels').hidden = !$('version-labels').hidden;
@@ -170,6 +173,14 @@ cr.define('cr.ui.login', function() {
         if (currentStepId == SCREEN_GAIA_SIGNIN ||
             currentStepId == SCREEN_ACCOUNT_PICKER) {
           chrome.send('toggleResetScreen');
+        }
+      } else if (name == ACCELERATOR_DEVICE_REQUISITION) {
+        if (this.isOobeUI())
+          this.showDeviceRequisitionPrompt_();
+      } else if (name == ACCELERATOR_DEVICE_REQUISITION_REMORA) {
+        if (this.isOobeUI()) {
+          this.deviceRequisition_ = 'remora';
+          this.showDeviceRequisitionPrompt_();
         }
       }
 
@@ -294,6 +305,8 @@ cr.define('cr.ui.login', function() {
               innerContainer.classList.remove('animation');
               oldStep.classList.add('hidden');
             }
+            // Refresh defaultControl. It could have changed.
+            var defaultControl = newStep.defaultControl;
             if (defaultControl)
               defaultControl.focus();
           });
@@ -312,6 +325,8 @@ cr.define('cr.ui.login', function() {
                 innerContainer.removeEventListener('webkitTransitionEnd', f);
                 $('progress-dots').classList.remove('down');
                 chrome.send('loginVisible', ['oobe']);
+                // Refresh defaultControl. It could have changed.
+                var defaultControl = newStep.defaultControl;
                 if (defaultControl)
                   defaultControl.focus();
               });
@@ -348,13 +363,6 @@ cr.define('cr.ui.login', function() {
     showScreen: function(screen) {
       var screenId = screen.id;
 
-      // As for now, support "back" only for create managed user screen.
-      if (screenId != SCREEN_CREATE_MANAGED_USER_DIALOG) {
-        this.screenParametersHistory_ = [];
-      }
-
-      this.screenParametersHistory_.push(screen);
-
       // Make sure the screen is decorated.
       this.preloadScreen(screen);
 
@@ -375,16 +383,6 @@ cr.define('cr.ui.login', function() {
       var index = this.getScreenIndex_(screenId);
       if (index >= 0)
         this.toggleStep_(index, data);
-    },
-
-    /**
-     * Shows the previous screen of workflow.
-     */
-    goBack: function() {
-      if (this.screenParametersHistory_.length >= 2) {
-        this.screenParametersHistory_.pop();
-        this.showScreen(this.screenParametersHistory_.pop());
-      }
     },
 
     /**
@@ -493,6 +491,41 @@ cr.define('cr.ui.login', function() {
     },
 
     /**
+     * Shows the device requisition prompt.
+     */
+    showDeviceRequisitionPrompt_: function() {
+      if (!this.deviceRequisitionDialog_) {
+        this.deviceRequisitionDialog_ =
+            new cr.ui.dialogs.PromptDialog(document.body);
+        this.deviceRequisitionDialog_.setOkLabel(
+            loadTimeData.getString('deviceRequisitionPromptOk'));
+        this.deviceRequisitionDialog_.setCancelLabel(
+            loadTimeData.getString('deviceRequisitionPromptCancel'));
+      }
+      this.deviceRequisitionDialog_.show(
+          loadTimeData.getString('deviceRequisitionPromptText'),
+          this.deviceRequisition_,
+          this.onConfirmDeviceRequisitionPrompt_.bind(this));
+    },
+
+    /**
+     * Confirmation handle for the device requisition prompt.
+     * @param {string} value The value entered by the user.
+     */
+    onConfirmDeviceRequisitionPrompt_: function(value) {
+      this.deviceRequisition_ = value;
+      chrome.send('setDeviceRequisition', [value]);
+    },
+
+    /*
+     * Updates the device requisition string shown in the requisition prompt.
+     * @param {string} requisition The device requisition.
+     */
+    updateDeviceRequisition: function(requisition) {
+      this.deviceRequisition_ = requisition;
+    },
+
+    /**
      * Returns true if Oobe UI is shown.
      */
     isOobeUI: function() {
@@ -505,7 +538,7 @@ cr.define('cr.ui.login', function() {
      */
     isSignInToAddScreen: function() {
       return document.documentElement.getAttribute('screen') ==
-          'login-add-user';
+          'user-adding';
     },
 
     /**
@@ -527,6 +560,17 @@ cr.define('cr.ui.login', function() {
    * Initializes display manager.
    */
   DisplayManager.initialize = function() {
+    // Extracting screen type from URL.
+    var hash = window.location.hash;
+    var screenType;
+    if (!hash) {
+      console.error('Screen type not found. Setting default value "login".');
+      screenType = 'login';
+    } else {
+      screenType = hash.substring(1);
+    }
+    document.documentElement.setAttribute('screen', screenType);
+
     var link = $('enterprise-info-hint-link');
     link.addEventListener(
         'click', DisplayManager.handleEnterpriseHintLinkClick);
@@ -704,6 +748,13 @@ cr.define('cr.ui.login', function() {
    */
   DisplayManager.clearUserPodPassword = function() {
     $('pod-row').clearFocusedPod();
+  };
+
+  /**
+   * Restores input focus to currently selected pod.
+   */
+  DisplayManager.refocusCurrentPod = function() {
+    $('pod-row').refocusCurrentPod();
   };
 
   // Export

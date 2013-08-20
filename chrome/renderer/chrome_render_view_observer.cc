@@ -10,7 +10,7 @@
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/prerender_messages.h"
@@ -31,34 +31,39 @@
 #include "extensions/common/constants.h"
 #include "net/base/data_url.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "ui/base/ui_base_switches.h"
+#include "third_party/WebKit/public/platform/WebCString.h"
+#include "third_party/WebKit/public/platform/WebRect.h"
+#include "third_party/WebKit/public/platform/WebSize.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/web/WebAccessibilityObject.h"
+#include "third_party/WebKit/public/web/WebDataSource.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebNode.h"
+#include "third_party/WebKit/public/web/WebNodeList.h"
+#include "third_party/WebKit/public/web/WebView.h"
+#include "ui/base/ui_base_switches_util.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "v8/include/v8-testing.h"
 #include "webkit/glue/image_decoder.h"
-#include "webkit/glue/multi_resolution_image_resource_fetcher.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebAccessibilityObject;
 using WebKit::WebCString;
 using WebKit::WebDataSource;
 using WebKit::WebDocument;
+using WebKit::WebElement;
 using WebKit::WebFrame;
 using WebKit::WebGestureEvent;
 using WebKit::WebIconURL;
+using WebKit::WebNode;
+using WebKit::WebNodeList;
 using WebKit::WebRect;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebSize;
@@ -69,7 +74,6 @@ using WebKit::WebURLRequest;
 using WebKit::WebView;
 using WebKit::WebVector;
 using extensions::APIPermission;
-using webkit_glue::MultiResolutionImageResourceFetcher;
 
 // Delay in milliseconds that we'll wait before capturing the page contents
 // and thumbnail.
@@ -214,6 +218,10 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeViewMsg_AddStrictSecurityHost,
                         OnAddStrictSecurityHost)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_NPAPINotSupported, OnNPAPINotSupported)
+#if defined(OS_ANDROID)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_UpdateTopControlsState,
+                        OnUpdateTopControlsState)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -281,6 +289,15 @@ void ChromeRenderViewObserver::OnNPAPINotSupported() {
 #endif
 }
 
+#if defined(OS_ANDROID)
+void ChromeRenderViewObserver::OnUpdateTopControlsState(
+    content::TopControlsState constraints,
+    content::TopControlsState current,
+    bool animate) {
+  render_view()->UpdateTopControlsState(constraints, current, animate);
+}
+#endif
+
 void ChromeRenderViewObserver::Navigate(const GURL& url) {
   // Execute cache clear operations that were postponed until a navigation
   // event (including tab reload).
@@ -299,26 +316,17 @@ void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
 }
 
 void ChromeRenderViewObserver::OnSetVisuallyDeemphasized(bool deemphasized) {
-  // TODO(msw|wittman): Remove this function entirely once new style constrained
-  // window is enabled on the other platforms.
-#if defined(OS_MACOSX) || defined(OS_WIN)
-  return;
-#endif
+  bool already_deemphasized = !!dimmed_color_overlay_.get();
+  if (already_deemphasized == deemphasized)
+    return;
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableNewDialogStyle)) {
-    bool already_deemphasized = !!dimmed_color_overlay_.get();
-    if (already_deemphasized == deemphasized)
-      return;
-
-    if (deemphasized) {
-      // 70% opaque grey.
-      SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
-      dimmed_color_overlay_.reset(
-          new WebViewColorOverlay(render_view(), greyish));
-    } else {
-      dimmed_color_overlay_.reset();
-    }
+  if (deemphasized) {
+    // 70% opaque grey.
+    SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
+    dimmed_color_overlay_.reset(
+        new WebViewColorOverlay(render_view(), greyish));
+  } else {
+    dimmed_color_overlay_.reset();
   }
 }
 
@@ -410,18 +418,6 @@ bool ChromeRenderViewObserver::allowWriteToClipboard(WebFrame* frame,
       routing_id(), GURL(frame->document().securityOrigin().toString().utf8()),
       &allowed));
   return allowed;
-}
-
-const extensions::Extension* ChromeRenderViewObserver::GetExtension(
-    const WebSecurityOrigin& origin) const {
-  if (!EqualsASCII(origin.protocol(), extensions::kExtensionScheme))
-    return NULL;
-
-  const std::string extension_id = origin.host().utf8().data();
-  if (!extension_dispatcher_->IsExtensionActive(extension_id))
-    return NULL;
-
-  return extension_dispatcher_->extensions()->GetByID(extension_id);
 }
 
 bool ChromeRenderViewObserver::allowWebComponents(const WebDocument& document,
@@ -625,12 +621,6 @@ void ChromeRenderViewObserver::DidStartLoading() {
 }
 
 void ChromeRenderViewObserver::DidStopLoading() {
-  CapturePageInfoLater(
-      false,  // preliminary_capture
-      base::TimeDelta::FromMilliseconds(
-          render_view()->GetContentStateImmediately() ?
-              0 : kDelayForCaptureMs));
-
   WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   GURL osd_url = main_frame->document().openSearchDescriptionURL();
   if (!osd_url.is_empty()) {
@@ -638,14 +628,27 @@ void ChromeRenderViewObserver::DidStopLoading() {
         routing_id(), render_view()->GetPageId(), osd_url,
         search_provider::AUTODETECTED_PROVIDER));
   }
+
+  // Don't capture pages including refresh meta tag.
+  if (HasRefreshMetaTag(main_frame))
+    return;
+
+  CapturePageInfoLater(
+      render_view()->GetPageId(),
+      false,  // preliminary_capture
+      base::TimeDelta::FromMilliseconds(
+          render_view()->GetContentStateImmediately() ?
+              0 : kDelayForCaptureMs));
 }
 
 void ChromeRenderViewObserver::DidCommitProvisionalLoad(
     WebFrame* frame, bool is_new_navigation) {
-  if (!is_new_navigation)
+  // Don't capture pages being not new, or including refresh meta tag.
+  if (!is_new_navigation || HasRefreshMetaTag(frame))
     return;
 
   CapturePageInfoLater(
+      render_view()->GetPageId(),
       true,  // preliminary_capture
       base::TimeDelta::FromMilliseconds(kDelayForForcedCaptureMs));
 }
@@ -663,25 +666,30 @@ void ChromeRenderViewObserver::DidHandleGestureEvent(
     return;
 
   WebKit::WebTextInputType text_input_type =
-      render_view()->GetWebView()->textInputType();
+      render_view()->GetWebView()->textInputInfo().type;
 
   render_view()->Send(new ChromeViewHostMsg_FocusedNodeTouched(
       routing_id(),
       text_input_type != WebKit::WebTextInputTypeNone));
 }
 
-void ChromeRenderViewObserver::CapturePageInfoLater(bool preliminary_capture,
+void ChromeRenderViewObserver::CapturePageInfoLater(int page_id,
+                                                    bool preliminary_capture,
                                                     base::TimeDelta delay) {
   capture_timer_.Start(
       FROM_HERE,
       delay,
       base::Bind(&ChromeRenderViewObserver::CapturePageInfo,
                  base::Unretained(this),
+                 page_id,
                  preliminary_capture));
 }
 
-void ChromeRenderViewObserver::CapturePageInfo(bool preliminary_capture) {
-  int page_id = render_view()->GetPageId();
+void ChromeRenderViewObserver::CapturePageInfo(int page_id,
+                                               bool preliminary_capture) {
+  // If |page_id| is obsolete, we should stop indexing and capturing a page.
+  if (render_view()->GetPageId() != page_id)
+    return;
 
   if (!render_view()->GetWebView())
     return;
@@ -712,7 +720,7 @@ void ChromeRenderViewObserver::CapturePageInfo(bool preliminary_capture) {
   UMA_HISTOGRAM_TIMES(kTranslateCaptureText,
                       base::TimeTicks::Now() - capture_begin_time);
   if (translate_helper_)
-    translate_helper_->PageCaptured(contents);
+    translate_helper_->PageCaptured(page_id, contents);
 
   // Skip indexing if this is not a new load.  Note that the case where
   // page_id == last_indexed_page_id_ is more complicated, since we need to
@@ -803,4 +811,42 @@ ExternalHostBindings* ChromeRenderViewObserver::GetExternalHostBindings() {
 
 bool ChromeRenderViewObserver::IsStrictSecurityHost(const std::string& host) {
   return (strict_security_hosts_.find(host) != strict_security_hosts_.end());
+}
+
+const extensions::Extension* ChromeRenderViewObserver::GetExtension(
+    const WebSecurityOrigin& origin) const {
+  if (!EqualsASCII(origin.protocol(), extensions::kExtensionScheme))
+    return NULL;
+
+  const std::string extension_id = origin.host().utf8().data();
+  if (!extension_dispatcher_->IsExtensionActive(extension_id))
+    return NULL;
+
+  return extension_dispatcher_->extensions()->GetByID(extension_id);
+}
+
+bool ChromeRenderViewObserver::HasRefreshMetaTag(WebFrame* frame) {
+  if (!frame)
+    return false;
+  WebElement head = frame->document().head();
+  if (head.isNull() || !head.hasChildNodes())
+    return false;
+
+  const WebString tag_name(ASCIIToUTF16("meta"));
+  const WebString attribute_name(ASCIIToUTF16("http-equiv"));
+
+  WebNodeList children = head.childNodes();
+  for (size_t i = 0; i < children.length(); ++i) {
+    WebNode node = children.item(i);
+    if (!node.isElementNode())
+      continue;
+    WebElement element = node.to<WebElement>();
+    if (!element.hasTagName(tag_name))
+      continue;
+    WebString value = element.getAttribute(attribute_name);
+    if (value.isNull() || !LowerCaseEqualsASCII(value, "refresh"))
+      continue;
+    return true;
+  }
+  return false;
 }

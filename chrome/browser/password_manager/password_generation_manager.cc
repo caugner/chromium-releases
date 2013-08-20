@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/pref_names.h"
-#include "components/autofill/common/autofill_messages.h"
-#include "components/autofill/browser/password_generator.h"
+#include "components/autofill/core/browser/password_generator.h"
+#include "components/autofill/core/common/autofill_messages.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
@@ -130,7 +130,7 @@ void PasswordGenerationManager::UpdateState(content::RenderViewHost* host,
   ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile);
   if (sync_service) {
-    syncer::ModelTypeSet sync_set = sync_service->GetPreferredDataTypes();
+    syncer::ModelTypeSet sync_set = sync_service->GetActiveDataTypes();
     password_sync_enabled = (sync_service->HasSyncSetupCompleted() &&
                              sync_set.Has(syncer::PASSWORDS));
   }

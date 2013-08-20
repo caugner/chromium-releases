@@ -297,7 +297,7 @@ class Enum(object):
               'description': self.description,
               'type': 'string',
               'enum': enum}
-    for property_name in ('inline_doc', 'nodoc'):
+    for property_name in ('inline_doc', 'noinline_doc', 'nodoc'):
       if self.node.GetProperty(property_name):
         result[property_name] = True
     return result
@@ -309,8 +309,7 @@ class Namespace(object):
   dictionary that the JSON schema compiler expects to see.
   '''
 
-  def __init__(self, namespace_node, nodoc=False, permissions=None,
-               internal=False):
+  def __init__(self, namespace_node, description, nodoc=False, internal=False):
     self.namespace = namespace_node
     self.nodoc = nodoc
     self.internal = internal
@@ -318,7 +317,7 @@ class Namespace(object):
     self.functions = []
     self.types = []
     self.callbacks = OrderedDict()
-    self.permissions = permissions or []
+    self.description = description
 
   def process(self):
     for node in self.namespace.children:
@@ -336,8 +335,8 @@ class Namespace(object):
       else:
         sys.exit('Did not process %s %s' % (node.cls, node))
     return {'namespace': self.namespace.GetName(),
+            'description': self.description,
             'nodoc': self.nodoc,
-            'documentation_permissions_required': self.permissions,
             'types': self.types,
             'functions': self.functions,
             'internal': self.internal,
@@ -364,22 +363,23 @@ class IDLSchema(object):
     namespaces = []
     nodoc = False
     internal = False
-    permissions = None
+    description = None
     for node in self.idl:
       if node.cls == 'Namespace':
-        namespace = Namespace(node, nodoc, permissions, internal)
+        if not description:
+          raise ValueError('%s must have a namespace-level comment. This will '
+                           'appear on the API summary page.' % node.GetName())
+        namespace = Namespace(node, description, nodoc, internal)
         namespaces.append(namespace.process())
         nodoc = False
         internal = False
       elif node.cls == 'Copyright':
         continue
       elif node.cls == 'Comment':
-        continue
+        description = node.GetName()
       elif node.cls == 'ExtAttribute':
         if node.name == 'nodoc':
           nodoc = bool(node.value)
-        elif node.name == 'permissions':
-          permission = node.value.split(',')
         elif node.name == 'internal':
           internal = bool(node.value)
         else:

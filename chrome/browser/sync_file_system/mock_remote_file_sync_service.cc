@@ -8,17 +8,15 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/fileapi/file_system_url.h"
+#include "webkit/browser/fileapi/file_system_url.h"
 
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::Return;
 
 namespace sync_file_system {
-
-const char MockRemoteFileSyncService::kServiceName[] = "mock_sync_service";
 
 MockRemoteFileSyncService::MockRemoteFileSyncService()
     : conflict_resolution_policy_(CONFLICT_RESOLUTION_MANUAL) {
@@ -43,8 +41,6 @@ MockRemoteFileSyncService::MockRemoteFileSyncService()
       .WillByDefault(Return(false));
   ON_CALL(*this, GetCurrentState())
       .WillByDefault(Return(REMOTE_SERVICE_OK));
-  ON_CALL(*this, GetServiceName())
-      .WillByDefault(Return(kServiceName));
   ON_CALL(*this, SetConflictResolutionPolicy(_))
       .WillByDefault(Invoke(this, &self::SetConflictResolutionPolicyStub));
   ON_CALL(*this, GetConflictResolutionPolicy())

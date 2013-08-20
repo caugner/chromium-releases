@@ -17,6 +17,11 @@ var onNativeSuggestionsCalls = 0;
 var onChangeCalls = 0;
 var submitCount = 0;
 var onEscKeyPressedCalls = 0;
+var onFocusChangedCalls = 0;
+var onToggleVoiceSearchCalls = 0;
+var isFocused = false;
+var onvisibilitycalls = 0;
+var onThemeChangedCalls = 0;
 
 function getApiHandle() {
   if (window.navigator && window.navigator.searchBox)
@@ -100,6 +105,23 @@ function handleMostVisitedChange() {
   }
 }
 
+document.addEventListener("webkitvisibilitychange", function() {
+  onvisibilitycalls++;
+}, false);
+
+function handleFocusChange() {
+  onFocusChangedCalls++;
+  isFocused = apiHandle.isFocused;
+}
+
+function handleToggleVoiceSearch() {
+  onToggleVoiceSearchCalls++;
+}
+
+function handleThemeChange() {
+  onThemeChangedCalls++;
+}
+
 function setUp() {
   apiHandle = getApiHandle();
   if (!apiHandle)
@@ -110,7 +132,10 @@ function setUp() {
   apiHandle.onsubmit = handleSubmit;
   apiHandle.onchange = handleOnChange;
   apiHandle.onkeypress = handleKeyPress;
+  apiHandle.onfocuschange = handleFocusChange;
+  apiHandle.ontogglevoicesearch = handleToggleVoiceSearch;
   newTabPageHandle.onmostvisitedchange = handleMostVisitedChange;
+  newTabPageHandle.onthemechange = handleThemeChange;
   if (apiHandle.value) {
     handleNativeSuggestions();
     handleOnChange();
@@ -118,6 +143,7 @@ function setUp() {
   if (newTabPageHandle.mostVisited && newTabPageHandle.mostVisited.length) {
     handleMostVisitedChange();
   }
+  handleFocusChange();
 }
 
 setUp();

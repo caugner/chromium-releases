@@ -17,7 +17,6 @@
 
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "native_client/src/trusted/plugin/callback_source.h"
-#include "native_client/src/trusted/plugin/delayed_callback.h"
 #include "native_client/src/trusted/plugin/file_downloader.h"
 #include "native_client/src/trusted/plugin/local_temp_file.h"
 #include "native_client/src/trusted/plugin/nacl_subprocess.h"
@@ -64,21 +63,17 @@ class TempFile;
 // The coordinator proceeds through several states.  They are
 // LOAD_TRANSLATOR_BINARIES
 //     Complete when ResourcesDidLoad is invoked.
+// OPEN_BITCODE_STREAM
+//       Complete when BitcodeStreamDidOpen is invoked
+// GET_NEXE_FD
+//       Get an FD which contains the cached nexe, or is writeable for
+//       translation output. Complete when NexeFdDidOpen is called.
 //
-// If cache is enabled:
-//   OPEN_LOCAL_FILE_SYSTEM
-//       Complete when FileSystemDidOpen is invoked.
-//   CREATED_PNACL_TEMP_DIRECTORY
-//       Complete when DirectoryWasCreated is invoked.
-//   CACHED_FILE_OPEN
-//       Complete with success if cached version is available and jump to end.
-//       Otherwise, proceed with usual pipeline of translation.
-//
+// If there was a cache hit, go to OPEN_NEXE_FOR_SEL_LDR, otherwise,
+// continue streaming the bitcode, and:
 // OPEN_TMP_FOR_LLC_TO_LD_COMMUNICATION
 //     Complete when ObjectFileDidOpen is invoked.
-// OPEN_TMP_FOR_LD_WRITING
-//     Complete when NexeWriteDidOpen is invoked.
-// PREPARE_PEXE_FOR_STREAMING
+// OPEN_NEXE_FD_FOR_WRITING
 //     Complete when RunTranslate is invoked.
 // START_LD_AND_LLC_SUBPROCESS_AND_INITIATE_TRANSLATION
 //     Complete when RunTranslate returns.
@@ -86,12 +81,7 @@ class TempFile;
 //     Complete when TranslateFinished is invoked.
 //
 // If cache is enabled:
-//   OPEN_CACHE_FOR_WRITE
-//     Complete when CachedNexeOpenedForWrite is invoked
-//   COPY_NEXE_TO_CACHE
-//     Complete when NexeWasCopiedToCache is invoked.
-//   RENAME_CACHE_FILE
-//     Complete when NexeFileWasRenamed is invoked.
+// TODO: notify browser of finished translation (and re-open read-only?)
 //
 // OPEN_NEXE_FOR_SEL_LDR
 //   Complete when NexeReadDidOpen is invoked.
@@ -109,13 +99,6 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
   // Call this to take ownership of the FD of the translated nexe after
   // BitcodeToNative has completed (and the finish_callback called).
   nacl::DescWrapper* ReleaseTranslatedFD() { return translated_fd_.release(); }
-
-  // Looks up a file descriptor for an url that was already downloaded.
-  // This is used for getting the descriptor for llc and ld nexes as well
-  // as the libraries and object files used by the linker.
-  int32_t GetLoadedFileDesc(int32_t pp_error,
-                            const nacl::string& url,
-                            const nacl::string& component);
 
   // Run |translate_notify_callback_| with an error condition that is not
   // PPAPI specific.  Also set ErrorInfo report.
@@ -143,6 +126,19 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
   // Get the last known load progress.
   void GetCurrentProgress(int64_t* bytes_loaded, int64_t* bytes_total);
 
+  // Return true if the total progress to report (w/ progress events) is known.
+  bool ExpectedProgressKnown() { return expected_pexe_size_ != -1; }
+
+  // Return true if we should delay the progress event reporting.
+  // This delay approximates:
+  // - the size of the buffer of bytes sent but not-yet-compiled by LLC.
+  // - the linking time.
+  bool ShouldDelayProgressEvent() {
+    const uint32_t kProgressEventSlopPct = 5;
+    return ((expected_pexe_size_ - pexe_bytes_compiled_) * 100 /
+            expected_pexe_size_) < kProgressEventSlopPct;
+  }
+
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(PnaclCoordinator);
 
@@ -153,8 +149,10 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
                    const PnaclOptions& pnacl_options,
                    const pp::CompletionCallback& translate_notify_callback);
 
+  // Callback for when the resource info JSON file has been read.
+  void ResourceInfoWasRead(int32_t pp_error);
+
   // Callback for when llc and ld have been downloaded.
-  // This is the first callback invoked in response to BitcodeToNative.
   void ResourcesDidLoad(int32_t pp_error);
 
   // Callbacks for temporary file related stages.
@@ -163,6 +161,14 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
   void FileSystemDidOpen(int32_t pp_error);
   // Invoked after we are sure the PNaCl temporary directory exists.
   void DirectoryWasCreated(int32_t pp_error);
+  // Invoke to issue a GET request for bitcode.
+  void OpenBitcodeStream();
+  // Invoked when we've started an URL fetch for the pexe to check for
+  // caching metadata.
+  void BitcodeStreamDidOpen(int32_t pp_error);
+  // Invoked when we've gotten a temp FD for the nexe, either with the nexe
+  // data, or a writeable fd to save to.
+  void NexeFdDidOpen(int32_t pp_error);
   // Invoked after we have checked the PNaCl cache for a translated version.
   void CachedFileDidOpen(int32_t pp_error);
   // Invoked when a pexe data chunk arrives (when using streaming translation)
@@ -216,16 +222,9 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
 
   // Translation creates local temporary files.
   nacl::scoped_ptr<pp::FileSystem> file_system_;
-  // The manifest used by resource loading and llc's reverse service to look up
-  // objects and libraries.
+  // The manifest used by resource loading and ld + llc's reverse service
+  // to look up objects and libraries.
   nacl::scoped_ptr<const Manifest> manifest_;
-  // TEMPORARY: ld needs to look up dynamic libraries in the nexe's manifest
-  // until metadata is complete in pexes.  This manifest lookup allows looking
-  // for whether a resource requested by ld is in the nexe manifest first, and
-  // if not, then consults the extension manifest.
-  // TODO(sehr,jvoung,pdox): remove this when metadata is correct.
-  // The manifest used by ld's reverse service to look up objects and libraries.
-  nacl::scoped_ptr<const Manifest> ld_manifest_;
   // An auxiliary class that manages downloaded resources (llc and ld nexes).
   nacl::scoped_ptr<PnaclResources> resources_;
 
@@ -245,6 +244,15 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
   // not have a writeable cache file.  That is currently the case when
   // off_the_record_ is true.
   nacl::scoped_ptr<LocalTempFile> cached_nexe_file_;
+  // True if the new cache flow is enabled. Currently set by an environment
+  // variable on construction. TODO(dschuff): remove old cache stuff.
+  bool use_new_cache_;
+  // Passed to the browser, which sets it to true if there is a translation
+  // cache hit.
+  PP_Bool is_cache_hit_;
+  // Passed to the browser, which sets it to the handle for the nexe file
+  // (either the translated nexe from the cache, or a temp file to write to).
+  PP_FileHandle nexe_handle_;
 
   // Downloader for streaming translation
   nacl::scoped_ptr<FileDownloader> streaming_downloader_;

@@ -6,7 +6,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/autofill/mock_autofill_dialog_controller.h"
 #import "chrome/browser/ui/cocoa/hyperlink_button_cell.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
@@ -27,7 +27,7 @@ class AutofillAccountChooserTest : public ui::CocoaTest {
  }
 
  protected:
-  scoped_nsobject<AutofillAccountChooser> view_;
+  base::scoped_nsobject<AutofillAccountChooser> view_;
   testing::NiceMock<autofill::MockAutofillDialogController> controller_;
 
  private:
@@ -48,7 +48,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
         int command_id,
         ui::Accelerator* accelerator) OVERRIDE { return false; }
 
-  virtual void ExecuteCommand(int command_id, int event_flags) {}
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {}
 };
 
 }  // namespace

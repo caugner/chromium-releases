@@ -5,10 +5,10 @@
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 
 #include "base/path_service.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -23,13 +23,11 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/test_browser_thread.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 
-using content::BrowserThread;
 using content::WebContentsTester;
 
 namespace {
@@ -49,7 +47,7 @@ class FaviconDelegate : public ui::MenuModelDelegate {
 
   virtual void OnIconChanged(int model_index) OVERRIDE {
     was_called_ = true;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   bool was_called() const { return was_called_; }
@@ -64,10 +62,6 @@ class FaviconDelegate : public ui::MenuModelDelegate {
 
 class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
  public:
-  BackFwdMenuModelTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_) {
-  }
-
   void ValidateModel(BackForwardMenuModel* model, int history_items,
                      int chapter_stops) {
     int h = std::min(BackForwardMenuModel::kMaxHistoryItems, history_items);
@@ -108,8 +102,6 @@ class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
     controller().GoForward();
     WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
-
-  content::TestBrowserThread ui_thread_;
 };
 
 TEST_F(BackFwdMenuModelTest, BasicCase) {
@@ -534,7 +526,7 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
           url1, base::Time::Now(), history::SOURCE_BROWSED);
   FaviconServiceFactory::GetForProfile(
       profile(), Profile::EXPLICIT_ACCESS)->SetFavicons(
-          url1, url1_favicon, history::FAVICON,
+          url1, url1_favicon, chrome::FAVICON,
           gfx::Image::CreateFrom1xBitmap(new_icon_bitmap));
 
   // Will return the current icon (default) but start an anync call
@@ -544,7 +536,7 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
 
   // Make the favicon service run GetFavIconForURL,
   // FaviconDelegate.OnIconChanged will be called.
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   // Verify that the callback executed.
   EXPECT_TRUE(favicon_delegate.was_called());

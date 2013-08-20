@@ -9,7 +9,7 @@
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/values.h"
 #include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/service/service_process_prefs.h"
@@ -63,13 +63,13 @@ class ConnectorSettingsTest : public testing::Test {
       file_util::WriteFile(file_name, content.c_str(), content.size());
     }
     ServiceProcessPrefs* prefs =
-        new ServiceProcessPrefs(file_name, message_loop_proxy_);
+        new ServiceProcessPrefs(file_name, message_loop_proxy_.get());
     prefs->ReadPrefs();
     return prefs;
   }
 
   base::ScopedTempDir temp_dir_;
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
 };
 

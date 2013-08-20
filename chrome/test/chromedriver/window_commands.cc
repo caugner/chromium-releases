@@ -7,14 +7,16 @@
 #include <list>
 
 #include "base/callback.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/basic_types.h"
 #include "chrome/test/chromedriver/chrome/chrome.h"
+#include "chrome/test/chromedriver/chrome/devtools_client.h"
 #include "chrome/test/chromedriver/chrome/geoposition.h"
+#include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
 #include "chrome/test/chromedriver/chrome/js.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/ui_events.h"
@@ -55,7 +57,7 @@ struct Cookie {
          const std::string& value,
          const std::string& domain,
          const std::string& path,
-         int expiry,
+         double expiry,
          bool secure,
          bool session)
       : name(name), value(value), domain(domain), path(path), expiry(expiry),
@@ -65,7 +67,7 @@ struct Cookie {
   std::string value;
   std::string domain;
   std::string path;
-  int expiry;
+  double expiry;
   bool secure;
   bool session;
 };
@@ -79,7 +81,7 @@ base::DictionaryValue* CreateDictionaryFrom(const Cookie& cookie) {
   if (!cookie.path.empty())
     dict->SetString("path", cookie.path);
   if (!cookie.session)
-    dict->SetInteger("expiry", cookie.expiry);
+    dict->SetDouble("expiry", cookie.expiry);
   dict->SetBoolean("secure", cookie.secure);
   return dict;
 }
@@ -104,9 +106,9 @@ Status GetVisibleCookies(WebView* web_view,
     cookie_dict->GetString("domain", &domain);
     std::string path;
     cookie_dict->GetString("path", &path);
-    double expiry_tmp = 0;
-    cookie_dict->GetDouble("expires", &expiry_tmp);
-    int expiry = static_cast<int>(expiry_tmp/1000);
+    double expiry = 0;
+    cookie_dict->GetDouble("expires", &expiry);
+    expiry /= 1000;  // Convert from millisecond to second.
     bool session = false;
     cookie_dict->GetBoolean("session", &session);
     bool secure = false;
@@ -126,15 +128,8 @@ Status ExecuteWindowCommand(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  bool is_dialog_open;
-  Status status = session->chrome->IsJavaScriptDialogOpen(&is_dialog_open);
-  if (status.IsError())
-    return status;
-  if (is_dialog_open)
-    return Status(kUnexpectedAlertOpen);
-
   WebView* web_view = NULL;
-  status = session->GetTargetWindow(&web_view);
+  Status status = session->GetTargetWindow(&web_view);
   if (status.IsError())
     return status;
 
@@ -142,25 +137,41 @@ Status ExecuteWindowCommand(
   if (status.IsError())
     return status;
 
-  Status nav_status =
-      web_view->WaitForPendingNavigations(session->GetCurrentFrameId());
-  if (nav_status.IsError())
-    return nav_status;
-  status = command.Run(session, web_view, params, value);
-  // Switch to main frame and retry command if subframe no longer exists.
-  if (status.code() == kNoSuchExecutionContext) {
-    session->SwitchToTopFrame();
+  status = web_view->HandleReceivedEvents();
+  if (status.IsError())
+    return status;
+
+  if (web_view->GetJavaScriptDialogManager()->IsDialogOpen())
+    return Status(kUnexpectedAlertOpen);
+
+  Status nav_status(kOk);
+  for (int attempt = 0; attempt < 2; attempt++) {
+    if (attempt == 1) {
+      if (status.code() == kNoSuchExecutionContext)
+        // Switch to main frame and retry command if subframe no longer exists.
+        session->SwitchToTopFrame();
+      else
+        break;
+    }
     nav_status =
-        web_view->WaitForPendingNavigations(session->GetCurrentFrameId());
+        web_view->WaitForPendingNavigations(session->GetCurrentFrameId(),
+                                            session->page_load_timeout);
     if (nav_status.IsError())
       return nav_status;
+
     status = command.Run(session, web_view, params, value);
   }
+
   nav_status =
-      web_view->WaitForPendingNavigations(session->GetCurrentFrameId());
+      web_view->WaitForPendingNavigations(session->GetCurrentFrameId(),
+                                          session->page_load_timeout);
+
   if (status.IsOk() && nav_status.IsError() &&
-      nav_status.code() != kDisconnected)
+      nav_status.code() != kDisconnected &&
+      nav_status.code() != kUnexpectedAlertOpen)
     return nav_status;
+  if (status.code() == kUnexpectedAlertOpen)
+    return Status(kOk);
   return status;
 }
 

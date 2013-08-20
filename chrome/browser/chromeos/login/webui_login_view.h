@@ -10,9 +10,9 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/chromeos/login/scoped_gaia_auth_extension.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_host.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
+#include "chrome/browser/extensions/scoped_gaia_auth_extension.h"
+#include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
+#include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -39,8 +39,8 @@ namespace chromeos {
 class WebUILoginView : public views::View,
                        public content::WebContentsDelegate,
                        public content::NotificationObserver,
-                       public WebContentsModalDialogManagerDelegate,
-                       public WebContentsModalDialogHost {
+                       public ChromeWebModalDialogManagerDelegate,
+                       public web_modal::WebContentsModalDialogHost {
  public:
   // Internal class name.
   static const char kViewClassName[];
@@ -54,23 +54,19 @@ class WebUILoginView : public views::View,
   // Overridden from views::Views:
   virtual bool AcceleratorPressed(
       const ui::Accelerator& accelerator) OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
 
-  // Overridden from WebContentsModalDialogManagerDelegate:
-  virtual void SetWebContentsBlocked(content::WebContents* web_contents,
-                                     bool blocked) OVERRIDE;
-  virtual WebContentsModalDialogHost*
+  // Overridden from ChromeWebModalDialogManagerDelegate:
+  virtual web_modal::WebContentsModalDialogHost*
       GetWebContentsModalDialogHost() OVERRIDE;
-  virtual bool IsWebContentsVisible(
-      content::WebContents* web_contents) OVERRIDE;
 
-  // Overridden from WebContentsModalDialogHost:
+  // Overridden from web_modal::WebContentsModalDialogHost:
   virtual gfx::NativeView GetHostView() const OVERRIDE;
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
   virtual void AddObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
 
   // Called when WebUI window is created.
   virtual void OnWindowCreated();
@@ -105,12 +101,12 @@ class WebUILoginView : public views::View,
 
   void set_is_hidden(bool hidden) { is_hidden_ = hidden; }
 
- protected:
-  // Let non-login derived classes suppress emission of this signal.
+  // Let suppress emission of this signal.
   void set_should_emit_login_prompt_visible(bool emit) {
     should_emit_login_prompt_visible_ = emit;
   }
 
+ protected:
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
   virtual void OnLocaleChanged() OVERRIDE;
@@ -182,7 +178,7 @@ class WebUILoginView : public views::View,
 
   scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;
 
-  ObserverList<WebContentsModalDialogHostObserver> observer_list_;
+  ObserverList<web_modal::WebContentsModalDialogHostObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUILoginView);
 };

@@ -49,6 +49,9 @@ class PolicyDetails:
     if is_chromium_os:
       expected_platform = 'chrome_os'
       wildcard_platform = None
+    elif os == 'android':
+      expected_platform = 'android'
+      wildcard_platform = None
     else:
       expected_platform = 'chrome.' + os.lower()
       wildcard_platform = 'chrome.*'
@@ -241,7 +244,7 @@ def _WritePolicyConstantSource(policies, os, f):
   f.write('const PolicyDefinitionList::Entry kEntries[] = {\n')
   for policy in policies:
     if policy.is_supported:
-      f.write('  { key::k%s, Value::%s, %s, %s },\n' %
+      f.write('  { key::k%s, base::Value::%s, %s, %s },\n' %
           (policy.name, policy.value_type,
               'true' if policy.is_device_only else 'false', policy.id))
   f.write('};\n\n')
@@ -251,12 +254,16 @@ def _WritePolicyConstantSource(policies, os, f):
           '  kEntries + arraysize(kEntries),\n'
           '};\n\n')
 
-  f.write('// List of deprecated policies.\n'
-          'const char* kDeprecatedPolicyList[] = {\n')
-  for policy in policies:
-    if policy.is_supported and policy.is_deprecated:
-      f.write('  key::k%s,\n' % policy.name)
-  f.write('};\n\n')
+  has_deprecated_policies = any(
+      [p.is_supported and p.is_deprecated for p in policies])
+
+  if has_deprecated_policies:
+    f.write('// List of deprecated policies.\n'
+            'const char* kDeprecatedPolicyList[] = {\n')
+    for policy in policies:
+      if policy.is_supported and policy.is_deprecated:
+        f.write('  key::k%s,\n' % policy.name)
+    f.write('};\n\n')
 
   f.write('}  // namespace\n\n')
 
@@ -269,16 +276,18 @@ def _WritePolicyConstantSource(policies, os, f):
             'L"' + CHROMIUM_POLICY_KEY + '";\n'
             '#endif\n\n')
 
-  f.write('bool IsDeprecatedPolicy(const std::string& policy) {\n'
-          '  for (size_t i = 0; i < arraysize(kDeprecatedPolicyList);'
-            ' ++i) {\n'
-          '    if (policy == kDeprecatedPolicyList[i])\n'
-          '      return true;\n'
-          '  }\n'
-          '  return false;\n'
-          '}\n'
-          '\n'
-          'const PolicyDefinitionList* GetChromePolicyDefinitionList() {\n'
+  f.write('bool IsDeprecatedPolicy(const std::string& policy) {\n')
+  if has_deprecated_policies:
+    # arraysize() doesn't work with empty arrays.
+    f.write('  for (size_t i = 0; i < arraysize(kDeprecatedPolicyList);'
+                ' ++i) {\n'
+            '    if (policy == kDeprecatedPolicyList[i])\n'
+            '      return true;\n'
+            '  }\n')
+  f.write('  return false;\n'
+          '}\n\n')
+
+  f.write('const PolicyDefinitionList* GetChromePolicyDefinitionList() {\n'
           '  return &kChromePolicyList;\n'
           '}\n\n')
 
@@ -415,7 +424,7 @@ namespace policy {
 
 namespace em = enterprise_management;
 
-Value* DecodeIntegerValue(google::protobuf::int64 value) {
+base::Value* DecodeIntegerValue(google::protobuf::int64 value) {
   if (value < std::numeric_limits<int>::min() ||
       value > std::numeric_limits<int>::max()) {
     LOG(WARNING) << "Integer value " << value
@@ -423,15 +432,15 @@ Value* DecodeIntegerValue(google::protobuf::int64 value) {
     return NULL;
   }
 
-  return Value::CreateIntegerValue(static_cast<int>(value));
+  return base::Value::CreateIntegerValue(static_cast<int>(value));
 }
 
-ListValue* DecodeStringList(const em::StringList& string_list) {
-  ListValue* list_value = new ListValue;
+base::ListValue* DecodeStringList(const em::StringList& string_list) {
+  base::ListValue* list_value = new base::ListValue;
   RepeatedPtrField<std::string>::const_iterator entry;
   for (entry = string_list.entries().begin();
        entry != string_list.entries().end(); ++entry) {
-    list_value->Append(Value::CreateStringValue(*entry));
+    list_value->Append(base::Value::CreateStringValue(*entry));
   }
   return list_value;
 }
@@ -448,16 +457,16 @@ CPP_FOOT = '''}
 
 def _CreateValue(type, arg):
   if type == 'TYPE_BOOLEAN':
-    return 'Value::CreateBooleanValue(%s)' % arg
+    return 'base::Value::CreateBooleanValue(%s)' % arg
   elif type == 'TYPE_INTEGER':
     return 'DecodeIntegerValue(%s)' % arg
   elif type == 'TYPE_STRING':
-    return 'Value::CreateStringValue(%s)' % arg
+    return 'base::Value::CreateStringValue(%s)' % arg
   elif type == 'TYPE_LIST':
     return 'DecodeStringList(%s)' % arg
   elif type == 'TYPE_DICTIONARY':
     # TODO(joaodasilva): decode 'dict' types. http://crbug.com/108997
-    return 'new DictionaryValue()'
+    return 'new base::DictionaryValue()'
   else:
     raise NotImplementedError('Unknown type %s' % type)
 
@@ -487,7 +496,7 @@ def _WritePolicyCode(f, policy):
           '        }\n'
           '      }\n'
           '      if (do_set) {\n')
-  f.write('        Value* value = %s;\n' %
+  f.write('        base::Value* value = %s;\n' %
           (_CreateValue(policy.value_type, 'policy_proto.value()')))
   f.write('        map->Set(key::k%s, level, POLICY_SCOPE_USER, value);\n' %
           policy.name)

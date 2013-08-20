@@ -4,6 +4,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "net/quic/congestion_control/inter_arrival_sender.h"
 #include "net/quic/congestion_control/quic_congestion_manager.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/test_tools/mock_clock.h"
@@ -28,8 +29,9 @@ class QuicCongestionManagerPeer : public QuicCongestionManager {
   }
 
   using QuicCongestionManager::rtt;
-  using QuicCongestionManager::SentBandwidth;
-
+  const SendAlgorithmInterface::SentPacketsMap& packet_history_map() {
+    return packet_history_map_;
+  }
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicCongestionManagerPeer);
 };
@@ -39,6 +41,9 @@ class QuicCongestionManagerTest : public ::testing::Test {
   void SetUpCongestionType(CongestionFeedbackType congestion_type) {
     manager_.reset(new QuicCongestionManagerPeer(&clock_, congestion_type));
   }
+
+  static const HasRetransmittableData kIgnored = HAS_RETRANSMITTABLE_DATA;
+
   MockClock clock_;
   scoped_ptr<QuicCongestionManagerPeer> manager_;
 };
@@ -55,10 +60,10 @@ TEST_F(QuicCongestionManagerTest, Bandwidth) {
 
   for (int i = 1; i <= 100; ++i) {
     QuicTime::Delta advance_time = manager_->TimeUntilSend(
-        clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA);
+        clock_.Now(), NOT_RETRANSMISSION, kIgnored);
     clock_.AdvanceTime(advance_time);
     EXPECT_TRUE(manager_->TimeUntilSend(
-        clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
+        clock_.Now(), NOT_RETRANSMISSION, kIgnored).IsZero());
     manager_->SentPacket(i, clock_.Now(), 1000, NOT_RETRANSMISSION);
     // Ack the packet we sent.
     ack.received_info.largest_observed = i;
@@ -66,7 +71,10 @@ TEST_F(QuicCongestionManagerTest, Bandwidth) {
   }
   EXPECT_EQ(100, manager_->BandwidthEstimate().ToKBytesPerSecond());
   EXPECT_NEAR(100,
-              manager_->SentBandwidth(clock_.Now()).ToKBytesPerSecond(), 4);
+              InterArrivalSender::CalculateSentBandwidth(
+                  manager_->packet_history_map(),
+                  clock_.Now()).ToKBytesPerSecond(),
+              4);
 }
 
 TEST_F(QuicCongestionManagerTest, BandwidthWith1SecondGap) {
@@ -83,7 +91,7 @@ TEST_F(QuicCongestionManagerTest, BandwidthWith1SecondGap) {
       ++sequence_number) {
     clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(10));
     EXPECT_TRUE(manager_->TimeUntilSend(
-        clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
+        clock_.Now(), NOT_RETRANSMISSION, kIgnored).IsZero());
     manager_->SentPacket(
         sequence_number, clock_.Now(), 1000, NOT_RETRANSMISSION);
     // Ack the packet we sent.
@@ -92,16 +100,24 @@ TEST_F(QuicCongestionManagerTest, BandwidthWith1SecondGap) {
   }
   EXPECT_EQ(100000, manager_->BandwidthEstimate().ToBytesPerSecond());
   EXPECT_NEAR(100000,
-              manager_->SentBandwidth(clock_.Now()).ToBytesPerSecond(), 2000);
+              InterArrivalSender::CalculateSentBandwidth(
+                  manager_->packet_history_map(),
+                  clock_.Now()).ToBytesPerSecond(),
+              2000);
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(500));
   EXPECT_NEAR(50000,
-              manager_->SentBandwidth(clock_.Now()).ToBytesPerSecond(), 1000);
+              InterArrivalSender::CalculateSentBandwidth(
+                  manager_->packet_history_map(),
+                  clock_.Now()).ToBytesPerSecond(),
+              1000);
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(501));
   EXPECT_NEAR(100000, manager_->BandwidthEstimate().ToBytesPerSecond(), 2000);
-  EXPECT_TRUE(manager_->SentBandwidth(clock_.Now()).IsZero());
+  EXPECT_TRUE(InterArrivalSender::CalculateSentBandwidth(
+      manager_->packet_history_map(),
+      clock_.Now()).IsZero());
   for (int i = 1; i <= 150; ++i) {
     EXPECT_TRUE(manager_->TimeUntilSend(
-        clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
+        clock_.Now(), NOT_RETRANSMISSION, kIgnored).IsZero());
     manager_->SentPacket(i + 100, clock_.Now(), 1000, NOT_RETRANSMISSION);
     clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(10));
     // Ack the packet we sent.
@@ -110,7 +126,10 @@ TEST_F(QuicCongestionManagerTest, BandwidthWith1SecondGap) {
   }
   EXPECT_EQ(100, manager_->BandwidthEstimate().ToKBytesPerSecond());
   EXPECT_NEAR(100,
-              manager_->SentBandwidth(clock_.Now()).ToKBytesPerSecond(), 2);
+              InterArrivalSender::CalculateSentBandwidth(
+                  manager_->packet_history_map(),
+                  clock_.Now()).ToKBytesPerSecond(),
+              2);
 }
 
 TEST_F(QuicCongestionManagerTest, Rtt) {

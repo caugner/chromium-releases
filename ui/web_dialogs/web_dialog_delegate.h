@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/web_dialogs/web_dialogs_export.h"
@@ -38,7 +38,7 @@ class WEB_DIALOGS_EXPORT WebDialogDelegate {
   virtual ModalType GetDialogModalType() const = 0;
 
   // Returns the title of the dialog.
-  virtual string16 GetDialogTitle() const = 0;
+  virtual base::string16 GetDialogTitle() const = 0;
 
   // Returns the dialog's name identifier. Used to identify this dialog for
   // state restoration.

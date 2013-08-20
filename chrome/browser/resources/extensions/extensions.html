@@ -21,6 +21,19 @@
 <script src="chrome://resources/js/cr/ui/focus_manager.js"></script>
 <script src="chrome://resources/js/cr/ui/overlay.js"></script>
 
+<if expr="pp_ifdef('chromeos')">
+<link rel="stylesheet" href="chrome://resources/css/list.css">
+<link rel="stylesheet" href="chromeos/kiosk_apps.css">
+<script src="chrome://resources/js/cr/event_target.js"></script>
+<script src="chrome://resources/js/cr/ui/array_data_model.js"></script>
+<script src="chrome://resources/js/cr/ui/list_selection_model.js"></script>
+<script src="chrome://resources/js/cr/ui/list_selection_controller.js"></script>
+<script src="chrome://resources/js/cr/ui/list_single_selection_model.js">
+</script>
+<script src="chrome://resources/js/cr/ui/list_item.js"></script>
+<script src="chrome://resources/js/cr/ui/list.js"></script>
+</if>
+
 <script src="chrome://extensions-frame/extensions.js"></script>
 </head>
 
@@ -31,6 +44,10 @@
   <include src="extension_commands_overlay.html">
   <include src="pack_extension_overlay.html">
   <include src="../../../../ui/webui/resources/html/alert_overlay.html">
+<if expr="pp_ifdef('chromeos')">
+    <include src="chromeos/kiosk_apps.html">
+    <include src="chromeos/kiosk_app_disable_bailout_confirm.html">
+</if>
   <div id="dropTargetOverlay" class="page">
     <div i18n-content="extensionSettingsInstallDropTarget"></div>
   </div>
@@ -45,12 +62,6 @@
           <span i18n-content="extensionSettingsDeveloperMode">
         </label>
       </div>
-      <if expr="not pp_ifdef('chromeos')">
-        <div id="managed-user-control-div">
-          <button id="unlock-button" i18n-content="unlockButton"></button>
-          <button id="lock-button" i18n-content="lockButton"></button>
-        </div>
-      </if>
     </div>
     <div class="page-banner profile-is-managed-banner">
       <div class="page-banner-gradient">
@@ -64,6 +75,10 @@
         i18n-content="extensionSettingsLoadUnpackedButton"></button>
     <button id="pack-extension"
         i18n-content="extensionSettingsPackButton"></button>
+<if expr="pp_ifdef('chromeos')">
+      <button id="add-kiosk-app"
+          i18n-content="addKioskAppButton" hidden></button>
+</if>
     <div id="dev-controls-spacer"></div>
     <button id="update-extensions-now"
         i18n-content="extensionSettingsUpdateButton"></button>
@@ -106,6 +121,12 @@
           </a>
           <a class="site-link" target="_parent" hidden></a>
         </p>
+        <div class="permanent-warnings">
+          <div class="extension-warnings" hidden>
+            <span i18n-content="extensionSettingsWarningsTitle"></span>
+            <ul></ul>
+          </div>
+        </div>
         <div class="developer-extras">
           <div>
             <span i18n-content="extensionSettingsExtensionId"></span>
@@ -122,10 +143,6 @@
             <span i18n-content="extensionSettingsInspectViews"></span>
             <a href="#"></a>
           </div>
-          <div class="extension-warnings" hidden>
-            <span i18n-content="extensionSettingsWarningsTitle"></span>
-            <ul></ul>
-          </div>
           <div class="install-warnings" hidden>
             <span i18n-content="extensionSettingsInstallWarnings"></span>
             <ul></ul>
@@ -134,25 +151,24 @@
         <div class="optional-controls">
           <button class="show-button"
               i18n-content="extensionSettingsShowButton" hidden></button>
-          <span class="optional-controls-disableable">
           <div class="checkbox"><label class="incognito-control">
             <input type="checkbox">
             <span i18n-content="extensionSettingsEnableIncognito"></span>
           </label></div>
-          <label class="file-access-control" hidden>
-            <input type="checkbox">
-            <span i18n-content="extensionSettingsAllowFileAccess"></span>
-          </label>
-          <a class="options-link" i18n-content="extensionSettingsOptions"
-              href="#" hidden></a>
-          <a class="activity-link" i18n-content="extensionSettingsActivity"
-              href="#" hidden></a>
-          <a class="reload-link" i18n-content="extensionSettingsReloadUnpacked"
-              href="#" hidden></a>
-          <a class="launch-link" i18n-content="extensionSettingsLaunch"
-              href="#" hidden></a>
-          <a class="restart-link" i18n-content="extensionSettingsRestart"
-              href="#" hidden></a>
+          <span class="optional-controls-disableable">
+            <label class="file-access-control" hidden>
+              <input type="checkbox">
+              <span i18n-content="extensionSettingsAllowFileAccess"></span>
+            </label>
+            <a class="options-link" i18n-content="extensionSettingsOptions"
+                href="#" hidden></a>
+            <a class="reload-link"
+                i18n-content="extensionSettingsReloadUnpacked"
+                href="#" hidden></a>
+            <a class="launch-link" i18n-content="extensionSettingsLaunch"
+                href="#" hidden></a>
+            <a class="restart-link" i18n-content="extensionSettingsRestart"
+                href="#" hidden></a>
           </span>
         </div>
         <div class="butter-bar"
@@ -171,6 +187,7 @@
             </span>
           </span>
         </label>
+        <span class="location-text"></span>
         </div>
       </div>
     </div>

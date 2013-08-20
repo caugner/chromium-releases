@@ -14,16 +14,16 @@ namespace extensions {
 class SyncFileSystemCustomBindings : public ChromeV8Extension {
  public:
   SyncFileSystemCustomBindings(Dispatcher* dispatcher,
-                               v8::Handle<v8::Context> v8_context);
+                               ChromeV8Context* context);
 
  private:
   // FileSystemObject GetSyncFileSystemObject(string name, string root_url):
   // construct a file system object from the given name and root_url.
-  v8::Handle<v8::Value> GetSyncFileSystemObject(const v8::Arguments& args);
+  void GetSyncFileSystemObject(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   DISALLOW_COPY_AND_ASSIGN(SyncFileSystemCustomBindings);
 };
 
-}  // extensions
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_SYNC_FILE_SYSTEM_CUSTOM_BINDINGS_H_

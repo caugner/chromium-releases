@@ -8,7 +8,8 @@
 #include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/values.h"
@@ -18,6 +19,7 @@
 #include "chrome/test/chromedriver/chrome/geolocation_override_manager.h"
 #include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
 #include "chrome/test/chromedriver/chrome/js.h"
+#include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chrome/navigation_tracker.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/ui_events.h"
@@ -65,17 +67,6 @@ const char* GetAsString(MouseButton button) {
   }
 }
 
-Status IsNotPendingNavigation(NavigationTracker* tracker,
-                              const std::string& frame_id,
-                              bool* is_not_pending) {
-  bool is_pending;
-  Status status = tracker->IsPendingNavigation(frame_id, &is_pending);
-  if (status.IsError())
-    return status;
-  *is_not_pending = !is_pending;
-  return Status(kOk);
-}
-
 const char* GetAsString(KeyEventType type) {
   switch (type) {
     case kKeyDownEventType:
@@ -94,7 +85,8 @@ const char* GetAsString(KeyEventType type) {
 }  // namespace
 
 WebViewImpl::WebViewImpl(const std::string& id,
-                         scoped_ptr<DevToolsClient> client)
+                         scoped_ptr<DevToolsClient> client,
+                         Log* log)
     : id_(id),
       dom_tracker_(new DomTracker(client.get())),
       frame_tracker_(new FrameTracker(client.get())),
@@ -102,7 +94,8 @@ WebViewImpl::WebViewImpl(const std::string& id,
       dialog_manager_(new JavaScriptDialogManager(client.get())),
       geolocation_override_manager_(
           new GeolocationOverrideManager(client.get())),
-      client_(client.release()) {}
+      client_(client.release()),
+      log_(log) {}
 
 WebViewImpl::~WebViewImpl() {}
 
@@ -114,7 +107,15 @@ Status WebViewImpl::ConnectIfNecessary() {
   return client_->ConnectIfNecessary();
 }
 
+Status WebViewImpl::HandleReceivedEvents() {
+  return client_->HandleReceivedEvents();
+}
+
 Status WebViewImpl::Load(const std::string& url) {
+  // Javascript URLs will cause a hang while waiting for the page to stop
+  // loading, so just disallow.
+  if (StartsWithASCII(url, "javascript:", false))
+    return Status(kUnknownError, "unsupported protocol");
   base::DictionaryValue params;
   params.SetString("url", url);
   return client_->SendCommand("Page.navigate", params);
@@ -257,39 +258,31 @@ Status WebViewImpl::DeleteCookie(const std::string& name,
   return client_->SendCommand("Page.deleteCookie", params);
 }
 
-Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id) {
-  std::string full_frame_id(frame_id);
-  if (full_frame_id.empty()) {
-    Status status = GetMainFrame(&full_frame_id);
-    if (status.IsError())
-      return status;
+Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id,
+                                              int timeout) {
+  log_->AddEntry(Log::kLog, "waiting for pending navigations...");
+  Status status = client_->HandleEventsUntil(
+      base::Bind(&WebViewImpl::IsNotPendingNavigation, base::Unretained(this),
+                 frame_id),
+      base::TimeDelta::FromMilliseconds(timeout));
+  if (status.code() == kTimeout) {
+    log_->AddEntry(Log::kLog, "timed out. stopping navigations...");
+    scoped_ptr<base::Value> unused_value;
+    EvaluateScript(std::string(), "window.stop();", &unused_value);
+    Status new_status = client_->HandleEventsUntil(
+        base::Bind(&WebViewImpl::IsNotPendingNavigation, base::Unretained(this),
+                   frame_id),
+        base::TimeDelta::FromSeconds(10));
+    if (new_status.IsError())
+      status = new_status;
   }
-  return client_->HandleEventsUntil(
-      base::Bind(IsNotPendingNavigation, navigation_tracker_.get(),
-                 full_frame_id));
+  log_->AddEntry(Log::kLog, "done waiting for pending navigations");
+  return status;
 }
 
 Status WebViewImpl::IsPendingNavigation(const std::string& frame_id,
                                         bool* is_pending) {
-  std::string full_frame_id(frame_id);
-  if (full_frame_id.empty()) {
-    Status status = GetMainFrame(&full_frame_id);
-    if (status.IsError())
-      return status;
-  }
   return navigation_tracker_->IsPendingNavigation(frame_id, is_pending);
-}
-
-Status WebViewImpl::GetMainFrame(std::string* out_frame) {
-  base::DictionaryValue params;
-  scoped_ptr<base::DictionaryValue> result;
-  Status status = client_->SendCommandAndGetResult(
-      "Page.getResourceTree", params, &result);
-  if (status.IsError())
-    return status;
-  if (!result->GetString("frameTree.frame.id", out_frame))
-    return Status(kUnknownError, "missing 'frameTree.frame.id' in response");
-  return Status(kOk);
 }
 
 JavaScriptDialogManager* WebViewImpl::GetJavaScriptDialogManager() {
@@ -413,6 +406,21 @@ Status WebViewImpl::CallAsyncFunctionInternal(const std::string& frame,
 
     base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
   }
+}
+
+Status WebViewImpl::IsNotPendingNavigation(const std::string& frame_id,
+                                           bool* is_not_pending) {
+  bool is_pending;
+  Status status =
+      navigation_tracker_->IsPendingNavigation(frame_id, &is_pending);
+  if (status.IsError())
+    return status;
+  // An alert may block the pending navigation.
+  if (is_pending && dialog_manager_->IsDialogOpen())
+    return Status(kUnexpectedAlertOpen);
+
+  *is_not_pending = !is_pending;
+  return Status(kOk);
 }
 
 namespace internal {

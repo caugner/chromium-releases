@@ -7,8 +7,9 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/supports_user_data.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/file_write_helper.h"
@@ -28,7 +29,7 @@ const char kDrivePathKey[] = "DrivePath";
 class DriveUserData : public base::SupportsUserData::Data {
  public:
   explicit DriveUserData(const base::FilePath& path) : file_path_(path),
-                                                 is_complete_(false) {}
+                                                       is_complete_(false) {}
   virtual ~DriveUserData() {}
 
   const base::FilePath& file_path() const { return file_path_; }
@@ -88,7 +89,7 @@ bool IsPersistedDriveDownload(const base::FilePath& drive_tmp_download_path,
                               DownloadItem* download) {
   // Persisted downloads are not in IN_PROGRESS state when created, while newly
   // created downloads are.
-  return drive_tmp_download_path.IsParent(download->GetFullPath()) &&
+  return drive_tmp_download_path.IsParent(download->GetTargetFilePath()) &&
       download->GetState() != DownloadItem::IN_PROGRESS;
 }
 
@@ -107,9 +108,9 @@ DownloadHandler::~DownloadHandler() {
 
 // static
 DownloadHandler* DownloadHandler::GetForProfile(Profile* profile) {
-  DriveSystemService* system_service =
-      DriveSystemServiceFactory::FindForProfile(profile);
-  return system_service ? system_service->download_handler() : NULL;
+  DriveIntegrationService* integration_service =
+      DriveIntegrationServiceFactory::FindForProfile(profile);
+  return integration_service ? integration_service->download_handler() : NULL;
 }
 
 void DownloadHandler::Initialize(
@@ -142,14 +143,14 @@ void DownloadHandler::SubstituteDriveDownloadPath(
   if (util::IsUnderDriveMountPoint(drive_path)) {
     // Can't access drive if the directory does not exist on Drive.
     // We set off a chain of callbacks as follows:
-    // FileSystem::GetEntryInfoByPath
+    // FileSystem::GetResourceEntryByPath
     //   OnEntryFound calls FileSystem::CreateDirectory (if necessary)
     //     OnCreateDirectory calls SubstituteDriveDownloadPathInternal
     const base::FilePath drive_dir_path =
         util::ExtractDrivePath(drive_path.DirName());
-    // Ensure the directory exists. This also forces FileSystem to
-    // initialize DriveRootDirectory.
-    file_system_->GetEntryInfoByPath(
+    // Check if the directory exists, and create it if the directory does not
+    // exist.
+    file_system_->GetResourceEntryByPath(
         drive_dir_path,
         base::Bind(&DownloadHandler::OnEntryFound,
                    weak_ptr_factory_.GetWeakPtr(),
@@ -188,14 +189,14 @@ base::FilePath DownloadHandler::GetTargetPath(
 
 bool DownloadHandler::IsDriveDownload(const DownloadItem* download) {
   // We use the existence of the DriveUserData object in download as a
-  // signal that this is a DriveDownload.
+  // signal that this is a download to Drive.
   return GetDriveUserData(download) != NULL;
 }
 
 void DownloadHandler::CheckForFileExistence(
     const DownloadItem* download,
     const content::CheckForFileExistenceCallback& callback) {
-  file_system_->GetEntryInfoByPath(
+  file_system_->GetResourceEntryByPath(
       util::ExtractDrivePath(GetTargetPath(download)),
       base::Bind(&ContinueCheckingForFileExistence,
                  callback));
@@ -245,8 +246,13 @@ void DownloadHandler::OnDownloadUpdated(
       break;
 
     case DownloadItem::CANCELLED:
-    case DownloadItem::INTERRUPTED:
       download->SetUserData(&kDrivePathKey, NULL);
+      break;
+
+    case DownloadItem::INTERRUPTED:
+      // Interrupted downloads can be resumed. Keep the Drive user data around
+      // so that it can be used when the download resumes. The download is truly
+      // done when it's complete, is cancelled or is removed.
       break;
 
     default:
@@ -271,7 +277,7 @@ void DownloadHandler::OnEntryFound(
     // Directory is already ready.
     OnCreateDirectory(callback, FILE_ERROR_OK);
   } else {
-    LOG(WARNING) << "Failed to get entry info for path: "
+    LOG(WARNING) << "Failed to get resource entry for path: "
                  << drive_dir_path.value() << ", error = "
                  << FileErrorToString(error);
     callback.Run(base::FilePath());
@@ -296,7 +302,7 @@ void DownloadHandler::OnCreateDirectory(
 }
 
 void DownloadHandler::UploadDownloadItem(DownloadItem* download) {
-  DCHECK(download->IsComplete());
+  DCHECK_EQ(DownloadItem::COMPLETE, download->GetState());
   file_write_helper_->PrepareWritableFileAndRun(
       util::ExtractDrivePath(GetTargetPath(download)),
       base::Bind(&MoveDownloadedFile, download->GetTargetFilePath()));

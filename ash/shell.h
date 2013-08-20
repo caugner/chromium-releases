@@ -19,6 +19,7 @@
 #include "base/observer_list.h"
 #include "ui/aura/client/activation_change_observer.h"
 #include "ui/base/events/event_target.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
@@ -26,6 +27,9 @@
 
 class CommandLine;
 
+namespace app_list {
+class ApplicationDragAndDropHost;
+}
 namespace aura {
 class EventFilter;
 class RootWindow;
@@ -81,7 +85,7 @@ class PartialMagnificationController;
 class PowerButtonController;
 class RootWindowHostFactory;
 class ScreenAsh;
-class SessionStateController;
+class LockStateController;
 class SessionStateDelegate;
 class ShellDelegate;
 class ShellObserver;
@@ -107,6 +111,7 @@ class EventClientImpl;
 class EventRewriterEventFilter;
 class EventTransformationHandler;
 class FocusCycler;
+class MirrorWindowController;
 class MouseCursorEventFilter;
 class OutputConfiguratorAnimation;
 class OverlayEventFilter;
@@ -197,9 +202,6 @@ class ASH_EXPORT Shell
       int container_id,
       aura::RootWindow* priority_root);
 
-  // True if "launcher per display" feature  is enabled.
-  static bool IsLauncherPerDisplayEnabled();
-
   // True if an experimental maximize mode is enabled which forces browser and
   // application windows to be maximized only.
   static bool IsForcedMaximizeMode();
@@ -210,12 +212,18 @@ class ASH_EXPORT Shell
 
   // Shows the context menu for the background and launcher at
   // |location_in_screen| (in screen coordinates).
-  void ShowContextMenu(const gfx::Point& location_in_screen);
+  void ShowContextMenu(const gfx::Point& location_in_screen,
+                       ui::MenuSourceType source_type);
 
   // Toggles the app list. |window| specifies in which display the app
   // list should be shown. If this is NULL, the active root window
   // will be used.
   void ToggleAppList(aura::Window* anchor);
+
+  // If |drag_and_drop_host| is not NULL it will be called upon drag and drop
+  // operations outside the application list.
+  void SetDragAndDropHostOfCurrentAppList(
+      app_list::ApplicationDragAndDropHost* drag_and_drop_host);
 
   // Returns app list target visibility.
   bool GetAppListTargetVisibility() const;
@@ -279,6 +287,9 @@ class ASH_EXPORT Shell
   internal::DisplayManager* display_manager() {
     return display_manager_.get();
   }
+  internal::MirrorWindowController* mirror_window_controller() {
+    return mirror_window_controller_.get();
+  }
   views::corewm::InputMethodEventFilter* input_method_filter() {
     return input_method_filter_.get();
   }
@@ -300,8 +311,8 @@ class ASH_EXPORT Shell
   PowerButtonController* power_button_controller() {
     return power_button_controller_.get();
   }
-  SessionStateController* session_state_controller() {
-    return session_state_controller_.get();
+  LockStateController* lock_state_controller() {
+    return lock_state_controller_.get();
   }
   UserActivityDetector* user_activity_detector() {
     return user_activity_detector_.get();
@@ -528,7 +539,7 @@ class ASH_EXPORT Shell
   scoped_ptr<views::corewm::TooltipController> tooltip_controller_;
   scoped_ptr<DesktopBackgroundController> desktop_background_controller_;
   scoped_ptr<PowerButtonController> power_button_controller_;
-  scoped_ptr<SessionStateController> session_state_controller_;
+  scoped_ptr<LockStateController> lock_state_controller_;
   scoped_ptr<UserActivityDetector> user_activity_detector_;
   scoped_ptr<VideoDetector> video_detector_;
   scoped_ptr<WindowCycleController> window_cycle_controller_;
@@ -567,6 +578,7 @@ class ASH_EXPORT Shell
   scoped_ptr<views::corewm::InputMethodEventFilter> input_method_filter_;
 
   scoped_ptr<internal::DisplayManager> display_manager_;
+  scoped_ptr<internal::MirrorWindowController> mirror_window_controller_;
 
 #if defined(OS_CHROMEOS) && defined(USE_X11)
   // Controls video output device state.

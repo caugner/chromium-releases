@@ -29,42 +29,15 @@ scoped_ptr<SpdyFrame> MakeSpdyFrame(const char* data, size_t size) {
 
 }  // namespace
 
-// This class is an IOBuffer implementation that simply holds a
-// reference to a SharedFrame object and a fixed offset. Used by
-// SpdyBuffer::GetIOBufferForRemainingData().
-class SpdyBuffer::SharedFrameIOBuffer : public IOBuffer {
- public:
-  SharedFrameIOBuffer(const scoped_refptr<SharedFrame>& shared_frame,
-                      size_t offset)
-      : IOBuffer(shared_frame->data->data() + offset),
-        shared_frame_(shared_frame),
-        offset_(offset) {}
-
- private:
-  virtual ~SharedFrameIOBuffer() {
-    // Prevent ~IOBuffer() from trying to delete |data_|.
-    data_ = NULL;
-  }
-
-  const scoped_refptr<SharedFrame> shared_frame_;
-  const size_t offset_;
-
-  DISALLOW_COPY_AND_ASSIGN(SharedFrameIOBuffer);
-};
-
 SpdyBuffer::SpdyBuffer(scoped_ptr<SpdyFrame> frame)
-    : shared_frame_(new SharedFrame()),
-      offset_(0) {
-  shared_frame_->data = frame.Pass();
-}
+    : frame_(frame.Pass()),
+      offset_(0) {}
 
 // The given data may not be strictly a SPDY frame; we (ab)use
 // |frame_| just as a container.
 SpdyBuffer::SpdyBuffer(const char* data, size_t size) :
-    shared_frame_(new SharedFrame()),
-    offset_(0) {
-  shared_frame_->data = MakeSpdyFrame(data, size);
-}
+    frame_(MakeSpdyFrame(data, size)),
+    offset_(0) {}
 
 SpdyBuffer::~SpdyBuffer() {
   if (GetRemainingSize() > 0)
@@ -72,11 +45,11 @@ SpdyBuffer::~SpdyBuffer() {
 }
 
 const char* SpdyBuffer::GetRemainingData() const {
-  return shared_frame_->data->data() + offset_;
+  return frame_->data() + offset_;
 }
 
 size_t SpdyBuffer::GetRemainingSize() const {
-  return shared_frame_->data->size() - offset_;
+  return frame_->size() - offset_;
 }
 
 void SpdyBuffer::AddConsumeCallback(const ConsumeCallback& consume_callback) {
@@ -88,7 +61,7 @@ void SpdyBuffer::Consume(size_t consume_size) {
 };
 
 IOBuffer* SpdyBuffer::GetIOBufferForRemainingData() {
-  return new SharedFrameIOBuffer(shared_frame_, offset_);
+  return new WrappedIOBuffer(GetRemainingData());
 }
 
 void SpdyBuffer::ConsumeHelper(size_t consume_size,

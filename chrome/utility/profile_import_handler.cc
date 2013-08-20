@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/importer/external_process_importer_bridge.h"
 #include "chrome/browser/importer/importer.h"
@@ -36,12 +36,13 @@ void ProfileImportHandler::OnImportStart(
     uint16 items,
     const base::DictionaryValue& localized_strings) {
   bridge_ = new ExternalProcessImporterBridge(
-      localized_strings, content::UtilityThread::Get(),
-      base::MessageLoopProxy::current());
+      localized_strings,
+      content::UtilityThread::Get(),
+      base::MessageLoopProxy::current().get());
   importer_ = importer::CreateImporterByType(source_profile.importer_type);
-  if (!importer_) {
-    Send(new ProfileImportProcessHostMsg_Import_Finished(false,
-        "Importer could not be created."));
+  if (!importer_.get()) {
+    Send(new ProfileImportProcessHostMsg_Import_Finished(
+        false, "Importer could not be created."));
     return;
   }
 
@@ -49,9 +50,10 @@ void ProfileImportHandler::OnImportStart(
 
   // Create worker thread in which importer runs.
   import_thread_.reset(new base::Thread("import_thread"));
-  base::Thread::Options options;
-  options.message_loop_type = MessageLoop::TYPE_IO;
-  if (!import_thread_->StartWithOptions(options)) {
+#if defined(OS_WIN)
+  import_thread_->init_com_with_mta(false);
+#endif
+  if (!import_thread_->Start()) {
     NOTREACHED();
     ImporterCleanup();
   }

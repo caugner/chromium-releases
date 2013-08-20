@@ -5,7 +5,7 @@
 #include "chrome/test/webdriver/webdriver_test_util.h"
 
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 
 namespace webdriver {
 
@@ -41,15 +41,15 @@ bool SwitchKeyboardLayout(const std::string& input_locale_identifier) {
 
 #if defined(OS_MACOSX)
 bool SwitchKeyboardLayout(const std::string& input_source_id) {
-  base::mac::ScopedCFTypeRef<CFMutableDictionaryRef> filter_dict(
+  base::ScopedCFTypeRef<CFMutableDictionaryRef> filter_dict(
       CFDictionaryCreateMutable(kCFAllocatorDefault,
                                 1,
                                 &kCFTypeDictionaryKeyCallBacks,
                                 &kCFTypeDictionaryValueCallBacks));
-  base::mac::ScopedCFTypeRef<CFStringRef> id_ref(CFStringCreateWithCString(
+  base::ScopedCFTypeRef<CFStringRef> id_ref(CFStringCreateWithCString(
       kCFAllocatorDefault, input_source_id.c_str(), kCFStringEncodingUTF8));
   CFDictionaryAddValue(filter_dict, kTISPropertyInputSourceID, id_ref);
-  base::mac::ScopedCFTypeRef<CFArrayRef> sources(
+  base::ScopedCFTypeRef<CFArrayRef> sources(
       TISCreateInputSourceList(filter_dict, true));
   if (CFArrayGetCount(sources) != 1)
     return false;

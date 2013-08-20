@@ -19,28 +19,18 @@
 #include "base/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/scoped_com_initializer.h"
-#include "base/win/windows_version.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/scoped_sc_handle_win.h"
-#include "remoting/base/stoppable.h"
 #include "remoting/host/branding.h"
+#include "remoting/host/daemon_process.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/logging.h"
-#include "remoting/host/win/security_descriptor.h"
-
-#if defined(REMOTING_MULTI_PROCESS)
-#include "remoting/host/daemon_process.h"
-#endif  // defined(REMOTING_MULTI_PROCESS)
-
+#include "remoting/host/win/com_security.h"
 #include "remoting/host/win/core_resource.h"
 #include "remoting/host/win/wts_terminal_observer.h"
-
-#if !defined(REMOTING_MULTI_PROCESS)
-#include "remoting/host/win/wts_console_session_process_driver.h"
-#endif  // !defined(REMOTING_MULTI_PROCESS)
 
 namespace remoting {
 
@@ -52,15 +42,6 @@ const char kIoThreadName[] = "I/O thread";
 
 // "--console" runs the service interactively for debugging purposes.
 const char kConsoleSwitchName[] = "console";
-
-// Concatenates ACE type, permissions and sid given as SDDL strings into an ACE
-// definition in SDDL form.
-#define SDDL_ACE(type, permissions, sid) \
-    L"(" type L";;" permissions L";;;" sid L")"
-
-// Text representation of COM_RIGHTS_EXECUTE and COM_RIGHTS_EXECUTE_LOCAL
-// permission bits that is used in the SDDL definition below.
-#define SDDL_COM_EXECUTE_LOCAL L"0x3"
 
 // Security descriptor allowing local processes running under SYSTEM or
 // LocalService accounts to call COM methods exposed by the daemon.
@@ -76,61 +57,6 @@ const wchar_t kComProcessSd[] =
 const wchar_t kComProcessMandatoryLabel[] =
     SDDL_SACL L":"
     SDDL_ACE(SDDL_MANDATORY_LABEL, SDDL_NO_EXECUTE_UP, SDDL_ML_MEDIUM);
-
-#undef SDDL_ACE
-#undef SDDL_COM_EXECUTE_LOCAL
-
-// Allows incoming calls from clients running under SYSTEM or LocalService at
-// medium integrity level.
-bool InitializeComSecurity() {
-  std::string sddl = WideToUTF8(kComProcessSd);
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-    sddl += WideToUTF8(kComProcessMandatoryLabel);
-  }
-
-  // Convert the SDDL description into a security descriptor in absolute format.
-  ScopedSd relative_sd = ConvertSddlToSd(sddl);
-  if (!relative_sd) {
-    LOG_GETLASTERROR(ERROR) << "Failed to create a security descriptor";
-    return false;
-  }
-  ScopedSd absolute_sd;
-  ScopedAcl dacl;
-  ScopedSid group;
-  ScopedSid owner;
-  ScopedAcl sacl;
-  if (!MakeScopedAbsoluteSd(relative_sd, &absolute_sd, &dacl, &group, &owner,
-                            &sacl)) {
-    LOG_GETLASTERROR(ERROR) << "MakeScopedAbsoluteSd() failed";
-    return false;
-  }
-
-  // Apply the security descriptor and the following settings:
-  //   - The daemon authenticates that all data received is from the expected
-  //     client.
-  //   - The daemon can impersonate clients to check their identity but cannot
-  //     act on their behalf.
-  //   - The caller's identity on every call (Dynamic cloaking).
-  //   - Activations where the activated COM server would run under the daemon's
-  //     identity are prohibited.
-  HRESULT result = CoInitializeSecurity(
-      absolute_sd.get(),
-      -1,       // Let COM choose which authentication services to register.
-      NULL,     // See above.
-      NULL,     // Reserved, must be NULL.
-      RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
-      RPC_C_IMP_LEVEL_IDENTIFY,
-      NULL,     // Default authentication information is not provided.
-      EOAC_DYNAMIC_CLOAKING | EOAC_DISABLE_AAA,
-      NULL);    /// Reserved, must be NULL
-  if (FAILED(result)) {
-    LOG(ERROR) << "CoInitializeSecurity() failed, result=0x"
-               << std::hex << result << std::dec << ".";
-    return false;
-  }
-
-  return true;
-}
 
 }  // namespace
 
@@ -158,12 +84,12 @@ int HostService::Run() {
   return (this->*run_routine_)();
 }
 
-bool HostService::AddWtsTerminalObserver(const net::IPEndPoint& client_endpoint,
-                                        WtsTerminalObserver* observer) {
+bool HostService::AddWtsTerminalObserver(const std::string& terminal_id,
+                                         WtsTerminalObserver* observer) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
   RegisteredObserver registered_observer;
-  registered_observer.client_endpoint = client_endpoint;
+  registered_observer.terminal_id = terminal_id;
   registered_observer.session_id = kInvalidSessionId;
   registered_observer.observer = observer;
 
@@ -172,7 +98,7 @@ bool HostService::AddWtsTerminalObserver(const net::IPEndPoint& client_endpoint,
   for (i = observers_.begin(); i != observers_.end(); ++i) {
     // Get the attached session ID from another observer watching the same WTS
     // console if any.
-    if (i->client_endpoint == client_endpoint) {
+    if (i->terminal_id == terminal_id) {
       registered_observer.session_id = i->session_id;
       session_id_found = true;
     }
@@ -182,10 +108,10 @@ bool HostService::AddWtsTerminalObserver(const net::IPEndPoint& client_endpoint,
       return false;
   }
 
-  // If |client_endpoint| is new, enumerate all sessions to see if there is one
-  // attached to |client_endpoint|.
+  // If |terminal_id| is new, enumerate all sessions to see if there is one
+  // attached to |terminal_id|.
   if (!session_id_found)
-    registered_observer.session_id = GetSessionIdForEndpoint(client_endpoint);
+    registered_observer.session_id = LookupSessionId(terminal_id);
 
   observers_.push_back(registered_observer);
 
@@ -211,7 +137,8 @@ void HostService::RemoveWtsTerminalObserver(WtsTerminalObserver* observer) {
 HostService::HostService() :
   run_routine_(&HostService::RunAsService),
   service_status_handle_(0),
-  stopped_event_(true, false) {
+  stopped_event_(true, false),
+  weak_factory_(this) {
 }
 
 HostService::~HostService() {
@@ -229,8 +156,8 @@ void HostService::OnSessionChange(uint32 event, uint32 session_id) {
 
   // Assuming that notification can arrive later query the current state of
   // |session_id|.
-  net::IPEndPoint client_endpoint;
-  bool attached = GetEndpointForSessionId(session_id, &client_endpoint);
+  std::string terminal_id;
+  bool attached = LookupTerminalId(session_id, &terminal_id);
 
   std::list<RegisteredObserver>::iterator i = observers_.begin();
   while (i != observers_.end()) {
@@ -240,7 +167,7 @@ void HostService::OnSessionChange(uint32 event, uint32 session_id) {
     // Issue a detach notification if the session was detached from a client or
     // if it is now attached to a different client.
     if (i->session_id == session_id &&
-        (!attached || !(i->client_endpoint == client_endpoint))) {
+        (!attached || !(i->terminal_id == terminal_id))) {
       i->session_id = kInvalidSessionId;
       i->observer->OnSessionDetached();
       i = next;
@@ -249,7 +176,7 @@ void HostService::OnSessionChange(uint32 event, uint32 session_id) {
 
     // The client currently attached to |session_id| was attached to a different
     // session before. Reconnect it to |session_id|.
-    if (attached && i->client_endpoint == client_endpoint &&
+    if (attached && i->terminal_id == terminal_id &&
         i->session_id != session_id) {
       WtsTerminalObserver* observer = i->observer;
 
@@ -283,30 +210,10 @@ void HostService::CreateLauncher(
     return;
   }
 
-#if defined(REMOTING_MULTI_PROCESS)
-
-  child_ = DaemonProcess::Create(
+  daemon_process_ = DaemonProcess::Create(
       task_runner,
       io_task_runner,
-      base::Bind(&HostService::OnChildStopped,
-                 base::Unretained(this))).PassAs<Stoppable>();
-
-#else  // !defined(REMOTING_MULTI_PROCESS)
-
-  // Create the console session process driver.
-  child_.reset(new WtsConsoleSessionProcessDriver(
-      base::Bind(&HostService::OnChildStopped, base::Unretained(this)),
-      this,
-      task_runner,
-      io_task_runner));
-
-#endif  // !defined(REMOTING_MULTI_PROCESS)
-}
-
-void HostService::OnChildStopped() {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-
-  child_.reset(NULL);
+      base::Bind(&HostService::StopDaemonProcess, weak_ptr_));
 }
 
 int HostService::RunAsService() {
@@ -333,6 +240,7 @@ void HostService::RunAsServiceImpl() {
   base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
   base::RunLoop run_loop;
   main_task_runner_ = message_loop.message_loop_proxy();
+  weak_ptr_ = weak_factory_.GetWeakPtr();
 
   // Register the service control handler.
   service_status_handle_ = RegisterServiceCtrlHandlerExW(
@@ -363,8 +271,10 @@ void HostService::RunAsServiceImpl() {
   if (!com_initializer.succeeded())
     return;
 
-  if (!InitializeComSecurity())
+  if (!InitializeComSecurity(WideToUTF8(kComProcessSd),
+                             WideToUTF8(kComProcessMandatoryLabel), false)) {
     return;
+  }
 
   CreateLauncher(scoped_refptr<AutoThreadTaskRunner>(
       new AutoThreadTaskRunner(main_task_runner_,
@@ -372,6 +282,7 @@ void HostService::RunAsServiceImpl() {
 
   // Run the service.
   run_loop.Run();
+  weak_factory_.InvalidateWeakPtrs();
 
   // Tell SCM that the service is stopped.
   service_status.dwCurrentState = SERVICE_STOPPED;
@@ -387,6 +298,7 @@ int HostService::RunInConsole() {
   base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
   base::RunLoop run_loop;
   main_task_runner_ = message_loop.message_loop_proxy();
+  weak_ptr_ = weak_factory_.GetWeakPtr();
 
   int result = kInitializationFailed;
 
@@ -395,8 +307,10 @@ int HostService::RunInConsole() {
   if (!com_initializer.succeeded())
     return result;
 
-  if (!InitializeComSecurity())
+  if (!InitializeComSecurity(WideToUTF8(kComProcessSd),
+                             WideToUTF8(kComProcessMandatoryLabel), false)) {
     return result;
+  }
 
   // Subscribe to Ctrl-C and other console events.
   if (!SetConsoleCtrlHandler(&HostService::ConsoleControlHandler, TRUE)) {
@@ -406,8 +320,8 @@ int HostService::RunInConsole() {
   }
 
   // Create a window for receiving session change notifications.
-  win::MessageWindow window;
-  if (!window.Create(this)) {
+  base::win::MessageWindow window;
+  if (!window.Create(this, NULL)) {
     LOG_GETLASTERROR(ERROR)
         << "Failed to create the session notification window";
     goto cleanup;
@@ -431,12 +345,20 @@ int HostService::RunInConsole() {
   }
 
 cleanup:
+  weak_factory_.InvalidateWeakPtrs();
+
   // Unsubscribe from console events. Ignore the exit code. There is nothing
   // we can do about it now and the program is about to exit anyway. Even if
   // it crashes nothing is going to be broken because of it.
   SetConsoleCtrlHandler(&HostService::ConsoleControlHandler, FALSE);
 
   return result;
+}
+
+void HostService::StopDaemonProcess() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  daemon_process_.reset();
 }
 
 bool HostService::HandleMessage(
@@ -459,9 +381,9 @@ BOOL WINAPI HostService::ConsoleControlHandler(DWORD event) {
     case CTRL_CLOSE_EVENT:
     case CTRL_LOGOFF_EVENT:
     case CTRL_SHUTDOWN_EVENT:
-      self->main_task_runner_->PostTask(FROM_HERE, base::Bind(
-          &Stoppable::Stop, base::Unretained(self->child_.get())));
-      self->stopped_event_.Wait();
+      self->main_task_runner_->PostTask(
+          FROM_HERE, base::Bind(&HostService::StopDaemonProcess,
+                                self->weak_ptr_));
       return TRUE;
 
     default:
@@ -481,14 +403,14 @@ DWORD WINAPI HostService::ServiceControlHandler(DWORD control,
 
     case SERVICE_CONTROL_SHUTDOWN:
     case SERVICE_CONTROL_STOP:
-      self->main_task_runner_->PostTask(FROM_HERE, base::Bind(
-          &Stoppable::Stop, base::Unretained(self->child_.get())));
-      self->stopped_event_.Wait();
+      self->main_task_runner_->PostTask(
+          FROM_HERE, base::Bind(&HostService::StopDaemonProcess,
+                                self->weak_ptr_));
       return NO_ERROR;
 
     case SERVICE_CONTROL_SESSIONCHANGE:
       self->main_task_runner_->PostTask(FROM_HERE, base::Bind(
-          &HostService::OnSessionChange, base::Unretained(self), event_type,
+          &HostService::OnSessionChange, self->weak_ptr_, event_type,
           reinterpret_cast<WTSSESSION_NOTIFICATION*>(event_data)->dwSessionId));
       return NO_ERROR;
 

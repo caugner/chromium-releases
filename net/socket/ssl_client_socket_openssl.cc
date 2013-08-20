@@ -130,6 +130,8 @@ int MapOpenSSLErrorSSL() {
       return ERR_SSL_DECOMPRESSION_FAILURE_ALERT;
     case SSL_R_SSLV3_ALERT_BAD_RECORD_MAC:
       return ERR_SSL_BAD_RECORD_MAC_ALERT;
+    case SSL_R_TLSV1_ALERT_DECRYPT_ERROR:
+      return ERR_SSL_DECRYPT_ERROR_ALERT;
     case SSL_R_UNSAFE_LEGACY_RENEGOTIATION_DISABLED:
       return ERR_SSL_UNSAFE_NEGOTIATION;
     case SSL_R_WRONG_NUMBER_OF_KEY_BITS:
@@ -170,7 +172,6 @@ int MapOpenSSLErrorSSL() {
     case SSL_R_SSLV3_ALERT_ILLEGAL_PARAMETER:
     case SSL_R_TLSV1_ALERT_DECODE_ERROR:
     case SSL_R_TLSV1_ALERT_DECRYPTION_FAILED:
-    case SSL_R_TLSV1_ALERT_DECRYPT_ERROR:
     case SSL_R_TLSV1_ALERT_EXPORT_RESTRICTION:
     case SSL_R_TLSV1_ALERT_INTERNAL_ERROR:
     case SSL_R_TLSV1_ALERT_NO_RENEGOTIATION:
@@ -193,7 +194,9 @@ int MapOpenSSLError(int err, const crypto::OpenSSLErrStackTracer& tracer) {
     case SSL_ERROR_WANT_WRITE:
       return ERR_IO_PENDING;
     case SSL_ERROR_SYSCALL:
-      DVLOG(1) << "OpenSSL SYSCALL error, errno " << errno;
+      LOG(ERROR) << "OpenSSL SYSCALL error, earliest error code in "
+                    "error queue: " << ERR_peek_error() << ", errno: "
+                 << errno;
       return ERR_SSL_PROTOCOL_ERROR;
     case SSL_ERROR_SSL:
       return MapOpenSSLErrorSSL();
@@ -529,8 +532,9 @@ bool SSLClientSocketOpenSSL::Init() {
   STACK_OF(SSL_CIPHER)* ciphers = SSL_get_ciphers(ssl_);
   DCHECK(ciphers);
   // See SSLConfig::disabled_cipher_suites for description of the suites
-  // disabled by default.
-  std::string command("DEFAULT:!NULL:!aNULL:!IDEA:!FZA");
+  // disabled by default. Note that !SHA384 only removes HMAC-SHA384 cipher
+  // suites, not GCM cipher suites with SHA384 as the handshake hash.
+  std::string command("DEFAULT:!NULL:!aNULL:!IDEA:!FZA:!SRP:!SHA384:!aECDH");
   // Walk through all the installed ciphers, seeing if any need to be
   // appended to the cipher removal |command|.
   for (int i = 0; i < sk_SSL_CIPHER_num(ciphers); ++i) {
@@ -590,7 +594,7 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl,
   }
 
   // Second pass: a client certificate should have been selected.
-  if (ssl_config_.client_cert) {
+  if (ssl_config_.client_cert.get()) {
     // A note about ownership: FetchClientCertPrivateKey() increments
     // the reference count of the EVP_PKEY. Ownership of this reference
     // is passed directly to OpenSSL, which will release the reference
@@ -616,7 +620,7 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl,
 
 bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
   ssl_info->Reset();
-  if (!server_cert_)
+  if (!server_cert_.get())
     return false;
 
   ssl_info->cert = server_cert_verify_result_.verified_cert;
@@ -626,7 +630,7 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
   ssl_info->public_key_hashes =
     server_cert_verify_result_.public_key_hashes;
   ssl_info->client_cert_sent =
-      ssl_config_.send_client_cert && ssl_config_.client_cert;
+      ssl_config_.send_client_cert && ssl_config_.client_cert.get();
   ssl_info->channel_id_sent = WasChannelIDSent();
 
   const SSL_CIPHER* cipher = SSL_get_current_cipher(ssl_);
@@ -927,11 +931,11 @@ int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
 }
 
 int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
-  DCHECK(server_cert_);
+  DCHECK(server_cert_.get());
   GotoState(STATE_VERIFY_CERT_COMPLETE);
 
   CertStatus cert_status;
-  if (ssl_config_.IsAllowedBadCert(server_cert_, &cert_status)) {
+  if (ssl_config_.IsAllowedBadCert(server_cert_.get(), &cert_status)) {
     VLOG(1) << "Received an expected bad cert with status: " << cert_status;
     server_cert_verify_result_.Reset();
     server_cert_verify_result_.cert_status = cert_status;
@@ -948,7 +952,9 @@ int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
     flags |= CertVerifier::VERIFY_CERT_IO_ENABLED;
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
   return verifier_->Verify(
-      server_cert_, host_and_port_.host(), flags,
+      server_cert_.get(),
+      host_and_port_.host(),
+      flags,
       NULL /* no CRL set */,
       &server_cert_verify_result_,
       base::Bind(&SSLClientSocketOpenSSL::OnHandshakeIOComplete,
@@ -974,8 +980,8 @@ int SSLClientSocketOpenSSL::DoVerifyCertComplete(int result) {
 }
 
 X509Certificate* SSLClientSocketOpenSSL::UpdateServerCert() {
-  if (server_cert_)
-    return server_cert_;
+  if (server_cert_.get())
+    return server_cert_.get();
 
   crypto::ScopedOpenSSL<X509, X509_free> cert(SSL_get_peer_certificate(ssl_));
   if (!cert.get()) {
@@ -992,9 +998,9 @@ X509Certificate* SSLClientSocketOpenSSL::UpdateServerCert() {
       intermediates.push_back(sk_X509_value(chain, i));
   }
   server_cert_ = X509Certificate::CreateFromHandle(cert.get(), intermediates);
-  DCHECK(server_cert_);
+  DCHECK(server_cert_.get());
 
-  return server_cert_;
+  return server_cert_.get();
 }
 
 bool SSLClientSocketOpenSSL::DoTransportIO() {
@@ -1016,7 +1022,7 @@ int SSLClientSocketOpenSSL::BufferSend(void) {
   if (transport_send_busy_)
     return ERR_IO_PENDING;
 
-  if (!send_buffer_) {
+  if (!send_buffer_.get()) {
     // Get a fresh send buffer out of the send BIO.
     size_t max_read = BIO_ctrl_pending(transport_bio_);
     if (!max_read)
@@ -1028,10 +1034,10 @@ int SSLClientSocketOpenSSL::BufferSend(void) {
   }
 
   int rv = transport_->socket()->Write(
-        send_buffer_,
-        send_buffer_->BytesRemaining(),
-        base::Bind(&SSLClientSocketOpenSSL::BufferSendComplete,
-                   base::Unretained(this)));
+      send_buffer_.get(),
+      send_buffer_->BytesRemaining(),
+      base::Bind(&SSLClientSocketOpenSSL::BufferSendComplete,
+                 base::Unretained(this)));
   if (rv == ERR_IO_PENDING) {
     transport_send_busy_ = true;
   } else {
@@ -1055,7 +1061,7 @@ void SSLClientSocketOpenSSL::TransportWriteComplete(int result) {
     BIO_set_mem_eof_return(transport_bio_, 0);
     send_buffer_ = NULL;
   } else {
-    DCHECK(send_buffer_);
+    DCHECK(send_buffer_.get());
     send_buffer_->DidConsume(result);
     DCHECK_GE(send_buffer_->BytesRemaining(), 0);
     if (send_buffer_->BytesRemaining() <= 0)
@@ -1091,7 +1097,8 @@ int SSLClientSocketOpenSSL::BufferRecv(void) {
 
   recv_buffer_ = new IOBuffer(max_write);
   int rv = transport_->socket()->Read(
-      recv_buffer_, max_write,
+      recv_buffer_.get(),
+      max_write,
       base::Bind(&SSLClientSocketOpenSSL::BufferRecvComplete,
                  base::Unretained(this)));
   if (rv == ERR_IO_PENDING) {
@@ -1119,7 +1126,7 @@ void SSLClientSocketOpenSSL::TransportReadComplete(int result) {
     BIO_set_mem_eof_return(transport_bio_, 0);
     (void)BIO_shutdown_wr(transport_bio_);
   } else {
-    DCHECK(recv_buffer_);
+    DCHECK(recv_buffer_.get());
     int ret = BIO_write(transport_bio_, recv_buffer_->data(), result);
     // A write into a memory BIO should always succeed.
     CHECK_EQ(result, ret);
@@ -1157,28 +1164,26 @@ void SSLClientSocketOpenSSL::OnSendComplete(int result) {
   int rv_write = ERR_IO_PENDING;
   bool network_moved;
   do {
-      if (user_read_buf_)
-          rv_read = DoPayloadRead();
-      if (user_write_buf_)
-          rv_write = DoPayloadWrite();
-      network_moved = DoTransportIO();
-  } while (rv_read == ERR_IO_PENDING &&
-           rv_write == ERR_IO_PENDING &&
-           (user_read_buf_ || user_write_buf_) &&
-           network_moved);
+    if (user_read_buf_.get())
+      rv_read = DoPayloadRead();
+    if (user_write_buf_.get())
+      rv_write = DoPayloadWrite();
+    network_moved = DoTransportIO();
+  } while (rv_read == ERR_IO_PENDING && rv_write == ERR_IO_PENDING &&
+           (user_read_buf_.get() || user_write_buf_.get()) && network_moved);
 
   // Performing the Read callback may cause |this| to be deleted. If this
   // happens, the Write callback should not be invoked. Guard against this by
   // holding a WeakPtr to |this| and ensuring it's still valid.
   base::WeakPtr<SSLClientSocketOpenSSL> guard(weak_factory_.GetWeakPtr());
-  if (user_read_buf_ && rv_read != ERR_IO_PENDING)
-      DoReadCallback(rv_read);
+  if (user_read_buf_.get() && rv_read != ERR_IO_PENDING)
+    DoReadCallback(rv_read);
 
   if (!guard.get())
     return;
 
-  if (user_write_buf_ && rv_write != ERR_IO_PENDING)
-      DoWriteCallback(rv_write);
+  if (user_write_buf_.get() && rv_write != ERR_IO_PENDING)
+    DoWriteCallback(rv_write);
 }
 
 void SSLClientSocketOpenSSL::OnRecvComplete(int result) {
@@ -1190,7 +1195,7 @@ void SSLClientSocketOpenSSL::OnRecvComplete(int result) {
 
   // Network layer received some data, check if client requested to read
   // decrypted data.
-  if (!user_read_buf_)
+  if (!user_read_buf_.get())
     return;
 
   int rv = DoReadLoop(result);
@@ -1203,7 +1208,7 @@ bool SSLClientSocketOpenSSL::IsConnected() const {
   if (!completed_handshake_)
     return false;
   // If an asynchronous operation is still pending.
-  if (user_read_buf_ || user_write_buf_)
+  if (user_read_buf_.get() || user_write_buf_.get())
     return true;
 
   return transport_->socket()->IsConnected();
@@ -1214,7 +1219,7 @@ bool SSLClientSocketOpenSSL::IsConnectedAndIdle() const {
   if (!completed_handshake_)
     return false;
   // If an asynchronous operation is still pending.
-  if (user_read_buf_ || user_write_buf_)
+  if (user_read_buf_.get() || user_write_buf_.get())
     return false;
   // If there is data waiting to be sent, or data read from the network that
   // has not yet been consumed.

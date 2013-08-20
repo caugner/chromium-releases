@@ -28,6 +28,9 @@ const CGFloat kDragThreshold = 5;
 - (void)updateDrag:(NSEvent*)theEvent;
 - (void)completeDrag;
 
+- (NSMenu*)menuForEvent:(NSEvent*)theEvent
+                 inPage:(NSCollectionView*)page;
+
 @end
 
 // An NSCollectionView that forwards mouse events to the factory they share.
@@ -56,7 +59,7 @@ const CGFloat kDragThreshold = 5;
 }
 
 - (NSCollectionView*)makePageWithFrame:(NSRect)pageFrame {
-  scoped_nsobject<GridCollectionView> itemCollectionView(
+  base::scoped_nsobject<GridCollectionView> itemCollectionView(
       [[GridCollectionView alloc] initWithFrame:pageFrame]);
   [itemCollectionView setFactory:self];
   [itemCollectionView setMaxNumberOfRows:rows_];
@@ -67,7 +70,7 @@ const CGFloat kDragThreshold = 5;
   [itemCollectionView setBackgroundColors:
       [NSArray arrayWithObject:[NSColor clearColor]]];
 
-  scoped_nsobject<AppsGridViewItem> itemPrototype(
+  base::scoped_nsobject<AppsGridViewItem> itemPrototype(
       [[AppsGridViewItem alloc] initWithSize:cellSize_]);
   [[itemPrototype button] setTarget:gridController_];
   [[itemPrototype button] setAction:@selector(onItemClicked:)];
@@ -145,7 +148,7 @@ const CGFloat kDragThreshold = 5;
   if (!itemDragController_) {
     itemDragController_.reset(
         [[ItemDragController alloc] initWithGridCellSize:cellSize_]);
-    [[gridController_ view] addSubview:[itemDragController_ view]];
+    [[[gridController_ view] superview] addSubview:[itemDragController_ view]];
   }
 
   [itemDragController_ initiate:[gridController_ itemAtIndex:itemHitIndex_]
@@ -160,6 +163,8 @@ const CGFloat kDragThreshold = 5;
 - (void)updateDrag:(NSEvent*)theEvent {
   [itemDragController_ update:[theEvent locationInWindow]
                     timestamp:[theEvent timestamp]];
+  [gridController_ maybeChangePageForPoint:[theEvent locationInWindow]];
+
   size_t visiblePage = [gridController_ visiblePage];
   size_t itemIndexOver = [self itemIndexForPage:visiblePage
                                    hitWithEvent:theEvent];
@@ -175,8 +180,10 @@ const CGFloat kDragThreshold = 5;
   if (itemDragIndex_ == itemIndexOver)
     return;
 
-  [gridController_ moveItemForDrag:itemDragIndex_
-                       toItemIndex:itemIndexOver];
+  [gridController_ moveItemInView:itemDragIndex_
+                      toItemIndex:itemIndexOver];
+  // A new item may be created when moving between pages. Ensure it is hidden.
+  [[[gridController_ itemAtIndex:itemIndexOver] button] setHidden:YES];
   itemDragIndex_ = itemIndexOver;
 }
 
@@ -184,8 +191,8 @@ const CGFloat kDragThreshold = 5;
   if (!dragging_)
     return;
 
-  [gridController_ moveItemForDrag:itemDragIndex_
-                       toItemIndex:itemHitIndex_];
+  [gridController_ moveItemInView:itemDragIndex_
+                      toItemIndex:itemHitIndex_];
   itemDragIndex_ = itemHitIndex_;
   [self completeDrag];
   itemHitIndex_ = NSNotFound;  // Ignore future mouse events for this drag.
@@ -193,6 +200,7 @@ const CGFloat kDragThreshold = 5;
 
 - (void)completeDrag {
   DCHECK_GE(itemDragIndex_, 0u);
+  [gridController_ cancelScrollTimer];
   AppsGridViewItem* item = [gridController_ itemAtIndex:itemDragIndex_];
 
   // The item could still be animating in the NSCollectionView, so ask it where
@@ -200,7 +208,7 @@ const CGFloat kDragThreshold = 5;
   NSCollectionView* pageView = base::mac::ObjCCastStrict<NSCollectionView>(
       [[item view] superview]);
   size_t indexInPage = itemDragIndex_ % (rows_ * columns_);
-  NSPoint targetOrigin = [[gridController_ view]
+  NSPoint targetOrigin = [[[itemDragController_ view] superview]
       convertPoint:[pageView frameForItemAtIndex:indexInPage].origin
           fromView:pageView];
 
@@ -212,11 +220,27 @@ const CGFloat kDragThreshold = 5;
   dragging_ = NO;
 }
 
+- (NSMenu*)menuForEvent:(NSEvent*)theEvent
+                 inPage:(NSCollectionView*)page {
+  size_t pageIndex = [gridController_ pageIndexForCollectionView:page];
+  size_t itemIndex = [self itemIndexForPage:pageIndex
+                               hitWithEvent:theEvent];
+  if (itemIndex == NSNotFound)
+    return nil;
+
+  return [[gridController_ itemAtIndex:itemIndex] contextMenu];
+}
+
 @end
 
 @implementation GridCollectionView
 
 @synthesize factory = factory_;
+
+- (NSMenu*)menuForEvent:(NSEvent*)theEvent {
+  return [factory_ menuForEvent:theEvent
+                         inPage:self];
+}
 
 - (void)mouseDown:(NSEvent*)theEvent {
   [factory_ onMouseDownInPage:self
@@ -229,6 +253,10 @@ const CGFloat kDragThreshold = 5;
 
 - (void)mouseUp:(NSEvent*)theEvent {
   [factory_ onMouseUp:theEvent];
+}
+
+- (BOOL)acceptsFirstResponder {
+  return NO;
 }
 
 @end

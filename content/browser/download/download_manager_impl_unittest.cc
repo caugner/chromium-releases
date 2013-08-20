@@ -6,15 +6,14 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/browser/byte_stream.h"
 #include "content/browser/download/download_create_info.h"
@@ -64,7 +63,7 @@ MATCHER_P2(DownloadCreateInfoWithDefaultPath, info, download_directory, "") {
 class MockDownloadItemImpl : public DownloadItemImpl {
  public:
   // Use history constructor for minimal base object.
-  MockDownloadItemImpl(DownloadItemImplDelegate* delegate)
+  explicit MockDownloadItemImpl(DownloadItemImplDelegate* delegate)
       : DownloadItemImpl(
           delegate,
           content::DownloadId(),
@@ -94,7 +93,8 @@ class MockDownloadItemImpl : public DownloadItemImpl {
   MOCK_METHOD0(ShouldOpenFileBasedOnExtension, bool());
   MOCK_METHOD0(OpenDownload, void());
   MOCK_METHOD0(ShowDownloadInShell, void());
-  MOCK_METHOD0(DangerousDownloadValidated, void());
+  MOCK_METHOD0(ValidateDangerousDownload, void());
+  MOCK_METHOD1(StealDangerousDownload, void(const AcquireFileCallback&));
   MOCK_METHOD3(UpdateProgress, void(int64, int64, const std::string&));
   MOCK_METHOD1(Cancel, void(bool));
   MOCK_METHOD0(MarkAsComplete, void());
@@ -108,18 +108,13 @@ class MockDownloadItemImpl : public DownloadItemImpl {
 
   MOCK_METHOD2(MockStart, void(DownloadFile*, DownloadRequestHandleInterface*));
 
-  MOCK_METHOD1(Delete, void(DeleteReason));
   MOCK_METHOD0(Remove, void());
   MOCK_CONST_METHOD1(TimeRemaining, bool(base::TimeDelta*));
   MOCK_CONST_METHOD0(CurrentSpeed, int64());
   MOCK_CONST_METHOD0(PercentComplete, int());
   MOCK_CONST_METHOD0(AllDataSaved, bool());
   MOCK_CONST_METHOD1(MatchesQuery, bool(const string16& query));
-  MOCK_CONST_METHOD0(IsPartialDownload, bool());
-  MOCK_CONST_METHOD0(IsInProgress, bool());
-  MOCK_CONST_METHOD0(IsCancelled, bool());
-  MOCK_CONST_METHOD0(IsInterrupted, bool());
-  MOCK_CONST_METHOD0(IsComplete, bool());
+  MOCK_CONST_METHOD0(IsDone, bool());
   MOCK_CONST_METHOD0(GetFullPath, const base::FilePath&());
   MOCK_CONST_METHOD0(GetTargetFilePath, const base::FilePath&());
   MOCK_CONST_METHOD0(GetTargetDisposition, TargetDisposition());
@@ -166,7 +161,6 @@ class MockDownloadItemImpl : public DownloadItemImpl {
   MOCK_CONST_METHOD0(GetWebContents, WebContents*());
   MOCK_CONST_METHOD0(GetFileNameToReportUser, base::FilePath());
   MOCK_METHOD1(SetDisplayName, void(const base::FilePath&));
-  MOCK_CONST_METHOD0(GetUserVerifiedFilePath, base::FilePath());
   MOCK_METHOD0(NotifyRemoved, void());
   // May be called when vlog is on.
   virtual std::string DebugString(bool verbose) const OVERRIDE {
@@ -426,7 +420,7 @@ class MockDownloadManagerObserver : public DownloadManager::Observer {
         DownloadManager*, int32));
 };
 
-} // namespace
+}  // namespace
 
 class DownloadManagerTest : public testing::Test {
  public:
@@ -446,7 +440,7 @@ class DownloadManagerTest : public testing::Test {
   // then create a DownloadManager that points
   // at all of those.
   virtual void SetUp() {
-    DCHECK(!download_manager_.get());
+    DCHECK(!download_manager_);
 
     mock_download_item_factory_ = (new MockDownloadItemFactory())->AsWeakPtr();
     mock_download_file_factory_ = (new MockDownloadFileFactory())->AsWeakPtr();
@@ -458,8 +452,8 @@ class DownloadManagerTest : public testing::Test {
     EXPECT_CALL(*mock_browser_context_.get(), IsOffTheRecord())
         .WillRepeatedly(Return(false));
 
-    download_manager_ = new DownloadManagerImpl(
-        NULL, mock_browser_context_.get());
+    download_manager_.reset(new DownloadManagerImpl(
+                                NULL, mock_browser_context_.get()));
     download_manager_->SetDownloadItemFactoryForTesting(
         scoped_ptr<DownloadItemFactory>(
             mock_download_item_factory_.get()).Pass());
@@ -474,16 +468,14 @@ class DownloadManagerTest : public testing::Test {
   virtual void TearDown() {
     while (MockDownloadItemImpl*
            item = mock_download_item_factory_->PopItem()) {
-      EXPECT_CALL(*item, IsDangerous())
-          .WillOnce(Return(false));
-      EXPECT_CALL(*item, IsPartialDownload())
-          .WillOnce(Return(false));
+      EXPECT_CALL(*item, GetState())
+          .WillOnce(Return(DownloadItem::CANCELLED));
     }
     EXPECT_CALL(GetMockObserver(), ManagerGoingDown(download_manager_.get()))
         .WillOnce(Return());
 
     download_manager_->Shutdown();
-    download_manager_ = NULL;
+    download_manager_.reset();
     message_loop_.RunUntilIdle();
     ASSERT_EQ(NULL, mock_download_item_factory_.get());
     ASSERT_EQ(NULL, mock_download_file_factory_.get());
@@ -557,7 +549,7 @@ class DownloadManagerTest : public testing::Test {
 
  protected:
   // Key test variable; we'll keep it available to sub-classes.
-  scoped_refptr<DownloadManagerImpl> download_manager_;
+  scoped_ptr<DownloadManagerImpl> download_manager_;
   base::WeakPtr<MockDownloadFileFactory> mock_download_file_factory_;
 
   // Target detetermined callback.
@@ -611,8 +603,8 @@ TEST_F(DownloadManagerTest, StartDownload) {
 TEST_F(DownloadManagerTest, DetermineDownloadTarget_True) {
   // Put a mock we have a handle to on the download manager.
   MockDownloadItemImpl& item(AddItemToManager());
-  EXPECT_CALL(item, IsInProgress())
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(item, GetState())
+      .WillRepeatedly(Return(DownloadItem::IN_PROGRESS));
 
   EXPECT_CALL(GetMockDownloadManagerDelegate(),
               DetermineDownloadTarget(&item, _))
@@ -651,27 +643,17 @@ TEST_F(DownloadManagerTest, RemoveAllDownloads) {
     EXPECT_EQ(i, item.GetId());
     EXPECT_CALL(item, GetStartTime())
         .WillRepeatedly(Return(now));
-
-    // Default returns; overridden for each item below.
-    EXPECT_CALL(GetMockDownloadItem(i), IsComplete())
-        .WillRepeatedly(Return(false));
-    EXPECT_CALL(GetMockDownloadItem(i), IsCancelled())
-        .WillRepeatedly(Return(false));
-    EXPECT_CALL(GetMockDownloadItem(i), IsInterrupted())
-        .WillRepeatedly(Return(false));
-    EXPECT_CALL(GetMockDownloadItem(i), IsInProgress())
-        .WillRepeatedly(Return(false));
   }
 
   // Specify states for each.
-  EXPECT_CALL(GetMockDownloadItem(0), IsComplete())
-      .WillRepeatedly(Return(true));
-  EXPECT_CALL(GetMockDownloadItem(1), IsCancelled())
-      .WillRepeatedly(Return(true));
-  EXPECT_CALL(GetMockDownloadItem(2), IsInterrupted())
-      .WillRepeatedly(Return(true));
-  EXPECT_CALL(GetMockDownloadItem(3), IsInProgress())
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(GetMockDownloadItem(0), GetState())
+      .WillRepeatedly(Return(DownloadItem::COMPLETE));
+  EXPECT_CALL(GetMockDownloadItem(1), GetState())
+      .WillRepeatedly(Return(DownloadItem::CANCELLED));
+  EXPECT_CALL(GetMockDownloadItem(2), GetState())
+      .WillRepeatedly(Return(DownloadItem::INTERRUPTED));
+  EXPECT_CALL(GetMockDownloadItem(3), GetState())
+      .WillRepeatedly(Return(DownloadItem::IN_PROGRESS));
 
   // Expectations for whether or not they'll actually be removed.
   EXPECT_CALL(GetMockDownloadItem(0), Remove())

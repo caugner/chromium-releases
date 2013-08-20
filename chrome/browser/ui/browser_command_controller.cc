@@ -23,9 +23,9 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
@@ -71,7 +71,7 @@ bool HasInternalURL(const NavigationEntry* entry) {
 
   // If the |virtual_url()| isn't a chrome:// URL, check if it's actually
   // view-source: of a chrome:// URL.
-  if (entry->GetVirtualURL().SchemeIs(chrome::kViewSourceScheme))
+  if (entry->GetVirtualURL().SchemeIs(content::kViewSourceScheme))
     return entry->GetURL().SchemeIs(chrome::kChromeUIScheme);
 
   return false;
@@ -387,9 +387,12 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       CloseTab(browser_);
       break;
     case IDC_SELECT_NEXT_TAB:
+      content::RecordAction(content::UserMetricsAction("Accel_SelectNextTab"));
       SelectNextTab(browser_);
       break;
     case IDC_SELECT_PREVIOUS_TAB:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_SelectPreviousTab"));
       SelectPreviousTab(browser_);
       break;
     case IDC_TABPOSE:
@@ -624,10 +627,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ToggleDevToolsWindow(browser_, DEVTOOLS_TOGGLE_ACTION_TOGGLE);
       break;
     case IDC_TASK_MANAGER:
-      OpenTaskManager(browser_, false);
-      break;
-    case IDC_VIEW_BACKGROUND_PAGES:
-      OpenTaskManager(browser_, true);
+      OpenTaskManager(browser_);
       break;
     case IDC_FEEDBACK:
       OpenFeedbackDialog(browser_);
@@ -716,19 +716,6 @@ void BrowserCommandController::OnProfileWasRemoved(
     const base::FilePath& profile_path,
     const string16& profile_name) {
   UpdateCommandsForMultipleProfiles();
-}
-
-void BrowserCommandController::OnProfileWillBeRemoved(
-    const base::FilePath& profile_path) {
-}
-
-void BrowserCommandController::OnProfileNameChanged(
-    const base::FilePath& profile_path,
-    const string16& old_profile_name) {
-}
-
-void BrowserCommandController::OnProfileAvatarChanged(
-    const base::FilePath& profile_path) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -951,10 +938,6 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_UPGRADE_DIALOG, true);
   command_updater_.UpdateCommandEnabled(IDC_VIEW_INCOMPATIBILITIES, true);
 
-  // View Background Pages entry is always enabled, but is hidden if there are
-  // no background pages.
-  command_updater_.UpdateCommandEnabled(IDC_VIEW_BACKGROUND_PAGES, true);
-
   // Toggle speech input
   command_updater_.UpdateCommandEnabled(IDC_TOGGLE_SPEECH_INPUT, true);
 
@@ -996,6 +979,7 @@ void BrowserCommandController::UpdateSharedCommandsForIncognitoAvailability(
 
   command_updater->UpdateCommandEnabled(IDC_IMPORT_SETTINGS, command_enabled);
   command_updater->UpdateCommandEnabled(IDC_OPTIONS, command_enabled);
+  command_updater->UpdateCommandEnabled(IDC_SHOW_SIGNIN, command_enabled);
 }
 
 void BrowserCommandController::UpdateCommandsForIncognitoAvailability() {

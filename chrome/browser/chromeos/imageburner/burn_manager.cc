@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -26,9 +26,6 @@ namespace chromeos {
 namespace imageburner {
 
 namespace {
-
-// Name for hwid in machine statistics.
-const char kHwidStatistic[] = "hardware_class";
 
 const char kConfigFileUrl[] =
     "https://dl.google.com/dl/edgedl/chromeos/recovery/recovery.conf";
@@ -226,7 +223,8 @@ BurnManager::BurnManager(
       url_request_context_getter_(context_getter),
       bytes_image_download_progress_last_reported_(0),
       weak_ptr_factory_(this) {
-  NetworkStateHandler::Get()->AddObserver(this);
+  NetworkHandler::Get()->network_state_handler()->AddObserver(
+      this, FROM_HERE);
   base::WeakPtr<BurnManager> weak_ptr(weak_ptr_factory_.GetWeakPtr());
   device_handler_.SetCallbacks(
       base::Bind(&BurnManager::NotifyDeviceAdded, weak_ptr),
@@ -242,7 +240,10 @@ BurnManager::~BurnManager() {
   if (image_dir_created_) {
     file_util::Delete(image_dir_, true);
   }
-  NetworkStateHandler::Get()->RemoveObserver(this);
+  if (NetworkHandler::IsInitialized()) {
+    NetworkHandler::Get()->network_state_handler()->RemoveObserver(
+        this, FROM_HERE);
+  }
   DBusThreadManager::Get()->GetImageBurnerClient()->ResetEventHandlers();
 }
 
@@ -364,7 +365,7 @@ void BurnManager::FetchConfigFile() {
 
   config_fetcher_.reset(net::URLFetcher::Create(
       config_file_url_, net::URLFetcher::GET, this));
-  config_fetcher_->SetRequestContext(url_request_context_getter_);
+  config_fetcher_->SetRequestContext(url_request_context_getter_.get());
   config_fetcher_->Start();
 }
 
@@ -384,7 +385,7 @@ void BurnManager::FetchImage() {
   image_fetcher_.reset(net::URLFetcher::Create(image_download_url_,
                                                net::URLFetcher::GET,
                                                this));
-  image_fetcher_->SetRequestContext(url_request_context_getter_);
+  image_fetcher_->SetRequestContext(url_request_context_getter_.get());
   image_fetcher_->SaveResponseToFileAtPath(
       zip_image_file_path_,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
@@ -555,7 +556,7 @@ void BurnManager::ConfigFileFetched(bool fetched, const std::string& content) {
   // Get image file name and image download URL.
   std::string hwid;
   if (fetched && system::StatisticsProvider::GetInstance()->
-      GetMachineStatistic(kHwidStatistic, &hwid)) {
+      GetMachineStatistic(system::kHardwareClass, &hwid)) {
     ConfigFile config_file(content);
     image_file_name_ = config_file.GetProperty(kFileName, hwid);
     image_download_url_ = GURL(config_file.GetProperty(kUrl, hwid));

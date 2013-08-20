@@ -17,12 +17,14 @@ class QuicFramerPeer {
  public:
   static QuicPacketSequenceNumber CalculatePacketSequenceNumberFromWire(
       QuicFramer* framer,
+      QuicSequenceNumberLength sequence_number_length,
       QuicPacketSequenceNumber packet_sequence_number);
+  static void SetLastSerializedGuid(QuicFramer* framer, QuicGuid guid);
   static void SetLastSequenceNumber(
       QuicFramer* framer,
       QuicPacketSequenceNumber packet_sequence_number);
   static void SetIsServer(QuicFramer* framer, bool is_server);
-  static void SetVersion(QuicFramer* framer, QuicVersionTag version);
+  static void SetVersion(QuicFramer* framer, QuicTag version);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicFramerPeer);

@@ -8,14 +8,14 @@ import sys
 import tempfile
 import time
 
-from telemetry.core import browser_finder
 from telemetry.core import browser_options
+from telemetry.core import discover
 from telemetry.core import wpr_modes
 from telemetry.page import page_measurement
 from telemetry.page import page_runner
 from telemetry.page import page_set
 from telemetry.page import page_test
-from telemetry.test import discover
+
 
 class RecordPage(page_test.PageTest):
   def __init__(self, measurements):
@@ -59,16 +59,16 @@ class RecordPage(page_test.PageTest):
     return actions
 
 
-def Main(measurement_dir):
-  measurements = discover.DiscoverClasses(measurement_dir,
-                                        os.path.join(measurement_dir, '..'),
-                                        page_measurement.PageMeasurement)
+def Main(base_dir):
+  measurements = discover.DiscoverClasses(base_dir, base_dir,
+                                          page_measurement.PageMeasurement)
   options = browser_options.BrowserOptions()
   parser = options.CreateParser('%prog <page_set>')
-  page_runner.PageRunner.AddCommandLineOptions(parser)
+  page_runner.AddCommandLineOptions(parser)
 
   recorder = RecordPage(measurements)
   recorder.AddCommandLineOptions(parser)
+  recorder.AddOutputOptions(parser)
 
   _, args = parser.parse_args()
 
@@ -84,33 +84,25 @@ def Main(measurement_dir):
 
   # Do the actual recording.
   options.wpr_mode = wpr_modes.WPR_RECORD
+  options.no_proxy_server = True
   recorder.CustomizeBrowserOptions(options)
-  possible_browser = browser_finder.FindBrowser(options)
-  if not possible_browser:
-    print >> sys.stderr, """No browser found.\n
-Use --browser=list to figure out which are available.\n"""
-    sys.exit(1)
-  results = page_test.PageTestResults()
-  with page_runner.PageRunner(ps) as runner:
-    runner.Run(options, possible_browser, recorder, results)
+  results = page_runner.Run(recorder, ps, options)
 
-  if results.page_failures:
+  if results.errors or results.failures:
     logging.warning('Some pages failed. The recording has not been updated for '
                     'these pages.')
-    logging.warning('Failed pages: %s', '\n'.join(
-        [failure['page'].url for failure in results.page_failures]))
+    logging.warning('Failed pages:\n%s',
+                    '\n'.join(zip(*results.errors + results.failures)[0]))
 
-  if results.skipped_pages:
+  if results.skipped:
     logging.warning('Some pages were skipped. The recording has not been '
                     'updated for these pages.')
-    logging.warning('Skipped pages: %s', '\n'.join(
-        [skipped['page'].url for skipped in results.skipped_pages]))
+    logging.warning('Skipped pages:\n%s', '\n'.join(zip(*results.skipped)[0]))
 
-  if results.page_successes:
+  if results.successes:
     # Update the metadata for the pages which were recorded.
-    ps.wpr_archive_info.AddRecordedPages(
-        [page['page'] for page in results.page_successes])
+    ps.wpr_archive_info.AddRecordedPages(results.successes)
   else:
     os.remove(temp_target_wpr_file_path)
 
-  return min(255, len(results.page_failures))
+  return min(255, len(results.failures))

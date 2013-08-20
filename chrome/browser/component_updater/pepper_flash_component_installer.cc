@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,14 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "build/build_config.h"
@@ -33,8 +34,8 @@
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "ppapi/c/private/ppb_pdf.h"
+#include "webkit/common/plugins/ppapi/ppapi_utils.h"
 #include "webkit/plugins/plugin_constants.h"
-#include "webkit/plugins/ppapi/plugin_module.h"
 
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
@@ -95,8 +96,8 @@ bool GetPepperFlashDirectory(base::FilePath* latest_dir,
                              std::vector<base::FilePath>* older_dirs) {
   base::FilePath base_dir = GetPepperFlashBaseDirectory();
   bool found = false;
-  file_util::FileEnumerator
-      file_enumerator(base_dir, false, file_util::FileEnumerator::DIRECTORIES);
+  base::FileEnumerator
+      file_enumerator(base_dir, false, base::FileEnumerator::DIRECTORIES);
   for (base::FilePath path = file_enumerator.Next(); !path.value().empty();
        path = file_enumerator.Next()) {
     Version version(path.BaseName().MaybeAsASCII());
@@ -123,7 +124,7 @@ bool GetPepperFlashDirectory(base::FilePath* latest_dir,
 // Returns true if the Pepper |interface_name| is implemented  by this browser.
 // It does not check if the interface is proxied.
 bool SupportsPepperInterface(const char* interface_name) {
-  if (webkit::ppapi::PluginModule::SupportsInterface(interface_name))
+  if (webkit::ppapi::IsSupportedPepperInterface(interface_name))
     return true;
   // The PDF interface is invisible to SupportsInterface() on the browser
   // process because it is provided using PpapiInterfaceFactoryManager. We need
@@ -249,6 +250,9 @@ class PepperFlashComponentInstaller : public ComponentInstaller {
   virtual bool Install(const base::DictionaryValue& manifest,
                        const base::FilePath& unpack_path) OVERRIDE;
 
+  virtual bool GetInstalledFile(const std::string& file,
+                                base::FilePath* installed_file) OVERRIDE;
+
  private:
   Version current_version_;
 };
@@ -289,6 +293,11 @@ bool PepperFlashComponentInstaller::Install(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&RegisterPepperFlashWithChrome, path, version));
   return true;
+}
+
+bool PepperFlashComponentInstaller::GetInstalledFile(
+    const std::string& file, base::FilePath* installed_file) {
+  return false;
 }
 
 bool CheckPepperFlashManifest(const base::DictionaryValue& manifest,

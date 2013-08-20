@@ -8,13 +8,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/nacl_cmd_line.h"
 #include "chrome/common/nacl_debug_exception_handler_win.h"
 #include "chrome/common/nacl_messages.h"
+#include "components/nacl/common/nacl_switches.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/sandbox_init.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_switches.h"
@@ -43,7 +45,7 @@ void NaClBrokerListener::Listen() {
   channel_.reset(new IPC::Channel(
       channel_name, IPC::Channel::MODE_CLIENT, this));
   CHECK(channel_->Connect());
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 }
 
 // NOTE: changes to this method need to be reviewed by the security team.
@@ -81,7 +83,7 @@ bool NaClBrokerListener::OnMessageReceived(const IPC::Message& msg) {
 
 void NaClBrokerListener::OnChannelError() {
   // The browser died unexpectedly, quit to avoid a zombie process.
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }
 
 void NaClBrokerListener::OnLaunchLoaderThroughBroker(
@@ -125,5 +127,5 @@ void NaClBrokerListener::OnLaunchDebugExceptionHandler(
 }
 
 void NaClBrokerListener::OnStopBroker() {
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }

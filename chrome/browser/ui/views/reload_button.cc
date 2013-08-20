@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/reload_button.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/search/search.h"
@@ -20,7 +20,7 @@
 #include "ui/views/widget/widget.h"
 
 // static
-const char ReloadButton::kViewClassName[] = "browser/ui/views/ReloadButton";
+const char ReloadButton::kViewClassName[] = "ReloadButton";
 
 const int kReloadImages[] =
     { IDR_RELOAD, IDR_RELOAD_H, IDR_RELOAD_P, IDR_RELOAD_D };
@@ -162,7 +162,7 @@ bool ReloadButton::GetTooltipText(const gfx::Point& p,
   return true;
 }
 
-std::string ReloadButton::GetClassName() const {
+const char* ReloadButton::GetClassName() const {
   return kViewClassName;
 }
 
@@ -170,8 +170,8 @@ bool ReloadButton::ShouldShowMenu() {
   return menu_enabled_ && (visible_mode_ == MODE_RELOAD);
 }
 
-void ReloadButton::ShowDropDownMenu() {
-  ButtonDropDown::ShowDropDownMenu();  // Blocks.
+void ReloadButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
+  ButtonDropDown::ShowDropDownMenu(source_type);  // Blocks.
   ChangeMode(intended_mode_, true);
 }
 

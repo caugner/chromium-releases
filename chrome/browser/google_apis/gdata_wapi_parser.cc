@@ -11,10 +11,10 @@
 #include "base/files/file_path.h"
 #include "base/json/json_value_converter.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/time_util.h"
@@ -578,18 +578,19 @@ std::string ResourceEntry::GetHostedDocumentExtension() const {
 }
 
 // static
-bool ResourceEntry::HasHostedDocumentExtension(const base::FilePath& file) {
+int ResourceEntry::ClassifyEntryKindByFileExtension(
+    const base::FilePath& file_path) {
 #if defined(OS_WIN)
-  std::string file_extension = WideToUTF8(file.Extension());
+  std::string file_extension = WideToUTF8(file_path.Extension());
 #else
-  std::string file_extension = file.Extension();
+  std::string file_extension = file_path.Extension();
 #endif
   for (size_t i = 0; i < arraysize(kEntryKindMap); ++i) {
     const char* document_extension = kEntryKindMap[i].extension;
     if (document_extension && file_extension == document_extension)
-      return true;
+      return ClassifyEntryKind(kEntryKindMap[i].kind);
   }
-  return false;
+  return 0;
 }
 
 // static
@@ -775,6 +776,7 @@ scoped_ptr<ResourceEntry> ResourceEntry::CreateFromChangeResource(
   entry->resource_id_ = change.file_id();
   // If |is_deleted()| returns true, the file is removed from Drive.
   entry->removed_ = change.is_deleted();
+  entry->changestamp_ = change.change_id();
 
   return entry.Pass();
 }
@@ -839,7 +841,7 @@ scoped_ptr<ResourceList> ResourceList::ExtractAndParse(
       as_dict->GetDictionary(kFeedField, &feed_dict)) {
     return ResourceList::CreateFrom(*feed_dict);
   }
-  return scoped_ptr<ResourceList>(NULL);
+  return scoped_ptr<ResourceList>();
 }
 
 // static
@@ -847,7 +849,7 @@ scoped_ptr<ResourceList> ResourceList::CreateFrom(const base::Value& value) {
   scoped_ptr<ResourceList> feed(new ResourceList());
   if (!feed->Parse(value)) {
     DVLOG(1) << "Invalid resource list!";
-    return scoped_ptr<ResourceList>(NULL);
+    return scoped_ptr<ResourceList>();
   }
 
   return feed.Pass();
@@ -1037,7 +1039,7 @@ scoped_ptr<AccountMetadata> AccountMetadata::CreateFrom(
       !dictionary->Get(kEntryField, &entry) ||
       !metadata->Parse(*entry)) {
     LOG(ERROR) << "Unable to create: Invalid account metadata feed!";
-    return scoped_ptr<AccountMetadata>(NULL);
+    return scoped_ptr<AccountMetadata>();
   }
 
   return metadata.Pass();

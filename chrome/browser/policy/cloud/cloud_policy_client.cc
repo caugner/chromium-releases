@@ -26,7 +26,7 @@ DeviceMode TranslateProtobufDeviceMode(
     case em::DeviceRegisterResponse::ENTERPRISE:
       return DEVICE_MODE_ENTERPRISE;
     case em::DeviceRegisterResponse::RETAIL:
-      return DEVICE_MODE_KIOSK;
+      return DEVICE_MODE_RETAIL_KIOSK;
   }
   LOG(ERROR) << "Unknown enrollment mode in registration response: " << mode;
   return DEVICE_MODE_NOT_SET;
@@ -84,7 +84,8 @@ void CloudPolicyClient::SetupRegistration(const std::string& dm_token,
 void CloudPolicyClient::Register(em::DeviceRegisterRequest::Type type,
                                  const std::string& auth_token,
                                  const std::string& client_id,
-                                 bool is_auto_enrollement) {
+                                 bool is_auto_enrollement,
+                                 const std::string& requisition) {
   DCHECK(service_);
   DCHECK(!auth_token.empty());
   DCHECK(!is_registered());
@@ -114,6 +115,8 @@ void CloudPolicyClient::Register(em::DeviceRegisterRequest::Type type,
     request->set_machine_model(machine_model_);
   if (is_auto_enrollement)
     request->set_auto_enrolled(true);
+  if (!requisition.empty())
+    request->set_requisition(requisition);
 
   request_job_->SetRetryCallback(
       base::Bind(&CloudPolicyClient::OnRetryRegister, base::Unretained(this)));
@@ -270,6 +273,7 @@ void CloudPolicyClient::OnRetryRegister(DeviceManagementRequestJob* job) {
 
 void CloudPolicyClient::OnRegisterCompleted(
     DeviceManagementStatus status,
+    int net_error,
     const em::DeviceManagementResponse& response) {
   if (status == DM_STATUS_SUCCESS &&
       (!response.has_register_response() ||
@@ -299,6 +303,7 @@ void CloudPolicyClient::OnRegisterCompleted(
 
 void CloudPolicyClient::OnFetchRobotAuthCodesCompleted(
     DeviceManagementStatus status,
+    int net_error,
     const em::DeviceManagementResponse& response) {
   if (status == DM_STATUS_SUCCESS &&
       (!response.has_service_api_access_response() ||
@@ -321,6 +326,7 @@ void CloudPolicyClient::OnFetchRobotAuthCodesCompleted(
 
 void CloudPolicyClient::OnPolicyFetchCompleted(
     DeviceManagementStatus status,
+    int net_error,
     const em::DeviceManagementResponse& response) {
   if (status == DM_STATUS_SUCCESS) {
     if (!response.has_policy_response() ||
@@ -366,6 +372,7 @@ void CloudPolicyClient::OnPolicyFetchCompleted(
 
 void CloudPolicyClient::OnUnregisterCompleted(
     DeviceManagementStatus status,
+    int net_error,
     const em::DeviceManagementResponse& response) {
   if (status == DM_STATUS_SUCCESS && !response.has_unregister_response()) {
     // Assume unregistration has succeeded either way.
@@ -384,6 +391,7 @@ void CloudPolicyClient::OnUnregisterCompleted(
 void CloudPolicyClient::OnCertificateUploadCompleted(
     const CloudPolicyClient::StatusCallback& callback,
     DeviceManagementStatus status,
+    int net_error,
     const enterprise_management::DeviceManagementResponse& response) {
   if (status == DM_STATUS_SUCCESS && !response.has_cert_upload_response()) {
     LOG(WARNING) << "Empty upload certificate response.";

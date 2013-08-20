@@ -5,10 +5,8 @@
 #include "chrome/browser/task_manager/task_manager.h"
 
 #include "base/files/file_path.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
-#include "chrome/browser/background/background_contents_service.h"
-#include "chrome/browser/background/background_contents_service_factory.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -20,6 +18,7 @@
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/task_manager/resource_provider.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -37,6 +36,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/test/browser_test_utils.h"
 #include "grit/generated_resources.h"
 #include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -76,11 +76,9 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
 
     EXPECT_EQ(0, model()->ResourceCount());
 
-    EXPECT_EQ(0, TaskManager::GetBackgroundPageCount());
-
     // Show the task manager. This populates the model, and helps with debugging
     // (you see the task manager).
-    chrome::ShowTaskManager(browser(), false);
+    chrome::ShowTaskManager(browser());
 
     // New Tab Page.
     TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
@@ -88,6 +86,10 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
 
   void Refresh() {
     model()->Refresh();
+  }
+
+  int GetUpdateTimeMs() {
+    return TaskManagerModel::kUpdateTimeMs;
   }
 
  protected:
@@ -183,67 +185,6 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_NoticePanelChanges) {
   TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
 }
 
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeBGContentsChanges) {
-  // Open a new background contents and make sure we notice that.
-  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
-      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
-
-  BackgroundContentsService* service =
-      BackgroundContentsServiceFactory::GetForProfile(browser()->profile());
-  string16 application_id(ASCIIToUTF16("test_app_id"));
-  service->LoadBackgroundContents(browser()->profile(),
-                                  url,
-                                  ASCIIToUTF16("background_page"),
-                                  application_id);
-  TaskManagerBrowserTestUtil::WaitForWebResourceChange(2);
-  EXPECT_EQ(1, TaskManager::GetBackgroundPageCount());
-
-  // Close the background contents and verify that we notice.
-  service->ShutdownAssociatedBackgroundContents(application_id);
-  TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
-  EXPECT_EQ(0, TaskManager::GetBackgroundPageCount());
-}
-
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillBGContents) {
-  int resource_count = TaskManager::GetInstance()->model()->ResourceCount();
-
-  // Open a new background contents and make sure we notice that.
-  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
-      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
-
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
-      content::Source<Profile>(browser()->profile()));
-
-  BackgroundContentsService* service =
-      BackgroundContentsServiceFactory::GetForProfile(browser()->profile());
-  string16 application_id(ASCIIToUTF16("test_app_id"));
-  service->LoadBackgroundContents(browser()->profile(),
-                                  url,
-                                  ASCIIToUTF16("background_page"),
-                                  application_id);
-
-  // Wait for the background contents process to finish loading.
-  observer.Wait();
-
-  EXPECT_EQ(resource_count + 1, model()->ResourceCount());
-  EXPECT_EQ(1, TaskManager::GetBackgroundPageCount());
-
-  // Kill the background contents process and verify that it disappears from the
-  // model.
-  bool found = false;
-  for (int i = 0; i < model()->ResourceCount(); ++i) {
-    if (model()->IsBackgroundResource(i)) {
-      TaskManager::GetInstance()->KillProcess(i);
-      found = true;
-      break;
-    }
-  }
-  ASSERT_TRUE(found);
-  TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
-  EXPECT_EQ(0, TaskManager::GetBackgroundPageCount());
-}
-
 #if defined(USE_ASH) || defined(OS_WIN)
 // This test fails on Ash because task manager treats view type
 // Panels differently for Ash.
@@ -282,20 +223,6 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_KillPanelExtension) {
   TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
 }
 
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionChanges) {
-  // Loading an extension with a background page should result in a new
-  // resource being created for it.
-  ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("common").AppendASCII("background_page")));
-  TaskManagerBrowserTestUtil::WaitForWebResourceChange(2);
-  EXPECT_EQ(1, TaskManager::GetBackgroundPageCount());
-
-  // Unload extension to avoid crash on Windows (see http://crbug.com/31663).
-  UnloadExtension(last_loaded_extension_id_);
-  TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
-  EXPECT_EQ(0, TaskManager::GetBackgroundPageCount());
-}
-
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionTabs) {
   int resource_count = TaskManager::GetInstance()->model()->ResourceCount();
   ASSERT_TRUE(LoadExtension(
@@ -313,7 +240,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionTabs) {
 
   // Check that the third entry (background) is an extension resource whose
   // title starts with "Extension:".
-  ASSERT_EQ(TaskManager::Resource::EXTENSION, model()->GetResourceType(
+  ASSERT_EQ(task_manager::Resource::EXTENSION, model()->GetResourceType(
       resource_count));
   ASSERT_TRUE(model()->GetResourceWebContents(resource_count) == NULL);
   ASSERT_TRUE(model()->GetResourceExtension(resource_count) != NULL);
@@ -324,7 +251,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionTabs) {
 
   // Check that the fourth entry (page.html) is of type extension and has both
   // a tab contents and an extension. The title should start with "Extension:".
-  ASSERT_EQ(TaskManager::Resource::EXTENSION, model()->GetResourceType(
+  ASSERT_EQ(task_manager::Resource::EXTENSION, model()->GetResourceType(
       resource_count + 1));
   ASSERT_TRUE(model()->GetResourceWebContents(resource_count + 1) != NULL);
   ASSERT_TRUE(model()->GetResourceExtension(resource_count + 1) != NULL);
@@ -355,7 +282,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeAppTabs) {
 
   // Check that the third entry (main.html) is of type extension and has both
   // a tab contents and an extension. The title should start with "App:".
-  ASSERT_EQ(TaskManager::Resource::EXTENSION, model()->GetResourceType(
+  ASSERT_EQ(task_manager::Resource::EXTENSION, model()->GetResourceType(
       resource_count));
   ASSERT_TRUE(model()->GetResourceWebContents(resource_count) != NULL);
   ASSERT_TRUE(model()->GetResourceExtension(resource_count) == extension);
@@ -428,27 +355,6 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeHostedAppTabs) {
   // The third entry's title should be back to a normal tab.
   ASSERT_TRUE(StartsWith(model()->GetResourceTitle(resource_count),
                          tab_prefix, true));
-}
-
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_KillExtension) {
-  int resource_count = TaskManager::GetInstance()->model()->ResourceCount();
-
-  ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("common").AppendASCII("background_page")));
-
-  // Wait until we see the loaded extension in the task manager (the three
-  // resources are: the browser process, New Tab Page, and the extension).
-  TaskManagerBrowserTestUtil::WaitForWebResourceChange(2);
-  EXPECT_EQ(1, TaskManager::GetBackgroundPageCount());
-
-  EXPECT_TRUE(model()->GetResourceExtension(0) == NULL);
-  EXPECT_TRUE(model()->GetResourceExtension(1) == NULL);
-  ASSERT_TRUE(model()->GetResourceExtension(resource_count) != NULL);
-
-  // Kill the extension process and make sure we notice it.
-  TaskManager::GetInstance()->KillProcess(resource_count);
-  TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
-  EXPECT_EQ(0, TaskManager::GetBackgroundPageCount());
 }
 
 // Disabled, http://crbug.com/66957.
@@ -546,6 +452,46 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
             l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT));
   DCHECK_NE(model()->GetResourceWebCoreCSSCacheSize(resource_count),
             l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT));
+}
+
+// Checks that task manager counts a worker thread JS heap size.
+// http://crbug.com/241066
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, WebWorkerJSHeapMemory) {
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
+  ui_test_utils::NavigateToURL(browser(), url);
+  const int extra_timeout_ms = 500;
+  size_t minimal_heap_size = 2 * 1024 * 1024 * sizeof(void*);
+  std::string test_js = base::StringPrintf(
+      "var blob = new Blob([\n"
+      "    'mem = new Array(%lu);',\n"
+      "    'for (var i = 0; i < mem.length; i += 16) mem[i] = i;',\n"
+      "    'postMessage();']);\n"
+      "blobURL = window.URL.createObjectURL(blob);\n"
+      "worker = new Worker(blobURL);\n"
+      "// Give the task manager few seconds to poll for JS heap sizes.\n"
+      "worker.onmessage = setTimeout.bind(\n"
+      "    this,\n"
+      "    function () { window.domAutomationController.send(true); },\n"
+      "    %d);\n"
+      "worker.postMessage();\n",
+      static_cast<unsigned long>(minimal_heap_size),
+      GetUpdateTimeMs() + extra_timeout_ms);
+  bool ok;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      browser()->tab_strip_model()->GetActiveWebContents(), test_js, &ok));
+  ASSERT_TRUE(ok);
+
+  int resource_index = TaskManager::GetInstance()->model()->ResourceCount() - 1;
+  size_t result;
+
+  ASSERT_TRUE(model()->GetV8Memory(resource_index, &result));
+  LOG(INFO) << "Got V8 Heap Size " << result << " bytes";
+  EXPECT_GE(result, minimal_heap_size);
+
+  ASSERT_TRUE(model()->GetV8MemoryUsed(resource_index, &result));
+  LOG(INFO) << "Got V8 Used Heap Size " << result << " bytes";
+  EXPECT_GE(result, minimal_heap_size);
 }
 
 #endif

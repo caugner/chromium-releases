@@ -17,11 +17,11 @@
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
@@ -398,7 +398,7 @@ void Automation::Init(
   if (options.ignore_certificate_errors)
     command.AppendSwitch(switches::kIgnoreCertificateErrors);
   if (options.user_data_dir.empty())
-    command.AppendArg(chrome::kAboutBlankURL);
+    command.AppendArg(content::kAboutBlankURL);
 
   command.AppendArguments(options.command, true /* include_program */);
 
@@ -714,7 +714,7 @@ void Automation::SendWebMouseEvent(const WebViewId& view_id,
     return;
 
   automation::Error auto_error;
-  if (!SendWebMouseEventJSONRequest(
+  if (!SendWebMouseEventJSONRequestDeprecated(
           automation(), view_locator, event, &auto_error)) {
     *error = Error::FromAutomationError(auto_error);
   }
@@ -729,7 +729,7 @@ void Automation::CaptureEntirePageAsPNG(const WebViewId& view_id,
     return;
 
   automation::Error auto_error;
-  if (!SendCaptureEntirePageJSONRequest(
+  if (!SendCaptureEntirePageJSONRequestDeprecated(
           automation(), view_locator, path, &auto_error)) {
     *error = Error::FromAutomationError(auto_error);
   }
@@ -745,7 +745,7 @@ void Automation::HeapProfilerDump(const WebViewId& view_id,
     return;
 
   automation::Error auto_error;
-  if (!SendHeapProfilerDumpJSONRequest(
+  if (!SendHeapProfilerDumpJSONRequestDeprecated(
           automation(), view_locator, reason, &auto_error)) {
     *error = Error::FromAutomationError(auto_error);
   }
@@ -792,12 +792,12 @@ void Automation::NavigateToURLAsync(const WebViewId& view_id,
   } else {
     scoped_refptr<BrowserProxy> browser =
         automation()->GetBrowserWindow(view_locator.browser_index());
-    if (!browser) {
+    if (!browser.get()) {
       *error = new Error(kUnknownError, "Couldn't obtain browser proxy");
       return;
     }
     scoped_refptr<TabProxy> tab = browser->GetTab(view_locator.tab_index());
-    if (!tab) {
+    if (!tab.get()) {
       *error = new Error(kUnknownError, "Couldn't obtain tab proxy");
       return;
     }
@@ -976,7 +976,8 @@ void Automation::GetChromeDriverAutomationVersion(int* version, Error** error) {
 
 void Automation::WaitForAllViewsToStopLoading(Error** error) {
   automation::Error auto_error;
-  if (!SendWaitForAllViewsToStopLoadingJSONRequest(automation(), &auto_error))
+  if (!SendWaitForAllViewsToStopLoadingJSONRequestDeprecated(
+          automation(), &auto_error))
     *error = Error::FromAutomationError(auto_error);
 }
 

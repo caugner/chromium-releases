@@ -15,13 +15,13 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
@@ -33,6 +33,7 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/net/connectivity_state_helper.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
@@ -45,6 +46,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -167,7 +169,6 @@ void ExistingUserController::Init(const UserList& users) {
   UpdateLoginDisplay(users);
   ConfigurePublicSessionAutoLogin();
 
-  LoginUtils::Get()->PrewarmAuthentication();
   DBusThreadManager::Get()->GetSessionManagerClient()->EmitLoginPromptReady();
 }
 
@@ -180,8 +181,13 @@ void ExistingUserController::UpdateLoginDisplay(const UserList& users) {
   if (show_users_on_signin) {
     for (UserList::const_iterator it = users.begin(); it != users.end(); ++it) {
       // TODO(xiyuan): Clean user profile whose email is not in whitelist.
-      if (LoginUtils::IsWhitelisted((*it)->email()) ||
-          (*it)->GetType() != User::USER_TYPE_REGULAR) {
+      bool meets_locally_managed_requirements =
+          (*it)->GetType() != User::USER_TYPE_LOCALLY_MANAGED ||
+          UserManager::Get()->AreLocallyManagedUsersAllowed();
+      bool meets_whitelist_requirements =
+          LoginUtils::IsWhitelisted((*it)->email()) ||
+          (*it)->GetType() != User::USER_TYPE_REGULAR;
+      if (meets_locally_managed_requirements && meets_whitelist_requirements) {
         filtered_users.push_back(*it);
       }
     }
@@ -437,6 +443,11 @@ void ExistingUserController::PerformLogin(
   is_login_in_progress_ = true;
   if (gaia::ExtractDomainName(user_context.username) ==
           UserManager::kLocallyManagedUserDomain) {
+    if (!UserManager::Get()->AreLocallyManagedUsersAllowed()) {
+      LOG(ERROR) << "Login attempt of locally managed user detected.";
+      login_display_->SetUIEnabled(true);
+      return;
+    }
     login_performer_->LoginAsLocallyManagedUser(
         UserContext(user_context.username,
                     user_context.password,
@@ -444,7 +455,7 @@ void ExistingUserController::PerformLogin(
   } else {
     login_performer_->PerformLogin(user_context, auth_mode);
   }
-  accessibility::MaybeSpeak(
+  AccessibilityManager::Get()->MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN));
 }
 
@@ -462,7 +473,7 @@ void ExistingUserController::LoginAsRetailModeUser() {
   login_performer_.reset(new LoginPerformer(this));
   is_login_in_progress_ = true;
   login_performer_->LoginRetailMode();
-  accessibility::MaybeSpeak(
+  AccessibilityManager::Get()->MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_DEMOUSER));
 }
 
@@ -515,7 +526,7 @@ void ExistingUserController::LoginAsGuest() {
   login_performer_.reset(new LoginPerformer(this));
   is_login_in_progress_ = true;
   login_performer_->LoginOffTheRecord();
-  accessibility::MaybeSpeak(
+  AccessibilityManager::Get()->MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_OFFRECORD));
 }
 
@@ -571,7 +582,7 @@ void ExistingUserController::LoginAsPublicAccount(
   login_performer_.reset(new LoginPerformer(this));
   is_login_in_progress_ = true;
   login_performer_->LoginAsPublicAccount(username);
-  accessibility::MaybeSpeak(
+  AccessibilityManager::Get()->MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_PUBLIC_ACCOUNT));
 }
 
@@ -591,8 +602,18 @@ void ExistingUserController::OnStartEnterpriseEnrollment() {
                  weak_factory_.GetWeakPtr()));
 }
 
+void ExistingUserController::OnStartKioskEnableScreen() {
+  KioskAppManager::Get()->GetConsumerKioskModeStatus(
+      base::Bind(&ExistingUserController::OnConsumerKioskModeCheckCompleted,
+                 weak_factory_.GetWeakPtr()));
+}
+
 void ExistingUserController::OnStartDeviceReset() {
   ShowResetScreen();
+}
+
+void ExistingUserController::OnStartKioskAutolaunchScreen() {
+  ShowKioskAutolaunchScreen();
 }
 
 void ExistingUserController::ResyncUserData() {
@@ -615,6 +636,12 @@ void ExistingUserController::Signout() {
   NOTREACHED();
 }
 
+void ExistingUserController::OnConsumerKioskModeCheckCompleted(
+    KioskAppManager::ConsumerKioskModeStatus status) {
+  if (status == KioskAppManager::CONSUMER_KIOSK_MODE_CONFIGURABLE)
+    ShowKioskEnableScreen();
+}
+
 void ExistingUserController::OnEnrollmentOwnershipCheckCompleted(
     DeviceSettingsService::OwnershipStatus status,
     bool current_user_is_owner) {
@@ -627,9 +654,11 @@ void ExistingUserController::OnEnrollmentOwnershipCheckCompleted(
         CrosSettings::Get()->PrepareTrustedValues(
             base::Bind(
                 &ExistingUserController::OnEnrollmentOwnershipCheckCompleted,
-                weak_factory_.GetWeakPtr(), status, current_user_is_owner));
-    if (trusted_status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED)
+                weak_factory_.GetWeakPtr(),
+                status, current_user_is_owner));
+    if (trusted_status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
       ShowEnrollmentScreen(false, std::string());
+    }
   } else {
     // OwnershipService::GetStatusAsync is supposed to return either
     // OWNERSHIP_NONE or OWNERSHIP_TAKEN.
@@ -653,6 +682,19 @@ void ExistingUserController::ShowEnrollmentScreen(bool is_auto_enrollment,
 void ExistingUserController::ShowResetScreen() {
   scoped_ptr<DictionaryValue> params;
   host_->StartWizard(WizardController::kResetScreenName, params.Pass());
+  login_display_->OnFadeOut();
+}
+
+void ExistingUserController::ShowKioskEnableScreen() {
+  scoped_ptr<DictionaryValue> params;
+  host_->StartWizard(WizardController::kKioskEnableScreenName, params.Pass());
+  login_display_->OnFadeOut();
+}
+
+void ExistingUserController::ShowKioskAutolaunchScreen() {
+  scoped_ptr<DictionaryValue> params;
+  host_->StartWizard(WizardController::kKioskAutolaunchScreenName,
+                     params.Pass());
   login_display_->OnFadeOut();
 }
 
@@ -714,6 +756,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
     }
     // Reenable clicking on other windows and status area.
     login_display_->SetUIEnabled(true);
+    login_display_->ClearAndEnablePassword();
     StartPublicSessionAutoLoginTimer();
   }
 
@@ -759,6 +802,7 @@ void ExistingUserController::OnLoginSuccess(
                                     display_email_,
                                     using_oauth,
                                     has_cookies,
+                                    false,          // Start session for user.
                                     this);
 
   display_email_.clear();
@@ -782,7 +826,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
       InitializeStartUrls();
 #ifndef NDEBUG
     if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kOobeSkipPostLogin)) {
+          chromeos::switches::kOobeSkipPostLogin)) {
       LoginUtils::Get()->DoBrowserLaunch(profile, host_);
       host_ = NULL;
     } else {
@@ -912,10 +956,20 @@ void ExistingUserController::ActivateWizard(const std::string& screen_name) {
 }
 
 void ExistingUserController::ConfigurePublicSessionAutoLogin() {
-  if (!cros_settings_->GetString(
-          kAccountsPrefDeviceLocalAccountAutoLoginId,
-          &public_session_auto_login_username_)) {
-    public_session_auto_login_username_.clear();
+  std::string auto_login_account_id;
+  cros_settings_->GetString(kAccountsPrefDeviceLocalAccountAutoLoginId,
+                            &auto_login_account_id);
+  const std::vector<policy::DeviceLocalAccount> device_local_accounts =
+      policy::GetDeviceLocalAccounts(cros_settings_);
+
+  public_session_auto_login_username_.clear();
+  for (std::vector<policy::DeviceLocalAccount>::const_iterator
+           it = device_local_accounts.begin();
+       it != device_local_accounts.end(); ++it) {
+    if (it->account_id == auto_login_account_id) {
+      public_session_auto_login_username_ = it->user_id;
+      break;
+    }
   }
 
   const User* user =
@@ -982,7 +1036,6 @@ gfx::NativeWindow ExistingUserController::GetNativeWindow() const {
 void ExistingUserController::InitializeStartUrls() const {
   std::vector<std::string> start_urls;
 
-  PrefService* prefs = g_browser_process->local_state();
   const base::ListValue *urls;
   bool can_show_getstarted_guide = true;
   if (UserManager::Get()->IsLoggedInAsDemoUser()) {
@@ -999,8 +1052,9 @@ void ExistingUserController::InitializeStartUrls() const {
     can_show_getstarted_guide = false;
   // Skip the default first-run behavior for public accounts.
   } else if (!UserManager::Get()->IsLoggedInAsPublicAccount()) {
-    if (prefs->GetBoolean(prefs::kSpokenFeedbackEnabled)) {
+    if (AccessibilityManager::Get()->IsSpokenFeedbackEnabled()) {
       const char* url = kChromeVoxTutorialURLPattern;
+      PrefService* prefs = g_browser_process->local_state();
       const std::string current_locale =
           StringToLowerASCII(prefs->GetString(prefs::kApplicationLocale));
       std::string vox_url = base::StringPrintf(url, current_locale.c_str());

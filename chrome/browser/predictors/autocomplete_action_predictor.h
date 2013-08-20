@@ -11,19 +11,19 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_table.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
-struct AutocompleteLog;
 struct AutocompleteMatch;
 class AutocompleteResult;
 class HistoryService;
+struct OmniboxLog;
 class PredictorsHandler;
 class Profile;
 
@@ -59,7 +59,7 @@ namespace predictors {
 // PostTaskAndReply without fear of crashes if it is destroyed before the reply
 // triggers. This is necessary during initialization.
 class AutocompleteActionPredictor
-    : public ProfileKeyedService,
+    : public BrowserContextKeyedService,
       public content::NotificationObserver,
       public base::SupportsWeakPtr<AutocompleteActionPredictor> {
  public:
@@ -163,7 +163,7 @@ class AutocompleteActionPredictor
   void DeleteRowsWithURLs(const history::URLRows& rows);
 
   // Called when NOTIFICATION_OMNIBOX_OPENED_URL is observed.
-  void OnOmniboxOpenedUrl(const AutocompleteLog& log);
+  void OnOmniboxOpenedUrl(const OmniboxLog& log);
 
   // Adds and updates rows in the database and caches.
   void AddAndUpdateRows(

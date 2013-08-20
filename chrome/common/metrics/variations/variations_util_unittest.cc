@@ -10,8 +10,8 @@
 #include "base/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_split.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/common/metrics/metrics_util.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "content/public/test/test_browser_thread.h"
@@ -56,7 +56,7 @@ class VariationsUtilTest : public ::testing::Test {
 
  private:
   base::FieldTrialList field_trial_list_;
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   scoped_ptr<content::TestBrowserThread> ui_thread_;
 };
 

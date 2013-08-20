@@ -7,10 +7,10 @@
 #include "base/basictypes.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/native_backend_gnome_x.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
@@ -307,8 +307,9 @@ class NativeBackendGnomeTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
+    base::MessageLoop::current()->Run();
     db_thread_.Stop();
   }
 
@@ -320,11 +321,11 @@ class NativeBackendGnomeTest : public testing::Test {
     // quit so we can get on with the rest of the test.
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
         base::Bind(&PostQuitTask, &message_loop_));
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
-  static void PostQuitTask(MessageLoop* loop) {
-    loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  static void PostQuitTask(base::MessageLoop* loop) {
+    loop->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
   }
 
   void CheckUint32Attribute(const MockKeyringItem* item,
@@ -378,7 +379,7 @@ class NativeBackendGnomeTest : public testing::Test {
     CheckStringAttribute(item, "application", app_string);
   }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
 

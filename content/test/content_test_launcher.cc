@@ -11,15 +11,15 @@
 #include "base/test/test_suite.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/content_test_suite_base.h"
+#include "content/shell/app/shell_main_delegate.h"
+#include "content/shell/common/shell_content_client.h"
+#include "content/shell/common/shell_switches.h"
 #include "content/shell/shell_content_browser_client.h"
-#include "content/shell/shell_content_client.h"
-#include "content/shell/shell_main_delegate.h"
-#include "content/shell/shell_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_ANDROID)
 #include "base/message_loop.h"
-#include "content/test/browser_test_message_pump_android.h"
+#include "content/public/test/nested_message_pump_android.h"
 #endif
 
 #if defined(OS_WIN)
@@ -57,7 +57,7 @@ class ContentShellTestSuiteInitializer
 
 #if defined(OS_ANDROID)
 base::MessagePump* CreateMessagePumpForUI() {
-  return new BrowserTestMessagePumpAndroid();
+  return new NestedMessagePumpAndroid();
 };
 #endif
 
@@ -102,10 +102,6 @@ class ContentTestLauncherDelegate : public TestLauncherDelegate {
   ContentTestLauncherDelegate() {}
   virtual ~ContentTestLauncherDelegate() {}
 
-  virtual std::string GetEmptyTestName() OVERRIDE {
-    return std::string();
-  }
-
   virtual int RunTestSuite(int argc, char** argv) OVERRIDE {
     return ContentBrowserTestSuite(argc, argv).Run();
   }
@@ -115,6 +111,7 @@ class ContentTestLauncherDelegate : public TestLauncherDelegate {
     command_line->AppendSwitchPath(switches::kContentShellDataPath,
                                    temp_data_dir);
     command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
+    command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
     return true;
   }
 

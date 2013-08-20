@@ -9,7 +9,7 @@
 
 #include "chrome/installer/util/chrome_frame_distribution.h"
 
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/common/net/test_server_locations.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/google_update_constants.h"
@@ -82,10 +82,6 @@ string16 ChromeFrameDistribution::GetStateMediumKey() {
   key.append(L"\\");
   key.append(kChromeFrameGuid);
   return key;
-}
-
-string16 ChromeFrameDistribution::GetStatsServerURL() {
-  return L"https://clients4.google.com/firefox/metrics/collect";
 }
 
 std::string ChromeFrameDistribution::GetNetworkStatsServer() const {

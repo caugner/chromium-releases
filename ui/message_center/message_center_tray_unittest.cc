@@ -4,7 +4,7 @@
 
 #include "ui/message_center/message_center_tray.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notification_types.h"
@@ -28,6 +28,9 @@ class MockDelegate : public MessageCenterTrayDelegate {
     return show_popups_success_;
   }
   virtual void HideMessageCenter() OVERRIDE {}
+  virtual bool ShowNotifierSettings() OVERRIDE {
+    return false;
+  }
 
   bool show_popups_success_;
   bool show_message_center_success_;
@@ -57,6 +60,19 @@ class MessageCenterTrayTest : public testing::Test {
   }
 
  protected:
+  void AddNotification(const std::string& id) {
+    scoped_ptr<Notification> notification(
+        new Notification(message_center::NOTIFICATION_TYPE_SIMPLE,
+                         id,
+                         ASCIIToUTF16("Test Web Notification"),
+                         ASCIIToUTF16("Notification message body."),
+                         gfx::Image(),
+                         ASCIIToUTF16("www.test.org"),
+                         "" /* extension id */,
+                         message_center::RichNotificationData(),
+                         NULL /* delegate */));
+    message_center_->AddNotification(notification.Pass());
+  }
   scoped_ptr<MockDelegate> delegate_;
   scoped_ptr<MessageCenterTray> message_center_tray_;
   MessageCenter* message_center_;
@@ -102,14 +118,7 @@ TEST_F(MessageCenterTrayTest, BasicPopup) {
   ASSERT_FALSE(message_center_tray_->popups_visible());
   ASSERT_FALSE(message_center_tray_->message_center_visible());
 
-  message_center_->AddNotification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      "BasicPopup",
-      ASCIIToUTF16("Test Web Notification"),
-      ASCIIToUTF16("Notification message body."),
-      ASCIIToUTF16("www.test.org"),
-      "" /* extension id */,
-      NULL /* optional_fields */);
+  AddNotification("BasicPopup");
 
   ASSERT_TRUE(message_center_tray_->popups_visible());
   ASSERT_FALSE(message_center_tray_->message_center_visible());
@@ -124,14 +133,7 @@ TEST_F(MessageCenterTrayTest, MessageCenterClosesPopups) {
   ASSERT_FALSE(message_center_tray_->popups_visible());
   ASSERT_FALSE(message_center_tray_->message_center_visible());
 
-  message_center_->AddNotification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      "MessageCenterClosesPopups",
-      ASCIIToUTF16("Test Web Notification"),
-      ASCIIToUTF16("Notification message body."),
-      ASCIIToUTF16("www.test.org"),
-      "" /* extension id */,
-      NULL /* optional_fields */);
+  AddNotification("MessageCenterClosesPopups");
 
   ASSERT_TRUE(message_center_tray_->popups_visible());
   ASSERT_FALSE(message_center_tray_->message_center_visible());
@@ -142,14 +144,7 @@ TEST_F(MessageCenterTrayTest, MessageCenterClosesPopups) {
   ASSERT_FALSE(message_center_tray_->popups_visible());
   ASSERT_TRUE(message_center_tray_->message_center_visible());
 
-  message_center_->AddNotification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      "MessageCenterClosesPopups2",
-      ASCIIToUTF16("Test Web Notification"),
-      ASCIIToUTF16("Notification message body."),
-      ASCIIToUTF16("www.test.org"),
-      "" /* extension id */,
-      NULL /* optional_fields */);
+  AddNotification("MessageCenterClosesPopups2");
 
   message_center_tray_->ShowPopupBubble();
 
@@ -162,6 +157,38 @@ TEST_F(MessageCenterTrayTest, MessageCenterClosesPopups) {
   ASSERT_FALSE(message_center_tray_->message_center_visible());
 }
 
+TEST_F(MessageCenterTrayTest, MessageCenterReopenPopupsForSystemPriority) {
+  ASSERT_FALSE(message_center_tray_->popups_visible());
+  ASSERT_FALSE(message_center_tray_->message_center_visible());
+
+  scoped_ptr<Notification> notification(
+      new Notification(message_center::NOTIFICATION_TYPE_SIMPLE,
+                       "MessageCenterReopnPopupsForSystemPriority",
+                       ASCIIToUTF16("Test Web Notification"),
+                       ASCIIToUTF16("Notification message body."),
+                       gfx::Image(),
+                       ASCIIToUTF16("www.test.org"),
+                       "" /* extension id */,
+                       message_center::RichNotificationData(),
+                       NULL /* delegate */));
+  notification->SetSystemPriority();
+  message_center_->AddNotification(notification.Pass());
+
+  ASSERT_TRUE(message_center_tray_->popups_visible());
+  ASSERT_FALSE(message_center_tray_->message_center_visible());
+
+  bool shown = message_center_tray_->ShowMessageCenterBubble();
+  EXPECT_TRUE(shown);
+
+  ASSERT_FALSE(message_center_tray_->popups_visible());
+  ASSERT_TRUE(message_center_tray_->message_center_visible());
+
+  message_center_tray_->HideMessageCenterBubble();
+
+  ASSERT_TRUE(message_center_tray_->popups_visible());
+  ASSERT_FALSE(message_center_tray_->message_center_visible());
+}
+
 TEST_F(MessageCenterTrayTest, ShowBubbleFails) {
   // Now the delegate will signal that it was unable to show a bubble.
   delegate_->show_popups_success_ = false;
@@ -170,14 +197,7 @@ TEST_F(MessageCenterTrayTest, ShowBubbleFails) {
   ASSERT_FALSE(message_center_tray_->popups_visible());
   ASSERT_FALSE(message_center_tray_->message_center_visible());
 
-  message_center_->AddNotification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      "ShowBubbleFails",
-      ASCIIToUTF16("Test Web Notification"),
-      ASCIIToUTF16("Notification message body."),
-      ASCIIToUTF16("www.test.org"),
-      "" /* extension id */,
-      NULL /* optional_fields */);
+  AddNotification("ShowBubbleFails");
 
   message_center_tray_->ShowPopupBubble();
 

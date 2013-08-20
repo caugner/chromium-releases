@@ -17,8 +17,8 @@
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -389,7 +389,7 @@ class PolicyPrefsTest
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
-    EXPECT_CALL(provider_, RegisterPolicyDomain(_, _)).Times(AnyNumber());
+    EXPECT_CALL(provider_, RegisterPolicyDomain(_)).Times(AnyNumber());
     BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
   }
 

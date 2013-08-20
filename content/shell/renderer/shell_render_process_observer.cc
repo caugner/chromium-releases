@@ -9,12 +9,12 @@
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/test/layouttest_support.h"
+#include "content/shell/common/shell_messages.h"
+#include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/shell_content_renderer_client.h"
 #include "content/shell/renderer/webkit_test_runner.h"
-#include "content/shell/shell_messages.h"
-#include "content/shell/shell_switches.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestInterfaces.h"
+#include "third_party/WebKit/public/testing/WebTestInterfaces.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/support/gc_extension.h"
 
@@ -41,11 +41,7 @@ ShellRenderProcessObserver::ShellRenderProcessObserver()
   RenderThread::Get()->AddObserver(this);
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
-  DisableAppCacheLogging();
-  EnableDevToolsFrontendTesting();
-  EnableShortCircuitSizeUpdates();
-  DoNotSendFocusEvents();
-  DisableNavigationErrorPages();
+  EnableRendererLayoutTestMode();
 }
 
 ShellRenderProcessObserver::~ShellRenderProcessObserver() {

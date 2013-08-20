@@ -13,6 +13,9 @@
 
 class Profile;
 
+const char *TtsEventTypeToString(TtsEventType event_type);
+TtsEventType TtsEventTypeFromString(const std::string& str);
+
 namespace extensions {
 
 class TtsSpeakFunction
@@ -28,6 +31,20 @@ class TtsStopSpeakingFunction : public SyncExtensionFunction {
   virtual ~TtsStopSpeakingFunction() {}
   virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION("tts.stop", TTS_STOP)
+};
+
+class TtsPauseFunction : public SyncExtensionFunction {
+ private:
+  virtual ~TtsPauseFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION("tts.pause", TTS_PAUSE)
+};
+
+class TtsResumeFunction : public SyncExtensionFunction {
+ private:
+  virtual ~TtsResumeFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION("tts.resume", TTS_RESUME)
 };
 
 class TtsIsSpeakingFunction : public SyncExtensionFunction {

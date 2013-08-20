@@ -4,16 +4,19 @@
 
 #include "chrome/browser/chromeos/drive/resource_metadata_storage.h"
 
-#include "base/callback.h"
+#include "base/bind.h"
 #include "base/file_util.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/sequenced_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 #include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
 
 namespace drive {
+namespace internal {
 
 namespace {
 
@@ -37,6 +40,9 @@ const base::FilePath::CharType kChildMapDBName[] =
 // Meant to be a character which never happen to be in real resource IDs.
 const char kDBKeyDelimeter = '\0';
 
+// String used as a suffix of a key for a cache entry.
+const char kCacheEntryKeySuffix[] = "CACHE";
+
 // Returns a string to be used as the key for the header.
 std::string GetHeaderDBKey() {
   std::string key;
@@ -48,6 +54,28 @@ std::string GetHeaderDBKey() {
 // Returns true if |key| is a key for a child entry.
 bool IsChildEntryKey(const leveldb::Slice& key) {
   return !key.empty() && key[key.size() - 1] == kDBKeyDelimeter;
+}
+
+// Returns a string to be used as a key for a cache entry.
+std::string GetCacheEntryKey(const std::string& resource_id) {
+  std::string key(resource_id);
+  key.push_back(kDBKeyDelimeter);
+  key.append(kCacheEntryKeySuffix);
+  return key;
+}
+
+// Returns true if |key| is a key for a cache entry.
+bool IsCacheEntryKey(const leveldb::Slice& key) {
+  // A cache entry key should end with |kDBKeyDelimeter + kCacheEntryKeySuffix|.
+  const leveldb::Slice expected_suffix(kCacheEntryKeySuffix,
+                                       arraysize(kCacheEntryKeySuffix) - 1);
+  if (key.size() < 1 + expected_suffix.size() ||
+      key[key.size() - expected_suffix.size() - 1] != kDBKeyDelimeter)
+    return false;
+
+  const leveldb::Slice key_substring(
+      key.data() + key.size() - expected_suffix.size(), expected_suffix.size());
+  return key_substring.compare(expected_suffix) == 0;
 }
 
 // Converts leveldb::Status to DBInitStatus.
@@ -65,13 +93,123 @@ DBInitStatus LevelDBStatusToDBInitStatus(const leveldb::Status status) {
 
 }  // namespace
 
-ResourceMetadataStorage::ResourceMetadataStorage(
-    const base::FilePath& directory_path)
-    : directory_path_(directory_path) {
+ResourceMetadataStorage::Iterator::Iterator(scoped_ptr<leveldb::Iterator> it)
+  : it_(it.Pass()) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(it_);
+
+  // Skip the header entry.
+  // Note: The header entry comes before all other entries because its key
+  // starts with kDBKeyDelimeter. (i.e. '\0')
+  it_->Seek(leveldb::Slice(GetHeaderDBKey()));
+
+  Advance();
 }
 
-ResourceMetadataStorage::~ResourceMetadataStorage() {
+ResourceMetadataStorage::Iterator::~Iterator() {
   base::ThreadRestrictions::AssertIOAllowed();
+}
+
+bool ResourceMetadataStorage::Iterator::IsAtEnd() const {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return !it_->Valid();
+}
+
+const ResourceEntry& ResourceMetadataStorage::Iterator::Get() const {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!IsAtEnd());
+  return entry_;
+}
+
+void ResourceMetadataStorage::Iterator::Advance() {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!IsAtEnd());
+
+  for (it_->Next() ; it_->Valid(); it_->Next()) {
+    if (!IsChildEntryKey(it_->key()) &&
+        !IsCacheEntryKey(it_->key()) &&
+        entry_.ParseFromArray(it_->value().data(), it_->value().size()))
+      break;
+  }
+}
+
+bool ResourceMetadataStorage::Iterator::HasError() const {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return !it_->status().ok();
+}
+
+ResourceMetadataStorage::CacheEntryIterator::CacheEntryIterator(
+    scoped_ptr<leveldb::Iterator> it) : it_(it.Pass()) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(it_);
+
+  it_->SeekToFirst();
+  AdvanceInternal();
+}
+
+ResourceMetadataStorage::CacheEntryIterator::~CacheEntryIterator() {
+  base::ThreadRestrictions::AssertIOAllowed();
+}
+
+bool ResourceMetadataStorage::CacheEntryIterator::IsAtEnd() const {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return !it_->Valid();
+}
+
+const std::string& ResourceMetadataStorage::CacheEntryIterator::GetID() const {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!IsAtEnd());
+  return resource_id_;
+}
+
+const FileCacheEntry&
+ResourceMetadataStorage::CacheEntryIterator::GetValue() const {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!IsAtEnd());
+  return entry_;
+}
+
+void ResourceMetadataStorage::CacheEntryIterator::Advance() {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!IsAtEnd());
+
+  it_->Next();
+  AdvanceInternal();
+}
+
+bool ResourceMetadataStorage::CacheEntryIterator::HasError() const {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return !it_->status().ok();
+}
+
+void ResourceMetadataStorage::CacheEntryIterator::AdvanceInternal() {
+  for (; it_->Valid(); it_->Next()) {
+    // Skip unparsable broken entries.
+    // TODO(hashimoto): Broken entries should be cleaned up at some point.
+    if (IsCacheEntryKey(it_->key()) &&
+        entry_.ParseFromArray(it_->value().data(), it_->value().size())) {
+      // Drop the suffix |kDBKeyDelimeter + kCacheEntryKeySuffix| from the key.
+      const size_t kSuffixLength = arraysize(kCacheEntryKeySuffix) - 1;
+      const int id_length = it_->key().size() - 1 - kSuffixLength;
+      resource_id_.assign(it_->key().data(), id_length);
+      break;
+    }
+  }
+}
+
+ResourceMetadataStorage::ResourceMetadataStorage(
+    const base::FilePath& directory_path,
+    base::SequencedTaskRunner* blocking_task_runner)
+    : directory_path_(directory_path),
+      opened_existing_db_(false),
+      blocking_task_runner_(blocking_task_runner) {
+}
+
+void ResourceMetadataStorage::Destroy() {
+  blocking_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&ResourceMetadataStorage::DestroyOnBlockingPool,
+                 base::Unretained(this)));
 }
 
 bool ResourceMetadataStorage::Initialize() {
@@ -91,16 +229,19 @@ bool ResourceMetadataStorage::Initialize() {
   leveldb::Options options;
   options.create_if_missing = false;
 
-  leveldb::Status status =
-      leveldb::DB::Open(options, resource_map_path.AsUTF8Unsafe(), &db);
-  DBInitStatus open_existing_result = LevelDBStatusToDBInitStatus(status);
+  DBInitStatus open_existing_result = DB_INIT_NOT_FOUND;
+  if (file_util::PathExists(resource_map_path)) {
+    leveldb::Status status =
+        leveldb::DB::Open(options, resource_map_path.AsUTF8Unsafe(), &db);
+    open_existing_result = LevelDBStatusToDBInitStatus(status);
+  }
 
   if (open_existing_result == DB_INIT_SUCCESS) {
     resource_map_.reset(db);
 
     // Check the validity of existing DB.
-    scoped_ptr<ResourceMetadataHeader> header = GetHeader();
-    if (!header || header->version() != kDBVersion) {
+    ResourceMetadataHeader header;
+    if (!GetHeader(&header) || header.version() != kDBVersion) {
       open_existing_result = DB_INIT_INCOMPATIBLE;
       LOG(INFO) << "Reject incompatible DB.";
     } else if (!CheckValidity()) {
@@ -108,7 +249,9 @@ bool ResourceMetadataStorage::Initialize() {
       LOG(ERROR) << "Reject invalid DB.";
     }
 
-    if (open_existing_result != DB_INIT_SUCCESS)
+    if (open_existing_result == DB_INIT_SUCCESS)
+      opened_existing_db_ = true;
+    else
       resource_map_.reset();
   }
 
@@ -129,7 +272,8 @@ bool ResourceMetadataStorage::Initialize() {
     // Create DB.
     options.create_if_missing = true;
 
-    status = leveldb::DB::Open(options, resource_map_path.AsUTF8Unsafe(), &db);
+    leveldb::Status status =
+        leveldb::DB::Open(options, resource_map_path.AsUTF8Unsafe(), &db);
     if (status.ok()) {
       resource_map_.reset(db);
 
@@ -156,23 +300,23 @@ bool ResourceMetadataStorage::SetLargestChangestamp(
     int64 largest_changestamp) {
   base::ThreadRestrictions::AssertIOAllowed();
 
-  scoped_ptr<ResourceMetadataHeader> header = GetHeader();
-  if (!header) {
+  ResourceMetadataHeader header;
+  if (!GetHeader(&header)) {
     DLOG(ERROR) << "Failed to get the header.";
     return false;
   }
-  header->set_largest_changestamp(largest_changestamp);
-  return PutHeader(*header);
+  header.set_largest_changestamp(largest_changestamp);
+  return PutHeader(header);
 }
 
 int64 ResourceMetadataStorage::GetLargestChangestamp() {
   base::ThreadRestrictions::AssertIOAllowed();
-  scoped_ptr<ResourceMetadataHeader> header = GetHeader();
-  if (!header) {
+  ResourceMetadataHeader header;
+  if (!GetHeader(&header)) {
     DLOG(ERROR) << "Failed to get the header.";
     return 0;
   }
-  return header->largest_changestamp();
+  return header.largest_changestamp();
 }
 
 bool ResourceMetadataStorage::PutEntry(const ResourceEntry& entry) {
@@ -188,10 +332,11 @@ bool ResourceMetadataStorage::PutEntry(const ResourceEntry& entry) {
   leveldb::WriteBatch batch;
 
   // Remove from the old parent.
-  scoped_ptr<ResourceEntry> old_entry = GetEntry(entry.resource_id());
-  if (old_entry && !old_entry->parent_resource_id().empty()) {
-    batch.Delete(GetChildEntryKey(old_entry->parent_resource_id(),
-                                  old_entry->base_name()));
+  ResourceEntry old_entry;
+  if (GetEntry(entry.resource_id(), &old_entry) &&
+      !old_entry.parent_resource_id().empty()) {
+    batch.Delete(GetChildEntryKey(old_entry.parent_resource_id(),
+                                  old_entry.base_name()));
   }
 
   // Add to the new parent.
@@ -208,8 +353,8 @@ bool ResourceMetadataStorage::PutEntry(const ResourceEntry& entry) {
   return status.ok();
 }
 
-scoped_ptr<ResourceEntry> ResourceMetadataStorage::GetEntry(
-    const std::string& resource_id) {
+bool ResourceMetadataStorage::GetEntry(const std::string& resource_id,
+                                       ResourceEntry* out_entry) {
   base::ThreadRestrictions::AssertIOAllowed();
   DCHECK(!resource_id.empty());
 
@@ -217,29 +362,23 @@ scoped_ptr<ResourceEntry> ResourceMetadataStorage::GetEntry(
   const leveldb::Status status = resource_map_->Get(leveldb::ReadOptions(),
                                                     leveldb::Slice(resource_id),
                                                     &serialized_entry);
-  if (!status.ok())
-    return scoped_ptr<ResourceEntry>();
-
-  scoped_ptr<ResourceEntry> entry(new ResourceEntry);
-  if (!entry->ParseFromString(serialized_entry))
-    return scoped_ptr<ResourceEntry>();
-  return entry.Pass();
+  return status.ok() && out_entry->ParseFromString(serialized_entry);
 }
 
 bool ResourceMetadataStorage::RemoveEntry(const std::string& resource_id) {
   base::ThreadRestrictions::AssertIOAllowed();
   DCHECK(!resource_id.empty());
 
-  scoped_ptr<ResourceEntry> entry = GetEntry(resource_id);
-  if (!entry)
+  ResourceEntry entry;
+  if (!GetEntry(resource_id, &entry))
     return false;
 
   leveldb::WriteBatch batch;
 
   // Remove from the parent.
-  if (!entry->parent_resource_id().empty()) {
-    batch.Delete(GetChildEntryKey(entry->parent_resource_id(),
-                                  entry->base_name()));
+  if (!entry.parent_resource_id().empty()) {
+    batch.Delete(GetChildEntryKey(entry.parent_resource_id(),
+                                  entry.base_name()));
   }
   // Remove the entry itself.
   batch.Delete(resource_id);
@@ -249,25 +388,13 @@ bool ResourceMetadataStorage::RemoveEntry(const std::string& resource_id) {
   return status.ok();
 }
 
-void ResourceMetadataStorage::Iterate(const IterateCallback& callback) {
+scoped_ptr<ResourceMetadataStorage::Iterator>
+ResourceMetadataStorage::GetIterator() {
   base::ThreadRestrictions::AssertIOAllowed();
-  DCHECK(!callback.is_null());
 
   scoped_ptr<leveldb::Iterator> it(
       resource_map_->NewIterator(leveldb::ReadOptions()));
-
-  // Skip the header entry.
-  // Note: The header entry comes before all other entries because its key
-  // starts with kDBKeyDelimeter. (i.e. '\0')
-  it->Seek(leveldb::Slice(GetHeaderDBKey()));
-  it->Next();
-
-  ResourceEntry entry;
-  for (; it->Valid(); it->Next()) {
-    if (!IsChildEntryKey(it->key()) &&
-        entry.ParseFromArray(it->value().data(), it->value().size()))
-      callback.Run(entry);
-  }
+  return make_scoped_ptr(new Iterator(it.Pass()));
 }
 
 std::string ResourceMetadataStorage::GetChild(
@@ -283,9 +410,8 @@ std::string ResourceMetadataStorage::GetChild(
   return child_resource_id;
 }
 
-void ResourceMetadataStorage::GetChildren(
-    const std::string& parent_resource_id,
-    std::vector<std::string>* children) {
+void ResourceMetadataStorage::GetChildren(const std::string& parent_resource_id,
+                                          std::vector<std::string>* children) {
   base::ThreadRestrictions::AssertIOAllowed();
 
   // Iterate over all entries with keys starting with |parent_resource_id|.
@@ -298,6 +424,64 @@ void ResourceMetadataStorage::GetChildren(
       children->push_back(it->value().ToString());
   }
   DCHECK(it->status().ok());
+}
+
+bool ResourceMetadataStorage::PutCacheEntry(const std::string& resource_id,
+                                            const FileCacheEntry& entry) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!resource_id.empty());
+
+  std::string serialized_entry;
+  if (!entry.SerializeToString(&serialized_entry)) {
+    DLOG(ERROR) << "Failed to serialize the entry.";
+    return false;
+  }
+
+  const leveldb::Status status = resource_map_->Put(
+      leveldb::WriteOptions(),
+      leveldb::Slice(GetCacheEntryKey(resource_id)),
+      leveldb::Slice(serialized_entry));
+  return status.ok();
+}
+
+bool ResourceMetadataStorage::GetCacheEntry(const std::string& resource_id,
+                                            FileCacheEntry* out_entry) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!resource_id.empty());
+
+  std::string serialized_entry;
+  const leveldb::Status status = resource_map_->Get(
+      leveldb::ReadOptions(),
+      leveldb::Slice(GetCacheEntryKey(resource_id)),
+      &serialized_entry);
+  return status.ok() && out_entry->ParseFromString(serialized_entry);
+}
+
+bool ResourceMetadataStorage::RemoveCacheEntry(const std::string& resource_id) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!resource_id.empty());
+
+  const leveldb::Status status = resource_map_->Delete(
+      leveldb::WriteOptions(),
+      leveldb::Slice(GetCacheEntryKey(resource_id)));
+  return status.ok();
+}
+
+scoped_ptr<ResourceMetadataStorage::CacheEntryIterator>
+ResourceMetadataStorage::GetCacheEntryIterator() {
+  base::ThreadRestrictions::AssertIOAllowed();
+
+  scoped_ptr<leveldb::Iterator> it(
+      resource_map_->NewIterator(leveldb::ReadOptions()));
+  return make_scoped_ptr(new CacheEntryIterator(it.Pass()));
+}
+
+ResourceMetadataStorage::~ResourceMetadataStorage() {
+  base::ThreadRestrictions::AssertIOAllowed();
+}
+
+void ResourceMetadataStorage::DestroyOnBlockingPool() {
+  delete this;
 }
 
 // static
@@ -328,8 +512,7 @@ bool ResourceMetadataStorage::PutHeader(
   return status.ok();
 }
 
-scoped_ptr<ResourceMetadataHeader>
-ResourceMetadataStorage::GetHeader() {
+bool ResourceMetadataStorage::GetHeader(ResourceMetadataHeader* header) {
   base::ThreadRestrictions::AssertIOAllowed();
 
   std::string serialized_header;
@@ -337,14 +520,7 @@ ResourceMetadataStorage::GetHeader() {
       leveldb::ReadOptions(),
       leveldb::Slice(GetHeaderDBKey()),
       &serialized_header);
-  if (!status.ok())
-    return scoped_ptr<ResourceMetadataHeader>();
-
-  scoped_ptr<ResourceMetadataHeader> header(
-      new ResourceMetadataHeader);
-  if (!header->ParseFromString(serialized_header))
-    return scoped_ptr<ResourceMetadataHeader>();
-  return header.Pass();
+  return status.ok() && header->ParseFromString(serialized_header);
 }
 
 bool ResourceMetadataStorage::CheckValidity() {
@@ -356,6 +532,20 @@ bool ResourceMetadataStorage::CheckValidity() {
 
   scoped_ptr<leveldb::Iterator> it(resource_map_->NewIterator(options));
   it->SeekToFirst();
+
+  // DB is organized like this:
+  //
+  // <key>                          : <value>
+  // "\0HEADER"                     : ResourceMetadataHeader
+  // "|ID of A|"                    : ResourceEntry for entry A.
+  // "|ID of A|\0CACHE"             : FileCacheEntry for entry A.
+  // "|ID of A|\0|child name 1|\0"  : ID of the 1st child entry of entry A.
+  // "|ID of A|\0|child name 2|\0"  : ID of the 2nd child entry of entry A.
+  // ...
+  // "|ID of A|\0|child name n|\0"  : ID of the nth child entry of entry A.
+  // "|ID of B|"                    : ResourceEntry for entry B.
+  // "|ID of B|\0CACHE"             : FileCacheEntry for entry B.
+  // ...
 
   // Check the header.
   ResourceMetadataHeader header;
@@ -379,6 +569,10 @@ bool ResourceMetadataStorage::CheckValidity() {
       ++num_child_entries;
       continue;
     }
+
+    // Ignore cache entries.
+    if (IsCacheEntryKey(it->key()))
+      continue;
 
     // Check if stored data is broken.
     if (!entry.ParseFromArray(it->value().data(), it->value().size()) ||
@@ -419,4 +613,5 @@ bool ResourceMetadataStorage::CheckValidity() {
   return true;
 }
 
+}  // namespace internal
 }  // namespace drive

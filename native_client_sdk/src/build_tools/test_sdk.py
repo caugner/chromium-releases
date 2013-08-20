@@ -25,27 +25,14 @@ sys.path.append(os.path.join(SDK_SRC_DIR, 'tools'))
 import getos
 
 
-TEST_EXAMPLE_LIST = [
-  'nacl_io_test',
-]
-
-TEST_LIBRARY_LIST = [
-  'gmock',
-  'gtest',
-  'gtest_ppapi',
-]
-
-
 def BuildStepBuildExamples(pepperdir, platform):
-  build_sdk.BuildStepMakeAll(pepperdir, platform, 'examples',
-                             'Build Examples (Debug)',
-                             deps=False, config='Debug')
-  build_sdk.BuildStepMakeAll(pepperdir, platform, 'examples',
-                             'Build Examples (Release)',
-                             deps=False, config='Release')
+  for config in ('Debug', 'Release'):
+    build_sdk.BuildStepMakeAll(pepperdir, platform, 'examples',
+                               'Build Examples (%s)' % config,
+                               deps=False, config=config)
 
 
-def BuildStepCopyTests(pepperdir, toolchains, build_experimental, clobber):
+def BuildStepCopyTests(pepperdir, toolchains, build_experimental):
   buildbot_common.BuildStep('Copy Tests')
 
   # Update test libraries and test apps
@@ -57,17 +44,19 @@ def BuildStepCopyTests(pepperdir, toolchains, build_experimental, clobber):
 
   tree = parse_dsc.LoadProjectTree(SDK_SRC_DIR, filters=filters)
   platform = getos.GetPlatform()
-  build_projects.UpdateHelpers(pepperdir, platform, clobber=clobber)
-  build_projects.UpdateProjects(pepperdir, platform, tree, clobber=clobber,
+  build_projects.UpdateHelpers(pepperdir, platform, clobber=False)
+  build_projects.UpdateProjects(pepperdir, platform, tree, clobber=False,
                                 toolchains=toolchains)
 
 
-
 def BuildStepBuildTests(pepperdir, platform):
-  build_sdk.BuildStepMakeAll(pepperdir, platform, 'testlibs',
-                             'Build Test Libraries')
-  build_sdk.BuildStepMakeAll(pepperdir, platform, 'tests', 'Build Tests',
-                             deps=False)
+  for config in ('Debug', 'Release'):
+    build_sdk.BuildStepMakeAll(pepperdir, platform, 'testlibs',
+                               'Build Test Libraries (%s)' % config,
+                               config=config)
+    build_sdk.BuildStepMakeAll(pepperdir, platform, 'tests',
+                               'Build Tests (%s)' % config,
+                               deps=False, config=config)
 
 
 def main(args):
@@ -75,19 +64,28 @@ def main(args):
   parser.add_option('--experimental', help='build experimental tests',
                     action='store_true')
 
+  if 'NACL_SDK_ROOT' in os.environ:
+    # We don't want the currently configured NACL_SDK_ROOT to have any effect
+    # of the build.
+    del os.environ['NACL_SDK_ROOT']
+
   options, args = parser.parse_args(args[1:])
 
   platform = getos.GetPlatform()
   pepper_ver = str(int(build_version.ChromeMajorVersion()))
   pepperdir = os.path.join(OUT_DIR, 'pepper_' + pepper_ver)
-  toolchains = ['newlib', 'glibc', 'pnacl', 'host']
+  toolchains = ['newlib', 'glibc', 'pnacl']
+  toolchains.append(platform)
 
   BuildStepBuildExamples(pepperdir, platform)
-  BuildStepCopyTests(pepperdir, toolchains, options.experimental, True)
+  BuildStepCopyTests(pepperdir, toolchains, options.experimental)
   BuildStepBuildTests(pepperdir, platform)
 
   return 0
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  try:
+    sys.exit(main(sys.argv))
+  except KeyboardInterrupt:
+    buildbot_common.ErrorExit('test_sdk: interrupted')

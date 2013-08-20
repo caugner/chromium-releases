@@ -12,7 +12,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_service.h"
@@ -136,28 +136,28 @@ class SQLiteCursor {
 
   virtual ~SQLiteCursor();
 
+  // Destory SQLiteCursor object on UI thread. All cleanup need finish in UI
+  // thread.
+  void DestroyOnUIThread();
+
   // This method is for testing only.
   void set_test_observer(TestObserver* test_observer) {
     test_observer_ = test_observer;
   }
 
   // Get Favicon from history backend.
-  bool GetFavicon(history::FaviconID id,
+  bool GetFavicon(chrome::FaviconID id,
                   std::vector<unsigned char>* image_data);
 
   void GetFaviconForIDInUIThread(
-      history::FaviconID id,
+      chrome::FaviconID id,
       const FaviconService::FaviconRawCallback& callback);
 
   // The callback function of FaviconService::GetLargestRawFaviconForID().
-  void OnFaviconData(const history::FaviconBitmapResult& bitmap_result);
+  void OnFaviconData(const chrome::FaviconBitmapResult& bitmap_result);
 
   // The callback function of MoveTo().
-  void OnMoved(AndroidHistoryProviderService::Handle handle,
-               int pos);
-
-  // Used to cancel all request on the UI thread during shutdown.
-  void CancelAllRequests(base::WaitableEvent* finished);
+  void OnMoved(AndroidHistoryProviderService::Handle handle, int pos);
 
   JavaColumnType GetColumnTypeInternal(int column);
 
@@ -187,7 +187,7 @@ class SQLiteCursor {
   int count_;
 
   // The favicon image.
-  history::FaviconBitmapResult favicon_bitmap_result_;
+  chrome::FaviconBitmapResult favicon_bitmap_result_;
 
   TestObserver* test_observer_;
 

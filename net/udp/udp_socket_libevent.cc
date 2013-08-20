@@ -151,8 +151,8 @@ int UDPSocketLibevent::RecvFrom(IOBuffer* buf,
   if (nread != ERR_IO_PENDING)
     return nread;
 
-  if (!MessageLoopForIO::current()->WatchFileDescriptor(
-          socket_, true, MessageLoopForIO::WATCH_READ,
+  if (!base::MessageLoopForIO::current()->WatchFileDescriptor(
+          socket_, true, base::MessageLoopForIO::WATCH_READ,
           &read_socket_watcher_, &read_watcher_)) {
     PLOG(ERROR) << "WatchFileDescriptor failed on read";
     int result = MapSystemError(errno);
@@ -194,8 +194,8 @@ int UDPSocketLibevent::SendToOrWrite(IOBuffer* buf,
   if (result != ERR_IO_PENDING)
     return result;
 
-  if (!MessageLoopForIO::current()->WatchFileDescriptor(
-          socket_, true, MessageLoopForIO::WATCH_WRITE,
+  if (!base::MessageLoopForIO::current()->WatchFileDescriptor(
+          socket_, true, base::MessageLoopForIO::WATCH_WRITE,
           &write_socket_watcher_, &write_watcher_)) {
     DVLOG(1) << "WatchFileDescriptor failed on write, errno " << errno;
     int result = MapSystemError(errno);
@@ -327,7 +327,8 @@ void UDPSocketLibevent::DoWriteCallback(int rv) {
 }
 
 void UDPSocketLibevent::DidCompleteRead() {
-  int result = InternalRecvFrom(read_buf_, read_buf_len_, recv_from_address_);
+  int result =
+      InternalRecvFrom(read_buf_.get(), read_buf_len_, recv_from_address_);
   if (result != ERR_IO_PENDING) {
     read_buf_ = NULL;
     read_buf_len_ = 0;
@@ -378,8 +379,8 @@ int UDPSocketLibevent::CreateSocket(const IPEndPoint& address) {
 }
 
 void UDPSocketLibevent::DidCompleteWrite() {
-  int result = InternalSendTo(write_buf_, write_buf_len_,
-                              send_to_address_.get());
+  int result =
+      InternalSendTo(write_buf_.get(), write_buf_len_, send_to_address_.get());
 
   if (result != ERR_IO_PENDING) {
     write_buf_ = NULL;

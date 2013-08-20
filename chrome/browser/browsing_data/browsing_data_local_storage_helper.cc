@@ -10,7 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "webkit/dom_storage/dom_storage_types.h"
+#include "webkit/common/dom_storage/dom_storage_types.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -128,10 +128,10 @@ void CannedBrowsingDataLocalStorageHelper::StartFetching(
   completion_callback_ = callback;
 
   // We post a task to emulate async fetching behavior.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(&CannedBrowsingDataLocalStorageHelper::
-          ConvertPendingInfo, this));
+      base::Bind(&CannedBrowsingDataLocalStorageHelper::ConvertPendingInfo,
+                 this));
 }
 
 CannedBrowsingDataLocalStorageHelper::~CannedBrowsingDataLocalStorageHelper() {}
@@ -144,7 +144,7 @@ void CannedBrowsingDataLocalStorageHelper::ConvertPendingInfo() {
     local_storage_info_.push_back(
         LocalStorageInfo(*iter, 0,  base::Time()));
   }
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&CannedBrowsingDataLocalStorageHelper::CallCompletionCallback,
                  this));

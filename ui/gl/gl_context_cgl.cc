@@ -10,6 +10,7 @@
 
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_cgl.h"
@@ -17,7 +18,18 @@
 
 namespace gfx {
 
+namespace {
+
 bool g_support_renderer_switching;
+
+struct CGLRendererInfoObjDeleter {
+  void operator()(CGLRendererInfoObj* x) {
+    if (x)
+      CGLDestroyRendererInfo(*x);
+  }
+};
+
+}  // namespace
 
 static CGLPixelFormatObj GetPixelFormat() {
   static CGLPixelFormatObj format;
@@ -53,7 +65,7 @@ static CGLPixelFormatObj GetPixelFormat() {
 }
 
 GLContextCGL::GLContextCGL(GLShareGroup* share_group)
-  : GLContext(share_group),
+  : GLContextReal(share_group),
     context_(NULL),
     gpu_preference_(PreferIntegratedGpu),
     discrete_pixelformat_(NULL),
@@ -174,7 +186,10 @@ bool GLContextCGL::MakeCurrent(GLSurface* surface) {
     return false;
   }
 
-  SetCurrent(this, surface);
+  // Set this as soon as the context is current, since we might call into GL.
+  SetRealGLApi();
+
+  SetCurrent(surface);
   if (!InitializeExtensionBindings()) {
     ReleaseCurrent(surface);
     return false;
@@ -185,7 +200,6 @@ bool GLContextCGL::MakeCurrent(GLSurface* surface) {
     return false;
   }
 
-  SetRealGLApi();
   return true;
 }
 
@@ -193,7 +207,7 @@ void GLContextCGL::ReleaseCurrent(GLSurface* surface) {
   if (!IsCurrent(surface))
     return;
 
-  SetCurrent(NULL, NULL);
+  SetCurrent(NULL);
   CGLSetCurrentContext(NULL);
 }
 
@@ -203,7 +217,7 @@ bool GLContextCGL::IsCurrent(GLSurface* surface) {
   // If our context is current then our notion of which GLContext is
   // current must be correct. On the other hand, third-party code
   // using OpenGL might change the current context.
-  DCHECK(!native_context_is_current || (GetCurrent() == this));
+  DCHECK(!native_context_is_current || (GetRealCurrent() == this));
 
   if (!native_context_is_current)
     return false;
@@ -245,7 +259,8 @@ bool GLContextCGL::GetTotalGpuMemory(size_t* bytes) {
                            &num_renderers) != kCGLNoError)
     return false;
 
-  ScopedCGLRendererInfoObj scoper(renderer_info);
+  scoped_ptr<CGLRendererInfoObj,
+      CGLRendererInfoObjDeleter> scoper(&renderer_info);
 
   for (GLint renderer_index = 0;
        renderer_index < num_renderers;
@@ -284,10 +299,6 @@ GLContextCGL::~GLContextCGL() {
 
 GpuPreference GLContextCGL::GetGpuPreference() {
   return gpu_preference_;
-}
-
-void ScopedCGLDestroyRendererInfo::operator()(CGLRendererInfoObj x) const {
-  CGLDestroyRendererInfo(x);
 }
 
 }  // namespace gfx

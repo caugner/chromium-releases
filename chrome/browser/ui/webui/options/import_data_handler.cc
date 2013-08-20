@@ -10,12 +10,13 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_list.h"
@@ -34,7 +35,7 @@ ImportDataHandler::ImportDataHandler() : importer_host_(NULL),
 }
 
 ImportDataHandler::~ImportDataHandler() {
-  if (importer_list_)
+  if (importer_list_.get())
     importer_list_->SetObserver(NULL);
 
   if (importer_host_)
@@ -66,7 +67,8 @@ void ImportDataHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
 void ImportDataHandler::InitializeHandler() {
   Profile* profile = Profile::FromWebUI(web_ui());
   importer_list_ = new ImporterList(profile->GetRequestContext());
-  importer_list_->DetectSourceProfiles(this);
+  importer_list_->DetectSourceProfiles(
+      g_browser_process->GetApplicationLocale(), this);
 }
 
 void ImportDataHandler::RegisterMessages() {
@@ -109,15 +111,13 @@ void ImportDataHandler::ImportData(const ListValue* args) {
                                      state);
     import_did_succeed_ = false;
 
-    // TODO(csilv): Out-of-process import has only been qualified on MacOS X,
-    // so we will only use it on that platform since it is required. Remove this
-    // conditional logic once oop import is qualified for Linux/Windows.
-    // http://crbug.com/22142
-#if defined(OS_MACOSX)
-    importer_host_ = new ExternalProcessImporterHost;
-#else
-    importer_host_ = new ImporterHost;
-#endif
+    // The Google Toolbar importer doesn't work for the out-of-process import.
+    // This is the only entry point for this importer (it is never used on first
+    // run). See discussion on http://crbug.com/219419 for details.
+    if (source_profile.importer_type == importer::TYPE_GOOGLE_TOOLBAR5)
+      importer_host_ = new ImporterHost;
+    else
+      importer_host_ = new ExternalProcessImporterHost;
     importer_host_->SetObserver(this);
     importer_host_->set_browser(
         chrome::FindBrowserWithWebContents(web_ui()->GetWebContents()));

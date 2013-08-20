@@ -9,14 +9,14 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/ubertoken_fetcher.h"
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -38,7 +38,10 @@
 #include "net/base/escape.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/ui/auto_login_infobar_delegate_android.h"
+#endif
 
 using content::NavigationController;
 using content::NotificationSource;
@@ -109,18 +112,18 @@ void AutoLoginRedirector::Observe(int type,
   // The WebContents that started this has been destroyed. The request must be
   // cancelled and this object must be deleted.
   ubertoken_fetcher_.reset();
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void AutoLoginRedirector::OnUbertokenSuccess(const std::string& token) {
   RedirectToMergeSession(token);
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void AutoLoginRedirector::OnUbertokenFailure(
     const GoogleServiceAuthError& error) {
   LOG(WARNING) << "AutoLoginRedirector: token request failed";
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void AutoLoginRedirector::RedirectToMergeSession(const std::string& token) {
@@ -132,7 +135,7 @@ void AutoLoginRedirector::RedirectToMergeSession(const std::string& token) {
       std::string());
 }
 
-}  // namepsace
+}  // namespace
 
 
 // AutoLoginInfoBarDelegate::Params -------------------------------------------
@@ -147,13 +150,12 @@ AutoLoginInfoBarDelegate::Params::~Params() {}
 void AutoLoginInfoBarDelegate::Create(InfoBarService* infobar_service,
                                       const Params& params) {
   infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
-      new AutoLoginInfoBarDelegate(infobar_service, params)));
-}
-
-string16 AutoLoginInfoBarDelegate::GetMessageText(
-    const std::string& username) const {
-  return l10n_util::GetStringFUTF16(IDS_AUTOLOGIN_INFOBAR_MESSAGE,
-                                    UTF8ToUTF16(username));
+#if defined(OS_ANDROID)
+      new AutoLoginInfoBarDelegateAndroid(infobar_service, params)
+#else
+      new AutoLoginInfoBarDelegate(infobar_service, params)
+#endif
+      ));
 }
 
 AutoLoginInfoBarDelegate::AutoLoginInfoBarDelegate(
@@ -179,9 +181,8 @@ void AutoLoginInfoBarDelegate::InfoBarDismissed() {
   button_pressed_ = true;
 }
 
-gfx::Image* AutoLoginInfoBarDelegate::GetIcon() const {
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INFOBAR_AUTOLOGIN);
+int AutoLoginInfoBarDelegate::GetIconID() const {
+  return IDR_INFOBAR_AUTOLOGIN;
 }
 
 InfoBarDelegate::Type AutoLoginInfoBarDelegate::GetInfoBarType() const {
@@ -194,7 +195,8 @@ AutoLoginInfoBarDelegate*
 }
 
 string16 AutoLoginInfoBarDelegate::GetMessageText() const {
-  return GetMessageText(params_.username);
+  return l10n_util::GetStringFUTF16(IDS_AUTOLOGIN_INFOBAR_MESSAGE,
+                                    UTF8ToUTF16(params_.username));
 }
 
 string16 AutoLoginInfoBarDelegate::GetButtonLabel(

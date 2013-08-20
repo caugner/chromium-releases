@@ -11,15 +11,15 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_process_type.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/content_paths.h"
@@ -129,7 +129,7 @@ class ChromePluginTest : public InProcessBrowserTest {
     GetFlashPath(&paths);
     ASSERT_FALSE(paths.empty());
 
-    PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
+    PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile).get();
     scoped_refptr<content::MessageLoopRunner> runner =
         new content::MessageLoopRunner;
     scoped_refptr<CallbackBarrier> callback_barrier(

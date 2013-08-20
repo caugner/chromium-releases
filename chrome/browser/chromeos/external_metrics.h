@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTERNAL_METRICS_H_
 #define CHROME_BROWSER_CHROMEOS_EXTERNAL_METRICS_H_
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 
 namespace chromeos {
@@ -64,6 +66,10 @@ class ExternalMetrics : public base::RefCountedThreadSafe<ExternalMetrics> {
   // in the form <histogram-name> <sample> <max>.
   void RecordLinearHistogram(const char* histogram_data);
 
+  // Passes a sparse histogram event to the UMA service.  |histogram_data| is
+  // in the form <histogram-name> <sample>.
+  void RecordSparseHistogram(const char* histogram_data);
+
   // Collects external events from metrics log file.  This is run at periodic
   // intervals.
   void CollectEvents();
@@ -79,6 +85,11 @@ class ExternalMetrics : public base::RefCountedThreadSafe<ExternalMetrics> {
 
   // Set containing known user actions.
   base::hash_set<std::string> valid_user_actions_;
+
+  // Calls setup methods for chromeOS field trials.  They are setup, here, so
+  // that we can make absolutely sure that they are setup before we gather UMA
+  // statistics from ChromeOS.
+  void SetupAllFieldTrials();
 
   // Used for testing only.
   RecorderType test_recorder_;

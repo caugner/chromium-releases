@@ -29,11 +29,13 @@
 }
 
 - (void)mouseEntered:(NSEvent*)theEvent {
-  self.hoverState = kHoverStateMouseOver;
+  if (trackingArea_.get())
+    self.hoverState = kHoverStateMouseOver;
 }
 
 - (void)mouseExited:(NSEvent*)theEvent {
-  self.hoverState = kHoverStateNone;
+  if (trackingArea_.get())
+    self.hoverState = kHoverStateNone;
 }
 
 - (void)mouseDown:(NSEvent*)theEvent {
@@ -42,7 +44,7 @@
   // it can be freed while |super mouseDown:| is in its loop, and the
   // |checkImageState| call will crash.
   // http://crbug.com/28220
-  scoped_nsobject<HoverButton> myself([self retain]);
+  base::scoped_nsobject<HoverButton> myself([self retain]);
 
   [super mouseDown:theEvent];
   // We need to check the image state after the mouseDown event loop finishes.

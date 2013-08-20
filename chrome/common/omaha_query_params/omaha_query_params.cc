@@ -5,7 +5,7 @@
 #include "chrome/common/omaha_query_params/omaha_query_params.h"
 
 #include "base/compiler_specific.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_version_info.h"
 
@@ -49,22 +49,6 @@ const char kChrome[] = "chrome";
 const char kChromeCrx[] = "chromecrx";
 const char kChromiumCrx[] = "chromiumcrx";
 
-const char* GetProdIdString(chrome::OmahaQueryParams::ProdId prod) {
-  switch (prod) {
-    case chrome::OmahaQueryParams::CHROME:
-      return kChrome;
-      break;
-    case chrome::OmahaQueryParams::CRX:
-#if defined(GOOGLE_CHROME_BUILD)
-      return kChromeCrx;
-#else
-      return kChromiumCrx;
-#endif
-      break;
-  }
-  return kUnknown;
-}
-
 const char kStable[] = "stable";
 const char kBeta[] = "beta";
 const char kDev[] = "dev";
@@ -95,6 +79,7 @@ const char* GetChannelString() {
 
 namespace chrome {
 
+// static
 std::string OmahaQueryParams::Get(ProdId prod) {
   return base::StringPrintf(
       "os=%s&arch=%s&nacl_arch=%s&prod=%s&prodchannel=%s&prodversion=%s",
@@ -104,6 +89,24 @@ std::string OmahaQueryParams::Get(ProdId prod) {
       GetProdIdString(prod),
       GetChannelString(),
       chrome::VersionInfo().Version().c_str());
+}
+
+// static
+const char* OmahaQueryParams::GetProdIdString(
+    chrome::OmahaQueryParams::ProdId prod) {
+  switch (prod) {
+    case chrome::OmahaQueryParams::CHROME:
+      return kChrome;
+      break;
+    case chrome::OmahaQueryParams::CRX:
+#if defined(GOOGLE_CHROME_BUILD)
+      return kChromeCrx;
+#else
+      return kChromiumCrx;
+#endif
+      break;
+  }
+  return kUnknown;
 }
 
 // static

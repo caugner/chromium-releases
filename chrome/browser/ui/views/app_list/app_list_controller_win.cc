@@ -13,23 +13,23 @@
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/shortcut.h"
 #include "base/win/windows_version.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
-#include "chrome/browser/ui/app_list/app_list_service.h"
+#include "chrome/browser/ui/app_list/app_list_service_impl.h"
 #include "chrome/browser/ui/app_list/app_list_service_win.h"
 #include "chrome/browser/ui/app_list/app_list_view_delegate.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -38,7 +38,6 @@
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
@@ -48,8 +47,6 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
@@ -261,10 +258,9 @@ class AppListControllerDelegateWin : public AppListControllerDelegate {
   virtual bool CanPin() OVERRIDE;
   virtual void OnShowExtensionPrompt() OVERRIDE;
   virtual void OnCloseExtensionPrompt() OVERRIDE;
-  virtual bool CanShowCreateShortcutsDialog() OVERRIDE;
-  virtual void ShowCreateShortcutsDialog(
-      Profile* profile,
-      const std::string& extension_id) OVERRIDE;
+  virtual bool CanDoCreateShortcutsFlow(bool is_platform_app) OVERRIDE;
+  virtual void DoCreateShortcutsFlow(Profile* profile,
+                                     const std::string& extension_id) OVERRIDE;
   virtual void CreateNewWindow(Profile* profile, bool incognito) OVERRIDE;
   virtual void ActivateApp(Profile* profile,
                            const extensions::Extension* extension,
@@ -278,8 +274,8 @@ class AppListControllerDelegateWin : public AppListControllerDelegate {
 
 class ScopedKeepAlive {
  public:
-  ScopedKeepAlive();
-  ~ScopedKeepAlive();
+  ScopedKeepAlive() { chrome::StartKeepAlive(); }
+  ~ScopedKeepAlive() { chrome::EndKeepAlive(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ScopedKeepAlive);
@@ -290,8 +286,7 @@ class ScopedKeepAlive {
 // TODO(tapted): Rename this class to AppListServiceWin and move entire file to
 // chrome/browser/ui/app_list/app_list_service_win.cc after removing
 // chrome/browser/ui/views dependency.
-class AppListController : public AppListService,
-                          public content::NotificationObserver {
+class AppListController : public AppListServiceImpl {
  public:
   virtual ~AppListController();
 
@@ -302,71 +297,44 @@ class AppListController : public AppListService,
 
   void set_can_close(bool can_close) { can_close_app_list_ = can_close; }
   bool can_close() { return can_close_app_list_; }
-  Profile* profile() const { return profile_; }
 
   void AppListClosing();
   void AppListActivationChanged(bool active);
-  void ShowAppListDuringModeSwitch(Profile* profile);
+  void ShowAppListDuringModeSwitch(Profile* requested_profile);
+  void DisableAppList();
 
   app_list::AppListView* GetView() { return current_view_; }
 
   // AppListService overrides:
   virtual void Init(Profile* initial_profile) OVERRIDE;
-
-  // Activates the app list at the current mouse cursor location, creating the
-  // app list if necessary.
-  virtual void ShowAppList(Profile* profile) OVERRIDE;
-
-  // Hides the app list.
+  virtual void ShowAppList(Profile* requested_profile) OVERRIDE;
   virtual void DismissAppList() OVERRIDE;
-
-  // Update the profile path stored in local prefs, load it (if not already
-  // loaded), and show the app list.
-  virtual void SetAppListProfile(
-      const base::FilePath& profile_file_path) OVERRIDE;
-
-  virtual Profile* GetCurrentAppListProfile() OVERRIDE;
-
   virtual bool IsAppListVisible() const OVERRIDE;
-
   virtual void EnableAppList() OVERRIDE;
-
-  // ProfileInfoCacheObserver override:
-  // We need to watch for profile removal to keep kAppListProfile updated.
-  virtual void OnProfileWillBeRemoved(
-      const base::FilePath& profile_path) OVERRIDE;
-
+  virtual gfx::NativeWindow GetAppListWindow() OVERRIDE;
   virtual AppListControllerDelegate* CreateControllerDelegate() OVERRIDE;
 
-  // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // AppListServiceImpl overrides:
+  virtual void OnSigninStatusChanged() OVERRIDE;
 
  private:
   friend struct DefaultSingletonTraits<AppListController>;
 
   AppListController();
 
-  // Loads a profile asynchronously and calls OnProfileLoaded() when done.
-  void LoadProfileAsync(const base::FilePath& profile_file_path);
+  bool IsWarmupNeeded();
+  void ScheduleWarmup();
 
-  // Callback for asynchronous profile load.
-  void OnProfileLoaded(int profile_load_sequence_id,
-                       Profile* profile,
-                       Profile::CreateStatus status);
+  // Loads the profile last used with the app list and populates the view from
+  // it without showing it so that the next show is faster. Does nothing if the
+  // view already exists, or another profile is in the middle of being loaded to
+  // be shown.
+  void LoadProfileForWarmup();
+  void OnLoadProfileForWarmup(Profile* initial_profile);
 
-  // We need to keep the browser alive while we are loading a profile as that
-  // shows intent to show the app list. These two functions track our pending
-  // profile loads and start or end browser keep alive accordingly.
-  void IncrementPendingProfileLoads();
-  void DecrementPendingProfileLoads();
-
-  // Create or recreate, and initialize |current_view_| from |profile|.
-  void PopulateViewFromProfile(Profile* profile);
-
-  // Save |profile_file_path| as the app list profile in local state.
-  void SaveProfilePathToLocalState(const base::FilePath& profile_file_path);
+  // Create or recreate, and initialize |current_view_| from
+  // |requested_profile|.
+  void PopulateViewFromProfile(Profile* requested_profile);
 
   // Utility methods for showing the app list.
   gfx::Point FindAnchorPoint(const gfx::Display& display,
@@ -388,16 +356,6 @@ class AppListController : public AppListService,
   void EnsureHaveKeepAliveForView();
   void FreeAnyKeepAliveForView();
 
-  // Loads the profile last used with the app list and populates the view from
-  // it without showing it so that the next show is faster. Does nothing if the
-  // view already exists, or another profile is in the middle of being loaded to
-  // be shown.
-  void InitView();
-  bool IsInitViewNeeded();
-  void InitViewFromProfile(int profile_load_sequence_id,
-                           Profile* profile,
-                           Profile::CreateStatus status);
-
   // Weak pointer. The view manages its own lifetime.
   app_list::AppListView* current_view_;
 
@@ -411,9 +369,6 @@ class AppListController : public AppListService,
 
   app_list::PaginationModel pagination_model_;
 
-  // The profile the AppList is currently displaying.
-  Profile* profile_;
-
   // True if the controller can close the app list.
   bool can_close_app_list_;
 
@@ -425,12 +380,6 @@ class AppListController : public AppListService,
   // browser regains focus after showing the app list.
   bool regain_first_lost_focus_;
 
-  // Incremented to indicate that pending profile loads are no longer valid.
-  int profile_load_sequence_id_;
-
-  // How many profile loads are pending.
-  int pending_profile_loads_;
-
   // When the context menu on the app list's taskbar icon is brought up the
   // app list should not be hidden, but it should be if the taskbar is clicked
   // on. There can be a period of time when the taskbar gets focus between a
@@ -438,8 +387,6 @@ class AppListController : public AppListService,
   // when this happens it is kept visible if the taskbar is seen briefly without
   // the right mouse button down, but not if this happens twice in a row.
   bool preserving_focus_for_taskbar_menu_;
-
-  content::NotificationRegistrar registrar_;
 
   base::WeakPtrFactory<AppListController> weak_factory_;
 
@@ -463,8 +410,7 @@ void AppListControllerDelegateWin::ViewClosing() {
 }
 
 gfx::NativeWindow AppListControllerDelegateWin::GetAppListWindow() {
-  app_list::AppListView* view = AppListController::GetInstance()->GetView();
-  return view ? view->GetWidget()->GetNativeWindow() : NULL;
+  return AppListController::GetInstance()->GetAppListWindow();
 }
 
 gfx::ImageSkia AppListControllerDelegateWin::GetWindowIcon() {
@@ -485,14 +431,16 @@ void AppListControllerDelegateWin::OnCloseExtensionPrompt() {
   AppListController::GetInstance()->set_can_close(true);
 }
 
-bool AppListControllerDelegateWin::CanShowCreateShortcutsDialog() {
+bool AppListControllerDelegateWin::CanDoCreateShortcutsFlow(
+    bool is_platform_app) {
   return true;
 }
 
-void AppListControllerDelegateWin::ShowCreateShortcutsDialog(
+void AppListControllerDelegateWin::DoCreateShortcutsFlow(
     Profile* profile,
     const std::string& extension_id) {
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   DCHECK(service);
   const extensions::Extension* extension = service->GetInstalledExtension(
       extension_id);
@@ -516,130 +464,45 @@ void AppListControllerDelegateWin::CreateNewWindow(Profile* profile,
 
 void AppListControllerDelegateWin::ActivateApp(
     Profile* profile, const extensions::Extension* extension, int event_flags) {
-  AppListService::RecordAppListAppLaunch();
   LaunchApp(profile, extension, event_flags);
 }
 
 void AppListControllerDelegateWin::LaunchApp(
     Profile* profile, const extensions::Extension* extension, int event_flags) {
+  AppListServiceImpl::RecordAppListAppLaunch();
   chrome::OpenApplication(chrome::AppLaunchParams(
       profile, extension, NEW_FOREGROUND_TAB));
-}
-
-ScopedKeepAlive::ScopedKeepAlive() {
-  chrome::StartKeepAlive();
-}
-
-ScopedKeepAlive::~ScopedKeepAlive() {
-  chrome::EndKeepAlive();
 }
 
 AppListController::AppListController()
     : current_view_(NULL),
       view_delegate_(NULL),
-      profile_(NULL),
       can_close_app_list_(true),
       regain_first_lost_focus_(false),
-      profile_load_sequence_id_(0),
-      pending_profile_loads_(0),
       preserving_focus_for_taskbar_menu_(false),
-      weak_factory_(this) {
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  profile_manager->GetProfileInfoCache().AddObserver(this);
-}
+      weak_factory_(this) {}
 
 AppListController::~AppListController() {
 }
 
-void AppListController::OnProfileWillBeRemoved(
-    const base::FilePath& profile_path) {
-  // If the profile the app list uses just got deleted, reset it to the last
-  // used profile.
-  PrefService* local_state = g_browser_process->local_state();
-  std::string app_list_last_profile = local_state->GetString(
-      prefs::kAppListProfile);
-  if (profile_path.BaseName().MaybeAsASCII() == app_list_last_profile) {
-    local_state->SetString(prefs::kAppListProfile,
-        local_state->GetString(prefs::kProfileLastUsed));
-  }
+gfx::NativeWindow AppListController::GetAppListWindow() {
+  if (!IsAppListVisible())
+    return NULL;
+  return current_view_ ? current_view_->GetWidget()->GetNativeWindow() : NULL;
 }
 
 AppListControllerDelegate* AppListController::CreateControllerDelegate() {
   return new AppListControllerDelegateWin();
 }
 
-void AppListController::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+void AppListController::OnSigninStatusChanged() {
   if (current_view_)
     current_view_->OnSigninStatusChanged();
 }
 
-void AppListController::SetAppListProfile(
-    const base::FilePath& profile_file_path) {
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  Profile* profile = profile_manager->GetProfileByPath(profile_file_path);
-
-  if (!profile) {
-    LoadProfileAsync(profile_file_path);
-    return;
-  }
-
-  ShowAppList(profile);
-}
-
-void AppListController::LoadProfileAsync(
-    const base::FilePath& profile_file_path) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-
-  // Invalidate any pending profile path loads.
-  profile_load_sequence_id_++;
-
-  IncrementPendingProfileLoads();
-
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  profile_manager->CreateProfileAsync(
-      profile_file_path,
-      base::Bind(&AppListController::OnProfileLoaded,
-                 weak_factory_.GetWeakPtr(), profile_load_sequence_id_),
-      string16(), string16(), false);
-}
-
-void AppListController::OnProfileLoaded(int profile_load_sequence_id,
-                                        Profile* profile,
-                                        Profile::CreateStatus status) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  switch (status) {
-    case Profile::CREATE_STATUS_CREATED:
-      break;
-    case Profile::CREATE_STATUS_INITIALIZED:
-      // Only show if there has been no other profile shown since this load
-      // started.
-      if (profile_load_sequence_id == profile_load_sequence_id_)
-        ShowAppList(profile);
-      DecrementPendingProfileLoads();
-      break;
-    case Profile::CREATE_STATUS_FAIL:
-      DecrementPendingProfileLoads();
-      break;
-  }
-}
-
-void AppListController::IncrementPendingProfileLoads() {
-  pending_profile_loads_++;
-  if (pending_profile_loads_ == 1)
-    chrome::StartKeepAlive();
-}
-
-void AppListController::DecrementPendingProfileLoads() {
-  pending_profile_loads_--;
-  if (pending_profile_loads_ == 0)
-    chrome::EndKeepAlive();
-}
-
-void AppListController::ShowAppList(Profile* profile) {
-  DCHECK(profile);
+void AppListController::ShowAppList(Profile* requested_profile) {
+  DCHECK(requested_profile);
+  ScopedKeepAlive show_app_list_keepalive;
 
   content::BrowserThread::PostBlockingPoolTask(
       FROM_HERE, base::Bind(SetDidRunForNDayActiveStats));
@@ -648,27 +511,26 @@ void AppListController::ShowAppList(Profile* profile) {
     // This request came from Windows 8 in desktop mode, but chrome is currently
     // running in Metro mode.
     chrome::AppMetroInfoBarDelegateWin::Create(
-        profile,
+        requested_profile,
         chrome::AppMetroInfoBarDelegateWin::SHOW_APP_LIST,
         std::string());
     return;
   }
 
-  // Invalidate any pending profile path loads.
-  profile_load_sequence_id_++;
+  InvalidatePendingProfileLoads();
 
   // If the app list is already displaying |profile| just activate it (in case
   // we have lost focus).
-  if (IsAppListVisible() && (profile == profile_)) {
+  if (IsAppListVisible() && (requested_profile == profile())) {
     current_view_->GetWidget()->Show();
     current_view_->GetWidget()->Activate();
     return;
   }
 
-  SaveProfilePathToLocalState(profile->GetPath());
+  SaveProfilePathToLocalState(requested_profile->GetPath());
 
   DismissAppList();
-  PopulateViewFromProfile(profile);
+  PopulateViewFromProfile(requested_profile);
 
   DCHECK(current_view_);
   EnsureHaveKeepAliveForView();
@@ -680,28 +542,24 @@ void AppListController::ShowAppList(Profile* profile) {
   RecordAppListLaunch();
 }
 
-void AppListController::ShowAppListDuringModeSwitch(Profile* profile) {
+void AppListController::ShowAppListDuringModeSwitch(
+    Profile* requested_profile) {
   regain_first_lost_focus_ = true;
-  ShowAppList(profile);
+  ShowAppList(requested_profile);
 }
 
-void AppListController::PopulateViewFromProfile(Profile* profile) {
+void AppListController::PopulateViewFromProfile(Profile* requested_profile) {
 #if !defined(USE_AURA)
-  if (profile == profile_)
+  if (requested_profile == profile())
     return;
 #endif
 
-  profile_ = profile;
-  registrar_.RemoveAll();
-  registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
-                 content::Source<Profile>(profile_));
-  registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
-                 content::Source<Profile>(profile_));
+  SetProfile(requested_profile);
 
   // The controller will be owned by the view delegate, and the delegate is
   // owned by the app list view. The app list view manages it's own lifetime.
   view_delegate_ = new AppListViewDelegate(CreateControllerDelegate(),
-                                           profile_);
+                                           profile());
   current_view_ = new app_list::AppListView(view_delegate_);
   gfx::Point cursor = gfx::Screen::GetNativeScreen()->GetCursorScreenPoint();
   current_view_->InitAsBubble(NULL,
@@ -742,13 +600,6 @@ void AppListController::PopulateViewFromProfile(Profile* profile) {
   ui::win::SetAppIconForWindow(icon_path, hwnd);
 }
 
-void AppListController::SaveProfilePathToLocalState(
-    const base::FilePath& profile_file_path) {
-  g_browser_process->local_state()->SetString(
-      prefs::kAppListProfile,
-      profile_file_path.BaseName().MaybeAsASCII());
-}
-
 void AppListController::DismissAppList() {
   if (IsAppListVisible() && can_close_app_list_) {
     current_view_->GetWidget()->Hide();
@@ -761,7 +612,7 @@ void AppListController::AppListClosing() {
   FreeAnyKeepAliveForView();
   current_view_ = NULL;
   view_delegate_ = NULL;
-  profile_ = NULL;
+  SetProfile(NULL);
   timer_.Stop();
 }
 
@@ -862,8 +713,8 @@ gfx::Point AppListController::FindAnchorPoint(
                     view_size.height() / 2 + kSnapOffset);
 
   gfx::Point anchor = FindReferencePoint(display, cursor);
-  anchor.ClampToMin(bounds_rect.origin());
-  anchor.ClampToMax(bounds_rect.bottom_right());
+  anchor.SetToMax(bounds_rect.origin());
+  anchor.SetToMin(bounds_rect.bottom_right());
   return anchor;
 }
 
@@ -992,48 +843,11 @@ void AppListController::FreeAnyKeepAliveForView() {
     keep_alive_.reset(NULL);
 }
 
-void AppListController::InitView() {
-  if (!IsInitViewNeeded())
+void AppListController::OnLoadProfileForWarmup(Profile* initial_profile) {
+  if (!IsWarmupNeeded())
     return;
 
-  base::FilePath user_data_dir(
-      g_browser_process->profile_manager()->user_data_dir());
-  base::FilePath profile_file_path(GetAppListProfilePath(user_data_dir));
-
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  Profile* profile = profile_manager->GetProfileByPath(profile_file_path);
-
-  if (!profile) {
-    profile_manager->CreateProfileAsync(
-        profile_file_path,
-        base::Bind(&AppListController::InitViewFromProfile,
-                   weak_factory_.GetWeakPtr(), profile_load_sequence_id_),
-        string16(), string16(), false);
-    return;
-  }
-  InitViewFromProfile(
-      profile_load_sequence_id_, profile, Profile::CREATE_STATUS_INITIALIZED);
-}
-
-bool AppListController::IsInitViewNeeded() {
-  if (!g_browser_process || g_browser_process->IsShuttingDown())
-    return false;
-
-  // We only need to initialize the view if there's no view already created and
-  // there's no profile loading to be shown.
-  return !current_view_ && profile_load_sequence_id_ == 0;
-}
-
-void AppListController::InitViewFromProfile(int profile_load_sequence_id,
-                                            Profile* profile,
-                                            Profile::CreateStatus status) {
-  if (!IsInitViewNeeded())
-    return;
-
-  if (status != Profile::CREATE_STATUS_INITIALIZED)
-    return;
-
-  PopulateViewFromProfile(profile);
+  PopulateViewFromProfile(initial_profile);
   current_view_->Prerender();
 }
 
@@ -1054,31 +868,15 @@ void AppListController::Init(Profile* initial_profile) {
   // Instantiate AppListController so it listens for profile deletions.
   AppListController::GetInstance();
 
-  // Post a task to create the app list. This is posted to not impact startup
-  // time.
-  const int kInitWindowDelay = 5;
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&AppListController::InitView, weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromSeconds(kInitWindowDelay));
-
-  // Send app list usage stats after a delay.
-  const int kSendUsageStatsDelay = 5;
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&AppListService::SendAppListStats),
-      base::TimeDelta::FromSeconds(kSendUsageStatsDelay));
+  ScheduleWarmup();
 
   MigrateAppLauncherEnabledPref();
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableAppList)) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAppList))
     EnableAppList();
-  }
-}
 
-Profile* AppListController::GetCurrentAppListProfile() {
-  return profile();
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableAppList))
+    DisableAppList();
 }
 
 bool AppListController::IsAppListVisible() const {
@@ -1094,8 +892,7 @@ void AppListController::EnableAppList() {
   bool has_been_enabled = local_state->GetBoolean(
       apps::prefs::kAppLauncherHasBeenEnabled);
   if (!has_been_enabled) {
-    local_state->SetBoolean(apps::prefs::kAppLauncherHasBeenEnabled,
-                            true);
+    local_state->SetBoolean(apps::prefs::kAppLauncherHasBeenEnabled, true);
     ShellIntegration::ShortcutLocations shortcut_locations;
     shortcut_locations.on_desktop = true;
     shortcut_locations.in_quick_launch_bar = true;
@@ -1111,6 +908,51 @@ void AppListController::EnableAppList() {
         base::Bind(&CreateAppListShortcuts,
                    user_data_dir, GetAppModelId(), shortcut_locations));
   }
+}
+
+void AppListController::DisableAppList() {
+  PrefService* local_state = g_browser_process->local_state();
+  local_state->SetBoolean(apps::prefs::kAppLauncherHasBeenEnabled, false);
+}
+
+void AppListController::ScheduleWarmup() {
+  // Post a task to create the app list. This is posted to not impact startup
+  // time.
+  const int kInitWindowDelay = 5;
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&AppListController::LoadProfileForWarmup,
+                 weak_factory_.GetWeakPtr()),
+      base::TimeDelta::FromSeconds(kInitWindowDelay));
+
+  // Send app list usage stats after a delay.
+  const int kSendUsageStatsDelay = 5;
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&AppListController::SendAppListStats),
+      base::TimeDelta::FromSeconds(kSendUsageStatsDelay));
+}
+
+bool AppListController::IsWarmupNeeded() {
+  if (!g_browser_process || g_browser_process->IsShuttingDown())
+    return false;
+
+  // We only need to initialize the view if there's no view already created and
+  // there's no profile loading to be shown.
+  return !current_view_ && !profile_loader().IsAnyProfileLoading();
+}
+
+void AppListController::LoadProfileForWarmup() {
+  if (!IsWarmupNeeded())
+    return;
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  base::FilePath profile_path(GetProfilePath(profile_manager->user_data_dir()));
+
+  profile_loader().LoadProfileInvalidatingOtherLoads(
+      profile_path,
+      base::Bind(&AppListController::OnLoadProfileForWarmup,
+                 weak_factory_.GetWeakPtr()));
 }
 
 }  // namespace

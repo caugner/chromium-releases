@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
-#include "base/stringprintf.h"
+#include "base/message_loop/message_loop_proxy.h"
+#include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/basic_http_user_agent_settings.h"
@@ -361,7 +361,8 @@ void DeviceManagementRequestJobImpl::HandleResponse(
   if (status.status() != net::URLRequestStatus::SUCCESS) {
     LOG(WARNING) << "DMServer request failed, status: " << status.status()
                  << ", error: " << status.error();
-    ReportError(DM_STATUS_REQUEST_FAILED);
+    em::DeviceManagementResponse dummy_response;
+    callback_.Run(DM_STATUS_REQUEST_FAILED, status.error(), dummy_response);
     return;
   }
 
@@ -375,7 +376,7 @@ void DeviceManagementRequestJobImpl::HandleResponse(
         ReportError(DM_STATUS_RESPONSE_DECODING_ERROR);
         return;
       }
-      callback_.Run(DM_STATUS_SUCCESS, response);
+      callback_.Run(DM_STATUS_SUCCESS, net::OK, response);
       return;
     }
     case kInvalidArgument:
@@ -485,7 +486,7 @@ void DeviceManagementRequestJobImpl::PrepareRetry() {
 
 void DeviceManagementRequestJobImpl::ReportError(DeviceManagementStatus code) {
   em::DeviceManagementResponse dummy_response;
-  callback_.Run(code, dummy_response);
+  callback_.Run(code, net::OK, dummy_response);
 }
 
 DeviceManagementRequestJob::~DeviceManagementRequestJob() {}
@@ -556,7 +557,7 @@ DeviceManagementRequestJob* DeviceManagementService::CreateJob(
 void DeviceManagementService::ScheduleInitialization(int64 delay_milliseconds) {
   if (initialized_)
     return;
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&DeviceManagementService::Initialize,
                  weak_ptr_factory_.GetWeakPtr()),
@@ -566,7 +567,7 @@ void DeviceManagementService::ScheduleInitialization(int64 delay_milliseconds) {
 void DeviceManagementService::Initialize() {
   if (initialized_)
     return;
-  DCHECK(!request_context_getter_);
+  DCHECK(!request_context_getter_.get());
   request_context_getter_ = new DeviceManagementRequestContextGetter(
       g_browser_process->system_request_context());
   initialized_ = true;

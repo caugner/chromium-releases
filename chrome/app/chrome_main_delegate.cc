@@ -10,8 +10,8 @@
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
@@ -30,6 +30,7 @@
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
+#include "components/nacl/common/nacl_switches.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "ui/base/ui_base_switches.h"
@@ -38,7 +39,7 @@
 #include <algorithm>
 #include <atlbase.h>
 #include <malloc.h>
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "sandbox/win/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
 #include "ui/base/resource/resource_bundle_win.h"
@@ -62,8 +63,9 @@
 #include <signal.h>
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if !defined(DISABLE_NACL) && defined(OS_LINUX)
 #include "chrome/app/nacl_fork_delegate_linux.h"
+#include "chrome/common/nacl_paths.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -474,6 +476,9 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #if defined(OS_CHROMEOS)
   chromeos::RegisterPathProvider();
 #endif
+#if !defined(DISABLE_NACL) && defined(OS_LINUX)
+  nacl::RegisterPathProvider();
+#endif
 
 #if defined(OS_MACOSX)
   // On the Mac, the child executable lives at a predefined location within
@@ -507,7 +512,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
 
   // Enable Message Loop related state asap.
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
-    MessageLoop::EnableHistogrammer(true);
+    base::MessageLoop::EnableHistogrammer(true);
 
 #if !defined(OS_ANDROID)
   // Android does InitLogging when library is loaded. Skip here.
@@ -528,12 +533,20 @@ void ChromeMainDelegate::PreSandboxStartup() {
     // Initialize ResourceBundle which handles files loaded from external
     // sources.  The language should have been passed in to us from the
     // browser process as a command line flag.
+#if defined(DISABLE_NACL)
+    DCHECK(command_line.HasSwitch(switches::kLang) ||
+           process_type == switches::kZygoteProcess ||
+           process_type == switches::kGpuProcess ||
+           process_type == switches::kPpapiBrokerProcess ||
+           process_type == switches::kPpapiPluginProcess);
+#else
     DCHECK(command_line.HasSwitch(switches::kLang) ||
            process_type == switches::kZygoteProcess ||
            process_type == switches::kGpuProcess ||
            process_type == switches::kNaClLoaderProcess ||
            process_type == switches::kPpapiBrokerProcess ||
            process_type == switches::kPpapiPluginProcess);
+#endif
 
     // TODO(markusheintz): The command line flag --lang is actually processed
     // by the CommandLinePrefStore, and made available through the PrefService
@@ -631,6 +644,7 @@ int ChromeMainDelegate::RunProcess(
     { switches::kRelauncherProcess,
       mac_relauncher::internal::RelauncherMain },
 #endif
+    // TODO(scottmg): http://crbug.com/237249 NaCl -> child.
 #if !defined(DISABLE_NACL)
     { switches::kNaClLoaderProcess, NaClMain },
 #endif  // DISABLE_NACL
@@ -705,6 +719,8 @@ content::ContentBrowserClient*
 }
 
 content::ContentPluginClient* ChromeMainDelegate::CreateContentPluginClient() {
+  // TODO(scottmg): http://crbug.com/237249 This will have to be split out into
+  // browser and child parts.
   return &g_chrome_content_plugin_client.Get();
 }
 

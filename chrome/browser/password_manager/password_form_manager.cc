@@ -7,14 +7,14 @@
 #include <algorithm>
 
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/autofill/browser/validation.h"
-#include "components/autofill/common/autofill_messages.h"
+#include "components/autofill/core/browser/validation.h"
+#include "components/autofill/core/common/autofill_messages.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/password_form.h"
@@ -127,7 +127,7 @@ void PasswordFormManager::PermanentlyBlacklist() {
   if (!best_matches_.empty()) {
     PasswordFormMap::const_iterator iter;
     PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
-        profile_, Profile::EXPLICIT_ACCESS);
+        profile_, Profile::EXPLICIT_ACCESS).get();
     if (!password_store) {
       NOTREACHED();
       return;
@@ -153,6 +153,10 @@ bool PasswordFormManager::IsNewLogin() {
   return is_new_login_;
 }
 
+bool PasswordFormManager::IsPendingCredentialsPublicSuffixMatch() {
+  return pending_credentials_.IsPublicSuffixMatch();
+}
+
 void PasswordFormManager::SetHasGeneratedPassword() {
   has_generated_password_ = true;
 }
@@ -174,7 +178,9 @@ bool PasswordFormManager::HasValidPasswordForm() {
       !observed_form_.password_element.empty();
 }
 
-void PasswordFormManager::ProvisionallySave(const PasswordForm& credentials) {
+void PasswordFormManager::ProvisionallySave(
+    const PasswordForm& credentials,
+    OtherPossibleUsernamesAction action) {
   DCHECK_EQ(state_, POST_MATCHING_PHASE);
   DCHECK(DoesManage(credentials, ACTION_MATCH_NOT_REQUIRED));
 
@@ -187,16 +193,30 @@ void PasswordFormManager::ProvisionallySave(const PasswordForm& credentials) {
   if (it != best_matches_.end()) {
     // The user signed in with a login we autofilled.
     pending_credentials_ = *it->second;
-    is_new_login_ = false;
+
+    // Public suffix matches should always be new logins, since we want to store
+    // them so they can automatically be filled in later.
+    is_new_login_ = IsPendingCredentialsPublicSuffixMatch();
 
     // Check to see if we're using a known username but a new password.
     if (pending_credentials_.password_value != credentials.password_value)
       user_action_ = kUserActionOverride;
+  } else if (action == ALLOW_OTHER_POSSIBLE_USERNAMES &&
+             UpdatePendingCredentialsIfOtherPossibleUsername(
+                 credentials.username_value)) {
+    // |pending_credentials_| is now set. Note we don't update
+    // |pending_credentials_.username_value| to |credentials.username_value|
+    // yet because we need to keep the original username to modify the stored
+    // credential.
+    selected_username_ = credentials.username_value;
+    is_new_login_ = false;
   } else {
     // User typed in a new, unknown username.
     user_action_ = kUserActionOverride;
     pending_credentials_ = observed_form_;
     pending_credentials_.username_value = credentials.username_value;
+    pending_credentials_.other_possible_usernames =
+        credentials.other_possible_usernames;
   }
 
   pending_credentials_.action = credentials.action;
@@ -227,7 +247,7 @@ void PasswordFormManager::FetchMatchingLoginsFromPasswordStore() {
   DCHECK_EQ(state_, PRE_MATCHING_PHASE);
   state_ = MATCHING_PHASE;
   PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
-      profile_, Profile::EXPLICIT_ACCESS);
+      profile_, Profile::EXPLICIT_ACCESS).get();
   if (!password_store) {
     NOTREACHED();
     return;
@@ -324,12 +344,14 @@ void PasswordFormManager::OnRequestDone(
   SendNotBlacklistedToRenderer();
 
   // Proceed to autofill.
-  // Note that we provide the choices but don't actually prefill a value if
-  // either: (1) we are in Incognito mode, or (2) the ACTION paths don't match.
+  // Note that we provide the choices but don't actually prefill a value if:
+  // (1) we are in Incognito mode, (2) the ACTION paths don't match,
+  // or (3) if it matched using public suffix domain matching.
   bool wait_for_username =
       profile_->IsOffTheRecord() ||
       observed_form_.action.GetWithEmptyPath() !=
-          preferred_match_->action.GetWithEmptyPath();
+          preferred_match_->action.GetWithEmptyPath() ||
+          preferred_match_->IsPublicSuffixMatch();
   if (wait_for_username)
     manager_action_ = kManagerActionNone;
   else
@@ -385,7 +407,7 @@ void PasswordFormManager::SaveAsNewLogin(bool reset_preferred_login) {
   DCHECK(!profile_->IsOffTheRecord());
 
   PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
-      profile_, Profile::IMPLICIT_ACCESS);
+      profile_, Profile::IMPLICIT_ACCESS).get();
   if (!password_store) {
     NOTREACHED();
     return;
@@ -402,17 +424,18 @@ void PasswordFormManager::SaveAsNewLogin(bool reset_preferred_login) {
 
 void PasswordFormManager::SanitizePossibleUsernames(PasswordForm* form) {
   // Remove any possible usernames that could be credit cards or SSN for privacy
-  // reasons. Also remove duplicates, both in possible_usernames and between
-  // possible_usernames and username_value.
+  // reasons. Also remove duplicates, both in other_possible_usernames and
+  // between other_possible_usernames and username_value.
   std::set<string16> set;
-  for (std::vector<string16>::iterator it = form->possible_usernames.begin();
-       it != form->possible_usernames.end(); ++it) {
+  for (std::vector<string16>::iterator it =
+           form->other_possible_usernames.begin();
+       it != form->other_possible_usernames.end(); ++it) {
     if (!autofill::IsValidCreditCardNumber(*it) && !autofill::IsSSN(*it))
       set.insert(*it);
   }
   set.erase(form->username_value);
   std::vector<string16> temp(set.begin(), set.end());
-  form->possible_usernames.swap(temp);
+  form->other_possible_usernames.swap(temp);
 }
 
 void PasswordFormManager::UpdatePreferredLoginState(
@@ -442,21 +465,37 @@ void PasswordFormManager::UpdateLogin() {
   DCHECK(!profile_->IsOffTheRecord());
 
   PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
-      profile_, Profile::IMPLICIT_ACCESS);
+      profile_, Profile::IMPLICIT_ACCESS).get();
   if (!password_store) {
     NOTREACHED();
     return;
   }
 
+  // Update metadata.
+  ++pending_credentials_.times_used;
+
   UpdatePreferredLoginState(password_store);
 
+  // Remove alternate usernames. At this point we assume that we have found
+  // the right username.
+  pending_credentials_.other_possible_usernames.clear();
+
   // Update the new preferred login.
-  // Note origin.spec().length > signon_realm.length implies the origin has a
-  // path, since signon_realm is a prefix of origin for HTML password forms.
-  if ((observed_form_.scheme == PasswordForm::SCHEME_HTML) &&
-      (observed_form_.origin.spec().length() >
-       observed_form_.signon_realm.length()) &&
-      (observed_form_.signon_realm == pending_credentials_.origin.spec())) {
+  if (!selected_username_.empty()) {
+    // An other possible username is selected. We set this selected username
+    // as the real username. The PasswordStore API isn't designed to update
+    // username, so we delete the old credentials and add a new one instead.
+    password_store->RemoveLogin(pending_credentials_);
+    pending_credentials_.username_value = selected_username_;
+    password_store->AddLogin(pending_credentials_);
+  } else if ((observed_form_.scheme == PasswordForm::SCHEME_HTML) &&
+             (observed_form_.origin.spec().length() >
+              observed_form_.signon_realm.length()) &&
+             (observed_form_.signon_realm ==
+              pending_credentials_.origin.spec())) {
+    // Note origin.spec().length > signon_realm.length implies the origin has a
+    // path, since signon_realm is a prefix of origin for HTML password forms.
+    //
     // The user logged in successfully with one of our autofilled logins on a
     // page with non-empty path, but the autofilled entry was initially saved/
     // imported with an empty path. Rather than just mark this entry preferred,
@@ -478,25 +517,41 @@ void PasswordFormManager::UpdateLogin() {
   }
 }
 
+bool PasswordFormManager::UpdatePendingCredentialsIfOtherPossibleUsername(
+    const string16& username) {
+  for (PasswordFormMap::const_iterator it = best_matches_.begin();
+       it != best_matches_.end(); ++it) {
+    for (size_t i = 0; i < it->second->other_possible_usernames.size(); ++i) {
+      if (it->second->other_possible_usernames[i] == username) {
+        pending_credentials_ = *it->second;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 int PasswordFormManager::ScoreResult(const PasswordForm& candidate) const {
   DCHECK_EQ(state_, MATCHING_PHASE);
   // For scoring of candidate login data:
   // The most important element that should match is the origin, followed by
   // the action, the password name, the submit button name, and finally the
   // username input field name.
-  // Exact origin match gives an addition of 32 (1 << 5) + # of matching url
+  // Exact origin match gives an addition of 64 (1 << 6) + # of matching url
   // dirs.
-  // Partial match gives an addition of 16 (1 << 4) + # matching url dirs
+  // Partial match gives an addition of 32 (1 << 5) + # matching url dirs
   // That way, a partial match cannot trump an exact match even if
   // the partial one matches all other attributes (action, elements) (and
   // regardless of the matching depth in the URL path).
+  // If public suffix origin match was not used, it gives an addition of
+  // 16 (1 << 4).
   int score = 0;
   if (candidate.origin == observed_form_.origin) {
     // This check is here for the most common case which
     // is we have a single match in the db for the given host,
     // so we don't generally need to walk the entire URL path (the else
     // clause).
-    score += (1 << 5) + static_cast<int>(form_path_tokens_.size());
+    score += (1 << 6) + static_cast<int>(form_path_tokens_.size());
   } else {
     // Walk the origin URL paths one directory at a time to see how
     // deep the two match.
@@ -511,9 +566,11 @@ int PasswordFormManager::ScoreResult(const PasswordForm& candidate) const {
       score++;
     }
     // do we have a partial match?
-    score += (depth > 0) ? 1 << 4 : 0;
+    score += (depth > 0) ? 1 << 5 : 0;
   }
   if (observed_form_.scheme == PasswordForm::SCHEME_HTML) {
+    if (!candidate.IsPublicSuffixMatch())
+      score += 1 << 4;
     if (candidate.action == observed_form_.action)
       score += 1 << 3;
     if (candidate.password_element == observed_form_.password_element)

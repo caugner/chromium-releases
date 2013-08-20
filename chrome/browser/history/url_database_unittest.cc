@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/history/url_database.h"
 #include "sql/connection.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -131,7 +130,7 @@ TEST_F(URLDatabaseTest, KeywordSearchTermVisit) {
   url_info1.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
   url_info1.set_hidden(false);
   URLID url_id = AddURL(url_info1);
-  ASSERT_TRUE(url_id != 0);
+  ASSERT_NE(0, url_id);
 
   // Add a keyword visit.
   TemplateURLID keyword_id = 100;
@@ -170,7 +169,7 @@ TEST_F(URLDatabaseTest, DeleteURLDeletesKeywordSearchTermVisit) {
   url_info1.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
   url_info1.set_hidden(false);
   URLID url_id = AddURL(url_info1);
-  ASSERT_TRUE(url_id != 0);
+  ASSERT_NE(0, url_id);
 
   // Add a keyword visit.
   ASSERT_TRUE(SetKeywordSearchTermsForURL(url_id, 1, UTF8ToUTF16("visit")));
@@ -232,9 +231,9 @@ TEST_F(URLDatabaseTest, IconMappingEnumerator) {
 
   // Insert a row with favicon
   URLID url_id1 = AddURL(url_info1);
-  ASSERT_TRUE(url_id1 != 0);
+  ASSERT_NE(0, url_id1);
 
-  FaviconID icon_id = 1;
+  chrome::FaviconID icon_id = 1;
   sql::Statement statement(GetDB().GetCachedStatement(
       SQL_FROM_HERE,
       "UPDATE urls SET favicon_id =? WHERE id=?"));
@@ -256,7 +255,7 @@ TEST_F(URLDatabaseTest, IconMappingEnumerator) {
 
   // Insert a row with favicon
   URLID url_id2 = AddURL(url_info2);
-  ASSERT_TRUE(url_id2 != 0);
+  ASSERT_NE(0, url_id2);
 
   IconMappingEnumerator e;
   InitIconMappingEnumeratorForEverything(&e);

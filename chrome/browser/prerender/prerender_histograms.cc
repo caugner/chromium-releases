@@ -8,7 +8,7 @@
 
 #include "base/format_macros.h"
 #include "base/metrics/histogram.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_util.h"
@@ -56,6 +56,8 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
       return ComposeHistogramName("websame", name);
     case ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN:
       return ComposeHistogramName("webcross", name);
+    case ORIGIN_LOCAL_PREDICTOR:
+      return ComposeHistogramName("localpredictor", name);
     case ORIGIN_GWS_PRERENDER:  // Handled above.
     default:
       NOTREACHED();
@@ -112,6 +114,8 @@ bool OriginIsOmnibox(Origin origin) {
   } else if (origin == ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN) { \
     HISTOGRAM; \
   } else if (origin == ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN) { \
+    HISTOGRAM; \
+  } else if (origin == ORIGIN_LOCAL_PREDICTOR) { \
     HISTOGRAM; \
   } else if (experiment != kNoExperiment) { \
     HISTOGRAM; \

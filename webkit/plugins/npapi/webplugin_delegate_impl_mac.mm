@@ -14,19 +14,19 @@
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/stats_counters.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "skia/ext/skia_utils_mac.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
+#include "webkit/common/cursors/webcursor.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/npapi/plugin_web_event_converter_mac.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/npapi/webplugin_accelerated_surface_mac.h"
 
-using WebKit::WebCursorInfo;
 using WebKit::WebKeyboardEvent;
 using WebKit::WebInputEvent;
 using WebKit::WebMouseEvent;
@@ -262,7 +262,7 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
 }
 
 void WebPluginDelegateImpl::PlatformDestroyInstance() {
-  if (redraw_timer_.get())
+  if (redraw_timer_)
     redraw_timer_->Stop();
   [renderer_ release];
   renderer_ = nil;
@@ -289,7 +289,7 @@ void WebPluginDelegateImpl::CGPaint(CGContextRef context,
 }
 
 bool WebPluginDelegateImpl::PlatformHandleInputEvent(
-    const WebInputEvent& event, WebCursorInfo* cursor_info) {
+    const WebInputEvent& event, WebCursor::CursorInfo* cursor_info) {
   DCHECK(cursor_info != NULL);
 
   // If an event comes in before the plugin has been set up, bail.

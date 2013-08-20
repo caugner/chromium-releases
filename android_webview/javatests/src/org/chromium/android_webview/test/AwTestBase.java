@@ -200,42 +200,40 @@ public class AwTestBase
         public AwLayoutSizer createLayoutSizer() {
             return new AwLayoutSizer();
         }
+        public AwTestContainerView createAwTestContainerView(AwTestRunnerActivity activity) {
+            return new AwTestContainerView(activity);
+        }
+    }
+
+    protected TestDependencyFactory createTestDependencyFactory() {
+        return new TestDependencyFactory();
     }
 
     protected AwTestContainerView createAwTestContainerView(
             final AwContentsClient awContentsClient) {
-        return createAwTestContainerView(awContentsClient, new TestDependencyFactory());
-    }
-
-    protected AwTestContainerView createAwTestContainerView(
-            final AwContentsClient awContentsClient,
-            final TestDependencyFactory testDependencyFactory) {
-        AwTestContainerView testContainerView =
-            createDetachedAwTestContainerView(awContentsClient, testDependencyFactory);
+        AwTestContainerView testContainerView = createDetachedAwTestContainerView(awContentsClient);
         getActivity().addView(testContainerView);
         testContainerView.requestFocus();
         return testContainerView;
     }
 
+    // The browser context needs to be a process-wide singleton.
+    private AwBrowserContext mBrowserContext =
+            new AwBrowserContext(new InMemorySharedPreferences());
+
     protected AwTestContainerView createDetachedAwTestContainerView(
-            final AwContentsClient awContentsClient,
-            final TestDependencyFactory testDependencyFactory) {
-        final AwTestContainerView testContainerView = new AwTestContainerView(getActivity());
+            final AwContentsClient awContentsClient) {
+        final TestDependencyFactory testDependencyFactory = createTestDependencyFactory();
+        final AwTestContainerView testContainerView =
+            testDependencyFactory.createAwTestContainerView(getActivity());
         testContainerView.initialize(new AwContents(
-                new AwBrowserContext(new InMemorySharedPreferences()),
-                testContainerView, testContainerView.getInternalAccessDelegate(),
+                mBrowserContext, testContainerView, testContainerView.getInternalAccessDelegate(),
                 awContentsClient, false, testDependencyFactory.createLayoutSizer()));
         return testContainerView;
     }
 
     protected AwTestContainerView createAwTestContainerViewOnMainSync(
             final AwContentsClient client) throws Exception {
-        return createAwTestContainerViewOnMainSync(client, new TestDependencyFactory());
-    }
-
-    protected AwTestContainerView createAwTestContainerViewOnMainSync(
-            final AwContentsClient client,
-            final TestDependencyFactory testDependencyFactory) throws Exception {
         final AtomicReference<AwTestContainerView> testContainerView =
                 new AtomicReference<AwTestContainerView>();
         getInstrumentation().runOnMainSync(new Runnable() {

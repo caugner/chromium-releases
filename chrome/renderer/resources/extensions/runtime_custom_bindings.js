@@ -6,14 +6,74 @@
 
 var binding = require('binding').Binding.create('runtime');
 
-var runtimeNatives = requireNative('runtime');
 var extensionNatives = requireNative('extension');
-var GetExtensionViews = extensionNatives.GetExtensionViews;
-var OpenChannelToExtension = runtimeNatives.OpenChannelToExtension;
-var OpenChannelToNativeApp = runtimeNatives.OpenChannelToNativeApp;
-var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
-var sendMessageUpdateArguments =
-    require('miscellaneous_bindings').sendMessageUpdateArguments;
+var miscBindings = require('miscellaneous_bindings');
+var runtimeNatives = requireNative('runtime');
+var unloadEvent = require('unload_event');
+var process = requireNative('process');
+
+var backgroundPage = window;
+var backgroundRequire = require;
+var contextType = process.GetContextType();
+if (contextType == 'BLESSED_EXTENSION' ||
+    contextType == 'UNBLESSED_EXTENSION') {
+  var manifest = runtimeNatives.GetManifest();
+  if (manifest.app && manifest.app.background) {
+    // Get the background page if one exists. Otherwise, default to the current
+    // window.
+    backgroundPage = extensionNatives.GetExtensionViews(-1, 'BACKGROUND')[0];
+    if (backgroundPage) {
+      var GetModuleSystem = requireNative('v8_context').GetModuleSystem;
+      backgroundRequire = GetModuleSystem(backgroundPage).require;
+    } else {
+      backgroundPage = window;
+    }
+  }
+}
+
+// For packaged apps, all windows use the bindFileEntryCallback from the
+// background page so their FileEntry objects have the background page's context
+// as their own.  This allows them to be used from other windows (including the
+// background page) after the original window is closed.
+if (window == backgroundPage) {
+  var lastError = require('lastError');
+  var fileSystemNatives = requireNative('file_system_natives');
+  var GetIsolatedFileSystem = fileSystemNatives.GetIsolatedFileSystem;
+  var bindDirectoryEntryCallback = function(functionName, apiFunctions) {
+    apiFunctions.setCustomCallback(functionName,
+        function(name, request, response) {
+      if (request.callback && response) {
+        var callback = request.callback;
+        request.callback = null;
+
+        var fileSystemId = response.fileSystemId;
+        var baseName = response.baseName;
+        var fs = GetIsolatedFileSystem(fileSystemId);
+
+        try {
+          fs.root.getDirectory(baseName, {}, callback, function(fileError) {
+            lastError.run('runtime.' + functionName,
+                          'Error getting Entry, code: ' + fileError.code,
+                          request.stack,
+                          callback);
+          });
+        } catch (e) {
+          lastError.run('runtime.' + functionName,
+                        'Error: ' + e.stack,
+                        request.stack,
+                        callback);
+        }
+      }
+    });
+  };
+} else {
+  // Force the runtime API to be loaded in the background page. Using
+  // backgroundPageModuleSystem.require('runtime') is insufficient as
+  // requireNative is only allowed while lazily loading an API.
+  backgroundPage.chrome.runtime;
+  var bindDirectoryEntryCallback = backgroundRequire(
+      'runtime').bindDirectoryEntryCallback;
+}
 
 binding.registerCustomHook(function(binding, id, contextType) {
   var apiFunctions = binding.apiFunctions;
@@ -36,22 +96,23 @@ binding.registerCustomHook(function(binding, id, contextType) {
     return 'chrome-extension://' + id + path;
   });
 
+  var sendMessageUpdateArguments = miscBindings.sendMessageUpdateArguments;
   apiFunctions.setUpdateArgumentsPreValidate('sendMessage',
-      sendMessageUpdateArguments.bind(null, 'sendMessage'));
+      $Function.bind(sendMessageUpdateArguments, null, 'sendMessage'));
   apiFunctions.setUpdateArgumentsPreValidate('sendNativeMessage',
-      sendMessageUpdateArguments.bind(null, 'sendNativeMessage'));
+      $Function.bind(sendMessageUpdateArguments, null, 'sendNativeMessage'));
 
   apiFunctions.setHandleRequest('sendMessage',
                                 function(targetId, message, responseCallback) {
     var port = runtime.connect(targetId || runtime.id,
-        {name: chromeHidden.kMessageChannel});
-    chromeHidden.Port.sendMessageImpl(port, message, responseCallback);
+        {name: miscBindings.kMessageChannel});
+    miscBindings.sendMessageImpl(port, message, responseCallback);
   });
 
   apiFunctions.setHandleRequest('sendNativeMessage',
                                 function(targetId, message, responseCallback) {
     var port = runtime.connectNative(targetId);
-    chromeHidden.Port.sendMessageImpl(port, message, responseCallback);
+    miscBindings.sendMessageImpl(port, message, responseCallback);
   });
 
   apiFunctions.setUpdateArgumentsPreValidate('connect', function() {
@@ -85,20 +146,21 @@ binding.registerCustomHook(function(binding, id, contextType) {
   });
 
   apiFunctions.setHandleRequest('connect', function(targetId, connectInfo) {
+    // Don't let orphaned content scripts communicate with their extension.
+    // http://crbug.com/168263
+    if (unloadEvent.wasDispatched)
+      throw new Error('Error connecting to extension ' + targetId);
+
     if (!targetId)
       targetId = runtime.id;
+
     var name = '';
     if (connectInfo && connectInfo.name)
       name = connectInfo.name;
 
-    // Don't let orphaned content scripts communicate with their extension.
-    // http://crbug.com/168263
-    if (!chromeHidden.wasUnloaded) {
-      var portId = OpenChannelToExtension(runtime.id, targetId, name);
-      if (portId >= 0)
-        return chromeHidden.Port.createPort(portId, name);
-    }
-    throw new Error('Error connecting to extension ' + targetId);
+    var portId = runtimeNatives.OpenChannelToExtension(targetId, name);
+    if (portId >= 0)
+      return miscBindings.createPort(portId, name);
   });
 
   //
@@ -109,10 +171,11 @@ binding.registerCustomHook(function(binding, id, contextType) {
 
   apiFunctions.setHandleRequest('connectNative',
                                 function(nativeAppName) {
-    if (!chromeHidden.wasUnloaded) {
-      var portId = OpenChannelToNativeApp(runtime.id, nativeAppName);
+    if (!unloadEvent.wasDispatched) {
+      var portId = runtimeNatives.OpenChannelToNativeApp(runtime.id,
+                                                         nativeAppName);
       if (portId >= 0)
-        return chromeHidden.Port.createPort(portId, '');
+        return miscBindings.createPort(portId, '');
     }
     throw new Error('Error connecting to native app: ' + nativeAppName);
   });
@@ -120,12 +183,14 @@ binding.registerCustomHook(function(binding, id, contextType) {
   apiFunctions.setCustomCallback('getBackgroundPage',
                                  function(name, request, response) {
     if (request.callback) {
-      var bg = GetExtensionViews(-1, 'BACKGROUND')[0] || null;
+      var bg = extensionNatives.GetExtensionViews(-1, 'BACKGROUND')[0] || null;
       request.callback(bg);
     }
     request.callback = null;
   });
 
+  bindDirectoryEntryCallback('getPackageDirectoryEntry', apiFunctions);
 });
 
+exports.bindDirectoryEntryCallback = bindDirectoryEntryCallback;
 exports.binding = binding.generate();

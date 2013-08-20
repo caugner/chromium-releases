@@ -13,9 +13,10 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/time.h"
 #include "base/timer.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -85,7 +86,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void OnSigninScreenReady() OVERRIDE;
   virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
+  virtual void OnStartKioskEnableScreen() OVERRIDE;
   virtual void OnStartDeviceReset() OVERRIDE;
+  virtual void OnStartKioskAutolaunchScreen() OVERRIDE;
   virtual void ResetPublicSessionAutoLoginTimer() OVERRIDE;
   virtual void ResyncUserData() OVERRIDE;
   virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
@@ -162,11 +165,16 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Shows Gaia page because password change was detected.
   void ShowGaiaPasswordChanged(const std::string& username);
 
-  // Handles result of ownership check and starts enterprise enrollment if
-  // applicable.
+  // Handles result of ownership check and starts enterprise or kiosk enrollment
+  // if applicable.
   void OnEnrollmentOwnershipCheckCompleted(
       DeviceSettingsService::OwnershipStatus status,
       bool current_user_is_owner);
+
+  // Handles result of consumer kiosk configurability check and starts
+  // enable kiosk screen if applicable.
+  void OnConsumerKioskModeCheckCompleted(
+      KioskAppManager::ConsumerKioskModeStatus status);
 
   // Enters the enterprise enrollment screen. |forced| is true if this is the
   // result of an auto-enrollment check, and the user shouldn't be able to
@@ -176,6 +184,12 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Shows "reset device" screen.
   void ShowResetScreen();
+
+  // Shows kiosk feature enable screen.
+  void ShowKioskEnableScreen();
+
+  // Shows "kiosk auto-launch permission" screen.
+  void ShowKioskAutolaunchScreen();
 
   // Shows "critical TPM error" screen.
   void ShowTPMError();

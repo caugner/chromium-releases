@@ -10,7 +10,8 @@
 
 #include <string>
 
-#include "base/hash_tables.h"
+#include "base/command_line.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/ip_endpoint.h"
 #include "net/quic/crypto/crypto_handshake.h"
@@ -24,9 +25,17 @@
 namespace net {
 namespace tools {
 
+namespace test {
+class QuicClientPeer;
+}  // namespace test
+
 class QuicClient : public EpollCallbackInterface {
  public:
   QuicClient(IPEndPoint server_address, const std::string& server_hostname);
+  QuicClient(IPEndPoint server_address,
+             const std::string& server_hostname,
+             const QuicConfig& config);
+
   virtual ~QuicClient();
 
   // Initializes the client to create a connection. Should be called exactly
@@ -53,7 +62,7 @@ class QuicClient : public EpollCallbackInterface {
 
   // Sends a request simple GET for each URL in arg, and then waits for
   // each to complete.
-  void SendRequestsAndWaitForResponse(int argc, char *argv[]);
+  void SendRequestsAndWaitForResponse(const CommandLine::StringVector& args);
 
   // Returns a newly created CreateReliableClientStream, owned by the
   // QuicClient.
@@ -61,6 +70,9 @@ class QuicClient : public EpollCallbackInterface {
 
   // Wait for events until the stream with the given ID is closed.
   void WaitForStreamToClose(QuicStreamId id);
+
+  // Wait for events until the handshake is confirmed.
+  void WaitForCryptoHandshakeConfirmed();
 
   // Wait up to 50ms, and handle any events which occur.
   // Returns true if there are any outstanding requests.
@@ -103,7 +115,14 @@ class QuicClient : public EpollCallbackInterface {
 
   int fd() { return fd_; }
 
+  // This should only be set before the initial Connect()
+  void set_server_hostname(const string& hostname) {
+    server_hostname_ = hostname;
+  }
+
  private:
+  friend class net::tools::test::QuicClientPeer;
+
   // Read a UDP packet and hand it to the framer.
   bool ReadAndProcessPacket();
 
@@ -114,7 +133,12 @@ class QuicClient : public EpollCallbackInterface {
   const IPEndPoint server_address_;
 
   // Hostname of the server. This may be a DNS name or an IP address literal.
-  const std::string server_hostname_;
+  std::string server_hostname_;
+
+  // config_ and crypto_config_ contain configuration and cached state about
+  // servers.
+  QuicConfig config_;
+  QuicCryptoClientConfig crypto_config_;
 
   // Address of the client if the client is connected to the server.
   IPEndPoint client_address_;
@@ -142,11 +166,6 @@ class QuicClient : public EpollCallbackInterface {
   // True if the kernel supports SO_RXQ_OVFL, the number of packets dropped
   // because the socket would otherwise overflow.
   bool overflow_supported_;
-
-  // config_ and crypto_config_ contain configuration and cached state about
-  // servers.
-  QuicConfig config_;
-  QuicCryptoClientConfig crypto_config_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicClient);
 };

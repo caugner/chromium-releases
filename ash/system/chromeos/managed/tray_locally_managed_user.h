@@ -29,13 +29,20 @@ class TrayLocallyManagedUser : public SystemTrayItem,
 
   // Overridden from SystemTrayItem.
   virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE;
+  virtual views::View* CreateNotificationView(
+     user::LoginStatus status) OVERRIDE;
   virtual void DestroyDefaultView() OVERRIDE;
+  virtual void DestroyNotificationView() OVERRIDE;
+  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
 
   // Overridden from ViewClickListener.
   virtual void OnViewClicked(views::View* sender) OVERRIDE;
 
  private:
   LabelTrayView* tray_view_;
+  views::View* notification_view_;
+  // Previous login status to avoid showing notification upon unlock.
+  user::LoginStatus status_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayLocallyManagedUser);
 };

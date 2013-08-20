@@ -9,6 +9,11 @@
 #include "ui/gfx/screen.h"
 #include "ui/views/test/views_test_base.h"
 
+#if defined(USE_AURA)
+#include "ui/aura/root_window.h"
+#include "ui/aura/test/test_cursor_client.h"
+#endif
+
 namespace views {
 
 namespace {
@@ -40,6 +45,11 @@ TEST_F(CustomButtonTest, HoverStateOnVisibilityChange) {
   widget->Init(params);
   widget->Show();
 
+#if defined(USE_AURA)
+  aura::test::TestCursorClient cursor_client(
+      widget->GetNativeView()->GetRootWindow());
+#endif
+
   // Position the widget in a way so that it is under the cursor.
   gfx::Point cursor = gfx::Screen::GetScreenFor(
       widget->GetNativeView())->GetCursorScreenPoint();
@@ -70,6 +80,24 @@ TEST_F(CustomButtonTest, HoverStateOnVisibilityChange) {
 
   button->SetVisible(true);
   EXPECT_EQ(CustomButton::STATE_HOVERED, button->state());
+
+#if defined(USE_AURA)
+  // In Aura views, no new hover effects are invoked if mouse events
+  // are disabled.
+  cursor_client.DisableMouseEvents();
+
+  button->SetEnabled(false);
+  EXPECT_EQ(CustomButton::STATE_DISABLED, button->state());
+
+  button->SetEnabled(true);
+  EXPECT_EQ(CustomButton::STATE_NORMAL, button->state());
+
+  button->SetVisible(false);
+  EXPECT_EQ(CustomButton::STATE_NORMAL, button->state());
+
+  button->SetVisible(true);
+  EXPECT_EQ(CustomButton::STATE_NORMAL, button->state());
+#endif
 }
 
 }  // namespace views

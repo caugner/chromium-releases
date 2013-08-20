@@ -6,21 +6,14 @@
 
 #include <string>
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
-#include "base/path_service.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/browser/google_apis/time_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using base::Value;
-using base::DictionaryValue;
-using base::ListValue;
 
 namespace google_apis {
 
@@ -29,10 +22,10 @@ namespace google_apis {
 // Test document feed parsing.
 TEST(GDataWAPIParserTest, ResourceListJsonParser) {
   std::string error;
-  scoped_ptr<Value> document =
+  scoped_ptr<base::Value> document =
       test_util::LoadJSONFile("chromeos/gdata/basic_feed.json");
   ASSERT_TRUE(document.get());
-  ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
   scoped_ptr<ResourceList> feed(ResourceList::ExtractAndParse(*document));
   ASSERT_TRUE(feed.get());
 
@@ -158,10 +151,10 @@ TEST(GDataWAPIParserTest, ResourceListJsonParser) {
 // Test document feed parsing.
 TEST(GDataWAPIParserTest, ResourceEntryJsonParser) {
   std::string error;
-  scoped_ptr<Value> document =
+  scoped_ptr<base::Value> document =
       test_util::LoadJSONFile("chromeos/gdata/file_entry.json");
   ASSERT_TRUE(document.get());
-  ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
   scoped_ptr<ResourceEntry> entry(ResourceEntry::ExtractAndParse(*document));
   ASSERT_TRUE(entry.get());
 
@@ -210,7 +203,7 @@ TEST(GDataWAPIParserTest, ResourceEntryJsonParser) {
 
   const Link* entry1_self_link = entry->GetLinkByType(Link::LINK_SELF);
   ASSERT_TRUE(entry1_self_link);
-  EXPECT_EQ("https://file1_link_self/file:2_file_resource_id",
+  EXPECT_EQ("https://file1_link_self/file%3A2_file_resource_id",
             entry1_self_link->href().spec());
   EXPECT_EQ("application/atom+xml", entry1_self_link->mime_type());
   EXPECT_EQ("", entry1_self_link->app_id());
@@ -239,13 +232,13 @@ TEST(GDataWAPIParserTest, ResourceEntryJsonParser) {
 }
 
 TEST(GDataWAPIParserTest, AccountMetadataParser) {
-  scoped_ptr<Value> document =
+  scoped_ptr<base::Value> document =
       test_util::LoadJSONFile("chromeos/gdata/account_metadata.json");
   ASSERT_TRUE(document.get());
-  ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
-  DictionaryValue* entry_value = NULL;
-  ASSERT_TRUE(reinterpret_cast<DictionaryValue*>(document.get())->GetDictionary(
-      std::string("entry"), &entry_value));
+  base::DictionaryValue* document_dict = NULL;
+  base::DictionaryValue* entry_value = NULL;
+  ASSERT_TRUE(document->GetAsDictionary(&document_dict));
+  ASSERT_TRUE(document_dict->GetDictionary(std::string("entry"), &entry_value));
   ASSERT_TRUE(entry_value);
 
   scoped_ptr<AccountMetadata> metadata(
@@ -305,26 +298,53 @@ TEST(GDataWAPIParserTest, AccountMetadataParser) {
   EXPECT_EQ(0U, second_app->secondary_extensions().size());
 }
 
-// Test file extension checking in ResourceEntry::HasDocumentExtension().
-TEST(GDataWAPIParserTest, ResourceEntryHasDocumentExtension) {
-  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test.gdoc"))));
-  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test.gsheet"))));
-  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test.gslides"))));
-  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test.gdraw"))));
-  EXPECT_TRUE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test.gtable"))));
-  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test.tar.gz"))));
-  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test.txt"))));
-  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath(FILE_PATH_LITERAL("Test"))));
-  EXPECT_FALSE(ResourceEntry::HasHostedDocumentExtension(
-      base::FilePath()));
+TEST(GDataWAPIParserTest, ClassifyEntryKindByFileExtension) {
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+      ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.gdoc"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+      ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.gsheet"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+      ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.gslides"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+      ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.gdraw"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_GOOGLE_DOCUMENT |
+      ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.gtable"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_EXTERNAL_DOCUMENT |
+      ResourceEntry::KIND_OF_HOSTED_DOCUMENT,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.glink"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_NONE,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.tar.gz"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_NONE,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test.txt"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_NONE,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath(FILE_PATH_LITERAL("Test"))));
+  EXPECT_EQ(
+      ResourceEntry::KIND_OF_NONE,
+      ResourceEntry::ClassifyEntryKindByFileExtension(
+          base::FilePath()));
 }
 
 TEST(GDataWAPIParserTest, ResourceEntryClassifyEntryKind) {

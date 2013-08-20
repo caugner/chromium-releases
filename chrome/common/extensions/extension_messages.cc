@@ -7,6 +7,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "content/public/common/common_param_traits.h"
 
@@ -41,9 +42,10 @@ scoped_refptr<Extension> ExtensionMsg_Loaded_Params::ConvertToExtension(
     std::string* error) const {
   scoped_refptr<Extension> extension =
       Extension::Create(path, location, *manifest, creation_flags, error);
-  if (extension) {
-    extension->SetActivePermissions(
-          new PermissionSet(apis, explicit_hosts, scriptable_hosts));
+  if (extension.get()) {
+    extensions::PermissionsData::SetActivePermissions(
+        extension.get(),
+        new PermissionSet(apis, explicit_hosts, scriptable_hosts));
   }
   return extension;
 }
@@ -195,7 +197,7 @@ void ParamTraits<ExtensionMsg_Loaded_Params>::Write(Message* m,
 bool ParamTraits<ExtensionMsg_Loaded_Params>::Read(const Message* m,
                                                    PickleIterator* iter,
                                                    param_type* p) {
-  p->manifest.reset(new DictionaryValue());
+  p->manifest.reset(new base::DictionaryValue());
   return ReadParam(m, iter, &p->location) &&
          ReadParam(m, iter, &p->path) &&
          ReadParam(m, iter, p->manifest.get()) &&

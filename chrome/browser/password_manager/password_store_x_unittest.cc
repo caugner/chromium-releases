@@ -10,11 +10,11 @@
 #include "base/platform_file.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_form_data.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
@@ -285,8 +285,9 @@ class PasswordStoreXTest : public testing::TestWithParam<BackendType> {
   }
 
   virtual void TearDown() {
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
+    base::MessageLoop::current()->Run();
     db_thread_.Stop();
   }
 
@@ -301,7 +302,7 @@ class PasswordStoreXTest : public testing::TestWithParam<BackendType> {
     }
   }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   // PasswordStore, WDS schedule work on this thread.
   content::TestBrowserThread db_thread_;
@@ -317,7 +318,7 @@ ACTION(STLDeleteElements0) {
 
 ACTION(QuitUIMessageLoop) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }
 
 TEST_P(PasswordStoreXTest, Notifications) {
@@ -341,18 +342,18 @@ TEST_P(PasswordStoreXTest, Notifications) {
   scoped_ptr<PasswordForm> form(CreatePasswordFormFromData(form_data));
 
   scoped_refptr<DBThreadObserverHelper> helper = new DBThreadObserverHelper;
-  helper->Init(store);
+  helper->Init(store.get());
 
   const PasswordStoreChange expected_add_changes[] = {
     PasswordStoreChange(PasswordStoreChange::ADD, *form),
   };
 
-  EXPECT_CALL(helper->observer(),
+  EXPECT_CALL(
+      helper->observer(),
       Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
-              content::Source<PasswordStore>(store),
+              content::Source<PasswordStore>(store.get()),
               Property(&content::Details<const PasswordStoreChangeList>::ptr,
-                       Pointee(ElementsAreArray(
-                           expected_add_changes)))));
+                       Pointee(ElementsAreArray(expected_add_changes)))));
 
   // Adding a login should trigger a notification.
   store->AddLogin(*form);
@@ -371,12 +372,12 @@ TEST_P(PasswordStoreXTest, Notifications) {
     PasswordStoreChange(PasswordStoreChange::UPDATE, *form),
   };
 
-  EXPECT_CALL(helper->observer(),
+  EXPECT_CALL(
+      helper->observer(),
       Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
-              content::Source<PasswordStore>(store),
+              content::Source<PasswordStore>(store.get()),
               Property(&content::Details<const PasswordStoreChangeList>::ptr,
-                       Pointee(ElementsAreArray(
-                           expected_update_changes)))));
+                       Pointee(ElementsAreArray(expected_update_changes)))));
 
   // Updating the login with the new password should trigger a notification.
   store->UpdateLogin(*form);
@@ -390,12 +391,12 @@ TEST_P(PasswordStoreXTest, Notifications) {
     PasswordStoreChange(PasswordStoreChange::REMOVE, *form),
   };
 
-  EXPECT_CALL(helper->observer(),
+  EXPECT_CALL(
+      helper->observer(),
       Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
-              content::Source<PasswordStore>(store),
+              content::Source<PasswordStore>(store.get()),
               Property(&content::Details<const PasswordStoreChangeList>::ptr,
-                       Pointee(ElementsAreArray(
-                           expected_delete_changes)))));
+                       Pointee(ElementsAreArray(expected_delete_changes)))));
 
   // Deleting the login should trigger a notification.
   store->RemoveLogin(*form);
@@ -406,7 +407,7 @@ TEST_P(PasswordStoreXTest, Notifications) {
   done.Wait();
 
   // Public in PasswordStore, protected in PasswordStoreX.
-  static_cast<PasswordStore*>(store)->ShutdownOnUIThread();
+  static_cast<PasswordStore*>(store.get())->ShutdownOnUIThread();
 }
 
 TEST_P(PasswordStoreXTest, NativeMigration) {
@@ -472,7 +473,7 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
       .WillOnce(DoAll(WithArg<1>(STLDeleteElements0()), QuitUIMessageLoop()));
 
   store->GetAutofillableLogins(&consumer);
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   // The blacklisted forms should have been migrated to the native backend.
   EXPECT_CALL(consumer,
@@ -481,7 +482,7 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
       .WillOnce(DoAll(WithArg<1>(STLDeleteElements0()), QuitUIMessageLoop()));
 
   store->GetBlacklistLogins(&consumer);
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   VectorOfForms empty;
   MockLoginDatabaseReturn ld_return;
@@ -543,7 +544,7 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
   STLDeleteElements(&expected_blacklisted);
 
   // Public in PasswordStore, protected in PasswordStoreX.
-  static_cast<PasswordStore*>(store)->ShutdownOnUIThread();
+  static_cast<PasswordStore*>(store.get())->ShutdownOnUIThread();
 }
 
 INSTANTIATE_TEST_CASE_P(NoBackend,

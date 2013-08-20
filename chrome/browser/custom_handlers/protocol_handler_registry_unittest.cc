@@ -8,8 +8,8 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
@@ -51,7 +51,7 @@ void AssertIntercepted(
                           base::Bind(AssertInterceptedIO,
                                      url,
                                      base::Unretained(interceptor)));
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 // FakeURLRequestJobFactory returns NULL for all job creation requests and false
@@ -73,6 +73,9 @@ class FakeURLRequestJobFactory : public net::URLRequestJobFactory {
   virtual bool IsHandledURL(const GURL& url) const OVERRIDE {
     return false;
   }
+  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE {
+    return true;
+  }
 };
 
 void AssertWillHandleIO(
@@ -83,7 +86,7 @@ void AssertWillHandleIO(
   interceptor->Chain(scoped_ptr<net::URLRequestJobFactory>(
       new FakeURLRequestJobFactory()));
   ASSERT_EQ(expected, interceptor->IsHandledProtocol(scheme));
-  interceptor->Chain(scoped_ptr<net::URLRequestJobFactory>(NULL));
+  interceptor->Chain(scoped_ptr<net::URLRequestJobFactory>());
 }
 
 void AssertWillHandle(
@@ -97,7 +100,7 @@ void AssertWillHandle(
                                      scheme,
                                      expected,
                                      base::Unretained(interceptor)));
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 class FakeDelegate : public ProtocolHandlerRegistry::Delegate {
@@ -175,7 +178,7 @@ class FakeClientObserver
       delegate_->FakeRegisterWithOS(worker_->protocol());
     }
     if (state != ShellIntegration::STATE_PROCESSING) {
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
     }
   }
 
@@ -277,19 +280,19 @@ class QueryProtocolHandlerOnChange
 // guarantee all messages are processed.) By overriding the IsType method
 // we basically ignore the supplied message loop type, and instead infer
 // our type based on the current thread. GO DEPENDENCY INJECTION!
-class TestMessageLoop : public MessageLoop {
+class TestMessageLoop : public base::MessageLoop {
  public:
-  TestMessageLoop() : MessageLoop(MessageLoop::TYPE_DEFAULT) {}
+  TestMessageLoop() : base::MessageLoop(base::MessageLoop::TYPE_DEFAULT) {}
   virtual ~TestMessageLoop() {}
-  virtual bool IsType(MessageLoop::Type type) const OVERRIDE {
+  virtual bool IsType(base::MessageLoop::Type type) const OVERRIDE {
     switch (type) {
-       case MessageLoop::TYPE_UI:
-         return BrowserThread::CurrentlyOn(BrowserThread::UI);
-       case MessageLoop::TYPE_IO:
-         return BrowserThread::CurrentlyOn(BrowserThread::IO);
-       case MessageLoop::TYPE_DEFAULT:
-         return !BrowserThread::CurrentlyOn(BrowserThread::UI) &&
-             !BrowserThread::CurrentlyOn(BrowserThread::IO);
+      case base::MessageLoop::TYPE_UI:
+        return BrowserThread::CurrentlyOn(BrowserThread::UI);
+      case base::MessageLoop::TYPE_IO:
+        return BrowserThread::CurrentlyOn(BrowserThread::IO);
+      case base::MessageLoop::TYPE_DEFAULT:
+        return !BrowserThread::CurrentlyOn(BrowserThread::UI) &&
+               !BrowserThread::CurrentlyOn(BrowserThread::IO);
     }
     return false;
   }
@@ -731,7 +734,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestOSRegistration) {
 
   registry()->OnAcceptRegisterProtocolHandler(ph_do1);
   registry()->OnDenyRegisterProtocolHandler(ph_dont);
-  MessageLoop::current()->Run();  // FILE thread needs to run.
+  base::MessageLoop::current()->Run();  // FILE thread needs to run.
   ASSERT_TRUE(delegate()->IsFakeRegisteredWithOS("do"));
   ASSERT_FALSE(delegate()->IsFakeRegisteredWithOS("dont"));
 
@@ -761,10 +764,10 @@ TEST_F(ProtocolHandlerRegistryTest, MAYBE_TestOSRegistrationFailure) {
   ASSERT_FALSE(registry()->IsHandledProtocol("dont"));
 
   registry()->OnAcceptRegisterProtocolHandler(ph_do);
-  MessageLoop::current()->Run();  // FILE thread needs to run.
+  base::MessageLoop::current()->Run();  // FILE thread needs to run.
   delegate()->set_force_os_failure(true);
   registry()->OnAcceptRegisterProtocolHandler(ph_dont);
-  MessageLoop::current()->Run();  // FILE thread needs to run.
+  base::MessageLoop::current()->Run();  // FILE thread needs to run.
   ASSERT_TRUE(registry()->IsHandledProtocol("do"));
   ASSERT_EQ(static_cast<size_t>(1), registry()->GetHandlersFor("do").size());
   ASSERT_FALSE(registry()->IsHandledProtocol("dont"));

@@ -10,7 +10,7 @@
 #include "content/public/renderer/render_view.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
+#include "third_party/WebKit/public/web/WebHistoryItem.h"
 
 using testing::AtLeast;
 using testing::Return;
@@ -110,7 +110,7 @@ TEST_F(TranslateHelperBrowserTest, TranslateLibNeverReady) {
 
   translate_helper_->TranslatePage(
       view_->GetPageId(), "en", "fr", std::string());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   int page_id;
   TranslateErrors::Type error;
@@ -150,7 +150,7 @@ TEST_F(TranslateHelperBrowserTest, TranslateSuccess) {
   std::string target_lang("fr");
   translate_helper_->TranslatePage(
       view_->GetPageId(), original_lang, target_lang, std::string());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   int page_id;
   std::string received_original_lang;
@@ -197,7 +197,7 @@ TEST_F(TranslateHelperBrowserTest, TranslateFailure) {
 
   translate_helper_->TranslatePage(
       view_->GetPageId(), "en", "fr", std::string());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   int page_id;
   TranslateErrors::Type error;
@@ -235,7 +235,7 @@ TEST_F(TranslateHelperBrowserTest, UndefinedSourceLang) {
   translate_helper_->TranslatePage(view_->GetPageId(),
                                    chrome::kUnknownLanguageCode, "fr",
                                    std::string());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   int page_id;
   TranslateErrors::Type error;
@@ -279,7 +279,7 @@ TEST_F(TranslateHelperBrowserTest, MultipleSimilarTranslations) {
   // happens.
   translate_helper_->TranslatePage(
       view_->GetPageId(), original_lang, target_lang, std::string());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   int page_id;
   std::string received_original_lang;
@@ -321,7 +321,7 @@ TEST_F(TranslateHelperBrowserTest, MultipleDifferentTranslations) {
   std::string new_target_lang("de");
   translate_helper_->TranslatePage(
       view_->GetPageId(), original_lang, new_target_lang, std::string());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   int page_id;
   std::string received_original_lang;
@@ -387,7 +387,7 @@ TEST_F(ChromeRenderViewTest, LanguageMetaTag) {
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Param params;
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("es", params.a);
+  EXPECT_EQ("es", params.a.adopted_language);
   render_thread_->sink().ClearMessages();
 
   // Makes sure we support multiple languages specified.
@@ -398,7 +398,7 @@ TEST_F(ChromeRenderViewTest, LanguageMetaTag) {
       ChromeViewHostMsg_TranslateLanguageDetermined::ID);
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("fr", params.a);
+  EXPECT_EQ("fr", params.a.adopted_language);
 }
 
 // Tests that the language meta tag works even with non-all-lower-case.
@@ -415,7 +415,7 @@ TEST_F(ChromeRenderViewTest, LanguageMetaTagCase) {
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Param params;
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("es", params.a);
+  EXPECT_EQ("es", params.a.adopted_language);
   render_thread_->sink().ClearMessages();
 
   // Makes sure we support multiple languages specified.
@@ -426,7 +426,7 @@ TEST_F(ChromeRenderViewTest, LanguageMetaTagCase) {
       ChromeViewHostMsg_TranslateLanguageDetermined::ID);
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("fr", params.a);
+  EXPECT_EQ("fr", params.a.adopted_language);
 }
 
 // Tests that the language meta tag is converted to Chrome standard of dashes
@@ -444,7 +444,7 @@ TEST_F(ChromeRenderViewTest, LanguageCommonMistakesAreCorrected) {
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Param params;
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("en-US", params.a);
+  EXPECT_EQ("en-US", params.a.adopted_language);
   render_thread_->sink().ClearMessages();
 }
 
@@ -458,7 +458,7 @@ TEST_F(ChromeRenderViewTest, BackToTranslatablePage) {
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Param params;
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("zh", params.a);
+  EXPECT_EQ("zh", params.a.adopted_language);
   render_thread_->sink().ClearMessages();
 
   LoadHTML("<html><head><meta http-equiv=\"content-language\" content=\"fr\">"
@@ -467,7 +467,7 @@ TEST_F(ChromeRenderViewTest, BackToTranslatablePage) {
       ChromeViewHostMsg_TranslateLanguageDetermined::ID);
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("fr", params.a);
+  EXPECT_EQ("fr", params.a.adopted_language);
   render_thread_->sink().ClearMessages();
 
   GoBack(GetMainFrame()->previousHistoryItem());
@@ -476,6 +476,6 @@ TEST_F(ChromeRenderViewTest, BackToTranslatablePage) {
       ChromeViewHostMsg_TranslateLanguageDetermined::ID);
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
   ChromeViewHostMsg_TranslateLanguageDetermined::Read(message, &params);
-  EXPECT_EQ("zh", params.a);
+  EXPECT_EQ("zh", params.a.adopted_language);
   render_thread_->sink().ClearMessages();
 }

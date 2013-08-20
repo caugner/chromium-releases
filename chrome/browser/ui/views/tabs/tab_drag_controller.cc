@@ -48,6 +48,7 @@
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
+#include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/env.h"
@@ -403,7 +404,7 @@ TabDragController::~TabDragController() {
   if (source_tabstrip_ && detach_into_browser_)
     GetModel(source_tabstrip_)->RemoveObserver(this);
 
-  MessageLoopForUI::current()->RemoveObserver(this);
+  base::MessageLoopForUI::current()->RemoveObserver(this);
 
   // Need to delete the view here manually _before_ we reset the dragged
   // contents to NULL, otherwise if the view is animating to its destination
@@ -456,7 +457,7 @@ void TabDragController::Init(
       std::find(tabs.begin(), tabs.end(), source_tab) - tabs.begin();
 
   // Listen for Esc key presses.
-  MessageLoopForUI::current()->AddObserver(this);
+  base::MessageLoopForUI::current()->AddObserver(this);
 
   if (source_tab->width() > 0) {
     offset_to_width_ratio_ = static_cast<float>(
@@ -1339,7 +1340,7 @@ void TabDragController::DetachIntoNewBrowserAndRunMoveLoop(
 
 void TabDragController::RunMoveLoop(const gfx::Vector2d& drag_offset) {
   // If the user drags the whole window we'll assume they are going to attach to
-  // another window and therefor want to reorder.
+  // another window and therefore want to reorder.
   move_behavior_ = REORDER;
 
   move_loop_widget_ = GetAttachedBrowserWidget();
@@ -2039,6 +2040,10 @@ Browser* TabDragController::CreateBrowserForDrag(
   // If the window is created maximized then the bounds we supplied are ignored.
   // We need to reset them again so they are honored.
   browser->window()->SetBounds(new_bounds);
+
+  // If source window was maximized - maximize the new window as well.
+  if (source->GetWidget()->IsMaximized() || source->GetWidget()->IsFullscreen())
+    browser->window()->Maximize();
   return browser;
 }
 
@@ -2056,6 +2061,7 @@ gfx::Point TabDragController::GetCursorScreenPoint() {
         gesture_recognizer()->GetLastTouchPointForTarget(widget_window,
                                                          &touch_point);
     DCHECK(got_touch_point);
+    ash::wm::ConvertPointToScreen(widget_window->GetRootWindow(), &touch_point);
     return touch_point;
   }
 #endif

@@ -21,6 +21,12 @@
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(USE_X11)
+#include "ui/base/x/x11_util.h"
+#include <X11/Xlib.h>
+#undef RootWindow
+#endif
+
 namespace ash {
 namespace test {
 namespace {
@@ -91,6 +97,9 @@ class DisplayControllerShutdownTest : public test::AshTestBase {
  public:
   virtual void TearDown() OVERRIDE {
     test::AshTestBase::TearDown();
+    if (!SupportsMultipleDisplays())
+      return;
+
     // Make sure that primary display is accessible after shutdown.
     gfx::Display primary = Shell::GetScreen()->GetPrimaryDisplay();
     EXPECT_EQ("0,0 444x333", primary.bounds().ToString());
@@ -110,8 +119,11 @@ class TestEventHandler : public ui::EventHandler {
   virtual ~TestEventHandler() {}
 
   virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
-    if (event->flags() & ui::EF_IS_SYNTHESIZED)
+    if (event->flags() & ui::EF_IS_SYNTHESIZED &&
+        event->type() != ui::ET_MOUSE_EXITED &&
+        event->type() != ui::ET_MOUSE_ENTERED) {
       return;
+    }
     aura::Window* target = static_cast<aura::Window*>(event->target());
     mouse_location_ = event->root_location();
     target_root_ = target->GetRootWindow();
@@ -181,15 +193,36 @@ float GetStoredUIScale(int64 id) {
   return Shell::GetInstance()->display_manager()->GetDisplayInfo(id).ui_scale();
 }
 
+#if defined(USE_X11)
+void GetPrimaryAndSeconary(aura::RootWindow** primary,
+                           aura::RootWindow** secondary) {
+  *primary = Shell::GetPrimaryRootWindow();
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  *secondary = root_windows[0] == *primary ? root_windows[1] : root_windows[0];
+}
+
+std::string GetXWindowName(aura::RootWindow* window) {
+  char* name = NULL;
+  XFetchName(ui::GetXDisplay(), window->GetAcceleratedWidget(), &name);
+  return std::string(name);
+}
+#endif
+
 }  // namespace
 
 typedef test::AshTestBase DisplayControllerTest;
 
 TEST_F(DisplayControllerShutdownTest, Shutdown) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   UpdateDisplay("444x333, 200x200");
 }
 
 TEST_F(DisplayControllerTest, SecondaryDisplayLayout) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   TestObserver observer;
   UpdateDisplay("500x500,400x400");
   EXPECT_EQ(1, observer.CountAndReset());  // resize and add
@@ -260,6 +293,9 @@ TEST_F(DisplayControllerTest, SecondaryDisplayLayout) {
 }
 
 TEST_F(DisplayControllerTest, BoundsUpdated) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   TestObserver observer;
   SetDefaultDisplayLayout(DisplayLayout::BOTTOM);
   UpdateDisplay("200x200,300x300");  // layout, resize and add.
@@ -279,15 +315,11 @@ TEST_F(DisplayControllerTest, BoundsUpdated) {
   EXPECT_EQ(1, observer.CountAndReset());  // two resizes
   EXPECT_EQ("0,0 400x400", GetPrimaryDisplay().bounds().ToString());
   EXPECT_EQ("0,400 200x200", GetSecondaryDisplay().bounds().ToString());
-  if (!ash::Shell::IsLauncherPerDisplayEnabled())
-    EXPECT_EQ("5,405 190x190", GetSecondaryDisplay().work_area().ToString());
 
   UpdateDisplay("400x400,300x300");
   EXPECT_EQ(1, observer.CountAndReset());
   EXPECT_EQ("0,0 400x400", GetPrimaryDisplay().bounds().ToString());
   EXPECT_EQ("0,400 300x300", GetSecondaryDisplay().bounds().ToString());
-  if (!ash::Shell::IsLauncherPerDisplayEnabled())
-    EXPECT_EQ("5,405 290x290", GetSecondaryDisplay().work_area().ToString());
 
   UpdateDisplay("400x400");
   EXPECT_EQ(1, observer.CountAndReset());
@@ -325,6 +357,9 @@ TEST_F(DisplayControllerTest, BoundsUpdated) {
 }
 
 TEST_F(DisplayControllerTest, MirroredLayout) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
   UpdateDisplay("500x500,400x400");
@@ -376,13 +411,10 @@ TEST_F(DisplayControllerTest, InvertLayout) {
             DisplayLayout(DisplayLayout::BOTTOM, -80).Invert().ToString());
 }
 
-// Crashes flakily on win8 aura bots: crbug.com/237642
-#if defined(OS_WIN) && defined(USE_AURA)
-#define MAYBE_SwapPrimary DISABLED_SwapPrimary
-#else
-#define MAYBE_SwapPrimary SwapPrimary
-#endif
-TEST_F(DisplayControllerTest, MAYBE_SwapPrimary) {
+TEST_F(DisplayControllerTest, SwapPrimary) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
 
@@ -412,10 +444,7 @@ TEST_F(DisplayControllerTest, MAYBE_SwapPrimary) {
   EXPECT_EQ("0,0 200x200", primary_display.bounds().ToString());
   EXPECT_EQ("0,0 200x152", primary_display.work_area().ToString());
   EXPECT_EQ("200,0 300x300", secondary_display.bounds().ToString());
-  if (ash::Shell::IsLauncherPerDisplayEnabled())
-    EXPECT_EQ("200,0 300x252", secondary_display.work_area().ToString());
-  else
-    EXPECT_EQ("200,0 300x300", secondary_display.work_area().ToString());
+  EXPECT_EQ("200,0 300x252", secondary_display.work_area().ToString());
   EXPECT_EQ("right, 50",
             display_controller->GetCurrentDisplayLayout().ToString());
 
@@ -450,10 +479,7 @@ TEST_F(DisplayControllerTest, MAYBE_SwapPrimary) {
   EXPECT_EQ("0,0 300x252", swapped_primary.work_area().ToString());
   EXPECT_EQ("-200,-50 200x200", swapped_secondary.bounds().ToString());
 
-  if (ash::Shell::IsLauncherPerDisplayEnabled())
-    EXPECT_EQ("-200,-50 200x152", swapped_secondary.work_area().ToString());
-  else
-    EXPECT_EQ("-200,-50 200x200", swapped_secondary.work_area().ToString());
+  EXPECT_EQ("-200,-50 200x152", swapped_secondary.work_area().ToString());
 
   aura::WindowTracker tracker;
   tracker.Add(primary_root);
@@ -474,13 +500,10 @@ TEST_F(DisplayControllerTest, MAYBE_SwapPrimary) {
   EXPECT_TRUE(primary_root->Contains(launcher_window));
 }
 
-// Crashes flakily on win8 aura bots: crbug.com/237642
-#if defined(OS_WIN) && defined(USE_AURA)
-#define MAYBE_SwapPrimaryById DISABLED_SwapPrimaryById
-#else
-#define MAYBE_SwapPrimaryById SwapPrimaryById
-#endif
-TEST_F(DisplayControllerTest, MAYBE_SwapPrimaryById) {
+TEST_F(DisplayControllerTest, SwapPrimaryById) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
 
@@ -602,6 +625,9 @@ TEST_F(DisplayControllerTest, MAYBE_SwapPrimaryById) {
 }
 
 TEST_F(DisplayControllerTest, CursorDeviceScaleFactorSwapPrimary) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
 
@@ -654,7 +680,8 @@ TEST_F(DisplayControllerTest, CursorDeviceScaleFactorSwapPrimary) {
 }
 
 #if defined(OS_WIN)
-// TODO(oshima): On Windows, we don't update the origin/size right away.
+// TODO(scottmg): RootWindow doesn't get resized on Windows
+// Ash. http://crbug.com/247916.
 #define MAYBE_UpdateDisplayWithHostOrigin DISABLED_UpdateDisplayWithHostOrigin
 #else
 #define MAYBE_UpdateDisplayWithHostOrigin UpdateDisplayWithHostOrigin
@@ -694,14 +721,10 @@ TEST_F(DisplayControllerTest, MAYBE_UpdateDisplayWithHostOrigin) {
   EXPECT_EQ("200x300", root_windows[1]->GetHostSize().ToString());
 }
 
-#if defined(OS_WIN)
-// TODO(oshima): Windows does not supoprts insets.
-#define MAYBE_OverscanInsets DISABLED_OverscanInsets
-#else
-#define MAYBE_OverscanInsets OverscanInsets
-#endif
+TEST_F(DisplayControllerTest, OverscanInsets) {
+  if (!SupportsMultipleDisplays())
+    return;
 
-TEST_F(DisplayControllerTest, MAYBE_OverscanInsets) {
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
   TestEventHandler event_handler;
@@ -733,22 +756,10 @@ TEST_F(DisplayControllerTest, MAYBE_OverscanInsets) {
   Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
 
-#if defined(OS_WIN)
-// On Win8 bots, the host window can't be resized and
-// SetTransform updates the window using the orignal host window
-// size.
-#define MAYBE_Rotate DISABLED_Rotate
-#define MAYBE_ScaleRootWindow DISABLED_ScaleRootWindow
-#define MAYBE_TouchScale DISABLED_TouchScale
-#define MAYBE_ConvertHostToRootCoords DISABLED_ConvertHostToRootCoords
-#else
-#define MAYBE_Rotate Rotate
-#define MAYBE_ScaleRootWindow ScaleRootWindow
-#define MAYBE_TouchScale TouchScale
-#define MAYBE_ConvertHostToRootCoords ConvertHostToRootCoords
-#endif
+TEST_F(DisplayControllerTest, Rotate) {
+  if (!SupportsMultipleDisplays())
+    return;
 
-TEST_F(DisplayControllerTest, MAYBE_Rotate) {
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
   internal::DisplayManager* display_manager =
@@ -796,6 +807,7 @@ TEST_F(DisplayControllerTest, MAYBE_Rotate) {
   EXPECT_EQ(gfx::Display::ROTATE_90, GetStoredRotation(display1.id()));
   EXPECT_EQ(gfx::Display::ROTATE_270, GetStoredRotation(display2_id));
 
+#if !defined(OS_WIN)
   aura::test::EventGenerator generator2(root_windows[1]);
   generator2.MoveMouseToInHost(50, 40);
   EXPECT_EQ("179,25", event_handler.GetLocationAndReset());
@@ -812,11 +824,15 @@ TEST_F(DisplayControllerTest, MAYBE_Rotate) {
 
   generator1.MoveMouseToInHost(50, 40);
   EXPECT_EQ("69,159", event_handler.GetLocationAndReset());
+#endif
 
   Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
 
-TEST_F(DisplayControllerTest, MAYBE_ScaleRootWindow) {
+TEST_F(DisplayControllerTest, ScaleRootWindow) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   TestEventHandler event_handler;
   Shell::GetInstance()->AddPreTargetHandler(&event_handler);
 
@@ -851,7 +867,10 @@ TEST_F(DisplayControllerTest, MAYBE_ScaleRootWindow) {
   Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
 
-TEST_F(DisplayControllerTest, MAYBE_TouchScale) {
+TEST_F(DisplayControllerTest, TouchScale) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   TestEventHandler event_handler;
   Shell::GetInstance()->AddPreTargetHandler(&event_handler);
 
@@ -880,7 +899,10 @@ TEST_F(DisplayControllerTest, MAYBE_TouchScale) {
   Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
 
-TEST_F(DisplayControllerTest, MAYBE_ConvertHostToRootCoords) {
+TEST_F(DisplayControllerTest, ConvertHostToRootCoords) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   TestEventHandler event_handler;
   Shell::GetInstance()->AddPreTargetHandler(&event_handler);
 
@@ -936,6 +958,30 @@ TEST_F(DisplayControllerTest, MAYBE_ConvertHostToRootCoords) {
 
   Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
+
+#if defined(USE_X11)
+TEST_F(DisplayControllerTest, XWidowNameForRootWindow) {
+  EXPECT_EQ("aura_root_0", GetXWindowName(Shell::GetPrimaryRootWindow()));
+
+  // Multiple display.
+  UpdateDisplay("200x200,300x300");
+  aura::RootWindow* primary, *secondary;
+  GetPrimaryAndSeconary(&primary, &secondary);
+  EXPECT_EQ("aura_root_0", GetXWindowName(primary));
+  EXPECT_EQ("aura_root_x", GetXWindowName(secondary));
+
+  // Swap primary.
+  primary = secondary = NULL;
+  Shell::GetInstance()->display_controller()->SwapPrimaryDisplay();
+  GetPrimaryAndSeconary(&primary, &secondary);
+  EXPECT_EQ("aura_root_0", GetXWindowName(primary));
+  EXPECT_EQ("aura_root_x", GetXWindowName(secondary));
+
+  // Switching back to single display.
+  UpdateDisplay("300x400");
+  EXPECT_EQ("aura_root_0", GetXWindowName(Shell::GetPrimaryRootWindow()));
+}
+#endif
 
 }  // namespace test
 }  // namespace ash

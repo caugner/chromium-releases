@@ -8,8 +8,8 @@
 #include "base/callback.h"
 #include "chrome/browser/sync_file_system/remote_change_processor.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "webkit/fileapi/syncable/file_change.h"
-#include "webkit/fileapi/syncable/sync_callbacks.h"
+#include "webkit/browser/fileapi/syncable/file_change.h"
+#include "webkit/browser/fileapi/syncable/sync_callbacks.h"
 
 namespace base {
 class FilePath;
@@ -27,9 +27,8 @@ class MockRemoteChangeProcessor : public RemoteChangeProcessor {
   virtual ~MockRemoteChangeProcessor();
 
   // RemoteChangeProcessor overrides.
-  MOCK_METHOD3(PrepareForProcessRemoteChange,
+  MOCK_METHOD2(PrepareForProcessRemoteChange,
                void(const fileapi::FileSystemURL& url,
-                    const std::string& service_name,
                     const PrepareChangeCallback& callback));
   MOCK_METHOD4(ApplyRemoteChange,
                void(const FileChange& change,

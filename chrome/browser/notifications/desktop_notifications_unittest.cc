@@ -5,8 +5,8 @@
 #include "chrome/browser/notifications/desktop_notifications_unittest.h"
 
 #include "base/prefs/testing_pref_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/notifications/balloon_notification_ui_manager.h"
 #include "chrome/browser/notifications/fake_balloon_view.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -15,25 +15,18 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/common/show_desktop_notification_params.h"
-
-#if defined(ENABLE_MESSAGE_CENTER)
+#include "ui/base/ime/input_method_initializer.h"
 #include "ui/message_center/message_center.h"
-#endif
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
 #include "ash/test/test_shell_delegate.h"
-#include "chrome/browser/ui/aura/active_desktop_monitor.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/public/web/WebKit.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #endif
 
-#if defined(OS_WIN)
-#include "base/win/metro.h"
-#include "ui/base/ime/win/tsf_bridge.h"
-#endif
 
 using content::BrowserThread;
 
@@ -108,23 +101,17 @@ DesktopNotificationsTest::~DesktopNotificationsTest() {
 }
 
 void DesktopNotificationsTest::SetUp() {
-#if defined(OS_WIN)
-  if (base::win::IsTSFAwareRequired())
-    ui::TSFBridge::Initialize();
-#endif
+  ui::InitializeInputMethodForTesting();
 #if defined(USE_ASH)
   WebKit::initialize(webkit_platform_support_.Get());
   ui::ScopedAnimationDurationScaleMode normal_duration_mode(
       ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
-#if defined(ENABLE_MESSAGE_CENTER)
   // The message center is notmally initialized on |g_browser_process| which
   // is not created for these tests.
   message_center::MessageCenter::Initialize();
-#endif
   // MockBalloonCollection retrieves information about the screen on creation.
   // So it is necessary to make sure the desktop gets created first.
   ash::Shell::CreateInstance(new ash::test::TestShellDelegate);
-  active_desktop_monitor_.reset(new ActiveDesktopMonitor);
 #endif
 
   chrome::RegisterLocalState(local_state_.registry());
@@ -141,16 +128,14 @@ void DesktopNotificationsTest::TearDown() {
   ui_manager_.reset(NULL);
   profile_.reset(NULL);
 #if defined(USE_ASH)
-  active_desktop_monitor_.reset();
   ash::Shell::DeleteInstance();
-#if defined(ENABLE_MESSAGE_CENTER)
   // The message center is notmally shutdown on |g_browser_process| which
   // is not created for these tests.
   message_center::MessageCenter::Shutdown();
-#endif
   aura::Env::DeleteInstance();
   WebKit::shutdown();
 #endif
+  ui::ShutdownInputMethodForTesting();
 }
 
 content::ShowDesktopNotificationHostMsgParams
@@ -173,7 +158,7 @@ TEST_F(DesktopNotificationsTest, TestShow) {
 
   EXPECT_TRUE(service_->ShowDesktopNotification(
       params, 0, 0, DesktopNotificationService::PageNotification));
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(1, balloon_collection_->count());
 
   content::ShowDesktopNotificationHostMsgParams params2;
@@ -184,7 +169,7 @@ TEST_F(DesktopNotificationsTest, TestShow) {
 
   EXPECT_TRUE(service_->ShowDesktopNotification(
       params2, 0, 0, DesktopNotificationService::PageNotification));
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(2, balloon_collection_->count());
 
   EXPECT_EQ("notification displayed\n"
@@ -200,7 +185,7 @@ TEST_F(DesktopNotificationsTest, TestClose) {
   // Request a notification; should open a balloon.
   EXPECT_TRUE(service_->ShowDesktopNotification(
       params, 0, 0, DesktopNotificationService::PageNotification));
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(1, balloon_collection_->count());
 
   // Close all the open balloons.
@@ -226,14 +211,14 @@ TEST_F(DesktopNotificationsTest, TestCancel) {
   EXPECT_TRUE(service_->ShowDesktopNotification(
       params, process_id, route_id,
       DesktopNotificationService::PageNotification));
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(1, balloon_collection_->count());
 
   // Cancel the same notification
   service_->CancelDesktopNotification(process_id,
                                       route_id,
                                       notification_id);
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   // Verify that the balloon collection is now empty.
   EXPECT_EQ(0, balloon_collection_->count());
 
@@ -341,7 +326,7 @@ TEST_F(DesktopNotificationsTest, TestCancelByProfile) {
         params, process_id, route_id,
         DesktopNotificationService::PageNotification));
   }
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
 
   ui_manager_->CancelAllByProfile(second_profile);
 
@@ -378,7 +363,7 @@ TEST_F(DesktopNotificationsTest, TestCancelBySourceOrigin) {
         odd_params, process_id, route_id,
         DesktopNotificationService::PageNotification));
   }
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
 
   ui_manager_->CancelAllBySourceOrigin(odd_params.origin);
 
@@ -401,7 +386,7 @@ TEST_F(DesktopNotificationsTest, TestQueueing) {
         params, process_id, route_id,
         DesktopNotificationService::PageNotification));
   }
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
 
   // Build up an expected log of what should be happening.
   std::string expected_log;
@@ -423,7 +408,7 @@ TEST_F(DesktopNotificationsTest, TestQueueing) {
          id <= kLotsOfToasts - balloon_collection_->max_balloon_count();
          ++id) {
       service_->CancelDesktopNotification(process_id, route_id, id);
-      MessageLoopForUI::current()->RunUntilIdle();
+      base::MessageLoopForUI::current()->RunUntilIdle();
       expected_log.append("notification closed by script\n");
       expected_log.append("notification displayed\n");
       EXPECT_EQ(balloon_collection_->max_balloon_count(),
@@ -435,7 +420,7 @@ TEST_F(DesktopNotificationsTest, TestQueueing) {
     for (; id <= kLotsOfToasts; ++id) {
       service_->CancelDesktopNotification(process_id, route_id, id);
       expected_log.append("notification closed by script\n");
-      MessageLoopForUI::current()->RunUntilIdle();
+      base::MessageLoopForUI::current()->RunUntilIdle();
       EXPECT_EQ(expected_log, log_output_);
     }
   }
@@ -468,7 +453,7 @@ TEST_F(DesktopNotificationsTest, TestUserInputEscaping) {
   EXPECT_TRUE(service_->ShowDesktopNotification(
       params, 0, 0, DesktopNotificationService::PageNotification));
 
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(1, balloon_collection_->count());
   Balloon* balloon = (*balloon_collection_->balloons().begin());
   GURL data_url = balloon->notification().content_url();

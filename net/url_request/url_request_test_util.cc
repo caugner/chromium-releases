@@ -14,6 +14,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/http/transport_security_state.h"
 #include "net/ssl/default_server_bound_cert_store.h"
 #include "net/ssl/server_bound_cert_service.h"
 #include "net/url_request/static_http_user_agent_settings.h"
@@ -72,14 +73,8 @@ void TestURLRequestContext::Init() {
     context_storage_.set_proxy_service(ProxyService::CreateDirect());
   if (!cert_verifier())
     context_storage_.set_cert_verifier(CertVerifier::CreateDefault());
-  if (!ftp_transaction_factory()) {
-#if !defined(DISABLE_FTP_SUPPORT)
-    context_storage_.set_ftp_transaction_factory(
-        new FtpNetworkLayer(host_resolver()));
-#else
-    context_storage_.set_ftp_transaction_factory(NULL);
-#endif  // !defined(DISABLE_FTP_SUPPORT)
-  }
+  if (!transport_security_state())
+    context_storage_.set_transport_security_state(new TransportSecurityState);
   if (!ssl_config_service())
     context_storage_.set_ssl_config_service(new SSLConfigServiceDefaults);
   if (!http_auth_handler_factory()) {
@@ -102,6 +97,7 @@ void TestURLRequestContext::Init() {
     params.client_socket_factory = client_socket_factory();
     params.host_resolver = host_resolver();
     params.cert_verifier = cert_verifier();
+    params.transport_security_state = transport_security_state();
     params.proxy_service = proxy_service();
     params.ssl_config_service = ssl_config_service();
     params.http_auth_handler_factory = http_auth_handler_factory();
@@ -143,14 +139,14 @@ TestURLRequest::~TestURLRequest() {
 TestURLRequestContextGetter::TestURLRequestContextGetter(
     const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner)
     : network_task_runner_(network_task_runner) {
-  DCHECK(network_task_runner_);
+  DCHECK(network_task_runner_.get());
 }
 
 TestURLRequestContextGetter::TestURLRequestContextGetter(
     const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner,
     scoped_ptr<TestURLRequestContext> context)
     : network_task_runner_(network_task_runner), context_(context.Pass()) {
-  DCHECK(network_task_runner_);
+  DCHECK(network_task_runner_.get());
 }
 
 TestURLRequestContextGetter::~TestURLRequestContextGetter() {}
@@ -182,19 +178,30 @@ TestDelegate::TestDelegate()
       have_certificate_errors_(false),
       certificate_errors_are_fatal_(false),
       auth_required_(false),
+      have_full_request_headers_(false),
       buf_(new IOBuffer(kBufferSize)) {
 }
 
 TestDelegate::~TestDelegate() {}
 
+void TestDelegate::ClearFullRequestHeaders() {
+  full_request_headers_.Clear();
+  have_full_request_headers_ = false;
+}
+
 void TestDelegate::OnReceivedRedirect(URLRequest* request,
                                       const GURL& new_url,
                                       bool* defer_redirect) {
   EXPECT_TRUE(request->is_redirecting());
+
+  have_full_request_headers_ =
+      request->GetFullRequestHeaders(&full_request_headers_);
+
   received_redirect_count_++;
   if (quit_on_redirect_) {
     *defer_redirect = true;
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
   } else if (cancel_in_rr_) {
     request->Cancel();
   }
@@ -229,6 +236,9 @@ void TestDelegate::OnResponseStarted(URLRequest* request) {
   DCHECK(!request->status().is_io_pending());
   EXPECT_FALSE(request->is_redirecting());
 
+  have_full_request_headers_ =
+      request->GetFullRequestHeaders(&full_request_headers_);
+
   response_started_count_++;
   if (cancel_in_rs_) {
     request->Cancel();
@@ -241,7 +251,7 @@ void TestDelegate::OnResponseStarted(URLRequest* request) {
   } else {
     // Initiate the first read.
     int bytes_read = 0;
-    if (request->Read(buf_, kBufferSize, &bytes_read))
+    if (request->Read(buf_.get(), kBufferSize, &bytes_read))
       OnReadCompleted(request, bytes_read);
     else if (!request->status().is_io_pending())
       OnResponseCompleted(request);
@@ -269,7 +279,7 @@ void TestDelegate::OnReadCompleted(URLRequest* request, int bytes_read) {
   // If it was not end of stream, request to read more.
   if (request->status().is_success() && bytes_read > 0) {
     bytes_read = 0;
-    while (request->Read(buf_, kBufferSize, &bytes_read)) {
+    while (request->Read(buf_.get(), kBufferSize, &bytes_read)) {
       if (bytes_read > 0) {
         data_received_.append(buf_->data(), bytes_read);
         received_bytes_count_ += bytes_read;
@@ -286,7 +296,8 @@ void TestDelegate::OnReadCompleted(URLRequest* request, int bytes_read) {
 
 void TestDelegate::OnResponseCompleted(URLRequest* request) {
   if (quit_on_complete_)
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
 }
 
 TestNetworkDelegate::TestNetworkDelegate()

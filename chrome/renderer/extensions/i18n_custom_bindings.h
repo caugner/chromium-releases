@@ -12,13 +12,12 @@ namespace extensions {
 // Implements custom bindings for the i18n API.
 class I18NCustomBindings : public ChromeV8Extension {
  public:
-  I18NCustomBindings(Dispatcher* dispatcher, v8::Handle<v8::Context> context);
+  I18NCustomBindings(Dispatcher* dispatcher, ChromeV8Context* context);
 
  private:
-  v8::Handle<v8::Value> GetL10nMessage(const v8::Arguments& args);
+  void GetL10nMessage(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
-}  // extensions
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_I18N_CUSTOM_BINDINGS_H_
-

@@ -9,11 +9,13 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
+#include "chrome/browser/extensions/event_names.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
@@ -25,16 +27,14 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
-#include "webkit/fileapi/file_system_types.h"
-#include "webkit/fileapi/isolated_context.h"
+#include "webkit/common/fileapi/file_system_types.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -50,7 +50,6 @@ using extensions::app_file_handler_util::FileHandlerCanHandleFile;
 using extensions::app_file_handler_util::FirstFileHandlerForFile;
 using extensions::app_file_handler_util::CreateFileEntry;
 using extensions::app_file_handler_util::GrantedFileEntry;
-using extensions::app_file_handler_util::SavedFileEntry;
 
 namespace extensions {
 
@@ -167,8 +166,8 @@ class PlatformAppPathLauncher
   void GetMimeTypeAndLaunchForDriveFile() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    drive::DriveSystemService* service =
-        drive::DriveSystemServiceFactory::FindForProfile(profile_);
+    drive::DriveIntegrationService* service =
+        drive::DriveIntegrationServiceFactory::FindForProfile(profile_);
     if (!service) {
       LaunchWithNoLaunchData();
       return;
@@ -181,15 +180,17 @@ class PlatformAppPathLauncher
 
   void OnGotDriveFile(drive::FileError error,
                       const base::FilePath& file_path,
-                      const std::string& mime_type,
-                      drive::DriveFileType file_type) {
+                      scoped_ptr<drive::ResourceEntry> entry) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    if (error != drive::FILE_ERROR_OK || file_type != drive::REGULAR_FILE) {
+    if (error != drive::FILE_ERROR_OK ||
+        !entry || entry->file_specific_info().is_hosted_document()) {
       LaunchWithNoLaunchData();
       return;
     }
 
+    const std::string& mime_type =
+        entry->file_specific_info().content_mime_type();
     LaunchWithMimeType(mime_type.empty() ? kFallbackMimeType : mime_type);
   }
 #endif  // defined(OS_CHROMEOS)
@@ -222,6 +223,9 @@ class PlatformAppPathLauncher
       return;
     }
 
+    if (handler_id_.empty())
+      handler_id_ = handler->id;
+
     // Access needs to be granted to the file for the process associated with
     // the extension. To do this the ExtensionHost is needed. This might not be
     // available, or it might be in the process of being unloaded, in which case
@@ -252,31 +256,14 @@ class PlatformAppPathLauncher
       return;
     }
 
-    content::ChildProcessSecurityPolicy* policy =
-        content::ChildProcessSecurityPolicy::GetInstance();
-    int renderer_id = host->render_process_host()->GetID();
-
-    // Granting read file permission to allow reading file content.
-    // If the renderer already has permission to read these paths, it is not
-    // regranted, as this would overwrite any other permissions which the
-    // renderer may already have.
-    if (!policy->CanReadFile(renderer_id, file_path_))
-      policy->GrantReadFile(renderer_id, file_path_);
-
-    std::string registered_name;
-    fileapi::IsolatedContext* isolated_context =
-        fileapi::IsolatedContext::GetInstance();
-    DCHECK(isolated_context);
-    std::string filesystem_id = isolated_context->RegisterFileSystemForPath(
-        fileapi::kFileSystemTypeNativeForPlatformApp, file_path_,
-        &registered_name);
-    // Granting read file system permission as well to allow file-system
-    // read operations.
-    policy->GrantReadFileSystem(renderer_id, filesystem_id);
-
+    GrantedFileEntry file_entry = CreateFileEntry(
+        profile_,
+        extension_->id(),
+        host->render_process_host()->GetID(),
+        file_path_,
+        false);
     AppEventRouter::DispatchOnLaunchedEventWithFileEntry(
-        profile_, extension_, handler_id_, mime_type, filesystem_id,
-        registered_name);
+        profile_, extension_, handler_id_, mime_type, file_entry);
   }
 
   // The profile the app should be run in.
@@ -291,83 +278,12 @@ class PlatformAppPathLauncher
   DISALLOW_COPY_AND_ASSIGN(PlatformAppPathLauncher);
 };
 
-class SavedFileEntryLauncher
-    : public base::RefCountedThreadSafe<SavedFileEntryLauncher> {
- public:
-  SavedFileEntryLauncher(
-      Profile* profile,
-      const Extension* extension,
-      const std::vector<SavedFileEntry>& file_entries)
-      : profile_(profile),
-        extension_(extension),
-        file_entries_(file_entries) {}
-
-  void Launch() {
-    // Access needs to be granted to the file or filesystem for the process
-    // associated with the extension. To do this the ExtensionHost is needed.
-    // This might not be available, or it might be in the process of being
-    // unloaded, in which case the lazy background task queue is used to load
-    // he extension and then call back to us.
-    extensions::LazyBackgroundTaskQueue* queue =
-        ExtensionSystem::Get(profile_)->lazy_background_task_queue();
-    if (queue->ShouldEnqueueTask(profile_, extension_)) {
-      queue->AddPendingTask(profile_, extension_->id(), base::Bind(
-              &SavedFileEntryLauncher::GrantAccessToFilesAndLaunch,
-              this));
-      return;
-    }
-    ExtensionProcessManager* process_manager =
-        ExtensionSystem::Get(profile_)->process_manager();
-    extensions::ExtensionHost* host =
-        process_manager->GetBackgroundHostForExtension(extension_->id());
-    DCHECK(host);
-    GrantAccessToFilesAndLaunch(host);
-  }
-
- private:
-  friend class base::RefCountedThreadSafe<SavedFileEntryLauncher>;
-  ~SavedFileEntryLauncher() {}
-
-  void GrantAccessToFilesAndLaunch(ExtensionHost* host) {
-    // If there was an error loading the app page, |host| will be NULL.
-    if (!host) {
-      LOG(ERROR) << "Could not load app page for " << extension_->id();
-      return;
-    }
-
-    int renderer_id = host->render_process_host()->GetID();
-    std::vector<GrantedFileEntry> granted_file_entries;
-    for (std::vector<SavedFileEntry>::const_iterator it =
-         file_entries_.begin(); it != file_entries_.end(); ++it) {
-      GrantedFileEntry file_entry = CreateFileEntry(
-          profile_, extension_->id(), renderer_id, it->path, it->writable);
-      file_entry.id = it->id;
-      granted_file_entries.push_back(file_entry);
-
-      // Record that we have granted this file permission.
-      ExtensionPrefs* extension_prefs = ExtensionSystem::Get(profile_)->
-          extension_service()->extension_prefs();
-      extension_prefs->AddSavedFileEntry(
-          host->extension()->id(), it->id, it->path, it->writable);
-    }
-    extensions::AppEventRouter::DispatchOnRestartedEvent(
-        profile_, extension_, granted_file_entries);
-  }
-
-  // The profile the app should be run in.
-  Profile* profile_;
-  // The extension providing the app.
-  const Extension* extension_;
-
-  std::vector<SavedFileEntry> file_entries_;
-};
-
 }  // namespace
 
-void LaunchPlatformApp(Profile* profile,
-                       const Extension* extension,
-                       const CommandLine* command_line,
-                       const base::FilePath& current_directory) {
+void LaunchPlatformAppWithCommandLine(Profile* profile,
+                                      const Extension* extension,
+                                      const CommandLine* command_line,
+                                      const base::FilePath& current_directory) {
 #if defined(OS_WIN)
   // On Windows 8's single window Metro mode we can not launch platform apps.
   // Offer to switch Chrome to desktop mode.
@@ -401,6 +317,10 @@ void LaunchPlatformAppWithPath(Profile* profile,
   launcher->Launch();
 }
 
+void LaunchPlatformApp(Profile* profile, const Extension* extension) {
+  LaunchPlatformAppWithCommandLine(profile, extension, NULL, base::FilePath());
+}
+
 void LaunchPlatformAppWithFileHandler(Profile* profile,
                                       const Extension* extension,
                                       const std::string& handler_id,
@@ -410,13 +330,26 @@ void LaunchPlatformAppWithFileHandler(Profile* profile,
   launcher->LaunchWithHandler(handler_id);
 }
 
-void RestartPlatformAppWithFileEntries(
-    Profile* profile,
-    const Extension* extension,
-    const std::vector<SavedFileEntry>& file_entries) {
-  scoped_refptr<SavedFileEntryLauncher> launcher = new SavedFileEntryLauncher(
-      profile, extension, file_entries);
-  launcher->Launch();
+void RestartPlatformApp(Profile* profile, const Extension* extension) {
+  extensions::EventRouter* event_router =
+      ExtensionSystem::Get(profile)->event_router();
+  bool listening_to_restart = event_router->
+      ExtensionHasEventListener(extension->id(), event_names::kOnRestarted);
+
+  if (listening_to_restart) {
+    extensions::AppEventRouter::DispatchOnRestartedEvent(profile, extension);
+    return;
+  }
+
+  ExtensionPrefs* extension_prefs = ExtensionSystem::Get(profile)->
+      extension_service()->extension_prefs();
+  bool had_windows = extension_prefs->IsActive(extension->id());
+  extension_prefs->SetIsActive(extension->id(), false);
+  bool listening_to_launch = event_router->
+      ExtensionHasEventListener(extension->id(), event_names::kOnLaunched);
+
+  if (listening_to_launch && had_windows)
+    LaunchPlatformAppWithNoData(profile, extension);
 }
 
 }  // namespace extensions

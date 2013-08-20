@@ -35,11 +35,6 @@ function consentRequired_(authContinue) {
  */
 remoting.init = function() {
   migrateLocalToChromeStorage_();
-
-  // TODO(jamiewalch): Remove this when we migrate to apps v2
-  // (http://crbug.com/ 134213).
-  remoting.initMockStorage();
-
   remoting.logExtensionInfo_();
   l10n.localize();
   // Create global objects.
@@ -64,7 +59,16 @@ remoting.init = function() {
       document.getElementById('wcs-sandbox');
   remoting.wcsSandbox = new remoting.WcsSandboxContainer(sandbox.contentWindow);
 
-  remoting.identity.getEmail(remoting.onEmail, remoting.showErrorMessage);
+  /** @param {remoting.Error} error */
+  var onGetEmailError = function(error) {
+    // No need to show the error message for NOT_AUTHENTICATED
+    // because we will show "auth-dialog".
+    if (error != remoting.Error.NOT_AUTHENTICATED) {
+      remoting.showErrorMessage(error);
+    }
+  }
+
+  remoting.identity.getEmail(remoting.onEmail, onGetEmailError);
 
   remoting.showOrHideIT2MeUi();
   remoting.showOrHideMe2MeUi();
@@ -125,13 +129,27 @@ remoting.onEmail = function(email) {
 };
 
 /**
+ * Returns whether or not IT2Me is supported via the host NPAPI plugin.
+ *
+ * @return {boolean}
+ */
+function isIT2MeSupported_() {
+  var container = document.getElementById('host-plugin-container');
+  /** @type {remoting.HostPlugin} */
+  var plugin = remoting.HostSession.createPlugin();
+  container.appendChild(plugin);
+  var result = plugin.hasOwnProperty('REQUESTED_ACCESS_CODE');
+  container.removeChild(plugin);
+  return result;
+}
+
+/**
  * initHomeScreenUi is called if the app is not starting up in session mode,
  * and also if the user cancels pin entry or the connection in session mode.
  */
 remoting.initHomeScreenUi = function() {
   remoting.hostController = new remoting.HostController();
-  document.getElementById('share-button').disabled =
-      !remoting.hostController.isPluginSupported();
+  document.getElementById('share-button').disabled = !isIT2MeSupported_();
   remoting.setMode(remoting.AppMode.HOME);
   if (!remoting.oauth2.isAuthenticated()) {
     document.getElementById('auth-dialog').hidden = false;
@@ -141,7 +159,7 @@ remoting.initHomeScreenUi = function() {
   // Display the cached host list, then asynchronously update and re-display it.
   remoting.updateLocalHostState();
   remoting.hostList.refresh(remoting.updateLocalHostState);
-  remoting.initSurvey();
+  remoting.butterBar = new remoting.ButterBar();
 };
 
 /**
@@ -213,7 +231,7 @@ remoting.promptClose = function() {
  */
 remoting.signOut = function() {
   remoting.oauth2.clear();
-  remoting.storage.local.clear();
+  chrome.storage.local.clear();
   remoting.setMode(remoting.AppMode.HOME);
   document.getElementById('auth-dialog').hidden = false;
 };

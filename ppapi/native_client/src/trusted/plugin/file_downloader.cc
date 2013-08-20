@@ -5,6 +5,7 @@
 #include "native_client/src/trusted/plugin/file_downloader.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <string>
 
 #include "native_client/src/include/portability_io.h"
@@ -21,8 +22,17 @@
 #include "ppapi/cpp/url_response_info.h"
 
 namespace {
+
 const int32_t kExtensionUrlRequestStatusOk = 200;
 const int32_t kDataUriRequestStatusOk = 0;
+
+struct NaClFileInfo NoFileInfo() {
+  struct NaClFileInfo info;
+  memset(&info, 0, sizeof(info));
+  info.desc = -1;
+  return info;
+}
+
 }
 
 namespace plugin {
@@ -45,6 +55,7 @@ bool FileDownloader::OpenStream(
     const nacl::string& url,
     const pp::CompletionCallback& callback,
     StreamCallbackSource* stream_callback_source) {
+  open_and_stream_ = false;
   data_stream_callback_source_ = stream_callback_source;
   return Open(url, DOWNLOAD_STREAM, callback, true, NULL);
 }
@@ -145,7 +156,8 @@ bool FileDownloader::Open(
 }
 
 void FileDownloader::OpenFast(const nacl::string& url,
-                              PP_FileHandle file_handle) {
+                              PP_FileHandle file_handle,
+                              uint64_t file_token_lo, uint64_t file_token_hi) {
   PLUGIN_PRINTF(("FileDownloader::OpenFast (url=%s)\n", url.c_str()));
   CHECK(instance_ != NULL);
   open_time_ = NaClGetTimeOfDayMicroseconds();
@@ -154,9 +166,12 @@ void FileDownloader::OpenFast(const nacl::string& url,
   url_ = url;
   mode_ = DOWNLOAD_NONE;
   file_handle_ = file_handle;
+  file_token_.lo = file_token_lo;
+  file_token_.hi = file_token_hi;
 }
 
-int32_t FileDownloader::GetPOSIXFileDescriptor() {
+struct NaClFileInfo FileDownloader::GetFileInfo() {
+  struct NaClFileInfo info = NoFileInfo();
   int32_t file_desc = NACL_NO_FILE_DESC;
   if (not_streaming() && file_handle_ != PP_kInvalidFileHandle) {
 #if NACL_WINDOWS
@@ -165,13 +180,14 @@ int32_t FileDownloader::GetPOSIXFileDescriptor() {
 #else
     file_desc = file_handle_;
 #endif
+    info.file_token = file_token_;
   } else {
     if (!streaming_to_file()) {
-      return NACL_NO_FILE_DESC;
+      return NoFileInfo();
     }
     // Use the trusted interface to get the file descriptor.
     if (file_io_trusted_interface_ == NULL) {
-      return NACL_NO_FILE_DESC;
+      return NoFileInfo();
     }
     file_desc = file_io_trusted_interface_->GetOSFileDescriptor(
         file_reader_.pp_resource());
@@ -183,12 +199,13 @@ int32_t FileDownloader::GetPOSIXFileDescriptor() {
   if (posix_desc == -1) {
     // Close the Windows HANDLE if it can't be converted.
     CloseHandle(reinterpret_cast<HANDLE>(file_desc));
-    return NACL_NO_FILE_DESC;
+    return NoFileInfo();
   }
   file_desc = posix_desc;
 #endif
 
-  return file_desc;
+  info.desc = file_desc;
+  return info;
 }
 
 int64_t FileDownloader::TimeSinceOpenMilliseconds() const {
@@ -202,31 +219,34 @@ int64_t FileDownloader::TimeSinceOpenMilliseconds() const {
 
 bool FileDownloader::InitialResponseIsValid(int32_t pp_error) {
   if (pp_error != PP_OK) {  // Url loading failed.
-    file_open_notify_callback_.Run(pp_error);
+    file_open_notify_callback_.RunAndClear(pp_error);
     return false;
   }
 
   // Process the response, validating the headers to confirm successful loading.
-  pp::URLResponseInfo url_response(url_loader_.GetResponseInfo());
-  if (url_response.is_null()) {
+  url_response_ = url_loader_.GetResponseInfo();
+  if (url_response_.is_null()) {
     PLUGIN_PRINTF((
-        "FileDownloader::InitialResponseIsValid (url_response=NULL)\n"));
-    file_open_notify_callback_.Run(PP_ERROR_FAILED);
+        "FileDownloader::InitialResponseIsValid (url_response_=NULL)\n"));
+    file_open_notify_callback_.RunAndClear(PP_ERROR_FAILED);
     return false;
   }
-  // Note that URLs in the chrome-extension scheme produce different error
-  // codes than other schemes.  This is because chrome-extension URLs are
-  // really a special kind of file scheme, and therefore do not produce HTTP
-  // status codes.
-  pp::Var full_url = url_response.GetURL();
+
+  pp::Var full_url = url_response_.GetURL();
   if (!full_url.is_string()) {
     PLUGIN_PRINTF((
         "FileDownloader::InitialResponseIsValid (url is not a string)\n"));
-    file_open_notify_callback_.Run(PP_ERROR_FAILED);
+    file_open_notify_callback_.RunAndClear(PP_ERROR_FAILED);
     return false;
   }
+  url_ = full_url.AsString();
+
+  // Note that URLs in the data-URI scheme produce different error
+  // codes than other schemes.  This is because data-URI are really a
+  // special kind of file scheme, and therefore do not produce HTTP
+  // status codes.
   bool status_ok = false;
-  status_code_ = url_response.GetStatusCode();
+  status_code_ = url_response_.GetStatusCode();
   switch (url_scheme_) {
     case SCHEME_CHROME_EXTENSION:
       PLUGIN_PRINTF(("FileDownloader::InitialResponseIsValid (chrome-extension "
@@ -246,7 +266,7 @@ bool FileDownloader::InitialResponseIsValid(int32_t pp_error) {
   }
 
   if (!status_ok) {
-    file_open_notify_callback_.Run(PP_ERROR_FAILED);
+    file_open_notify_callback_.RunAndClear(PP_ERROR_FAILED);
     return false;
   }
 
@@ -257,20 +277,65 @@ void FileDownloader::URLLoadStartNotify(int32_t pp_error) {
   PLUGIN_PRINTF(("FileDownloader::URLLoadStartNotify (pp_error=%"
                  NACL_PRId32")\n", pp_error));
 
-  if (!InitialResponseIsValid(pp_error))
+  if (!InitialResponseIsValid(pp_error)) {
+    // InitialResponseIsValid() calls file_open_notify_callback_ on errors.
     return;
+  }
+
+  if (open_and_stream_)
+    return FinishStreaming(file_open_notify_callback_);
+
+  file_open_notify_callback_.RunAndClear(pp_error);
+}
+
+void FileDownloader::URLBufferStartNotify(int32_t pp_error) {
+  PLUGIN_PRINTF(("FileDownloader::URLBufferStartNotify (pp_error=%"
+                 NACL_PRId32")\n", pp_error));
+
+  if (!InitialResponseIsValid(pp_error)) {
+    // InitialResponseIsValid() calls file_open_notify_callback_ on errors.
+    return;
+  }
+
+  if (open_and_stream_)
+    return FinishStreaming(file_open_notify_callback_);
+
+  file_open_notify_callback_.RunAndClear(pp_error);
+}
+
+void FileDownloader::FinishStreaming(
+    const pp::CompletionCallback& callback) {
+  stream_finish_callback_ = callback;
+
   // Finish streaming the body providing an optional callback.
-  pp::CompletionCallback onload_callback =
-      callback_factory_.NewOptionalCallback(
-          &FileDownloader::URLLoadFinishNotify);
-  pp_error = url_loader_.FinishStreamingToFile(onload_callback);
-  bool async_notify_ok = (pp_error == PP_OK_COMPLETIONPENDING);
-  PLUGIN_PRINTF(("FileDownloader::URLLoadStartNotify (async_notify_ok=%d)\n",
-                 async_notify_ok));
-  if (!async_notify_ok) {
-    // Call manually to free allocated memory and report errors.  This calls
-    // |file_open_notify_callback_| with |pp_error| as the parameter.
-    onload_callback.Run(pp_error);
+  if (streaming_to_file()) {
+    pp::CompletionCallback onload_callback =
+        callback_factory_.NewOptionalCallback(
+            &FileDownloader::URLLoadFinishNotify);
+    int32_t pp_error = url_loader_.FinishStreamingToFile(onload_callback);
+    bool async_notify_ok = (pp_error == PP_OK_COMPLETIONPENDING);
+    PLUGIN_PRINTF(("FileDownloader::FinishStreaming (async_notify_ok=%d)\n",
+                   async_notify_ok));
+    if (!async_notify_ok) {
+      // Call manually to free allocated memory and report errors.  This calls
+      // |stream_finish_callback_| with |pp_error| as the parameter.
+      onload_callback.RunAndClear(pp_error);
+    }
+  } else {
+    pp::CompletionCallback onread_callback =
+        callback_factory_.NewOptionalCallback(
+            &FileDownloader::URLReadBodyNotify);
+    int32_t temp_size = static_cast<int32_t>(temp_buffer_.size());
+    int32_t pp_error = url_loader_.ReadResponseBody(&temp_buffer_[0],
+                                                    temp_size,
+                                                    onread_callback);
+    bool async_notify_ok = (pp_error == PP_OK_COMPLETIONPENDING);
+    PLUGIN_PRINTF((
+        "FileDownloader::FinishStreaming (async_notify_ok=%d)\n",
+        async_notify_ok));
+    if (!async_notify_ok) {
+      onread_callback.RunAndClear(pp_error);
+    }
   }
 }
 
@@ -278,66 +343,46 @@ void FileDownloader::URLLoadFinishNotify(int32_t pp_error) {
   PLUGIN_PRINTF(("FileDownloader::URLLoadFinishNotify (pp_error=%"
                  NACL_PRId32")\n", pp_error));
   if (pp_error != PP_OK) {  // Streaming failed.
-    file_open_notify_callback_.Run(pp_error);
+    stream_finish_callback_.RunAndClear(pp_error);
     return;
   }
 
-  pp::URLResponseInfo url_response(url_loader_.GetResponseInfo());
-  // Validated on load.
-  CHECK(url_response.GetStatusCode() == NACL_HTTP_STATUS_OK ||
-        url_response.GetStatusCode() == kExtensionUrlRequestStatusOk);
+  // Validate response again on load (though it should be the same
+  // as it was during InitialResponseIsValid?).
+  url_response_ = url_loader_.GetResponseInfo();
+  CHECK(url_response_.GetStatusCode() == NACL_HTTP_STATUS_OK ||
+        url_response_.GetStatusCode() == kExtensionUrlRequestStatusOk);
 
   // Record the full url from the response.
-  pp::Var full_url = url_response.GetURL();
+  pp::Var full_url = url_response_.GetURL();
   PLUGIN_PRINTF(("FileDownloader::URLLoadFinishNotify (full_url=%s)\n",
                  full_url.DebugString().c_str()));
   if (!full_url.is_string()) {
-    file_open_notify_callback_.Run(PP_ERROR_FAILED);
+    stream_finish_callback_.RunAndClear(PP_ERROR_FAILED);
     return;
   }
   url_ = full_url.AsString();
 
   // The file is now fully downloaded.
-  pp::FileRef file(url_response.GetBodyAsFileRef());
+  pp::FileRef file(url_response_.GetBodyAsFileRef());
   if (file.is_null()) {
     PLUGIN_PRINTF(("FileDownloader::URLLoadFinishNotify (file=NULL)\n"));
-    file_open_notify_callback_.Run(PP_ERROR_FAILED);
+    stream_finish_callback_.RunAndClear(PP_ERROR_FAILED);
     return;
   }
 
   // Open the file providing an optional callback.
   pp::CompletionCallback onopen_callback =
-      callback_factory_.NewOptionalCallback(&FileDownloader::FileOpenNotify);
+      callback_factory_.NewOptionalCallback(
+          &FileDownloader::StreamFinishNotify);
   pp_error = file_reader_.Open(file, PP_FILEOPENFLAG_READ, onopen_callback);
   bool async_notify_ok = (pp_error == PP_OK_COMPLETIONPENDING);
   PLUGIN_PRINTF(("FileDownloader::URLLoadFinishNotify (async_notify_ok=%d)\n",
                  async_notify_ok));
   if (!async_notify_ok) {
     // Call manually to free allocated memory and report errors.  This calls
-    // |file_open_notify_callback_| with |pp_error| as the parameter.
-    onopen_callback.Run(pp_error);
-  }
-}
-
-void FileDownloader::URLBufferStartNotify(int32_t pp_error) {
-  PLUGIN_PRINTF(("FileDownloader::URLBufferStartNotify (pp_error=%"
-                 NACL_PRId32")\n", pp_error));
-
-  if (!InitialResponseIsValid(pp_error))
-    return;
-  // Finish streaming the body asynchronously providing a callback.
-  pp::CompletionCallback onread_callback =
-      callback_factory_.NewOptionalCallback(&FileDownloader::URLReadBodyNotify);
-
-  int32_t temp_size = static_cast<int32_t>(temp_buffer_.size());
-  pp_error = url_loader_.ReadResponseBody(&temp_buffer_[0],
-                                          temp_size,
-                                          onread_callback);
-  bool async_notify_ok = (pp_error == PP_OK_COMPLETIONPENDING);
-  PLUGIN_PRINTF(("FileDownloader::URLBufferStartNotify (async_notify_ok=%d)\n",
-                 async_notify_ok));
-  if (!async_notify_ok) {
-    onread_callback.Run(pp_error);
+    // |stream_finish_callback_| with |pp_error| as the parameter.
+    onopen_callback.RunAndClear(pp_error);
   }
 }
 
@@ -345,12 +390,12 @@ void FileDownloader::URLReadBodyNotify(int32_t pp_error) {
   PLUGIN_PRINTF(("FileDownloader::URLReadBodyNotify (pp_error=%"
                  NACL_PRId32")\n", pp_error));
   if (pp_error < PP_OK) {
-    file_open_notify_callback_.Run(pp_error);
+    stream_finish_callback_.RunAndClear(pp_error);
   } else if (pp_error == PP_OK) {
     if (streaming_to_user()) {
-      data_stream_callback_source_->GetCallback().Run(PP_OK);
+      data_stream_callback_source_->GetCallback().RunAndClear(PP_OK);
     }
-    FileOpenNotify(PP_OK);
+    StreamFinishNotify(PP_OK);
   } else {
     if (streaming_to_buffer()) {
       buffer_.insert(buffer_.end(), &temp_buffer_[0], &temp_buffer_[pp_error]);
@@ -359,7 +404,7 @@ void FileDownloader::URLReadBodyNotify(int32_t pp_error) {
                      &temp_buffer_[0]));
       StreamCallback cb = data_stream_callback_source_->GetCallback();
       *(cb.output()) = &temp_buffer_;
-      cb.Run(pp_error);
+      cb.RunAndClear(pp_error);
     }
     pp::CompletionCallback onread_callback =
         callback_factory_.NewOptionalCallback(
@@ -370,7 +415,7 @@ void FileDownloader::URLReadBodyNotify(int32_t pp_error) {
                                             onread_callback);
     bool async_notify_ok = (pp_error == PP_OK_COMPLETIONPENDING);
     if (!async_notify_ok) {
-      onread_callback.Run(pp_error);
+      onread_callback.RunAndClear(pp_error);
     }
   }
 }
@@ -382,10 +427,21 @@ bool FileDownloader::GetDownloadProgress(
                                          total_bytes_to_be_received);
 }
 
-void FileDownloader::FileOpenNotify(int32_t pp_error) {
-  PLUGIN_PRINTF(("FileDownloader::FileOpenNotify (pp_error=%"NACL_PRId32")\n",
-                 pp_error));
-  file_open_notify_callback_.Run(pp_error);
+nacl::string FileDownloader::GetResponseHeaders() const {
+  pp::Var headers = url_response_.GetHeaders();
+  if (!headers.is_string()) {
+    PLUGIN_PRINTF((
+        "FileDownloader::GetResponseHeaders (headers are not a string)\n"));
+    return nacl::string();
+  }
+  return headers.AsString();
+}
+
+void FileDownloader::StreamFinishNotify(int32_t pp_error) {
+  PLUGIN_PRINTF((
+      "FileDownloader::StreamFinishNotify (pp_error=%"NACL_PRId32")\n",
+      pp_error));
+  stream_finish_callback_.RunAndClear(pp_error);
 }
 
 bool FileDownloader::streaming_to_file() const {

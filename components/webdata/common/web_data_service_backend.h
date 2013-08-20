@@ -10,11 +10,11 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/ref_counted_delete_on_message_loop.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "components/webdata/common/web_database_service.h"
-#include "content/public/browser/browser_thread.h"
-
+#include "components/webdata/common/webdata_export.h"
 
 class WebDatabase;
 class WebDatabaseTable;
@@ -29,10 +29,10 @@ class Location;
 // WebDatabaseService. It is refcounted to allow asynchronous destruction on the
 // DB thread.
 
-class WebDataServiceBackend
-    : public base::RefCountedThreadSafe<
-          WebDataServiceBackend,
-          content::BrowserThread::DeleteOnDBThread> {
+// TODO(caitkp): Rename this class to WebDatabaseBackend.
+
+class WEBDATA_EXPORT WebDataServiceBackend
+    : public base::RefCountedDeleteOnMessageLoop<WebDataServiceBackend> {
  public:
   class Delegate {
     public:
@@ -42,8 +42,9 @@ class WebDataServiceBackend
     virtual void DBLoaded(sql::InitStatus status) = 0;
   };
 
-  explicit WebDataServiceBackend(const base::FilePath& path,
-                                 Delegate* delegate);
+  WebDataServiceBackend(const base::FilePath& path,
+                        Delegate* delegate,
+                        const scoped_refptr<base::MessageLoopProxy>& db_thread);
 
   // Must call only before InitDatabaseWithCallback.
   void AddTable(scoped_ptr<WebDatabaseTable> table);
@@ -62,7 +63,10 @@ class WebDataServiceBackend
   // possible to re-initialize the DB after the shutdown.
   void ShutdownDatabase(bool should_reinit);
 
-  // Task wrappers to run database tasks.
+  // Task wrappers to update requests and and notify |request_manager_|. These
+  // are used in cases where the request is being made from the UI thread and an
+  // asyncronous callback is required to notify the client of |request|'s
+  // completion.
   void DBWriteTaskWrapper(
       const WebDatabaseService::WriteTask& task,
       scoped_ptr<WebDataRequest> request);
@@ -70,19 +74,24 @@ class WebDataServiceBackend
       const WebDatabaseService::ReadTask& task,
       scoped_ptr<WebDataRequest> request);
 
+  // Task runners to run database tasks.
+  void ExecuteWriteTask(const WebDatabaseService::WriteTask& task);
+  scoped_ptr<WDTypedResult> ExecuteReadTask(
+      const WebDatabaseService::ReadTask& task);
+
   const scoped_refptr<WebDataRequestManager>& request_manager() {
     return request_manager_;
   }
 
   WebDatabase* database() { return db_.get(); }
 
- private:
-  friend struct content::BrowserThread::DeleteOnThread<
-      content::BrowserThread::DB>;
+ protected:
+  friend class base::RefCountedDeleteOnMessageLoop<WebDataServiceBackend>;
   friend class base::DeleteHelper<WebDataServiceBackend>;
 
   virtual ~WebDataServiceBackend();
 
+ private:
   // Commit the current transaction.
   void Commit();
 

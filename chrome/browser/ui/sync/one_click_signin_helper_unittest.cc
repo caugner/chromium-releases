@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -30,7 +30,6 @@
 #include "content/public/common/password_form.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/mock_render_process_host.h"
-#include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_renderer_host.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -55,6 +54,7 @@ const char kImplicitURLString[] =
 class SigninManagerMock : public FakeSigninManager {
  public:
   explicit SigninManagerMock(Profile* profile) : FakeSigninManager(profile) {
+    Initialize(profile, NULL);
   }
   MOCK_CONST_METHOD1(IsAllowedUsername, bool(const std::string& username));
 };
@@ -154,8 +154,8 @@ class OneClickTestProfileSyncService : public TestProfileSyncService {
    virtual ~OneClickTestProfileSyncService() {}
 
    // Helper routine to be used in conjunction with
-   // ProfileKeyedServiceFactory::SetTestingFactory().
-   static ProfileKeyedService* Build(content::BrowserContext* profile) {
+   // BrowserContextKeyedServiceFactory::SetTestingFactory().
+   static BrowserContextKeyedService* Build(content::BrowserContext* profile) {
      return new OneClickTestProfileSyncService(static_cast<Profile*>(profile));
    }
 
@@ -188,7 +188,7 @@ class OneClickTestProfileSyncService : public TestProfileSyncService {
    bool first_setup_in_progress_;
 };
 
-static ProfileKeyedService* BuildSigninManagerMock(
+static BrowserContextKeyedService* BuildSigninManagerMock(
     content::BrowserContext* profile) {
   return new SigninManagerMock(static_cast<Profile*>(profile));
 }
@@ -226,9 +226,6 @@ class OneClickSigninHelperTest : public content::RenderViewHostTestHarness {
   TestingProfile* profile_;
 
  private:
-  // Members to fake that we are on the UI thread.
-  content::TestBrowserThread ui_thread_;
-
   // The ID of the signin process the test will assume to be trusted.
   // By default, set to the test RenderProcessHost's process ID, but
   // overridden by SetTrustedSigninProcessID.
@@ -239,7 +236,6 @@ class OneClickSigninHelperTest : public content::RenderViewHostTestHarness {
 
 OneClickSigninHelperTest::OneClickSigninHelperTest()
     : profile_(NULL),
-      ui_thread_(content::BrowserThread::UI, &message_loop_),
       trusted_signin_process_id_(-1) {
 }
 
@@ -292,11 +288,10 @@ void OneClickSigninHelperTest::AddEmailToOneClickRejectedList(
 }
 
 void OneClickSigninHelperTest::AllowSigninCookies(bool enable) {
-  CookieSettings* cookie_settings =
-      CookieSettings::Factory::GetForProfile(
-          Profile::FromBrowserContext(browser_context_.get()));
-  cookie_settings->SetDefaultCookieSetting(
-      enable ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+  CookieSettings* cookie_settings = CookieSettings::Factory::GetForProfile(
+      Profile::FromBrowserContext(browser_context_.get())).get();
+  cookie_settings->SetDefaultCookieSetting(enable ? CONTENT_SETTING_ALLOW
+                                                  : CONTENT_SETTING_BLOCK);
 }
 
 void OneClickSigninHelperTest::SetAllowedUsernamePattern(
@@ -333,7 +328,6 @@ void OneClickSigninHelperTest::SubmitGAIAPassword(
 class OneClickSigninHelperIOTest : public OneClickSigninHelperTest {
  public:
   OneClickSigninHelperIOTest();
-  virtual ~OneClickSigninHelperIOTest();
 
   virtual void SetUp() OVERRIDE;
 
@@ -345,23 +339,13 @@ class OneClickSigninHelperIOTest : public OneClickSigninHelperTest {
   const GURL valid_gaia_url_;
 
  private:
-  content::TestBrowserThread db_thread_;
-  content::TestBrowserThread fub_thread_;
-  content::TestBrowserThread io_thread_;
-
   DISALLOW_COPY_AND_ASSIGN(OneClickSigninHelperIOTest);
 };
 
 OneClickSigninHelperIOTest::OneClickSigninHelperIOTest()
     : testing_profile_manager_(
           TestingBrowserProcess::GetGlobal()),
-      valid_gaia_url_("https://accounts.google.com/"),
-      db_thread_(content::BrowserThread::DB, &message_loop_),
-      fub_thread_(content::BrowserThread::FILE_USER_BLOCKING, &message_loop_),
-      io_thread_(content::BrowserThread::IO, &message_loop_) {
-}
-
-OneClickSigninHelperIOTest::~OneClickSigninHelperIOTest() {
+      valid_gaia_url_("https://accounts.google.com/") {
 }
 
 void OneClickSigninHelperIOTest::SetUp() {
@@ -374,7 +358,7 @@ TestProfileIOData* OneClickSigninHelperIOTest::CreateTestProfileIOData(
   PrefService* pref_service = profile_->GetPrefs();
   PrefService* local_state = g_browser_process->local_state();
   CookieSettings* cookie_settings =
-      CookieSettings::Factory::GetForProfile(profile_);
+      CookieSettings::Factory::GetForProfile(profile_).get();
   TestProfileIOData* io_data = new TestProfileIOData(
       is_incognito, pref_service, local_state, cookie_settings);
   io_data->set_reverse_autologin_pending_email("user@gmail.com");
@@ -666,6 +650,7 @@ TEST_F(OneClickSigninHelperTest, SigninFromWebstoreWithConfigSyncfirst) {
   OneClickSigninHelper::CreateForWebContents(contents);
   OneClickSigninHelper* helper =
       OneClickSigninHelper::FromWebContents(contents);
+  helper->SetDoNotClearPendingEmailForTesting();
 
   GURL continueUrl("https://chrome.google.com/webstore?source=5");
   OneClickSigninHelper::ShowInfoBarUIThread(
@@ -723,7 +708,7 @@ TEST_F(OneClickSigninHelperIOTest, CanOfferOnIOThreadBadURL) {
 TEST_F(OneClickSigninHelperIOTest, CanOfferOnIOThreadReferrer) {
   scoped_ptr<TestProfileIOData> io_data(CreateTestProfileIOData(false));
   std::string continue_url(SyncPromoUI::GetSyncPromoURL(
-      GURL(), SyncPromoUI::SOURCE_START_PAGE, false).spec());
+      SyncPromoUI::SOURCE_START_PAGE, false).spec());
 
   EXPECT_EQ(OneClickSigninHelper::CAN_OFFER,
             OneClickSigninHelper::CanOfferOnIOThreadImpl(

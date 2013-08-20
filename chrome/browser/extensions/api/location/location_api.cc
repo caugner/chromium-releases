@@ -5,7 +5,6 @@
 #include "chrome/browser/extensions/api/location/location_api.h"
 
 #include "chrome/browser/extensions/api/location/location_manager.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/common/extensions/api/location.h"
 
 // TODO(vadimt): add tests.
@@ -17,34 +16,26 @@ namespace ClearWatch = location::ClearWatch;
 namespace extensions {
 
 bool LocationWatchLocationFunction::RunImpl() {
-  return true;
-
-  /*
   scoped_ptr<WatchLocation::Params> params(
       WatchLocation::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   // TODO(vadimt): validate and use params->request_info.
-  ExtensionSystem::Get(profile())->location_manager()->AddLocationRequest(
+  LocationManager::Get(profile())->AddLocationRequest(
       extension_id(), params->name);
 
   return true;
-  */
 }
 
 bool LocationClearWatchFunction::RunImpl() {
-  return true;
-
-  /*
   scoped_ptr<ClearWatch::Params> params(
       ClearWatch::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  ExtensionSystem::Get(profile())->location_manager()->RemoveLocationRequest(
+  LocationManager::Get(profile())->RemoveLocationRequest(
       extension_id(), params->name);
 
   return true;
-  */
 }
 
 }  // namespace extensions

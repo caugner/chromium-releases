@@ -10,18 +10,17 @@
 #include <mshtml.h>
 #include <shlobj.h>
 
-#include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_local.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
@@ -661,6 +660,17 @@ int GetConfigInt(int default_value, const wchar_t* value_name) {
   return ret;
 }
 
+int64 GetConfigInt64(int64 default_value, const wchar_t* value_name) {
+  int64 ret = default_value;
+  RegKey config_key;
+  if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
+                      KEY_QUERY_VALUE) == ERROR_SUCCESS) {
+    config_key.ReadInt64(value_name, &ret);
+  }
+
+  return ret;
+}
+
 bool GetConfigBool(bool default_value, const wchar_t* value_name) {
   DWORD value = GetConfigInt(default_value, value_name);
   return (value != FALSE);
@@ -680,6 +690,19 @@ bool SetConfigInt(const wchar_t* value_name, int value) {
 
 bool SetConfigBool(const wchar_t* value_name, bool value) {
   return SetConfigInt(value_name, value);
+}
+
+bool SetConfigInt64(const wchar_t* value_name, int64 value) {
+  RegKey config_key;
+  if (config_key.Create(HKEY_CURRENT_USER, kChromeFrameConfigKey,
+                        KEY_SET_VALUE) == ERROR_SUCCESS) {
+    if (config_key.WriteValue(value_name, &value, sizeof(value),
+                              REG_QWORD) == ERROR_SUCCESS) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool DeleteConfigValue(const wchar_t* value_name) {
@@ -965,7 +988,7 @@ bool IsValidUrlScheme(const GURL& url, bool is_privileged) {
 
   // Additional checking for view-source. Allow only http and https
   // URLs in view source.
-  if (url.SchemeIs(chrome::kViewSourceScheme)) {
+  if (url.SchemeIs(content::kViewSourceScheme)) {
     GURL sub_url(url.path());
     if (sub_url.SchemeIs(chrome::kHttpScheme) ||
         sub_url.SchemeIs(chrome::kHttpsScheme))

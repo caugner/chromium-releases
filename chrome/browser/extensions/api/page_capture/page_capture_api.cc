@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/api/page_capture/page_capture_api.h"
 
+#include <limits>
+
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "chrome/browser/browser_process.h"
@@ -17,8 +19,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 
-#include <limits>
-
 using content::BrowserThread;
 using content::ChildProcessSecurityPolicy;
 using content::WebContents;
@@ -29,11 +29,10 @@ namespace SaveAsMHTML = extensions::api::page_capture::SaveAsMHTML;
 
 namespace {
 
-// Error messages.
-const char* const kFileTooBigError = "The MHTML file generated is too big.";
-const char* const kMHTMLGenerationFailedError = "Failed to generate MHTML.";
-const char* const kTemporaryFileError = "Failed to create a temporary file.";
-const char* const kTabClosedError = "Cannot find the tab for thie request.";
+const char kFileTooBigError[] = "The MHTML file generated is too big.";
+const char kMHTMLGenerationFailedError[] = "Failed to generate MHTML.";
+const char kTemporaryFileError[] = "Failed to create a temporary file.";
+const char kTabClosedError[] = "Cannot find the tab for thie request.";
 
 }  // namespace
 
@@ -104,8 +103,10 @@ void PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated(bool success) {
       // Setup a ShareableFileReference so the temporary file gets deleted
       // once it is no longer used.
       mhtml_file_ = ShareableFileReference::GetOrCreate(
-          mhtml_path_, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
+          mhtml_path_,
+          ShareableFileReference::DELETE_ON_FINAL_RELEASE,
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)
+              .get());
     }
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -174,7 +175,7 @@ void PageCaptureSaveAsMHTMLFunction::ReturnSuccess(int64 file_size) {
   ChildProcessSecurityPolicy::GetInstance()->GrantReadFile(
       child_id, mhtml_path_);
 
-  DictionaryValue* dict = new DictionaryValue();
+  base::DictionaryValue* dict = new base::DictionaryValue();
   SetResult(dict);
   dict->SetString("mhtmlFilePath", mhtml_path_.value());
   dict->SetInteger("mhtmlFileLength", file_size);

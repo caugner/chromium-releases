@@ -15,8 +15,9 @@ class JSONSchemaValidatorCPPTest : public JSONSchemaValidatorTestBase {
 
  protected:
   virtual void ExpectValid(const std::string& test_source,
-                           Value* instance, DictionaryValue* schema,
-                           ListValue* types) OVERRIDE {
+                           base::Value* instance,
+                           base::DictionaryValue* schema,
+                           base::ListValue* types) OVERRIDE {
     JSONSchemaValidator validator(schema, types);
     if (validator.Validate(instance))
       return;
@@ -30,8 +31,8 @@ class JSONSchemaValidatorCPPTest : public JSONSchemaValidatorTestBase {
 
   virtual void ExpectNotValid(
       const std::string& test_source,
-      Value* instance, DictionaryValue* schema,
-      ListValue* types,
+      base::Value* instance, base::DictionaryValue* schema,
+      base::ListValue* types,
       const std::string& expected_error_path,
       const std::string& expected_error_message) OVERRIDE {
     JSONSchemaValidator validator(schema, types);
@@ -49,4 +50,80 @@ class JSONSchemaValidatorCPPTest : public JSONSchemaValidatorTestBase {
 
 TEST_F(JSONSchemaValidatorCPPTest, Test) {
   RunTests();
+}
+
+TEST(JSONSchemaValidator, IsValidSchema) {
+  std::string error;
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema("", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema("\0", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema("string", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema("\"string\"", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema("[]", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema("{}", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema(
+      "{ \"type\": 123 }", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema(
+      "{ \"type\": \"invalid\" }", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema(
+      "{"
+      "  \"type\": \"object\","
+      "  \"properties\": []"  // Invalid properties type.
+      "}", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema(
+      "{"
+      "  \"type\": \"string\","
+      "  \"maxLength\": -1"  // Must be >= 0.
+      "}", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema(
+      "{"
+      "  \"type\": \"string\","
+      "  \"enum\": [ {} ],"  // "enum" must contain simple values.
+      "}", &error));
+  EXPECT_FALSE(JSONSchemaValidator::IsValidSchema(
+      "{"
+      "  \"type\": \"array\","
+      "  \"items\": [ 123 ],"  // "items" must contain a schema or schemas.
+      "}", &error));
+  EXPECT_TRUE(JSONSchemaValidator::IsValidSchema(
+      "{ \"type\": \"object\" }", &error)) << error;
+  EXPECT_TRUE(JSONSchemaValidator::IsValidSchema(
+      "{ \"type\": [\"object\", \"array\"] }", &error)) << error;
+  EXPECT_TRUE(JSONSchemaValidator::IsValidSchema(
+      "{"
+      "  \"type\": [\"object\", \"array\"],"
+      "  \"properties\": {"
+      "    \"string-property\": {"
+      "      \"type\": \"string\","
+      "      \"minLength\": 1,"
+      "      \"maxLength\": 100,"
+      "      \"title\": \"The String Policy\","
+      "      \"description\": \"This policy controls the String widget.\""
+      "    },"
+      "    \"integer-property\": {"
+      "      \"type\": \"number\","
+      "      \"minimum\": 1000.0,"
+      "      \"maximum\": 9999.0"
+      "    },"
+      "    \"enum-property\": {"
+      "      \"type\": \"integer\","
+      "      \"enum\": [0, 1, 10, 100]"
+      "    },"
+      "    \"items-property\": {"
+      "      \"type\": \"array\","
+      "      \"items\": {"
+      "        \"type\": \"string\""
+      "      }"
+      "    },"
+      "    \"items-list-property\": {"
+      "      \"type\": \"array\","
+      "      \"items\": ["
+      "        { \"type\": \"string\" },"
+      "        { \"type\": \"integer\" }"
+      "      ]"
+      "    }"
+      "  },"
+      "  \"additionalProperties\": {"
+      "    \"type\": \"any\""
+      "  }"
+      "}", &error)) << error;
 }

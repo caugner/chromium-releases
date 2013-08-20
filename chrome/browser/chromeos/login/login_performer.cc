@@ -11,8 +11,8 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -69,7 +69,7 @@ LoginPerformer::~LoginPerformer() {
   DVLOG(1) << "Deleting LoginPerformer";
   DCHECK(default_performer_ != NULL) << "Default instance should exist.";
   default_performer_ = NULL;
-  if (authenticator_)
+  if (authenticator_.get())
     authenticator_->SetConsumer(NULL);
 }
 
@@ -109,7 +109,7 @@ void LoginPerformer::OnLoginFailure(const LoginFailure& failure) {
     VLOG(1) << "Online login timed out. "
             << "Granting user access based on offline auth only.";
     // ScreenLock is not active, it's ok to delete itself.
-    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+    base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   } else {
     // COULD_NOT_MOUNT_CRYPTOHOME, COULD_NOT_MOUNT_TMPFS:
     // happens during offline auth only.
@@ -150,7 +150,7 @@ void LoginPerformer::OnLoginSuccess(
   // 1. ScreenLock active (pending correct new password input)
   // 2. Pending online auth request.
   if (!pending_requests)
-    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+    base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   else
     initial_online_auth_pending_ = true;
 
@@ -303,8 +303,7 @@ void LoginPerformer::LoginAsPublicAccount(const std::string& username) {
   policy::DeviceLocalAccountPolicyService* policy_service =
       g_browser_process->browser_policy_connector()->
           GetDeviceLocalAccountPolicyService();
-  if (!policy_service ||
-      !policy_service->IsPolicyAvailableForAccount(username)) {
+  if (!policy_service || !policy_service->IsPolicyAvailableForUser(username)) {
     DCHECK(delegate_);
     if (delegate_)
       delegate_->PolicyLoadFailed();
@@ -376,7 +375,7 @@ void LoginPerformer::ResolveInitialNetworkAuthFailure() {
               << "Online login failed with "
               << last_login_failure_.error().state();
       // Resolving initial online auth failure, no ScreenLock is active.
-      MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+      base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
       return;
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
       // Offline auth OK, so it might be the case of changed password.
@@ -474,7 +473,7 @@ void LoginPerformer::ResolveScreenUnlocked() {
   DVLOG(1) << "Screen unlocked";
   registrar_.RemoveAll();
   // If screen was unlocked that was for a reason, should delete itself now.
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void LoginPerformer::StartLoginCompletion() {

@@ -37,27 +37,35 @@ class FakeSessionManagerClient : public chromeos::SessionManagerClient {
   virtual void NotifyLockScreenShown() OVERRIDE;
   virtual void RequestUnlockScreen() OVERRIDE;
   virtual void NotifyLockScreenDismissed() OVERRIDE;
+  virtual void RetrieveActiveSessions(
+      const ActiveSessionsCallback& callback) OVERRIDE;
   virtual void RetrieveDevicePolicy(
       const RetrievePolicyCallback& callback) OVERRIDE;
-  virtual void RetrieveUserPolicy(
+  virtual void RetrievePolicyForUser(
+      const std::string& username,
       const RetrievePolicyCallback& callback) OVERRIDE;
   virtual void RetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
       const RetrievePolicyCallback& callback) OVERRIDE;
   virtual void StoreDevicePolicy(const std::string& policy_blob,
                                  const StorePolicyCallback& callback) OVERRIDE;
-  virtual void StoreUserPolicy(const std::string& policy_blob,
-                               const StorePolicyCallback& callback) OVERRIDE;
+  virtual void StorePolicyForUser(const std::string& username,
+                                  const std::string& policy_blob,
+                                  const std::string& policy_key,
+                                  const StorePolicyCallback& callback) OVERRIDE;
   virtual void StoreDeviceLocalAccountPolicy(
       const std::string& account_id,
       const std::string& policy_blob,
       const StorePolicyCallback& callback) OVERRIDE;
+  virtual void SetFlagsForUser(const std::string& username,
+                               const std::vector<std::string>& flags) OVERRIDE;
 
   const std::string& device_policy() const;
   void set_device_policy(const std::string& policy_blob);
 
-  const std::string& user_policy() const;
-  void set_user_policy(const std::string& policy_blob);
+  const std::string& user_policy(const std::string& username) const;
+  void set_user_policy(const std::string& username,
+                       const std::string& policy_blob);
 
   const std::string& device_local_account_policy(
       const std::string& account_id) const;
@@ -67,11 +75,31 @@ class FakeSessionManagerClient : public chromeos::SessionManagerClient {
   // Notify observers about a property change completion.
   void OnPropertyChangeComplete(bool success);
 
+  // Returns how many times EmitLoginPromptReady() is called.
+  int emit_login_prompt_ready_call_count() {
+    return emit_login_prompt_ready_call_count_;
+  }
+
+  // Returns how many times LockScreenShown() was called.
+  int notify_lock_screen_shown_call_count() {
+    return notify_lock_screen_shown_call_count_;
+  }
+
+  // Returns how many times LockScreenDismissed() was called.
+  int notify_lock_screen_dismissed_call_count() {
+    return notify_lock_screen_dismissed_call_count_;
+  }
+
  private:
   std::string device_policy_;
-  std::string user_policy_;
+  std::map<std::string, std::string> user_policies_;
   std::map<std::string, std::string> device_local_account_policy_;
   ObserverList<Observer> observers_;
+  SessionManagerClient::ActiveSessionsMap user_sessions_;
+
+  int emit_login_prompt_ready_call_count_;
+  int notify_lock_screen_shown_call_count_;
+  int notify_lock_screen_dismissed_call_count_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSessionManagerClient);
 };

@@ -36,7 +36,7 @@ namespace browser_sync {
 SyncBackendHostForProfileSyncTest::SyncBackendHostForProfileSyncTest(
     Profile* profile,
     const base::WeakPtr<SyncPrefs>& sync_prefs,
-    const base::WeakPtr<InvalidatorStorage>& invalidator_storage,
+    const base::WeakPtr<invalidation::InvalidatorStorage>& invalidator_storage,
     syncer::TestIdFactory& id_factory,
     base::Closure& callback,
     bool set_initial_sync_ended_on_init,
@@ -85,10 +85,10 @@ void SyncBackendHostForProfileSyncTest::InitCore(
       new TestInternalComponentsFactory(factory_switches, storage);
 
   SyncBackendHost::InitCore(test_options);
-  if (synchronous_init_) {
+  if (synchronous_init_ && !base::MessageLoop::current()->is_running()) {
     // The SyncBackend posts a task to the current loop when
     // initialization completes.
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 }
 
@@ -103,17 +103,23 @@ void SyncBackendHostForProfileSyncTest::UpdateCredentials(
 
 void SyncBackendHostForProfileSyncTest::RequestConfigureSyncer(
     syncer::ConfigureReason reason,
-    syncer::ModelTypeSet types_to_config,
-    syncer::ModelTypeSet failed_types,
+    syncer::ModelTypeSet to_download,
+    syncer::ModelTypeSet to_purge,
+    syncer::ModelTypeSet to_journal,
+    syncer::ModelTypeSet to_unapply,
+    syncer::ModelTypeSet to_ignore,
     const syncer::ModelSafeRoutingInfo& routing_info,
-    const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
+    const base::Callback<void(syncer::ModelTypeSet,
+                              syncer::ModelTypeSet)>& ready_task,
     const base::Closure& retry_callback) {
   syncer::ModelTypeSet failed_configuration_types;
   if (fail_initial_download_)
-    failed_configuration_types = types_to_config;
+    failed_configuration_types = to_download;
 
-  FinishConfigureDataTypesOnFrontendLoop(failed_configuration_types,
-                                         ready_task);
+  FinishConfigureDataTypesOnFrontendLoop(
+      syncer::Difference(to_download, failed_configuration_types),
+      failed_configuration_types,
+      ready_task);
 }
 
 void SyncBackendHostForProfileSyncTest
@@ -166,7 +172,7 @@ void SyncBackendHostForProfileSyncTest
   if (fail_initial_download_) {
     frontend()->OnSyncConfigureRetry();
     if (synchronous_init_)
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
   } else {
     initial_download_closure_.Run();
     initial_download_closure_.Reset();
@@ -227,7 +233,7 @@ TestProfileSyncService::~TestProfileSyncService() {
 }
 
 // static
-ProfileKeyedService* TestProfileSyncService::BuildAutoStartAsyncInit(
+BrowserContextKeyedService* TestProfileSyncService::BuildAutoStartAsyncInit(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
   SigninManagerBase* signin =
@@ -244,6 +250,23 @@ TestProfileSyncService::components_factory_mock() {
   return static_cast<ProfileSyncComponentsFactoryMock*>(factory());
 }
 
+void TestProfileSyncService::RequestAccessToken() {
+  ProfileSyncService::RequestAccessToken();
+  if (synchronous_backend_initialization_) {
+    base::MessageLoop::current()->Run();
+  }
+}
+
+void TestProfileSyncService::OnGetTokenFailure(
+    const OAuth2TokenService::Request* request,
+    const GoogleServiceAuthError& error) {
+  ProfileSyncService::OnGetTokenFailure(request, error);
+  if (synchronous_backend_initialization_) {
+    base::MessageLoop::current()->Quit();
+  }
+}
+
+
 void TestProfileSyncService::OnBackendInitialized(
     const syncer::WeakHandle<syncer::JsBackend>& backend,
     const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
@@ -255,7 +278,7 @@ void TestProfileSyncService::OnBackendInitialized(
 
   // TODO(akalin): Figure out a better way to do this.
   if (synchronous_backend_initialization_) {
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 }
 
@@ -263,7 +286,7 @@ void TestProfileSyncService::OnConfigureDone(
     const browser_sync::DataTypeManager::ConfigureResult& result) {
   ProfileSyncService::OnConfigureDone(result);
   if (!synchronous_sync_configuration_)
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
 }
 
 UserShare* TestProfileSyncService::GetUserShare() const {
@@ -295,4 +318,24 @@ void TestProfileSyncService::CreateBackend() {
       synchronous_backend_initialization_,
       fail_initial_download_,
       storage_option_));
+}
+
+scoped_ptr<OAuth2TokenService::Request> FakeOAuth2TokenService::StartRequest(
+    const OAuth2TokenService::ScopeSet& scopes,
+    OAuth2TokenService::Consumer* consumer) {
+  // Ensure token in question is cached and never expires. Request will succeed
+  // without network IO.
+  RegisterCacheEntry(GetRefreshToken(), scopes, "access_token",
+      base::Time::Max());
+  return ProfileOAuth2TokenService::StartRequest(scopes, consumer);
+}
+
+BrowserContextKeyedService* FakeOAuth2TokenService::BuildTokenService(
+    content::BrowserContext* context) {
+  Profile* profile = static_cast<Profile*>(context);
+
+  FakeOAuth2TokenService* service =
+      new FakeOAuth2TokenService(context->GetRequestContext());
+  service->Initialize(profile);
+  return service;
 }

@@ -16,9 +16,9 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/accessibility/accessibility_events.h"
 #include "chrome/browser/command_updater.h"
@@ -94,6 +94,7 @@
 #include "ui/gfx/font.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/rect.h"
 
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -106,10 +107,11 @@ namespace {
 // We are positioned with a little bit of extra space that we don't use now.
 const int kTopMargin = 1;
 const int kBottomMargin = 1;
-const int kLeftMargin = 1;
-const int kRightMargin = 1;
 // We draw a border on the top and bottom (but not on left or right).
 const int kBorderThickness = 1;
+
+const int kPopupEdgeThickness = 1;
+const int kNormalEdgeThickness = 2;
 
 // Spacing needed to align the bubble with the left side of the omnibox.
 const int kFirstRunBubbleLeftSpacing = 4;
@@ -264,7 +266,7 @@ void ContentSettingImageViewGtk::Update(WebContents* web_contents) {
 void ContentSettingImageViewGtk::AnimationEnded(
     const ui::Animation* animation) {
   if (animation_.IsShowing()) {
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ContentSettingImageViewGtk::CloseAnimation,
                    weak_factory_.GetWeakPtr()),
@@ -461,7 +463,7 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
       theme_service_->BuildLabel(std::string(), kHintTextColor);
   gtk_widget_set_sensitive(tab_to_search_hint_leading_label_, FALSE);
   tab_to_search_hint_icon_ = gtk_image_new_from_pixbuf(
-      rb.GetNativeImageNamed(IDR_LOCATION_BAR_KEYWORD_HINT_TAB).ToGdkPixbuf());
+      rb.GetNativeImageNamed(IDR_OMNIBOX_KEYWORD_HINT_TAB).ToGdkPixbuf());
   tab_to_search_hint_trailing_label_ =
       theme_service_->BuildLabel(std::string(), kHintTextColor);
   gtk_widget_set_sensitive(tab_to_search_hint_trailing_label_, FALSE);
@@ -624,6 +626,10 @@ void LocationBarViewGtk::SetSiteTypeDragSource() {
 
 WebContents* LocationBarViewGtk::GetWebContents() const {
   return browser_->tab_strip_model()->GetActiveWebContents();
+}
+
+gfx::Rect LocationBarViewGtk::GetOmniboxBounds() const {
+  return gfx::Rect();
 }
 
 void LocationBarViewGtk::SetPreviewEnabledPageAction(
@@ -841,7 +847,7 @@ InstantController* LocationBarViewGtk::GetInstant() {
 void LocationBarViewGtk::ShowFirstRunBubble() {
   // We need the browser window to be shown before we can show the bubble, but
   // we get called before that's happened.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&LocationBarViewGtk::ShowFirstRunBubbleInternal,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -1069,15 +1075,15 @@ void LocationBarViewGtk::Observe(int type,
         // 12.1px = 9pt @ 96dpi
         gtk_util::ForceFontSizePixels(security_info_label_, 12.1);
         gtk_util::ForceFontSizePixels(tab_to_search_full_label_,
-            browser_defaults::kAutocompleteEditFontPixelSize);
+                                      browser_defaults::kOmniboxFontPixelSize);
         gtk_util::ForceFontSizePixels(tab_to_search_partial_label_,
-            browser_defaults::kAutocompleteEditFontPixelSize);
+                                      browser_defaults::kOmniboxFontPixelSize);
         gtk_util::ForceFontSizePixels(tab_to_search_hint_leading_label_,
-            browser_defaults::kAutocompleteEditFontPixelSize);
+                                      browser_defaults::kOmniboxFontPixelSize);
         gtk_util::ForceFontSizePixels(tab_to_search_hint_trailing_label_,
-            browser_defaults::kAutocompleteEditFontPixelSize);
+                                      browser_defaults::kOmniboxFontPixelSize);
 
-        const int top_bottom = popup_window_mode_ ? kBorderThickness : 0;
+        const int top_bottom = popup_window_mode_ ? kPopupEdgeThickness : 0;
         gtk_alignment_set_padding(GTK_ALIGNMENT(location_entry_alignment_),
                                   kTopMargin + kBorderThickness,
                                   kBottomMargin + kBorderThickness,
@@ -1105,20 +1111,54 @@ gboolean LocationBarViewGtk::HandleExpose(GtkWidget* widget,
                                           GdkEventExpose* event) {
   // If we're not using GTK theming, draw our own border over the edge pixels
   // of the background.
-  if (!GtkThemeService::GetFrom(browser_->profile())->UsingNativeTheme()) {
-    int left, center, right;
-    if (popup_window_mode_) {
-      left = right = IDR_LOCATIONBG_POPUPMODE_EDGE;
-      center = IDR_LOCATIONBG_POPUPMODE_CENTER;
-    } else {
-      left = IDR_LOCATIONBG_L;
-      center = IDR_LOCATIONBG_C;
-      right = IDR_LOCATIONBG_R;
+  GtkThemeService* theme_service =
+      GtkThemeService::GetFrom(browser_->profile());
+  if (!theme_service->UsingNativeTheme()) {
+    // Perform a scoped paint to fill in the background color.
+    {
+      gfx::CanvasSkiaPaint canvas(event, /*opaque=*/false);
+
+      GtkAllocation allocation;
+      gtk_widget_get_allocation(widget, &allocation);
+
+      int thickness = popup_window_mode_ ?
+          kPopupEdgeThickness : kNormalEdgeThickness;
+      gfx::Rect bounds(allocation);
+      bounds.Inset(thickness, thickness);
+
+      const SkColor color = SK_ColorWHITE;
+      if (popup_window_mode_) {
+        canvas.FillRect(bounds, color);
+      } else {
+        SkPaint paint;
+        paint.setStyle(SkPaint::kFill_Style);
+        paint.setColor(color);
+        const int kBorderCornerRadius = 2;
+        canvas.DrawRoundRect(bounds, kBorderCornerRadius, paint);
+      }
     }
 
-    NineBox background(left, center, right,
-                       0, 0, 0, 0, 0, 0);
-    background.RenderToWidget(widget);
+    if (popup_window_mode_) {
+      NineBox(IDR_OMNIBOX_POPUP_BORDER_TOP_LEFT,
+              IDR_OMNIBOX_POPUP_BORDER_TOP,
+              IDR_OMNIBOX_POPUP_BORDER_TOP_RIGHT,
+              IDR_OMNIBOX_POPUP_BORDER_LEFT,
+              IDR_OMNIBOX_POPUP_BORDER_CENTER,
+              IDR_OMNIBOX_POPUP_BORDER_RIGHT,
+              IDR_OMNIBOX_POPUP_BORDER_BOTTOM_LEFT,
+              IDR_OMNIBOX_POPUP_BORDER_BOTTOM,
+              IDR_OMNIBOX_POPUP_BORDER_BOTTOM_RIGHT).RenderToWidget(widget);
+    } else {
+      NineBox(IDR_OMNIBOX_BORDER_TOP_LEFT,
+              IDR_OMNIBOX_BORDER_TOP,
+              IDR_OMNIBOX_BORDER_TOP_RIGHT,
+              IDR_OMNIBOX_BORDER_LEFT,
+              IDR_OMNIBOX_BORDER_CENTER,
+              IDR_OMNIBOX_BORDER_RIGHT,
+              IDR_OMNIBOX_BORDER_BOTTOM_LEFT,
+              IDR_OMNIBOX_BORDER_BOTTOM,
+              IDR_OMNIBOX_BORDER_BOTTOM_RIGHT).RenderToWidget(widget);
+    }
   }
 
   // Draw ExtensionAction backgrounds and borders, if necessary.  The borders

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/infobars/after_translate_infobar.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -26,6 +26,8 @@ AfterTranslateInfoBar::AfterTranslateInfoBar(
       options_menu_button_(NULL),
       options_menu_model_(delegate),
       swapped_language_buttons_(false) {
+  autodetermined_source_language_ =
+      delegate->original_language_index() == TranslateInfoBarDelegate::kNoIndex;
 }
 
 AfterTranslateInfoBar::~AfterTranslateInfoBar() {
@@ -42,7 +44,7 @@ void AfterTranslateInfoBar::Layout() {
 
   views::MenuButton* first_button = original_language_menu_button_;
   views::MenuButton* second_button = target_language_menu_button_;
-  if (swapped_language_buttons_)
+  if (swapped_language_buttons_ || autodetermined_source_language_)
     std::swap(first_button, second_button);
   gfx::Size first_button_size = first_button->GetPreferredSize();
   first_button->SetBounds(label_1_->bounds().right() + kButtonInLabelSpacing,
@@ -55,19 +57,24 @@ void AfterTranslateInfoBar::Layout() {
       label_2_size.height());
   available_width = std::max(0, available_width - label_2_size.width());
 
-  gfx::Size second_button_size = second_button->GetPreferredSize();
-  second_button->SetBounds(label_2_->bounds().right() + kButtonInLabelSpacing,
-      OffsetY(second_button_size), second_button_size.width(),
-      second_button_size.height());
+  if (!autodetermined_source_language_) {
+    gfx::Size second_button_size = second_button->GetPreferredSize();
+    second_button->SetBounds(label_2_->bounds().right() + kButtonInLabelSpacing,
+        OffsetY(second_button_size), second_button_size.width(),
+        second_button_size.height());
 
-  gfx::Size label_3_size = label_3_->GetPreferredSize();
-  label_3_->SetBounds(second_button->bounds().right() + kButtonInLabelSpacing,
-      OffsetY(label_3_size), std::min(label_3_size.width(), available_width),
-      label_3_size.height());
+    gfx::Size label_3_size = label_3_->GetPreferredSize();
+    label_3_->SetBounds(second_button->bounds().right() + kButtonInLabelSpacing,
+        OffsetY(label_3_size), std::min(label_3_size.width(), available_width),
+        label_3_size.height());
+  }
 
   gfx::Size revert_button_size = revert_button_->GetPreferredSize();
-  revert_button_->SetBounds(label_3_->bounds().right() + kButtonInLabelSpacing,
-      OffsetY(revert_button_size), revert_button_size.width(),
+  revert_button_->SetBounds(
+      (label_3_ ? label_3_ : label_2_)->bounds().right() +
+          kButtonInLabelSpacing,
+      OffsetY(revert_button_size),
+      revert_button_size.width(),
       revert_button_size.height());
 
   gfx::Size options_size = options_menu_button_->GetPreferredSize();
@@ -75,22 +82,22 @@ void AfterTranslateInfoBar::Layout() {
       OffsetY(options_size), options_size.width(), options_size.height());
 }
 
-void AfterTranslateInfoBar::ViewHierarchyChanged(bool is_add,
-                                                 View* parent,
-                                                 View* child) {
-  if (!is_add || (child != this) || (label_1_ != NULL)) {
-    TranslateInfoBarBase::ViewHierarchyChanged(is_add, parent, child);
+void AfterTranslateInfoBar::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (!details.is_add || (details.child != this) || (label_1_ != NULL)) {
+    TranslateInfoBarBase::ViewHierarchyChanged(details);
     return;
   }
 
   std::vector<string16> strings;
-  TranslateInfoBarDelegate* delegate = GetDelegate();
-  delegate->GetAfterTranslateStrings(&strings, &swapped_language_buttons_);
-  DCHECK_EQ(3U, strings.size());
+  TranslateInfoBarDelegate::GetAfterTranslateStrings(
+      &strings, &swapped_language_buttons_, autodetermined_source_language_);
+  DCHECK_EQ(autodetermined_source_language_ ? 2U : 3U, strings.size());
 
   label_1_ = CreateLabel(strings[0]);
   AddChildView(label_1_);
 
+  TranslateInfoBarDelegate* delegate = GetDelegate();
   original_language_menu_button_ = CreateMenuButton(string16(), this);
   original_language_menu_model_.reset(new TranslateLanguageMenuModel(
       TranslateLanguageMenuModel::ORIGINAL, delegate, this,
@@ -99,17 +106,19 @@ void AfterTranslateInfoBar::ViewHierarchyChanged(bool is_add,
   target_language_menu_model_.reset(new TranslateLanguageMenuModel(
       TranslateLanguageMenuModel::TARGET, delegate, this,
       target_language_menu_button_, true));
-  AddChildView(swapped_language_buttons_ ?
+  AddChildView((swapped_language_buttons_ || autodetermined_source_language_) ?
       target_language_menu_button_ : original_language_menu_button_);
 
   label_2_ = CreateLabel(strings[1]);
   AddChildView(label_2_);
 
-  AddChildView(swapped_language_buttons_ ?
-      original_language_menu_button_ : target_language_menu_button_);
+  if (!autodetermined_source_language_) {
+    AddChildView(swapped_language_buttons_ ?
+        original_language_menu_button_ : target_language_menu_button_);
 
-  label_3_ = CreateLabel(strings[2]);
-  AddChildView(label_3_);
+    label_3_ = CreateLabel(strings[2]);
+    AddChildView(label_3_);
+  }
 
   revert_button_ = CreateLabelButton(this,
       l10n_util::GetStringUTF16(IDS_TRANSLATE_INFOBAR_REVERT), false);
@@ -121,13 +130,15 @@ void AfterTranslateInfoBar::ViewHierarchyChanged(bool is_add,
 
   // This must happen after adding all other children so InfoBarView can ensure
   // the close button is the last child.
-  TranslateInfoBarBase::ViewHierarchyChanged(is_add, parent, child);
+  TranslateInfoBarBase::ViewHierarchyChanged(details);
 
   // These must happen after adding all children because they trigger layout,
   // which assumes that particular children (e.g. the close button) have already
   // been added.
-  UpdateLanguageButtonText(original_language_menu_button_,
-      delegate->language_name_at(delegate->original_language_index()));
+  if (!autodetermined_source_language_) {
+    UpdateLanguageButtonText(original_language_menu_button_,
+        delegate->language_name_at(delegate->original_language_index()));
+  }
   UpdateLanguageButtonText(target_language_menu_button_,
       delegate->language_name_at(delegate->target_language_index()));
 }

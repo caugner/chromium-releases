@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_HISTORY_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_HISTORY_UI_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/timer.h"
 #include "base/values.h"
 #include "chrome/browser/common/cancelable_request.h"
@@ -100,24 +100,6 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
 
   // Handler for "removeBookmark" message.
   void HandleRemoveBookmark(const base::ListValue* args);
-
-#if !defined(OS_ANDROID)
-  // Handler for "processManagedUrls".
-  void HandleProcessManagedUrls(const ListValue* args);
-#endif
-
-#if defined(ENABLE_MANAGED_USERS)
-  // Handler for the "setElevated" message.
-  void HandleSetElevated(const base::ListValue* args);
-
-  // Handler for the "managedUserGetElevated" message.
-  void HandleManagedUserGetElevated(const base::ListValue* args);
-
-  // Sets the managed user in elevated state if the authentication was
-  // successful.
-  void PassphraseDialogCallback(bool success);
-
-#endif
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,

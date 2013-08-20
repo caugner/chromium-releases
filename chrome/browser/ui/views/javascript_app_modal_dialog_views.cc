@@ -4,10 +4,9 @@
 
 #include "chrome/browser/ui/views/javascript_app_modal_dialog_views.h"
 
-#include "base/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -30,13 +29,6 @@ JavaScriptAppModalDialogViews::JavaScriptAppModalDialogViews(
   views::MessageBoxView::InitParams params(parent->message_text());
   params.options = options;
   params.default_prompt = parent->default_prompt_text();
-  if (content::WebContents* web_contents = parent->web_contents()) {
-    if (Browser* browser = chrome::FindBrowserWithWebContents(web_contents)) {
-      params.clipboard_source_tag =
-        content::BrowserContext::GetMarkerForOffTheRecordContext(
-            browser->profile());
-    }
-  }
   message_box_view_ = new views::MessageBoxView(params);
   DCHECK(message_box_view_);
 
@@ -171,9 +163,6 @@ NativeAppModalDialog* NativeAppModalDialog::CreateNativeJavaScriptPrompt(
     JavaScriptAppModalDialog* dialog,
     gfx::NativeWindow parent_window) {
   JavaScriptAppModalDialogViews* d = new JavaScriptAppModalDialogViews(dialog);
-  if (parent_window)
-    views::Widget::CreateWindowWithParent(d, parent_window);
-  else
-    views::Widget::CreateWindow(d);
+  CreateBrowserModalDialogViews(d, parent_window);
   return d;
 }

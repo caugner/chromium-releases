@@ -6,8 +6,6 @@
 
 #include "custom_events.h"
 
-namespace event_queue {
-
 // Convert a given modifier to a descriptive string.  Note that the actual
 // declared type of modifier in each of the event classes is uint32_t, but it is
 // expected to be interpreted as a bitfield of 'or'ed PP_InputEvent_Modifier
@@ -65,7 +63,8 @@ std::string MouseEvent::ToString() const {
          << " modifier:" << string_event_modifiers()
          << " button:" << MouseButtonToString(mouse_button_)
          << " x:" << x_position_ << " y:" << y_position_
-         << " click_count:" << click_count_ << " time:" << timestamp_ << "\n";
+         << " click_count:" << click_count_ << " time:" << timestamp_
+         << " is_context_menu: " << is_context_menu_ << "\n";
   return stream.str();
 }
 
@@ -150,5 +149,3 @@ std::string TouchEvent::ToString() const {
   stream << " time:" << timestamp_ << "\n";
   return stream.str();
 }
-
-}  // end namespace

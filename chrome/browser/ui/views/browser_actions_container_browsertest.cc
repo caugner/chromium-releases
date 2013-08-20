@@ -4,9 +4,11 @@
 
 #include "chrome/browser/ui/views/browser_actions_container.h"
 
+#include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/test/test_utils.h"
 
 using extensions::Extension;
@@ -178,9 +180,10 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, ForceHide) {
   std::string idA = browser_actions_bar()->GetExtensionId(0);
 
   // Force hide this browser action.
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
-  service->extension_prefs()->SetBrowserActionVisibility(
-      service->GetExtensionById(idA, false), false);
+  extensions::ExtensionActionAPI::SetBrowserActionVisibility(
+      extensions::ExtensionSystem::Get(browser()->profile())->
+          extension_service()->extension_prefs(),
+      idA,
+      false);
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
 }

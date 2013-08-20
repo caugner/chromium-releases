@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/shortcuts_backend.h"
 #include "chrome/browser/history/shortcuts_backend_factory.h"
 #include "chrome/browser/history/shortcuts_database.h"
@@ -43,7 +42,7 @@ class ShortcutsBackendTest : public testing::Test,
 
   TestingProfile profile_;
   scoped_refptr<ShortcutsBackend> backend_;
-  MessageLoopForUI ui_message_loop_;
+  base::MessageLoopForUI ui_message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
 
@@ -67,7 +66,7 @@ void ShortcutsBackendTest::TearDown() {
 
 void ShortcutsBackendTest::OnShortcutsLoaded() {
   load_notified_ = true;
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }
 
 void ShortcutsBackendTest::OnShortcutsChanged() {
@@ -75,11 +74,12 @@ void ShortcutsBackendTest::OnShortcutsChanged() {
 }
 
 void ShortcutsBackendTest::InitBackend() {
-  ShortcutsBackend* backend = ShortcutsBackendFactory::GetForProfile(&profile_);
+  ShortcutsBackend* backend =
+      ShortcutsBackendFactory::GetForProfile(&profile_).get();
   ASSERT_TRUE(backend);
   ASSERT_FALSE(load_notified_);
   ASSERT_FALSE(backend_->initialized());
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   EXPECT_TRUE(load_notified_);
   EXPECT_TRUE(backend_->initialized());
 }

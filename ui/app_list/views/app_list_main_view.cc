@@ -6,7 +6,9 @@
 
 #include <algorithm>
 
-#include "base/string_util.h"
+#include "base/callback.h"
+#include "base/files/file_path.h"
+#include "base/strings/string_util.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/app_list_model.h"
@@ -60,8 +62,8 @@ class AppListMainView::IconLoader : public AppListItemModelObserver {
   }
   virtual void ItemTitleChanged() OVERRIDE {}
   virtual void ItemHighlightedChanged() OVERRIDE {}
-  virtual void ItemIsInstallingChanged() OVERRIDE {};
-  virtual void ItemPercentDownloadedChanged() OVERRIDE {};
+  virtual void ItemIsInstallingChanged() OVERRIDE {}
+  virtual void ItemPercentDownloadedChanged() OVERRIDE {}
 
   AppListMainView* owner_;
   AppListItemModel* item_;
@@ -134,6 +136,11 @@ void AppListMainView::Prerender() {
   contents_view_->Prerender();
 }
 
+void AppListMainView::SetDragAndDropHostOfCurrentAppList(
+    app_list::ApplicationDragAndDropHost* drag_and_drop_host) {
+  contents_view_->SetDragAndDropHostOfCurrentAppList(drag_and_drop_host);
+}
+
 void AppListMainView::PreloadIcons(PaginationModel* pagination_model,
                                    views::View* anchor) {
   ui::ScaleFactor scale_factor = ui::SCALE_FACTOR_100P;
@@ -183,8 +190,18 @@ void AppListMainView::ActivateApp(AppListItemModel* item, int event_flags) {
     delegate_->ActivateAppListItem(item, event_flags);
 }
 
+void AppListMainView::GetShortcutPathForApp(
+    const std::string& app_id,
+    const base::Callback<void(const base::FilePath&)>& callback) {
+  if (delegate_) {
+    delegate_->GetShortcutPathForApp(app_id, callback);
+    return;
+  }
+  callback.Run(base::FilePath());
+}
+
 void AppListMainView::QueryChanged(SearchBoxView* sender) {
-  string16 query;
+  base::string16 query;
   TrimWhitespace(model_->search_box()->text(), TRIM_ALL, &query);
   bool should_show_search = !query.empty();
   contents_view_->ShowSearchResults(should_show_search);
@@ -197,12 +214,12 @@ void AppListMainView::QueryChanged(SearchBoxView* sender) {
   }
 }
 
-void AppListMainView::OpenResult(const SearchResult& result, int event_flags) {
+void AppListMainView::OpenResult(SearchResult* result, int event_flags) {
   if (delegate_)
     delegate_->OpenSearchResult(result, event_flags);
 }
 
-void AppListMainView::InvokeResultAction(const SearchResult& result,
+void AppListMainView::InvokeResultAction(SearchResult* result,
                                          int action_index,
                                          int event_flags) {
   if (delegate_)

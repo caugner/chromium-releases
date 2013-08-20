@@ -13,12 +13,14 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -156,6 +158,8 @@ ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
                  content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
                  content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
+                 content::Source<Profile>(original_profile));
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                  content::Source<Profile>(profile));
   if (profile->IsOffTheRecord()) {
@@ -216,7 +220,6 @@ void ExtensionProcessManager::EnsureBrowserWhenRequired(
 #endif
   }
 }
-
 
 ExtensionHost* ExtensionProcessManager::CreateViewHost(
     const Extension* extension,
@@ -428,7 +431,7 @@ int ExtensionProcessManager::DecrementLazyKeepaliveCount(
   int& count = background_page_data_[extension->id()].lazy_keepalive_count;
   DCHECK_GT(count, 0);
   if (--count == 0) {
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ExtensionProcessManager::OnLazyBackgroundPageIdle,
                    weak_ptr_factory_.GetWeakPtr(), extension->id(),
@@ -491,7 +494,7 @@ void ExtensionProcessManager::OnShouldSuspendAck(
 void ExtensionProcessManager::OnSuspendAck(const std::string& extension_id) {
   background_page_data_[extension_id].is_closing = true;
   int sequence_id = background_page_data_[extension_id].close_sequence_id;
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ExtensionProcessManager::CloseLazyBackgroundPageNow,
                  weak_ptr_factory_.GetWeakPtr(), extension_id, sequence_id),
@@ -563,7 +566,8 @@ void ExtensionProcessManager::Observe(
       CreateBackgroundHostsForProfileStartup();
       break;
     }
-    case chrome::NOTIFICATION_EXTENSIONS_READY: {
+    case chrome::NOTIFICATION_EXTENSIONS_READY:
+    case chrome::NOTIFICATION_PROFILE_CREATED: {
       // Don't load background hosts now if the loading should be deferred.
       // Instead they will be loaded when a browser window for this profile
       // (or an incognito profile from this profile) is ready.
@@ -576,7 +580,8 @@ void ExtensionProcessManager::Observe(
 
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
       Profile* profile = content::Source<Profile>(source).ptr();
-      ExtensionService* service = profile->GetExtensionService();
+      ExtensionService* service =
+          extensions::ExtensionSystem::Get(profile)->extension_service();
       if (service->is_ready()) {
         const Extension* extension =
             content::Details<const Extension>(details).ptr();
@@ -697,16 +702,25 @@ void ExtensionProcessManager::CreateBackgroundHostsForProfileStartup() {
   ExtensionService* service = GetProfile()->GetExtensionService();
   for (ExtensionSet::const_iterator extension = service->extensions()->begin();
        extension != service->extensions()->end(); ++extension) {
-    CreateBackgroundHostForExtensionLoad(this, *extension);
+    CreateBackgroundHostForExtensionLoad(this, extension->get());
 
     extensions::RuntimeEventRouter::DispatchOnStartupEvent(
         GetProfile(), (*extension)->id());
   }
 
   // Background pages should only be loaded once. To prevent any further loads
-  // ocurring the notification listener is removed.
+  // occurring, we remove the notification listeners.
+  Profile* original_profile = GetProfile()->GetOriginalProfile();
   registrar_.Remove(this, chrome::NOTIFICATION_BROWSER_WINDOW_READY,
                     content::NotificationService::AllSources());
+  if (registrar_.IsRegistered(this, chrome::NOTIFICATION_PROFILE_CREATED,
+                              content::Source<Profile>(original_profile)))
+    registrar_.Remove(this, chrome::NOTIFICATION_PROFILE_CREATED,
+                      content::Source<Profile>(original_profile));
+  if (registrar_.IsRegistered(this, chrome::NOTIFICATION_EXTENSIONS_READY,
+                              content::Source<Profile>(original_profile)))
+    registrar_.Remove(this, chrome::NOTIFICATION_EXTENSIONS_READY,
+                      content::Source<Profile>(original_profile));
 }
 
 Profile* ExtensionProcessManager::GetProfile() const {
@@ -762,6 +776,12 @@ void ExtensionProcessManager::ClearBackgroundPageData(
 }
 
 bool ExtensionProcessManager::DeferLoadingBackgroundHosts() const {
+  // The profile may not be valid yet if it is still being initialized.
+  // In that case, defer loading, since it depends on an initialized profile.
+  // http://crbug.com/222473
+  if (!g_browser_process->profile_manager()->IsValidProfile(GetProfile()))
+    return true;
+
 #if defined(OS_ANDROID)
   return false;
 #else
@@ -786,6 +806,8 @@ IncognitoExtensionProcessManager::IncognitoExtensionProcessManager(
   // manager need only worry about the split mode extensions, which is handled
   // in the NOTIFICATION_BROWSER_WINDOW_READY notification handler.
   registrar_.Remove(this, chrome::NOTIFICATION_EXTENSIONS_READY,
+                    content::Source<Profile>(profile->GetOriginalProfile()));
+  registrar_.Remove(this, chrome::NOTIFICATION_PROFILE_CREATED,
                     content::Source<Profile>(profile->GetOriginalProfile()));
 }
 

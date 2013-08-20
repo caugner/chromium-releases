@@ -25,6 +25,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/cookies.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/common/error_utils.h"
@@ -81,8 +82,8 @@ void CookiesEventRouter::Observe(
 void CookiesEventRouter::CookieChanged(
     Profile* profile,
     ChromeCookieDetails* details) {
-  scoped_ptr<ListValue> args(new ListValue());
-  DictionaryValue* dict = new DictionaryValue();
+  scoped_ptr<base::ListValue> args(new base::ListValue());
+  base::DictionaryValue* dict = new base::DictionaryValue();
   dict->SetBoolean(keys::kRemovedKey, details->removed);
 
   scoped_ptr<Cookie> cookie(
@@ -128,7 +129,7 @@ void CookiesEventRouter::CookieChanged(
 void CookiesEventRouter::DispatchEvent(
     Profile* profile,
     const std::string& event_name,
-    scoped_ptr<ListValue> event_args,
+    scoped_ptr<base::ListValue> event_args,
     GURL& cookie_domain) {
   EventRouter* router = profile ?
       extensions::ExtensionSystem::Get(profile)->event_router() : NULL;
@@ -149,7 +150,8 @@ bool CookiesFunction::ParseUrl(const std::string& url_string, GURL* url,
     return false;
   }
   // Check against host permissions if needed.
-  if (check_host_permissions && !GetExtension()->HasHostPermission(*url)) {
+  if (check_host_permissions &&
+      !PermissionsData::HasHostPermission(GetExtension(), *url)) {
     error_ = ErrorUtils::FormatErrorMessage(
         keys::kNoHostPermissionsError, url->spec());
     return false;
@@ -509,13 +511,13 @@ void CookiesRemoveFunction::RespondOnUIThread() {
 bool CookiesGetAllCookieStoresFunction::RunImpl() {
   Profile* original_profile = profile();
   DCHECK(original_profile);
-  scoped_ptr<ListValue> original_tab_ids(new ListValue());
+  scoped_ptr<base::ListValue> original_tab_ids(new base::ListValue());
   Profile* incognito_profile = NULL;
-  scoped_ptr<ListValue> incognito_tab_ids;
+  scoped_ptr<base::ListValue> incognito_tab_ids;
   if (include_incognito() && profile()->HasOffTheRecordProfile()) {
     incognito_profile = profile()->GetOffTheRecordProfile();
     if (incognito_profile)
-      incognito_tab_ids.reset(new ListValue());
+      incognito_tab_ids.reset(new base::ListValue());
   }
   DCHECK(original_profile != incognito_profile);
 

@@ -6,65 +6,39 @@
 #define CHROME_BROWSER_SYNC_FILE_SYSTEM_LOCAL_SYNC_OPERATION_RESOLVER_H_
 
 #include "base/gtest_prod_util.h"
-#include "webkit/fileapi/syncable/file_change.h"
-#include "webkit/fileapi/syncable/sync_file_type.h"
+#include "chrome/browser/sync_file_system/sync_operation_type.h"
+#include "webkit/browser/fileapi/syncable/file_change.h"
+#include "webkit/browser/fileapi/syncable/sync_file_type.h"
 
 namespace sync_file_system {
 
 class DriveMetadata;
 class FileChange;
 
-enum LocalSyncOperationType {
-  LOCAL_SYNC_OPERATION_ADD_FILE,
-  LOCAL_SYNC_OPERATION_ADD_DIRECTORY,
-  LOCAL_SYNC_OPERATION_UPDATE_FILE,
-  LOCAL_SYNC_OPERATION_DELETE_FILE,
-  LOCAL_SYNC_OPERATION_DELETE_DIRECTORY,
-  LOCAL_SYNC_OPERATION_NONE,
-  LOCAL_SYNC_OPERATION_CONFLICT,
-  LOCAL_SYNC_OPERATION_RESOLVE_TO_LOCAL,
-  LOCAL_SYNC_OPERATION_RESOLVE_TO_REMOTE,
-  LOCAL_SYNC_OPERATION_DELETE_METADATA,
-  LOCAL_SYNC_OPERATION_FAIL,
-};
-
 class LocalSyncOperationResolver {
  public:
-  static LocalSyncOperationType Resolve(
+  // |remote_file_change| is non-null when we have a remote change for the file,
+  // and |drive_metadata| is also non-null when we have metadata.
+  static SyncOperationType Resolve(
       const FileChange& local_file_change,
-      bool has_remote_change,
-      const FileChange& remote_file_change,
-      DriveMetadata* drive_metadata);
+      const FileChange* remote_file_change,
+      const DriveMetadata* drive_metadata);
 
  private:
-  static LocalSyncOperationType ResolveForAddOrUpdateFile(
-      bool has_remote_change,
-      const FileChange& remote_file_change,
+  static SyncOperationType ResolveForAddOrUpdateFile(
+      const FileChange* remote_file_change,
       SyncFileType remote_file_type_in_metadata);
-  static LocalSyncOperationType ResolveForAddOrUpdateFileInConflict(
-      bool has_remote_change,
-      const FileChange& remote_file_change);
-  static LocalSyncOperationType ResolveForAddDirectory(
-      bool has_remote_change,
-      const FileChange& remote_file_change,
+  static SyncOperationType ResolveForAddOrUpdateFileInConflict(
+      const FileChange* remote_file_change);
+  static SyncOperationType ResolveForAddDirectory(
+      const FileChange* remote_file_change,
       SyncFileType remote_file_type_in_metadata);
-  static LocalSyncOperationType ResolveForAddDirectoryInConflict(
-      bool has_remote_change,
-      const FileChange& remote_file_change);
-  static LocalSyncOperationType ResolveForDeleteFile(
-      bool has_remote_change,
-      const FileChange& remote_file_change,
+  static SyncOperationType ResolveForAddDirectoryInConflict();
+  static SyncOperationType ResolveForDelete(
+      const FileChange* remote_file_change,
       SyncFileType remote_file_type_in_metadata);
-  static LocalSyncOperationType ResolveForDeleteFileInConflict(
-      bool has_remote_change,
-      const FileChange& remote_file_change);
-  static LocalSyncOperationType ResolveForDeleteDirectory(
-      bool has_remote_change,
-      const FileChange& remote_file_change,
-      SyncFileType remote_file_type_in_metadata);
-  static LocalSyncOperationType ResolveForDeleteDirectoryInConflict(
-      bool has_remote_change,
-      const FileChange& remote_file_change);
+  static SyncOperationType ResolveForDeleteInConflict(
+      const FileChange* remote_file_change);
 
   FRIEND_TEST_ALL_PREFIXES(LocalSyncOperationResolverTest,
                            ResolveForAddOrUpdateFile);
@@ -75,13 +49,9 @@ class LocalSyncOperationResolver {
   FRIEND_TEST_ALL_PREFIXES(LocalSyncOperationResolverTest,
                            ResolveForAddDirectoryInConflict);
   FRIEND_TEST_ALL_PREFIXES(LocalSyncOperationResolverTest,
-                           ResolveForDeleteFile);
+                           ResolveForDelete);
   FRIEND_TEST_ALL_PREFIXES(LocalSyncOperationResolverTest,
-                           ResolveForDeleteFileInConflict);
-  FRIEND_TEST_ALL_PREFIXES(LocalSyncOperationResolverTest,
-                           ResolveForDeleteDirectory);
-  FRIEND_TEST_ALL_PREFIXES(LocalSyncOperationResolverTest,
-                           ResolveForDeleteDirectoryInConflict);
+                           ResolveForDeleteInConflict);
 };
 
 }  // namespace sync_file_system

@@ -4,7 +4,7 @@
 
 #include <cstring>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_image_data.h"
@@ -166,13 +166,9 @@ TEST_F(PDFResourceTest, GetResourceImageForScale) {
       { 5, 10 },
       20,
   };
-  std::string image_data_desc;
-  image_data_desc.resize(sizeof(PP_ImageDataDesc));
-  memcpy(&image_data_desc[0], &expected_desc, sizeof(PP_ImageDataDesc));
   SerializedHandle serialized_handle(SerializedHandle::SHARED_MEMORY);
   PpapiPluginMsg_PDF_GetResourceImageReply reply_msg(expected_resource,
-                                                     image_data_desc,
-                                                     0);
+                                                     expected_desc);
   ResourceSyncCallHandler handler(
       &sink(),
       PpapiHostMsg_PDF_GetResourceImage::ID,

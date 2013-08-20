@@ -10,6 +10,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -81,6 +82,12 @@ void Profile::RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kSafeBrowsingProceedAnywayDisabled,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+#if defined(ENABLE_GOOGLE_NOW)
+  registry->RegisterBooleanPref(
+      prefs::kGoogleGeolocationAccessEnabled,
+      false,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+#endif
   registry->RegisterBooleanPref(
       prefs::kDisableExtensions,
       false,
@@ -167,11 +174,15 @@ bool Profile::IsNewProfile() {
   // TODO(dconnelly): revisit this when crbug.com/22142 (unifying the profile
   // import code) is fixed.
   return GetOriginalProfile()->GetPrefs()->GetInitializationStatus() ==
-      PrefService::INITIALIZATION_STATUS_CREATED_NEW_PREF_STORE ||
-          first_run::DidPerformProfileImport(NULL);
+      PrefService::INITIALIZATION_STATUS_CREATED_NEW_PREF_STORE;
 }
 
 bool Profile::IsSyncAccessible() {
+  if (ProfileSyncServiceFactory::HasProfileSyncService(this))
+    return !ProfileSyncServiceFactory::GetForProfile(this)->IsManaged();
+
+  // No ProfileSyncService created yet - we don't want to create one, so just
+  // infer the accessible state by looking at prefs/command line flags.
   browser_sync::SyncPrefs prefs(GetPrefs());
   return ProfileSyncService::IsSyncEnabled() && !prefs.IsManaged();
 }

@@ -4,18 +4,16 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/storage/settings_frontend.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "components/autofill/browser/webdata/autofill_webdata_service.h"
-#if !defined(OS_ANDROID)
-#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
-#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
-#endif
+#include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
@@ -60,8 +58,23 @@
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/syncable_service.h"
+
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_user_registration_service.h"
+#include "chrome/browser/managed_mode/managed_user_registration_service_factory.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/policy/managed_mode_policy_provider.h"
+#include "chrome/browser/policy/profile_policy_connector.h"
+#include "chrome/browser/policy/profile_policy_connector_factory.h"
+#endif
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
+#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
+#endif
 
 using browser_sync::AutofillDataTypeController;
 using browser_sync::AutofillProfileDataTypeController;
@@ -175,7 +188,19 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
         new SessionDataTypeController(this, profile_, pss));
   }
 
+  // Migrate sync flags that should be prefs.
+  // TODO(pastarmovj): Remove this code once enough time has passed to not need
+  // to migrate anymore.
+  about_flags::PrefServiceFlagsStorage flags_storage(
+      g_browser_process->local_state());
   if (command_line_->HasSwitch(switches::kEnableSyncFavicons)) {
+    profile_->GetPrefs()->SetBoolean(prefs::kSyncFaviconsEnabled, true);
+    about_flags::SetExperimentEnabled(&flags_storage,
+                                      syncer::kFaviconSyncFlag,
+                                      false);
+  }
+
+  if (profile_->GetPrefs()->GetBoolean(prefs::kSyncFaviconsEnabled)) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(syncer::FAVICON_IMAGES,
                                  this,
@@ -274,20 +299,35 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
   }
 #endif
 
+#if defined(ENABLE_MANAGED_USERS)
+  if (ManagedUserService::AreManagedUsersEnabled()) {
+    if (ManagedUserService::ProfileIsManaged(profile_)) {
+      pss->RegisterDataTypeController(
+          new UIDataTypeController(
+              syncer::MANAGED_USER_SETTINGS, this, profile_, pss));
+    } else {
+      pss->RegisterDataTypeController(
+          new UIDataTypeController(
+              syncer::MANAGED_USERS, this, profile_, pss));
+    }
+  }
+#endif
 }
 
 DataTypeManager* ProfileSyncComponentsFactoryImpl::CreateDataTypeManager(
     const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
         debug_info_listener,
-    SyncBackendHost* backend,
     const DataTypeController::TypeMap* controllers,
+    const browser_sync::DataTypeEncryptionHandler* encryption_handler,
+    SyncBackendHost* backend,
     DataTypeManagerObserver* observer,
-    const FailedDatatypesHandler* failed_datatypes_handler) {
+    browser_sync::FailedDataTypesHandler* failed_data_types_handler) {
   return new DataTypeManagerImpl(debug_info_listener,
-                                 backend,
                                  controllers,
+                                 encryption_handler,
+                                 backend,
                                  observer,
-                                 failed_datatypes_handler);
+                                 failed_data_types_handler);
 }
 
 browser_sync::GenericChangeProcessor*
@@ -322,14 +362,14 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
           syncer::PRIORITY_PREFERENCES)->AsWeakPtr();
     case syncer::AUTOFILL:
     case syncer::AUTOFILL_PROFILE: {
-      if (!web_data_service_)
+      if (!web_data_service_.get())
         return base::WeakPtr<syncer::SyncableService>();
       if (type == syncer::AUTOFILL) {
         return AutocompleteSyncableService::FromWebDataService(
-            web_data_service_)->AsWeakPtr();
+            web_data_service_.get())->AsWeakPtr();
       } else {
         return AutofillProfileSyncableService::FromWebDataService(
-            web_data_service_)->AsWeakPtr();
+            web_data_service_.get())->AsWeakPtr();
       }
     }
     case syncer::APPS:
@@ -368,6 +408,14 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
     case syncer::FAVICON_TRACKING:
       return ProfileSyncServiceFactory::GetForProfile(profile_)->
           GetSessionModelAssociator()->GetFaviconCache()->AsWeakPtr();
+#if defined(ENABLE_MANAGED_USERS)
+    case syncer::MANAGED_USER_SETTINGS:
+      return policy::ProfilePolicyConnectorFactory::GetForProfile(profile_)->
+          managed_mode_policy_provider()->AsWeakPtr();
+    case syncer::MANAGED_USERS:
+      return ManagedUserRegistrationServiceFactory::GetForProfile(profile_)->
+          AsWeakPtr();
+#endif
     default:
       // The following datatypes still need to be transitioned to the
       // syncer::SyncableService API:

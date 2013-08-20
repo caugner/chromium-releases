@@ -17,8 +17,8 @@
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/iat_patch_function.h"
 #include "base/win/metro.h"
 #include "base/win/scoped_hdc.h"
@@ -38,7 +38,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/missing_system_file_dialog_win.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/user_metrics.h"
@@ -132,19 +131,17 @@ bool IsDrag(const POINT& origin, const POINT& current) {
 }
 
 // Copies |selected_text| as text to the primary clipboard.
-void DoCopyText(const string16& selected_text, Profile* profile) {
+void DoCopyText(const string16& selected_text) {
   ui::ScopedClipboardWriter scw(ui::Clipboard::GetForCurrentThread(),
-                                ui::Clipboard::BUFFER_STANDARD,
-                                content::BrowserContext::
-                                    GetMarkerForOffTheRecordContext(profile));
+                                ui::Clipboard::BUFFER_STANDARD);
   scw.WriteText(selected_text);
 }
 
 // Writes |url| and |text| to the clipboard as a well-formed URL.
-void DoCopyURL(const GURL& url, const string16& text, Profile* profile) {
+void DoCopyURL(const GURL& url, const string16& text) {
   BookmarkNodeData data;
   data.ReadFromTuple(url, text);
-  data.WriteToClipboard(profile);
+  data.WriteToClipboard();
 }
 
 }  // namespace
@@ -463,15 +460,16 @@ HMODULE OmniboxViewWin::loaded_library_module_ = NULL;
 
 OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
                                ToolbarModel* toolbar_model,
-                               LocationBarView* parent_view,
+                               LocationBarView* location_bar,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
-                               views::View* location_bar)
-    : OmniboxView(parent_view->profile(), controller, toolbar_model,
-          command_updater),
-      popup_view_(OmniboxPopupContentsView::Create(
-          parent_view->font(), this, model(), location_bar)),
-      parent_view_(parent_view),
+                               const gfx::Font& font,
+                               int font_y_offset)
+    : OmniboxView(location_bar->profile(), controller, toolbar_model,
+                  command_updater),
+      popup_view_(
+          OmniboxPopupContentsView::Create(font, this, model(), location_bar)),
+      location_bar_(location_bar),
       popup_window_mode_(popup_window_mode),
       force_hidden_(false),
       tracking_click_(),
@@ -480,13 +478,14 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
       can_discard_mousemove_(false),
       ignore_ime_messages_(false),
       delete_at_end_pressed_(false),
-      font_(parent_view->font()),
+      font_(font),
+      font_y_adjustment_(font_y_offset),
       possible_drag_(false),
       in_drag_(false),
       initiated_drag_(false),
       drop_highlight_position_(-1),
       ime_candidate_window_open_(false),
-      background_color_(skia::SkColorToCOLORREF(parent_view->GetColor(
+      background_color_(skia::SkColorToCOLORREF(location_bar->GetColor(
           ToolbarModel::NONE, LocationBarView::BACKGROUND))),
       security_level_(ToolbarModel::NONE),
       text_object_model_(NULL),
@@ -494,13 +493,8 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
           new ui::TSFEventRouter(this) : NULL) {
   if (!loaded_library_module_)
     loaded_library_module_ = LoadLibrary(kRichEditDLLName);
-
-  if (!loaded_library_module_) {
-    // RichEdit DLL is not available. This is a rare error.
-    MissingSystemFileDialog::ShowDialog(
-        GetAncestor(location_bar->GetWidget()->GetNativeView(), GA_ROOT),
-        parent_view_->profile());
-  }
+  // RichEdit should be available; rare exceptions should use the Views omnibox.
+  DCHECK(loaded_library_module_);
 
   saved_selection_for_focus_change_.cpMin = -1;
 
@@ -509,7 +503,8 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
   Create(location_bar->GetWidget()->GetNativeView(), 0, 0, 0,
          l10n_util::GetExtendedStyles());
   SetReadOnly(popup_window_mode_);
-  SetFont(font_.GetNativeFont());
+  gfx::NativeFont native_font(font_.GetNativeFont());
+  SetFont(native_font);
 
   // IMF_DUALFONT (on by default) is supposed to use one font for ASCII text
   // and a different one for Asian text.  In some cases, ASCII characters may
@@ -532,7 +527,7 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
 
   // Get the metrics for the font.
   base::win::ScopedGetDC screen_dc(NULL);
-  base::win::ScopedSelectObject font_in_dc(screen_dc, font_.GetNativeFont());
+  base::win::ScopedSelectObject font_in_dc(screen_dc, native_font);
   TEXTMETRIC tm = {0};
   GetTextMetrics(screen_dc, &tm);
   int cap_height = font_.GetBaseline() - tm.tmInternalLeading;
@@ -542,12 +537,6 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
   const float kXHeightRatio = 0.7f;
   font_x_height_ = static_cast<int>(
       (static_cast<float>(cap_height) * kXHeightRatio) + 0.5);
-
-  // We set font_y_adjustment_ so that the ascender of the font gets
-  // centered on the available height of the view.
-  font_y_adjustment_ =
-      (parent_view->GetInternalHeight(true) - cap_height) / 2 -
-      tm.tmInternalLeading;
 
   // Get the number of twips per pixel, which we need below to offset our text
   // by the desired number of pixels.
@@ -591,7 +580,7 @@ OmniboxViewWin::~OmniboxViewWin() {
 }
 
 views::View* OmniboxViewWin::parent_view() const {
-  return parent_view_;
+  return location_bar_;
 }
 
 void OmniboxViewWin::SaveStateToTab(WebContents* tab) {
@@ -1039,7 +1028,7 @@ gfx::NativeView OmniboxViewWin::GetRelativeWindowForPopup() const {
 }
 
 void OmniboxViewWin::SetInstantSuggestion(const string16& suggestion) {
-  parent_view_->SetInstantSuggestion(suggestion);
+  location_bar_->SetInstantSuggestion(suggestion);
 }
 
 int OmniboxViewWin::TextWidth() const {
@@ -1047,7 +1036,7 @@ int OmniboxViewWin::TextWidth() const {
 }
 
 string16 OmniboxViewWin::GetInstantSuggestion() const {
-  return parent_view_->GetInstantSuggestion();
+  return location_bar_->GetInstantSuggestion();
 }
 
 bool OmniboxViewWin::IsImeComposing() const {
@@ -1081,10 +1070,6 @@ views::View* OmniboxViewWin::AddToView(views::View* parent) {
 
 int OmniboxViewWin::OnPerformDrop(const ui::DropTargetEvent& event) {
   return OnPerformDropImpl(event, false);
-}
-
-gfx::Font OmniboxViewWin::GetFont() {
-  return font_;
 }
 
 int OmniboxViewWin::OnPerformDropImpl(const ui::DropTargetEvent& event,
@@ -1125,9 +1110,7 @@ int OmniboxViewWin::OnPerformDropImpl(const ui::DropTargetEvent& event,
 }
 
 void OmniboxViewWin::CopyURL() {
-  DoCopyURL(toolbar_model()->GetURL(),
-            toolbar_model()->GetText(false),
-            model()->profile());
+  DoCopyURL(toolbar_model()->GetURL(), toolbar_model()->GetText(false));
 }
 
 bool OmniboxViewWin::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
@@ -1199,9 +1182,8 @@ bool OmniboxViewWin::IsCommandIdEnabled(int command_id) const {
       return !!CanCopy();
     case IDC_COPY_URL:
       return !!CanCopy() &&
-             !model()->user_input_in_progress() &&
-             (toolbar_model()->GetSearchTermsType() !=
-                 ToolbarModel::NO_SEARCH_TERMS);
+          !model()->user_input_in_progress() &&
+          toolbar_model()->WouldReplaceSearchURLWithSearchTerms();
     case IDC_PASTE:
       return !!CanPaste();
     case IDS_PASTE_AND_GO:
@@ -1219,7 +1201,7 @@ bool OmniboxViewWin::IsCommandIdEnabled(int command_id) const {
 bool OmniboxViewWin::GetAcceleratorForCommandId(
     int command_id,
     ui::Accelerator* accelerator) {
-  return parent_view_->GetWidget()->GetAccelerator(command_id, accelerator);
+  return location_bar_->GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
 bool OmniboxViewWin::IsItemForCommandIdDynamic(int command_id) const {
@@ -1439,7 +1421,7 @@ void OmniboxViewWin::OnContextMenu(HWND window, const CPoint& point) {
 
   ignore_result(context_menu_runner_->RunMenuAt(native_view_host_->GetWidget(),
       NULL, gfx::Rect(location, gfx::Size()), views::MenuItemView::TOPLEFT,
-      views::MenuRunner::HAS_MNEMONICS));
+      ui::MENU_SOURCE_MOUSE, views::MenuRunner::HAS_MNEMONICS));
 }
 
 void OmniboxViewWin::OnCopy() {
@@ -1455,9 +1437,9 @@ void OmniboxViewWin::OnCopy() {
   // the smaller value.
   model()->AdjustTextForCopy(sel.cpMin, IsSelectAll(), &text, &url, &write_url);
   if (write_url)
-    DoCopyURL(url, text, model()->profile());
+    DoCopyURL(url, text);
   else
-    DoCopyText(text, model()->profile());
+    DoCopyText(text);
 }
 
 LRESULT OmniboxViewWin::OnCreate(const CREATESTRUCTW* /*create_struct*/) {
@@ -2035,11 +2017,11 @@ void OmniboxViewWin::OnRButtonUp(UINT /*keys*/, const CPoint& point) {
 }
 
 void OmniboxViewWin::OnSetFocus(HWND focus_wnd) {
-  views::FocusManager* focus_manager = parent_view_->GetFocusManager();
+  views::FocusManager* focus_manager = location_bar_->GetFocusManager();
   if (focus_manager) {
     // Notify the FocusManager that the focused view is now the location bar
     // (our parent view).
-    focus_manager->SetFocusedView(parent_view_);
+    focus_manager->SetFocusedView(location_bar_);
   } else {
     NOTREACHED();
   }
@@ -2166,7 +2148,7 @@ bool OmniboxViewWin::OnKeyDownOnlyWritable(TCHAR key,
         GetSel(selection);
         return (selection.cpMin == selection.cpMax) &&
             (selection.cpMin == GetTextLength()) &&
-            model()->CommitSuggestedText(true);
+            model()->CommitSuggestedText();
       }
 
     case VK_RETURN:
@@ -2475,7 +2457,7 @@ void OmniboxViewWin::EmphasizeURLComponents() {
       UTF8ToUTF16(extensions::kExtensionScheme);
   bool grey_base = model()->CurrentTextIsURL() &&
       (host.is_nonempty() || grey_out_url);
-  cf.crTextColor = skia::SkColorToCOLORREF(parent_view_->GetColor(
+  cf.crTextColor = skia::SkColorToCOLORREF(location_bar_->GetColor(
       security_level_,
       grey_base ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT));
   // NOTE: Don't use SetDefaultCharFormat() instead of the below; that sets
@@ -2486,7 +2468,7 @@ void OmniboxViewWin::EmphasizeURLComponents() {
   if (host.is_nonempty() && !grey_out_url) {
     // We've found a host name and we should provide emphasis to host names,
     // so emphasize it.
-    cf.crTextColor = skia::SkColorToCOLORREF(parent_view_->GetColor(
+    cf.crTextColor = skia::SkColorToCOLORREF(location_bar_->GetColor(
         security_level_, LocationBarView::TEXT));
     SetSelection(host.begin, host.end());
     SetSelectionCharFormat(cf);
@@ -2500,7 +2482,7 @@ void OmniboxViewWin::EmphasizeURLComponents() {
       insecure_scheme_component_.begin = scheme.begin;
       insecure_scheme_component_.len = scheme.len;
     }
-    cf.crTextColor = skia::SkColorToCOLORREF(parent_view_->GetColor(
+    cf.crTextColor = skia::SkColorToCOLORREF(location_bar_->GetColor(
         security_level_, LocationBarView::SECURITY_TEXT));
     SetSelection(scheme.begin, scheme.end());
     SetSelectionCharFormat(cf);
@@ -2541,12 +2523,12 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   const SkScalar kStrokeWidthPixels = SkIntToScalar(2);
   const int kAdditionalSpaceOutsideFont =
       static_cast<int>(ceil(kStrokeWidthPixels * 1.5f));
-  const CRect scheme_rect(PosFromChar(insecure_scheme_component_.begin).x,
-                          font_top + font_.GetBaseline() - font_x_height_ -
-                              kAdditionalSpaceOutsideFont,
-                          PosFromChar(insecure_scheme_component_.end()).x,
-                          font_top + font_.GetBaseline() +
-                              kAdditionalSpaceOutsideFont);
+  const int font_ascent = font_.GetBaseline();
+  const CRect scheme_rect(
+      PosFromChar(insecure_scheme_component_.begin).x,
+      font_top + font_ascent - font_x_height_ - kAdditionalSpaceOutsideFont,
+      PosFromChar(insecure_scheme_component_.end()).x,
+      font_top + font_ascent + kAdditionalSpaceOutsideFont);
 
   // Clip to the portion we care about and translate to canvas coordinates
   // (see the canvas creation below) for use later.
@@ -2597,8 +2579,8 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   sk_canvas->save();
   if (selection_rect.isEmpty() ||
       sk_canvas->clipRect(selection_rect, SkRegion::kDifference_Op)) {
-    paint.setColor(parent_view_->GetColor(security_level_,
-                                          LocationBarView::SECURITY_TEXT));
+    paint.setColor(location_bar_->GetColor(security_level_,
+                                           LocationBarView::SECURITY_TEXT));
     sk_canvas->drawLine(start_point.fX, start_point.fY,
                         end_point.fX, end_point.fY, paint);
   }
@@ -2606,8 +2588,8 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
 
   // Draw the selected portion of the stroke.
   if (!selection_rect.isEmpty() && sk_canvas->clipRect(selection_rect)) {
-    paint.setColor(parent_view_->GetColor(security_level_,
-                                          LocationBarView::SELECTED_TEXT));
+    paint.setColor(location_bar_->GetColor(security_level_,
+                                           LocationBarView::SELECTED_TEXT));
     sk_canvas->drawLine(start_point.fX, start_point.fY,
                         end_point.fX, end_point.fY, paint);
   }

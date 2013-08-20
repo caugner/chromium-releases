@@ -4,7 +4,7 @@
 
 #include "ui/views/test/child_modal_window.h"
 
-#include "base/utf_string_conversions.h"  // ASCIIToUTF16
+#include "base/strings/utf_string_conversions.h"  // ASCIIToUTF16
 #include "ui/aura/window.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/background.h"
@@ -186,10 +186,9 @@ void ChildModalParent::Layout() {
   host_->SetBounds(x(), running_y, width(), height() - running_y);
 }
 
-void ChildModalParent::ViewHierarchyChanged(bool is_add,
-                                            View* parent,
-                                            View* child) {
-  if (is_add && child == this) {
+void ChildModalParent::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.child == this) {
     host_->Attach(modal_parent_);
     GetWidget()->GetNativeView()->SetName("Parent");
   }

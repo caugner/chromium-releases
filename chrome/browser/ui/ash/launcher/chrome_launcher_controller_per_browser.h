@@ -13,7 +13,7 @@
 #include "ash/launcher/launcher_delegate.h"
 #include "ash/launcher/launcher_model_observer.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_layout_manager_observer.h"
 #include "ash/shelf/shelf_types.h"
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
@@ -30,7 +30,6 @@
 #include "ui/aura/window_observer.h"
 
 class AppSyncUIState;
-class BaseWindow;
 class Browser;
 class BrowserLauncherItemControllerTest;
 class ExtensionEnableFlow;
@@ -48,6 +47,10 @@ class Window;
 
 namespace content {
 class WebContents;
+}
+
+namespace ui {
+class BaseWindow;
 }
 
 // ChromeLauncherControllerPerBrowser manages the launcher items needed for
@@ -68,7 +71,7 @@ class ChromeLauncherControllerPerBrowser
       public PrefServiceSyncableObserver,
       public AppSyncUIStateObserver,
       public ExtensionEnableFlowDelegate,
-      public ash::internal::ShelfLayoutManager::Observer {
+      public ash::ShelfLayoutManagerObserver {
  public:
   ChromeLauncherControllerPerBrowser(Profile* profile,
                                      ash::LauncherModel* model);
@@ -244,14 +247,12 @@ class ChromeLauncherControllerPerBrowser
 
   // Activates a |window|. If |allow_minimize| is true and the system allows
   // it, the the window will get minimized instead.
-  virtual void ActivateWindowOrMinimizeIfActive(BaseWindow* window,
+  virtual void ActivateWindowOrMinimizeIfActive(ui::BaseWindow* window,
                                                 bool allow_minimize) OVERRIDE;
 
   // ash::LauncherDelegate overrides:
-  virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE;
   virtual void ItemSelected(const ash::LauncherItem& item,
                            const ui::Event& event) OVERRIDE;
-  virtual int GetBrowserShortcutResourceId() OVERRIDE;
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE;
@@ -298,7 +299,7 @@ class ChromeLauncherControllerPerBrowser
   virtual void SetAppImage(const std::string& app_id,
                            const gfx::ImageSkia& image) OVERRIDE;
 
-  // ash::internal::ShelfLayoutManager::Observer overrides:
+  // ash::ShelfLayoutManagerObserver overrides:
   virtual void OnAutoHideBehaviorChanged(
       ash::ShelfAutoHideBehavior new_behavior) OVERRIDE;
 
@@ -368,6 +369,23 @@ class ChromeLauncherControllerPerBrowser
 
   bool HasItemController(ash::LauncherID id) const;
 
+  // Create LauncherItem for Browser Shortcut.
+  ash::LauncherID CreateBrowserShortcutLauncherItem();
+
+  // Update browser shortcut's index.
+  void SetChromeIconIndexToPref(int index);
+
+  // Get browser shortcut's index from pref.
+  int GetChromeIconIndexFromPref() const;
+
+  // Invoked when browser shortcut is clicked.
+  void BrowserShortcutClicked(int event_flags);
+
+  // Move an item internally (ignoring pinned state changes) from |index| to
+  // |target_index|.
+  void MoveItemWithoutPinnedStateChangeNotification(int source_index,
+                                                    int target_index);
+
   ash::LauncherModel* model_;
 
   // Profile used for prefs and loading extensions. This is NOT necessarily the
@@ -401,6 +419,9 @@ class ChromeLauncherControllerPerBrowser
 
   // Launchers that are currently being observed.
   std::set<ash::Launcher*> launchers_;
+
+  // If true, incoming pinned state changes should be ignored.
+  bool ignore_persist_pinned_state_change_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeLauncherControllerPerBrowser);
 };

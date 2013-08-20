@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 #include "ui/views/corewm/native_cursor_manager.h"
@@ -45,6 +45,9 @@ class ASH_EXPORT AshNativeCursorManager
       views::corewm::NativeCursorManagerDelegate* delegate) OVERRIDE;
   virtual void SetVisibility(
       bool visible,
+      views::corewm::NativeCursorManagerDelegate* delegate) OVERRIDE;
+  virtual void SetScale(
+      float scale,
       views::corewm::NativeCursorManagerDelegate* delegate) OVERRIDE;
   virtual void SetMouseEventsEnabled(
       bool enabled,

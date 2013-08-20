@@ -65,6 +65,7 @@ class RdpClientWindow
   // Specifies the endpoint to connect to and passes the event handler pointer
   // to be notified about connection events.
   RdpClientWindow(const net::IPEndPoint& server_endpoint,
+                  const std::string& terminal_id,
                   EventHandler* event_handler);
   ~RdpClientWindow();
 
@@ -76,6 +77,10 @@ class RdpClientWindow
   // Initiates shutdown of the connection. The caller must not delete |this|
   // until it receives OnDisconnected() notification.
   void Disconnect();
+
+  // Emulates pressing Ctrl+Alt+End combination that is translated to Secure
+  // Attention Sequence by the ActiveX control.
+  void InjectSas();
 
  private:
   typedef IDispEventImpl<1, RdpClientWindow,
@@ -132,6 +137,9 @@ class RdpClientWindow
 
   // The endpoint to connect to.
   net::IPEndPoint server_endpoint_;
+
+  // The terminal ID assigned to this connection.
+  std::string terminal_id_;
 
   // Interfaces exposed by the RDP ActiveX control.
   base::win::ScopedComPtr<mstsc::IMsRdpClient> client_;

@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
@@ -129,7 +130,7 @@ class ContactDatabaseTest : public testing::Test {
     message_loop_.Quit();
   }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
 
   // Temporary directory where the database is saved.
@@ -314,8 +315,8 @@ TEST_F(ContactDatabaseTest, FullAndIncrementalUpdates) {
 TEST_F(ContactDatabaseTest, DeleteWhenCorrupt) {
   DestroyDatabase();
   // Overwrite all of the files in the database with a space character.
-  file_util::FileEnumerator enumerator(
-      database_path(), false, file_util::FileEnumerator::FILES);
+  base::FileEnumerator enumerator(
+      database_path(), false, base::FileEnumerator::FILES);
   for (base::FilePath path = enumerator.Next(); !path.empty();
        path = enumerator.Next()) {
     file_util::WriteFile(path, " ", 1);

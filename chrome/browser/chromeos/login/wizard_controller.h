@@ -29,6 +29,9 @@ namespace chromeos {
 class EnrollmentScreen;
 class ErrorScreen;
 class EulaScreen;
+class KioskAutolaunchScreen;
+class KioskEnableScreen;
+class LocallyManagedUserCreationScreen;
 class LoginDisplayHost;
 class NetworkScreen;
 class OobeDisplay;
@@ -38,7 +41,6 @@ class UpdateScreen;
 class UserImageScreen;
 class WizardScreen;
 class WrongHWIDScreen;
-class LocallyManagedUserCreationScreen;
 
 // Class that manages control flow between wizard screens. Wizard controller
 // interacts with screen controllers to move the user between screens.
@@ -115,6 +117,8 @@ class WizardController : public ScreenObserver {
   EulaScreen* GetEulaScreen();
   EnrollmentScreen* GetEnrollmentScreen();
   ResetScreen* GetResetScreen();
+  KioskAutolaunchScreen* GetKioskAutolaunchScreen();
+  KioskEnableScreen* GetKioskEnableScreen();
   TermsOfServiceScreen* GetTermsOfServiceScreen();
   WrongHWIDScreen* GetWrongHWIDScreen();
   LocallyManagedUserCreationScreen* GetLocallyManagedUserCreationScreen();
@@ -135,6 +139,8 @@ class WizardController : public ScreenObserver {
   static const char kEulaScreenName[];
   static const char kEnrollmentScreenName[];
   static const char kResetScreenName[];
+  static const char kKioskEnableScreenName[];
+  static const char kKioskAutolaunchScreenName[];
   static const char kErrorScreenName[];
   static const char kTermsOfServiceScreenName[];
   static const char kWrongHWIDScreenName[];
@@ -148,6 +154,8 @@ class WizardController : public ScreenObserver {
   void ShowEulaScreen();
   void ShowEnrollmentScreen();
   void ShowResetScreen();
+  void ShowKioskAutolaunchScreen();
+  void ShowKioskEnableScreen();
   void ShowTermsOfServiceScreen();
   void ShowWrongHWIDScreen();
   void ShowLocallyManagedUserCreationScreen();
@@ -171,6 +179,9 @@ class WizardController : public ScreenObserver {
   void OnEnrollmentDone();
   void OnAutoEnrollmentDone();
   void OnResetCanceled();
+  void OnKioskAutolaunchCanceled();
+  void OnKioskAutolaunchConfirmed();
+  void OnKioskEnableCompleted();
   void OnWrongHWIDWarningSkipped();
   void OnOOBECompleted();
   void OnTermsOfServiceDeclined();
@@ -216,6 +227,15 @@ class WizardController : public ScreenObserver {
   // Logs in the specified user via default login screen.
   void Login(const std::string& username, const std::string& password);
 
+  // Launched kiosk app configured for auto-launch.
+  void AutoLaunchKioskApp();
+
+  // Checks whether OOBE should start enrollment automatically.
+  bool ShouldAutoStartEnrollment() const;
+
+  // Checks whether the user is allowed to exit enrollment.
+  bool CanExitEnrollment() const;
+
   // Whether to skip any screens that may normally be shown after login
   // (registration, Terms of Service, user image selection).
   static bool skip_post_login_screens_;
@@ -228,6 +248,8 @@ class WizardController : public ScreenObserver {
   scoped_ptr<UserImageScreen> user_image_screen_;
   scoped_ptr<EulaScreen> eula_screen_;
   scoped_ptr<ResetScreen> reset_screen_;
+  scoped_ptr<KioskAutolaunchScreen> autolaunch_screen_;
+  scoped_ptr<KioskEnableScreen> kiosk_enable_screen_;
   scoped_ptr<EnrollmentScreen> enrollment_screen_;
   scoped_ptr<ErrorScreen> error_screen_;
   scoped_ptr<TermsOfServiceScreen> terms_of_service_screen_;
@@ -285,12 +307,6 @@ class WizardController : public ScreenObserver {
   // Indicates that once image selection screen finishes we should return to
   // a previous screen instead of proceeding with usual flow.
   bool user_image_screen_return_to_previous_hack_;
-
-  // True if OOBE should force enterprise enrollment flow.
-  bool force_enrollment_;
-
-  // True if OOBE should prevent exiting enterprise enrollment.
-  bool can_exit_enrollment_;
 
   FRIEND_TEST_ALL_PREFIXES(EnrollmentScreenTest, TestCancel);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, Accelerators);

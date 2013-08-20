@@ -7,12 +7,16 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
-#include "base/stringprintf.h"
+#include "base/message_loop/message_loop_proxy.h"
+#include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
+#include "chrome/test/chromedriver/alert_commands.h"
+#include "chrome/test/chromedriver/chrome/adb_impl.h"
+#include "chrome/test/chromedriver/chrome/device_manager.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/version.h"
+#include "chrome/test/chromedriver/chrome_launcher.h"
 #include "chrome/test/chromedriver/command_names.h"
 #include "chrome/test/chromedriver/commands.h"
 #include "chrome/test/chromedriver/element_commands.h"
@@ -33,8 +37,8 @@ const char kSessionStorage[] = "sessionStorage";
 
 }  // namespace
 
-CommandExecutorImpl::CommandExecutorImpl()
-    : io_thread_("ChromeDriver IO") {}
+CommandExecutorImpl::CommandExecutorImpl(Log* log)
+    : log_(log), io_thread_("ChromeDriver IO") {}
 
 CommandExecutorImpl::~CommandExecutorImpl() {}
 
@@ -42,11 +46,13 @@ void CommandExecutorImpl::Init() {
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
 #endif
-  base::Thread::Options options(MessageLoop::TYPE_IO, 0);
+  base::Thread::Options options(base::MessageLoop::TYPE_IO, 0);
   CHECK(io_thread_.StartWithOptions(options));
   context_getter_ = new URLRequestContextGetter(
       io_thread_.message_loop_proxy());
-  socket_factory_ = CreateSyncWebSocketFactory(context_getter_);
+  socket_factory_ = CreateSyncWebSocketFactory(context_getter_.get());
+  adb_.reset(new AdbImpl(io_thread_.message_loop_proxy(), log_));
+  device_manager_.reset(new DeviceManager(adb_.get()));
 
   // Commands which require an element id.
   typedef std::map<std::string, ElementCommand> ElementCommandMap;
@@ -190,8 +196,6 @@ void CommandExecutorImpl::Init() {
   }
   session_command_map[CommandNames::kGetSessionCapabilities] =
       base::Bind(&ExecuteGetSessionCapabilities, &session_map_);
-  session_command_map[CommandNames::kQuit] =
-      base::Bind(&ExecuteQuit, &session_map_);
   session_command_map[CommandNames::kGetCurrentWindowHandle] =
       base::Bind(&ExecuteGetCurrentWindowHandle);
   session_command_map[CommandNames::kClose] =
@@ -207,15 +211,15 @@ void CommandExecutorImpl::Init() {
   session_command_map[CommandNames::kImplicitlyWait] =
       base::Bind(&ExecuteImplicitlyWait);
   session_command_map[CommandNames::kGetAlert] =
-      base::Bind(&ExecuteGetAlert);
+      base::Bind(&ExecuteAlertCommand, base::Bind(&ExecuteGetAlert));
   session_command_map[CommandNames::kGetAlertText] =
-      base::Bind(&ExecuteGetAlertText);
+      base::Bind(&ExecuteAlertCommand, base::Bind(&ExecuteGetAlertText));
   session_command_map[CommandNames::kSetAlertValue] =
-      base::Bind(&ExecuteSetAlertValue);
+      base::Bind(&ExecuteAlertCommand, base::Bind(&ExecuteSetAlertValue));
   session_command_map[CommandNames::kAcceptAlert] =
-      base::Bind(&ExecuteAcceptAlert);
+      base::Bind(&ExecuteAlertCommand, base::Bind(&ExecuteAcceptAlert));
   session_command_map[CommandNames::kDismissAlert] =
-      base::Bind(&ExecuteDismissAlert);
+      base::Bind(&ExecuteAlertCommand, base::Bind(&ExecuteDismissAlert));
   session_command_map[CommandNames::kIsLoading] =
       base::Bind(&ExecuteIsLoading);
   session_command_map[CommandNames::kGetLocation] =
@@ -254,13 +258,16 @@ void CommandExecutorImpl::Init() {
   command_map_.Set(CommandNames::kStatus, base::Bind(&ExecuteGetStatus));
   command_map_.Set(
       CommandNames::kNewSession,
-      base::Bind(&ExecuteNewSession, &session_map_, context_getter_,
-                 socket_factory_));
+      base::Bind(&ExecuteNewSession,
+                 NewSessionParams(
+                     log_, &session_map_, context_getter_, socket_factory_,
+                     device_manager_.get())));
+  command_map_.Set(CommandNames::kQuit,
+      base::Bind(&ExecuteQuit, false, &session_map_));
   command_map_.Set(
       CommandNames::kQuitAll,
       base::Bind(&ExecuteQuitAll,
-                 base::Bind(execute_session_command,
-                            base::Bind(&ExecuteQuit, &session_map_)),
+                 base::Bind(&ExecuteQuit, true, &session_map_),
                  &session_map_));
 }
 

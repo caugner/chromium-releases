@@ -48,6 +48,13 @@ class TextInputClient;
 // ui::InputMethod and owns it.
 class InputMethod {
  public:
+  // TODO(yukawa): Move these typedef into ime_constants.h or somewhere.
+#if defined(OS_WIN)
+  typedef LRESULT NativeEventResult;
+#else
+  typedef int32 NativeEventResult;
+#endif
+
   virtual ~InputMethod() {}
 
   // Sets the delegate used by this InputMethod instance. It should only be
@@ -63,6 +70,13 @@ class InputMethod {
 
   // Called when the top-level system window loses keyboard focus.
   virtual void OnBlur() = 0;
+
+  // Called when the focused window receives native IME messages that are not
+  // translated into other predefined event callbacks. Currently this method is
+  // used only for IME functionalities specific to Windows.
+  // TODO(ime): Break down these messages into platform-neutral methods.
+  virtual bool OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                        NativeEventResult* result) = 0;
 
   // Sets the text input client which receives text input events such as
   // SetCompositionText(). |client| can be NULL. A gfx::NativeWindow which
@@ -102,6 +116,13 @@ class InputMethod {
   // focused client.
   virtual void CancelComposition(const TextInputClient* client) = 0;
 
+  // Called by the focused client whenever its input locale is changed.
+  // This method is currently used only on Windows.
+  // This method does not take a parameter of TextInputClient for historical
+  // reasons.
+  // TODO(ime): Consider to take a parameter of TextInputClient.
+  virtual void OnInputLocaleChanged() = 0;
+
   // Returns the locale of current keyboard layout or input method, as a BCP-47
   // tag, or an empty string if the input method cannot provide it.
   virtual std::string GetInputLocale() = 0;
@@ -125,6 +146,11 @@ class InputMethod {
 
   // Checks if the focused text input client supports inline composition.
   virtual bool CanComposeInline() const = 0;
+
+  // Returns true if we know for sure that a candidate window (or IME suggest,
+  // etc.) is open.  Returns false if no popup window is open or the detection
+  // of IME popups is not supported.
+  virtual bool IsCandidatePopupOpen() const = 0;
 
   // Management of the observer list.
   virtual void AddObserver(InputMethodObserver* observer) = 0;

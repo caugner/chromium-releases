@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/time.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_per_app.h"
 #include "chrome/browser/ui/ash/launcher/launcher_item_controller.h"
 
@@ -43,7 +44,8 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   virtual void LauncherItemChanged(
       int model_index,
       const ash::LauncherItem& old_item) OVERRIDE;
-  virtual ChromeLauncherAppMenuItems GetApplicationList() OVERRIDE;
+  virtual ChromeLauncherAppMenuItems GetApplicationList(
+      int event_flags) OVERRIDE;
   std::vector<content::WebContents*> GetRunningApplications();
 
   // Get the refocus url pattern, which can be used to identify this application
@@ -70,8 +72,18 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   // will return true if it has sucessfully advanced.
   bool AdvanceToNextApp();
 
+  // Returns true if the application is a V2 app.
+  bool IsV2App();
+
+  // Returns true if it is allowed to try starting a V2 app again.
+  bool AllowNextLaunchAttempt();
+
   GURL refocus_url_;
   ChromeLauncherControllerPerApp* app_controller_;
+
+  // Since V2 applications can be undetectable after launching, this timer is
+  // keeping track of the last launch attempt.
+  base::Time last_launch_attempt_;
 
   DISALLOW_COPY_AND_ASSIGN(AppShortcutLauncherItemController);
 };

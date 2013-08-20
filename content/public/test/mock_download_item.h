@@ -5,6 +5,7 @@
 #ifndef CONTENT_PUBLIC_TEST_MOCK_DOWNLOAD_ITEM_H_
 #define CONTENT_PUBLIC_TEST_MOCK_DOWNLOAD_ITEM_H_
 
+#include "base/callback.h"
 #include "base/time.h"
 #include "content/public/browser/download_id.h"
 #include "content/public/browser/download_interrupt_reasons.h"
@@ -22,12 +23,11 @@ class MockDownloadItem : public DownloadItem {
   MOCK_METHOD1(AddObserver, void(DownloadItem::Observer*));
   MOCK_METHOD1(RemoveObserver, void(DownloadItem::Observer*));
   MOCK_METHOD0(UpdateObservers, void());
-  MOCK_METHOD0(DangerousDownloadValidated, void());
+  MOCK_METHOD0(ValidateDangerousDownload, void());
+  MOCK_METHOD1(StealDangerousDownload, void(const AcquireFileCallback&));
   MOCK_METHOD0(Pause, void());
   MOCK_METHOD0(Resume, void());
-  MOCK_METHOD0(ResumeInterruptedDownload, void());
   MOCK_METHOD1(Cancel, void(bool));
-  MOCK_METHOD1(Delete, void(DeleteReason));
   MOCK_METHOD0(Remove, void());
   MOCK_METHOD0(OpenDownload, void());
   MOCK_METHOD0(ShowDownloadInShell, void());
@@ -37,11 +37,8 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetLastReason, DownloadInterruptReason());
   MOCK_CONST_METHOD0(IsPaused, bool());
   MOCK_CONST_METHOD0(IsTemporary, bool());
-  MOCK_CONST_METHOD0(IsPartialDownload, bool());
-  MOCK_CONST_METHOD0(IsInProgress, bool());
-  MOCK_CONST_METHOD0(IsCancelled, bool());
-  MOCK_CONST_METHOD0(IsInterrupted, bool());
-  MOCK_CONST_METHOD0(IsComplete, bool());
+  MOCK_CONST_METHOD0(CanResume, bool());
+  MOCK_CONST_METHOD0(IsDone, bool());
   MOCK_CONST_METHOD0(GetURL, const GURL&());
   MOCK_CONST_METHOD0(GetUrlChain, const std::vector<GURL>&());
   MOCK_CONST_METHOD0(GetOriginalUrl, const GURL&());
@@ -60,7 +57,6 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetFullPath, const base::FilePath&());
   MOCK_CONST_METHOD0(GetTargetFilePath, const base::FilePath&());
   MOCK_CONST_METHOD0(GetForcedFilePath, const base::FilePath&());
-  MOCK_CONST_METHOD0(GetUserVerifiedFilePath, base::FilePath());
   MOCK_CONST_METHOD0(GetFileNameToReportUser, base::FilePath());
   MOCK_CONST_METHOD0(GetTargetDisposition, TargetDisposition());
   MOCK_CONST_METHOD0(GetHash, const std::string&());

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,12 +9,13 @@ import optparse
 import os
 import sys
 
+VALID_TOOLCHAINS = ['newlib', 'glibc', 'pnacl', 'win', 'linux', 'mac']
+
 # 'KEY' : ( <TYPE>, [Accepted Values], <Required?>)
 DSC_FORMAT = {
     'DISABLE': (bool, [True, False], False),
     'DISABLE_PACKAGE': (bool, [True, False], False),
-    'TOOLS' : (list, ['newlib:arm', 'newlib:x64', 'newlib:x86', 'newlib',
-                      'glibc', 'pnacl', 'win', 'linux'], True),
+    'TOOLS' : (list, VALID_TOOLCHAINS, True),
     'CONFIGS' : (list, ['Debug', 'Release'], False),
     'PREREQ' : (list, '', False),
     'TARGETS' : (list, {
@@ -22,7 +24,8 @@ DSC_FORMAT = {
         # lib = library target
         # so = shared object target, automatically added to NMF
         # so-standalone =  shared object target, not put into NMF
-        'TYPE': (str, ['main', 'lib', 'so', 'so-standalone'], True),
+        'TYPE': (str, ['main', 'lib', 'static-lib', 'so', 'so-standalone'],
+                 True),
         'SOURCES': (list, '', True),
         'CCFLAGS': (list, '', False),
         'CXXFLAGS': (list, '', False),
@@ -47,49 +50,38 @@ DSC_FORMAT = {
     'TITLE': (str, '', False),
     'GROUP': (str, '', False),
     'EXPERIMENTAL': (bool, [True, False], False),
+    'PERMISSIONS': (list, '', False),
 }
 
-def IgnoreMsgFunc(test):
+
+class ValidationError(Exception):
   pass
 
 
-def ErrorMsgFunc(text):
-  sys.stderr.write(text + '\n')
-
-
-def ValidateFormat(src, dsc_format, ErrorMsg=ErrorMsgFunc):
-  failed = False
-
+def ValidateFormat(src, dsc_format):
   # Verify all required keys are there
   for key in dsc_format:
-    (exp_type, exp_value, required) = dsc_format[key]
+    exp_type, exp_value, required = dsc_format[key]
     if required and key not in src:
-      ErrorMsg('Missing required key %s.' % key)
-      failed = True
+      raise ValidationError('Missing required key %s.' % key)
 
   # For each provided key, verify it's valid
   for key in src:
     # Verify the key is known
     if key not in dsc_format:
-      ErrorMsg('Unexpected key %s.' % key)
-      failed = True
-      continue
+      raise ValidationError('Unexpected key %s.' % key)
 
     exp_type, exp_value, required = dsc_format[key]
     value = src[key]
 
     # Verify the key is of the expected type
     if exp_type != type(value):
-      ErrorMsg('Key %s expects %s not %s.' % (
+      raise ValidationError('Key %s expects %s not %s.' % (
           key, exp_type.__name__.upper(), type(value).__name__.upper()))
-      failed = True
-      continue
 
     # Verify the value is non-empty if required
     if required and not value:
-      ErrorMsg('Expected non-empty value for %s.' % key)
-      failed = True
-      continue
+      raise ValidationError('Expected non-empty value for %s.' % key)
 
     # If it's a bool, the expected values are always True or False.
     if exp_type is bool:
@@ -99,8 +91,8 @@ def ValidateFormat(src, dsc_format, ErrorMsg=ErrorMsgFunc):
     if exp_type is str:
       if type(exp_value) is list and exp_value:
         if value not in exp_value:
-          ErrorMsg("Value '%s' not expected for %s." % (value, key))
-          failed = True
+          raise ValidationError("Value '%s' not expected for %s." %
+                                (value, key))
       continue
 
     # if it's a list, then we need to validate the values
@@ -108,44 +100,35 @@ def ValidateFormat(src, dsc_format, ErrorMsg=ErrorMsgFunc):
       # If we expect a dictionary, then call this recursively
       if type(exp_value) is dict:
         for val in value:
-          if not ValidateFormat(val, exp_value, ErrorMsg):
-            failed = True
+          ValidateFormat(val, exp_value)
         continue
       # If we expect a list of strings
       if type(exp_value) is str:
         for val in value:
           if type(val) is not str:
-            ErrorMsg('Value %s in %s is not a string.' % (val, key))
-            failed = True
+            raise ValidationError('Value %s in %s is not a string.' %
+                                  (val, key))
         continue
       # if we expect a particular string
       if type(exp_value) is list:
         for val in value:
           if val not in exp_value:
-            ErrorMsg('Value %s not expected in %s.' % (val, key))
-            failed = True
+            raise ValidationError('Value %s not expected in %s.' %
+                                  (val, key))
         continue
 
     # If we got this far, it's an unexpected type
-    ErrorMsg('Unexpected type %s for key %s.' % (str(type(src[key])), key))
-    continue
-  return not failed
+    raise ValidationError('Unexpected type %s for key %s.' %
+                          (str(type(src[key])), key))
 
 
-def LoadProject(filename, ErrorMsg=ErrorMsgFunc, verbose=False):
-  if verbose:
-    errmsg = ErrorMsgFunc
-  else:
-    errmsg = IgnoreMsgFunc
-
+def LoadProject(filename):
   with open(filename, 'r') as descfile:
     desc = eval(descfile.read(), {}, {})
-    if desc.get('DISABLE', False):
-      return None
-    if not ValidateFormat(desc, DSC_FORMAT, errmsg):
-      ErrorMsg('Failed to validate: ' + filename)
-      return None
-    desc['FILEPATH'] = os.path.abspath(filename)
+  if desc.get('DISABLE', False):
+    return None
+  ValidateFormat(desc, DSC_FORMAT)
+  desc['FILEPATH'] = os.path.abspath(filename)
   return desc
 
 
@@ -181,15 +164,17 @@ def PruneTree(tree, filters):
   return out
 
 
-def LoadProjectTree(srcpath, toolchains=None, verbose=False, filters=None,
-                    ErrorMsg=ErrorMsgFunc, InfoMsg=ErrorMsgFunc):
+def LoadProjectTree(srcpath, filters=None):
   # Build the tree
   out = collections.defaultdict(list)
   for root, _, files in os.walk(srcpath):
     for filename in files:
       if fnmatch.fnmatch(filename, '*.dsc'):
         filepath = os.path.join(root, filename)
-        desc = LoadProject(filepath, ErrorMsg, verbose)
+        try:
+          desc = LoadProject(filepath)
+        except ValidationError as e:
+          raise ValidationError("Failed to validate: %s: %s" % (filepath, e))
         if desc:
           key = desc['DEST']
           out[key].append(desc)
@@ -200,11 +185,17 @@ def LoadProjectTree(srcpath, toolchains=None, verbose=False, filters=None,
   return out
 
 
-def PrintProjectTree(tree, InfoMsg=ErrorMsgFunc):
+def PrintProjectTree(tree):
   for key in tree:
     print key + ':'
     for val in tree[key]:
       print '\t' + val['NAME']
+
+
+def GenerateProjects(tree):
+  for key in tree:
+    for val in tree[key]:
+      yield key, val
 
 
 def main(argv):
@@ -228,9 +219,13 @@ def main(argv):
   if not options.experimental:
     filters['EXPERIMENTAL'] = False
 
-  tree = LoadProjectTree('.', filters=filters)
-  PrintProjectTree(tree)
+  try:
+    tree = LoadProjectTree('.', filters=filters)
+  except ValidationError as e:
+    sys.stderr.write(str(e) + '\n')
+    return 1
 
+  PrintProjectTree(tree)
   return 0
 
 

@@ -41,6 +41,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_aura_utils.h"
 #include "ui/views/widget/widget_delegate.h"
+#include "ui/views/widget/window_reorderer.h"
 
 DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(VIEWS_EXPORT,
                                       views::DesktopNativeWidgetAura*);
@@ -178,6 +179,8 @@ DesktopNativeWidgetAura::~DesktopNativeWidgetAura() {
     CloseNow();
 
   stacking_client_.reset();  // Uses root_window_ at destruction.
+
+  root_window_->RemoveRootWindowObserver(this);
   root_window_.reset();  // Uses input_method_event_filter_ at destruction.
   input_method_event_filter_.reset();
 }
@@ -235,6 +238,8 @@ void DesktopNativeWidgetAura::InitNativeWidget(
                                     this, params.bounds);
   root_window_.reset(
       desktop_root_window_host_->Init(window_, params));
+  root_window_->AddRootWindowObserver(this);
+
   stacking_client_.reset(
       new DesktopNativeWidgetAuraStackingClient(root_window_.get()));
   drop_helper_.reset(new DropHelper(
@@ -270,6 +275,9 @@ void DesktopNativeWidgetAura::InitNativeWidget(
   shadow_controller_.reset(
       new corewm::ShadowController(
           aura::client::GetActivationClient(root_window_.get())));
+
+  window_reorderer_.reset(new WindowReorderer(window_,
+      GetWidget()->GetRootView()));
 }
 
 NonClientFrameView* DesktopNativeWidgetAura::CreateNonClientFrameView() {
@@ -312,11 +320,12 @@ ui::Compositor* DesktopNativeWidgetAura::GetCompositor() {
   return window_->layer()->GetCompositor();
 }
 
-gfx::Vector2d DesktopNativeWidgetAura::CalculateOffsetToAncestorWithLayer(
-      ui::Layer** layer_parent) {
-  if (layer_parent)
-    *layer_parent = window_->layer();
-  return gfx::Vector2d();
+ui::Layer* DesktopNativeWidgetAura::GetLayer() {
+  return window_->layer();
+}
+
+void DesktopNativeWidgetAura::ReorderNativeViews() {
+  window_reorderer_->ReorderChildWindows();
 }
 
 void DesktopNativeWidgetAura::ViewRemoved(View* view) {
@@ -381,6 +390,7 @@ void DesktopNativeWidgetAura::SetWindowTitle(const string16& title) {
 
 void DesktopNativeWidgetAura::SetWindowIcons(const gfx::ImageSkia& window_icon,
                                              const gfx::ImageSkia& app_icon) {
+  desktop_root_window_host_->SetWindowIcons(window_icon, app_icon);
 }
 
 void DesktopNativeWidgetAura::InitModalType(ui::ModalType modal_type) {
@@ -541,6 +551,10 @@ void DesktopNativeWidgetAura::SchedulePaintInRect(const gfx::Rect& rect) {
 
 void DesktopNativeWidgetAura::SetCursor(gfx::NativeCursor cursor) {
   desktop_root_window_host_->AsRootWindowHost()->SetCursor(cursor);
+}
+
+bool DesktopNativeWidgetAura::IsMouseEventsEnabled() const {
+  return true;
 }
 
 void DesktopNativeWidgetAura::ClearNativeFocus() {
@@ -842,6 +856,21 @@ int DesktopNativeWidgetAura::OnPerformDrop(const ui::DropTargetEvent& event) {
   DCHECK(drop_helper_.get() != NULL);
   return drop_helper_->OnDrop(event.data(), event.location(),
       last_drop_operation_);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// DesktopNativeWidgetAura, aura::RootWindowObserver implementation:
+
+void DesktopNativeWidgetAura::OnRootWindowHostCloseRequested(
+    const aura::RootWindow* root) {
+  Close();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// DesktopNativeWidgetAura, NativeWidget implementation:
+
+ui::EventHandler* DesktopNativeWidgetAura::GetEventHandler() {
+  return this;
 }
 
 }  // namespace views

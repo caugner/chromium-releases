@@ -11,12 +11,13 @@
 #include "base/logging.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_reader.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
+#include "chrome/browser/chromeos/drive/local_file_reader.h"
 #include "chrome/browser/google_apis/task_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_byte_range.h"
 
 using content::BrowserThread;
 
@@ -26,6 +27,12 @@ namespace {
 // Converts FileError code to net::Error code.
 int FileErrorToNetError(FileError error) {
   return net::PlatformFileErrorToNetError(FileErrorToPlatformError(error));
+}
+
+// Runs task on UI thread.
+void RunTaskOnUIThread(const base::Closure& task) {
+  google_apis::RunTaskOnThread(
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI), task);
 }
 
 }  // namespace
@@ -65,8 +72,8 @@ int ReadInternal(ScopedVector<std::string>* pending_data,
 
 }  // namespace
 
-LocalReaderProxy::LocalReaderProxy(scoped_ptr<util::FileReader> file_reader,
-                                   int64 length)
+LocalReaderProxy::LocalReaderProxy(
+    scoped_ptr<util::LocalFileReader> file_reader, int64 length)
     : file_reader_(file_reader.Pass()),
       remaining_length_(length),
       weak_ptr_factory_(this) {
@@ -114,7 +121,7 @@ void LocalReaderProxy::OnReadCompleted(const net::CompletionCallback& callback,
     DCHECK_LE(read_result, remaining_length_);
     remaining_length_ -= read_result;
   } else {
-    // An error occurs. Close the FileReader.
+    // An error occurs. Close the |file_reader_|.
     file_reader_.reset();
   }
   callback.Run(read_result);
@@ -142,7 +149,7 @@ int NetworkReaderProxy::Read(net::IOBuffer* buffer, int buffer_length,
                              const net::CompletionCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Check if there is no pending Read operation.
-  DCHECK(!buffer_);
+  DCHECK(!buffer_.get());
   DCHECK_EQ(buffer_length_, 0);
   DCHECK(callback_.is_null());
   // Validate the arguments.
@@ -196,7 +203,7 @@ void NetworkReaderProxy::OnGetContent(scoped_ptr<std::string> data) {
   }
 
   pending_data_.push_back(data.release());
-  if (!buffer_) {
+  if (!buffer_.get()) {
     // No pending Read operation.
     return;
   }
@@ -283,13 +290,6 @@ void GetFileContentByPath(
 
 }  // namespace
 
-struct DriveFileStreamReader::Range {
-  Range(uint64 offset, uint64 length) : offset(offset), length(length) {}
-
-  uint64 offset;
-  uint64 length;
-};
-
 DriveFileStreamReader::DriveFileStreamReader(
     const FileSystemGetter& file_system_getter,
     base::SequencedTaskRunner* file_task_runner)
@@ -309,8 +309,7 @@ bool DriveFileStreamReader::IsInitialized() const {
 
 void DriveFileStreamReader::Initialize(
     const base::FilePath& drive_file_path,
-    uint64 range_offset,
-    uint64 range_length,
+    const net::HttpByteRange& byte_range,
     const InitializeCompletionCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!callback.is_null());
@@ -321,7 +320,7 @@ void DriveFileStreamReader::Initialize(
       base::Bind(&DriveFileStreamReader
                      ::InitializeAfterGetFileContentByPathInitialized,
                  weak_ptr_factory_.GetWeakPtr(),
-                 Range(range_offset, range_length),
+                 byte_range,
                  callback),
       base::Bind(&DriveFileStreamReader::OnGetContent,
                  weak_ptr_factory_.GetWeakPtr()),
@@ -340,7 +339,7 @@ int DriveFileStreamReader::Read(net::IOBuffer* buffer, int buffer_length,
 }
 
 void DriveFileStreamReader::InitializeAfterGetFileContentByPathInitialized(
-    const Range& range,
+    const net::HttpByteRange& in_byte_range,
     const InitializeCompletionCallback& callback,
     FileError error,
     scoped_ptr<ResourceEntry> entry,
@@ -354,30 +353,43 @@ void DriveFileStreamReader::InitializeAfterGetFileContentByPathInitialized(
   }
   DCHECK(entry);
 
-  // Clamp the reading range.
-  uint64 file_size = entry->file_info().size();
-  uint64 range_offset = std::min(range.offset, file_size);
-  uint64 range_length = std::min(range.length, file_size - range_offset);
+  net::HttpByteRange byte_range = in_byte_range;
+  if (!byte_range.ComputeBounds(entry->file_info().size())) {
+    // If |byte_range| is invalid (e.g. out of bounds), return with an error.
+    // At the same time, we cancel the in-flight downloading operation if
+    // needed and and invalidate weak pointers so that we won't
+    // receive unwanted callbacks.
+    if (!ui_cancel_download_closure.is_null())
+      ui_cancel_download_closure.Run();
+    weak_ptr_factory_.InvalidateWeakPtrs();
+    callback.Run(
+        net::ERR_REQUEST_RANGE_NOT_SATISFIABLE, scoped_ptr<ResourceEntry>());
+    return;
+  }
+
+  // Note: both boundary of |byte_range| are inclusive.
+  int64 range_length =
+      byte_range.last_byte_position() - byte_range.first_byte_position() + 1;
+  DCHECK_GE(range_length, 0);
 
   if (local_cache_file_path.empty()) {
     // The file is not cached, and being downloaded.
     DCHECK(!ui_cancel_download_closure.is_null());
     reader_proxy_.reset(
         new internal::NetworkReaderProxy(
-            range_offset, range_length,
-            base::Bind(&google_apis::RunTaskOnUIThread,
-                       ui_cancel_download_closure)));
+            byte_range.first_byte_position(), range_length,
+            base::Bind(&RunTaskOnUIThread, ui_cancel_download_closure)));
     callback.Run(net::OK, entry.Pass());
     return;
   }
 
   // Otherwise, open the stream for file.
-  scoped_ptr<util::FileReader> file_reader(
-      new util::FileReader(file_task_runner_));
-  util::FileReader* file_reader_ptr = file_reader.get();
+  scoped_ptr<util::LocalFileReader> file_reader(
+      new util::LocalFileReader(file_task_runner_.get()));
+  util::LocalFileReader* file_reader_ptr = file_reader.get();
   file_reader_ptr->Open(
       local_cache_file_path,
-      range_offset,
+      byte_range.first_byte_position(),
       base::Bind(
           &DriveFileStreamReader::InitializeAfterLocalFileOpen,
           weak_ptr_factory_.GetWeakPtr(),
@@ -388,10 +400,10 @@ void DriveFileStreamReader::InitializeAfterGetFileContentByPathInitialized(
 }
 
 void DriveFileStreamReader::InitializeAfterLocalFileOpen(
-    uint64 length,
+    int64 length,
     const InitializeCompletionCallback& callback,
     scoped_ptr<ResourceEntry> entry,
-    scoped_ptr<util::FileReader> file_reader,
+    scoped_ptr<util::LocalFileReader> file_reader,
     int open_result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 

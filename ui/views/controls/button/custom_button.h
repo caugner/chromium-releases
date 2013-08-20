@@ -61,17 +61,12 @@ class VIEWS_EXPORT CustomButton : public Button,
     animate_on_state_change_ = value;
   }
 
-  // Returns true if the mouse pointer is over this control.  Note that this
-  // isn't the same as IsHotTracked() because the mouse may be over the control
-  // when it's disabled.
-  bool IsMouseHovered() const;
-
   void SetHotTracked(bool is_hot_tracked);
   bool IsHotTracked() const;
 
   // Overridden from View:
   virtual void OnEnabledChanged() OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
@@ -84,7 +79,7 @@ class VIEWS_EXPORT CustomButton : public Button,
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture) OVERRIDE;
+                               ui::MenuSourceType source_type) OVERRIDE;
   virtual void OnDragDone() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void VisibilityChanged(View* starting_from, bool is_visible) OVERRIDE;
@@ -117,9 +112,8 @@ class VIEWS_EXPORT CustomButton : public Button,
   virtual bool ShouldEnterPushedState(const ui::Event& event);
 
   // Overridden from View:
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    View* parent,
-                                    View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
   virtual void OnBlur() OVERRIDE;
 
   // The button state (defined in implementation)

@@ -7,13 +7,12 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chromeos/login/captive_portal_window_proxy.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
@@ -21,13 +20,10 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/reload_button.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
-#include "chrome/common/render_messages.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ipc/ipc_message.h"
@@ -42,6 +38,7 @@
 
 using content::WebContents;
 using views::GridLayout;
+using web_modal::WebContentsModalDialogManager;
 
 namespace {
 
@@ -141,7 +138,7 @@ SimpleWebViewDialog::~SimpleWebViewDialog() {
   if (web_view_container_.get()) {
     // WebView can't be deleted immediately, because it could be on the stack.
     web_view_->web_contents()->SetDelegate(NULL);
-    MessageLoop::current()->DeleteSoon(
+    base::MessageLoop::current()->DeleteSoon(
         FROM_HERE, web_view_container_.release());
   }
 }
@@ -191,12 +188,8 @@ void SimpleWebViewDialog::Init() {
   toolbar_model_.reset(new ToolbarModelImpl(this));
 
   // Location bar.
-  location_bar_ = new LocationBarView(NULL,
-                                      profile_,
-                                      command_updater_.get(),
-                                      toolbar_model_.get(),
-                                      this,
-                                      LocationBarView::POPUP);
+  location_bar_ = new LocationBarView(NULL, profile_, command_updater_.get(),
+                                      toolbar_model_.get(), this, true);
 
   // Reload button.
   reload_ = new ReloadButton(location_bar_, command_updater_.get());
@@ -246,7 +239,7 @@ void SimpleWebViewDialog::Init() {
 void SimpleWebViewDialog::Layout() {
   views::WidgetDelegateView::Layout();
 
-  FOR_EACH_OBSERVER(WebContentsModalDialogHostObserver,
+  FOR_EACH_OBSERVER(web_modal::WebContentsModalDialogHostObserver,
                     observer_list_,
                     OnPositionRequiresUpdate());
 }
@@ -315,9 +308,8 @@ void SimpleWebViewDialog::ShowWebsiteSettings(
 PageActionImageView* SimpleWebViewDialog::CreatePageActionImageView(
     LocationBarView* owner,
     ExtensionAction* action) {
-  // Notreached because SimpleWebViewDialog uses
-  // LocationBarView::POPUP type, and it doesn't create
-  // PageActionImageViews.
+  // Notreached because SimpleWebViewDialog uses a popup-mode LocationBarView,
+  // and it doesn't create PageActionImageViews.
   NOTREACHED();
   return NULL;
 }
@@ -360,25 +352,9 @@ void SimpleWebViewDialog::ExecuteCommandWithDisposition(
   }
 }
 
-void SimpleWebViewDialog::SetWebContentsBlocked(
-    content::WebContents* web_contents,
-    bool blocked) {
-  // RenderViewHost may be NULL during shutdown.
-  content::RenderViewHost* host = web_contents->GetRenderViewHost();
-  if (host) {
-    host->Send(new ChromeViewMsg_SetVisuallyDeemphasized(
-               host->GetRoutingID(), blocked));
-  }
-}
-
-WebContentsModalDialogHost*
+web_modal::WebContentsModalDialogHost*
     SimpleWebViewDialog::GetWebContentsModalDialogHost() {
   return this;
-}
-
-bool SimpleWebViewDialog::IsWebContentsVisible(
-    content::WebContents* web_contents) {
-  return platform_util::IsVisible(web_contents->GetView()->GetNativeView());
 }
 
 gfx::NativeView SimpleWebViewDialog::GetHostView() const {
@@ -393,13 +369,13 @@ gfx::Point SimpleWebViewDialog::GetDialogPosition(const gfx::Size& size) {
 }
 
 void SimpleWebViewDialog::AddObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   if (observer && !observer_list_.HasObserver(observer))
     observer_list_.AddObserver(observer);
 }
 
 void SimpleWebViewDialog::RemoveObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 

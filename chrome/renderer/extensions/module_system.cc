@@ -5,14 +5,19 @@
 #include "chrome/renderer/extensions/module_system.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/console.h"
+#include "chrome/renderer/extensions/safe_builtins.h"
 #include "content/public/renderer/render_view.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebScopedMicrotaskSuppression.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
 
 namespace extensions {
 
@@ -23,8 +28,75 @@ const char* kModuleName = "module_name";
 const char* kModuleField = "module_field";
 const char* kModulesField = "modules";
 
-// Formats |try_catch| as a nice string.
-std::string CreateExceptionString(const v8::TryCatch& try_catch) {
+// Prepends |extension_id| if it's non-empty to |message|.
+std::string PrependExtensionID(const std::string& extension_id,
+                               const std::string& message) {
+  std::string with_extension_id;
+  if (!extension_id.empty()) {
+    with_extension_id += "(";
+    with_extension_id += extension_id;
+    with_extension_id += ") ";
+  }
+  with_extension_id += message;
+  return with_extension_id;
+}
+
+void Fatal(const std::string& extension_id, const std::string& message) {
+  // Only crash web pages in dev channel.
+  // Always crash extension processes, or when in single process mode (since
+  // typically it's used to debug renderer crashes).
+  bool is_fatal = false;
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kExtensionProcess) ||
+      command_line->HasSwitch(switches::kSingleProcess)) {
+    is_fatal = true;
+  } else {
+    // <= dev means dev, canary, and trunk.
+    is_fatal = Feature::GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV;
+  }
+  std::string with_extension_id = PrependExtensionID(extension_id, message);
+  if (is_fatal)
+    console::Fatal(v8::Context::GetCalling(), with_extension_id);
+  else
+    console::Error(v8::Context::GetCalling(), with_extension_id);
+}
+
+void Warn(const std::string& extension_id, const std::string& message) {
+  console::Warn(v8::Context::GetCalling(),
+                PrependExtensionID(extension_id, message));
+}
+
+// Default exception handler which logs the exception.
+class DefaultExceptionHandler : public ModuleSystem::ExceptionHandler {
+ public:
+  explicit DefaultExceptionHandler(const std::string& extension_id)
+      : extension_id_(extension_id) {}
+
+  // Fatally dumps the debug info from |try_catch| to the console.
+  // Make sure this is never used for exceptions that originate in external
+  // code!
+  virtual void HandleUncaughtException(const v8::TryCatch& try_catch) OVERRIDE {
+    v8::HandleScope handle_scope;
+    std::string stack_trace = "<stack trace unavailable>";
+    if (!try_catch.StackTrace().IsEmpty()) {
+      v8::String::Utf8Value stack_value(try_catch.StackTrace());
+      if (*stack_value)
+        stack_trace.assign(*stack_value, stack_value.length());
+      else
+        stack_trace = "<could not convert stack trace to string>";
+    }
+    Fatal(extension_id_,
+          CreateExceptionString(try_catch) + "{" + stack_trace + "}");
+  }
+
+ private:
+  std::string extension_id_;
+};
+
+} // namespace
+
+std::string ModuleSystem::ExceptionHandler::CreateExceptionString(
+    const v8::TryCatch& try_catch) {
   v8::Handle<v8::Message> message(try_catch.Message());
   if (message.IsEmpty()) {
     return "try_catch has no message";
@@ -49,37 +121,20 @@ std::string CreateExceptionString(const v8::TryCatch& try_catch) {
                             error_message.c_str());
 }
 
-// Fatally dumps the debug info from |try_catch| to the console.
-// Don't use this for logging exceptions that might originate in external code!
-void DumpException(const v8::TryCatch& try_catch) {
-  v8::HandleScope handle_scope;
-
-  std::string stack_trace = "<stack trace unavailable>";
-  if (!try_catch.StackTrace().IsEmpty()) {
-    v8::String::Utf8Value stack_value(try_catch.StackTrace());
-    if (*stack_value)
-      stack_trace.assign(*stack_value, stack_value.length());
-    else
-      stack_trace = "<could not convert stack trace to string>";
-  }
-
-  console::Fatal(v8::Context::GetCalling(),
-                 CreateExceptionString(try_catch) + "{" + stack_trace + "}");
-}
-
-} // namespace
-
-ModuleSystem::ModuleSystem(v8::Handle<v8::Context> context,
+ModuleSystem::ModuleSystem(ChromeV8Context* context,
                            SourceMap* source_map)
     : ObjectBackedNativeHandler(context),
+      context_(context),
       source_map_(source_map),
-      natives_enabled_(0) {
+      natives_enabled_(0),
+      exception_handler_(
+          new DefaultExceptionHandler(context->GetExtensionID())) {
   RouteFunction("require",
       base::Bind(&ModuleSystem::RequireForJs, base::Unretained(this)));
   RouteFunction("requireNative",
       base::Bind(&ModuleSystem::RequireNative, base::Unretained(this)));
 
-  v8::Handle<v8::Object> global(context->Global());
+  v8::Handle<v8::Object> global(context->v8_context()->Global());
   global->SetHiddenValue(v8::String::New(kModulesField), v8::Object::New());
   global->SetHiddenValue(v8::String::New(kModuleSystem),
                          v8::External::New(this));
@@ -97,7 +152,7 @@ void ModuleSystem::Invalidate() {
   // and we use this as a signal in lazy handlers that we no longer exist.
   {
     v8::HandleScope scope;
-    v8::Handle<v8::Object> global = v8_context()->Global();
+    v8::Handle<v8::Object> global = context()->v8_context()->Global();
     global->DeleteHiddenValue(v8::String::New(kModulesField));
     global->DeleteHiddenValue(v8::String::New(kModuleSystem));
   }
@@ -123,10 +178,7 @@ ModuleSystem::NativesEnabledScope::~NativesEnabledScope() {
 }
 
 void ModuleSystem::HandleException(const v8::TryCatch& try_catch) {
-  if (exception_handler_)
-    exception_handler_->HandleUncaughtException();
-  else
-    DumpException(try_catch);
+  exception_handler_->HandleUncaughtException(try_catch);
 }
 
 v8::Handle<v8::Value> ModuleSystem::Require(const std::string& module_name) {
@@ -135,18 +187,18 @@ v8::Handle<v8::Value> ModuleSystem::Require(const std::string& module_name) {
       RequireForJsInner(v8::String::New(module_name.c_str())));
 }
 
-v8::Handle<v8::Value> ModuleSystem::RequireForJs(const v8::Arguments& args) {
-  v8::HandleScope handle_scope;
+void ModuleSystem::RequireForJs(
+  const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::Handle<v8::String> module_name = args[0]->ToString();
-  return handle_scope.Close(RequireForJsInner(module_name));
+  args.GetReturnValue().Set(RequireForJsInner(module_name));
 }
 
 v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
     v8::Handle<v8::String> module_name) {
   v8::HandleScope handle_scope;
-  v8::Context::Scope context_scope(v8_context());
+  v8::Context::Scope context_scope(context()->v8_context());
 
-  v8::Handle<v8::Object> global(v8_context()->Global());
+  v8::Handle<v8::Object> global(context()->v8_context()->Global());
 
   // The module system might have been deleted. This can happen if a different
   // context keeps a reference to us, but our frame is destroyed (e.g.
@@ -154,7 +206,7 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
   v8::Handle<v8::Value> modules_value =
       global->GetHiddenValue(v8::String::New(kModulesField));
   if (modules_value.IsEmpty() || modules_value->IsUndefined()) {
-    console::Warn(v8::Context::GetCalling(), "Extension view no longer exists");
+    Warn(context_->GetExtensionID(), "Extension view no longer exists");
     return v8::Undefined();
   }
 
@@ -166,8 +218,8 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
   std::string module_name_str = *v8::String::AsciiValue(module_name);
   v8::Handle<v8::Value> source(GetSource(module_name_str));
   if (source.IsEmpty() || source->IsUndefined()) {
-    console::Error(v8::Context::GetCalling(),
-                   "No source for require(" + module_name_str + ")");
+    Fatal(context_->GetExtensionID(),
+          "No source for require(" + module_name_str + ")");
     return v8::Undefined();
   }
   v8::Handle<v8::String> wrapped_source(WrapSource(
@@ -175,8 +227,8 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
   // Modules are wrapped in (function(){...}) so they always return functions.
   v8::Handle<v8::Value> func_as_value = RunString(wrapped_source, module_name);
   if (func_as_value.IsEmpty() || func_as_value->IsUndefined()) {
-    console::Error(v8::Context::GetCalling(),
-                   "Bad source for require(" + module_name_str + ")");
+    Fatal(context_->GetExtensionID(),
+          "Bad source for require(" + module_name_str + ")");
     return v8::Undefined();
   }
 
@@ -184,16 +236,26 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
 
   exports = v8::Object::New();
   v8::Handle<v8::Object> natives(NewInstance());
+  CHECK(!natives.IsEmpty());  // this can happen if v8 has issues
+
+  // These must match the argument order in WrapSource.
   v8::Handle<v8::Value> args[] = {
+    // CommonJS.
     natives->Get(v8::String::NewSymbol("require")),
     natives->Get(v8::String::NewSymbol("requireNative")),
     exports,
+    // Each safe builtin. Keep in order with the arguments in WrapSource.
+    context_->safe_builtins()->GetArray(),
+    context_->safe_builtins()->GetFunction(),
+    context_->safe_builtins()->GetJSON(),
+    context_->safe_builtins()->GetObjekt(),
+    context_->safe_builtins()->GetRegExp(),
+    context_->safe_builtins()->GetString(),
   };
   {
-    WebKit::WebScopedMicrotaskSuppression suppression;
     v8::TryCatch try_catch;
     try_catch.SetCaptureMessage(true);
-    func->Call(global, 3, args);
+    context_->CallFunction(func, arraysize(args), args);
     if (try_catch.HasCaught()) {
       HandleException(try_catch);
       return v8::Undefined();
@@ -206,22 +268,41 @@ v8::Handle<v8::Value> ModuleSystem::RequireForJsInner(
 v8::Local<v8::Value> ModuleSystem::CallModuleMethod(
     const std::string& module_name,
     const std::string& method_name) {
-  std::vector<v8::Handle<v8::Value> > args;
-  return CallModuleMethod(module_name, method_name, &args);
+  v8::HandleScope handle_scope;
+  v8::Handle<v8::Value> no_args;
+  return CallModuleMethod(module_name, method_name, 0, &no_args);
 }
 
 v8::Local<v8::Value> ModuleSystem::CallModuleMethod(
     const std::string& module_name,
     const std::string& method_name,
     std::vector<v8::Handle<v8::Value> >* args) {
+  return CallModuleMethod(
+      module_name, method_name, args->size(), vector_as_array(args));
+}
+
+v8::Local<v8::Value> ModuleSystem::CallModuleMethod(
+    const std::string& module_name,
+    const std::string& method_name,
+    int argc,
+    v8::Handle<v8::Value> argv[]) {
+  TRACE_EVENT2("v8", "v8.callModuleMethod",
+               "module_name", module_name,
+               "method_name", method_name);
+
   v8::HandleScope handle_scope;
-  v8::Local<v8::Value> module =
-      v8::Local<v8::Value>::New(
-          RequireForJsInner(v8::String::New(module_name.c_str())));
+  v8::Context::Scope context_scope(context()->v8_context());
+
+  v8::Local<v8::Value> module;
+  {
+    NativesEnabledScope natives_enabled(this);
+    module = v8::Local<v8::Value>::New(
+        RequireForJsInner(v8::String::New(module_name.c_str())));
+  }
+
   if (module.IsEmpty() || !module->IsObject()) {
-    console::Error(
-        v8::Context::GetCalling(),
-        "Failed to get module " + module_name + " to call " + method_name);
+    Fatal(context_->GetExtensionID(),
+          "Failed to get module " + module_name + " to call " + method_name);
     return handle_scope.Close(v8::Undefined());
   }
 
@@ -229,20 +310,17 @@ v8::Local<v8::Value> ModuleSystem::CallModuleMethod(
       v8::Handle<v8::Object>::Cast(module)->Get(
           v8::String::New(method_name.c_str()));
   if (value.IsEmpty() || !value->IsFunction()) {
-    console::Error(v8::Context::GetCalling(),
-                   module_name + "." + method_name + " is not a function");
+    Fatal(context_->GetExtensionID(),
+          module_name + "." + method_name + " is not a function");
     return handle_scope.Close(v8::Undefined());
   }
 
-  v8::Handle<v8::Function> func =
-      v8::Handle<v8::Function>::Cast(value);
-  v8::Handle<v8::Object> global(v8_context()->Global());
+  v8::Handle<v8::Function> func = v8::Handle<v8::Function>::Cast(value);
   v8::Local<v8::Value> result;
   {
-    WebKit::WebScopedMicrotaskSuppression suppression;
     v8::TryCatch try_catch;
     try_catch.SetCaptureMessage(true);
-    result = func->Call(global, args->size(), vector_as_array(args));
+    result = context_->CallFunction(func, argc, argv);
     if (try_catch.HasCaught())
       HandleException(try_catch);
   }
@@ -265,29 +343,31 @@ void ModuleSystem::RunString(const std::string& code, const std::string& name) {
 }
 
 // static
-v8::Handle<v8::Value> ModuleSystem::NativeLazyFieldGetter(
-    v8::Local<v8::String> property, const v8::AccessorInfo& info) {
-  return LazyFieldGetterInner(property,
-                              info,
-                              &ModuleSystem::RequireNativeFromString);
-}
-
-// static
-v8::Handle<v8::Value> ModuleSystem::LazyFieldGetter(
-    v8::Local<v8::String> property, const v8::AccessorInfo& info) {
-  return LazyFieldGetterInner(property, info, &ModuleSystem::Require);
-}
-
-// static
-v8::Handle<v8::Value> ModuleSystem::LazyFieldGetterInner(
+void ModuleSystem::NativeLazyFieldGetter(
     v8::Local<v8::String> property,
-    const v8::AccessorInfo& info,
+    const v8::PropertyCallbackInfo<v8::Value>& info) {
+  LazyFieldGetterInner(property,
+                       info,
+                       &ModuleSystem::RequireNativeFromString);
+}
+
+// static
+void ModuleSystem::LazyFieldGetter(
+    v8::Local<v8::String> property,
+    const v8::PropertyCallbackInfo<v8::Value>& info) {
+  LazyFieldGetterInner(property, info, &ModuleSystem::Require);
+}
+
+// static
+void ModuleSystem::LazyFieldGetterInner(
+    v8::Local<v8::String> property,
+    const v8::PropertyCallbackInfo<v8::Value>& info,
     RequireFunction require_function) {
   CHECK(!info.Data().IsEmpty());
   CHECK(info.Data()->IsObject());
   v8::HandleScope handle_scope;
   v8::Handle<v8::Object> parameters = v8::Handle<v8::Object>::Cast(info.Data());
-  // This context should be the same as v8_context().
+  // This context should be the same as context()->v8_context().
   v8::Handle<v8::Context> context = parameters->CreationContext();
   v8::Handle<v8::Object> global(context->Global());
   v8::Handle<v8::Value> module_system_value =
@@ -295,9 +375,8 @@ v8::Handle<v8::Value> ModuleSystem::LazyFieldGetterInner(
   if (module_system_value.IsEmpty() || !module_system_value->IsExternal()) {
     // ModuleSystem has been deleted.
     // TODO(kalman): See comment in header file.
-    console::Warn(v8::Context::GetCalling(),
-                  "Module system has been deleted, does extension view exist?");
-    return v8::Undefined();
+    Warn("", "Module system has been deleted, does extension view exist?");
+    return;
   }
 
   ModuleSystem* module_system = static_cast<ModuleSystem*>(
@@ -315,11 +394,11 @@ v8::Handle<v8::Value> ModuleSystem::LazyFieldGetterInner(
   v8::Handle<v8::Value> module_value = (module_system->*require_function)(name);
   if (try_catch.HasCaught()) {
     module_system->HandleException(try_catch);
-    return v8::Undefined();
+    return;
   }
   if (module_value.IsEmpty() || !module_value->IsObject()) {
     // require_function will have already logged this, we don't need to.
-    return v8::Undefined();
+    return;
   }
 
   v8::Handle<v8::Object> module = v8::Handle<v8::Object>::Cast(module_value);
@@ -328,16 +407,16 @@ v8::Handle<v8::Value> ModuleSystem::LazyFieldGetterInner(
 
   if (!module->Has(field)) {
     std::string field_str = *v8::String::AsciiValue(field);
-    console::Fatal(v8::Context::GetCalling(),
-                   "Lazy require of " + name + "." + field_str + " did not " +
-                   "set the " + field_str + " field");
-    return v8::Undefined();
+    Fatal(module_system->context_->GetExtensionID(),
+          "Lazy require of " + name + "." + field_str + " did not " +
+              "set the " + field_str + " field");
+    return;
   }
 
   v8::Local<v8::Value> new_field = module->Get(field);
   if (try_catch.HasCaught()) {
     module_system->HandleException(try_catch);
-    return v8::Undefined();
+    return;
   }
 
   // Ok for it to be undefined, among other things it's how bindings signify
@@ -349,7 +428,7 @@ v8::Handle<v8::Value> ModuleSystem::LazyFieldGetterInner(
   v8::Handle<v8::Object> object = info.This();
   object->Delete(property);
   object->Set(property, new_field);
-  return handle_scope.Close(new_field);
+  info.GetReturnValue().Set(new_field);
 }
 
 void ModuleSystem::SetLazyField(v8::Handle<v8::Object> object,
@@ -364,7 +443,7 @@ void ModuleSystem::SetLazyField(v8::Handle<v8::Object> object,
                                 const std::string& field,
                                 const std::string& module_name,
                                 const std::string& module_field,
-                                v8::AccessorGetter getter) {
+                                v8::AccessorGetterCallback getter) {
   v8::HandleScope handle_scope;
   v8::Handle<v8::Object> parameters = v8::Object::New();
   parameters->Set(v8::String::New(kModuleName),
@@ -388,6 +467,7 @@ void ModuleSystem::SetNativeLazyField(v8::Handle<v8::Object> object,
 v8::Handle<v8::Value> ModuleSystem::RunString(v8::Handle<v8::String> code,
                                               v8::Handle<v8::String> name) {
   v8::HandleScope handle_scope;
+  v8::Context::Scope context_scope(context()->v8_context());
 
   WebKit::WebScopedMicrotaskSuppression suppression;
   v8::TryCatch try_catch;
@@ -414,10 +494,11 @@ v8::Handle<v8::Value> ModuleSystem::GetSource(const std::string& module_name) {
   return handle_scope.Close(source_map_->GetSource(module_name));
 }
 
-v8::Handle<v8::Value> ModuleSystem::RequireNative(const v8::Arguments& args) {
+void ModuleSystem::RequireNative(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
   std::string native_name = *v8::String::AsciiValue(args[0]->ToString());
-  return RequireNativeFromString(native_name);
+  args.GetReturnValue().Set(RequireNativeFromString(native_name));
 }
 
 v8::Handle<v8::Value> ModuleSystem::RequireNativeFromString(
@@ -428,8 +509,8 @@ v8::Handle<v8::Value> ModuleSystem::RequireNativeFromString(
     // we could crash.
     if (exception_handler_)
       return v8::ThrowException(v8::String::New("Natives disabled"));
-    console::Fatal(v8::Context::GetCalling(),
-                   "Natives disabled for requireNative(" + native_name + ")");
+    Fatal(context_->GetExtensionID(),
+          "Natives disabled for requireNative(" + native_name + ")");
     return v8::Undefined();
   }
 
@@ -438,9 +519,8 @@ v8::Handle<v8::Value> ModuleSystem::RequireNativeFromString(
 
   NativeHandlerMap::iterator i = native_handler_map_.find(native_name);
   if (i == native_handler_map_.end()) {
-    console::Fatal(
-        v8::Context::GetCalling(),
-        "Couldn't find native for requireNative(" + native_name + ")");
+    Fatal(context_->GetExtensionID(),
+          "Couldn't find native for requireNative(" + native_name + ")");
     return v8::Undefined();
   }
   return i->second->NewInstance();
@@ -448,11 +528,14 @@ v8::Handle<v8::Value> ModuleSystem::RequireNativeFromString(
 
 v8::Handle<v8::String> ModuleSystem::WrapSource(v8::Handle<v8::String> source) {
   v8::HandleScope handle_scope;
+  // Keep in order with the arguments in RequireForJsInner.
   v8::Handle<v8::String> left = v8::String::New(
-      "(function(require, requireNative, exports) {'use strict';");
+      "(function(require, requireNative, exports,"
+                "$Array, $Function, $JSON, $Object, $RegExp, $String) {"
+       "'use strict';");
   v8::Handle<v8::String> right = v8::String::New("\n})");
   return handle_scope.Close(
       v8::String::Concat(left, v8::String::Concat(source, right)));
 }
 
-}  // extensions
+}  // namespace extensions

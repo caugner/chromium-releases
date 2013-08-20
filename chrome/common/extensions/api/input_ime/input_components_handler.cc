@@ -5,13 +5,14 @@
 #include "chrome/common/extensions/api/input_ime/input_components_handler.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
+#include "chrome/common/extensions/manifest_url_handler.h"
 #include "extensions/common/error_utils.h"
 
 namespace keys = extension_manifest_keys;
@@ -48,13 +49,13 @@ InputComponentsHandler::~InputComponentsHandler() {
 bool InputComponentsHandler::Parse(Extension* extension,
                                    string16* error) {
   scoped_ptr<InputComponents> info(new InputComponents);
-  const ListValue* list_value = NULL;
+  const base::ListValue* list_value = NULL;
   if (!extension->manifest()->GetList(keys::kInputComponents, &list_value)) {
     *error = ASCIIToUTF16(errors::kInvalidInputComponents);
     return false;
   }
   for (size_t i = 0; i < list_value->GetSize(); ++i) {
-    const DictionaryValue* module_value = NULL;
+    const base::DictionaryValue* module_value = NULL;
     std::string name_str;
     InputComponentType type;
     std::string id_str;
@@ -116,22 +117,18 @@ bool InputComponentsHandler::Parse(Extension* extension,
     }
 
     // Get input_components[i].layouts.
-    const ListValue* layouts_value = NULL;
-    if (!module_value->GetList(keys::kLayouts, &layouts_value)) {
-      *error = ASCIIToUTF16(
-          errors::kInvalidInputComponentLayouts);
-      return false;
-    }
-
-    for (size_t j = 0; j < layouts_value->GetSize(); ++j) {
-      std::string layout_name_str;
-      if (!layouts_value->GetString(j, &layout_name_str)) {
-        *error = ErrorUtils::FormatErrorMessageUTF16(
-            errors::kInvalidInputComponentLayoutName,
-            base::IntToString(i), base::IntToString(j));
-        return false;
+    const base::ListValue* layouts_value = NULL;
+    if (module_value->GetList(keys::kLayouts, &layouts_value)) {
+      for (size_t j = 0; j < layouts_value->GetSize(); ++j) {
+        std::string layout_name_str;
+        if (!layouts_value->GetString(j, &layout_name_str)) {
+          *error = ErrorUtils::FormatErrorMessageUTF16(
+              errors::kInvalidInputComponentLayoutName,
+              base::IntToString(i), base::IntToString(j));
+          return false;
+        }
+        layouts.insert(layout_name_str);
       }
-      layouts.insert(layout_name_str);
     }
 
     if (module_value->HasKey(keys::kShortcutKey)) {
@@ -180,6 +177,8 @@ bool InputComponentsHandler::Parse(Extension* extension,
     info->input_components.back().shortcut_alt = shortcut_alt;
     info->input_components.back().shortcut_ctrl = shortcut_ctrl;
     info->input_components.back().shortcut_shift = shortcut_shift;
+    info->input_components.back().options_page_url =
+        extensions::ManifestURL::GetOptionsPage(extension);
   }
   extension->SetManifestData(keys::kInputComponents, info.release());
   return true;

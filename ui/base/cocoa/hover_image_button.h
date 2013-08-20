@@ -7,7 +7,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #import "ui/base/cocoa/hover_button.h"
 #include "ui/base/ui_export.h"
 
@@ -15,13 +15,9 @@
 UI_EXPORT
 @interface HoverImageButton : HoverButton {
  @private
-  float defaultOpacity_;
-  float hoverOpacity_;
-  float pressedOpacity_;
-
-  scoped_nsobject<NSImage> defaultImage_;
-  scoped_nsobject<NSImage> hoverImage_;
-  scoped_nsobject<NSImage> pressedImage_;
+  base::scoped_nsobject<NSImage> defaultImage_;
+  base::scoped_nsobject<NSImage> hoverImage_;
+  base::scoped_nsobject<NSImage> pressedImage_;
 }
 
 // Sets the default image.
@@ -32,15 +28,6 @@ UI_EXPORT
 
 // Sets the pressed image.
 - (void)setPressedImage:(NSImage*)image;
-
-// Sets the default opacity.
-- (void)setDefaultOpacity:(float)opacity;
-
-// Sets the opacity on hover.
-- (void)setHoverOpacity:(float)opacity;
-
-// Sets the opacity when pressed.
-- (void)setPressedOpacity:(float)opacity;
 
 @end
 

@@ -9,8 +9,8 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "components/user_prefs/user_prefs.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
@@ -64,7 +65,6 @@ BookmarkEditorView::BookmarkEditorView(
     BookmarkEditor::Configuration configuration)
     : profile_(profile),
       tree_view_(NULL),
-      new_folder_button_(NULL),
       url_label_(NULL),
       url_tf_(NULL),
       title_label_(NULL),
@@ -94,7 +94,7 @@ string16 BookmarkEditorView::GetDialogButtonLabel(
 
 bool BookmarkEditorView::IsDialogButtonEnabled(ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK) {
-    if (!bb_model_->IsLoaded())
+    if (!bb_model_->loaded())
       return false;
 
     if (details_.GetNodeType() != BookmarkNode::FOLDER)
@@ -218,9 +218,9 @@ void BookmarkEditorView::ExecuteCommand(int command_id, int event_flags) {
 }
 
 void BookmarkEditorView::Show(gfx::NativeWindow parent) {
-  views::DialogDelegateView::CreateDialogWidget(this, NULL, parent);
+  CreateBrowserModalDialogViews(this, parent);
   UserInputChanged();
-  if (show_tree_ && bb_model_->IsLoaded())
+  if (show_tree_ && bb_model_->loaded())
     ExpandAndSelect();
   GetWidget()->Show();
   // Select all the text in the name Textfield.
@@ -234,8 +234,10 @@ void BookmarkEditorView::Close() {
   GetWidget()->Close();
 }
 
-void BookmarkEditorView::ShowContextMenuForView(views::View* source,
-                                                const gfx::Point& point) {
+void BookmarkEditorView::ShowContextMenuForView(
+    views::View* source,
+    const gfx::Point& point,
+    ui::MenuSourceType source_type) {
   DCHECK_EQ(tree_view_, source);
   if (!tree_view_->GetSelectedNode())
     return;
@@ -247,6 +249,7 @@ void BookmarkEditorView::ShowContextMenuForView(views::View* source,
 
   if (context_menu_runner_->RunMenuAt(source->GetWidget()->GetTopLevelWidget(),
         NULL, gfx::Rect(point, gfx::Size()), views::MenuItemView::TOPRIGHT,
+        source_type,
         views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
         views::MenuRunner::MENU_DELETED)
     return;
@@ -331,9 +334,8 @@ void BookmarkEditorView::Init() {
         l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_URL_LABEL));
 
     url_tf_ = new views::Textfield;
-    PrefService* prefs = profile_ ?
-        components::UserPrefs::Get(profile_) :
-        NULL;
+    PrefService* prefs =
+        profile_ ? user_prefs::UserPrefs::Get(profile_) : NULL;
     url_tf_->SetText(chrome::FormatBookmarkURLForDisplay(url, prefs));
     url_tf_->SetController(this);
     url_tf_->SetAccessibleName(url_label_->text());
@@ -353,7 +355,7 @@ void BookmarkEditorView::Init() {
 
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
-  if (!show_tree_ || bb_model_->IsLoaded())
+  if (!show_tree_ || bb_model_->loaded())
     Reset();
 }
 
@@ -519,7 +521,7 @@ BookmarkEditorView::EditorNode* BookmarkEditorView::FindNodeWithID(
 }
 
 void BookmarkEditorView::ApplyEdits() {
-  DCHECK(bb_model_->IsLoaded());
+  DCHECK(bb_model_->loaded());
 
   if (tree_view_)
     tree_view_->CommitEdit();

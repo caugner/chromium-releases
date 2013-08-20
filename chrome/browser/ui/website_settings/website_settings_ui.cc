@@ -180,61 +180,61 @@ string16 WebsiteSettingsUI::PermissionActionToUIString(
 }
 
 // static
-const gfx::Image& WebsiteSettingsUI::GetPermissionIcon(
-    ContentSettingsType type,
-    ContentSetting setting) {
+int WebsiteSettingsUI::GetPermissionIconID(ContentSettingsType type,
+                                           ContentSetting setting) {
   bool use_blocked = (setting == CONTENT_SETTING_BLOCK);
   int resource_id = IDR_INFO;
   switch (type) {
     case CONTENT_SETTINGS_TYPE_IMAGES:
-      resource_id = use_blocked ? IDR_BLOCKED_IMAGES
-                                : IDR_ALLOWED_IMAGES;
+      resource_id = use_blocked ? IDR_BLOCKED_IMAGES : IDR_ALLOWED_IMAGES;
       break;
     case CONTENT_SETTINGS_TYPE_JAVASCRIPT:
-      resource_id = use_blocked ? IDR_BLOCKED_JAVASCRIPT
-                                : IDR_ALLOWED_JAVASCRIPT;
+      resource_id =
+          use_blocked ? IDR_BLOCKED_JAVASCRIPT : IDR_ALLOWED_JAVASCRIPT;
       break;
     case CONTENT_SETTINGS_TYPE_COOKIES:
-      resource_id = use_blocked ? IDR_BLOCKED_COOKIES
-                                : IDR_ACCESSED_COOKIES;
+      resource_id = use_blocked ? IDR_BLOCKED_COOKIES : IDR_ACCESSED_COOKIES;
       break;
     case CONTENT_SETTINGS_TYPE_POPUPS:
-      resource_id = use_blocked ? IDR_BLOCKED_POPUPS
-                                : IDR_ALLOWED_POPUPS;
+      resource_id = use_blocked ? IDR_BLOCKED_POPUPS : IDR_ALLOWED_POPUPS;
       break;
     case CONTENT_SETTINGS_TYPE_PLUGINS:
-      resource_id = use_blocked ? IDR_BLOCKED_PLUGINS
-                                : IDR_ALLOWED_PLUGINS;
+      resource_id = use_blocked ? IDR_BLOCKED_PLUGINS : IDR_ALLOWED_PLUGINS;
       break;
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-      resource_id = use_blocked ? IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON
-                                : IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON;
+      resource_id = use_blocked ? IDR_BLOCKED_LOCATION : IDR_ALLOWED_LOCATION;
       break;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-      resource_id = use_blocked ? IDR_BLOCKED_NOTIFICATION
-                                : IDR_ALLOWED_NOTIFICATION;
+      resource_id =
+          use_blocked ? IDR_BLOCKED_NOTIFICATION : IDR_ALLOWED_NOTIFICATION;
       break;
     case CONTENT_SETTINGS_TYPE_FULLSCREEN:
       resource_id = IDR_ALLOWED_FULLSCREEN;
       break;
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
-      resource_id = use_blocked ? IDR_BLOCKED_MOUSE_CURSOR
-                                : IDR_ALLOWED_MOUSE_CURSOR;
+      resource_id =
+          use_blocked ? IDR_BLOCKED_MOUSE_CURSOR : IDR_ALLOWED_MOUSE_CURSOR;
       break;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
-      resource_id = use_blocked ? IDR_BLOCKED_MEDIA
-                                : IDR_ASK_MEDIA;
+      resource_id = use_blocked ? IDR_BLOCKED_MEDIA : IDR_ASK_MEDIA;
       break;
     default:
       NOTREACHED();
       break;
   }
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetNativeImageNamed(resource_id);
+  return resource_id;
 }
 
 // static
-const gfx::Image& WebsiteSettingsUI::GetIdentityIcon(
+const gfx::Image& WebsiteSettingsUI::GetPermissionIcon(
+    ContentSettingsType type,
+    ContentSetting setting) {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  return rb.GetNativeImageNamed(GetPermissionIconID(type, setting));
+}
+
+// static
+int WebsiteSettingsUI::GetIdentityIconID(
     WebsiteSettings::SiteIdentityStatus status) {
   int resource_id = IDR_PAGEINFO_INFO;
   switch (status) {
@@ -260,12 +260,18 @@ const gfx::Image& WebsiteSettingsUI::GetIdentityIcon(
       NOTREACHED();
       break;
   }
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetNativeImageNamed(resource_id);
+  return resource_id;
 }
 
 // static
-const gfx::Image& WebsiteSettingsUI::GetConnectionIcon(
+const gfx::Image& WebsiteSettingsUI::GetIdentityIcon(
+    WebsiteSettings::SiteIdentityStatus status) {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  return rb.GetNativeImageNamed(GetIdentityIconID(status));
+}
+
+// static
+int WebsiteSettingsUI::GetConnectionIconID(
     WebsiteSettings::SiteConnectionStatus status) {
   int resource_id = IDR_PAGEINFO_INFO;
   switch (status) {
@@ -287,15 +293,26 @@ const gfx::Image& WebsiteSettingsUI::GetConnectionIcon(
       NOTREACHED();
       break;
   }
+  return resource_id;
+}
+
+// static
+const gfx::Image& WebsiteSettingsUI::GetConnectionIcon(
+    WebsiteSettings::SiteConnectionStatus status) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetNativeImageNamed(resource_id);
+  return rb.GetNativeImageNamed(GetConnectionIconID(status));
+}
+
+// static
+int WebsiteSettingsUI::GetFirstVisitIconID(const string16& first_visit) {
+  // FIXME(markusheintz): Display a minor warning icon if the page is visited
+  // the first time.
+  return IDR_PAGEINFO_INFO;
 }
 
 // static
 const gfx::Image& WebsiteSettingsUI::GetFirstVisitIcon(
     const string16& first_visit) {
-  // FIXME(markusheintz): Display a minor warning icon if the page is visited
-  // the first time.
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetNativeImageNamed(IDR_PAGEINFO_INFO);
+  return rb.GetNativeImageNamed(GetFirstVisitIconID(first_visit));
 }

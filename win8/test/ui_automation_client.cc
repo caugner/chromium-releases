@@ -14,8 +14,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
@@ -158,11 +158,7 @@ HRESULT UIAutomationClient::Context::EventHandler::HandleAutomationEvent(
 base::WeakPtr<UIAutomationClient::Context>
     UIAutomationClient::Context::Create() {
   Context* context = new Context();
-  base::WeakPtr<Context> context_ptr(context->weak_ptr_factory_.GetWeakPtr());
-  // Unbind from this thread so that the instance will bind to the automation
-  // thread when Initialize is called.
-  context->weak_ptr_factory_.DetachFromThread();
-  return context_ptr;
+  return context->weak_ptr_factory_.GetWeakPtr();
 }
 
 void UIAutomationClient::Context::DeleteOnAutomationThread() {
@@ -437,7 +433,7 @@ HRESULT UIAutomationClient::Context::InvokeDesiredItem(
 
   // If the item was found, invoke it.
   if (!target.get()) {
-    LOG(ERROR) << "Failed to find desired item to invoke.";
+    LOG(WARNING) << "Failed to find desired item to invoke.";
     return E_FAIL;
   }
 
@@ -610,7 +606,7 @@ void UIAutomationClient::Begin(const wchar_t* class_name,
                                const InitializedCallback& init_callback,
                                const ResultCallback& result_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK_EQ(context_, static_cast<Context*>(NULL));
+  DCHECK_EQ(context_.get(), static_cast<Context*>(NULL));
 
   // Start the automation thread and initialize our automation client on it.
   context_ = Context::Create();

@@ -5,12 +5,13 @@
 #include <list>
 #include <utility>
 
+#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "net/base/directory_lister.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,12 +33,12 @@ class ListerDelegate : public DirectoryLister::DirectoryListerDelegate {
     file_list_.push_back(data.info);
     paths_.push_back(data.path);
     if (quit_loop_after_each_file_)
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
   }
 
   virtual void OnListDone(int error) OVERRIDE {
     error_ = error;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
     if (recursive_)
       CheckRecursiveSort();
     else
@@ -63,18 +64,17 @@ class ListerDelegate : public DirectoryLister::DirectoryListerDelegate {
            current < file_list_.size();
            previous++, current++) {
         // Directories should come before files.
-        if (file_util::FileEnumerator::IsDirectory(file_list_[previous]) &&
-            !file_util::FileEnumerator::IsDirectory(file_list_[current])) {
+        if (file_list_[previous].IsDirectory() &&
+            !file_list_[current].IsDirectory()) {
           continue;
         }
         EXPECT_NE(FILE_PATH_LITERAL(".."),
-            file_util::FileEnumerator::GetFilename(
-                file_list_[current]).BaseName().value());
-        EXPECT_EQ(file_util::FileEnumerator::IsDirectory(file_list_[previous]),
-                  file_util::FileEnumerator::IsDirectory(file_list_[current]));
+                  file_list_[current].GetName().BaseName().value());
+        EXPECT_EQ(file_list_[previous].IsDirectory(),
+                  file_list_[current].IsDirectory());
         EXPECT_TRUE(file_util::LocaleAwareCompareFilenames(
-            file_util::FileEnumerator::GetFilename(file_list_[previous]),
-            file_util::FileEnumerator::GetFilename(file_list_[current])));
+            file_list_[previous].GetName(),
+            file_list_[current].GetName()));
       }
     }
   }
@@ -87,7 +87,7 @@ class ListerDelegate : public DirectoryLister::DirectoryListerDelegate {
   int error_;
   bool recursive_;
   bool quit_loop_after_each_file_;
-  std::vector<file_util::FileEnumerator::FindInfo> file_list_;
+  std::vector<base::FileEnumerator::FileInfo> file_list_;
   std::vector<base::FilePath> paths_;
 };
 
@@ -143,7 +143,7 @@ TEST_F(DirectoryListerTest, BigDirTest) {
   DirectoryLister lister(root_path(), &delegate);
   lister.Start();
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   EXPECT_EQ(OK, delegate.error());
 }
@@ -154,7 +154,7 @@ TEST_F(DirectoryListerTest, BigDirRecursiveTest) {
                          &delegate);
   lister.Start();
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   EXPECT_EQ(OK, delegate.error());
 }
@@ -164,13 +164,13 @@ TEST_F(DirectoryListerTest, CancelTest) {
   DirectoryLister lister(root_path(), &delegate);
   lister.Start();
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   int num_files = delegate.num_files();
 
   lister.Cancel();
 
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   EXPECT_EQ(num_files, delegate.num_files());
 }
@@ -185,7 +185,7 @@ TEST_F(DirectoryListerTest, EmptyDirTest) {
   DirectoryLister lister(tempDir.path(), &delegate);
   lister.Start();
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   // Contains only the parent directory ("..")
   EXPECT_EQ(1, delegate.num_files());

@@ -11,9 +11,9 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_creator.h"
@@ -88,7 +88,7 @@ const Extension* ExtensionBrowserTest::GetExtensionByPath(
   for (ExtensionSet::const_iterator iter = extensions->begin();
        iter != extensions->end(); ++iter) {
     if ((*iter)->path() == extension_path) {
-      return *iter;
+      return iter->get();
     }
   }
   return NULL;
@@ -306,7 +306,7 @@ class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
       const Extension* extension,
       const ShowDialogCallback& show_dialog_callback) OVERRIDE {
     delegate->InstallUIAbort(true);
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 
   virtual void OnInstallSuccess(const Extension* extension,
@@ -411,6 +411,7 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
     installer->set_expected_id(id);
     installer->set_is_gallery_install(from_webstore);
     installer->set_install_source(install_source);
+    installer->set_install_wait_for_idle(false);
     if (!from_webstore) {
       installer->set_off_store_install_allow_reason(
           extensions::CrxInstaller::OffStoreInstallAllowedInTest);
@@ -663,7 +664,7 @@ void ExtensionBrowserTest::Observe(
       last_loaded_extension_id_ =
           content::Details<const Extension>(details).ptr()->id();
       VLOG(1) << "Got EXTENSION_LOADED notification.";
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       break;
 
     case chrome::NOTIFICATION_CRX_INSTALLER_DONE:
@@ -677,29 +678,29 @@ void ExtensionBrowserTest::Observe(
           last_loaded_extension_id_ = "";
       }
       ++crx_installers_done_observed_;
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       break;
 
     case chrome::NOTIFICATION_EXTENSION_INSTALLED:
       VLOG(1) << "Got EXTENSION_INSTALLED notification.";
       ++extension_installs_observed_;
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       break;
 
     case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR:
       VLOG(1) << "Got EXTENSION_INSTALL_ERROR notification.";
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       break;
 
     case chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED:
       VLOG(1) << "Got EXTENSION_PROCESS_TERMINATED notification.";
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       break;
 
     case chrome::NOTIFICATION_EXTENSION_LOAD_ERROR:
       VLOG(1) << "Got EXTENSION_LOAD_ERROR notification.";
       ++extension_load_errors_observed_;
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       break;
 
     case chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED: {
@@ -710,7 +711,7 @@ void ExtensionBrowserTest::Observe(
       if (location_bar->PageActionCount() ==
           target_page_action_count_) {
         target_page_action_count_ = -1;
-        MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->Quit();
       }
       break;
     }
@@ -724,14 +725,14 @@ void ExtensionBrowserTest::Observe(
       if (location_bar->PageActionVisibleCount() ==
           target_visible_page_action_count_) {
         target_visible_page_action_count_ = -1;
-        MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->Quit();
       }
       break;
     }
 
     case content::NOTIFICATION_LOAD_STOP:
       VLOG(1) << "Got LOAD_STOP notification.";
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       break;
 
     default:

@@ -4,13 +4,13 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/net/network_stats.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -24,7 +24,7 @@ class NetworkStatsTest : public PlatformTest {
     // Flush the message loop to make application verifiers happy.
     message_loop_.RunUntilIdle();
   }
-  MessageLoopForIO message_loop_;
+  base::MessageLoopForIO message_loop_;
 };
 
 class NetworkStatsTestUDP : public NetworkStatsTest {
@@ -411,6 +411,27 @@ TEST_F(NetworkStatsTestUDP, VerifyBytes) {
   message = version + checksum + payload_size + key_string + encoded_payload;
   EXPECT_EQ(NetworkStats::SUCCESS, network_stats.VerifyBytes(message));
   EXPECT_EQ(1u, network_stats.packets_received_mask());
+}
+
+TEST_F(NetworkStatsTestUDP, DeleteDuringResolve) {
+  ASSERT_TRUE(test_server_.Start());
+  scoped_ptr<NetworkStats> network_stats(new NetworkStats());
+  scoped_ptr<net::MockHostResolver> host_resolver(new net::MockHostResolver());
+  host_resolver->set_ondemand_mode(true);
+  host_resolver->set_synchronous_mode(false);
+  net::TestCompletionCallback cb;
+  EXPECT_FALSE(host_resolver->has_pending_requests());
+  EXPECT_TRUE(network_stats->Start(host_resolver.get(),
+                                   net::HostPortPair::FromURL(
+                                       GURL("http://www.example.com")),
+                                   NetworkStats::HISTOGRAM_PORT_MAX,
+                                   true,
+                                   100,
+                                   1,
+                                   cb.callback()));
+  EXPECT_TRUE(host_resolver->has_pending_requests());
+  network_stats.reset(NULL);
+  EXPECT_FALSE(host_resolver->has_pending_requests());
 }
 
 }  // namespace chrome_browser_net

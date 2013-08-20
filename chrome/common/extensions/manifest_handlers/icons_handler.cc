@@ -8,7 +8,7 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
@@ -127,7 +127,7 @@ IconsHandler::~IconsHandler() {
 
 bool IconsHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<IconsInfo> icons_info(new IconsInfo);
-  const DictionaryValue* icons_dict = NULL;
+  const base::DictionaryValue* icons_dict = NULL;
   if (!extension->manifest()->GetDictionary(keys::kIcons, &icons_dict)) {
     *error = ASCIIToUTF16(extension_manifest_errors::kInvalidIcons);
     return false;

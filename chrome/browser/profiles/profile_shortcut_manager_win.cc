@@ -12,17 +12,19 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/path_service.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/shortcut.h"
 #include "chrome/browser/app_icon_win.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/product.h"
@@ -124,7 +126,7 @@ SkBitmap BadgeIcon(const SkBitmap& app_icon_bitmap,
       skia::CreateBitmapCanvas(app_icon_bitmap.width(),
                                app_icon_bitmap.height(),
                                false));
-  DCHECK(offscreen_canvas.get());
+  DCHECK(offscreen_canvas);
   offscreen_canvas->drawBitmap(app_icon_bitmap, 0, 0);
   offscreen_canvas->drawBitmap(sk_icon,
                                app_icon_bitmap.width() - sk_icon.width(),
@@ -146,7 +148,7 @@ base::FilePath CreateChromeDesktopShortcutIconForProfile(
     const SkBitmap& avatar_bitmap_2x) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   scoped_ptr<SkBitmap> app_icon_bitmap(GetAppIconForSize(kShortcutIconSize));
-  if (!app_icon_bitmap.get())
+  if (!app_icon_bitmap)
     return base::FilePath();
 
   gfx::ImageFamily badged_bitmaps;
@@ -154,7 +156,7 @@ base::FilePath CreateChromeDesktopShortcutIconForProfile(
       BadgeIcon(*app_icon_bitmap, avatar_bitmap_1x, 1)));
 
   app_icon_bitmap = GetAppIconForSize(IconUtil::kLargeIconSize);
-  if (app_icon_bitmap.get()) {
+  if (app_icon_bitmap) {
     badged_bitmaps.Add(gfx::Image::CreateFrom1xBitmap(
         BadgeIcon(*app_icon_bitmap, avatar_bitmap_2x, 2)));
   }
@@ -232,8 +234,8 @@ void ListDesktopShortcutsWithCommandLine(const base::FilePath& chrome_exe,
   if (!GetDesktopShortcutsDirectories(&user_shortcuts_directory, NULL))
     return;
 
-  file_util::FileEnumerator enumerator(user_shortcuts_directory, false,
-      file_util::FileEnumerator::FILES);
+  base::FileEnumerator enumerator(user_shortcuts_directory, false,
+                                  base::FileEnumerator::FILES);
   for (base::FilePath path = enumerator.Next(); !path.empty();
        path = enumerator.Next()) {
     string16 shortcut_command_line;
@@ -367,6 +369,9 @@ void CreateOrUpdateDesktopShortcutsForProfile(
     properties.set_arguments(string16());
   }
 
+  properties.set_app_id(
+      ShellIntegration::GetChromiumModelIdForProfile(profile_path));
+
   ShellUtil::ShortcutOperation operation =
       ShellUtil::SHELL_SHORTCUT_REPLACE_EXISTING;
 
@@ -399,8 +404,8 @@ bool ChromeDesktopShortcutsExist(const base::FilePath& chrome_exe) {
   if (!GetDesktopShortcutsDirectories(&user_shortcuts_directory, NULL))
     return false;
 
-  file_util::FileEnumerator enumerator(user_shortcuts_directory, false,
-      file_util::FileEnumerator::FILES);
+  base::FileEnumerator enumerator(user_shortcuts_directory, false,
+                                  base::FileEnumerator::FILES);
   for (base::FilePath path = enumerator.Next(); !path.empty();
        path = enumerator.Next()) {
     if (IsChromeShortcut(path, chrome_exe, NULL))
@@ -605,10 +610,6 @@ void ProfileShortcutManagerWin::OnProfileAdded(
                                             UPDATE_EXISTING_ONLY,
                                             UPDATE_NON_PROFILE_SHORTCUTS);
   }
-}
-
-void ProfileShortcutManagerWin::OnProfileWillBeRemoved(
-    const base::FilePath& profile_path) {
 }
 
 void ProfileShortcutManagerWin::OnProfileWasRemoved(

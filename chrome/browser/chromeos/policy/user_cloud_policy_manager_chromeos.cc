@@ -15,6 +15,7 @@
 #include "chrome/browser/policy/cloud/cloud_policy_refresh_scheduler.h"
 #include "chrome/browser/policy/cloud/resource_cache.h"
 #include "chrome/browser/policy/policy_bundle.h"
+#include "chrome/browser/policy/policy_domain_descriptor.h"
 #include "chrome/common/pref_names.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -102,11 +103,10 @@ bool UserCloudPolicyManagerChromeOS::IsInitializationComplete(
 }
 
 void UserCloudPolicyManagerChromeOS::RegisterPolicyDomain(
-    PolicyDomain domain,
-    const std::set<std::string>& component_ids) {
-  if (ComponentCloudPolicyService::SupportsDomain(domain) &&
+    scoped_refptr<const PolicyDomainDescriptor> descriptor) {
+  if (ComponentCloudPolicyService::SupportsDomain(descriptor->domain()) &&
       component_policy_service_) {
-    component_policy_service_->RegisterPolicyDomain(domain, component_ids);
+    component_policy_service_->RegisterPolicyDomain(descriptor);
   }
 }
 
@@ -196,14 +196,14 @@ void UserCloudPolicyManagerChromeOS::FetchPolicyOAuthTokenUsingSigninProfile() {
   Profile* signin_profile = chromeos::ProfileHelper::GetSigninProfile();
   if (signin_profile)
     signin_context = signin_profile->GetRequestContext();
-  if (!signin_context) {
+  if (!signin_context.get()) {
     LOG(ERROR) << "No signin Profile for policy oauth token fetch!";
     OnOAuth2PolicyTokenFetched(std::string());
     return;
   }
 
   token_fetcher_.reset(new PolicyOAuth2TokenFetcher(
-      signin_context,
+      signin_context.get(),
       g_browser_process->system_request_context(),
       base::Bind(&UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched,
                  base::Unretained(this))));
@@ -234,7 +234,7 @@ void UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched(
     // Start client registration. Either OnRegistrationStateChanged() or
     // OnClientError() will be called back.
     client()->Register(em::DeviceRegisterRequest::USER,
-                       policy_token, std::string(), false);
+                       policy_token, std::string(), false, std::string());
   }
 
   token_fetcher_.reset();

@@ -11,7 +11,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/string_split.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
@@ -27,8 +27,7 @@
 #include "net/socket/socket_test_util.h"
 #include "net/socket_stream/socket_stream.h"
 #include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_test_util_spdy3.h"
-#include "net/spdy/spdy_websocket_test_util_spdy3.h"
+#include "net/spdy/spdy_websocket_test_util.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/websockets/websocket_throttle.h"
@@ -36,13 +35,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
-using namespace net::test_spdy3;
+namespace net {
 
 namespace {
 
-class MockSocketStream : public net::SocketStream {
+class MockSocketStream : public SocketStream {
  public:
-  MockSocketStream(const GURL& url, net::SocketStream::Delegate* delegate)
+  MockSocketStream(const GURL& url, SocketStream::Delegate* delegate)
       : SocketStream(url, delegate) {
   }
 
@@ -54,7 +53,7 @@ class MockSocketStream : public net::SocketStream {
 
   virtual void Close() OVERRIDE {}
   virtual void RestartWithAuth(
-      const net::AuthCredentials& credentials) OVERRIDE {
+      const AuthCredentials& credentials) OVERRIDE {
   }
 
   virtual void DetachDelegate() OVERRIDE {
@@ -72,7 +71,7 @@ class MockSocketStream : public net::SocketStream {
   std::string sent_data_;
 };
 
-class MockSocketStreamDelegate : public net::SocketStream::Delegate {
+class MockSocketStreamDelegate : public SocketStream::Delegate {
  public:
   MockSocketStreamDelegate()
       : amount_sent_(0),
@@ -101,41 +100,41 @@ class MockSocketStreamDelegate : public net::SocketStream::Delegate {
   }
 
   virtual int OnStartOpenConnection(
-      net::SocketStream* socket,
-      const net::CompletionCallback& callback) OVERRIDE {
+      SocketStream* socket,
+      const CompletionCallback& callback) OVERRIDE {
     if (!on_start_open_connection_.is_null())
       on_start_open_connection_.Run();
-    return net::OK;
+    return OK;
   }
-  virtual void OnConnected(net::SocketStream* socket,
+  virtual void OnConnected(SocketStream* socket,
                            int max_pending_send_allowed) OVERRIDE {
     if (!on_connected_.is_null())
       on_connected_.Run();
   }
-  virtual void OnSentData(net::SocketStream* socket,
+  virtual void OnSentData(SocketStream* socket,
                           int amount_sent) OVERRIDE {
     amount_sent_ += amount_sent;
     if (!on_sent_data_.is_null())
       on_sent_data_.Run();
   }
-  virtual void OnReceivedData(net::SocketStream* socket,
+  virtual void OnReceivedData(SocketStream* socket,
                               const char* data, int len) OVERRIDE {
     received_data_ += std::string(data, len);
     if (!on_received_data_.is_null())
       on_received_data_.Run();
   }
-  virtual void OnClose(net::SocketStream* socket) OVERRIDE {
+  virtual void OnClose(SocketStream* socket) OVERRIDE {
     if (!on_close_.is_null())
       on_close_.Run();
   }
-  virtual bool CanGetCookies(net::SocketStream* socket,
+  virtual bool CanGetCookies(SocketStream* socket,
                              const GURL& url) OVERRIDE {
     return allow_all_cookies_;
   }
-  virtual bool CanSetCookie(net::SocketStream* request,
+  virtual bool CanSetCookie(SocketStream* request,
                             const GURL& url,
                             const std::string& cookie_line,
-                            net::CookieOptions* options) OVERRIDE {
+                            CookieOptions* options) OVERRIDE {
     return allow_all_cookies_;
   }
 
@@ -153,19 +152,19 @@ class MockSocketStreamDelegate : public net::SocketStream::Delegate {
   base::Closure on_close_;
 };
 
-class MockCookieStore : public net::CookieStore {
+class MockCookieStore : public CookieStore {
  public:
   struct Entry {
     GURL url;
     std::string cookie_line;
-    net::CookieOptions options;
+    CookieOptions options;
   };
 
   MockCookieStore() {}
 
   bool SetCookieWithOptions(const GURL& url,
                             const std::string& cookie_line,
-                            const net::CookieOptions& options) {
+                            const CookieOptions& options) {
     Entry entry;
     entry.url = url;
     entry.cookie_line = cookie_line;
@@ -175,7 +174,7 @@ class MockCookieStore : public net::CookieStore {
   }
 
   std::string GetCookiesWithOptions(const GURL& url,
-                                    const net::CookieOptions& options) {
+                                    const CookieOptions& options) {
     std::string result;
     for (size_t i = 0; i < entries_.size(); i++) {
       Entry& entry = entries_[i];
@@ -193,7 +192,7 @@ class MockCookieStore : public net::CookieStore {
   virtual void SetCookieWithOptionsAsync(
       const GURL& url,
       const std::string& cookie_line,
-      const net::CookieOptions& options,
+      const CookieOptions& options,
       const SetCookiesCallback& callback) OVERRIDE {
     bool result = SetCookieWithOptions(url, cookie_line, options);
     if (!callback.is_null())
@@ -202,7 +201,7 @@ class MockCookieStore : public net::CookieStore {
 
   virtual void GetCookiesWithOptionsAsync(
       const GURL& url,
-      const net::CookieOptions& options,
+      const CookieOptions& options,
       const GetCookiesCallback& callback) OVERRIDE {
     if (!callback.is_null())
       callback.Run(GetCookiesWithOptions(url, options));
@@ -225,7 +224,7 @@ class MockCookieStore : public net::CookieStore {
     ADD_FAILURE();
   }
 
-  virtual net::CookieMonster* GetCookieMonster() OVERRIDE { return NULL; }
+  virtual CookieMonster* GetCookieMonster() OVERRIDE { return NULL; }
 
   const std::vector<Entry>& entries() const { return entries_; }
 
@@ -236,17 +235,17 @@ class MockCookieStore : public net::CookieStore {
   std::vector<Entry> entries_;
 };
 
-class MockSSLConfigService : public net::SSLConfigService {
+class MockSSLConfigService : public SSLConfigService {
  public:
-  virtual void GetSSLConfig(net::SSLConfig* config) OVERRIDE {}
+  virtual void GetSSLConfig(SSLConfig* config) OVERRIDE {}
 
  protected:
   virtual ~MockSSLConfigService() {}
 };
 
-class MockURLRequestContext : public net::URLRequestContext {
+class MockURLRequestContext : public URLRequestContext {
  public:
-  explicit MockURLRequestContext(net::CookieStore* cookie_store)
+  explicit MockURLRequestContext(CookieStore* cookie_store)
       : transport_security_state_() {
     set_cookie_store(cookie_store);
     set_transport_security_state(&transport_security_state_);
@@ -259,77 +258,78 @@ class MockURLRequestContext : public net::URLRequestContext {
   virtual ~MockURLRequestContext() {}
 
  private:
-  net::TransportSecurityState transport_security_state_;
+  TransportSecurityState transport_security_state_;
 };
 
-class MockHttpTransactionFactory : public net::HttpTransactionFactory {
+class MockHttpTransactionFactory : public HttpTransactionFactory {
  public:
-  explicit MockHttpTransactionFactory(net::OrderedSocketData* data) {
+  explicit MockHttpTransactionFactory(OrderedSocketData* data) {
     data_ = data;
-    net::MockConnect connect_data(net::SYNCHRONOUS, net::OK);
+    MockConnect connect_data(SYNCHRONOUS, OK);
     data_->set_connect_data(connect_data);
-    session_deps_.reset(new net::SpdySessionDependencies(net::kProtoSPDY3));
+    session_deps_.reset(new SpdySessionDependencies(kProtoSPDY3));
     session_deps_->socket_factory->AddSocketDataProvider(data_);
     http_session_ =
-        net::SpdySessionDependencies::SpdyCreateSession(session_deps_.get());
+        SpdySessionDependencies::SpdyCreateSession(session_deps_.get());
     host_port_pair_.set_host("example.com");
     host_port_pair_.set_port(80);
-    host_port_proxy_pair_.first = host_port_pair_;
-    host_port_proxy_pair_.second = net::ProxyServer::Direct();
-    net::SpdySessionPool* spdy_session_pool =
+    spdy_session_key_ = SpdySessionKey(host_port_pair_,
+                                            ProxyServer::Direct(),
+                                            kPrivacyModeDisabled);
+    SpdySessionPool* spdy_session_pool =
         http_session_->spdy_session_pool();
     DCHECK(spdy_session_pool);
-    EXPECT_FALSE(spdy_session_pool->HasSession(host_port_proxy_pair_));
+    EXPECT_FALSE(spdy_session_pool->HasSession(spdy_session_key_));
     session_ =
-        spdy_session_pool->Get(host_port_proxy_pair_, net::BoundNetLog());
-    EXPECT_TRUE(spdy_session_pool->HasSession(host_port_proxy_pair_));
+        spdy_session_pool->Get(spdy_session_key_, BoundNetLog());
+    EXPECT_TRUE(spdy_session_pool->HasSession(spdy_session_key_));
 
     transport_params_ =
-        new net::TransportSocketParams(host_port_pair_,
-                                       net::MEDIUM,
+        new TransportSocketParams(host_port_pair_,
+                                       MEDIUM,
                                        false,
                                        false,
-                                       net::OnHostResolutionCallback());
-    net::ClientSocketHandle* connection = new net::ClientSocketHandle;
-    EXPECT_EQ(net::OK,
+                                       OnHostResolutionCallback());
+    ClientSocketHandle* connection = new ClientSocketHandle;
+    EXPECT_EQ(OK,
               connection->Init(host_port_pair_.ToString(), transport_params_,
-                               net::MEDIUM, net::CompletionCallback(),
+                               MEDIUM, CompletionCallback(),
                                http_session_->GetTransportSocketPool(
-                                   net::HttpNetworkSession::NORMAL_SOCKET_POOL),
-                               net::BoundNetLog()));
-    EXPECT_EQ(net::OK,
-              session_->InitializeWithSocket(connection, false, net::OK));
+                                   HttpNetworkSession::NORMAL_SOCKET_POOL),
+                               BoundNetLog()));
+    EXPECT_EQ(OK,
+              session_->InitializeWithSocket(connection, false, OK));
   }
   virtual int CreateTransaction(
-      net::RequestPriority priority,
-      scoped_ptr<net::HttpTransaction>* trans,
-      net::HttpTransactionDelegate* delegate) OVERRIDE {
+      RequestPriority priority,
+      scoped_ptr<HttpTransaction>* trans,
+      HttpTransactionDelegate* delegate) OVERRIDE {
     NOTREACHED();
-    return net::ERR_UNEXPECTED;
+    return ERR_UNEXPECTED;
   }
-  virtual net::HttpCache* GetCache() OVERRIDE {
+  virtual HttpCache* GetCache() OVERRIDE {
     NOTREACHED();
     return NULL;
   }
-  virtual net::HttpNetworkSession* GetSession() OVERRIDE {
+  virtual HttpNetworkSession* GetSession() OVERRIDE {
     return http_session_.get();
   }
  private:
-  net::OrderedSocketData* data_;
-  scoped_ptr<net::SpdySessionDependencies> session_deps_;
-  scoped_refptr<net::HttpNetworkSession> http_session_;
-  scoped_refptr<net::TransportSocketParams> transport_params_;
-  scoped_refptr<net::SpdySession> session_;
-  net::HostPortPair host_port_pair_;
-  net::HostPortProxyPair host_port_proxy_pair_;
+  OrderedSocketData* data_;
+  scoped_ptr<SpdySessionDependencies> session_deps_;
+  scoped_refptr<HttpNetworkSession> http_session_;
+  scoped_refptr<TransportSocketParams> transport_params_;
+  scoped_refptr<SpdySession> session_;
+  HostPortPair host_port_pair_;
+  SpdySessionKey spdy_session_key_;
 };
 
 }  // namespace
 
-namespace net {
-
 class WebSocketJobSpdy3Test : public PlatformTest {
  public:
+  WebSocketJobSpdy3Test() : spdy_util_(kProtoSPDY3) {}
+
   virtual void SetUp() {
     stream_type_ = STREAM_INVALID;
     cookie_store_ = new MockCookieStore;
@@ -387,10 +387,10 @@ class WebSocketJobSpdy3Test : public PlatformTest {
       }
 
       ssl_config_service_ = new MockSSLConfigService();
-      context_->set_ssl_config_service(ssl_config_service_);
-      proxy_service_.reset(net::ProxyService::CreateDirect());
+      context_->set_ssl_config_service(ssl_config_service_.get());
+      proxy_service_.reset(ProxyService::CreateDirect());
       context_->set_proxy_service(proxy_service_.get());
-      host_resolver_.reset(new net::MockHostResolver);
+      host_resolver_.reset(new MockHostResolver);
       context_->set_host_resolver(host_resolver_.get());
 
       socket_ = new SocketStream(url, websocket_.get());
@@ -412,15 +412,15 @@ class WebSocketJobSpdy3Test : public PlatformTest {
   }
   void SkipToConnecting() {
     websocket_->state_ = WebSocketJob::CONNECTING;
-    WebSocketThrottle::GetInstance()->PutInQueue(websocket_);
+    WebSocketThrottle::GetInstance()->PutInQueue(websocket_.get());
   }
   WebSocketJob::State GetWebSocketJobState() {
     return websocket_->state_;
   }
   void CloseWebSocketJob() {
-    if (websocket_->socket_) {
+    if (websocket_->socket_.get()) {
       websocket_->socket_->DetachDelegate();
-      WebSocketThrottle::GetInstance()->RemoveFromQueue(websocket_);
+      WebSocketThrottle::GetInstance()->RemoveFromQueue(websocket_.get());
     }
     websocket_->state_ = WebSocketJob::CLOSED;
     websocket_->delegate_ = NULL;
@@ -453,6 +453,7 @@ class WebSocketJobSpdy3Test : public PlatformTest {
   void TestConnectByWebSocket(ThrottlingOption throttling);
   void TestConnectBySpdy(SpdyOption spdy, ThrottlingOption throttling);
 
+  SpdyWebSocketTestUtil spdy_util_;
   StreamType stream_type_;
   scoped_refptr<MockCookieStore> cookie_store_;
   scoped_refptr<WebSocketJob> websocket_;
@@ -461,8 +462,8 @@ class WebSocketJobSpdy3Test : public PlatformTest {
   scoped_ptr<OrderedSocketData> data_;
   TestCompletionCallback sync_test_callback_;
   scoped_refptr<MockSSLConfigService> ssl_config_service_;
-  scoped_ptr<net::ProxyService> proxy_service_;
-  scoped_ptr<net::MockHostResolver> host_resolver_;
+  scoped_ptr<ProxyService> proxy_service_;
+  scoped_ptr<MockHostResolver> host_resolver_;
   scoped_ptr<MockHttpTransactionFactory> http_factory_;
   scoped_ptr<MockURLRequestContext> context_;
 
@@ -576,7 +577,7 @@ void WebSocketJobSpdy3Test::TestSimpleHandshake() {
   SkipToConnecting();
 
   DoSendRequest();
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeRequestWithoutCookie, sent_data());
   EXPECT_EQ(WebSocketJob::CONNECTING, GetWebSocketJobState());
   websocket_->OnSentData(socket_.get(),
@@ -586,7 +587,7 @@ void WebSocketJobSpdy3Test::TestSimpleHandshake() {
   websocket_->OnReceivedData(socket_.get(),
                              kHandshakeResponseWithoutCookie,
                              kHandshakeResponseWithoutCookieLength);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeResponseWithoutCookie, delegate.received_data());
   EXPECT_EQ(WebSocketJob::OPEN, GetWebSocketJobState());
   CloseWebSocketJob();
@@ -601,7 +602,7 @@ void WebSocketJobSpdy3Test::TestSlowHandshake() {
   DoSendRequest();
   // We assume request is sent in one data chunk (from WebKit)
   // We don't support streaming request.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeRequestWithoutCookie, sent_data());
   EXPECT_EQ(WebSocketJob::CONNECTING, GetWebSocketJobState());
   websocket_->OnSentData(socket_.get(),
@@ -613,15 +614,13 @@ void WebSocketJobSpdy3Test::TestSlowHandshake() {
   for (size_t i = 0; i < lines.size() - 2; i++) {
     std::string line = lines[i] + "\r\n";
     SCOPED_TRACE("Line: " + line);
-    websocket_->OnReceivedData(socket_,
-                               line.c_str(),
-                               line.size());
-    MessageLoop::current()->RunUntilIdle();
+    websocket_->OnReceivedData(socket_.get(), line.c_str(), line.size());
+    base::MessageLoop::current()->RunUntilIdle();
     EXPECT_TRUE(delegate.received_data().empty());
     EXPECT_EQ(WebSocketJob::CONNECTING, GetWebSocketJobState());
   }
   websocket_->OnReceivedData(socket_.get(), "\r\n", 2);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(delegate.received_data().empty());
   EXPECT_EQ(kHandshakeResponseWithoutCookie, delegate.received_data());
   EXPECT_EQ(WebSocketJob::OPEN, GetWebSocketJobState());
@@ -634,14 +633,15 @@ TEST_F(WebSocketJobSpdy3Test, DelayedCookies) {
   GURL cookieUrl("http://example.com/demo");
   CookieOptions cookie_options;
   scoped_refptr<DelayedCookieMonster> cookie_store = new DelayedCookieMonster();
-  context_->set_cookie_store(cookie_store);
-  cookie_store->SetCookieWithOptionsAsync(
-      cookieUrl, "CR-test=1", cookie_options,
-      net::CookieMonster::SetCookiesCallback());
+  context_->set_cookie_store(cookie_store.get());
+  cookie_store->SetCookieWithOptionsAsync(cookieUrl,
+                                          "CR-test=1",
+                                          cookie_options,
+                                          CookieMonster::SetCookiesCallback());
   cookie_options.set_include_httponly();
   cookie_store->SetCookieWithOptionsAsync(
       cookieUrl, "CR-test-httponly=1", cookie_options,
-      net::CookieMonster::SetCookiesCallback());
+      CookieMonster::SetCookiesCallback());
 
   MockSocketStreamDelegate delegate;
   InitWebSocketJob(url, &delegate, STREAM_MOCK_SOCKET);
@@ -650,10 +650,10 @@ TEST_F(WebSocketJobSpdy3Test, DelayedCookies) {
   bool sent = websocket_->SendData(kHandshakeRequestWithCookie,
                                    kHandshakeRequestWithCookieLength);
   EXPECT_TRUE(sent);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeRequestWithFilteredCookie, sent_data());
   EXPECT_EQ(WebSocketJob::CONNECTING, GetWebSocketJobState());
-  websocket_->OnSentData(socket_,
+  websocket_->OnSentData(socket_.get(),
                          kHandshakeRequestWithFilteredCookieLength);
   EXPECT_EQ(kHandshakeRequestWithCookieLength,
             delegate.amount_sent());
@@ -661,7 +661,7 @@ TEST_F(WebSocketJobSpdy3Test, DelayedCookies) {
   websocket_->OnReceivedData(socket_.get(),
                              kHandshakeResponseWithCookie,
                              kHandshakeResponseWithCookieLength);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeResponseWithoutCookie, delegate.received_data());
   EXPECT_EQ(WebSocketJob::OPEN, GetWebSocketJobState());
 
@@ -685,10 +685,10 @@ void WebSocketJobSpdy3Test::TestHandshakeWithCookie() {
   bool sent = websocket_->SendData(kHandshakeRequestWithCookie,
                                    kHandshakeRequestWithCookieLength);
   EXPECT_TRUE(sent);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeRequestWithFilteredCookie, sent_data());
   EXPECT_EQ(WebSocketJob::CONNECTING, GetWebSocketJobState());
-  websocket_->OnSentData(socket_,
+  websocket_->OnSentData(socket_.get(),
                          kHandshakeRequestWithFilteredCookieLength);
   EXPECT_EQ(kHandshakeRequestWithCookieLength,
             delegate.amount_sent());
@@ -696,7 +696,7 @@ void WebSocketJobSpdy3Test::TestHandshakeWithCookie() {
   websocket_->OnReceivedData(socket_.get(),
                              kHandshakeResponseWithCookie,
                              kHandshakeResponseWithCookieLength);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeResponseWithoutCookie, delegate.received_data());
   EXPECT_EQ(WebSocketJob::OPEN, GetWebSocketJobState());
 
@@ -729,17 +729,16 @@ void WebSocketJobSpdy3Test::TestHandshakeWithCookieButNotAllowed() {
   bool sent = websocket_->SendData(kHandshakeRequestWithCookie,
                                    kHandshakeRequestWithCookieLength);
   EXPECT_TRUE(sent);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeRequestWithoutCookie, sent_data());
   EXPECT_EQ(WebSocketJob::CONNECTING, GetWebSocketJobState());
-  websocket_->OnSentData(socket_, kHandshakeRequestWithoutCookieLength);
-  EXPECT_EQ(kHandshakeRequestWithCookieLength,
-            delegate.amount_sent());
+  websocket_->OnSentData(socket_.get(), kHandshakeRequestWithoutCookieLength);
+  EXPECT_EQ(kHandshakeRequestWithCookieLength, delegate.amount_sent());
 
   websocket_->OnReceivedData(socket_.get(),
                              kHandshakeResponseWithCookie,
                              kHandshakeResponseWithCookieLength);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeResponseWithoutCookie, delegate.received_data());
   EXPECT_EQ(WebSocketJob::OPEN, GetWebSocketJobState());
 
@@ -779,7 +778,7 @@ void WebSocketJobSpdy3Test::TestInvalidSendData() {
   DoSendRequest();
   // We assume request is sent in one data chunk (from WebKit)
   // We don't support streaming request.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(kHandshakeRequestWithoutCookie, sent_data());
   EXPECT_EQ(WebSocketJob::CONNECTING, GetWebSocketJobState());
   websocket_->OnSentData(socket_.get(),
@@ -862,7 +861,7 @@ void WebSocketJobSpdy3Test::TestConnectByWebSocket(
 
     // Remove the former WebSocket object from throttling queue to unblock the
     // latter.
-    WebSocketThrottle::GetInstance()->RemoveFromQueue(block_websocket);
+    WebSocketThrottle::GetInstance()->RemoveFromQueue(block_websocket.get());
     block_websocket->state_ = WebSocketJob::CLOSED;
     block_websocket = NULL;
     WebSocketThrottle::GetInstance()->WakeupSocketIfNecessary();
@@ -905,25 +904,25 @@ void WebSocketJobSpdy3Test::TestConnectBySpdy(
 
   const SpdyStreamId kStreamId = 1;
   scoped_ptr<SpdyFrame> request_frame(
-      ConstructSpdyWebSocketHandshakeRequestFrame(
+      spdy_util_.ConstructSpdyWebSocketHandshakeRequestFrame(
           kHandshakeRequestForSpdy,
           arraysize(kHandshakeRequestForSpdy) / 2,
           kStreamId,
           MEDIUM));
   scoped_ptr<SpdyFrame> response_frame(
-      ConstructSpdyWebSocketHandshakeResponseFrame(
+      spdy_util_.ConstructSpdyWebSocketHandshakeResponseFrame(
           kHandshakeResponseForSpdy,
           arraysize(kHandshakeResponseForSpdy) / 2,
           kStreamId,
           MEDIUM));
   scoped_ptr<SpdyFrame> data_hello_frame(
-      ConstructSpdyWebSocketDataFrame(
+      spdy_util_.ConstructSpdyWebSocketDataFrame(
           kDataHello,
           kDataHelloLength,
           kStreamId,
           false));
   scoped_ptr<SpdyFrame> data_world_frame(
-      ConstructSpdyWebSocketDataFrame(
+      spdy_util_.ConstructSpdyWebSocketDataFrame(
           kDataWorld,
           kDataWorldLength,
           kStreamId,
@@ -978,7 +977,7 @@ void WebSocketJobSpdy3Test::TestConnectBySpdy(
 
     // Remove the former WebSocket object from throttling queue to unblock the
     // latter.
-    WebSocketThrottle::GetInstance()->RemoveFromQueue(block_websocket);
+    WebSocketThrottle::GetInstance()->RemoveFromQueue(block_websocket.get());
     block_websocket->state_ = WebSocketJob::CLOSED;
     block_websocket = NULL;
     WebSocketThrottle::GetInstance()->WakeupSocketIfNecessary();

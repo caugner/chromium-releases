@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/devtools/devtools_file_helper.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "content/public/browser/devtools_client_host.h"
@@ -180,6 +180,9 @@ class DevToolsWindow : private content::NotificationObserver,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual content::JavaScriptDialogManager*
       GetJavaScriptDialogManager() OVERRIDE;
+  virtual content::ColorChooser* OpenColorChooser(
+      content::WebContents* web_contents,
+      SkColor color) OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* web_contents,
       const content::FileChooserParams& params) OVERRIDE;

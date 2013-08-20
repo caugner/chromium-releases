@@ -5,12 +5,13 @@
 #include "chrome/common/extensions/api/system_indicator/system_indicator_handler.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 
 namespace extensions {
 
@@ -21,7 +22,7 @@ SystemIndicatorHandler::~SystemIndicatorHandler() {
 }
 
 bool SystemIndicatorHandler::Parse(Extension* extension, string16* error) {
-  const DictionaryValue* system_indicator_value = NULL;
+  const base::DictionaryValue* system_indicator_value = NULL;
   if (!extension->manifest()->GetDictionary(
           extension_manifest_keys::kSystemIndicator, &system_indicator_value)) {
     *error = ASCIIToUTF16(extension_manifest_errors::kInvalidSystemIndicator);
@@ -36,7 +37,8 @@ bool SystemIndicatorHandler::Parse(Extension* extension, string16* error) {
 
   // Because the manifest was successfully parsed, auto-grant the permission.
   // TODO(dewittj) Add this for all extension action APIs.
-  extension->initial_api_permissions()->insert(APIPermission::kSystemIndicator);
+  PermissionsData::GetInitialAPIPermissions(extension)->insert(
+      APIPermission::kSystemIndicator);
 
   ActionInfo::SetSystemIndicatorInfo(extension, action_info.release());
   return true;

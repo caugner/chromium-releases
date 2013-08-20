@@ -5,10 +5,10 @@
 #ifndef CHROME_COMMON_EXTENSIONS_COMMAND_H_
 #define CHROME_COMMON_EXTENSIONS_COMMAND_H_
 
-#include <string>
 #include <map>
+#include <string>
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/base/accelerators/accelerator.h"
 
 namespace base {
@@ -35,6 +35,10 @@ class Command {
   // Parse a string as an accelerator. If the accelerator is unparsable then
   // a generic ui::Accelerator object will be returns (with key_code Unknown).
   static ui::Accelerator StringToAccelerator(const std::string& accelerator);
+
+  // Returns the string representation of an accelerator without localizing the
+  // shortcut text (like accelerator::GetShortcutText() does).
+  static std::string AcceleratorToString(const ui::Accelerator& accelerator);
 
   // Parse the command.
   bool Parse(const base::DictionaryValue* command,

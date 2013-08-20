@@ -2,13 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// 'use strict'; TODO(vadimt): Uncomment once crbug.com/237617 is fixed.
+'use strict';
 
 // TODO(vadimt): Remove alerts.
 
 /**
  * @fileoverview Utility objects and functions for Google Now extension.
  */
+
+// TODO(vadimt): Figure out the server name. Use it in the manifest and for
+// NOTIFICATION_CARDS_URL. Meanwhile, to use the feature, you need to manually
+// set the server name via local storage.
+/**
+ * Notification server URL.
+ */
+var NOTIFICATION_CARDS_URL = localStorage['server_url'];
 
 /**
  * Checks for internal errors.
@@ -18,7 +26,22 @@
  */
 function verify(condition, message) {
   if (!condition)
-    throw new Error('ASSERT: ' + message);
+    throw new Error('\nASSERT: ' + message);
+}
+
+/**
+ * Builds a request to the notification server.
+ * @param {string} handlerName Server handler to send the request to.
+ * @return {XMLHttpRequest} Server request.
+ */
+function buildServerRequest(handlerName) {
+  var request = new XMLHttpRequest();
+
+  request.responseType = 'text';
+  request.open('POST', NOTIFICATION_CARDS_URL + '/' + handlerName, true);
+  request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+
+  return request;
 }
 
 /**
@@ -29,17 +52,6 @@ function verify(condition, message) {
  * @return {Object} Task manager interface.
  */
 function buildTaskManager(areConflicting) {
-  /**
-   * Name of the alarm that triggers the error saying that the event page cannot
-   * unload.
-   */
-  var CANNOT_UNLOAD_ALARM_NAME = 'CANNOT-UNLOAD';
-
-  /**
-   * Maximal time we expect the event page to stay loaded after starting a task.
-   */
-  var MAXIMUM_LOADED_TIME_MINUTES = 5;
-
   /**
    * Queue of scheduled tasks. The first element, if present, corresponds to the
    * currently running task.
@@ -59,10 +71,6 @@ function buildTaskManager(areConflicting) {
    */
   function startFirst() {
     verify(queue.length >= 1, 'startFirst: queue is empty');
-
-    // Set alarm to verify that the event page will unload in a reasonable time.
-    chrome.alarms.create(CANNOT_UNLOAD_ALARM_NAME,
-                         {delayInMinutes: MAXIMUM_LOADED_TIME_MINUTES});
 
     // Start the oldest queued task, but don't remove it from the queue.
     verify(
@@ -136,8 +144,24 @@ function buildTaskManager(areConflicting) {
     stepName = step;
   }
 
-  // Limiting 1 alert per background page load.
-  var alertShown = false;
+  // Limiting 1 error report per background page load.
+  var errorReported = false;
+
+  /**
+   * Sends an error report to the server.
+   * @param {Error} error Error to report.
+   */
+  function sendErrorReport(error) {
+    var filteredStack = error.stack.replace(/.*\n/, '');
+    var requestParameters =
+        'name=' + escape(error.name) +
+        '&stack=' + escape(filteredStack);
+    var request = buildServerRequest('exception');
+    request.onloadend = function(event) {
+      console.log('sendErrorReport status: ' + request.status);
+    };
+    request.send(requestParameters);
+  }
 
   /**
    * Adds error processing to an API callback.
@@ -152,8 +176,12 @@ function buildTaskManager(areConflicting) {
       } catch (error) {
         var message = 'Uncaught exception:\n' + error.stack;
         console.error(message);
-        if (!alertShown) {
-          alertShown = true;
+        if (!errorReported) {
+          errorReported = true;
+          chrome.metricsPrivate.getIsCrashReportingEnabled(function(isEnabled) {
+            if (isEnabled)
+              sendErrorReport(error);
+          });
           alert(message);
         }
       }
@@ -190,19 +218,7 @@ function buildTaskManager(areConflicting) {
   instrumentApiFunction(chrome.alarms.onAlarm, 'addListener', 0);
   instrumentApiFunction(chrome.runtime.onSuspend, 'addListener', 0);
 
-  chrome.alarms.onAlarm.addListener(function(alarm) {
-    if (alarm.name == CANNOT_UNLOAD_ALARM_NAME) {
-      // Error if the event page wasn't unloaded after a reasonable timeout
-      // since starting the last task.
-      verify(false, 'Event page didn\'t unload, queue=' +
-          JSON.stringify(queue) + ', step=' + stepName +
-          ' (ignore this assert if devtools is open).');
-    }
-  });
-
   chrome.runtime.onSuspend.addListener(function() {
-    chrome.alarms.clear(CANNOT_UNLOAD_ALARM_NAME);
-
     verify(
         queue.length == 0,
         'Incomplete task when unloading event page, queue = ' +
@@ -219,5 +235,102 @@ function buildTaskManager(areConflicting) {
     debugSetStepName: debugSetStepName,
     instrumentApiFunction: instrumentApiFunction,
     wrapCallback: wrapCallback
+  };
+}
+
+var storage = chrome.storage.local;
+
+/**
+ * Builds an object to manage retrying activities with exponential backoff.
+ * @param {string} name Name of this attempt manager.
+ * @param {function()} attempt Activity that the manager retries until it
+ *     calls 'stop' method.
+ * @param {number} initialDelaySeconds Default first delay until first retry.
+ * @param {number} maximumDelaySeconds Maximum delay between retries.
+ * @return {Object} Attempt manager interface.
+ */
+function buildAttemptManager(
+    name, attempt, initialDelaySeconds, maximumDelaySeconds) {
+  var alarmName = name + '-scheduler';
+  var currentDelayStorageKey = name + '-current-delay';
+
+  /**
+   * Creates an alarm for the next attempt. The alarm is repeating for the case
+   * when the next attempt crashes before registering next alarm.
+   * @param {number} delaySeconds Delay until next retry.
+   */
+  function createAlarm(delaySeconds) {
+    var alarmInfo = {
+      delayInMinutes: delaySeconds / 60,
+      periodInMinutes: maximumDelaySeconds / 60
+    };
+    chrome.alarms.create(alarmName, alarmInfo);
+  }
+
+  /**
+   * Schedules next attempt.
+   * @param {number=} opt_previousDelaySeconds Previous delay in a sequence of
+   *     retry attempts, if specified. Not specified for scheduling first retry
+   *     in the exponential sequence.
+   */
+  function scheduleNextAttempt(opt_previousDelaySeconds) {
+    var base = opt_previousDelaySeconds ? opt_previousDelaySeconds * 2 :
+                                          initialDelaySeconds;
+    var newRetryDelaySeconds =
+        Math.min(base * (1 + 0.2 * Math.random()), maximumDelaySeconds);
+
+    createAlarm(newRetryDelaySeconds);
+
+    var items = {};
+    items[currentDelayStorageKey] = newRetryDelaySeconds;
+    storage.set(items);
+  }
+
+  /**
+   * Starts repeated attempts.
+   * @param {number=} opt_firstDelaySeconds Time until the first attempt, if
+   *     specified. Otherwise, initialDelaySeconds will be used for the first
+   *     attempt.
+   */
+  function start(opt_firstDelaySeconds) {
+    if (opt_firstDelaySeconds) {
+      createAlarm(opt_firstDelaySeconds);
+      storage.remove(currentDelayStorageKey);
+    } else {
+      scheduleNextAttempt();
+    }
+  }
+
+  /**
+   * Stops repeated attempts.
+   */
+  function stop() {
+    chrome.alarms.clear(alarmName);
+    storage.remove(currentDelayStorageKey);
+  }
+
+  /**
+   * Plans for the next attempt.
+   * @param {function()} callback Completion callback. It will be invoked after
+   *     the planning is done.
+   */
+  function planForNext(callback) {
+    tasks.debugSetStepName('planForNext-get-storage');
+    storage.get(currentDelayStorageKey, function(items) {
+      console.log('planForNext-get-storage ' + JSON.stringify(items));
+      scheduleNextAttempt(items[currentDelayStorageKey]);
+      callback();
+    });
+  }
+
+  chrome.alarms.onAlarm.addListener(function(alarm) {
+    if (alarm.name == alarmName)
+      attempt();
+  });
+
+  return {
+    start: start,
+    planForNext: planForNext,
+    stop: stop
   };
 }

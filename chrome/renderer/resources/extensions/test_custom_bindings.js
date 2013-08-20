@@ -8,10 +8,10 @@
 var binding = require('binding').Binding.create('test');
 
 var chrome = requireNative('chrome').GetChrome();
-var GetExtensionAPIDefinitions =
-    requireNative('apiDefinitions').GetExtensionAPIDefinitions;
+var GetExtensionAPIDefinitionsForTest =
+    requireNative('apiDefinitions').GetExtensionAPIDefinitionsForTest;
 var GetAvailability = requireNative('v8_context').GetAvailability;
-var json = require('json');
+var GetAPIFeatures = requireNative('test_features').GetAPIFeatures;
 
 binding.registerCustomHook(function(api) {
   var chromeTest = api.compiledApi;
@@ -55,10 +55,18 @@ binding.registerCustomHook(function(api) {
   apiFunctions.setHandleRequest('callbackAdded', function() {
     pendingCallbacks++;
 
-    var called = false;
+    var called = null;
     return function() {
-      chromeTest.assertFalse(called, 'callback has already been run');
-      called = true;
+      if (called != null) {
+        var redundantPrefix = 'Error\n';
+        chrome.test.fail(
+          'Callback has already been run. ' +
+          'First call:\n' +
+          $String.slice(called, redundantPrefix.length) + '\n' +
+          'Second call:\n' +
+          $String.slice(new Error().stack, redundantPrefix.length));
+      }
+      called = new Error().stack;
 
       pendingCallbacks--;
       if (pendingCallbacks == 0) {
@@ -145,12 +153,16 @@ binding.registerCustomHook(function(api) {
       return false;
 
     for (var p in actual) {
-      if (actual.hasOwnProperty(p) && !expected.hasOwnProperty(p))
+      if ($Object.hasOwnProperty(actual, p) &&
+          !$Object.hasOwnProperty(expected, p)) {
         return false;
+      }
     }
     for (var p in expected) {
-      if (expected.hasOwnProperty(p) && !actual.hasOwnProperty(p))
+      if ($Object.hasOwnProperty(expected, p) &&
+          !$Object.hasOwnProperty(actual, p)) {
         return false;
+      }
     }
 
     for (var p in expected) {
@@ -181,9 +193,13 @@ binding.registerCustomHook(function(api) {
       error_msg += ": " + message;
     if (typeof(expected) == 'object') {
       if (!chromeTest.checkDeepEq(expected, actual)) {
-        chromeTest.fail(error_msg +
-                         "\nActual: " + json.stringify(actual) +
-                         "\nExpected: " + json.stringify(expected));
+        // Note: these JSON.stringify calls may fail in tests that explicitly
+        // override JSON.stringfy, so surround in try-catch.
+        try {
+          error_msg += "\nActual: " + JSON.stringify(actual) +
+                       "\nExpected: " + JSON.stringify(expected);
+        } catch (e) {}
+        chromeTest.fail(error_msg);
       }
       return;
     }
@@ -215,7 +231,7 @@ binding.registerCustomHook(function(api) {
   function safeFunctionApply(func, args) {
     try {
       if (func)
-        func.apply(null, args);
+        $Function.apply(func, null, args);
     } catch (e) {
       var msg = "uncaught exception " + e;
       chromeTest.fail(msg);
@@ -286,9 +302,11 @@ binding.registerCustomHook(function(api) {
   });
 
   apiFunctions.setHandleRequest('getApiDefinitions', function() {
-    return GetExtensionAPIDefinitions().filter(function(api) {
-      return GetAvailability(api.namespace).is_available;
-    });
+    return GetExtensionAPIDefinitionsForTest();
+  });
+
+  apiFunctions.setHandleRequest('getApiFeatures', function() {
+    return GetAPIFeatures();
   });
 });
 

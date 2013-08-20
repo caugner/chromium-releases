@@ -6,14 +6,14 @@
 
 #include <gtk/gtk.h>
 
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/login/login_model.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -28,6 +28,7 @@
 using content::BrowserThread;
 using content::PasswordForm;
 using content::WebContents;
+using web_modal::WebContentsModalDialogManager;
 
 // ----------------------------------------------------------------------------
 // LoginHandlerGtk
@@ -61,6 +62,7 @@ class LoginHandlerGtk : public LoginHandler {
       gtk_editable_select_region(GTK_EDITABLE(username_entry_), 0, -1);
     }
   }
+  virtual void OnLoginModelDestroying() OVERRIDE {}
 
   // LoginHandler:
   virtual void BuildViewForPasswordManager(

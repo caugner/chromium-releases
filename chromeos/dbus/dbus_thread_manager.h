@@ -27,20 +27,14 @@ class DBusThreadManagerObserver;
 
 // Style Note: Clients are sorted by names.
 class BluetoothAdapterClient;
+class BluetoothAgentManagerClient;
 class BluetoothDeviceClient;
 class BluetoothInputClient;
-class BluetoothManagerClient;
-class BluetoothNodeClient;
-class BluetoothOutOfBandClient;
+class BluetoothProfileManagerClient;
 class CrasAudioClient;
 class CrosDisksClient;
 class CryptohomeClient;
 class DebugDaemonClient;
-class ExperimentalBluetoothAdapterClient;
-class ExperimentalBluetoothAgentManagerClient;
-class ExperimentalBluetoothDeviceClient;
-class ExperimentalBluetoothInputClient;
-class ExperimentalBluetoothProfileManagerClient;
 class GsmSMSClient;
 class IBusClient;
 class IBusConfigClient;
@@ -127,25 +121,14 @@ class CHROMEOS_EXPORT DBusThreadManager {
   // All returned objects are owned by DBusThreadManager.  Do not cache these
   // pointers and use them after DBusThreadManager has been shut down.
   virtual BluetoothAdapterClient* GetBluetoothAdapterClient() = 0;
+  virtual BluetoothAgentManagerClient* GetBluetoothAgentManagerClient() = 0;
   virtual BluetoothDeviceClient* GetBluetoothDeviceClient() = 0;
   virtual BluetoothInputClient* GetBluetoothInputClient() = 0;
-  virtual BluetoothManagerClient* GetBluetoothManagerClient() = 0;
-  virtual BluetoothNodeClient* GetBluetoothNodeClient() = 0;
-  virtual BluetoothOutOfBandClient* GetBluetoothOutOfBandClient() = 0;
+  virtual BluetoothProfileManagerClient* GetBluetoothProfileManagerClient() = 0;
   virtual CrasAudioClient* GetCrasAudioClient() = 0;
   virtual CrosDisksClient* GetCrosDisksClient() = 0;
   virtual CryptohomeClient* GetCryptohomeClient() = 0;
   virtual DebugDaemonClient* GetDebugDaemonClient() = 0;
-  virtual ExperimentalBluetoothAdapterClient*
-      GetExperimentalBluetoothAdapterClient() = 0;
-  virtual ExperimentalBluetoothAgentManagerClient*
-      GetExperimentalBluetoothAgentManagerClient() = 0;
-  virtual ExperimentalBluetoothDeviceClient*
-      GetExperimentalBluetoothDeviceClient() = 0;
-  virtual ExperimentalBluetoothInputClient*
-      GetExperimentalBluetoothInputClient() = 0;
-  virtual ExperimentalBluetoothProfileManagerClient*
-      GetExperimentalBluetoothProfileManagerClient() = 0;
   virtual GsmSMSClient* GetGsmSMSClient() = 0;
   virtual IBusClient* GetIBusClient() = 0;
   virtual IBusConfigClient* GetIBusConfigClient() = 0;

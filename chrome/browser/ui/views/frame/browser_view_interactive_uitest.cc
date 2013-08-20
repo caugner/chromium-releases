@@ -5,48 +5,39 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/autocomplete/autocomplete_controller.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/immersive_fullscreen_configuration.h"
+#include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/browser/ui/search/instant_test_utils.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
-#include "chrome/browser/ui/views/frame/browser_view_layout.h"
+#include "chrome/browser/ui/views/frame/contents_container.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
+#include "chrome/browser/ui/views/frame/overlay_container.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
-#include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/common/instant_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "ui/views/controls/single_split_view.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/window/non_client_view.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
-#include "chrome/browser/search/search.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/instant_test_utils.h"
-#include "chrome/browser/ui/views/frame/contents_container.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #endif
 
 using views::FocusManager;
 
 namespace {
-
-// Tab strip bounds depend on the window frame sizes.
-gfx::Point ExpectedTabStripOrigin(BrowserView* browser_view) {
-  gfx::Rect tabstrip_bounds(
-      browser_view->frame()->GetBoundsForTabStrip(browser_view->tabstrip()));
-  gfx::Point tabstrip_origin(tabstrip_bounds.origin());
-  views::View::ConvertPointToTarget(browser_view->parent(),
-                                    browser_view,
-                                    &tabstrip_origin);
-  return tabstrip_origin;
-}
 
 // Returns the bounds of |view| in widget coordinates.
 gfx::Rect GetRectInWidget(views::View* view) {
@@ -56,92 +47,6 @@ gfx::Rect GetRectInWidget(views::View* view) {
 }
 
 typedef InProcessBrowserTest BrowserViewTest;
-
-IN_PROC_BROWSER_TEST_F(BrowserViewTest, BrowserView) {
-  BookmarkBarView::DisableAnimationsForTesting(true);
-
-  BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
-  TopContainerView* top_container = browser_view->top_container();
-  TabStrip* tabstrip = browser_view->tabstrip();
-  ToolbarView* toolbar = browser_view->toolbar();
-  views::SingleSplitView* contents_split =
-      browser_view->GetContentsSplitForTest();
-  views::WebView* contents_web_view =
-      browser_view->GetContentsWebViewForTest();
-
-  // Verify the view hierarchy.
-  EXPECT_EQ(top_container, browser_view->tabstrip()->parent());
-  EXPECT_EQ(top_container, browser_view->toolbar()->parent());
-  EXPECT_EQ(top_container, browser_view->GetBookmarkBarView()->parent());
-  EXPECT_EQ(browser_view, browser_view->infobar_container()->parent());
-
-  // Top container is at the front of the view hierarchy.
-  EXPECT_EQ(browser_view->child_count() - 1,
-            browser_view->GetIndexOf(top_container));
-
-  // Verify basic layout.
-  EXPECT_EQ(0, top_container->x());
-  EXPECT_EQ(0, top_container->y());
-  EXPECT_EQ(browser_view->width(), top_container->width());
-  // Tabstrip layout varies based on window frame sizes.
-  gfx::Point expected_tabstrip_origin = ExpectedTabStripOrigin(browser_view);
-  EXPECT_EQ(expected_tabstrip_origin.x(), tabstrip->x());
-  EXPECT_EQ(expected_tabstrip_origin.y(), tabstrip->y());
-  EXPECT_EQ(0, toolbar->x());
-  EXPECT_EQ(
-      tabstrip->bounds().bottom() -
-          BrowserViewLayout::kToolbarTabStripVerticalOverlap,
-      toolbar->y());
-  EXPECT_EQ(0, contents_split->x());
-  EXPECT_EQ(toolbar->bounds().bottom(), contents_split->y());
-  EXPECT_EQ(0, contents_web_view->x());
-  EXPECT_EQ(0, contents_web_view->y());
-
-  // Verify bookmark bar visibility.
-  BookmarkBarView* bookmark_bar = browser_view->GetBookmarkBarView();
-  EXPECT_FALSE(bookmark_bar->visible());
-  EXPECT_FALSE(bookmark_bar->IsDetached());
-  chrome::ExecuteCommand(browser(), IDC_SHOW_BOOKMARK_BAR);
-  EXPECT_TRUE(bookmark_bar->visible());
-  EXPECT_FALSE(bookmark_bar->IsDetached());
-  chrome::ExecuteCommand(browser(), IDC_SHOW_BOOKMARK_BAR);
-  EXPECT_FALSE(bookmark_bar->visible());
-  EXPECT_FALSE(bookmark_bar->IsDetached());
-
-  // Bookmark bar is reparented to BrowserView on NTP.
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
-  EXPECT_TRUE(bookmark_bar->visible());
-  EXPECT_TRUE(bookmark_bar->IsDetached());
-  EXPECT_EQ(browser_view, bookmark_bar->parent());
-  // Top container is still in front.
-  EXPECT_EQ(browser_view->child_count() - 1,
-            browser_view->GetIndexOf(top_container));
-
-  // Bookmark bar layout on NTP.
-  EXPECT_EQ(0, bookmark_bar->x());
-  EXPECT_EQ(
-      tabstrip->bounds().bottom() +
-          toolbar->height() -
-          BrowserViewLayout::kToolbarTabStripVerticalOverlap -
-          views::NonClientFrameView::kClientEdgeThickness,
-      bookmark_bar->y());
-  EXPECT_EQ(toolbar->bounds().bottom(), contents_split->y());
-  // Contents view has a "top margin" pushing it below the bookmark bar.
-  EXPECT_EQ(bookmark_bar->height() -
-                views::NonClientFrameView::kClientEdgeThickness,
-            contents_web_view->y());
-
-  // Bookmark bar is parented back to top container on normal page.
-  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
-  EXPECT_FALSE(bookmark_bar->visible());
-  EXPECT_FALSE(bookmark_bar->IsDetached());
-  EXPECT_EQ(top_container, bookmark_bar->parent());
-  // Top container is still in front.
-  EXPECT_EQ(browser_view->child_count() - 1,
-            browser_view->GetIndexOf(top_container));
-
-  BookmarkBarView::DisableAnimationsForTesting(false);
-}
 
 // Active window and focus testing is not reliable on Windows crbug.com/79493
 // TODO(linux_aura) http://crbug.com/163931
@@ -167,6 +72,98 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, MAYBE_FullscreenClearsFocus) {
 
 //////////////////////////////////////////////////////////////////////////////
 
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
+class BrowserViewInstantExtendedTest : public InProcessBrowserTest,
+                                       public InstantTestBase {
+ public:
+  BrowserViewInstantExtendedTest() {}
+  virtual ~BrowserViewInstantExtendedTest() {}
+
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+    chrome::EnableInstantExtendedAPIForTesting();
+    ASSERT_TRUE(https_test_server().Start());
+    GURL instant_url = https_test_server().GetURL(
+        "files/instant_extended.html?strk=1&");
+    InstantTestBase::Init(instant_url);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BrowserViewInstantExtendedTest);
+};
+
+IN_PROC_BROWSER_TEST_F(BrowserViewInstantExtendedTest,
+                       InstantExtendedForOverlay) {
+  BookmarkBarView::DisableAnimationsForTesting(true);
+
+  BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
+  ContentsContainer* contents_container =
+      browser_view->GetContentsContainerForTest();
+  OverlayContainer* overlay_container =
+      browser_view->GetOverlayContainerForTest();
+
+  // Start up instant.
+  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
+
+  // Enable attached bookmark bar.
+  BookmarkBarView* bookmark_bar = browser_view->GetBookmarkBarView();
+  chrome::ExecuteCommand(browser(), IDC_SHOW_BOOKMARK_BAR);
+  EXPECT_TRUE(bookmark_bar->visible());
+  EXPECT_FALSE(bookmark_bar->IsDetached());
+
+  // Overlay container is invisible but at front of view hierarchy.
+  EXPECT_FALSE(overlay_container->visible());
+  EXPECT_EQ(browser_view->child_count() - 1,
+            browser_view->GetIndexOf(overlay_container));
+
+  ////////////////////////////////////////////////////////////////////////////
+  // Test suggestions on a normal web page, which are in an overlay.
+
+  // Focus omnibox, which constructs an overlay web contents.
+  FocusOmniboxAndWaitForInstantOverlayAndNTPSupport();
+  // Typing in the omnibox should show suggestions in an overlay view.
+  SetOmniboxTextAndWaitForOverlayToShow("santa");
+  EXPECT_TRUE(instant()->model()->mode().is_search_suggestions());
+
+  views::WebView* overlay = overlay_container->GetOverlayWebViewForTest();
+  content::WebContents* overlay_contents = overlay->web_contents();
+
+  // Overlay container is still at front, but is now visible and has an overlay.
+  EXPECT_EQ(browser_view->child_count() - 1,
+            browser_view->GetIndexOf(overlay_container));
+  EXPECT_TRUE(overlay_container->visible());
+  EXPECT_EQ(overlay_container, overlay->parent());
+
+  // Content area is still immediately below the visible attached bookmark bar.
+  EXPECT_TRUE(bookmark_bar->visible());
+  EXPECT_EQ(GetRectInWidget(bookmark_bar).bottom(),
+            GetRectInWidget(browser_view->GetContentsWebViewForTest()).y());
+
+  // Overlay web view (with suggestions) aligns with the bottom of the toolbar.
+  gfx::Rect overlay_rect_in_widget = GetRectInWidget(
+      overlay_container->GetOverlayWebViewForTest());
+  EXPECT_EQ(GetRectInWidget(browser_view->toolbar()).bottom(),
+                            overlay_rect_in_widget.y());
+
+  // Commit the search by pressing Enter.
+  browser_view->GetLocationBar()->AcceptInput();
+
+  // Overlay is reparented to and becomes active in ContentsContainer with the
+  // same web contents, which is the active contents in browser, while overlay
+  // container is childless and invisible.
+  EXPECT_EQ(contents_container, overlay->parent());
+  EXPECT_EQ(overlay, contents_container->GetActiveWebViewForTest());
+  EXPECT_EQ(overlay_contents, overlay->web_contents());
+  EXPECT_EQ(overlay_contents,
+            browser()->tab_strip_model()->GetActiveWebContents());
+  EXPECT_EQ(1, contents_container->child_count());
+  EXPECT_EQ(0, overlay_container->child_count());
+  EXPECT_FALSE(overlay_container->visible());
+
+  BookmarkBarView::DisableAnimationsForTesting(false);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
 // Immersive fullscreen is currently enabled only on Chrome OS.
 #if defined(OS_CHROMEOS)
 
@@ -177,7 +174,7 @@ class BrowserViewImmersiveInstantExtendedTest : public InProcessBrowserTest,
   virtual ~BrowserViewImmersiveInstantExtendedTest() {}
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    chrome::EnableImmersiveFullscreenForTest();
+    ImmersiveFullscreenConfiguration::EnableImmersiveFullscreenForTest();
     chrome::EnableInstantExtendedAPIForTesting();
     ASSERT_TRUE(https_test_server().Start());
     GURL instant_url = https_test_server().GetURL(
@@ -201,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewImmersiveInstantExtendedTest,
 
   // Start up both instant and immersive fullscreen.
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  ASSERT_TRUE(chrome::UseImmersiveFullscreen());
+  ASSERT_TRUE(ImmersiveFullscreenConfiguration::UseImmersiveFullscreen());
   chrome::ToggleFullscreenMode(browser());
   ASSERT_TRUE(browser_view->IsFullscreen());
   ASSERT_TRUE(browser_view->immersive_mode_controller()->IsEnabled());
@@ -229,9 +226,30 @@ IN_PROC_BROWSER_TEST_F(BrowserViewImmersiveInstantExtendedTest,
   EXPECT_EQ(GetRectInWidget(browser_view).y() + Tab::GetImmersiveHeight(),
             GetRectInWidget(contents_web_view).y());
   // Overlay web view (with suggestions) aligns with the bottom of the omnibox.
+  OverlayContainer* overlay_container =
+      browser_view->GetOverlayContainerForTest();
   gfx::Rect overlay_rect_in_widget = GetRectInWidget(
-      browser_view->GetContentsContainerForTest()->GetOverlayWebViewForTest());
+      overlay_container->GetOverlayWebViewForTest());
   EXPECT_EQ(GetRectInWidget(toolbar).bottom(), overlay_rect_in_widget.y());
+
+  // Overlay container layer is on top of top container layer, so that it
+  // paints over the bookmark bar and bottom of toolbar.
+  ui::Layer* top_container_layer = browser_view->top_container()->layer();
+  if (top_container_layer != NULL) {
+    ui::Layer* overlay_container_layer = overlay_container->layer();
+    EXPECT_TRUE(overlay_container_layer != NULL);
+    if (overlay_container_layer && overlay_container_layer->parent()) {
+      const std::vector<ui::Layer*>& children =
+          overlay_container_layer->parent()->children();
+      size_t top_index =
+          std::find(children.begin(), children.end(), top_container_layer) -
+              children.begin();
+      size_t overlay_index =
+          std::find(children.begin(), children.end(), overlay_container_layer) -
+              children.begin();
+      EXPECT_TRUE(overlay_index > top_index);
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////////
   // Test suggestions on the NTP, which are not in an overlay.
@@ -258,7 +276,8 @@ IN_PROC_BROWSER_TEST_F(BrowserViewImmersiveInstantExtendedTest,
       InstantSuggestion(ASCIIToUTF16("query"),
                         INSTANT_COMPLETE_NOW,
                         INSTANT_SUGGESTION_SEARCH,
-                        ASCIIToUTF16("query")));
+                        ASCIIToUTF16("query"),
+                        kNoMatchIndex));
   while (!omnibox()->model()->autocomplete_controller()->done()) {
     content::WindowedNotificationObserver autocomplete_observer(
         chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
@@ -278,3 +297,4 @@ IN_PROC_BROWSER_TEST_F(BrowserViewImmersiveInstantExtendedTest,
 }
 
 #endif  // defined(OS_CHROMEOS)
+#endif  // defined(HTML_INSTANT_EXTENDED_POPUP)

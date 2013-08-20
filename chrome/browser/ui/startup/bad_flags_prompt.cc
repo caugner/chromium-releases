@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/startup/bad_flags_prompt.h"
 
 #include "base/command_line.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
@@ -28,6 +28,8 @@ void ShowBadFlagsPrompt(Browser* browser) {
     // Origin Policy.
     switches::kEnableBrowserPluginForAllViewTypes,
     switches::kExtensionsOnChromeURLs,
+    // This parameter should be used only for server side developments.
+    switches::kTranslateScriptURL,
     NULL
   };
 
@@ -45,7 +47,8 @@ void ShowBadFlagsPrompt(Browser* browser) {
     if (!web_contents)
       return;
     SimpleAlertInfoBarDelegate::Create(
-        InfoBarService::FromWebContents(web_contents), NULL,
+        InfoBarService::FromWebContents(web_contents),
+        InfoBarDelegate::kNoIconID,
         l10n_util::GetStringFUTF16(IDS_BAD_FLAGS_WARNING_MESSAGE,
                                     UTF8ToUTF16(std::string("--") + bad_flag)),
         false);

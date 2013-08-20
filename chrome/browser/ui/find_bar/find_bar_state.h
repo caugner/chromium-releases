@@ -9,12 +9,12 @@
 #define CHROME_BROWSER_UI_FIND_BAR_FIND_BAR_STATE_H_
 
 #include "base/basictypes.h"
-#include "base/string16.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
+#include "base/strings/string16.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
 class Profile;
 
-class FindBarState : public ProfileKeyedService {
+class FindBarState : public BrowserContextKeyedService {
  public:
   FindBarState() {}
   virtual ~FindBarState() {}

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+ // Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,9 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/chromeos_export.h"
+#include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_handler_callbacks.h"
+#include "chromeos/network/network_profile_observer.h"
 #include "chromeos/network/onc/onc_constants.h"
 
 namespace base {
@@ -22,6 +24,11 @@ class ListValue;
 }
 
 namespace chromeos {
+
+class NetworkConfigurationHandler;
+class NetworkProfileHandler;
+class NetworkStateHandler;
+class NetworkUIData;
 
 // The ManagedNetworkConfigurationHandler class is used to create and configure
 // networks in ChromeOS using ONC and takes care of network policies.
@@ -48,21 +55,19 @@ namespace chromeos {
 // that is suitable for logging. None of the error message text is meant for
 // user consumption.
 
-class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
+class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler
+    : public NetworkProfileObserver {
  public:
-  typedef std::map<std::string, const base::DictionaryValue*> PolicyMap;
+  typedef std::map<std::string, const base::DictionaryValue*> GuidToPolicyMap;
+  typedef std::map<std::string, GuidToPolicyMap> UserToPoliciesMap;
 
-  // Initializes the singleton.
-  static void Initialize();
+  virtual ~ManagedNetworkConfigurationHandler();
 
-  // Returns if the singleton is initialized.
-  static bool IsInitialized();
-
-  // Destroys the singleton.
-  static void Shutdown();
-
-  // Initialize() must be called before this.
-  static ManagedNetworkConfigurationHandler* Get();
+  // Returns the NetworkUIData parsed from the UIData property of
+  // |shill_dictionary|. If parsing fails or the field doesn't exist, returns
+  // NULL.
+  static scoped_ptr<NetworkUIData> GetUIData(
+      const base::DictionaryValue& shill_dictionary);
 
   // Provides the properties of the network with |service_path| to |callback|.
   void GetProperties(
@@ -71,8 +76,10 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
       const network_handler::ErrorCallback& error_callback) const;
 
   // Provides the managed properties of the network with |service_path| to
-  // |callback|.
+  // |callback|. |userhash| is only used to ensure that the user's policy is
+  // already applied.
   void GetManagedProperties(
+      const std::string& userhash,
       const std::string& service_path,
       const network_handler::DictionaryResultCallback& callback,
       const network_handler::ErrorCallback& error_callback);
@@ -88,25 +95,13 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
       const base::Closure& callback,
       const network_handler::ErrorCallback& error_callback) const;
 
-  // Initiates a connection with network that has |service_path|. |callback| is
-  // called if the connection request was successfully handled. That doesn't
-  // mean that the connection was successfully established.
-  void Connect(const std::string& service_path,
-               const base::Closure& callback,
-               const network_handler::ErrorCallback& error_callback) const;
-
-  // Initiates a disconnect with the network at |service_path|. |callback| is
-  // called if the diconnect request was successfully handled. That doesn't mean
-  // that the network is already diconnected.
-  void Disconnect(const std::string& service_path,
-                  const base::Closure& callback,
-                  const network_handler::ErrorCallback& error_callback) const;
-
   // Initially configures an unconfigured network with the given user settings
   // and returns the new identifier to |callback| if successful. Fails if the
   // network was already configured by a call to this function or because of a
-  // policy.
+  // policy. The new configuration will be owned by user |userhash|. If
+  // |userhash| is empty, the new configuration will be shared.
   void CreateConfiguration(
+      const std::string& userhash,
       const base::DictionaryValue& properties,
       const network_handler::StringResultCallback& callback,
       const network_handler::ErrorCallback& error_callback) const;
@@ -123,16 +118,31 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
   // |network_configs_onc| as the current policy of |onc_source|. The network
   // configurations of the policy will be applied (not necessarily immediately)
   // to Shill's profiles and enforced in future configurations until the policy
-  // associated with |onc_source| is changed again with this function.
-  // This function doesn't validate the policy. The caller must ensure validity.
+  // associated with |onc_source| is changed again with this function. For
+  // device policies, |userhash| must be empty.
   void SetPolicy(onc::ONCSource onc_source,
+                 const std::string& userhash,
                  const base::ListValue& network_configs_onc);
 
+  // NetworkProfileObserver overrides
+  virtual void OnProfileAdded(const NetworkProfile& profile) OVERRIDE;
+  virtual void OnProfileRemoved(const NetworkProfile& profile) OVERRIDE;
+
+  NetworkConfigurationHandler* network_configuration_handler() {
+    return network_configuration_handler_;
+  }
+
  private:
+  friend class NetworkHandler;
+  friend class ManagedNetworkConfigurationHandlerTest;
   class PolicyApplicator;
 
   ManagedNetworkConfigurationHandler();
-  ~ManagedNetworkConfigurationHandler();
+
+  void Init(NetworkStateHandler* network_state_handler,
+            NetworkProfileHandler* network_profile_handler,
+            NetworkConfigurationHandler* network_configuration_handler);
+
 
   void GetManagedPropertiesCallback(
       const network_handler::DictionaryResultCallback& callback,
@@ -140,14 +150,19 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
       const std::string& service_path,
       const base::DictionaryValue& shill_properties);
 
-  const PolicyMap* GetPoliciesForProfile(const std::string& profile) const;
+  const GuidToPolicyMap* GetPoliciesForUser(const std::string& userhash) const;
+  const GuidToPolicyMap* GetPoliciesForProfile(
+      const NetworkProfile& profile) const;
 
-  // The entries of these maps are owned by this class and are explicitly
-  // deleted where necessary.
-  PolicyMap user_policies_by_guid_;
-  PolicyMap device_policies_by_guid_;
-  bool user_policies_initialized_;
-  bool device_policies_initialized_;
+  // The DictionaryValues of the nested maps are owned by this class and are
+  // explicitly deleted where necessary. If present, the empty string maps to
+  // the device policy.
+  UserToPoliciesMap policies_by_user_;
+
+  // Local references to the associated handler instances.
+  NetworkStateHandler* network_state_handler_;
+  NetworkProfileHandler* network_profile_handler_;
+  NetworkConfigurationHandler* network_configuration_handler_;
 
   // For Shill client callbacks
   base::WeakPtrFactory<ManagedNetworkConfigurationHandler> weak_ptr_factory_;

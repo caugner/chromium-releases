@@ -71,7 +71,7 @@ class VIEWS_EXPORT NonClientFrameView : public View {
   // Overridden from View:
   virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
 
  protected:
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
@@ -145,6 +145,9 @@ class VIEWS_EXPORT NonClientView : public View {
   // Replaces the current NonClientFrameView (if any) with the specified one.
   void SetFrameView(NonClientFrameView* frame_view);
 
+  // Replaces the current |overlay_view_| (if any) with the specified one.
+  void SetOverlayView(View* view);
+
   // Returns true if the ClientView determines that the containing window can be
   // closed, false otherwise.
   bool CanClose();
@@ -210,17 +213,17 @@ class VIEWS_EXPORT NonClientView : public View {
   virtual gfx::Size GetMaximumSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
 
-  virtual views::View* GetEventHandlerForPoint(const gfx::Point& point)
-      OVERRIDE;
-  virtual views::View* GetTooltipHandlerForPoint(const gfx::Point& point)
-      OVERRIDE;
+  virtual views::View* GetEventHandlerForPoint(
+      const gfx::Point& point) OVERRIDE;
+  virtual views::View* GetTooltipHandlerForPoint(
+      const gfx::Point& point) OVERRIDE;
 
  protected:
   // NonClientView, View overrides:
-  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child)
-      OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
  private:
   // A ClientView object or subclass, responsible for sizing the contents view
@@ -232,6 +235,10 @@ class VIEWS_EXPORT NonClientView : public View {
   // This object is not owned by the view hierarchy because it can be replaced
   // dynamically as the system settings change.
   scoped_ptr<NonClientFrameView> frame_view_;
+
+  // The overlay view, when non-NULL and visible, takes up the entire widget and
+  // is placed on top of the ClientView and NonClientFrameView.
+  View* overlay_view_;
 
   // The accessible name of this view.
   string16 accessible_name_;

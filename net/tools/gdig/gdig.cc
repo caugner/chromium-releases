@@ -12,9 +12,9 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/string_split.h"
 #include "base/time.h"
 #include "net/base/address_list.h"
@@ -182,6 +182,7 @@ bool LoadReplayLog(const base::FilePath& file_path, ReplayLog* replay_log) {
 class GDig {
  public:
   GDig();
+  ~GDig();
 
   enum Result {
     RESULT_NO_RESOLVE = -3,
@@ -219,7 +220,8 @@ class GDig {
 
   base::CancelableClosure timeout_closure_;
   scoped_ptr<DnsConfigService> dns_config_service_;
-  scoped_ptr<FileNetLog> log_;
+  scoped_ptr<FileNetLogObserver> log_observer_;
+  scoped_ptr<NetLog> log_;
   scoped_ptr<HostResolver> resolver_;
 };
 
@@ -230,6 +232,11 @@ GDig::GDig()
       parallellism_(6),
       replay_log_index_(0u),
       active_resolves_(0) {
+}
+
+GDig::~GDig() {
+  if (log_)
+    log_->RemoveThreadSafeObserver(log_observer_.get());
 }
 
 GDig::Result GDig::Main(int argc, const char* argv[]) {
@@ -253,12 +260,12 @@ GDig::Result GDig::Main(int argc, const char* argv[]) {
 #endif
 
   base::AtExitManager exit_manager;
-  MessageLoopForIO loop;
+  base::MessageLoopForIO loop;
 
   result_ = RESULT_PENDING;
   Start();
   if (result_ == RESULT_PENDING)
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
 
   // Destroy it while MessageLoopForIO is alive.
   dns_config_service_.reset();
@@ -299,7 +306,9 @@ bool GDig::ParseCommandLine(int argc, const char* argv[]) {
         return false;
       }
     }
-    log_.reset(new FileNetLog(stderr, level));
+    log_.reset(new NetLog);
+    log_observer_.reset(new FileNetLogObserver(stderr));
+    log_->AddThreadSafeObserver(log_observer_.get(), level);
   }
 
   print_config_ = parsed_command_line.HasSwitch("print_config");
@@ -374,18 +383,16 @@ void GDig::Start() {
                                                base::Unretained(this)));
     timeout_closure_.Reset(base::Bind(&GDig::OnTimeout,
                                       base::Unretained(this)));
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        timeout_closure_.callback(),
-        config_timeout_);
+    base::MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, timeout_closure_.callback(), config_timeout_);
   }
 }
 
 void GDig::Finish(Result result) {
   DCHECK_NE(RESULT_PENDING, result);
   result_ = result;
-  if (MessageLoop::current())
-    MessageLoop::current()->Quit();
+  if (base::MessageLoop::current())
+    base::MessageLoop::current()->Quit();
 }
 
 void GDig::OnDnsConfig(const DnsConfig& dns_config_const) {
@@ -433,10 +440,10 @@ void GDig::ReplayNextEntry() {
     const ReplayLogEntry& entry = replay_log_[replay_log_index_];
     if (time_since_start < entry.start_time) {
       // Delay call to next time and return.
-      MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&GDig::ReplayNextEntry, base::Unretained(this)),
-        entry.start_time - time_since_start);
+      base::MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&GDig::ReplayNextEntry, base::Unretained(this)),
+          entry.start_time - time_since_start);
       return;
     }
 

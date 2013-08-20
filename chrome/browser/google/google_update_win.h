@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "google_update/google_update_idl.h"
 
 namespace base {
@@ -56,8 +56,12 @@ enum GoogleUpdateErrorCode {
   // An error occurred while upgrading (or while checking for update).
   // Check the Google Update log in %TEMP% for more details.
   GOOGLE_UPDATE_ERROR_UPDATING,
-  // Updates can not be downloaded because the administrator has disabled them.
+  // Updates can not be downloaded because the administrator has disabled all
+  // types of updating.
   GOOGLE_UPDATE_DISABLED_BY_POLICY,
+  // Updates can not be downloaded because the administrator has disabled
+  // manual (on-demand) updates.  Automatic background updates are allowed.
+  GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY,
 };
 
 // The GoogleUpdateStatusListener interface is used by components to receive

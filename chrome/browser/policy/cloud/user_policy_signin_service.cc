@@ -32,6 +32,10 @@
 #include "google_apis/gaia/oauth2_access_token_consumer.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
 
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#endif
+
 namespace em = enterprise_management;
 
 namespace {
@@ -204,7 +208,7 @@ void CloudPolicyClientRegistrationHelper::OnGetUserInfoSuccess(
   // Kick off registration of the CloudPolicyClient with our newly minted
   // oauth_access_token_.
   client_->Register(em::DeviceRegisterRequest::BROWSER, oauth_access_token_,
-                    std::string(), false);
+                    std::string(), false, std::string());
 }
 
 void CloudPolicyClientRegistrationHelper::OnRegistrationStateChanged(
@@ -226,11 +230,8 @@ UserPolicySigninService::UserPolicySigninService(
     Profile* profile)
     : profile_(profile),
       weak_factory_(this) {
-  CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-  if (profile_->GetPrefs()->GetBoolean(prefs::kDisableCloudPolicyOnSignin) ||
-      ProfileManager::IsImportProcess(*cmd_line)) {
+  if (profile_->GetPrefs()->GetBoolean(prefs::kDisableCloudPolicyOnSignin))
     return;
-  }
 
   // Initialize/shutdown the UserCloudPolicyManager when the user signs out.
   registrar_.Add(this,
@@ -364,9 +365,15 @@ void UserPolicySigninService::Observe(
   // Note that the profile manager is NULL in unit tests.
   if (g_browser_process->profile_manager() &&
       g_browser_process->profile_manager()->will_import()) {
-    DCHECK_EQ(chrome::NOTIFICATION_PROFILE_ADDED, type);
     return;
   }
+
+#if defined(ENABLE_MANAGED_USERS)
+  if (ManagedUserService::ProfileIsManaged(profile_)) {
+    registrar_.RemoveAll();
+    return;
+  }
+#endif
 
   // If using a TestingProfile with no SigninManager or UserCloudPolicyManager,
   // skip initialization.
@@ -403,7 +410,7 @@ void UserPolicySigninService::Observe(
           *(content::Details<const TokenService::TokenAvailableDetails>(
               details).ptr());
       if (token_details.service() ==
-          GaiaConstants::kGaiaOAuth2LoginRefreshToken) {
+              GaiaConstants::kGaiaOAuth2LoginRefreshToken) {
         SigninManager* signin_manager =
             SigninManagerFactory::GetForProfile(profile_);
         std::string username = signin_manager->GetAuthenticatedUsername();
@@ -537,7 +544,7 @@ void UserPolicySigninService::OnClientError(CloudPolicyClient* client) {
 
       // Can't shutdown now because we're in the middle of a callback from
       // the CloudPolicyClient, so queue up a task to do the shutdown.
-      MessageLoop::current()->PostTask(
+      base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(&UserPolicySigninService::ShutdownUserCloudPolicyManager,
                      weak_factory_.GetWeakPtr()));

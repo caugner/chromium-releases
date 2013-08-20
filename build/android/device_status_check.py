@@ -12,8 +12,9 @@ import smtplib
 import sys
 import re
 
-from pylib import buildbot_report
 from pylib import android_commands
+from pylib import buildbot_report
+from pylib import constants
 from pylib.cmd_helper import GetCmdOutput
 
 
@@ -24,20 +25,33 @@ def DeviceInfo(serial):
     serial: The serial of the attached device to construct info about.
 
   Returns:
-    Tuple of device type, build id and report as a string.
+    Tuple of device type, build id, report as a string, error messages, and
+    boolean indicating whether or not device can be used for testing.
   """
 
   def AdbShellCmd(cmd):
     return GetCmdOutput('adb -s %s shell %s' % (serial, cmd),
                         shell=True).strip()
 
+  device_adb = android_commands.AndroidCommands(serial)
+
+  # TODO(navabi): Replace AdbShellCmd with device_adb.
   device_type = AdbShellCmd('getprop ro.build.product')
   device_build = AdbShellCmd('getprop ro.build.id')
+  device_build_type = AdbShellCmd('getprop ro.build.type')
   device_product_name = AdbShellCmd('getprop ro.product.name')
 
   setup_wizard_disabled = AdbShellCmd(
       'getprop ro.setupwizard.mode') == 'DISABLED'
   battery = AdbShellCmd('dumpsys battery')
+  install_output = GetCmdOutput(
+    ['%s/build/android/adb_install_apk.py' % constants.DIR_SOURCE_ROOT, '--apk',
+     '%s/build/android/CheckInstallApk-debug.apk' % constants.DIR_SOURCE_ROOT])
+  install_speed_found = re.findall('(\d+) KB/s', install_output)
+  if install_speed_found:
+    install_speed = int(install_speed_found[0])
+  else:
+    install_speed = 'Unknown'
   if 'Error' in battery:
     ac_power = 'Unknown'
     battery_level = 'Unknown'
@@ -55,17 +69,28 @@ def DeviceInfo(serial):
                                              '| grep Device'
                                              "| awk '{print $4}'")[-6:],
             '  Wifi IP: %s' % AdbShellCmd('getprop dhcp.wlan0.ipaddress'),
+            '  Install Speed: %s KB/s' % install_speed,
             '']
 
   errors = []
-  if battery_level < 5:
-    errors += ['Device critically low in battery.']
-  if not setup_wizard_disabled:
+  if battery_level < 15:
+    errors += ['Device critically low in battery. Turning off device.']
+  if not setup_wizard_disabled and device_build_type != 'user':
     errors += ['Setup wizard not disabled. Was it provisioned correctly?']
   if device_product_name == 'mantaray' and ac_power != 'true':
     errors += ['Mantaray device not connected to AC power.']
+  # TODO(navabi): Insert warning once we have a better handle of what install
+  # speeds to expect. The following lines were causing too many alerts.
+  # if install_speed < 500:
+  #   errors += ['Device install speed too low. Do not use for testing.']
 
-  return device_type, device_build, '\n'.join(report), errors
+  # Causing the device status check step fail for slow install speed or low
+  # battery currently is too disruptive to the bots (especially try bots).
+  # Turn off devices with low battery and the step does not fail.
+  if battery_level < 15:
+    device_adb.EnableAdbRoot()
+    AdbShellCmd('reboot -p')
+  return device_type, device_build, '\n'.join(report), errors, True
 
 
 def CheckForMissingDevices(options, adb_online_devs):
@@ -107,9 +132,14 @@ def CheckForMissingDevices(options, adb_online_devs):
   last_devices = ReadDeviceList('.last_devices')
   missing_devs = list(set(last_devices) - set(adb_online_devs))
 
-  WriteDeviceList('.last_devices', (adb_online_devs + last_devices))
+  all_known_devices = list(set(adb_online_devs) | set(last_devices))
+  WriteDeviceList('.last_devices', all_known_devices)
   WriteDeviceList('.last_missing', missing_devs)
 
+  if not all_known_devices:
+    # This can happen if for some reason the .last_devices file is not
+    # present or if it was empty.
+    return ['No online devices. Have any devices been plugged in?']
   if missing_devs:
     devices_missing_msg = '%d devices not detected.' % len(missing_devs)
     buildbot_report.PrintSummaryText(devices_missing_msg)
@@ -161,8 +191,10 @@ def main():
     parser.error('Unknown options %s' % args)
   devices = android_commands.GetAttachedDevices()
   types, builds, reports, errors = [], [], [], []
+  fail_step_lst = []
   if devices:
-    types, builds, reports, errors = zip(*[DeviceInfo(dev) for dev in devices])
+    types, builds, reports, errors, fail_step_lst = zip(*[DeviceInfo(dev)
+                                                          for dev in devices])
 
   err_msg = CheckForMissingDevices(options, devices) or []
 
@@ -183,6 +215,12 @@ def main():
     msg = '\n'.join(err_msg)
     print msg
     SendDeviceStatusAlert(msg)
+
+  if False in fail_step_lst:
+    # TODO(navabi): Build fails on device status check step if there exists any
+    # devices with critically low battery or install speed. Remove those devices
+    # from testing, allowing build to continue with good devices.
+    return 1
 
   if not devices:
     return 1

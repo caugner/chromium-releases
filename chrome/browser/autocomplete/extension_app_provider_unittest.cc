@@ -4,7 +4,7 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/extension_app_provider.h"
 #include "chrome/browser/history/history_service.h"
@@ -33,7 +33,7 @@ class ExtensionAppProviderTest : public testing::Test {
                int num_cases);
 
  protected:
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   scoped_refptr<ExtensionAppProvider> app_provider_;
   scoped_ptr<TestingProfile> profile_;

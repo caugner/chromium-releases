@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_piece.h"
 #include "net/tools/flip_server/balsa_frame.h"
@@ -17,6 +17,8 @@ template <typename T> struct DefaultSingletonTraits;
 
 namespace net {
 namespace tools {
+
+extern std::string FLAGS_quic_in_memory_cache_dir;
 
 class QuicServer;
 

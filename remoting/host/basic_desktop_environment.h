@@ -26,7 +26,7 @@ class BasicDesktopEnvironment : public DesktopEnvironment {
   virtual scoped_ptr<AudioCapturer> CreateAudioCapturer() OVERRIDE;
   virtual scoped_ptr<InputInjector> CreateInputInjector() OVERRIDE;
   virtual scoped_ptr<ScreenControls> CreateScreenControls() OVERRIDE;
-  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer() OVERRIDE;
+  virtual scoped_ptr<webrtc::ScreenCapturer> CreateVideoCapturer() OVERRIDE;
   virtual std::string GetCapabilities() const OVERRIDE;
   virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
 
@@ -38,9 +38,7 @@ class BasicDesktopEnvironment : public DesktopEnvironment {
   BasicDesktopEnvironment(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-      base::WeakPtr<ClientSessionControl> client_session_control,
-      const UiStrings& ui_strings);
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
 
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner() const {
     return caller_task_runner_;
@@ -79,8 +77,6 @@ class BasicDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
   virtual ~BasicDesktopEnvironmentFactory();
 
   // DesktopEnvironmentFactory implementation.
-  virtual scoped_ptr<DesktopEnvironment> Create(
-      base::WeakPtr<ClientSessionControl> client_session_control) OVERRIDE;
   virtual bool SupportsAudioCapture() const OVERRIDE;
 
  protected:

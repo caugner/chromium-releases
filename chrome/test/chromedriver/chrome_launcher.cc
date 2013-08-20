@@ -4,28 +4,35 @@
 
 #include "chrome/test/chromedriver/chrome_launcher.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "base/base64.h"
+#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/logging.h"
 #include "base/process.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/chrome_android_impl.h"
 #include "chrome/test/chromedriver/chrome/chrome_desktop_impl.h"
 #include "chrome/test/chromedriver/chrome/chrome_finder.h"
+#include "chrome/test/chromedriver/chrome/device_manager.h"
 #include "chrome/test/chromedriver/chrome/devtools_http_client.h"
 #include "chrome/test/chromedriver/chrome/embedded_automation_extension.h"
+#include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/user_data_dir.h"
 #include "chrome/test/chromedriver/chrome/version.h"
@@ -33,6 +40,9 @@
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 
 namespace {
+
+const char* kCommonSwitches[] = {
+  "ignore-certificate-errors", "metrics-recording-only"};
 
 Status UnpackAutomationExtension(const base::FilePath& temp_dir,
                                  base::FilePath* automation_extension) {
@@ -141,11 +151,12 @@ Status WaitForDevToolsAndCheckVersion(
     int port,
     URLRequestContextGetter* context_getter,
     const SyncWebSocketFactory& socket_factory,
+    Log* log,
     scoped_ptr<DevToolsHttpClient>* user_client,
     std::string* version,
     int* build_no) {
   scoped_ptr<DevToolsHttpClient> client(new DevToolsHttpClient(
-      port, context_getter, socket_factory));
+      port, context_getter, socket_factory, log));
 
   base::Time deadline = base::Time::Now() + base::TimeDelta::FromSeconds(20);
   std::string devtools_version;
@@ -156,7 +167,7 @@ Status WaitForDevToolsAndCheckVersion(
       break;
     if (status.code() != kChromeNotReachable)
       return status;
-    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(50));
   }
   if (status.IsError())
     return status;
@@ -171,7 +182,7 @@ Status WaitForDevToolsAndCheckVersion(
       *user_client = client.Pass();
       return Status(kOk);
     }
-    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(50));
   }
   return Status(kUnknownError, "unable to discover open pages");
 }
@@ -180,15 +191,17 @@ Status LaunchDesktopChrome(
     URLRequestContextGetter* context_getter,
     int port,
     const SyncWebSocketFactory& socket_factory,
+    Log* log,
     const Capabilities& capabilities,
-    const std::list<DevToolsEventLogger*>& devtools_event_loggers,
+    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
     scoped_ptr<Chrome>* chrome) {
   CommandLine command(CommandLine::NO_PROGRAM);
   base::ScopedTempDir user_data_dir;
   base::ScopedTempDir extension_dir;
   PrepareCommandLine(port, capabilities,
                      &command, &user_data_dir, &extension_dir);
-  command.AppendSwitch("ignore-certificate-errors");
+  for (size_t i = 0; i < arraysize(kCommonSwitches); i++)
+    command.AppendSwitch(kCommonSwitches[i]);
   base::LaunchOptions options;
 
 #if !defined(OS_WIN)
@@ -199,9 +212,16 @@ Status LaunchDesktopChrome(
                                             capabilities.log_path));
     options.environ = &environ;
   }
+  if (capabilities.detach)
+    options.new_process_group = true;
 #endif
 
-  LOG(INFO) << "Launching chrome: " << command.GetCommandLineString();
+#if defined(OS_WIN)
+  std::string command_string = base::WideToUTF8(command.GetCommandLineString());
+#else
+  std::string command_string = command.GetCommandLineString();
+#endif
+  log->AddEntry(Log::kLog, "Launching chrome: " + command_string);
   base::ProcessHandle process;
   if (!base::LaunchProcess(command, options, &process))
     return Status(kUnknownError, "chrome failed to start");
@@ -210,7 +230,7 @@ Status LaunchDesktopChrome(
   std::string version;
   int build_no;
   Status status = WaitForDevToolsAndCheckVersion(
-      port, context_getter, socket_factory, &devtools_client, &version,
+      port, context_getter, socket_factory, log, &devtools_client, &version,
       &build_no);
 
   if (status.IsError()) {
@@ -247,9 +267,14 @@ Status LaunchDesktopChrome(
     }
     return status;
   }
-  chrome->reset(new ChromeDesktopImpl(
-      devtools_client.Pass(), version, build_no, devtools_event_loggers,
-      process, &user_data_dir, &extension_dir));
+  chrome->reset(new ChromeDesktopImpl(devtools_client.Pass(),
+                                      version,
+                                      build_no,
+                                      devtools_event_listeners,
+                                      log,
+                                      process,
+                                      &user_data_dir,
+                                      &extension_dir));
   return Status(kOk);
 }
 
@@ -257,38 +282,47 @@ Status LaunchAndroidChrome(
     URLRequestContextGetter* context_getter,
     int port,
     const SyncWebSocketFactory& socket_factory,
+    Log* log,
     const Capabilities& capabilities,
-    const std::list<DevToolsEventLogger*>& devtools_event_loggers,
+    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+    DeviceManager* device_manager,
     scoped_ptr<Chrome>* chrome) {
-  // TODO(frankf): Figure out how this should be installed to
-  // make this work for all platforms.
-  base::FilePath adb_commands(FILE_PATH_LITERAL("adb_commands.py"));
-  CommandLine command(adb_commands);
-  command.AppendSwitchASCII("package", capabilities.android_package);
-  command.AppendSwitch("launch");
-  command.AppendSwitchASCII("port", base::IntToString(port));
-
-  std::string output;
-  if (!base::GetAppOutput(command, &output)) {
-    if (output.empty())
-      return Status(
-          kUnknownError,
-          "failed to run adb_commands.py. Make sure it is set in PATH.");
-    else
-      return Status(kUnknownError, "android app failed to start.\n" + output);
+  Status status(kOk);
+  scoped_ptr<Device> device;
+  if (capabilities.device_serial.empty()) {
+    status = device_manager->AcquireDevice(&device);
+  } else {
+    status = device_manager->AcquireSpecificDevice(
+        capabilities.device_serial, &device);
   }
+  if (!status.IsOk())
+    return status;
+
+  std::string args(capabilities.android_args);
+  for (size_t i = 0; i < arraysize(kCommonSwitches); i++)
+    args += "--" + std::string(kCommonSwitches[i]) + " ";
+  args += "--disable-fre --enable-remote-debugging";
+
+  status = device->StartChrome(capabilities.android_package, port, args);
+  if (!status.IsOk())
+    return status;
 
   scoped_ptr<DevToolsHttpClient> devtools_client;
   std::string version;
   int build_no;
-  Status status = WaitForDevToolsAndCheckVersion(
-      port, context_getter, socket_factory, &devtools_client, &version,
-      &build_no);
+  status = WaitForDevToolsAndCheckVersion(port,
+                                          context_getter,
+                                          socket_factory,
+                                          log,
+                                          &devtools_client,
+                                          &version,
+                                          &build_no);
   if (status.IsError())
     return status;
 
   chrome->reset(new ChromeAndroidImpl(
-      devtools_client.Pass(), version, build_no, devtools_event_loggers));
+      devtools_client.Pass(), version, build_no, devtools_event_listeners,
+      device.Pass(), log));
   return Status(kOk);
 }
 
@@ -298,17 +332,19 @@ Status LaunchChrome(
     URLRequestContextGetter* context_getter,
     int port,
     const SyncWebSocketFactory& socket_factory,
+    Log* log,
+    DeviceManager* device_manager,
     const Capabilities& capabilities,
-    const std::list<DevToolsEventLogger*>& devtools_event_loggers,
+    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
     scoped_ptr<Chrome>* chrome) {
   if (capabilities.IsAndroid()) {
     return LaunchAndroidChrome(
-        context_getter, port, socket_factory, capabilities,
-        devtools_event_loggers, chrome);
+        context_getter, port, socket_factory, log, capabilities,
+        devtools_event_listeners, device_manager, chrome);
   } else {
     return LaunchDesktopChrome(
-        context_getter, port, socket_factory, capabilities,
-        devtools_event_loggers, chrome);
+        context_getter, port, socket_factory, log, capabilities,
+        devtools_event_listeners, chrome);
   }
 }
 
@@ -358,7 +394,12 @@ Status ProcessExtensions(const std::vector<std::string>& extensions,
     Status status = UnpackAutomationExtension(temp_dir, &automation_extension);
     if (status.IsError())
       return status;
-    extension_paths.push_back(automation_extension.value());
+    if (command->HasSwitch("disable-extensions")) {
+      command->AppendSwitchNative("load-component-extension",
+                                  automation_extension.value());
+    } else {
+      extension_paths.push_back(automation_extension.value());
+    }
   }
 
   if (extension_paths.size()) {
@@ -383,8 +424,12 @@ Status WritePrefsFile(
                   "cannot parse internal JSON template: " + error_msg);
   }
 
-  if (custom_prefs)
-    prefs->MergeDictionary(custom_prefs);
+  if (custom_prefs) {
+    for (base::DictionaryValue::Iterator it(*custom_prefs); !it.IsAtEnd();
+         it.Advance()) {
+      prefs->Set(it.key(), it.value().DeepCopy());
+    }
+  }
 
   std::string prefs_str;
   base::JSONWriter::Write(prefs, &prefs_str);

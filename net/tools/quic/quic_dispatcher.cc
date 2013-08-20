@@ -58,6 +58,12 @@ int QuicDispatcher::WritePacket(const char* buffer, size_t buf_len,
                                 const IPEndPoint& peer_address,
                                 QuicBlockedWriterInterface* writer,
                                 int* error) {
+  if (write_blocked_) {
+    write_blocked_list_.AddBlockedObject(writer);
+    *error = EAGAIN;
+    return -1;
+  }
+
   int rc = QuicSocketUtils::WritePacket(fd_, buffer, buf_len,
                                         self_address, peer_address,
                                         error);
@@ -181,9 +187,10 @@ QuicSession* QuicDispatcher::CreateQuicSession(
     EpollServer* epoll_server) {
   QuicConnectionHelperInterface* helper =
       new QuicEpollConnectionHelper(this, epoll_server);
-  return new QuicServerSession(
-      config_, crypto_config_,
-      new QuicConnection(guid, client_address, helper, true), this);
+  QuicServerSession* session = new QuicServerSession(
+       config_, new QuicConnection(guid, client_address, helper, true), this);
+  session->InitializeSession(crypto_config_);
+  return session;
 }
 
 }  // namespace tools

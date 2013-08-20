@@ -6,6 +6,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/chromeos/attestation/attestation_policy_observer.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/enrollment_handler_chromeos.h"
@@ -16,6 +18,7 @@
 #include "chrome/browser/policy/cloud/device_management_service.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/chromeos_constants.h"
 
 namespace em = enterprise_management;
 
@@ -48,6 +51,32 @@ const char* kMachineInfoSerialNumberKeys[] = {
   "Product_SN",     // Mario
   "sn",             // old ZGB devices (more recent ones use serial_number)
 };
+
+// Fetches a machine statistic value from StatisticsProvider, returns an empty
+// string on failure.
+std::string GetMachineStatistic(const std::string& key) {
+  std::string value;
+  chromeos::system::StatisticsProvider* provider =
+      chromeos::system::StatisticsProvider::GetInstance();
+  if (!provider->GetMachineStatistic(key, &value))
+    LOG(WARNING) << "Failed to get machine statistic " << key;
+
+  return value;
+}
+
+// Gets a machine flag from StatisticsProvider, returns the given
+// |default_value| if not present.
+bool GetMachineFlag(const std::string& key, bool default_value) {
+  bool value = default_value;
+  chromeos::system::StatisticsProvider* provider =
+      chromeos::system::StatisticsProvider::GetInstance();
+  if (!provider->GetMachineFlag(key, &value)) {
+    LOG(WARNING) << "Failed to get machine flag " << key;
+    return default_value;
+  }
+
+  return value;
+}
 
 }  // namespace
 
@@ -92,7 +121,7 @@ void DeviceCloudPolicyManagerChromeOS::StartEnrollment(
       new EnrollmentHandlerChromeOS(
           device_store_.get(), install_attributes_, CreateClient(), auth_token,
           install_attributes_->GetDeviceId(), is_auto_enrollment,
-          allowed_device_modes,
+          GetDeviceRequisition(), allowed_device_modes,
           base::Bind(&DeviceCloudPolicyManagerChromeOS::EnrollmentCompleted,
                      base::Unretained(this), callback)));
   enrollment_handler_->StartEnrollment();
@@ -105,6 +134,50 @@ void DeviceCloudPolicyManagerChromeOS::CancelEnrollment() {
   }
 }
 
+std::string DeviceCloudPolicyManagerChromeOS::GetDeviceRequisition() const {
+  std::string requisition;
+  const PrefService::Preference* pref = local_state_->FindPreference(
+      prefs::kDeviceEnrollmentRequisition);
+  if (pref->IsDefaultValue()) {
+    requisition =
+        GetMachineStatistic(chromeos::system::kOemDeviceRequisitionKey);
+  } else {
+    pref->GetValue()->GetAsString(&requisition);
+  }
+
+  return requisition;
+}
+
+void DeviceCloudPolicyManagerChromeOS::SetDeviceRequisition(
+    const std::string& requisition) {
+  if (local_state_) {
+    if (requisition.empty()) {
+      local_state_->ClearPref(prefs::kDeviceEnrollmentRequisition);
+      local_state_->ClearPref(prefs::kDeviceEnrollmentAutoStart);
+      local_state_->ClearPref(prefs::kDeviceEnrollmentCanExit);
+    } else {
+      local_state_->SetString(prefs::kDeviceEnrollmentRequisition, requisition);
+      local_state_->SetBoolean(prefs::kDeviceEnrollmentAutoStart, true);
+      local_state_->SetBoolean(prefs::kDeviceEnrollmentCanExit, false);
+    }
+  }
+}
+
+bool DeviceCloudPolicyManagerChromeOS::ShouldAutoStartEnrollment() const {
+  if (local_state_->HasPrefPath(prefs::kDeviceEnrollmentAutoStart))
+    return local_state_->GetBoolean(prefs::kDeviceEnrollmentAutoStart);
+
+  return GetMachineFlag(chromeos::system::kOemIsEnterpriseManagedKey, false);
+}
+
+bool DeviceCloudPolicyManagerChromeOS::CanExitEnrollment() const {
+  if (local_state_->HasPrefPath(prefs::kDeviceEnrollmentCanExit))
+    return local_state_->GetBoolean(prefs::kDeviceEnrollmentCanExit);
+
+  return GetMachineFlag(chromeos::system::kOemCanExitEnterpriseEnrollmentKey,
+                        true);
+}
+
 void DeviceCloudPolicyManagerChromeOS::Shutdown() {
   CloudPolicyManager::Shutdown();
   device_status_provider_.reset();
@@ -115,6 +188,15 @@ void DeviceCloudPolicyManagerChromeOS::OnStoreLoaded(CloudPolicyStore* store) {
 
   if (!enrollment_handler_.get())
     StartIfManaged();
+}
+
+// static
+void DeviceCloudPolicyManagerChromeOS::RegisterPrefs(
+    PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kDeviceEnrollmentRequisition,
+                               std::string());
+  registry->RegisterBooleanPref(prefs::kDeviceEnrollmentAutoStart, false);
+  registry->RegisterBooleanPref(prefs::kDeviceEnrollmentCanExit, true);
 }
 
 // static
@@ -138,13 +220,12 @@ std::string DeviceCloudPolicyManagerChromeOS::GetMachineID() {
 
 // static
 std::string DeviceCloudPolicyManagerChromeOS::GetMachineModel() {
-  std::string machine_model;
-  chromeos::system::StatisticsProvider* provider =
-      chromeos::system::StatisticsProvider::GetInstance();
-  if (!provider->GetMachineStatistic(kMachineInfoSystemHwqual, &machine_model))
-    LOG(WARNING) << "Failed to get machine model.";
+  return GetMachineStatistic(kMachineInfoSystemHwqual);
+}
 
-  return machine_model;
+std::string DeviceCloudPolicyManagerChromeOS::GetRobotAccountId() {
+  const enterprise_management::PolicyData* policy = device_store_->policy();
+  return policy ? policy->service_account_identity() : std::string();
 }
 
 scoped_ptr<CloudPolicyClient> DeviceCloudPolicyManagerChromeOS::CreateClient() {

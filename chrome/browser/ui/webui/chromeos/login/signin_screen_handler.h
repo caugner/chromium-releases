@@ -9,12 +9,12 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_display.h"
+#include "chrome/browser/chromeos/login/screens/error_screen_actor.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
@@ -24,8 +24,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui.h"
-
-class BrowsingDataRemover;
+#include "net/base/net_errors.h"
 
 namespace base {
 class DictionaryValue;
@@ -35,7 +34,6 @@ class ListValue;
 namespace chromeos {
 
 class CaptivePortalWindowProxy;
-class ErrorScreenActor;
 class LocallyManagedUserCreationScreenHandler;
 class NativeWindowDelegate;
 class User;
@@ -62,7 +60,6 @@ class LoginDisplayWebUIHandler {
   // Show sign-in screen for the given credentials.
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password) = 0;
-  virtual void SetGaiaOriginForTesting(const std::string& arg) = 0;
  protected:
   virtual ~LoginDisplayWebUIHandler() {}
 };
@@ -72,6 +69,9 @@ class SigninScreenHandlerDelegate {
  public:
   // Cancels current password changed flow.
   virtual void CancelPasswordChangedFlow() = 0;
+
+  // Cancels user adding.
+  virtual void CancelUserAdding() = 0;
 
   // Create a new Google account.
   virtual void CreateAccount() = 0;
@@ -116,8 +116,14 @@ class SigninScreenHandlerDelegate {
   // Shows Enterprise Enrollment screen.
   virtual void ShowEnterpriseEnrollmentScreen() = 0;
 
+  // Shows Kiosk Enable screen.
+  virtual void ShowKioskEnableScreen() = 0;
+
   // Shows Reset screen.
   virtual void ShowResetScreen() = 0;
+
+  // Shows Reset screen.
+  virtual void ShowKioskAutolaunchScreen() = 0;
 
   // Show wrong hwid screen.
   virtual void ShowWrongHWIDScreen() = 0;
@@ -159,10 +165,8 @@ class SigninScreenHandlerDelegate {
 class SigninScreenHandler
     : public BaseScreenHandler,
       public LoginDisplayWebUIHandler,
-      public BrowsingDataRemover::Observer,
       public SystemKeyEventListener::CapsLockObserver,
       public content::NotificationObserver,
-      public NetworkStateInformerDelegate,
       public NetworkStateInformer::NetworkStateInformerObserver {
  public:
   SigninScreenHandler(
@@ -183,21 +187,24 @@ class SigninScreenHandler
 
   void SetNativeWindowDelegate(NativeWindowDelegate* native_window_delegate);
 
-  // NetworkStateInformerDelegate implementation:
+  // NetworkStateInformer::NetworkStateInformerObserver implementation:
   virtual void OnNetworkReady() OVERRIDE;
 
-  // NetworkStateInformer::NetworkStateInformerObserver implementation:
   virtual void UpdateState(NetworkStateInformer::State state,
-                           const std::string& service_path,
-                           ConnectionType connection_type,
-                           const std::string& reason) OVERRIDE;
+                           ErrorScreenActor::ErrorReason reason) OVERRIDE;
 
  private:
   enum UIState {
     UI_STATE_UNKNOWN = 0,
     UI_STATE_GAIA_SIGNIN,
     UI_STATE_ACCOUNT_PICKER,
-    UI_STATE_LOCALLY_MANAGED_USER_CREATION
+  };
+
+  enum FrameState {
+    FRAME_STATE_UNKNOWN = 0,
+    FRAME_STATE_LOADING,
+    FRAME_STATE_LOADED,
+    FRAME_STATE_ERROR
   };
 
   typedef base::hash_set<std::string> WebUIObservers;
@@ -211,22 +218,12 @@ class SigninScreenHandler
   void UpdateUIState(UIState ui_state, DictionaryValue* params);
 
   void UpdateStateInternal(NetworkStateInformer::State state,
-                           const std::string service_path,
-                           ConnectionType connection_type,
-                           std::string reason,
+                           ErrorScreenActor::ErrorReason reason,
                            bool force_update);
   void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
-                                  const std::string& service_path,
-                                  ConnectionType connection_type,
-                                  const std::string& reason,
-                                  bool is_proxy_error,
-                                  bool is_under_captive_portal,
-                                  bool is_gaia_loading_timeout);
+                                  ErrorScreenActor::ErrorReason reason);
   void HideOfflineMessage(NetworkStateInformer::State state,
-                          const std::string& service_path,
-                          const std::string& reason,
-                          bool is_gaia_signin,
-                          bool is_gaia_reloaded);
+                          ErrorScreenActor::ErrorReason reason);
   void ReloadGaiaScreen();
 
   // BaseScreenHandler implementation:
@@ -255,10 +252,6 @@ class SigninScreenHandler
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) OVERRIDE;
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password) OVERRIDE;
-  virtual void SetGaiaOriginForTesting(const std::string& arg) OVERRIDE;
-
-  // BrowsingDataRemover::Observer overrides.
-  virtual void OnBrowsingDataRemoverDone() OVERRIDE;
 
   // SystemKeyEventListener::CapsLockObserver overrides.
   virtual void OnCapsLockChange(bool enabled) OVERRIDE;
@@ -283,6 +276,12 @@ class SigninScreenHandler
   void UpdateAuthExtension();
   void UpdateAddButtonStatus();
 
+  // Fill |params| that are passed to JS..
+  void UpdateAuthParams(DictionaryValue* params);
+
+  // Restore input focus to current user pod.
+  void RefocusCurrentPod();
+
   // WebUI message handlers.
   void HandleCompleteAuthentication(const std::string& email,
                                     const std::string& password,
@@ -302,7 +301,9 @@ class SigninScreenHandler
   void HandleRemoveUser(const std::string& email);
   void HandleShowAddUser(const base::ListValue* args);
   void HandleToggleEnrollmentScreen();
+  void HandleToggleKioskEnableScreen();
   void HandleToggleResetScreen();
+  void HandleToggleKioskAutolaunchScreen();
   void HandleLaunchHelpApp(double help_topic_id);
   void HandleCreateAccount();
   void HandleAccountPickerReady();
@@ -315,12 +316,13 @@ class SigninScreenHandler
   void HandleOpenProxySettings();
   void HandleLoginVisible(const std::string& source);
   void HandleCancelPasswordChangedFlow();
+  void HandleCancelUserAdding();
   void HandleMigrateUserData(const std::string& password);
   void HandleResyncUserData();
   void HandleLoginUIStateChanged(const std::string& source, bool new_value);
   void HandleUnlockOnLoginSuccess();
   void HandleLoginScreenUpdate();
-  void HandleShowGaiaFrameError(int error);
+  void HandleFrameLoadingCompleted(int status);
   void HandleShowLoadingTimeoutError();
   void HandleUpdateOfflineLogin(bool offline_login_active);
   void HandleShowLocallyManagedUserCreationScreen();
@@ -334,7 +336,8 @@ class SigninScreenHandler
   void SendUserList(bool animated);
 
   // Kick off cookie / local storage cleanup.
-  void StartClearingCookies();
+  void StartClearingCookies(const base::Closure& on_clear_callback);
+  void OnCookiesCleared(base::Closure on_clear_callback);
 
   // Kick off DNS cache flushing.
   void StartClearingDnsCache();
@@ -357,7 +360,11 @@ class SigninScreenHandler
   OobeUI::Screen GetCurrentScreen() const;
 
   // Returns true if current visible screen is the Gaia sign-in page.
-  bool IsGaiaLogin() const;
+  bool IsGaiaVisible() const;
+
+  // Returns true if current visible screen is the error screen over
+  // Gaia sign-in page.
+  bool IsGaiaHiddenByError() const;
 
   // Returns true if current screen is the error screen over signin
   // screen.
@@ -369,7 +376,14 @@ class SigninScreenHandler
   // Returns true if offline login is allowed.
   bool IsOfflineLoginAllowed() const;
 
+  // Current UI state of the signin screen.
   UIState ui_state_;
+
+  // Current state of Gaia frame.
+  FrameState frame_state_;
+
+  // Latest Gaia frame error.
+  net::Error frame_error_;
 
   // A delegate that glues this handler with backend LoginDisplay.
   SigninScreenHandlerDelegate* delegate_;
@@ -419,9 +433,6 @@ class SigninScreenHandler
   std::string test_user_;
   std::string test_pass_;
 
-  BrowsingDataRemover* cookie_remover_;
-  base::Closure cookie_remover_callback_;
-
   base::WeakPtrFactory<SigninScreenHandler> weak_factory_;
 
   // Set to true once |LOGIN_WEBUI_VISIBLE| notification is observed.
@@ -444,8 +455,11 @@ class SigninScreenHandler
   // NOTIFICATION_AUTH_CANCELLED.
   bool has_pending_auth_ui_;
 
-  // Testing helper, specifies new value for gaia url.
-  std::string gaia_origin_for_test_;
+  // Whether to ignore the next net::ERR_ABORTED frame error. ERR_ABORTED could
+  // be triggered when reloading gaia frame's src with a pending load.
+  // ReloadGaiaExtension() sets this flag to true to ignore potential
+  // ERR_ABORTED triggered from its reload request. See http://crbug.com/242527.
+  bool ignore_next_user_abort_frame_error_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

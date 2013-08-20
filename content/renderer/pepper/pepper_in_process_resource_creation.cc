@@ -15,12 +15,14 @@
 #include "ipc/ipc_message_macros.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/proxy/browser_font_resource_trusted.h"
+#include "ppapi/proxy/ext_crx_file_system_private_resource.h"
 #include "ppapi/proxy/file_chooser_resource.h"
 #include "ppapi/proxy/file_io_resource.h"
 #include "ppapi/proxy/file_system_resource.h"
 #include "ppapi/proxy/graphics_2d_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/printing_resource.h"
+#include "ppapi/proxy/url_loader_resource.h"
 #include "ppapi/proxy/url_request_info_resource.h"
 #include "ppapi/proxy/url_response_info_resource.h"
 #include "ppapi/proxy/websocket_resource.h"
@@ -69,10 +71,12 @@ PP_Resource PepperInProcessResourceCreation::CreateFileChooser(
     const PP_Var& accept_types) {
   scoped_refptr<ppapi::StringVar> string_var =
       ppapi::StringVar::FromPPVar(accept_types);
-  std::string str = string_var ? string_var->value() : std::string();
+  std::string str = string_var.get() ? string_var->value() : std::string();
   return (new ppapi::proxy::FileChooserResource(
       host_impl_->in_process_router()->GetPluginConnection(),
-      instance, mode, str.c_str()))->GetReference();
+      instance,
+      mode,
+      str.c_str()))->GetReference();
 }
 
 PP_Resource PepperInProcessResourceCreation::CreateFileIO(
@@ -113,20 +117,18 @@ PP_Resource PepperInProcessResourceCreation::CreateTrueTypeFont(
   return 0;
 }
 
+PP_Resource PepperInProcessResourceCreation::CreateURLLoader(
+    PP_Instance instance) {
+  return (new ppapi::proxy::URLLoaderResource(
+      host_impl_->in_process_router()->GetPluginConnection(),
+      instance))->GetReference();
+}
+
 PP_Resource PepperInProcessResourceCreation::CreateURLRequestInfo(
     PP_Instance instance) {
   return (new ppapi::proxy::URLRequestInfoResource(
       host_impl_->in_process_router()->GetPluginConnection(),
       instance, ::ppapi::URLRequestInfoData()))->GetReference();
-}
-
-PP_Resource PepperInProcessResourceCreation::CreateURLResponseInfo(
-    PP_Instance instance,
-    const ::ppapi::URLResponseInfoData& data,
-    PP_Resource file_ref_resource) {
-  return (new ppapi::proxy::URLResponseInfoResource(
-      host_impl_->in_process_router()->GetPluginConnection(),
-      instance, data, file_ref_resource))->GetReference();
 }
 
 PP_Resource PepperInProcessResourceCreation::CreateWebSocket(

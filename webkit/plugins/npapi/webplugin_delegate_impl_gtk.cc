@@ -12,16 +12,16 @@
 
 #include "base/metrics/stats_counters.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/gfx/blit.h"
+#include "webkit/common/cursors/webcursor.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/plugin_constants.h"
 
 #include "third_party/npapi/bindings/npapi_x11.h"
 
-using WebKit::WebCursorInfo;
 using WebKit::WebKeyboardEvent;
 using WebKit::WebInputEvent;
 using WebKit::WebMouseEvent;
@@ -176,7 +176,7 @@ bool WebPluginDelegateImpl::WindowedReposition(
 }
 
 void WebPluginDelegateImpl::WindowedSetWindow() {
-  if (!instance_)
+  if (!instance_.get())
     return;
 
   if (!windowed_handle_) {
@@ -714,7 +714,7 @@ static bool NPEventFromWebInputEvent(const WebInputEvent& event,
 }
 
 bool WebPluginDelegateImpl::PlatformHandleInputEvent(
-    const WebInputEvent& event, WebCursorInfo* cursor_info) {
+    const WebInputEvent& event, WebCursor::CursorInfo* cursor_info) {
 
   if (first_event_time_ < 0.0)
     first_event_time_ = event.timeStampSeconds;

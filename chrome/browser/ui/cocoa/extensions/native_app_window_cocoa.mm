@@ -77,6 +77,13 @@ enum {
     appWindow_->WindowDidDeminiaturize();
 }
 
+- (BOOL)windowShouldZoom:(NSWindow*)window
+                 toFrame:(NSRect)newFrame {
+  if (appWindow_)
+    appWindow_->WindowWillZoom();
+  return YES;
+}
+
 - (void)executeCommand:(int)command {
   // No-op, swallow the event.
 }
@@ -193,6 +200,8 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
     const ShellWindow::CreateParams& params)
     : shell_window_(shell_window),
       has_frame_(params.frame == ShellWindow::FRAME_CHROME),
+      is_maximized_(false),
+      is_fullscreen_(false),
       attention_request_id_(0),
       use_system_drag_(true) {
   // Flip coordinates based on the primary screen.
@@ -217,7 +226,7 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
                           NSTexturedBackgroundWindowMask;
   if (resizable_)
     style_mask |= NSResizableWindowMask;
-  scoped_nsobject<NSWindow> window;
+  base::scoped_nsobject<NSWindow> window;
   if (has_frame_) {
     window.reset([[ShellNSWindow alloc]
         initWithContentRect:cocoa_bounds
@@ -323,7 +332,7 @@ bool NativeAppWindowCocoa::IsActive() const {
 }
 
 bool NativeAppWindowCocoa::IsMaximized() const {
-  return [window() isZoomed];
+  return is_maximized_;
 }
 
 bool NativeAppWindowCocoa::IsMinimized() const {
@@ -394,6 +403,10 @@ bool NativeAppWindowCocoa::IsFullscreenOrPending() const {
   return is_fullscreen_;
 }
 
+bool NativeAppWindowCocoa::IsDetached() const {
+  return false;
+}
+
 gfx::NativeWindow NativeAppWindowCocoa::GetNativeWindow() {
   return window();
 }
@@ -405,6 +418,12 @@ gfx::Rect NativeAppWindowCocoa::GetRestoredBounds() const {
   gfx::Rect bounds(frame.origin.x, 0, NSWidth(frame), NSHeight(frame));
   bounds.set_y(NSHeight([screen frame]) - NSMaxY(frame));
   return bounds;
+}
+
+ui::WindowShowState NativeAppWindowCocoa::GetRestoredState() const {
+  if (IsMaximized())
+    return ui::SHOW_STATE_MAXIMIZED;
+  return ui::SHOW_STATE_NORMAL;
 }
 
 gfx::Rect NativeAppWindowCocoa::GetBounds() const {
@@ -439,8 +458,9 @@ void NativeAppWindowCocoa::Deactivate() {
 
 void NativeAppWindowCocoa::Maximize() {
   // Zoom toggles so only call if not already maximized.
-  if (!IsMaximized())
+  if (![window() isZoomed])
     [window() zoom:window_controller_];
+  is_maximized_ = true;
 }
 
 void NativeAppWindowCocoa::Minimize() {
@@ -448,10 +468,11 @@ void NativeAppWindowCocoa::Minimize() {
 }
 
 void NativeAppWindowCocoa::Restore() {
-  if (IsMaximized())
+  if ([window() isZoomed])
     [window() zoom:window_controller_];  // Toggles zoom mode.
   else if (IsMinimized())
     [window() deminiaturize:window_controller_];
+  is_maximized_ = false;
 }
 
 void NativeAppWindowCocoa::SetBounds(const gfx::Rect& bounds) {
@@ -635,7 +656,7 @@ void NativeAppWindowCocoa::InstallDraggableRegionViews() {
   // Note that [webView subviews] returns the view's mutable internal array and
   // it should be copied to avoid mutating the original array while enumerating
   // it.
-  scoped_nsobject<NSArray> subviews([[webView subviews] copy]);
+  base::scoped_nsobject<NSArray> subviews([[webView subviews] copy]);
   for (NSView* subview in subviews.get())
     if ([subview isKindOfClass:[ControlRegionView class]])
       [subview removeFromSuperview];
@@ -646,7 +667,7 @@ void NativeAppWindowCocoa::InstallDraggableRegionViews() {
            system_drag_exclude_areas_.begin();
        iter != system_drag_exclude_areas_.end();
        ++iter) {
-    scoped_nsobject<NSView> controlRegion(
+    base::scoped_nsobject<NSView> controlRegion(
         [[ControlRegionView alloc] initWithAppWindow:this]);
     [controlRegion setFrame:NSMakeRect(iter->x(),
                                        webViewHeight - iter->bottom(),
@@ -693,18 +714,23 @@ gfx::Insets NativeAppWindowCocoa::GetFrameInsets() const {
   return frame_rect.InsetsFrom(content_rect);
 }
 
+gfx::NativeView NativeAppWindowCocoa::GetHostView() const {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 gfx::Point NativeAppWindowCocoa::GetDialogPosition(const gfx::Size& size) {
   NOTIMPLEMENTED();
   return gfx::Point();
 }
 
 void NativeAppWindowCocoa::AddObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   NOTIMPLEMENTED();
 }
 
 void NativeAppWindowCocoa::RemoveObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   NOTIMPLEMENTED();
 }
 
@@ -719,6 +745,7 @@ void NativeAppWindowCocoa::WindowDidBecomeKey() {
       web_contents()->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetActive(true);
+  shell_window_->OnNativeWindowActivated();
 }
 
 void NativeAppWindowCocoa::WindowDidResignKey() {
@@ -749,6 +776,10 @@ void NativeAppWindowCocoa::WindowDidMiniaturize() {
 
 void NativeAppWindowCocoa::WindowDidDeminiaturize() {
   shell_window_->OnNativeWindowChanged();
+}
+
+void NativeAppWindowCocoa::WindowWillZoom() {
+  is_maximized_ = ![window() isZoomed];
 }
 
 bool NativeAppWindowCocoa::HandledByExtensionCommand(NSEvent* event) {

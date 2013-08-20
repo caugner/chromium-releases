@@ -9,7 +9,9 @@
 #include "base/md5.h"
 #include "media/audio/null_audio_sink.h"
 #include "media/base/filter_collection.h"
+#include "media/base/media_keys.h"
 #include "media/base/pipeline.h"
+#include "media/base/video_frame.h"
 #include "media/filters/video_renderer_base.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -22,8 +24,11 @@ namespace media {
 class Decryptor;
 class Demuxer;
 
-// Empty MD5 hash string.  Used to verify empty audio or video tracks.
-extern const char kNullHash[];
+// Empty MD5 hash string.  Used to verify empty video tracks.
+extern const char kNullVideoHash[];
+
+// Empty hash string.  Used to verify empty audio tracks.
+extern const char kNullAudioHash[];
 
 // Integration tests for Pipeline. Real demuxers, real decoders, and
 // base renderer implementations are used to verify pipeline functionality. The
@@ -76,11 +81,12 @@ class PipelineIntegrationTestBase {
   bool hashing_enabled_;
   scoped_ptr<Demuxer> demuxer_;
   scoped_ptr<DataSource> data_source_;
-  scoped_refptr<Pipeline> pipeline_;
+  scoped_ptr<Pipeline> pipeline_;
   scoped_refptr<NullAudioSink> audio_sink_;
   bool ended_;
   PipelineStatus pipeline_status_;
   NeedKeyCB need_key_cb_;
+  VideoFrame::Format last_video_frame_format_;
 
   void OnStatusCallbackChecked(PipelineStatus expected_status,
                                PipelineStatus status);

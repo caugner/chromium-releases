@@ -21,7 +21,9 @@
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/geolocation_provider.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -46,7 +48,7 @@ void SetMockPositionToReturnNext(const content::Geoposition &position) {
 }
 
 void MockPositionUpdateRequester(
-    const content::GeolocationUpdateCallback& callback) {
+    const content::GeolocationProvider::LocationUpdateCallback& callback) {
   if (!mock_position_to_return_next.get())
     return;
 
@@ -65,10 +67,13 @@ class TestingDeviceStatusCollector : public policy::DeviceStatusCollector {
  public:
   TestingDeviceStatusCollector(
       PrefService* local_state,
-      chromeos::system::StatisticsProvider* provider)
-      : policy::DeviceStatusCollector(local_state,
-                                      provider,
-                                      &MockPositionUpdateRequester) {
+      chromeos::system::StatisticsProvider* provider,
+      policy::DeviceStatusCollector::LocationUpdateRequester*
+          location_update_requester)
+      : policy::DeviceStatusCollector(
+          local_state,
+          provider,
+          location_update_requester) {
     // Set the baseline time to a fixed value (1 AM) to prevent test flakiness
     // due to a single activity period spanning two days.
     SetBaselineTime(Time::Now().LocalMidnight() + TimeDelta::FromHours(1));
@@ -135,7 +140,7 @@ namespace policy {
 class DeviceStatusCollectorTest : public testing::Test {
  public:
   DeviceStatusCollectorTest()
-    : message_loop_(MessageLoop::TYPE_UI),
+    : message_loop_(base::MessageLoop::TYPE_UI),
       ui_thread_(content::BrowserThread::UI, &message_loop_),
       file_thread_(content::BrowserThread::FILE, &message_loop_),
       io_thread_(content::BrowserThread::IO, &message_loop_) {
@@ -173,8 +178,12 @@ class DeviceStatusCollectorTest : public testing::Test {
   }
 
   void RestartStatusCollector() {
+    policy::DeviceStatusCollector::LocationUpdateRequester callback =
+        base::Bind(&MockPositionUpdateRequester);
     status_collector_.reset(
-        new TestingDeviceStatusCollector(&prefs_, &statistics_provider_));
+        new TestingDeviceStatusCollector(&prefs_,
+                                         &statistics_provider_,
+                                         &callback));
   }
 
   void GetStatus() {
@@ -227,7 +236,7 @@ class DeviceStatusCollectorTest : public testing::Test {
     return policy::DeviceStatusCollector::kIdlePollIntervalSeconds * 1000;
   }
 
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   content::TestBrowserThread io_thread_;

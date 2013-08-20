@@ -177,7 +177,7 @@ class TestUDPClientSocket : public MockUDPClientSocket {
 // Creates TestUDPClientSockets and keeps endpoints reported via OnConnect.
 class TestSocketFactory : public MockClientSocketFactory {
  public:
-  TestSocketFactory() : create_failing_sockets_(false) {}
+  TestSocketFactory() : fail_next_socket_(false) {}
   virtual ~TestSocketFactory() {}
 
   virtual DatagramClientSocket* CreateDatagramClientSocket(
@@ -185,8 +185,10 @@ class TestSocketFactory : public MockClientSocketFactory {
       const RandIntCallback& rand_int_cb,
       net::NetLog* net_log,
       const net::NetLog::Source& source) OVERRIDE {
-    if (create_failing_sockets_)
+    if (fail_next_socket_) {
+      fail_next_socket_ = false;
       return new FailingUDPClientSocket(&empty_data_, net_log);
+    }
     SocketDataProvider* data_provider = mock_data().GetNext();
     TestUDPClientSocket* socket = new TestUDPClientSocket(this,
                                                           data_provider,
@@ -200,7 +202,7 @@ class TestSocketFactory : public MockClientSocketFactory {
   }
 
   std::vector<IPEndPoint> remote_endpoints_;
-  bool create_failing_sockets_;
+  bool fail_next_socket_;
 
  private:
   StaticSocketDataProvider empty_data_;
@@ -276,7 +278,7 @@ class TransactionHelper {
 
     // Tell MessageLoop to quit now, in case any ASSERT_* fails.
     if (quit_in_callback_)
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
 
     if (expected_answer_count_ >= 0) {
       ASSERT_EQ(OK, rv);
@@ -303,7 +305,7 @@ class TransactionHelper {
 
   bool Run(DnsTransactionFactory* factory) {
     StartTransaction(factory);
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     return has_completed();
   }
 
@@ -311,7 +313,7 @@ class TransactionHelper {
   bool RunUntilDone(DnsTransactionFactory* factory) {
     set_quit_in_callback();
     StartTransaction(factory);
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
     return has_completed();
   }
 
@@ -328,7 +330,7 @@ class TransactionHelper {
 
 class DnsTransactionTest : public testing::Test {
  public:
-  DnsTransactionTest() : socket_factory_(NULL) {}
+  DnsTransactionTest() {}
 
   // Generates |nameservers| for DnsConfig.
   void ConfigureNumServers(unsigned num_servers) {
@@ -498,7 +500,7 @@ TEST_F(DnsTransactionTest, ConcurrentLookup) {
   TransactionHelper helper1(kT1HostName, kT1Qtype, kT1RecordCount);
   helper1.StartTransaction(transaction_factory_.get());
 
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   EXPECT_TRUE(helper0.has_completed());
   EXPECT_TRUE(helper1.has_completed());
@@ -517,7 +519,7 @@ TEST_F(DnsTransactionTest, CancelLookup) {
 
   helper0.Cancel();
 
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   EXPECT_FALSE(helper0.has_completed());
   EXPECT_TRUE(helper1.has_completed());
@@ -533,7 +535,7 @@ TEST_F(DnsTransactionTest, DestroyFactory) {
   // Destroying the client does not affect running requests.
   transaction_factory_.reset(NULL);
 
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   EXPECT_TRUE(helper0.has_completed());
 }
@@ -624,7 +626,7 @@ TEST_F(DnsTransactionTest, Timeout) {
 
   TransactionHelper helper0(kT0HostName, kT0Qtype, ERR_DNS_TIMED_OUT);
   EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
-  MessageLoop::current()->AssertIdle();
+  base::MessageLoop::current()->AssertIdle();
 }
 
 TEST_F(DnsTransactionTest, ServerFallbackAndRotate) {
@@ -645,6 +647,7 @@ TEST_F(DnsTransactionTest, ServerFallbackAndRotate) {
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeNXDOMAIN);
   // Responses for second request.
   AddAsyncQueryAndRcode(kT1HostName, kT1Qtype, dns_protocol::kRcodeSERVFAIL);
+  AddAsyncQueryAndRcode(kT1HostName, kT1Qtype, dns_protocol::kRcodeSERVFAIL);
   AddAsyncQueryAndRcode(kT1HostName, kT1Qtype, dns_protocol::kRcodeNXDOMAIN);
 
   TransactionHelper helper0(kT0HostName, kT0Qtype, ERR_NAME_NOT_RESOLVED);
@@ -655,7 +658,7 @@ TEST_F(DnsTransactionTest, ServerFallbackAndRotate) {
 
   unsigned kOrder[] = {
       0, 1, 2, 0, 1,    // The first transaction.
-      1, 2,             // The second transaction starts from the next server.
+      1, 2, 0,          // The second transaction starts from the next server.
   };
   CheckServerOrder(kOrder, arraysize(kOrder));
 }
@@ -857,10 +860,24 @@ TEST_F(DnsTransactionTest, SyncSearchQuery) {
 }
 
 TEST_F(DnsTransactionTest, ConnectFailure) {
-  socket_factory_->create_failing_sockets_ = true;
+  socket_factory_->fail_next_socket_ = true;
   transaction_ids_.push_back(0);  // Needed to make a DnsUDPAttempt.
   TransactionHelper helper0("www.chromium.org", dns_protocol::kTypeA,
                             ERR_CONNECTION_REFUSED);
+  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+}
+
+TEST_F(DnsTransactionTest, ConnectFailureFollowedBySuccess) {
+  // Retry after server failure.
+  config_.attempts = 2;
+  ConfigureFactory();
+  // First server connection attempt fails.
+  transaction_ids_.push_back(0);  // Needed to make a DnsUDPAttempt.
+  socket_factory_->fail_next_socket_ = true;
+  // Second DNS query succeeds.
+  AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
+                           kT0ResponseDatagram, arraysize(kT0ResponseDatagram));
+  TransactionHelper helper0(kT0HostName, kT0Qtype, kT0RecordCount);
   EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
 }
 
@@ -913,6 +930,14 @@ TEST_F(DnsTransactionTest, TCPTimeout) {
 
   TransactionHelper helper0(kT0HostName, kT0Qtype, ERR_DNS_TIMED_OUT);
   EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+}
+
+TEST_F(DnsTransactionTest, InvalidQuery) {
+  config_.timeout = TestTimeouts::tiny_timeout();
+  ConfigureFactory();
+
+  TransactionHelper helper0(".", dns_protocol::kTypeA, ERR_INVALID_ARGUMENT);
+  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
 }
 
 }  // namespace

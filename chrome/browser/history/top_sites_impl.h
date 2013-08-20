@@ -58,6 +58,10 @@ class TopSitesImpl : public TopSites {
   virtual bool SetPageThumbnail(const GURL& url,
                         const gfx::Image& thumbnail,
                         const ThumbnailScore& score) OVERRIDE;
+  virtual bool SetPageThumbnailToJPEGBytes(
+      const GURL& url,
+      const base::RefCountedMemory* memory,
+      const ThumbnailScore& score) OVERRIDE;
   virtual void GetMostVisitedURLs(
       const GetMostVisitedURLsCallback& callback) OVERRIDE;
   virtual bool GetPageThumbnail(
@@ -78,6 +82,8 @@ class TopSitesImpl : public TopSites {
   virtual void Shutdown() OVERRIDE;
   virtual CancelableRequestProvider::Handle StartQueryForMostVisited() OVERRIDE;
   virtual bool IsKnownURL(const GURL& url) OVERRIDE;
+  virtual const std::string& GetCanonicalURLString(
+      const GURL& url) const OVERRIDE;
   virtual bool IsFull() OVERRIDE;
   virtual MostVisitedURLList GetPrepopulatePages() OVERRIDE;
   virtual bool loaded() const OVERRIDE;
@@ -136,13 +142,13 @@ class TopSitesImpl : public TopSites {
   // reading last known top sites from the DB.
   // Returns true if the thumbnail was set, false if the existing one is better.
   bool SetPageThumbnailNoDB(const GURL& url,
-                            const base::RefCountedBytes* thumbnail_data,
+                            const base::RefCountedMemory* thumbnail_data,
                             const ThumbnailScore& score);
 
   // A version of SetPageThumbnail that takes RefCountedBytes as
   // returned by HistoryService.
   bool SetPageThumbnailEncoded(const GURL& url,
-                               const base::RefCountedBytes* thumbnail,
+                               const base::RefCountedMemory* thumbnail,
                                const ThumbnailScore& score);
 
   // Encodes the bitmap to bytes for storage to the db. Returns true if the
@@ -156,7 +162,7 @@ class TopSitesImpl : public TopSites {
 
   // Add a thumbnail for an unknown url. See temp_thumbnails_map_.
   void AddTemporaryThumbnail(const GURL& url,
-                             const base::RefCountedBytes* thumbnail,
+                             const base::RefCountedMemory* thumbnail,
                              const ThumbnailScore& score);
 
   // Called by our timer. Starts the query for the most visited sites.
@@ -174,9 +180,6 @@ class TopSitesImpl : public TopSites {
 
   // Takes |urls|, produces it's copy in |out| after removing blacklisted URLs.
   void ApplyBlacklist(const MostVisitedURLList& urls, MostVisitedURLList* out);
-
-  // Converts a url into a canonical string representation.
-  std::string GetURLString(const GURL& url);
 
   // Returns an MD5 hash of the URL. Hashing is required for blacklisted URLs.
   std::string GetURLHash(const GURL& url);

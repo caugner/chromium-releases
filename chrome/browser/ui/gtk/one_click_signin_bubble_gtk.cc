@@ -10,7 +10,7 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
@@ -61,7 +61,8 @@ void OneClickSigninBubbleGtk::BubbleClosing(
   // |close_button_| (which is a CustomDrawButton) can be destroyed, because it
   // depends on all references being cleared for the GtkWidget before it is
   // destroyed.
-  MessageLoopForUI::current()->DeleteSoon(FROM_HERE, close_button_.release());
+  base::MessageLoopForUI::current()->DeleteSoon(FROM_HERE,
+                                                close_button_.release());
 
   delete this;
 }

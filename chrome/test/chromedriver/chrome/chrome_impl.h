@@ -11,12 +11,14 @@
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "chrome/test/chromedriver/chrome/chrome.h"
 
 class AutomationExtension;
-class DevToolsEventLogger;
+class DevToolsEventListener;
 class DevToolsHttpClient;
 class JavaScriptDialogManager;
+class Log;
 class Status;
 class WebView;
 class WebViewImpl;
@@ -32,33 +34,29 @@ class ChromeImpl : public Chrome {
   virtual Status GetWebViewById(const std::string& id,
                                 WebView** web_view) OVERRIDE;
   virtual Status CloseWebView(const std::string& id) OVERRIDE;
-  virtual Status IsJavaScriptDialogOpen(bool* is_open) OVERRIDE;
-  virtual Status GetJavaScriptDialogMessage(std::string* message) OVERRIDE;
-  virtual Status HandleJavaScriptDialog(
-      bool accept,
-      const std::string& prompt_text) OVERRIDE;
   virtual Status GetAutomationExtension(
       AutomationExtension** extension) OVERRIDE;
 
  protected:
-  ChromeImpl(scoped_ptr<DevToolsHttpClient> client,
-             const std::string& version,
-             int build_no,
-             const std::list<DevToolsEventLogger*>& devtools_event_loggers);
+  ChromeImpl(
+      scoped_ptr<DevToolsHttpClient> client,
+      const std::string& version,
+      int build_no,
+      ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+      Log* log);
 
   scoped_ptr<DevToolsHttpClient> devtools_http_client_;
+  Log* log_;
 
  private:
   typedef std::list<linked_ptr<WebViewImpl> > WebViewList;
-
-  Status GetDialogManagerForOpenDialog(JavaScriptDialogManager** manager);
 
   std::string version_;
   int build_no_;
 
   // Web views in this list are in the same order as they are opened.
   WebViewList web_views_;
-  std::list<DevToolsEventLogger*> devtools_event_loggers_;
+  ScopedVector<DevToolsEventListener> devtools_event_listeners_;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_CHROME_IMPL_H_

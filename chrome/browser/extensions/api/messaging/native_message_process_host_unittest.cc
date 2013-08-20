@@ -15,7 +15,7 @@
 #include "base/platform_file.h"
 #include "base/process_util.h"
 #include "base/run_loop.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -29,7 +29,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
@@ -79,11 +79,10 @@ class FakeLauncher : public NativeProcessLauncher {
 class NativeMessagingTest : public ::testing::Test,
                             public NativeMessageProcessHost::Client,
                             public base::SupportsWeakPtr<NativeMessagingTest> {
- public:
+ protected:
   NativeMessagingTest()
       : current_channel_(chrome::VersionInfo::CHANNEL_DEV),
-        native_message_process_host_(NULL) {
-  }
+        thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
@@ -91,10 +90,6 @@ class NativeMessagingTest : public ::testing::Test,
     // directory.
     ASSERT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_));
     ASSERT_TRUE(PathService::Override(chrome::DIR_USER_DATA, GetTestDir()));
-    ui_thread_.reset(new content::TestBrowserThread(BrowserThread::UI,
-                                                    &message_loop_));
-    io_thread_.reset(new content::TestBrowserThread(BrowserThread::IO,
-                                                    &message_loop_));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -104,7 +99,7 @@ class NativeMessagingTest : public ::testing::Test,
       BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
                                 native_message_process_host_.release());
     }
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   virtual void PostMessageFromNativeProcess(
@@ -153,10 +148,8 @@ class NativeMessagingTest : public ::testing::Test,
   Feature::ScopedCurrentChannel current_channel_;
   scoped_ptr<NativeMessageProcessHost> native_message_process_host_;
   base::FilePath user_data_dir_;
-  MessageLoopForIO message_loop_;
   scoped_ptr<base::RunLoop> read_message_run_loop_;
-  scoped_ptr<content::TestBrowserThread> ui_thread_;
-  scoped_ptr<content::TestBrowserThread> io_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   std::string last_message_;
   scoped_ptr<base::DictionaryValue> last_message_parsed_;
 };
@@ -195,10 +188,10 @@ TEST_F(NativeMessagingTest, SingleSendMessageWrite) {
       AsWeakPtr(), kTestNativeMessagingExtensionId, "empty_app.py",
       0, launcher.Pass());
   ASSERT_TRUE(native_message_process_host_.get());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   native_message_process_host_->Send(kTestMessage);
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   std::string output;
   base::TimeTicks start_time = base::TimeTicks::Now();

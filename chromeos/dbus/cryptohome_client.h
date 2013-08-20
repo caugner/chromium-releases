@@ -55,6 +55,9 @@ class CHROMEOS_EXPORT CryptohomeClient {
   static CryptohomeClient* Create(DBusClientImplementationType type,
                                   dbus::Bus* bus);
 
+  // Returns the sanitized |username| that the stub implementation would return.
+  static std::string GetStubSanitizedUsername(const std::string& username);
+
   // Sets AsyncCallStatus signal handlers.
   // |handler| is called when results for AsyncXXX methods are returned.
   // Cryptohome service will process the calls in a first-in-first-out manner
@@ -109,6 +112,14 @@ class CHROMEOS_EXPORT CryptohomeClient {
                           const std::string& key,
                           int flags,
                           const AsyncMethodCallback& callback) = 0;
+
+  // Calls the AsyncAddKey method to asynchronously add another |new_key| for
+  // |username|, using |key| to unlock it first.
+  // |callback| is called after the method call succeeds.
+  virtual void AsyncAddKey(const std::string& username,
+                           const std::string& key,
+                           const std::string& new_key,
+                           const AsyncMethodCallback& callback) = 0;
 
   // Calls AsyncMountGuest method.  |callback| is called after the method call
   // succeeds.

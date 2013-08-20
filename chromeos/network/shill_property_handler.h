@@ -71,9 +71,13 @@ class CHROMEOS_EXPORT ShillPropertyHandler
         const std::string& key,
         const base::Value& value) = 0;
 
+    // Called when the list of devices with portal check enabled changes.
+    virtual void CheckPortalListChanged(
+         const std::string& check_portal_list) = 0;
+
     // Called when one or more manager properties (e.g. a technology list)
     // changes.
-    virtual void ManagerPropertyChanged() = 0;
+    virtual void NotifyManagerPropertyChanged() = 0;
 
     // Called when a managed state list has changed, after properties for any
     // new entries in the list have been received and
@@ -103,6 +107,9 @@ class CHROMEOS_EXPORT ShillPropertyHandler
       bool enabled,
       const network_handler::ErrorCallback& error_callback);
 
+  // Sets the list of devices on which portal check is enabled.
+  void SetCheckPortalList(const std::string& check_portal_list);
+
   // Requests an immediate network scan.
   void RequestScan() const;
 
@@ -128,7 +135,8 @@ class CHROMEOS_EXPORT ShillPropertyHandler
                                  const base::DictionaryValue& properties);
   // Called form OnPropertyChanged() and ManagerPropertiesCallback().
   // Returns true if observers should be notified.
-  bool ManagerPropertyChanged(const std::string& key, const base::Value& value);
+  bool ManagerPropertyChanged(const std::string& key,
+                              const base::Value& value);
 
   // Updates the Shill property observers to observe any entries for |type|.
   void UpdateObserved(ManagedState::ManagedType type,

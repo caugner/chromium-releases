@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
-#include "chrome/browser/storage_monitor/media_storage_util.h"
+#include "chrome/browser/storage_monitor/storage_info.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
+#include "chrome/browser/storage_monitor/test_storage_monitor.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -59,8 +60,8 @@ class MediaGalleriesPrivateApiTest : public ExtensionApiTest {
 
   // ExtensionApiTest overrides.
   virtual void SetUp() OVERRIDE {
-    device_id_ = chrome::MediaStorageUtil::MakeDeviceId(
-        chrome::MediaStorageUtil::REMOVABLE_MASS_STORAGE_WITH_DCIM, kDeviceId);
+    device_id_ = chrome::StorageInfo::MakeDeviceId(
+        chrome::StorageInfo::REMOVABLE_MASS_STORAGE_WITH_DCIM, kDeviceId);
     ExtensionApiTest::SetUp();
   }
 
@@ -86,29 +87,32 @@ class MediaGalleriesPrivateApiTest : public ExtensionApiTest {
   }
 
   void Attach() {
+    DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
     chrome::StorageInfo info(device_id_, ASCIIToUTF16(kDeviceName), kDevicePath,
                              string16(), string16(), string16(), 0);
     chrome::StorageMonitor::GetInstance()->receiver()->ProcessAttach(info);
-    WaitForDeviceEvents();
-  }
-
-  void Detach() {
-    chrome::StorageMonitor::GetInstance()->receiver()->ProcessDetach(
-        device_id_);
-    WaitForDeviceEvents();
-  }
-
- private:
-  void WaitForDeviceEvents() {
     content::RunAllPendingInMessageLoop();
   }
 
+  void Detach() {
+    DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
+    chrome::StorageMonitor::GetInstance()->receiver()->ProcessDetach(
+        device_id_);
+    content::RunAllPendingInMessageLoop();
+  }
+
+ private:
   std::string device_id_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaGalleriesPrivateApiTest);
 };
 
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPrivateApiTest, DeviceAttachDetachEvents) {
+  scoped_ptr<chrome::test::TestStorageMonitor> monitor(
+      chrome::test::TestStorageMonitor::CreateForBrowserTests());
+  monitor->Init();
+  monitor->MarkInitialized();
+
   // Setup.
   const extensions::Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII(kTestExtensionPath));

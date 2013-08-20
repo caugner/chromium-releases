@@ -7,9 +7,11 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/i18n/rtl.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
-#include "components/autofill/browser/autofill_manager_delegate.h"
+#include "components/autofill/content/browser/autocheckout_steps.h"
+#include "components/autofill/core/browser/autofill_manager_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -41,6 +43,7 @@ class TabAutofillManagerDelegate
       GetAutocheckoutWhitelistManager() const OVERRIDE;
   virtual void HideRequestAutocompleteDialog() OVERRIDE;
   virtual void OnAutocheckoutError() OVERRIDE;
+  virtual void OnAutocheckoutSuccess() OVERRIDE;
   virtual void ShowAutofillSettings() OVERRIDE;
   virtual void ConfirmSaveCreditCard(
       const AutofillMetrics& metric_logger,
@@ -59,18 +62,29 @@ class TabAutofillManagerDelegate
                                 const std::string&)>& callback) OVERRIDE;
   virtual void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
+      base::i18n::TextDirection text_direction,
       const std::vector<string16>& values,
       const std::vector<string16>& labels,
       const std::vector<string16>& icons,
       const std::vector<int>& identifiers,
       base::WeakPtr<AutofillPopupDelegate> delegate) OVERRIDE;
   virtual void HideAutofillPopup() OVERRIDE;
-  virtual void UpdateProgressBar(double value) OVERRIDE;
+  virtual bool IsAutocompleteEnabled() OVERRIDE;
+
+  virtual void AddAutocheckoutStep(AutocheckoutStepType step_type) OVERRIDE;
+  virtual void UpdateAutocheckoutStep(
+      AutocheckoutStepType step_type,
+      AutocheckoutStepStatus step_status) OVERRIDE;
 
   // content::WebContentsObserver implementation.
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
+
+  // Exposed for testing.
+  AutofillDialogControllerImpl* GetDialogControllerForTesting() {
+    return dialog_controller_.get();
+  }
 
  private:
   explicit TabAutofillManagerDelegate(content::WebContents* web_contents);

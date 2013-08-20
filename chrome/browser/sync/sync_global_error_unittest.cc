@@ -5,7 +5,7 @@
 #include "chrome/browser/sync/sync_global_error.h"
 
 #include "base/basictypes.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -62,7 +62,8 @@ class FakeLoginUI : public LoginUIService::LoginUI {
   int focus_ui_call_count_;
 };
 
-ProfileKeyedService* BuildMockLoginUIService(content::BrowserContext* profile) {
+BrowserContextKeyedService* BuildMockLoginUIService(
+    content::BrowserContext* profile) {
   return new FakeLoginUIService();
 }
 

@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "cc/base/switches.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_constants.h"
@@ -60,6 +60,7 @@ void SetContentCommandLineFlags(int max_render_process_count,
 
   parsed_command_line->AppendSwitch(switches::kEnableGestureTapHighlight);
   parsed_command_line->AppendSwitch(switches::kEnablePinch);
+  parsed_command_line->AppendSwitch(switches::kEnableOverscrollNotifications);
 
   // Run the GPU service as a thread in the browser instead of as a
   // standalone process.
@@ -69,9 +70,6 @@ void SetContentCommandLineFlags(int max_render_process_count,
   // Always use fixed layout and viewport tag.
   parsed_command_line->AppendSwitch(switches::kEnableFixedLayout);
   parsed_command_line->AppendSwitch(switches::kEnableViewport);
-
-  parsed_command_line->AppendSwitch(
-      cc::switches::kEnableCompositorFrameMessage);
 
   if (!plugin_descriptor.empty()) {
     parsed_command_line->AppendSwitchNative(

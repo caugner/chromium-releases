@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/time.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "googleurl/src/gurl.h"
@@ -72,6 +72,9 @@ class SSLBlockingPage : public content::InterstitialPageDelegate {
   // Has the site requested strict enforcement of certificate errors?
   bool strict_enforcement_;
   content::InterstitialPage* interstitial_page_;  // Owns us.
+
+  // For the FieldTrial: this contains the name of the condition.
+  std::string trialCondition_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLBlockingPage);
 };

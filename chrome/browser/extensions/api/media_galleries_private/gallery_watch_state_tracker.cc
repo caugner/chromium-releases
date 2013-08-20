@@ -55,7 +55,7 @@ chrome::MediaGalleryPrefIdSet WatchedGalleryIdsFromValue(
 scoped_ptr<base::ListValue> WatchedGalleryIdsToValue(
     const chrome::MediaGalleryPrefIdSet gallery_ids) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  scoped_ptr<base::ListValue> list(new ListValue());
+  scoped_ptr<base::ListValue> list(new base::ListValue());
   for (chrome::MediaGalleryPrefIdSet::const_iterator id_iter =
            gallery_ids.begin();
        id_iter != gallery_ids.end(); ++id_iter)
@@ -72,14 +72,6 @@ const Extension* GetExtensionById(Profile* profile,
   return service->GetExtensionById(extension_id, false);
 }
 
-// Returns the initialized media galleries preferences for the specified
-// |profile|.
-chrome::MediaGalleriesPreferences* GetMediaGalleryPreferences(
-    Profile* profile) {
-  return g_browser_process->media_file_system_registry()->GetPreferences(
-      profile);
-}
-
 }  // namespace
 
 GalleryWatchStateTracker::GalleryWatchStateTracker(Profile* profile)
@@ -90,10 +82,18 @@ GalleryWatchStateTracker::GalleryWatchStateTracker(Profile* profile)
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(profile_));
+  chrome::MediaGalleriesPreferences* preferences =
+      g_browser_process->media_file_system_registry()->GetPreferences(
+          profile);
+  preferences->AddGalleryChangeObserver(this);
 }
 
 GalleryWatchStateTracker::~GalleryWatchStateTracker() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  chrome::MediaGalleriesPreferences* preferences =
+      g_browser_process->media_file_system_registry()->GetPreferences(
+          profile_);
+  preferences->RemoveGalleryChangeObserver(this);
 }
 
 // static
@@ -113,20 +113,23 @@ GalleryWatchStateTracker* GalleryWatchStateTracker::GetForProfile(
   return NULL;
 }
 
-void GalleryWatchStateTracker::OnGalleryPermissionChanged(
+void GalleryWatchStateTracker::OnGalleryChanged(
+    chrome::MediaGalleriesPreferences* preferences,
     const std::string& extension_id,
     chrome::MediaGalleryPrefId gallery_id,
     bool has_permission) {
+  if (extension_id.empty())
+    return;
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   // Granted gallery permission.
   if (has_permission && HasGalleryWatchInfo(extension_id, gallery_id, false)) {
-    SetupGalleryWatch(extension_id, gallery_id);
+    SetupGalleryWatch(extension_id, gallery_id, preferences);
     return;
   }
 
   // Revoked gallery permission.
   if (!has_permission && HasGalleryWatchInfo(extension_id, gallery_id, true))
-    RemoveGalleryWatch(extension_id, gallery_id);
+    RemoveGalleryWatch(extension_id, gallery_id, preferences);
 }
 
 chrome::MediaGalleryPrefIdSet
@@ -147,7 +150,8 @@ GalleryWatchStateTracker::GetAllWatchedGalleryIDsForExtension(
 }
 
 void GalleryWatchStateTracker::RemoveAllGalleryWatchersForExtension(
-    const std::string& extension_id) {
+    const std::string& extension_id,
+    chrome::MediaGalleriesPreferences* preferences) {
   WatchedExtensionsMap::iterator extension_id_iter =
       watched_extensions_map_.find(extension_id);
   if (extension_id_iter == watched_extensions_map_.end())
@@ -155,7 +159,7 @@ void GalleryWatchStateTracker::RemoveAllGalleryWatchersForExtension(
   const WatchedGalleriesMap& galleries = extension_id_iter->second;
   for (WatchedGalleriesMap::const_iterator gallery_id_iter = galleries.begin();
        gallery_id_iter != galleries.end(); ++gallery_id_iter)
-    RemoveGalleryWatch(extension_id, gallery_id_iter->second);
+    RemoveGalleryWatch(extension_id, gallery_id_iter->second, preferences);
   watched_extensions_map_.erase(extension_id_iter);
   WriteToStorage(extension_id);
 }
@@ -239,30 +243,36 @@ void GalleryWatchStateTracker::WriteToStorage(const std::string& extension_id) {
       WatchedGalleryIdsToValue(gallery_ids).PassAs<base::Value>());
 }
 
-void GalleryWatchStateTracker::ReadFromStorage(const std::string& extension_id,
-                                               scoped_ptr<base::Value> value) {
+void GalleryWatchStateTracker::ReadFromStorage(
+    const std::string& extension_id,
+    scoped_ptr<base::Value> value) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  chrome::MediaGalleriesPreferences* preferences =
+      g_browser_process->media_file_system_registry()->GetPreferences(profile_);
   base::ListValue* list = NULL;
   if (!value.get() || !value->GetAsList(&list))
     return;
   chrome::MediaGalleryPrefIdSet gallery_ids = WatchedGalleryIdsFromValue(list);
+  if (gallery_ids.empty())
+    return;
+
   for (chrome::MediaGalleryPrefIdSet::const_iterator id_iter =
            gallery_ids.begin();
        id_iter != gallery_ids.end(); ++id_iter) {
     watched_extensions_map_[extension_id][*id_iter] = false;
-    SetupGalleryWatch(extension_id, *id_iter);
+    SetupGalleryWatch(extension_id, *id_iter, preferences);
   }
 }
 
 void GalleryWatchStateTracker::SetupGalleryWatch(
     const std::string& extension_id,
-    chrome::MediaGalleryPrefId gallery_id) {
+    chrome::MediaGalleryPrefId gallery_id,
+    chrome::MediaGalleriesPreferences* preferences) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   const Extension* extension = GetExtensionById(profile_, extension_id);
   DCHECK(extension);
-  base::FilePath gallery_file_path(
-      GetMediaGalleryPreferences(profile_)->LookUpGalleryPathForExtension(
-          gallery_id, extension, false));
+  base::FilePath gallery_file_path(preferences->LookUpGalleryPathForExtension(
+      gallery_id, extension, false));
   if (gallery_file_path.empty())
     return;
   MediaGalleriesPrivateEventRouter* router =
@@ -285,13 +295,13 @@ void GalleryWatchStateTracker::SetupGalleryWatch(
 
 void GalleryWatchStateTracker::RemoveGalleryWatch(
     const std::string& extension_id,
-    chrome::MediaGalleryPrefId gallery_id) {
+    chrome::MediaGalleryPrefId gallery_id,
+    chrome::MediaGalleriesPreferences* preferences) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   const Extension* extension = GetExtensionById(profile_, extension_id);
   DCHECK(extension);
-  base::FilePath gallery_file_path(
-      GetMediaGalleryPreferences(profile_)->LookUpGalleryPathForExtension(
-          gallery_id, extension, true));
+  base::FilePath gallery_file_path(preferences->LookUpGalleryPathForExtension(
+      gallery_id, extension, true));
   if (gallery_file_path.empty())
     return;
   content::BrowserThread::PostTask(

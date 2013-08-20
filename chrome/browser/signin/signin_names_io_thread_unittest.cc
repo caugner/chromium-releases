@@ -4,7 +4,7 @@
 
 #include "base/message_loop.h"
 #include "base/prefs/testing_pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_names_io_thread.h"
@@ -29,7 +29,7 @@ class SigninNamesOnIOThreadTest : public testing::Test {
   void SimulateSignout(const string16& email);
   void AddNewProfile(const string16& name, const string16& email);
 
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread io_thread_;
   TestingProfileManager testing_profile_manager_;

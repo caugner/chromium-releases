@@ -5,7 +5,7 @@
 #import "chrome/browser/ui/cocoa/applescript/window_applescript.h"
 
 #include "base/logging.h"
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #import "chrome/browser/app_controller_mac.h"
@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/cocoa/applescript/error_applescript.h"
 #import "chrome/browser/ui/cocoa/applescript/tab_applescript.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
@@ -74,7 +75,7 @@
         Browser::CreateParams(aProfile, chrome::HOST_DESKTOP_TYPE_NATIVE));
     chrome::NewTab(browser_);
     browser_->window()->Show();
-    scoped_nsobject<NSNumber> numID(
+    base::scoped_nsobject<NSNumber> numID(
         [[NSNumber alloc] initWithInt:browser_->session_id().id()]);
     [self setUniqueID:numID];
   }
@@ -92,7 +93,7 @@
     // the applescript runtime calls appleScriptWindows in
     // BrowserCrApplication and this particular window is never returned.
     browser_ = aBrowser;
-    scoped_nsobject<NSNumber> numID(
+    base::scoped_nsobject<NSNumber> numID(
         [[NSNumber alloc] initWithInt:browser_->session_id().id()]);
     [self setUniqueID:numID];
   }
@@ -158,7 +159,7 @@
       continue;
     }
 
-    scoped_nsobject<TabAppleScript> tab(
+    base::scoped_nsobject<TabAppleScript> tab(
         [[TabAppleScript alloc] initWithWebContents:webContents]);
     [tab setContainer:self
              property:AppleScript::kTabsProperty];
@@ -179,7 +180,8 @@
       browser_,
       GURL(chrome::kChromeUINewTabURL),
       content::PAGE_TRANSITION_TYPED);
-  contents->SetNewTabStartTime(newTabStartTime);
+  CoreTabHelper* core_tab_helper = CoreTabHelper::FromWebContents(contents);
+  core_tab_helper->set_new_tab_start_time(newTabStartTime);
   [aTab setWebContents:contents];
 }
 
@@ -196,7 +198,9 @@
   params.disposition = NEW_FOREGROUND_TAB;
   params.tabstrip_index = index;
   chrome::Navigate(&params);
-  params.target_contents->SetNewTabStartTime(newTabStartTime);
+  CoreTabHelper* core_tab_helper =
+      CoreTabHelper::FromWebContents(params.target_contents);
+  core_tab_helper->set_new_tab_start_time(newTabStartTime);
 
   [aTab setWebContents:params.target_contents];
 }

@@ -6,14 +6,16 @@
 
 #include <list>
 
-#include "base/stringprintf.h"
+#include "base/logging.h"  // For CHECK macros.
+#include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/capabilities.h"
 #include "chrome/test/chromedriver/chrome/chrome.h"
 #include "chrome/test/chromedriver/chrome/chrome_android_impl.h"
 #include "chrome/test/chromedriver/chrome/chrome_desktop_impl.h"
-#include "chrome/test/chromedriver/chrome/devtools_event_logger.h"
+#include "chrome/test/chromedriver/chrome/device_manager.h"
+#include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/version.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
@@ -45,10 +47,22 @@ Status ExecuteGetStatus(
   return Status(kOk);
 }
 
-Status ExecuteNewSession(
+NewSessionParams::NewSessionParams(
+    Log* log,
     SessionMap* session_map,
     scoped_refptr<URLRequestContextGetter> context_getter,
     const SyncWebSocketFactory& socket_factory,
+    DeviceManager* device_manager)
+    : log(log),
+      session_map(session_map),
+      context_getter(context_getter),
+      socket_factory(socket_factory),
+      device_manager(device_manager) {}
+
+NewSessionParams::~NewSessionParams() {}
+
+Status ExecuteNewSession(
+    const NewSessionParams& bound_params,
     const base::DictionaryValue& params,
     const std::string& session_id,
     scoped_ptr<base::Value>* out_value,
@@ -66,17 +80,23 @@ Status ExecuteNewSession(
   if (status.IsError())
     return status;
 
-  // Create DevToolsEventLoggers, fail if log levels are invalid.
-  ScopedVector<DevToolsEventLogger> devtools_event_loggers;
-  status = CreateLoggers(capabilities, &devtools_event_loggers);
+  // Create Log's and DevToolsEventListener's for ones that are DevTools-based.
+  // Session will own the Log's, Chrome will own the listeners.
+  ScopedVector<WebDriverLog> devtools_logs;
+  ScopedVector<DevToolsEventListener> devtools_event_listeners;
+  status = CreateLogs(capabilities, &devtools_logs, &devtools_event_listeners);
   if (status.IsError())
     return status;
 
   scoped_ptr<Chrome> chrome;
-  std::list<DevToolsEventLogger*> devtools_event_logger_list(
-      devtools_event_loggers.begin(), devtools_event_loggers.end());
-  status = LaunchChrome(context_getter, port, socket_factory,
-                        capabilities, devtools_event_logger_list, &chrome);
+  status = LaunchChrome(bound_params.context_getter.get(),
+                        port,
+                        bound_params.socket_factory,
+                        bound_params.log,
+                        bound_params.device_manager,
+                        capabilities,
+                        devtools_event_listeners,
+                        &chrome);
   if (status.IsError())
     return status;
 
@@ -92,21 +112,48 @@ Status ExecuteNewSession(
   if (new_id.empty())
     new_id = GenerateId();
   scoped_ptr<Session> session(new Session(new_id, chrome.Pass()));
-  session->devtools_event_loggers.swap(devtools_event_loggers);
+  session->devtools_logs.swap(devtools_logs);
   if (!session->thread.Start()) {
     chrome->Quit();
     return Status(kUnknownError,
                   "failed to start a thread for the new session");
   }
   session->window = web_view_ids.front();
+  session->detach = capabilities.detach;
   out_value->reset(session->capabilities->DeepCopy());
   *out_session_id = new_id;
 
   scoped_refptr<SessionAccessor> accessor(
       new SessionAccessorImpl(session.Pass()));
-  session_map->Set(new_id, accessor);
+  bound_params.session_map->Set(new_id, accessor);
 
   return Status(kOk);
+}
+
+Status ExecuteQuit(
+    bool allow_detach,
+    SessionMap* session_map,
+    const base::DictionaryValue& params,
+    const std::string& session_id,
+    scoped_ptr<base::Value>* out_value,
+    std::string* out_session_id) {
+  *out_session_id = session_id;
+  scoped_refptr<SessionAccessor> session_accessor;
+  if (!session_map->Get(session_id, &session_accessor))
+    return Status(kOk);
+  scoped_ptr<base::AutoLock> session_lock;
+  Session* session = session_accessor->Access(&session_lock);
+  if (!session)
+    return Status(kOk);
+  CHECK(session_map->Remove(session->id));
+  if (allow_detach && session->detach) {
+    session_accessor->DeleteSession();
+    return Status(kOk);
+  } else {
+    Status status = session->chrome->Quit();
+    session_accessor->DeleteSession();
+    return status;
+  }
 }
 
 Status ExecuteQuitAll(

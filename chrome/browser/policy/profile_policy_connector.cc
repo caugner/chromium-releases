@@ -18,15 +18,16 @@
 
 #if defined(OS_CHROMEOS)
 #include "base/bind.h"
-#include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_provider.h"
+#include "chrome/browser/chromeos/policy/login_profile_policy_provider.h"
 #include "chrome/browser/chromeos/policy/network_configuration_updater.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/policy/policy_service.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -36,56 +37,6 @@
 #endif
 
 namespace policy {
-
-#if defined(OS_CHROMEOS)
-class ProfilePolicyConnector::PolicyInitializationObserver
-    : public PolicyService::Observer {
- public:
-  PolicyInitializationObserver(const base::Closure& closure,
-                               PolicyService* policy_service)
-      : closure_(closure),
-        policy_service_(policy_service),
-        weak_ptr_factory_(this) {
-    if (policy_service_->IsInitializationComplete(POLICY_DOMAIN_CHROME))
-      OnPolicyServiceInitialized(POLICY_DOMAIN_CHROME);
-    else
-      policy_service_->AddObserver(POLICY_DOMAIN_CHROME, this);
-  }
-
-  virtual ~PolicyInitializationObserver() {
-    policy_service_->RemoveObserver(POLICY_DOMAIN_CHROME, this);
-  }
-
-  // PolicyService::Observer overrides.
-  virtual void OnPolicyUpdated(const PolicyNamespace& ns,
-                               const PolicyMap& previous,
-                               const PolicyMap& current) OVERRIDE {
-    // Ignore policy changes.
-  }
-
-  virtual void OnPolicyServiceInitialized(PolicyDomain domain) OVERRIDE {
-    if (domain != POLICY_DOMAIN_CHROME)
-      return;
-    policy_service_->RemoveObserver(POLICY_DOMAIN_CHROME, this);
-    // Delay one cycle, so that the policies are propagated to the device policy
-    // service before calling the closure.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&PolicyInitializationObserver::RunClosure,
-                              weak_ptr_factory_.GetWeakPtr()));
-  }
-
-  void RunClosure() {
-    closure_.Run();
-  }
-
- private:
-  base::Closure closure_;
-  PolicyService* policy_service_;
-  base::WeakPtrFactory<PolicyInitializationObserver> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PolicyInitializationObserver);
-};
-#endif
 
 ProfilePolicyConnector::ProfilePolicyConnector(Profile* profile)
     : profile_(profile),
@@ -113,7 +64,11 @@ void ProfilePolicyConnector::Init(
 
   bool is_managed = false;
   std::string username;
-  if (!chromeos::ProfileHelper::IsSigninProfile(profile_)) {
+  if (chromeos::ProfileHelper::IsSigninProfile(profile_)) {
+    special_user_policy_provider_.reset(new LoginProfilePolicyProvider(
+        connector->GetPolicyService()));
+    special_user_policy_provider_->Init();
+  } else {
     // |user| should never be NULL except for the signin profile.
     // TODO(joaodasilva): get the |user| that corresponds to the |profile_|
     // from the ProfileHelper, once that's ready.
@@ -128,9 +83,10 @@ void ProfilePolicyConnector::Init(
         chromeos::UserManager::Get()->GetLoggedInUsers().size() == 1;
     if (user->GetType() == chromeos::User::USER_TYPE_PUBLIC_ACCOUNT)
       InitializeDeviceLocalAccountPolicyProvider(username);
-    if (device_local_account_policy_provider_)
-      providers.push_back(device_local_account_policy_provider_.get());
   }
+  if (special_user_policy_provider_)
+    providers.push_back(special_user_policy_provider_.get());
+
 #else
   UserCloudPolicyManager* cloud_policy_manager =
       UserCloudPolicyManagerFactory::GetForProfile(profile_);
@@ -149,12 +105,10 @@ void ProfilePolicyConnector::Init(
 
 #if defined(OS_CHROMEOS)
   if (is_primary_user_) {
-    if (cloud_policy_manager) {
+    if (cloud_policy_manager)
       connector->SetUserPolicyDelegate(cloud_policy_manager);
-    } else if (device_local_account_policy_provider_) {
-      connector->SetUserPolicyDelegate(
-          device_local_account_policy_provider_.get());
-    }
+    else if (special_user_policy_provider_)
+      connector->SetUserPolicyDelegate(special_user_policy_provider_.get());
 
     chromeos::CryptohomeClient* cryptohome_client =
         chromeos::DBusThreadManager::Get()->GetCryptohomeClient();
@@ -175,11 +129,13 @@ void ProfilePolicyConnector::InitForTesting(scoped_ptr<PolicyService> service) {
 void ProfilePolicyConnector::Shutdown() {
 #if defined(OS_CHROMEOS)
   if (is_primary_user_) {
-    g_browser_process->browser_policy_connector()->SetUserPolicyDelegate(NULL);
-    user_policy_init_observer_.reset();
+    BrowserPolicyConnector* connector =
+        g_browser_process->browser_policy_connector();
+    connector->SetUserPolicyDelegate(NULL);
+    connector->network_configuration_updater()->UnsetUserPolicyService();
   }
-  if (device_local_account_policy_provider_)
-    device_local_account_policy_provider_->Shutdown();
+  if (special_user_policy_provider_)
+    special_user_policy_provider_->Shutdown();
 #endif
 
 #if defined(ENABLE_MANAGED_USERS)
@@ -205,10 +161,9 @@ void ProfilePolicyConnector::InitializeDeviceLocalAccountPolicyProvider(
       connector->GetDeviceLocalAccountPolicyService();
   if (!device_local_account_policy_service)
     return;
-  device_local_account_policy_provider_.reset(
-      new DeviceLocalAccountPolicyProvider(
-          username, device_local_account_policy_service));
-  device_local_account_policy_provider_->Init();
+  special_user_policy_provider_.reset(new DeviceLocalAccountPolicyProvider(
+      username, device_local_account_policy_service));
+  special_user_policy_provider_->Init();
 }
 
 void ProfilePolicyConnector::InitializeNetworkConfigurationUpdater(
@@ -218,17 +173,9 @@ void ProfilePolicyConnector::InitializeNetworkConfigurationUpdater(
   // TODO(joaodasilva): create the NetworkConfigurationUpdater for user ONC
   // here, after splitting that class into an instance for device policy and
   // another per profile for user policy.
-  BrowserPolicyConnector* connector =
-      g_browser_process->browser_policy_connector();
-  NetworkConfigurationUpdater* network_updater =
-      connector->GetNetworkConfigurationUpdater();
-
-  user_policy_init_observer_.reset(new PolicyInitializationObserver(
-      base::Bind(&NetworkConfigurationUpdater::OnUserPolicyInitialized,
-                 base::Unretained(network_updater),
-                 is_managed,
-                 hashed_username),
-      policy_service()));
+  g_browser_process->browser_policy_connector()->
+      network_configuration_updater()->SetUserPolicyService(
+          is_managed, hashed_username, policy_service());
 }
 #endif
 

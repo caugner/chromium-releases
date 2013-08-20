@@ -6,14 +6,14 @@
 
 #include "base/command_line.h"
 #include "base/format_macros.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "content/public/common/gpu_info.h"
 #include "googleurl/src/gurl.h"
+#include "gpu/config/gpu_info.h"
 
 namespace child_process_logging {
 
@@ -95,7 +95,7 @@ void SetActiveExtensions(const std::set<std::string>& extension_ids) {
                 arraysize(g_extension_ids));
 }
 
-void SetGpuInfo(const content::GPUInfo& gpu_info) {
+void SetGpuInfo(const gpu::GPUInfo& gpu_info) {
   snprintf(g_gpu_vendor_id, arraysize(g_gpu_vendor_id), "0x%04x",
            gpu_info.gpu.vendor_id);
   snprintf(g_gpu_device_id, arraysize(g_gpu_device_id), "0x%04x",

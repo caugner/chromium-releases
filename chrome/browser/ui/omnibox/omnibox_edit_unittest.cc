@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
@@ -14,6 +14,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/rect.h"
 
 using content::WebContents;
 
@@ -75,7 +76,6 @@ class TestingOmniboxView : public OmniboxView {
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE {
     return 0;
   }
-  virtual gfx::Font GetFont() OVERRIDE { return gfx::Font(); }
 #endif
 
   virtual int GetOmniboxTextLength() const OVERRIDE { return 0; }
@@ -103,6 +103,7 @@ class TestingOmniboxEditController : public OmniboxEditController {
   virtual WebContents* GetWebContents() const OVERRIDE {
     return NULL;
   }
+  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE { return gfx::Rect(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestingOmniboxEditController);
@@ -187,8 +188,8 @@ TEST_F(AutocompleteEditTest, AdjustTextForCopy) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input); ++i) {
     model.UpdatePermanentText(ASCIIToUTF16(input[i].perm_text));
 
-    toolbar_model()->set_search_terms_type(input[i].extracted_search_terms ?
-        ToolbarModel::NORMAL_SEARCH_TERMS : ToolbarModel::NO_SEARCH_TERMS);
+    toolbar_model()->set_replace_search_url_with_search_terms(
+        input[i].extracted_search_terms);
 
     string16 result = ASCIIToUTF16(input[i].input);
     GURL url;

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/autocomplete/builtin_provider.h"
 
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/net/url_fixer_upper.h"
@@ -113,7 +113,7 @@ BuiltinProvider::~BuiltinProvider() {}
 void BuiltinProvider::AddMatch(const string16& match_string,
                                const ACMatchClassifications& styles) {
   AutocompleteMatch match(this, kRelevance, false,
-                          AutocompleteMatch::NAVSUGGEST);
+                          AutocompleteMatchType::NAVSUGGEST);
   match.fill_into_edit = match_string;
   match.destination_url = GURL(match_string);
   match.contents = match_string;

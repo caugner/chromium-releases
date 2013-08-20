@@ -11,12 +11,17 @@
 namespace aura {
 class RootWindow;
 class Window;
+
 namespace client {
 
 class AURA_EXPORT TooltipClient {
  public:
   // Informs the shell tooltip manager of change in tooltip for window |target|.
   virtual void UpdateTooltip(Window* target) = 0;
+
+  // Sets the time after which the tooltip is hidden for Window |target|. If
+  // |timeout_in_ms| is <= 0, the tooltip is shown indefinitely.
+  virtual void SetTooltipShownTimeout(Window* target, int timeout_in_ms) = 0;
 
   // Enables/Disables tooltips.
   virtual void SetTooltipsEnabled(bool enable) = 0;
@@ -25,8 +30,9 @@ class AURA_EXPORT TooltipClient {
 AURA_EXPORT void SetTooltipClient(RootWindow* root_window,
                                   TooltipClient* client);
 AURA_EXPORT TooltipClient* GetTooltipClient(RootWindow* root_window);
-AURA_EXPORT void SetTooltipText(Window* window, string16* tooltip_text);
-AURA_EXPORT const string16 GetTooltipText(Window* window);
+
+AURA_EXPORT void SetTooltipText(Window* window, base::string16* tooltip_text);
+AURA_EXPORT const base::string16 GetTooltipText(Window* window);
 
 }  // namespace client
 }  // namespace aura

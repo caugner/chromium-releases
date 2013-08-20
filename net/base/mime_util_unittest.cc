@@ -4,7 +4,7 @@
 
 #include "base/basictypes.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "net/base/mime_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -294,6 +294,22 @@ TEST(MimeUtilTest, TestGetCertificateMimeTypeForMimeType) {
 #endif
   EXPECT_EQ(CERTIFICATE_MIME_TYPE_UNKNOWN,
             GetCertificateMimeTypeForMimeType("text/plain"));
+}
+
+TEST(MimeUtilTest, TestAddMultipartValueForUpload) {
+  const char* ref_output = "--boundary\r\nContent-Disposition: form-data;"
+                           " name=\"value name\"\r\nContent-Type: content type"
+                           "\r\n\r\nvalue\r\n"
+                           "--boundary\r\nContent-Disposition: form-data;"
+                           " name=\"value name\"\r\n\r\nvalue\r\n"
+                           "--boundary--\r\n";
+  std::string post_data;
+  AddMultipartValueForUpload("value name", "value", "boundary",
+                             "content type", &post_data);
+  AddMultipartValueForUpload("value name", "value", "boundary",
+                             "", &post_data);
+  AddMultipartFinalDelimiterForUpload("boundary", &post_data);
+  EXPECT_STREQ(ref_output, post_data.c_str());
 }
 
 }  // namespace net

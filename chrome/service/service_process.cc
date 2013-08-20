@@ -14,8 +14,8 @@
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -122,7 +122,7 @@ ServiceProcess::ServiceProcess()
   g_service_process = this;
 }
 
-bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
+bool ServiceProcess::Initialize(base::MessageLoopForUI* message_loop,
                                 const CommandLine& command_line,
                                 ServiceProcessState* state) {
 #if defined(TOOLKIT_GTK)
@@ -144,7 +144,7 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   service_process_state_.reset(state);
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   base::Thread::Options options;
-  options.message_loop_type = MessageLoop::TYPE_IO;
+  options.message_loop_type = base::MessageLoop::TYPE_IO;
   io_thread_.reset(new ServiceIOThread("ServiceProcess_IO"));
   file_thread_.reset(new base::Thread("ServiceProcess_File"));
   if (!io_thread_->StartWithOptions(options) ||
@@ -161,10 +161,10 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   base::FilePath pref_path =
       user_data_dir.Append(chrome::kServiceStateFileName);
-  service_prefs_.reset(
-      new ServiceProcessPrefs(
-          pref_path,
-          JsonPrefStore::GetTaskRunnerForFile(pref_path, blocking_pool_)));
+  service_prefs_.reset(new ServiceProcessPrefs(
+      pref_path,
+      JsonPrefStore::GetTaskRunnerForFile(pref_path, blocking_pool_.get())
+          .get()));
   service_prefs_->ReadPrefs();
 
   // This switch it required to run connector with test gaia.
@@ -193,7 +193,7 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   // Then check if the cloud print proxy was previously enabled.
   if (command_line.HasSwitch(switches::kEnableCloudPrintProxy) ||
       service_prefs_->GetBoolean(prefs::kCloudPrintProxyEnabled, false)) {
-    GetCloudPrintProxy()->EnableForUser(std::string());
+    GetCloudPrintProxy()->EnableForUser();
   }
 
   VLOG(1) << "Starting Service Process IPC Server";
@@ -204,8 +204,8 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   // After the IPC server has started we signal that the service process is
   // ready.
   if (!service_process_state_->SignalReady(
-      io_thread_->message_loop_proxy(),
-      base::Bind(&ServiceProcess::Terminate, base::Unretained(this)))) {
+          io_thread_->message_loop_proxy().get(),
+          base::Bind(&ServiceProcess::Terminate, base::Unretained(this)))) {
     return false;
   }
 
@@ -267,7 +267,7 @@ void ServiceProcess::Shutdown() {
 }
 
 void ServiceProcess::Terminate() {
-  main_message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  main_message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
 }
 
 bool ServiceProcess::HandleClientDisconnect() {
@@ -339,7 +339,7 @@ void ServiceProcess::OnServiceDisabled() {
 }
 
 void ServiceProcess::ScheduleShutdownCheck() {
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ServiceProcess::ShutdownIfNeeded, base::Unretained(this)),
       base::TimeDelta::FromSeconds(kShutdownDelaySeconds));
@@ -360,7 +360,7 @@ void ServiceProcess::ShutdownIfNeeded() {
 }
 
 void ServiceProcess::ScheduleCloudPrintPolicyCheck() {
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ServiceProcess::CloudPrintPolicyCheckIfNeeded,
                  base::Unretained(this)),

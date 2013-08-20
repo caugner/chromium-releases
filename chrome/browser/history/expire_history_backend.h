@@ -36,6 +36,11 @@ class BroadcastNotificationDelegate {
   virtual void BroadcastNotifications(int type,
                                       HistoryDetails* details_deleted) = 0;
 
+  // Trigger handling of deleted urls in typed url sync code
+  virtual void NotifySyncURLsDeleted(bool all_history,
+                                     bool archived,
+                                     URLRows* rows) = 0;
+
  protected:
   virtual ~BroadcastNotificationDelegate() {}
 };
@@ -199,7 +204,7 @@ class ExpireHistoryBackend {
   // care about favicons so much, so don't want to stop everything if it fails).
   // Fills |expired_favicons| with the set of favicon urls that no longer
   // have associated visits and were therefore expired.
-  void DeleteFaviconsIfPossible(const std::set<FaviconID>& favicon_id,
+  void DeleteFaviconsIfPossible(const std::set<chrome::FaviconID>& favicon_id,
                                 std::set<GURL>* expired_favicons);
 
   // Enum representing what type of action resulted in the history DB deletion.

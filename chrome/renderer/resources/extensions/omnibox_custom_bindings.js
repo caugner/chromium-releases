@@ -7,7 +7,7 @@
 
 var binding = require('binding').Binding.create('omnibox');
 
-var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var eventBindings = require('event_bindings');
 var sendRequest = require('sendRequest').sendRequest;
 
 // Remove invalid characters from |text| so that it is suitable to use
@@ -65,7 +65,7 @@ function parseOmniboxDescription(input) {
           'type': child.nodeName,
           'offset': result.description.length
         };
-        result.descriptionStyles.push(style);
+        $Array.push(result.descriptionStyles, style);
         walk(child);
         style.length = result.description.length - style.offset;
         continue;
@@ -105,13 +105,13 @@ binding.registerCustomHook(function(bindingsAPI) {
       var parseResult = parseOmniboxDescription(
           userSuggestions[i].description);
       parseResult.content = userSuggestions[i].content;
-      suggestions.push(parseResult);
+      $Array.push(suggestions, parseResult);
     }
     return [requestId, suggestions];
   });
 });
 
-chromeHidden.Event.registerArgumentMassager('omnibox.onInputChanged',
+eventBindings.registerArgumentMassager('omnibox.onInputChanged',
     function(args, dispatch) {
   var text = args[0];
   var requestId = args[1];

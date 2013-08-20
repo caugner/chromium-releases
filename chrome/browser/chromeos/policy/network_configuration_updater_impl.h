@@ -25,20 +25,20 @@ class PolicyMap;
 // This implementation pushes policies to the
 // ManagedNetworkConfigurationHandler. User policies are only pushed after
 // OnUserPolicyInitialized() was called.
-// TODO(pneubeck): Certificates are not implemented yet, they are silently
-// ignored.
 class NetworkConfigurationUpdaterImpl : public NetworkConfigurationUpdater {
  public:
   NetworkConfigurationUpdaterImpl(
       PolicyService* policy_service,
-      chromeos::ManagedNetworkConfigurationHandler* network_config_handler,
       scoped_ptr<chromeos::CertificateHandler> certificate_handler);
   virtual ~NetworkConfigurationUpdaterImpl();
 
   // NetworkConfigurationUpdater overrides.
-  virtual void OnUserPolicyInitialized(
+  virtual void SetUserPolicyService(
       bool allow_trusted_certs_from_policy,
-      const std::string& hashed_username) OVERRIDE;
+      const std::string& hashed_username,
+      PolicyService* user_policy_service) OVERRIDE;
+
+  virtual void UnsetUserPolicyService() OVERRIDE;
 
  private:
   // Callback that's called by |policy_service_| if the respective ONC policy
@@ -55,8 +55,8 @@ class NetworkConfigurationUpdaterImpl : public NetworkConfigurationUpdater {
   // The policy service storing the ONC policies.
   PolicyService* policy_service_;
 
-  // Pointer to the global singleton or mock provided to the constructor.
-  chromeos::ManagedNetworkConfigurationHandler* network_config_handler_;
+  // User hash of the user that the user policy applies to.
+  std::string hashed_username_;
 
   scoped_ptr<chromeos::CertificateHandler> certificate_handler_;
 

@@ -19,8 +19,8 @@ using content::BrowserThread;
 class ValueStoreFrontendTest : public testing::Test {
  public:
   ValueStoreFrontendTest()
-      : ui_thread_(BrowserThread::UI, MessageLoop::current()),
-        file_thread_(BrowserThread::FILE, MessageLoop::current()) {
+      : ui_thread_(BrowserThread::UI, base::MessageLoop::current()),
+        file_thread_(BrowserThread::FILE, base::MessageLoop::current()) {
   }
 
   virtual void SetUp() {
@@ -36,7 +36,7 @@ class ValueStoreFrontendTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    MessageLoop::current()->RunUntilIdle();  // wait for storage to delete
+    base::MessageLoop::current()->RunUntilIdle();  // wait for storage to delete
     storage_.reset();
   }
 
@@ -48,7 +48,7 @@ class ValueStoreFrontendTest : public testing::Test {
   bool Get(const std::string& key, scoped_ptr<base::Value>* output) {
     storage_->Get(key, base::Bind(&ValueStoreFrontendTest::GetAndWait,
                                   base::Unretained(this), output));
-    MessageLoop::current()->Run();  // wait for GetAndWait
+    base::MessageLoop::current()->Run();  // wait for GetAndWait
     return !!output->get();
   }
 
@@ -56,19 +56,19 @@ class ValueStoreFrontendTest : public testing::Test {
   void GetAndWait(scoped_ptr<base::Value>* output,
                   scoped_ptr<base::Value> result) {
     *output = result.Pass();
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   scoped_ptr<ValueStoreFrontend> storage_;
   base::ScopedTempDir temp_dir_;
   base::FilePath db_path_;
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 };
 
 TEST_F(ValueStoreFrontendTest, GetExistingData) {
-  scoped_ptr<base::Value> value(NULL);
+  scoped_ptr<base::Value> value;
   ASSERT_FALSE(Get("key0", &value));
 
   // Test existing keys in the DB.
@@ -97,7 +97,7 @@ TEST_F(ValueStoreFrontendTest, ChangesPersistAfterReload) {
   // Reload the DB and test our changes.
   ResetStorage();
 
-  scoped_ptr<base::Value> value(NULL);
+  scoped_ptr<base::Value> value;
   {
     ASSERT_TRUE(Get("key0", &value));
     int result;

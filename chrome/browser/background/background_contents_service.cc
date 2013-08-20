@@ -4,13 +4,14 @@
 
 #include "chrome/browser/background/background_contents_service.h"
 
+#include "apps/app_load_service.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -60,9 +61,9 @@ void CloseBalloon(const std::string id) {
 }
 
 void ScheduleCloseBalloon(const std::string& extension_id) {
-  if (!MessageLoop::current())  // For unit_tests
+  if (!base::MessageLoop::current())  // For unit_tests
     return;
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&CloseBalloon, kNotificationPrefix + extension_id));
 }
 
@@ -83,26 +84,35 @@ class CrashNotificationDelegate : public NotificationDelegate {
   virtual void Close(bool by_user) OVERRIDE {}
 
   virtual void Click() OVERRIDE {
+    // http://crbug.com/247790 involves a crash notification balloon being
+    // clicked while the extension isn't in the TERMINATED state. In that case,
+    // any of the "reload" methods called below can unload the extension, which
+    // indirectly destroys *this, invalidating all the member variables, so we
+    // copy the extension ID before using it.
+    std::string copied_extension_id = extension_id_;
     if (is_hosted_app_) {
       // There can be a race here: user clicks the balloon, and simultaneously
       // reloads the sad tab for the app. So we check here to be safe before
       // loading the background page.
       BackgroundContentsService* service =
           BackgroundContentsServiceFactory::GetForProfile(profile_);
-      if (!service->GetAppBackgroundContents(ASCIIToUTF16(extension_id_)))
-        service->LoadBackgroundContentsForExtension(profile_, extension_id_);
+      if (!service->GetAppBackgroundContents(ASCIIToUTF16(copied_extension_id)))
+        service->LoadBackgroundContentsForExtension(profile_,
+                                                    copied_extension_id);
     } else if (is_platform_app_) {
-      extensions::ExtensionSystem::Get(profile_)->extension_service()->
-          RestartExtension(extension_id_);
+      apps::AppLoadService::Get(profile_)->
+          RestartApplication(copied_extension_id);
     } else {
       extensions::ExtensionSystem::Get(profile_)->extension_service()->
-          ReloadExtension(extension_id_);
+          ReloadExtension(copied_extension_id);
     }
 
     // Closing the balloon here should be OK, but it causes a crash on Mac
     // http://crbug.com/78167
-    ScheduleCloseBalloon(extension_id_);
+    ScheduleCloseBalloon(copied_extension_id);
   }
+
+  virtual bool HasClickedListener() OVERRIDE { return true; }
 
   virtual std::string id() const OVERRIDE {
     return kNotificationPrefix + extension_id_;
@@ -137,14 +147,13 @@ void NotificationImageReady(
     notification_icon = rb.GetImageNamed(IDR_EXTENSION_DEFAULT_ICON);
   }
   string16 title;  // no notification title
-  DesktopNotificationService::AddIconNotification(
-      extension_url,
-      title,
-      message,
-      notification_icon,
-      string16(),
-      delegate,
-      profile);
+  DesktopNotificationService::AddIconNotification(extension_url,
+                                                  title,
+                                                  message,
+                                                  notification_icon,
+                                                  string16(),
+                                                  delegate.get(),
+                                                  profile);
 }
 #endif
 
@@ -372,7 +381,7 @@ void BackgroundContentsService::Observe(
       // notifications for this extension to be cancelled by
       // DesktopNotificationService. For this reason, instead of showing the
       // balloon right now, we schedule it to show a little later.
-      MessageLoop::current()->PostTask(
+      base::MessageLoop::current()->PostTask(
           FROM_HERE, base::Bind(&ShowBalloon, extension, profile));
       break;
     }
@@ -516,7 +525,7 @@ void BackgroundContentsService::LoadBackgroundContentsFromManifests(
       extension_service()->extensions();
   ExtensionSet::const_iterator iter = extensions->begin();
   for (; iter != extensions->end(); ++iter) {
-    const Extension* extension = *iter;
+    const Extension* extension = iter->get();
     if (extension->is_hosted_app() &&
         BackgroundInfo::HasBackgroundPage(extension)) {
       LoadBackgroundContents(profile,

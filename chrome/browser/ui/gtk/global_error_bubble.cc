@@ -7,7 +7,7 @@
 #include <gtk/gtk.h>
 
 #include "base/i18n/rtl.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 
@@ -39,7 +38,7 @@ GlobalErrorBubble::GlobalErrorBubble(Browser* browser,
       error_(error),
       message_width_(kMinMessageLabelWidth) {
   DCHECK(browser_);
-  DCHECK(error_);
+  DCHECK(error_.get());
   GtkWidget* content = gtk_vbox_new(FALSE, ui::kControlSpacing);
   gtk_container_set_border_width(GTK_CONTAINER(content),
                                  ui::kContentAreaBorder);
@@ -48,9 +47,9 @@ GlobalErrorBubble::GlobalErrorBubble(Browser* browser,
   GtkThemeService* theme_service =
       GtkThemeService::GetFrom(browser_->profile());
 
-  int resource_id = error_->GetBubbleViewIconResourceID();
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  GdkPixbuf* pixbuf = rb.GetNativeImageNamed(resource_id).ToGdkPixbuf();
+  gfx::Image image = error_->GetBubbleViewIcon();
+  CHECK(!image.IsEmpty());
+  GdkPixbuf* pixbuf = image.ToGdkPixbuf();
   GtkWidget* image_view = gtk_image_new_from_pixbuf(pixbuf);
 
   GtkWidget* title_label = theme_service->BuildLabel(
@@ -123,7 +122,7 @@ GlobalErrorBubble::~GlobalErrorBubble() {
 
 void GlobalErrorBubble::BubbleClosing(BubbleGtk* bubble,
                                       bool closed_by_escape) {
-  if (error_)
+  if (error_.get())
     error_->BubbleViewDidClose(browser_);
 }
 
@@ -132,13 +131,13 @@ void GlobalErrorBubble::OnDestroy(GtkWidget* sender) {
 }
 
 void GlobalErrorBubble::OnAcceptButton(GtkWidget* sender) {
-  if (error_)
+  if (error_.get())
     error_->BubbleViewAcceptButtonPressed(browser_);
   bubble_->Close();
 }
 
 void GlobalErrorBubble::OnCancelButton(GtkWidget* sender) {
-  if (error_)
+  if (error_.get())
     error_->BubbleViewCancelButtonPressed(browser_);
   bubble_->Close();
 }

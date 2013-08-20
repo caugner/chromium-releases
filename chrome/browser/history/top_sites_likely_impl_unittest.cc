@@ -9,8 +9,8 @@
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -59,7 +59,7 @@ class WaitForHistoryTask : public HistoryDBTask {
   }
 
   virtual void DoneRunOnMainThread() OVERRIDE {
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
  private:
@@ -87,7 +87,7 @@ class TopSitesQuerier {
                    weak_ptr_factory_.GetWeakPtr()));
     if (wait && start_number_of_callbacks == number_of_callbacks_) {
       waiting_ = true;
-      MessageLoop::current()->Run();
+      base::MessageLoop::current()->Run();
     }
   }
 
@@ -106,7 +106,7 @@ class TopSitesQuerier {
     urls_ = data;
     number_of_callbacks_++;
     if (waiting_) {
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
       waiting_ = false;
     }
   }
@@ -193,7 +193,7 @@ class TopSitesLikelyImplTest : public HistoryUnitTestBase {
   // need to wait until you know history has processed a task.
   void WaitForHistory() {
     history_service()->ScheduleDBTask(new WaitForHistoryTask(), &consumer_);
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
   // Waits for top sites to finish processing a task. This is useful if you need
@@ -203,7 +203,7 @@ class TopSitesLikelyImplTest : public HistoryUnitTestBase {
         base::Bind(&TopSitesLikelyImplTest::QuitCallback,
                    base::Unretained(this)),
         &cancelable_task_tracker_);
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
   TopSitesLikelyImpl* top_sites() {
@@ -240,7 +240,7 @@ class TopSitesLikelyImplTest : public HistoryUnitTestBase {
   // Quit the current message loop when invoked. Useful when running a nested
   // message loop.
   void QuitCallback() {
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   // Adds a page to history.
@@ -286,7 +286,7 @@ class TopSitesLikelyImplTest : public HistoryUnitTestBase {
                             base::RefCountedMemory* bytes) {
     scoped_refptr<base::RefCountedBytes> encoded_image;
     TopSitesLikelyImpl::EncodeBitmap(image, &encoded_image);
-    return ThumbnailsAreEqual(encoded_image, bytes);
+    return ThumbnailsAreEqual(encoded_image.get(), bytes);
   }
 
   // Recreates top sites. This forces top sites to reread from the db.
@@ -328,7 +328,7 @@ class TopSitesLikelyImplTest : public HistoryUnitTestBase {
   }
 
  private:
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
   scoped_ptr<TestingProfile> profile_;

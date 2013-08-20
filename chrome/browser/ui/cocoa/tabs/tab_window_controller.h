@@ -14,7 +14,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 
 @class FastResizeView;
 @class FocusTracker;
@@ -23,13 +23,17 @@
 
 @interface TabWindowController : NSWindowController<NSWindowDelegate> {
  @private
-  scoped_nsobject<FastResizeView> tabContentArea_;
-  scoped_nsobject<TabStripView> tabStripView_;
-  NSWindow* overlayWindow_;  // Used during dragging for window opacity tricks
-  NSView* cachedContentView_;  // Used during dragging for identifying which
-                               // view is the proper content area in the overlay
-                               // (weak)
-  scoped_nsobject<FocusTracker> focusBeforeOverlay_;
+  base::scoped_nsobject<FastResizeView> tabContentArea_;
+  base::scoped_nsobject<TabStripView> tabStripView_;
+
+  // The child window used during dragging to achieve the opacity tricks.
+  NSWindow* overlayWindow_;
+
+  // The contentView of the original window that is moved (for the duration
+  // of the drag) to the |overlayWindow_|.
+  NSView* originalContentView_;  // weak
+
+  base::scoped_nsobject<FocusTracker> focusBeforeOverlay_;
   BOOL closeDeferred_;  // If YES, call performClose: in removeOverlay:.
 }
 @property(readonly, nonatomic) TabStripView* tabStripView;

@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 class SavePackage;
 
@@ -78,6 +78,9 @@ class DownloadItemModel {
 
   // Is this considered a malicious download? Implies IsDangerous().
   bool IsMalicious() const;
+
+  // Is safe browsing download feedback feature available for this download?
+  bool ShouldAllowDownloadFeedback() const;
 
   // Returns |true| if this download is expected to complete successfully and
   // thereafter be removed from the shelf.  Downloads that are opened

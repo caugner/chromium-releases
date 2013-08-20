@@ -23,10 +23,10 @@
     "language": "en",
     "layouts": ["us::eng"]
   },{
-    "name": "EchoBackIME",
+    "name": "APIArgumentIME",
     "type": "ime",
-    "id": "EchoBackIME",
-    "description": "Just echo back called function name to Chrome.",
+    "id": "APIArgumentIME",
+    "description": "Send back argument into Chrome.",
     "language": "en",
     "layouts": ["us::eng"]
   }]

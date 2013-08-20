@@ -14,8 +14,8 @@
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "net/proxy/proxy_config.h"
@@ -176,7 +176,7 @@ class MockSettingGetter
   }
 
   virtual bool Init(base::SingleThreadTaskRunner* glib_thread_task_runner,
-                    MessageLoopForIO* file_loop) OVERRIDE {
+                    base::MessageLoopForIO* file_loop) OVERRIDE {
     return true;
   }
 
@@ -265,7 +265,7 @@ class SynchConfigGetter {
         config_service_(config_service) {
     // Start an IO thread.
     base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
+    options.message_loop_type = base::MessageLoop::TYPE_IO;
     io_thread_.StartWithOptions(options);
 
     // Make sure the thread started.
@@ -288,12 +288,13 @@ class SynchConfigGetter {
   // all on the calling thread (meant to be the thread with the
   // default glib main loop, which is the UI thread).
   void SetupAndInitialFetch() {
-    MessageLoop* file_loop = io_thread_.message_loop();
-    DCHECK_EQ(MessageLoop::TYPE_IO, file_loop->type());
+    base::MessageLoop* file_loop = io_thread_.message_loop();
+    DCHECK_EQ(base::MessageLoop::TYPE_IO, file_loop->type());
     // We pass the mock IO thread as both the IO and file threads.
     config_service_->SetupAndFetchInitialConfig(
-        base::MessageLoopProxy::current(), io_thread_.message_loop_proxy(),
-        static_cast<MessageLoopForIO*>(file_loop));
+        base::MessageLoopProxy::current().get(),
+        io_thread_.message_loop_proxy().get(),
+        static_cast<base::MessageLoopForIO*>(file_loop));
   }
   // Synchronously gets the proxy config.
   net::ProxyConfigService::ConfigAvailability SyncGetLatestProxyConfig(
@@ -322,7 +323,7 @@ class SynchConfigGetter {
 
   // [Runs on |io_thread_|] Signals |event_| on cleanup completion.
   void CleanUp() {
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     event_.Signal();
   }
 

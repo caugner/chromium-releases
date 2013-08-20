@@ -5,13 +5,14 @@
 #include "chrome/browser/ui/views/external_protocol_dialog.h"
 
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/chromium_strings.h"
@@ -154,16 +155,14 @@ ExternalProtocolDialog::ExternalProtocolDialog(WebContents* web_contents,
   message_box_view_->SetCheckBoxLabel(
       l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_CHECKBOX_TEXT));
 
-  HWND root_hwnd;
+  // Dialog is top level if we don't have a web_contents associated with us.
+  HWND root_hwnd = NULL;
   if (web_contents_) {
     root_hwnd = GetAncestor(web_contents_->GetView()->GetContentNativeView(),
                             GA_ROOT);
-  } else {
-    // Dialog is top level if we don't have a web_contents associated with us.
-    root_hwnd = NULL;
   }
 
-  views::Widget::CreateWindowWithParent(this, root_hwnd)->Show();
+  CreateBrowserModalDialogViews(this, root_hwnd)->Show();
 }
 
 // static

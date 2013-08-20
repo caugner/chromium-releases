@@ -47,7 +47,7 @@ class MouseEnterExitEvent : public ui::MouseEvent {
 }  // namespace
 
 // static
-const char RootView::kViewClassName[] = "views/RootView";
+const char RootView::kViewClassName[] = "RootView";
 
 ////////////////////////////////////////////////////////////////////////////////
 // RootView, public:
@@ -117,7 +117,8 @@ void RootView::DispatchKeyEvent(ui::KeyEvent* event) {
   // keyboard.
   if (v && v->enabled() && ((event->key_code() == ui::VKEY_APPS) ||
      (event->key_code() == ui::VKEY_F10 && event->IsShiftDown()))) {
-    v->ShowContextMenu(v->GetKeyboardContextMenuLocation(), false);
+    v->ShowContextMenu(v->GetKeyboardContextMenuLocation(),
+                       ui::MENU_SOURCE_KEYBOARD);
     event->StopPropagation();
     return;
   }
@@ -363,7 +364,7 @@ bool RootView::IsDrawn() const {
   return visible();
 }
 
-std::string RootView::GetClassName() const {
+const char* RootView::GetClassName() const {
   return kViewClassName;
 }
 
@@ -590,28 +591,30 @@ void RootView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = widget_->widget_delegate()->GetAccessibleWindowRole();
 }
 
-void RootView::ReorderChildLayers(ui::Layer* parent_layer) {
-  View::ReorderChildLayers(parent_layer);
+void RootView::UpdateParentLayer() {
+  if (layer())
+    ReparentLayer(gfx::Vector2d(GetMirroredX(), y()), widget_->GetLayer());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // RootView, protected:
 
-void RootView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
-  widget_->ViewHierarchyChanged(is_add, parent, child);
+void RootView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  widget_->ViewHierarchyChanged(details);
 
-  if (!is_add) {
-    if (!explicit_mouse_handler_ && mouse_pressed_handler_ == child)
+  if (!details.is_add) {
+    if (!explicit_mouse_handler_ && mouse_pressed_handler_ == details.child)
       mouse_pressed_handler_ = NULL;
-    if (mouse_move_handler_ == child)
+    if (mouse_move_handler_ == details.child)
       mouse_move_handler_ = NULL;
-    if (touch_pressed_handler_ == child)
+    if (touch_pressed_handler_ == details.child)
       touch_pressed_handler_ = NULL;
-    if (gesture_handler_ == child)
+    if (gesture_handler_ == details.child)
       gesture_handler_ = NULL;
-    if (scroll_gesture_handler_ == child)
+    if (scroll_gesture_handler_ == details.child)
       scroll_gesture_handler_ = NULL;
-    if (event_dispatch_target_ == child)
+    if (event_dispatch_target_ == details.child)
       event_dispatch_target_ = NULL;
   }
 }
@@ -630,8 +633,8 @@ void RootView::OnPaint(gfx::Canvas* canvas) {
 gfx::Vector2d RootView::CalculateOffsetToAncestorWithLayer(
     ui::Layer** layer_parent) {
   gfx::Vector2d offset(View::CalculateOffsetToAncestorWithLayer(layer_parent));
-  if (!layer())
-    offset += widget_->CalculateOffsetToAncestorWithLayer(layer_parent);
+  if (!layer() && layer_parent)
+    *layer_parent = widget_->GetLayer();
   return offset;
 }
 

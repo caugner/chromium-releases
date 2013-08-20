@@ -19,8 +19,8 @@
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/time.h"
 #include "build/build_config.h"
 #include "sync/engine/get_commit_ids_command.h"
@@ -29,7 +29,6 @@
 #include "sync/engine/sync_scheduler_impl.h"
 #include "sync/engine/syncer.h"
 #include "sync/engine/syncer_proto_util.h"
-#include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/engine/traffic_recorder.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
@@ -116,14 +115,20 @@ class SyncerTest : public testing::Test,
   SyncerTest()
       : syncer_(NULL),
         saw_syncer_event_(false),
+        last_client_invalidation_hint_buffer_size_(10),
         traffic_recorder_(0, 0) {
 }
 
   // SyncSession::Delegate implementation.
-  virtual void OnSilencedUntil(const base::TimeTicks& silenced_until) OVERRIDE {
+  virtual void OnThrottled(const base::TimeDelta& throttle_duration) OVERRIDE {
     FAIL() << "Should not get silenced.";
   }
-  virtual bool IsSyncingCurrentlySilenced() OVERRIDE {
+  virtual void OnTypesThrottled(
+      ModelTypeSet types,
+      const base::TimeDelta& throttle_duration) OVERRIDE {
+    FAIL() << "Should not get silenced.";
+  }
+  virtual bool IsCurrentlyThrottled() OVERRIDE {
     return false;
   }
   virtual void OnReceivedLongPollIntervalUpdate(
@@ -137,6 +142,10 @@ class SyncerTest : public testing::Test,
   virtual void OnReceivedSessionsCommitDelay(
       const base::TimeDelta& new_delay) OVERRIDE {
     last_sessions_commit_delay_seconds_ = new_delay;
+  }
+  virtual void OnReceivedClientInvalidationHintBufferSize(
+      int size) OVERRIDE {
+    last_client_invalidation_hint_buffer_size_ = size;
   }
   virtual void OnShouldStopSyncingPermanently() OVERRIDE {
   }
@@ -171,23 +180,37 @@ class SyncerTest : public testing::Test,
     saw_syncer_event_ = true;
   }
 
-  SyncSession* MakeSession() {
+  void SyncShareNudge() {
     ModelSafeRoutingInfo info;
     GetModelSafeRoutingInfo(&info);
     ModelTypeInvalidationMap invalidation_map =
         ModelSafeRoutingInfoToInvalidationMap(info, std::string());
-    sessions::SyncSourceInfo source_info(sync_pb::GetUpdatesCallerInfo::UNKNOWN,
-                                         invalidation_map);
-    return new SyncSession(context_.get(), this, source_info);
-  }
+    sessions::SyncSourceInfo source_info(
+        sync_pb::GetUpdatesCallerInfo::LOCAL,
+        invalidation_map);
+    // Use our dummy nudge tracker.  These tests won't notice that it hasn't
+    // been tracking anything because the server is mocked out and ignores most
+    // of the content of requests sent by the client.
+    session_.reset(
+        SyncSession::BuildForNudge(context_.get(),
+                                   this,
+                                   source_info,
+                                   &nudge_tracker_));
 
-  void SyncShareNudge() {
-    session_.reset(MakeSession());
     EXPECT_TRUE(syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END));
   }
 
   void SyncShareConfigure() {
-    session_.reset(MakeSession());
+    ModelSafeRoutingInfo info;
+    GetModelSafeRoutingInfo(&info);
+    ModelTypeInvalidationMap invalidation_map =
+        ModelSafeRoutingInfoToInvalidationMap(info, std::string());
+    sessions::SyncSourceInfo source_info(
+        sync_pb::GetUpdatesCallerInfo::RECONFIGURATION,
+        invalidation_map);
+    session_.reset(SyncSession::Build(context_.get(),
+                                      this,
+                                      source_info));
     EXPECT_TRUE(
         syncer_->SyncShare(session_.get(), DOWNLOAD_UPDATES, APPLY_UPDATES));
   }
@@ -209,21 +232,18 @@ class SyncerTest : public testing::Test,
     GetModelSafeRoutingInfo(&routing_info);
     GetWorkers(&workers);
 
-    throttled_data_type_tracker_.reset(new ThrottledDataTypeTracker(NULL));
-
     context_.reset(
         new SyncSessionContext(
             mock_server_.get(), directory(), workers,
-            &extensions_activity_monitor_, throttled_data_type_tracker_.get(),
+            &extensions_activity_monitor_,
             listeners, NULL, &traffic_recorder_,
             true,  // enable keystore encryption
             "fake_invalidator_client_id"));
     context_->set_routing_info(routing_info);
     syncer_ = new Syncer();
-    session_.reset(MakeSession());
 
     syncable::ReadTransaction trans(FROM_HERE, directory());
-    syncable::Directory::ChildHandles children;
+    syncable::Directory::Metahandles children;
     directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
     ASSERT_EQ(0u, children.size());
     saw_syncer_event_ = false;
@@ -537,7 +557,7 @@ class SyncerTest : public testing::Test,
     return directory()->GetCryptographer(trans);
   }
 
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
 
   // Some ids to aid tests. Only the root one's value is specific. The rest
   // are named for test clarity.
@@ -552,7 +572,6 @@ class SyncerTest : public testing::Test,
   TestDirectorySetterUpper dir_maker_;
   FakeEncryptor encryptor_;
   FakeExtensionsActivityMonitor extensions_activity_monitor_;
-  scoped_ptr<ThrottledDataTypeTracker> throttled_data_type_tracker_;
   scoped_ptr<MockConnectionManager> mock_server_;
 
   Syncer* syncer_;
@@ -563,10 +582,12 @@ class SyncerTest : public testing::Test,
   base::TimeDelta last_short_poll_interval_received_;
   base::TimeDelta last_long_poll_interval_received_;
   base::TimeDelta last_sessions_commit_delay_seconds_;
+  int last_client_invalidation_hint_buffer_size_;
   scoped_refptr<ModelSafeWorker> worker_;
 
   ModelTypeSet enabled_datatypes_;
   TrafficRecorder traffic_recorder_;
+  sessions::NudgeTracker nudge_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncerTest);
 };
@@ -624,23 +645,26 @@ TEST_F(SyncerTest, GetCommitIdsCommandTruncates) {
   }
 
   // The arrangement is now: x (b (d) c (e)) w j
-  // Entry "w" is in conflict, making its sucessors unready to commit.
+  // Entry "w" is in conflict, so it is not eligible for commit.
   vector<int64> unsynced_handle_view;
   vector<syncable::Id> expected_order;
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
     GetUnsyncedEntries(&rtrans, &unsynced_handle_view);
   }
-  // The expected order is "x", "b", "c", "d", "e", truncated appropriately.
+  // The expected order is "x", "b", "c", "d", "e", "j", truncated
+  // appropriately.
   expected_order.push_back(ids_.MakeServer("x"));
   expected_order.push_back(ids_.MakeLocal("b"));
   expected_order.push_back(ids_.MakeLocal("c"));
   expected_order.push_back(ids_.MakeLocal("d"));
   expected_order.push_back(ids_.MakeLocal("e"));
+  expected_order.push_back(ids_.MakeLocal("j"));
   DoTruncationTest(unsynced_handle_view, expected_order);
 }
 
-TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
+// TODO(rlarocque): re-enable this test.
+TEST_F(SyncerTest, DISABLED_GetCommitIdsFiltersThrottledEntries) {
   const ModelTypeSet throttled_types(BOOKMARKS);
   sync_pb::EntitySpecifics bookmark_data;
   AddDefaultFieldValue(BOOKMARKS, &bookmark_data);
@@ -659,9 +683,9 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   }
 
   // Now set the throttled types.
-  context_->throttled_data_type_tracker()->SetUnthrottleTime(
-      throttled_types,
-      base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1200));
+  // context_->throttled_data_type_tracker()->SetUnthrottleTime(
+  //     throttled_types,
+  //     base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1200));
   SyncShareNudge();
 
   {
@@ -673,9 +697,9 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   }
 
   // Now unthrottle.
-  context_->throttled_data_type_tracker()->SetUnthrottleTime(
-      throttled_types,
-      base::TimeTicks::Now() - base::TimeDelta::FromSeconds(1200));
+  // context_->throttled_data_type_tracker()->SetUnthrottleTime(
+  //    throttled_types,
+  //    base::TimeTicks::Now() - base::TimeDelta::FromSeconds(1200));
   SyncShareNudge();
   {
     // It should have been committed.
@@ -1072,6 +1096,7 @@ TEST_F(SyncerTest, TestPurgeWhileUnsynced) {
   }
 
   directory()->PurgeEntriesWithTypeIn(ModelTypeSet(PREFERENCES),
+                                      ModelTypeSet(),
                                       ModelTypeSet());
 
   SyncShareNudge();
@@ -1106,8 +1131,9 @@ TEST_F(SyncerTest, TestPurgeWhileUnapplied) {
     parent.Put(syncable::ID, parent_id_);
   }
 
-  directory()->PurgeEntriesWithTypeIn(
-      ModelTypeSet(BOOKMARKS), ModelTypeSet());
+  directory()->PurgeEntriesWithTypeIn(ModelTypeSet(BOOKMARKS),
+                                      ModelTypeSet(),
+                                      ModelTypeSet());
 
   SyncShareNudge();
   directory()->SaveChanges();
@@ -1145,7 +1171,8 @@ TEST_F(SyncerTest, TestPurgeWithJournal) {
   }
 
   directory()->PurgeEntriesWithTypeIn(ModelTypeSet(PREFERENCES, BOOKMARKS),
-                                      ModelTypeSet(BOOKMARKS));
+                                      ModelTypeSet(BOOKMARKS),
+                                      ModelTypeSet());
   {
     // Verify bookmark nodes are saved in delete journal but not preference
     // node.
@@ -2242,7 +2269,7 @@ TEST_F(EntryCreatedInNewFolderTest, EntryCreatedInNewFolderMidSync) {
   mock_server_->SetMidCommitCallback(
       base::Bind(&EntryCreatedInNewFolderTest::CreateFolderInBob,
                  base::Unretained(this)));
-  syncer_->SyncShare(session_.get(), COMMIT, SYNCER_END);
+  SyncShareNudge();
   // We loop until no unsynced handles remain, so we will commit both ids.
   EXPECT_EQ(2u, mock_server_->committed_ids().size());
   {
@@ -2327,7 +2354,7 @@ TEST_F(SyncerTest, DoublyChangedWithResolver) {
                                   local_cache_guid(), local_id.GetServerId());
   mock_server_->set_conflict_all_commits(true);
   SyncShareNudge();
-  syncable::Directory::ChildHandles children;
+  syncable::Directory::Metahandles children;
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     directory()->GetChildHandlesById(&trans, parent_id_, &children);
@@ -2430,7 +2457,7 @@ TEST_F(SyncerTest, ParentAndChildBothMatch) {
   SyncShareNudge();
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
-    Directory::ChildHandles children;
+    Directory::Metahandles children;
     directory()->GetChildHandlesById(&trans, root_id_, &children);
     EXPECT_EQ(1u, children.size());
     directory()->GetChildHandlesById(&trans, parent_id, &children);
@@ -2438,7 +2465,7 @@ TEST_F(SyncerTest, ParentAndChildBothMatch) {
     std::vector<int64> unapplied;
     directory()->GetUnappliedUpdateMetaHandles(&trans, all_types, &unapplied);
     EXPECT_EQ(0u, unapplied.size());
-    syncable::Directory::UnsyncedMetaHandles unsynced;
+    syncable::Directory::Metahandles unsynced;
     directory()->GetUnsyncedMetaHandles(&trans, &unsynced);
     EXPECT_EQ(0u, unsynced.size());
     saw_syncer_event_ = false;
@@ -2480,8 +2507,7 @@ TEST_F(SyncerTest, UnappliedUpdateDuringCommit) {
     entry.Put(SERVER_SPECIFICS, DefaultBookmarkSpecifics());
     entry.Put(IS_DEL, false);
   }
-  syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
+  SyncShareNudge();
   EXPECT_EQ(1, session_->status_controller().TotalNumConflictingItems());
   saw_syncer_event_ = false;
 }
@@ -2508,7 +2534,7 @@ TEST_F(SyncerTest, DeletingEntryInFolder) {
     entry.Put(IS_UNSYNCED, true);
     existing_metahandle = entry.Get(META_HANDLE);
   }
-  syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
+  SyncShareNudge();
   {
     WriteTransaction trans(FROM_HERE, UNITTEST, directory());
     MutableEntry newfolder(&trans, CREATE, BOOKMARKS, trans.root_id(), "new");
@@ -2526,7 +2552,7 @@ TEST_F(SyncerTest, DeletingEntryInFolder) {
     newfolder.Put(IS_DEL, true);
     existing.Put(IS_DEL, true);
   }
-  syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
+  SyncShareNudge();
   EXPECT_EQ(0, status().num_server_conflicts());
 }
 
@@ -2549,7 +2575,7 @@ TEST_F(SyncerTest, DeletingEntryWithLocalEdits) {
   mock_server_->AddUpdateDirectory(1, 0, "bob", 2, 20,
                                    foreign_cache_guid(), "-1");
   mock_server_->SetLastUpdateDeleted();
-  syncer_->SyncShare(session_.get(), SYNCER_BEGIN, APPLY_UPDATES);
+  SyncShareConfigure();
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, syncable::GET_BY_HANDLE, newfolder_metahandle);
@@ -3204,7 +3230,7 @@ TEST_F(SyncerTest, LongChangelistWithApplicationConflict) {
       folder_id, "stuck", 1, 1,
       foreign_cache_guid(), "-99999");
   mock_server_->SetChangesRemaining(depth - 1);
-  syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
+  SyncShareNudge();
 
   // Buffer up a very long series of downloads.
   // We should never be stuck (conflict resolution shouldn't
@@ -3432,6 +3458,7 @@ TEST_F(SyncerTest, TestClientCommandDuringUpdate) {
   command->set_set_sync_poll_interval(8);
   command->set_set_sync_long_poll_interval(800);
   command->set_sessions_commit_delay_seconds(3141);
+  command->set_client_invalidation_hint_buffer_size(11);
   mock_server_->AddUpdateDirectory(1, 0, "in_root", 1, 1,
                                    foreign_cache_guid(), "-1");
   mock_server_->SetGUClientCommand(command);
@@ -3443,11 +3470,13 @@ TEST_F(SyncerTest, TestClientCommandDuringUpdate) {
               last_long_poll_interval_received_);
   EXPECT_TRUE(TimeDelta::FromSeconds(3141) ==
               last_sessions_commit_delay_seconds_);
+  EXPECT_EQ(11, last_client_invalidation_hint_buffer_size_);
 
   command = new ClientCommand();
   command->set_set_sync_poll_interval(180);
   command->set_set_sync_long_poll_interval(190);
   command->set_sessions_commit_delay_seconds(2718);
+  command->set_client_invalidation_hint_buffer_size(9);
   mock_server_->AddUpdateDirectory(1, 0, "in_root", 1, 1,
                                    foreign_cache_guid(), "-1");
   mock_server_->SetGUClientCommand(command);
@@ -3459,6 +3488,7 @@ TEST_F(SyncerTest, TestClientCommandDuringUpdate) {
               last_long_poll_interval_received_);
   EXPECT_TRUE(TimeDelta::FromSeconds(2718) ==
               last_sessions_commit_delay_seconds_);
+  EXPECT_EQ(9, last_client_invalidation_hint_buffer_size_);
 }
 
 TEST_F(SyncerTest, TestClientCommandDuringCommit) {
@@ -3468,6 +3498,7 @@ TEST_F(SyncerTest, TestClientCommandDuringCommit) {
   command->set_set_sync_poll_interval(8);
   command->set_set_sync_long_poll_interval(800);
   command->set_sessions_commit_delay_seconds(3141);
+  command->set_client_invalidation_hint_buffer_size(11);
   CreateUnsyncedDirectory("X", "id_X");
   mock_server_->SetCommitClientCommand(command);
   SyncShareNudge();
@@ -3478,11 +3509,13 @@ TEST_F(SyncerTest, TestClientCommandDuringCommit) {
               last_long_poll_interval_received_);
   EXPECT_TRUE(TimeDelta::FromSeconds(3141) ==
               last_sessions_commit_delay_seconds_);
+  EXPECT_EQ(11, last_client_invalidation_hint_buffer_size_);
 
   command = new ClientCommand();
   command->set_set_sync_poll_interval(180);
   command->set_set_sync_long_poll_interval(190);
   command->set_sessions_commit_delay_seconds(2718);
+  command->set_client_invalidation_hint_buffer_size(9);
   CreateUnsyncedDirectory("Y", "id_Y");
   mock_server_->SetCommitClientCommand(command);
   SyncShareNudge();
@@ -3493,6 +3526,7 @@ TEST_F(SyncerTest, TestClientCommandDuringCommit) {
               last_long_poll_interval_received_);
   EXPECT_TRUE(TimeDelta::FromSeconds(2718) ==
               last_sessions_commit_delay_seconds_);
+  EXPECT_EQ(9, last_client_invalidation_hint_buffer_size_);
 }
 
 TEST_F(SyncerTest, EnsureWeSendUpOldParent) {
@@ -3890,7 +3924,7 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
     EXPECT_EQ("tag2", tag2.Get(UNIQUE_CLIENT_TAG));
     tag2_metahandle = tag2.Get(META_HANDLE);
 
-    syncable::Directory::ChildHandles children;
+    syncable::Directory::Metahandles children;
     directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
     ASSERT_EQ(2U, children.size());
   }
@@ -3930,7 +3964,7 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
     EXPECT_EQ("tag2", tag2.Get(UNIQUE_CLIENT_TAG));
     EXPECT_EQ(tag2_metahandle, tag2.Get(META_HANDLE));
 
-    syncable::Directory::ChildHandles children;
+    syncable::Directory::Metahandles children;
     directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
     ASSERT_EQ(2U, children.size());
   }
@@ -4009,7 +4043,7 @@ TEST_F(SyncerTest, ClientTagClashWithinBatchOfUpdates) {
     EXPECT_EQ(21, tag_c.Get(BASE_VERSION));
     EXPECT_EQ("tag c", tag_c.Get(UNIQUE_CLIENT_TAG));
 
-    syncable::Directory::ChildHandles children;
+    syncable::Directory::Metahandles children;
     directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
     ASSERT_EQ(3U, children.size());
   }

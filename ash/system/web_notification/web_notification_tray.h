@@ -106,6 +106,7 @@ class ASH_EXPORT WebNotificationTray
   virtual bool ShowPopups() OVERRIDE;
   virtual void UpdatePopups() OVERRIDE;
   virtual void HidePopups() OVERRIDE;
+  virtual bool ShowNotifierSettings() OVERRIDE;
 
   message_center::MessageCenter* message_center();
 
@@ -118,6 +119,11 @@ class ASH_EXPORT WebNotificationTray
 
   void UpdateTrayContent();
 
+  // The actual process to show the message center. Set |show_settings| to true
+  // if the message center should be initialized with the settings visible.
+  // Returns true if the center is successfully created.
+  bool ShowMessageCenterInternal(bool show_settings);
+
   // Queries login status and the status area widget to determine visibility of
   // the message center.
   bool ShouldShowMessageCenter();
@@ -126,7 +132,7 @@ class ASH_EXPORT WebNotificationTray
   bool ShouldShowQuietModeMenu(const ui::Event& event);
 
   // Shows the quiet mode menu.
-  void ShowQuietModeMenu();
+  void ShowQuietModeMenu(const ui::Event& event);
 
   internal::WebNotificationBubbleWrapper* message_center_bubble() const {
     return message_center_bubble_.get();

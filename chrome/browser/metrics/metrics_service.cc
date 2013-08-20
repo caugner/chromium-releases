@@ -36,7 +36,7 @@
 // the MS was first constructed.  Note that even though the initial log is
 // commonly sent a full minute after startup, the initial log does not include
 // much in the way of user stats.   The most common interlog period (delay)
-// is 20 minutes. That time period starts when the first user action causes a
+// is 30 minutes. That time period starts when the first user action causes a
 // logging event.  This means that if there is no user action, there may be long
 // periods without any (ongoing) log transmissions.  Ongoing logs typically
 // contain very detailed records of user activities (ex: opened tab, closed
@@ -164,13 +164,12 @@
 #include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/tracked_objects.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/autocomplete/autocomplete_log.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/process_map.h"
@@ -183,14 +182,16 @@
 #include "chrome/browser/metrics/tracking_synchronizer.h"
 #include "chrome/browser/net/http_pipelining_compatibility_client.h"
 #include "chrome/browser/net/network_stats.h"
+#include "chrome/browser/omnibox/omnibox_log.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_otr_state.h"
+#include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/common/child_process_logging.h"
-#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/metrics/entropy_provider.h"
@@ -291,9 +292,9 @@ ResponseStatus ResponseCodeToStatus(int response_code) {
 }
 
 // The argument used to generate a non-identifying entropy source. We want no
-// more than 13 bits of entropy, so use this max to return a number between 1
-// and 2^13 = 8192 as the entropy source.
-const uint32 kMaxLowEntropySize = (1 << 13);
+// more than 13 bits of entropy, so use this max to return a number in the range
+// [0, 7999] as the entropy source (12.97 bits of entropy).
+const int kMaxLowEntropySize = 8000;
 
 // Default prefs value for prefs::kMetricsLowEntropySource to indicate that the
 // value has not yet been set.
@@ -380,7 +381,7 @@ class MetricsMemoryDetails : public MemoryDetails {
       : callback_(callback) {}
 
   virtual void OnDetailsAvailable() OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, callback_);
+    base::MessageLoop::current()->PostTask(FROM_HERE, callback_);
   }
 
  private:
@@ -536,12 +537,15 @@ scoped_ptr<const base::FieldTrial::EntropyProvider>
   //  1) It makes the entropy source less identifiable for parties that do not
   //     know the low entropy source.
   //  2) It makes the final entropy source resettable.
+  const int low_entropy_source_value = GetLowEntropySource();
+  UMA_HISTOGRAM_SPARSE_SLOWLY("UMA.LowEntropySourceValue",
+                              low_entropy_source_value);
   if (reporting_will_be_enabled) {
     if (entropy_source_returned_ == LAST_ENTROPY_NONE)
       entropy_source_returned_ = LAST_ENTROPY_HIGH;
     DCHECK_EQ(LAST_ENTROPY_HIGH, entropy_source_returned_);
     const std::string high_entropy_source =
-        client_id_ + base::IntToString(GetLowEntropySource());
+        client_id_ + base::IntToString(low_entropy_source_value);
     return scoped_ptr<const base::FieldTrial::EntropyProvider>(
         new metrics::SHA1EntropyProvider(high_entropy_source));
   }
@@ -549,9 +553,18 @@ scoped_ptr<const base::FieldTrial::EntropyProvider>
   if (entropy_source_returned_ == LAST_ENTROPY_NONE)
     entropy_source_returned_ = LAST_ENTROPY_LOW;
   DCHECK_EQ(LAST_ENTROPY_LOW, entropy_source_returned_);
+
+#if defined(OS_ANDROID) || defined(OS_IOS)
   return scoped_ptr<const base::FieldTrial::EntropyProvider>(
-      new metrics::PermutedEntropyProvider(GetLowEntropySource(),
+      new metrics::CachingPermutedEntropyProvider(
+          g_browser_process->local_state(),
+          low_entropy_source_value,
+          kMaxLowEntropySize));
+#else
+  return scoped_ptr<const base::FieldTrial::EntropyProvider>(
+      new metrics::PermutedEntropyProvider(low_entropy_source_value,
                                            kMaxLowEntropySize));
+#endif
 }
 
 void MetricsService::ForceClientIdCreation() {
@@ -693,9 +706,13 @@ void MetricsService::Observe(int type,
       LogLoadComplete(type, source, details);
       break;
 
-    case content::NOTIFICATION_LOAD_START:
-      LogLoadStarted();
+    case content::NOTIFICATION_LOAD_START: {
+      content::NavigationController* controller =
+          content::Source<content::NavigationController>(source).ptr();
+      content::WebContents* web_contents = controller->GetWebContents();
+      LogLoadStarted(web_contents);
       break;
+    }
 
     case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
         content::RenderProcessHost::RendererClosedDetails* process_details =
@@ -723,7 +740,7 @@ void MetricsService::Observe(int type,
           static_cast<MetricsLog*>(log_manager_.current_log());
       DCHECK(current_log);
       current_log->RecordOmniboxOpenedURL(
-          *content::Details<AutocompleteLog>(details).ptr());
+          *content::Details<OmniboxLog>(details).ptr());
       break;
     }
 
@@ -951,7 +968,7 @@ void MetricsService::OnInitTaskGotPluginInfo(
       FROM_HERE,
       base::Bind(&MetricsService::InitTaskGetGoogleUpdateData,
                  self_ptr_factory_.GetWeakPtr(),
-                 MessageLoop::current()->message_loop_proxy()));
+                 base::MessageLoop::current()->message_loop_proxy()));
 }
 
 // static
@@ -1026,18 +1043,22 @@ int MetricsService::GetLowEntropySource() {
   if (low_entropy_source_ != kLowEntropySourceNotSet)
     return low_entropy_source_;
 
-  PrefService* pref = g_browser_process->local_state();
+  PrefService* local_state = g_browser_process->local_state();
   const CommandLine* command_line(CommandLine::ForCurrentProcess());
   // Only try to load the value from prefs if the user did not request a reset.
   // Otherwise, skip to generating a new value.
   if (!command_line->HasSwitch(switches::kResetVariationState)) {
-    const int value = pref->GetInteger(prefs::kMetricsLowEntropySource);
-    if (value != kLowEntropySourceNotSet) {
-      // Ensure the prefs value is in the range [0, kMaxLowEntropySize). Old
-      // versions of the code would generate values in the range of [1, 8192],
-      // so the below line ensures 8192 gets mapped to 0 and also guards against
-      // the case of corrupted values.
-      low_entropy_source_ = value % kMaxLowEntropySize;
+    int value = local_state->GetInteger(prefs::kMetricsLowEntropySource);
+    // Old versions of the code would generate values in the range of [1, 8192],
+    // before the range was switched to [0, 8191] and then to [0, 7999]. Map
+    // 8192 to 0, so that the 0th bucket remains uniform, while re-generating
+    // the low entropy source for old values in the [8000, 8191] range.
+    if (value == 8192)
+      value = 0;
+    // If the value is outside the [0, kMaxLowEntropySize) range, re-generate
+    // it below.
+    if (value >= 0 && value < kMaxLowEntropySize) {
+      low_entropy_source_ = value;
       UMA_HISTOGRAM_BOOLEAN("UMA.GeneratedLowEntropySource", false);
       return low_entropy_source_;
     }
@@ -1045,7 +1066,8 @@ int MetricsService::GetLowEntropySource() {
 
   UMA_HISTOGRAM_BOOLEAN("UMA.GeneratedLowEntropySource", true);
   low_entropy_source_ = GenerateLowEntropySource();
-  pref->SetInteger(prefs::kMetricsLowEntropySource, low_entropy_source_);
+  local_state->SetInteger(prefs::kMetricsLowEntropySource, low_entropy_source_);
+  metrics::CachingPermutedEntropyProvider::ClearCache(local_state);
 
   return low_entropy_source_;
 }
@@ -1061,7 +1083,7 @@ std::string MetricsService::GenerateClientID() {
 void MetricsService::ScheduleNextStateSave() {
   state_saver_factory_.InvalidateWeakPtrs();
 
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&MetricsService::SaveLocalState,
                  state_saver_factory_.GetWeakPtr()),
       base::TimeDelta::FromMinutes(kSaveStateIntervalMinutes));
@@ -1102,7 +1124,7 @@ void MetricsService::OpenNewLog() {
         FROM_HERE,
         base::Bind(&MetricsService::InitTaskGetHardwareClass,
             self_ptr_factory_.GetWeakPtr(),
-            MessageLoop::current()->message_loop_proxy()),
+            base::MessageLoop::current()->message_loop_proxy()),
         base::TimeDelta::FromSeconds(kInitializationDelaySeconds));
   }
 }
@@ -1249,13 +1271,11 @@ void MetricsService::OnMemoryDetailCollectionDone() {
       &MetricsService::OnHistogramSynchronizationDone,
       self_ptr_factory_.GetWeakPtr());
 
-  base::StatisticsRecorder::CollectHistogramStats("Browser");
-
   // Set up the callback to task to call after we receive histograms from all
   // child processes. Wait time specifies how long to wait before absolutely
   // calling us back on the task.
   content::FetchHistogramsAsynchronously(
-      MessageLoop::current(), callback,
+      base::MessageLoop::current(), callback,
       base::TimeDelta::FromMilliseconds(kMaxHistogramGatheringWaitDuration));
 }
 
@@ -1558,13 +1578,23 @@ void MetricsService::IncrementLongPrefsValue(const char* path) {
   pref->SetInt64(path, value + 1);
 }
 
-void MetricsService::LogLoadStarted() {
+void MetricsService::LogLoadStarted(content::WebContents* web_contents) {
   content::RecordAction(content::UserMetricsAction("PageLoad"));
   HISTOGRAM_ENUMERATION("Chrome.UmaPageloadCounter", 1, 2);
   IncrementPrefValue(prefs::kStabilityPageLoadCount);
   IncrementLongPrefsValue(prefs::kUninstallMetricsPageLoadCount);
   // We need to save the prefs, as page load count is a critical stat, and it
   // might be lost due to a crash :-(.
+
+  // Track whether the page loaded is a search results page.
+  if (web_contents) {
+    SearchTabHelper* search_tab_helper =
+        SearchTabHelper::FromWebContents(web_contents);
+    if (search_tab_helper) {
+      if (search_tab_helper->model()->mode().is_search_results())
+        content::RecordAction(content::UserMetricsAction("PageLoadSRP"));
+    }
+  }
 }
 
 void MetricsService::LogRendererCrash(content::RenderProcessHost* host,

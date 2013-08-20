@@ -97,10 +97,11 @@ class TestAudioSource : public SineWaveAudioSource {
 
 }  // namespace
 
-class VirtualAudioInputStreamTest : public testing::Test {
+class VirtualAudioInputStreamTest : public testing::TestWithParam<bool> {
  public:
   VirtualAudioInputStreamTest()
       : audio_thread_(new base::Thread("AudioThread")),
+        worker_thread_(new base::Thread("AudioWorkerThread")),
         stream_(NULL),
         closed_stream_(false, false) {
     audio_thread_->Start();
@@ -115,8 +116,9 @@ class VirtualAudioInputStreamTest : public testing::Test {
   }
 
   void Create() {
+    const bool worker_is_separate_thread = GetParam();
     stream_ = new VirtualAudioInputStream(
-        kParams, audio_message_loop_,
+        kParams, GetWorkerLoop(worker_is_separate_thread),
         base::Bind(&base::DeletePointer<VirtualAudioInputStream>));
     stream_->Open();
   }
@@ -132,10 +134,10 @@ class VirtualAudioInputStreamTest : public testing::Test {
 
   void CreateAndStartOneOutputStream() {
     ASSERT_TRUE(!!stream_);
-    AudioOutputStream* const output_stream =
-        new VirtualAudioOutputStream(
-            kParams, audio_message_loop_, stream_,
-            base::Bind(&base::DeletePointer<VirtualAudioOutputStream>));
+    AudioOutputStream* const output_stream = new VirtualAudioOutputStream(
+        kParams,
+        stream_,
+        base::Bind(&base::DeletePointer<VirtualAudioOutputStream>));
     output_streams_.push_back(output_stream);
 
     output_stream->Open();
@@ -211,6 +213,19 @@ class VirtualAudioInputStreamTest : public testing::Test {
     return audio_message_loop_;
   }
 
+  const scoped_refptr<base::MessageLoopProxy>& GetWorkerLoop(
+      bool worker_is_separate_thread) {
+    if (worker_is_separate_thread) {
+      if (!worker_thread_->IsRunning()) {
+        worker_thread_->Start();
+        worker_message_loop_ = worker_thread_->message_loop_proxy();
+      }
+      return worker_message_loop_;
+    } else {
+      return audio_message_loop_;
+    }
+  }
+
  private:
   void SyncWithAudioThread() {
     base::WaitableEvent done(false, false);
@@ -222,6 +237,8 @@ class VirtualAudioInputStreamTest : public testing::Test {
 
   scoped_ptr<base::Thread> audio_thread_;
   scoped_refptr<base::MessageLoopProxy> audio_message_loop_;
+  scoped_ptr<base::Thread> worker_thread_;
+  scoped_refptr<base::MessageLoopProxy> worker_message_loop_;
 
   VirtualAudioInputStream* stream_;
   MockInputCallback input_callback_;
@@ -239,13 +256,13 @@ class VirtualAudioInputStreamTest : public testing::Test {
       FROM_HERE, base::Bind(&VirtualAudioInputStreamTest::method,  \
                             base::Unretained(this)))
 
-TEST_F(VirtualAudioInputStreamTest, CreateAndClose) {
+TEST_P(VirtualAudioInputStreamTest, CreateAndClose) {
   RUN_ON_AUDIO_THREAD(Create);
   RUN_ON_AUDIO_THREAD(Close);
   WaitUntilClosed();
 }
 
-TEST_F(VirtualAudioInputStreamTest, NoOutputs) {
+TEST_P(VirtualAudioInputStreamTest, NoOutputs) {
   RUN_ON_AUDIO_THREAD(Create);
   RUN_ON_AUDIO_THREAD(Start);
   WaitForDataToFlow();
@@ -254,7 +271,7 @@ TEST_F(VirtualAudioInputStreamTest, NoOutputs) {
   WaitUntilClosed();
 }
 
-TEST_F(VirtualAudioInputStreamTest, SingleOutput) {
+TEST_P(VirtualAudioInputStreamTest, SingleOutput) {
   RUN_ON_AUDIO_THREAD(Create);
   RUN_ON_AUDIO_THREAD(Start);
   RUN_ON_AUDIO_THREAD(CreateAndStartOneOutputStream);
@@ -265,7 +282,7 @@ TEST_F(VirtualAudioInputStreamTest, SingleOutput) {
   WaitUntilClosed();
 }
 
-TEST_F(VirtualAudioInputStreamTest, SingleOutputPausedAndRestarted) {
+TEST_P(VirtualAudioInputStreamTest, SingleOutputPausedAndRestarted) {
   RUN_ON_AUDIO_THREAD(Create);
   RUN_ON_AUDIO_THREAD(Start);
   RUN_ON_AUDIO_THREAD(CreateAndStartOneOutputStream);
@@ -279,7 +296,7 @@ TEST_F(VirtualAudioInputStreamTest, SingleOutputPausedAndRestarted) {
   WaitUntilClosed();
 }
 
-TEST_F(VirtualAudioInputStreamTest, MultipleOutputs) {
+TEST_P(VirtualAudioInputStreamTest, MultipleOutputs) {
   RUN_ON_AUDIO_THREAD(Create);
   RUN_ON_AUDIO_THREAD(Start);
   RUN_ON_AUDIO_THREAD(CreateAndStartOneOutputStream);
@@ -302,7 +319,7 @@ TEST_F(VirtualAudioInputStreamTest, MultipleOutputs) {
 }
 
 // A combination of all of the above tests with many output streams.
-TEST_F(VirtualAudioInputStreamTest, ComprehensiveTest) {
+TEST_P(VirtualAudioInputStreamTest, ComprehensiveTest) {
   static const int kNumOutputs = 8;
   static const int kHalfNumOutputs = kNumOutputs / 2;
   static const int kPauseIterations = 5;
@@ -333,5 +350,9 @@ TEST_F(VirtualAudioInputStreamTest, ComprehensiveTest) {
   RUN_ON_AUDIO_THREAD(Close);
   WaitUntilClosed();
 }
+
+INSTANTIATE_TEST_CASE_P(SingleVersusMultithreaded,
+                        VirtualAudioInputStreamTest,
+                        ::testing::Values(false, true));
 
 }  // namespace media

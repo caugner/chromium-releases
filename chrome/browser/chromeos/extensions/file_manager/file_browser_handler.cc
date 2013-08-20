@@ -5,9 +5,9 @@
 #include "chrome/browser/chromeos/extensions/file_manager/file_browser_handler.h"
 
 #include "base/logging.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -15,8 +15,6 @@
 #include "content/public/common/url_constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/url_pattern.h"
-#include "googleurl/src/gurl.h"
-#include "googleurl/src/url_util.h"
 
 namespace keys = extension_manifest_keys;
 namespace errors = extension_manifest_errors;

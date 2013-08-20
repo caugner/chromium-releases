@@ -87,6 +87,8 @@ std::string GetIBusKey(int keyval) {
     case XK_Control_L:
     case XK_Control_R:
       return "Ctrl";
+    case XK_Caps_Lock:
+      return "CapsLock";
     default: {
       // TODO: Properly support unicode characters.
       char value[2];
@@ -147,7 +149,7 @@ std::string GetIBusKeyCode(uint16 keycode) {
     case 0x0020: return "KeyO";
     case 0x0021: return "KeyP";
     case 0x0022: return "BracketLeft";
-    case 0x0023: return "BlacketRight";
+    case 0x0023: return "BracketRight";
     case 0x0024: return "Enter";
     case 0x0025: return "ControlLeft";
     case 0x0026: return "KeyA";
@@ -232,8 +234,8 @@ std::string GetIBusKeyCode(uint16 keycode) {
     case 0x005b: return "NumpadDecimal";
     case 0x0068: return "NumpadEnter";
     case 0x006a: return "NumpadDivide";
-    case 0x00bb: return "NumpadParentLeft";
-    case 0x00bc: return "NumpadParentRight";
+    case 0x00bb: return "NumpadParenLeft";
+    case 0x00bc: return "NumpadParenRight";
 
     // Unsupported keys
 

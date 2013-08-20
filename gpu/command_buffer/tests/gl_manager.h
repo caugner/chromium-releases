@@ -30,6 +30,8 @@ class MailboxManager;
 class GLES2Decoder;
 class GLES2CmdHelper;
 class GLES2Implementation;
+class ImageFactory;
+class ImageManager;
 class ShareGroup;
 
 };
@@ -50,6 +52,10 @@ class GLManager {
     bool bind_generates_resource;
     // Whether or not it's ok to lose the context.
     bool context_lost_allowed;
+    // Image manager to be used.
+    gles2::ImageManager* image_manager;
+    // Image factory to be used.
+    gles2::ImageFactory* image_factory;
   };
   GLManager();
   ~GLManager();
@@ -60,6 +66,10 @@ class GLManager {
   void MakeCurrent();
 
   void SetSurface(gfx::GLSurface* surface);
+
+  gles2::GLES2Decoder* decoder() const {
+    return decoder_.get();
+  }
 
   gles2::MailboxManager* mailbox_manager() const {
     return mailbox_manager_.get();

@@ -8,14 +8,13 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/google_apis/auth_service_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -27,8 +26,6 @@
 #if defined(OS_CHROMEOS)
 #include "chromeos/login/login_state.h"
 #endif  // OS_CHROMEOS
-
-using content::BrowserThread;
 
 namespace google_apis {
 
@@ -44,14 +41,14 @@ const int kSuccessRatioHistogramMaxValue = 4;  // The max value is exclusive.
 
 }  // namespace
 
-// OAuth2 authorization token retrieval operation.
-class AuthOperation : public OAuth2AccessTokenConsumer {
+// OAuth2 authorization token retrieval request.
+class AuthRequest : public OAuth2AccessTokenConsumer {
  public:
-  AuthOperation(net::URLRequestContextGetter* url_request_context_getter,
-                const AuthStatusCallback& callback,
-                const std::vector<std::string>& scopes,
-                const std::string& refresh_token);
-  virtual ~AuthOperation();
+  AuthRequest(net::URLRequestContextGetter* url_request_context_getter,
+              const AuthStatusCallback& callback,
+              const std::vector<std::string>& scopes,
+              const std::string& refresh_token);
+  virtual ~AuthRequest();
   void Start();
 
   // Overridden from OAuth2AccessTokenConsumer:
@@ -65,11 +62,12 @@ class AuthOperation : public OAuth2AccessTokenConsumer {
   AuthStatusCallback callback_;
   std::vector<std::string> scopes_;
   scoped_ptr<OAuth2AccessTokenFetcher> oauth2_access_token_fetcher_;
+  base::ThreadChecker thread_checker_;
 
-  DISALLOW_COPY_AND_ASSIGN(AuthOperation);
+  DISALLOW_COPY_AND_ASSIGN(AuthRequest);
 };
 
-AuthOperation::AuthOperation(
+AuthRequest::AuthRequest(
     net::URLRequestContextGetter* url_request_context_getter,
     const AuthStatusCallback& callback,
     const std::vector<std::string>& scopes,
@@ -81,9 +79,9 @@ AuthOperation::AuthOperation(
   DCHECK(!callback_.is_null());
 }
 
-AuthOperation::~AuthOperation() {}
+AuthRequest::~AuthRequest() {}
 
-void AuthOperation::Start() {
+void AuthRequest::Start() {
   DCHECK(!refresh_token_.empty());
   oauth2_access_token_fetcher_.reset(new OAuth2AccessTokenFetcher(
       this, url_request_context_getter_));
@@ -96,9 +94,9 @@ void AuthOperation::Start() {
 
 // Callback for OAuth2AccessTokenFetcher on success. |access_token| is the token
 // used to start fetching user data.
-void AuthOperation::OnGetTokenSuccess(const std::string& access_token,
-                                      const base::Time& expiration_time) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+void AuthRequest::OnGetTokenSuccess(const std::string& access_token,
+                                    const base::Time& expiration_time) {
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   UMA_HISTOGRAM_ENUMERATION("GData.AuthSuccess",
                             kSuccessRatioHistogramSuccess,
@@ -109,10 +107,10 @@ void AuthOperation::OnGetTokenSuccess(const std::string& access_token,
 }
 
 // Callback for OAuth2AccessTokenFetcher on failure.
-void AuthOperation::OnGetTokenFailure(const GoogleServiceAuthError& error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+void AuthRequest::OnGetTokenFailure(const GoogleServiceAuthError& error) {
+  DCHECK(thread_checker_.CalledOnValidThread());
 
-  LOG(WARNING) << "AuthOperation: token request using refresh token failed: "
+  LOG(WARNING) << "AuthRequest: token request using refresh token failed: "
                << error.ToString();
 
   // There are many ways to fail, but if the failure is due to connection,
@@ -164,32 +162,32 @@ AuthService::AuthService(
       url_request_context_getter_(url_request_context_getter),
       scopes_(scopes),
       weak_ptr_factory_(this) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 AuthService::~AuthService() {
 }
 
 void AuthService::StartAuthentication(const AuthStatusCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   scoped_refptr<base::MessageLoopProxy> relay_proxy(
       base::MessageLoopProxy::current());
 
   if (HasAccessToken()) {
     // We already have access token. Give it back to the caller asynchronously.
     relay_proxy->PostTask(FROM_HERE,
-         base::Bind(callback, HTTP_SUCCESS, access_token_));
+                          base::Bind(callback, HTTP_SUCCESS, access_token_));
   } else if (HasRefreshToken()) {
     // We have refresh token, let's get an access token.
-    (new AuthOperation(url_request_context_getter_,
-                       base::Bind(&AuthService::OnAuthCompleted,
-                                  weak_ptr_factory_.GetWeakPtr(),
-                                  callback),
-                       scopes_,
-                       refresh_token_))->Start();
+    (new AuthRequest(url_request_context_getter_,
+                     base::Bind(&AuthService::OnAuthCompleted,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                callback),
+                     scopes_,
+                     refresh_token_))->Start();
   } else {
     relay_proxy->PostTask(FROM_HERE,
-        base::Bind(callback, GDATA_NOT_READY, std::string()));
+                          base::Bind(callback, GDATA_NOT_READY, std::string()));
   }
 }
 
@@ -220,7 +218,7 @@ void AuthService::ClearRefreshToken() {
 void AuthService::OnAuthCompleted(const AuthStatusCallback& callback,
                                   GDataErrorCode error,
                                   const std::string& access_token) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (error == HTTP_SUCCESS) {
@@ -276,7 +274,7 @@ bool AuthService::CanAuthenticate(Profile* profile) {
 #if defined(OS_CHROMEOS)
   if (!chromeos::LoginState::IsInitialized())
     return false;
-  if (!chromeos::LoginState::Get()->IsUserAuthenticated())
+  if (!chromeos::LoginState::Get()->IsUserGaiaAuthenticated())
     return false;
 #endif  // OS_CHROMEOS
 

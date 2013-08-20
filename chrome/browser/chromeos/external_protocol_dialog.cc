@@ -5,12 +5,10 @@
 #include "chrome/browser/chromeos/external_protocol_dialog.h"
 
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "googleurl/src/gurl.h"
@@ -105,14 +103,6 @@ ExternalProtocolDialog::ExternalProtocolDialog(WebContents* web_contents,
       ASCIIToUTF16(url.scheme() + ":"),
       elided_url_without_scheme) + ASCIIToUTF16("\n\n"));
   params.message_width = kMessageWidth;
-  if (web_contents) {
-    Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
-    if (browser) {
-      params.clipboard_source_tag =
-        content::BrowserContext::GetMarkerForOffTheRecordContext(
-            browser->profile());
-    }
-  }
   message_box_view_ = new views::MessageBoxView(params);
   message_box_view_->SetCheckBoxLabel(
       l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_CHECKBOX_TEXT));
@@ -124,5 +114,5 @@ ExternalProtocolDialog::ExternalProtocolDialog(WebContents* web_contents,
     // Dialog is top level if we don't have a web_contents associated with us.
     parent_window = NULL;
   }
-  views::Widget::CreateWindowWithParent(this, parent_window)->Show();
+  views::DialogDelegate::CreateDialogWidget(this, NULL, parent_window)->Show();
 }

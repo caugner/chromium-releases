@@ -15,7 +15,7 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/common/chrome_version_info.h"
@@ -55,6 +55,9 @@ class RecoveryComponentInstaller : public ComponentInstaller {
 
   virtual bool Install(const base::DictionaryValue& manifest,
                        const base::FilePath& unpack_path) OVERRIDE;
+
+  virtual bool GetInstalledFile(const std::string& file,
+                                base::FilePath* installed_file) OVERRIDE;
 
  private:
   Version current_version_;
@@ -128,6 +131,11 @@ bool RecoveryComponentInstaller::Install(const base::DictionaryValue& manifest,
         base::Bind(&RecoveryUpdateVersionHelper, version, prefs_));
   }
   return base::LaunchProcess(cmdline, base::LaunchOptions(), NULL);
+}
+
+bool RecoveryComponentInstaller::GetInstalledFile(
+    const std::string& file, base::FilePath* installed_file) {
+  return false;
 }
 
 void RegisterRecoveryComponent(ComponentUpdateService* cus,

@@ -5,6 +5,7 @@
 [
   {
     "namespace": "extension",
+    "description": "The <code>chrome.extension</code> API has utilities that can be used by any extension page. It includes support for exchanging messages between an extension and its content scripts or between extensions, as described in detail in <a href='messaging.html'>Message Passing</a>.",
     "compiler_options": {
       "implemented_in": "chrome/browser/extensions/api/module/module.h"
     },
@@ -23,7 +24,6 @@
       "lastError": {
         "type": "object",
         "optional": true,
-        "unprivileged": true,
         "description": "Set for the lifetime of a callback if an ansychronous extension api has resulted in an error. If no error has occured lastError will be <var>undefined</var>.",
         "properties": {
           "message": { "type": "string", "description": "Description of the error that has taken place." }
@@ -32,7 +32,6 @@
       "inIncognitoContext": {
         "type": "boolean",
         "optional": true,
-        "unprivileged": true,
         "description": "True for content scripts running inside incognito tabs, and for extension pages running inside an incognito process. The latter only applies to extensions with 'split' incognito_behavior."
       }
     },
@@ -43,7 +42,6 @@
         "nodoc": true,
         "type": "function",
         "allowAmbiguousOptionalArguments": true,
-        "unprivileged": true,
         "description": "Deprecated: Please use sendMessage.",
         "parameters": [
           {"type": "string", "name": "extensionId", "optional": true, "description": "The extension ID of the extension you want to connect to. If omitted, default is your own extension."},
@@ -66,7 +64,6 @@
         "name": "getURL",
         "nocompile": true,
         "type": "function",
-        "unprivileged": true,
         "description": "Converts a relative path within an extension install directory to a fully-qualified URL.",
         "parameters": [
           {
@@ -108,7 +105,12 @@
         "returns": {
           "type": "array",
           "description": "Array of global objects",
-          "items": { "type": "object", "isInstanceOf": "global", "additionalProperties": { "type": "any" } }
+          "items": {
+            "name": "viewGlobals",
+            "type": "object",
+            "isInstanceOf": "global",
+            "additionalProperties": { "type": "any" }
+          }
         }
       },
       {
@@ -118,7 +120,11 @@
         "description": "Returns the JavaScript 'window' object for the background page running inside the current extension. Returns null if the extension has no background page.",
         "parameters": [],
         "returns": {
-          "type": "object", "isInstanceOf": "global", "additionalProperties": { "type": "any" }
+            "type": "object",
+            "optional": true,
+            "name": "backgroundPageGlobal",
+            "isInstanceOf": "global",
+            "additionalProperties": { "type": "any" }
          }
       },
       {
@@ -134,7 +140,12 @@
         "returns": {
           "type": "array",
           "description": "Array of global window objects",
-          "items": { "type": "object", "isInstanceOf": "global", "additionalProperties": { "type": "any" } }
+          "items": {
+            "type": "object",
+            "name": "tabGlobals",
+            "isInstanceOf": "global",
+            "additionalProperties": { "type": "any" }
+          }
         }
       },
       {
@@ -190,7 +201,6 @@
         "nodoc": true,
         "type": "function",
         "anonymous": true,
-        "unprivileged": true,
         "description": "Deprecated: please use onMessage.",
         "parameters": [
           {"name": "request", "type": "any", "description": "The request sent by the calling script."},

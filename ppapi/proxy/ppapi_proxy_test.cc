@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/observer_list.h"
 #include "base/process_util.h"
 #include "base/run_loop.h"
@@ -41,11 +41,6 @@ void SetReserveInstanceIDCallback(PP_Module module,
   // worry about Instance uniqueness in tests, so we can ignore the call.
 }
 
-int32_t GetURLLoaderBufferedBytes(PP_Resource url_loader) {
-  NOTREACHED();
-  return 0;
-}
-
 void AddRefModule(PP_Module module) {}
 void ReleaseModule(PP_Module module) {}
 PP_Bool IsInModuleDestructor(PP_Module module) { return PP_FALSE; }
@@ -54,7 +49,6 @@ PPB_Proxy_Private ppb_proxy_private = {
   &PluginCrashed,
   &GetInstanceForResource,
   &SetReserveInstanceIDCallback,
-  &GetURLLoaderBufferedBytes,
   &AddRefModule,
   &ReleaseModule,
   &IsInModuleDestructor
@@ -557,7 +551,7 @@ void TwoWayTest::SetUp() {
                  &remote_harness_set_up));
   remote_harness_set_up.Wait();
   local_harness_->SetUpHarnessWithChannel(handle,
-                                          io_thread_.message_loop_proxy(),
+                                          io_thread_.message_loop_proxy().get(),
                                           &shutdown_event_,
                                           true);  // is_client
 }

@@ -8,16 +8,17 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystemType.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/public/platform/WebFileSystemType.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 
 namespace extensions {
 
 FileBrowserHandlerCustomBindings::FileBrowserHandlerCustomBindings(
-    Dispatcher* dispatcher, v8::Handle<v8::Context> context)
+    Dispatcher* dispatcher, ChromeV8Context* context)
     : ChromeV8Extension(dispatcher, context) {
   RouteFunction(
       "GetExternalFileEntry",
@@ -25,8 +26,8 @@ FileBrowserHandlerCustomBindings::FileBrowserHandlerCustomBindings(
                  base::Unretained(this)));
 }
 
-v8::Handle<v8::Value> FileBrowserHandlerCustomBindings::GetExternalFileEntry(
-    const v8::Arguments& args) {
+void FileBrowserHandlerCustomBindings::GetExternalFileEntry(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   // TODO(zelidrag): Make this magic work on other platforms when file browser
   // matures enough on ChromeOS.
 #if defined(OS_CHROMEOS)
@@ -45,15 +46,13 @@ v8::Handle<v8::Value> FileBrowserHandlerCustomBindings::GetExternalFileEntry(
     bool is_directory =
         file_def->Get(v8::String::New("fileIsDirectory"))->ToBoolean()->Value();
     WebKit::WebFrame* webframe =
-        WebKit::WebFrame::frameForContext(v8_context());
-    return webframe->createFileEntry(
+        WebKit::WebFrame::frameForContext(context()->v8_context());
+    args.GetReturnValue().Set(webframe->createFileEntry(
         WebKit::WebFileSystemTypeExternal,
         WebKit::WebString::fromUTF8(file_system_name.c_str()),
         WebKit::WebString::fromUTF8(file_system_path.c_str()),
         WebKit::WebString::fromUTF8(file_full_path.c_str()),
-        is_directory);
-#else
-    return v8::Undefined();
+        is_directory));
 #endif
 }
 

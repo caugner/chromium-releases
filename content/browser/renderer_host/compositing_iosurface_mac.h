@@ -19,6 +19,7 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "media/base/video_frame.h"
+#include "ui/base/latency_info.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_conversions.h"
@@ -37,6 +38,7 @@ class CompositingIOSurfaceContext;
 class CompositingIOSurfaceShaderPrograms;
 class CompositingIOSurfaceTransformer;
 class RenderWidgetHostViewFrameSubscriber;
+class RenderWidgetHostViewMac;
 
 // This class manages an OpenGL context and IOSurface for the accelerated
 // compositing code path. The GL context is attached to
@@ -53,26 +55,30 @@ class CompositingIOSurfaceMac {
   // Returns NULL if IOSurface support is missing or GL APIs fail. Specify in
   // |order| the desired ordering relationship of the surface to the containing
   // window.
-  static CompositingIOSurfaceMac* Create(int window_number,
-                                  SurfaceOrder order);
+  static CompositingIOSurfaceMac* Create(int window_number);
+  static CompositingIOSurfaceMac* Create(
+      const scoped_refptr<CompositingIOSurfaceContext>& context);
   ~CompositingIOSurfaceMac();
 
   // Set IOSurface that will be drawn on the next NSView drawRect.
-  void SetIOSurface(uint64 io_surface_handle,
-                    const gfx::Size& size);
+  bool SetIOSurface(uint64 io_surface_handle,
+                    const gfx::Size& size,
+                    float scale_factor,
+                    const ui::LatencyInfo& latency_info);
 
   // Get the CGL renderer ID currently associated with this context.
   int GetRendererID();
 
-  // Blit the IOSurface at the upper-left corner of the |view|. If |view| window
-  // size is larger than the IOSurface, the remaining right and bottom edges
-  // will be white. |scaleFactor| is 1 in normal views, 2 in HiDPI views.
-  // |frame_subscriber| listens to this draw event and provides output buffer
-  // for copying this frame into.
-  void DrawIOSurface(NSView* view,
-                     float scale_factor,
-                     int window_number,
-                     RenderWidgetHostViewFrameSubscriber* frame_subscriber);
+  // Blit the IOSurface at the upper-left corner of the of the specified
+  // window_size. If the window size is larger than the IOSurface, the
+  // remaining right and bottom edges will be white. |scaleFactor| is 1
+  // in normal views, 2 in HiDPI views.  |frame_subscriber| listens to
+  // this draw event and provides output buffer for copying this frame into.
+  bool DrawIOSurface(const gfx::Size& window_size,
+                     float window_scale_factor,
+                     RenderWidgetHostViewFrameSubscriber* frame_subscriber,
+                     bool using_core_animation);
+  bool DrawIOSurface(RenderWidgetHostViewMac* render_widget_host_view);
 
   // Copy the data of the "live" OpenGL texture referring to this IOSurfaceRef
   // into |out|. The copied region is specified with |src_pixel_subrect| and
@@ -83,7 +89,6 @@ class CompositingIOSurfaceMac {
   // |callback| is invoked when the operation is completed or failed.
   // Do no call this method again before |callback| is invoked.
   void CopyTo(const gfx::Rect& src_pixel_subrect,
-              float src_scale_factor,
               const gfx::Size& dst_pixel_size,
               const base::Callback<void(bool, const SkBitmap&)>& callback);
 
@@ -91,7 +96,6 @@ class CompositingIOSurfaceMac {
   // VideoFrame, and invoke a callback to indicate success or failure.
   void CopyToVideoFrame(
       const gfx::Rect& src_subrect,
-      float src_scale_factor,
       const scoped_refptr<media::VideoFrame>& target,
       const base::Callback<void(bool)>& callback);
 
@@ -112,11 +116,14 @@ class CompositingIOSurfaceMac {
     return pixel_io_surface_size_;
   }
   // In cocoa view units / DIPs.
-  const gfx::Size& io_surface_size() const { return io_surface_size_; }
-
-  void SetDeviceScaleFactor(float scale_factor);
+  const gfx::Size& dip_io_surface_size() const { return dip_io_surface_size_; }
+  float scale_factor() const { return scale_factor_; }
 
   bool is_vsync_disabled() const;
+
+  const scoped_refptr<CompositingIOSurfaceContext>& context() {
+    return context_;
+  }
 
   // Get vsync scheduling parameters.
   // |interval_numerator/interval_denominator| equates to fractional number of
@@ -224,14 +231,15 @@ class CompositingIOSurfaceMac {
 
   CompositingIOSurfaceMac(
       IOSurfaceSupport* io_surface_support,
-      scoped_refptr<CompositingIOSurfaceContext> context);
+      const scoped_refptr<CompositingIOSurfaceContext>& context);
 
   void SetupCVDisplayLink();
 
   // If this IOSurface has moved to a different window, use that window's
   // GL context (if multiple visible windows are using the same GL context
   // then call to setView call can stall and prevent reaching 60fps).
-  void SwitchToContextOnNewWindow(NSView* view, int window_number);
+  void SwitchToContextOnNewWindow(NSView* view,
+                                  int window_number);
 
   bool IsVendorIntel();
 
@@ -262,7 +270,6 @@ class CompositingIOSurfaceMac {
   // operations. This allow certain optimizations.
   base::Closure CopyToVideoFrameWithinContext(
       const gfx::Rect& src_subrect,
-      float src_scale_factor,
       bool called_within_draw,
       const scoped_refptr<media::VideoFrame>& target,
       const base::Callback<void(bool)>& callback);
@@ -272,7 +279,6 @@ class CompositingIOSurfaceMac {
   // |bitmap_output| or letter-boxed YV12 is written to |video_frame_output|.
   base::Closure CopyToSelectedOutputWithinContext(
       const gfx::Rect& src_pixel_subrect,
-      float src_scale_factor,
       const gfx::Rect& dst_pixel_rect,
       bool called_within_draw,
       const SkBitmap* bitmap_output,
@@ -301,8 +307,11 @@ class CompositingIOSurfaceMac {
   void FailAllCopies();
   void DestroyAllCopyContextsWithinContext();
 
-  gfx::Rect IntersectWithIOSurface(const gfx::Rect& rect,
-                                   float scale_factor) const;
+  // Check for GL errors and store the result in error_. Only return new
+  // errors
+  GLenum GetAndSaveGLError();
+
+  gfx::Rect IntersectWithIOSurface(const gfx::Rect& rect) const;
 
   // Cached pointer to IOSurfaceSupport Singleton.
   IOSurfaceSupport* io_surface_support_;
@@ -313,11 +322,12 @@ class CompositingIOSurfaceMac {
 
   // IOSurface data.
   uint64 io_surface_handle_;
-  base::mac::ScopedCFTypeRef<CFTypeRef> io_surface_;
+  base::ScopedCFTypeRef<CFTypeRef> io_surface_;
 
   // The width and height of the io surface.
   gfx::Size pixel_io_surface_size_;  // In pixels.
-  gfx::Size io_surface_size_;  // In view units.
+  gfx::Size dip_io_surface_size_;  // In view / density independent pixels.
+  float scale_factor_;
 
   // The "live" OpenGL texture referring to this IOSurfaceRef. Note
   // that per the CGLTexImageIOSurface2D API we do not need to
@@ -345,10 +355,6 @@ class CompositingIOSurfaceMac {
   // Lock for sharing data between UI thread and display-link thread.
   base::Lock lock_;
 
-  // Counts for throttling swaps.
-  int64 vsync_count_;
-  int64 swap_count_;
-
   // Vsync timing data.
   base::TimeTicks vsync_timebase_;
   uint32 vsync_interval_numerator_;
@@ -357,6 +363,11 @@ class CompositingIOSurfaceMac {
   bool initialized_is_intel_;
   bool is_intel_;
   GLint screen_;
+
+  // Error saved by GetAndSaveGLError
+  GLint gl_error_;
+
+  ui::LatencyInfo latency_info_;
 };
 
 }  // namespace content

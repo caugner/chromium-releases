@@ -10,8 +10,8 @@
 #include "base/memory/scoped_vector.h"
 #include "base/rand_util.h"
 #include "base/sha1.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -56,12 +56,8 @@ bool WebSocket::Send(const std::string& message) {
   if (state_ != OPEN)
     return false;
 
-  net::WebSocketFrameHeader header;
+  net::WebSocketFrameHeader header(net::WebSocketFrameHeader::kOpCodeText);
   header.final = true;
-  header.reserved1 = false;
-  header.reserved2 = false;
-  header.reserved3 = false;
-  header.opcode = net::WebSocketFrameHeader::kOpCodeText;
   header.masked = true;
   header.payload_length = message.length();
   int header_size = net::GetWebSocketFrameHeaderSize(header);
@@ -132,19 +128,19 @@ void WebSocket::ContinueWritingIfNecessary() {
         pending_write_.length());
     pending_write_.clear();
   }
-  int code = socket_->Write(
-      write_buffer_,
-      write_buffer_->BytesRemaining(),
-      base::Bind(&WebSocket::OnWrite, base::Unretained(this)));
+  int code =
+      socket_->Write(write_buffer_.get(),
+                     write_buffer_->BytesRemaining(),
+                     base::Bind(&WebSocket::OnWrite, base::Unretained(this)));
   if (code != net::ERR_IO_PENDING)
     OnWrite(code);
 }
 
 void WebSocket::Read() {
-  int code = socket_->Read(
-      read_buffer_,
-      read_buffer_->size(),
-      base::Bind(&WebSocket::OnRead, base::Unretained(this)));
+  int code =
+      socket_->Read(read_buffer_.get(),
+                    read_buffer_->size(),
+                    base::Bind(&WebSocket::OnRead, base::Unretained(this)));
   if (code != net::ERR_IO_PENDING)
     OnRead(code);
 }
@@ -200,7 +196,7 @@ void WebSocket::OnReadDuringOpen(const char* data, int len) {
   CHECK(parser_.Decode(data, len, &frame_chunks));
   for (size_t i = 0; i < frame_chunks.size(); ++i) {
     scoped_refptr<net::IOBufferWithSize> buffer = frame_chunks[i]->data;
-    if (buffer)
+    if (buffer.get())
       next_message_ += std::string(buffer->data(), buffer->size());
     if (frame_chunks[i]->final_chunk) {
       listener_->OnMessageReceived(next_message_);

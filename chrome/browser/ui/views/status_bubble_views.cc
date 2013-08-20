@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
@@ -221,10 +221,10 @@ void StatusBubbleViews::StatusView::StartTimer(base::TimeDelta time) {
   if (timer_factory_.HasWeakPtrs())
     timer_factory_.InvalidateWeakPtrs();
 
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&StatusBubbleViews::StatusView::OnTimer,
-                timer_factory_.GetWeakPtr()),
+                 timer_factory_.GetWeakPtr()),
       time);
 }
 
@@ -548,7 +548,6 @@ const int StatusBubbleViews::kShadowThickness = 1;
 StatusBubbleViews::StatusBubbleViews(views::View* base_view)
     : contains_mouse_(false),
       offset_(0),
-      popup_(NULL),
       opacity_(0),
       base_view_(base_view),
       view_(NULL),
@@ -681,7 +680,7 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
     if (is_expanded_ && !url.is_empty()) {
       ExpandBubble();
     } else if (net::FormatUrl(url, languages).length() > url_text_.length()) {
-      MessageLoop::current()->PostDelayedTask(
+      base::MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&StatusBubbleViews::ExpandBubble,
                      expand_timer_factory_.GetWeakPtr()),

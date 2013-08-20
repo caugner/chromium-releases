@@ -36,6 +36,7 @@ const char kForwardKeyEventSignal[] = "ForwardKeyEvent";
 const char kHidePreeditTextSignal[] = "HidePreeditText";
 const char kShowPreeditTextSignal[] = "ShowPreeditText";
 const char kUpdatePreeditTextSignal[] = "UpdatePreeditText";
+const char kDeleteSurroundingTextSignal[] = "DeleteSurroundingText";
 const char kFocusInMethod[] = "FocusIn";
 const char kFocusOutMethod[] = "FocusOut";
 const char kResetMethod[] = "Reset";
@@ -75,6 +76,7 @@ const char kUpdatePropertySignal[] = "UpdateProperty";
 const char kForwardKeyEventSignal[] = "ForwardKeyEvent";
 const char kRequireSurroundingTextSignal[] = "RequireSurroundingText";
 const char kCommitTextSignal[] = "CommitText";
+const char kDeleteSurroundingTextSignal[] = "DeleteSurroundingText";
 }  // namespace engine
 
 namespace panel {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+  // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "chromeos/dbus/mock_shill_manager_client.h"
 #include "chromeos/dbus/mock_shill_service_client.h"
 #include "chromeos/network/network_configuration_handler.h"
+#include "chromeos/network/network_state_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -50,7 +51,7 @@ void DictionaryValueCallback(
 void ErrorCallback(bool error_expected,
                    const std::string& expected_id,
                    const std::string& error_name,
-                   const scoped_ptr<base::DictionaryValue> error_data) {
+                   scoped_ptr<base::DictionaryValue> error_data) {
   EXPECT_TRUE(error_expected) << "Unexpected error: " << error_name
       << " with associated data: \n"
       << PrettyJson(*error_data);
@@ -87,13 +88,15 @@ class NetworkConfigurationHandlerTest : public testing::Test {
     mock_service_client_ =
         mock_dbus_thread_manager->mock_shill_service_client();
 
-    // Initialize DBusThreadManager with a stub implementation.
-    NetworkConfigurationHandler::Initialize();
+    network_state_handler_.reset(NetworkStateHandler::InitializeForTest());
+    network_configuration_handler_.reset(new NetworkConfigurationHandler());
+    network_configuration_handler_->Init(network_state_handler_.get());
     message_loop_.RunUntilIdle();
   }
 
   virtual void TearDown() OVERRIDE {
-    NetworkConfigurationHandler::Shutdown();
+    network_configuration_handler_.reset();
+    network_state_handler_.reset();
     DBusThreadManager::Shutdown();
   }
 
@@ -134,18 +137,6 @@ class NetworkConfigurationHandlerTest : public testing::Test {
     callback.Run(result);
   }
 
-  void OnConnect(const dbus::ObjectPath& service_path,
-                 const base::Closure& callback,
-                 const ShillClientHelper::ErrorCallback& error_callback) {
-    callback.Run();
-  }
-
-  void OnDisconnect(const dbus::ObjectPath& service_path,
-                    const base::Closure& callback,
-                    const ShillClientHelper::ErrorCallback& error_callback) {
-    callback.Run();
-  }
-
   void OnGetService(const base::DictionaryValue& properties,
                     const ObjectPathCallback& callback,
                     const ShillClientHelper::ErrorCallback& error_callback) {
@@ -161,7 +152,9 @@ class NetworkConfigurationHandlerTest : public testing::Test {
  protected:
   MockShillManagerClient* mock_manager_client_;
   MockShillServiceClient* mock_service_client_;
-  MessageLoop message_loop_;
+  scoped_ptr<NetworkStateHandler> network_state_handler_;
+  scoped_ptr<NetworkConfigurationHandler> network_configuration_handler_;
+  base::MessageLoop message_loop_;
   base::DictionaryValue* dictionary_value_result_;
 };
 
@@ -190,7 +183,7 @@ TEST_F(NetworkConfigurationHandlerTest, GetProperties) {
               GetProperties(_, _)).WillOnce(
                   Invoke(this,
                          &NetworkConfigurationHandlerTest::OnGetProperties));
-  NetworkConfigurationHandler::Get()->GetProperties(
+  network_configuration_handler_->GetProperties(
       service_path,
       base::Bind(&DictionaryValueCallback,
                  service_path,
@@ -213,7 +206,7 @@ TEST_F(NetworkConfigurationHandlerTest, SetProperties) {
               ConfigureService(_, _, _)).WillOnce(
                   Invoke(this,
                          &NetworkConfigurationHandlerTest::OnSetProperties));
-  NetworkConfigurationHandler::Get()->SetProperties(
+  network_configuration_handler_->SetProperties(
       service_path,
       value,
       base::Bind(&base::DoNothing),
@@ -236,7 +229,7 @@ TEST_F(NetworkConfigurationHandlerTest, ClearProperties) {
               ConfigureService(_, _, _)).WillOnce(
                   Invoke(this,
                          &NetworkConfigurationHandlerTest::OnSetProperties));
-  NetworkConfigurationHandler::Get()->SetProperties(
+  network_configuration_handler_->SetProperties(
       service_path,
       value,
       base::Bind(&base::DoNothing),
@@ -250,7 +243,7 @@ TEST_F(NetworkConfigurationHandlerTest, ClearProperties) {
               ClearProperties(_, _, _, _)).WillOnce(
                   Invoke(this,
                          &NetworkConfigurationHandlerTest::OnClearProperties));
-  NetworkConfigurationHandler::Get()->ClearProperties(
+  network_configuration_handler_->ClearProperties(
       service_path,
       values_to_clear,
       base::Bind(&base::DoNothing),
@@ -273,7 +266,7 @@ TEST_F(NetworkConfigurationHandlerTest, ClearPropertiesError) {
               ConfigureService(_, _, _)).WillOnce(
                   Invoke(this,
                          &NetworkConfigurationHandlerTest::OnSetProperties));
-  NetworkConfigurationHandler::Get()->SetProperties(
+  network_configuration_handler_->SetProperties(
       service_path,
       value,
       base::Bind(&base::DoNothing),
@@ -288,39 +281,11 @@ TEST_F(NetworkConfigurationHandlerTest, ClearPropertiesError) {
       ClearProperties(_, _, _, _)).WillOnce(
           Invoke(this,
                  &NetworkConfigurationHandlerTest::OnClearPropertiesError));
-  NetworkConfigurationHandler::Get()->ClearProperties(
+  network_configuration_handler_->ClearProperties(
       service_path,
       values_to_clear,
       base::Bind(&base::DoNothing),
       base::Bind(&ErrorCallback, true, service_path));
-  message_loop_.RunUntilIdle();
-}
-
-TEST_F(NetworkConfigurationHandlerTest, Connect) {
-  std::string service_path = "/service/1";
-
-  EXPECT_CALL(*mock_service_client_,
-              Connect(_, _, _)).WillOnce(
-                  Invoke(this,
-                         &NetworkConfigurationHandlerTest::OnConnect));
-  NetworkConfigurationHandler::Get()->Connect(
-      service_path,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ErrorCallback, false, service_path));
-  message_loop_.RunUntilIdle();
-}
-
-TEST_F(NetworkConfigurationHandlerTest, Disconnect) {
-  std::string service_path = "/service/1";
-
-  EXPECT_CALL(*mock_service_client_,
-              Disconnect(_, _, _)).WillOnce(
-                  Invoke(this,
-                         &NetworkConfigurationHandlerTest::OnDisconnect));
-  NetworkConfigurationHandler::Get()->Disconnect(
-      service_path,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ErrorCallback, false, service_path));
   message_loop_.RunUntilIdle();
 }
 
@@ -338,7 +303,7 @@ TEST_F(NetworkConfigurationHandlerTest, CreateConfiguration) {
       GetService(_, _, _)).WillOnce(
           Invoke(this,
                  &NetworkConfigurationHandlerTest::OnGetService));
-  NetworkConfigurationHandler::Get()->CreateConfiguration(
+  network_configuration_handler_->CreateConfiguration(
       value,
       base::Bind(&StringResultCallback, std::string("/service/2")),
       base::Bind(&ErrorCallback, false, std::string("")));
@@ -353,7 +318,7 @@ TEST_F(NetworkConfigurationHandlerTest, RemoveConfiguration) {
       Remove(_, _, _)).WillOnce(
           Invoke(this,
                  &NetworkConfigurationHandlerTest::OnRemove));
-  NetworkConfigurationHandler::Get()->RemoveConfiguration(
+  network_configuration_handler_->RemoveConfiguration(
       service_path,
       base::Bind(&base::DoNothing),
       base::Bind(&ErrorCallback, false, service_path));

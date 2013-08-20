@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -68,19 +68,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptIgnoreHostPermissions) {
   ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunExtensionTest(
       "content_scripts/dont_match_host_permissions")) << message_;
-}
-
-IN_PROC_BROWSER_TEST_F(
-    ExtensionApiTest, ContentScriptInjectedIntoMultipartPage) {
-  ASSERT_TRUE(StartTestServer());
-
-  // Start with a renderer already open at a URL.
-  GURL url(test_server()->GetURL("multipart-slow"));
-  ui_test_utils::NavigateToURL(browser(), url);
-
-  string16 title;
-  ui_test_utils::GetCurrentTabTitle(browser(), &title);
-  EXPECT_EQ(std::string("PASS"), UTF16ToUTF8(title));
 }
 
 // crbug.com/39249 -- content scripts js should not run on view source.
@@ -162,9 +149,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionAPIs) {
   EXPECT_TRUE(catcher.GetNextResult());
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptPermissionsApi) {
-  PermissionsRequestFunction::SetIgnoreUserGestureForTests(true);
-  PermissionsRequestFunction::SetAutoConfirmForTests(true);
+// Flaky on Windows. http://crbug.com/248418
+#if defined(OS_WIN)
+#define MAYBE_ContentScriptPermissionsApi DISABLED_ContentScriptPermissionsApi
+#else
+#define MAYBE_ContentScriptPermissionsApi ContentScriptPermissionsApi
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ContentScriptPermissionsApi) {
+  extensions::PermissionsRequestFunction::SetIgnoreUserGestureForTests(true);
+  extensions::PermissionsRequestFunction::SetAutoConfirmForTests(true);
   host_resolver()->AddRule("*.com", "127.0.0.1");
   ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/permissions")) << message_;

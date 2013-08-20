@@ -8,7 +8,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/data_buffer.h"
 #include "media/base/gmock_callback_support.h"
@@ -19,6 +19,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::base::Time;
+using ::base::TimeTicks;
 using ::base::TimeDelta;
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -63,7 +64,8 @@ class AudioRendererImplTest : public ::testing::Test {
         message_loop_.message_loop_proxy(),
         new NiceMock<MockAudioRendererSink>(),
         decoders.Pass(),
-        SetDecryptorReadyCB()));
+        SetDecryptorReadyCB(),
+        false));
 
     // Stub out time.
     renderer_->set_now_cb_for_testing(base::Bind(
@@ -279,7 +281,7 @@ class AudioRendererImplTest : public ::testing::Test {
   }
 
   void CallResumeAfterUnderflow() {
-    renderer_->ResumeAfterUnderflow(false);
+    renderer_->ResumeAfterUnderflow();
   }
 
   TimeDelta CalculatePlayTime(int bytes_filled) {
@@ -333,7 +335,7 @@ class AudioRendererImplTest : public ::testing::Test {
   scoped_ptr<AudioRendererImpl> renderer_;
 
  private:
-  Time GetTime() {
+  TimeTicks GetTime() {
     base::AutoLock auto_lock(lock_);
     return time_;
   }
@@ -366,7 +368,7 @@ class AudioRendererImplTest : public ::testing::Test {
 
   // Used for stubbing out time in the audio callback thread.
   base::Lock lock_;
-  Time time_;
+  TimeTicks time_;
 
   // Used for satisfying reads.
   AudioDecoder::ReadCB read_cb_;
@@ -436,7 +438,7 @@ TEST_F(AudioRendererImplTest, Underflow) {
   EXPECT_CALL(*this, OnUnderflow());
   EXPECT_FALSE(ConsumeBufferedData(kDataSize, NULL));
 
-  renderer_->ResumeAfterUnderflow(false);
+  renderer_->ResumeAfterUnderflow();
 
   // Verify after resuming that we're still not getting data.
   bool muted = false;

@@ -14,6 +14,10 @@ PROJECTS:= \
 
 HTTPD:={{rel_sdk}}/tools/httpd.py
 
+ifeq ($(TOOLCHAIN),all)
+TOOLCHAIN_ARG:=TOOLCHAIN=all
+endif
+
 # Define the default target
 all:
 
@@ -23,37 +27,42 @@ all:
 # Macro defines a phony target for each example, and adds it to a list of
 # targets.
 #
+# Note: We use targets for each project (instead of an explicit recipe) so
+# each project can be built in parallel.
+#
 define TARGET
-TARGET_LIST+=$(1)_TARGET
-.PHONY: $(1)_TARGET
-$(1)_TARGET:
-	+$(MAKE) -C $(1)
+ALL_TARGET_LIST+=$(1)_ALL_TARGET
+.PHONY: $(1)_ALL_TARGET
+$(1)_ALL_TARGET:
+	+$(MAKE) -C $(1) $(TOOLCHAIN_ARG) all
 
-VERSIONS_LIST+=$(1)_VERSIONS
-.PHONY: $(1)_VERSIONS
-$(1)_VERSIONS:
-	+$(MAKE) -C $(1) all_versions
-
-CLEAN_LIST+=$(1)_CLEAN
-.PHONY: $(1)_CLEAN
-$(1)_CLEAN:
-	+$(MAKE) -C $(1) clean
+CLEAN_TARGET_LIST+=$(1)_CLEAN_TARGET
+.PHONY: $(1)_CLEAN_TARGET
+$(1)_CLEAN_TARGET:
+	+$(MAKE) -C $(1) $(TOOLCHAIN_ARG) clean
 endef
 
 
 # Define the various targets via the Macro
 $(foreach proj,$(PROJECTS),$(eval $(call TARGET,$(proj))))
 
-all: $(TARGET_LIST)
+.PHONY: all
+all: $(ALL_TARGET_LIST)
 	@echo Done building targets.
 
-all_versions: $(VERSIONS_LIST)
-	@echo Done building all versions.
-
-clean: $(CLEAN_LIST)
+.PHONY: clean
+clean: $(CLEAN_TARGET_LIST)
 	@echo Done cleaning targets.
 
-.PHONY: RUN
-RUN: all
+.PHONY: run
+run: all
 	@echo Starting up python webserver.
 	python $(HTTPD)
+
+# Phony aliases for backward compatibility
+RUN: run
+
+all_versions:
+	+$(MAKE) TOOLCHAIN=all
+
+.PHONY: RUN all_versions

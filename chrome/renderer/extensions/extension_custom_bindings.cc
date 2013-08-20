@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/dispatcher.h"
@@ -16,10 +16,10 @@
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/view_type.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "webkit/glue/webkit_glue.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
+#include "webkit/glue/webkit_glue.h"
 
 namespace extensions {
 
@@ -27,22 +27,21 @@ namespace {
 
 }  // namespace
 
-ExtensionCustomBindings::ExtensionCustomBindings(
-    Dispatcher* dispatcher,
-    v8::Handle<v8::Context> context)
+ExtensionCustomBindings::ExtensionCustomBindings(Dispatcher* dispatcher,
+                                                 ChromeV8Context* context)
     : ChromeV8Extension(dispatcher, context) {
   RouteFunction("GetExtensionViews",
       base::Bind(&ExtensionCustomBindings::GetExtensionViews,
                  base::Unretained(this)));
 }
 
-v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
-    const v8::Arguments& args) {
+void ExtensionCustomBindings::GetExtensionViews(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   if (args.Length() != 2)
-    return v8::Undefined();
+    return;
 
   if (!args[0]->IsInt32() || !args[1]->IsString())
-    return v8::Undefined();
+    return;
 
   // |browser_window_id| == extension_misc::kUnknownWindowId means getting
   // views attached to any browser window.
@@ -70,12 +69,12 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
   } else if (view_type_string == kViewTypePanel) {
     view_type = VIEW_TYPE_PANEL;
   } else if (view_type_string != kViewTypeAll) {
-    return v8::Undefined();
+    return;
   }
 
   const Extension* extension = GetExtensionForRenderView();
   if (!extension)
-    return v8::Undefined();
+    return;
 
   std::vector<content::RenderView*> views = ExtensionHelper::GetExtensionViews(
       extension->id(), browser_window_id, view_type);
@@ -91,7 +90,7 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
     }
   }
 
-  return v8_views;
+  args.GetReturnValue().Set(v8_views);
 }
 
 }  // namespace extensions

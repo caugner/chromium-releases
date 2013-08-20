@@ -7,14 +7,13 @@
 #include "base/logging.h"
 #include "base/shared_memory.h"
 #include "components/visitedlink/common/visitedlink_messages.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-
-namespace components {
+#include "third_party/WebKit/public/web/WebView.h"
 
 using WebKit::WebView;
 
-VisitedLinkSlave::VisitedLinkSlave() : shared_memory_(NULL) {
-}
+namespace visitedlink {
+
+VisitedLinkSlave::VisitedLinkSlave() : shared_memory_(NULL) {}
 
 VisitedLinkSlave::~VisitedLinkSlave() {
   FreeTable();
@@ -90,4 +89,4 @@ void VisitedLinkSlave::FreeTable() {
   table_length_ = 0;
 }
 
-}  // namespace components
+}  // namespace visitedlink

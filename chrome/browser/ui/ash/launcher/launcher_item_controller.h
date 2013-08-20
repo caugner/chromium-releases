@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_vector.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 class ChromeLauncherController;
 class ChromeLauncherAppMenuItem;
@@ -100,7 +100,7 @@ class LauncherItemController {
   virtual void OnRemoved() = 0;
 
   // Called to retrieve the list of running applications.
-  virtual ChromeLauncherAppMenuItems GetApplicationList() = 0;
+  virtual ChromeLauncherAppMenuItems GetApplicationList(int event_flags) = 0;
 
   // Helper function to get the ash::LauncherItemType for the item type.
   ash::LauncherItemType GetLauncherItemType() const;

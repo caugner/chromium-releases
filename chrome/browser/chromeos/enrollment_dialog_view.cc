@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
 
 #include "base/bind.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/profiles/profile.h"
@@ -96,7 +96,7 @@ void EnrollmentDialogView::ShowDialog(gfx::NativeWindow owning_window,
                                       const base::Closure& connect) {
   EnrollmentDialogView* dialog_view =
       new EnrollmentDialogView(network_name, profile, target_uri, connect);
-  views::Widget::CreateWindowWithParent(dialog_view, owning_window);
+  views::DialogDelegate::CreateDialogWidget(dialog_view, NULL, owning_window);
   dialog_view->InitDialog();
   views::Widget* widget = dialog_view->GetWidget();
   DCHECK(widget);

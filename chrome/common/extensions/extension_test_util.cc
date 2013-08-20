@@ -19,7 +19,7 @@ using extensions::Manifest;
 namespace extension_test_util {
 
 scoped_refptr<Extension> CreateExtensionWithID(std::string id) {
-  DictionaryValue values;
+  base::DictionaryValue values;
   values.SetString(extension_manifest_keys::kName, "test");
   values.SetString(extension_manifest_keys::kVersion, "0.1");
   std::string error;
@@ -40,10 +40,10 @@ scoped_refptr<Extension> LoadManifestUnchecked(const std::string& dir,
              .AppendASCII(test_file);
 
   JSONFileValueSerializer serializer(path);
-  scoped_ptr<Value> result(serializer.Deserialize(NULL, error));
+  scoped_ptr<base::Value> result(serializer.Deserialize(NULL, error));
   if (!result)
     return NULL;
-  const DictionaryValue* dict;
+  const base::DictionaryValue* dict;
   CHECK(result->GetAsDictionary(&dict));
 
   scoped_refptr<Extension> extension = Extension::Create(
@@ -68,7 +68,7 @@ scoped_refptr<Extension> LoadManifest(const std::string& dir,
   scoped_refptr<Extension> extension =
       LoadManifestUnchecked(dir, test_file, location, extra_flags, &error);
 
-  EXPECT_TRUE(extension) << test_file << ":" << error;
+  EXPECT_TRUE(extension.get()) << test_file << ":" << error;
   return extension;
 }
 

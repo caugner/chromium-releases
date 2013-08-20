@@ -14,10 +14,11 @@
 #include "base/supports_user_data.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/non_thread_safe.h"
-#include "components/autofill/browser/autofill_type.h"
-#include "components/autofill/browser/webdata/autofill_change.h"
-#include "components/autofill/browser/webdata/autofill_entry.h"
-#include "components/autofill/browser/webdata/autofill_webdata_service_observer.h"
+#include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/webdata/autofill_change.h"
+#include "components/autofill/core/browser/webdata/autofill_entry.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_backend.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service_observer.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_data.h"
 #include "sync/api/sync_error.h"
@@ -50,8 +51,9 @@ class AutofillProfileSyncableService
 
   // Creates a new AutofillProfileSyncableService and hangs it off of
   // |web_data_service|, which takes ownership.
-  static void CreateForWebDataService(
+  static void CreateForWebDataServiceAndBackend(
       autofill::AutofillWebDataService* web_data_service,
+      autofill::AutofillWebDataBackend* webdata_backend,
       const std::string& app_locale);
 
   // Retrieves the AutofillProfileSyncableService stored on |web_data_service|.
@@ -77,9 +79,14 @@ class AutofillProfileSyncableService
   virtual void AutofillProfileChanged(
       const autofill::AutofillProfileChange& change) OVERRIDE;
 
+  // Provides a StartSyncFlare to the SyncableService. See
+  // sync_start_util for more.
+  void InjectStartSyncFlare(
+      const syncer::SyncableService::StartSyncFlare& flare);
+
  protected:
   AutofillProfileSyncableService(
-      autofill::AutofillWebDataService* web_data_service,
+      autofill::AutofillWebDataBackend* webdata_backend,
       const std::string& app_locale);
 
   // A convenience wrapper of a bunch of state we pass around while
@@ -89,26 +96,28 @@ class AutofillProfileSyncableService
   struct DataBundle;
 
   // Helper to query WebDatabase for the current autofill state.
-  // Made virtual for ease of mocking in the unit-test.
+  // Made virtual for ease of mocking in unit tests.
   // Caller owns returned |profiles|.
   virtual bool LoadAutofillData(
       std::vector<autofill::AutofillProfile*>* profiles);
 
   // Helper to persist any changes that occured during model association to
   // the WebDatabase.
-  // Made virtual for ease of mocking in the unit-test.
+  // Made virtual for ease of mocking in unit tests.
   virtual bool SaveChangesToWebData(const DataBundle& bundle);
+
+  // For unit tests.
+  AutofillProfileSyncableService();
+  void set_sync_processor(syncer::SyncChangeProcessor* sync_processor) {
+    sync_processor_.reset(sync_processor);
+  }
+
+  // Creates syncer::SyncData based on supplied |profile|.
+  // Exposed for unit tests.
+  static syncer::SyncData CreateData(const autofill::AutofillProfile& profile);
 
  private:
   friend class ProfileSyncServiceAutofillTest;
-  friend class MockAutofillProfileSyncableService;
-  FRIEND_TEST_ALL_PREFIXES(AutofillProfileSyncableServiceTest,
-                           MergeDataAndStartSyncing);
-  FRIEND_TEST_ALL_PREFIXES(AutofillProfileSyncableServiceTest, GetAllSyncData);
-  FRIEND_TEST_ALL_PREFIXES(AutofillProfileSyncableServiceTest,
-                           ProcessSyncChanges);
-  FRIEND_TEST_ALL_PREFIXES(AutofillProfileSyncableServiceTest,
-                           ActOnChange);
   FRIEND_TEST_ALL_PREFIXES(AutofillProfileSyncableServiceTest,
                            UpdateField);
   FRIEND_TEST_ALL_PREFIXES(AutofillProfileSyncableServiceTest,
@@ -149,9 +158,6 @@ class AutofillProfileSyncableService
   // Syncs |change| to the cloud.
   void ActOnChange(const autofill::AutofillProfileChange& change);
 
-  // Creates syncer::SyncData based on supplied |profile|.
-  static syncer::SyncData CreateData(const autofill::AutofillProfile& profile);
-
   autofill::AutofillTable* GetAutofillTable() const;
 
   // Helper to compare the local value and cloud value of a field, copy into
@@ -167,20 +173,17 @@ class AutofillProfileSyncableService
 
   // Calls merge_into->OverwriteWithOrAddTo() and then checks if the
   // |merge_into| has extra data. Returns |true| if |merge_into| posseses some
-  // multi-valued field values that are not in |merge_from|, false otherwise.
+  // multi-valued field values that are not in |merge_from| or if the origins
+  // of the two profiles differ, false otherwise.
+  // TODO(isherman): Seems like this should return |true| if |merge_into| was
+  // modified at all: http://crbug.com/248440
   static bool MergeProfile(const autofill::AutofillProfile& merge_from,
                            autofill::AutofillProfile* merge_into,
                            const std::string& app_locale);
 
-  // For unit-tests.
-  AutofillProfileSyncableService();
-  void set_sync_processor(syncer::SyncChangeProcessor* sync_processor) {
-    sync_processor_.reset(sync_processor);
-  }
-
-  autofill::AutofillWebDataService* web_data_service_;  // WEAK
+  autofill::AutofillWebDataBackend* webdata_backend_;  // WEAK
   std::string app_locale_;
-  ScopedObserver<autofill::AutofillWebDataService,
+  ScopedObserver<autofill::AutofillWebDataBackend,
                  AutofillProfileSyncableService> scoped_observer_;
 
   // Cached Autofill profiles. *Warning* deleted profiles are still in the
@@ -192,10 +195,12 @@ class AutofillProfileSyncableService
 
   scoped_ptr<syncer::SyncErrorFactory> sync_error_factory_;
 
+  syncer::SyncableService::StartSyncFlare flare_;
+
   DISALLOW_COPY_AND_ASSIGN(AutofillProfileSyncableService);
 };
 
-// This object is used in unit-tests as well, so it defined here.
+// This object is used in unit tests as well, so it defined here.
 struct AutofillProfileSyncableService::DataBundle {
   DataBundle();
   ~DataBundle();

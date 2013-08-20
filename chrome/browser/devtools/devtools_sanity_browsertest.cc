@@ -9,9 +9,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/devtools/browser_list_tabcontents_provider.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -45,7 +45,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/socket/tcp_listen_socket.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 
 using content::BrowserThread;
 using content::DevToolsManager;
@@ -70,7 +70,7 @@ class BrowserClosedObserver : public content::NotificationObserver {
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 
  private:
@@ -171,7 +171,7 @@ class DevToolsSanityTest : public InProcessBrowserTest {
 
 void TimeoutCallback(const std::string& timeout_message) {
   FAIL() << timeout_message;
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }
 
 // Base class for DevTools tests that test devtools functionality for
@@ -203,8 +203,8 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
                     content::NotificationService::AllSources());
       base::CancelableClosure timeout(
           base::Bind(&TimeoutCallback, "Extension load timed out."));
-      MessageLoop::current()->PostDelayedTask(
-          FROM_HERE, timeout.callback(), base::TimeDelta::FromSeconds(4));
+      base::MessageLoop::current()->PostDelayedTask(
+          FROM_HERE, timeout.callback(), TestTimeouts::action_timeout());
       extensions::UnpackedInstaller::Create(service)->Load(path);
       content::RunMessageLoop();
       timeout.Cancel();
@@ -226,8 +226,8 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
                   content::NotificationService::AllSources());
     base::CancelableClosure timeout(
         base::Bind(&TimeoutCallback, "Extension host load timed out."));
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE, timeout.callback(), base::TimeDelta::FromSeconds(4));
+    base::MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, timeout.callback(), TestTimeouts::action_timeout());
 
     ExtensionProcessManager* manager =
         extensions::ExtensionSystem::Get(browser()->profile())->
@@ -252,7 +252,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     switch (type) {
       case chrome::NOTIFICATION_EXTENSION_LOADED:
       case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
-        MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->Quit();
         break;
       default:
         NOTREACHED();
@@ -304,7 +304,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
       worker_data_->worker_route_id = route_id;
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          MessageLoop::QuitClosure());
+          base::MessageLoop::QuitClosure());
       delete this;
     }
     scoped_refptr<WorkerData> worker_data_;
@@ -324,7 +324,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
       ASSERT_EQ(worker_data_->worker_route_id, route_id);
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          MessageLoop::QuitClosure());
+          base::MessageLoop::QuitClosure());
       delete this;
     }
     scoped_refptr<WorkerData> worker_data_;
@@ -345,7 +345,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
     if (WorkerService::GetInstance()->TerminateWorker(
             worker_data->worker_process_id, worker_data->worker_route_id)) {
       WorkerService::GetInstance()->AddObserver(
-          new WorkerTerminationObserver(worker_data));
+          new WorkerTerminationObserver(worker_data.get()));
       return;
     }
     FAIL() << "Failed to terminate worker.\n";
@@ -366,7 +366,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
       worker_data->worker_process_id = worker_info[0].process_id;
       worker_data->worker_route_id = worker_info[0].route_id;
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          MessageLoop::QuitClosure());
+          base::MessageLoop::QuitClosure());
       return;
     }
 
@@ -392,8 +392,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
             worker_data->worker_process_id,
             worker_data->worker_route_id));
     DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(
-        agent_host,
-        window_->GetDevToolsClientHostForTest());
+        agent_host.get(), window_->GetDevToolsClientHostForTest());
     RenderViewHost* client_rvh = window_->GetRenderViewHost();
     WebContents* client_contents = WebContents::FromRenderViewHost(client_rvh);
     if (client_contents->IsLoading()) {
@@ -444,10 +443,17 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
   RunTest("waitForTestResultsInConsole", std::string());
 }
 
+// Disabled on Windows due to flakiness. http://crbug.com/183649
+#if defined(OS_WIN)
+#define MAYBE_TestDevToolsExtensionMessaging DISABLED_TestDevToolsExtensionMessaging
+#else
+#define MAYBE_TestDevToolsExtensionMessaging TestDevToolsExtensionMessaging
+#endif
+
 // Tests that chrome.devtools extension can communicate with background page
 // using extension messaging.
 IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
-                       TestDevToolsExtensionMessaging) {
+                       MAYBE_TestDevToolsExtensionMessaging) {
   LoadExtension("devtools_messaging");
   RunTest("waitForTestResultsInConsole", std::string());
 }
@@ -491,6 +497,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
 // is already running.
 #if defined(OS_WIN)
 // Timing out on windows tryservers: http://crbug.com/219515
+#define MAYBE_TestPauseWhenScriptIsRunning DISABLED_TestPauseWhenScriptIsRunning
+#elif defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+// Timing out on linux ARM bot: https://crbug/238453
 #define MAYBE_TestPauseWhenScriptIsRunning DISABLED_TestPauseWhenScriptIsRunning
 #else
 #define MAYBE_TestPauseWhenScriptIsRunning TestPauseWhenScriptIsRunning
@@ -620,14 +629,14 @@ IN_PROC_BROWSER_TEST_F(DevToolsAgentHostTest, TestAgentHostReleased) {
   ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
   RenderViewHost* rvh = browser()->tab_strip_model()->GetWebContentsAt(0)->
       GetRenderViewHost();
-  DevToolsAgentHost* agent_raw = DevToolsAgentHost::GetOrCreateFor(rvh);
+  DevToolsAgentHost* agent_raw = DevToolsAgentHost::GetOrCreateFor(rvh).get();
   const std::string agent_id = agent_raw->GetId();
   ASSERT_EQ(agent_raw, DevToolsAgentHost::GetForId(agent_id)) <<
       "DevToolsAgentHost cannot be found by id";
   browser()->tab_strip_model()->
       CloseWebContentsAt(0, TabStripModel::CLOSE_NONE);
-  ASSERT_FALSE(DevToolsAgentHost::GetForId(agent_id)) <<
-      "DevToolsAgentHost is not released when the tab is closed";
+  ASSERT_FALSE(DevToolsAgentHost::GetForId(agent_id).get())
+      << "DevToolsAgentHost is not released when the tab is closed";
 }
 
 class RemoteDebuggingTest: public ExtensionApiTest {

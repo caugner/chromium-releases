@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/fake_message_center.h"
 #include "ui/message_center/notification.h"
@@ -59,7 +59,7 @@ MockNotificationView::MockNotificationView(const Notification& notification,
                                            MessageCenter* message_center,
                                            Test* test,
                                            int view_id)
-    : NotificationView(notification, message_center, true),
+    : NotificationView(notification, message_center, NULL, true),
       test_(test),
       id_(view_id) {
 }
@@ -127,21 +127,23 @@ MessageCenterViewTest::~MessageCenterViewTest() {
 
 void MessageCenterViewTest::SetUp() {
   // Create a dummy notification.
-  Notification notification(
-        NOTIFICATION_TYPE_SIMPLE,
-        std::string("notification id"),
-        UTF8ToUTF16("title"),
-        UTF8ToUTF16("message"),
-        UTF8ToUTF16("display source"),
-        std::string("extension id"),
-        NULL);
+  Notification notification(NOTIFICATION_TYPE_SIMPLE,
+                            std::string("notification id"),
+                            UTF8ToUTF16("title"),
+                            UTF8ToUTF16("message"),
+                            gfx::Image(),
+                            UTF8ToUTF16("display source"),
+                            std::string("extension id"),
+                            message_center::RichNotificationData(),
+                            NULL);
 
   // ...and a list for it.
   NotificationList::Notifications notifications;
   notifications.insert(&notification);
 
   // Then create a new MessageCenterView with that single notification.
-  message_center_view_.reset(new MessageCenterView(&message_center_, 100));
+  message_center_view_.reset(new MessageCenterView(
+      &message_center_, NULL, 100, false));
   message_center_view_->SetNotifications(notifications);
 
   // Remove and delete the NotificationView now owned by the MessageCenterView's

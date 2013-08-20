@@ -12,8 +12,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/timer.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/print_error_dialog.h"
 #include "chrome/browser/printing/print_job.h"
@@ -192,7 +192,7 @@ void PrintViewManager::RenderViewGone(base::TerminationStatus status) {
     return;
 
   scoped_refptr<PrintedDocument> document(print_job_->document());
-  if (document) {
+  if (document.get()) {
     // If IsComplete() returns false, the document isn't completely rendered.
     // Since our renderer is gone, there's nothing to do, cancel it. Otherwise,
     // the print job may finish without problem.
@@ -490,7 +490,7 @@ void PrintViewManager::ShouldQuitFromInnerMessageLoop() {
       inside_inner_message_loop_) {
     // We are in a message loop created by RenderAllMissingPagesNow. Quit from
     // it.
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
     inside_inner_message_loop_ = false;
   }
 }
@@ -595,17 +595,18 @@ bool PrintViewManager::RunInnerMessageLoop() {
   // be CPU bound, the page overly complex/large or the system just
   // memory-bound.
   static const int kPrinterSettingsTimeout = 60000;
-  base::OneShotTimer<MessageLoop> quit_timer;
+  base::OneShotTimer<base::MessageLoop> quit_timer;
   quit_timer.Start(FROM_HERE,
                    TimeDelta::FromMilliseconds(kPrinterSettingsTimeout),
-                   MessageLoop::current(), &MessageLoop::Quit);
+                   base::MessageLoop::current(), &base::MessageLoop::Quit);
 
   inside_inner_message_loop_ = true;
 
   // Need to enable recursive task.
   {
-    MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
-    MessageLoop::current()->Run();
+    base::MessageLoop::ScopedNestableTaskAllower allow(
+        base::MessageLoop::current());
+    base::MessageLoop::current()->Run();
   }
 
   bool success = true;

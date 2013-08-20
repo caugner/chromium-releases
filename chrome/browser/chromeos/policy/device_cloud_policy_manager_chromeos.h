@@ -23,6 +23,7 @@ class AttestationPolicyObserver;
 }
 }
 
+class PrefRegistrySimple;
 class PrefService;
 
 namespace policy {
@@ -62,17 +63,35 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   // Cancels a pending enrollment operation, if any.
   void CancelEnrollment();
 
+  // Gets/Sets the device requisition.
+  std::string GetDeviceRequisition() const;
+  void SetDeviceRequisition(const std::string& requisition);
+
+  // Checks whether enterprise enrollment should be a regular step during OOBE.
+  bool ShouldAutoStartEnrollment() const;
+
+  // Checks whether the user can cancel enrollment.
+  bool CanExitEnrollment() const;
+
   // CloudPolicyManager:
   virtual void Shutdown() OVERRIDE;
 
   // CloudPolicyStore::Observer:
   virtual void OnStoreLoaded(CloudPolicyStore* store) OVERRIDE;
 
+  // Pref registration helper.
+  static void RegisterPrefs(PrefRegistrySimple* registry);
+
   // Returns the device serial number, or an empty string if not available.
   static std::string GetMachineID();
 
   // Returns the machine model, or an empty string if not available.
   static std::string GetMachineModel();
+
+  // Returns the robot 'email address' associated with the device robot
+  // account (sometimes called a service account) associated with this device
+  // during enterprise enrollment.
+  std::string GetRobotAccountId();
 
  private:
   // Creates a new CloudPolicyClient.

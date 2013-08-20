@@ -46,7 +46,9 @@ class OmniboxViewViews
                    Profile* profile,
                    CommandUpdater* command_updater,
                    bool popup_window_mode,
-                   LocationBarView* location_bar);
+                   LocationBarView* location_bar,
+                   const gfx::Font& font,
+                   int font_y_offset);
   virtual ~OmniboxViewViews();
 
   // Initialize, create the underlying views, etc;
@@ -56,10 +58,9 @@ class OmniboxViewViews
   void SetBaseColor();
 
   // views::Textfield:
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
@@ -103,10 +104,10 @@ class OmniboxViewViews
   virtual string16 GetInstantSuggestion() const OVERRIDE;
   virtual int TextWidth() const OVERRIDE;
   virtual bool IsImeComposing() const OVERRIDE;
+  virtual bool IsImeShowingPopup() const OVERRIDE;
   virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
   virtual views::View* AddToView(views::View* parent) OVERRIDE;
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual gfx::Font GetFont() OVERRIDE;
 
   // views::TextfieldController:
   virtual void ContentsChanged(views::Textfield* sender,

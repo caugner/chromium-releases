@@ -4,7 +4,7 @@
 
 #include "ui/views/widget/widget_delegate.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/view.h"
@@ -70,6 +70,10 @@ string16 WidgetDelegate::GetWindowTitle() const {
 }
 
 bool WidgetDelegate::ShouldShowWindowTitle() const {
+  return true;
+}
+
+bool WidgetDelegate::ShouldShowCloseButton() const {
   return true;
 }
 
@@ -139,6 +143,10 @@ ClientView* WidgetDelegate::CreateClientView(Widget* widget) {
 }
 
 NonClientFrameView* WidgetDelegate::CreateNonClientFrameView(Widget* widget) {
+  return NULL;
+}
+
+View* WidgetDelegate::CreateOverlayView() {
   return NULL;
 }
 

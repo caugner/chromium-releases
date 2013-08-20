@@ -9,15 +9,16 @@
 #include "base/message_loop.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/app/breakpad_win.h"
 #include "chrome/common/chrome_result_codes.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/nacl/nacl_broker_listener.h"
 #include "chrome/nacl/nacl_listener.h"
 #include "chrome/nacl/nacl_main_platform_delegate.h"
+#include "components/nacl/common/nacl_switches.h"
 #include "content/public/app/startup_helper_win.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/sandbox_init.h"
 #include "sandbox/win/src/sandbox_types.h"
@@ -29,7 +30,7 @@ extern int NaClMain(const content::MainFunctionParams&);
 int NaClBrokerMain(const content::MainFunctionParams& parameters) {
   const CommandLine& parsed_command_line = parameters.command_line;
 
-  MessageLoopForIO main_message_loop;
+  base::MessageLoopForIO main_message_loop;
   base::PlatformThread::SetName("CrNaClBrokerMain");
 
   base::PowerMonitor power_monitor;

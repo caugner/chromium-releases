@@ -6,33 +6,51 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_content_browser_client.h"
+#include "android_webview/browser/aw_form_database_service.h"
 #include "base/android/jni_android.h"
 #include "base/logging.h"
 #include "base/time.h"
-#include "components/autofill/browser/webdata/autofill_webdata_service.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "jni/AwFormDatabase_jni.h"
+
+// static
+scoped_refptr<autofill::AutofillWebDataService>
+autofill::AutofillWebDataService::FromBrowserContext(
+    content::BrowserContext* context) {
+
+  DCHECK(context);
+  android_webview::AwFormDatabaseService* service =
+      static_cast<android_webview::AwBrowserContext*>(
+          context)->GetFormDatabaseService();
+  DCHECK(service);
+  return service->get_autofill_webdata_service();
+}
 
 namespace android_webview {
 
-// static
-void ClearFormData(JNIEnv*, jclass) {
+namespace {
+
+AwFormDatabaseService* GetFormDatabaseService() {
+
   AwBrowserContext* context = AwContentBrowserClient::GetAwBrowserContext();
-  DCHECK(context);
-
-  autofill::AutofillWebDataService* service =
-      autofill::AutofillWebDataService::FromBrowserContext(context).get();
-  if (service == NULL) {
-    LOG(WARNING) << "No webdata service found, ignoring ClearFormData";
-    return;
-  }
-
-  base::Time begin;
-  base::Time end = base::Time::Max();
-  service->RemoveFormElementsAddedBetween(begin, end);
-  service->RemoveAutofillDataModifiedBetween(begin, end);
+  AwFormDatabaseService* service = context->GetFormDatabaseService();
+  return service;
 }
 
-bool RegisterFormDatabase(JNIEnv* env) {
+} // anonymous namespace
+
+
+// static
+jboolean HasFormData(JNIEnv*, jclass) {
+  return GetFormDatabaseService()->HasFormData();
+}
+
+// static
+void ClearFormData(JNIEnv*, jclass) {
+  GetFormDatabaseService()->ClearFormData();
+}
+
+bool RegisterAwFormDatabase(JNIEnv* env) {
   return RegisterNativesImpl(env) >= 0;
 }
 

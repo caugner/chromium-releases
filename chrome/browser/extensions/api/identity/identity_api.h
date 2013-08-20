@@ -6,27 +6,32 @@
 #define CHROME_BROWSER_EXTENSIONS_API_IDENTITY_IDENTITY_API_H_
 
 #include <map>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/extensions/api/identity/gaia_web_auth_flow.h"
 #include "chrome/browser/extensions/api/identity/identity_mint_queue.h"
 #include "chrome/browser/extensions/api/identity/identity_signin_flow.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/extensions/extension_install_prompt.h"
+#include "chrome/browser/signin/oauth2_token_service.h"
 #include "chrome/browser/signin/signin_global_error.h"
 #include "google_apis/gaia/oauth2_mint_token_flow.h"
 
-class GetAuthTokenFunctionTest;
-class MockGetAuthTokenFunction;
 class GoogleServiceAuthError;
+class MockGetAuthTokenFunction;
 class Profile;
 class SigninManagerBase;
 
 namespace extensions {
+
+class GetAuthTokenFunctionTest;
+class MockGetAuthTokenFunction;
 
 namespace identity_constants {
 extern const char kInvalidClientId[];
@@ -38,6 +43,7 @@ extern const char kUserNotSignedIn[];
 extern const char kInteractionRequired[];
 extern const char kInvalidRedirect[];
 extern const char kOffTheRecord[];
+extern const char kPageLoadFailure[];
 }  // namespace identity_constants
 
 // identity.getAuthToken fetches an OAuth 2 function for the
@@ -58,10 +64,11 @@ extern const char kOffTheRecord[];
 // new login token, there is a sign-in flow. If that flow completes
 // successfully, getAuthToken proceeds to the non-interactive flow.
 class IdentityGetAuthTokenFunction : public AsyncExtensionFunction,
-                                     public ExtensionInstallPrompt::Delegate,
+                                     public GaiaWebAuthFlow::Delegate,
                                      public IdentityMintRequestQueue::Request,
                                      public OAuth2MintTokenFlow::Delegate,
-                                     public IdentitySigninFlow::Delegate {
+                                     public IdentitySigninFlow::Delegate,
+                                     public OAuth2TokenService::Consumer {
  public:
   DECLARE_EXTENSION_FUNCTION("identity.getAuthToken",
                              EXPERIMENTAL_IDENTITY_GETAUTHTOKEN);
@@ -72,7 +79,10 @@ class IdentityGetAuthTokenFunction : public AsyncExtensionFunction,
   virtual ~IdentityGetAuthTokenFunction();
 
  private:
-  friend class GetAuthTokenFunctionTest;
+  FRIEND_TEST_ALL_PREFIXES(GetAuthTokenFunctionTest,
+                           ComponentWithChromeClientId);
+  FRIEND_TEST_ALL_PREFIXES(GetAuthTokenFunctionTest,
+                           ComponentWithNormalClientId);
   friend class MockGetAuthTokenFunction;
 
   // ExtensionFunction:
@@ -102,9 +112,19 @@ class IdentityGetAuthTokenFunction : public AsyncExtensionFunction,
   virtual void SigninSuccess(const std::string& token) OVERRIDE;
   virtual void SigninFailed() OVERRIDE;
 
-  // ExtensionInstallPrompt::Delegate implementation:
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  // GaiaWebAuthFlow::Delegate implementation:
+  virtual void OnGaiaFlowFailure(GaiaWebAuthFlow::Failure failure,
+                                 GoogleServiceAuthError service_error,
+                                 const std::string& oauth_error) OVERRIDE;
+  virtual void OnGaiaFlowCompleted(const std::string& access_token,
+                                   const std::string& expiration) OVERRIDE;
+
+  // OAuth2TokenService::Consumer implementation:
+  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                                 const std::string& access_token,
+                                 const base::Time& expiration_time) OVERRIDE;
+  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                                 const GoogleServiceAuthError& error) OVERRIDE;
 
   // Starts a mint token request to GAIA.
   void StartGaiaRequest(OAuth2MintTokenFlow::Mode mode);
@@ -119,17 +139,25 @@ class IdentityGetAuthTokenFunction : public AsyncExtensionFunction,
   // Checks if there is a master login token to mint tokens for the extension.
   virtual bool HasLoginToken() const;
 
+  // Maps OAuth2 protocol errors to an error message returned to the
+  // developer in chrome.runtime.lastError.
+  std::string MapOAuth2ErrorToDescription(const std::string& error);
+
+  std::string GetOAuth2ClientId() const;
+
   bool should_prompt_for_scopes_;
   IdentityMintRequestQueue::MintType mint_token_flow_type_;
   scoped_ptr<OAuth2MintTokenFlow> mint_token_flow_;
   std::string refresh_token_;
   bool should_prompt_for_signin_;
 
+  std::string oauth2_client_id_;
   // When launched in interactive mode, and if there is no existing grant,
   // a permissions prompt will be popped up to the user.
   IssueAdviceInfo issue_advice_;
-  scoped_ptr<ExtensionInstallPrompt> install_ui_;
+  scoped_ptr<GaiaWebAuthFlow> gaia_web_auth_flow_;
   scoped_ptr<IdentitySigninFlow> signin_flow_;
+  scoped_ptr<OAuth2TokenService::Request> device_token_request_;
 };
 
 class IdentityRemoveCachedAuthTokenFunction : public SyncExtensionFunction {
@@ -153,12 +181,8 @@ class IdentityLaunchWebAuthFlowFunction : public AsyncExtensionFunction,
 
   IdentityLaunchWebAuthFlowFunction();
 
-  // URL checking helpers. Public for testing.
-  // Checks to see if the current URL ends the flow.
-  bool IsFinalRedirectURL(const GURL& url) const;
-
-  // Unit tests may override extension_id.
-  void InitFinalRedirectURLPrefixesForTest(const std::string& extension_id);
+  // Tests may override extension_id.
+  void InitFinalRedirectURLPrefixForTest(const std::string& extension_id);
 
  private:
   virtual ~IdentityLaunchWebAuthFlowFunction();
@@ -167,12 +191,13 @@ class IdentityLaunchWebAuthFlowFunction : public AsyncExtensionFunction,
   // WebAuthFlow::Delegate implementation.
   virtual void OnAuthFlowFailure(WebAuthFlow::Failure failure) OVERRIDE;
   virtual void OnAuthFlowURLChange(const GURL& redirect_url) OVERRIDE;
+  virtual void OnAuthFlowTitleChange(const std::string& title) OVERRIDE {}
 
-  // Helper to initialize final URLs vector.
-  void InitFinalRedirectURLPrefixes(const std::string& extension_id);
+  // Helper to initialize final URL prefix.
+  void InitFinalRedirectURLPrefix(const std::string& extension_id);
 
   scoped_ptr<WebAuthFlow> auth_flow_;
-  std::vector<GURL> final_prefixes_;
+  GURL final_url_prefix_;
 };
 
 class IdentityTokenCacheValue {
@@ -194,6 +219,7 @@ class IdentityTokenCacheValue {
   CacheValueStatus status() const;
   const IssueAdviceInfo& issue_advice() const;
   const std::string& token() const;
+  const base::Time& expiration_time() const;
 
  private:
   bool is_expired() const;
@@ -208,6 +234,17 @@ class IdentityAPI : public ProfileKeyedAPI,
                     public SigninGlobalError::AuthStatusProvider,
                     public content::NotificationObserver {
  public:
+  struct TokenCacheKey {
+    TokenCacheKey(const std::string& extension_id,
+                  const std::set<std::string> scopes);
+    ~TokenCacheKey();
+    bool operator<(const TokenCacheKey& rhs) const;
+    std::string extension_id;
+    std::set<std::string> scopes;
+  };
+
+  typedef std::map<TokenCacheKey, IdentityTokenCacheValue> CachedTokens;
+
   explicit IdentityAPI(Profile* profile);
   virtual ~IdentityAPI();
   void Initialize();
@@ -224,6 +261,8 @@ class IdentityAPI : public ProfileKeyedAPI,
   void EraseAllCachedTokens();
   const IdentityTokenCacheValue& GetCachedToken(
       const std::string& extension_id, const std::vector<std::string> scopes);
+
+  const CachedTokens& GetAllCachedTokens();
 
   void ReportAuthError(const GoogleServiceAuthError& error);
 
@@ -242,15 +281,6 @@ class IdentityAPI : public ProfileKeyedAPI,
  private:
   friend class ProfileKeyedAPIFactory<IdentityAPI>;
 
-  struct TokenCacheKey {
-    TokenCacheKey(const std::string& extension_id,
-                  const std::set<std::string> scopes);
-    ~TokenCacheKey();
-    bool operator<(const TokenCacheKey& rhs) const;
-    std::string extension_id;
-    std::set<std::string> scopes;
-  };
-
   // ProfileKeyedAPI implementation.
   static const char* service_name() {
     return "IdentityAPI";
@@ -263,7 +293,7 @@ class IdentityAPI : public ProfileKeyedAPI,
   // Used to listen to notifications from the TokenService.
   content::NotificationRegistrar registrar_;
   IdentityMintRequestQueue mint_queue_;
-  std::map<TokenCacheKey, IdentityTokenCacheValue> token_cache_;
+  CachedTokens token_cache_;
 };
 
 template <>

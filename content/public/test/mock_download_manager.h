@@ -60,6 +60,7 @@ class MockDownloadManager : public DownloadManager {
   };
 
   MockDownloadManager();
+  virtual ~MockDownloadManager();
 
   // DownloadManager:
   MOCK_METHOD1(SetDelegate, void(DownloadManagerDelegate* delegate));
@@ -75,7 +76,6 @@ class MockDownloadManager : public DownloadManager {
 
   MOCK_METHOD2(MockStartDownload,
                DownloadItem*(DownloadCreateInfo*, ByteStreamReader*));
-  MOCK_METHOD1(CancelDownload, void(int32 download_id));
   MOCK_METHOD2(RemoveDownloadsBetween, int(base::Time remove_begin,
                                            base::Time remove_end));
   MOCK_METHOD1(RemoveDownloads, int(base::Time remove_begin));
@@ -115,9 +115,6 @@ class MockDownloadManager : public DownloadManager {
   MOCK_METHOD1(SavePageDownloadFinished, void(DownloadItem* download));
   MOCK_METHOD1(GetActiveDownloadItem, DownloadItem*(int id));
   MOCK_METHOD1(GetActiveDownload, DownloadItem*(int32 download_id));
-
- protected:
-  virtual ~MockDownloadManager();
 };
 
 }  // namespace content

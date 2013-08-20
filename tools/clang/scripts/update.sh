@@ -8,7 +8,7 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=179138
+CLANG_REVISION=182481
 
 THIS_DIR="$(dirname "${0}")"
 LLVM_DIR="${THIS_DIR}/../../../third_party/llvm"
@@ -34,7 +34,6 @@ mac_only=
 run_tests=
 bootstrap=
 with_android=yes
-with_tools_extra=
 chrome_tools="plugins"
 
 if [[ "${OS}" = "Darwin" ]]; then
@@ -58,9 +57,6 @@ while [[ $# > 0 ]]; do
     --without-android)
       with_android=
       ;;
-    --with-tools-extra)
-      with_tools_extra=yes
-      ;;
     --with-chrome-tools)
       shift
       if [[ $# == 0 ]]; then
@@ -76,7 +72,6 @@ while [[ $# > 0 ]]; do
       echo "--mac-only: Do initial download only on Mac systems."
       echo "--run-tests: Run tests after building. Only for local builds."
       echo "--without-android: Don't build ASan Android runtime library."
-      echo "--with-tools-extra: Also build the clang-tools-extra repository."
       echo "--with-chrome-tools: Select which chrome tools to build." \
            "Defaults to plugins."
       echo "    Example: --with-chrome-tools 'plugins empty-string'"
@@ -148,15 +143,7 @@ if [[ "${OS}" = "Darwin" ]]; then
   fi
 fi
 
-if [ -f "${THIS_DIR}/../../../WebKit.gyp" ]; then
-  # We're inside a WebKit checkout.
-  # TODO(thakis): try to unify the directory layout of the xcode- and
-  # make-based builds. http://crbug.com/110455
-  MAKE_DIR="${THIS_DIR}/../../../../../../out"
-else
-  # We're inside a Chromium checkout.
-  MAKE_DIR="${THIS_DIR}/../../../out"
-fi
+MAKE_DIR="${THIS_DIR}/../../../out"
 
 for CONFIG in Debug Release; do
   if [[ -d "${MAKE_DIR}/${CONFIG}/obj.target" ||
@@ -256,15 +243,6 @@ echo Getting compiler-rt r"${CLANG_REVISION}" in "${COMPILER_RT_DIR}"
 svn co --force "${LLVM_REPO_URL}/compiler-rt/trunk@${CLANG_REVISION}" \
                "${COMPILER_RT_DIR}"
 
-if [[ -n "${with_tools_extra}" ]]; then
-  echo Getting clang-tools-extra r"${CLANG_REVISION}" in \
-       "${CLANG_TOOLS_EXTRA_DIR}"
-  svn co --force "${LLVM_REPO_URL}/clang-tools-extra/trunk@${CLANG_REVISION}" \
-                 "${CLANG_TOOLS_EXTRA_DIR}"
-else
-  rm -rf "${CLANG_TOOLS_EXTRA_DIR}"
-fi
-
 # Echo all commands.
 set -x
 
@@ -324,21 +302,16 @@ if [[ -n "${with_android}" ]]; then
   # Make a standalone Android toolchain.
   ${ANDROID_NDK_DIR}/build/tools/make-standalone-toolchain.sh \
       --platform=android-14 \
-      --install-dir="${LLVM_BUILD_DIR}/android-toolchain"
-
-  # Fixup mismatching version numbers in android-ndk-r8b.
-  # TODO: This will be fixed in the next NDK, remove this when that ships.
-  TC="${LLVM_BUILD_DIR}/android-toolchain"
-  if [[ -d "${TC}/lib/gcc/arm-linux-androideabi/4.6.x-google" ]]; then
-    mv "${TC}/lib/gcc/arm-linux-androideabi/4.6.x-google" \
-        "${TC}/lib/gcc/arm-linux-androideabi/4.6"
-    mv "${TC}/libexec/gcc/arm-linux-androideabi/4.6.x-google" \
-        "${TC}/libexec/gcc/arm-linux-androideabi/4.6"
-  fi
+      --install-dir="${LLVM_BUILD_DIR}/android-toolchain" \
+      --system=linux-x86_64 \
+      --stl=stlport
 
   # Build ASan runtime for Android.
+  # Note: LLVM_ANDROID_TOOLCHAIN_DIR is not relative to PWD, but to where we
+  # build the runtime, i.e. third_party/llvm/projects/compiler-rt.
   cd "${LLVM_BUILD_DIR}"
-  make -C tools/clang/runtime/ LLVM_ANDROID_TOOLCHAIN_DIR="../../../../${TC}"
+  make -C tools/clang/runtime/ \
+    LLVM_ANDROID_TOOLCHAIN_DIR="../../../llvm-build/android-toolchain"
   cd -
 fi
 

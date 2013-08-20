@@ -65,6 +65,7 @@ class MockVisitor : public SpdyFramerVisitorInterface {
   MOCK_METHOD2(OnSynStreamCompressed,
                void(size_t uncompressed_length,
                     size_t compressed_length));
+  MOCK_METHOD1(OnBlocked, void(SpdyStreamId stream_id));
 };
 
 class SpdyFramerTestUtil {
@@ -100,7 +101,7 @@ class SpdyFramerTestUtil {
 
   class DecompressionVisitor : public SpdyFramerVisitorInterface {
    public:
-    explicit DecompressionVisitor(int version)
+    explicit DecompressionVisitor(SpdyMajorVersion version)
         : version_(version), size_(0), finished_(false) {}
 
     void ResetBuffer() {
@@ -245,7 +246,7 @@ class SpdyFramerTestUtil {
     }
 
    private:
-    int version_;
+    SpdyMajorVersion version_;
     scoped_ptr<char[]> buffer_;
     size_t size_;
     bool finished_;
@@ -263,7 +264,7 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface,
   static const size_t kDefaultHeaderBufferSize = 16 * 1024 * 1024;
   static const size_t kDefaultCredentialBufferSize = 16 * 1024;
 
-  explicit TestSpdyVisitor(int version)
+  explicit TestSpdyVisitor(SpdyMajorVersion version)
     : framer_(version),
       use_compression_(false),
       error_count_(0),
@@ -281,8 +282,8 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface,
       control_frame_header_data_count_(0),
       zero_length_control_frame_header_data_count_(0),
       data_frame_count_(0),
-      last_uncompressed_size_(0),
-      last_compressed_size_(0),
+      last_payload_len_(0),
+      last_frame_len_(0),
       header_buffer_(new char[kDefaultHeaderBufferSize]),
       header_buffer_length_(0),
       header_buffer_size_(kDefaultHeaderBufferSize),
@@ -430,16 +431,18 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface,
     return true;
   }
 
-  virtual void OnCompressedHeaderBlock(size_t uncompressed_size,
-                                       size_t compressed_size) OVERRIDE {
-    last_uncompressed_size_ = uncompressed_size;
-    last_compressed_size_ = compressed_size;
+  virtual void OnSendCompressedFrame(SpdyStreamId stream_id,
+                                     SpdyFrameType type,
+                                     size_t payload_len,
+                                     size_t frame_len) OVERRIDE {
+    last_payload_len_ = payload_len;
+    last_frame_len_ = frame_len;
   }
 
-  virtual void OnDecompressedHeaderBlock(size_t decompressed_size,
-                                         size_t compressed_size) OVERRIDE {
-    last_uncompressed_size_ = decompressed_size;
-    last_compressed_size_ = compressed_size;
+  virtual void OnReceiveCompressedFrame(SpdyStreamId stream_id,
+                                        SpdyFrameType type,
+                                        size_t frame_len) OVERRIDE {
+    last_frame_len_ = frame_len;
   }
 
   // Convenience function which runs a framer simulation with particular input.
@@ -504,8 +507,8 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface,
   // The count of zero-length control frame header data chunks received.
   int zero_length_control_frame_header_data_count_;
   int data_frame_count_;
-  size_t last_uncompressed_size_;
-  size_t last_compressed_size_;
+  size_t last_payload_len_;
+  size_t last_frame_len_;
 
   // Header block streaming state:
   scoped_ptr<char[]> header_buffer_;
@@ -543,17 +546,11 @@ using net::test::GetSerializedHeaders;
 
 namespace net {
 
-enum SpdyFramerTestTypes {
-  SPDY2 = 2,
-  SPDY3 = 3,
-  SPDY4 = 4,
-};
-
-class SpdyFramerTest
-    : public ::testing::TestWithParam<SpdyFramerTestTypes> {
+class SpdyFramerTest : public ::testing::TestWithParam<SpdyMajorVersion> {
  protected:
   virtual void SetUp() {
     spdy_version_ = GetParam();
+    spdy_version_ch_ = static_cast<unsigned char>(spdy_version_);
   }
 
   void CompareFrame(const string& description,
@@ -621,7 +618,8 @@ class SpdyFramerTest
   bool IsSpdy4() { return spdy_version_ == SPDY4; }
 
   // Version of SPDY protocol to be used.
-  unsigned char spdy_version_;
+  SpdyMajorVersion spdy_version_;
+  unsigned char spdy_version_ch_;
 };
 
 // All tests are run with two different SPDY versions: SPDY/2 and SPDY/3.
@@ -692,9 +690,13 @@ TEST_P(SpdyFramerTest, OutOfOrderHeaders) {
 
   // Frame builder with plentiful buffer size.
   SpdyFrameBuilder frame(1024);
-  frame.WriteControlFrameHeader(framer, SYN_STREAM, CONTROL_FLAG_NONE);
+  if (spdy_version_ < 4) {
+    frame.WriteControlFrameHeader(framer, SYN_STREAM, CONTROL_FLAG_NONE);
+    frame.WriteUInt32(3);  // stream_id
+  } else {
+    frame.WriteFramePrefix(framer, SYN_STREAM, CONTROL_FLAG_NONE, 3);
+  }
 
-  frame.WriteUInt32(3);  // stream_id
   frame.WriteUInt32(0);  // Associated stream id
   frame.WriteUInt16(0);  // Priority.
 
@@ -729,7 +731,7 @@ TEST_P(SpdyFramerTest, CreateCredential) {
   {
     const char kDescription[] = "CREDENTIAL frame";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x0A,
+      0x80, spdy_version_ch_, 0x00, 0x0A,
       0x00, 0x00, 0x00, 0x33,
       0x00, 0x03, 0x00, 0x00,
       0x00, 0x05, 'p',  'r',
@@ -746,7 +748,8 @@ TEST_P(SpdyFramerTest, CreateCredential) {
       'e',  'r',  't',
     };
     const unsigned char kV4FrameData[] = {
-      0x00, 0x37, 0x0A, 0x00,
+      0x00, 0x3b, 0x0A, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x00, 0x03, 0x00, 0x00,
       0x00, 0x05, 'p',  'r',
       'o',  'o',  'f',  0x00,
@@ -781,7 +784,7 @@ TEST_P(SpdyFramerTest, ParseCredentialFrameData) {
 
   {
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x0A,
+      0x80, spdy_version_ch_, 0x00, 0x0A,
       0x00, 0x00, 0x00, 0x33,
       0x00, 0x03, 0x00, 0x00,
       0x00, 0x05, 'p',  'r',
@@ -799,6 +802,7 @@ TEST_P(SpdyFramerTest, ParseCredentialFrameData) {
     };
     const unsigned char kV4FrameData[] = {
       0x00, 0x37, 0x0A, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x00, 0x03, 0x00, 0x00,
       0x00, 0x05, 'p',  'r',
       'o',  'o',  'f',  0x00,
@@ -844,9 +848,13 @@ TEST_P(SpdyFramerTest, DuplicateHeader) {
   SpdyFramer framer(spdy_version_);
   // Frame builder with plentiful buffer size.
   SpdyFrameBuilder frame(1024);
-  frame.WriteControlFrameHeader(framer, SYN_STREAM, CONTROL_FLAG_NONE);
+  if (spdy_version_ < 4) {
+    frame.WriteControlFrameHeader(framer, SYN_STREAM, CONTROL_FLAG_NONE);
+    frame.WriteUInt32(3);  // stream_id
+  } else {
+    frame.WriteFramePrefix(framer, SYN_STREAM, CONTROL_FLAG_NONE, 3);
+  }
 
-  frame.WriteUInt32(3);  // stream_id
   frame.WriteUInt32(0);  // associated stream id
   frame.WriteUInt16(0);  // Priority.
 
@@ -881,9 +889,13 @@ TEST_P(SpdyFramerTest, MultiValueHeader) {
   SpdyFramer framer(spdy_version_);
   // Frame builder with plentiful buffer size.
   SpdyFrameBuilder frame(1024);
-  frame.WriteControlFrameHeader(framer, SYN_STREAM, CONTROL_FLAG_NONE);
+  if (spdy_version_ < 4) {
+    frame.WriteControlFrameHeader(framer, SYN_STREAM, CONTROL_FLAG_NONE);
+    frame.WriteUInt32(3);  // stream_id
+  } else {
+    frame.WriteFramePrefix(framer, SYN_STREAM, CONTROL_FLAG_NONE, 3);
+  }
 
-  frame.WriteUInt32(3);  // stream_id
   frame.WriteUInt32(0);  // associated stream id
   frame.WriteUInt16(0);  // Priority.
 
@@ -932,19 +944,22 @@ TEST_P(SpdyFramerTest, BasicCompression) {
                              CONTROL_FLAG_NONE,
                              true,  // compress
                              &headers));
+  size_t uncompressed_size1 = visitor->last_payload_len_;
+  size_t compressed_size1 =
+      visitor->last_frame_len_ - framer.GetSynStreamMinimumSize();
   if (IsSpdy2()) {
-    EXPECT_EQ(139u, visitor->last_uncompressed_size_);
+    EXPECT_EQ(139u, uncompressed_size1);
 #if defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(155u, visitor->last_compressed_size_);
+    EXPECT_EQ(155u, compressed_size1);
 #else  // !defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(135u, visitor->last_compressed_size_);
+    EXPECT_EQ(135u, compressed_size1);
 #endif  // !defined(USE_SYSTEM_ZLIB)
   } else {
-    EXPECT_EQ(165u, visitor->last_uncompressed_size_);
+    EXPECT_EQ(165u, uncompressed_size1);
 #if defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(181u, visitor->last_compressed_size_);
+    EXPECT_EQ(181u, compressed_size1);
 #else  // !defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(117u, visitor->last_compressed_size_);
+    EXPECT_EQ(117u, compressed_size1);
 #endif  // !defined(USE_SYSTEM_ZLIB)
   }
   scoped_ptr<SpdyFrame> frame2(
@@ -955,6 +970,9 @@ TEST_P(SpdyFramerTest, BasicCompression) {
                              CONTROL_FLAG_NONE,
                              true,  // compress
                              &headers));
+  size_t uncompressed_size2 = visitor->last_payload_len_;
+  size_t compressed_size2 =
+      visitor->last_frame_len_ - framer.GetSynStreamMinimumSize();
 
   // Expect the second frame to be more compact than the first.
   EXPECT_LE(frame2->size(), frame1->size());
@@ -968,21 +986,29 @@ TEST_P(SpdyFramerTest, BasicCompression) {
   framer.set_debug_visitor(visitor.get());
   scoped_ptr<SpdyFrame> frame4(SpdyFramerTestUtil::DecompressFrame(
       &framer, *frame2.get()));
+  size_t uncompressed_size4 =
+      frame4->size() - framer.GetSynStreamMinimumSize();
+  size_t compressed_size4 =
+      visitor->last_frame_len_ - framer.GetSynStreamMinimumSize();
   if (IsSpdy2()) {
-    EXPECT_EQ(139u, visitor->last_uncompressed_size_);
+    EXPECT_EQ(139u, uncompressed_size4);
 #if defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(149u, visitor->last_compressed_size_);
+    EXPECT_EQ(149u, compressed_size4);
 #else  // !defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(101u, visitor->last_compressed_size_);
+    EXPECT_EQ(101u, compressed_size4);
 #endif  // !defined(USE_SYSTEM_ZLIB)
   } else {
-    EXPECT_EQ(165u, visitor->last_uncompressed_size_);
+    EXPECT_EQ(165u, uncompressed_size4);
 #if defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(175u, visitor->last_compressed_size_);
+    EXPECT_EQ(175u, compressed_size4);
 #else  // !defined(USE_SYSTEM_ZLIB)
-    EXPECT_EQ(102u, visitor->last_compressed_size_);
+    EXPECT_EQ(102u, compressed_size4);
 #endif  // !defined(USE_SYSTEM_ZLIB)
   }
+
+  EXPECT_EQ(uncompressed_size1, uncompressed_size2);
+  EXPECT_EQ(uncompressed_size1, uncompressed_size4);
+  EXPECT_EQ(compressed_size2, compressed_size4);
 
   // Expect frames 3 & 4 to be the same.
   CompareFrames("Uncompressed SYN_STREAM", *frame3, *frame4);
@@ -1026,7 +1052,7 @@ TEST_P(SpdyFramerTest, CompressEmptyHeaders) {
 
 TEST_P(SpdyFramerTest, Basic) {
   const unsigned char kV2Input[] = {
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #1
     0x00, 0x00, 0x00, 0x14,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1034,7 +1060,7 @@ TEST_P(SpdyFramerTest, Basic) {
     0x00, 0x02, 'h', 'h',
     0x00, 0x02, 'v', 'v',
 
-    0x80, spdy_version_, 0x00, 0x08,  // HEADERS on Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x08,  // HEADERS on Stream #1
     0x00, 0x00, 0x00, 0x18,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x02,
@@ -1049,7 +1075,7 @@ TEST_P(SpdyFramerTest, Basic) {
     0xde, 0xad, 0xbe, 0xef,
     0xde, 0xad, 0xbe, 0xef,
 
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #3
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #3
     0x00, 0x00, 0x00, 0x0c,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x00,
@@ -1064,7 +1090,7 @@ TEST_P(SpdyFramerTest, Basic) {
     0x00, 0x00, 0x00, 0x04,
     0xde, 0xad, 0xbe, 0xef,
 
-    0x80, spdy_version_, 0x00, 0x03,  // RST_STREAM on Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x03,  // RST_STREAM on Stream #1
     0x00, 0x00, 0x00, 0x08,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1072,14 +1098,14 @@ TEST_P(SpdyFramerTest, Basic) {
     0x00, 0x00, 0x00, 0x03,           // DATA on Stream #3
     0x00, 0x00, 0x00, 0x00,
 
-    0x80, spdy_version_, 0x00, 0x03,  // RST_STREAM on Stream #3
+    0x80, spdy_version_ch_, 0x00, 0x03,  // RST_STREAM on Stream #3
     0x00, 0x00, 0x00, 0x08,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x00,
   };
 
   const unsigned char kV3Input[] = {
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #1
     0x00, 0x00, 0x00, 0x1a,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1089,7 +1115,7 @@ TEST_P(SpdyFramerTest, Basic) {
     0x00, 0x00, 0x00, 0x02,
     'v', 'v',
 
-    0x80, spdy_version_, 0x00, 0x08,  // HEADERS on Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x08,  // HEADERS on Stream #1
     0x00, 0x00, 0x00, 0x20,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x02,
@@ -1107,7 +1133,7 @@ TEST_P(SpdyFramerTest, Basic) {
     0xde, 0xad, 0xbe, 0xef,
     0xde, 0xad, 0xbe, 0xef,
 
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #3
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #3
     0x00, 0x00, 0x00, 0x0e,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x00,
@@ -1123,7 +1149,7 @@ TEST_P(SpdyFramerTest, Basic) {
     0x00, 0x00, 0x00, 0x04,
     0xde, 0xad, 0xbe, 0xef,
 
-    0x80, spdy_version_, 0x00, 0x03,  // RST_STREAM on Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x03,  // RST_STREAM on Stream #1
     0x00, 0x00, 0x00, 0x08,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1131,7 +1157,7 @@ TEST_P(SpdyFramerTest, Basic) {
     0x00, 0x00, 0x00, 0x03,           // DATA on Stream #3
     0x00, 0x00, 0x00, 0x00,
 
-    0x80, spdy_version_, 0x00, 0x03,  // RST_STREAM on Stream #3
+    0x80, spdy_version_ch_, 0x00, 0x03,  // RST_STREAM on Stream #3
     0x00, 0x00, 0x00, 0x08,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x00,
@@ -1213,7 +1239,7 @@ TEST_P(SpdyFramerTest, Basic) {
 // Test that the FIN flag on a data frame signifies EOF.
 TEST_P(SpdyFramerTest, FinOnDataFrame) {
   const unsigned char kV2Input[] = {
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #1
     0x00, 0x00, 0x00, 0x14,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1221,7 +1247,7 @@ TEST_P(SpdyFramerTest, FinOnDataFrame) {
     0x00, 0x02, 'h', 'h',
     0x00, 0x02, 'v', 'v',
 
-    0x80, spdy_version_, 0x00, 0x02,  // SYN REPLY Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x02,  // SYN REPLY Stream #1
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x01,
@@ -1239,7 +1265,7 @@ TEST_P(SpdyFramerTest, FinOnDataFrame) {
     0xde, 0xad, 0xbe, 0xef,
   };
   const unsigned char kV3Input[] = {
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #1
     0x00, 0x00, 0x00, 0x1a,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1249,7 +1275,7 @@ TEST_P(SpdyFramerTest, FinOnDataFrame) {
     0x00, 0x00, 0x00, 0x02,
     'v',  'v',
 
-    0x80, spdy_version_, 0x00, 0x02,  // SYN REPLY Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x02,  // SYN REPLY Stream #1
     0x00, 0x00, 0x00, 0x14,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x01,
@@ -1318,7 +1344,7 @@ TEST_P(SpdyFramerTest, FinOnDataFrame) {
 // Test that the FIN flag on a SYN reply frame signifies EOF.
 TEST_P(SpdyFramerTest, FinOnSynReplyFrame) {
   const unsigned char kV2Input[] = {
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #1
     0x00, 0x00, 0x00, 0x14,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1326,7 +1352,7 @@ TEST_P(SpdyFramerTest, FinOnSynReplyFrame) {
     0x00, 0x02, 'h', 'h',
     0x00, 0x02, 'v', 'v',
 
-    0x80, spdy_version_, 0x00, 0x02,  // SYN REPLY Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x02,  // SYN REPLY Stream #1
     0x01, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x01,
@@ -1334,7 +1360,7 @@ TEST_P(SpdyFramerTest, FinOnSynReplyFrame) {
     0x00, 0x02, 'b', 'b',
   };
   const unsigned char kV3Input[] = {
-    0x80, spdy_version_, 0x00, 0x01,  // SYN Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x01,  // SYN Stream #1
     0x00, 0x00, 0x00, 0x1a,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00,
@@ -1344,7 +1370,7 @@ TEST_P(SpdyFramerTest, FinOnSynReplyFrame) {
     0x00, 0x00, 0x00, 0x02,
     'v', 'v',
 
-    0x80, spdy_version_, 0x00, 0x02,  // SYN REPLY Stream #1
+    0x80, spdy_version_ch_, 0x00, 0x02,  // SYN REPLY Stream #1
     0x01, 0x00, 0x00, 0x14,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x01,
@@ -1577,7 +1603,7 @@ TEST_P(SpdyFramerTest, WindowUpdateFrame) {
 
   const char kDescription[] = "WINDOW_UPDATE frame, stream 1, delta 0x12345678";
   const unsigned char kV3FrameData[] = {  // Also applies for V2.
-    0x80, spdy_version_, 0x00, 0x09,
+    0x80, spdy_version_ch_, 0x00, 0x09,
     0x00, 0x00, 0x00, 0x08,
     0x00, 0x00, 0x00, 0x01,
     0x12, 0x34, 0x56, 0x78
@@ -1766,7 +1792,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamUncompressed) {
     const unsigned char kPri = IsSpdy2() ? 0xC0 : 0xE0;
     const unsigned char kCre = IsSpdy2() ? 0 : 2;
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x20,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x00,
@@ -1778,7 +1804,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamUncompressed) {
       0x03, 'b',  'a',  'r'
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x2a,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x00,
@@ -1833,7 +1859,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamUncompressed) {
     headers["foo"] = "bar";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x01, 0x00, 0x00, 0x1D,
       0x7f, 0xff, 0xff, 0xff,
       0x7f, 0xff, 0xff, 0xff,
@@ -1845,7 +1871,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamUncompressed) {
       'r'
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x01, 0x00, 0x00, 0x27,
       0x7f, 0xff, 0xff, 0xff,
       0x7f, 0xff, 0xff, 0xff,
@@ -1899,7 +1925,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamUncompressed) {
 
     const unsigned char kPri = IsSpdy2() ? 0x40 : 0x20;
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x01, 0x00, 0x00, 0x1D,
       0x7f, 0xff, 0xff, 0xff,
       0x7f, 0xff, 0xff, 0xff,
@@ -1911,7 +1937,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamUncompressed) {
       0x00
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x01, 0x00, 0x00, 0x27,
       0x7f, 0xff, 0xff, 0xff,
       0x7f, 0xff, 0xff, 0xff,
@@ -1972,7 +1998,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamCompressed) {
 
     const SpdyPriority priority = IsSpdy2() ? 2 : 4;
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x36,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x00,
@@ -1990,7 +2016,7 @@ TEST_P(SpdyFramerTest, CreateSynStreamCompressed) {
       0xff, 0xff,
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x01,
+      0x80, spdy_version_ch_, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x37,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x00,
@@ -2055,7 +2081,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyUncompressed) {
     headers["foo"] = "bar";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x00, 0x00, 0x00, 0x1C,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x02,
@@ -2066,7 +2092,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyUncompressed) {
       0x03, 'b',  'a',  'r'
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x00, 0x00, 0x00, 0x24,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x02,
@@ -2110,7 +2136,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyUncompressed) {
     headers["foo"] = "bar";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x01, 0x00, 0x00, 0x19,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2121,7 +2147,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyUncompressed) {
       'r'
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x01, 0x00, 0x00, 0x21,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2165,7 +2191,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyUncompressed) {
     headers["foo"] = "";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x01, 0x00, 0x00, 0x19,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2176,7 +2202,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyUncompressed) {
       0x00
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x01, 0x00, 0x00, 0x21,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2227,7 +2253,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyCompressed) {
     headers["foo"] = "bar";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x00, 0x00, 0x00, 0x32,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x38, 0xea,
@@ -2244,7 +2270,7 @@ TEST_P(SpdyFramerTest, CreateSynReplyCompressed) {
       0xff, 0xff,
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x02,
+      0x80, spdy_version_ch_, 0x00, 0x02,
       0x00, 0x00, 0x00, 0x31,
       0x00, 0x00, 0x00, 0x01,
       0x38, 0xea, 0xe3, 0xc6,
@@ -2295,7 +2321,7 @@ TEST_P(SpdyFramerTest, CreateRstStream) {
   {
     const char kDescription[] = "RST_STREAM frame";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x03,
+      0x80, spdy_version_ch_, 0x00, 0x03,
       0x00, 0x00, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x01,
@@ -2317,7 +2343,7 @@ TEST_P(SpdyFramerTest, CreateRstStream) {
   {
     const char kDescription[] = "RST_STREAM frame with max stream ID";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x03,
+      0x80, spdy_version_ch_, 0x00, 0x03,
       0x00, 0x00, 0x00, 0x08,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x01,
@@ -2339,7 +2365,7 @@ TEST_P(SpdyFramerTest, CreateRstStream) {
   {
     const char kDescription[] = "RST_STREAM frame with max status code";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x03,
+      0x80, spdy_version_ch_, 0x00, 0x03,
       0x00, 0x00, 0x00, 0x08,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x06,
@@ -2376,21 +2402,22 @@ TEST_P(SpdyFramerTest, CreateSettings) {
     EXPECT_EQ(kValue, settings[kId].second);
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x04,
+      0x80, spdy_version_ch_, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x0c,
       0x00, 0x00, 0x00, 0x01,
       0x04, 0x03, 0x02, 0x01,
       0x0a, 0x0b, 0x0c, 0x0d,
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x04,
+      0x80, spdy_version_ch_, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x0c,
       0x00, 0x00, 0x00, 0x01,
       0x01, 0x02, 0x03, 0x04,
       0x0a, 0x0b, 0x0c, 0x0d,
     };
     const unsigned char kV4FrameData[] = {
-      0x00, 0x10, 0x04, 0x00,
+      0x00, 0x14, 0x04, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x01,
       0x01, 0x02, 0x03, 0x04,
       0x0a, 0x0b, 0x0c, 0x0d,
@@ -2420,7 +2447,7 @@ TEST_P(SpdyFramerTest, CreateSettings) {
         &settings, 0x03000003, 0xff000004);  // 4th Setting
 
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x04,
+      0x80, spdy_version_ch_, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x24,
       0x00, 0x00, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x00,  // 1st Setting
@@ -2433,7 +2460,8 @@ TEST_P(SpdyFramerTest, CreateSettings) {
       0xff, 0x00, 0x00, 0x04,
     };
     const unsigned char kV4FrameData[] = {
-      0x00, 0x28, 0x04, 0x00,
+      0x00, 0x2c, 0x04, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x00,  // 1st Setting
       0x00, 0x00, 0x00, 0x01,
@@ -2458,12 +2486,13 @@ TEST_P(SpdyFramerTest, CreateSettings) {
     SettingsMap settings;
 
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x04,
+      0x80, spdy_version_ch_, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x00,
     };
     const unsigned char kV4FrameData[] = {
-      0x00, 0x08, 0x04, 0x00,
+      0x00, 0x0c, 0x04, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00,
     };
     scoped_ptr<SpdyFrame> frame(framer.CreateSettings(settings));
@@ -2481,12 +2510,13 @@ TEST_P(SpdyFramerTest, CreatePingFrame) {
   {
     const char kDescription[] = "PING frame";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x06,
+      0x80, spdy_version_ch_, 0x00, 0x06,
       0x00, 0x00, 0x00, 0x04,
       0x12, 0x34, 0x56, 0x78,
     };
     const unsigned char kV4FrameData[] = {
-      0x00, 0x08, 0x06, 0x00,
+      0x00, 0x0c, 0x06, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x12, 0x34, 0x56, 0x78,
     };
     scoped_ptr<SpdyFrame> frame(framer.CreatePingFrame(0x12345678u));
@@ -2504,18 +2534,19 @@ TEST_P(SpdyFramerTest, CreateGoAway) {
   {
     const char kDescription[] = "GOAWAY frame";
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x07,
+      0x80, spdy_version_ch_, 0x00, 0x07,
       0x00, 0x00, 0x00, 0x04,
       0x00, 0x00, 0x00, 0x00,
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x07,
+      0x80, spdy_version_ch_, 0x00, 0x07,
       0x00, 0x00, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00,
     };
     const unsigned char kV4FrameData[] = {
-      0x00, 0x0c, 0x07, 0x00,
+      0x00, 0x10, 0x07, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00,
     };
@@ -2532,18 +2563,19 @@ TEST_P(SpdyFramerTest, CreateGoAway) {
   {
     const char kDescription[] = "GOAWAY frame with max stream ID, status";
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x07,
+      0x80, spdy_version_ch_, 0x00, 0x07,
       0x00, 0x00, 0x00, 0x04,
       0x7f, 0xff, 0xff, 0xff,
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x07,
+      0x80, spdy_version_ch_, 0x00, 0x07,
       0x00, 0x00, 0x00, 0x08,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
     };
     const unsigned char kV4FrameData[] = {
-      0x00, 0x0c, 0x07, 0x00,
+      0x00, 0x10, 0x07, 0x00,
+      0x00, 0x00, 0x00, 0x00,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
     };
@@ -2571,7 +2603,7 @@ TEST_P(SpdyFramerTest, CreateHeadersUncompressed) {
     headers["foo"] = "bar";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x1C,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x02,
@@ -2582,7 +2614,7 @@ TEST_P(SpdyFramerTest, CreateHeadersUncompressed) {
       0x03, 'b',  'a',  'r'
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x24,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x02,
@@ -2626,7 +2658,7 @@ TEST_P(SpdyFramerTest, CreateHeadersUncompressed) {
     headers["foo"] = "bar";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x01, 0x00, 0x00, 0x19,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2637,7 +2669,7 @@ TEST_P(SpdyFramerTest, CreateHeadersUncompressed) {
       'r'
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x01, 0x00, 0x00, 0x21,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2681,7 +2713,7 @@ TEST_P(SpdyFramerTest, CreateHeadersUncompressed) {
     headers["foo"] = "";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x01, 0x00, 0x00, 0x19,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2692,7 +2724,7 @@ TEST_P(SpdyFramerTest, CreateHeadersUncompressed) {
       0x00
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x01, 0x00, 0x00, 0x21,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x02,
@@ -2743,7 +2775,7 @@ TEST_P(SpdyFramerTest, CreateHeadersCompressed) {
     headers["foo"] = "bar";
 
     const unsigned char kV2FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x32,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x38, 0xea,
@@ -2760,7 +2792,7 @@ TEST_P(SpdyFramerTest, CreateHeadersCompressed) {
       0xff, 0xff,
     };
     const unsigned char kV3FrameData[] = {
-      0x80, spdy_version_, 0x00, 0x08,
+      0x80, spdy_version_ch_, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x31,
       0x00, 0x00, 0x00, 0x01,
       0x38, 0xea, 0xe3, 0xc6,
@@ -2811,7 +2843,7 @@ TEST_P(SpdyFramerTest, CreateWindowUpdate) {
   {
     const char kDescription[] = "WINDOW_UPDATE frame";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x09,
+      0x80, spdy_version_ch_, 0x00, 0x09,
       0x00, 0x00, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x01,
       0x00, 0x00, 0x00, 0x01,
@@ -2833,7 +2865,7 @@ TEST_P(SpdyFramerTest, CreateWindowUpdate) {
   {
     const char kDescription[] = "WINDOW_UPDATE frame with max stream ID";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x09,
+      0x80, spdy_version_ch_, 0x00, 0x09,
       0x00, 0x00, 0x00, 0x08,
       0x7f, 0xff, 0xff, 0xff,
       0x00, 0x00, 0x00, 0x01,
@@ -2854,7 +2886,7 @@ TEST_P(SpdyFramerTest, CreateWindowUpdate) {
   {
     const char kDescription[] = "WINDOW_UPDATE frame with max window delta";
     const unsigned char kV3FrameData[] = {  // Also applies for V2.
-      0x80, spdy_version_, 0x00, 0x09,
+      0x80, spdy_version_ch_, 0x00, 0x09,
       0x00, 0x00, 0x00, 0x08,
       0x00, 0x00, 0x00, 0x01,
       0x7f, 0xff, 0xff, 0xff,
@@ -2871,6 +2903,24 @@ TEST_P(SpdyFramerTest, CreateWindowUpdate) {
       CompareFrame(kDescription, *frame, kV3FrameData, arraysize(kV3FrameData));
     }
   }
+}
+
+TEST_P(SpdyFramerTest, SerializeBlocked) {
+  if (spdy_version_ < SPDY4) {
+    return;
+  }
+
+  SpdyFramer framer(spdy_version_);
+
+  const char kDescription[] = "BLOCKED frame";
+  const unsigned char kFrameData[] = {
+    0x00, 0x08, 0x0b, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+  };
+  SpdyBlockedIR blocked_ir(0);
+  scoped_ptr<SpdySerializedFrame> frame(framer.SerializeBlocked(blocked_ir));
+  CompareFrame(kDescription, *frame, kFrameData, arraysize(kFrameData));
+
 }
 
 TEST_P(SpdyFramerTest, ReadCompressedSynStreamHeaderBlock) {
@@ -3138,7 +3188,7 @@ TEST_P(SpdyFramerTest, ControlFrameSizesAreValidated) {
   ASSERT_GE(250u, SpdyFramer::kControlFrameBufferSize);
   const unsigned char length =  1 + SpdyFramer::kControlFrameBufferSize;
   const unsigned char kV3FrameData[] = {  // Also applies for V2.
-    0x80, spdy_version_, 0x00, 0x07,
+    0x80, spdy_version_ch_, 0x00, 0x07,
     0x00, 0x00, 0x00, length,
     0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00,
@@ -3248,7 +3298,7 @@ TEST_P(SpdyFramerTest, ReadDuplicateSettings) {
   SpdyFramer framer(spdy_version_);
 
   const unsigned char kV2FrameData[] = {
-    0x80, spdy_version_, 0x00, 0x04,
+    0x80, spdy_version_ch_, 0x00, 0x04,
     0x00, 0x00, 0x00, 0x1C,
     0x00, 0x00, 0x00, 0x03,
     0x01, 0x00, 0x00, 0x00,  // 1st Setting
@@ -3259,7 +3309,7 @@ TEST_P(SpdyFramerTest, ReadDuplicateSettings) {
     0x00, 0x00, 0x00, 0x03,
   };
   const unsigned char kV3FrameData[] = {
-    0x80, spdy_version_, 0x00, 0x04,
+    0x80, spdy_version_ch_, 0x00, 0x04,
     0x00, 0x00, 0x00, 0x1C,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x01,  // 1st Setting
@@ -3270,7 +3320,8 @@ TEST_P(SpdyFramerTest, ReadDuplicateSettings) {
     0x00, 0x00, 0x00, 0x03,
   };
   const unsigned char kV4FrameData[] = {
-    0x00, 0x20, 0x04, 0x00,
+    0x00, 0x24, 0x04, 0x00,
+    0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x01,  // 1st Setting
     0x00, 0x00, 0x00, 0x02,
@@ -3298,7 +3349,7 @@ TEST_P(SpdyFramerTest, ReadOutOfOrderSettings) {
   SpdyFramer framer(spdy_version_);
 
   const unsigned char kV2FrameData[] = {
-    0x80, spdy_version_, 0x00, 0x04,
+    0x80, spdy_version_ch_, 0x00, 0x04,
     0x00, 0x00, 0x00, 0x1C,
     0x00, 0x00, 0x00, 0x03,
     0x02, 0x00, 0x00, 0x00,  // 1st Setting
@@ -3309,7 +3360,7 @@ TEST_P(SpdyFramerTest, ReadOutOfOrderSettings) {
     0x00, 0x00, 0x00, 0x03,
   };
   const unsigned char kV3FrameData[] = {
-    0x80, spdy_version_, 0x00, 0x04,
+    0x80, spdy_version_ch_, 0x00, 0x04,
     0x00, 0x00, 0x00, 0x1C,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x02,  // 1st Setting
@@ -3320,7 +3371,8 @@ TEST_P(SpdyFramerTest, ReadOutOfOrderSettings) {
     0x00, 0x00, 0x00, 0x03,
   };
   const unsigned char kV4FrameData[] = {
-    0x00, 0x20, 0x04, 0x00,
+    0x00, 0x24, 0x04, 0x00,
+    0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x02,  // 1st Setting
     0x00, 0x00, 0x00, 0x02,
@@ -3494,7 +3546,7 @@ TEST_P(SpdyFramerTest, ReadGarbageWithValidVersion) {
   }
   SpdyFramer framer(spdy_version_);
   const unsigned char kFrameData[] = {
-    0x80, spdy_version_, 0xff, 0xff,
+    0x80, spdy_version_ch_, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff,
   };
   TestSpdyVisitor visitor(spdy_version_);
@@ -3507,17 +3559,16 @@ TEST_P(SpdyFramerTest, SizesTest) {
   SpdyFramer framer(spdy_version_);
   EXPECT_EQ(8u, framer.GetDataFrameMinimumSize());
   if (IsSpdy4()) {
-    EXPECT_EQ(4u, framer.GetControlFrameHeaderSize());
-    EXPECT_EQ(14u, framer.GetSynStreamMinimumSize());
     EXPECT_EQ(8u, framer.GetSynReplyMinimumSize());
     EXPECT_EQ(12u, framer.GetRstStreamSize());
-    EXPECT_EQ(8u, framer.GetSettingsMinimumSize());
-    EXPECT_EQ(8u, framer.GetPingSize());
-    EXPECT_EQ(12u, framer.GetGoAwaySize());
+    EXPECT_EQ(12u, framer.GetSettingsMinimumSize());
+    EXPECT_EQ(12u, framer.GetPingSize());
+    EXPECT_EQ(16u, framer.GetGoAwaySize());
     EXPECT_EQ(8u, framer.GetHeadersMinimumSize());
     EXPECT_EQ(12u, framer.GetWindowUpdateSize());
-    EXPECT_EQ(6u, framer.GetCredentialMinimumSize());
-    EXPECT_EQ(4u, framer.GetFrameMinimumSize());
+    EXPECT_EQ(10u, framer.GetCredentialMinimumSize());
+    EXPECT_EQ(8u, framer.GetBlockedSize());
+    EXPECT_EQ(8u, framer.GetFrameMinimumSize());
     EXPECT_EQ(65535u, framer.GetFrameMaximumSize());
     EXPECT_EQ(65527u, framer.GetDataFrameMaximumPayload());
   } else {
@@ -4058,7 +4109,7 @@ TEST_P(SpdyFramerTest, RstStreamStatusBounds) {
   DCHECK_GE(0xff, RST_STREAM_NUM_STATUS_CODES);
 
   const unsigned char kV3RstStreamInvalid[] = {
-    0x80, spdy_version_, 0x00, 0x03,
+    0x80, spdy_version_ch_, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x08,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, RST_STREAM_INVALID
@@ -4070,7 +4121,7 @@ TEST_P(SpdyFramerTest, RstStreamStatusBounds) {
   };
 
   const unsigned char kV3RstStreamNumStatusCodes[] = {
-    0x80, spdy_version_, 0x00, 0x03,
+    0x80, spdy_version_ch_, 0x00, 0x03,
     0x00, 0x00, 0x00, 0x08,
     0x00, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, RST_STREAM_NUM_STATUS_CODES
@@ -4113,18 +4164,19 @@ TEST_P(SpdyFramerTest, RstStreamStatusBounds) {
 // Tests handling of a GOAWAY frame with out-of-bounds stream ID.
 TEST_P(SpdyFramerTest, GoAwayStreamIdBounds) {
   const unsigned char kV2FrameData[] = {
-    0x80, spdy_version_, 0x00, 0x07,
+    0x80, spdy_version_ch_, 0x00, 0x07,
     0x00, 0x00, 0x00, 0x04,
     0xff, 0xff, 0xff, 0xff,
   };
   const unsigned char kV3FrameData[] = {
-    0x80, spdy_version_, 0x00, 0x07,
+    0x80, spdy_version_ch_, 0x00, 0x07,
     0x00, 0x00, 0x00, 0x08,
     0xff, 0xff, 0xff, 0xff,
     0x00, 0x00, 0x00, 0x00,
   };
   const unsigned char kV4FrameData[] = {
-    0x00, 0x0c, 0x07, 0x00,
+    0x00, 0x10, 0x07, 0x00,
+    0x00, 0x00, 0x00, 0x00,
     0xff, 0xff, 0xff, 0xff,
     0x00, 0x00, 0x00, 0x00,
   };
@@ -4144,6 +4196,27 @@ TEST_P(SpdyFramerTest, GoAwayStreamIdBounds) {
     framer.ProcessInput(reinterpret_cast<const char*>(kV4FrameData),
                         arraysize(kV4FrameData));
   }
+  EXPECT_EQ(SpdyFramer::SPDY_RESET, framer.state());
+  EXPECT_EQ(SpdyFramer::SPDY_NO_ERROR, framer.error_code());
+}
+
+TEST_P(SpdyFramerTest, OnBlocked) {
+  if (spdy_version_ < SPDY4) {
+    return;
+  }
+
+  const SpdyStreamId kStreamId = 0;
+
+  testing::StrictMock<test::MockVisitor> visitor;
+  SpdyFramer framer(spdy_version_);
+  framer.set_visitor(&visitor);
+
+  EXPECT_CALL(visitor, OnBlocked(kStreamId));
+
+  SpdyBlockedIR blocked_ir(0);
+  scoped_ptr<SpdySerializedFrame> frame(framer.SerializeBlocked(blocked_ir));
+  framer.ProcessInput(frame->data(), framer.GetBlockedSize());
+
   EXPECT_EQ(SpdyFramer::SPDY_RESET, framer.state());
   EXPECT_EQ(SpdyFramer::SPDY_NO_ERROR, framer.error_code());
 }

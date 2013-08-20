@@ -23,8 +23,8 @@ class DictionaryValue;
 }
 
 class Chrome;
-class DevToolsEventLogger;
 class Status;
+class WebDriverLog;
 class WebView;
 
 struct FrameInfo {
@@ -38,6 +38,8 @@ struct FrameInfo {
 };
 
 struct Session {
+  static const int kDefaultPageLoadTimeoutMs;
+
   explicit Session(const std::string& id);
   Session(const std::string& id, scoped_ptr<Chrome> chrome);
   ~Session();
@@ -51,6 +53,7 @@ struct Session {
 
   const std::string id;
   base::Thread thread;
+  bool detach;
   scoped_ptr<Chrome> chrome;
   std::string window;
   int sticky_modifiers;
@@ -62,9 +65,10 @@ struct Session {
   int implicit_wait;
   int page_load_timeout;
   int script_timeout;
-  std::string prompt_text;
+  scoped_ptr<std::string> prompt_text;
   scoped_ptr<Geoposition> overridden_geoposition;
-  ScopedVector<DevToolsEventLogger> devtools_event_loggers;
+  // Logs that populate from DevTools events.
+  ScopedVector<WebDriverLog> devtools_logs;
   base::ScopedTempDir temp_dir;
   const scoped_ptr<base::DictionaryValue> capabilities;
 

@@ -70,16 +70,16 @@ class BlueYellowLayerClient : public ContentLayerClient {
 
     SkPaint paint;
     paint.setColor(SK_ColorBLUE);
-    canvas->drawRect(SkRect::MakeWH(layer_rect_.width() / 2,
-                                    layer_rect_.height()),
+    canvas->drawRect(SkRect::MakeWH(layer_rect_.width(),
+                                    layer_rect_.height() / 2),
                      paint);
 
     paint.setColor(SK_ColorYELLOW);
     canvas->drawRect(
-        SkRect::MakeXYWH(layer_rect_.width() / 2,
-                         0,
-                         layer_rect_.width() / 2,
-                         layer_rect_.height()),
+        SkRect::MakeXYWH(0,
+                         layer_rect_.height() / 2,
+                         layer_rect_.width(),
+                         layer_rect_.height() / 2),
         paint);
   }
 
@@ -99,7 +99,9 @@ TEST_F(LayerTreeHostOnDemandRasterPixelTest, RasterPictureLayer) {
   layer->SetBounds(layer_rect.size());
   layer->SetPosition(layer_rect.origin());
 
-  RunPixelTest(layer, base::FilePath(FILE_PATH_LITERAL("blue_yellow.png")));
+  RunPixelTest(GL_WITH_BITMAP,
+               layer,
+               base::FilePath(FILE_PATH_LITERAL("blue_yellow.png")));
 }
 
 }  // namespace

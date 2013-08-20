@@ -7,7 +7,7 @@
 
 #include "base/memory/singleton.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome/browser/speech/tts_controller.h"
@@ -23,13 +23,18 @@ class TtsPlatformImplWin : public TtsPlatformImpl {
       int utterance_id,
       const std::string& utterance,
       const std::string& lang,
+      const VoiceData& voice,
       const UtteranceContinuousParameters& params);
 
   virtual bool StopSpeaking();
 
+  virtual void Pause();
+
+  virtual void Resume();
+
   virtual bool IsSpeaking();
 
-  virtual bool SendsEvent(TtsEventType event_type);
+  virtual void GetVoices(std::vector<VoiceData>* out_voices) OVERRIDE;
 
   // Get the single instance of this class.
   static TtsPlatformImplWin* GetInstance();
@@ -50,6 +55,7 @@ class TtsPlatformImplWin : public TtsPlatformImpl {
   int prefix_len_;
   ULONG stream_number_;
   int char_position_;
+  bool paused_;
 
   friend struct DefaultSingletonTraits<TtsPlatformImplWin>;
 
@@ -65,6 +71,7 @@ bool TtsPlatformImplWin::Speak(
     int utterance_id,
     const std::string& src_utterance,
     const std::string& lang,
+    const VoiceData& voice,
     const UtteranceContinuousParameters& params) {
   std::wstring prefix;
   std::wstring suffix;
@@ -123,8 +130,30 @@ bool TtsPlatformImplWin::StopSpeaking() {
       // Stop speech by speaking the empty string with the purge flag.
       speech_synthesizer_->Speak(L"", SPF_ASYNC | SPF_PURGEBEFORESPEAK, NULL);
     }
+    if (paused_) {
+      speech_synthesizer_->Resume();
+      paused_ = false;
+    }
   }
   return true;
+}
+
+void TtsPlatformImplWin::Pause() {
+  if (speech_synthesizer_.get() && utterance_id_ && !paused_) {
+    speech_synthesizer_->Pause();
+    paused_ = true;
+    TtsController::GetInstance()->OnTtsEvent(
+        utterance_id_, TTS_EVENT_PAUSE, char_position_, "");
+  }
+}
+
+void TtsPlatformImplWin::Resume() {
+  if (speech_synthesizer_.get() && utterance_id_ && paused_) {
+    speech_synthesizer_->Resume();
+    paused_ = false;
+    TtsController::GetInstance()->OnTtsEvent(
+        utterance_id_, TTS_EVENT_RESUME, char_position_, "");
+  }
 }
 
 bool TtsPlatformImplWin::IsSpeaking() {
@@ -141,12 +170,21 @@ bool TtsPlatformImplWin::IsSpeaking() {
   return false;
 }
 
-bool TtsPlatformImplWin::SendsEvent(TtsEventType event_type) {
-  return (event_type == TTS_EVENT_START ||
-          event_type == TTS_EVENT_END ||
-          event_type == TTS_EVENT_MARKER ||
-          event_type == TTS_EVENT_WORD ||
-          event_type == TTS_EVENT_SENTENCE);
+void TtsPlatformImplWin::GetVoices(
+    std::vector<VoiceData>* out_voices) {
+  // TODO: get all voices, not just default voice.
+  // http://crbug.com/88059
+  out_voices->push_back(VoiceData());
+  VoiceData& voice = out_voices->back();
+  voice.native = true;
+  voice.name = "native";
+  voice.events.insert(TTS_EVENT_START);
+  voice.events.insert(TTS_EVENT_END);
+  voice.events.insert(TTS_EVENT_MARKER);
+  voice.events.insert(TTS_EVENT_WORD);
+  voice.events.insert(TTS_EVENT_SENTENCE);
+  voice.events.insert(TTS_EVENT_PAUSE);
+  voice.events.insert(TTS_EVENT_RESUME);
 }
 
 void TtsPlatformImplWin::OnSpeechEvent() {
@@ -190,7 +228,8 @@ TtsPlatformImplWin::TtsPlatformImplWin()
   : utterance_id_(0),
     prefix_len_(0),
     stream_number_(0),
-    char_position_(0) {
+    char_position_(0),
+    paused_(false) {
   speech_synthesizer_.CreateInstance(CLSID_SpVoice);
   if (speech_synthesizer_.get()) {
     ULONGLONG event_mask =

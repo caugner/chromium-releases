@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -22,7 +22,6 @@
 #include "chrome/browser/ui/webui/crashes_ui.h"
 #include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
-#include "chrome/browser/ui/webui/extensions/extension_activity_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_info_ui.h"
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
 #include "chrome/browser/ui/webui/feedback_ui.h"
@@ -30,6 +29,8 @@
 #include "chrome/browser/ui/webui/flash_ui.h"
 #include "chrome/browser/ui/webui/help/help_ui.h"
 #include "chrome/browser/ui/webui/history_ui.h"
+#include "chrome/browser/ui/webui/identity_internals_ui.h"
+#include "chrome/browser/ui/webui/inline_login_ui.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/browser/ui/webui/memory_internals/memory_internals_ui.h"
@@ -42,10 +43,9 @@
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
-#include "chrome/browser/ui/webui/quota_internals_ui.h"
+#include "chrome/browser/ui/webui/quota_internals/quota_internals_ui.h"
 #include "chrome/browser/ui/webui/signin/profile_signin_confirmation_ui.h"
 #include "chrome/browser/ui/webui/signin_internals_ui.h"
-#include "chrome/browser/ui/webui/sync_file_system_internals_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
 #include "chrome/browser/ui/webui/translate_internals/translate_internals_ui.h"
 #include "chrome/browser/ui/webui/user_actions/user_actions_ui.h"
@@ -58,6 +58,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/url_utils.h"
 #include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/favicon_size.h"
@@ -75,6 +76,7 @@
 #include "chrome/browser/ui/webui/welcome_ui_android.h"
 #else
 #include "chrome/browser/ui/webui/suggestions_internals/suggestions_internals_ui.h"
+#include "chrome/browser/ui/webui/sync_file_system_internals/sync_file_system_internals_ui.h"
 #include "chrome/browser/ui/webui/uber/uber_ui.h"
 #endif
 
@@ -84,7 +86,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/chromeos/app_launch_ui.h"
-#include "chrome/browser/ui/webui/chromeos/app_login_ui.h"
 #include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
 #include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
@@ -106,7 +107,7 @@
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #endif
 
 #if defined(OS_WIN)
@@ -211,15 +212,14 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<FlagsUI>;
   if (url.host() == chrome::kChromeUIHistoryFrameHost)
     return &NewWebUI<HistoryUI>;
+  if (url.host() == chrome::kChromeUIInlineLoginHost)
+    return &NewWebUI<InlineLoginUI>;
   if (url.host() == chrome::kChromeUIInstantHost)
     return &NewWebUI<InstantUI>;
   if (url.host() == chrome::kChromeUIManagedUserPassphrasePageHost)
     return &NewWebUI<ConstrainedWebDialogUI>;
-  if (url.host() == chrome::kChromeUIMemoryInternalsHost &&
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableMemoryInternalsUI)) {
+  if (url.host() == chrome::kChromeUIMemoryInternalsHost)
     return &NewWebUI<MemoryInternalsUI>;
-  }
 #if !defined(DISABLE_NACL)
   if (url.host() == chrome::kChromeUINaClHost)
     return &NewWebUI<NaClUI>;
@@ -240,8 +240,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<QuotaInternalsUI>;
   if (url.host() == chrome::kChromeUISignInInternalsHost)
     return &NewWebUI<SignInInternalsUI>;
-  if (url.host() == chrome::kChromeUISyncFileSystemInternalsHost)
-    return &NewWebUI<SyncFileSystemInternalsUI>;
   if (url.host() == chrome::kChromeUISyncInternalsHost)
     return &NewWebUI<SyncInternalsUI>;
   if (url.host() == chrome::kChromeUISyncResourcesHost)
@@ -282,6 +280,9 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // Help is implemented with native UI elements on Android.
   if (url.host() == chrome::kChromeUIHelpFrameHost)
     return &NewWebUI<HelpUI>;
+  // Identity API is not available on Android.
+  if (url.host() == chrome::kChromeUIIdentityInternalsHost)
+    return &NewWebUI<IdentityInternalsUI>;
   // chrome://inspect isn't supported on Android. Page debugging is handled by a
   // remote devtools on the host machine, and other elements (Shared Workers,
   // extensions, etc) aren't supported.
@@ -298,6 +299,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<options::OptionsUI>;
   if (url.host() == chrome::kChromeUISuggestionsInternalsHost)
     return &NewWebUI<SuggestionsInternalsUI>;
+  if (url.host() == chrome::kChromeUISyncFileSystemInternalsHost)
+    return &NewWebUI<SyncFileSystemInternalsUI>;
   // Uber frame is not used on Android.
   if (url.host() == chrome::kChromeUIUberFrameHost)
     return &NewWebUI<UberFrameUI>;
@@ -318,8 +321,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(OS_CHROMEOS)
   if (url.host() == chrome::kChromeUIAppLaunchHost)
     return &NewWebUI<chromeos::AppLaunchUI>;
-  if (url.host() == chrome::kChromeUIAppLoginHost)
-    return &NewWebUI<chromeos::AppLoginUI>;
   if (url.host() == chrome::kChromeUIBluetoothPairingHost)
     return &NewWebUI<chromeos::BluetoothPairingUI>;
   if (url.host() == chrome::kChromeUIChooseMobileNetworkHost)
@@ -352,12 +353,13 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (url.host() == chrome::kChromeUIPolicyHost)
     return &NewWebUI<PolicyUI>;
-#endif
 
-#if defined(ENABLE_CONFIGURATION_POLICY) && !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
   if (url.host() == chrome::kChromeUIProfileSigninConfirmationHost)
     return &NewWebUI<ProfileSigninConfirmationUI>;
 #endif
+
+#endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
   if (url.host() == chrome::kChromeUITabModalConfirmDialogHost) {
@@ -370,19 +372,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<GestureConfigUI>;
   if (url.host() == keyboard::kKeyboardWebUIHost)
     return &NewWebUI<keyboard::KeyboardUIController>;
-#endif
-
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
-  if (url.host() == chrome::kChromeUISyncPromoHost) {
-    // If the sync promo page is enabled then use the sync promo WebUI otherwise
-    // use the NTP WebUI. We don't want to return NULL if the sync promo page
-    // is disabled because the page can be disabled mid-flight (for example,
-    // if sync login finishes).
-    if (SyncPromoUI::ShouldShowSyncPromo(profile))
-      return &NewWebUI<SyncPromoUI>;
-    else
-      return &NewWebUI<NewTabUI>;
-  }
 #endif
 
   if (url.host() == chrome::kChromeUIChromeURLsHost ||
@@ -410,11 +399,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   }
 
 #if defined(ENABLE_EXTENSIONS)
-  if (url.host() == chrome::kChromeUIExtensionActivityHost &&
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExtensionActivityUI)) {
-    return &NewWebUI<ExtensionActivityUI>;
-  }
   if (url.host() == chrome::kChromeUIExtensionInfoHost &&
       extensions::FeatureSwitch::script_badges()->IsEnabled()) {
     return &NewWebUI<ExtensionInfoUI>;
@@ -433,7 +417,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 
 void RunFaviconCallbackAsync(
     const FaviconService::FaviconResultsCallback& callback,
-    const std::vector<history::FaviconBitmapResult>* results) {
+    const std::vector<chrome::FaviconBitmapResult>* results) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
       base::Bind(&FaviconService::FaviconResultsCallbackRunner,
@@ -493,22 +477,22 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
     ExtensionWebUI::GetFaviconForURL(profile, url, callback);
 #else
     RunFaviconCallbackAsync(callback,
-                            new std::vector<history::FaviconBitmapResult>());
+                            new std::vector<chrome::FaviconBitmapResult>());
 #endif
     return;
   }
 
-  std::vector<history::FaviconBitmapResult>* favicon_bitmap_results =
-      new std::vector<history::FaviconBitmapResult>();
+  std::vector<chrome::FaviconBitmapResult>* favicon_bitmap_results =
+      new std::vector<chrome::FaviconBitmapResult>();
 
   for (size_t i = 0; i < scale_factors.size(); ++i) {
     scoped_refptr<base::RefCountedMemory> bitmap(GetFaviconResourceBytes(
           url, scale_factors[i]));
     if (bitmap.get() && bitmap->size()) {
-      history::FaviconBitmapResult bitmap_result;
+      chrome::FaviconBitmapResult bitmap_result;
       bitmap_result.bitmap_data = bitmap;
       // Leave |bitmap_result|'s icon URL as the default of GURL().
-      bitmap_result.icon_type = history::FAVICON;
+      bitmap_result.icon_type = chrome::FAVICON;
       favicon_bitmap_results->push_back(bitmap_result);
 
       // Assume that |bitmap| is |gfx::kFaviconSize| x |gfx::kFaviconSize|

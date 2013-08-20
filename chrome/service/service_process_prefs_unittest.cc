@@ -18,7 +18,7 @@ class ServiceProcessPrefsTest : public testing::Test {
 
     prefs_.reset(new ServiceProcessPrefs(
         temp_dir_.path().AppendASCII("service_process_prefs.txt"),
-        message_loop_.message_loop_proxy()));
+        message_loop_.message_loop_proxy().get()));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -28,7 +28,7 @@ class ServiceProcessPrefsTest : public testing::Test {
   // The path to temporary directory used to contain the test operations.
   base::ScopedTempDir temp_dir_;
   // A message loop that we can use as the file thread message loop.
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   scoped_ptr<ServiceProcessPrefs> prefs_;
 };
 

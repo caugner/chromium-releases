@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
@@ -166,7 +167,7 @@ struct ExpireHistoryBackend::DeleteDependencies {
   // The list of all favicon IDs that the affected URLs had. Favicons will be
   // shared between all URLs with the same favicon, so this is the set of IDs
   // that we will need to check when the delete operations are complete.
-  std::set<FaviconID> affected_favicons;
+  std::set<chrome::FaviconID> affected_favicons;
 
   // The list of all favicon urls that were actually deleted from the thumbnail
   // db.
@@ -339,14 +340,14 @@ void ExpireHistoryBackend::InitWorkQueue() {
 }
 
 const ExpiringVisitsReader* ExpireHistoryBackend::GetAllVisitsReader() {
-  if (!all_visits_reader_.get())
+  if (!all_visits_reader_)
     all_visits_reader_.reset(new AllVisitsReader());
   return all_visits_reader_.get();
 }
 
 const ExpiringVisitsReader*
     ExpireHistoryBackend::GetAutoSubframeVisitsReader() {
-  if (!auto_subframe_visits_reader_.get())
+  if (!auto_subframe_visits_reader_)
     auto_subframe_visits_reader_.reset(new AutoSubframeVisitsReader());
   return auto_subframe_visits_reader_.get();
 }
@@ -371,16 +372,16 @@ void ExpireHistoryBackend::StartArchivingOldStuff(
 }
 
 void ExpireHistoryBackend::DeleteFaviconsIfPossible(
-    const std::set<FaviconID>& favicon_set,
+    const std::set<chrome::FaviconID>& favicon_set,
     std::set<GURL>* expired_favicons) {
   if (!thumb_db_)
     return;
 
-  for (std::set<FaviconID>::const_iterator i = favicon_set.begin();
+  for (std::set<chrome::FaviconID>::const_iterator i = favicon_set.begin();
        i != favicon_set.end(); ++i) {
     if (!thumb_db_->HasMappingFor(*i)) {
       GURL icon_url;
-      IconType icon_type;
+      chrome::IconType icon_type;
       FaviconSizes favicon_sizes;
       if (thumb_db_->GetFaviconHeader(*i,
                                       &icon_url,
@@ -405,6 +406,9 @@ void ExpireHistoryBackend::BroadcastDeleteNotifications(
     deleted_details->archived = (type == DELETION_ARCHIVED);
     deleted_details->rows = dependencies->deleted_urls;
     deleted_details->favicon_urls = dependencies->expired_favicons;
+    delegate_->NotifySyncURLsDeleted(false,
+                                     deleted_details->archived,
+                                     &deleted_details->rows);
     delegate_->BroadcastNotifications(
         chrome::NOTIFICATION_HISTORY_URLS_DELETED, deleted_details);
   }
@@ -632,7 +636,7 @@ void ExpireHistoryBackend::ScheduleArchive() {
     delay = TimeDelta::FromSeconds(kExpirationDelaySec);
   }
 
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ExpireHistoryBackend::DoArchiveIteration,
                  weak_factory_.GetWeakPtr()),
@@ -697,9 +701,9 @@ bool ExpireHistoryBackend::ArchiveSomeOldHistory(
 
   // Create a union of all affected favicons (we don't store favicons for
   // archived URLs) and delete them.
-  std::set<FaviconID> affected_favicons(
+  std::set<chrome::FaviconID> affected_favicons(
       archived_dependencies.affected_favicons);
-  for (std::set<FaviconID>::const_iterator i =
+  for (std::set<chrome::FaviconID>::const_iterator i =
            deleted_dependencies.affected_favicons.begin();
        i != deleted_dependencies.affected_favicons.end(); ++i) {
     affected_favicons.insert(*i);
@@ -728,7 +732,7 @@ void ExpireHistoryBackend::ScheduleExpireHistoryIndexFiles() {
   }
 
   TimeDelta delay = TimeDelta::FromMinutes(kIndexExpirationDelayMin);
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ExpireHistoryBackend::DoExpireHistoryIndexFiles,
                  weak_factory_.GetWeakPtr()),
@@ -751,8 +755,8 @@ void ExpireHistoryBackend::DoExpireHistoryIndexFiles() {
   base::FilePath::StringType history_index_files_pattern =
       TextDatabase::file_base();
   history_index_files_pattern.append(FILE_PATH_LITERAL("*"));
-  file_util::FileEnumerator file_enumerator(
-      text_db_->GetDir(), false, file_util::FileEnumerator::FILES,
+  base::FileEnumerator file_enumerator(
+      text_db_->GetDir(), false, base::FileEnumerator::FILES,
       history_index_files_pattern);
   for (base::FilePath file = file_enumerator.Next(); !file.empty();
        file = file_enumerator.Next()) {

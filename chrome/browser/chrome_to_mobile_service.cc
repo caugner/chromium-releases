@@ -12,7 +12,7 @@
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_to_mobile_service_factory.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
@@ -45,6 +45,7 @@
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
+#include "net/base/mime_util.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -137,13 +138,13 @@ std::string GetContentType(ChromeToMobileService::JobType type) {
       "multipart/related" : "text/plain";
 }
 
-// Utility function to call cloud_print::AddMultipartValueForUpload.
+// Utility function to call net::AddMultipartValueForUpload.
 void AddValue(const std::string& value_name,
               const std::string& value,
               const std::string& mime_boundary,
               std::string* post_data) {
-  cloud_print::AddMultipartValueForUpload(value_name, value, mime_boundary,
-                                          std::string(), post_data);
+  net::AddMultipartValueForUpload(value_name, value, mime_boundary,
+                                  std::string(), post_data);
 }
 
 // Append the Chrome To Mobile client query parameter, used by cloud print.
@@ -583,10 +584,10 @@ void ChromeToMobileService::SendJobRequest(base::WeakPtr<Observer> observer,
   AddValue("contentType", GetContentType(data.type), bound, &post);
 
   // Add the snapshot or use dummy content to workaround a URL submission error.
-  cloud_print::AddMultipartValueForUpload("content",
+  net::AddMultipartValueForUpload("content",
       data.snapshot_content.empty() ? "content" : data.snapshot_content,
       bound, "text/mhtml", &post);
-  post.append("--" + bound + "--\r\n");
+  net::AddMultipartFinalDelimiterForUpload(bound, &post);
 
   LogMetric(data.type == SNAPSHOT ? SENDING_SNAPSHOT : SENDING_URL);
   net::URLFetcher* request = net::URLFetcher::Create(
@@ -746,7 +747,7 @@ void ChromeToMobileService::HandleSubmitResponse(
   // Check if the observer is waiting on a second response (url or snapshot).
   for (RequestObserverMap::iterator other = request_observer_map_.begin();
        observer.get() && (other != request_observer_map_.end()); ++other) {
-    if (other->second == observer) {
+    if (other->second.get() == observer.get()) {
       // Delay reporting success until the second response is received.
       if (success)
         return;

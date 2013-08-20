@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/ash/launcher/app_shortcut_launcher_item_controller.h"
 
 #include "ash/wm/window_util.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item_tab.h"
@@ -18,11 +20,20 @@
 #include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event.h"
 #include "ui/views/corewm/window_animations.h"
 
 using extensions::Extension;
+
+namespace {
+
+// The time delta between clicks in which clicks to launch V2 apps are ignored.
+const int kClickSuppressionInMS = 1000;
+
+}  // namespace
 
 // Item controller for an app shortcut. Shortcuts track app and launcher ids,
 // but do not have any associated windows (opening a shortcut will replace the
@@ -36,9 +47,11 @@ AppShortcutLauncherItemController::AppShortcutLauncherItemController(
   // used URL. This will also work with applications like Google Drive.
   const Extension* extension =
       launcher_controller()->GetExtensionForAppID(app_id);
-  // Some unit tests have no real extension and will set their
-  if (extension)
-    set_refocus_url(GURL(extension->launch_web_url() + "*"));
+  // Some unit tests have no real extension.
+  if (extension) {
+    set_refocus_url(GURL(
+        extensions::AppLaunchInfo::GetLaunchWebURL(extension).spec() + "*"));
+  }
 }
 
 AppShortcutLauncherItemController::~AppShortcutLauncherItemController() {
@@ -82,6 +95,16 @@ void AppShortcutLauncherItemController::Launch(int event_flags) {
 void AppShortcutLauncherItemController::Activate() {
   content::WebContents* content = GetLRUApplication();
   if (!content) {
+    if (IsV2App()) {
+      // Ideally we come here only once. After that ShellLauncherItemController
+      // will take over when the shell window gets opened. However there are
+      // apps which take a lot of time for pre-processing (like the files app)
+      // before they open a window. Since there is currently no other way to
+      // detect if an app was started we suppress any further clicks within a
+      // special time out.
+      if (!AllowNextLaunchAttempt())
+        return;
+    }
     Launch(ui::EF_NONE);
     return;
   }
@@ -124,7 +147,7 @@ void AppShortcutLauncherItemController::LauncherItemChanged(
 }
 
 ChromeLauncherAppMenuItems
-AppShortcutLauncherItemController::GetApplicationList() {
+AppShortcutLauncherItemController::GetApplicationList(int event_flags) {
   ChromeLauncherAppMenuItems items;
   // Add the application name to the menu.
   items.push_back(new ChromeLauncherAppMenuItem(GetTitle(), NULL, false));
@@ -267,6 +290,21 @@ bool AppShortcutLauncherItemController::AdvanceToNextApp() {
         return true;
       }
     }
+  }
+  return false;
+}
+
+bool AppShortcutLauncherItemController::IsV2App() {
+  const Extension* extension = app_controller_->GetExtensionForAppID(app_id());
+  return extension && extension->is_platform_app();
+}
+
+bool AppShortcutLauncherItemController::AllowNextLaunchAttempt() {
+  if (last_launch_attempt_.is_null() ||
+      last_launch_attempt_ + base::TimeDelta::FromMilliseconds(
+          kClickSuppressionInMS) < base::Time::Now()) {
+    last_launch_attempt_ = base::Time::Now();
+    return true;
   }
   return false;
 }

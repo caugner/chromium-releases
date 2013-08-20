@@ -4,8 +4,8 @@
 
 #include "chrome/browser/history/android/bookmark_model_sql_handler.h"
 
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_database.h"
@@ -32,8 +32,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
         ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_) {
   }
-  ~BookmarkModelSQLHandlerTest() {
-  }
+  virtual ~BookmarkModelSQLHandlerTest() {}
 
  protected:
   virtual void SetUp() OVERRIDE {
@@ -58,7 +57,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath history_db_name = temp_dir_.path().AppendASCII(
         chrome::kHistoryFilename);
-    history_db_.Init(history_db_name, NULL);
+    history_db_.Init(history_db_name);
   }
 
   // Runs the MessageLoopForUI, and return till all pending messages were
@@ -69,7 +68,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
 
   TestingProfileManager profile_manager_;
   BookmarkModel* bookmark_model_;
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   base::ScopedTempDir temp_dir_;

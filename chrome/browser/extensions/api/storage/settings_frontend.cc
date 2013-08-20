@@ -44,7 +44,7 @@ class DefaultObserver : public SettingsObserver {
       const std::string& change_json) OVERRIDE {
     // TODO(gdk): This is a temporary hack while the refactoring for
     // string-based event payloads is removed. http://crbug.com/136045
-    scoped_ptr<ListValue> args(new ListValue());
+    scoped_ptr<base::ListValue> args(new base::ListValue());
     args->Append(base::JSONReader::Read(change_json));
     args->Append(Value::CreateStringValue(settings_namespace::ToString(
         settings_namespace)));
@@ -176,7 +176,7 @@ void SettingsFrontend::RunWithStorage(
   scoped_refptr<const Extension> extension =
       extensions::ExtensionSystem::Get(profile_)->extension_service()->
           GetExtensionById(extension_id, true);
-  CHECK(extension);
+  CHECK(extension.get());
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,

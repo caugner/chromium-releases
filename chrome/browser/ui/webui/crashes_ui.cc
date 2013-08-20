@@ -11,7 +11,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/crash_upload_list.h"
@@ -78,7 +78,7 @@ class CrashesDOMHandler : public WebUIMessageHandler,
   virtual void RegisterMessages() OVERRIDE;
 
   // CrashUploadList::Delegate implemenation.
-  virtual void OnCrashListAvailable() OVERRIDE;
+  virtual void OnUploadListAvailable() OVERRIDE;
 
  private:
   // Asynchronously fetches the list of crashes. Called from JS.
@@ -104,7 +104,7 @@ CrashesDOMHandler::~CrashesDOMHandler() {
 }
 
 void CrashesDOMHandler::RegisterMessages() {
-  upload_list_->LoadCrashListAsynchronously();
+  upload_list_->LoadUploadListAsynchronously();
 
   web_ui()->RegisterMessageCallback("requestCrashList",
       base::Bind(&CrashesDOMHandler::HandleRequestCrashes,
@@ -118,7 +118,7 @@ void CrashesDOMHandler::HandleRequestCrashes(const ListValue* args) {
     js_request_pending_ = true;
 }
 
-void CrashesDOMHandler::OnCrashListAvailable() {
+void CrashesDOMHandler::OnUploadListAvailable() {
   list_available_ = true;
   if (js_request_pending_)
     UpdateUI();
@@ -129,15 +129,14 @@ void CrashesDOMHandler::UpdateUI() {
   ListValue crash_list;
 
   if (crash_reporting_enabled) {
-    std::vector<CrashUploadList::CrashInfo> crashes;
-    upload_list_->GetUploadedCrashes(50, &crashes);
+    std::vector<CrashUploadList::UploadInfo> crashes;
+    upload_list_->GetUploads(50, &crashes);
 
-    for (std::vector<CrashUploadList::CrashInfo>::iterator i = crashes.begin();
+    for (std::vector<CrashUploadList::UploadInfo>::iterator i = crashes.begin();
          i != crashes.end(); ++i) {
       DictionaryValue* crash = new DictionaryValue();
-      crash->SetString("id", i->crash_id);
-      crash->SetString("time",
-                       base::TimeFormatFriendlyDateAndTime(i->crash_time));
+      crash->SetString("id", i->id);
+      crash->SetString("time", base::TimeFormatFriendlyDateAndTime(i->time));
       crash_list.Append(crash);
     }
   }
@@ -184,9 +183,8 @@ bool CrashesUI::CrashReportingUIEnabled() {
   return reporting_enabled;
 #elif defined(OS_ANDROID)
   // Android has it's own setings for metrics / crash uploading.
-  // Crashes are uploaded depending on connection availablity
-  // varies from time to time. Lets just show this page all the time.
-  return true;
+  PrefService* prefs = g_browser_process->local_state();
+  return prefs->GetBoolean(prefs::kCrashReportingEnabled);
 #else
   PrefService* prefs = g_browser_process->local_state();
   return prefs->GetBoolean(prefs::kMetricsReportingEnabled);

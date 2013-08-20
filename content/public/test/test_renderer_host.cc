@@ -10,6 +10,7 @@
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
@@ -72,8 +73,8 @@ RenderViewHostTestEnabler::~RenderViewHostTestEnabler() {
 
 // RenderViewHostTestHarness --------------------------------------------------
 
-RenderViewHostTestHarness::RenderViewHostTestHarness() : contents_(NULL) {
-}
+RenderViewHostTestHarness::RenderViewHostTestHarness()
+    : thread_bundle_options_(TestBrowserThreadBundle::DEFAULT) {}
 
 RenderViewHostTestHarness::~RenderViewHostTestHarness() {
 }
@@ -155,11 +156,14 @@ void RenderViewHostTestHarness::FailedReload() {
 }
 
 void RenderViewHostTestHarness::SetUp() {
+  thread_bundle_.reset(new TestBrowserThreadBundle(thread_bundle_options_));
+
 #if defined(OS_WIN)
   ole_initializer_.reset(new ui::ScopedOleInitializer());
 #endif
 #if defined(USE_AURA)
-  aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
+  aura_test_helper_.reset(
+      new aura::test::AuraTestHelper(base::MessageLoopForUI::current()));
   aura_test_helper_->SetUp();
 #endif
   SetContents(CreateTestWebContents());
@@ -174,17 +178,22 @@ void RenderViewHostTestHarness::TearDown() {
   // before we destroy the browser context.
   base::RunLoop().RunUntilIdle();
 
+#if defined(OS_WIN)
+  ole_initializer_.reset();
+#endif
+
   // Delete any RenderProcessHosts before the BrowserContext goes away.
   if (rvh_test_enabler_.rph_factory_)
     rvh_test_enabler_.rph_factory_.reset();
 
-  // Release the browser context on the UI thread.
-  message_loop_.DeleteSoon(FROM_HERE, browser_context_.release());
-  base::RunLoop().RunUntilIdle();
-
-#if defined(OS_WIN)
-  ole_initializer_.reset();
-#endif
+  // Release the browser context by posting itself on the end of the task
+  // queue. This is preferable to immediate deletion because it will behave
+  // properly if the |rph_factory_| reset above enqueued any tasks which
+  // depend on |browser_context_|.
+  BrowserThread::DeleteSoon(content::BrowserThread::UI,
+                            FROM_HERE,
+                            browser_context_.release());
+  thread_bundle_.reset();
 }
 
 void RenderViewHostTestHarness::SetRenderProcessHostFactory(

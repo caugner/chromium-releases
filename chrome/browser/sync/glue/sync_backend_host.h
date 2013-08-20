@@ -44,11 +44,14 @@ namespace syncer {
 class SyncManagerFactory;
 }
 
+namespace invalidation {
+class InvalidatorStorage;
+}
+
 namespace browser_sync {
 
 class AndroidInvalidatorBridge;
 class ChangeProcessor;
-class InvalidatorStorage;
 class SyncBackendRegistrar;
 class SyncPrefs;
 class SyncedDeviceTracker;
@@ -163,7 +166,8 @@ class SyncBackendHost
       Profile* profile,
       const base::WeakPtr<SyncPrefs>& sync_prefs,
       // TODO(tim): Temporary, remove when bug 124137 finished.
-      const base::WeakPtr<InvalidatorStorage>& invalidator_storage);
+      const base::WeakPtr<invalidation::InvalidatorStorage>&
+          invalidator_storage);
 
   // For testing.
   // TODO(skrul): Extract an interface so this is not needed.
@@ -245,7 +249,8 @@ class SyncBackendHost
   virtual void ConfigureDataTypes(
       syncer::ConfigureReason reason,
       const DataTypeConfigStateMap& config_state_map,
-      const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
+      const base::Callback<void(syncer::ModelTypeSet,
+                                syncer::ModelTypeSet)>& ready_task,
       const base::Callback<void()>& retry_callback) OVERRIDE;
 
   // Turns on encryption of all present and future sync data.
@@ -308,6 +313,7 @@ class SyncBackendHost
   typedef base::Callback<scoped_ptr<syncer::HttpPostProviderFactory>(void)>
       MakeHttpBridgeFactoryFn;
 
+  // Utility struct for holding initialization options.
   struct DoInitializeOptions {
     DoInitializeOptions(
         base::MessageLoop* sync_loop,
@@ -328,7 +334,9 @@ class SyncBackendHost
         syncer::InternalComponentsFactory* internal_components_factory,
         syncer::UnrecoverableErrorHandler* unrecoverable_error_handler,
         syncer::ReportUnrecoverableErrorFunction
-            report_unrecoverable_error_function);
+            report_unrecoverable_error_function,
+        bool use_oauth2_token,
+        bool create_invalidator);
     ~DoInitializeOptions();
 
     base::MessageLoop* sync_loop;
@@ -352,6 +360,8 @@ class SyncBackendHost
     syncer::UnrecoverableErrorHandler* unrecoverable_error_handler;
     syncer::ReportUnrecoverableErrorFunction
         report_unrecoverable_error_function;
+    bool use_oauth2_token;
+    bool create_invalidator;
   };
 
   // Allows tests to perform alternate core initialization work.
@@ -361,16 +371,22 @@ class SyncBackendHost
   // Virtual for testing.
   virtual void RequestConfigureSyncer(
       syncer::ConfigureReason reason,
-      syncer::ModelTypeSet types_to_config,
-      syncer::ModelTypeSet failed_types,
+      syncer::ModelTypeSet to_download,
+      syncer::ModelTypeSet to_purge,
+      syncer::ModelTypeSet to_journal,
+      syncer::ModelTypeSet to_unapply,
+      syncer::ModelTypeSet to_ignore,
       const syncer::ModelSafeRoutingInfo& routing_info,
-      const base::Callback<void(syncer::ModelTypeSet)>& ready_task,
+      const base::Callback<void(syncer::ModelTypeSet,
+                                syncer::ModelTypeSet)>& ready_task,
       const base::Closure& retry_callback);
 
   // Called when the syncer has finished performing a configuration.
   void FinishConfigureDataTypesOnFrontendLoop(
+      const syncer::ModelTypeSet succeeded_configuration_types,
       const syncer::ModelTypeSet failed_configuration_types,
-      const base::Callback<void(syncer::ModelTypeSet)>& ready_task);
+      const base::Callback<void(syncer::ModelTypeSet,
+                                syncer::ModelTypeSet)>& ready_task);
 
   // Called when the SyncManager has been constructed and initialized.
   // Stores |js_backend| and |debug_info_listener| on the UI thread for

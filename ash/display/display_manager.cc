@@ -11,16 +11,17 @@
 
 #include "ash/ash_switches.h"
 #include "ash/display/display_controller.h"
+#include "ash/display/mirror_window_controller.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
@@ -38,7 +39,9 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "ash/display/output_configurator_animation.h"
 #include "base/chromeos/chromeos_version.h"
+#include "chromeos/display/output_configurator.h"
 #endif
 
 #if defined(OS_WIN)
@@ -54,6 +57,10 @@ typedef std::vector<gfx::Display> DisplayList;
 typedef std::vector<DisplayInfo> DisplayInfoList;
 
 namespace {
+
+// The number of pixels to overlap between the primary and secondary displays,
+// in case that the offset value is too large.
+const int kMinimumOverlapForInvalidOffset = 100;
 
 // List of value UI Scale values. Scales for 2x are equivalent to 640,
 // 800, 1024, 1280, 1440, 1600 and 1920 pixel width respectively on
@@ -85,7 +92,68 @@ struct ScaleComparator {
   float scale;
 };
 
-std::vector<float> GetScalesForDisplay(const DisplayInfo& info) {
+gfx::Display& GetInvalidDisplay() {
+  static gfx::Display* invalid_display = new gfx::Display();
+  return *invalid_display;
+}
+
+// Scoped objects used to either create or close the mirror window
+// at specific timing.
+class MirrorWindowCreator {
+ public:
+  explicit MirrorWindowCreator(const DisplayInfo& display_info)
+      : display_info_(display_info) {
+  }
+
+  virtual ~MirrorWindowCreator() {
+    Shell::GetInstance()->mirror_window_controller()->
+        UpdateWindow(display_info_);
+  }
+
+ private:
+  const DisplayInfo display_info_;
+  DISALLOW_COPY_AND_ASSIGN(MirrorWindowCreator);
+};
+
+class MirrorWindowCloser {
+ public:
+  MirrorWindowCloser() {}
+  virtual ~MirrorWindowCloser() {
+    Shell::GetInstance()->mirror_window_controller()->Close();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MirrorWindowCloser);
+};
+
+}  // namespace
+
+using aura::RootWindow;
+using aura::Window;
+using std::string;
+using std::vector;
+
+DEFINE_WINDOW_PROPERTY_KEY(int64, kDisplayIdKey,
+                           gfx::Display::kInvalidDisplayID);
+
+DisplayManager::DisplayManager()
+    : first_display_id_(gfx::Display::kInvalidDisplayID),
+      num_connected_displays_(0),
+      force_bounds_changed_(false),
+      change_display_upon_host_resize_(false),
+      software_mirroring_enabled_(false) {
+#if defined(OS_CHROMEOS)
+  change_display_upon_host_resize_ = !base::chromeos::IsRunningOnChromeOS();
+#endif
+  Init();
+}
+
+DisplayManager::~DisplayManager() {
+}
+
+// static
+std::vector<float> DisplayManager::GetScalesForDisplay(
+    const DisplayInfo& info) {
   std::vector<float> ret;
   if (info.device_scale_factor() == 2.0f) {
     ret.assign(kUIScalesFor2x, kUIScalesFor2x + arraysize(kUIScalesFor2x));
@@ -111,46 +179,6 @@ std::vector<float> GetScalesForDisplay(const DisplayInfo& info) {
   return ret;
 }
 
-gfx::Display& GetInvalidDisplay() {
-  static gfx::Display* invalid_display = new gfx::Display();
-  return *invalid_display;
-}
-
-}  // namespace
-
-using aura::RootWindow;
-using aura::Window;
-using std::string;
-using std::vector;
-
-DEFINE_WINDOW_PROPERTY_KEY(int64, kDisplayIdKey,
-                           gfx::Display::kInvalidDisplayID);
-
-DisplayManager::DisplayManager()
-    : first_display_id_(gfx::Display::kInvalidDisplayID),
-      mirrored_display_id_(gfx::Display::kInvalidDisplayID),
-      num_connected_displays_(0),
-      force_bounds_changed_(false),
-      change_display_upon_host_resize_(false) {
-#if defined(OS_CHROMEOS)
-  change_display_upon_host_resize_ = !base::chromeos::IsRunningOnChromeOS();
-#endif
-  Init();
-}
-
-DisplayManager::~DisplayManager() {
-}
-
-// static
-void DisplayManager::CycleDisplay() {
-  Shell::GetInstance()->display_manager()->CycleDisplayImpl();
-}
-
-// static
-void DisplayManager::ToggleDisplayScaleFactor() {
-  Shell::GetInstance()->display_manager()->ScaleDisplayImpl();
-}
-
 // static
 float DisplayManager::GetNextUIScale(const DisplayInfo& info, bool up) {
   float scale = info.ui_scale();
@@ -166,6 +194,53 @@ float DisplayManager::GetNextUIScale(const DisplayInfo& info, bool up) {
   }
   // Fallback to 1.0f if the |scale| wasn't in the list.
   return 1.0f;
+}
+
+void DisplayManager::UpdateDisplayBoundsForLayout(
+    const DisplayLayout& layout,
+    const gfx::Display& primary_display,
+    gfx::Display* secondary_display) {
+
+  const gfx::Rect& primary_bounds = primary_display.bounds();
+  DisplayController::GetPrimaryDisplay().bounds();
+
+  const gfx::Rect& secondary_bounds = secondary_display->bounds();
+  gfx::Point new_secondary_origin = primary_bounds.origin();
+
+  DisplayLayout::Position position = layout.position;
+
+  // Ignore the offset in case the secondary display doesn't share edges with
+  // the primary display.
+  int offset = layout.offset;
+  if (position == DisplayLayout::TOP || position == DisplayLayout::BOTTOM) {
+    offset = std::min(
+        offset, primary_bounds.width() - kMinimumOverlapForInvalidOffset);
+    offset = std::max(
+        offset, -secondary_bounds.width() + kMinimumOverlapForInvalidOffset);
+  } else {
+    offset = std::min(
+        offset, primary_bounds.height() - kMinimumOverlapForInvalidOffset);
+    offset = std::max(
+        offset, -secondary_bounds.height() + kMinimumOverlapForInvalidOffset);
+  }
+  switch (position) {
+    case DisplayLayout::TOP:
+      new_secondary_origin.Offset(offset, -secondary_bounds.height());
+      break;
+    case DisplayLayout::RIGHT:
+      new_secondary_origin.Offset(primary_bounds.width(), offset);
+      break;
+    case DisplayLayout::BOTTOM:
+      new_secondary_origin.Offset(offset, primary_bounds.height());
+      break;
+    case DisplayLayout::LEFT:
+      new_secondary_origin.Offset(-secondary_bounds.width(), offset);
+      break;
+  }
+  gfx::Insets insets = secondary_display->GetWorkAreaInsets();
+  secondary_display->set_bounds(
+      gfx::Rect(new_secondary_origin, secondary_bounds.size()));
+  secondary_display->UpdateWorkAreaFromInsets(insets);
 }
 
 bool DisplayManager::IsActiveDisplay(const gfx::Display& display) const {
@@ -220,6 +295,7 @@ void DisplayManager::SetOverscanInsets(int64 display_id,
        iter != displays_.end(); ++iter) {
     display_info_list.push_back(GetDisplayInfo(iter->id()));
   }
+  AddMirrorDisplayInfoIfAny(&display_info_list);
   UpdateDisplays(display_info_list);
 }
 
@@ -230,6 +306,7 @@ void DisplayManager::ClearCustomOverscanInsets(int64 display_id) {
        iter != displays_.end(); ++iter) {
     display_info_list.push_back(GetDisplayInfo(iter->id()));
   }
+  AddMirrorDisplayInfoIfAny(&display_info_list);
   UpdateDisplays(display_info_list);
 }
 
@@ -248,6 +325,7 @@ void DisplayManager::SetDisplayRotation(int64 display_id,
     }
     display_info_list.push_back(info);
   }
+  AddMirrorDisplayInfoIfAny(&display_info_list);
   UpdateDisplays(display_info_list);
 }
 
@@ -275,6 +353,7 @@ void DisplayManager::SetDisplayUIScale(int64 display_id,
     }
     display_info_list.push_back(info);
   }
+  AddMirrorDisplayInfoIfAny(&display_info_list);
   UpdateDisplays(display_info_list);
 }
 
@@ -344,7 +423,7 @@ void DisplayManager::OnNativeDisplaysChanged(
 
   bool internal_display_connected = false;
   num_connected_displays_ = updated_displays.size();
-  mirrored_display_id_ = gfx::Display::kInvalidDisplayID;
+  mirrored_display_ = gfx::Display();
   DisplayInfoList new_display_info_list;
   for (DisplayInfoList::const_iterator iter = updated_displays.begin();
        iter != updated_displays.end();
@@ -355,7 +434,7 @@ void DisplayManager::OnNativeDisplaysChanged(
     int y = iter->bounds_in_pixel().y();
     if (y_coords.find(y) != y_coords.end()) {
       InsertAndUpdateDisplayInfo(*iter);
-      mirrored_display_id_ = iter->id();
+      mirrored_display_ = CreateDisplayFromDisplayInfoById(iter->id());
     } else {
       y_coords.insert(y);
       new_display_info_list.push_back(*iter);
@@ -381,11 +460,20 @@ void DisplayManager::UpdateDisplays() {
        iter != displays_.end(); ++iter) {
     display_info_list.push_back(GetDisplayInfo(iter->id()));
   }
+  AddMirrorDisplayInfoIfAny(&display_info_list);
   UpdateDisplays(display_info_list);
 }
 
 void DisplayManager::UpdateDisplays(
     const std::vector<DisplayInfo>& updated_display_info_list) {
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    DCHECK_EQ(1u, updated_display_info_list.size()) <<
+        "Multiple display test does not work on Win8 bots. Please "
+        "skip (don't disable) the test using SupportsMultipleDisplays()";
+  }
+#endif
+
   DisplayInfoList new_display_info_list = updated_display_info_list;
   std::sort(displays_.begin(), displays_.end(), DisplaySortFunctor());
   std::sort(new_display_info_list.begin(),
@@ -401,8 +489,38 @@ void DisplayManager::UpdateDisplays(
   DisplayList new_displays;
   bool update_mouse_location = false;
 
+  scoped_ptr<MirrorWindowCreator> mirror_window_creater;
+
+  // Use the internal display or 1st as the mirror source, then scale
+  // the root window so that it matches the external display's
+  // resolution. This is necessary in order for scaling to work while
+  // mirrored.
+  int64 mirrored_display_id = gfx::Display::kInvalidDisplayID;
+  if (software_mirroring_enabled_ && new_display_info_list.size() == 2)
+    mirrored_display_id = new_display_info_list[1].id();
+
   while (curr_iter != displays_.end() ||
          new_info_iter != new_display_info_list.end()) {
+    if (new_info_iter != new_display_info_list.end() &&
+        mirrored_display_id == new_info_iter->id()) {
+      DisplayInfo info = *new_info_iter;
+      info.SetOverscanInsets(true, gfx::Insets());
+      InsertAndUpdateDisplayInfo(info);
+
+      mirrored_display_ = CreateDisplayFromDisplayInfoById(new_info_iter->id());
+      mirror_window_creater.reset(
+          new MirrorWindowCreator(display_info_[new_info_iter->id()]));
+      ++new_info_iter;
+      // Remove existing external dispaly if it is going to be mirrored.
+      if (curr_iter != displays_.end() &&
+          curr_iter->id() == mirrored_display_id) {
+        removed_displays.push_back(*curr_iter);
+        ++curr_iter;
+      }
+      update_mouse_location = true;
+      continue;
+    }
+
     if (curr_iter == displays_.end()) {
       // more displays in new list.
       added_display_indices.push_back(new_displays.size());
@@ -429,16 +547,13 @@ void DisplayManager::UpdateDisplays(
           current_display_info.bounds_in_pixel() !=
           new_display_info.bounds_in_pixel();
 
-      // TODO(oshima): Rotating square dislay doesn't work as the size
-      // won't change. This doesn't cause a problem now as there is no
-      // such display. This will be fixed by comparing the rotation as
-      // well when the rotation variable is added to gfx::Display.
       if (force_bounds_changed_ ||
           host_window_bounds_changed ||
           (current_display.device_scale_factor() !=
            new_display.device_scale_factor()) ||
           (current_display_info.size_in_pixel() !=
-           new_display.GetSizeInPixel())) {
+           new_display.GetSizeInPixel()) ||
+          (current_display.rotation() != new_display.rotation())) {
 
         // Don't update mouse location if the display size has
         // changed due to rotation or zooming.
@@ -467,6 +582,11 @@ void DisplayManager::UpdateDisplays(
     }
   }
 
+  scoped_ptr<MirrorWindowCloser> mirror_window_closer;
+  // Try to close mirror window unless mirror window is necessary.
+  if (!mirror_window_creater.get())
+    mirror_window_closer.reset(new MirrorWindowCloser);
+
   // Do not update |displays_| if there's nothing to be updated. Without this,
   // it will not update the display layout, which causes the bug
   // http://crbug.com/155948.
@@ -480,6 +600,17 @@ void DisplayManager::UpdateDisplays(
   gfx::Point mouse_location_in_native;
   display_controller->NotifyDisplayConfigurationChanging();
   mouse_location_in_native = display_controller->GetNativeMouseCursorLocation();
+
+  size_t updated_index;
+  if (UpdateSecondaryDisplayBoundsForLayout(&new_displays, &updated_index) &&
+      std::find(added_display_indices.begin(),
+                added_display_indices.end(),
+                updated_index) == added_display_indices.end() &&
+      std::find(changed_display_indices.begin(),
+                changed_display_indices.end(),
+                updated_index) == changed_display_indices.end()) {
+    changed_display_indices.push_back(updated_index);
+  }
 
   displays_ = new_displays;
 
@@ -495,10 +626,17 @@ void DisplayManager::UpdateDisplays(
     Shell::GetInstance()->screen()->NotifyDisplayRemoved(displays_.back());
     displays_.pop_back();
   }
+  // Close the mirror window here to avoid creating two compositor on
+  // one display.
+  mirror_window_closer.reset();
   for (std::vector<size_t>::iterator iter = added_display_indices.begin();
        iter != added_display_indices.end(); ++iter) {
     Shell::GetInstance()->screen()->NotifyDisplayAdded(displays_[*iter]);
   }
+  // Create the mirror window after all displays are added so that
+  // it can mirror the display newly added. This can happen when switching
+  // from dock mode to software mirror mode.
+  mirror_window_creater.reset();
   for (std::vector<size_t>::iterator iter = changed_display_indices.begin();
        iter != changed_display_indices.end(); ++iter) {
     Shell::GetInstance()->screen()->NotifyBoundsChanged(displays_[*iter]);
@@ -548,7 +686,7 @@ size_t DisplayManager::GetNumDisplays() const {
 }
 
 bool DisplayManager::IsMirrored() const {
-  return mirrored_display_id_ != gfx::Display::kInvalidDisplayID;
+  return mirrored_display_.id() != gfx::Display::kInvalidDisplayID;
 }
 
 const gfx::Display& DisplayManager::GetDisplayNearestWindow(
@@ -594,7 +732,7 @@ const gfx::Display& DisplayManager::GetDisplayMatching(
 const DisplayInfo& DisplayManager::GetDisplayInfo(int64 display_id) const {
   std::map<int64, DisplayInfo>::const_iterator iter =
       display_info_.find(display_id);
-  CHECK(iter != display_info_.end());
+  CHECK(iter != display_info_.end()) << display_id;
   return iter->second;
 }
 
@@ -609,21 +747,6 @@ std::string DisplayManager::GetDisplayNameForId(int64 id) {
   return base::StringPrintf("Display %d", static_cast<int>(id));
 }
 
-void DisplayManager::OnRootWindowResized(const aura::RootWindow* root,
-                                         const gfx::Size& old_size) {
-  if (change_display_upon_host_resize_) {
-    gfx::Display& display = FindDisplayForRootWindow(root);
-    gfx::Size old_display_size_in_pixel = display.GetSizeInPixel();
-    display_info_[display.id()].SetBounds(
-        gfx::Rect(root->GetHostOrigin(), root->GetHostSize()));
-    const gfx::Size& new_root_size = root->bounds().size();
-    if (old_size != new_root_size) {
-      display.SetSize(display_info_[display.id()].size_in_pixel());
-      Shell::GetInstance()->screen()->NotifyBoundsChanged(display);
-    }
-  }
-}
-
 int64 DisplayManager::GetDisplayIdForUIScaling() const {
   // UI Scaling is effective only on internal display.
   int64 display_id = gfx::Display::InternalDisplayId();
@@ -631,6 +754,89 @@ int64 DisplayManager::GetDisplayIdForUIScaling() const {
   display_id = first_display_id();
 #endif
   return display_id;
+}
+
+void DisplayManager::SetMirrorMode(bool mirrored) {
+  if (num_connected_displays() <= 1)
+    return;
+
+#if defined(OS_CHROMEOS)
+  if (base::chromeos::IsRunningOnChromeOS()) {
+    chromeos::OutputState new_state = mirrored ?
+        chromeos::STATE_DUAL_MIRROR : chromeos::STATE_DUAL_EXTENDED;
+    Shell::GetInstance()->output_configurator()->SetDisplayMode(new_state);
+    return;
+  }
+#endif
+  SetSoftwareMirroring(mirrored);
+  DisplayInfoList display_info_list;
+  int count = 0;
+  for (std::map<int64, DisplayInfo>::const_iterator iter =
+           display_info_.begin();
+       count < 2; ++iter, ++count) {
+    display_info_list.push_back(GetDisplayInfo(iter->second.id()));
+  }
+  UpdateDisplays(display_info_list);
+#if defined(OS_CHROMEOS)
+  if (Shell::GetInstance()->output_configurator_animation()) {
+    Shell::GetInstance()->output_configurator_animation()->
+        StartFadeInAnimation();
+  }
+#endif
+}
+
+void DisplayManager::AddRemoveDisplay() {
+  DCHECK(!displays_.empty());
+  std::vector<DisplayInfo> new_display_info_list;
+  new_display_info_list.push_back(
+      GetDisplayInfo(DisplayController::GetPrimaryDisplay().id()));
+  // Add if there is only one display connected.
+  if (num_connected_displays() == 1) {
+    // Layout the 2nd display below the primary as with the real device.
+    aura::RootWindow* primary = Shell::GetPrimaryRootWindow();
+    gfx::Rect host_bounds =
+        gfx::Rect(primary->GetHostOrigin(),  primary->GetHostSize());
+    new_display_info_list.push_back(DisplayInfo::CreateFromSpec(
+        base::StringPrintf(
+            "%d+%d-500x400", host_bounds.x(), host_bounds.bottom())));
+  }
+  num_connected_displays_ = new_display_info_list.size();
+  mirrored_display_ = gfx::Display();
+  UpdateDisplays(new_display_info_list);
+}
+
+void DisplayManager::ToggleDisplayScaleFactor() {
+  DCHECK(!displays_.empty());
+  std::vector<DisplayInfo> new_display_info_list;
+  for (DisplayList::const_iterator iter = displays_.begin();
+       iter != displays_.end(); ++iter) {
+    DisplayInfo display_info = GetDisplayInfo(iter->id());
+    display_info.set_device_scale_factor(
+        display_info.device_scale_factor() == 1.0f ? 2.0f : 1.0f);
+    new_display_info_list.push_back(display_info);
+  }
+  AddMirrorDisplayInfoIfAny(&new_display_info_list);
+  UpdateDisplays(new_display_info_list);
+}
+
+void DisplayManager::OnRootWindowHostResized(const aura::RootWindow* root) {
+  if (change_display_upon_host_resize_) {
+    gfx::Display& display = FindDisplayForRootWindow(root);
+    gfx::Size old_display_size_in_pixel = display.GetSizeInPixel();
+    display_info_[display.id()].SetBounds(
+        gfx::Rect(root->GetHostOrigin(), root->GetHostSize()));
+    // It's tricky to support resizing mirror window on desktop.
+    if (software_mirroring_enabled_ && mirrored_display_.id() == display.id())
+      return;
+    display.SetSize(display_info_[display.id()].size_in_pixel());
+    Shell::GetInstance()->screen()->NotifyBoundsChanged(display);
+    Shell::GetInstance()->mirror_window_controller()->UpdateWindow();
+  }
+}
+
+void DisplayManager::SetSoftwareMirroring(bool enabled) {
+  software_mirroring_enabled_ = enabled;
+  mirrored_display_ = gfx::Display();
 }
 
 void DisplayManager::Init() {
@@ -652,41 +858,15 @@ void DisplayManager::Init() {
   num_connected_displays_ = displays_.size();
 }
 
-void DisplayManager::CycleDisplayImpl() {
-  DCHECK(!displays_.empty());
-  std::vector<DisplayInfo> new_display_info_list;
-  new_display_info_list.push_back(
-      GetDisplayInfo(DisplayController::GetPrimaryDisplay().id()));
-  // Add if there is only one display.
-  if (displays_.size() == 1) {
-    // Layout the 2nd display below the primary as with the real device.
-    aura::RootWindow* primary = Shell::GetPrimaryRootWindow();
-    gfx::Rect host_bounds =
-        gfx::Rect(primary->GetHostOrigin(),  primary->GetHostSize());
-    new_display_info_list.push_back(DisplayInfo::CreateFromSpec(
-        base::StringPrintf(
-            "%d+%d-500x400", host_bounds.x(), host_bounds.bottom())));
-  }
-  num_connected_displays_ = new_display_info_list.size();
-  UpdateDisplays(new_display_info_list);
-}
-
-void DisplayManager::ScaleDisplayImpl() {
-  DCHECK(!displays_.empty());
-  std::vector<DisplayInfo> new_display_info_list;
-  for (DisplayList::const_iterator iter = displays_.begin();
-       iter != displays_.end(); ++iter) {
-    DisplayInfo display_info = GetDisplayInfo(iter->id());
-    display_info.set_device_scale_factor(
-        display_info.device_scale_factor() == 1.0f ? 2.0f : 1.0f);
-    new_display_info_list.push_back(display_info);
-  }
-  UpdateDisplays(new_display_info_list);
-}
-
 gfx::Display& DisplayManager::FindDisplayForRootWindow(
     const aura::RootWindow* root_window) {
   int64 id = root_window->GetProperty(kDisplayIdKey);
+  // RootWindow needs Display to determine it's device scale factor.
+  // TODO(oshima): We don't need full display info for mirror
+  // window. Refactor so that RootWindow doesn't use it.
+  if (mirrored_display_.id() == id)
+    return mirrored_display_;
+
   // if id is |kInvaildDisplayID|, it's being deleted.
   DCHECK(id != gfx::Display::kInvalidDisplayID);
   gfx::Display& display = FindDisplayForId(id);
@@ -702,6 +882,12 @@ gfx::Display& DisplayManager::FindDisplayForId(int64 id) {
   }
   DLOG(WARNING) << "Could not find display:" << id;
   return GetInvalidDisplay();
+}
+
+void DisplayManager::AddMirrorDisplayInfoIfAny(
+    std::vector<DisplayInfo>* display_info_list) {
+  if (software_mirroring_enabled_ && mirrored_display_.is_valid())
+    display_info_list->push_back(GetDisplayInfo(mirrored_display_.id()));
 }
 
 void DisplayManager::AddDisplayFromSpec(const std::string& spec) {
@@ -737,6 +923,39 @@ gfx::Display DisplayManager::CreateDisplayFromDisplayInfoById(int64 id) {
       display_info.device_scale_factor(), gfx::Rect(bounds_in_pixel.size()));
   new_display.set_rotation(display_info.rotation());
   return new_display;
+}
+
+bool DisplayManager::UpdateSecondaryDisplayBoundsForLayout(
+    DisplayList* displays,
+    size_t* updated_index) const {
+  if (displays->size() != 2U)
+    return false;
+
+  DisplayController* controller = Shell::GetInstance()->display_controller();
+  DisplayIdPair pair =
+      std::make_pair(displays->at(0).id(), displays->at(1).id());
+  DisplayLayout layout =
+      controller->ComputeDisplayLayoutForDisplayIdPair(pair);
+
+  // Ignore if a user has a old format (should be extremely rare)
+  // and this will be replaced with DCHECK.
+  if (layout.primary_id != gfx::Display::kInvalidDisplayID) {
+    size_t primary_index, secondary_index;
+    if (displays->at(0).id() == layout.primary_id) {
+      primary_index = 0;
+      secondary_index = 1;
+    } else {
+      primary_index = 1;
+      secondary_index = 0;
+    }
+    gfx::Rect bounds =
+        GetDisplayForId(displays->at(secondary_index).id()).bounds();
+    UpdateDisplayBoundsForLayout(
+        layout, displays->at(primary_index), &displays->at(secondary_index));
+    *updated_index = secondary_index;
+    return bounds != displays->at(secondary_index).bounds();
+  }
+  return false;
 }
 
 }  // namespace internal

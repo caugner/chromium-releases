@@ -5,9 +5,21 @@
 class Request(object):
   '''Request data.
   '''
-  def __init__(self, path, headers):
-    self.path = path
+  def __init__(self, path, host, headers):
+    self.path = path.lstrip('/')
+    self.host = host.rstrip('/')
     self.headers = headers
+
+  @staticmethod
+  def ForTest(path, host='http://developer.chrome.com', headers=None):
+    return Request(path, host, headers or {})
+
+  def __repr__(self):
+    return 'Request(path=%s, host=%s, headers=%s entries)' % (
+        self.path, self.host, len(self.headers.keys()))
+
+  def __str__(self):
+    return repr(self)
 
 class _ContentBuilder(object):
   '''Builds the response content.
@@ -55,8 +67,6 @@ class Response(object):
   def Redirect(url, permanent=False):
     '''Returns a redirect (301 or 302) response.
     '''
-    if not url.startswith('/'):
-      url = '/%s' % url
     status = 301 if permanent else 302
     return Response(headers={'Location': url}, status=status)
 
@@ -90,9 +100,17 @@ class Response(object):
   def SetStatus(self, status):
     self.status = status
 
+  def GetRedirect(self):
+    if self.headers.get('Location') is None:
+      return (None, None)
+    return (self.headers.get('Location'), self.status == 301)
+
   def __repr__(self):
-    return '{content: %s bytes, status: %s, headers: %s entries}' % (
+    return 'Response(content=%s bytes, status=%s, headers=%s entries)' % (
         len(self.content), self.status, len(self.headers.keys()))
+
+  def __str__(self):
+    return repr(self)
 
 class Servlet(object):
   def __init__(self, request):

@@ -12,6 +12,7 @@
 #include "base/timer.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_item_model_observer.h"
+#include "ui/app_list/views/cached_label.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/custom_button.h"
@@ -28,7 +29,6 @@ namespace app_list {
 
 class AppListItemModel;
 class AppsGridView;
-class CachedLabel;
 
 class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
                                         public views::ContextMenuController,
@@ -45,6 +45,10 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   void Prerender();
 
   AppListItemModel* model() const { return model_; }
+
+  const views::Label* title() const { return title_; }
+
+  gfx::ImageSkia GetDragImage();
 
  private:
   enum UIState {
@@ -71,14 +75,15 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   virtual void ItemPercentDownloadedChanged() OVERRIDE;
 
   // views::View overrides:
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   // views::ContextMenuController overrides:
   virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& point) OVERRIDE;
+                                      const gfx::Point& point,
+                                      ui::MenuSourceType source_type) OVERRIDE;
 
   // views::CustomButton overrides:
   virtual void StateChanged() OVERRIDE;

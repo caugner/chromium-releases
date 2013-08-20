@@ -14,7 +14,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/crx_installer.h"
@@ -24,6 +24,7 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -32,15 +33,17 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/web_apps.h"
+#include "chrome/common/web_application_info.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
@@ -52,11 +55,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/webui/web_ui_util.h"
-
-#if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
-#endif
 
 using chrome::AppLaunchParams;
 using chrome::OpenApplication;
@@ -103,16 +101,12 @@ void AppLauncherHandler::CreateAppInfo(
   // impede our ability to determine directionality.
   string16 name = UTF8ToUTF16(extension->name());
   base::i18n::UnadjustStringForLocaleDirection(&name);
-  NewTabUI::SetUrlTitleAndDirection(value, name, extension->GetFullLaunchURL());
+  NewTabUI::SetUrlTitleAndDirection(
+      value, name, extensions::AppLaunchInfo::GetFullLaunchURL(extension));
 
   bool enabled = service->IsExtensionEnabled(extension->id()) &&
       !service->GetTerminatedExtension(extension->id());
-  extension->GetBasicInfo(enabled, value);
-
-#if defined(ENABLE_MANAGED_USERS)
-  scoped_ptr<ScopedExtensionElevation> elevation =
-      GetScopedElevation(extension->id(), service);
-#endif
+  extensions::GetExtensionBasicInfo(extension, enabled, value);
 
   value->SetBoolean("mayDisable", extensions::ExtensionSystem::Get(
       service->profile())->management_policy()->UserMayModifySettings(
@@ -135,7 +129,8 @@ void AppLauncherHandler::CreateAppInfo(
                                       false, &icon_small_exists);
   value->SetString("icon_small", icon_small.spec());
   value->SetBoolean("icon_small_exists", icon_small_exists);
-  value->SetInteger("launch_container", extension->launch_container());
+  value->SetInteger("launch_container",
+                    extensions::AppLaunchInfo::GetLaunchContainer(extension));
   ExtensionPrefs* prefs = service->extension_prefs();
   value->SetInteger("launch_type",
       prefs->GetLaunchType(extension,
@@ -239,6 +234,10 @@ void AppLauncherHandler::Observe(int type,
       if (!extension->is_app())
         return;
 
+      PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+      if (!ShouldDisplayInNewTabPage(extension, prefs))
+        return;
+
       scoped_ptr<DictionaryValue> app_info(GetAppInfo(extension));
       if (app_info.get()) {
         visible_apps_.insert(extension->id());
@@ -261,6 +260,10 @@ void AppLauncherHandler::Observe(int type,
       if (!extension->is_app())
         return;
 
+      PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+      if (!ShouldDisplayInNewTabPage(extension, prefs))
+        return;
+
       scoped_ptr<DictionaryValue> app_info(GetAppInfo(extension));
       scoped_ptr<base::FundamentalValue> uninstall_value(
           Value::CreateBooleanValue(
@@ -281,7 +284,8 @@ void AppLauncherHandler::Observe(int type,
           content::Details<const std::string>(details).ptr();
       if (id) {
         const Extension* extension =
-            extension_service_->GetExtensionById(*id, false);
+            extension_service_->GetInstalledExtension(*id);
+        DCHECK(extension) << "Could not find extension with id " << *id;
         DictionaryValue app_info;
         CreateAppInfo(extension,
                       extension_service_,
@@ -536,11 +540,6 @@ void AppLauncherHandler::HandleUninstallApp(const ListValue* args) {
   if (!extension)
     return;
 
-#if defined(ENABLE_MANAGED_USERS)
-  scoped_ptr<ScopedExtensionElevation> elevation =
-      GetScopedElevation(extension->id(), extension_service_);
-#endif
-
   if (!extensions::ExtensionSystem::Get(extension_service_->profile())->
           management_policy()->UserMayModifySettings(extension, NULL)) {
     LOG(ERROR) << "Attempt to uninstall an extension that is non-usermanagable "
@@ -669,7 +668,7 @@ void AppLauncherHandler::HandleGenerateAppForLink(const ListValue* args) {
   favicon_service->GetFaviconImageForURL(
       FaviconService::FaviconForURLParams(profile,
                                           launch_url,
-                                          history::FAVICON,
+                                          chrome::FAVICON,
                                           gfx::kFaviconSize),
       base::Bind(&AppLauncherHandler::OnFaviconForApp,
                  base::Unretained(this),
@@ -699,7 +698,7 @@ void AppLauncherHandler::StopShowingAppLauncherPromo(
 
 void AppLauncherHandler::OnFaviconForApp(
     scoped_ptr<AppInstallInfo> install_info,
-    const history::FaviconImageResult& image_result) {
+    const chrome::FaviconImageResult& image_result) {
   scoped_ptr<WebApplicationInfo> web_app(new WebApplicationInfo());
   web_app->is_bookmark_app = install_info->is_bookmark_app;
   web_app->title = install_info->title;
@@ -769,6 +768,28 @@ void AppLauncherHandler::RecordAppLaunchType(
 }
 
 // static
+void AppLauncherHandler::RecordAppListSearchLaunch(const Extension* extension) {
+  extension_misc::AppLaunchBucket bucket =
+      extension_misc::APP_LAUNCH_APP_LIST_SEARCH;
+  if (extension->id() == extension_misc::kWebStoreAppId)
+    bucket = extension_misc::APP_LAUNCH_APP_LIST_SEARCH_WEBSTORE;
+  else if (extension->id() == extension_misc::kChromeAppId)
+    bucket = extension_misc::APP_LAUNCH_APP_LIST_SEARCH_CHROME;
+  AppLauncherHandler::RecordAppLaunchType(bucket, extension->GetType());
+}
+
+// static
+void AppLauncherHandler::RecordAppListMainLaunch(const Extension* extension) {
+  extension_misc::AppLaunchBucket bucket =
+      extension_misc::APP_LAUNCH_APP_LIST_MAIN;
+  if (extension->id() == extension_misc::kWebStoreAppId)
+    bucket = extension_misc::APP_LAUNCH_APP_LIST_MAIN_WEBSTORE;
+  else if (extension->id() == extension_misc::kChromeAppId)
+    bucket = extension_misc::APP_LAUNCH_APP_LIST_MAIN_CHROME;
+  AppLauncherHandler::RecordAppLaunchType(bucket, extension->GetType());
+}
+
+// static
 void AppLauncherHandler::RecordWebStoreLaunch() {
   RecordAppLaunchType(extension_misc::APP_LAUNCH_NTP_WEBSTORE,
       extensions::Manifest::TYPE_HOSTED_APP);
@@ -788,19 +809,6 @@ void AppLauncherHandler::RecordAppLaunchByUrl(
 
   RecordAppLaunchType(bucket, extensions::Manifest::TYPE_HOSTED_APP);
 }
-
-#if defined(ENABLE_MANAGED_USERS)
-// static
-scoped_ptr<ScopedExtensionElevation> AppLauncherHandler::GetScopedElevation(
-    const std::string& extension_id, ExtensionService* service) {
-  ManagedUserService* managed_user_service =
-      ManagedUserServiceFactory::GetForProfile(service->profile());
-  scoped_ptr<ScopedExtensionElevation> elevation(
-      new ScopedExtensionElevation(managed_user_service));
-  elevation->AddExtension(extension_id);
-  return elevation.Pass();
-}
-#endif
 
 void AppLauncherHandler::PromptToEnableApp(const std::string& extension_id) {
   if (!extension_id_prompting_.empty())

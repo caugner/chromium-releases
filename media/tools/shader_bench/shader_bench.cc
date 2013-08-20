@@ -11,7 +11,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "media/base/video_frame.h"
 #include "media/tools/shader_bench/cpu_color_painter.h"
@@ -130,11 +130,9 @@ int main(int argc, char** argv) {
   gfx::GLSurface::InitializeOneOff();
   scoped_ptr<media::Window> window(new media::Window(width, height));
   gfx::GLSurface* surface =
-      gfx::GLSurface::CreateViewGLSurface(false, window->PluginWindow());
+      gfx::GLSurface::CreateViewGLSurface(window->PluginWindow()).get();
   gfx::GLContext* context = gfx::GLContext::CreateGLContext(
-      NULL,
-      surface,
-      gfx::PreferDiscreteGpu);
+      NULL, surface, gfx::PreferDiscreteGpu).get();
   context->MakeCurrent(surface);
   // This sets D3DPRESENT_INTERVAL_IMMEDIATE on Windows.
   context->SetSwapInterval(0);

@@ -4,9 +4,9 @@
 
 #include <windows.h>
 
-#include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/win/registry.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/work_item.h"

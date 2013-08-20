@@ -9,13 +9,13 @@ make the build use system libraries.
 """
 
 
+import optparse
 import os.path
 import shutil
 import sys
 
 
 REPLACEMENTS = {
-  'use_system_bzip2': 'third_party/bzip2/bzip2.gyp',
   'use_system_expat': 'third_party/expat/expat.gyp',
   'use_system_ffmpeg': 'third_party/ffmpeg/ffmpeg.gyp',
   'use_system_flac': 'third_party/flac/flac.gyp',
@@ -45,16 +45,33 @@ def DoMain(argv):
   source_tree_root = os.path.abspath(
     os.path.join(my_dirname, '..', '..', '..'))
 
+  parser = optparse.OptionParser()
+
+  # Accept arguments in gyp command-line syntax, so that the caller can re-use
+  # command-line for this script and gyp.
+  parser.add_option('-D', dest='defines', action='append')
+
+  parser.add_option('--undo', action='store_true')
+
+  options, args = parser.parse_args(argv)
+
   for flag, path in REPLACEMENTS.items():
-    # Accept arguments in gyp command-line syntax, and ignore other
-    # parameters, so that the caller can re-use command-line for this
-    # script and gyp.
-    if '-D%s=1' % flag not in argv:
+    if '%s=1' % flag not in options.defines:
       continue
 
-    # Copy the gyp file from directory of this script to target path.
-    shutil.copyfile(os.path.join(my_dirname, os.path.basename(path)),
-                    os.path.join(source_tree_root, path))
+    if options.undo:
+      # Restore original file, and also remove the backup.
+      # This is meant to restore the source tree to its original state.
+      os.rename(os.path.join(source_tree_root, path + '.orig'),
+                os.path.join(source_tree_root, path))
+    else:
+      # Create a backup copy for --undo.
+      shutil.copyfile(os.path.join(source_tree_root, path),
+                      os.path.join(source_tree_root, path + '.orig'))
+
+      # Copy the gyp file from directory of this script to target path.
+      shutil.copyfile(os.path.join(my_dirname, os.path.basename(path)),
+                      os.path.join(source_tree_root, path))
 
   return 0
 

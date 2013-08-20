@@ -7,7 +7,7 @@
 #include "base/debug/trace_event.h"
 #include "base/i18n/number_formatting.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/profiles/profile.h"
@@ -48,7 +48,6 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/canvas.h"
@@ -86,64 +85,26 @@ namespace {
 const int kLeftEdgeSpacing = 3;
 const int kRightEdgeSpacing = 2;
 
-// The buttons to the left of the omnibox are close together.
-const int kButtonSpacing = 0;
-
 // Ash doesn't use a rounded content area and its top edge has an extra shadow.
 const int kContentShadowHeightAsh = 2;
 
 // Non-ash uses a rounded content area with no shadow in the assets.
 const int kContentShadowHeight = 0;
 
-const int kPopupTopSpacingNonGlass = 3;
-const int kPopupBottomSpacingNonGlass = 2;
-const int kPopupBottomSpacingGlass = 1;
-
 // Top margin for the wrench menu badges (badge is placed in the upper right
 // corner of the wrench menu).
 const int kBadgeTopMargin = 2;
 
-gfx::ImageSkia* kPopupBackgroundEdge = NULL;
-
-// The omnibox border has some additional shadow, so we use less vertical
-// spacing than ToolbarView::kVertSpacing.
-int location_bar_vert_spacing() {
-  static int value = -1;
-  if (value == -1) {
-    switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_DESKTOP:
-        value = ToolbarView::kVertSpacing;
-        break;
-      case ui::LAYOUT_TOUCH:
-        value = 10;
-        break;
-      default:
-        NOTREACHED();
-    }
-  }
-  return value;
-}
-
-// The buttons to the left of the omnibox are close together.
-int button_spacing() {
-  static int value = -1;
-  if (value == -1) {
-    switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_DESKTOP:
-        value = kButtonSpacing;
-        break;
-      case ui::LAYOUT_TOUCH:
-        value = kButtonSpacing + 3;
-        break;
-    }
-  }
-  return value;
+int GetButtonSpacing() {
+  return (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH) ?
+      ToolbarView::kStandardSpacing : 0;
 }
 
 }  // namespace
 
 // static
-const char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
+const char ToolbarView::kViewClassName[] = "ToolbarView";
+
 // The space between items is 3 px in general.
 const int ToolbarView::kStandardSpacing = 3;
 // The top of the toolbar has an edge we have to skip over in addition to the
@@ -173,11 +134,6 @@ ToolbarView::ToolbarView(Browser* browser)
 
   display_mode_ = browser->SupportsWindowFeature(Browser::FEATURE_TABSTRIP) ?
       DISPLAYMODE_NORMAL : DISPLAYMODE_LOCATION;
-
-  if (!kPopupBackgroundEdge) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    kPopupBackgroundEdge = rb.GetImageSkiaNamed(IDR_LOCATIONBG_POPUPMODE_EDGE);
-  }
 
   registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                  content::NotificationService::AllSources());
@@ -209,8 +165,8 @@ ToolbarView::~ToolbarView() {
 void ToolbarView::Init() {
   back_ = new views::ButtonDropDown(this, new BackForwardMenuModel(
       browser_, BackForwardMenuModel::BACKWARD_MENU));
-  back_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
-                                     ui::EF_MIDDLE_MOUSE_BUTTON);
+  back_->set_triggerable_event_flags(
+      ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON);
   back_->set_tag(IDC_BACK);
   back_->SetImageAlignment(views::ImageButton::ALIGN_RIGHT,
                            views::ImageButton::ALIGN_TOP);
@@ -218,10 +174,11 @@ void ToolbarView::Init() {
   back_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_BACK));
   back_->set_id(VIEW_ID_BACK_BUTTON);
 
-  forward_ = new views::ButtonDropDown(this, new BackForwardMenuModel(
-      browser_, BackForwardMenuModel::FORWARD_MENU));
-  forward_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
-                                        ui::EF_MIDDLE_MOUSE_BUTTON);
+  forward_ = new views::ButtonDropDown(
+      this,
+      new BackForwardMenuModel(browser_, BackForwardMenuModel::FORWARD_MENU));
+  forward_->set_triggerable_event_flags(
+      ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON);
   forward_->set_tag(IDC_FORWARD);
   forward_->SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_FORWARD));
   forward_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_FORWARD));
@@ -229,25 +186,21 @@ void ToolbarView::Init() {
 
   // Have to create this before |reload_| as |reload_|'s constructor needs it.
   location_bar_ = new LocationBarView(
-      browser_,
-      browser_->profile(),
-      browser_->command_controller()->command_updater(),
-      model_,
-      this,
-      (display_mode_ == DISPLAYMODE_LOCATION) ?
-          LocationBarView::POPUP : LocationBarView::NORMAL);
+      browser_, browser_->profile(),
+      browser_->command_controller()->command_updater(), model_, this,
+      display_mode_ == DISPLAYMODE_LOCATION);
 
   reload_ = new ReloadButton(location_bar_,
                              browser_->command_controller()->command_updater());
-  reload_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
-                                       ui::EF_MIDDLE_MOUSE_BUTTON);
+  reload_->set_triggerable_event_flags(
+      ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON);
   reload_->set_tag(IDC_RELOAD);
   reload_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_RELOAD));
   reload_->set_id(VIEW_ID_RELOAD_BUTTON);
 
   home_ = new HomeImageButton(this, browser_);
-  home_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
-                                     ui::EF_MIDDLE_MOUSE_BUTTON);
+  home_->set_triggerable_event_flags(
+      ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON);
   home_->set_tag(IDC_HOME);
   home_->SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_HOME));
   home_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_HOME));
@@ -510,12 +463,13 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
 
 gfx::Size ToolbarView::GetPreferredSize() {
   if (is_display_mode_normal()) {
+    int button_spacing = GetButtonSpacing();
     int min_width = kLeftEdgeSpacing +
-        back_->GetPreferredSize().width() + button_spacing() +
-        forward_->GetPreferredSize().width() + button_spacing() +
+        back_->GetPreferredSize().width() + button_spacing +
+        forward_->GetPreferredSize().width() + button_spacing +
         reload_->GetPreferredSize().width() + kStandardSpacing +
         (show_home_button_.GetValue() ?
-            (home_->GetPreferredSize().width() + button_spacing()) : 0) +
+            (home_->GetPreferredSize().width() + button_spacing) : 0) +
         location_bar_->GetPreferredSize().width() +
         browser_actions_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kRightEdgeSpacing;
@@ -525,6 +479,8 @@ gfx::Size ToolbarView::GetPreferredSize() {
                      normal_background->height() - content_shadow_height());
   }
 
+  const int kPopupBottomSpacingGlass = 1;
+  const int kPopupBottomSpacingNonGlass = 2;
   int vertical_spacing = PopupTopSpacing() +
       (GetWidget()->ShouldUseNativeFrame() ?
           kPopupBottomSpacingGlass : kPopupBottomSpacingNonGlass);
@@ -537,24 +493,18 @@ void ToolbarView::Layout() {
   if (back_ == NULL)
     return;
 
-  bool maximized = browser_->window() && browser_->window()->IsMaximized();
   if (!is_display_mode_normal()) {
-    int edge_width = maximized ?
-        0 : kPopupBackgroundEdge->width();  // See OnPaint().
-    location_bar_->SetBounds(edge_width, PopupTopSpacing(),
-        width() - (edge_width * 2), location_bar_->GetPreferredSize().height());
+    location_bar_->SetBounds(0, PopupTopSpacing(), width(),
+                             location_bar_->GetPreferredSize().height());
     return;
   }
 
-  // We assume all child elements are the same height.
+  // We assume all child elements except the location bar are the same height.
+  // Set child_y such that buttons appear vertically centered. We put any excess
+  // padding above the buttons.
   int child_height =
       std::min(back_->GetPreferredSize().height(), height());
-
-  // Set child_y such that buttons appear vertically centered. To preseve
-  // the behaviour on non-touch UIs, round-up by taking
-  // ceil((height() - child_height) / 2) + delta
-  // which is equivalent to the below.
-  int child_y = (1 + ((height() - child_height - 1) / 2));
+  int child_y = (height() - child_height + 1) / 2;
 
   // If the window is maximized, we extend the back button to the left so that
   // clicking on the left-most pixel will activate the back button.
@@ -563,21 +513,23 @@ void ToolbarView::Layout() {
   //                will be slightly the wrong size.  We should force a
   //                Layout() in this case.
   //                http://crbug.com/5540
+  bool maximized = browser_->window() && browser_->window()->IsMaximized();
   int back_width = back_->GetPreferredSize().width();
   if (maximized)
     back_->SetBounds(0, child_y, back_width + kLeftEdgeSpacing, child_height);
   else
     back_->SetBounds(kLeftEdgeSpacing, child_y, back_width, child_height);
 
-  forward_->SetBounds(back_->x() + back_->width() + button_spacing(),
+  int button_spacing = GetButtonSpacing();
+  forward_->SetBounds(back_->x() + back_->width() + button_spacing,
       child_y, forward_->GetPreferredSize().width(), child_height);
 
-  reload_->SetBounds(forward_->x() + forward_->width() + button_spacing(),
+  reload_->SetBounds(forward_->x() + forward_->width() + button_spacing,
       child_y, reload_->GetPreferredSize().width(), child_height);
 
   if (show_home_button_.GetValue()) {
     home_->SetVisible(true);
-    home_->SetBounds(reload_->x() + reload_->width() + button_spacing(),
+    home_->SetBounds(reload_->x() + reload_->width() + button_spacing,
                      child_y, home_->GetPreferredSize().width(), child_height);
   } else {
     home_->SetVisible(false);
@@ -590,10 +542,10 @@ void ToolbarView::Layout() {
   int available_width = std::max(0, width() - kRightEdgeSpacing -
       app_menu_width - browser_actions_width - location_x);
 
-  int location_y = std::min(location_bar_vert_spacing(), height());
-  int location_bar_height = location_bar_->GetPreferredSize().height();
+  int location_height = location_bar_->GetPreferredSize().height();
+  int location_y = (height() - location_height + 1) / 2;
   location_bar_->SetBounds(location_x, location_y, std::max(available_width, 0),
-                           location_bar_height);
+                           location_height);
 
   browser_actions_->SetBounds(location_bar_->x() + location_bar_->width(), 0,
                               browser_actions_width, height());
@@ -628,15 +580,6 @@ void ToolbarView::OnPaint(gfx::Canvas* canvas) {
 
   if (is_display_mode_normal())
     return;
-
-  // In maximized mode, we don't draw the endcaps on the location bar, because
-  // when they're flush against the edge of the screen they just look glitchy.
-  if (!browser_->window() || !browser_->window()->IsMaximized()) {
-    int top_spacing = PopupTopSpacing();
-    canvas->DrawImageInt(*kPopupBackgroundEdge, 0, top_spacing);
-    canvas->DrawImageInt(*kPopupBackgroundEdge,
-                         width() - kPopupBackgroundEdge->width(), top_spacing);
-  }
 
   // For glass, we need to draw a black line below the location bar to separate
   // it from the content area.  For non-glass, the NonClientView draws the
@@ -678,7 +621,7 @@ void ToolbarView::OnThemeChanged() {
   LoadImages();
 }
 
-std::string ToolbarView::GetClassName() const {
+const char* ToolbarView::GetClassName() const {
   return kViewClassName;
 }
 
@@ -741,6 +684,7 @@ bool ToolbarView::ShouldShowIncompatibilityWarning() {
 }
 
 int ToolbarView::PopupTopSpacing() const {
+  const int kPopupTopSpacingNonGlass = 3;
   return GetWidget()->ShouldUseNativeFrame() ? 0 : kPopupTopSpacingNonGlass;
 }
 

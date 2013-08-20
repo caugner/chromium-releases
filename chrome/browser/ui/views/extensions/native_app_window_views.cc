@@ -27,10 +27,12 @@
 #include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/browser/web_applications/web_app_win.h"
 #include "ui/base/win/shell.h"
+#include "ui/views/win/hwnd_util.h"
 #endif
 
 #if defined(USE_ASH)
@@ -40,7 +42,9 @@
 #include "ash/wm/panels/panel_frame_view.h"
 #include "ash/wm/window_properties.h"
 #include "chrome/browser/ui/ash/ash_util.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/window.h"
 #endif
 
 namespace {
@@ -152,7 +156,7 @@ void NativeAppWindowViews::InitializeDefaultWindow(
     const ShellWindow::CreateParams& create_params) {
   views::Widget::InitParams init_params(views::Widget::InitParams::TYPE_WINDOW);
   init_params.delegate = this;
-  init_params.remove_standard_frame = true;
+  init_params.remove_standard_frame = ShouldUseChromeStyleFrame();
   init_params.use_system_default_icon = true;
   // TODO(erg): Conceptually, these are toplevel windows, but we theoretically
   // could plumb context through to here in some cases.
@@ -221,13 +225,7 @@ void NativeAppWindowViews::OnShortcutInfoLoaded(
 }
 
 HWND NativeAppWindowViews::GetNativeAppWindowHWND() const {
-#if defined(USE_AURA)
-  gfx::NativeWindow window =
-      GetWidget()->GetTopLevelWidget()->GetNativeWindow();
-  return window->GetRootWindow()->GetAcceleratedWidget();
-#else
-  return GetWidget()->GetTopLevelWidget()->GetNativeWindow();
-#endif
+  return views::HWNDForWidget(GetWidget()->GetTopLevelWidget());
 }
 #endif
 
@@ -266,19 +264,25 @@ void NativeAppWindowViews::InitializePanelWindow(
   window_->Init(params);
   window_->set_focus_on_creation(create_params.focused);
 
-#if !defined(USE_ASH)
-  // TODO(oshima|stevenjb): Ideally, we should be able to just pre-determine
-  // the exact location and size, but this doesn't work well
-  // on non-ash environment where we don't have full control over
-  // window management.
-  gfx::Rect window_bounds =
-      window_->non_client_view()->GetWindowBoundsForClientBounds(
-          create_params.bounds);
-  window_->SetBounds(window_bounds);
+#if defined(USE_ASH)
+  if (create_params.state == ui::SHOW_STATE_DETACHED) {
+    gfx::Rect window_bounds(create_params.bounds.x(),
+                            create_params.bounds.y(),
+                            preferred_size_.width(),
+                            preferred_size_.height());
+    aura::Window* native_window = GetNativeWindow();
+    native_window->SetProperty(ash::internal::kPanelAttachedKey, false);
+    native_window->SetDefaultParentByRootWindow(
+        native_window->GetRootWindow(), native_window->GetBoundsInScreen());
+    window_->SetBounds(window_bounds);
+  }
+#else
+  // TODO(stevenjb): NativeAppWindow panels need to be implemented for other
+  // platforms.
 #endif
 }
 
-// BaseWindow implementation.
+// ui::BaseWindow implementation.
 
 bool NativeAppWindowViews::IsActive() const {
   return window_->IsActive();
@@ -302,6 +306,23 @@ gfx::NativeWindow NativeAppWindowViews::GetNativeWindow() {
 
 gfx::Rect NativeAppWindowViews::GetRestoredBounds() const {
   return window_->GetRestoredBounds();
+}
+
+ui::WindowShowState NativeAppWindowViews::GetRestoredState() const {
+  if (IsMaximized())
+    return ui::SHOW_STATE_MAXIMIZED;
+#if defined(USE_ASH)
+  // On Ash, restore fullscreen.
+  if (IsFullscreen())
+    return ui::SHOW_STATE_FULLSCREEN;
+  // Use kRestoreShowStateKey in case a window is minimized/hidden.
+  ui::WindowShowState restore_state =
+      window_->GetNativeWindow()->GetProperty(
+          aura::client::kRestoreShowStateKey);
+  if (restore_state != ui::SHOW_STATE_MINIMIZED)
+    return restore_state;
+#endif
+  return ui::SHOW_STATE_NORMAL;
 }
 
 gfx::Rect NativeAppWindowViews::GetBounds() const {
@@ -386,6 +407,10 @@ gfx::Insets NativeAppWindowViews::GetFrameInsets() const {
   return window_bounds.InsetsFrom(client_bounds);
 }
 
+gfx::NativeView NativeAppWindowViews::GetHostView() const {
+  return window_->GetNativeView();
+}
+
 gfx::Point NativeAppWindowViews::GetDialogPosition(const gfx::Size& size) {
   gfx::Size shell_window_size = window_->GetWindowBoundsInScreen().size();
   return gfx::Point(shell_window_size.width() / 2 - size.width() / 2,
@@ -393,11 +418,11 @@ gfx::Point NativeAppWindowViews::GetDialogPosition(const gfx::Size& size) {
 }
 
 void NativeAppWindowViews::AddObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   observer_list_.AddObserver(observer);
 }
 void NativeAppWindowViews::RemoveObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
@@ -407,35 +432,37 @@ void NativeAppWindowViews::OnViewWasResized() {
   // TODO(jeremya): this doesn't seem like a terribly elegant way to keep the
   // window shape in sync.
 #if defined(OS_WIN) && !defined(USE_AURA)
-  // Set the window shape of the RWHV.
   DCHECK(window_);
   DCHECK(web_view_);
   gfx::Size sz = web_view_->size();
   int height = sz.height(), width = sz.width();
-  int radius = 1;
-  gfx::Path path;
-  if (window_->IsMaximized() || window_->IsFullscreen()) {
-    // Don't round the corners when the window is maximized or fullscreen.
-    path.addRect(0, 0, width, height);
-  } else {
-    if (frameless_) {
-      path.moveTo(0, radius);
-      path.lineTo(radius, 0);
-      path.lineTo(width - radius, 0);
-      path.lineTo(width, radius);
+  if (ShouldUseChromeStyleFrame()) {
+    // Set the window shape of the RWHV.
+    const int kCornerRadius = 1;
+    gfx::Path path;
+    if (window_->IsMaximized() || window_->IsFullscreen()) {
+      // Don't round the corners when the window is maximized or fullscreen.
+      path.addRect(0, 0, width, height);
     } else {
-      // Don't round the top corners in chrome-style frame mode.
-      path.moveTo(0, 0);
-      path.lineTo(width, 0);
+      if (frameless_) {
+        path.moveTo(0, kCornerRadius);
+        path.lineTo(kCornerRadius, 0);
+        path.lineTo(width - kCornerRadius, 0);
+        path.lineTo(width, kCornerRadius);
+      } else {
+        // Don't round the top corners in chrome-style frame mode.
+        path.moveTo(0, 0);
+        path.lineTo(width, 0);
+      }
+      path.lineTo(width, height - kCornerRadius - 1);
+      path.lineTo(width - kCornerRadius - 1, height);
+      path.lineTo(kCornerRadius + 1, height);
+      path.lineTo(0, height - kCornerRadius - 1);
+      path.close();
     }
-    path.lineTo(width, height - radius - 1);
-    path.lineTo(width - radius - 1, height);
-    path.lineTo(radius + 1, height);
-    path.lineTo(0, height - radius - 1);
-    path.close();
+    SetWindowRgn(web_contents()->GetView()->GetNativeView(),
+                 path.CreateNativeRegion(), 1);
   }
-  SetWindowRgn(web_contents()->GetView()->GetNativeView(),
-               path.CreateNativeRegion(), 1);
 
   SkRegion* rgn = new SkRegion;
   if (!window_->IsFullscreen()) {
@@ -455,9 +482,14 @@ void NativeAppWindowViews::OnViewWasResized() {
     web_contents()->GetRenderViewHost()->GetView()->SetClickthroughRegion(rgn);
 #endif
 
-  FOR_EACH_OBSERVER(WebContentsModalDialogHostObserver,
+  FOR_EACH_OBSERVER(web_modal::WebContentsModalDialogHostObserver,
                     observer_list_,
                     OnPositionRequiresUpdate());
+}
+
+bool NativeAppWindowViews::ShouldUseChromeStyleFrame() const {
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kAppsUseNativeFrame) || frameless_;
 }
 
 // WidgetDelegate implementation.
@@ -546,23 +578,27 @@ views::NonClientFrameView* NativeAppWindowViews::CreateNonClientFrameView(
     }
   }
 #endif
-  ShellWindowFrameView* frame_view = new ShellWindowFrameView(this);
-  frame_view->Init(window_);
-  return frame_view;
+  if (ShouldUseChromeStyleFrame()) {
+    ShellWindowFrameView* frame_view = new ShellWindowFrameView(this);
+    frame_view->Init(window_);
+    return frame_view;
+  }
+  return views::WidgetDelegateView::CreateNonClientFrameView(widget);
 }
 
 bool NativeAppWindowViews::ShouldDescendIntoChildForEventHandling(
     gfx::NativeView child,
     const gfx::Point& location) {
 #if defined(USE_AURA)
-  DCHECK_EQ(child, web_view_->web_contents()->GetView()->GetNativeView());
-  // Shell window should claim mouse events that fall within the draggable
-  // region.
-  return !draggable_region_.get() ||
-         !draggable_region_->contains(location.x(), location.y());
-#else
-  return true;
+  if (child == web_view_->web_contents()->GetView()->GetNativeView()) {
+    // Shell window should claim mouse events that fall within the draggable
+    // region.
+    return !draggable_region_.get() ||
+           !draggable_region_->contains(location.x(), location.y());
+  }
 #endif
+
+  return true;
 }
 
 // WidgetObserver implementation.
@@ -575,6 +611,8 @@ void NativeAppWindowViews::OnWidgetVisibilityChanged(views::Widget* widget,
 void NativeAppWindowViews::OnWidgetActivationChanged(views::Widget* widget,
                                                      bool active) {
   shell_window_->OnNativeWindowChanged();
+  if (active)
+    shell_window_->OnNativeWindowActivated();
 }
 
 // WebContentsObserver implementation.
@@ -602,10 +640,9 @@ void NativeAppWindowViews::Layout() {
   OnViewWasResized();
 }
 
-void NativeAppWindowViews::ViewHierarchyChanged(bool is_add,
-                                                views::View* parent,
-                                                views::View* child) {
-  if (is_add && child == this) {
+void NativeAppWindowViews::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.child == this) {
     web_view_ = new views::WebView(NULL);
     AddChildView(web_view_);
     web_view_->SetWebContents(web_contents());
@@ -663,6 +700,17 @@ void NativeAppWindowViews::SetFullscreen(bool fullscreen) {
 
 bool NativeAppWindowViews::IsFullscreenOrPending() const {
   return is_fullscreen_;
+}
+
+bool NativeAppWindowViews::IsDetached() const {
+  if (!shell_window_->window_type_is_panel())
+    return false;
+#if defined(USE_ASH)
+  return !window_->GetNativeWindow()->GetProperty(
+      ash::internal::kPanelAttachedKey);
+#else
+  return false;
+#endif
 }
 
 views::View* NativeAppWindowViews::GetContentsView() {

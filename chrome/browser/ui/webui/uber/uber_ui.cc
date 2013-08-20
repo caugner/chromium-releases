@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/webui/uber/uber_ui.h"
 
 #include "base/stl_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
@@ -74,7 +74,7 @@ bool HasExtensionType(Profile* profile, const char* extensionType) {
   for (ExtensionSet::const_iterator iter = extensionSet->begin();
        iter != extensionSet->end(); ++iter) {
     extensions::URLOverrides::URLOverrideMap map =
-        extensions::URLOverrides::GetChromeURLOverrides(*iter);
+        extensions::URLOverrides::GetChromeURLOverrides(iter->get());
     extensions::URLOverrides::URLOverrideMap::const_iterator result =
         map.find(std::string(extensionType));
 

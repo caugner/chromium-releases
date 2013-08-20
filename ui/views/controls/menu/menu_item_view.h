@@ -10,7 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "ui/base/models/menu_separator_types.h"
 #include "ui/gfx/image/image_skia.h"
@@ -167,9 +167,8 @@ class VIEWS_EXPORT MenuItemView : public View {
                               Type type,
                               ui::MenuSeparatorType separator_style);
 
-  // Remove an item from the menu at a specified index.
-  // ChildrenChanged() should be called after removing menu items (whether
-  // the menu may be active or not).
+  // Remove an item from the menu at a specified index. The removed MenuItemView
+  // is deleted when ChildrenChanged() is invoked.
   void RemoveMenuItemAt(int index);
 
   // Appends an item to this menu.
@@ -343,7 +342,7 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
 
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
 
   // Returns the preferred size (and padding) of any children.
   virtual gfx::Size GetChildPreferredSize();

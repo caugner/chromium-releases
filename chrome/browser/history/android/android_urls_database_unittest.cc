@@ -4,7 +4,6 @@
 
 #include "chrome/browser/history/android/android_urls_database.h"
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
@@ -20,8 +19,7 @@ class AndroidURLsMigrationTest : public HistoryUnitTestBase {
  public:
   AndroidURLsMigrationTest() {
   }
-  ~AndroidURLsMigrationTest() {
-  }
+  virtual ~AndroidURLsMigrationTest() {}
 
  protected:
   virtual void SetUp() {
@@ -47,7 +45,7 @@ class AndroidURLsMigrationTest : public HistoryUnitTestBase {
 // fails. See http://crbug.com/175460 .
 TEST_F(AndroidURLsMigrationTest, DISABLED_MigrateToVersion22) {
   HistoryDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(history_db_name_, NULL));
+  ASSERT_EQ(sql::INIT_OK, db.Init(history_db_name_));
   // Migration has done.
   // The column of previous table shouldn't exist.
   EXPECT_FALSE(db.GetDB().DoesColumnExist("android_urls", "bookmark"));

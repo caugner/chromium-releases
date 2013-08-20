@@ -146,7 +146,7 @@ static NSEvent* MakeMouseEvent(NSEventType type,
     NSRectFillUsingOperation([self bounds], NSCompositeSourceOver);
 
     if ([glintAnimation_ isAnimating]) {
-      scoped_nsobject<NSGradient> glint([NSGradient alloc]);
+      base::scoped_nsobject<NSGradient> glint([NSGradient alloc]);
       float currentAlpha = 0.8 * [glintAnimation_ currentValue];
       NSColor* startColor = [NSColor colorWithCalibratedWhite:1.0
                                                         alpha:currentAlpha];
@@ -289,11 +289,8 @@ static NSEvent* MakeMouseEvent(NSEventType type,
                  pressedImage:(NSImage*)pressedImage
                       toolTip:(NSString*)toolTip {
   [button setDefaultImage:image];
-  [button setDefaultOpacity:1.0];
   [button setHoverImage:hoverImage];
-  [button setHoverOpacity:1.0];
   [button setPressedImage:pressedImage];
-  [button setPressedOpacity:1.0];
   [button setToolTip:toolTip];
   [[button cell] setHighlightsBy:NSNoCellMask];
 }

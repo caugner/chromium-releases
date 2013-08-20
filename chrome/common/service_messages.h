@@ -19,21 +19,13 @@ IPC_STRUCT_TRAITS_BEGIN(cloud_print::CloudPrintProxyInfo)
   IPC_STRUCT_TRAITS_MEMBER(proxy_id)
 IPC_STRUCT_TRAITS_END()
 
-//-----------------------------------------------------------------------------
-// Service process messages:
-// These are messages from the browser to the service process.
-// Tell the service process to enable the cloud proxy passing in the lsid
-// of the account to be used.
-IPC_MESSAGE_CONTROL1(ServiceMsg_EnableCloudPrintProxy,
-                     std::string /* lsid */)
-
 // Tell the service process to enable the cloud proxy passing in the OAuth2
 // auth code of a robot account.
 IPC_MESSAGE_CONTROL4(ServiceMsg_EnableCloudPrintProxyWithRobot,
                      std::string /* robot_auth_code */,
                      std::string /* robot_email */,
                      std::string /* user_email */,
-                     DictionaryValue /* user_settings */)
+                     base::DictionaryValue /* user_settings */)
 
 // Tell the service process to disable the cloud proxy.
 IPC_MESSAGE_CONTROL0(ServiceMsg_DisableCloudPrintProxy)

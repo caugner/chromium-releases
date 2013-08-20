@@ -13,19 +13,19 @@
 namespace extensions {
 
 TTSCustomBindings::TTSCustomBindings(
-    Dispatcher* dispatcher, v8::Handle<v8::Context> v8_context)
-    : ChromeV8Extension(dispatcher, v8_context) {
+    Dispatcher* dispatcher, ChromeV8Context* context)
+    : ChromeV8Extension(dispatcher, context) {
   RouteFunction("GetNextTTSEventId",
       base::Bind(&TTSCustomBindings::GetNextTTSEventId,
                  base::Unretained(this)));
 }
 
-v8::Handle<v8::Value> TTSCustomBindings::GetNextTTSEventId(
-    const v8::Arguments& args) {
+void TTSCustomBindings::GetNextTTSEventId(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   // Note: this works because the TTS API only works in the
   // extension process, not content scripts.
-  static int next_tts_event_id = 1;
-  return v8::Integer::New(next_tts_event_id++);
+  static int32_t next_tts_event_id = 1;
+  args.GetReturnValue().Set(next_tts_event_id++);
 }
 
-}  // extensions
+}  // namespace extensions

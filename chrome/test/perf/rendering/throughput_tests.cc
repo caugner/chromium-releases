@@ -9,8 +9,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/values.h"
 #include "chrome/browser/net/url_fixer_upper.h"
@@ -30,8 +30,8 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
-#include "content/test/gpu/gpu_test_config.h"
 #include "googleurl/src/gurl.h"
+#include "gpu/config/gpu_test_config.h"
 #include "net/base/net_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -208,8 +208,9 @@ class ThroughputTest : public BrowserPerfTest {
 
   void Wait(int ms) {
     base::RunLoop run_loop;
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(),
+    base::MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        run_loop.QuitClosure(),
         base::TimeDelta::FromMilliseconds(ms));
     content::RunThisRunLoop(&run_loop);
   }
@@ -544,21 +545,21 @@ IN_PROC_BROWSER_TEST_F(ThroughputTestThread, DrawImageShadowGPU) {
 
 IN_PROC_BROWSER_TEST_F(ThroughputTestSW, CanvasToCanvasDrawSW) {
   if (IsGpuAvailable() &&
-      GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
+      gpu::GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
     return;
   RunTest("canvas2d_balls_draw_from_canvas", kNone);
 }
 
 IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, CanvasToCanvasDrawGPU) {
   if (IsGpuAvailable() &&
-      GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
+      gpu::GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
     return;
   RunTest("canvas2d_balls_draw_from_canvas", kNone | kIsGpuCanvasTest);
 }
 
 IN_PROC_BROWSER_TEST_F(ThroughputTestSW, CanvasTextSW) {
   if (IsGpuAvailable() &&
-      GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
+      gpu::GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
     return;
   RunTest("canvas2d_balls_text", kNone);
 }
@@ -581,7 +582,7 @@ IN_PROC_BROWSER_TEST_F(ThroughputTestSW, CanvasSingleImageSW) {
 
 IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, CanvasSingleImageGPU) {
   if (IsGpuAvailable() &&
-      GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
+      gpu::GPUTestBotConfig::CurrentConfigMatches("MAC AMD"))
     return;
   RunCanvasBenchTest("single_image", kNone | kIsGpuCanvasTest);
 }

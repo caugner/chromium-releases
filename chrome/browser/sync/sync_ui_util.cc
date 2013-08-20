@@ -7,8 +7,8 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/time_formatting.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_global_error.h"
@@ -55,8 +55,11 @@ string16 GetSyncedStateStatusLabel(ProfileSyncService* service,
       return l10n_util::GetStringFUTF16(IDS_SIGNED_IN_WITH_SYNC_DISABLED,
                                         user_name);
     } else if (service->IsStartSuppressed()) {
-      return l10n_util::GetStringFUTF16(IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED,
-                                        user_name);
+      // User is signed in, but sync has been stopped.
+      return l10n_util::GetStringFUTF16(
+          IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED,
+          user_name,
+          ASCIIToUTF16(chrome::kSyncGoogleDashboardURL));
     }
   }
 
@@ -226,10 +229,10 @@ MessageType GetStatusInfo(ProfileSyncService* service,
         }
       } else if (auth_error.state() != AuthError::NONE &&
                  auth_error.state() != AuthError::TWO_FACTOR) {
-        if (status_label) {
+        if (status_label && link_label) {
           status_label->clear();
           signin_ui_util::GetStatusLabelsForAuthError(
-              signin, status_label, NULL);
+              signin, status_label, link_label);
         }
         result_type = SYNC_ERROR;
       }
@@ -244,6 +247,16 @@ MessageType GetStatusInfo(ProfileSyncService* service,
         }
       } else if (status_label) {
         status_label->assign(l10n_util::GetStringUTF16(IDS_SYNC_SETUP_ERROR));
+      }
+    } else if (!signin.GetAuthenticatedUsername().empty()) {
+      // The user is signed in, but sync has been stopped.
+      if (status_label) {
+        string16 label = l10n_util::GetStringFUTF16(
+                             IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED,
+                             UTF8ToUTF16(signin.GetAuthenticatedUsername()),
+                             ASCIIToUTF16(chrome::kSyncGoogleDashboardURL));
+        status_label->assign(label);
+        result_type = PRE_SYNCED;
       }
     }
   }

@@ -20,10 +20,10 @@
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "media/base/djb2.h"
 #include "media/base/media.h"
@@ -92,12 +92,9 @@ int main(int argc, const char** argv) {
 
   CommandLine::Init(argc, argv);
 
-  logging::InitLogging(
-      NULL,
-      logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-      logging::LOCK_LOG_FILE,  // Ignored.
-      logging::DELETE_OLD_LOG_FILE,  // Ignored.
-      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  logging::InitLogging(settings);
 
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
   const CommandLine::StringVector& filenames = cmd_line->GetArgs();

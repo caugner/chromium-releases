@@ -5,8 +5,8 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/management/management_api_constants.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_utils.h"
 
@@ -112,9 +113,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
 
   EXPECT_TRUE(MatchPattern(
       util::RunFunctionAndReturnError(
-          uninstall_function,
+          uninstall_function.get(),
           base::StringPrintf("[\"%s\", {\"showConfirmDialog\": true}]",
-              id.c_str()),
+                             id.c_str()),
           browser()),
       keys::kUninstallCanceledError));
 
@@ -126,7 +127,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
   ManagementUninstallFunction::SetAutoConfirmForTest(true);
 
   util::RunFunctionAndReturnSingleResult(
-      uninstall_function,
+      uninstall_function.get(),
       base::StringPrintf("[\"%s\", {\"showConfirmDialog\": true}]", id.c_str()),
       browser());
 

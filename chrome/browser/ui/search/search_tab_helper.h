@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -17,8 +18,15 @@ namespace content {
 class WebContents;
 }
 
+class InstantPageTest;
+
 // Per-tab search "helper".  Acts as the owner and controller of the tab's
 // search UI model.
+//
+// When the page is finished loading, SearchTabHelper determines the instant
+// support for the page. When a navigation entry is committed (except for
+// in-page navigations), SearchTabHelper resets the instant support state to
+// INSTANT_SUPPORT_UNKNOWN and cause support to be determined again.
 class SearchTabHelper : public content::NotificationObserver,
                         public content::WebContentsObserver,
                         public content::WebContentsUserData<SearchTabHelper> {
@@ -28,6 +36,9 @@ class SearchTabHelper : public content::NotificationObserver,
   SearchModel* model() {
     return &model_;
   }
+
+  // Sets up the initial state correctly for a preloaded NTP.
+  void InitForPreloadedNTP();
 
   // Invoked when the OmniboxEditModel changes state in some way that might
   // affect the search mode.
@@ -42,8 +53,23 @@ class SearchTabHelper : public content::NotificationObserver,
   // the notification system and shouldn't call this method.
   void NavigationEntryUpdated();
 
+  // Invoked to update the instant support state.
+  void InstantSupportChanged(bool supports_instant);
+
+  // Returns true if the page supports instant. If the instant support state is
+  // not determined or if the page does not support instant returns false.
+  bool SupportsInstant() const;
+
  private:
   friend class content::WebContentsUserData<SearchTabHelper>;
+  friend class InstantPageTest;
+  FRIEND_TEST_ALL_PREFIXES(InstantPageTest,
+                           DetermineIfPageSupportsInstant_Local);
+  FRIEND_TEST_ALL_PREFIXES(InstantPageTest,
+                           DetermineIfPageSupportsInstant_NonLocal);
+  FRIEND_TEST_ALL_PREFIXES(InstantPageTest,
+                           PageURLDoesntBelongToInstantRenderer);
+  FRIEND_TEST_ALL_PREFIXES(InstantPageTest, PageSupportsInstant);
 
   explicit SearchTabHelper(content::WebContents* web_contents);
 
@@ -53,15 +79,38 @@ class SearchTabHelper : public content::NotificationObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from contents::WebContentsObserver:
+  virtual void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void DidFinishLoad(
+      int64 frame_id,
+      const GURL& validated_url,
+      bool is_main_frame,
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
   // Sets the mode of the model based on the current URL of web_contents().
-  void UpdateMode();
+  // Only updates the origin part of the mode if |update_origin| is true,
+  // otherwise keeps the current origin. If |is_preloaded_ntp| is true, the mode
+  // is set to NTP regardless of the current URL; this is used to ensure that
+  // InstantController can bind InstantTab to new tab pages immediately.
+  void UpdateMode(bool update_origin, bool is_preloaded_ntp);
+
+  // Tells the renderer to determine if the page supports the Instant API, which
+  // results in a call to OnInstantSupportDetermined() when the reply
+  // is received.
+  void DetermineIfPageSupportsInstant();
+
+  // Handler for when Instant support has been determined.
+  void OnInstantSupportDetermined(int page_id, bool supports_instant);
 
   // Handlers for SearchBox API to show and hide top bars (bookmark and info
   // bars).
   void OnSearchBoxShowBars(int page_id);
   void OnSearchBoxHideBars(int page_id);
+
+  // Sets whether the page supports voice search on the model.
+  void OnSetVoiceSearchSupported(int page_id, bool supported);
 
   const bool is_search_enabled_;
 

@@ -13,11 +13,17 @@ namespace test {
 // static
 QuicPacketSequenceNumber QuicFramerPeer::CalculatePacketSequenceNumberFromWire(
     QuicFramer* framer,
+    QuicSequenceNumberLength sequence_number_length,
     QuicPacketSequenceNumber packet_sequence_number) {
-  return framer->CalculatePacketSequenceNumberFromWire(packet_sequence_number);
+  return framer->CalculatePacketSequenceNumberFromWire(sequence_number_length,
+                                                       packet_sequence_number);
 }
 
 // static
+void QuicFramerPeer::SetLastSerializedGuid(QuicFramer* framer, QuicGuid guid) {
+  framer->last_serialized_guid_ = guid;
+}
+
 void QuicFramerPeer::SetLastSequenceNumber(
     QuicFramer* framer,
     QuicPacketSequenceNumber packet_sequence_number) {
@@ -28,7 +34,7 @@ void QuicFramerPeer::SetIsServer(QuicFramer* framer, bool is_server) {
   framer->is_server_ = is_server;
 }
 
-void QuicFramerPeer::SetVersion(QuicFramer* framer, QuicVersionTag version) {
+void QuicFramerPeer::SetVersion(QuicFramer* framer, QuicTag version) {
   framer->quic_version_ = version;
 }
 

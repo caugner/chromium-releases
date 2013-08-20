@@ -4,7 +4,7 @@
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -276,7 +276,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CheckDockedPanelProperties) {
 
   // Ensure that the layout message can get a chance to be processed so that
   // the button visibility can be updated.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   EXPECT_EQ(3, panel_manager->num_panels());
   EXPECT_TRUE(docked_collection->HasPanel(panel1));
@@ -672,7 +672,13 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestoreButtonClick) {
   EXPECT_FALSE(panel3->IsMinimized());
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, RestoreAllWithTitlebarClick) {
+// http://crbug.com/243891 flaky on Linux
+#if defined(OS_LINUX)
+#define MAYBE_RestoreAllWithTitlebarClick DISABLED_RestoreAllWithTitlebarClick
+#else
+#define MAYBE_RestoreAllWithTitlebarClick RestoreAllWithTitlebarClick
+#endif
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_RestoreAllWithTitlebarClick) {
   // Test with three panels.
   Panel* panel1 = CreatePanel("PanelTest1");
   Panel* panel2 = CreatePanel("PanelTest2");
@@ -914,7 +920,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ChangeAutoHideTaskBarThickness) {
   mock_display_settings_provider()->SetDesktopBarThickness(
       DisplaySettingsProvider::DESKTOP_BAR_ALIGNED_RIGHT,
       right_bar_thickness);
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(initial_starting_right_position,
             docked_collection->StartingRightPosition());
   EXPECT_EQ(docked_collection->work_area().bottom() - bottom_bar_thickness,
@@ -933,7 +939,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ChangeAutoHideTaskBarThickness) {
   mock_display_settings_provider()->SetDesktopBarThickness(
       DisplaySettingsProvider::DESKTOP_BAR_ALIGNED_RIGHT,
       right_bar_thickness);
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(docked_collection->StartingRightPosition(),
             initial_starting_right_position);
   EXPECT_EQ(docked_collection->work_area().bottom() - bottom_bar_thickness,
@@ -1132,7 +1138,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_DrawAttentionWhileMinimized) {
 }
 
 // http://crbug.com/175760; several panel tests failing regularly on mac.
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_LINUX)
 #define MAYBE_StopDrawingAttentionWhileMinimized \
   DISABLED_StopDrawingAttentionWhileMinimized
 #else
@@ -1421,12 +1427,12 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   WaitForPanelActiveState(panel1, SHOW_AS_ACTIVE);
 
   panel1->SetExpansionState(Panel::MINIMIZED);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   WaitForPanelActiveState(panel1, SHOW_AS_INACTIVE);
   EXPECT_EQ(Panel::MINIMIZED, panel1->expansion_state());
 
   panel2->SetExpansionState(Panel::MINIMIZED);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   WaitForPanelActiveState(panel2, SHOW_AS_INACTIVE);
   EXPECT_EQ(Panel::MINIMIZED, panel2->expansion_state());
 
@@ -1454,7 +1460,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
   DictionaryValue empty_value;
   scoped_refptr<extensions::Extension> extension =
       CreateExtension(FILE_PATH_LITERAL("TestExtension"),
-                      extensions::Manifest::INVALID_LOCATION, empty_value);
+                      extensions::Manifest::INTERNAL, empty_value);
   std::string extension_app_name =
       web_app::GenerateApplicationNameFromExtensionId(extension->id());
 
@@ -1473,14 +1479,14 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
 
   // Create a panel with a non-extension host.
   CreatePanelParams params1(extension_app_name, gfx::Rect(), SHOW_AS_INACTIVE);
-  params1.url = GURL(chrome::kAboutBlankURL);
+  params1.url = GURL(content::kAboutBlankURL);
   Panel* panel1 = CreatePanelWithParams(params1);
   EXPECT_EQ(2, panel_manager->num_panels());
 
   // Create another extension and a panel from that extension.
   scoped_refptr<extensions::Extension> extension_other =
       CreateExtension(FILE_PATH_LITERAL("TestExtensionOther"),
-                      extensions::Manifest::INVALID_LOCATION, empty_value);
+                      extensions::Manifest::INTERNAL, empty_value);
   std::string extension_app_name_other =
       web_app::GenerateApplicationNameFromExtensionId(extension_other->id());
   Panel* panel_other = CreatePanel(extension_app_name_other);
@@ -1493,8 +1499,8 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
       content::Source<Panel>(panel1));
 
   // Send unload notification on the first extension.
-  extensions::UnloadedExtensionInfo details(extension,
-                                extension_misc::UNLOAD_REASON_UNINSTALL);
+  extensions::UnloadedExtensionInfo details(
+      extension.get(), extension_misc::UNLOAD_REASON_UNINSTALL);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_UNLOADED,
       content::Source<Profile>(browser()->profile()),

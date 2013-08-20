@@ -8,8 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string_number_conversions.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_change_observer.h"
@@ -35,6 +35,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/compositor/test/test_layers.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
 
@@ -385,7 +386,12 @@ TEST_F(WindowTest, ContainsMouse) {
 }
 
 // Test Window::ConvertPointToWindow() with transform to root_window.
+#if defined(USE_OZONE)
+// TODO(rjkroege): Add cursor support in ozone: http://crbug.com/252315.
+TEST_F(WindowTest, DISABLED_MoveCursorToWithTransformRootWindow) {
+#else
 TEST_F(WindowTest, MoveCursorToWithTransformRootWindow) {
+#endif
   RootWindow* root = root_window();
   gfx::Transform transform;
   transform.Translate(100.0, 100.0);
@@ -442,7 +448,13 @@ TEST_F(WindowTest, MoveCursorToWithTransformWindow) {
 
 // Test Window::ConvertPointToWindow() with complex transforms to both root and
 // non-root windows.
+// Test Window::ConvertPointToWindow() with transform to root_window.
+#if defined(USE_OZONE)
+// TODO(rjkroege): Add cursor support in ozone: http://crbug.com/252315.
+TEST_F(WindowTest, DISABLED_MoveCursorToWithComplexTransform) {
+#else
 TEST_F(WindowTest, MoveCursorToWithComplexTransform) {
+#endif
   scoped_ptr<Window> w1(
       CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 10, 500, 500),
                        root_window()));
@@ -1165,9 +1177,11 @@ class MouseEnterExitWindowDelegate : public TestWindowDelegate {
   virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
     switch (event->type()) {
       case ui::ET_MOUSE_ENTERED:
+        EXPECT_TRUE(event->flags() & ui::EF_IS_SYNTHESIZED);
         entered_ = true;
         break;
       case ui::ET_MOUSE_EXITED:
+        EXPECT_TRUE(event->flags() & ui::EF_IS_SYNTHESIZED);
         exited_ = true;
         break;
       default:
@@ -2056,6 +2070,21 @@ TEST_F(WindowTest, RecreateLayer) {
   EXPECT_TRUE(layer->GetMasksToBounds());
 }
 
+// Verify that RecreateLayer() stacks the old layer above the newly creatd
+// layer.
+TEST_F(WindowTest, RecreateLayerZOrder) {
+  scoped_ptr<Window> w(
+      CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(0, 0, 100, 100),
+                       root_window()));
+  scoped_ptr<ui::Layer> old_layer(w->RecreateLayer());
+
+  const std::vector<ui::Layer*>& child_layers =
+      root_window()->layer()->children();
+  ASSERT_EQ(2u, child_layers.size());
+  EXPECT_EQ(w->layer(), child_layers[0]);
+  EXPECT_EQ(old_layer.get(), child_layers[1]);
+}
+
 // Ensure that acquiring a layer then recreating a layer does not crash
 // and that RecreateLayer returns null.
 TEST_F(WindowTest, AcquireThenRecreateLayer) {
@@ -2072,23 +2101,39 @@ TEST_F(WindowTest, AcquireThenRecreateLayer) {
 
 TEST_F(WindowTest, StackWindowsWhoseLayersHaveNoDelegate) {
   scoped_ptr<Window> window1(CreateTestWindowWithId(1, root_window()));
+  window1->layer()->set_name("1");
   scoped_ptr<Window> window2(CreateTestWindowWithId(2, root_window()));
+  window2->layer()->set_name("2");
+  scoped_ptr<Window> window3(CreateTestWindowWithId(3, root_window()));
+  window3->layer()->set_name("3");
 
-  // This brings window1 (and its layer) to the front.
-  root_window()->StackChildAbove(window1.get(), window2.get());
-  EXPECT_EQ(root_window()->children().front(), window2.get());
-  EXPECT_EQ(root_window()->children().back(), window1.get());
-  EXPECT_EQ(root_window()->layer()->children().front(), window2->layer());
-  EXPECT_EQ(root_window()->layer()->children().back(), window1->layer());
+  // This brings |window1| (and its layer) to the front.
+  root_window()->StackChildAbove(window1.get(), window3.get());
+  EXPECT_EQ("2 3 1", ChildWindowIDsAsString(root_window()));
+  EXPECT_EQ("2 3 1",
+            ui::test::ChildLayerNamesAsString(*root_window()->layer()));
 
-  // Since window1 does not have a delegate, window2 should not move in
+  // Since |window1| does not have a delegate, |window2| should not move in
   // front of it, nor should its layer.
   window1->layer()->set_delegate(NULL);
   root_window()->StackChildAbove(window2.get(), window1.get());
-  EXPECT_EQ(root_window()->children().front(), window2.get());
-  EXPECT_EQ(root_window()->children().back(), window1.get());
-  EXPECT_EQ(root_window()->layer()->children().front(), window2->layer());
-  EXPECT_EQ(root_window()->layer()->children().back(), window1->layer());
+  EXPECT_EQ("3 2 1", ChildWindowIDsAsString(root_window()));
+  EXPECT_EQ("3 2 1",
+            ui::test::ChildLayerNamesAsString(*root_window()->layer()));
+
+  // It should still be possible to stack |window3| immediately below |window1|.
+  root_window()->StackChildBelow(window3.get(), window1.get());
+  EXPECT_EQ("2 3 1", ChildWindowIDsAsString(root_window()));
+  EXPECT_EQ("2 3 1",
+            ui::test::ChildLayerNamesAsString(*root_window()->layer()));
+
+  // Since neither |window3| nor |window1| have a delegate, |window2| should
+  // not move in front of either.
+  window3->layer()->set_delegate(NULL);
+  root_window()->StackChildBelow(window2.get(), window1.get());
+  EXPECT_EQ("2 3 1", ChildWindowIDsAsString(root_window()));
+  EXPECT_EQ("2 3 1",
+            ui::test::ChildLayerNamesAsString(*root_window()->layer()));
 }
 
 TEST_F(WindowTest, StackTransientsWhoseLayersHaveNoDelegate) {
@@ -2401,7 +2446,6 @@ TEST_F(WindowTest, StackOverClosingTransient) {
   EXPECT_EQ(root->layer()->children()[3], transient2->layer());
 
   // This brings window1 and its transient to the front.
-  // root_window()->StackChildAbove(window1.get(), window2.get());
   root->StackChildAtTop(window1.get());
 
   EXPECT_EQ(root->children()[0], window2.get());

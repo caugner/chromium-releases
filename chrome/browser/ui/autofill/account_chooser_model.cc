@@ -6,12 +6,12 @@
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/common/pref_names.h"
-#include "components/autofill/browser/autofill_metrics.h"
+#include "components/autofill/core/browser/autofill_metrics.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -34,7 +34,6 @@ AccountChooserModel::AccountChooserModel(
       checked_item_(
           prefs->GetBoolean(::prefs::kAutofillDialogPayWithoutWallet) ?
               kAutofillItemId : kActiveWalletItemId),
-      had_wallet_error_(false),
       metric_logger_(metric_logger),
       dialog_type_(dialog_type) {
   ReconstructMenuItems();
@@ -74,7 +73,7 @@ bool AccountChooserModel::IsCommandIdChecked(int command_id) const {
 
 bool AccountChooserModel::IsCommandIdEnabled(int command_id) const {
   // Currently, _any_ (non-sign-in) error disables _all_ Wallet accounts.
-  if (command_id != kAutofillItemId && had_wallet_error_)
+  if (command_id != kAutofillItemId && HadWalletError())
     return false;
 
   return true;
@@ -91,29 +90,33 @@ void AccountChooserModel::ExecuteCommand(int command_id, int event_flags) {
     return;
 
   // Log metrics.
-   AutofillMetrics::DialogUiEvent chooser_event;
-   if (command_id == kAutofillItemId) {
-     chooser_event =
-         AutofillMetrics::DIALOG_UI_ACCOUNT_CHOOSER_SWITCHED_TO_AUTOFILL;
-   } else if (checked_item_ == kAutofillItemId) {
-     chooser_event =
-         AutofillMetrics::DIALOG_UI_ACCOUNT_CHOOSER_SWITCHED_TO_WALLET;
-   } else {
-     chooser_event =
-         AutofillMetrics::DIALOG_UI_ACCOUNT_CHOOSER_SWITCHED_WALLET_ACCOUNT;
-   }
-   metric_logger_.LogDialogUiEvent(dialog_type_, chooser_event);
+  AutofillMetrics::DialogUiEvent chooser_event;
+  if (command_id == kAutofillItemId) {
+    chooser_event =
+        AutofillMetrics::DIALOG_UI_ACCOUNT_CHOOSER_SWITCHED_TO_AUTOFILL;
+  } else if (checked_item_ == kAutofillItemId) {
+    chooser_event =
+        AutofillMetrics::DIALOG_UI_ACCOUNT_CHOOSER_SWITCHED_TO_WALLET;
+  } else {
+    chooser_event =
+        AutofillMetrics::DIALOG_UI_ACCOUNT_CHOOSER_SWITCHED_WALLET_ACCOUNT;
+  }
+  metric_logger_.LogDialogUiEvent(dialog_type_, chooser_event);
 
-   checked_item_ = command_id;
+  checked_item_ = command_id;
   ReconstructMenuItems();
   delegate_->AccountChoiceChanged();
 }
 
-void AccountChooserModel::SetHadWalletError() {
+void AccountChooserModel::SetHadWalletError(const base::string16& message) {
   // Any non-sign-in error disables all Wallet accounts.
-  had_wallet_error_ = true;
+  wallet_error_message_ = message;
   ClearActiveWalletAccountName();
   ExecuteCommand(kAutofillItemId, 0);
+}
+
+bool AccountChooserModel::HadWalletError() const {
+  return !wallet_error_message_.empty();
 }
 
 void AccountChooserModel::SetHadWalletSigninError() {

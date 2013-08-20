@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/stl_util.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_constants.h"
+#include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_types.h"
 #include "ui/message_center/views/message_view.h"
@@ -65,7 +65,12 @@ void PopupBubbleContentsView::Update(
     // could come if those subviews were initially collapsed and allowed to be
     // expanded by users. TODO(dharcourt): Fix.
     content_->AddChildView(
-        NotificationView::Create(*(*iter), message_center_, true));
+        NotificationView::Create(*(*iter),
+                                 message_center_,
+                                 NULL,
+                                 true,    // Create expanded.
+                                 false)); // Not creating a top-level
+                                          // notification.
   }
   content_->SizeToPreferredSize();
   content_->InvalidateLayout();
@@ -126,7 +131,7 @@ void MessagePopupBubble::AutocloseTimer::Suspend() {
 
 // MessagePopupBubble
 MessagePopupBubble::MessagePopupBubble(MessageCenter* message_center)
-    : MessageBubbleBase(message_center),
+    : MessageBubbleBase(message_center, NULL),
       contents_view_(NULL) {
 }
 

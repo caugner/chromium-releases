@@ -9,7 +9,7 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_value_store.h"
 #include "base/run_loop.h"
@@ -58,9 +58,7 @@ class IncrementalTimeProvider : public ExtensionPrefs::TimeProvider {
 }  // namespace
 
 TestExtensionPrefs::TestExtensionPrefs(base::SequencedTaskRunner* task_runner)
-    : pref_service_(NULL),
-      task_runner_(task_runner),
-      extensions_disabled_(false) {
+    : task_runner_(task_runner), extensions_disabled_(false) {
   EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
   preferences_file_ = temp_dir_.path().AppendASCII("Preferences");
   extensions_dir_ = temp_dir_.path().AppendASCII("Extensions");
@@ -84,7 +82,7 @@ TestExtensionPrefs::pref_registry() {
 
 void TestExtensionPrefs::ResetPrefRegistry() {
   pref_registry_ = new user_prefs::PrefRegistrySyncable;
-  ExtensionPrefs::RegisterUserPrefs(pref_registry_);
+  ExtensionPrefs::RegisterUserPrefs(pref_registry_.get());
 }
 
 void TestExtensionPrefs::RecreateExtensionPrefs() {
@@ -106,12 +104,12 @@ void TestExtensionPrefs::RecreateExtensionPrefs() {
 
   extension_pref_value_map_.reset(new ExtensionPrefValueMap);
   PrefServiceMockBuilder builder;
-  builder.WithUserFilePrefs(preferences_file_, task_runner_);
+  builder.WithUserFilePrefs(preferences_file_, task_runner_.get());
   builder.WithExtensionPrefs(
       new ExtensionPrefStore(extension_pref_value_map_.get(), false));
-  pref_service_.reset(builder.CreateSyncable(pref_registry_));
+  pref_service_.reset(builder.CreateSyncable(pref_registry_.get()));
 
-  prefs_ = ExtensionPrefs::Create(
+  prefs_.reset(ExtensionPrefs::Create(
       pref_service_.get(),
       temp_dir_.path(),
       extension_pref_value_map_.get(),
@@ -119,7 +117,7 @@ void TestExtensionPrefs::RecreateExtensionPrefs() {
       // Guarantee that no two extensions get the same installation time
       // stamp and we can reliably assert the installation order in the tests.
       scoped_ptr<ExtensionPrefs::TimeProvider>(
-          new IncrementalTimeProvider()));
+          new IncrementalTimeProvider())));
 }
 
 scoped_refptr<Extension> TestExtensionPrefs::AddExtension(std::string name) {
@@ -156,12 +154,13 @@ scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifestAndFlags(
   std::string errors;
   scoped_refptr<Extension> extension = Extension::Create(
       path, location, manifest, extra_flags, &errors);
-  EXPECT_TRUE(extension) << errors;
-  if (!extension)
+  EXPECT_TRUE(extension.get()) << errors;
+  if (!extension.get())
     return NULL;
 
   EXPECT_TRUE(Extension::IdIsValid(extension->id()));
-  prefs_->OnExtensionInstalled(extension, Extension::ENABLED,
+  prefs_->OnExtensionInstalled(extension.get(),
+                               Extension::ENABLED,
                                syncer::StringOrdinal::CreateInitialOrdinal());
   return extension;
 }

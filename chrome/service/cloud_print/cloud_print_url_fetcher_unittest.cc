@@ -4,14 +4,14 @@
 
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/service/cloud_print/cloud_print_url_fetcher.h"
 #include "chrome/service/service_process.h"
 #include "googleurl/src/gurl.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
@@ -34,8 +34,7 @@ class TrackingTestURLRequestContextGetter
       base::MessageLoopProxy* io_message_loop_proxy,
       net::URLRequestThrottlerManager* throttler_manager)
       : TestURLRequestContextGetter(io_message_loop_proxy),
-        throttler_manager_(throttler_manager),
-        context_(NULL) {
+        throttler_manager_(throttler_manager) {
     g_request_context_getter_instances++;
   }
 
@@ -127,7 +126,7 @@ class CloudPrintURLFetcherTest : public testing::Test,
     // Deleting the fetcher causes a task to be posted to the IO thread to
     // release references to the URLRequestContextGetter. We need to run all
     // pending tasks to execute that (this is the IO thread).
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     EXPECT_EQ(0, g_request_context_getter_instances);
   }
 
@@ -135,7 +134,7 @@ class CloudPrintURLFetcherTest : public testing::Test,
   // we assume that the current thread is the IO thread where the URLFetcher
   // dispatches its requests to.  When we wish to simulate being used from
   // a UI thread, we dispatch a worker thread to do so.
-  MessageLoopForIO io_loop_;
+  base::MessageLoopForIO io_loop_;
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
   int max_retries_;
   Time start_time_;
@@ -213,14 +212,14 @@ class CloudPrintURLFetcherRetryBackoffTest : public CloudPrintURLFetcherTest {
 
 
 void CloudPrintURLFetcherTest::CreateFetcher(const GURL& url, int max_retries) {
-  fetcher_ = new TestCloudPrintURLFetcher(io_message_loop_proxy());
+  fetcher_ = new TestCloudPrintURLFetcher(io_message_loop_proxy().get());
 
   // Registers an entry for test url. It only allows 3 requests to be sent
   // in 200 milliseconds.
   scoped_refptr<net::URLRequestThrottlerEntry>
   entry(new net::URLRequestThrottlerEntry(
       fetcher_->throttler_manager(), std::string(), 200, 3, 1, 2.0, 0.0, 256));
-  fetcher_->throttler_manager()->OverrideEntryForTests(url, entry);
+  fetcher_->throttler_manager()->OverrideEntryForTests(url, entry.get());
 
   max_retries_ = max_retries;
   start_time_ = Time::Now();
@@ -256,7 +255,8 @@ CloudPrintURLFetcherBasicTest::HandleRawResponse(
   if (handle_raw_response_) {
     // If the current message loop is not the IO loop, it will be shut down when
     // the main loop returns and this thread subsequently goes out of scope.
-    io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    io_message_loop_proxy()->PostTask(FROM_HERE,
+                                      base::MessageLoop::QuitClosure());
     return CloudPrintURLFetcher::STOP_PROCESSING;
   }
   return CloudPrintURLFetcher::CONTINUE_PROCESSING;
@@ -270,7 +270,8 @@ CloudPrintURLFetcherBasicTest::HandleRawData(
   // We should never get here if we returned true in HandleRawResponse
   EXPECT_FALSE(handle_raw_response_);
   if (handle_raw_data_) {
-    io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    io_message_loop_proxy()->PostTask(FROM_HERE,
+                                      base::MessageLoop::QuitClosure());
     return CloudPrintURLFetcher::STOP_PROCESSING;
   }
   return CloudPrintURLFetcher::CONTINUE_PROCESSING;
@@ -285,7 +286,8 @@ CloudPrintURLFetcherBasicTest::HandleJSONData(
   // We should never get here if we returned true in one of the above methods.
   EXPECT_FALSE(handle_raw_response_);
   EXPECT_FALSE(handle_raw_data_);
-  io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  io_message_loop_proxy()->PostTask(FROM_HERE,
+                                    base::MessageLoop::QuitClosure());
   return CloudPrintURLFetcher::STOP_PROCESSING;
 }
 
@@ -305,7 +307,8 @@ CloudPrintURLFetcherOverloadTest::HandleRawData(
     // We have already sent 20 requests continuously. And we expect that
     // it takes more than 1 second due to the overload protection settings.
     EXPECT_TRUE(Time::Now() - start_time_ >= one_second);
-    io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    io_message_loop_proxy()->PostTask(FROM_HERE,
+                                      base::MessageLoop::QuitClosure());
   }
   return CloudPrintURLFetcher::STOP_PROCESSING;
 }
@@ -324,7 +327,8 @@ CloudPrintURLFetcherRetryBackoffTest::HandleRawData(
 void CloudPrintURLFetcherRetryBackoffTest::OnRequestGiveUp() {
   // It takes more than 200 ms to finish all 11 requests.
   EXPECT_TRUE(Time::Now() - start_time_ >= TimeDelta::FromMilliseconds(200));
-  io_message_loop_proxy()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  io_message_loop_proxy()->PostTask(FROM_HERE,
+                                    base::MessageLoop::QuitClosure());
 }
 
 TEST_F(CloudPrintURLFetcherBasicTest, HandleRawResponse) {
@@ -335,7 +339,7 @@ TEST_F(CloudPrintURLFetcherBasicTest, HandleRawResponse) {
   SetHandleRawResponse(true);
 
   CreateFetcher(test_server.GetURL("echo"), 0);
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 }
 
 TEST_F(CloudPrintURLFetcherBasicTest, HandleRawData) {
@@ -346,7 +350,7 @@ TEST_F(CloudPrintURLFetcherBasicTest, HandleRawData) {
 
   SetHandleRawData(true);
   CreateFetcher(test_server.GetURL("echo"), 0);
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 }
 
 TEST_F(CloudPrintURLFetcherOverloadTest, Protect) {
@@ -358,7 +362,7 @@ TEST_F(CloudPrintURLFetcherOverloadTest, Protect) {
   GURL url(test_server.GetURL("defaultresponse"));
   CreateFetcher(url, 11);
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 }
 
 TEST_F(CloudPrintURLFetcherRetryBackoffTest, GiveUp) {
@@ -370,7 +374,7 @@ TEST_F(CloudPrintURLFetcherRetryBackoffTest, GiveUp) {
   GURL url(test_server.GetURL("defaultresponse"));
   CreateFetcher(url, 11);
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 }
 
 }  // namespace cloud_print

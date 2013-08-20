@@ -31,14 +31,14 @@
 #include "base/file_util.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringize_macros.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "content/common/gpu/media/rendering_helper.h"
 #include "content/public/common/content_switches.h"
 
@@ -49,6 +49,7 @@
 #include "content/common/gpu/media/exynos_video_decode_accelerator.h"
 #elif defined(ARCH_CPU_X86_FAMILY)
 #include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
+#include "content/common/gpu/media/vaapi_wrapper.h"
 #endif  // ARCH_CPU_ARMEL
 #else
 #error The VideoAccelerator tests are not supported on this platform.
@@ -897,8 +898,8 @@ INSTANTIATE_TEST_CASE_P(
         MakeTuple(1, 1, 1, 1, END_OF_STREAM_RESET,
                   static_cast<ClientState>(-100))));
 
-// Test that decoding various variation works: multiple concurrent decoders and
-// multiple fragments per Decode() call.
+// Test that decoding various variation works: multiple fragments per Decode()
+// call and multiple in-flight decodes.
 INSTANTIATE_TEST_CASE_P(
     DecodeVariations, VideoDecodeAcceleratorTest,
     ::testing::Values(
@@ -906,9 +907,6 @@ INSTANTIATE_TEST_CASE_P(
         MakeTuple(1, 1, 10, 1, END_OF_STREAM_RESET, CS_RESET),
         // Tests queuing.
         MakeTuple(1, 1, 15, 1, END_OF_STREAM_RESET, CS_RESET),
-        // +0 hack below to promote enum to int.
-        MakeTuple(1, kMinSupportedNumConcurrentDecoders + 0, 1, 1,
-                  END_OF_STREAM_RESET, CS_RESET),
         MakeTuple(2, 1, 1, 1, END_OF_STREAM_RESET, CS_RESET),
         MakeTuple(3, 1, 1, 1, END_OF_STREAM_RESET, CS_RESET),
         MakeTuple(5, 1, 1, 1, END_OF_STREAM_RESET, CS_RESET),
@@ -946,12 +944,11 @@ int main(int argc, char **argv) {
   CommandLine::Init(argc, argv);
 
   // Needed to enable DVLOG through --vmodule.
-  CHECK(logging::InitLogging(
-      NULL,
-      logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-      logging::DONT_LOCK_LOG_FILE,
-      logging::APPEND_TO_OLD_LOG_FILE,
-      logging::ENABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS));
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  settings.dcheck_state =
+      logging::ENABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS;
+  CHECK(logging::InitLogging(settings));
 
   CommandLine* cmd_line = CommandLine::ForCurrentProcess();
   DCHECK(cmd_line);
@@ -969,7 +966,6 @@ int main(int argc, char **argv) {
   }
 
   base::ShadowingAtExitManager at_exit_manager;
-  content::RenderingHelper::InitializePlatform();
 
 #if defined(OS_WIN)
   content::DXVAVideoDecodeAccelerator::PreSandboxInitialization();
@@ -977,7 +973,7 @@ int main(int argc, char **argv) {
 #if defined(ARCH_CPU_ARMEL)
   content::ExynosVideoDecodeAccelerator::PreSandboxInitialization();
 #elif defined(ARCH_CPU_X86_FAMILY)
-  content::VaapiVideoDecodeAccelerator::PreSandboxInitialization();
+  content::VaapiWrapper::PreSandboxInitialization();
 #endif  // ARCH_CPU_ARMEL
 #endif  // OS_CHROMEOS
 

@@ -8,18 +8,19 @@
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "v8/include/v8.h"
 
 namespace extensions {
 
 TEST(ChromeV8ContextSet, Lifecycle) {
-  MessageLoop loop;
+  base::MessageLoop loop;
 
   ChromeV8ContextSet context_set;
 
   v8::HandleScope handle_scope;
-  v8::Handle<v8::Context> v8_context(v8::Context::New());
+  v8::Handle<v8::Context> v8_context(
+      v8::Context::New(v8::Isolate::GetCurrent()));
 
   // Dirty hack, but we don't actually need the frame, and this is easier than
   // creating a whole webview.

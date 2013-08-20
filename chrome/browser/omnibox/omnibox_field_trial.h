@@ -55,24 +55,6 @@ class OmniboxFieldTrial {
       std::vector<uint32>* field_trial_hash);
 
   // ---------------------------------------------------------
-  // For the HistoryQuick provider field trial that combines replacing
-  // the HistoryURL provider and turning on "new scoring" in HistoryQuick
-  // provider.
-
-  // Returns whether the user should get "new scoring" in HistoryQuick
-  // provider or the default scoring.  "New scoring" is based on the
-  // frequency of recent visits to the URL, a.k.a. "frecency"
-  // scoring).
-  static bool InHQPNewScoringExperimentGroup();
-
-  // Returns whether the user experiment the replace HUP behavior or
-  // the default behavior.  The experiment group simultaneously
-  // disables HistoryURL provider from searching the URL database and
-  // directs HistoryQuick provider to calculate both HUP-style and
-  // HQP-style scores for matches, then return whichever is larger.
-  static bool InHQPReplaceHUPScoringExperimentGroup();
-
-  // ---------------------------------------------------------
   // For the HistoryURL provider disable culling redirects field trial.
 
   // Returns whether the user is in any group for this field trial.
@@ -114,6 +96,22 @@ class OmniboxFieldTrial {
   // ZeroSuggestProvider should be used to get suggestions when the
   // user clicks on the omnibox but has not typed anything yet.
   static bool InZeroSuggestFieldTrial();
+
+  // ---------------------------------------------------------
+  // For the ShortcutsScoring field trial.
+
+  // If the field trial is active and the user is in an experiment
+  // group, extract from the experiment group name the maximum
+  // relevance score ShortcutsProvider:: CalculateScore() can return.
+  // Returns true on a successful extraction.  If the extraction failed,
+  // if the field trial is not active, etc., returns false.
+  // CalculateScore()'s return value is a product of this maximum
+  // relevance score and some attenuating factors that are all between
+  // 0 and 1.  (Note that Shortcuts results may have their scores
+  // reduced later if the assigned score is higher than allowed for
+  // non-inlineable results.  Shortcuts results are not allowed to be
+  // inlined.)
+  static bool ShortcutsScoringMaxRelevance(int* max_relevance);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(OmniboxFieldTrial);

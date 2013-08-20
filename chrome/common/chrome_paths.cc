@@ -8,12 +8,13 @@
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/widevine_cdm_constants.h"
+#include "components/breakpad/common/breakpad_paths.h"
 #include "ui/base/ui_base_paths.h"
 
 #if defined(OS_ANDROID)
@@ -62,15 +63,6 @@ const base::FilePath::CharType kInternalNaClPluginFileName[] =
 #else  // Linux and Chrome OS
     FILE_PATH_LITERAL("libppGoogleNaClPluginChrome.so");
 #endif
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-// File name of the nacl_helper and nacl_helper_bootstrap, Linux only.
-const base::FilePath::CharType kInternalNaClHelperFileName[] =
-    FILE_PATH_LITERAL("nacl_helper");
-const base::FilePath::CharType kInternalNaClHelperBootstrapFileName[] =
-    FILE_PATH_LITERAL("nacl_helper_bootstrap");
-#endif
-
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 
@@ -199,24 +191,6 @@ bool PathProvider(int key, base::FilePath* result) {
       // and annoyed a lot of users.
 #endif
       break;
-    case chrome::DIR_CRASH_DUMPS:
-#if defined(OS_CHROMEOS)
-      // ChromeOS uses a separate directory. See http://crosbug.com/25089
-      cur = base::FilePath("/var/log/chrome");
-#elif defined(OS_ANDROID)
-      if (!base::android::GetCacheDirectory(&cur))
-        return false;
-#else
-      // The crash reports are always stored relative to the default user data
-      // directory.  This avoids the problem of having to re-initialize the
-      // exception handler after parsing command line options, which may
-      // override the location of the app's profile directory.
-      if (!GetDefaultUserDataDirectory(&cur))
-        return false;
-#endif
-      cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
-      create_dir = true;
-      break;
     case chrome::DIR_RESOURCES:
 #if defined(OS_MACOSX)
       cur = base::mac::FrameworkBundlePath();
@@ -328,16 +302,6 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("pnacl"));
       break;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-    case chrome::FILE_NACL_HELPER:
-      if (!PathService::Get(base::DIR_MODULE, &cur))
-        return false;
-      cur = cur.Append(kInternalNaClHelperFileName);
-      break;
-    case chrome::FILE_NACL_HELPER_BOOTSTRAP:
-      if (!PathService::Get(base::DIR_MODULE, &cur))
-        return false;
-      cur = cur.Append(kInternalNaClHelperBootstrapFileName);
-      break;
     case chrome::FILE_O3D_PLUGIN:
       if (!PathService::Get(base::DIR_MODULE, &cur))
         return false;
@@ -354,7 +318,7 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(kGTalkPluginFileName);
       break;
 #endif
-#if defined(WIDEVINE_CDM_AVAILABLE)
+#if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS)
 #if defined(WIDEVINE_CDM_IS_COMPONENT)
     case chrome::DIR_COMPONENT_WIDEVINE_CDM:
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
@@ -368,9 +332,9 @@ bool PathProvider(int key, base::FilePath* result) {
     case chrome::FILE_WIDEVINE_CDM_ADAPTER:
       if (!GetInternalPluginsDirectory(&cur))
         return false;
-      cur = cur.Append(kWidevineCdmAdapterFileName);
+      cur = cur.AppendASCII(kWidevineCdmAdapterFileName);
       break;
-#endif  // defined(WIDEVINE_CDM_AVAILABLE)
+#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS)
     case chrome::FILE_RESOURCES_PACK:
 #if defined(OS_MACOSX) && !defined(OS_IOS)
       if (base::mac::AmIBundled()) {
@@ -515,6 +479,25 @@ bool PathProvider(int key, base::FilePath* result) {
 #endif
       break;
 
+    case breakpad::DIR_CRASH_DUMPS:
+#if defined(OS_CHROMEOS)
+      // ChromeOS uses a separate directory. See http://crosbug.com/25089
+      cur = base::FilePath("/var/log/chrome");
+#elif defined(OS_ANDROID)
+      if (!base::android::GetCacheDirectory(&cur))
+        return false;
+#else
+      // The crash reports are always stored relative to the default user data
+      // directory.  This avoids the problem of having to re-initialize the
+      // exception handler after parsing command line options, which may
+      // override the location of the app's profile directory.
+      if (!GetDefaultUserDataDirectory(&cur))
+        return false;
+#endif
+      cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
+      create_dir = true;
+      break;
+
     default:
       return false;
   }
@@ -531,6 +514,8 @@ bool PathProvider(int key, base::FilePath* result) {
 // eliminate this object file if there is no direct entry point into it.
 void RegisterPathProvider() {
   PathService::RegisterProvider(PathProvider, PATH_START, PATH_END);
+  PathService::RegisterProvider(
+      PathProvider, breakpad::PATH_START, breakpad::PATH_END);
 }
 
 }  // namespace chrome

@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/chromeos/login/auth_prewarmer.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
@@ -28,6 +29,7 @@ class AutoEnrollmentClient;
 
 namespace chromeos {
 
+class FocusRingController;
 class OobeUI;
 class WebUILoginDisplay;
 class WebUILoginView;
@@ -53,7 +55,7 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   virtual WebUILoginView* GetWebUILoginView() const OVERRIDE;
   virtual views::Widget* GetWidget() const OVERRIDE;
   virtual void BeforeSessionStart() OVERRIDE;
-  virtual void OnSessionStart() OVERRIDE;
+  virtual void Finalize() OVERRIDE;
   virtual void OnCompleteLogin() OVERRIDE;
   virtual void OpenProxySettings() OVERRIDE;
   virtual void SetOobeProgressBarVisible(bool visible) OVERRIDE;
@@ -64,9 +66,12 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
       const std::string& first_screen_name,
       scoped_ptr<DictionaryValue> screen_parameters) OVERRIDE;
   virtual WizardController* GetWizardController() OVERRIDE;
+  virtual void StartUserAdding(
+      const base::Closure& completion_callback) OVERRIDE;
   virtual void StartSignInScreen() OVERRIDE;
   virtual void ResumeSignInScreen() OVERRIDE;
   virtual void OnPreferencesChanged() OVERRIDE;
+  virtual void PrewarmAuthentication() OVERRIDE;
 
   // Creates WizardController instance.
   WizardController* CreateWizardController();
@@ -122,6 +127,12 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Closes |login_window_| and resets |login_window_| and |login_view_| fields.
   void ResetLoginWindowAndView();
 
+  // Returns true if hosr running UI for adding users into session.
+  bool IsRunningUserAdding();
+
+  // Deletes |auth_prewarmer_|.
+  void OnAuthPrewarmDone();
+
   // Used to calculate position of the screens and background.
   gfx::Rect background_bounds_;
 
@@ -161,9 +172,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Login display we are using.
   WebUILoginDisplay* webui_login_display_;
 
-  // True if alternate boot animation is enabled.
-  bool is_boot_animation2_enabled_;
-
   // True if the login display is the current screen.
   bool is_showing_login_;
 
@@ -196,7 +204,8 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   enum {
     RESTORE_UNKNOWN,
     RESTORE_WIZARD,
-    RESTORE_SIGN_IN
+    RESTORE_SIGN_IN,
+    RESTORE_ADD_USER_INTO_SESSION,
   } restore_path_;
 
   // Stored parameters for StartWizard, required to restore in case of crash.
@@ -206,6 +215,16 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Old value of the ash::internal::kIgnoreSoloWindowFramePainterPolicy
   // property of the root window for |login_window_|.
   bool old_ignore_solo_window_frame_painter_policy_value_;
+
+  // Called before host deletion.
+  base::Closure completion_callback_;
+
+  // Active instance of authentication prewarmer.
+  scoped_ptr<AuthPrewarmer> auth_prewarmer_;
+
+  // A focus ring controller to draw focus ring around view for keyboard
+  // driven oobe.
+  scoped_ptr<FocusRingController> focus_ring_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginDisplayHostImpl);
 };

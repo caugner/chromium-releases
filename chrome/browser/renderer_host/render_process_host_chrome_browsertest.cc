@@ -36,27 +36,17 @@ int RenderProcessHostCount() {
 }
 
 RenderViewHost* FindFirstDevToolsHost() {
-  content::RenderProcessHost::iterator hosts =
-      content::RenderProcessHost::AllHostsIterator();
-  for (; !hosts.IsAtEnd(); hosts.Advance()) {
-    content::RenderProcessHost* render_process_host = hosts.GetCurrentValue();
-    DCHECK(render_process_host);
-    if (!render_process_host->HasConnection())
+  RenderWidgetHost::List widgets = RenderWidgetHost::GetRenderWidgetHosts();
+  for (size_t i = 0; i < widgets.size(); ++i) {
+    if (!widgets[i]->GetProcess()->HasConnection())
       continue;
-    content::RenderProcessHost::RenderWidgetHostsIterator iter(
-        render_process_host->GetRenderWidgetHostsIterator());
-    for (; !iter.IsAtEnd(); iter.Advance()) {
-      const RenderWidgetHost* widget = iter.GetCurrentValue();
-      DCHECK(widget);
-      if (!widget || !widget->IsRenderView())
-        continue;
-      RenderViewHost* host =
-          RenderViewHost::From(const_cast<RenderWidgetHost*>(widget));
-      WebContents* contents = WebContents::FromRenderViewHost(host);
-      GURL url = contents->GetURL();
-      if (url.SchemeIs(chrome::kChromeDevToolsScheme))
-        return host;
-    }
+    if (!widgets[i]->IsRenderView())
+      continue;
+    RenderViewHost* host = RenderViewHost::From(widgets[i]);
+    WebContents* contents = WebContents::FromRenderViewHost(host);
+    GURL url = contents->GetURL();
+    if (url.SchemeIs(chrome::kChromeDevToolsScheme))
+      return host;
   }
   return NULL;
 }
@@ -78,8 +68,8 @@ class ChromeRenderProcessHostTest : public InProcessBrowserTest {
     // Ensure that the backgrounding / foregrounding gets a chance to run.
     content::BrowserThread::PostTaskAndReply(
         content::BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-        base::Bind(&base::DoNothing), MessageLoop::QuitClosure());
-    MessageLoop::current()->Run();
+        base::Bind(&base::DoNothing), base::MessageLoop::QuitClosure());
+    base::MessageLoop::current()->Run();
 
     return wc->GetRenderProcessHost()->GetHandle();
   }

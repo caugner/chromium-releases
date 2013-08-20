@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
@@ -253,6 +253,10 @@ gfx::Rect Panel::GetRestoredBounds() const {
   return bounds;
 }
 
+ui::WindowShowState Panel::GetRestoredState() const {
+  return ui::SHOW_STATE_NORMAL;
+}
+
 gfx::Rect Panel::GetBounds() const {
   return native_panel_->GetPanelBounds();
 }
@@ -494,14 +498,16 @@ panel::Resizability Panel::CanResizeByMouse() const {
   return collection_->GetPanelResizability(this);
 }
 
-void Panel::Initialize(const GURL& url, const gfx::Rect& bounds) {
+void Panel::Initialize(const GURL& url,
+                       const gfx::Rect& bounds,
+                       bool always_on_top) {
   DCHECK(!initialized_);
   DCHECK(!collection_);  // Cannot be added to a collection until fully created.
   DCHECK_EQ(EXPANDED, expansion_state_);
   DCHECK(!bounds.IsEmpty());
   initialized_ = true;
   full_size_ = bounds.size();
-  native_panel_ = CreateNativePanel(this, bounds);
+  native_panel_ = CreateNativePanel(this, bounds, always_on_top);
 
   extension_window_controller_.reset(
       new panel_internal::PanelExtensionWindowController(this, profile_));
@@ -511,7 +517,10 @@ void Panel::Initialize(const GURL& url, const gfx::Rect& bounds) {
   // Set up hosting for web contents.
   panel_host_.reset(new PanelHost(this, profile_));
   panel_host_->Init(url);
-  native_panel_->AttachWebContents(GetWebContents());
+  content::WebContents* web_contents = GetWebContents();
+  // The contents might be NULL for most of our tests.
+  if (web_contents)
+    native_panel_->AttachWebContents(web_contents);
 
   // Close when the extension is unloaded or the browser is exiting.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,

@@ -3,17 +3,18 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/android/autofill/autofill_dialog_view_android.h"
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/android/window_android_helper.h"
 #include "chrome/browser/ui/autofill/data_model_wrapper.h"
-#include "components/autofill/browser/autofill_profile.h"
-#include "components/autofill/browser/autofill_type.h"
-#include "components/autofill/browser/credit_card.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/credit_card.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "jni/AutofillDialogGlue_jni.h"
@@ -126,6 +127,18 @@ void AutofillDialogViewAndroid::UpdateButtonStrip() {
   NOTIMPLEMENTED();
 }
 
+void AutofillDialogViewAndroid::UpdateDetailArea() {
+  NOTIMPLEMENTED();
+}
+
+void AutofillDialogViewAndroid::UpdateForErrors() {
+  NOTIMPLEMENTED();
+}
+
+void AutofillDialogViewAndroid::UpdateAutocheckoutStepsArea() {
+  NOTIMPLEMENTED();
+}
+
 void AutofillDialogViewAndroid::UpdateSection(DialogSection section) {
   UpdateOrFillSectionToJava(section, true, UNKNOWN_TYPE);
 }
@@ -191,6 +204,10 @@ void AutofillDialogViewAndroid::ModelChanged() {
   UpdateSection(SECTION_BILLING);
   UpdateSection(SECTION_CC_BILLING);
   UpdateSection(SECTION_SHIPPING);
+}
+
+void AutofillDialogViewAndroid::OnSignInResize(const gfx::Size& pref_size) {
+  NOTIMPLEMENTED();
 }
 
 // TODO(aruslan): bind to the list of accounts population.
@@ -285,14 +302,6 @@ ScopedJavaLocalRef<jstring> AutofillDialogViewAndroid::GetLegalDocumentsText(
       controller_->LegalDocumentsText());
 }
 
-ScopedJavaLocalRef<jstring> AutofillDialogViewAndroid::GetProgressBarText(
-    JNIEnv* env,
-    jobject obj) {
-  return base::android::ConvertUTF16ToJavaString(
-      env,
-      controller_->ProgressBarText());
-}
-
 jboolean AutofillDialogViewAndroid::IsTheAddItem(
     JNIEnv* env,
     jobject obj,
@@ -341,7 +350,7 @@ jboolean AutofillDialogViewAndroid::EditingComplete(JNIEnv* env,
                                                     jint jsection) {
   // Unfortunately, edits are not sent to the models, http://crbug.com/223919.
   const DialogSection section = static_cast<DialogSection>(jsection);
-  if (ValidateSection(section, AutofillDialogController::VALIDATE_FINAL)) {
+  if (ValidateSection(section, VALIDATE_FINAL)) {
     UpdateOrFillSectionToJava(section, false, UNKNOWN_TYPE);
     return true;
   }
@@ -359,41 +368,41 @@ void AutofillDialogViewAndroid::EditingCancel(JNIEnv* env,
 
 void AutofillDialogViewAndroid::EditedOrActivatedField(JNIEnv* env,
                                                        jobject obj,
+                                                       jint jsection,
                                                        jint detail_input,
                                                        jint view_android,
                                                        jstring value,
                                                        jboolean was_edit) {
+  const DialogSection section = static_cast<DialogSection>(jsection);
   DetailInput* input = reinterpret_cast<DetailInput*>(detail_input);
   ui::ViewAndroid* view = reinterpret_cast<ui::ViewAndroid*>(view_android);
   gfx::Rect rect = gfx::Rect(0, 0, 0, 0);
   string16 value16 = base::android::ConvertJavaStringToUTF16(
       env, value);
-  controller_->UserEditedOrActivatedInput(input, view, rect, value16, was_edit);
+  controller_->UserEditedOrActivatedInput(
+      section, input, view, rect, value16, was_edit);
 }
 
 ScopedJavaLocalRef<jstring> AutofillDialogViewAndroid::ValidateField(
     JNIEnv* env,
     jobject obj,
+    jint jsection,
     jint type,
     jstring value) {
   string16 field_value = base::android::ConvertJavaStringToUTF16(env, value);
+  const DialogSection section = static_cast<DialogSection>(jsection);
   AutofillFieldType field_type = static_cast<AutofillFieldType>(type);
-  if (controller_->InputIsValid(field_type, field_value)) {
-    return ScopedJavaLocalRef<jstring>();
-  } else {
-    // TODO(aurimas) Start using real error strings.
-    string16 error = ASCIIToUTF16("Error");
-    ScopedJavaLocalRef<jstring> error_text =
-        base::android::ConvertUTF16ToJavaString(env, error);
-    return error_text;
-  }
+  string16 error_message =
+      controller_->InputValidityMessage(section, field_type, field_value);
+  ScopedJavaLocalRef<jstring> error_text =
+      base::android::ConvertUTF16ToJavaString(env, error_message);
+  return error_text;
 }
 
 void AutofillDialogViewAndroid::ValidateSection(JNIEnv* env,
                                                 jobject obj,
                                                 jint section) {
-  ValidateSection(static_cast<DialogSection>(section),
-                  AutofillDialogController::VALIDATE_EDIT);
+  ValidateSection(static_cast<DialogSection>(section), VALIDATE_EDIT);
 }
 
 void AutofillDialogViewAndroid::DialogSubmit(JNIEnv* env, jobject obj) {
@@ -454,12 +463,12 @@ bool AutofillDialogViewAndroid::RegisterAutofillDialogViewAndroid(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 
-bool AutofillDialogViewAndroid::ValidateSection(
-    DialogSection section, AutofillDialogController::ValidationType type) {
+bool AutofillDialogViewAndroid::ValidateSection(DialogSection section,
+                                                ValidationType type) {
   DetailOutputMap detail_outputs;
   GetUserInput(section, &detail_outputs);
   ValidityData invalid_inputs =
-      controller_->InputsAreValid(detail_outputs, type);
+      controller_->InputsAreValid(section, detail_outputs, type);
 
   const size_t item_count = invalid_inputs.size();
   if (item_count == 0) return true;
@@ -560,11 +569,26 @@ void AutofillDialogViewAndroid::UpdateOrFillSectionToJava(
         static_cast<int>(button_type));
   }
 
+  const SuggestionState& suggestion_state =
+      controller_->SuggestionStateForSection(section);
+  ScopedJavaLocalRef<jstring> suggestion_text =
+      base::android::ConvertUTF16ToJavaString(env, suggestion_state.text);
+  ScopedJavaLocalRef<jstring> suggestion_text_extra =
+      base::android::ConvertUTF16ToJavaString(env, suggestion_state.extra_text);
+  ScopedJavaLocalRef<jobject> suggestion_icon =
+      GetJavaBitmap(suggestion_state.icon);
+  ScopedJavaLocalRef<jobject> suggestion_icon_extra =
+      GetJavaBitmap(suggestion_state.extra_icon);
+
   Java_AutofillDialogGlue_updateSection(env,
                                         java_object_.obj(),
                                         section,
                                         controller_->SectionIsActive(section),
                                         field_array.obj(),
+                                        suggestion_text.obj(),
+                                        suggestion_icon.obj(),
+                                        suggestion_text_extra.obj(),
+                                        suggestion_icon_extra.obj(),
                                         menu_array.obj(),
                                         selected_item,
                                         clobber_inputs,
@@ -662,9 +686,9 @@ AutofillDialogViewAndroid::MBT AutofillDialogViewAndroid::GetMenuItemButtonType(
   if (IsTheAddMenuItem(section, index)) {
     const bool currently_selected =
         index == GetSelectedItemIndexForSection(section);
-    // - shouldn't show any button if not selected;
+    // - should show "Add..."  button if not selected;
     if (!currently_selected)
-      return MENU_ITEM_BUTTON_TYPE_NONE;
+      return MENU_ITEM_BUTTON_TYPE_ADD;
 
     // - should show "Add..." button if selected and doesn't have user data;
     string16 label, sublabel;

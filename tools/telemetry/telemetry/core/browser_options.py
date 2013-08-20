@@ -10,6 +10,7 @@ import copy
 from telemetry.core import browser_finder
 from telemetry.core import profile_types
 from telemetry.core import wpr_modes
+from telemetry.core.platform.profiler import profiler_finder
 
 class BrowserOptions(optparse.Values):
   """Options to be used for discovering and launching a browser."""
@@ -23,8 +24,11 @@ class BrowserOptions(optparse.Values):
     self.android_device = None
     self.cros_ssh_identity = None
 
+    # When set to True, the browser will use the default profile.  Telemetry
+    # will not provide an alternate profile directory.
     self.dont_override_profile = False
     self.profile_dir = None
+    self.profile_type = None
     self.extra_browser_args = []
     self.extra_wpr_args = []
     self.show_stdout = False
@@ -36,11 +40,15 @@ class BrowserOptions(optparse.Values):
 
     self.browser_user_agent_type = None
 
+    self.profiler_tool = None
+    self.profiler_dir = None
     self.trace_dir = None
     self.verbosity = 0
 
     self.page_filter = None
     self.page_filter_exclude = None
+
+    self.no_proxy_server = False
 
   def Copy(self):
     return copy.deepcopy(self)
@@ -84,7 +92,7 @@ class BrowserOptions(optparse.Values):
 
     # Browser options
     group = optparse.OptionGroup(parser, 'Browser options')
-    profile_choices = ['clean', 'default'] + profile_types.PROFILE_TYPES
+    profile_choices = profile_types.GetProfileTypes()
     group.add_option('--profile-type',
         dest='profile_type',
         type='choice',
@@ -133,6 +141,14 @@ class BrowserOptions(optparse.Values):
     # Debugging options
     group = optparse.OptionGroup(parser, 'When things go wrong')
     group.add_option(
+      '--profiler-tool', dest='profiler_tool', default=None, type='choice',
+      choices=profiler_finder.GetAllAvailableProfilers(),
+      help=('Record sampling profilers with this tool. Supported values: ' +
+            ', '.join(profiler_finder.GetAllAvailableProfilers())))
+    group.add_option(
+      '--profiler-dir', dest='profiler_dir', default=None,
+      help='Record sampling profiles and store them in this directory.')
+    group.add_option(
       '--trace-dir', dest='trace_dir', default=None,
       help='Record traces and store them in this directory.')
     group.add_option(
@@ -168,6 +184,11 @@ class BrowserOptions(optparse.Values):
       else:
         logging.basicConfig(level=logging.WARNING)
 
+      if ((self.profiler_tool and not self.profiler_dir) or
+          (not self.profiler_tool and self.profiler_dir)):
+        sys.stderr.write(
+            'Must use --profiler-tool and --profiler-dir together.\n')
+        sys.exit(1)
       if self.browser_executable and not self.browser_type:
         self.browser_type = 'exact'
       if not self.browser_executable and not self.browser_type:
@@ -195,9 +216,7 @@ class BrowserOptions(optparse.Values):
         delattr(self, 'extra_wpr_args_as_string')
       if self.profile_type == 'default':
         self.dont_override_profile = True
-      elif self.profile_type != 'clean':
-        self.profile_dir = profile_types.GetProfileDir(self.profile_type)
-      delattr(self, 'profile_type')
+      self.profile_dir = profile_types.GetProfileDir(self.profile_type)
       return ret
     parser.parse_args = ParseArgs
     return parser

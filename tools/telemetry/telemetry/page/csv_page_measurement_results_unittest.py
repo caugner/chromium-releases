@@ -47,8 +47,7 @@ class CsvPageMeasurementResultsTest(unittest.TestCase):
     return rows[1:]
 
   def test_with_output_after_every_page(self):
-    results = NonPrintingCsvPageMeasurementResults(
-      csv.writer(self._output), True)
+    results = NonPrintingCsvPageMeasurementResults(self._output, True)
     results.WillMeasurePage(self._page_set[0])
     results.Add('foo', 'seconds', 3)
     results.DidMeasurePage()
@@ -70,8 +69,7 @@ class CsvPageMeasurementResultsTest(unittest.TestCase):
       [self._page_set[1].url, '4'])
 
   def test_with_output_after_every_page_and_inconsistency(self):
-    results = NonPrintingCsvPageMeasurementResults(
-      csv.writer(self._output), True)
+    results = NonPrintingCsvPageMeasurementResults(self._output, True)
     results.WillMeasurePage(self._page_set[0])
     results.Add('foo', 'seconds', 3)
     results.DidMeasurePage()
@@ -85,8 +83,7 @@ class CsvPageMeasurementResultsTest(unittest.TestCase):
       lambda: results.DidMeasurePage()) # pylint: disable=W0108
 
   def test_with_output_at_print_summary_time(self):
-    results = NonPrintingCsvPageMeasurementResults(csv.writer(self._output),
-                                                 False)
+    results = NonPrintingCsvPageMeasurementResults(self._output, False)
     results.WillMeasurePage(self._page_set[0])
     results.Add('foo', 'seconds', 3)
     results.DidMeasurePage()
@@ -95,7 +92,7 @@ class CsvPageMeasurementResultsTest(unittest.TestCase):
     results.Add('bar', 'seconds', 4)
     results.DidMeasurePage()
 
-    results.PrintSummary('tag')
+    results.PrintSummary()
 
     self.assertEquals(
       self.output_header_row,
@@ -106,8 +103,7 @@ class CsvPageMeasurementResultsTest(unittest.TestCase):
        [self._page_set[1].url, '4', '-']])
 
   def test_histogram(self):
-    results = NonPrintingCsvPageMeasurementResults(csv.writer(self._output),
-                                                 False)
+    results = NonPrintingCsvPageMeasurementResults(self._output, False)
     results.WillMeasurePage(self._page_set[0])
     results.Add('a', '',
                 '{"buckets": [{"low": 1, "high": 2, "count": 1}]}',
@@ -120,7 +116,7 @@ class CsvPageMeasurementResultsTest(unittest.TestCase):
                 data_type='histogram')
     results.DidMeasurePage()
 
-    results.PrintSummary('tag')
+    results.PrintSummary()
 
     self.assertEquals(
       self.output_header_row,

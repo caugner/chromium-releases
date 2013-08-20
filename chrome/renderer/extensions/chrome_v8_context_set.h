@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "v8/include/v8.h"
 
 class GURL;
@@ -50,24 +51,26 @@ class ChromeV8ContextSet {
   typedef std::set<ChromeV8Context*> ContextSet;
   ContextSet GetAll() const;
 
-  // Gets the ChromeV8Context corresponding to the v8::Context that is
-  // on the top of the stack, or NULL if no such context exists.
+  // Gets the ChromeV8Context corresponding to v8::Context::GetCurrent(), or
+  // NULL if no such context exists.
   ChromeV8Context* GetCurrent() const;
+
+  // Gets the ChromeV8Context corresponding to v8::Context::GetCalling(), or
+  // NULL if no such context exists.
+  ChromeV8Context* GetCalling() const;
 
   // Gets the ChromeV8Context corresponding to the specified
   // v8::Context or NULL if no such context exists.
-  ChromeV8Context* GetByV8Context(
-      v8::Handle<v8::Context> context) const;
+  ChromeV8Context* GetByV8Context(v8::Handle<v8::Context> context) const;
 
-  // Calls chromeHidden.<methodName> in each context for <extension_id>. If
-  // render_view is non-NULL, only call the function in contexts belonging to
-  // that view. The called javascript function should not return a value other
-  // than v8::Undefined(). A DCHECK is setup to break if it is otherwise.
-  void DispatchChromeHiddenMethod(const std::string& extension_id,
-                                  const std::string& method_name,
-                                  const base::ListValue& arguments,
-                                  content::RenderView* render_view,
-                                  const GURL& event_url) const;
+  // Synchronously runs |callback| with each ChromeV8Context that belongs to
+  // |extension_id| in |render_view|.
+  //
+  // |extension_id| may be "" to match all extensions.
+  // |render_view| may be NULL to match all render views.
+  void ForEach(const std::string& extension_id,
+               content::RenderView* render_view,
+               const base::Callback<void(ChromeV8Context*)>& callback) const;
 
   // Cleans up contexts belonging to an unloaded extension.
   //

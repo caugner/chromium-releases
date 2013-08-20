@@ -9,7 +9,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/public/browser/web_ui.h"
 #include "device/bluetooth/bluetooth_adapter.h"
@@ -213,7 +213,7 @@ void BluetoothOptionsHandler::InitializePage() {
 void BluetoothOptionsHandler::InitializeAdapter(
     scoped_refptr<device::BluetoothAdapter> adapter) {
   adapter_ = adapter;
-  CHECK(adapter_);
+  CHECK(adapter_.get());
   adapter_->AddObserver(this);
 }
 
@@ -514,7 +514,7 @@ void BluetoothOptionsHandler::ConfirmPasskey(device::BluetoothDevice* device,
 }
 
 void BluetoothOptionsHandler::DismissDisplayOrConfirm() {
-  DCHECK(adapter_);
+  DCHECK(adapter_.get());
 
   // We can receive this delegate call when we haven't been asked to display or
   // confirm anything; we can determine that by checking whether we've saved

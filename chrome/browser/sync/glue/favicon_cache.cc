@@ -36,7 +36,7 @@ struct SyncedFaviconInfo {
   // The actual favicon data.
   // TODO(zea): don't keep around the actual data for locally sourced
   // favicons (UI can access those directly).
-  history::FaviconBitmapResult bitmap_data[NUM_SIZES];
+  chrome::FaviconBitmapResult bitmap_data[NUM_SIZES];
   // The URL this favicon was loaded from.
   const GURL favicon_url;
   // Is the favicon for a bookmarked page?
@@ -79,7 +79,7 @@ const int kMaxFaviconResolution = 16;
 // TODO(zea): Supporting other favicons types will involve some work in the
 // favicon service and navigation controller. See crbug.com/181068.
 int SupportedFaviconTypes() {
-  return history::FAVICON;
+  return chrome::FAVICON;
 }
 
 // Returns the appropriate IconSize to use for a given gfx::Size pixel
@@ -122,12 +122,12 @@ GURL GetFaviconURLFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
 }
 
 // Convert protobuf image data into a FaviconBitmapResult.
-history::FaviconBitmapResult GetImageDataFromSpecifics(
+chrome::FaviconBitmapResult GetImageDataFromSpecifics(
     const sync_pb::FaviconData& favicon_data) {
   base::RefCountedString* temp_string =
       new base::RefCountedString();
   temp_string->data() = favicon_data.favicon();
-  history::FaviconBitmapResult bitmap_result;
+  chrome::FaviconBitmapResult bitmap_result;
   bitmap_result.bitmap_data = temp_string;
   bitmap_result.pixel_size.set_height(favicon_data.height());
   bitmap_result.pixel_size.set_width(favicon_data.width());
@@ -136,9 +136,9 @@ history::FaviconBitmapResult GetImageDataFromSpecifics(
 
 // Convert a FaviconBitmapResult into protobuf image data.
 void FillSpecificsWithImageData(
-    const history::FaviconBitmapResult& bitmap_result,
+    const chrome::FaviconBitmapResult& bitmap_result,
     sync_pb::FaviconData* favicon_data) {
-  if (!bitmap_result.bitmap_data)
+  if (!bitmap_result.bitmap_data.get())
     return;
   favicon_data->set_height(bitmap_result.pixel_size.height());
   favicon_data->set_width(bitmap_result.pixel_size.width());
@@ -172,7 +172,7 @@ void BuildTrackingSpecifics(
 
 // Updates |favicon_info| with the image data in |bitmap_result|.
 bool UpdateFaviconFromBitmapResult(
-    const history::FaviconBitmapResult& bitmap_result,
+    const chrome::FaviconBitmapResult& bitmap_result,
     SyncedFaviconInfo* favicon_info) {
   DCHECK_EQ(favicon_info->favicon_url, bitmap_result.icon_url);
   if (!bitmap_result.is_valid()) {
@@ -374,7 +374,7 @@ syncer::SyncError FaviconCache::ProcessSyncChanges(
           } else {
             for (int i = 0; i < NUM_SIZES; ++i) {
               favicon_iter->second->bitmap_data[i] =
-                  history::FaviconBitmapResult();
+                  chrome::FaviconBitmapResult();
             }
             DCHECK(!FaviconInfoHasImages(*(favicon_iter->second)));
           }
@@ -500,7 +500,7 @@ bool FaviconCache::GetSyncedFaviconForFaviconURL(
     return false;
 
   // TODO(zea): support getting other resolutions.
-  if (!iter->second->bitmap_data[SIZE_16].bitmap_data)
+  if (!iter->second->bitmap_data[SIZE_16].bitmap_data.get())
     return false;
 
   *favicon_png = iter->second->bitmap_data[SIZE_16].bitmap_data;
@@ -538,7 +538,7 @@ void FaviconCache::OnReceivedSyncFavicon(const GURL& page_url,
 
   // Post a task to do the actual association because this method may have been
   // called while in a transaction.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&FaviconCache::OnReceivedSyncFaviconImpl,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -636,7 +636,7 @@ bool FaviconCache::FaviconRecencyFunctor::operator()(
 
 void FaviconCache::OnFaviconDataAvailable(
     const GURL& page_url,
-    const std::vector<history::FaviconBitmapResult>& bitmap_results) {
+    const std::vector<chrome::FaviconBitmapResult>& bitmap_results) {
   PageTaskMap::iterator page_iter = page_task_map_.find(page_url);
   if (page_iter == page_task_map_.end())
     return;
@@ -652,7 +652,7 @@ void FaviconCache::OnFaviconDataAvailable(
   base::Time now = base::Time::Now();
   std::map<GURL, LocalFaviconUpdateInfo> favicon_updates;
   for (size_t i = 0; i < bitmap_results.size(); ++i) {
-    const history::FaviconBitmapResult& bitmap_result = bitmap_results[i];
+    const chrome::FaviconBitmapResult& bitmap_result = bitmap_results[i];
     GURL favicon_url = bitmap_result.icon_url;
     if (!favicon_url.is_valid() || favicon_url.SchemeIs("data"))
       continue;  // Can happen if the page is still loading.
@@ -844,19 +844,19 @@ void FaviconCache::MergeSyncFavicon(const syncer::SyncData& sync_favicon,
     if (image_specifics.has_favicon_web()) {
       favicon_info->bitmap_data[SIZE_16] = GetImageDataFromSpecifics(
           image_specifics.favicon_web());
-    } else if (favicon_info->bitmap_data[SIZE_16].bitmap_data) {
+    } else if (favicon_info->bitmap_data[SIZE_16].bitmap_data.get()) {
       needs_update = true;
     }
     if (image_specifics.has_favicon_web_32()) {
       favicon_info->bitmap_data[SIZE_32] = GetImageDataFromSpecifics(
           image_specifics.favicon_web_32());
-    } else if (favicon_info->bitmap_data[SIZE_32].bitmap_data) {
+    } else if (favicon_info->bitmap_data[SIZE_32].bitmap_data.get()) {
       needs_update = true;
     }
     if (image_specifics.has_favicon_touch_64()) {
       favicon_info->bitmap_data[SIZE_64] = GetImageDataFromSpecifics(
           image_specifics.favicon_touch_64());
-    } else if (favicon_info->bitmap_data[SIZE_64].bitmap_data) {
+    } else if (favicon_info->bitmap_data[SIZE_64].bitmap_data.get()) {
       needs_update = true;
     }
 

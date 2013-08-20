@@ -9,9 +9,9 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/ui/bookmarks/bookmark_context_menu_controller.h"
-#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
-#import "chrome/browser/ui/cocoa/menu_controller.h"
 #include "chrome/browser/ui/browser.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
+#import "ui/base/cocoa/menu_controller.h"
 
 @interface BookmarkContextMenuCocoaController (Private)
 - (void)willExecuteCommand:(int)command;
@@ -85,7 +85,7 @@ class BookmarkContextMenuDelegateBridge :
 - (NSMenu*)menuForBookmarkNode:(const BookmarkNode*)node {
   // Depending on timing, the model may not yet have been loaded.
   BookmarkModel* bookmarkModel = [bookmarkBarController_ bookmarkModel];
-  if (!bookmarkModel || !bookmarkModel->IsLoaded())
+  if (!bookmarkModel || !bookmarkModel->loaded())
     return nil;
 
   // This may be called before the BMB view has been added to the window. In

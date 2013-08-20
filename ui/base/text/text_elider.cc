@@ -17,10 +17,10 @@
 #include "base/i18n/char_iterator.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
@@ -252,7 +252,8 @@ string16 ElideUrl(const GURL& url,
 
   // Get domain and registry information from the URL.
   string16 url_domain = UTF8ToUTF16(
-      net::RegistryControlledDomainService::GetDomainAndRegistry(url));
+      net::registry_controlled_domains::GetDomainAndRegistry(
+          url, net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES));
   if (url_domain.empty())
     url_domain = url_host;
 

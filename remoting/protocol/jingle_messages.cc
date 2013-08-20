@@ -5,7 +5,7 @@
 #include "remoting/protocol/jingle_messages.h"
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/content_description.h"
 #include "remoting/protocol/name_value_map.h"
@@ -168,6 +168,7 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
 
   from = stanza->Attr(QName(kEmptyNamespace, "from"));
   to = stanza->Attr(QName(kEmptyNamespace, "to"));
+  initiator = jingle_tag->Attr(QName(kEmptyNamespace, "initiator"));
 
   std::string action_str = jingle_tag->Attr(QName(kEmptyNamespace, "action"));
   if (action_str.empty()) {
@@ -287,7 +288,7 @@ scoped_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
   }
 
   if (action == SESSION_INITIATE)
-    jingle_tag->AddAttr(QName(kEmptyNamespace, "initiator"), from);
+    jingle_tag->AddAttr(QName(kEmptyNamespace, "initiator"), initiator);
 
   if (reason != UNKNOWN_REASON) {
     XmlElement* reason_tag = new XmlElement(QName(kJingleNamespace, "reason"));

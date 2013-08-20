@@ -35,7 +35,7 @@
 #include "net/ssl/server_bound_cert_service.h"
 #include "net/url_request/protocol_intercept_job_factory.h"
 #include "net/url_request/url_request_job_factory_impl.h"
-#include "webkit/database/database_tracker.h"
+#include "webkit/browser/database/database_tracker.h"
 
 using content::BrowserThread;
 
@@ -77,7 +77,7 @@ OffTheRecordProfileIOData::Handle::CreateMainRequestContextGetter(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 #endif  // defined(OS_CHROMEOS)
   LazyInitialize();
-  DCHECK(!main_request_context_getter_);
+  DCHECK(!main_request_context_getter_.get());
   main_request_context_getter_ =
       ChromeURLRequestContextGetter::CreateOffTheRecord(
           profile_, io_data_, protocol_handlers);
@@ -88,7 +88,7 @@ scoped_refptr<ChromeURLRequestContextGetter>
 OffTheRecordProfileIOData::Handle::GetExtensionsRequestContextGetter() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   LazyInitialize();
-  if (!extensions_request_context_getter_) {
+  if (!extensions_request_context_getter_.get()) {
     extensions_request_context_getter_ =
         ChromeURLRequestContextGetter::CreateOffTheRecordForExtensions(
             profile_, io_data_);
@@ -201,8 +201,8 @@ void OffTheRecordProfileIOData::InitializeInternal(
   set_server_bound_cert_service(server_bound_cert_service);
   main_context->set_server_bound_cert_service(server_bound_cert_service);
 
-  main_context->set_cookie_store(
-      new net::CookieMonster(NULL, profile_params->cookie_monster_delegate));
+  main_context->set_cookie_store(new net::CookieMonster(
+      NULL, profile_params->cookie_monster_delegate.get()));
 
   net::HttpCache::BackendFactory* main_backend =
       net::HttpCache::DefaultBackend::InMemory(0);
@@ -216,7 +216,6 @@ void OffTheRecordProfileIOData::InitializeInternal(
 #if !defined(DISABLE_FTP_SUPPORT)
   ftp_factory_.reset(
       new net::FtpNetworkLayer(main_context->host_resolver()));
-  main_context->set_ftp_transaction_factory(ftp_factory_.get());
 #endif  // !defined(DISABLE_FTP_SUPPORT)
 
   scoped_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
@@ -227,8 +226,7 @@ void OffTheRecordProfileIOData::InitializeInternal(
       main_job_factory.Pass(),
       profile_params->protocol_handler_interceptor.Pass(),
       network_delegate(),
-      main_context->ftp_transaction_factory(),
-      main_context->ftp_auth_cache());
+      ftp_factory_.get());
   main_context->set_job_factory(main_job_factory_.get());
 
 #if defined(ENABLE_EXTENSIONS)
@@ -262,11 +260,6 @@ void OffTheRecordProfileIOData::
   extensions_cookie_store->SetCookieableSchemes(schemes, 2);
   extensions_context->set_cookie_store(extensions_cookie_store);
 
-#if !defined(DISABLE_FTP_SUPPORT)
-  DCHECK(ftp_factory_.get());
-  extensions_context->set_ftp_transaction_factory(ftp_factory_.get());
-#endif  // !defined(DISABLE_FTP_SUPPORT)
-
   scoped_ptr<net::URLRequestJobFactoryImpl> extensions_job_factory(
       new net::URLRequestJobFactoryImpl());
   // TODO(shalev): The extensions_job_factory has a NULL NetworkDelegate.
@@ -277,10 +270,9 @@ void OffTheRecordProfileIOData::
   // SetUpJobFactoryDefaults() to get this effect.
   extensions_job_factory_ = SetUpJobFactoryDefaults(
       extensions_job_factory.Pass(),
-      scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>(NULL),
+      scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>(),
       NULL,
-      extensions_context->ftp_transaction_factory(),
-      extensions_context->ftp_auth_cache());
+      ftp_factory_.get());
   extensions_context->set_job_factory(extensions_job_factory_.get());
 }
 
@@ -318,8 +310,7 @@ OffTheRecordProfileIOData::InitializeAppRequestContext(
   top_job_factory = SetUpJobFactoryDefaults(job_factory.Pass(),
                                             protocol_handler_interceptor.Pass(),
                                             network_delegate(),
-                                            context->ftp_transaction_factory(),
-                                            context->ftp_auth_cache());
+                                            ftp_factory_.get());
   context->SetJobFactory(top_job_factory.Pass());
   return context;
 }

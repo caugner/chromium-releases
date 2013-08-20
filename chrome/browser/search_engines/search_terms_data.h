@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 class Profile;
 
@@ -39,6 +39,10 @@ class SearchTermsData {
   // The optional client parameter passed with Google search requests.  This
   // implementation returns the empty string.
   virtual std::string GetSearchClient() const;
+
+  // The client parameter passed with Google suggest requests.  This
+  // implementation returns the empty string.
+  virtual std::string GetSuggestClient() const;
 
   // Returns a string indicating whether Instant (in the visible-preview mode)
   // is enabled, suitable for adding as a query string param to the homepage
@@ -78,6 +82,7 @@ class UIThreadSearchTermsData : public SearchTermsData {
   virtual std::string GetApplicationLocale() const OVERRIDE;
   virtual string16 GetRlzParameterValue() const OVERRIDE;
   virtual std::string GetSearchClient() const OVERRIDE;
+  virtual std::string GetSuggestClient() const OVERRIDE;
   virtual std::string InstantEnabledParam() const OVERRIDE;
   virtual std::string InstantExtendedEnabledParam() const OVERRIDE;
   virtual std::string NTPIsThemedParam() const OVERRIDE;

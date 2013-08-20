@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/shortcuts_database.h"
 #include "chrome/test/base/testing_profile.h"
 #include "sql/statement.h"

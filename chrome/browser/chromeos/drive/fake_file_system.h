@@ -18,13 +18,14 @@
 namespace google_apis {
 
 class AboutResource;
-class DriveServiceInterface;
 class ResourceEntry;
+class ResourceList;
 
 }  // namespace google_apis
 
 namespace drive {
 
+class DriveServiceInterface;
 class FileSystemObserver;
 class ResourceEntry;
 
@@ -38,8 +39,7 @@ namespace test_util {
 // Currently most methods are empty (not implemented).
 class FakeFileSystem : public FileSystemInterface {
  public:
-  explicit FakeFileSystem(
-      google_apis::DriveServiceInterface* drive_service);
+  explicit FakeFileSystem(DriveServiceInterface* drive_service);
   virtual ~FakeFileSystem();
 
   // Initialization for testing. This can be called instead of Initialize
@@ -51,9 +51,9 @@ class FakeFileSystem : public FileSystemInterface {
   virtual void AddObserver(FileSystemObserver* observer) OVERRIDE;
   virtual void RemoveObserver(FileSystemObserver* observer) OVERRIDE;
   virtual void CheckForUpdates() OVERRIDE;
-  virtual void GetEntryInfoByResourceId(
+  virtual void GetResourceEntryById(
       const std::string& resource_id,
-      const GetEntryInfoWithFilePathCallback& callback) OVERRIDE;
+      const GetResourceEntryCallback& callback) OVERRIDE;
   virtual void TransferFileFromRemoteToLocal(
       const base::FilePath& remote_src_file_path,
       const base::FilePath& local_dest_file_path,
@@ -82,6 +82,10 @@ class FakeFileSystem : public FileSystemInterface {
   virtual void CreateFile(const base::FilePath& file_path,
                           bool is_exclusive,
                           const FileOperationCallback& callback) OVERRIDE;
+  virtual void TouchFile(const base::FilePath& file_path,
+                         const base::Time& last_access_time,
+                         const base::Time& last_modified_time,
+                         const FileOperationCallback& callback) OVERRIDE;
   virtual void Pin(const base::FilePath& file_path,
                    const FileOperationCallback& callback) OVERRIDE;
   virtual void Unpin(const base::FilePath& file_path,
@@ -90,7 +94,7 @@ class FakeFileSystem : public FileSystemInterface {
                              const GetFileCallback& callback) OVERRIDE;
   virtual void GetFileByResourceId(
       const std::string& resource_id,
-      const DriveClientContext& context,
+      const ClientContext& context,
       const GetFileCallback& get_file_callback,
       const google_apis::GetContentCallback& get_content_callback) OVERRIDE;
   virtual void GetFileContentByPath(
@@ -100,11 +104,11 @@ class FakeFileSystem : public FileSystemInterface {
       const FileOperationCallback& completion_callback) OVERRIDE;
   virtual void UpdateFileByResourceId(
       const std::string& resource_id,
-      const DriveClientContext& context,
+      const ClientContext& context,
       const FileOperationCallback& callback) OVERRIDE;
-  virtual void GetEntryInfoByPath(
+  virtual void GetResourceEntryByPath(
       const base::FilePath& file_path,
-      const GetEntryInfoCallback& callback) OVERRIDE;
+      const GetResourceEntryCallback& callback) OVERRIDE;
   virtual void ReadDirectoryByPath(
       const base::FilePath& file_path,
       const ReadDirectoryWithSettingCallback& callback) OVERRIDE;
@@ -112,7 +116,7 @@ class FakeFileSystem : public FileSystemInterface {
       const base::FilePath& file_path,
       const FileOperationCallback& callback) OVERRIDE;
   virtual void Search(const std::string& search_query,
-                      const GURL& next_feed,
+                      const GURL& next_url,
                       const SearchCallback& callback) OVERRIDE;
   virtual void SearchMetadata(const std::string& query,
                               int options,
@@ -120,9 +124,6 @@ class FakeFileSystem : public FileSystemInterface {
                               const SearchMetadataCallback& callback) OVERRIDE;
   virtual void GetAvailableSpace(
       const GetAvailableSpaceCallback& callback) OVERRIDE;
-  virtual void AddUploadedFile(scoped_ptr<google_apis::ResourceEntry> doc_entry,
-                               const base::FilePath& file_content_path,
-                               const FileOperationCallback& callback) OVERRIDE;
   virtual void GetMetadata(
       const GetFilesystemMetadataCallback& callback) OVERRIDE;
   virtual void MarkCacheFileAsMounted(
@@ -135,54 +136,14 @@ class FakeFileSystem : public FileSystemInterface {
       const std::string& resource_id,
       const std::string& md5,
       const GetCacheEntryCallback& callback) OVERRIDE;
-  virtual void IterateCache(const CacheIterateCallback& iteration_callback,
-                            const base::Closure& completion_callback) OVERRIDE;
   virtual void Reload() OVERRIDE;
 
  private:
-  // Callback to return the result of GetFilePath.
-  typedef base::Callback<void(const base::FilePath& file_path)>
-      GetFilePathCallback;
-
-  // Returns the path for the |resource_id| via |callback|.
-  // How the method works:
-  // 1) Gets AboutResource from the drive service to obtain root resource id.
-  // 2) Gets ResourceEntry from the drive service to get the base name,
-  //    prepends it to the |file_path|. Unless it is root, also tries for
-  //    the parent recursively.
-  void GetFilePath(const std::string& resource_id,
-                   const GetFilePathCallback& callback);
-  void GetFilePathAfterGetAboutResource(
-      const std::string& resource_id,
-      const GetFilePathCallback& callback,
-      google_apis::GDataErrorCode error,
-      scoped_ptr<google_apis::AboutResource> about_resource);
-  void GetFilePathInternal(
-      const std::string& root_resource_id,
-      const std::string& resource_id,
-      const base::FilePath& file_path,
-      const GetFilePathCallback& callback);
-  void GetFilePathAfterGetResourceEntry(
-      const std::string& root_resource_id,
-      const base::FilePath& remaining_file_path,
-      const GetFilePathCallback& callback,
+  // Helper of GetResourceEntryById.
+  void GetResourceEntryByIdAfterGetResourceEntry(
+      const GetResourceEntryCallback& callback,
       google_apis::GDataErrorCode error_in,
       scoped_ptr<google_apis::ResourceEntry> resource_entry);
-
-  // Helpers of GetEntryInfoByResourceId.
-  // How the method works:
-  // 1) Gets ResourceEntry from the drive service.
-  // 2) Gets the file path of the resource.
-  // 3) Runs the |callback|.
-  void GetEntryInfoByResourceIdAfterGetResourceEntry(
-      const GetEntryInfoWithFilePathCallback& callback,
-      google_apis::GDataErrorCode error_in,
-      scoped_ptr<google_apis::ResourceEntry> resource_entry);
-  void GetEntryInfoByResourceIdAfterGetFilePath(
-      const GetEntryInfoWithFilePathCallback& callback,
-      FileError error,
-      scoped_ptr<ResourceEntry> entry,
-      const base::FilePath& parent_file_path);
 
   // Helpers of GetFileContentByPath.
   // How the method works:
@@ -190,19 +151,24 @@ class FakeFileSystem : public FileSystemInterface {
   // 2) Look at if there is a cache file or not. If found return it.
   // 3) Otherwise start DownloadFile.
   // 4) Runs the |completion_callback| upon the download completion.
-  void GetFileContentByPathAfterGetEntryInfo(
-      const base::FilePath& file_path,
+  void GetFileContentByPathAfterGetResourceEntry(
       const GetFileContentInitializedCallback& initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
       const FileOperationCallback& completion_callback,
       FileError error,
       scoped_ptr<ResourceEntry> entry);
+  void GetFileContentByPathAfterGetWapiResourceEntry(
+      const GetFileContentInitializedCallback& initialized_callback,
+      const google_apis::GetContentCallback& get_content_callback,
+      const FileOperationCallback& completion_callback,
+      google_apis::GDataErrorCode gdata_error,
+      scoped_ptr<google_apis::ResourceEntry> gdata_entry);
   void GetFileContentByPathAfterDownloadFile(
       const FileOperationCallback& completion_callback,
       google_apis::GDataErrorCode gdata_error,
       const base::FilePath& temp_file);
 
-  // Helpers of GetEntryInfoByPath.
+  // Helpers of GetResourceEntryByPath.
   // How the method works:
   // 1) If the path is root, gets AboutResrouce from the drive service
   //    and create ResourceEntry.
@@ -213,22 +179,22 @@ class FakeFileSystem : public FileSystemInterface {
   // not supported in FakeFileSystem. Thus, even if the server has
   // files sharing the same name under a directory, the second (or later)
   // file cannot be taken with the suffixed name.
-  void GetEntryInfoByPathAfterGetAboutResource(
-      const GetEntryInfoCallback& callback,
+  void GetResourceEntryByPathAfterGetAboutResource(
+      const GetResourceEntryCallback& callback,
       google_apis::GDataErrorCode gdata_error,
       scoped_ptr<google_apis::AboutResource> about_resource);
-  void GetEntryInfoByPathAfterGetParentEntryInfo(
+  void GetResourceEntryByPathAfterGetParentEntryInfo(
       const base::FilePath& base_name,
-      const GetEntryInfoCallback& callback,
+      const GetResourceEntryCallback& callback,
       FileError error,
       scoped_ptr<ResourceEntry> parent_entry);
-  void GetEntryInfoByPathAfterGetResourceList(
+  void GetResourceEntryByPathAfterGetResourceList(
       const base::FilePath& base_name,
-      const GetEntryInfoCallback& callback,
+      const GetResourceEntryCallback& callback,
       google_apis::GDataErrorCode gdata_error,
       scoped_ptr<google_apis::ResourceList> resource_list);
 
-  google_apis::DriveServiceInterface* drive_service_;  // Not owned.
+  DriveServiceInterface* drive_service_;  // Not owned.
   base::ScopedTempDir cache_dir_;
 
   // Note: This should remain the last member so it'll be destroyed and

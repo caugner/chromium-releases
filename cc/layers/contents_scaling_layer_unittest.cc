@@ -30,16 +30,6 @@ class MockContentsScalingLayer : public ContentsScalingLayer {
     return last_needs_display_rect_;
   }
 
-  void UpdateContentsScale(float contents_scale) {
-    // Simulate CalcDrawProperties.
-    CalculateContentsScale(
-        contents_scale,
-        false,  // animating_transform_to_screen
-        &draw_properties().contents_scale_x,
-        &draw_properties().contents_scale_y,
-        &draw_properties().content_bounds);
-  }
-
  private:
   virtual ~MockContentsScalingLayer() {}
 
@@ -51,10 +41,12 @@ void CalcDrawProps(Layer* root, float device_scale) {
   LayerTreeHostCommon::CalculateDrawProperties(
       root,
       gfx::Size(500, 500),
+      gfx::Transform(),
       device_scale,
       1.f,
       NULL,
       1024,
+      false,
       false,
       &render_surface_layer_list);
 }
@@ -67,22 +59,22 @@ TEST(ContentsScalingLayerTest, CheckContentsBounds) {
   root->AddChild(test_layer);
 
   test_layer->SetBounds(gfx::Size(320, 240));
-  CalcDrawProps(root, 1.f);
+  CalcDrawProps(root.get(), 1.f);
   EXPECT_FLOAT_EQ(1.f, test_layer->contents_scale_x());
   EXPECT_FLOAT_EQ(1.f, test_layer->contents_scale_y());
   EXPECT_EQ(320, test_layer->content_bounds().width());
   EXPECT_EQ(240, test_layer->content_bounds().height());
 
-  CalcDrawProps(root, 2.f);
+  CalcDrawProps(root.get(), 2.f);
   EXPECT_EQ(640, test_layer->content_bounds().width());
   EXPECT_EQ(480, test_layer->content_bounds().height());
 
   test_layer->SetBounds(gfx::Size(10, 20));
-  CalcDrawProps(root, 2.f);
+  CalcDrawProps(root.get(), 2.f);
   EXPECT_EQ(20, test_layer->content_bounds().width());
   EXPECT_EQ(40, test_layer->content_bounds().height());
 
-  CalcDrawProps(root, 1.33f);
+  CalcDrawProps(root.get(), 1.33f);
   EXPECT_EQ(14, test_layer->content_bounds().width());
   EXPECT_EQ(27, test_layer->content_bounds().height());
 }

@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -161,7 +162,7 @@ void BrowserNavigatorTest::RunDoNothingIfIncognitoIsForcedTest(
   // The page should not be opened.
   EXPECT_EQ(browser, p.browser);
   EXPECT_EQ(1, browser->tab_strip_model()->count());
-  EXPECT_EQ(GURL(chrome::kAboutBlankURL),
+  EXPECT_EQ(GURL(content::kAboutBlankURL),
             browser->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
@@ -184,6 +185,8 @@ namespace {
 
 // This test verifies that when a navigation occurs within a tab, the tab count
 // of the Browser remains the same and the current tab bears the loaded URL.
+// Note that network URLs are not actually loaded in tests, so this also tests
+// that error pages leave the intended URL in the address bar.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_CurrentTab) {
   ui_test_utils::NavigateToURL(browser(), GetGoogleURL());
   EXPECT_EQ(GetGoogleURL(),
@@ -925,7 +928,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 IN_PROC_BROWSER_TEST_F(
     BrowserNavigatorTest,
     Disposition_ViewSource_Settings_DoNothingIfIncognitoForced) {
-  std::string view_source(chrome::kViewSourceScheme);
+  std::string view_source(content::kViewSourceScheme);
   view_source.append(":");
   view_source.append(chrome::kChromeUISettingsURL);
   RunDoNothingIfIncognitoIsForcedTest(GURL(view_source));
@@ -936,7 +939,7 @@ IN_PROC_BROWSER_TEST_F(
 // case).
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        Disposition_ViewSource_Settings_UseNonIncognitoWindow) {
-  std::string view_source(chrome::kViewSourceScheme);
+  std::string view_source(content::kViewSourceScheme);
   view_source.append(":");
   view_source.append(chrome::kChromeUISettingsURL);
   RunUseNonIncognitoWindowTest(GURL(view_source));
@@ -990,22 +993,6 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   RunDoNothingIfIncognitoIsForcedTest(GURL(chrome::kChromeUIBookmarksURL));
 }
 
-// This test verifies that the sync promo page isn't opened in the incognito
-// window.
-IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
-                       Disposition_SyncPromo_UseNonIncognitoWindow) {
-  RunUseNonIncognitoWindowTest(GURL(chrome::kChromeUISyncPromoURL));
-}
-
-// The Sync promo page is expected to always open in normal mode regardless of
-// whether the user is trying to open it in incognito mode or not.  This test
-// verifies that if incognito mode is forced (by policy), the sync promo page
-// doesn't open at all.
-IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
-                       Disposition_SyncPromo_DoNothingIfIncognitoIsForced) {
-  RunDoNothingIfIncognitoIsForcedTest(GURL(chrome::kChromeUISyncPromoURL));
-}
-
 // This test makes sure a crashed singleton tab reloads from a new navigation.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateToCrashedSingletonTab) {
@@ -1051,7 +1038,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromBlankToOptionsInSameTab) {
   chrome::NavigateParams p(MakeNavigateParams());
-  p.url = GURL(chrome::kAboutBlankURL);
+  p.url = GURL(content::kAboutBlankURL);
   ui_test_utils::NavigateToURL(&p);
 
   {
@@ -1285,6 +1272,23 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
       GetGoogleURL(), content::PAGE_TRANSITION_LINK);
   ui_test_utils::NavigateToURL(&params_incognito);
   EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
+}
+
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, ViewSourceIsntSingleton) {
+  const std::string viewsource_ntp_url =
+      std::string(content::kViewSourceScheme) + ":" +
+      chrome::kChromeUIVersionURL;
+
+  chrome::NavigateParams viewsource_params(browser(),
+                                           GURL(viewsource_ntp_url),
+                                           content::PAGE_TRANSITION_LINK);
+  ui_test_utils::NavigateToURL(&viewsource_params);
+
+  chrome::NavigateParams singleton_params(browser(),
+                                          GURL(chrome::kChromeUIVersionURL),
+                                          content::PAGE_TRANSITION_LINK);
+  singleton_params.disposition = SINGLETON_TAB;
+  EXPECT_EQ(-1, chrome::GetIndexOfSingletonTab(&singleton_params));
 }
 
 } // namespace

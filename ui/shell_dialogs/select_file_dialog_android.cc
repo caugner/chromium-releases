@@ -9,9 +9,9 @@
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/logging.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "jni/SelectFileDialog_jni.h"
 #include "ui/android/window_android.h"
 
@@ -19,7 +19,7 @@ namespace ui {
 
 // static
 SelectFileDialogImpl* SelectFileDialogImpl::Create(Listener* listener,
-                                           ui::SelectFilePolicy* policy) {
+                                                   SelectFilePolicy* policy) {
   return new SelectFileDialogImpl(listener, policy);
 }
 
@@ -52,8 +52,8 @@ void SelectFileDialogImpl::ListenerDestroyed() {
 }
 
 void SelectFileDialogImpl::SelectFileImpl(
-    ui::SelectFileDialog::Type type,
-    const string16& title,
+    SelectFileDialog::Type type,
+    const base::string16& title,
     const base::FilePath& default_path,
     const SelectFileDialog::FileTypeInfo* file_types,
     int file_type_index,
@@ -62,15 +62,20 @@ void SelectFileDialogImpl::SelectFileImpl(
     void* params) {
   JNIEnv* env = base::android::AttachCurrentThread();
 
-  std::vector<string16> accept_types =
-      *(reinterpret_cast<std::vector<string16>*>(params));
+  ScopedJavaLocalRef<jstring> capture_value;
+  std::vector<base::string16> accept_types;
+  if (params) {
+    accept_types = *(reinterpret_cast<std::vector<base::string16>*>(params));
 
-  // The last string in params is expected to be the string with capture value.
-  ScopedJavaLocalRef<jstring> capture_value =
-      base::android::ConvertUTF16ToJavaString(env,
+    // The last string in params is expected to be the string
+    // with capture value.
+    capture_value = base::android::ConvertUTF16ToJavaString(env,
           StringToLowerASCII(accept_types.back()));
-  base::android::CheckException(env);
-  accept_types.pop_back();
+    base::android::CheckException(env);
+    accept_types.pop_back();
+  } else {
+    capture_value = base::android::ConvertUTF8ToJavaString(env, "filesystem");
+  }
 
   // The rest params elements are expected to be accept_types.
   ScopedJavaLocalRef<jobjectArray> accept_types_java =
@@ -91,9 +96,8 @@ SelectFileDialogImpl::~SelectFileDialogImpl() {
 }
 
 SelectFileDialogImpl::SelectFileDialogImpl(Listener* listener,
-                                           ui::SelectFilePolicy* policy)
-    : ui::SelectFileDialog(listener, policy),
-      is_running_(false) {
+                                           SelectFilePolicy* policy)
+    : SelectFileDialog(listener, policy), is_running_(false) {
   JNIEnv* env = base::android::AttachCurrentThread();
   java_object_.Reset(
       Java_SelectFileDialog_create(env, reinterpret_cast<jint>(this)));

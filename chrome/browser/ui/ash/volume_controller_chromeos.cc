@@ -5,11 +5,12 @@
 #include "chrome/browser/ui/ash/volume_controller_chromeos.h"
 
 #include "ash/ash_switches.h"
-#include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/extensions/api/system_private/system_private_api.h"
 #include "content/public/browser/user_metrics.h"
+
+using chromeos::CrasAudioHandler;
 
 namespace {
 
@@ -19,21 +20,21 @@ const double kStepPercentage = 4.0;
 }  // namespace
 
 VolumeController::VolumeController() {
-  if (UseNewAudioHandler())
-    chromeos::CrasAudioHandler::Get()->AddAudioObserver(this);
+  if (ash::switches::UseNewAudioHandler())
+    CrasAudioHandler::Get()->AddAudioObserver(this);
 }
 
 VolumeController::~VolumeController() {
-  if (UseNewAudioHandler() && chromeos::CrasAudioHandler::IsInitialized())
-    chromeos::CrasAudioHandler::Get()->RemoveAudioObserver(this);
+  if (ash::switches::UseNewAudioHandler() && CrasAudioHandler::IsInitialized())
+    CrasAudioHandler::Get()->RemoveAudioObserver(this);
 }
 
 bool VolumeController::HandleVolumeMute(const ui::Accelerator& accelerator) {
   if (accelerator.key_code() == ui::VKEY_VOLUME_MUTE)
     content::RecordAction(content::UserMetricsAction("Accel_VolumeMute_F8"));
 
-  if (UseNewAudioHandler()) {
-    chromeos::CrasAudioHandler::Get()->SetOutputMute(true);
+  if (ash::switches::UseNewAudioHandler()) {
+    CrasAudioHandler::Get()->SetOutputMute(true);
     return true;
   }
 
@@ -52,13 +53,16 @@ bool VolumeController::HandleVolumeDown(const ui::Accelerator& accelerator) {
   if (accelerator.key_code() == ui::VKEY_VOLUME_DOWN)
     content::RecordAction(content::UserMetricsAction("Accel_VolumeDown_F9"));
 
-  if (UseNewAudioHandler()) {
-    chromeos::CrasAudioHandler* audio_handler =
-        chromeos::CrasAudioHandler::Get();
-    if (audio_handler->IsOutputMuted())
+  if (ash::switches::UseNewAudioHandler()) {
+    CrasAudioHandler* audio_handler = CrasAudioHandler::Get();
+
+    if (audio_handler->IsOutputMuted()) {
       audio_handler->SetOutputVolumePercent(0);
-    else
+    } else {
       audio_handler->AdjustOutputVolumeByPercent(-kStepPercentage);
+      if (audio_handler->IsOutputVolumeBelowDefaultMuteLvel())
+        audio_handler->SetOutputMute(true);
+    }
     return true;
   }
 
@@ -77,13 +81,12 @@ bool VolumeController::HandleVolumeUp(const ui::Accelerator& accelerator) {
   if (accelerator.key_code() == ui::VKEY_VOLUME_UP)
     content::RecordAction(content::UserMetricsAction("Accel_VolumeUp_F10"));
 
-  if (UseNewAudioHandler()) {
-    chromeos::CrasAudioHandler* audio_handler =
-        chromeos::CrasAudioHandler::Get();
+  if (ash::switches::UseNewAudioHandler()) {
+    CrasAudioHandler* audio_handler = CrasAudioHandler::Get();
+
     if (audio_handler->IsOutputMuted())
       audio_handler->SetOutputMute(false);
-    else
-      audio_handler->AdjustOutputVolumeByPercent(kStepPercentage);
+    audio_handler->AdjustOutputVolumeByPercent(kStepPercentage);
     return true;
   }
 
@@ -100,18 +103,18 @@ bool VolumeController::HandleVolumeUp(const ui::Accelerator& accelerator) {
 }
 
 bool VolumeController::IsAudioMuted() const {
-  DCHECK(!UseNewAudioHandler());
+  DCHECK(!ash::switches::UseNewAudioHandler());
   return chromeos::AudioHandler::GetInstance()->IsMuted();
 }
 
 void VolumeController::SetAudioMuted(bool muted) {
-  DCHECK(!UseNewAudioHandler());
+  DCHECK(!ash::switches::UseNewAudioHandler());
   chromeos::AudioHandler::GetInstance()->SetMuted(muted);
 }
 
 // Gets the volume level. The range is [0, 1.0].
 float VolumeController::GetVolumeLevel() const {
-  DCHECK(!UseNewAudioHandler());
+  DCHECK(!ash::switches::UseNewAudioHandler());
   return chromeos::AudioHandler::GetInstance()->GetVolumePercent() / 100.f;
 }
 
@@ -121,7 +124,7 @@ void VolumeController::SetVolumeLevel(float level) {
 }
 
 void VolumeController::SetVolumePercent(double percent) {
-  DCHECK(!UseNewAudioHandler());
+  DCHECK(!ash::switches::UseNewAudioHandler());
   chromeos::AudioHandler* audio_handler = chromeos::AudioHandler::GetInstance();
   audio_handler->SetVolumePercent(percent);
   extensions::DispatchVolumeChangedEvent(audio_handler->GetVolumePercent(),
@@ -129,22 +132,17 @@ void VolumeController::SetVolumePercent(double percent) {
 }
 
 void VolumeController::OnOutputVolumeChanged() {
-  DCHECK(UseNewAudioHandler());
-  chromeos::CrasAudioHandler* audio_handler = chromeos::CrasAudioHandler::Get();
+  DCHECK(ash::switches::UseNewAudioHandler());
+  CrasAudioHandler* audio_handler = CrasAudioHandler::Get();
   extensions::DispatchVolumeChangedEvent(
       audio_handler->GetOutputVolumePercent(),
       audio_handler->IsOutputMuted());
 }
 
 void VolumeController::OnOutputMuteChanged() {
-  DCHECK(UseNewAudioHandler());
-  chromeos::CrasAudioHandler* audio_handler = chromeos::CrasAudioHandler::Get();
+  DCHECK(ash::switches::UseNewAudioHandler());
+  CrasAudioHandler* audio_handler = CrasAudioHandler::Get();
   extensions::DispatchVolumeChangedEvent(
       audio_handler->GetOutputVolumePercent(),
       audio_handler->IsOutputMuted());
-}
-
-bool VolumeController::UseNewAudioHandler() const {
-  return !CommandLine::ForCurrentProcess()->
-      HasSwitch(ash::switches::kAshDisableNewAudioHandler);
 }

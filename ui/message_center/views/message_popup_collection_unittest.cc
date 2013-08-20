@@ -8,7 +8,7 @@
 
 #include "base/message_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/rect.h"
 #include "ui/message_center/fake_message_center.h"
@@ -25,7 +25,7 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
     views::ViewsTestBase::SetUp();
     MessageCenter::Initialize();
     collection_.reset(
-        new MessagePopupCollection(GetContext(), MessageCenter::Get()));
+        new MessagePopupCollection(GetContext(), MessageCenter::Get(), NULL));
     // This size fits test machines resolution and also can keep a few toasts
     // w/o ill effects of hitting the screen overflow. This allows us to assume
     // and verify normal layout of the toast stack.
@@ -68,10 +68,17 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
 
   std::string AddNotification() {
     std::string id = base::IntToString(id_++);
-    MessageCenter::Get()->AddNotification(
-        NOTIFICATION_TYPE_BASE_FORMAT, id, UTF8ToUTF16("test title"),
-        UTF8ToUTF16("test message"), string16() /* display_source */,
-        "" /* extension_id */, NULL);
+    scoped_ptr<Notification> notification(
+        new Notification(NOTIFICATION_TYPE_BASE_FORMAT,
+                         id,
+                         UTF8ToUTF16("test title"),
+                         UTF8ToUTF16("test message"),
+                         gfx::Image(),
+                         string16() /* display_source */,
+                         "" /* extension_id */,
+                         message_center::RichNotificationData(),
+                         NULL /* delegate */));
+    MessageCenter::Get()->AddNotification(notification.Pass());
     return id;
   }
 

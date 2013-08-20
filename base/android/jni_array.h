@@ -11,7 +11,7 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/basictypes.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 namespace base {
 namespace android {
@@ -65,6 +65,12 @@ BASE_EXPORT void JavaIntArrayToIntVector(
     JNIEnv* env,
     jintArray int_array,
     std::vector<int>* out);
+
+// Replaces the content of |out| with the Java floats in |float_array|.
+BASE_EXPORT void JavaFloatArrayToFloatVector(
+    JNIEnv* env,
+    jfloatArray float_array,
+    std::vector<float>* out);
 
 // Assuming |array| is an byte[][] (array of byte arrays), replaces the
 // content of |out| with the corresponding vector of strings. No UTF-8

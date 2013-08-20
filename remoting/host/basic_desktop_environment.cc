@@ -7,11 +7,11 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "media/video/capture/screen/screen_capturer.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/client_session_control.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/host/screen_controls.h"
+#include "third_party/webrtc/modules/desktop_capture/screen_capturer.h"
 
 namespace remoting {
 
@@ -44,21 +44,19 @@ std::string BasicDesktopEnvironment::GetCapabilities() const {
 void BasicDesktopEnvironment::SetCapabilities(const std::string& capabilities) {
 }
 
-scoped_ptr<media::ScreenCapturer>
+scoped_ptr<webrtc::ScreenCapturer>
 BasicDesktopEnvironment::CreateVideoCapturer() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   // The basic desktop environment does not use X DAMAGE, since it is
   // broken on many systems - see http://crbug.com/73423.
-  return media::ScreenCapturer::Create();
+  return scoped_ptr<webrtc::ScreenCapturer>(webrtc::ScreenCapturer::Create());
 }
 
 BasicDesktopEnvironment::BasicDesktopEnvironment(
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    base::WeakPtr<ClientSessionControl> client_session_control,
-    const UiStrings& ui_strings)
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
     : caller_task_runner_(caller_task_runner),
       input_task_runner_(input_task_runner),
       ui_task_runner_(ui_task_runner) {
@@ -77,18 +75,6 @@ BasicDesktopEnvironmentFactory::BasicDesktopEnvironmentFactory(
 }
 
 BasicDesktopEnvironmentFactory::~BasicDesktopEnvironmentFactory() {
-}
-
-scoped_ptr<DesktopEnvironment> BasicDesktopEnvironmentFactory::Create(
-    base::WeakPtr<ClientSessionControl> client_session_control) {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  return scoped_ptr<DesktopEnvironment>(
-      new BasicDesktopEnvironment(caller_task_runner(),
-                                  input_task_runner(),
-                                  ui_task_runner(),
-                                  client_session_control,
-                                  ui_strings_));
 }
 
 bool BasicDesktopEnvironmentFactory::SupportsAudioCapture() const {

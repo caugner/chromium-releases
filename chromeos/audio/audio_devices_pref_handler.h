@@ -14,21 +14,25 @@ class PrefRegistrySimple;
 
 namespace chromeos {
 
+struct AudioDevice;
+
 // Interface that handles audio preference related work, reads and writes
 // audio preferences, and notifies AudioPrefObserver for audio preference
 // changes.
 class CHROMEOS_EXPORT AudioDevicesPrefHandler
     : public base::RefCountedThreadSafe<AudioDevicesPrefHandler> {
  public:
-  // Gets the audio output volume value from prefs for the active device.
-  virtual double GetOutputVolumeValue() = 0;
-  // Reads the audio output mute value from prefs for the active device.
-  virtual bool GetOutputMuteValue() = 0;
+  // Gets the audio output volume value from prefs for a device. Since we can
+  // only have either a gain or a volume for a device (depending on whether it
+  // is input or output), we don't really care which value it is.
+  virtual double GetVolumeGainValue(const AudioDevice& device) = 0;
+  // Sets the audio volume or gain value to prefs for a device.
+  virtual void SetVolumeGainValue(const AudioDevice& device, double value) = 0;
 
-  // Sets the output audio volume value to prefs for the active device.
-  virtual void SetOutputVolumeValue(double volume_percent) = 0;
-  // Sets the audio output mute value to prefs for the active device.
-  virtual void SetOutputMuteValue(bool mute_on) = 0;
+  // Reads the audio mute value from prefs for a device.
+  virtual bool GetMuteValue(const AudioDevice& device) = 0;
+  // Sets the audio mute value to prefs for a device.
+  virtual void SetMuteValue(const AudioDevice& device, bool mute_on) = 0;
 
   // Reads the audio capture allowed value from prefs.
   virtual bool GetAudioCaptureAllowedValue() = 0;

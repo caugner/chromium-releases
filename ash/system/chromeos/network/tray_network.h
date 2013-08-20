@@ -21,9 +21,6 @@ class NetworkState;
 namespace ash {
 namespace internal {
 
-class NetworkStateNotifier;
-class TrayNetworkStateObserver;
-
 namespace tray {
 class NetworkDefaultView;
 class NetworkDetailedView;
@@ -41,7 +38,6 @@ class TrayNetwork : public SystemTrayItem,
   virtual ~TrayNetwork();
 
   tray::NetworkDetailedView* detailed() { return detailed_; }
-  void set_request_wifi_view(bool b) { request_wifi_view_ = b; }
 
   // SystemTrayItem
   virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE;
@@ -58,7 +54,6 @@ class TrayNetwork : public SystemTrayItem,
       ShelfAlignment alignment) OVERRIDE;
 
   // NetworkObserver
-  virtual void OnNetworkRefresh(const NetworkIconInfo& info) OVERRIDE;
   virtual void SetNetworkMessage(
       NetworkTrayDelegate* delegate,
       MessageType message_type,
@@ -67,19 +62,12 @@ class TrayNetwork : public SystemTrayItem,
       const base::string16& message,
       const std::vector<base::string16>& links) OVERRIDE;
   virtual void ClearNetworkMessage(MessageType message_type) OVERRIDE;
-  virtual void OnWillToggleWifi() OVERRIDE;
+  virtual void RequestToggleWifi() OVERRIDE;
 
   // TrayNetworkStateObserver::Delegate
   virtual void NetworkStateChanged(bool list_changed) OVERRIDE;
   virtual void NetworkServiceChanged(
       const chromeos::NetworkState* network) OVERRIDE;
-
-  // Gets the correct icon and label for |icon_type|. Also sets |animating|
-  // based on whether or not the icon is animating (i.e. connecting).
-  void GetNetworkStateHandlerImageAndLabel(network_icon::IconType icon_type,
-                                           gfx::ImageSkia* image,
-                                           base::string16* label,
-                                           bool* animating);
 
  private:
   friend class tray::NetworkMessageView;
@@ -96,7 +84,6 @@ class TrayNetwork : public SystemTrayItem,
   scoped_ptr<tray::NetworkMessages> messages_;
   bool request_wifi_view_;
   scoped_ptr<TrayNetworkStateObserver> network_state_observer_;
-  scoped_ptr<NetworkStateNotifier> network_state_notifier_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayNetwork);
 };

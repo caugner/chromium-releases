@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_APP_METRO_INFOBAR_DELEGATE_WIN_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_APP_METRO_INFOBAR_DELEGATE_WIN_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "ui/base/window_open_disposition.h"
@@ -41,7 +41,7 @@ class AppMetroInfoBarDelegateWin : public ConfirmInfoBarDelegate {
   virtual ~AppMetroInfoBarDelegateWin();
 
   // ConfirmInfoBarDelegate overrides:
-  virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual int GetIconID() const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;

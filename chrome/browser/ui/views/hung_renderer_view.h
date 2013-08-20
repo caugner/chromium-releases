@@ -104,7 +104,7 @@ class HungRendererDialogView : public views::DialogDelegateView,
  public:
   // Factory function for creating an instance of the HungRendererDialogView
   // class. At any given point only one instance can be active.
-  static HungRendererDialogView* Create();
+  static HungRendererDialogView* Create(gfx::NativeView context);
 
   // Returns a pointer to the singleton instance if any.
   static HungRendererDialogView* GetInstance();
@@ -139,9 +139,8 @@ class HungRendererDialogView : public views::DialogDelegateView,
   virtual ~HungRendererDialogView();
 
   // views::View overrides:
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
   static HungRendererDialogView* g_instance_;
 

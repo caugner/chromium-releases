@@ -45,7 +45,7 @@ class VIEWS_EXPORT ButtonDropDown : public ImageButton,
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   // Showing the drop down results in a MouseCaptureLost, we need to ignore it.
   virtual void OnMouseCaptureLost() OVERRIDE {}
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
@@ -54,7 +54,8 @@ class VIEWS_EXPORT ButtonDropDown : public ImageButton,
 
   // Overridden from views::ContextMenuController
   virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& point) OVERRIDE;
+                                      const gfx::Point& point,
+                                      ui::MenuSourceType source_type) OVERRIDE;
 
  protected:
   // Overridden from CustomButton. Returns true if the button should become
@@ -67,7 +68,7 @@ class VIEWS_EXPORT ButtonDropDown : public ImageButton,
   virtual bool ShouldShowMenu();
 
   // Function to show the dropdown menu.
-  virtual void ShowDropDownMenu();
+  virtual void ShowDropDownMenu(ui::MenuSourceType source_type);
 
  private:
   // The model that populates the attached menu.

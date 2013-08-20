@@ -8,18 +8,18 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string16.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
-#include "crypto/sha2.h"
 #include "chrome/renderer/safe_browsing/features.h"
 #include "chrome/renderer/safe_browsing/mock_feature_extractor_clock.h"
 #include "chrome/renderer/safe_browsing/murmurhash3_util.h"
 #include "chrome/renderer/safe_browsing/test_utils.h"
+#include "crypto/sha2.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -113,7 +113,7 @@ class PhishingTermFeatureExtractorTest : public ::testing::Test {
     msg_loop_.Quit();
   }
 
-  MessageLoop msg_loop_;
+  base::MessageLoop msg_loop_;
   MockFeatureExtractorClock clock_;
   scoped_ptr<PhishingTermFeatureExtractor> extractor_;
   base::hash_set<std::string> term_hashes_;

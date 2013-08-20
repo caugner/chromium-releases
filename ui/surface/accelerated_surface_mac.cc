@@ -11,8 +11,8 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/io_surface_support_mac.h"
 #include "ui/gl/scoped_make_current.h"
-#include "ui/surface/io_surface_support_mac.h"
 
 AcceleratedSurface::AcceleratedSurface()
     : io_surface_id_(0),
@@ -39,8 +39,7 @@ bool AcceleratedSurface::Initialize(
       gfx::GetGLImplementation() != gfx::kGLImplementationAppleGL)
     return false;
 
-  gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(
-      false, gfx::Size(1, 1));
+  gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size(1, 1));
   if (!gl_surface_.get()) {
     Destroy();
     return false;
@@ -117,7 +116,7 @@ static void AddBooleanValue(CFMutableDictionaryRef dictionary,
 static void AddIntegerValue(CFMutableDictionaryRef dictionary,
                             const CFStringRef key,
                             int32 value) {
-  base::mac::ScopedCFTypeRef<CFNumberRef> number(
+  base::ScopedCFTypeRef<CFNumberRef> number(
       CFNumberCreate(NULL, kCFNumberSInt32Type, &value));
   CFDictionaryAddValue(dictionary, key, number.get());
 }
@@ -216,7 +215,7 @@ uint32 AcceleratedSurface::SetSurfaceSize(const gfx::Size& size) {
 
   // Allocate a new IOSurface, which is the GPU resource that can be
   // shared across processes.
-  base::mac::ScopedCFTypeRef<CFMutableDictionaryRef> properties;
+  base::ScopedCFTypeRef<CFMutableDictionaryRef> properties;
   properties.reset(CFDictionaryCreateMutable(kCFAllocatorDefault,
                                              0,
                                              &kCFTypeDictionaryKeyCallBacks,

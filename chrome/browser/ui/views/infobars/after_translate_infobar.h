@@ -26,9 +26,8 @@ class AfterTranslateInfoBar : public TranslateInfoBarBase,
 
   // TranslateInfoBarBase:
   virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE;
   virtual int ContentMinimumWidth() const OVERRIDE;
@@ -56,6 +55,9 @@ class AfterTranslateInfoBar : public TranslateInfoBarBase,
 
   // True if the target language comes before the original one.
   bool swapped_language_buttons_;
+
+  // True if the source language is expected to be determined by a server.
+  bool autodetermined_source_language_;
 
   DISALLOW_COPY_AND_ASSIGN(AfterTranslateInfoBar);
 };

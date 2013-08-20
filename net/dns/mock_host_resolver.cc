@@ -11,7 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/string_split.h"
 #include "base/threading/platform_thread.h"
 #include "net/base/net_errors.h"
@@ -88,7 +88,7 @@ int MockHostResolverBase::Resolve(const RequestInfo& info,
     *handle = reinterpret_cast<RequestHandle>(id);
 
   if (!ondemand_mode_) {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&MockHostResolverBase::ResolveNow, AsWeakPtr(), id));
   }
@@ -127,7 +127,7 @@ void MockHostResolverBase::ResolveAllPending() {
   DCHECK(CalledOnValidThread());
   DCHECK(ondemand_mode_);
   for (RequestMap::iterator i = requests_.begin(); i != requests_.end(); ++i) {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&MockHostResolverBase::ResolveNow, AsWeakPtr(), i->first));
   }
@@ -424,15 +424,16 @@ ScopedDefaultHostResolverProc::ScopedDefaultHostResolverProc(
 }
 
 ScopedDefaultHostResolverProc::~ScopedDefaultHostResolverProc() {
-  HostResolverProc* old_proc = HostResolverProc::SetDefault(previous_proc_);
+  HostResolverProc* old_proc =
+      HostResolverProc::SetDefault(previous_proc_.get());
   // The lifetimes of multiple instances must be nested.
   CHECK_EQ(old_proc, current_proc_);
 }
 
 void ScopedDefaultHostResolverProc::Init(HostResolverProc* proc) {
   current_proc_ = proc;
-  previous_proc_ = HostResolverProc::SetDefault(current_proc_);
-  current_proc_->SetLastProc(previous_proc_);
+  previous_proc_ = HostResolverProc::SetDefault(current_proc_.get());
+  current_proc_->SetLastProc(previous_proc_.get());
 }
 
 }  // namespace net

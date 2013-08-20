@@ -10,9 +10,14 @@
     # the link of the actual chrome (or chromium) executable on
     # Linux or Mac, and into chrome.dll on Windows.
     # NOTE: Most new includes should go in the OS!="ios" condition below.
-    'chromium_dependencies': [
+    'chromium_browser_dependencies': [
       'common',
       'browser',
+      '../content/content.gyp:content_app',
+      '../sync/sync.gyp:sync',
+    ],
+    'chromium_child_dependencies': [
+      'common',
       '../content/content.gyp:content_app',
       '../sync/sync.gyp:sync',
     ],
@@ -24,7 +29,12 @@
     'apply_locales_cmd': ['python', '<(DEPTH)/build/apply_locales.py'],
     'conditions': [
       ['OS!="ios"', {
-        'chromium_dependencies': [
+        'chromium_browser_dependencies': [
+          'debugger',
+          '../content/content.gyp:content_ppapi_plugin',
+          '../printing/printing.gyp:printing',
+        ],
+        'chromium_child_dependencies': [
           'debugger',
           'plugin',
           'renderer',
@@ -46,7 +56,7 @@
             'app/resources/locale_settings_win.grd',
       },],
       ['OS!="android" and OS!="ios"', {
-        'chromium_dependencies': [
+        'chromium_browser_dependencies': [
           # Android doesn't use the service process (only needed for print).
           'service',
         ],
@@ -275,10 +285,13 @@
             '../base/base.gyp:base',
             '../content/content.gyp:content_utility',
             '../skia/skia.gyp:skia',
+            '../third_party/libxml/libxml.gyp:libxml',
           ],
           'sources': [
             'utility/chrome_content_utility_client.cc',
             'utility/chrome_content_utility_client.h',
+            'utility/itunes_pref_parser_win.cc',
+            'utility/itunes_pref_parser_win.h',
             'utility/profile_import_handler.cc',
             'utility/profile_import_handler.h',
           ],
@@ -355,8 +368,6 @@
             'service/cloud_print/printer_job_handler.h',
             'service/cloud_print/printer_job_queue_handler.cc',
             'service/cloud_print/printer_job_queue_handler.h',
-            'service/gaia/service_gaia_authenticator.cc',
-            'service/gaia/service_gaia_authenticator.h',
             'service/net/service_url_request_context.cc',
             'service/net/service_url_request_context.h',
           ],
@@ -867,7 +878,7 @@
           ],
         },
       ],
-    },],  # OS=="linux"
+    }],  # OS=="linux"
     ['OS=="win"',
       { 'targets': [
         {
@@ -1039,8 +1050,12 @@
             'tools/safe_browsing/sb_sigutil.cc',
           ],
         },
-      ]},  # 'targets'
-    ],  # OS=="win"
+      ],  # 'targets'
+      'includes': [
+        'chrome_process_finder.gypi',
+        'metro_utils.gypi',
+      ],
+    }],  # OS=="win"
     ['OS=="win" and target_arch=="ia32"',
       { 'targets': [
         {
@@ -1112,6 +1127,7 @@
           'dependencies': [
             'chrome_resources.gyp:chrome_strings',
             'profile_sync_service_model_type_selection_java',
+            'resource_id_java',
             'toolbar_model_security_levels_java',
             '../base/base.gyp:base',
             '../components/components.gyp:autofill_java',
@@ -1142,5 +1158,8 @@
         'chrome_android.gypi',
       ]}, # 'includes'
     ],  # OS=="android"
+    ['configuration_policy==1 and OS!="android"', {
+      'includes': [ 'policy.gypi', ],
+    }],
   ],  # 'conditions'
 }

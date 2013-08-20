@@ -12,7 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/ui/ash/launcher/launcher_favicon_loader.h"
 #include "chrome/browser/ui/ash/launcher/launcher_item_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
@@ -78,7 +78,8 @@ class BrowserLauncherItemController : public LauncherItemController,
   virtual void OnRemoved() OVERRIDE;
   virtual void LauncherItemChanged(int index,
                                    const ash::LauncherItem& old_item) OVERRIDE;
-  virtual ChromeLauncherAppMenuItems GetApplicationList() OVERRIDE;
+  virtual ChromeLauncherAppMenuItems GetApplicationList(
+      int event_flags) OVERRIDE;
 
   // TabStripModel overrides:
   virtual void ActiveTabChanged(content::WebContents* old_contents,

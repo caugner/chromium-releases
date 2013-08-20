@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
@@ -140,6 +139,7 @@ ui::WindowShowState AdjustShowState(ui::WindowShowState state) {
     case ui::SHOW_STATE_MINIMIZED:
     case ui::SHOW_STATE_MAXIMIZED:
     case ui::SHOW_STATE_FULLSCREEN:
+    case ui::SHOW_STATE_DETACHED:
       return state;
 
     case ui::SHOW_STATE_DEFAULT:
@@ -203,7 +203,7 @@ SessionService::SessionService(const base::FilePath& save_path)
 
 SessionService::~SessionService() {
   // The BrowserList should outlive the SessionService since it's static and
-  // the SessionService is a ProfileKeyedService.
+  // the SessionService is a BrowserContextKeyedService.
   BrowserList::RemoveObserver(this);
   Save();
 }
@@ -1348,16 +1348,10 @@ void SessionService::BuildCommandsForBrowser(
   DCHECK(browser && commands);
   DCHECK(browser->session_id().id());
 
-  ui::WindowShowState show_state = ui::SHOW_STATE_NORMAL;
-  if (browser->window()->IsMaximized())
-    show_state = ui::SHOW_STATE_MAXIMIZED;
-  else if (browser->window()->IsMinimized())
-    show_state = ui::SHOW_STATE_MINIMIZED;
-
   commands->push_back(
       CreateSetWindowBoundsCommand(browser->session_id(),
                                    browser->window()->GetRestoredBounds(),
-                                   show_state));
+                                   browser->window()->GetRestoredState()));
 
   commands->push_back(CreateSetWindowTypeCommand(
       browser->session_id(), WindowTypeForBrowserType(browser->type())));

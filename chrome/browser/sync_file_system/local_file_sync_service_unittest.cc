@@ -6,7 +6,7 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/location.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/threading/thread.h"
@@ -16,16 +16,16 @@
 #include "chrome/test/base/testing_profile.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/syncable/canned_syncable_file_system.h"
-#include "webkit/fileapi/syncable/file_change.h"
-#include "webkit/fileapi/syncable/local_file_change_tracker.h"
-#include "webkit/fileapi/syncable/local_file_sync_context.h"
-#include "webkit/fileapi/syncable/local_file_sync_status.h"
-#include "webkit/fileapi/syncable/mock_sync_status_observer.h"
-#include "webkit/fileapi/syncable/sync_file_metadata.h"
-#include "webkit/fileapi/syncable/sync_status_code.h"
-#include "webkit/fileapi/syncable/syncable_file_system_util.h"
+#include "webkit/browser/fileapi/file_system_context.h"
+#include "webkit/browser/fileapi/syncable/canned_syncable_file_system.h"
+#include "webkit/browser/fileapi/syncable/file_change.h"
+#include "webkit/browser/fileapi/syncable/local_file_change_tracker.h"
+#include "webkit/browser/fileapi/syncable/local_file_sync_context.h"
+#include "webkit/browser/fileapi/syncable/local_file_sync_status.h"
+#include "webkit/browser/fileapi/syncable/mock_sync_status_observer.h"
+#include "webkit/browser/fileapi/syncable/sync_file_metadata.h"
+#include "webkit/browser/fileapi/syncable/sync_status_code.h"
+#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
 
 using fileapi::FileSystemURL;
 using ::testing::_;
@@ -38,7 +38,6 @@ namespace sync_file_system {
 namespace {
 
 const char kOrigin[] = "http://example.com";
-const char kServiceName[] = "test";
 
 void DidPrepareForProcessRemoteChange(const tracked_objects::Location& where,
                                       const base::Closure& oncompleted,
@@ -106,7 +105,7 @@ class LocalFileSyncServiceTest
     thread_helper_.SetUp();
 
     file_system_.reset(new CannedSyncableFileSystem(
-        GURL(kOrigin), kServiceName,
+        GURL(kOrigin),
         thread_helper_.io_task_runner(),
         thread_helper_.file_task_runner()));
 
@@ -117,7 +116,7 @@ class LocalFileSyncServiceTest
     base::RunLoop run_loop;
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
     local_service_->MaybeInitializeFileSystemContext(
-        GURL(kOrigin), kServiceName, file_system_->file_system_context(),
+        GURL(kOrigin), file_system_->file_system_context(),
         AssignAndQuitCallback(&run_loop, &status));
     run_loop.Run();
 
@@ -132,7 +131,7 @@ class LocalFileSyncServiceTest
   virtual void TearDown() OVERRIDE {
     local_service_->Shutdown();
     file_system_->TearDown();
-    RevokeSyncableFileSystem(kServiceName);
+    RevokeSyncableFileSystem();
 
     thread_helper_.TearDown();
   }
@@ -150,7 +149,6 @@ class LocalFileSyncServiceTest
     base::RunLoop run_loop;
     local_service_->PrepareForProcessRemoteChange(
         url,
-        kServiceName,
         base::Bind(&DidPrepareForProcessRemoteChange,
                    where,
                    run_loop.QuitClosure(),
@@ -175,6 +173,7 @@ class LocalFileSyncServiceTest
     return file_system_->file_system_context()->change_tracker()->num_changes();
   }
 
+  ScopedEnableSyncFSDirectoryOperation enable_directory_operation_;
   TestingProfile profile_;
 
   MultiThreadTestHelper thread_helper_;
@@ -279,7 +278,6 @@ TEST_F(LocalFileSyncServiceTest, LocalChangeObserver) {
 TEST_F(LocalFileSyncServiceTest, MAYBE_LocalChangeObserverMultipleContexts) {
   const char kOrigin2[] = "http://foo";
   CannedSyncableFileSystem file_system2(GURL(kOrigin2),
-                                        kServiceName,
                                         thread_helper_.io_task_runner(),
                                         thread_helper_.file_task_runner());
   file_system2.SetUp();
@@ -287,7 +285,7 @@ TEST_F(LocalFileSyncServiceTest, MAYBE_LocalChangeObserverMultipleContexts) {
   base::RunLoop run_loop;
   SyncStatusCode status = SYNC_STATUS_UNKNOWN;
   local_service_->MaybeInitializeFileSystemContext(
-      GURL(kOrigin2), kServiceName, file_system2.file_system_context(),
+      GURL(kOrigin2), file_system2.file_system_context(),
       AssignAndQuitCallback(&run_loop, &status));
   run_loop.Run();
 
@@ -332,7 +330,8 @@ TEST_F(LocalFileSyncServiceTest, ProcessLocalChange_CreateFile) {
   base::PlatformFileInfo info;
   base::FilePath platform_path;
   EXPECT_EQ(base::PLATFORM_FILE_OK,
-            file_system_->GetMetadata(kFile, &info, &platform_path));
+            file_system_->GetMetadataAndPlatformPath(
+                kFile, &info, &platform_path));
 
   ASSERT_FALSE(info.is_directory);
   ASSERT_EQ(kTestFileDataSize, info.size);

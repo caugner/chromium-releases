@@ -8,13 +8,12 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 DownloadRequestInfoBarDelegate::FakeCreateCallback*
   DownloadRequestInfoBarDelegate::callback_ = NULL;
 
 DownloadRequestInfoBarDelegate::~DownloadRequestInfoBarDelegate() {
-  if (host_)
+  if (host_.get())
     host_->Cancel();
 }
 
@@ -54,9 +53,8 @@ DownloadRequestInfoBarDelegate::DownloadRequestInfoBarDelegate(
       host_(host) {
 }
 
-gfx::Image* DownloadRequestInfoBarDelegate::GetIcon() const {
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INFOBAR_MULTIPLE_DOWNLOADS);
+int DownloadRequestInfoBarDelegate::GetIconID() const {
+  return IDR_INFOBAR_MULTIPLE_DOWNLOADS;
 }
 
 string16 DownloadRequestInfoBarDelegate::GetMessageText() const {
@@ -70,11 +68,11 @@ string16 DownloadRequestInfoBarDelegate::GetButtonLabel(
 }
 
 bool DownloadRequestInfoBarDelegate::Accept() {
-  if (host_) {
+  if (host_.get()) {
     // Accept() call will invalidate host_ weak pointer if no further
     // prompts are required.
     host_->Accept();
   }
 
-  return !host_;
+  return !host_.get();
 }

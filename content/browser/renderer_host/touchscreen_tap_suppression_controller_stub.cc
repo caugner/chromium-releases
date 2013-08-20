@@ -13,9 +13,7 @@ namespace content {
 
 TouchscreenTapSuppressionController::TouchscreenTapSuppressionController(
     GestureEventFilter* /*gef*/)
-    : gesture_event_filter_(NULL),
-      controller_(NULL) {
-}
+    : gesture_event_filter_(NULL) {}
 
 TouchscreenTapSuppressionController::~TouchscreenTapSuppressionController() {}
 
@@ -26,7 +24,7 @@ void TouchscreenTapSuppressionController::GestureFlingCancelAck(
 }
 
 bool TouchscreenTapSuppressionController::ShouldDeferGestureTapDown(
-    const WebKit::WebGestureEvent& /*event*/) {
+    const GestureEventWithLatencyInfo& /*event*/) {
   return false;
 }
 

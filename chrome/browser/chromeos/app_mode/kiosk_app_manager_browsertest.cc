@@ -8,16 +8,19 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager_observer.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/test_utils.h"
 #include "net/base/host_port_pair.h"
 #include "net/dns/mock_host_resolver.h"
 
@@ -26,6 +29,36 @@ namespace chromeos {
 namespace {
 
 const char kWebstoreDomain[] = "cws.com";
+
+// Helper KioskAppManager::GetConsumerKioskModeStatusCallback implementation.
+void ConsumerKioskModeStatusCheck(
+    KioskAppManager::ConsumerKioskModeStatus* out_status,
+    const base::Closure& runner_quit_task,
+    KioskAppManager::ConsumerKioskModeStatus in_status) {
+  LOG(INFO) << "ConsumerKioskModeStatus = " << in_status;
+  *out_status = in_status;
+  runner_quit_task.Run();
+}
+
+// Helper KioskAppManager::EnableKioskModeCallback implementation.
+void ConsumerKioskModeLockCheck(
+    bool* out_locked,
+    const base::Closure& runner_quit_task,
+    bool in_locked) {
+  LOG(INFO) << "kioks locked  = " << in_locked;
+  *out_locked = in_locked;
+  runner_quit_task.Run();
+}
+
+// Helper EnterpriseInstallAttributes::LockResultCallback implementation.
+void OnEnterpriseDeviceLock(
+    policy::EnterpriseInstallAttributes::LockResult* out_locked,
+    const base::Closure& runner_quit_task,
+    policy::EnterpriseInstallAttributes::LockResult in_locked) {
+  LOG(INFO) << "Enterprise lock  = " << in_locked;
+  *out_locked = in_locked;
+  runner_quit_task.Run();
+}
 
 class TestKioskAppManagerObserver : public KioskAppManagerObserver {
  public:
@@ -75,7 +108,7 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
   }
 
   void Wait() {
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
   bool loaded() const { return loaded_; }
@@ -84,11 +117,11 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
   // KioskAppManagerObserver overrides:
   virtual void OnKioskAppDataChanged(const std::string& app_id) OVERRIDE {
     loaded_ = true;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
   virtual void OnKioskAppDataLoadFailure(const std::string& app_id) OVERRIDE {
     loaded_ = false;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   KioskAppManager* manager_;
@@ -130,13 +163,32 @@ class KioskAppManagerTest : public InProcessBrowserTest {
     for (size_t i = 0; i < apps.size(); ++i) {
       if (i > 0)
         str += ',';
-      str += apps[i].id;
+      str += apps[i].app_id;
     }
 
     return str;
   }
 
   KioskAppManager* manager() const { return KioskAppManager::Get(); }
+
+  // Locks device for enterprise.
+  policy::EnterpriseInstallAttributes::LockResult LockDeviceForEnterprise() {
+    scoped_ptr<policy::EnterpriseInstallAttributes::LockResult> lock_result(
+        new policy::EnterpriseInstallAttributes::LockResult(
+            policy::EnterpriseInstallAttributes::LOCK_NOT_READY));
+    scoped_refptr<content::MessageLoopRunner> runner =
+        new content::MessageLoopRunner;
+    g_browser_process->browser_policy_connector()->GetInstallAttributes()->
+        LockDevice(
+            "user@domain.com",
+            policy::DEVICE_MODE_ENTERPRISE,
+            "device-id",
+            base::Bind(&OnEnterpriseDeviceLock,
+                       lock_result.get(),
+                       runner->QuitClosure()));
+    runner->Run();
+    return *lock_result.get();
+  }
 
  private:
   std::string test_gallery_url_;
@@ -158,10 +210,16 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, Basic) {
   // Clear the auto launch app.
   manager()->SetAutoLaunchApp("");
   EXPECT_EQ("", manager()->GetAutoLaunchApp());
+  EXPECT_FALSE(manager()->IsAutoLaunchEnabled());
 
   // Set another auto launch app.
   manager()->SetAutoLaunchApp("app_2");
   EXPECT_EQ("app_2", manager()->GetAutoLaunchApp());
+
+  // Check auto launch permissions.
+  EXPECT_FALSE(manager()->IsAutoLaunchEnabled());
+  manager()->SetEnableAutoLaunch(true);
+  EXPECT_TRUE(manager()->IsAutoLaunchEnabled());
 
   // Remove the auto launch app.
   manager()->RemoveApp("app_2");
@@ -172,6 +230,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, Basic) {
   TestKioskAppManagerObserver observer(manager());
   manager()->SetAutoLaunchApp("none_exist_app");
   EXPECT_EQ("", manager()->GetAutoLaunchApp());
+  EXPECT_FALSE(manager()->IsAutoLaunchEnabled());
 
   // Add an exist app again.
   observer.Reset();
@@ -203,7 +262,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, LoadCached) {
       "app_1_id");
   entry->SetIntegerWithoutPathExpansion(
       kAccountsPrefDeviceLocalAccountsKeyType,
-      DEVICE_LOCAL_ACCOUNT_TYPE_KIOSK_APP);
+      policy::DeviceLocalAccount::TYPE_KIOSK_APP);
   entry->SetStringWithoutPathExpansion(
       kAccountsPrefDeviceLocalAccountsKeyKioskAppId,
       "app_1");
@@ -218,7 +277,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, LoadCached) {
   KioskAppManager::Apps apps;
   manager()->GetApps(&apps);
   EXPECT_EQ(1u, apps.size());
-  EXPECT_EQ("app_1", apps[0].id);
+  EXPECT_EQ("app_1", apps[0].app_id);
   EXPECT_EQ("App1 Name", apps[0].name);
   EXPECT_EQ(gfx::Size(16, 16), apps[0].icon.size());
 }
@@ -249,7 +308,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, GoodApp) {
   KioskAppManager::Apps apps;
   manager()->GetApps(&apps);
   EXPECT_EQ(1u, apps.size());
-  EXPECT_EQ("app_1", apps[0].id);
+  EXPECT_EQ("app_1", apps[0].app_id);
   EXPECT_EQ("Name of App 1", apps[0].name);
   EXPECT_EQ(gfx::Size(16, 16), apps[0].icon.size());
 
@@ -269,8 +328,81 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, GoodApp) {
   ASSERT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &expected_icon_path));
   expected_icon_path = expected_icon_path.
       AppendASCII(KioskAppManager::kIconCacheDir).
-      AppendASCII(apps[0].id).AddExtension(".png");
+      AppendASCII(apps[0].app_id).AddExtension(".png");
   EXPECT_EQ(expected_icon_path.value(), icon_path_string);
+}
+
+IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, EnableConsumerKiosk) {
+  scoped_ptr<KioskAppManager::ConsumerKioskModeStatus> status(
+      new KioskAppManager::ConsumerKioskModeStatus(
+          KioskAppManager::CONSUMER_KIOSK_MODE_DISABLED));
+  scoped_ptr<bool> locked(new bool(false));
+
+  scoped_refptr<content::MessageLoopRunner> runner =
+      new content::MessageLoopRunner;
+  manager()->GetConsumerKioskModeStatus(
+      base::Bind(&ConsumerKioskModeStatusCheck,
+                 status.get(),
+                 runner->QuitClosure()));
+  runner->Run();
+  EXPECT_EQ(*status.get(), KioskAppManager::CONSUMER_KIOSK_MODE_CONFIGURABLE);
+
+  scoped_refptr<content::MessageLoopRunner> runner2 =
+      new content::MessageLoopRunner;
+  manager()->EnableConsumerModeKiosk(
+      base::Bind(&ConsumerKioskModeLockCheck,
+                 locked.get(),
+                 runner2->QuitClosure()));
+  runner2->Run();
+  EXPECT_TRUE(*locked.get());
+
+  scoped_refptr<content::MessageLoopRunner> runner3 =
+      new content::MessageLoopRunner;
+  manager()->GetConsumerKioskModeStatus(
+      base::Bind(&ConsumerKioskModeStatusCheck,
+                 status.get(),
+                 runner3->QuitClosure()));
+  runner3->Run();
+  EXPECT_EQ(*status.get(), KioskAppManager::CONSUMER_KIOSK_MODE_ENABLED);
+}
+
+IN_PROC_BROWSER_TEST_F(KioskAppManagerTest,
+                       PreventEnableConsumerKioskForEnterprise) {
+  // First, lock the device as enterprise.
+  EXPECT_EQ(LockDeviceForEnterprise(),
+            policy::EnterpriseInstallAttributes::LOCK_SUCCESS);
+
+  scoped_ptr<KioskAppManager::ConsumerKioskModeStatus> status(
+      new KioskAppManager::ConsumerKioskModeStatus(
+          KioskAppManager::CONSUMER_KIOSK_MODE_DISABLED));
+  scoped_ptr<bool> locked(new bool(true));
+
+  scoped_refptr<content::MessageLoopRunner> runner =
+      new content::MessageLoopRunner;
+  manager()->GetConsumerKioskModeStatus(
+      base::Bind(&ConsumerKioskModeStatusCheck,
+                 status.get(),
+                 runner->QuitClosure()));
+  runner->Run();
+  EXPECT_EQ(*status.get(), KioskAppManager::CONSUMER_KIOSK_MODE_DISABLED);
+
+  scoped_refptr<content::MessageLoopRunner> runner2 =
+      new content::MessageLoopRunner;
+  manager()->EnableConsumerModeKiosk(
+      base::Bind(&ConsumerKioskModeLockCheck,
+                 locked.get(),
+                 runner2->QuitClosure()));
+  runner2->Run();
+  EXPECT_FALSE(*locked.get());
+
+  scoped_refptr<content::MessageLoopRunner> runner3 =
+      new content::MessageLoopRunner;
+  manager()->GetConsumerKioskModeStatus(
+      base::Bind(&ConsumerKioskModeStatusCheck,
+                 status.get(),
+                 runner3->QuitClosure()));
+  runner3->Run();
+  EXPECT_EQ(*status.get(), KioskAppManager::CONSUMER_KIOSK_MODE_DISABLED);
 }
 
 }  // namespace chromeos

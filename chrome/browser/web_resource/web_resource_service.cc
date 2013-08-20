@@ -7,10 +7,10 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
@@ -93,7 +93,7 @@ void WebResourceService::OnResourceRequestsAllowed() {
 // Delay initial load of resource data into cache so as not to interfere
 // with startup time.
 void WebResourceService::ScheduleFetch(int64 delay_ms) {
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&WebResourceService::StartFetch,
                  weak_ptr_factory_.GetWeakPtr()),

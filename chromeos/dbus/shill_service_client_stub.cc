@@ -86,7 +86,7 @@ void ShillServiceClientStub::GetProperties(
     call_status = DBUS_METHOD_CALL_FAILURE;
   }
 
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&PassStubServiceProperties,
                  callback,
@@ -102,29 +102,34 @@ void ShillServiceClientStub::SetProperty(const dbus::ObjectPath& service_path,
   base::DictionaryValue* dict = NULL;
   if (!stub_services_.GetDictionaryWithoutPathExpansion(
           service_path.value(), &dict)) {
+    LOG(ERROR) << "Service not found:  " << service_path.value();
     error_callback.Run("Error.InvalidService", "Invalid Service");
     return;
   }
+  VLOG(1) << "Service.SetProperty: " << name << " = " << value
+          << " For: " << service_path.value();
   if (name == flimflam::kStateProperty) {
-    // If we connect to a service, then we move it to the top of the list in
-    // the manager client.
+    // If the service went into a connected state, then move it to the top of
+    // the list in the manager client.
+    // TODO(gauravsh): Generalize to sort services properly to allow for testing
+    //  more complex scenarios.
     std::string state;
-    if (value.GetAsString(&state) && state == flimflam::kStateOnline) {
+    if (value.GetAsString(&state) && (state == flimflam::kStateOnline ||
+                                      state == flimflam::kStatePortal))  {
       ShillManagerClient* manager_client =
           DBusThreadManager::Get()->GetShillManagerClient();
-      manager_client->GetTestInterface()->RemoveService(service_path.value());
-      manager_client->GetTestInterface()->AddServiceAtIndex(
+      manager_client->GetTestInterface()->MoveServiceToIndex(
           service_path.value(), 0, true);
     }
   }
   dict->SetWithoutPathExpansion(name, value.DeepCopy());
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&ShillServiceClientStub::NotifyObserversPropertyChanged,
                  weak_ptr_factory_.GetWeakPtr(), service_path, name));
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 void ShillServiceClientStub::ClearProperty(
@@ -139,13 +144,13 @@ void ShillServiceClientStub::ClearProperty(
     return;
   }
   dict->Remove(name, NULL);
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&ShillServiceClientStub::NotifyObserversPropertyChanged,
                  weak_ptr_factory_.GetWeakPtr(), service_path, name));
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 void ShillServiceClientStub::ClearProperties(
@@ -167,7 +172,7 @@ void ShillServiceClientStub::ClearProperties(
   }
   for (std::vector<std::string>::const_iterator iter = names.begin();
       iter != names.end(); ++iter) {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(
             &ShillServiceClientStub::NotifyObserversPropertyChanged,
@@ -175,7 +180,7 @@ void ShillServiceClientStub::ClearProperties(
   }
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&PassStubListValue,
                  callback, base::Owned(results.release())));
@@ -184,20 +189,27 @@ void ShillServiceClientStub::ClearProperties(
 void ShillServiceClientStub::Connect(const dbus::ObjectPath& service_path,
                                      const base::Closure& callback,
                                      const ErrorCallback& error_callback) {
+  VLOG(1) << "ShillServiceClientStub::Connect: " << service_path.value();
   base::Value* service;
   if (!stub_services_.Get(service_path.value(), &service)) {
+    LOG(ERROR) << "Service not found:  " << service_path.value();
     error_callback.Run("Error.InvalidService", "Invalid Service");
     return;
   }
+  base::TimeDelta delay;
   // Set Associating
   base::StringValue associating_value(flimflam::kStateAssociation);
   SetServiceProperty(service_path.value(),
                      flimflam::kStateProperty,
                      associating_value);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableStubInteractive)) {
+    const int kConnectDelaySeconds = 5;
+    delay = base::TimeDelta::FromSeconds(kConnectDelaySeconds);
+  }
   // Set Online after a delay
-  const int kConnectDelaySeconds = 5;
   base::StringValue online_value(flimflam::kStateOnline);
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ShillServiceClientStub::SetProperty,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -206,7 +218,7 @@ void ShillServiceClientStub::Connect(const dbus::ObjectPath& service_path,
                  online_value,
                  base::Bind(&base::DoNothing),
                  error_callback),
-                 base::TimeDelta::FromSeconds(kConnectDelaySeconds));
+      delay);
   callback.Run();
 }
 
@@ -218,10 +230,15 @@ void ShillServiceClientStub::Disconnect(const dbus::ObjectPath& service_path,
     error_callback.Run("Error.InvalidService", "Invalid Service");
     return;
   }
+  base::TimeDelta delay;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableStubInteractive)) {
+    const int kConnectDelaySeconds = 2;
+    delay = base::TimeDelta::FromSeconds(kConnectDelaySeconds);
+  }
   // Set Idle after a delay
-  const int kConnectDelaySeconds = 2;
   base::StringValue idle_value(flimflam::kStateIdle);
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ShillServiceClientStub::SetProperty,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -230,7 +247,7 @@ void ShillServiceClientStub::Disconnect(const dbus::ObjectPath& service_path,
                  idle_value,
                  base::Bind(&base::DoNothing),
                  error_callback),
-                 base::TimeDelta::FromSeconds(kConnectDelaySeconds));
+      delay);
   callback.Run();
 }
 
@@ -239,7 +256,7 @@ void ShillServiceClientStub::Remove(const dbus::ObjectPath& service_path,
                                     const ErrorCallback& error_callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 void ShillServiceClientStub::ActivateCellularModem(
@@ -249,7 +266,7 @@ void ShillServiceClientStub::ActivateCellularModem(
     const ErrorCallback& error_callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 void ShillServiceClientStub::CompleteCellularActivation(
@@ -258,7 +275,7 @@ void ShillServiceClientStub::CompleteCellularActivation(
     const ErrorCallback& error_callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 bool ShillServiceClientStub::CallActivateCellularModemAndBlock(
@@ -290,7 +307,7 @@ void ShillServiceClientStub::AddServiceWithIPConfig(
     const std::string& ipconfig_path,
     bool add_to_watch_list) {
   DBusThreadManager::Get()->GetShillManagerClient()->GetTestInterface()->
-      AddService(service_path, add_to_watch_list);
+      AddManagerService(service_path, add_to_watch_list);
 
   base::DictionaryValue* properties =
       GetModifiableServiceProperties(service_path);
@@ -314,7 +331,7 @@ void ShillServiceClientStub::AddServiceWithIPConfig(
 
 void ShillServiceClientStub::RemoveService(const std::string& service_path) {
   DBusThreadManager::Get()->GetShillManagerClient()->GetTestInterface()->
-      RemoveService(service_path);
+      RemoveManagerService(service_path);
 
   stub_services_.RemoveWithoutPathExpansion(service_path, NULL);
 }
@@ -336,7 +353,7 @@ const base::DictionaryValue* ShillServiceClientStub::GetServiceProperties(
 
 void ShillServiceClientStub::ClearServices() {
   DBusThreadManager::Get()->GetShillManagerClient()->GetTestInterface()->
-      ClearServices();
+      ClearManagerServices();
 
   stub_services_.Clear();
 }
@@ -346,53 +363,53 @@ void ShillServiceClientStub::SetDefaultProperties() {
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kDisableStubEthernet)) {
-    AddService("stub_ethernet", "eth0",
+    AddService("eth1", "eth1",
                flimflam::kTypeEthernet,
                flimflam::kStateOnline,
                add_to_watchlist);
   }
 
-  AddService("stub_wifi1", "wifi1",
+  AddService("wifi1", "wifi1",
              flimflam::kTypeWifi,
              flimflam::kStateOnline,
              add_to_watchlist);
-  SetServiceProperty("stub_wifi1",
+  SetServiceProperty("wifi1",
                      flimflam::kSecurityProperty,
                      base::StringValue(flimflam::kSecurityWep));
 
-  AddService("stub_wifi2", "wifi2_PSK",
+  AddService("wifi2", "wifi2_PSK",
              flimflam::kTypeWifi,
              flimflam::kStateIdle,
              add_to_watchlist);
-  SetServiceProperty("stub_wifi2",
+  SetServiceProperty("wifi2",
                      flimflam::kSecurityProperty,
                      base::StringValue(flimflam::kSecurityPsk));
   base::FundamentalValue strength_value(80);
-  SetServiceProperty("stub_wifi2",
+  SetServiceProperty("wifi2",
                      flimflam::kSignalStrengthProperty,
                      strength_value);
 
-  AddService("stub_cellular1", "cellular1",
+  AddService("cellular1", "cellular1",
              flimflam::kTypeCellular,
              flimflam::kStateIdle,
              add_to_watchlist);
   base::StringValue technology_value(flimflam::kNetworkTechnologyGsm);
-  SetServiceProperty("stub_cellular1",
+  SetServiceProperty("cellular1",
                      flimflam::kNetworkTechnologyProperty,
                      technology_value);
-  SetServiceProperty("stub_cellular1",
+  SetServiceProperty("cellular1",
                      flimflam::kActivationStateProperty,
                      base::StringValue(flimflam::kActivationStateNotActivated));
-  SetServiceProperty("stub_cellular1",
+  SetServiceProperty("cellular1",
                      flimflam::kRoamingStateProperty,
                      base::StringValue(flimflam::kRoamingStateHome));
 
-  AddService("stub_vpn1", "vpn1",
+  AddService("vpn1", "vpn1",
              flimflam::kTypeVPN,
              flimflam::kStateOnline,
              add_to_watchlist);
 
-  AddService("stub_vpn2", "vpn2",
+  AddService("vpn2", "vpn2",
              flimflam::kTypeVPN,
              flimflam::kStateOffline,
              add_to_watchlist);

@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/theme_provider.h"
@@ -53,7 +53,7 @@ extern "C" NSString* const kBrowserThemeDidChangeNotification;
 
 class ThemeService : public base::NonThreadSafe,
                      public content::NotificationObserver,
-                     public ProfileKeyedService,
+                     public BrowserContextKeyedService,
                      public ui::ThemeProvider {
  public:
   // Public constants used in ThemeService and its subclasses:
@@ -163,7 +163,7 @@ class ThemeService : public base::NonThreadSafe,
   // from ClearCaches().
   virtual void FreePlatformCaches();
 
-  Profile* profile() { return profile_; }
+  Profile* profile() const { return profile_; }
 
   void set_ready() { ready_ = true; }
 
@@ -183,6 +183,9 @@ class ThemeService : public base::NonThreadSafe,
   // Implementation of SetTheme() (and the fallback from LoadThemePrefs() in
   // case we don't have a theme pack).
   void BuildFromExtension(const extensions::Extension* extension);
+
+  // Returns true if the profile belongs to a managed user.
+  bool IsManagedUser() const;
 
 #if defined(TOOLKIT_GTK)
   // Loads an image and flips it horizontally if |rtl_enabled| is true.

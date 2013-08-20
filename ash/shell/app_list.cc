@@ -9,10 +9,12 @@
 #include "ash/shell/example_factory.h"
 #include "ash/shell/toplevel_window.h"
 #include "base/basictypes.h"
+#include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_view_delegate.h"
@@ -231,19 +233,24 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
     return NULL;
   }
 
+  virtual void GetShortcutPathForApp(
+      const std::string& app_id,
+      const base::Callback<void(const base::FilePath&)>& callback) OVERRIDE {
+  }
+
   virtual void ActivateAppListItem(app_list::AppListItemModel* item,
                                    int event_flags) OVERRIDE {
     static_cast<WindowTypeLauncherItem*>(item)->Activate(event_flags);
   }
 
-  virtual void OpenSearchResult(const app_list::SearchResult& result,
+  virtual void OpenSearchResult(app_list::SearchResult* result,
                                 int event_flags) OVERRIDE {
     const ExampleSearchResult* example_result =
-        static_cast<const ExampleSearchResult*>(&result);
+        static_cast<const ExampleSearchResult*>(result);
     WindowTypeLauncherItem::Activate(example_result->type(), event_flags);
   }
 
-  virtual void InvokeSearchResultAction(const app_list::SearchResult& result,
+  virtual void InvokeSearchResultAction(app_list::SearchResult* result,
                                         int action_index,
                                         int event_flags) OVERRIDE {
     NOTIMPLEMENTED();
@@ -304,6 +311,10 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
   }
 
   virtual void OpenSettings() OVERRIDE {
+    // Nothing needs to be done.
+  }
+
+  virtual void OpenHelp() OVERRIDE {
     // Nothing needs to be done.
   }
 

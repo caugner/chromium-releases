@@ -4,13 +4,17 @@
 
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
+#include "ash/ash_switches.h"
+#include "ash/display/display_controller.h"
 #include "ash/launcher/launcher.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_util.h"
+#include "ash/launcher/launcher_view.h"
 #include "ash/shell.h"
+#include "ash/test/launcher_view_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/wm/window_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -21,6 +25,8 @@
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
+#include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_per_app.h"
 #include "chrome/browser/ui/ash/launcher/launcher_item_controller.h"
 #include "chrome/browser/ui/browser.h"
@@ -40,6 +46,8 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/app_list/views/apps_grid_view.h"
+#include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
 
@@ -47,10 +55,6 @@ using extensions::Extension;
 using content::WebContents;
 
 namespace {
-
-// TODO(skuhne): Remove this temporary fix once M28 is out and CL 11596003
-// has landed. See also launcher.cc for the offset introduction.
-const int kChromeItemOffset = 1;
 
 class TestEvent : public ui::Event {
  public:
@@ -156,7 +160,7 @@ class LauncherPlatformPerAppAppBrowserTest
 
   // Activate the launcher item with the given |id|.
   void ActivateLauncherItem(int id) {
-    launcher_->ActivateLauncherItem(id + kChromeItemOffset);
+    launcher_->ActivateLauncherItem(id);
   }
 
   ash::Launcher* launcher_;
@@ -188,7 +192,9 @@ class LauncherPerAppAppBrowserTest : public ExtensionBrowserTest {
   size_t NumberOfDetectedLauncherBrowsers(bool show_all_tabs) {
     ChromeLauncherControllerPerApp* controller =
         static_cast<ChromeLauncherControllerPerApp*>(launcher_->delegate());
-    int items = controller->GetBrowserApplicationList(
+    LauncherItemController* item_controller =
+      controller->GetBrowserShortcutLauncherItemController();
+    int items = item_controller->GetApplicationList(
         show_all_tabs ? ui::EF_SHIFT_DOWN : 0).size();
     // If we have at least one item, we have also a title which we remove here.
     return items ? (items - 1) : 0;
@@ -239,7 +245,7 @@ class LauncherPerAppAppBrowserTest : public ExtensionBrowserTest {
 
   // Activate the launcher item with the given |id|.
   void ActivateLauncherItem(int id) {
-    launcher_->ActivateLauncherItem(id + kChromeItemOffset);
+    launcher_->ActivateLauncherItem(id);
   }
 
   ash::Launcher* launcher_;
@@ -1252,7 +1258,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformPerAppAppBrowserTest,
                        AltNumberAppsTabbing) {
   // First run app.
   const Extension* extension1 = LoadAndLaunchPlatformApp("launch");
-  BaseWindow* window1 = CreateShellWindow(extension1)->GetBaseWindow();
+  ui::BaseWindow* window1 = CreateShellWindow(extension1)->GetBaseWindow();
   const ash::LauncherItem& item1 = GetLastLauncherItem();
   ash::LauncherID app_id = item1.id;
   int app_index = launcher_model()->ItemIndexByID(app_id);
@@ -1261,7 +1267,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformPerAppAppBrowserTest,
   EXPECT_EQ(ash::STATUS_ACTIVE, item1.status);
 
   const Extension* extension2 = LoadAndLaunchPlatformApp("launch_2");
-  BaseWindow* window2 = CreateShellWindow(extension2)->GetBaseWindow();
+  ui::BaseWindow* window2 = CreateShellWindow(extension2)->GetBaseWindow();
 
   // By now the browser should be active. Issue Alt keystrokes several times to
   // see that we stay on that application.
@@ -1271,7 +1277,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformPerAppAppBrowserTest,
   ActivateLauncherItem(app_index);
   EXPECT_TRUE(window1->IsActive());
 
-  BaseWindow* window1a = CreateShellWindow(extension1)->GetBaseWindow();
+  ui::BaseWindow* window1a = CreateShellWindow(extension1)->GetBaseWindow();
 
   EXPECT_TRUE(window1a->IsActive());
   EXPECT_FALSE(window1->IsActive());
@@ -1287,10 +1293,10 @@ IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTestNoDefaultBrowser,
   // Get the number of items in the browser menu.
   EXPECT_EQ(0u, chrome::GetTotalBrowserCount());
   // The first activation should create a browser.
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
   // A second activation should not create a new instance.
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   Browser* browser1 = chrome::FindBrowserWithWindow(ash::wm::GetActiveWindow());
   EXPECT_TRUE(browser1);
   aura::Window* window1 = browser1->window()->GetNativeWindow();
@@ -1302,9 +1308,9 @@ IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTestNoDefaultBrowser,
   EXPECT_EQ(window2, ash::wm::GetActiveWindow());
 
   // Activate multiple times the switcher to see that the windows get activated.
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window1, ash::wm::GetActiveWindow());
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window2, ash::wm::GetActiveWindow());
 
   // Create a third browser - make sure that we do not toggle simply between
@@ -1317,13 +1323,13 @@ IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTestNoDefaultBrowser,
   EXPECT_NE(window2, window3);
   EXPECT_EQ(window3, ash::wm::GetActiveWindow());
 
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window1, ash::wm::GetActiveWindow());
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window2, ash::wm::GetActiveWindow());
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window3, ash::wm::GetActiveWindow());
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window1, ash::wm::GetActiveWindow());
 
   // Create anther app and make sure that none of our browsers is active.
@@ -1332,6 +1338,182 @@ IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTestNoDefaultBrowser,
   EXPECT_NE(window2, ash::wm::GetActiveWindow());
 
   // After activation our browser should be active again.
-  launcher_->ActivateLauncherItem(1);
+  launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window1, ash::wm::GetActiveWindow());
+}
+
+// Do various drag and drop interaction tests between the application list and
+// the launcher.
+IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTest, DragAndDrop) {
+  // Get a number of interfaces we need.
+  aura::test::EventGenerator generator(
+      ash::Shell::GetPrimaryRootWindow(), gfx::Point());
+  ash::test::LauncherViewTestAPI test(launcher_->GetLauncherViewForTest());
+  AppListService* service = AppListService::Get();
+
+  // There should be two items in our launcher by this time.
+  EXPECT_EQ(2, model_->item_count());
+  EXPECT_FALSE(service->IsAppListVisible());
+
+  // Open the app list menu and check that the drag and drop host was set.
+  gfx::Rect app_list_bounds =
+      test.launcher_view()->GetAppListButtonView()->GetBoundsInScreen();
+  generator.MoveMouseTo(app_list_bounds.CenterPoint().x(),
+                        app_list_bounds.CenterPoint().y());
+  base::MessageLoop::current()->RunUntilIdle();
+  generator.ClickLeftButton();
+
+  EXPECT_TRUE(service->IsAppListVisible());
+  app_list::AppsGridView* grid_view =
+      app_list::AppsGridView::GetLastGridViewForTest();
+  ASSERT_TRUE(grid_view);
+  ASSERT_TRUE(grid_view->has_drag_and_drop_host_for_test());
+
+  // There should be 2 items in our application list.
+  const views::ViewModel* vm_grid = grid_view->view_model_for_test();
+  EXPECT_EQ(2, vm_grid->view_size());
+
+  // Test #1: Drag an app list which does not exist yet item into the
+  // launcher. Keeping it dragged, see that a new item gets created. Continuing
+  // to drag it out should remove it again.
+
+  // Get over item #1 of the application list and press the mouse button.
+  views::View* item1 = vm_grid->view_at(1);
+  gfx::Rect bounds_grid_1 = item1->GetBoundsInScreen();
+  generator.MoveMouseTo(bounds_grid_1.CenterPoint().x(),
+                        bounds_grid_1.CenterPoint().y());
+  base::MessageLoop::current()->RunUntilIdle();
+  generator.PressLeftButton();
+
+  EXPECT_FALSE(grid_view->forward_events_to_drag_and_drop_host_for_test());
+
+  // Drag the item into the launcher and check that a new item gets created.
+  const views::ViewModel* vm_launcher =
+      test.launcher_view()->view_model_for_test();
+  views::View* launcher1 = vm_launcher->view_at(1);
+  gfx::Rect bounds_launcher_1 = launcher1->GetBoundsInScreen();
+  generator.MoveMouseTo(bounds_launcher_1.CenterPoint().x(),
+                        bounds_launcher_1.CenterPoint().y());
+  base::MessageLoop::current()->RunUntilIdle();
+
+  // Check that a new item got created.
+  EXPECT_EQ(3, model_->item_count());
+  EXPECT_TRUE(grid_view->forward_events_to_drag_and_drop_host_for_test());
+
+  // Move it where the item originally was and check that it disappears again.
+  generator.MoveMouseTo(bounds_grid_1.CenterPoint().x(),
+                        bounds_grid_1.CenterPoint().y());
+  base::MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(2, model_->item_count());
+  EXPECT_FALSE(grid_view->forward_events_to_drag_and_drop_host_for_test());
+
+  // Dropping it should keep the launcher as it originally was.
+  generator.ReleaseLeftButton();
+  base::MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(2, model_->item_count());
+  // There are a few animations which need finishing before we can continue.
+  test.RunMessageLoopUntilAnimationsDone();
+  // Move the mouse outside of the launcher.
+  generator.MoveMouseTo(0, 0);
+
+  // Test #2: Check that the unknown item dropped into the launcher will
+  // create a new item.
+  generator.MoveMouseTo(bounds_grid_1.CenterPoint().x(),
+                        bounds_grid_1.CenterPoint().y());
+  generator.PressLeftButton();
+  generator.MoveMouseTo(bounds_launcher_1.CenterPoint().x(),
+                        bounds_launcher_1.CenterPoint().y());
+  base::MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(3, model_->item_count());
+  EXPECT_TRUE(grid_view->forward_events_to_drag_and_drop_host_for_test());
+  generator.ReleaseLeftButton();
+  base::MessageLoop::current()->RunUntilIdle();
+  EXPECT_FALSE(grid_view->forward_events_to_drag_and_drop_host_for_test());
+  EXPECT_EQ(3, model_->item_count());  // It should be still there.
+  test.RunMessageLoopUntilAnimationsDone();
+
+  // Test #3: Check that the now known item dropped into the launcher will
+  // not create a new item.
+  generator.MoveMouseTo(bounds_grid_1.CenterPoint().x(),
+                        bounds_grid_1.CenterPoint().y());
+  generator.PressLeftButton();
+  generator.MoveMouseTo(bounds_launcher_1.CenterPoint().x(),
+                        bounds_launcher_1.CenterPoint().y());
+  base::MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(3, model_->item_count());  // No new item got added.
+  EXPECT_TRUE(grid_view->forward_events_to_drag_and_drop_host_for_test());
+  generator.ReleaseLeftButton();
+  base::MessageLoop::current()->RunUntilIdle();
+  EXPECT_FALSE(grid_view->forward_events_to_drag_and_drop_host_for_test());
+  EXPECT_EQ(3, model_->item_count());  // And it remains that way.
+}
+
+// Check that clicking on an app launcher item launches a new browser.
+IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTest, ClickItem) {
+  // Get a number of interfaces we need.
+  aura::test::EventGenerator generator(
+      ash::Shell::GetPrimaryRootWindow(), gfx::Point());
+  ash::test::LauncherViewTestAPI test(launcher_->GetLauncherViewForTest());
+  AppListService* service = AppListService::Get();
+  // There should be two items in our launcher by this time.
+  EXPECT_EQ(2, model_->item_count());
+  EXPECT_FALSE(service->IsAppListVisible());
+
+  // Open the app list menu and check that the drag and drop host was set.
+  gfx::Rect app_list_bounds =
+      test.launcher_view()->GetAppListButtonView()->GetBoundsInScreen();
+  generator.MoveMouseTo(app_list_bounds.CenterPoint().x(),
+                        app_list_bounds.CenterPoint().y());
+  generator.ClickLeftButton();
+  base::MessageLoop::current()->RunUntilIdle();
+
+  EXPECT_TRUE(service->IsAppListVisible());
+  app_list::AppsGridView* grid_view =
+      app_list::AppsGridView::GetLastGridViewForTest();
+  ASSERT_TRUE(grid_view);
+  const views::ViewModel* vm_grid = grid_view->view_model_for_test();
+  EXPECT_EQ(2, vm_grid->view_size());
+  gfx::Rect bounds_grid_1 = vm_grid->view_at(1)->GetBoundsInScreen();
+  // Test now that a click does create a new application tab.
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+  int tab_count = tab_strip->count();
+  generator.MoveMouseTo(bounds_grid_1.CenterPoint().x(),
+                        bounds_grid_1.CenterPoint().y());
+  generator.ClickLeftButton();
+  base::MessageLoop::current()->RunUntilIdle();
+  EXPECT_EQ(tab_count + 1, tab_strip->count());
+}
+
+// Check LauncherItemController of Browser Shortcut functionality.
+IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTestNoDefaultBrowser,
+    BrowserShortcutLauncherItemController) {
+  ChromeLauncherControllerPerApp* controller =
+      static_cast<ChromeLauncherControllerPerApp*>(launcher_->delegate());
+  LauncherItemController* item_controller =
+      controller->GetBrowserShortcutLauncherItemController();
+
+  // Get the number of browsers.
+  size_t running_browser = chrome::GetTotalBrowserCount();
+  EXPECT_EQ(0u, running_browser);
+  EXPECT_FALSE(item_controller->IsOpen());
+
+  // Activate. This creates new browser
+  item_controller->Activate();
+  // New Window is created.
+  running_browser = chrome::GetTotalBrowserCount();
+  EXPECT_EQ(1u, running_browser);
+  EXPECT_TRUE(item_controller->IsOpen());
+
+  // Minimize Window.
+  aura::Window* window = ash::wm::GetActiveWindow();
+  ash::wm::MinimizeWindow(window);
+  EXPECT_TRUE(ash::wm::IsWindowMinimized(window));
+
+  // Activate again. This doesn't create new browser.
+  // It activates window.
+  item_controller->Activate();
+  running_browser = chrome::GetTotalBrowserCount();
+  EXPECT_EQ(1u, running_browser);
+  EXPECT_TRUE(item_controller->IsOpen());
+  EXPECT_FALSE(ash::wm::IsWindowMinimized(window));
 }

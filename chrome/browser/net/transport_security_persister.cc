@@ -67,6 +67,8 @@ std::string ExternalStringToHashedDomain(const std::string& external) {
 }
 
 const char kIncludeSubdomains[] = "include_subdomains";
+const char kStsIncludeSubdomains[] = "sts_include_subdomains";
+const char kPkpIncludeSubdomains[] = "pkp_include_subdomains";
 const char kMode[] = "mode";
 const char kExpiry[] = "expiry";
 const char kDynamicSPKIHashesExpiry[] = "dynamic_spki_hashes_expiry";
@@ -101,7 +103,7 @@ class TransportSecurityPersister::Loader {
     // Make sure we're deleted.
     scoped_ptr<Loader> deleter(this);
 
-    if (!persister_ || !state_valid_)
+    if (!persister_.get() || !state_valid_)
       return;
     persister_->CompleteLoad(state_);
   }
@@ -123,7 +125,8 @@ TransportSecurityPersister::TransportSecurityPersister(
     bool readonly)
     : transport_security_state_(state),
       writer_(profile_path.AppendASCII("TransportSecurity"),
-              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)),
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)
+                  .get()),
       readonly_(readonly),
       weak_ptr_factory_(this) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -167,8 +170,10 @@ bool TransportSecurityPersister::SerializeData(std::string* output) {
         state.domain_state();
 
     DictionaryValue* serialized = new DictionaryValue;
-    serialized->SetBoolean(kIncludeSubdomains,
-                           domain_state.include_subdomains);
+    serialized->SetBoolean(kStsIncludeSubdomains,
+                           domain_state.sts_include_subdomains);
+    serialized->SetBoolean(kPkpIncludeSubdomains,
+                           domain_state.pkp_include_subdomains);
     serialized->SetDouble(kCreated, domain_state.created.ToDoubleT());
     serialized->SetDouble(kExpiry, domain_state.upgrade_expiry.ToDoubleT());
     serialized->SetDouble(kDynamicSPKIHashesExpiry,
@@ -204,25 +209,16 @@ bool TransportSecurityPersister::SerializeData(std::string* output) {
   return true;
 }
 
-bool TransportSecurityPersister::DeserializeFromCommandLine(
-    const std::string& serialized) {
-  // Purposefully ignore |dirty| because we do not want to persist entries
-  // deserialized in this way.
-  bool dirty;
-  return Deserialize(serialized, true, &dirty, transport_security_state_);
-}
-
 bool TransportSecurityPersister::LoadEntries(const std::string& serialized,
                                              bool* dirty) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   transport_security_state_->ClearDynamicData();
-  return Deserialize(serialized, false, dirty, transport_security_state_);
+  return Deserialize(serialized, dirty, transport_security_state_);
 }
 
 // static
 bool TransportSecurityPersister::Deserialize(const std::string& serialized,
-                                             bool forced,
                                              bool* dirty,
                                              TransportSecurityState* state) {
   scoped_ptr<Value> value(base::JSONReader::Read(serialized));
@@ -246,8 +242,24 @@ bool TransportSecurityPersister::Deserialize(const std::string& serialized,
     double dynamic_spki_hashes_expiry = 0.0;
     TransportSecurityState::DomainState domain_state;
 
-    if (!parsed->GetBoolean(kIncludeSubdomains,
-                            &domain_state.include_subdomains) ||
+    // kIncludeSubdomains is a legacy synonym for kStsIncludeSubdomains and
+    // kPkpIncludeSubdomains. Parse at least one of these properties,
+    // preferably the new ones.
+    bool include_subdomains = false;
+    bool parsed_include_subdomains = parsed->GetBoolean(kIncludeSubdomains,
+                                                        &include_subdomains);
+    domain_state.sts_include_subdomains = include_subdomains;
+    domain_state.pkp_include_subdomains = include_subdomains;
+    if (parsed->GetBoolean(kStsIncludeSubdomains, &include_subdomains)) {
+      domain_state.sts_include_subdomains = include_subdomains;
+      parsed_include_subdomains = true;
+    }
+    if (parsed->GetBoolean(kPkpIncludeSubdomains, &include_subdomains)) {
+      domain_state.pkp_include_subdomains = include_subdomains;
+      parsed_include_subdomains = true;
+    }
+
+    if (!parsed_include_subdomains ||
         !parsed->GetString(kMode, &mode_string) ||
         !parsed->GetDouble(kExpiry, &expiry)) {
       LOG(WARNING) << "Could not parse some elements of entry " << i.key()
@@ -307,10 +319,7 @@ bool TransportSecurityPersister::Deserialize(const std::string& serialized,
       continue;
     }
 
-    if (forced)
-      state->AddOrUpdateForcedHosts(hashed, domain_state);
-    else
-      state->AddOrUpdateEnabledHosts(hashed, domain_state);
+    state->AddOrUpdateEnabledHosts(hashed, domain_state);
   }
 
   *dirty = dirtied;

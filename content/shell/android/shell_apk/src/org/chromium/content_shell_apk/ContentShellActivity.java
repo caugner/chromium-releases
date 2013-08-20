@@ -14,11 +14,14 @@ import android.util.Log;
 import android.view.KeyEvent;
 
 import org.chromium.base.ChromiumActivity;
+import org.chromium.base.MemoryPressureListener;
 import org.chromium.content.app.LibraryLoader;
-import org.chromium.content.browser.ActivityContentVideoViewDelegate;
+import org.chromium.content.browser.ActivityContentVideoViewClient;
 import org.chromium.content.browser.AndroidBrowserProcess;
 import org.chromium.content.browser.ContentVideoView;
+import org.chromium.content.browser.ContentVideoViewClient;
 import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.DeviceUtils;
 import org.chromium.content.browser.TracingIntentHandler;
 import org.chromium.content.common.CommandLine;
@@ -41,6 +44,21 @@ public class ContentShellActivity extends ChromiumActivity {
     private static final String ACTION_STOP_TRACE =
             "org.chromium.content_shell.action.PROFILE_STOP";
     public static final String COMMAND_LINE_ARGS_KEY = "commandLineArgs";
+
+    /**
+     * Sending an intent with this action will simulate a memory pressure signal
+     * at a critical level.
+     */
+    private static final String ACTION_LOW_MEMORY =
+            "org.chromium.content_shell.action.ACTION_LOW_MEMORY";
+
+    /**
+     * Sending an intent with this action will simulate a memory pressure signal
+     * at a moderate level.
+     */
+    private static final String ACTION_TRIM_MEMORY_MODERATE =
+            "org.chromium.content_shell.action.ACTION_TRIM_MEMORY_MODERATE";
+
 
     private ShellManager mShellManager;
     private WindowAndroid mWindowAndroid;
@@ -69,14 +87,12 @@ public class ContentShellActivity extends ChromiumActivity {
             mWindowAndroid = new WindowAndroid(this);
             mWindowAndroid.restoreInstanceState(savedInstanceState);
             mShellManager.setWindow(mWindowAndroid);
-            ContentVideoView.registerContentVideoViewContextDelegate(
-                    new ActivityContentVideoViewDelegate(this));
 
             String startupUrl = getUrlFromIntent(getIntent());
             if (!TextUtils.isEmpty(startupUrl)) {
                 mShellManager.setStartupUrl(Shell.sanitizeUrl(startupUrl));
             }
-            if (!AndroidBrowserProcess.init(this, AndroidBrowserProcess.MAX_RENDERERS_AUTOMATIC)) {
+            if (!AndroidBrowserProcess.init(this, AndroidBrowserProcess.MAX_RENDERERS_LIMIT)) {
                 String shellUrl = ShellManager.DEFAULT_SHELL_URL;
                 if (savedInstanceState != null
                     && savedInstanceState.containsKey(ACTIVE_SHELL_URL_KEY)) {
@@ -84,6 +100,12 @@ public class ContentShellActivity extends ChromiumActivity {
                 }
                 mShellManager.launchShell(shellUrl);
             }
+            getActiveContentView().setContentViewClient(new ContentViewClient() {
+                @Override
+                public ContentVideoViewClient getContentVideoViewClient() {
+                    return new ActivityContentVideoViewClient(ContentShellActivity.this);
+                }
+            });
         } catch (ProcessInitException e) {
             Log.e(TAG, "ContentView initialization failed.", e);
             finish();
@@ -126,6 +148,14 @@ public class ContentShellActivity extends ChromiumActivity {
     protected void onNewIntent(Intent intent) {
         if (getCommandLineParamsFromIntent(intent) != null) {
             Log.i(TAG, "Ignoring command line params: can only be set when creating the activity.");
+        }
+
+        if (ACTION_LOW_MEMORY.equals(intent.getAction())) {
+            MemoryPressureListener.simulateMemoryPressureSignal(TRIM_MEMORY_COMPLETE);
+            return;
+        } else if (ACTION_TRIM_MEMORY_MODERATE.equals(intent.getAction())) {
+            MemoryPressureListener.simulateMemoryPressureSignal(TRIM_MEMORY_MODERATE);
+            return;
         }
 
         String url = getUrlFromIntent(intent);

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/infobars/before_translate_infobar.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -84,11 +84,10 @@ void BeforeTranslateInfoBar::Layout() {
       OffsetY(options_size), options_size.width(), options_size.height());
 }
 
-void BeforeTranslateInfoBar::ViewHierarchyChanged(bool is_add,
-                                                  views::View* parent,
-                                                  views::View* child) {
-  if (!is_add || (child != this) || (label_1_ != NULL)) {
-    TranslateInfoBarBase::ViewHierarchyChanged(is_add, parent, child);
+void BeforeTranslateInfoBar::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (!details.is_add || (details.child != this) || (label_1_ != NULL)) {
+    TranslateInfoBarBase::ViewHierarchyChanged(details);
     return;
   }
 
@@ -138,7 +137,7 @@ void BeforeTranslateInfoBar::ViewHierarchyChanged(bool is_add,
 
   // This must happen after adding all other children so InfoBarView can ensure
   // the close button is the last child.
-  TranslateInfoBarBase::ViewHierarchyChanged(is_add, parent, child);
+  TranslateInfoBarBase::ViewHierarchyChanged(details);
 
   // This must happen after adding all children because it triggers layout,
   // which assumes that particular children (e.g. the close button) have already

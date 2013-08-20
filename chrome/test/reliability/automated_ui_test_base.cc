@@ -31,7 +31,7 @@ void AutomatedUITestBase::LogInfoMessage(const std::string& info) {
 
 void AutomatedUITestBase::SetUp() {
   UITest::SetUp();
-  set_active_browser(automation()->GetBrowserWindow(0));
+  set_active_browser(automation()->GetBrowserWindow(0).get());
 }
 
 bool AutomatedUITestBase::BackButton() {
@@ -74,7 +74,7 @@ bool AutomatedUITestBase::CloseActiveWindow() {
     scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(i));
     Browser::Type type;
     if (browser->GetType(&type) && type == Browser::TYPE_TABBED) {
-      set_active_browser(browser);
+      set_active_browser(browser.get());
       return true;
     }
   }

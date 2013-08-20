@@ -6,8 +6,8 @@
 
 #include <limits>
 
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/label.h"
@@ -75,7 +75,6 @@ InnerBoundedLabel::InnerBoundedLabel(const BoundedLabel& owner)
       wrapped_text_lines_(0) {
   SetMultiLine(true);
   SetAllowCharacterBreak(true);
-  SetElideBehavior(views::Label::ELIDE_AT_END);
   SetHorizontalAlignment(gfx::ALIGN_LEFT);
   set_collapse_when_hidden(true);
 }

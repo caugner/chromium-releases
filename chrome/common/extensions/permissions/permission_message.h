@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 namespace extensions {
 
@@ -62,6 +62,9 @@ class PermissionMessage {
     kSyncFileSystem,
     kAudio,
     kFavicon,
+    kMusicManagerPrivate,
+    kWebConnectable,
+    kActivityLogPrivate,
     kEnumBoundary,
   };
 

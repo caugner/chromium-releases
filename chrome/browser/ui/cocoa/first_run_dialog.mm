@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
+#import "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted.h"
-#import "base/memory/scoped_nsobject.h"
 #include "base/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -72,7 +72,7 @@ FirstRunShowBridge::FirstRunShowBridge(
 
 void FirstRunShowBridge::ShowDialog() {
   [controller_ show];
-  MessageLoop::current()->QuitNow();
+  base::MessageLoop::current()->QuitNow();
 }
 
 FirstRunShowBridge::~FirstRunShowBridge() {}
@@ -91,7 +91,7 @@ bool ShowFirstRun(Profile* profile) {
       g_browser_process->local_state()->FindPreference(
           prefs::kMetricsReportingEnabled);
   if (!metrics_reporting_pref || !metrics_reporting_pref->IsManaged()) {
-    scoped_nsobject<FirstRunDialogController> dialog(
+    base::scoped_nsobject<FirstRunDialogController> dialog(
         [[FirstRunDialogController alloc] init]);
 
     [dialog.get() showWindow:nil];
@@ -181,9 +181,9 @@ bool ShowFirstRunDialog(Profile* profile) {
   // Therefore the main MessageLoop is run so things work.
 
   scoped_refptr<FirstRunShowBridge> bridge(new FirstRunShowBridge(self));
-  MessageLoop::current()->PostTask(FROM_HERE,
+  base::MessageLoop::current()->PostTask(FROM_HERE,
       base::Bind(&FirstRunShowBridge::ShowDialog, bridge.get()));
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 }
 
 - (void)show {

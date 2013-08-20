@@ -12,12 +12,12 @@ namespace extensions {
 // Implements custom bindings for the tts API.
 class TTSCustomBindings : public ChromeV8Extension {
  public:
-  TTSCustomBindings(Dispatcher* dispatcher, v8::Handle<v8::Context> v8_context);
+  TTSCustomBindings(Dispatcher* dispatcher, ChromeV8Context* context);
 
  private:
-  v8::Handle<v8::Value> GetNextTTSEventId(const v8::Arguments& args);
+  void GetNextTTSEventId(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
-}  // extensions
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_TTS_CUSTOM_BINDINGS_H_

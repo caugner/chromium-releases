@@ -230,17 +230,14 @@ int SyncClientMain(int argc, char* argv[]) {
 #endif
   base::AtExitManager exit_manager;
   CommandLine::Init(argc, argv);
-  logging::InitLogging(
-      NULL,
-      logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-      logging::LOCK_LOG_FILE,
-      logging::DELETE_OLD_LOG_FILE,
-      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  logging::InitLogging(settings);
 
-  MessageLoop sync_loop;
+  base::MessageLoop sync_loop;
   base::Thread io_thread("IO thread");
   base::Thread::Options options;
-  options.message_loop_type = MessageLoop::TYPE_IO;
+  options.message_loop_type = base::MessageLoop::TYPE_IO;
   io_thread.StartWithOptions(options);
 
   // Parse command line.
@@ -293,7 +290,7 @@ int SyncClientMain(int argc, char* argv[]) {
     routing_info[it.Get()] = GROUP_PASSIVE;
   }
   scoped_refptr<PassiveModelWorker> passive_model_safe_worker =
-      new PassiveModelWorker(&sync_loop);
+      new PassiveModelWorker(&sync_loop, NULL);
   std::vector<ModelSafeWorker*> workers;
   workers.push_back(passive_model_safe_worker.get());
 
@@ -310,10 +307,8 @@ int SyncClientMain(int argc, char* argv[]) {
   const char kUserAgent[] = "sync_client";
   // TODO(akalin): Replace this with just the context getter once
   // HttpPostProviderFactory is removed.
-  scoped_ptr<HttpPostProviderFactory> post_factory(
-      new HttpBridgeFactory(context_getter,
-                            kUserAgent,
-                            NetworkTimeUpdateCallback()));
+  scoped_ptr<HttpPostProviderFactory> post_factory(new HttpBridgeFactory(
+      context_getter.get(), kUserAgent, NetworkTimeUpdateCallback()));
   // Used only when committing bookmarks, so it's okay to leave this
   // as NULL.
   ExtensionsActivityMonitor* extensions_activity_monitor = NULL;
@@ -347,7 +342,7 @@ int SyncClientMain(int argc, char* argv[]) {
                         new InternalComponentsFactoryImpl(factory_switches)),
                     &null_encryptor,
                     &unrecoverable_error_handler,
-                    &LogUnrecoverableErrorContext);
+                    &LogUnrecoverableErrorContext, false);
   // TODO(akalin): Avoid passing in model parameters multiple times by
   // organizing handling of model types.
   sync_manager->UpdateEnabledTypes(model_types);

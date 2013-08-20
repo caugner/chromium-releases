@@ -19,13 +19,13 @@ class AppListMenu : public ui::SimpleMenuModel::Delegate {
   enum AppListMenuCommands {
     CURRENT_USER,
     SHOW_SETTINGS,
+    SHOW_HELP,
     SHOW_FEEDBACK,
   };
 
   explicit AppListMenu(AppListViewDelegate* delegate);
   virtual ~AppListMenu();
 
- protected:
   ui::SimpleMenuModel* menu_model() { return &menu_model_; }
 
  private:

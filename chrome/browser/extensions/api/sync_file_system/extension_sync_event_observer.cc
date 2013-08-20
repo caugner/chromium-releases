@@ -12,9 +12,9 @@
 #include "chrome/browser/sync_file_system/sync_event_observer.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
 #include "chrome/common/extensions/api/sync_file_system.h"
-#include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/syncable/syncable_file_system_util.h"
+#include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
+#include "webkit/common/fileapi/file_system_util.h"
 
 using sync_file_system::SyncEventObserver;
 
@@ -26,15 +26,13 @@ ExtensionSyncEventObserver::ExtensionSyncEventObserver(
       sync_service_(NULL) {}
 
 void ExtensionSyncEventObserver::InitializeForService(
-    sync_file_system::SyncFileSystemService* sync_service,
-    const std::string& service_name) {
+    sync_file_system::SyncFileSystemService* sync_service) {
   DCHECK(sync_service);
   if (sync_service_ != NULL) {
     DCHECK_EQ(sync_service_, sync_service);
     return;
   }
   sync_service_ = sync_service;
-  service_name_ = service_name;
   sync_service_->AddSyncEventObserver(this);
 }
 
@@ -77,7 +75,7 @@ void ExtensionSyncEventObserver::OnFileSynced(
     sync_file_system::SyncFileStatus status,
     sync_file_system::SyncAction action,
     sync_file_system::SyncDirection direction) {
-  scoped_ptr<base::ListValue> params(new ListValue());
+  scoped_ptr<base::ListValue> params(new base::ListValue());
 
   // For now we always assume events come only for files (not directories).
   params->Append(CreateDictionaryValueForFileSystemEntry(

@@ -9,7 +9,7 @@
 #include "ash/shell.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/events/event.h"
@@ -27,18 +27,16 @@
 
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
-#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
+#include "chrome/browser/chromeos/keyboard_driven_event_rewriter.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "chromeos/ime/xkeyboard.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/x/x11_util.h"
-
-using chromeos::input_method::GetInputMethodManager;
 #endif
 
 namespace {
@@ -47,6 +45,7 @@ const int kBadDeviceId = -1;
 
 #if defined(OS_CHROMEOS)
 const char kNeo2LayoutId[] = "xkb:de:neo:ger";
+const char kCaMultixLayoutId[] = "xkb:ca:multix:fra";
 
 // A key code and a flag we should use when a key is remapped to |remap_to|.
 const struct ModifierRemapping {
@@ -70,7 +69,6 @@ const struct ModifierRemapping {
 };
 
 const ModifierRemapping* kModifierRemappingCtrl = &kModifierRemappings[1];
-const ModifierRemapping* kModifierRemappingCapsLock = &kModifierRemappings[4];
 
 // A structure for converting |native_modifier| to a pair of |flag| and
 // |pref_name|.
@@ -118,14 +116,9 @@ bool IsRight(KeySym native_keysym) {
   return false;
 }
 
-bool HasChromeOSKeyboard() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kHasChromeOSKeyboard);
-}
-
 bool HasDiamondKey() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kHasChromeOSDiamondKey);
+      chromeos::switches::kHasChromeOSDiamondKey);
 }
 
 bool IsMod3UsedByCurrentInputMethod() {
@@ -133,7 +126,10 @@ bool IsMod3UsedByCurrentInputMethod() {
   // it's not possible to make both features work. For now, we don't remap
   // Mod3Mask when Neo2 is in use.
   // TODO(yusukes): Remove the restriction.
-  return GetInputMethodManager()->GetCurrentInputMethod().id() == kNeo2LayoutId;
+  chromeos::input_method::InputMethodManager* manager =
+      chromeos::input_method::InputMethodManager::Get();
+  return manager->GetCurrentInputMethod().id() == kNeo2LayoutId ||
+      manager->GetCurrentInputMethod().id() == kCaMultixLayoutId;
 }
 #endif
 
@@ -150,6 +146,8 @@ EventRewriter::EventRewriter()
     : last_device_id_(kBadDeviceId),
 #if defined(OS_CHROMEOS)
       xkeyboard_(NULL),
+      keyboard_driven_event_rewritter_(
+          new chromeos::KeyboardDrivenEventRewriter),
 #endif
       pref_service_(NULL) {
   // The ash shell isn't instantiated for our unit tests.
@@ -356,6 +354,11 @@ void EventRewriter::Rewrite(ui::KeyEvent* event) {
   // crbug.com/136465.
   if (event->native_event()->xkey.send_event)
     return;
+
+  // Keyboard driven rewriting needs to happen before RewriteExtendedKeys
+  // to handle Ctrl+Alt+Shift+(Up | Down) so that they are not translated
+  // to Home/End.
+  keyboard_driven_event_rewritter_->RewriteIfKeyboardDrivenOnLoginScreen(event);
 #endif
   RewriteModifiers(event);
   RewriteNumPadKeys(event);
@@ -401,11 +404,9 @@ void EventRewriter::GetRemappedModifierMasks(
   // configurable modifier because Mod2Mask may be worked as NumLock mask.
   // (cf. http://crbug.com/173956)
   const bool skip_mod2 = !HasDiamondKey();
-  // When a Chrome OS keyboard is available, the configuration UI for Caps Lock
-  // is not shown. Therefore, ignore the kLanguageRemapCapsLockKeyTo syncable
-  // pref. If Mod3 is in use, don't check the pref either.
-  const bool skip_mod3 =
-    HasChromeOSKeyboard() || IsMod3UsedByCurrentInputMethod();
+  // If Mod3 is used by the current input method, don't allow the CapsLock
+  // pref to remap it, or the keyboard behavior will be broken.
+  const bool skip_mod3 = IsMod3UsedByCurrentInputMethod();
 
   for (size_t i = 0; i < arraysize(kModifierFlagToPrefName); ++i) {
     if ((skip_mod2 && kModifierFlagToPrefName[i].native_modifier == Mod2Mask) ||
@@ -455,11 +456,11 @@ bool EventRewriter::RewriteModifiers(ui::KeyEvent* event) {
   // restart chrome process. In future this is to be changed.
   // TODO(glotov): remove the following condition when we do not restart chrome
   // when user logs in as guest.
- #if defined(OS_CHROMEOS)
-   if (chromeos::UserManager::Get()->IsLoggedInAsGuest() &&
-       chromeos::LoginDisplayHostImpl::default_host())
-     return false;
- #endif  // defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+  if (chromeos::UserManager::Get()->IsLoggedInAsGuest() &&
+      chromeos::LoginDisplayHostImpl::default_host())
+    return false;
+#endif  // defined(OS_CHROMEOS)
   const PrefService* pref_service =
       pref_service_ ? pref_service_ : GetPrefService();
   if (!pref_service)
@@ -497,15 +498,8 @@ bool EventRewriter::RewriteModifiers(ui::KeyEvent* event) {
     // true, the key generates XK_ISO_Level3_Shift with Mod3Mask, not
     // XF86XK_Launch7).
     case XF86XK_Launch7:
-      // When a Chrome OS keyboard is available, the configuration UI for Caps
-      // Lock is not shown. Therefore, ignore the kLanguageRemapCapsLockKeyTo
-      // syncable pref.
-      if (!HasChromeOSKeyboard())
-        remapped_key =
-            GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, *pref_service);
-      // Default behavior is Caps Lock key.
-      if (!remapped_key)
-        remapped_key = kModifierRemappingCapsLock;
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, *pref_service);
       break;
     case XK_Super_L:
     case XK_Super_R:
@@ -554,8 +548,9 @@ bool EventRewriter::RewriteModifiers(ui::KeyEvent* event) {
   if ((event->type() == ui::ET_KEY_PRESSED) &&
       (event->key_code() != ui::VKEY_CAPITAL) &&
       (remapped_keycode == ui::VKEY_CAPITAL)) {
-    chromeos::input_method::XKeyboard* xkeyboard =
-        xkeyboard_ ? xkeyboard_ : GetInputMethodManager()->GetXKeyboard();
+    chromeos::input_method::XKeyboard* xkeyboard = xkeyboard_ ?
+        xkeyboard_ :
+        chromeos::input_method::InputMethodManager::Get()->GetXKeyboard();
     xkeyboard->SetCapsLockEnabled(!xkeyboard->CapsLockIsEnabled());
   }
 

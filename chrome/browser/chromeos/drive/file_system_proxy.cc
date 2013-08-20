@@ -9,23 +9,25 @@
 
 #include "base/bind.h"
 #include "base/platform_file.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
+#include "chrome/browser/chromeos/drive/webkit_file_stream_reader_impl.h"
 #include "chrome/browser/google_apis/task_util.h"
 #include "chrome/browser/google_apis/time_util.h"
 #include "content/public/browser/browser_thread.h"
-#include "webkit/blob/file_stream_reader.h"
-#include "webkit/blob/shareable_file_reference.h"
-#include "webkit/fileapi/file_system_types.h"
-#include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/file_system_util.h"
+#include "webkit/browser/blob/file_stream_reader.h"
+#include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/common/blob/shareable_file_reference.h"
+#include "webkit/common/fileapi/file_system_types.h"
+#include "webkit/common/fileapi/file_system_util.h"
 
 using base::MessageLoopProxy;
 using content::BrowserThread;
+using fileapi::DirectoryEntry;
 using fileapi::FileSystemURL;
 using fileapi::FileSystemOperation;
 using webkit_blob::ShareableFileReference;
@@ -36,8 +38,6 @@ namespace {
 
 typedef fileapi::RemoteFileSystemProxyInterface::OpenFileCallback
     OpenFileCallback;
-
-const char kFeedField[] = "feed";
 
 // Helper function to run reply on results of base::CreatePlatformFile() on
 // IO thread.
@@ -57,8 +57,7 @@ void OnGetFileByPathForOpen(
     base::ProcessHandle peer_handle,
     FileError file_error,
     const base::FilePath& local_path,
-    const std::string& unused_mime_type,
-    DriveFileType file_type) {
+    scoped_ptr<ResourceEntry> entry) {
   base::PlatformFileError error =
       FileErrorToPlatformError(file_error);
   if (error != base::PLATFORM_FILE_OK) {
@@ -89,8 +88,7 @@ void CallSnapshotFileCallback(
     const base::PlatformFileInfo& file_info,
     FileError file_error,
     const base::FilePath& local_path,
-    const std::string& unused_mime_type,
-    DriveFileType file_type) {
+    scoped_ptr<ResourceEntry> entry) {
   scoped_refptr<ShareableFileReference> file_ref;
   base::PlatformFileError error =
       FileErrorToPlatformError(file_error);
@@ -98,7 +96,8 @@ void CallSnapshotFileCallback(
   // If the file is a hosted document, a temporary JSON file is created to
   // represent the document. The JSON file is not cached and its lifetime
   // is managed by ShareableFileReference.
-  if (error == base::PLATFORM_FILE_OK && file_type == HOSTED_DOCUMENT) {
+  if (error == base::PLATFORM_FILE_OK &&
+      entry && entry->file_specific_info().is_hosted_document()) {
     file_ref = ShareableFileReference::GetOrCreate(
         local_path, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
@@ -153,13 +152,13 @@ void DidCloseFileForTruncate(
 
 }  // namespace
 
-base::FileUtilProxy::Entry ResourceEntryToFileUtilProxyEntry(
+DirectoryEntry ResourceEntryToDirectoryEntry(
     const ResourceEntry& resource_entry) {
   base::PlatformFileInfo file_info;
   util::ConvertResourceEntryToPlatformFileInfo(
       resource_entry.file_info(), &file_info);
 
-  base::FileUtilProxy::Entry entry;
+  DirectoryEntry entry;
   entry.name = resource_entry.base_name();
   entry.is_directory = file_info.is_directory;
   entry.size = file_info.size;
@@ -190,19 +189,17 @@ void FileSystemProxy::GetFileInfo(
         FROM_HERE,
         base::Bind(callback,
                    base::PLATFORM_FILE_ERROR_NOT_FOUND,
-                   base::PlatformFileInfo(),
-                   base::FilePath()));
+                   base::PlatformFileInfo()));
     return;
   }
 
   CallFileSystemMethodOnUIThread(
-      base::Bind(&FileSystemInterface::GetEntryInfoByPath,
+      base::Bind(&FileSystemInterface::GetResourceEntryByPath,
                  base::Unretained(file_system_),
                  file_path,
                  google_apis::CreateRelayCallback(
                      base::Bind(&FileSystemProxy::OnGetMetadata,
                                 this,
-                                file_path,
                                 callback))));
 }
 
@@ -269,7 +266,7 @@ void FileSystemProxy::ReadDirectory(
         FROM_HERE,
         base::Bind(callback,
                    base::PLATFORM_FILE_ERROR_NOT_FOUND,
-                   std::vector<base::FileUtilProxy::Entry>(),
+                   std::vector<DirectoryEntry>(),
                    false));
     return;
   }
@@ -619,11 +616,18 @@ void FileSystemProxy::TouchFile(
     const FileSystemOperation::StatusCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  // TODO(kinaba,kochi): crbug.com/144369. Support this operations once we have
-  // migrated to the new Drive API.
-  MessageLoopProxy::current()->PostTask(
-      FROM_HERE,
-      base::Bind(callback, base::PLATFORM_FILE_ERROR_INVALID_OPERATION));
+  base::FilePath file_path;
+  if (!ValidateUrl(url, &file_path))
+    return;
+
+  CallFileSystemMethodOnUIThread(
+      base::Bind(&FileSystemInterface::TouchFile,
+                 base::Unretained(file_system_),
+                 file_path, last_access_time, last_modified_time,
+                 google_apis::CreateRelayCallback(
+                     base::Bind(&FileSystemProxy::OnStatusCallback,
+                                this,
+                                callback))));
 }
 
 void FileSystemProxy::CreateSnapshotFile(
@@ -644,17 +648,17 @@ void FileSystemProxy::CreateSnapshotFile(
   }
 
   CallFileSystemMethodOnUIThread(
-      base::Bind(&FileSystemInterface::GetEntryInfoByPath,
+      base::Bind(&FileSystemInterface::GetResourceEntryByPath,
                  base::Unretained(file_system_),
                  file_path,
                  google_apis::CreateRelayCallback(
-                     base::Bind(&FileSystemProxy::OnGetEntryInfoByPath,
+                     base::Bind(&FileSystemProxy::OnGetResourceEntryByPath,
                                 this,
                                 file_path,
                                 callback))));
 }
 
-void FileSystemProxy::OnGetEntryInfoByPath(
+void FileSystemProxy::OnGetResourceEntryByPath(
     const base::FilePath& entry_path,
     const FileSystemOperation::SnapshotFileCallback& callback,
     FileError error,
@@ -716,10 +720,19 @@ FileSystemProxy::CreateFileStreamReader(
     const fileapi::FileSystemURL& url,
     int64 offset,
     const base::Time& expected_modification_time) {
-  // TODO(hidehiko): Implement the FileStreamReader for drive files.
-  // crbug.com/127129
-  NOTIMPLEMENTED();
-  return scoped_ptr<webkit_blob::FileStreamReader>();
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  base::FilePath drive_file_path;
+  if (!ValidateUrl(url, &drive_file_path))
+    return scoped_ptr<webkit_blob::FileStreamReader>();
+
+  return scoped_ptr<webkit_blob::FileStreamReader>(
+      new internal::WebkitFileStreamReaderImpl(
+          base::Bind(&FileSystemProxy::GetFileSystemOnUIThread, this),
+          file_task_runner,
+          drive_file_path,
+          offset,
+          expected_modification_time));
 }
 
 FileSystemProxy::~FileSystemProxy() {
@@ -761,7 +774,6 @@ void FileSystemProxy::OnStatusCallback(
 }
 
 void FileSystemProxy::OnGetMetadata(
-    const base::FilePath& file_path,
     const FileSystemOperation::GetMetadataCallback& callback,
     FileError error,
     scoped_ptr<ResourceEntry> entry) {
@@ -769,8 +781,7 @@ void FileSystemProxy::OnGetMetadata(
 
   if (error != FILE_ERROR_OK) {
     callback.Run(FileErrorToPlatformError(error),
-                 base::PlatformFileInfo(),
-                 base::FilePath());
+                 base::PlatformFileInfo());
     return;
   }
   DCHECK(entry.get());
@@ -778,7 +789,7 @@ void FileSystemProxy::OnGetMetadata(
   base::PlatformFileInfo file_info;
   util::ConvertResourceEntryToPlatformFileInfo(entry->file_info(), &file_info);
 
-  callback.Run(base::PLATFORM_FILE_OK, file_info, file_path);
+  callback.Run(base::PLATFORM_FILE_OK, file_info);
 }
 
 void FileSystemProxy::OnReadDirectory(
@@ -791,13 +802,13 @@ void FileSystemProxy::OnReadDirectory(
 
   if (error != FILE_ERROR_OK) {
     callback.Run(FileErrorToPlatformError(error),
-                 std::vector<base::FileUtilProxy::Entry>(),
+                 std::vector<DirectoryEntry>(),
                  false);
     return;
   }
   DCHECK(resource_entries.get());
 
-  std::vector<base::FileUtilProxy::Entry> entries;
+  std::vector<DirectoryEntry> entries;
   // Convert Drive files to something File API stack can understand.
   for (size_t i = 0; i < resource_entries->size(); ++i) {
     const ResourceEntry& resource_entry = (*resource_entries)[i];
@@ -806,7 +817,7 @@ void FileSystemProxy::OnReadDirectory(
         hide_hosted_documents) {
       continue;
     }
-    entries.push_back(ResourceEntryToFileUtilProxyEntry(resource_entry));
+    entries.push_back(ResourceEntryToDirectoryEntry(resource_entry));
   }
 
   callback.Run(base::PLATFORM_FILE_OK, entries, false);
@@ -847,6 +858,11 @@ void FileSystemProxy::CloseWritableSnapshotFile(
                  google_apis::CreateRelayCallback(
                      base::Bind(&EmitDebugLogForCloseFile,
                                 virtual_path))));
+}
+
+FileSystemInterface* FileSystemProxy::GetFileSystemOnUIThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return file_system_;
 }
 
 }  // namespace drive

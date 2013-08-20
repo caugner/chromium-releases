@@ -14,11 +14,11 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
@@ -51,41 +51,43 @@ using content::Referrer;
 using content::UserMetricsAction;
 using content::WebContents;
 
+namespace {
+
 // For malware interstitial pages, we link the problematic URL to Google's
 // diagnostic page.
 #if defined(GOOGLE_CHROME_BUILD)
-static const char* const kSbDiagnosticUrl =
+const char* const kSbDiagnosticUrl =
     "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?site=%s&client=googlechrome";
 #else
-static const char* const kSbDiagnosticUrl =
+const char* const kSbDiagnosticUrl =
     "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?site=%s&client=chromium";
 #endif
 
-static const char* const kSbReportPhishingErrorUrl =
+const char* const kSbReportPhishingErrorUrl =
     "http://www.google.com/safebrowsing/report_error/";
 
 // URL for the "Learn more" link on the multi threat malware blocking page.
-static const char* const kLearnMoreMalwareUrl =
+const char* const kLearnMoreMalwareUrl =
     "https://www.google.com/support/bin/answer.py?answer=45449&topic=360"
     "&sa=X&oi=malwarewarninglink&resnum=1&ct=help";
-static const char* const kLearnMoreMalwareUrlV2 =
+const char* const kLearnMoreMalwareUrlV2 =
     "https://www.google.com/goodtoknow/online-safety/malware/";
-static const char* const kLearnMorePhishingUrlV2 =
+const char* const kLearnMorePhishingUrlV2 =
     "https://www.google.com/goodtoknow/online-safety/phishing/";
 
 // URL for the "Learn more" link on the phishing blocking page.
-static const char* const kLearnMorePhishingUrl =
+const char* const kLearnMorePhishingUrl =
     "https://www.google.com/support/bin/answer.py?answer=106318";
 
-static const char* const kSbDiagnosticHtml =
+const char* const kSbDiagnosticHtml =
     "<a href=\"\" onclick=\"sendCommand('showDiagnostic'); return false;\" "
     "onmousedown=\"return false;\">%s</a>";
 
-static const char* const kPLinkHtml =
+const char* const kPLinkHtml =
     "<a href=\"\" onclick=\"sendCommand('proceed'); return false;\" "
     "onmousedown=\"return false;\">%s</a>";
 
-static const char* const kPrivacyLinkHtml =
+const char* const kPrivacyLinkHtml =
     "<a id=\"privacy-link\" href=\"\" onclick=\"sendCommand('showPrivacy'); "
     "return false;\" onmousedown=\"return false;\">%s</a>";
 
@@ -93,31 +95,51 @@ static const char* const kPrivacyLinkHtml =
 // but clicked "proceed anyway", we delay the call to
 // MalwareDetails::FinishCollection() by this much time (in
 // milliseconds).
-static const int64 kMalwareDetailsProceedDelayMilliSeconds = 3000;
+const int64 kMalwareDetailsProceedDelayMilliSeconds = 3000;
 
 // The commands returned by the page when the user performs an action.
-static const char* const kShowDiagnosticCommand = "showDiagnostic";
-static const char* const kReportErrorCommand = "reportError";
-static const char* const kLearnMoreCommand = "learnMore";
-static const char* const kLearnMoreCommandV2 = "learnMore2";
-static const char* const kShowPrivacyCommand = "showPrivacy";
-static const char* const kProceedCommand = "proceed";
-static const char* const kTakeMeBackCommand = "takeMeBack";
-static const char* const kDoReportCommand = "doReport";
-static const char* const kDontReportCommand = "dontReport";
-static const char* const kDisplayCheckBox = "displaycheckbox";
-static const char* const kBoxChecked = "boxchecked";
-static const char* const kExpandedSeeMore = "expandedSeeMore";
+const char* const kShowDiagnosticCommand = "showDiagnostic";
+const char* const kReportErrorCommand = "reportError";
+const char* const kLearnMoreCommand = "learnMore";
+const char* const kLearnMoreCommandV2 = "learnMore2";
+const char* const kShowPrivacyCommand = "showPrivacy";
+const char* const kProceedCommand = "proceed";
+const char* const kTakeMeBackCommand = "takeMeBack";
+const char* const kDoReportCommand = "doReport";
+const char* const kDontReportCommand = "dontReport";
+const char* const kDisplayCheckBox = "displaycheckbox";
+const char* const kBoxChecked = "boxchecked";
+const char* const kExpandedSeeMore = "expandedSeeMore";
 // Special command that we use when the user navigated away from the
 // page.  E.g., closed the tab or the window.  This is only used by
 // RecordUserReactionTime.
-static const char* const kNavigatedAwayMetaCommand = "closed";
+const char* const kNavigatedAwayMetaCommand = "closed";
+
+base::LazyInstance<SafeBrowsingBlockingPage::UnsafeResourceMap>
+    g_unsafe_resource_map = LAZY_INSTANCE_INITIALIZER;
+
+// These are the conditions for the summer 2013 Finch experiment.
+const char* const kMalwareStudyName = "InterstitialMalware310";
+const char* const kPhishingStudyName = "InterstitialPhishing564";
+const char* const kCond1MalwareControl = "cond1MalwareControl";
+const char* const kCond2MalwareNoBrand = "cond2MalwareNoBrand";
+const char* const kCond3PhishingControl = "cond3PhishingControl";
+const char* const kCond4PhishingNoBrand = "cond4PhishingNoBrand";
+const char* const kCond5MalwareOneStep = "cond5MalwareOneStep";
+const char* const kCond6PhishingOneStep = "cond6PhishingOneStep";
+const char* const kCond7MalwareFearMsg = "cond7MalwareFearMsg";
+const char* const kCond8PhishingFearMsg = "cond8PhishingFearMsg";
+const char* const kCond9MalwareCollabMsg = "cond9MalwareCollabMsg";
+const char* const kCond10PhishingCollabMsg = "cond10PhishingCollabMsg";
+const char* const kCond11MalwareQuestion = "cond11MalwareQuestion";
+const char* const kCond12PhishingQuestion = "cond12PhishingQuestion";
+const char* const kCond13MalwareGoBack = "cond13MalwareGoBack";
+const char* const kCond14PhishingGoBack = "cond14PhishingGoBack";
+
+}  // namespace
 
 // static
 SafeBrowsingBlockingPageFactory* SafeBrowsingBlockingPage::factory_ = NULL;
-
-static base::LazyInstance<SafeBrowsingBlockingPage::UnsafeResourceMap>
-    g_unsafe_resource_map = LAZY_INSTANCE_INITIALIZER;
 
 // The default SafeBrowsingBlockingPageFactory.  Global, made a singleton so we
 // don't leak it.
@@ -129,7 +151,7 @@ class SafeBrowsingBlockingPageFactoryImpl
       WebContents* web_contents,
       const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources)
       OVERRIDE {
-    // Only do the trial if the interstitial is for a single malware or
+    // Only use the V2 page if the interstitial is for a single malware or
     // phishing resource, the multi-threat interstitial has not been updated to
     // V2 yet.
     if (unsafe_resources.size() == 1 &&
@@ -204,8 +226,7 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
   // reports.
   if (unsafe_resources.size() == 1 &&
       unsafe_resources[0].threat_type == SB_THREAT_TYPE_URL_MALWARE &&
-      malware_details_ == NULL &&
-      CanShowMalwareDetailsOption()) {
+      malware_details_.get() == NULL && CanShowMalwareDetailsOption()) {
     malware_details_ = MalwareDetails::NewMalwareDetails(
         ui_manager_, web_contents, unsafe_resources[0]);
   }
@@ -483,6 +504,9 @@ void SafeBrowsingBlockingPage::RecordUserAction(BlockingPageEvent event) {
     PHISHING_DONT_PROCEED,
     PHISHING_FORCED_DONT_PROCEED,
     PHISHING_PROCEED,
+    MALWARE_SHOW_ADVANCED,
+    MULTIPLE_SHOW_ADVANCED,
+    PHISHING_SHOW_ADVANCED,
     MAX_ACTION
   } histogram_action = MAX_ACTION;
 
@@ -540,6 +564,19 @@ void SafeBrowsingBlockingPage::RecordUserAction(BlockingPageEvent event) {
         }
       }
       break;
+    case SHOW_ADVANCED:
+      switch (interstitial_type_) {
+        case TYPE_MALWARE_AND_PHISHING:
+          histogram_action = MULTIPLE_SHOW_ADVANCED;
+          break;
+        case TYPE_MALWARE:
+          histogram_action = MALWARE_SHOW_ADVANCED;
+          break;
+        case TYPE_PHISHING:
+          histogram_action = PHISHING_SHOW_ADVANCED;
+          break;
+      }
+      break;
     default:
       NOTREACHED() << "Unexpected event: " << event;
   }
@@ -577,6 +614,8 @@ void SafeBrowsingBlockingPage::RecordUserAction(BlockingPageEvent event) {
         action.append("ForcedDontProceed");
       else
         action.append("DontProceed");
+      break;
+    case SHOW_ADVANCED:
       break;
     default:
       NOTREACHED() << "Unexpected event: " << event;
@@ -619,7 +658,7 @@ void SafeBrowsingBlockingPage::RecordUserReactionTime(
       // interstitial.
       if (has_expanded_see_more_section_)
         return;
-
+      RecordUserAction(SHOW_ADVANCED);
       UMA_HISTOGRAM_MEDIUM_TIMES("SB2.MalwareInterstitialTimeExpandedSeeMore",
                                  dt);
       has_expanded_see_more_section_ = true;
@@ -646,7 +685,7 @@ void SafeBrowsingBlockingPage::RecordUserReactionTime(
       // interstitial.
       if (has_expanded_see_more_section_)
         return;
-
+      RecordUserAction(SHOW_ADVANCED);
       UMA_HISTOGRAM_MEDIUM_TIMES("SB2.PhishingInterstitialTimeExpandedSeeMore",
                                  dt);
       has_expanded_see_more_section_ = true;
@@ -662,7 +701,7 @@ void SafeBrowsingBlockingPage::RecordUserReactionTime(
 }
 
 void SafeBrowsingBlockingPage::FinishMalwareDetails(int64 delay_ms) {
-  if (malware_details_ == NULL)
+  if (malware_details_.get() == NULL)
     return;  // Not all interstitials have malware details (eg phishing).
 
   if (IsPrefEnabled(prefs::kSafeBrowsingReportingEnabled)) {
@@ -891,6 +930,16 @@ SafeBrowsingBlockingPageV2::SafeBrowsingBlockingPageV2(
     WebContents* web_contents,
     const UnsafeResourceList& unsafe_resources)
   : SafeBrowsingBlockingPage(ui_manager, web_contents, unsafe_resources) {
+    if (unsafe_resources_[0].threat_type == SB_THREAT_TYPE_URL_MALWARE) {
+      trialCondition_ =
+          base::FieldTrialList::FindFullName(kMalwareStudyName);
+    } else if (unsafe_resources_[0].threat_type ==
+                   SB_THREAT_TYPE_URL_PHISHING ||
+               unsafe_resources_[0].threat_type ==
+                   SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL) {
+      trialCondition_ =
+          base::FieldTrialList::FindFullName(kPhishingStudyName);
+    }
 }
 
 std::string SafeBrowsingBlockingPageV2::GetHTMLContents() {
@@ -947,6 +996,35 @@ void SafeBrowsingBlockingPageV2::PopulateStringDictionary(
       IDS_SAFE_BROWSING_MALWARE_V2_SEE_MORE));
   strings->SetString("proceed",
       l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_V2_PROCEED_LINK));
+
+  // Field trial
+  strings->SetString("trialType", trialCondition_);
+  if (trialCondition_ == kCond7MalwareFearMsg) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_FEAR_HEADLINE));
+  } else if (trialCondition_ == kCond8PhishingFearMsg) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_FEAR_HEADLINE));
+  } else if (trialCondition_ == kCond9MalwareCollabMsg) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_COLLAB_HEADLINE));
+  } else if (trialCondition_ == kCond10PhishingCollabMsg) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_COLLAB_HEADLINE));
+  } else if (trialCondition_ == kCond11MalwareQuestion) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_QUESTION_HEADLINE));
+  } else if (trialCondition_ == kCond12PhishingQuestion) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(
+            IDS_SAFE_BROWSING_PHISHING_QUESTION_HEADLINE));
+  } else if (trialCondition_ == kCond13MalwareGoBack) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_BACK_HEADLINE));
+  } else if (trialCondition_ == kCond14PhishingGoBack) {
+    strings->SetString("headLine",
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_BACK_HEADLINE));
+  }
 
   webui::SetFontAndTextDirection(strings);
 }

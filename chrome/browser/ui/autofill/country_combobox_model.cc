@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/autofill/country_combobox_model.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "components/autofill/browser/autofill_country.h"
+#include "components/autofill/core/browser/autofill_country.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 
 namespace autofill {

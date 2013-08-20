@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "webkit/glue/resource_fetcher.h"
+#include "content/renderer/fetchers/resource_fetcher.h"
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -15,15 +15,13 @@
 #include "content/shell/shell.h"
 #include "content/test/content_browser_test.h"
 #include "content/test/content_browser_test_utils.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebView.h"
 
 using WebKit::WebFrame;
 using WebKit::WebURLRequest;
 using WebKit::WebURLResponse;
-using webkit_glue::ResourceFetcher;
-using webkit_glue::ResourceFetcherWithTimeout;
 
 namespace content {
 

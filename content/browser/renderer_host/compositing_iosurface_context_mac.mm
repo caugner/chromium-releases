@@ -17,18 +17,17 @@
 
 namespace content {
 
+// static
 scoped_refptr<CompositingIOSurfaceContext>
-    CompositingIOSurfaceContext::Get(
-        int window_number,
-        CompositingIOSurfaceMac::SurfaceOrder surface_order) {
+CompositingIOSurfaceContext::Get(int window_number) {
   TRACE_EVENT0("browser", "CompositingIOSurfaceContext::Get");
 
-  // Return the context for this window_number and order, if it exists.
-  std::pair<int, int> key = std::make_pair(
-      window_number, static_cast<int>(surface_order));
-  WindowMap::iterator found = window_map()->find(key);
-  if (found != window_map()->end())
+  // Return the context for this window_number, if it exists.
+  WindowMap::iterator found = window_map()->find(window_number);
+  if (found != window_map()->end()) {
+    DCHECK(found->second->can_be_shared_);
     return found->second;
+  }
 
   std::vector<NSOpenGLPixelFormatAttribute> attributes;
   attributes.push_back(NSOpenGLPFADoubleBuffer);
@@ -38,7 +37,7 @@ scoped_refptr<CompositingIOSurfaceContext>
     attributes.push_back(NSOpenGLPFAAllowOfflineRenderers);
   attributes.push_back(0);
 
-  scoped_nsobject<NSOpenGLPixelFormat> glPixelFormat(
+  base::scoped_nsobject<NSOpenGLPixelFormat> glPixelFormat(
       [[NSOpenGLPixelFormat alloc] initWithAttributes:&attributes.front()]);
   if (!glPixelFormat) {
     LOG(ERROR) << "NSOpenGLPixelFormat initWithAttributes failed";
@@ -50,21 +49,12 @@ scoped_refptr<CompositingIOSurfaceContext>
   NSOpenGLContext* share_context = nil;
   if (!window_map()->empty())
     share_context = window_map()->begin()->second->nsgl_context();
-    scoped_nsobject<NSOpenGLContext> nsgl_context(
-        [[NSOpenGLContext alloc] initWithFormat:glPixelFormat
-                                   shareContext:share_context]);
+  base::scoped_nsobject<NSOpenGLContext> nsgl_context(
+      [[NSOpenGLContext alloc] initWithFormat:glPixelFormat
+                                 shareContext:share_context]);
   if (!nsgl_context) {
     LOG(ERROR) << "NSOpenGLContext initWithFormat failed";
     return NULL;
-  }
-
-  // If requested, ask the WindowServer to render the OpenGL surface underneath
-  // the window. This, combined with a hole punched in the window, will allow
-  // for views to "overlap" the GL surface from the user's point of view.
-  if (surface_order == CompositingIOSurfaceMac::SURFACE_ORDER_BELOW_WINDOW) {
-    GLint gl_surface_order = -1;
-    [nsgl_context setValues:&gl_surface_order
-                  forParameter:NSOpenGLCPSurfaceOrder];
   }
 
   CGLContextObj cgl_context = (CGLContextObj)[nsgl_context CGLContextObj];
@@ -96,41 +86,51 @@ scoped_refptr<CompositingIOSurfaceContext>
 
   return new CompositingIOSurfaceContext(
       window_number,
-      surface_order,
       nsgl_context.release(),
       cgl_context,
       is_vsync_disabled,
       shader_program_cache.Pass());
 }
 
+// static
+void CompositingIOSurfaceContext::MarkExistingContextsAsNotShareable() {
+  for (WindowMap::iterator it = window_map()->begin();
+       it != window_map()->end();
+       ++it) {
+    it->second->can_be_shared_ = false;
+  }
+  window_map()->clear();
+}
+
 CompositingIOSurfaceContext::CompositingIOSurfaceContext(
     int window_number,
-    CompositingIOSurfaceMac::SurfaceOrder surface_order,
     NSOpenGLContext* nsgl_context,
     CGLContextObj cgl_context,
     bool is_vsync_disabled,
     scoped_ptr<CompositingIOSurfaceShaderPrograms> shader_program_cache)
     : window_number_(window_number),
-      surface_order_(surface_order),
       nsgl_context_(nsgl_context),
       cgl_context_(cgl_context),
       is_vsync_disabled_(is_vsync_disabled),
-      shader_program_cache_(shader_program_cache.Pass()) {
-  std::pair<int, int> key = std::make_pair(
-      window_number_, static_cast<int>(surface_order_));
-  DCHECK(window_map()->find(key) == window_map()->end());
-  window_map()->insert(std::make_pair(key, this));
+      shader_program_cache_(shader_program_cache.Pass()),
+      can_be_shared_(true) {
+  DCHECK(window_map()->find(window_number_) == window_map()->end());
+  window_map()->insert(std::make_pair(window_number_, this));
 }
 
 CompositingIOSurfaceContext::~CompositingIOSurfaceContext() {
   CGLSetCurrentContext(cgl_context_);
   shader_program_cache_->Reset();
   CGLSetCurrentContext(0);
-  std::pair<int, int> key = std::make_pair(
-      window_number_, static_cast<int>(surface_order_));
-  DCHECK(window_map()->find(key) != window_map()->end());
-  DCHECK(window_map()->find(key)->second == this);
-  window_map()->erase(key);
+  if (can_be_shared_) {
+    DCHECK(window_map()->find(window_number_) != window_map()->end());
+    DCHECK(window_map()->find(window_number_)->second == this);
+    window_map()->erase(window_number_);
+  } else {
+    WindowMap::const_iterator found = window_map()->find(window_number_);
+    if (found != window_map()->end())
+      DCHECK(found->second != this);
+  }
 }
 
 // static

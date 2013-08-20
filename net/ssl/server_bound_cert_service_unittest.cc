@@ -38,7 +38,7 @@ class ServerBoundCertServiceTest : public testing::Test {
   }
 
   virtual ~ServerBoundCertServiceTest() {
-    if (sequenced_worker_pool_)
+    if (sequenced_worker_pool_.get())
       sequenced_worker_pool_->Shutdown();
   }
 
@@ -52,11 +52,12 @@ TEST_F(ServerBoundCertServiceTest, GetDomainForHost) {
             ServerBoundCertService::GetDomainForHost("google.com"));
   EXPECT_EQ("google.com",
             ServerBoundCertService::GetDomainForHost("www.google.com"));
-  // NOTE(rch): we would like to segregate cookies and certificates for
-  // *.appspot.com, but currently we can not do that becaues we want to
-  // allow direct navigation to appspot.com.
-  EXPECT_EQ("appspot.com",
+  EXPECT_EQ("foo.appspot.com",
             ServerBoundCertService::GetDomainForHost("foo.appspot.com"));
+  EXPECT_EQ("bar.appspot.com",
+            ServerBoundCertService::GetDomainForHost("foo.bar.appspot.com"));
+  EXPECT_EQ("appspot.com",
+            ServerBoundCertService::GetDomainForHost("appspot.com"));
   EXPECT_EQ("google.com",
             ServerBoundCertService::GetDomainForHost("www.mail.google.com"));
   EXPECT_EQ("goto",
@@ -322,7 +323,7 @@ TEST_F(ServerBoundCertServiceTest, ExtractValuesFromBytesEC) {
   // Check that we can retrieve the cert from the bytes.
   scoped_refptr<X509Certificate> x509cert(
       X509Certificate::CreateFromBytes(der_cert.data(), der_cert.size()));
-  EXPECT_TRUE(x509cert != NULL);
+  EXPECT_TRUE(x509cert.get() != NULL);
 }
 
 // Tests that the callback of a canceled request is never made.
@@ -351,7 +352,7 @@ TEST_F(ServerBoundCertServiceTest, CancelRequest) {
   sequenced_worker_pool_->FlushForTesting();
   // Wait for reply from ServerBoundCertServiceWorker to be posted back to the
   // ServerBoundCertService.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // Even though the original request was cancelled, the service will still
   // store the result, it just doesn't call the callback.
@@ -384,7 +385,7 @@ TEST_F(ServerBoundCertServiceTest, CancelRequestByHandleDestruction) {
   sequenced_worker_pool_->FlushForTesting();
   // Wait for reply from ServerBoundCertServiceWorker to be posted back to the
   // ServerBoundCertService.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // Even though the original request was cancelled, the service will still
   // store the result, it just doesn't call the callback.
@@ -419,7 +420,7 @@ TEST_F(ServerBoundCertServiceTest, DestructionWithPendingRequest) {
   // ServerBoundCertServiceWorker should not post anything back to the
   // non-existant ServerBoundCertService, but run the loop just to be sure it
   // doesn't.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // If we got here without crashing or a valgrind error, it worked.
 }
@@ -433,7 +434,7 @@ TEST_F(ServerBoundCertServiceTest, RequestAfterPoolShutdown) {
   sequenced_worker_pool_ = NULL;
 
   // Ensure any shutdown code is processed.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // Make a request that will force synchronous completion.
   std::string host("encrypted.google.com");

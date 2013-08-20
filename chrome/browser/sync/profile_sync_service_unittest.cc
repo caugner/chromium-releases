@@ -116,7 +116,7 @@ class ProfileSyncServiceTestHarness {
         profile->GetPrefs()->SetBoolean(prefs::kSyncHasSetupCompleted, false);
 
       // Register the bookmark data type.
-      ON_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
+      ON_CALL(*factory, CreateDataTypeManager(_, _, _, _, _, _)).
           WillByDefault(ReturnNewDataTypeManager());
 
       if (issue_auth_token) {
@@ -127,19 +127,21 @@ class ProfileSyncServiceTestHarness {
   }
 
   void IssueTestTokens() {
+    ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
+        profile.get(), FakeOAuth2TokenService::BuildTokenService);
     TokenService* token_service =
         TokenServiceFactory::GetForProfile(profile.get());
     token_service->IssueAuthTokenForTest(
-        GaiaConstants::kSyncService, "token1");
+        GaiaConstants::kGaiaOAuth2LoginRefreshToken, "oauth2_login_token");
     token_service->IssueAuthTokenForTest(
-        GaiaConstants::kGaiaOAuth2LoginRefreshToken, "token2");
+          GaiaConstants::kSyncService, "token");
   }
 
   scoped_ptr<TestProfileSyncService> service;
   scoped_ptr<TestingProfile> profile;
 
  private:
-  MessageLoop ui_loop_;
+  base::MessageLoop ui_loop_;
   // Needed by |service|.
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
@@ -234,7 +236,7 @@ TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
       signin,
       ProfileSyncService::AUTO_START,
       true));
-  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).Times(0);
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _, _)).Times(0);
   EXPECT_CALL(*factory, CreateBookmarkSyncComponents(_, _)).
       Times(0);
   harness_.service->RegisterDataTypeController(
@@ -260,7 +262,7 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
       ProfileSyncService::AUTO_START,
       true));
   // Register the bookmark data type.
-  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _, _)).
       WillRepeatedly(ReturnNewDataTypeManager());
 
   harness_.IssueTestTokens();
@@ -282,8 +284,12 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
       harness_.profile->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart));
 }
 
+// Certain ProfileSyncService tests don't apply to Chrome OS, for example
+// things that deal with concepts like "signing out" and policy.
+#if !defined (OS_CHROMEOS)
+
 TEST_F(ProfileSyncServiceTest, EnableSyncAndSignOut) {
-  SigninManagerBase* signin =
+  SigninManager* signin =
       SigninManagerFactory::GetForProfile(harness_.profile.get());
   signin->SetAuthenticatedUsername("test@test.com");
   ProfileSyncComponentsFactoryMock* factory =
@@ -295,7 +301,7 @@ TEST_F(ProfileSyncServiceTest, EnableSyncAndSignOut) {
       ProfileSyncService::AUTO_START,
       true));
   // Register the bookmark data type.
-  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _, _)).
       WillRepeatedly(ReturnNewDataTypeManager());
 
   harness_.IssueTestTokens();
@@ -310,12 +316,15 @@ TEST_F(ProfileSyncServiceTest, EnableSyncAndSignOut) {
   EXPECT_FALSE(harness_.service->sync_initialized());
 }
 
+#endif  // !defined(OS_CHROMEOS)
+
 TEST_F(ProfileSyncServiceTest, JsControllerHandlersBasic) {
   harness_.StartSyncService();
   EXPECT_TRUE(harness_.service->sync_initialized());
   EXPECT_TRUE(harness_.service->GetBackendForTest() != NULL);
 
-  syncer::JsController* js_controller = harness_.service->GetJsController();
+  base::WeakPtr<syncer::JsController> js_controller =
+      harness_.service->GetJsController();
   StrictMock<syncer::MockJsEventHandler> event_handler;
   js_controller->AddJsEventHandler(&event_handler);
   js_controller->RemoveJsEventHandler(&event_handler);
@@ -332,7 +341,8 @@ TEST_F(ProfileSyncServiceTest,
   EXPECT_EQ(NULL, harness_.service->GetBackendForTest());
   EXPECT_FALSE(harness_.service->sync_initialized());
 
-  syncer::JsController* js_controller = harness_.service->GetJsController();
+  base::WeakPtr<syncer::JsController> js_controller =
+      harness_.service->GetJsController();
   js_controller->AddJsEventHandler(&event_handler);
   // Since we're doing synchronous initialization, backend should be
   // initialized by this call.
@@ -353,7 +363,8 @@ TEST_F(ProfileSyncServiceTest, JsControllerProcessJsMessageBasic) {
               HandleJsReply("getNotificationState", HasArgs(args1)));
 
   {
-    syncer::JsController* js_controller = harness_.service->GetJsController();
+    base::WeakPtr<syncer::JsController> js_controller =
+        harness_.service->GetJsController();
     js_controller->ProcessJsMessage("getNotificationState", args1,
                                     reply_handler.AsWeakHandle());
   }
@@ -376,7 +387,8 @@ TEST_F(ProfileSyncServiceTest,
               HandleJsReply("getNotificationState", HasArgs(args1)));
 
   {
-    syncer::JsController* js_controller = harness_.service->GetJsController();
+    base::WeakPtr<syncer::JsController> js_controller =
+        harness_.service->GetJsController();
     js_controller->ProcessJsMessage("getNotificationState",
                                     args1, reply_handler.AsWeakHandle());
   }

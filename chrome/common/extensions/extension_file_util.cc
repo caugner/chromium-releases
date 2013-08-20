@@ -8,15 +8,16 @@
 #include <vector>
 
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
@@ -139,7 +140,8 @@ scoped_refptr<Extension> LoadExtension(const base::FilePath& extension_path,
                                        Manifest::Location location,
                                        int flags,
                                        std::string* error) {
-  scoped_ptr<DictionaryValue> manifest(LoadManifest(extension_path, error));
+  scoped_ptr<base::DictionaryValue> manifest(
+      LoadManifest(extension_path, error));
   if (!manifest.get())
     return NULL;
   if (!extension_l10n_util::LocalizeExtension(extension_path, manifest.get(),
@@ -164,8 +166,8 @@ scoped_refptr<Extension> LoadExtension(const base::FilePath& extension_path,
   return extension;
 }
 
-DictionaryValue* LoadManifest(const base::FilePath& extension_path,
-                              std::string* error) {
+base::DictionaryValue* LoadManifest(const base::FilePath& extension_path,
+                                    std::string* error) {
   base::FilePath manifest_path =
       extension_path.Append(extensions::kManifestFilename);
   if (!file_util::PathExists(manifest_path)) {
@@ -174,7 +176,7 @@ DictionaryValue* LoadManifest(const base::FilePath& extension_path,
   }
 
   JSONFileValueSerializer serializer(manifest_path);
-  scoped_ptr<Value> root(serializer.Deserialize(NULL, error));
+  scoped_ptr<base::Value> root(serializer.Deserialize(NULL, error));
   if (!root.get()) {
     if (error->empty()) {
       // If |error| is empty, than the file could not be read.
@@ -190,20 +192,20 @@ DictionaryValue* LoadManifest(const base::FilePath& extension_path,
     return NULL;
   }
 
-  if (!root->IsType(Value::TYPE_DICTIONARY)) {
+  if (!root->IsType(base::Value::TYPE_DICTIONARY)) {
     *error = l10n_util::GetStringUTF8(IDS_EXTENSION_MANIFEST_INVALID);
     return NULL;
   }
 
-  return static_cast<DictionaryValue*>(root.release());
+  return static_cast<base::DictionaryValue*>(root.release());
 }
 
 std::vector<base::FilePath> FindPrivateKeyFiles(
     const base::FilePath& extension_dir) {
   std::vector<base::FilePath> result;
   // Pattern matching only works at the root level, so filter manually.
-  file_util::FileEnumerator traversal(extension_dir, /*recursive=*/true,
-                                      file_util::FileEnumerator::FILES);
+  base::FileEnumerator traversal(extension_dir, /*recursive=*/true,
+                                 base::FileEnumerator::FILES);
   for (base::FilePath current = traversal.Next(); !current.empty();
        current = traversal.Next()) {
     if (!current.MatchesExtension(chrome::kExtensionKeyFileExtension))
@@ -331,9 +333,9 @@ void GarbageCollectExtensions(
     return;
 
   DVLOG(1) << "Garbage collecting extensions...";
-  file_util::FileEnumerator enumerator(install_directory,
-                                       false,  // Not recursive.
-                                       file_util::FileEnumerator::DIRECTORIES);
+  base::FileEnumerator enumerator(install_directory,
+                                  false,  // Not recursive.
+                                  base::FileEnumerator::DIRECTORIES);
   base::FilePath extension_path;
   for (extension_path = enumerator.Next(); !extension_path.value().empty();
        extension_path = enumerator.Next()) {
@@ -378,10 +380,10 @@ void GarbageCollectExtensions(
     }
 
     // Clean up old version directories.
-    file_util::FileEnumerator versions_enumerator(
+    base::FileEnumerator versions_enumerator(
         extension_path,
         false,  // Not recursive.
-        file_util::FileEnumerator::DIRECTORIES);
+        base::FileEnumerator::DIRECTORIES);
     for (base::FilePath version_dir = versions_enumerator.Next();
          !version_dir.value().empty();
          version_dir = versions_enumerator.Next()) {
@@ -471,9 +473,8 @@ bool CheckForIllegalFilenames(const base::FilePath& extension_path,
   // There is a problem when using pattern "_*" with FileEnumerator, so we have
   // to cheat with find_first_of and match all.
   const int kFilesAndDirectories =
-      file_util::FileEnumerator::DIRECTORIES | file_util::FileEnumerator::FILES;
-  file_util::FileEnumerator all_files(
-      extension_path, false, kFilesAndDirectories);
+      base::FileEnumerator::DIRECTORIES | base::FileEnumerator::FILES;
+  base::FileEnumerator all_files(extension_path, false, kFilesAndDirectories);
 
   base::FilePath file;
   while (!(file = all_files.Next()).empty()) {
@@ -505,15 +506,7 @@ base::FilePath ExtensionURLToRelativeFilePath(const GURL& url) {
   if (skip != file_path.npos)
     file_path = file_path.substr(skip);
 
-  base::FilePath path =
-#if defined(OS_POSIX)
-    base::FilePath(file_path);
-#elif defined(OS_WIN)
-    base::FilePath(UTF8ToWide(file_path));
-#else
-    base::FilePath();
-    NOTIMPLEMENTED();
-#endif
+  base::FilePath path = base::FilePath::FromUTF8Unsafe(file_path);
 
   // It's still possible for someone to construct an annoying URL whose path
   // would still wind up not being considered relative at this point.

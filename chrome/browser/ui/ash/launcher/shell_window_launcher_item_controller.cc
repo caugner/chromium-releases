@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/ash/launcher/shell_window_launcher_item_controller.h"
 
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item_v2app.h"
@@ -15,6 +16,7 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event.h"
 #include "ui/views/corewm/window_animations.h"
 
 namespace {
@@ -141,16 +143,15 @@ void ShellWindowLauncherItemController::Clicked(const ui::Event& event) {
   if (type() == TYPE_APP_PANEL) {
     DCHECK(shell_windows_.size() == 1);
     ShellWindow* panel = shell_windows_.front();
-    // If the panel is on another display, move it to the current display and
-    // activate it.
-    if (ash::wm::MoveWindowToEventRoot(panel->GetNativeWindow(), event)) {
+    aura::Window* panel_window = panel->GetNativeWindow();
+    // If the panel is attached on another display, move it to the current
+    // display and activate it.
+    if (panel_window->GetProperty(ash::internal::kPanelAttachedKey) &&
+        ash::wm::MoveWindowToEventRoot(panel_window, event)) {
       if (!panel->GetBaseWindow()->IsActive())
         ShowAndActivateOrMinimize(panel);
     } else {
-      if (panel->GetBaseWindow()->IsActive())
-        panel->GetBaseWindow()->Minimize();
-      else
-        ShowAndActivateOrMinimize(panel);
+      ShowAndActivateOrMinimize(panel);
     }
   } else if (launcher_controller()->GetPerAppInterface() ||
       shell_windows_.size() == 1) {
@@ -191,7 +192,7 @@ void ShellWindowLauncherItemController::ActivateIndexedApp(size_t index) {
 }
 
 ChromeLauncherAppMenuItems
-ShellWindowLauncherItemController::GetApplicationList() {
+ShellWindowLauncherItemController::GetApplicationList(int event_flags) {
   ChromeLauncherAppMenuItems items;
   items.push_back(new ChromeLauncherAppMenuItem(GetTitle(), NULL, false));
   int index = 0;
@@ -233,7 +234,7 @@ void ShellWindowLauncherItemController::ShowAndActivateOrMinimize(
   // Either show or minimize windows when shown from the launcher.
   launcher_controller()->ActivateWindowOrMinimizeIfActive(
       shell_window->GetBaseWindow(),
-      GetApplicationList().size() == 2);
+      GetApplicationList(0).size() == 2);
 }
 
 void ShellWindowLauncherItemController::ActivateOrAdvanceToNextShellWindow(

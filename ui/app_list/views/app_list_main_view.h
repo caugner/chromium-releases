@@ -18,6 +18,7 @@ class Widget;
 
 namespace app_list {
 
+class ApplicationDragAndDropHost;
 class AppListModel;
 class AppListItemModel;
 class AppListViewDelegate;
@@ -45,7 +46,12 @@ class AppListMainView : public views::View,
 
   void Prerender();
 
-  SearchBoxView* search_box_view() { return search_box_view_; }
+  SearchBoxView* search_box_view() const { return search_box_view_; }
+
+  // If |drag_and_drop_host| is not NULL it will be called upon drag and drop
+  // operations outside the application list.
+  void SetDragAndDropHostOfCurrentAppList(
+      ApplicationDragAndDropHost* drag_and_drop_host);
 
  private:
   class IconLoader;
@@ -63,14 +69,17 @@ class AppListMainView : public views::View,
 
   // Overridden from AppsGridViewDelegate:
   virtual void ActivateApp(AppListItemModel* item, int event_flags) OVERRIDE;
+  virtual void GetShortcutPathForApp(
+      const std::string& app_id,
+      const base::Callback<void(const base::FilePath&)>& callback) OVERRIDE;
 
   // Overridden from SearchBoxViewDelegate:
   virtual void QueryChanged(SearchBoxView* sender) OVERRIDE;
 
   // Overridden from SearchResultListViewDelegate:
-  virtual void OpenResult(const SearchResult& result,
+  virtual void OpenResult(SearchResult* result,
                           int event_flags) OVERRIDE;
-  virtual void InvokeResultAction(const SearchResult& result,
+  virtual void InvokeResultAction(SearchResult* result,
                                   int action_index,
                                   int event_flags) OVERRIDE;
 

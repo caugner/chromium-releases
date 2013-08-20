@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/history_overlay_controller.h"
 
 #include "base/logging.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -61,7 +62,7 @@ const CGFloat kGestureCompleteProgress = 0.3;
     NSRect arrowRect = NSMakeRect(offset, 0, kShieldRadius, kShieldHeight);
     arrowRect = NSInsetRect(arrowRect, 10, 0);  // Give a little padding.
 
-    scoped_nsobject<NSImageView> imageView(
+    base::scoped_nsobject<NSImageView> imageView(
         [[NSImageView alloc] initWithFrame:arrowRect]);
     [imageView setImage:image];
     [imageView setAutoresizingMask:NSViewMinYMargin | NSViewMaxYMargin];
@@ -93,6 +94,8 @@ const CGFloat kGestureCompleteProgress = 0.3;
 }
 
 - (void)dealloc {
+  [[BrowserWindowController
+      browserWindowControllerForView:[self view]] onHistoryOverlayHidden];
   [self.view removeFromSuperview];
   [super dealloc];
 }
@@ -150,6 +153,8 @@ const CGFloat kGestureCompleteProgress = 0.3;
   [[parent_ superview] addSubview:self.view
                        positioned:NSWindowAbove
                        relativeTo:parent_];
+  [[BrowserWindowController
+      browserWindowControllerForView:[self view]] onHistoryOverlayShown];
 }
 
 - (void)dismiss {
@@ -157,7 +162,7 @@ const CGFloat kGestureCompleteProgress = 0.3;
 
   NSView* overlay = self.view;
 
-  scoped_nsobject<CAAnimation> animation(
+  base::scoped_nsobject<CAAnimation> animation(
       [[overlay animationForKey:@"alphaValue"] copy]);
   [animation setDelegate:self];
   [animation setDuration:kFadeOutDurationSeconds];

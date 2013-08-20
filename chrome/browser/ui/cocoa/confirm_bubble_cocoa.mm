@@ -4,7 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/confirm_bubble_cocoa.h"
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/confirm_bubble_controller.h"
 #include "chrome/browser/ui/confirm_bubble.h"
@@ -215,17 +215,17 @@ void ShowConfirmBubble(gfx::NativeView view,
       initWithFrame:NSMakeRect(left, bottom, kMaxMessageWidth, 0)]);
   NSString* messageText = [controller_ messageText];
   NSMutableDictionary* attributes = [NSMutableDictionary dictionary];
-  scoped_nsobject<NSMutableAttributedString> attributedMessage(
+  base::scoped_nsobject<NSMutableAttributedString> attributedMessage(
       [[NSMutableAttributedString alloc] initWithString:messageText
                                              attributes:attributes]);
   NSString* linkText = [controller_ linkText];
   if (linkText) {
-    scoped_nsobject<NSAttributedString> whiteSpace(
+    base::scoped_nsobject<NSAttributedString> whiteSpace(
         [[NSAttributedString alloc] initWithString:@" "]);
     [attributedMessage.get() appendAttributedString:whiteSpace.get()];
     [attributes setObject:[NSString string]
                    forKey:NSLinkAttributeName];
-    scoped_nsobject<NSAttributedString> attributedLink(
+    base::scoped_nsobject<NSAttributedString> attributedLink(
         [[NSAttributedString alloc] initWithString:linkText
                                         attributes:attributes]);
     [attributedMessage.get() appendAttributedString:attributedLink.get()];

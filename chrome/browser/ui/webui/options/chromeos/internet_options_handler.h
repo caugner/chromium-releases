@@ -74,11 +74,6 @@ class InternetOptionsHandler
 
   // Helper functions called by NetworkCommandCallback(...)
   void AddConnection(chromeos::ConnectionType type);
-  void ConnectToNetwork(chromeos::Network* network);
-
-  // Used to finish up async connection to the |network|.  |network| cannot
-  // be NULL.
-  void DoConnect(chromeos::Network* network);
 
   void SetCellularButtonsVisibility(
       const chromeos::CellularNetwork* cellular,
@@ -105,13 +100,6 @@ class InternetOptionsHandler
   void ShareNetworkCallback(const base::ListValue* args);
   void ShowMorePlanInfoCallback(const base::ListValue* args);
   void RefreshNetworksCallback(const base::ListValue* args);
-
-  /**
-   * Toggle airplane mode.  Disables all wireless networks when activated.
-   * Celluar and Bluetooth connections remain disabled while active, but
-   * Wi-Fi can be reactivated. |args| is unused.
-   */
-  void ToggleAirplaneModeCallback(const ListValue* args);
 
   // Populates the ui with the details of the given device path. This forces
   // an overlay to be displayed in the UI. Called after the asynchronous

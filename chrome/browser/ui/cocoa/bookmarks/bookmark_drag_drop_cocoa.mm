@@ -9,9 +9,9 @@
 #include <cmath>
 
 #include "base/logging.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/message_loop.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -69,9 +69,8 @@ void DrawTruncatedTitle(NSAttributedString* title, NSRect frame) {
 
   NSColor* color = [NSColor blackColor];
   NSColor* alpha_color = [color colorWithAlphaComponent:0.0];
-  scoped_nsobject<NSGradient> mask(
-      [[NSGradient alloc] initWithStartingColor:color
-                                    endingColor:alpha_color]);
+  base::scoped_nsobject<NSGradient> mask(
+      [[NSGradient alloc] initWithStartingColor:color endingColor:alpha_color]);
   // Draw the gradient mask.
   CGContextSetBlendMode(context, kCGBlendModeDestinationIn);
   [mask drawFromPoint:NSMakePoint(NSMaxX(frame) - gradient_width,
@@ -101,9 +100,8 @@ NSImage* DragImageForBookmark(NSImage* favicon, const string16& title) {
       [NSDictionary dictionaryWithObject:[NSFont systemFontOfSize:
                                            [NSFont smallSystemFontSize]]
                                   forKey:NSFontAttributeName];
-  scoped_nsobject<NSAttributedString> rich_title(
-      [[NSAttributedString alloc] initWithString:ns_title
-                                      attributes:attrs]);
+  base::scoped_nsobject<NSAttributedString> rich_title(
+      [[NSAttributedString alloc] initWithString:ns_title attributes:attrs]);
 
   // Set up sizes and locations for rendering.
   const CGFloat kIconMargin = 2.0;  // Gap between icon and text.
@@ -136,8 +134,8 @@ void DragBookmarks(Profile* profile,
   DCHECK(!nodes.empty());
 
   // Allow nested message loop so we get DnD events as we drag this around.
-  bool was_nested = MessageLoop::current()->IsNested();
-  MessageLoop::current()->SetNestableTasksAllowed(true);
+  bool was_nested = base::MessageLoop::current()->IsNested();
+  base::MessageLoop::current()->SetNestableTasksAllowed(true);
 
   std::vector<BookmarkNodeData::Element> elements;
   for (std::vector<const BookmarkNode*>::const_iterator it = nodes.begin();
@@ -148,8 +146,7 @@ void DragBookmarks(Profile* profile,
   bookmark_pasteboard_helper_mac::WriteToPasteboard(
       bookmark_pasteboard_helper_mac::kDragPasteboard,
       elements,
-      profile->GetPath(),
-      ui::SourceTag());
+      profile->GetPath());
 
   // Synthesize an event for dragging, since we can't be sure that
   // [NSApp currentEvent] will return a valid dragging event.
@@ -180,7 +177,7 @@ void DragBookmarks(Profile* profile,
              source:nil
           slideBack:YES];
 
-  MessageLoop::current()->SetNestableTasksAllowed(was_nested);
+  base::MessageLoop::current()->SetNestableTasksAllowed(was_nested);
 }
 
 }  // namespace chrome

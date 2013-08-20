@@ -155,7 +155,7 @@ class ResourcePrefetchPredictorTest : public testing::Test {
 
   void InitializeSampleData();
 
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
   scoped_ptr<TestingProfile> profile_;
@@ -170,11 +170,10 @@ class ResourcePrefetchPredictorTest : public testing::Test {
 };
 
 ResourcePrefetchPredictorTest::ResourcePrefetchPredictorTest()
-    : loop_(MessageLoop::TYPE_DEFAULT),
+    : loop_(base::MessageLoop::TYPE_DEFAULT),
       ui_thread_(content::BrowserThread::UI, &loop_),
       db_thread_(content::BrowserThread::DB, &loop_),
       profile_(new TestingProfile()),
-      predictor_(NULL),
       mock_tables_(new StrictMock<MockResourcePrefetchPredictorTables>()),
       empty_url_data_(PREFETCH_KEY_TYPE_URL, std::string()),
       empty_host_data_(PREFETCH_KEY_TYPE_HOST, std::string()) {}
@@ -195,7 +194,7 @@ void ResourcePrefetchPredictorTest::SetUp() {
   ResetPredictor();
   EXPECT_EQ(predictor_->initialization_state_,
             ResourcePrefetchPredictor::NOT_INITIALIZED);
-  EXPECT_CALL(*mock_tables_,
+  EXPECT_CALL(*mock_tables_.get(),
               GetAllData(Pointee(ContainerEq(PrefetchDataMap())),
                          Pointee(ContainerEq(PrefetchDataMap()))));
   InitializePredictor();
@@ -354,7 +353,7 @@ TEST_F(ResourcePrefetchPredictorTest, LazilyInitializeWithData) {
   AddUrlToHistory("http://www.google.com/", 4);
   AddUrlToHistory("http://www.yahoo.com/", 2);
 
-  EXPECT_CALL(*mock_tables_,
+  EXPECT_CALL(*mock_tables_.get(),
               GetAllData(Pointee(ContainerEq(PrefetchDataMap())),
                          Pointee(ContainerEq(PrefetchDataMap()))))
       .WillOnce(DoAll(SetArgPointee<0>(test_url_data_),
@@ -423,7 +422,7 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationNotRecorded) {
                                             0,
                                             0,
                                             3.0));
-  EXPECT_CALL(*mock_tables_, UpdateData(empty_url_data_, host_data));
+  EXPECT_CALL(*mock_tables_.get(), UpdateData(empty_url_data_, host_data));
 
   predictor_->OnNavigationComplete(main_frame.navigation_id);
   profile_->BlockUntilHistoryProcessesPendingRequests();
@@ -507,11 +506,11 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDB) {
                                            0,
                                            0,
                                            7.0));
-  EXPECT_CALL(*mock_tables_, UpdateData(url_data, empty_host_data_));
+  EXPECT_CALL(*mock_tables_.get(), UpdateData(url_data, empty_host_data_));
 
   PrefetchData host_data(PREFETCH_KEY_TYPE_HOST, "www.google.com");
   host_data.resources = url_data.resources;
-  EXPECT_CALL(*mock_tables_, UpdateData(empty_url_data_, host_data));
+  EXPECT_CALL(*mock_tables_.get(), UpdateData(empty_url_data_, host_data));
 
   predictor_->OnNavigationComplete(main_frame.navigation_id);
   profile_->BlockUntilHistoryProcessesPendingRequests();
@@ -522,7 +521,7 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
   // the database cache.
   AddUrlToHistory("http://www.google.com", 4);
 
-  EXPECT_CALL(*mock_tables_,
+  EXPECT_CALL(*mock_tables_.get(),
               GetAllData(Pointee(ContainerEq(PrefetchDataMap())),
                          Pointee(ContainerEq(PrefetchDataMap()))))
       .WillOnce(DoAll(SetArgPointee<0>(test_url_data_),
@@ -605,11 +604,11 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
                                            0,
                                            0,
                                            3.0));
-  EXPECT_CALL(*mock_tables_, UpdateData(url_data, empty_host_data_));
+  EXPECT_CALL(*mock_tables_.get(), UpdateData(url_data, empty_host_data_));
 
-  EXPECT_CALL(*mock_tables_,
-              DeleteSingleDataPoint("www.facebook.com",
-                                    PREFETCH_KEY_TYPE_HOST));
+  EXPECT_CALL(
+      *mock_tables_.get(),
+      DeleteSingleDataPoint("www.facebook.com", PREFETCH_KEY_TYPE_HOST));
 
   PrefetchData host_data(PREFETCH_KEY_TYPE_HOST, "www.google.com");
   host_data.resources.push_back(ResourceRow(std::string(),
@@ -640,7 +639,7 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
                                             0,
                                             0,
                                             7.0));
-  EXPECT_CALL(*mock_tables_, UpdateData(empty_url_data_, host_data));
+  EXPECT_CALL(*mock_tables_.get(), UpdateData(empty_url_data_, host_data));
 
   predictor_->OnNavigationComplete(main_frame.navigation_id);
   profile_->BlockUntilHistoryProcessesPendingRequests();
@@ -650,7 +649,7 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
   // Tests that a URL is deleted before another is added if the cache is full.
   AddUrlToHistory("http://www.nike.com/", 4);
 
-  EXPECT_CALL(*mock_tables_,
+  EXPECT_CALL(*mock_tables_.get(),
               GetAllData(Pointee(ContainerEq(PrefetchDataMap())),
                          Pointee(ContainerEq(PrefetchDataMap()))))
       .WillOnce(DoAll(SetArgPointee<0>(test_url_data_),
@@ -680,12 +679,12 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
       ResourceType::IMAGE, "image/png", false);
   predictor_->RecordUrlResponse(resource2);
 
-  EXPECT_CALL(*mock_tables_,
-              DeleteSingleDataPoint("http://www.google.com/",
-                                    PREFETCH_KEY_TYPE_URL));
-  EXPECT_CALL(*mock_tables_,
-              DeleteSingleDataPoint("www.facebook.com",
-                                    PREFETCH_KEY_TYPE_HOST));
+  EXPECT_CALL(
+      *mock_tables_.get(),
+      DeleteSingleDataPoint("http://www.google.com/", PREFETCH_KEY_TYPE_URL));
+  EXPECT_CALL(
+      *mock_tables_.get(),
+      DeleteSingleDataPoint("www.facebook.com", PREFETCH_KEY_TYPE_HOST));
 
   PrefetchData url_data(PREFETCH_KEY_TYPE_URL, "http://www.nike.com/");
   url_data.resources.push_back(ResourceRow(std::string(),
@@ -702,11 +701,11 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
                                            0,
                                            0,
                                            2.0));
-  EXPECT_CALL(*mock_tables_, UpdateData(url_data, empty_host_data_));
+  EXPECT_CALL(*mock_tables_.get(), UpdateData(url_data, empty_host_data_));
 
   PrefetchData host_data(PREFETCH_KEY_TYPE_HOST, "www.nike.com");
   host_data.resources = url_data.resources;
-  EXPECT_CALL(*mock_tables_, UpdateData(empty_url_data_, host_data));
+  EXPECT_CALL(*mock_tables_.get(), UpdateData(empty_url_data_, host_data));
 
   predictor_->OnNavigationComplete(main_frame.navigation_id);
   profile_->BlockUntilHistoryProcessesPendingRequests();
@@ -752,15 +751,15 @@ TEST_F(ResourcePrefetchPredictorTest, DeleteUrls) {
   hosts_to_delete.push_back("www.google.com");
   hosts_to_delete.push_back("www.apple.com");
 
-  EXPECT_CALL(*mock_tables_,
-              DeleteData(ContainerEq(urls_to_delete),
-                         ContainerEq(hosts_to_delete)));
+  EXPECT_CALL(
+      *mock_tables_.get(),
+      DeleteData(ContainerEq(urls_to_delete), ContainerEq(hosts_to_delete)));
 
   predictor_->DeleteUrls(rows);
   EXPECT_EQ(2, static_cast<int>(predictor_->url_table_cache_->size()));
   EXPECT_EQ(1, static_cast<int>(predictor_->host_table_cache_->size()));
 
-  EXPECT_CALL(*mock_tables_, DeleteAllData());
+  EXPECT_CALL(*mock_tables_.get(), DeleteAllData());
 
   predictor_->DeleteAllUrls();
   EXPECT_TRUE(predictor_->url_table_cache_->empty());

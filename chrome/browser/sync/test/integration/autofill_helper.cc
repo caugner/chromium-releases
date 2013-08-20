@@ -11,15 +11,15 @@
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "components/autofill/browser/autofill_common_test.h"
-#include "components/autofill/browser/autofill_profile.h"
-#include "components/autofill/browser/autofill_type.h"
-#include "components/autofill/browser/personal_data_manager.h"
-#include "components/autofill/browser/personal_data_manager_observer.h"
-#include "components/autofill/browser/webdata/autofill_entry.h"
-#include "components/autofill/browser/webdata/autofill_table.h"
-#include "components/autofill/browser/webdata/autofill_webdata_service.h"
-#include "components/autofill/common/form_field_data.h"
+#include "components/autofill/core/browser/autofill_common_test.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/personal_data_manager_observer.h"
+#include "components/autofill/core/browser/webdata/autofill_entry.h"
+#include "components/autofill/core/browser/webdata/autofill_table.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/autofill/core/common/form_field_data.h"
 #include "components/webdata/common/web_database.h"
 
 using autofill::AutofillChangeList;
@@ -221,7 +221,7 @@ void RemoveKeys(int profile) {
 
 std::set<AutofillEntry> GetAllKeys(int profile) {
   scoped_refptr<AutofillWebDataService> wds = GetWebDataService(profile);
-  std::vector<AutofillEntry> all_entries = GetAllAutofillEntries(wds);
+  std::vector<AutofillEntry> all_entries = GetAllAutofillEntries(wds.get());
   std::set<AutofillEntry> all_keys;
   for (std::vector<AutofillEntry>::const_iterator it = all_entries.begin();
        it != all_entries.end(); ++it) {
@@ -241,7 +241,7 @@ void SetProfiles(int profile, std::vector<AutofillProfile>* autofill_profiles) {
   PersonalDataManager* pdm = GetPersonalDataManager(profile);
   pdm->AddObserver(&observer);
   pdm->SetProfiles(autofill_profiles);
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   pdm->RemoveObserver(&observer);
 }
 
@@ -252,7 +252,7 @@ void SetCreditCards(int profile, std::vector<CreditCard>* credit_cards) {
   PersonalDataManager* pdm = GetPersonalDataManager(profile);
   pdm->AddObserver(&observer);
   pdm->SetCreditCards(credit_cards);
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   pdm->RemoveObserver(&observer);
 }
 
@@ -297,7 +297,7 @@ const std::vector<AutofillProfile*>& GetAllProfiles(
   PersonalDataManager* pdm = GetPersonalDataManager(profile);
   pdm->AddObserver(&observer);
   pdm->Refresh();
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   pdm->RemoveObserver(&observer);
   return pdm->web_profiles();
 }

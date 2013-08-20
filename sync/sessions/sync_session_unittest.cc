@@ -9,7 +9,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "sync/engine/syncer_types.h"
-#include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/base/model_type_invalidation_map_test_util.h"
 #include "sync/sessions/status_controller.h"
@@ -33,7 +32,9 @@ class SyncSessionTest : public testing::Test,
   SyncSessionTest() : controller_invocations_allowed_(false) {}
 
   SyncSession* MakeSession() {
-    return new SyncSession(context_.get(), this, SyncSourceInfo());
+    return SyncSession::Build(context_.get(),
+                              this,
+                              SyncSourceInfo());
   }
 
   virtual void SetUp() {
@@ -60,7 +61,6 @@ class SyncSessionTest : public testing::Test,
             NULL,
             workers,
             &extensions_activity_monitor_,
-            throttled_data_type_tracker_.get(),
             std::vector<SyncEngineEventListener*>(),
             NULL,
             NULL,
@@ -69,17 +69,21 @@ class SyncSessionTest : public testing::Test,
     context_->set_routing_info(routes_);
 
     session_.reset(MakeSession());
-    throttled_data_type_tracker_.reset(new ThrottledDataTypeTracker(NULL));
   }
   virtual void TearDown() {
     session_.reset();
     context_.reset();
   }
 
-  virtual void OnSilencedUntil(const base::TimeTicks& silenced_until) OVERRIDE {
-    FailControllerInvocationIfDisabled("OnSilencedUntil");
+  virtual void OnThrottled(const base::TimeDelta& throttle_duration) OVERRIDE {
+    FailControllerInvocationIfDisabled("OnThrottled");
   }
-  virtual bool IsSyncingCurrentlySilenced() OVERRIDE {
+  virtual void OnTypesThrottled(
+      ModelTypeSet types,
+      const base::TimeDelta& throttle_duration) OVERRIDE {
+    FailControllerInvocationIfDisabled("OnTypesThrottled");
+  }
+  virtual bool IsCurrentlyThrottled() OVERRIDE {
     FailControllerInvocationIfDisabled("IsSyncingCurrentlySilenced");
     return false;
   }
@@ -94,6 +98,11 @@ class SyncSessionTest : public testing::Test,
   virtual void OnReceivedSessionsCommitDelay(
       const base::TimeDelta& new_delay) OVERRIDE {
     FailControllerInvocationIfDisabled("OnReceivedSessionsCommitDelay");
+  }
+  virtual void OnReceivedClientInvalidationHintBufferSize(
+      int size) OVERRIDE {
+    FailControllerInvocationIfDisabled(
+        "OnReceivedClientInvalidationHintBufferSize");
   }
   virtual void OnShouldStopSyncingPermanently() OVERRIDE {
     FailControllerInvocationIfDisabled("OnShouldStopSyncingPermanently");
@@ -130,14 +139,13 @@ class SyncSessionTest : public testing::Test,
     return ModelTypeSet(AUTOFILL);
   }
 
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   bool controller_invocations_allowed_;
   scoped_ptr<SyncSession> session_;
   scoped_ptr<SyncSessionContext> context_;
   std::vector<scoped_refptr<ModelSafeWorker> > workers_;
   ModelSafeRoutingInfo routes_;
   FakeExtensionsActivityMonitor extensions_activity_monitor_;
-  scoped_ptr<ThrottledDataTypeTracker> throttled_data_type_tracker_;
 };
 
 TEST_F(SyncSessionTest, MoreToDownloadIfDownloadFailed) {

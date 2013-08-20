@@ -7,14 +7,18 @@
 #ifndef NET_QUIC_TEST_TOOLS_QUIC_TEST_UTILS_H_
 #define NET_QUIC_TEST_TOOLS_QUIC_TEST_UTILS_H_
 
+#include <string>
 #include <vector>
 
+#include "base/strings/string_piece.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_framer.h"
 #include "net/quic/quic_session.h"
+#include "net/quic/quic_spdy_decompressor.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/mock_random.h"
+#include "net/spdy/spdy_framer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace net {
@@ -33,7 +37,13 @@ void CompareQuicDataWithHexError(const std::string& description,
 
 // Returns the length of the QuicPacket that will be created if it contains
 // a stream frame that has |payload| bytes.
-size_t GetPacketLengthForOneStream(bool include_version, size_t payload);
+size_t GetPacketLengthForOneStream(
+    bool include_version, InFecGroup is_in_fec_group, size_t payload);
+
+string SerializeUncompressedHeaders(const SpdyHeaderBlock& headers);
+
+// Returns QuicConfig set to default values.
+QuicConfig DefaultQuicConfig();
 
 class MockFramerVisitor : public QuicFramerVisitorInterface {
  public:
@@ -42,7 +52,7 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
 
   MOCK_METHOD1(OnError, void(QuicFramer* framer));
   // The constructor sets this up to return false by default.
-  MOCK_METHOD1(OnProtocolVersionMismatch, bool(QuicVersionTag version));
+  MOCK_METHOD1(OnProtocolVersionMismatch, bool(QuicTag version));
   MOCK_METHOD0(OnPacket, void());
   MOCK_METHOD1(OnPublicResetPacket, void(const QuicPublicResetPacket& header));
   MOCK_METHOD1(OnVersionNegotiationPacket,
@@ -77,7 +87,7 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
   virtual void OnVersionNegotiationPacket(
       const QuicVersionNegotiationPacket& packet) OVERRIDE {}
   virtual void OnRevivedPacket() OVERRIDE {}
-  virtual bool OnProtocolVersionMismatch(QuicVersionTag version) OVERRIDE;
+  virtual bool OnProtocolVersionMismatch(QuicTag version) OVERRIDE;
   virtual bool OnPacketHeader(const QuicPacketHeader& header) OVERRIDE;
   virtual void OnFecProtectedPayload(base::StringPiece payload) OVERRIDE {}
   virtual bool OnStreamFrame(const QuicStreamFrame& frame) OVERRIDE;
@@ -234,7 +244,7 @@ class MockConnection : public QuicConnection {
     QuicConnection::ProcessUdpPacket(self_address, peer_address, packet);
   }
 
-  virtual bool OnProtocolVersionMismatch(QuicVersionTag version) OVERRIDE {
+  virtual bool OnProtocolVersionMismatch(QuicTag version) OVERRIDE {
     return false;
   }
 
@@ -257,6 +267,7 @@ class PacketSavingConnection : public MockConnection {
       HasRetransmittableData has_retransmittable_data) OVERRIDE;
 
   std::vector<QuicPacket*> packets_;
+  std::vector<QuicEncryptedPacket*> encrypted_packets_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PacketSavingConnection);
@@ -286,15 +297,34 @@ class MockSession : public QuicSession {
   DISALLOW_COPY_AND_ASSIGN(MockSession);
 };
 
+class TestSession : public QuicSession {
+ public:
+  TestSession(QuicConnection* connection,
+              const QuicConfig& config,
+              bool is_server);
+  virtual ~TestSession();
+
+  MOCK_METHOD1(CreateIncomingReliableStream,
+               ReliableQuicStream*(QuicStreamId id));
+  MOCK_METHOD0(CreateOutgoingReliableStream, ReliableQuicStream*());
+
+  void SetCryptoStream(QuicCryptoStream* stream);
+
+  virtual QuicCryptoStream* GetCryptoStream();
+
+ private:
+  QuicCryptoStream* crypto_stream_;
+  DISALLOW_COPY_AND_ASSIGN(TestSession);
+};
+
 class MockSendAlgorithm : public SendAlgorithmInterface {
  public:
   MockSendAlgorithm();
   virtual ~MockSendAlgorithm();
 
-  MOCK_METHOD4(OnIncomingQuicCongestionFeedbackFrame,
+  MOCK_METHOD3(OnIncomingQuicCongestionFeedbackFrame,
                void(const QuicCongestionFeedbackFrame&,
                     QuicTime feedback_receive_time,
-                    QuicBandwidth sent_bandwidth,
                     const SentPacketsMap&));
   MOCK_METHOD3(OnIncomingAck,
                void(QuicPacketSequenceNumber, QuicByteCount, QuicTime::Delta));
@@ -322,8 +352,21 @@ class TestEntropyCalculator :
       QuicPacketSequenceNumber sequence_number) const OVERRIDE;
 };
 
-}  // namespace test
+class TestDecompressorVisitor : public QuicSpdyDecompressor::Visitor {
+ public:
+  virtual ~TestDecompressorVisitor() {}
+  virtual bool OnDecompressedData(base::StringPiece data) OVERRIDE;
+  virtual void OnDecompressionError() OVERRIDE;
 
+  string data() { return data_; }
+  bool error() { return error_; }
+
+ private:
+  string data_;
+  bool error_;
+};
+
+}  // namespace test
 }  // namespace net
 
 #endif  // NET_QUIC_TEST_TOOLS_QUIC_TEST_UTILS_H_

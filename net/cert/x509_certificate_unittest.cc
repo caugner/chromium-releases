@@ -9,7 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/pickle.h"
 #include "base/sha1.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "crypto/rsa_private_key.h"
 #include "net/base/net_errors.h"
@@ -781,6 +781,20 @@ TEST(X509CertificateTest, IsIssuedByEncodedWithIntermediates) {
   EXPECT_FALSE(cert_chain->IsIssuedByEncoded(issuers));
 }
 
+#if defined(USE_NSS)
+TEST(X509CertificateTest, GetDefaultNickname) {
+  base::FilePath certs_dir = GetTestCertsDirectory();
+
+  scoped_refptr<X509Certificate> test_cert(
+      ImportCertFromFile(certs_dir, "no_subject_common_name_cert.pem"));
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), test_cert);
+
+  std::string nickname = test_cert->GetDefaultNickname(USER_CERT);
+  EXPECT_EQ("wtc@google.com's COMODO Client Authentication and "
+            "Secure Email CA ID", nickname);
+}
+#endif
+
 #if !defined(OS_IOS)  // TODO(ios): Unable to create certificates.
 #if defined(USE_NSS) || defined(OS_WIN) || defined(OS_MACOSX)
 // This test creates a self-signed cert from a private key and then verify the
@@ -943,7 +957,7 @@ TEST_P(X509CertificateParseTest, CanParseFormat) {
 
     // Compare the parsed certificate with the expected certificate, by
     // comparing fingerprints.
-    const X509Certificate* cert = certs[i];
+    const X509Certificate* cert = certs[i].get();
     const SHA1HashValue& actual_fingerprint = cert->fingerprint();
     uint8* expected_fingerprint = test_data_.chain_fingerprints[i];
 
@@ -1023,7 +1037,6 @@ const CertificateNameVerifyTestData kNameVerifyTestData[] = {
                                             "xn--poema-*.com.br,"
                                             "xn--*-9qae5a.com.br,"
                                             "*--poema-9qae5a.com.br" },
-    { true, "xn--poema-9qae5a.com.br", "*.com.br" },
     // The following are adapted from the  examples quoted from
     // http://tools.ietf.org/html/rfc6125#section-6.4.3
     //  (e.g., *.example.com would match foo.example.com but
@@ -1037,12 +1050,25 @@ const CertificateNameVerifyTestData kNameVerifyTestData[] = {
     { true, "baz1.example.net", "baz*.example.net" },
     { true, "foobaz.example.net", "*baz.example.net" },
     { true, "buzz.example.net", "b*z.example.net" },
-    // Wildcards should not be valid unless there are at least three name
-    // components.
-    { true,  "h.co.uk", "*.co.uk" },
+    // Wildcards should not be valid for public registry controlled domains,
+    // and unknown/unrecognized domains, at least three domain components must
+    // be present.
+    { true, "www.test.example", "*.test.example" },
+    { true, "test.example.co.uk", "*.example.co.uk" },
+    { false, "test.example", "*.exmaple" },
+    { false, "example.co.uk", "*.co.uk" },
     { false, "foo.com", "*.com" },
     { false, "foo.us", "*.us" },
     { false, "foo", "*" },
+    // IDN variants of wildcards and registry controlled domains.
+    { true, "www.xn--poema-9qae5a.com.br", "*.xn--poema-9qae5a.com.br" },
+    { true, "test.example.xn--mgbaam7a8h", "*.example.xn--mgbaam7a8h" },
+    { false, "xn--poema-9qae5a.com.br", "*.com.br" },
+    { false, "example.xn--mgbaam7a8h", "*.xn--mgbaam7a8h" },
+    // Wildcards should be permissible for 'private' registry controlled
+    // domains.
+    { true, "www.appspot.com", "*.appspot.com" },
+    { true, "foo.s3.amazonaws.com", "*.s3.amazonaws.com" },
     // Multiple wildcards are not valid.
     { false, "foo.example.com", "*.*.com" },
     { false, "foo.bar.example.com", "*.bar.*.com" },
@@ -1063,6 +1089,9 @@ const CertificateNameVerifyTestData kNameVerifyTestData[] = {
     { false, "example.com.", "*.com" },
     { false, "example.com.", "*.com." },
     { false, "foo.", "*." },
+    { false, "foo", "*." },
+    { false, "foo.co.uk", "*.co.uk." },
+    { false, "foo.co.uk.", "*.co.uk." },
     // IP addresses in common name; IPv4 only.
     { true, "127.0.0.1", "127.0.0.1" },
     { true, "192.168.1.1", "192.168.1.1" },

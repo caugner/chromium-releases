@@ -4,7 +4,6 @@
 
 #include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
 
-#include "base/logging.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/devtools_client.h"
 #include "chrome/test/chromedriver/chrome/status.h"
@@ -14,11 +13,9 @@ JavaScriptDialogManager::JavaScriptDialogManager(DevToolsClient* client)
   client_->AddListener(this);
 }
 
-JavaScriptDialogManager::~JavaScriptDialogManager() {
-}
+JavaScriptDialogManager::~JavaScriptDialogManager() {}
 
 bool JavaScriptDialogManager::IsDialogOpen() {
-  client_->HandleReceivedEvents();
   return !unhandled_dialog_queue_.empty();
 }
 
@@ -31,13 +28,14 @@ Status JavaScriptDialogManager::GetDialogMessage(std::string* message) {
 }
 
 Status JavaScriptDialogManager::HandleDialog(bool accept,
-                                             const std::string& text) {
+                                             const std::string* text) {
   if (!IsDialogOpen())
     return Status(kNoAlertOpen);
 
   base::DictionaryValue params;
   params.SetBoolean("accept", accept);
-  params.SetString("promptText", text);
+  if (text)
+    params.SetString("promptText", *text);
   Status status = client_->SendCommand("Page.handleJavaScriptDialog", params);
   if (status.IsError())
     return status;
@@ -56,18 +54,19 @@ Status JavaScriptDialogManager::OnConnected(DevToolsClient* client) {
   return client_->SendCommand("Page.enable", params);
 }
 
-void JavaScriptDialogManager::OnEvent(DevToolsClient* client,
-                                      const std::string& method,
-                                      const base::DictionaryValue& params) {
+Status JavaScriptDialogManager::OnEvent(DevToolsClient* client,
+                                        const std::string& method,
+                                        const base::DictionaryValue& params) {
   if (method == "Page.javascriptDialogOpening") {
     std::string message;
-    if (!params.GetString("message", &message)) {
-      LOG(ERROR) << "dialog event missing or invalid 'message'";
-    }
+    if (!params.GetString("message", &message))
+      return Status(kUnknownError, "dialog event missing or invalid 'message'");
+
     unhandled_dialog_queue_.push_back(message);
   } else if (method == "Page.javascriptDialogClosing") {
     // Inspector only sends this event when all dialogs have been closed.
     // Clear the unhandled queue in case the user closed a dialog manually.
     unhandled_dialog_queue_.clear();
   }
+  return Status(kOk);
 }

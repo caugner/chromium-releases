@@ -68,7 +68,8 @@ void InstantTestBase::SetupInstant(Browser* browser) {
   TemplateURLData data;
   // Necessary to use exact URL for both the main URL and the alternate URL for
   // search term extraction to work in InstantExtended.
-  data.SetURL(instant_url_.spec() + "q={searchTerms}");
+  data.SetURL(instant_url_.spec() +
+              "q={searchTerms}&is_search&{google:omniboxStartMarginParameter}");
   data.instant_url = instant_url_.spec();
   data.alternate_urls.push_back(instant_url_.spec() + "#q={searchTerms}");
   data.search_terms_replacement_key = "strk";
@@ -76,8 +77,6 @@ void InstantTestBase::SetupInstant(Browser* browser) {
   TemplateURL* template_url = new TemplateURL(browser_->profile(), data);
   service->Add(template_url);  // Takes ownership of |template_url|.
   service->SetDefaultSearchProvider(template_url);
-
-  browser_->profile()->GetPrefs()->SetBoolean(prefs::kInstantEnabled, true);
 
   // TODO(shishir): Fix this ugly hack.
   instant()->SetInstantEnabled(false, true);
@@ -119,33 +118,13 @@ void InstantTestBase::FocusOmnibox() {
   }
 }
 
-void InstantTestBase::FocusOmniboxAndWaitForInstantOverlaySupport() {
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_INSTANT_OVERLAY_SUPPORT_DETERMINED,
-      content::NotificationService::AllSources());
-  FocusOmnibox();
-  if (!instant()->overlay() ||
-      !instant()->overlay()->instant_support_determined()) {
-    observer.Wait();
-  }
-}
-
-void InstantTestBase::FocusOmniboxAndWaitForInstantOverlayAndNTPSupport() {
+void InstantTestBase::FocusOmniboxAndWaitForInstantNTPSupport() {
   content::WindowedNotificationObserver ntp_observer(
       chrome::NOTIFICATION_INSTANT_NTP_SUPPORT_DETERMINED,
       content::NotificationService::AllSources());
-  content::WindowedNotificationObserver overlay_observer(
-      chrome::NOTIFICATION_INSTANT_OVERLAY_SUPPORT_DETERMINED,
-      content::NotificationService::AllSources());
   FocusOmnibox();
-  if (!instant()->ntp() ||
-      !instant()->ntp()->instant_support_determined()) {
+  if (!instant()->ntp() || !instant()->ntp()->supports_instant())
     ntp_observer.Wait();
-  }
-  if (!instant()->overlay() ||
-      !instant()->overlay()->instant_support_determined()) {
-    overlay_observer.Wait();
-  }
 }
 
 void InstantTestBase::SetOmniboxText(const std::string& text) {
@@ -181,6 +160,14 @@ void InstantTestBase::SetOmniboxTextAndWaitForSuggestion(
       content::NotificationService::AllSources());
   SetOmniboxText(text);
   observer.Wait();
+}
+
+void InstantTestBase::PressEnterAndWaitForNavigation() {
+  content::WindowedNotificationObserver nav_observer(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::NotificationService::AllSources());
+  browser_->window()->GetLocationBar()->AcceptInput();
+  nav_observer.Wait();
 }
 
 bool InstantTestBase::GetBoolFromJS(content::WebContents* contents,

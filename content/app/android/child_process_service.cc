@@ -10,9 +10,9 @@
 #include "base/android/jni_array.h"
 #include "base/logging.h"
 #include "base/posix/global_descriptors.h"
+#include "content/child/child_process.h"
+#include "content/child/child_thread.h"
 #include "content/common/android/surface_texture_peer.h"
-#include "content/common/child_process.h"
-#include "content/common/child_thread.h"
 #include "content/common/gpu/gpu_surface_lookup.h"
 #include "content/public/app/android_library_loader_hooks.h"
 #include "content/public/common/content_descriptors.h"
@@ -47,7 +47,7 @@ class SurfaceTexturePeerChildImpl : public content::SurfaceTexturePeer,
       base::ProcessHandle pid,
       scoped_refptr<gfx::SurfaceTextureBridge> surface_texture_bridge,
       int primary_id,
-      int secondary_id) {
+      int secondary_id) OVERRIDE {
     JNIEnv* env = base::android::AttachCurrentThread();
     content::Java_ChildProcessService_establishSurfaceTexturePeer(
         env, service_.obj(), pid,

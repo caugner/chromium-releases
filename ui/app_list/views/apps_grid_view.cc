@@ -6,19 +6,32 @@
 
 #include <algorithm>
 
+#include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/apps_grid_view_delegate.h"
 #include "ui/app_list/pagination_model.h"
+#include "ui/app_list/views/app_list_drag_and_drop_host.h"
 #include "ui/app_list/views/app_list_item_view.h"
 #include "ui/app_list/views/page_switcher.h"
 #include "ui/app_list/views/pulsing_block_view.h"
 #include "ui/base/animation/animation.h"
 #include "ui/base/events/event.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/views/border.h"
 #include "ui/views/view_model_utils.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/root_window.h"
+#endif
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+#include "base/command_line.h"
+#include "base/files/file_path.h"
+#include "base/win/shortcut.h"
+#include "ui/base/dragdrop/drag_utils.h"
+#include "ui/base/dragdrop/drop_target_win.h"
+#include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #endif
 
 namespace {
@@ -42,6 +55,12 @@ const int kPageFlipDelayInMs = 1000;
 
 // How many pages on either side of the selected one we prerender.
 const int kPrerenderPages = 1;
+
+// The drag and drop proxy should get scaled by this factor.
+const float kDragAndDropProxyScale = 1.5f;
+
+// For testing we remember the last created grid view.
+app_list::AppsGridView* last_created_grid_view_for_test = NULL;
 
 // RowMoveAnimationDelegate is used when moving an item into a different row.
 // Before running the animation, the item's layer is re-created and kept in
@@ -97,6 +116,121 @@ class RowMoveAnimationDelegate
 
 namespace app_list {
 
+#if defined(OS_WIN) && !defined(USE_AURA)
+// Interprets drag events sent from Windows via the drag/drop API and forwards
+// them to AppsGridView.
+// On Windows, in order to have the OS perform the drag properly we need to
+// provide it with a shortcut file which may or may not exist at the time the
+// drag is started. Therefore while waiting for that shortcut to be located we
+// just do a regular "internal" drag and transition into the synchronous drag
+// when the shortcut is found/created. Hence a synchronous drag is an optional
+// phase of a regular drag and non-Windows platforms drags are equivalent to a
+// Windows drag that never enters the synchronous drag phase.
+class SynchronousDrag : public ui::DragSourceWin {
+ public:
+  SynchronousDrag(app_list::AppsGridView* grid_view,
+              app_list::AppListItemView* drag_view,
+              const gfx::Point& drag_view_offset)
+      : grid_view_(grid_view),
+        drag_view_(drag_view),
+        drag_view_offset_(drag_view_offset),
+        has_shortcut_path_(false),
+        running_(false),
+        canceled_(false) {
+  }
+
+  void set_shortcut_path(const base::FilePath& shortcut_path) {
+    has_shortcut_path_ = true;
+    shortcut_path_ = shortcut_path;
+  }
+
+  bool CanRun() {
+    return has_shortcut_path_ && !running_;
+  }
+
+  void Run() {
+    DCHECK(CanRun());
+    running_ = true;
+
+    ui::OSExchangeData data;
+    SetupExchangeData(&data);
+
+    // Hide the dragged view because the OS is going to create its own.
+    const gfx::Size drag_view_size = drag_view_->size();
+    drag_view_->SetSize(gfx::Size(0, 0));
+
+    // Blocks until the drag is finished. Calls into the ui::DragSourceWin
+    // methods.
+    DWORD effects;
+    DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
+               this, DROPEFFECT_MOVE | DROPEFFECT_LINK, &effects);
+
+    // Restore the dragged view to its original size.
+    drag_view_->SetSize(drag_view_size);
+
+    grid_view_->EndDrag(canceled_ || !IsCursorWithinGridView());
+  }
+
+ private:
+  // Overridden from ui::DragSourceWin.
+  virtual void OnDragSourceCancel() OVERRIDE {
+    canceled_ = true;
+  }
+
+  virtual void OnDragSourceDrop() OVERRIDE {
+  }
+
+  virtual void OnDragSourceMove() OVERRIDE {
+    grid_view_->UpdateDrag(app_list::AppsGridView::MOUSE,
+                           GetCursorInGridViewCoords());
+
+    // Don't turn pages if the cursor is dragged outside the view.
+    if (!IsCursorWithinGridView())
+      grid_view_->StopPageFlipTimer();
+  }
+
+  void SetupExchangeData(ui::OSExchangeData* data) {
+    data->SetFilename(shortcut_path_);
+    gfx::ImageSkia image(drag_view_->GetDragImage());
+    gfx::Size image_size(image.size());
+    drag_utils::SetDragImageOnDataObject(
+        image,
+        image.size(),
+        gfx::Vector2d(drag_view_offset_.x(), drag_view_offset_.y()),
+        data);
+  }
+
+  HWND GetGridViewHWND() {
+    return grid_view_->GetWidget()->GetTopLevelWidget()->GetNativeView();
+  }
+
+  bool IsCursorWithinGridView() {
+    POINT p;
+    GetCursorPos(&p);
+    return GetGridViewHWND() == WindowFromPoint(p);
+  }
+
+  gfx::Point GetCursorInGridViewCoords() {
+    POINT p;
+    GetCursorPos(&p);
+    ScreenToClient(GetGridViewHWND(), &p);
+    gfx::Point grid_view_pt(p.x, p.y);
+    views::View::ConvertPointFromWidget(grid_view_, &grid_view_pt);
+    return grid_view_pt;
+  }
+
+  app_list::AppsGridView* grid_view_;
+  app_list::AppListItemView* drag_view_;
+  gfx::Point drag_view_offset_;
+  bool has_shortcut_path_;
+  base::FilePath shortcut_path_;
+  bool running_;
+  bool canceled_;
+
+  DISALLOW_COPY_AND_ASSIGN(SynchronousDrag);
+};
+#endif // defined(OS_WIN) && !defined(USE_AURA)
+
 AppsGridView::AppsGridView(AppsGridViewDelegate* delegate,
                            PaginationModel* pagination_model)
     : model_(NULL),
@@ -108,9 +242,12 @@ AppsGridView::AppsGridView(AppsGridViewDelegate* delegate,
       selected_view_(NULL),
       drag_view_(NULL),
       drag_pointer_(NONE),
+      drag_and_drop_host_(NULL),
+      forward_events_to_drag_and_drop_host_(false),
       page_flip_target_(-1),
       page_flip_delay_in_ms_(kPageFlipDelayInMs),
       bounds_animator_(this) {
+  last_created_grid_view_for_test = this;
   pagination_model_->AddObserver(this);
   AddChildView(page_switcher_view_);
 }
@@ -177,33 +314,116 @@ void AppsGridView::EnsureViewVisible(const views::View* view) {
     pagination_model_->SelectPage(index.page, false);
 }
 
-void AppsGridView::InitiateDrag(views::View* view,
+void AppsGridView::InitiateDrag(AppListItemView* view,
                                 Pointer pointer,
                                 const ui::LocatedEvent& event) {
+  DCHECK(view);
   if (drag_view_ || pulsing_blocks_model_.view_size())
     return;
 
   drag_view_ = view;
-  drag_start_ = event.location();
+
+  // When a drag and drop host is given, the item can be dragged out of the app
+  // list window. In that case a proxy widget needs to be used.
+  // Note: This code has very likely to be changed for Windows (non metro mode)
+  // when a |drag_and_drop_host_| gets implemented.
+  if (drag_and_drop_host_) {
+    // Determine the mouse offset to the center of the icon so that the drag and
+    // drop host follows this layer.
+    gfx::Vector2d delta = event.root_location() -
+                          drag_view_->GetBoundsInScreen().CenterPoint();
+    delta.set_y(delta.y() + drag_view_->title()->size().height() / 2);
+    // We have to hide the original item since the drag and drop host will do
+    // the OS dependent code to "lift off the dragged item".
+    drag_and_drop_host_->CreateDragIconProxy(event.root_location(),
+                                             view->model()->icon(),
+                                             drag_view_,
+                                             delta,
+                                             kDragAndDropProxyScale);
+    HideView(drag_view_, true);
+  }
+  drag_view_offset_ = event.location();
+  ExtractDragLocation(event, &drag_start_grid_view_);
+  drag_view_start_ = gfx::Point(drag_view_->x(), drag_view_->y());
 }
 
-void AppsGridView::UpdateDrag(views::View* view,
-                              Pointer pointer,
-                              const ui::LocatedEvent& event) {
-  if (!dragging() && drag_view_ &&
-      ExceededDragThreshold(event.location() - drag_start_)) {
+void AppsGridView::OnGotShortcutPath(const base::FilePath& path) {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // Drag may have ended before we get the shortcut path.
+  if (!synchronous_drag_)
+    return;
+  // Setting the shortcut path here means the next time we hit UpdateDrag()
+  // we'll enter the synchronous drag.
+  // NOTE we don't Run() the drag here because that causes animations not to
+  // update for some reason.
+  synchronous_drag_->set_shortcut_path(path);
+  DCHECK(synchronous_drag_->CanRun());
+#endif
+}
+
+void AppsGridView::StartSettingUpSynchronousDrag() {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  delegate_->GetShortcutPathForApp(
+    drag_view_->model()->app_id(),
+    base::Bind(&AppsGridView::OnGotShortcutPath, base::Unretained(this)));
+  synchronous_drag_ = new SynchronousDrag(this, drag_view_, drag_view_offset_);
+#endif
+}
+
+bool AppsGridView::RunSynchronousDrag() {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  if (synchronous_drag_ && synchronous_drag_->CanRun()) {
+    synchronous_drag_->Run();
+    synchronous_drag_ = NULL;
+    return true;
+  }
+#endif
+  return false;
+}
+
+void AppsGridView::CleanUpSynchronousDrag() {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  synchronous_drag_ = NULL;
+#endif
+}
+
+void AppsGridView::UpdateDragFromItem(Pointer pointer,
+                                      const ui::LocatedEvent& event) {
+  gfx::Point drag_point_in_grid_view;
+  ExtractDragLocation(event, &drag_point_in_grid_view);
+  UpdateDrag(pointer, drag_point_in_grid_view);
+
+  // If a drag and drop host is provided, see if the drag operation needs to be
+  // forwarded.
+  DispatchDragEventToDragAndDropHost(event.root_location());
+  if (drag_and_drop_host_)
+    drag_and_drop_host_->UpdateDragIconProxy(event.root_location());
+}
+
+void AppsGridView::UpdateDrag(Pointer pointer, const gfx::Point& point) {
+  // EndDrag was called before if |drag_view_| is NULL.
+  if (!drag_view_)
+    return;
+
+  if (RunSynchronousDrag())
+    return;
+
+  gfx::Vector2d drag_vector(point - drag_start_grid_view_);
+  if (!dragging() && ExceededDragThreshold(drag_vector)) {
     drag_pointer_ = pointer;
     // Move the view to the front so that it appears on top of other views.
     ReorderChildView(drag_view_, -1);
     bounds_animator_.StopAnimatingView(drag_view_);
+    StartSettingUpSynchronousDrag();
   }
+
   if (drag_pointer_ != pointer)
     return;
 
-  ExtractDragLocation(event, &last_drag_point_);
-
+  last_drag_point_ = point;
   const Index last_drop_target = drop_target_;
   CalculateDropTarget(last_drag_point_, false);
+
   MaybeStartPageFlipTimer(last_drag_point_);
 
   gfx::Point page_switcher_point(last_drag_point_);
@@ -213,30 +433,55 @@ void AppsGridView::UpdateDrag(views::View* view,
 
   if (last_drop_target != drop_target_)
     AnimateToIdealBounds();
-  drag_view_->SetPosition(
-      gfx::PointAtOffsetFromOrigin(last_drag_point_ - drag_start_));
+
+  drag_view_->SetPosition(drag_view_start_ + drag_vector);
 }
 
 void AppsGridView::EndDrag(bool cancel) {
-  if (!cancel && dragging() && drag_view_) {
+  // EndDrag was called before if |drag_view_| is NULL.
+  if (!drag_view_)
+    return;
+
+  if (forward_events_to_drag_and_drop_host_) {
+    forward_events_to_drag_and_drop_host_ = false;
+    drag_and_drop_host_->EndDrag(cancel);
+  } else if (!cancel && dragging()) {
     CalculateDropTarget(last_drag_point_, true);
     if (IsValidIndex(drop_target_))
       MoveItemInModel(drag_view_, drop_target_);
   }
 
-  drag_pointer_ = NONE;
-  drop_target_ = Index();
-  if (drag_view_) {
-    drag_view_ = NULL;
-    AnimateToIdealBounds();
+  if (drag_and_drop_host_) {
+    // If we had a drag and drop proxy icon, we delete it and make the real
+    // item visible again.
+    drag_and_drop_host_->DestroyDragIconProxy();
+    HideView(drag_view_, false);
   }
 
+  // The drag can be ended after the synchronous drag is created but before it
+  // is Run().
+  CleanUpSynchronousDrag();
+
+  drag_pointer_ = NONE;
+  drop_target_ = Index();
+  drag_view_ = NULL;
+  AnimateToIdealBounds();
+
+  StopPageFlipTimer();
+}
+
+void AppsGridView::StopPageFlipTimer() {
   page_flip_timer_.Stop();
   page_flip_target_ = -1;
 }
 
 bool AppsGridView::IsDraggedView(const views::View* view) const {
   return drag_view_ == view;
+}
+
+void AppsGridView::SetDragAndDropHostOfCurrentAppList(
+    ApplicationDragAndDropHost* drag_and_drop_host) {
+  drag_and_drop_host_ = drag_and_drop_host;
 }
 
 void AppsGridView::Prerender(int page_index) {
@@ -260,6 +505,22 @@ gfx::Size AppsGridView::GetPreferredSize() {
       tile_size.width() * cols_ + insets.width(),
       tile_size.height() * rows_per_page_ +
           page_switcher_height + insets.height());
+}
+
+bool AppsGridView::GetDropFormats(
+    int* formats,
+    std::set<OSExchangeData::CustomFormat>* custom_formats) {
+  // TODO(koz): Only accept a specific drag type for app shortcuts.
+  *formats = OSExchangeData::FILE_NAME;
+  return true;
+}
+
+bool AppsGridView::CanDrop(const OSExchangeData& data) {
+  return true;
+}
+
+int AppsGridView::OnDragUpdated(const ui::DropTargetEvent& event) {
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 void AppsGridView::Layout() {
@@ -288,25 +549,26 @@ bool AppsGridView::OnKeyPressed(const ui::KeyEvent& event) {
     handled = selected_view_->OnKeyPressed(event);
 
   if (!handled) {
+    const int forward_dir = base::i18n::IsRTL() ? -1 : 1;
     switch (event.key_code()) {
       case ui::VKEY_LEFT:
-        MoveSelected(0, -1);
+        MoveSelected(0, -forward_dir, 0);
         return true;
       case ui::VKEY_RIGHT:
-        MoveSelected(0, 1);
+        MoveSelected(0, forward_dir, 0);
         return true;
       case ui::VKEY_UP:
-        MoveSelected(0, -cols_);
+        MoveSelected(0, 0, -1);
         return true;
       case ui::VKEY_DOWN:
-        MoveSelected(0, cols_);
+        MoveSelected(0, 0, 1);
         return true;
       case ui::VKEY_PRIOR: {
-        MoveSelected(-1, 0);
+        MoveSelected(-1, 0, 0);
         return true;
       }
       case ui::VKEY_NEXT: {
-        MoveSelected(1, 0);
+        MoveSelected(1, 0, 0);
         return true;
       }
       default:
@@ -325,18 +587,22 @@ bool AppsGridView::OnKeyReleased(const ui::KeyEvent& event) {
   return handled;
 }
 
-void AppsGridView::ViewHierarchyChanged(bool is_add,
-                                        views::View* parent,
-                                        views::View* child) {
-  if (!is_add && parent == this) {
-    if (selected_view_ == child)
+void AppsGridView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (!details.is_add && details.parent == this) {
+    if (selected_view_ == details.child)
       selected_view_ = NULL;
 
-    if (drag_view_ == child)
+    if (drag_view_ == details.child)
       EndDrag(true);
 
-    bounds_animator_.StopAnimatingView(child);
+    bounds_animator_.StopAnimatingView(details.child);
   }
+}
+
+// static
+AppsGridView* AppsGridView::GetLastGridViewForTest() {
+  return last_created_grid_view_for_test;
 }
 
 void AppsGridView::Update() {
@@ -433,20 +699,41 @@ views::View* AppsGridView::GetViewAtIndex(const Index& index) const {
   return view_model_.view_at(model_index);
 }
 
-void AppsGridView::MoveSelected(int page_delta, int slot_delta) {
+void AppsGridView::MoveSelected(int page_delta,
+                                int slot_x_delta,
+                                int slot_y_delta) {
   if (!selected_view_)
     return SetSelectedItemByIndex(Index(pagination_model_->selected_page(), 0));
 
   const Index& selected = GetIndexOfView(selected_view_);
-  int target_slot = selected.slot + slot_delta;
-  if (target_slot < 0) {
-    page_delta += (target_slot + 1) / tiles_per_page() - 1;
-    if (selected.page > 0)
-      target_slot = tiles_per_page() + (target_slot + 1) % tiles_per_page() - 1;
-  } else if (target_slot >= tiles_per_page()) {
-    page_delta += target_slot / tiles_per_page();
-    if (selected.page < pagination_model_->total_pages() - 1)
-      target_slot %= tiles_per_page();
+  int target_slot = selected.slot + slot_x_delta + slot_y_delta * cols_;
+
+  if (selected.slot % cols_ == 0 && slot_x_delta == -1) {
+    if (selected.page > 0) {
+      page_delta = -1;
+      target_slot = selected.slot + cols_ - 1;
+    } else {
+      target_slot = selected.slot;
+    }
+  }
+
+  if (selected.slot % cols_ == cols_ - 1 && slot_x_delta == 1) {
+    if (selected.page < pagination_model_->total_pages() - 1) {
+      page_delta = 1;
+      target_slot = selected.slot - cols_ + 1;
+    } else {
+      target_slot = selected.slot;
+    }
+  }
+
+  // Clamp the target slot to the last item if we are moving to the last page
+  // but our target slot is past the end of the item list.
+  if (page_delta &&
+      selected.page + page_delta == pagination_model_->total_pages() - 1) {
+    int last_item_slot = (view_model_.view_size() - 1) % tiles_per_page();
+    if (last_item_slot < target_slot) {
+      target_slot = last_item_slot;
+    }
   }
 
   int target_page = std::min(pagination_model_->total_pages() - 1,
@@ -659,6 +946,39 @@ void AppsGridView::CalculateDropTarget(const gfx::Point& drag_point,
   }
 }
 
+void AppsGridView::DispatchDragEventToDragAndDropHost(
+    const gfx::Point& point) {
+  if (!drag_view_ || !drag_and_drop_host_)
+    return;
+  if (bounds().Contains(last_drag_point_)) {
+    // The event was issued inside the app menu and we should get all events.
+    if (forward_events_to_drag_and_drop_host_) {
+      // The DnD host was previously called and needs to be informed that the
+      // session returns to the owner.
+      forward_events_to_drag_and_drop_host_ = false;
+      drag_and_drop_host_->EndDrag(true);
+    }
+  } else {
+    // The event happened outside our app menu and we might need to dispatch.
+    if (forward_events_to_drag_and_drop_host_) {
+      // Dispatch since we have already started.
+      if (!drag_and_drop_host_->Drag(point)) {
+        // The host is not active any longer and we cancel the operation.
+        forward_events_to_drag_and_drop_host_ = false;
+        drag_and_drop_host_->EndDrag(true);
+      }
+    } else {
+      if (drag_and_drop_host_->StartDrag(drag_view_->model()->app_id(),
+                                         point)) {
+        // From now on we forward the drag events.
+        forward_events_to_drag_and_drop_host_ = true;
+        // Any flip operations are stopped.
+        StopPageFlipTimer();
+      }
+    }
+  }
+}
+
 void AppsGridView::MaybeStartPageFlipTimer(const gfx::Point& drag_point) {
   int new_page_flip_target = -1;
 
@@ -725,7 +1045,7 @@ void AppsGridView::ButtonPressed(views::Button* sender,
   if (dragging())
     return;
 
-  if (sender->GetClassName() != AppListItemView::kViewClassName)
+  if (strcmp(sender->GetClassName(), AppListItemView::kViewClassName))
     return;
 
   if (delegate_) {
@@ -803,6 +1123,14 @@ void AppsGridView::OnAppListModelStatusChanged() {
   UpdatePulsingBlockViews();
   Layout();
   SchedulePaint();
+}
+
+void AppsGridView::HideView(views::View* view, bool hide) {
+#if defined(USE_AURA)
+  ui::ScopedLayerAnimationSettings animator(view->layer()->GetAnimator());
+  animator.SetPreemptionStrategy(ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET);
+  view->layer()->SetOpacity(hide ? 0 : 1);
+#endif
 }
 
 }  // namespace app_list

@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/network/geolocation_handler.h"
@@ -21,7 +21,7 @@ class GeolocationChromeOsWifiDataProviderTest : public testing::Test {
 
   virtual void SetUp() OVERRIDE {
     chromeos::DBusThreadManager::InitializeWithStub();
-    chromeos::GeolocationHandler::Initialize();
+    chromeos::NetworkHandler::Initialize();
     manager_client_ =
         chromeos::DBusThreadManager::Get()->GetShillManagerClient();
     manager_test_ = manager_client_->GetTestInterface();
@@ -31,7 +31,7 @@ class GeolocationChromeOsWifiDataProviderTest : public testing::Test {
 
   virtual void TearDown() OVERRIDE {
     provider_ = NULL;
-    chromeos::GeolocationHandler::Shutdown();
+    chromeos::NetworkHandler::Shutdown();
     chromeos::DBusThreadManager::Shutdown();
   }
 

@@ -114,6 +114,8 @@ void EnrollmentScreen::OnAuthError(
     case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
     case GoogleServiceAuthError::REQUEST_CANCELED:
+    case GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE:
+    case GoogleServiceAuthError::SERVICE_ERROR:
       UMAFailure(policy::kMetricEnrollmentLoginFailed);
       LOG(ERROR) << "Auth error " << error.state();
       return;
@@ -167,7 +169,7 @@ void EnrollmentScreen::OnConfirmationClosed() {
   // If the machine has been put in KIOSK mode we have to restart the session
   // here to go in the proper KIOSK mode login screen.
   if (g_browser_process->browser_policy_connector()->GetDeviceMode() ==
-          policy::DEVICE_MODE_KIOSK) {
+          policy::DEVICE_MODE_RETAIL_KIOSK) {
     DBusThreadManager::Get()->GetSessionManagerClient()->StopSession();
     return;
   }
@@ -213,7 +215,7 @@ void EnrollmentScreen::RegisterForDevicePolicy(
 
   policy::DeviceCloudPolicyManagerChromeOS::AllowedDeviceModes modes;
   modes[policy::DEVICE_MODE_ENTERPRISE] = true;
-  modes[policy::DEVICE_MODE_KIOSK] = !is_auto_enrollment_;
+  modes[policy::DEVICE_MODE_RETAIL_KIOSK] = !is_auto_enrollment_;
   connector->ScheduleServiceInitialization(0);
   connector->GetDeviceCloudPolicyManager()->StartEnrollment(
       token, is_auto_enrollment_, modes,

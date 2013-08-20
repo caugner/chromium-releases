@@ -18,7 +18,7 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/plugins/plugin_finder.h"
@@ -238,7 +238,7 @@ void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
   }
   bool enable = enable_str == "true";
 
-  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile).get();
   if (is_group_str == "true") {
     string16 group_name;
     if (!args->GetString(0, &group_name)) {
@@ -331,7 +331,7 @@ void PluginsDOMHandler::LoadPlugins() {
 void PluginsDOMHandler::PluginsLoaded(
     const std::vector<webkit::WebPluginInfo>& plugins) {
   Profile* profile = Profile::FromWebUI(web_ui());
-  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile).get();
 
   ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
 

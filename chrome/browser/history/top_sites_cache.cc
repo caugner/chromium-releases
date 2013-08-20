@@ -34,7 +34,7 @@ bool TopSitesCache::GetPageThumbnail(
   std::map<GURL, Images>::const_iterator found =
       images_.find(GetCanonicalURL(url));
   if (found != images_.end()) {
-    base::RefCountedBytes* data = found->second.thumbnail.get();
+    base::RefCountedMemory* data = found->second.thumbnail.get();
     if (data) {
       *bytes = data;
       return true;
@@ -54,7 +54,7 @@ bool TopSitesCache::GetPageThumbnailScore(const GURL& url,
   return false;
 }
 
-GURL TopSitesCache::GetCanonicalURL(const GURL& url) {
+const GURL& TopSitesCache::GetCanonicalURL(const GURL& url) {
   CanonicalURLs::iterator i = TopSitesCache::GetCanonicalURLsIterator(url);
   return i == canonical_urls_.end() ? url : i->first.first->url;
 }

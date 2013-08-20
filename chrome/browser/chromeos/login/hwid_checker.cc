@@ -9,9 +9,10 @@
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/common/chrome_switches.h"
+#include "chromeos/chromeos_switches.h"
 #include "third_party/re2/re2/re2.h"
 #include "third_party/zlib/zlib.h"
 
@@ -42,11 +43,7 @@ bool IsCorrectHWIDv2(const std::string& hwid) {
   return CalculateHWIDv2Checksum(body) == checksum;
 }
 
-bool IsExceptionalHWID(const std::string& hwid) {
-  return RE2::PartialMatch(hwid, "^(SPRING [A-D])|(FALCO A)");
-}
-
-std::string CalculateExceptionalHWIDChecksum(const std::string& data) {
+std::string CalculateHWIDv3Checksum(const std::string& data) {
   static const char base32_alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   unsigned crc32 = CalculateCRC32(data);
   // We take 10 least significant bits of CRC-32 and encode them in 2 characters
@@ -57,9 +54,7 @@ std::string CalculateExceptionalHWIDChecksum(const std::string& data) {
   return checksum;
 }
 
-bool IsCorrectExceptionalHWID(const std::string& hwid) {
-  if (!IsExceptionalHWID(hwid))
-    return false;
+bool IsCorrectHWIDv3(const std::string& hwid) {
   std::string bom;
   if (!RE2::FullMatch(hwid, "[A-Z0-9]+ ((?:[A-Z2-7]{4}-)*[A-Z2-7]{1,4})", &bom))
     return false;
@@ -72,29 +67,6 @@ bool IsCorrectExceptionalHWID(const std::string& hwid) {
       hwid_without_dashes.substr(0, hwid_without_dashes.length() - 2);
   std::string checksum =
       hwid_without_dashes.substr(hwid_without_dashes.length() - 2);
-  return CalculateExceptionalHWIDChecksum(not_checksum) == checksum;
-}
-
-std::string CalculateHWIDv3Checksum(const std::string& data) {
-  static const char base8_alphabet[] = "23456789";
-  static const char base32_alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  unsigned crc32 = CalculateCRC32(data);
-  // We take 8 least significant bits of CRC-32 and encode them in 2 characters.
-  std::string checksum;
-  checksum += base8_alphabet[(crc32 >> 5) & 0x7];
-  checksum += base32_alphabet[crc32 & 0x1f];
-  return checksum;
-}
-
-bool IsCorrectHWIDv3(const std::string& hwid) {
-  if (IsExceptionalHWID(hwid))
-    return false;
-  std::string regex =
-      "([A-Z0-9]+ (?:[A-Z2-7][2-9][A-Z2-7]-)*[A-Z2-7])([2-9][A-Z2-7])";
-  std::string not_checksum, checksum;
-  if (!RE2::FullMatch(hwid, regex, &not_checksum, &checksum))
-    return false;
-  RemoveChars(not_checksum, "-", &not_checksum);
   return CalculateHWIDv3Checksum(not_checksum) == checksum;
 }
 
@@ -103,22 +75,23 @@ bool IsCorrectHWIDv3(const std::string& hwid) {
 namespace chromeos {
 
 bool IsHWIDCorrect(const std::string& hwid) {
-  return IsCorrectHWIDv2(hwid) || IsCorrectExceptionalHWID(hwid) ||
-      IsCorrectHWIDv3(hwid);
+  return IsCorrectHWIDv2(hwid) || IsCorrectHWIDv3(hwid);
 }
 
 bool IsMachineHWIDCorrect() {
 #if !defined(GOOGLE_CHROME_BUILD)
   return true;
 #endif
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType))
+  CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(::switches::kTestType) ||
+      cmd_line->HasSwitch(chromeos::switches::kSkipHWIDCheck))
     return true;
   if (!base::chromeos::IsRunningOnChromeOS())
     return true;
   std::string hwid;
   chromeos::system::StatisticsProvider* stats =
       chromeos::system::StatisticsProvider::GetInstance();
-  if (!stats->GetMachineStatistic("hardware_class", &hwid)) {
+  if (!stats->GetMachineStatistic(chromeos::system::kHardwareClass, &hwid)) {
     LOG(ERROR) << "Couldn't get machine statistic 'hardware_class'.";
     return false;
   }

@@ -20,13 +20,13 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/process_info.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
@@ -66,7 +66,6 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_setup_flow.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -131,7 +130,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
@@ -150,8 +148,7 @@
 #include "chrome/common/search_types.h"
 #include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/web_apps.h"
-#include "content/public/browser/color_chooser.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -185,7 +182,6 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/point.h"
 #include "ui/shell_dialogs/selected_file_info.h"
-#include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_WIN)
@@ -194,8 +190,9 @@
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "components/autofill/browser/autofill_ie_toolbar_import_win.h"
+#include "components/autofill/core/browser/autofill_ie_toolbar_import_win.h"
 #include "ui/base/win/shell.h"
+#include "ui/views/win/hwnd_util.h"
 #endif  // OS_WIN
 
 #if defined(OS_CHROMEOS)
@@ -218,6 +215,7 @@ using content::UserMetricsAction;
 using content::WebContents;
 using extensions::Extension;
 using ui::WebDialogDelegate;
+using web_modal::WebContentsModalDialogManager;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -233,14 +231,6 @@ const int kUIUpdateCoalescingTimeMS = 200;
 
 BrowserWindow* CreateBrowserWindow(Browser* browser) {
   return BrowserWindow::CreateBrowserWindow(browser);
-}
-
-bool ShouldReloadCrashedTab(WebContents* contents) {
-#if defined(OS_CHROMEOS)
-  return contents->IsCrashed();
-#else
-  return false;
-#endif
 }
 
 }  // namespace
@@ -353,6 +343,11 @@ Browser::Browser(const CreateParams& params)
       command_controller_(new chrome::BrowserCommandController(
           this, g_browser_process->profile_manager())),
       window_has_shown_(false) {
+  // If this causes a crash then a window is being opened using a profile type
+  // that is disallowed by policy. The crash prevents the disabled window type
+  // from opening at all, but the path that triggered it should be fixed.
+  CHECK(IncognitoModePrefs::CanOpenBrowser(profile_));
+
   if (!app_name_.empty())
     chrome::RegisterAppPrefs(app_name_, profile_);
   tab_strip_model_->AddObserver(this);
@@ -387,9 +382,6 @@ Browser::Browser(const CreateParams& params)
       prefs::kShowBookmarkBar,
       base::Bind(&Browser::UpdateBookmarkBarState, base::Unretained(this),
                  BOOKMARK_BAR_STATE_CHANGE_PREF_CHANGE));
-  profile_pref_registrar_.Add(
-      prefs::kHomePage,
-      base::Bind(&Browser::MarkHomePageAsChanged, base::Unretained(this)));
 
   BrowserList::AddBrowser(this);
 
@@ -408,7 +400,7 @@ Browser::Browser(const CreateParams& params)
   window_ = params.window ? params.window : CreateBrowserWindow(this);
 
   // TODO(beng): move to BrowserFrameWin.
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
   // Set the app user model id for this application to that of the application
   // name.  See http://crbug.com/7028.
   ui::win::SetAppIdForWindow(
@@ -416,7 +408,7 @@ Browser::Browser(const CreateParams& params)
       ShellIntegration::GetAppModelIdForProfile(UTF8ToWide(app_name_),
                                                 profile_->GetPath()) :
       ShellIntegration::GetChromiumModelIdForProfile(profile_->GetPath()),
-      window()->GetNativeWindow());
+      views::HWNDForNativeWindow(window()->GetNativeWindow()));
 #endif
 
   // Create the extension window controller before sending notifications.
@@ -485,6 +477,14 @@ Browser::~Browser() {
   profile_pref_registrar_.RemoveAll();
 
   encoding_auto_detect_.Destroy();
+
+  // Destroy BrowserExtensionWindowController before the incognito profile
+  // is destroyed to make sure the chrome.windows.onRemoved event is sent.
+  extension_window_controller_.reset();
+
+  // Destroy BrowserInstantController before the incongnito profile is destroyed
+  // because the InstantController destructor depends on this profile.
+  instant_controller_.reset();
 
   if (profile_->IsOffTheRecord() &&
       !BrowserList::IsOffTheRecordSessionActiveForProfile(profile_)) {
@@ -603,8 +603,10 @@ void Browser::OnWindowClosing() {
   bool should_quit_if_last_browser =
       browser_shutdown::IsTryingToQuit() || !chrome::WillKeepAlive();
 
-  if (should_quit_if_last_browser && chrome::ShouldStartShutdown(this))
+  if (should_quit_if_last_browser &&
+      BrowserList::GetInstance(host_desktop_type_)->size() == 1) {
     browser_shutdown::OnShutdownStarting(browser_shutdown::WINDOW_CLOSE);
+  }
 
   // Don't use GetForProfileIfExisting here, we want to force creation of the
   // session service so that user can restore what was open.
@@ -631,22 +633,6 @@ void Browser::OnWindowClosing() {
       content::NotificationService::NoDetails());
 
   tab_strip_model_->CloseAllTabs();
-}
-
-void Browser::OnWindowActivated() {
-  // On some platforms we want to automatically reload tabs that are
-  // killed when the user selects them.
-  WebContents* contents = tab_strip_model_->GetActiveWebContents();
-  if (contents && ShouldReloadCrashedTab(contents)) {
-    chrome::Reload(this, CURRENT_TAB);
-    // The reload above will change the toolbar reload button into a stop
-    // button. If the user activated the window with a mouse press on the
-    // reload button itself, the reload will stop on mouse release and the page
-    // will be blank. Disable the stop command temporarily. It will be
-    // re-enabled as the page loads.
-    command_controller_->command_updater()->UpdateCommandEnabled(IDC_STOP,
-                                                                 false);
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -842,7 +828,7 @@ void Browser::JSOutOfMemoryHelper(WebContents* web_contents) {
     return;
 
   SimpleAlertInfoBarDelegate::Create(
-      infobar_service, NULL,
+      infobar_service, InfoBarDelegate::kNoIconID,
       l10n_util::GetStringUTF16(IDS_JS_OUT_OF_MEMORY_PROMPT), true);
 }
 
@@ -1025,21 +1011,8 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
                                int reason) {
   content::RecordAction(UserMetricsAction("ActiveTabChanged"));
 
-  // On some platforms we want to automatically reload tabs that are
-  // killed when the user selects them.
-  bool did_reload = false;
-  if ((reason & CHANGE_REASON_USER_GESTURE) &&
-      ShouldReloadCrashedTab(new_contents)) {
-    LOG(WARNING) << "Reloading killed tab at " << index;
-    static int reload_count = 0;
-    UMA_HISTOGRAM_CUSTOM_COUNTS(
-        "Tabs.SadTab.ReloadCount", ++reload_count, 1, 1000, 50);
-    chrome::Reload(this, CURRENT_TAB);
-    did_reload = true;
-  }
-
   // Discarded tabs always get reloaded.
-  if (!did_reload && tab_strip_model_->IsTabDiscarded(index)) {
+  if (tab_strip_model_->IsTabDiscarded(index)) {
     LOG(WARNING) << "Reloading discarded tab at " << index;
     static int reload_count = 0;
     UMA_HISTOGRAM_CUSTOM_COUNTS(
@@ -1150,7 +1123,7 @@ void Browser::TabStripEmpty() {
   // Note: This will be called several times if TabStripEmpty is called several
   //       times. This is because it does not close the window if tabs are
   //       still present.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&Browser::CloseFrame, weak_factory_.GetWeakPtr()));
 
   // Instant may have visible WebContents that need to be detached before the
@@ -1161,7 +1134,7 @@ void Browser::TabStripEmpty() {
 bool Browser::CanOverscrollContent() const {
 #if defined(USE_AURA)
   bool overscroll_enabled = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kOverscrollHistoryNavigation) == "1";
+      GetSwitchValueASCII(switches::kOverscrollHistoryNavigation) != "0";
   if (!overscroll_enabled)
     return false;
   if (is_app() || is_devtools() || !is_type_tabbed())
@@ -1443,9 +1416,9 @@ void Browser::ViewSourceForTab(WebContents* source, const GURL& page_url) {
 
 void Browser::ViewSourceForFrame(WebContents* source,
                                  const GURL& frame_url,
-                                 const std::string& frame_content_state) {
+                                 const content::PageState& frame_page_state) {
   DCHECK(source);
-  chrome::ViewSource(this, source, frame_url, frame_content_state);
+  chrome::ViewSource(this, source, frame_url, frame_page_state);
 }
 
 void Browser::ShowRepostFormWarningDialog(WebContents* source) {
@@ -1512,7 +1485,7 @@ void Browser::RendererResponsive(WebContents* source) {
 
 void Browser::WorkerCrashed(WebContents* source) {
   SimpleAlertInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(source), NULL,
+      InfoBarService::FromWebContents(source), InfoBarDelegate::kNoIconID,
       l10n_util::GetStringUTF16(IDS_WEBWORKER_CRASHED_PROMPT), true);
 }
 
@@ -1531,27 +1504,8 @@ content::JavaScriptDialogManager* Browser::GetJavaScriptDialogManager() {
 }
 
 content::ColorChooser* Browser::OpenColorChooser(WebContents* web_contents,
-                                                 int color_chooser_id,
-                                                 SkColor color) {
-#if defined(OS_WIN)
-  // On Windows, only create a color chooser if one doesn't exist, because we
-  // can't close the old color chooser dialog.
-  if (!color_chooser_.get())
-    color_chooser_.reset(content::ColorChooser::Create(color_chooser_id,
-                                                       web_contents,
-                                                       color));
-#else
-  if (color_chooser_.get())
-    color_chooser_->End();
-  color_chooser_.reset(content::ColorChooser::Create(color_chooser_id,
-                                                     web_contents,
-                                                     color));
-#endif
-  return color_chooser_.get();
-}
-
-void Browser::DidEndColorChooser() {
-  color_chooser_.reset();
+                                                 SkColor initial_color) {
+  return chrome::ShowColorChooser(web_contents, initial_color);
 }
 
 void Browser::RunFileChooser(WebContents* web_contents,
@@ -1674,7 +1628,7 @@ void Browser::ConfirmAddSearchProvider(TemplateURL* template_url,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Browser, WebContentsModalDialogManagerDelegate implementation:
+// Browser, web_modal::WebContentsModalDialogManagerDelegate implementation:
 
 void Browser::SetWebContentsBlocked(content::WebContents* web_contents,
                                     bool blocked) {
@@ -1688,7 +1642,8 @@ void Browser::SetWebContentsBlocked(content::WebContents* web_contents,
     web_contents->GetView()->Focus();
 }
 
-WebContentsModalDialogHost* Browser::GetWebContentsModalDialogHost() {
+web_modal::WebContentsModalDialogHost*
+Browser::GetWebContentsModalDialogHost() {
   return window_->GetWebContentsModalDialogHost();
 }
 
@@ -1836,10 +1791,6 @@ void Browser::OnDevToolsDisabledChanged() {
     content::DevToolsManager::GetInstance()->CloseAllClientHosts();
 }
 
-void Browser::MarkHomePageAsChanged() {
-  profile_->GetPrefs()->SetBoolean(prefs::kHomePageChanged, true);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, UI update coalescing and handling (private):
 
@@ -1898,7 +1849,7 @@ void Browser::ScheduleUIUpdate(const WebContents* source,
 
   if (!chrome_updater_factory_.HasWeakPtrs()) {
     // No task currently scheduled, start another.
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&Browser::ProcessPendingUIUpdates,
                    chrome_updater_factory_.GetWeakPtr()),
@@ -2250,12 +2201,12 @@ bool Browser::MaybeCreateBackgroundContents(int route_id,
       content::SiteInstance::Create(opener_web_contents->GetBrowserContext());
 
   // Passed all the checks, so this should be created as a BackgroundContents.
-  BackgroundContents* contents = service->CreateBackgroundContents(
-      site_instance,
-      route_id,
-      profile_,
-      frame_name,
-      ASCIIToUTF16(extension->id()));
+  BackgroundContents* contents =
+      service->CreateBackgroundContents(site_instance.get(),
+                                        route_id,
+                                        profile_,
+                                        frame_name,
+                                        ASCIIToUTF16(extension->id()));
 
   // When a separate process is used, the original renderer cannot access the
   // new window later, thus we need to navigate the window now.

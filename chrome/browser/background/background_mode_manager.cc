@@ -12,7 +12,7 @@
 #include "base/logging.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/background/background_mode_manager.h"
@@ -123,8 +123,8 @@ void BackgroundModeManager::BackgroundModeData::BuildProfileMenu(
              applications_->begin();
          cursor != applications_->end();
          ++cursor, ++position) {
-      const gfx::ImageSkia* icon = applications_->GetIcon(*cursor);
-      DCHECK(position == applications_->GetPosition(*cursor));
+      const gfx::ImageSkia* icon = applications_->GetIcon(cursor->get());
+      DCHECK(position == applications_->GetPosition(cursor->get()));
       const std::string& name = (*cursor)->name();
       menu->AddItem(position, UTF8ToUTF16(name));
       if (icon)
@@ -435,11 +435,6 @@ void BackgroundModeManager::OnProfileWillBeRemoved(
   }
 }
 
-void BackgroundModeManager::OnProfileWasRemoved(
-    const base::FilePath& profile_path,
-    const string16& profile_name) {
-}
-
 void BackgroundModeManager::OnProfileNameChanged(
     const base::FilePath& profile_path,
     const string16& old_profile_name) {
@@ -458,10 +453,6 @@ void BackgroundModeManager::OnProfileNameChanged(
   }
 }
 
-void BackgroundModeManager::OnProfileAvatarChanged(
-    const base::FilePath& profile_path) {
-
-}
 ///////////////////////////////////////////////////////////////////////////////
 //  BackgroundModeManager::BackgroundModeData, ui::SimpleMenuModel overrides
 bool BackgroundModeManager::IsCommandIdChecked(
@@ -496,7 +487,7 @@ void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
       chrome::ShowAboutChrome(bmd->GetBrowserWindow());
       break;
     case IDC_TASK_MANAGER:
-      chrome::OpenTaskManager(bmd->GetBrowserWindow(), true);
+      chrome::OpenTaskManager(bmd->GetBrowserWindow());
       break;
     case IDC_EXIT:
       content::RecordAction(UserMetricsAction("Exit"));
@@ -530,8 +521,8 @@ void BackgroundModeManager::EndKeepAliveForStartup() {
     // We call this via the message queue to make sure we don't try to end
     // keep-alive (which can shutdown Chrome) before the message loop has
     // started.
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     base::Bind(&chrome::EndKeepAlive));
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::Bind(&chrome::EndKeepAlive));
   }
 }
 

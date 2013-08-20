@@ -6,9 +6,9 @@
 
 #include <string>
 
-#include "base/string_util.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/mock_authenticator.h"
@@ -81,7 +81,7 @@ void LoginAttemptObserver::WaitForAttempt() {
 void LoginAttemptObserver::LoginAttempted() {
   login_attempted_ = true;
   if (waiting_)
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
 }
 
 }

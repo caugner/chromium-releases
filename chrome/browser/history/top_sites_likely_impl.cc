@@ -12,11 +12,11 @@
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_db_task.h"
@@ -226,11 +226,46 @@ bool TopSitesLikelyImpl::SetPageThumbnail(const GURL& url,
     // Always remove the existing entry and then add it back. That way if we end
     // up with too many temp thumbnails we'll prune the oldest first.
     RemoveTemporaryThumbnailByURL(url);
-    AddTemporaryThumbnail(url, thumbnail_data, score);
+    AddTemporaryThumbnail(url, thumbnail_data.get(), score);
     return true;
   }
 
-  return SetPageThumbnailEncoded(url, thumbnail_data, score);
+  return SetPageThumbnailEncoded(url, thumbnail_data.get(), score);
+}
+
+bool TopSitesLikelyImpl::SetPageThumbnailToJPEGBytes(
+    const GURL& url,
+    const base::RefCountedMemory* memory,
+    const ThumbnailScore& score) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (!loaded_) {
+    // TODO(sky): I need to cache these and apply them after the load
+    // completes.
+    return false;
+  }
+
+  bool add_temp_thumbnail = false;
+  if (!IsKnownURL(url)) {
+    if (!IsFull()) {
+      add_temp_thumbnail = true;
+    } else {
+      return false;  // This URL is not known to us.
+    }
+  }
+
+  if (!HistoryService::CanAddURL(url))
+    return false;  // It's not a real webpage.
+
+  if (add_temp_thumbnail) {
+    // Always remove the existing entry and then add it back. That way if we end
+    // up with too many temp thumbnails we'll prune the oldest first.
+    RemoveTemporaryThumbnailByURL(url);
+    AddTemporaryThumbnail(url, memory, score);
+    return true;
+  }
+
+  return SetPageThumbnailEncoded(url, memory, score);
 }
 
 // WARNING: this function may be invoked on any thread.
@@ -335,9 +370,8 @@ void TopSitesLikelyImpl::FinishHistoryMigration(
     URLToThumbnailMap::const_iterator image_i =
         data.url_to_thumbnail_map.find(data.most_visited[i].url);
     if (image_i != data.url_to_thumbnail_map.end()) {
-      SetPageThumbnailEncoded(data.most_visited[i].url,
-                              image_i->second,
-                              ThumbnailScore());
+      SetPageThumbnailEncoded(
+          data.most_visited[i].url, image_i->second.get(), ThumbnailScore());
     }
   }
 
@@ -512,6 +546,11 @@ bool TopSitesLikelyImpl::IsKnownURL(const GURL& url) {
   return loaded_ && cache_->IsKnownURL(url);
 }
 
+const std::string& TopSitesLikelyImpl::GetCanonicalURLString(
+    const GURL& url) const {
+  return cache_->GetCanonicalURL(url).spec();
+}
+
 bool TopSitesLikelyImpl::IsFull() {
   return loaded_ && cache_->top_sites().size() >= kTopSitesNumber;
 }
@@ -521,7 +560,7 @@ TopSitesLikelyImpl::~TopSitesLikelyImpl() {
 
 bool TopSitesLikelyImpl::SetPageThumbnailNoDB(
     const GURL& url,
-    const base::RefCountedBytes* thumbnail_data,
+    const base::RefCountedMemory* thumbnail_data,
     const ThumbnailScore& score) {
   // This should only be invoked when we know about the url.
   DCHECK(cache_->IsKnownURL(url));
@@ -542,7 +581,7 @@ bool TopSitesLikelyImpl::SetPageThumbnailNoDB(
       image->thumbnail.get())
     return false;  // The one we already have is better.
 
-  image->thumbnail = const_cast<base::RefCountedBytes*>(thumbnail_data);
+  image->thumbnail = const_cast<base::RefCountedMemory*>(thumbnail_data);
   image->thumbnail_score = new_score_with_redirects;
 
   ResetThreadSafeImageCache();
@@ -551,7 +590,7 @@ bool TopSitesLikelyImpl::SetPageThumbnailNoDB(
 
 bool TopSitesLikelyImpl::SetPageThumbnailEncoded(
     const GURL& url,
-    const base::RefCountedBytes* thumbnail,
+    const base::RefCountedMemory* thumbnail,
     const ThumbnailScore& score) {
   if (!SetPageThumbnailNoDB(url, thumbnail, score))
     return false;
@@ -595,15 +634,16 @@ void TopSitesLikelyImpl::RemoveTemporaryThumbnailByURL(const GURL& url) {
   }
 }
 
-void TopSitesLikelyImpl::AddTemporaryThumbnail(const GURL& url,
-                                         const base::RefCountedBytes* thumbnail,
-                                         const ThumbnailScore& score) {
+void TopSitesLikelyImpl::AddTemporaryThumbnail(
+    const GURL& url,
+    const base::RefCountedMemory* thumbnail,
+    const ThumbnailScore& score) {
   if (temp_images_.size() == kMaxTempTopImages)
     temp_images_.erase(temp_images_.begin());
 
   TempImage image;
   image.first = url;
-  image.second.thumbnail = const_cast<base::RefCountedBytes*>(thumbnail);
+  image.second.thumbnail = const_cast<base::RefCountedMemory*>(thumbnail);
   image.second.thumbnail_score = score;
   temp_images_.push_back(image);
 }
@@ -659,10 +699,6 @@ void TopSitesLikelyImpl::ApplyBlacklist(const MostVisitedURLList& urls,
     if (!IsBlacklisted(urls[i].url))
       out->push_back(urls[i]);
   }
-}
-
-std::string TopSitesLikelyImpl::GetURLString(const GURL& url) {
-  return cache_->GetCanonicalURL(url).spec();
 }
 
 std::string TopSitesLikelyImpl::GetURLHash(const GURL& url) {
@@ -760,9 +796,8 @@ void TopSitesLikelyImpl::SetTopSites(const MostVisitedURLList& new_top_sites) {
       for (TempImages::iterator it = temp_images_.begin();
            it != temp_images_.end(); ++it) {
         if (canonical_url == cache_->GetCanonicalURL(it->first)) {
-          SetPageThumbnailEncoded(mv.url,
-                                  it->second.thumbnail,
-                                  it->second.thumbnail_score);
+          SetPageThumbnailEncoded(
+              mv.url, it->second.thumbnail.get(), it->second.thumbnail_score);
           temp_images_.erase(it);
           break;
         }

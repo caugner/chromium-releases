@@ -10,7 +10,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
-#include "chrome/common/translate_errors.h"
+#include "chrome/common/translate/translate_errors.h"
 #include "content/public/renderer/render_view_observer.h"
 
 namespace WebKit {
@@ -27,7 +27,7 @@ class TranslateHelper : public content::RenderViewObserver {
   virtual ~TranslateHelper();
 
   // Informs us that the page's text has been extracted.
-  void PageCaptured(const string16& contents);
+  void PageCaptured(int page_id, const string16& contents);
 
  protected:
   // The following methods are protected so they can be overridden in
@@ -87,38 +87,66 @@ class TranslateHelper : public content::RenderViewObserver {
   virtual double ExecuteScriptAndGetDoubleResult(const std::string& script);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, LanguageCodeTypoCorrection);
-  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, LanguageCodeSynonyms);
-  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, ResetInvalidLanguageCode);
-  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest,
-                           CLDDisagreeWithWrongLanguageCode);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, AdoptHtmlLang);
   FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest,
                            CLDAgreeWithLanguageCodeHavingCountryCode);
   FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest,
+                           CLDDisagreeWithWrongLanguageCode);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest,
                            InvalidLanguageMetaTagProviding);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, LanguageCodeTypoCorrection);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, LanguageCodeSynonyms);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, ResetInvalidLanguageCode);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, SimilarLanguageCode);
+  FRIEND_TEST_ALL_PREFIXES(TranslateHelperTest, WellKnownWrongConfiguration);
 
-  // Correct language code if it contains well-known mistakes.
+  // Corrects language code if it contains well-known mistakes.
   static void CorrectLanguageCodeTypo(std::string* code);
 
-  // Convert language code to the one used in server supporting list.
+  // Converts language code to the one used in server supporting list.
   static void ConvertLanguageCodeSynonym(std::string* code);
 
-  // Reset language code if the specified string is apparently invalid.
+  // Resets language code if the specified string is apparently invalid.
   static void ResetInvalidLanguageCode(std::string* code);
 
-  // Determine content page language from Content-Language code and contents.
+  // Applies a series of language code modification in proper order.
+  static void ApplyLanguageCodeCorrection(std::string* code);
+
+  // Checks if languages are matched, or similar. This function returns true
+  // against a language pair containing a language which is difficult for CLD
+  // to distinguish.
+  static bool IsSameOrSimilarLanguages(const std::string& page_language,
+                                       const std::string& cld_language);
+
+  // Checks if languages pair is one of well-known pairs of wrong server
+  // configuration.
+  static bool MaybeServerWrongConfiguration(const std::string& page_language,
+                                            const std::string& cld_language);
+
+  // Checks if CLD can complement a sub code when the page language doesn't
+  // know the sub code.
+  static bool CanCLDComplementSubCode(const std::string& page_language,
+                                      const std::string& cld_language);
+
+  // Determines content page language from Content-Language code and contents.
   static std::string DeterminePageLanguage(const std::string& code,
-                                           const string16& contents);
+                                           const std::string& html_lang,
+                                           const string16& contents,
+                                           std::string* cld_language,
+                                           bool* is_cld_reliable);
 
   // Returns whether the page associated with |document| is a candidate for
   // translation.  Some pages can explictly specify (via a meta-tag) that they
   // should not be translated.
-  static bool IsPageTranslatable(WebKit::WebDocument* document);
+  static bool IsTranslationAllowed(WebKit::WebDocument* document);
 
 #if defined(ENABLE_LANGUAGE_DETECTION)
   // Returns the ISO 639_1 language code of the specified |text|, or 'unknown'
   // if it failed.
-  static std::string DetermineTextLanguage(const string16& text);
+  // |is_cld_reliable| will be set as true if CLD says the detection is
+  // reliable.
+  static std::string DetermineTextLanguage(const string16& text,
+                                           bool* is_cld_reliable);
 #endif
 
   // RenderViewObserver implementation.
@@ -145,11 +173,18 @@ class TranslateHelper : public content::RenderViewObserver {
   // if the page is being closed.
   WebKit::WebFrame* GetMainFrame();
 
+  // ID to represent a page which TranslateHelper captured and determined a
+  // content language.
+  int page_id_;
+
   // The states associated with the current translation.
   bool translation_pending_;
-  int page_id_;
   std::string source_lang_;
   std::string target_lang_;
+
+  // Time when a page langauge is determined. This is used to know a duration
+  // time from showing infobar to requesting translation.
+  base::TimeTicks language_determined_time_;
 
   // Method factory used to make calls to TranslatePageImpl.
   base::WeakPtrFactory<TranslateHelper> weak_method_factory_;

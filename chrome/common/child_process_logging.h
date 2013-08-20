@@ -11,12 +11,12 @@
 
 #include "base/basictypes.h"
 #include "base/debug/crash_logging.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "googleurl/src/gurl.h"
 
 class CommandLine;
 
-namespace content {
+namespace gpu {
 struct GPUInfo;
 }
 
@@ -102,7 +102,7 @@ void SetActiveExtensions(const std::set<std::string>& extension_ids);
 void SetNumberOfViews(int number_of_views);
 
 // Sets the data on the gpu to send along with crash reports.
-void SetGpuInfo(const content::GPUInfo& gpu_info);
+void SetGpuInfo(const gpu::GPUInfo& gpu_info);
 
 // Sets the data on the printer to send along with crash reports. Data may be
 // separated by ';' up to kMaxReportedPrinterRecords strings. Each substring

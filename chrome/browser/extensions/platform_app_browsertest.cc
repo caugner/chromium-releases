@@ -7,9 +7,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -31,12 +31,12 @@
 #include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/user_prefs/pref_registry_syncable.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -45,6 +45,7 @@
 #include "googleurl/src/gurl.h"
 
 using content::WebContents;
+using web_modal::WebContentsModalDialogManager;
 
 namespace extensions {
 
@@ -151,8 +152,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, EmptyContextMenu) {
   // only include the developer tools.
   WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
-  WebKit::WebContextMenuData data;
-  content::ContextMenuParams params(data);
+  content::ContextMenuParams params;
   scoped_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents, params));
   menu->Init();
@@ -176,8 +176,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenu) {
   // separator and the developer tools, is all that should be in the menu.
   WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
-  WebKit::WebContextMenuData data;
-  content::ContextMenuParams params(data);
+  content::ContextMenuParams params;
   scoped_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents, params));
   menu->Init();
@@ -204,8 +203,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, InstalledAppWithContextMenu) {
   // these are all that should be in the menu.
   WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
-  WebKit::WebContextMenuData data;
-  content::ContextMenuParams params(data);
+  content::ContextMenuParams params;
   scoped_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents, params));
   menu->Init();
@@ -232,8 +230,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuTextField) {
   // separator and the developer tools, is all that should be in the menu.
   WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
-  WebKit::WebContextMenuData data;
-  content::ContextMenuParams params(data);
+  content::ContextMenuParams params;
   params.is_editable = true;
   scoped_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents, params));
@@ -261,8 +258,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuSelection) {
   // separator and the developer tools, is all that should be in the menu.
   WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
-  WebKit::WebContextMenuData data;
-  content::ContextMenuParams params(data);
+  content::ContextMenuParams params;
   params.selection_text = ASCIIToUTF16("Hello World");
   scoped_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents, params));
@@ -289,8 +285,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuClicked) {
   // Test that the menu item shows up
   WebContents* web_contents = GetFirstShellWindowWebContents();
   ASSERT_TRUE(web_contents);
-  WebKit::WebContextMenuData data;
-  content::ContextMenuParams params(data);
+  content::ContextMenuParams params;
   params.page_url = GURL("http://foo.bar");
   scoped_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents, params));
@@ -376,7 +371,14 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Isolation) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/isolation")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ExtensionWindowingApis) {
+// See crbug.com/248441
+#if defined(OS_WIN)
+#define MAYBE_ExtensionWindowingApis DISABLED_ExtensionWindowingApis
+#else
+#define MAYBE_ExtensionWindowingApis ExtensionWindowingApis
+#endif
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_ExtensionWindowingApis) {
   // Initially there should be just the one browser window visible to the
   // extensions API.
   const Extension* extension = LoadExtension(
@@ -391,7 +393,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ExtensionWindowingApis) {
   LoadAndLaunchPlatformApp("minimal");
   ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
   ASSERT_EQ(1U, GetShellWindowCount());
-  ShellWindowRegistry::ShellWindowSet shell_windows =
+  ShellWindowRegistry::ShellWindowList shell_windows =
       ShellWindowRegistry::Get(browser()->profile())->shell_windows();
   int shell_window_id = (*shell_windows.begin())->session_id().id();
 
@@ -632,6 +634,94 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/geometry"));
 }
 
+// This appears to be unreliable on linux.
+// TODO(stevenjb): Investigate and enable
+#if defined(OS_LINUX) && !defined(USE_ASH)
+#define MAYBE_ShellWindowRestoreState DISABLED_ShellWindowRestoreState
+#else
+#define MAYBE_ShellWindowRestoreState ShellWindowRestoreState
+#endif
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       MAYBE_ShellWindowRestoreState) {
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/restore_state"));
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       ShellWindowAdjustBoundsToBeVisibleOnScreen) {
+  const Extension* extension = LoadAndLaunchPlatformApp("minimal");
+  ShellWindow* window = CreateShellWindow(extension);
+
+  // The screen bounds didn't change, the cached bounds didn't need to adjust.
+  gfx::Rect cached_bounds(80, 100, 400, 400);
+  gfx::Rect cached_screen_bounds(0, 0, 1600, 900);
+  gfx::Rect current_screen_bounds(0, 0, 1600, 900);
+  gfx::Size minimum_size(200, 200);
+  gfx::Rect bounds;
+  CallAdjustBoundsToBeVisibleOnScreenForShellWindow(window,
+                                                    cached_bounds,
+                                                    cached_screen_bounds,
+                                                    current_screen_bounds,
+                                                    minimum_size,
+                                                    &bounds);
+  EXPECT_EQ(bounds, cached_bounds);
+
+  // We have an empty screen bounds, the cached bounds didn't need to adjust.
+  gfx::Rect empty_screen_bounds;
+  CallAdjustBoundsToBeVisibleOnScreenForShellWindow(window,
+                                                    cached_bounds,
+                                                    empty_screen_bounds,
+                                                    current_screen_bounds,
+                                                    minimum_size,
+                                                    &bounds);
+  EXPECT_EQ(bounds, cached_bounds);
+
+  // Cached bounds is completely off the new screen bounds in horizontal
+  // locations. Expect to reposition the bounds.
+  gfx::Rect horizontal_out_of_screen_bounds(-800, 100, 400, 400);
+  CallAdjustBoundsToBeVisibleOnScreenForShellWindow(
+      window,
+      horizontal_out_of_screen_bounds,
+      gfx::Rect(-1366, 0, 1600, 900),
+      current_screen_bounds,
+      minimum_size,
+      &bounds);
+  EXPECT_EQ(bounds, gfx::Rect(0, 100, 400, 400));
+
+  // Cached bounds is completely off the new screen bounds in vertical
+  // locations. Expect to reposition the bounds.
+  gfx::Rect vertical_out_of_screen_bounds(10, 1000, 400, 400);
+  CallAdjustBoundsToBeVisibleOnScreenForShellWindow(
+      window,
+      vertical_out_of_screen_bounds,
+      gfx::Rect(-1366, 0, 1600, 900),
+      current_screen_bounds,
+      minimum_size,
+      &bounds);
+  EXPECT_EQ(bounds, gfx::Rect(10, 500, 400, 400));
+
+  // From a large screen resulotion to a small one. Expect it fit on screen.
+  gfx::Rect big_cache_bounds(10, 10, 1000, 1000);
+  CallAdjustBoundsToBeVisibleOnScreenForShellWindow(
+      window,
+      big_cache_bounds,
+      gfx::Rect(0, 0, 1600, 1000),
+      gfx::Rect(0, 0, 800, 600),
+      minimum_size,
+      &bounds);
+  EXPECT_EQ(bounds, gfx::Rect(0, 0, 800, 600));
+
+  // Don't resize the bounds smaller than minimum size, when the minimum size is
+  // larger than the screen.
+  CallAdjustBoundsToBeVisibleOnScreenForShellWindow(
+      window,
+      big_cache_bounds,
+      gfx::Rect(0, 0, 1600, 1000),
+      gfx::Rect(0, 0, 800, 600),
+      gfx::Size(900, 900),
+      &bounds);
+  EXPECT_EQ(bounds, gfx::Rect(0, 0, 900, 900));
+}
+
 namespace {
 
 class PlatformAppDevToolsBrowserTest : public PlatformAppBrowserTest {
@@ -693,11 +783,23 @@ void PlatformAppDevToolsBrowserTest::RunTestWithDevTools(
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(PlatformAppDevToolsBrowserTest, ReOpenedWithID) {
+// http://crbug.com/246634
+#if defined(OS_CHROMEOS)
+#define MAYBE_ReOpenedWithID DISABLED_ReOpenedWithID
+#else
+#define MAYBE_ReOpenedWithID ReOpenedWithID
+#endif
+IN_PROC_BROWSER_TEST_F(PlatformAppDevToolsBrowserTest, MAYBE_ReOpenedWithID) {
   RunTestWithDevTools("minimal_id", RELAUNCH | HAS_ID);
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppDevToolsBrowserTest, ReOpenedWithURL) {
+// http://crbug.com/246999
+#if defined(OS_CHROMEOS) || defined(OS_WIN)
+#define MAYBE_ReOpenedWithURL DISABLED_ReOpenedWithURL
+#else
+#define MAYBE_ReOpenedWithURL ReOpenedWithURL
+#endif
+IN_PROC_BROWSER_TEST_F(PlatformAppDevToolsBrowserTest, MAYBE_ReOpenedWithURL) {
   RunTestWithDevTools("minimal", RELAUNCH);
 }
 
@@ -843,8 +945,8 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
       extension_service()->extension_prefs();
 
   // Clear the registered events to ensure they are updated.
-  extension_prefs->SetRegisteredEvents(extension->id(),
-                                       std::set<std::string>());
+  extensions::ExtensionSystem::Get(browser()->profile())->event_router()->
+      SetRegisteredEvents(extension->id(), std::set<std::string>());
 
   const base::StringValue old_version("1");
   std::string pref_path("extensions.settings.");
@@ -912,7 +1014,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_WebContentsHasFocus) {
   ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
 
   EXPECT_EQ(1LU, GetShellWindowCount());
-  ShellWindowRegistry::ShellWindowSet shell_windows = ShellWindowRegistry::Get(
+  ShellWindowRegistry::ShellWindowList shell_windows = ShellWindowRegistry::Get(
       browser()->profile())->shell_windows();
   EXPECT_TRUE((*shell_windows.begin())->web_contents()->
       GetRenderWidgetHostView()->HasFocus());
@@ -936,11 +1038,11 @@ class PlatformAppIncognitoBrowserTest : public PlatformAppBrowserTest,
   }
 
   // ShellWindowRegistry::Observer implementation.
-  virtual void OnShellWindowAdded(ShellWindow* shell_window) {
+  virtual void OnShellWindowAdded(ShellWindow* shell_window) OVERRIDE {
     opener_app_ids_.insert(shell_window->extension()->id());
   }
-  virtual void OnShellWindowIconChanged(ShellWindow* shell_window) {}
-  virtual void OnShellWindowRemoved(ShellWindow* shell_window) {}
+  virtual void OnShellWindowIconChanged(ShellWindow* shell_window) OVERRIDE {}
+  virtual void OnShellWindowRemoved(ShellWindow* shell_window) OVERRIDE {}
 
  protected:
   // A set of ids of apps we've seen open a shell window.

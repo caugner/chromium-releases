@@ -4,6 +4,7 @@
 
 #include "android_webview/native/java_browser_view_renderer_helper.h"
 
+#include "base/debug/trace_event.h"
 #include "jni/JavaBrowserViewRendererHelper_jni.h"
 
 using base::android::JavaRef;
@@ -20,23 +21,30 @@ JavaBrowserViewRendererHelper::~JavaBrowserViewRendererHelper() {
 ScopedJavaLocalRef<jobject> JavaBrowserViewRendererHelper::CreateBitmap(
     JNIEnv* env,
     int width,
-    int height) {
+    int height,
+    const base::android::JavaRef<jobject>& jcanvas) {
+  TRACE_EVENT0("android_webview", "RendererHelper::CreateBitmap");
   return width <= 0 || height <= 0 ? ScopedJavaLocalRef<jobject>() :
-      Java_JavaBrowserViewRendererHelper_createBitmap(env, width, height);
+      Java_JavaBrowserViewRendererHelper_createBitmap(env, width, height,
+                                                      jcanvas.obj());
 }
 
 void JavaBrowserViewRendererHelper::DrawBitmapIntoCanvas(
     JNIEnv* env,
     const JavaRef<jobject>& jbitmap,
-    const JavaRef<jobject>& jcanvas) {
+    const JavaRef<jobject>& jcanvas,
+    int x,
+    int y) {
+  TRACE_EVENT0("android_webview", "RendererHelper::DrawBitmapIntoCanvas");
   Java_JavaBrowserViewRendererHelper_drawBitmapIntoCanvas(
-      env, jbitmap.obj(), jcanvas.obj());
+      env, jbitmap.obj(), jcanvas.obj(), x, y);
 }
 
 ScopedJavaLocalRef<jobject>
 JavaBrowserViewRendererHelper::RecordBitmapIntoPicture(
     JNIEnv* env,
     const JavaRef<jobject>& jbitmap) {
+  TRACE_EVENT0("android_webview", "RendererHelper::RecordBitmapIntoPicture");
   return Java_JavaBrowserViewRendererHelper_recordBitmapIntoPicture(
       env, jbitmap.obj());
 }

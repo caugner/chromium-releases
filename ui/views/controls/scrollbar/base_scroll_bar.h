@@ -5,6 +5,7 @@
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_H_
 
+#include "base/gtest_prod_util.h"
 #include "ui/views/animation/scroll_animator.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/image_button.h"
@@ -88,7 +89,8 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
 
   // ContextMenuController overrides:
   virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& point) OVERRIDE;
+                                      const gfx::Point& point,
+                                      ui::MenuSourceType source_type) OVERRIDE;
 
   // Menu::Delegate overrides:
   virtual string16 GetLabel(int id) const OVERRIDE;
@@ -111,6 +113,9 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
   virtual int GetScrollIncrement(bool is_page, bool is_positive);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(NativeScrollBarTest, ScrollBarFitsToBottom);
+  int GetThumbSizeForTest();
+
   // Changes to 'pushed' state and starts a timer to scroll repeatedly.
   void ProcessPressEvent(const ui::LocatedEvent& event);
 
@@ -148,6 +153,9 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
 
   // The current amount the contents is offset by in the viewport.
   int contents_scroll_offset_;
+
+  // The current size of the view port, in pixels.
+  int viewport_size_;
 
   // The state of the scrollbar track. Typically, the track will highlight when
   // the user presses the mouse on them (during page scrolling).

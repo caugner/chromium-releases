@@ -21,14 +21,16 @@ using ::testing::AtMost;
 
 namespace media {
 
-const char kNullHash[] = "d41d8cd98f00b204e9800998ecf8427e";
+const char kNullVideoHash[] = "d41d8cd98f00b204e9800998ecf8427e";
+const char kNullAudioHash[] = "0.00,0.00,0.00,0.00,0.00,0.00,";
 
 PipelineIntegrationTestBase::PipelineIntegrationTestBase()
     : hashing_enabled_(false),
       pipeline_(new Pipeline(message_loop_.message_loop_proxy(),
                              new MediaLog())),
       ended_(false),
-      pipeline_status_(PIPELINE_OK) {
+      pipeline_status_(PIPELINE_OK),
+      last_video_frame_format_(VideoFrame::INVALID) {
   base::MD5Init(&md5_context_);
   EXPECT_CALL(*this, OnSetOpaque(true)).Times(AnyNumber());
 }
@@ -67,8 +69,7 @@ void PipelineIntegrationTestBase::DemuxerNeedKeyCB(
   DCHECK(init_data.get());
   DCHECK_GT(init_data_size, 0);
   CHECK(!need_key_cb_.is_null());
-  need_key_cb_.Run(
-      std::string(), std::string(), type, init_data.Pass(), init_data_size);
+  need_key_cb_.Run(std::string(), type, init_data.Pass(), init_data_size);
 }
 
 void PipelineIntegrationTestBase::OnEnded() {
@@ -228,9 +229,9 @@ PipelineIntegrationTestBase::CreateFilterCollection(
 
   ScopedVector<VideoDecoder> video_decoders;
   video_decoders.push_back(
-      new FFmpegVideoDecoder(message_loop_.message_loop_proxy()));
-  video_decoders.push_back(
       new VpxVideoDecoder(message_loop_.message_loop_proxy()));
+  video_decoders.push_back(
+      new FFmpegVideoDecoder(message_loop_.message_loop_proxy()));
 
   // Disable frame dropping if hashing is enabled.
   scoped_ptr<VideoRenderer> renderer(new VideoRendererBase(
@@ -255,10 +256,12 @@ PipelineIntegrationTestBase::CreateFilterCollection(
 
   AudioRendererImpl* audio_renderer_impl = new AudioRendererImpl(
       message_loop_.message_loop_proxy(),
-      audio_sink_,
+      audio_sink_.get(),
       audio_decoders.Pass(),
       base::Bind(&PipelineIntegrationTestBase::SetDecryptor,
-                 base::Unretained(this), decryptor));
+                 base::Unretained(this),
+                 decryptor),
+      true);
   // Disable underflow if hashing is enabled.
   if (hashing_enabled_) {
     audio_sink_->StartAudioHashForTesting();
@@ -278,6 +281,7 @@ void PipelineIntegrationTestBase::SetDecryptor(
 
 void PipelineIntegrationTestBase::OnVideoRendererPaint(
     const scoped_refptr<VideoFrame>& frame) {
+  last_video_frame_format_ = frame->format();
   if (!hashing_enabled_)
     return;
   frame->HashFrameForTesting(&md5_context_);

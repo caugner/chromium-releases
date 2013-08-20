@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/history/android/android_cache_database.h"
 #include "chrome/browser/history/android/android_time.h"
 #include "chrome/browser/history/history_database.h"
@@ -21,8 +20,7 @@ class AndroidCacheDatabaseTest : public testing::Test {
  public:
   AndroidCacheDatabaseTest() {
   }
-  ~AndroidCacheDatabaseTest() {
-  }
+  virtual ~AndroidCacheDatabaseTest() {}
 
  protected:
   virtual void SetUp() {
@@ -32,7 +30,7 @@ class AndroidCacheDatabaseTest : public testing::Test {
         temp_dir_.path().AppendASCII("history.db");
     android_cache_db_name_ = temp_dir_.path().AppendASCII(
         "TestAndroidCache.db");
-    ASSERT_EQ(sql::INIT_OK, history_db_.Init(history_db_name_, NULL));
+    ASSERT_EQ(sql::INIT_OK, history_db_.Init(history_db_name_));
     ASSERT_EQ(sql::INIT_OK,
               history_db_.InitAndroidCacheDatabase(android_cache_db_name_));
   }
@@ -50,7 +48,7 @@ TEST(AndroidCacheDatabaseAttachTest, AttachDatabaseInTransactionNesting) {
   base::FilePath history_db_name = temp_dir.path().AppendASCII("history.db");
   android_cache_db_name = temp_dir.path().AppendASCII(
         "TestAndroidCache.db");
-  ASSERT_EQ(sql::INIT_OK, history_db.Init(history_db_name, NULL));
+  ASSERT_EQ(sql::INIT_OK, history_db.Init(history_db_name));
   // Create nested transactions.
   history_db.BeginTransaction();
   history_db.BeginTransaction();

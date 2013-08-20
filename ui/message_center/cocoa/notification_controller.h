@@ -9,7 +9,7 @@
 
 #include <string>
 
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #include "ui/message_center/message_center_export.h"
 
 namespace message_center {
@@ -35,21 +35,31 @@ MESSAGE_CENTER_EXPORT
   message_center::MessageCenter* messageCenter_;
 
   // The button that invokes |-close:|, in the upper-right corner.
-  scoped_nsobject<HoverImageButton> closeButton_;
+  base::scoped_nsobject<HoverImageButton> closeButton_;
 
   // The large icon associated with the notification, on the left side.
-  scoped_nsobject<NSImageView> icon_;
+  base::scoped_nsobject<NSImageView> icon_;
 
   // The title of the message.
-  scoped_nsobject<NSTextField> title_;
+  base::scoped_nsobject<NSTextField> title_;
 
   // Body text of the message.
-  scoped_nsobject<NSTextField> message_;
+  base::scoped_nsobject<NSTextField> message_;
+
+  // Container for optional list item views.
+  base::scoped_nsobject<NSView> listItemView_;
+
+  // Container for optional items at the bottom of the notification.
+  base::scoped_nsobject<NSView> bottomView_;
 }
 
 // Creates a new controller for a given notification.
 - (id)initWithNotification:(const message_center::Notification*)notification
     messageCenter:(message_center::MessageCenter*)messageCenter;
+
+// If the model object changes, this method will update the views to reflect
+// the new model object. Returns the updated frame of the notification.
+- (NSRect)updateNotification:(const message_center::Notification*)notification;
 
 // Action for clicking on the notification's |closeButton_|.
 - (void)close:(id)sender;
@@ -61,6 +71,9 @@ MESSAGE_CENTER_EXPORT
 // rather than the model object, so it's safe to use after the Notification has
 // been deleted.
 - (const std::string&)notificationID;
+
+// Called when the user clicks within the notification view.
+- (void)notificationClicked;
 
 @end
 

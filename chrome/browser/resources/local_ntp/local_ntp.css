@@ -6,22 +6,9 @@ body {
   background-color: white;
   cursor: default;
   font-family: arial, sans-serif;
+  font-size: small;
   margin: 0;
   overflow-x: hidden;
-}
-
-body.user-typed {
-  overflow: hidden;
-}
-
-#active-suggestions-container {
-  position: absolute;
-  width: 100%;
-  z-index: 1;
-}
-
-.suggestion-contents {
-  z-index: 1;
 }
 
 #ntp-contents {
@@ -34,35 +21,18 @@ body.user-typed {
   top: -webkit-calc(50% - 155px);
 }
 
-body.hide-ntp #ntp-contents,
-body.hide-ntp #attribution {
-  display: none;
-}
-
-body.user-typed #fakebox {
-  border-color: rgba(185, 185, 185, 0.5);
-  border-top-color: rgba(160, 160, 160, 0.5);
-  cursor: default;
-}
-
-body.user-typed #fakebox > input {
-  cursor: default;
-}
-
-body.fakebox-animate #ntp-contents,
-body.fakebox-animate #attribution {
-  -webkit-transition: opacity 100ms linear;
-  opacity: 0.2;
-}
-
-/* Hide suggestions during the fakebox animation. */
-body.fakebox-animate #active-suggestions-container {
-  height: 0;
+body.hide-fakebox-logo #logo,
+body.hide-fakebox-logo #fakebox {
   visibility: hidden;
 }
 
-body.fakebox-animate .suggestion-contents {
-  visibility: hidden;
+body.fakebox-disable #fakebox {
+  border-color: rgb(238, 238, 238);
+  cursor: default;
+}
+
+body.fakebox-disable #fakebox > input {
+  cursor: default;
 }
 
 #logo {
@@ -71,7 +41,7 @@ body.fakebox-animate .suggestion-contents {
       url(images/2x/google_logo.png) 2x) no-repeat;
   height: 95px;
   margin-bottom: 24px;
-  margin-top: 134px;
+  margin-top: 157px;
   width: 275px;
 }
 
@@ -108,10 +78,6 @@ body.fakebox-focused #fakebox {
   border: 1px solid rgb(77, 144, 254);
 }
 
-body.fakebox-animate #fakebox {
-  -webkit-transform: translateY(-100px);
-}
-
 #fakebox > input {
   bottom: 0;
   left: 0;
@@ -124,10 +90,16 @@ body.fakebox-animate #fakebox {
 #cursor {
   background: #333;
   bottom: 5px;
+  left: 9px;
   position: absolute;
   top: 5px;
   visibility: hidden;
   width: 1px;
+}
+
+body.rtl #cursor {
+  left: auto;
+  right: 9px;
 }
 
 @-webkit-keyframes blink {
@@ -214,12 +186,6 @@ body.fakebox-focused #cursor {
   width: 138px;
 }
 
-.mv-tile.mv-tile-hide {
-  -webkit-margin-end: -10px;
-  opacity: 0;
-  width: 10px;
-}
-
 /* Class applied to tiles to trigger the blacklist animation. */
 .mv-tile.mv-blacklist {
   -webkit-transform: scale(0.5);
@@ -229,13 +195,16 @@ body.fakebox-focused #cursor {
 .mv-page-ready {
   border: 1px solid #c0c0c0;
   cursor: pointer;
+  outline: none;
 }
 
-.mv-page-ready:hover {
+.mv-page-ready:hover,
+.mv-page-ready:focus {
   border-color: #7f7f7f
 }
 
-.mv-thumb {
+.mv-thumb,
+.mv-mask {
   border: none;
   cursor: pointer;
   height: 83px;
@@ -254,6 +223,18 @@ body.fakebox-focused #cursor {
   width: 140px;
 }
 
+.mv-mask {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.mv-page:focus .mv-mask {
+  -webkit-transition: background-color 100ms ease-in-out;
+  background: -webkit-linear-gradient(rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0) 80%, rgba(255, 255, 255, 0.9));
+  background-color: black;
+}
+
 .mv-x-hide .mv-x {
   display: none;
 }
@@ -267,11 +248,19 @@ body.fakebox-focused #cursor {
   width: 16px;
 }
 
-.mv-x:hover {
+body.custom-theme #mv-notice-x {
+  background: transparent url(images/close_2_white.png);
+}
+
+.mv-x:hover,
+body.custom-theme #mv-notice-x:hover,
+#mv-notice-x:focus,
+body.custom-theme #mv-notice-x:focus {
   background: transparent url(images/close_2_hover.png);
 }
 
-.mv-x:active {
+.mv-x:active,
+body.custom-theme #mv-notice-x:active {
   background: transparent url(images/close_2_active.png);
 }
 
@@ -283,16 +272,14 @@ body.fakebox-focused #cursor {
   top: 2px;
 }
 
+body.rtl .mv-page .mv-x {
+  left: 2px;
+  right: auto;
+}
+
 .mv-page-ready:hover .mv-x {
   -webkit-transition-delay: 500ms;
   opacity: 1;
-}
-
-.mv-domain {
-  bottom: 24px;
-  color: #777;
-  margin: 0 7px;
-  position: absolute;
 }
 
 .mv-favicon {
@@ -306,7 +293,7 @@ body.fakebox-focused #cursor {
 
 /* The notification shown when a tile is blacklisted. */
 #mv-notice {
-  font-size: 75%;
+  font-size: 12px;
   font-weight: bold;
   opacity: 1;
   padding: 10px 0;
@@ -321,15 +308,18 @@ body.fakebox-focused #cursor {
   -webkit-margin-start: 6px;
   color: rgb(17, 85, 204);
   cursor: pointer;
+  outline: none;
   padding: 0 4px;
 }
 
-#mv-notice-links span:hover {
+#mv-notice-links span:hover,
+#mv-notice-links span:focus {
   text-decoration: underline;
 }
 
 #mv-notice-links .mv-x {
   -webkit-margin-start: 8px;
+  outline: none;
   vertical-align: top;
 }
 
@@ -348,7 +338,7 @@ body.fakebox-focused #cursor {
   bottom: 0;
   color: #fff;
   cursor: default;
-  font-size: 75%;
+  font-size: 13px;
   position: absolute;
   right: 13px;
   text-align: left;
@@ -357,48 +347,4 @@ body.fakebox-focused #cursor {
 
 #attribution img {
   display: block;
-}
-
-.suggestions-box {
-  background-color: #fff;
-  border-bottom: 1px #d9d9d9 solid;
-  padding-bottom: 6px;
-  padding-top: 6px;
-}
-
-.suggestion {
-  background: -webkit-image-set(
-      url(images/page_icon.png) 1x,
-      url(images/2x/page_icon.png) 2x) no-repeat;
-  border-radius: 2px;
-  height: 22px;
-  padding-bottom: 2px;
-  padding-top: 3px;
-  white-space: nowrap;
-}
-
-.search {
-  background: -webkit-image-set(
-      url(images/search_icon.png) 1x,
-      url(images/2x/search_icon.png) 2x) no-repeat;
-}
-
-.hovered {
-  background-color: #eee;
-}
-
-.selected {
-  background-color: rgba(181, 213, 255, 0.5);
-}
-
-.suggestion-contents {
-  -webkit-user-select: none;
-  border: none;
-  height: 22px;
-  overflow: hidden;
-  position: absolute;
-}
-
-#pending-suggestions-container {
-  display: none;
 }

@@ -6,8 +6,8 @@
 
 #include <string>
 
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/menu_manager.h"
@@ -91,9 +91,11 @@ extensions::MenuItem::ContextList GetContexts(
 }
 
 template<typename PropertyWithEnumT>
-extensions::MenuItem::Type GetType(const PropertyWithEnumT& property) {
+extensions::MenuItem::Type GetType(const PropertyWithEnumT& property,
+                                   extensions::MenuItem::Type default_type) {
   switch (property.type) {
     case PropertyWithEnumT::TYPE_NONE:
+      return default_type;
     case PropertyWithEnumT::TYPE_NORMAL:
       return extensions::MenuItem::NORMAL;
     case PropertyWithEnumT::TYPE_CHECKBOX:
@@ -164,7 +166,7 @@ bool ContextMenusCreateFunction::RunImpl() {
     }
 
     // The Generated Id is added by context_menus_custom_bindings.js.
-    DictionaryValue* properties = NULL;
+    base::DictionaryValue* properties = NULL;
     EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &properties));
     EXTENSION_FUNCTION_VALIDATE(properties->GetInteger(kGeneratedIdKey,
                                                        &id.uid));
@@ -200,7 +202,7 @@ bool ContextMenusCreateFunction::RunImpl() {
     return false;
   }
 
-  MenuItem::Type type = GetType(params->create_properties);
+  MenuItem::Type type = GetType(params->create_properties, MenuItem::NORMAL);
 
   if (title.empty() && type != MenuItem::SEPARATOR) {
     error_ = kTitleNeededError;
@@ -268,7 +270,7 @@ bool ContextMenusUpdateFunction::RunImpl() {
   }
 
   // Type.
-  MenuItem::Type type = GetType(params->update_properties);
+  MenuItem::Type type = GetType(params->update_properties, item->type());
 
   if (type != item->type()) {
     if (type == MenuItem::RADIO || item->type() == MenuItem::RADIO)

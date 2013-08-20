@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/time.h"
 #include "base/timer.h"
@@ -26,6 +27,8 @@ class TickClock;
 
 namespace chromeos {
 namespace system {
+
+class AutomaticRebootManagerObserver;
 
 // Schedules and executes automatic reboots.
 //
@@ -44,14 +47,19 @@ namespace system {
 // * If the login screen is being shown: Reboots are inhibited while the user is
 //   interacting with the screen (determined by checking whether there has been
 //   any user activity in the past 60 seconds).
-// * If a user is logged in: Reboots are inhibited as long as the user remains
-//   logged in and the device is not suspended.
+// * If a session is in progress: Reboots are inhibited until the session ends,
+//   the browser is restarted or the device is suspended.
 //
 // If reboots are inhibited, a 24 hour grace period is started. The reboot
 // request is carried out the moment none of the inhibiting criteria apply
-// anymore (e.g. the user becomes idle on the login screen, the user logs out of
+// anymore (e.g. the user becomes idle on the login screen, the user logs exits
 // a session, the user suspends the device). If reboots remain inhibited for the
 // entire grace period, a reboot is unconditionally performed at its end.
+//
+// Note: Currently, automatic reboots are only enabled while the login screen is
+// being shown or a kiosk app session is in progress. This will change in the
+// future and the policy will always apply, regardless of whether a session of
+// any particular type is in progress or not. http://crbug.com/244972
 //
 // Reboots may be scheduled and canceled at any time. This causes the time at
 // which a reboot should be requested and the grace period that follows it to
@@ -84,6 +92,9 @@ class AutomaticRebootManager : public PowerManagerClient::Observer,
 
   explicit AutomaticRebootManager(scoped_ptr<base::TickClock> clock);
   virtual ~AutomaticRebootManager();
+
+  void AddObserver(AutomaticRebootManagerObserver* observer);
+  void RemoveObserver(AutomaticRebootManagerObserver* observer);
 
   // PowerManagerClient::Observer:
   virtual void SystemResumed(const base::TimeDelta& sleep_duration) OVERRIDE;
@@ -119,9 +130,8 @@ class AutomaticRebootManager : public PowerManagerClient::Observer,
   // Called whenever the status of the criteria inhibiting reboots may have
   // changed. Reboots immediately if a reboot has actually been requested and
   // none of the criteria inhibiting it apply anymore. Otherwise, does nothing.
-  // If |ignore_logged_in_user|, the presence of a logged-in user does not
-  // inhibit reboots.
-  void MaybeReboot(bool ignore_logged_in_user);
+  // If |ignore_session|, a session in progress does not inhibit reboots.
+  void MaybeReboot(bool ignore_session);
 
   // Reboots immediately.
   void Reboot();
@@ -155,6 +165,8 @@ class AutomaticRebootManager : public PowerManagerClient::Observer,
   scoped_ptr<base::OneShotTimer<AutomaticRebootManager> > grace_end_timer_;
 
   base::WeakPtrFactory<AutomaticRebootManager> weak_ptr_factory_;
+
+  ObserverList<AutomaticRebootManagerObserver, true> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomaticRebootManager);
 };

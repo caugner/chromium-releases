@@ -6,7 +6,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
@@ -20,6 +20,7 @@
 using content::WebContents;
 using ui::WebDialogDelegate;
 using ui::WebDialogWebContentsDelegate;
+using web_modal::NativeWebContentsModalDialog;
 
 namespace {
 
@@ -94,7 +95,7 @@ class ConstrainedWebDialogDelegateViewMac :
  private:
   scoped_ptr<ConstrainedWebDialogDelegateMac> impl_;
   scoped_ptr<ConstrainedWindowMac> constrained_window_;
-  scoped_nsobject<NSWindow> window_;
+  base::scoped_nsobject<NSWindow> window_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWebDialogDelegateViewMac);
 };
@@ -118,9 +119,8 @@ ConstrainedWebDialogDelegateViewMac::ConstrainedWebDialogDelegateViewMac(
   [[window_ contentView]
       addSubview:GetWebContents()->GetView()->GetNativeView()];
 
-  scoped_nsobject<CustomConstrainedWindowSheet> sheet(
-      [[CustomConstrainedWindowSheet alloc]
-          initWithCustomWindow:window_]);
+  base::scoped_nsobject<CustomConstrainedWindowSheet> sheet(
+      [[CustomConstrainedWindowSheet alloc] initWithCustomWindow:window_]);
   constrained_window_.reset(new ConstrainedWindowMac(
       this, web_contents, sheet));
 

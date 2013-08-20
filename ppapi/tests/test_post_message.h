@@ -34,6 +34,10 @@ class TestPostMessage : public TestCase {
   // Returns true on success, false on failure.
   bool AddEchoingListener(const std::string& expression);
 
+  // Posts a message from JavaScript to the plugin. |func| should be a
+  // JavaScript function which returns the variable to post.
+  bool PostMessageFromJavaScript(const std::string& func);
+
   // Clear any listeners that have been added using AddEchoingListener by
   // calling removeEventListener for each.
   // Returns true on success, false on failure.
@@ -42,6 +46,12 @@ class TestPostMessage : public TestCase {
   // Wait for pending messages; return the number of messages that were pending
   // at the time of invocation.
   int WaitForMessages();
+
+  // Verifies that the given javascript assertions are true of the message
+  // (|test_data|) passed via PostMessage().
+  std::string CheckMessageProperties(
+      const pp::Var& test_data,
+      const std::vector<std::string>& properties_to_check);
 
   // Test that we can send a message from Instance::Init. Note the actual
   // message is sent in TestPostMessage::Init, and this test simply makes sure
@@ -54,6 +64,15 @@ class TestPostMessage : public TestCase {
 
   // Test sending ArrayBuffer vars in both directions.
   std::string TestSendingArrayBuffer();
+
+  // Test sending Array vars in both directions.
+  std::string TestSendingArray();
+
+  // Test sending Dictionary vars in both directions.
+  std::string TestSendingDictionary();
+
+  // Test sending a complex var with references and cycles in both directions.
+  std::string TestSendingComplexVar();
 
   // Test the MessageEvent object that JavaScript received to make sure it is
   // of the right type and has all the expected fields.

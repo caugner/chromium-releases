@@ -128,9 +128,7 @@
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "DisabledSchemes": ["file"] },
     "pref_mappings": [
-      { "pref": "protocol.disabled_schemes",
-        "local_state": true
-      }
+      { "pref": "policy.url_blacklist" }
     ]
   },
 
@@ -415,19 +413,7 @@
   },
 
   "ClearSiteDataOnExit": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "ClearSiteDataOnExit": true },
-    "pref_mappings": [
-      { "pref": "profile.managed_default_content_settings.cookies",
-        "indicator_selector": "[content-setting=cookies]",
-        "indicator_tests": [
-          { "policy": { "ClearSiteDataOnExit": true },
-            "value": "session"}
-        ]
-      }
-    ],
-
-    "note": "TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
+    "note": "This policy is retired, see http://crbug.com/133291."
   },
 
   "ProxyMode": {
@@ -964,6 +950,16 @@
     ]
   },
 
+  "AudioCaptureAllowedUrls": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "AudioCaptureAllowedUrls": ["[*.]google.com"] },
+    "pref_mappings": [
+      {
+        "pref": "hardware.audio_capture_allowed_urls"
+      }
+    ]
+  },
+
   "VideoCaptureAllowed": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "VideoCaptureAllowed": false },
@@ -973,6 +969,16 @@
         "indicator_tests": [
           { "policy": { "VideoCaptureAllowed": false } }
         ]
+      }
+    ]
+  },
+
+  "VideoCaptureAllowedUrls": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "VideoCaptureAllowedUrls": ["[*.]google.com"] },
+    "pref_mappings": [
+      {
+        "pref": "hardware.video_capture_allowed_urls"
       }
     ]
   },
@@ -1204,16 +1210,6 @@
   },
 
   "InstantEnabled": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "can_be_recommended": true,
-    "test_policy": { "InstantEnabled": true },
-    "pref_mappings": [
-      { "pref": "instant.enabled",
-        "indicator_tests": [
-          { "policy": { "InstantEnabled": true } }
-        ]
-      }
-    ]
   },
 
   "TranslateEnabled": {
@@ -1371,19 +1367,11 @@
   },
 
   "EnterpriseWebStoreURL": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "EnterpriseWebStoreURL": "http://example.com/webstore" },
-    "pref_mappings": [
-      { "pref": "webstore.enterprise_store_url" }
-    ]
+    "note": "This policy is retired, see http://crbug.com/178938."
   },
 
   "EnterpriseWebStoreName": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "EnterpriseWebStoreName": "Example Webstore" },
-    "pref_mappings": [
-      { "pref": "webstore.enterprise_store_name" }
-    ]
+    "note": "This policy is retired, see http://crbug.com/178938."
   },
 
   "EnableMemoryInfo": {
@@ -1708,10 +1696,13 @@
   },
 
   "PresentationIdleDelayScale": {
+  },
+
+  "PresentationScreenDimDelayScale": {
     "os": ["chromeos"],
-    "test_policy": { "PresentationIdleDelayScale": 200 },
+    "test_policy": { "PresentationScreenDimDelayScale": 200 },
     "pref_mappings": [
-      { "pref": "power.presentation_idle_delay_factor" }
+      { "pref": "power.presentation_screen_dim_delay_factor" }
     ]
   },
 
@@ -1720,6 +1711,14 @@
     "test_policy": { "AllowScreenWakeLocks": false },
     "pref_mappings": [
       { "pref": "power.allow_screen_wake_locks" }
+    ]
+  },
+
+  "UserActivityScreenDimDelayScale": {
+    "os": ["chromeos"],
+    "test_policy": { "UserActivityScreenDimDelayScale": 200 },
+    "pref_mappings": [
+      { "pref": "power.user_activity_screen_dim_delay_factor" }
     ]
   },
 
@@ -1740,6 +1739,55 @@
           { "policy": { "ShowAccessibilityOptionsInSystemTrayMenu": true } }
         ]
       }
+    ]
+  },
+
+  "LargeCursorEnabled": {
+    "os": ["chromeos"],
+    "test_policy": { "LargeCursorEnabled": true },
+    "pref_mappings": [
+      { "pref": "settings.a11y.large_cursor_enabled",
+        "indicator_tests": [
+          { "policy": { "LargeCursorEnabled": true } }
+        ]
+      }
+    ]
+  },
+
+  "SpokenFeedbackEnabled": {
+    "os": ["chromeos"],
+    "test_policy": { "SpokenFeedbackEnabled": true },
+    "pref_mappings": [
+      { "pref": "settings.accessibility",
+        "indicator_tests": [
+          { "policy": { "SpokenFeedbackEnabled": true } }
+        ]
+      }
+    ]
+  },
+
+  "HighContrastEnabled": {
+    "os": ["chromeos"],
+    "test_policy": { "HighContrastEnabled": true },
+    "pref_mappings": [
+      { "pref": "settings.a11y.high_contrast_enabled",
+        "indicator_tests": [
+          { "policy": { "HighContrastEnabled": true } }
+        ]
+      }
+    ]
+  },
+
+  "ScreenMagnifierType": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenMagnifierType": 1 },
+    "pref_mappings": [
+      { "pref": "settings.a11y.screen_magnifier",
+        "indicator_tests": [
+          { "policy": { "ScreenMagnifierType": 1 } }
+        ]
+      },
+      { "pref": "settings.a11y.screen_magnifier_type2" }
     ]
   },
 
@@ -1888,6 +1936,18 @@
   "DeviceVariationsRestrictParameter" : {
   },
 
+  "DeviceLoginScreenDefaultLargeCursorEnabled" : {
+  },
+
+  "DeviceLoginScreenDefaultSpokenFeedbackEnabled" : {
+  },
+
+  "DeviceLoginScreenDefaultHighContrastEnabled" : {
+  },
+
+  "DeviceLoginScreenDefaultScreenMagnifierType" : {
+  },
+
   "UptimeLimit": {
   },
 
@@ -1895,6 +1955,9 @@
   },
 
   "AttestationEnabledForDevice": {
+  },
+
+  "SupervisedUsersEnabled": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},
@@ -1915,5 +1978,8 @@
   },
 
   "AdditionalLaunchParameters": {
+  },
+
+  "SuppressChromeFrameTurndownPrompt": {
   }
 }

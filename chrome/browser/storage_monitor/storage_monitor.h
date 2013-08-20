@@ -12,15 +12,15 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/storage_monitor/storage_info.h"
 
 class ChromeBrowserMainPartsLinux;
 class ChromeBrowserMainPartsMac;
+class MediaGalleriesPlatformAppBrowserTest;
 class MediaGalleriesPrivateApiTest;
 class MediaGalleriesPrivateEjectApiTest;
-class PlatformAppMediaGalleriesBrowserTest;
 class SystemInfoStorageApiTest;
 
 namespace device {
@@ -39,7 +39,15 @@ class TransientDeviceIds;
 // implementations before the profile is initialized, so listeners can be
 // created during profile construction. The platform-specific initialization,
 // which can lead to calling registered listeners with notifications of
-// attached volumes, will happen after profile construction.
+// attached volumes, are done lazily at first use through the async
+// |Initialize()| method. That must be done before any of the registered
+// listeners will receive updates or calls to other API methods return
+// meaningful results.
+// A post-initialization |GetAttachedStorage()| call coupled with a
+// registered listener will receive a complete set, albeit potentially with
+// duplicates. This is because there's no tracking between when listeners were
+// registered and the state of initialization, and the fact that platforms
+// behave differently in how these notifications are provided.
 class StorageMonitor {
  public:
   // This interface is provided to generators of storage notifications.
@@ -64,14 +72,14 @@ class StorageMonitor {
   // somewhat shorter than a process Singleton.
   static StorageMonitor* GetInstance();
 
-  // Initialize the storage monitor. The provided callback, if non-null,
-  // will be called when initialization is complete. If initialization has
-  // already completed, this callback will be invoked within the calling stack.
-  // Before the callback is run, calls to |GetAttachedStorage| and
+  // Ensures that the storage monitor is initialized. The provided callback, If
+  // non-null, will be called when initialization is complete. If initialization
+  // has already completed, this callback will be invoked within the calling
+  // stack. Before the callback is run, calls to |GetAllAvailableStorages| and
   // |GetStorageInfoForPath| may not return the correct results. In addition,
   // registered observers will not be notified on device attachment/detachment.
   // Should be invoked on the UI thread; callbacks will be run on the UI thread.
-  void Initialize(base::Closure callback);
+  void EnsureInitialized(base::Closure callback);
 
   // Return true if the storage monitor has already been initialized.
   bool IsInitialized();
@@ -102,8 +110,9 @@ class StorageMonitor {
       media_transfer_protocol_manager() = 0;
 #endif
 
-  // Returns information for attached removable storage.
-  std::vector<StorageInfo> GetAttachedStorage() const;
+  // Returns information for all known storages on the system,
+  // including fixed and removable storages.
+  std::vector<StorageInfo> GetAllAvailableStorages() const;
 
   void AddObserver(RemovableStorageObserver* obs);
   void RemoveObserver(RemovableStorageObserver* obs);
@@ -116,10 +125,10 @@ class StorageMonitor {
       base::Callback<void(EjectStatus)> callback);
 
  protected:
+  friend class ::MediaGalleriesPlatformAppBrowserTest;
   friend class ::MediaGalleriesPrivateApiTest;
   friend class ::MediaGalleriesPrivateEjectApiTest;
   friend class MediaFileSystemRegistryTest;
-  friend class ::PlatformAppMediaGalleriesBrowserTest;
   friend class ::SystemInfoStorageApiTest;
 
   StorageMonitor();
@@ -143,7 +152,7 @@ class StorageMonitor {
   friend class ReceiverImpl;
 
   // Key: device id.
-  typedef std::map<std::string, StorageInfo> RemovableStorageMap;
+  typedef std::map<std::string, StorageInfo> StorageMap;
 
   void ProcessAttach(const StorageInfo& storage);
   void ProcessDetach(const std::string& id);
@@ -153,14 +162,18 @@ class StorageMonitor {
   scoped_refptr<ObserverListThreadSafe<RemovableStorageObserver> >
       observer_list_;
 
+  // Used to make sure we call initialize from the same thread as creation.
+  base::ThreadChecker thread_checker_;
+
+  bool initializing_;
   bool initialized_;
   std::vector<base::Closure> on_initialize_callbacks_;
 
-  // For manipulating removable_storage_map_ structure.
+  // For manipulating storage_map_ structure.
   mutable base::Lock storage_lock_;
 
-  // Map of all the attached removable storage devices.
-  RemovableStorageMap storage_map_;
+  // Map of all known storage devices,including fixed and removable storages.
+  StorageMap storage_map_;
 
   scoped_ptr<TransientDeviceIds> transient_device_ids_;
 };

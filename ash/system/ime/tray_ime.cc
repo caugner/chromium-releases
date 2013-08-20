@@ -20,8 +20,7 @@
 #include "ash/system/tray/tray_notification_view.h"
 #include "ash/system/tray/tray_utils.h"
 #include "base/logging.h"
-#include "base/timer.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -181,35 +180,12 @@ class IMENotificationView : public TrayNotificationView {
     UpdateView(GetLabel());
   }
 
-  void StartAutoCloseTimer(int seconds) {
-    autoclose_.Stop();
-    autoclose_delay_ = seconds;
-    if (autoclose_delay_) {
-      autoclose_.Start(FROM_HERE,
-                       base::TimeDelta::FromSeconds(autoclose_delay_),
-                       this, &IMENotificationView::Close);
-    }
-  }
-
-  void StopAutoCloseTimer() {
-    autoclose_.Stop();
-  }
-
-  void RestartAutoCloseTimer() {
-    if (autoclose_delay_)
-      StartAutoCloseTimer(autoclose_delay_);
-  }
-
   // Overridden from TrayNotificationView.
   virtual void OnClickAction() OVERRIDE {
     owner()->PopupDetailedView(0, true);
   }
 
  private:
-  void Close() {
-    owner()->HideNotificationView();
-  }
-
   views::Label* GetLabel() {
     SystemTrayDelegate* delegate = Shell::GetInstance()->system_tray_delegate();
     IMEInfo current;
@@ -225,10 +201,6 @@ class IMENotificationView : public TrayNotificationView {
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     return label;
   }
-
-
-  int autoclose_delay_;
-  base::OneShotTimer<IMENotificationView> autoclose_;
 
   DISALLOW_COPY_AND_ASSIGN(IMENotificationView);
 };
@@ -268,6 +240,9 @@ views::View* TrayIME::CreateTrayView(user::LoginStatus status) {
   tray_label_ = new TrayItemView(this);
   tray_label_->CreateLabel();
   SetupLabelForTray(tray_label_->label());
+  // Hide IME tray when it is created, it will be updated when it is notified
+  // for IME refresh event.
+  tray_label_->SetVisible(false);
   return tray_label_;
 }
 

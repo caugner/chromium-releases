@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_to_mobile_service.h"
 #include "chrome/browser/extensions/api/page_launcher/page_launcher_api.h"
@@ -87,7 +87,7 @@ scoped_ptr<ActionBoxMenuModel> ActionBoxButtonController::CreateMenuModel() {
     const ExtensionSet* extensions = extension_service->extensions();
     for (ExtensionSet::const_iterator it = extensions->begin();
          it != extensions->end(); ++it) {
-      const extensions::Extension* extension = *it;
+      const extensions::Extension* extension = it->get();
       if (ActionInfo::GetPageLauncherInfo(extension)) {
         int command_id = GetCommandIdForExtension(*extension);
         menu_model->AddExtension(*extension, command_id);

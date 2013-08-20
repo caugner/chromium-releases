@@ -95,11 +95,40 @@ function run() {
 
   /**
    * Callback to chrome.fileBrowserPrivate.getFileTasks.
+   * It checks that the returned task is not the default, sets it as the default
+   * and calls getFileTasks again.
+   *
+   * @param {string} fileUrl File url for which getFileTasks was called.
+   * @param {string} mimeType MIME type of fireUrl.
+   * @param {Array.<Object>} tasks List of found task objects.
+   */
+
+  function onGotNonDefaultTasks(fileUrl, mimeType, tasks) {
+    if (!tasks) {
+      onError('Failed getting tasks for ' + fileUrl);
+      return;
+    }
+    if (tasks.length != 1) {
+      onError('Got invalid number of tasks for "' + fileUrl + '": ' +
+              tasks.length);
+    }
+    if (tasks[0].isDefault) {
+      onError('Task "' + tasks[0].taskId + '" is default for "' + fileUrl +
+          '"');
+    }
+    chrome.fileBrowserPrivate.setDefaultTask(
+        tasks[0].taskId, [fileUrl], [mimeType],
+        chrome.fileBrowserPrivate.getFileTasks.bind(null, [fileUrl], [mimeType],
+            onGotTasks.bind(null, fileUrl)));
+  }
+
+  /**
+   * Callback to chrome.fileBrowserPrivate.getFileTasks.
    * It remembers the returned task id and url. When tasks for all test cases
    * are found, they are executed.
    *
    * @param {string} fileUrl File url for which getFileTasks was called.
-   * @param {Array.<Object>} tesks List of found task objects.
+   * @param {Array.<Object>} tasks List of found task objects.
    */
   function onGotTasks(fileUrl, tasks) {
     if (!tasks) {
@@ -107,8 +136,12 @@ function run() {
       return;
     }
     if (tasks.length != 1) {
-      onError('Got invalid number of tasks for "' + fileUrl + '" : ' +
-              tasks.lenght);
+      onError('Got invalid number of tasks for "' + fileUrl + '": ' +
+              tasks.length);
+    }
+    if (!tasks[0].isDefault) {
+      onError('Task "' + tasks[0].taskId + '" is not default for "' + fileUrl +
+          '"');
     }
 
     foundTasks.push({id: tasks[0].taskId, url: fileUrl});
@@ -137,7 +170,8 @@ function run() {
         chrome.fileBrowserPrivate.getFileTasks(
             [testCase.entry.toURL()],
             [testCase.mimeType],
-            onGotTasks.bind(null, testCase.entry.toURL()));
+            onGotNonDefaultTasks.bind(null, testCase.entry.toURL(),
+              testCase.mimeType));
       });
     }
   }
@@ -159,7 +193,7 @@ function run() {
   }
 
   /**
-   * Callback for chrome.fileBrowserPrivate.requestLocalFileSystem.
+   * Callback for chrome.fileBrowserPrivate.requestFileSystem.
    * When the local fileSystem is found, tries to get the test mount point root
    * dir by probing for existence of possible mount point root dirs.
    * The Chrome should have enabled either 'local/' or 'drive/' mount point.
@@ -190,7 +224,7 @@ function run() {
     tryNextMountPoint();
   }
 
-  chrome.fileBrowserPrivate.requestLocalFileSystem(onGotFileSystem);
+  chrome.fileBrowserPrivate.requestFileSystem(onGotFileSystem);
 }
 
 // Start the testing.

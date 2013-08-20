@@ -31,7 +31,15 @@ enum TtsEventType {
   TTS_EVENT_MARKER,
   TTS_EVENT_INTERRUPTED,
   TTS_EVENT_CANCELLED,
-  TTS_EVENT_ERROR
+  TTS_EVENT_ERROR,
+  TTS_EVENT_PAUSE,
+  TTS_EVENT_RESUME
+};
+
+enum TtsGenderType {
+  TTS_GENDER_NONE,
+  TTS_GENDER_MALE,
+  TTS_GENDER_FEMALE
 };
 
 // Returns true if this event type is one that indicates an utterance
@@ -54,9 +62,14 @@ struct VoiceData {
 
   std::string name;
   std::string lang;
-  std::string gender;
+  TtsGenderType gender;
   std::string extension_id;
-  std::vector<std::string> events;
+  std::set<TtsEventType> events;
+
+  // If true, this is implemented by this platform's subclass of
+  // TtsPlatformImpl. If false, this is implemented by an extension.
+  bool native;
+  std::string native_voice_identifier;
 };
 
 // Class that wants to receive events on utterances.
@@ -67,6 +80,14 @@ class UtteranceEventDelegate {
                           TtsEventType event_type,
                           int char_index,
                           const std::string& error_message) = 0;
+};
+
+// Class that wants to be notified when the set of
+// voices has changed.
+class VoicesChangedDelegate {
+ public:
+  virtual ~VoicesChangedDelegate() {}
+  virtual void OnVoicesChanged() = 0;
 };
 
 // One speech utterance.
@@ -116,10 +137,10 @@ class Utterance {
   }
   const std::string& lang() const { return lang_; }
 
-  void set_gender(const std::string& gender) {
+  void set_gender(TtsGenderType gender) {
     gender_ = gender;
   }
-  const std::string& gender() const { return gender_; }
+  TtsGenderType gender() const { return gender_; }
 
   void set_continuous_parameters(const UtteranceContinuousParameters& params) {
     continuous_parameters_ = params;
@@ -131,17 +152,17 @@ class Utterance {
   void set_can_enqueue(bool can_enqueue) { can_enqueue_ = can_enqueue; }
   bool can_enqueue() const { return can_enqueue_; }
 
-  void set_required_event_types(const std::set<std::string>& types) {
+  void set_required_event_types(const std::set<TtsEventType>& types) {
     required_event_types_ = types;
   }
-  const std::set<std::string>& required_event_types() const {
+  const std::set<TtsEventType>& required_event_types() const {
     return required_event_types_;
   }
 
-  void set_desired_event_types(const std::set<std::string>& types) {
+  void set_desired_event_types(const std::set<TtsEventType>& types) {
     desired_event_types_ = types;
   }
-  const std::set<std::string>& desired_event_types() const {
+  const std::set<TtsEventType>& desired_event_types() const {
     return desired_event_types_;
   }
 
@@ -202,11 +223,11 @@ class Utterance {
   // The parsed options.
   std::string voice_name_;
   std::string lang_;
-  std::string gender_;
+  TtsGenderType gender_;
   UtteranceContinuousParameters continuous_parameters_;
   bool can_enqueue_;
-  std::set<std::string> required_event_types_;
-  std::set<std::string> desired_event_types_;
+  std::set<TtsEventType> required_event_types_;
+  std::set<TtsEventType> desired_event_types_;
 
   // The index of the current char being spoken.
   int char_index_;
@@ -232,8 +253,16 @@ class TtsController {
   // immediately.
   void SpeakOrEnqueue(Utterance* utterance);
 
-  // Stop all utterances and flush the queue.
+  // Stop all utterances and flush the queue. Implies leaving pause mode
+  // as well.
   void Stop();
+
+  // Pause the speech queue. Some engines may support pausing in the middle
+  // of an utterance.
+  void Pause();
+
+  // Resume speaking.
+  void Resume();
 
   // Handle events received from the speech engine. Events are forwarded to
   // the callback function, and in addition, completion and error events
@@ -251,6 +280,16 @@ class TtsController {
   // Called by TtsExtensionLoaderChromeOs::LoadTtsExtension when it
   // finishes loading the built-in TTS component extension.
   void RetrySpeakingQueuedUtterances();
+
+  // Called by the extension system or platform implementation when the
+  // list of voices may have changed and should be re-queried.
+  void VoicesChanged();
+
+  // Add a delegate that wants to be notified when the set of voices changes.
+  void AddVoicesChangedDelegate(VoicesChangedDelegate* delegate);
+
+  // Remove delegate that wants to be notified when the set of voices changes.
+  void RemoveVoicesChangedDelegate(VoicesChangedDelegate* delegate);
 
   // For unit testing.
   void SetPlatformImpl(TtsPlatformImpl* platform_impl);
@@ -278,13 +317,24 @@ class TtsController {
   // Start speaking the next utterance in the queue.
   void SpeakNextUtterance();
 
+  // Given an utterance and a vector of voices, return the
+  // index of the voice that best matches the utterance.
+  int GetMatchingVoice(const Utterance* utterance,
+                       std::vector<VoiceData>& voices);
+
   friend struct DefaultSingletonTraits<TtsController>;
 
   // The current utterance being spoken.
   Utterance* current_utterance_;
 
+  // Whether the queue is paused or not.
+  bool paused_;
+
   // A queue of utterances to speak after the current one finishes.
   std::queue<Utterance*> utterance_queue_;
+
+  // A set of delegates that want to be notified when the voices change.
+  std::set<VoicesChangedDelegate*> voices_changed_delegates_;
 
   // A pointer to the platform implementation of text-to-speech, for
   // dependency injection.

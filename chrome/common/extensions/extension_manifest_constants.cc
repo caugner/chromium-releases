@@ -51,12 +51,6 @@ const char kImport[] = "import";
 const char kIncognito[] = "incognito";
 const char kIncludeGlobs[] = "include_globs";
 const char kInputComponents[] = "input_components";
-const char kIntentDisposition[] = "disposition";
-const char kIntentHref[] = "href";
-const char kIntentPath[] = "path";
-const char kIntents[] = "intents";
-const char kIntentTitle[] = "title";
-const char kIntentType[] = "type";
 const char kIsolation[] = "app.isolation";
 const char kJs[] = "js";
 const char kKey[] = "key";
@@ -68,10 +62,6 @@ const char kLaunchContainer[] = "app.launch.container";
 const char kLaunchHeight[] = "app.launch.height";
 const char kLaunchLocalPath[] = "app.launch.local_path";
 const char kLaunchWebURL[] = "app.launch.web_url";
-const char kLaunchMaxHeight[] = "app.launch.max_height";
-const char kLaunchMaxWidth[] = "app.launch.max_width";
-const char kLaunchMinHeight[] = "app.launch.min_height";
-const char kLaunchMinWidth[] = "app.launch.min_width";
 const char kLaunchWidth[] = "app.launch.width";
 const char kLayouts[] = "layouts";
 const char kManifestVersion[] = "manifest_version";
@@ -85,6 +75,7 @@ const char kNaClModules[] = "nacl_modules";
 const char kNaClModulesMIMEType[] = "mime_type";
 const char kNaClModulesPath[] = "path";
 const char kOAuth2[] = "oauth2";
+const char kOAuth2AutoApprove[] = "oauth2.auto_approve";
 const char kOAuth2ClientId[] = "oauth2.client_id";
 const char kOAuth2Scopes[] = "oauth2.scopes";
 const char kOfflineEnabled[] = "offline_enabled";
@@ -125,6 +116,7 @@ const char kSpellcheckDictionaryFormat[] = "dictionary_format";
 const char kSpellcheckDictionaryLanguage[] = "dictionary_language";
 const char kSpellcheckDictionaryLocale[] = "dictionary_locale";
 const char kSpellcheckDictionaryPath[] = "dictionary_path";
+const char kStorageManagedSchema[] = "storage.managed_schema";
 const char kSuggestedKey[] = "suggested_key";
 const char kSystemIndicator[] = "system_indicator";
 const char kSystemInfoDisplay[] = "systemInfo.display";
@@ -166,6 +158,25 @@ const char kKeybindingPlatformDefault[] = "default";
 const char kKeybindingPlatformLinux[] = "linux";
 const char kKeybindingPlatformMac[] = "mac";
 const char kKeybindingPlatformWin[] = "windows";
+const char kKeyAlt[] = "Alt";
+const char kKeyComma[] = "Comma";
+const char kKeyCommand[] = "Command";
+const char kKeyCtrl[] = "Ctrl";
+const char kKeyDel[] = "Delete";
+const char kKeyDown[] = "Down";
+const char kKeyEnd[] = "End";
+const char kKeyHome[] = "Home";
+const char kKeyIns[] = "Insert";
+const char kKeyLeft[] = "Left";
+const char kKeyMacCtrl[] = "MacCtrl";
+const char kKeyPgDwn[] = "PageDown";
+const char kKeyPgUp[] = "PageUp";
+const char kKeyPeriod[] = "Period";
+const char kKeyRight[] = "Right";
+const char kKeySeparator[] = "+";
+const char kKeyShift[] = "Shift";
+const char kKeyTab[] = "Tab";
+const char kKeyUp[] = "Up";
 const char kRunAtDocumentStart[] = "document_start";
 const char kRunAtDocumentEnd[] = "document_end";
 const char kRunAtDocumentIdle[] = "document_idle";
@@ -204,6 +215,8 @@ const char kCannotClaimAllURLsInExtent[] =
     "Cannot claim all URLs in an extent.";
 const char kCannotScriptGallery[] =
     "The extensions gallery cannot be scripted.";
+const char kCannotScriptSigninPage[] =
+    "The sign-in page cannot be scripted.";
 const char kChromeVersionTooLow[] =
     "This extension requires * version * or greater.";
 const char kDisabledByPolicy[] =
@@ -322,17 +335,12 @@ const char kInvalidImportVersion[] =
     "Invalid value for 'import[*].minimum_version'.";
 const char kInvalidIncognitoBehavior[] =
     "Invalid value for 'incognito'.";
-const char kInvalidIncognitoModeForPlatformApp[] =
-    "Invalid value for 'incognito'. Packaged apps must use split incognito "
-    "mode.";
 const char kInvalidInputComponents[] =
     "Invalid value for 'input_components'";
 const char kInvalidInputComponentDescription[] =
     "Invalid value for 'input_components[*].description";
 const char kInvalidInputComponentLayoutName[] =
     "Invalid value for 'input_components[*].layouts[*]";
-const char kInvalidInputComponentLayouts[] =
-    "Invalid value for 'input_components[*].layouts";
 const char kInvalidInputComponentName[] =
     "Invalid value for 'input_components[*].name";
 const char kInvalidInputComponentShortcutKey[] =
@@ -430,6 +438,8 @@ const char kInvalidNaClModulesPath[] =
     "Invalid value for 'nacl_modules[*].path'.";
 const char kInvalidNaClModulesMIMEType[] =
     "Invalid value for 'nacl_modules[*].mime_type'.";
+const char kInvalidOAuth2AutoApprove[] =
+    "Invalid value for 'oauth2.auto_approve'. Value must be true or false.";
 const char kInvalidOAuth2ClientId[] =
     "Invalid value for 'oauth2.client_id'.";
 const char kInvalidOAuth2Scopes[] =

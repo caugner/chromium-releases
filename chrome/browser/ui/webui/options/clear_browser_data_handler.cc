@@ -8,7 +8,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/prefs/pref_service.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -164,7 +164,7 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
     remove_mask |= BrowsingDataRemover::REMOVE_DOWNLOADS;
   }
   if (prefs->GetBoolean(prefs::kDeleteCache))
-    remove_mask |= BrowsingDataRemover::REMOVE_CACHED_DATA;
+    remove_mask |= BrowsingDataRemover::REMOVE_CACHE;
   if (prefs->GetBoolean(prefs::kDeleteCookies)) {
     remove_mask |= site_data_mask;
     origin_mask |= BrowsingDataHelper::UNPROTECTED_WEB;

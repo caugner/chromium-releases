@@ -39,19 +39,35 @@ QuicClient::QuicClient(IPEndPoint server_address,
       initialized_(false),
       packets_dropped_(0),
       overflow_supported_(false) {
-  epoll_server_.set_timeout_in_us(50 * 1000);
   config_.SetDefaults();
-  crypto_config_.SetDefaults();
+}
+
+QuicClient::QuicClient(IPEndPoint server_address,
+                       const string& server_hostname,
+                       const QuicConfig& config)
+    : server_address_(server_address),
+      server_hostname_(server_hostname),
+      config_(config),
+      local_port_(0),
+      fd_(-1),
+      initialized_(false),
+      packets_dropped_(0),
+      overflow_supported_(false) {
 }
 
 QuicClient::~QuicClient() {
   if (connected()) {
-    session()->connection()
-        ->SendConnectionClosePacket(QUIC_PEER_GOING_AWAY, std::string());
+    session()->connection()->SendConnectionClosePacket(
+        QUIC_PEER_GOING_AWAY, "");
   }
 }
 
 bool QuicClient::Initialize() {
+  DCHECK(!initialized_);
+
+  epoll_server_.set_timeout_in_us(50 * 1000);
+  crypto_config_.SetDefaults();
+
   int address_family = server_address_.GetSockAddrFamily();
   fd_ = socket(address_family, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
   if (fd_ < 0) {
@@ -153,12 +169,14 @@ void QuicClient::Disconnect() {
   epoll_server_.UnregisterFD(fd_);
   close(fd_);
   fd_ = -1;
+  initialized_ = false;
 }
 
-void QuicClient::SendRequestsAndWaitForResponse(int argc, char *argv[]) {
-  for (int i = 1; i < argc; ++i) {
+void QuicClient::SendRequestsAndWaitForResponse(
+    const CommandLine::StringVector& args) {
+  for (uint32_t i = 0; i < args.size(); i++) {
     BalsaHeaders headers;
-    headers.SetRequestFirstlineFromStringPieces("GET", argv[i], "HTTP/1.1");
+    headers.SetRequestFirstlineFromStringPieces("GET", args[i], "HTTP/1.1");
     CreateReliableClientStream()->SendRequest(headers, "", true);
   }
 
@@ -166,7 +184,9 @@ void QuicClient::SendRequestsAndWaitForResponse(int argc, char *argv[]) {
 }
 
 QuicReliableClientStream* QuicClient::CreateReliableClientStream() {
-  DCHECK(connected());
+  if (!connected()) {
+    return NULL;
+  }
 
   return session_->CreateOutgoingReliableStream();
 }
@@ -175,6 +195,14 @@ void QuicClient::WaitForStreamToClose(QuicStreamId id) {
   DCHECK(connected());
 
   while (!session_->IsClosedStream(id)) {
+    epoll_server_.WaitForEventsAndExecuteCallbacks();
+  }
+}
+
+void QuicClient::WaitForCryptoHandshakeConfirmed() {
+  DCHECK(connected());
+
+  while (!session_->IsCryptoHandshakeConfirmed()) {
     epoll_server_.WaitForEventsAndExecuteCallbacks();
   }
 }

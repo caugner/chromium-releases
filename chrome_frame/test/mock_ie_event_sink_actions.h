@@ -11,8 +11,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/string_util.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/test/test_process_killer_win.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
@@ -257,20 +257,19 @@ ACTION(OpenContextMenuAsync) {
   ::PostMessage(hwnd, WM_RBUTTONUP, 0, coordinates);
 }
 
-ACTION_P(PostCharMessage, character_code) {
-  ::PostMessage(arg0, WM_CHAR, character_code, 0);
+// Posts a WM_KEYDOWN and WM_KEYUP message to the renderer window. Modifiers are
+// not supported, so |character_code| is limited to the regular expression
+// [0-9a-z].
+ACTION_P2(PostKeyMessageToRenderer, mock, character_code) {
+  char character_codes[] = { character_code, '\0' };
+  mock->event_sink()->SendKeys(character_codes);
 }
 
-ACTION_P2(PostCharMessageToRenderer, mock, character_code) {
-  AccInWindow<void>(PostCharMessage(character_code),
-                    mock->event_sink()->GetRendererWindow());
-}
-
-ACTION_P2(PostCharMessagesToRenderer, mock, character_codes) {
-  HWND window = mock->event_sink()->GetRendererWindow();
-  std::string codes = character_codes;
-  for (size_t i = 0; i < codes.length(); i++)
-    ::PostMessage(window, WM_CHAR, codes[i], 0);
+// Posts WM_KEYDOWN and WM_KEYUP messages to the renderer window. Modifiers are
+// not supported, so |character_codes| is limited to the regular expression
+// [0-9a-z]*.
+ACTION_P2(PostKeyMessagesToRenderer, mock, character_codes) {
+  mock->event_sink()->SendKeys(std::string(character_codes).c_str());
 }
 
 ACTION_P3(WatchWindow, mock, caption, window_class) {
@@ -308,8 +307,8 @@ ACTION(DoCloseWindow) {
 }
 
 ACTION_P(DelayDoCloseWindow, delay) {
-  DCHECK(MessageLoop::current());
-  MessageLoop::current()->PostDelayedTask(
+  DCHECK(base::MessageLoop::current());
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE, base::Bind(DoCloseWindowNow, arg0),
       base::TimeDelta::FromMilliseconds(delay));
 }

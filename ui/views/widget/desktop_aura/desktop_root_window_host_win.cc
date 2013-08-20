@@ -8,11 +8,12 @@
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/cursor_client.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window_property.h"
 #include "ui/base/cursor/cursor_loader_win.h"
-#include "ui/base/ime/input_method_win.h"
+#include "ui/base/ime/input_method.h"
 #include "ui/base/ime/win/tsf_bridge.h"
 #include "ui/base/win/dpi.h"
 #include "ui/base/win/shell.h"
@@ -131,8 +132,6 @@ aura::RootWindow* DesktopRootWindowHostWin::Init(
 
   root_window_->Init();
   root_window_->AddChild(content_window_);
-
-  native_widget_delegate_->OnNativeWidgetCreated();
 
   capture_client_.reset(new views::DesktopCaptureClient(root_window_));
   aura::client::SetCaptureClient(root_window_, capture_client_.get());
@@ -473,7 +472,17 @@ void DesktopRootWindowHostWin::SetCursor(gfx::NativeCursor cursor) {
 }
 
 bool DesktopRootWindowHostWin::QueryMouseLocation(gfx::Point* location_return) {
-  return false;
+  aura::client::CursorClient* cursor_client =
+      aura::client::GetCursorClient(GetRootWindow());
+  if (cursor_client && !cursor_client->IsMouseEventsEnabled()) {
+    *location_return = gfx::Point(0, 0);
+    return false;
+  }
+  POINT pt = {0};
+  ::GetCursorPos(&pt);
+  *location_return =
+      gfx::Point(static_cast<int>(pt.x), static_cast<int>(pt.y));
+  return true;
 }
 
 bool DesktopRootWindowHostWin::ConfineCursorToRootWindow() {
@@ -487,6 +496,9 @@ void DesktopRootWindowHostWin::OnCursorVisibilityChanged(bool show) {
 }
 
 void DesktopRootWindowHostWin::MoveCursorTo(const gfx::Point& location) {
+  POINT cursor_location = location.ToPOINT();
+  ::ClientToScreen(GetHWND(), &cursor_location);
+  ::SetCursorPos(cursor_location.x, cursor_location.y);
 }
 
 void DesktopRootWindowHostWin::SetFocusWhenShown(bool focus_when_shown) {
@@ -596,7 +608,8 @@ bool DesktopRootWindowHostWin::WillProcessWorkAreaChange() const {
 
 int DesktopRootWindowHostWin::GetNonClientComponent(
     const gfx::Point& point) const {
-  return native_widget_delegate_->GetNonClientComponent(point);
+  gfx::Point dip_position = ui::win::ScreenToDIPPoint(point);
+  return native_widget_delegate_->GetNonClientComponent(dip_position);
 }
 
 void DesktopRootWindowHostWin::GetWindowMask(const gfx::Size& size,
@@ -682,7 +695,7 @@ void DesktopRootWindowHostWin::HandleCreate() {
   // TODO(beng): moar
   NOTIMPLEMENTED();
 
-  native_widget_delegate_->OnNativeWidgetCreated();
+  native_widget_delegate_->OnNativeWidgetCreated(true);
 
   // 1. Window property association
   // 2. MouseWheel.
@@ -786,27 +799,20 @@ bool DesktopRootWindowHostWin::HandleIMEMessage(UINT message,
                                                 WPARAM w_param,
                                                 LPARAM l_param,
                                                 LRESULT* result) {
-  // TODO(ime): Having to cast here is wrong. Maybe we should have IME events
-  // and have these flow through the same path as
-  // HandleUnHandletranslatedKeyEvent() does.
-  ui::InputMethodWin* ime_win =
-      static_cast<ui::InputMethodWin*>(
-          desktop_native_widget_aura_->input_method_event_filter()->
-          input_method());
-  BOOL handled = FALSE;
-  *result = ime_win->OnImeMessages(message, w_param, l_param, &handled);
-  return !!handled;
+  MSG msg = {};
+  msg.hwnd = GetHWND();
+  msg.message = message;
+  msg.wParam = w_param;
+  msg.lParam = l_param;
+  return desktop_native_widget_aura_->input_method_event_filter()->
+      input_method()->OnUntranslatedIMEMessage(msg, result);
 }
 
 void DesktopRootWindowHostWin::HandleInputLanguageChange(
     DWORD character_set,
     HKL input_language_id) {
-  // TODO(ime): Seem comment in HandleIMEMessage().
-  ui::InputMethodWin* ime_win =
-      static_cast<ui::InputMethodWin*>(
-          desktop_native_widget_aura_->input_method_event_filter()->
-          input_method());
-  ime_win->OnInputLangChange(character_set, input_language_id);
+  desktop_native_widget_aura_->input_method_event_filter()->
+      input_method()->OnInputLocaleChanged();
 }
 
 bool DesktopRootWindowHostWin::HandlePaintAccelerated(

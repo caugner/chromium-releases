@@ -14,9 +14,9 @@
 static base::android::RegistrationMethod
     kWebViewDependencyRegisteredMethods[] = {
     { "NavigationInterception",
-        components::RegisterNavigationInterceptionJni },
+        navigation_interception::RegisterNavigationInterceptionJni },
     { "WebContentsDelegateAndroid",
-        components::RegisterWebContentsDelegateAndroidJni },
+        web_contents_delegate_android::RegisterWebContentsDelegateAndroidJni },
 };
 
 // This is called by the VM when the shared library is first loaded.

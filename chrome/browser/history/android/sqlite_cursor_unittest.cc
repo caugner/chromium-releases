@@ -9,8 +9,8 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/android/android_history_provider_service.h"
 #include "chrome/browser/history/android/android_history_types.h"
 #include "chrome/browser/history/android/android_time.h"
@@ -77,24 +77,24 @@ class SQLiteCursorTest : public testing::Test,
 
   // Override SQLiteCursor::TestObserver.
   virtual void OnPostMoveToTask() OVERRIDE {
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
   virtual void OnGetMoveToResult() OVERRIDE {
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   virtual void OnPostGetFaviconTask() OVERRIDE {
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
   virtual void OnGetFaviconResult() OVERRIDE {
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
  protected:
   TestingProfileManager profile_manager_;
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   scoped_ptr<AndroidHistoryProviderService> service_;
@@ -126,7 +126,7 @@ class CallbackHelper : public base::RefCountedThreadSafe<CallbackHelper> {
                   bool success,
                   int64 id) {
     success_ = success;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   void OnQueryResult(AndroidHistoryProviderService::Handle handle,
@@ -134,7 +134,7 @@ class CallbackHelper : public base::RefCountedThreadSafe<CallbackHelper> {
                      AndroidStatement* statement) {
     success_ = success;
     statement_ = statement;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
  private:
@@ -168,7 +168,7 @@ TEST_F(SQLiteCursorTest, Run) {
   service_->InsertHistoryAndBookmark(row, &cancelable_consumer_,
       Bind(&CallbackHelper::OnInserted, callback.get()));
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   EXPECT_TRUE(callback->success());
 
   std::vector<HistoryAndBookmarkRow::ColumnID> projections;
@@ -181,7 +181,7 @@ TEST_F(SQLiteCursorTest, Run) {
   service_->QueryHistoryAndBookmarks(projections, std::string(),
       std::vector<string16>(), std::string(), &cancelable_consumer_,
       Bind(&CallbackHelper::OnQueryResult, callback.get()));
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   ASSERT_TRUE(callback->success());
 
   AndroidStatement* statement = callback->statement();
@@ -197,28 +197,25 @@ TEST_F(SQLiteCursorTest, Run) {
 
   FaviconService* favicon_service = new FaviconService(hs_);
 
-  // Wraps cursor in a block, so the destructor will be called after that.
-  {
-    SQLiteCursor cursor(column_names, statement, service_.get(),
-                        favicon_service);
-    cursor.set_test_observer(this);
-    JNIEnv* env = base::android::AttachCurrentThread();
-    EXPECT_EQ(1, cursor.GetCount(env, NULL));
-    EXPECT_EQ(0, cursor.MoveTo(env, NULL, 0));
-    EXPECT_EQ(row.url().spec(), base::android::ConvertJavaStringToUTF8(
-        cursor.GetString(env, NULL, 0)).c_str());
-    EXPECT_EQ(history::ToDatabaseTime(row.last_visit_time()),
-              cursor.GetLong(env, NULL, 1));
-    EXPECT_EQ(row.visit_count(), cursor.GetInt(env, NULL, 2));
-    base::android::ScopedJavaLocalRef<jbyteArray> data =
-        cursor.GetBlob(env, NULL, 3);
-    std::vector<uint8> out;
-    base::android::JavaByteArrayToByteVector(env, data.obj(), &out);
-    EXPECT_EQ(data_bytes->data().size(), out.size());
-    EXPECT_EQ(data_bytes->data()[0], out[0]);
-  }
-
-  // Cursor's destructor post the task in UI thread, run Message loop to release
-  // the statement etc.
+  SQLiteCursor* cursor = new SQLiteCursor(column_names, statement,
+      service_.get(), favicon_service);
+  cursor->set_test_observer(this);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  EXPECT_EQ(1, cursor->GetCount(env, NULL));
+  EXPECT_EQ(0, cursor->MoveTo(env, NULL, 0));
+  EXPECT_EQ(row.url().spec(), base::android::ConvertJavaStringToUTF8(
+      cursor->GetString(env, NULL, 0)).c_str());
+  EXPECT_EQ(history::ToDatabaseTime(row.last_visit_time()),
+      cursor->GetLong(env, NULL, 1));
+  EXPECT_EQ(row.visit_count(), cursor->GetInt(env, NULL, 2));
+  base::android::ScopedJavaLocalRef<jbyteArray> data =
+      cursor->GetBlob(env, NULL, 3);
+  std::vector<uint8> out;
+  base::android::JavaByteArrayToByteVector(env, data.obj(), &out);
+  EXPECT_EQ(data_bytes->data().size(), out.size());
+  EXPECT_EQ(data_bytes->data()[0], out[0]);
+  cursor->Destroy(env, NULL);
+  // Cursor::Destroy posts the task in UI thread, run Message loop to release
+  // the statement, delete SQLiteCursor itself etc.
   content::RunAllPendingInMessageLoop();
 }

@@ -6,7 +6,7 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
@@ -178,7 +178,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
                                   chrome::HostDesktopType host_desktop_type) {
     Browser* new_browser =
         new Browser(Browser::CreateParams(profile, host_desktop_type));
-    chrome::AddSelectedTabWithURL(new_browser, GURL(chrome::kAboutBlankURL),
+    chrome::AddSelectedTabWithURL(new_browser, GURL(content::kAboutBlankURL),
                                   content::PAGE_TRANSITION_AUTO_TOPLEVEL);
     content::WaitForLoadStop(
         new_browser->tab_strip_model()->GetActiveWebContents());

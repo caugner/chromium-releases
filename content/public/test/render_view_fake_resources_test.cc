@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+#include "base/command_line.h"
 #include "base/process.h"
 #include "base/run_loop.h"
 #include "base/shared_memory.h"
@@ -13,6 +14,7 @@
 #include "content/common/resource_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/resource_response.h"
+#include "content/public/renderer/history_item_serialization.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
@@ -22,13 +24,13 @@
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_status.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "webkit/dom_storage/dom_storage_types.h"
-#include "webkit/glue/glue_serialize.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebHistoryItem.h"
+#include "third_party/WebKit/public/web/WebView.h"
+#include "ui/base/ui_base_switches.h"
+#include "webkit/common/dom_storage/dom_storage_types.h"
 #include "webkit/glue/webkit_glue.h"
 
 namespace content {
@@ -68,6 +70,9 @@ void RenderViewFakeResourcesTest::SetUp() {
   channel_.reset(new IPC::Channel(channel_id,
                                   IPC::Channel::MODE_SERVER, this));
   ASSERT_TRUE(channel_->Connect());
+
+  CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  command_line.AppendSwitchASCII(switches::kLang, "en-us");
 
   webkit_glue::SetJavaScriptFlags("--expose-gc");
   mock_process_.reset(new MockRenderProcess);
@@ -213,7 +218,7 @@ void RenderViewFakeResourcesTest::GoToOffset(
                                         impl->historyForwardListCount() + 1);
   params.url = GURL(history_item.urlString());
   params.transition = PAGE_TRANSITION_FORWARD_BACK;
-  params.state = webkit_glue::HistoryItemToString(history_item);
+  params.page_state = HistoryItemToPageState(history_item);
   params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
   params.request_time = base::Time::Now();
   channel_->Send(new ViewMsg_Navigate(impl->routing_id(), params));

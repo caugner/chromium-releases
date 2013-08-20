@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/json/json_reader.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "testing/gtest_mac.h"
@@ -21,7 +21,7 @@ struct TestCase {
   DescType expected_aedesc_type;
 };
 
-TEST_F(AppleEventUtilTest, ValueToAppleEventDescriptor) {
+TEST_F(AppleEventUtilTest, DISABLED_ValueToAppleEventDescriptor) {
   const struct TestCase cases[] = {
     { "null",         "'msng'",             typeType },
     { "-1000",        "-1000",              typeSInt32 },

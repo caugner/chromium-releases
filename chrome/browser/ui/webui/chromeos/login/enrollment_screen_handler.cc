@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/command_line.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
@@ -183,6 +182,8 @@ void EnrollmentScreenHandler::ShowAuthError(
     case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
     case GoogleServiceAuthError::REQUEST_CANCELED:
+    case GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE:
+    case GoogleServiceAuthError::SERVICE_ERROR:
       ShowError(IDS_ENTERPRISE_ENROLLMENT_AUTH_FATAL_ERROR, false);
       return;
     case GoogleServiceAuthError::USER_NOT_SIGNED_UP:
@@ -463,13 +464,7 @@ void EnrollmentScreenHandler::OnTokenRevokerDone(
 void EnrollmentScreenHandler::DoShow() {
   DictionaryValue screen_data;
   screen_data.SetString("signin_url", kGaiaExtStartPage);
-  screen_data.SetString("gaiaOrigin",
-                        GaiaUrls::GetInstance()->gaia_origin_url());
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kGaiaUrlPath)) {
-    screen_data.SetString("gaiaUrlPath",
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kGaiaUrlPath));
-  }
+  screen_data.SetString("gaiaUrl", GaiaUrls::GetInstance()->gaia_url().spec());
   screen_data.SetBoolean("is_auto_enrollment", is_auto_enrollment_);
   screen_data.SetBoolean("prevent_cancellation", !can_exit_enrollment_);
   if (!test_email_.empty()) {

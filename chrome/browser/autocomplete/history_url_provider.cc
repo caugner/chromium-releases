@@ -12,8 +12,8 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/history/history_backend.h"
@@ -295,7 +295,7 @@ HistoryURLProviderParams::HistoryURLProviderParams(
     const std::string& languages,
     TemplateURL* default_search_provider,
     const SearchTermsData& search_terms_data)
-    : message_loop(MessageLoop::current()),
+    : message_loop(base::MessageLoop::current()),
       input(input),
       prevent_inline_autocomplete(input.prevent_inline_autocomplete()),
       trim_http(trim_http),
@@ -323,8 +323,7 @@ HistoryURLProvider::HistoryURLProvider(AutocompleteProviderListener* listener,
           !OmniboxFieldTrial::InHUPCreateShorterMatchFieldTrial() ||
           !OmniboxFieldTrial::
               InHUPCreateShorterMatchFieldTrialExperimentGroup()),
-      search_url_database_(
-          !OmniboxFieldTrial::InHQPReplaceHUPScoringExperimentGroup()) {
+      search_url_database_(true) {
 }
 
 // static
@@ -333,7 +332,7 @@ AutocompleteMatch HistoryURLProvider::SuggestExactInput(
     const AutocompleteInput& input,
     bool trim_http) {
   AutocompleteMatch match(provider, 0, false,
-                          AutocompleteMatch::URL_WHAT_YOU_TYPED);
+                          AutocompleteMatchType::URL_WHAT_YOU_TYPED);
 
   const GURL& url = input.canonicalized_url();
   if (url.is_valid()) {
@@ -350,8 +349,8 @@ AutocompleteMatch HistoryURLProvider::SuggestExactInput(
     match.fill_into_edit =
         AutocompleteInput::FormattedStringWithEquivalentMeaning(url,
                                                                 display_string);
-    // NOTE: Don't set match.input_location (to allow inline autocompletion)
-    // here, it's surprising and annoying.
+    // NOTE: Don't set match.inline_autocomplete_offset (to allow inline
+    // autocompletion) here, it's surprising and annoying.
 
     // Try to highlight "innermost" match location.  If we fix up "w" into
     // "www.w.com", we want to highlight the fifth character, not the first.
@@ -360,9 +359,14 @@ AutocompleteMatch HistoryURLProvider::SuggestExactInput(
     match.contents = display_string;
     const URLPrefix* best_prefix = URLPrefix::BestURLPrefix(
         UTF8ToUTF16(match.destination_url.spec()), input.text());
+
+    // We only want to trim the HTTP scheme off our match if the user didn't
+    // explicitly type "http:".
+    DCHECK(!trim_http || !HasHTTPScheme(input.text()));
+
     // Because of the vagaries of GURL, it's possible for match.destination_url
-    // to not contain the user's input at all.  In this case don't mark anything
-    // as a match.
+    // to not contain the user's input at all (so |best_prefix| is NULL).
+    // In this case don't mark anything as a match.
     const size_t match_location = (best_prefix == NULL) ?
         string16::npos : best_prefix->prefix.length() - offset;
     AutocompleteMatch::ClassifyLocationInString(match_location,
@@ -795,8 +799,12 @@ bool HistoryURLProvider::CanFindIntranetURL(
     return false;
   const std::string host(UTF16ToUTF8(
       input.text().substr(input.parts().host.begin, input.parts().host.len)));
-  return (net::RegistryControlledDomainService::GetRegistryLength(host,
-      false) == 0) && db->IsTypedHost(host);
+  const size_t registry_length =
+      net::registry_controlled_domains::GetRegistryLength(
+          host,
+          net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+  return registry_length == 0 && db->IsTypedHost(host);
 }
 
 bool HistoryURLProvider::PromoteMatchForInlineAutocomplete(
@@ -1035,7 +1043,7 @@ AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
     int relevance) {
   const history::URLRow& info = history_match.url_info;
   AutocompleteMatch match(this, relevance,
-      !!info.visit_count(), AutocompleteMatch::HISTORY_URL);
+      !!info.visit_count(), AutocompleteMatchType::HISTORY_URL);
   match.typed_count = info.typed_count();
   match.destination_url = info.url();
   DCHECK(match.destination_url.is_valid());

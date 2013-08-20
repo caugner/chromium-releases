@@ -34,11 +34,11 @@ class MiscellaneousBindings {
  public:
   // Creates an instance of the extension.
   static ChromeV8Extension* Get(Dispatcher* dispatcher,
-                                v8::Handle<v8::Context> context);
+                                ChromeV8Context* context);
 
-  // Dispatches the Port.onConnect content script messaging event to some
-  // contexts in |contexts|. If |restrict_to_render_view| is specified, only
-  // contexts in that render view will receive the message.
+  // Dispatches the onConnect content script messaging event to some contexts
+  // in |contexts|. If |restrict_to_render_view| is specified, only contexts in
+  // that render view will receive the message.
   static void DispatchOnConnect(
       const ChromeV8ContextSet::ContextSet& contexts,
       int target_port_id,
@@ -58,8 +58,7 @@ class MiscellaneousBindings {
       const std::string& message,
       content::RenderView* restrict_to_render_view);
 
-  // Dispatches the Port.onDisconnect event in response to the channel being
-  // closed.
+  // Dispatches the onDisconnect event in response to the channel being closed.
   static void DispatchOnDisconnect(
       const ChromeV8ContextSet::ContextSet& context_set,
       int port_id,
@@ -67,6 +66,6 @@ class MiscellaneousBindings {
       content::RenderView* restrict_to_render_view);
 };
 
-}  // namespace
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_MISCELLANEOUS_BINDINGS_H_

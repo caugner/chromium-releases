@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_GOOGLE_APIS_GDATA_ERRORCODE_H_
 #define CHROME_BROWSER_GOOGLE_APIS_GDATA_ERRORCODE_H_
 
+#include <string>
+
 namespace google_apis {
 
 // HTTP errors that can be returned by GData service.
@@ -23,6 +25,7 @@ enum GDataErrorCode {
   HTTP_LENGTH_REQUIRED       = 411,
   HTTP_PRECONDITION          = 412,
   HTTP_INTERNAL_SERVER_ERROR = 500,
+  HTTP_NOT_IMPLEMENTED       = 501,
   HTTP_BAD_GATEWAY           = 502,
   HTTP_SERVICE_UNAVAILABLE   = 503,
   GDATA_PARSE_ERROR          = -100,
@@ -33,6 +36,9 @@ enum GDataErrorCode {
   GDATA_NOT_READY            = -105,
   GDATA_NO_SPACE             = -106,
 };
+
+// Returns a string representation of GDataErrorCode.
+std::string GDataErrorCodeToString(GDataErrorCode error);
 
 }  // namespace google_apis
 

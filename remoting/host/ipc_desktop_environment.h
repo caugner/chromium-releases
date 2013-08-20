@@ -13,7 +13,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "remoting/host/curtain_mode.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_session_connector.h"
 
@@ -52,7 +51,7 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
   virtual scoped_ptr<AudioCapturer> CreateAudioCapturer() OVERRIDE;
   virtual scoped_ptr<InputInjector> CreateInputInjector() OVERRIDE;
   virtual scoped_ptr<ScreenControls> CreateScreenControls() OVERRIDE;
-  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer() OVERRIDE;
+  virtual scoped_ptr<webrtc::ScreenCapturer> CreateVideoCapturer() OVERRIDE;
   virtual std::string GetCapabilities() const OVERRIDE;
   virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
 
@@ -65,8 +64,7 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
 // Used to create IpcDesktopEnvironment objects integrating with the desktop via
 // a helper process and talking to that process via IPC.
 class IpcDesktopEnvironmentFactory
-    : public CurtainMode,
-      public DesktopEnvironmentFactory,
+    : public DesktopEnvironmentFactory,
       public DesktopSessionConnector {
  public:
   // Passes a reference to the IPC channel connected to the daemon process and
@@ -79,12 +77,10 @@ class IpcDesktopEnvironmentFactory
       IPC::Sender* daemon_channel);
   virtual ~IpcDesktopEnvironmentFactory();
 
-  // CurtainMode implementation.
-  virtual void SetActivated(bool activated) OVERRIDE;
-
   // DesktopEnvironmentFactory implementation.
   virtual scoped_ptr<DesktopEnvironment> Create(
       base::WeakPtr<ClientSessionControl> client_session_control) OVERRIDE;
+  virtual void SetEnableCurtaining(bool enable) OVERRIDE;
   virtual bool SupportsAudioCapture() const OVERRIDE;
 
   // DesktopSessionConnector implementation.
@@ -117,8 +113,8 @@ class IpcDesktopEnvironmentFactory
   // Task runner used for running background I/O.
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
-  // True if curtain mode is activated.
-  bool curtain_activated_;
+  // True if curtain mode is enabled.
+  bool curtain_enabled_;
 
   // IPC channel connected to the daemon process.
   IPC::Sender* daemon_channel_;

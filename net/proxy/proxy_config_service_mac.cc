@@ -42,7 +42,7 @@ bool GetBoolFromDictionary(CFDictionaryRef dict,
 }
 
 void GetCurrentProxyConfig(ProxyConfig* config) {
-  base::mac::ScopedCFTypeRef<CFDictionaryRef> config_dict(
+  base::ScopedCFTypeRef<CFDictionaryRef> config_dict(
       SCDynamicStoreCopyProxies(NULL));
   DCHECK(config_dict);
 
@@ -205,7 +205,7 @@ ProxyConfigServiceMac::ProxyConfigServiceMac(
       has_fetched_config_(false),
       helper_(new Helper(this)),
       io_thread_task_runner_(io_thread_task_runner) {
-  DCHECK(io_thread_task_runner_);
+  DCHECK(io_thread_task_runner_.get());
   config_watcher_.reset(new NetworkConfigWatcherMac(&forwarder_));
 }
 

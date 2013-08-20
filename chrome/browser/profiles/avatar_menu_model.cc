@@ -5,10 +5,11 @@
 #include "chrome/browser/profiles/avatar_menu_model.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu_model_observer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,13 +24,16 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/site_instance.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(ENABLE_MANAGED_USERS)
 #include "chrome/browser/managed_mode/managed_user_service.h"
@@ -218,13 +222,32 @@ const AvatarMenuModel::Item& AvatarMenuModel::GetItemAt(size_t index) {
 
 bool AvatarMenuModel::ShouldShowAddNewProfileLink() const {
 #if defined(ENABLE_MANAGED_USERS)
-  if (!browser_)
-    return true;
-  ManagedUserService* service = ManagedUserServiceFactory::GetForProfile(
-      browser_->profile());
-  return !service->ProfileIsManaged();
+  // |browser_| can be NULL in unit_tests.
+  return !browser_ ||
+      !ManagedUserService::ProfileIsManaged(browser_->profile());
 #endif
   return true;
+}
+
+base::string16 AvatarMenuModel::GetManagedUserInformation() const {
+#if defined(ENABLE_MANAGED_USERS)
+  // |browser_| can be NULL in unit_tests.
+  if (!browser_)
+    return base::string16();
+
+  ManagedUserService* service = ManagedUserServiceFactory::GetForProfile(
+      browser_->profile());
+  if (service->ProfileIsManaged()) {
+    base::string16 custodian = UTF8ToUTF16(service->GetCustodianName());
+    return l10n_util::GetStringFUTF16(IDS_MANAGED_USER_INFO, custodian);
+  }
+#endif
+  return base::string16();
+}
+
+const gfx::Image& AvatarMenuModel::GetManagedUserIcon() const {
+  return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+      IDR_MANAGED_USER_ICON);
 }
 
 void AvatarMenuModel::Observe(int type,
@@ -262,8 +285,13 @@ void AvatarMenuModel::RebuildMenu() {
     bool is_gaia_picture =
         profile_info_->IsUsingGAIAPictureOfProfileAtIndex(i) &&
         profile_info_->GetGAIAPictureOfProfileAtIndex(i);
-    gfx::Image icon = profiles::GetAvatarIconForMenu(
-        profile_info_->GetAvatarIconOfProfileAtIndex(i), is_gaia_picture);
+
+    gfx::Image icon = profile_info_->GetAvatarIconOfProfileAtIndex(i);
+    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kNewProfileManagement)) {
+      // old avatar menu uses resized-small images
+      icon = profiles::GetAvatarIconForMenu(icon, is_gaia_picture);
+    }
 
     Item* item = new Item(i, icon);
     item->name = profile_info_->GetNameOfProfileAtIndex(i);
@@ -271,7 +299,8 @@ void AvatarMenuModel::RebuildMenu() {
     item->signed_in = !item->sync_state.empty();
     if (!item->signed_in) {
       item->sync_state = l10n_util::GetStringUTF16(
-          IDS_PROFILES_LOCAL_PROFILE_STATE);
+          profile_info_->ProfileIsManagedAtIndex(i) ?
+              IDS_MANAGED_USER_AVATAR_LABEL : IDS_PROFILES_LOCAL_PROFILE_STATE);
     }
     if (browser_) {
       base::FilePath path = profile_info_->GetPathOfProfileAtIndex(i);
@@ -287,8 +316,7 @@ void AvatarMenuModel::ClearMenu() {
 }
 
 
-content::WebContents* AvatarMenuModel::BeginSignOut(
-    const char* logout_override) {
+content::WebContents* AvatarMenuModel::BeginSignOut() {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   Profile* current_profile = browser_->profile();
 
@@ -299,10 +327,10 @@ content::WebContents* AvatarMenuModel::BeginSignOut(
   std::string landing_url = SyncPromoUI::GetSyncLandingURL("close", 1);
   GURL logout_url(GaiaUrls::GetInstance()->service_logout_url() +
                   "?continue=" + landing_url);
-  if (logout_override) {
+  if (!logout_override_.empty()) {
     // We're testing...
-    landing_url = logout_override;
-    logout_url = GURL(logout_override);
+    landing_url = logout_override_;
+    logout_url = GURL(logout_override_);
   }
 
   content::WebContents::CreateParams create_params(current_profile);

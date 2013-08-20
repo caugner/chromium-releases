@@ -91,16 +91,11 @@ ImportingDialog.prototype.show = function(entries, move) {
  */
 ImportingDialog.prototype.start = function(destination) {
   this.destination_ = destination;
-  var files = this.entries_.map(function(e) { return e.fullPath }).join('\n');
-  var operationInfo = {
-    isCut: this.move_ ? 'true' : 'false',
-    isOnDrive:
-        PathUtil.getRootType(this.entries_[0].fullPath) == RootType.DRIVE,
-    sourceDir: null,
-    directories: '',
-    files: files
-  };
-  this.copyManager_.paste(operationInfo, this.destination_.fullPath, true);
+  var files = this.entries_.map(function(e) { return e.fullPath });
+  var isOnDrive =
+      PathUtil.getRootType(files[0].fullPath) == RootType.DRIVE;
+  this.copyManager_.paste(files, [], this.move_, isOnDrive,
+                          this.destination_.fullPath, true);
 };
 
 /**
@@ -154,13 +149,13 @@ ImportingDialog.prototype.onOkClick_ = function() {
  * @private
  */
 ImportingDialog.prototype.onViewClick_ = function() {
-  var url = util.platform.getURL('main.html') +
+  var url = chrome.runtime.getURL('main.html') +
       '?{%22gallery%22:%22mosaic%22}#' + this.destination_.fullPath;
   if (!this.parentWindowId_ ||
       !util.redirectMainWindow(this.parentWindowId_, url)) {
     // The parent window hasn't been found. Launch the url as a new window.
     // TODO(mtomasz): Change it to chrome.fileBrowserPrivate.openNewWindow.
-    util.platform.createWindow(url);
+    chrome.app.window.create(url);
   }
   this.hide();
   window.close();

@@ -6,7 +6,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/ui/browser.h"
@@ -220,8 +220,7 @@ WebsiteSettingsPopupGtk::WebsiteSettingsPopupGtk(
       identity_contents_(NULL),
       connection_contents_(NULL),
       first_visit_contents_(NULL),
-      notebook_(NULL),
-      presenter_(NULL) {
+      notebook_(NULL) {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent);
   browser_ = browser_window->browser();
@@ -270,7 +269,7 @@ void WebsiteSettingsPopupGtk::BubbleClosing(BubbleGtk* bubble,
 
   // Slightly delay destruction to allow the event stack to unwind and release
   // references to owned widgets.
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void WebsiteSettingsPopupGtk::InitContents() {

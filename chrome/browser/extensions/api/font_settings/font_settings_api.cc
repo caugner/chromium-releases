@@ -11,9 +11,10 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/api/preference/preference_helpers.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -173,8 +174,8 @@ void FontSettingsEventRouter::OnFontNamePrefChanged(
   }
   font_name = MaybeGetLocalizedFontName(font_name);
 
-  ListValue args;
-  DictionaryValue* dict = new DictionaryValue();
+  base::ListValue args;
+  base::DictionaryValue* dict = new base::DictionaryValue();
   args.Append(dict);
   dict->SetString(kFontIdKey, font_name);
   dict->SetString(kGenericFamilyKey, generic_family);
@@ -197,8 +198,8 @@ void FontSettingsEventRouter::OnFontPrefChanged(
       pref_name.c_str());
   CHECK(pref);
 
-  ListValue args;
-  DictionaryValue* dict = new DictionaryValue();
+  base::ListValue args;
+  base::DictionaryValue* dict = new base::DictionaryValue();
   args.Append(dict);
   dict->Set(key, pref->GetValue()->DeepCopy());
 
@@ -243,11 +244,8 @@ bool FontSettingsClearFontFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(
       profile_->GetPrefs()->FindPreference(pref_path.c_str()));
 
-  ExtensionPrefs* prefs = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->extension_prefs();
-  prefs->RemoveExtensionControlledPref(extension_id(),
-                                       pref_path.c_str(),
-                                       kExtensionPrefsScopeRegular);
+  PreferenceAPI::Get(profile_)->RemoveExtensionControlledPref(
+      extension_id(), pref_path.c_str(), kExtensionPrefsScopeRegular);
   return true;
 }
 
@@ -277,7 +275,7 @@ bool FontSettingsGetFontFunction::RunImpl() {
                                                         pref_path,
                                                         kIncognito);
 
-  DictionaryValue* result = new DictionaryValue();
+  base::DictionaryValue* result = new base::DictionaryValue();
   result->SetString(kFontIdKey, font_name);
   result->SetString(kLevelOfControlKey, level_of_control);
   SetResult(result);
@@ -301,9 +299,7 @@ bool FontSettingsSetFontFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(
       profile_->GetPrefs()->FindPreference(pref_path.c_str()));
 
-  ExtensionPrefs* prefs = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->extension_prefs();
-  prefs->SetExtensionControlledPref(
+  PreferenceAPI::Get(profile_)->SetExtensionControlledPref(
       extension_id(),
       pref_path.c_str(),
       kExtensionPrefsScopeRegular,
@@ -318,15 +314,17 @@ bool FontSettingsGetFontListFunction::RunImpl() {
 }
 
 void FontSettingsGetFontListFunction::FontListHasLoaded(
-    scoped_ptr<ListValue> list) {
+    scoped_ptr<base::ListValue> list) {
   bool success = CopyFontsToResult(list.get());
   SendResponse(success);
 }
 
-bool FontSettingsGetFontListFunction::CopyFontsToResult(ListValue* fonts) {
-  scoped_ptr<ListValue> result(new ListValue());
-  for (ListValue::iterator it = fonts->begin(); it != fonts->end(); ++it) {
-    ListValue* font_list_value;
+bool FontSettingsGetFontListFunction::CopyFontsToResult(
+    base::ListValue* fonts) {
+  scoped_ptr<base::ListValue> result(new base::ListValue());
+  for (base::ListValue::iterator it = fonts->begin();
+       it != fonts->end(); ++it) {
+    base::ListValue* font_list_value;
     if (!(*it)->GetAsList(&font_list_value)) {
       NOTREACHED();
       return false;
@@ -344,7 +342,7 @@ bool FontSettingsGetFontListFunction::CopyFontsToResult(ListValue* fonts) {
       return false;
     }
 
-    DictionaryValue* font_name = new DictionaryValue();
+    base::DictionaryValue* font_name = new base::DictionaryValue();
     font_name->Set(kFontIdKey, Value::CreateStringValue(name));
     font_name->Set(kDisplayNameKey, Value::CreateStringValue(localized_name));
     result->Append(font_name);
@@ -360,11 +358,8 @@ bool ClearFontPrefExtensionFunction::RunImpl() {
     return false;
   }
 
-  ExtensionPrefs* prefs = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->extension_prefs();
-  prefs->RemoveExtensionControlledPref(extension_id(),
-                                       GetPrefName(),
-                                       kExtensionPrefsScopeRegular);
+  PreferenceAPI::Get(profile_)->RemoveExtensionControlledPref(
+      extension_id(), GetPrefName(), kExtensionPrefsScopeRegular);
   return true;
 }
 
@@ -383,7 +378,7 @@ bool GetFontPrefExtensionFunction::RunImpl() {
                                                         GetPrefName(),
                                                         kIncognito);
 
-  DictionaryValue* result = new DictionaryValue();
+  base::DictionaryValue* result = new base::DictionaryValue();
   result->Set(GetKey(), pref->GetValue()->DeepCopy());
   result->SetString(kLevelOfControlKey, level_of_control);
   SetResult(result);
@@ -396,18 +391,17 @@ bool SetFontPrefExtensionFunction::RunImpl() {
     return false;
   }
 
-  DictionaryValue* details = NULL;
+  base::DictionaryValue* details = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &details));
 
   Value* value;
   EXTENSION_FUNCTION_VALIDATE(details->Get(GetKey(), &value));
 
-  ExtensionPrefs* prefs = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->extension_prefs();
-  prefs->SetExtensionControlledPref(extension_id(),
-                                    GetPrefName(),
-                                    kExtensionPrefsScopeRegular,
-                                    value->DeepCopy());
+  PreferenceAPI::Get(profile_)->SetExtensionControlledPref(
+      extension_id(),
+      GetPrefName(),
+      kExtensionPrefsScopeRegular,
+      value->DeepCopy());
   return true;
 }
 

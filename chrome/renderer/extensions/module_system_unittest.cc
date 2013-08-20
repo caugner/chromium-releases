@@ -13,7 +13,7 @@ using extensions::ObjectBackedNativeHandler;
 
 class CounterNatives : public ObjectBackedNativeHandler {
  public:
-  explicit CounterNatives(v8::Handle<v8::Context> context)
+  explicit CounterNatives(extensions::ChromeV8Context* context)
       : ObjectBackedNativeHandler(context), counter_(0) {
     RouteFunction("Get", base::Bind(&CounterNatives::Get,
         base::Unretained(this)));
@@ -21,13 +21,12 @@ class CounterNatives : public ObjectBackedNativeHandler {
         base::Unretained(this)));
   }
 
-  v8::Handle<v8::Value> Get(const v8::Arguments& args) {
-    return v8::Integer::New(counter_);
+  void Get(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    args.GetReturnValue().Set(static_cast<int32_t>(counter_));
   }
 
-  v8::Handle<v8::Value> Increment(const v8::Arguments& args) {
+  void Increment(const v8::FunctionCallbackInfo<v8::Value>& args) {
     counter_++;
-    return v8::Undefined();
   }
 
  private:
@@ -40,7 +39,7 @@ class TestExceptionHandler : public ModuleSystem::ExceptionHandler {
       : handled_exception_(false) {
   }
 
-  virtual void HandleUncaughtException() OVERRIDE {
+  virtual void HandleUncaughtException(const v8::TryCatch& try_catch) OVERRIDE {
     handled_exception_ = true;
   }
 
@@ -175,7 +174,7 @@ TEST_F(ModuleSystemTest, TestLazyFieldIsOnlyEvaledOnce) {
   ModuleSystem::NativesEnabledScope natives_enabled_scope(module_system_.get());
   module_system_->RegisterNativeHandler(
       "counter",
-      scoped_ptr<NativeHandler>(new CounterNatives(v8::Context::GetCurrent())));
+      scoped_ptr<NativeHandler>(new CounterNatives(context_.get())));
   RegisterModule("lazy",
       "requireNative('counter').Increment();"
       "exports.x = 5;");
@@ -229,7 +228,7 @@ TEST_F(ModuleSystemTest, TestModulesOnlyGetEvaledOnce) {
   ModuleSystem::NativesEnabledScope natives_enabled_scope(module_system_.get());
   module_system_->RegisterNativeHandler(
       "counter",
-      scoped_ptr<NativeHandler>(new CounterNatives(v8::Context::GetCurrent())));
+      scoped_ptr<NativeHandler>(new CounterNatives(context_.get())));
 
   RegisterModule("incrementsWhenEvaled",
       "requireNative('counter').Increment();");

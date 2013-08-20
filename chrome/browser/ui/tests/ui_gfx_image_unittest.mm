@@ -5,7 +5,7 @@
 #import <AppKit/AppKit.h>
 
 #import "base/mac/mac_util.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -17,7 +17,8 @@ namespace {
 class UiGfxImageTest : public CocoaTest {
 };
 
-TEST_F(UiGfxImageTest, CheckColor) {
+// http://crbug.com/247379
+TEST_F(UiGfxImageTest, DISABLED_CheckColor) {
   // TODO(kbr): re-enable: http://crbug.com/222296
   if (base::mac::IsOSMountainLionOrLater())
     return;
@@ -44,7 +45,7 @@ TEST_F(UiGfxImageTest, CheckColor) {
 }
 
 TEST_F(UiGfxImageTest, ImageView) {
-  scoped_nsobject<NSImageView> image_view(
+  base::scoped_nsobject<NSImageView> image_view(
       [[NSImageView alloc] initWithFrame:NSMakeRect(10, 10, 25, 25)]);
   [[test_window() contentView] addSubview:image_view];
   [test_window() orderFront:nil];

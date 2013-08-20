@@ -12,6 +12,9 @@
 @class AppsGridController;
 
 namespace app_list {
+
+class AppListModel;
+
 namespace test {
 
 class AppListTestViewDelegate;
@@ -30,8 +33,8 @@ class AppsGridControllerTestHelper : public ui::CocoaTest {
   // Send a click to the test window in the centre of |view|.
   void SimulateClick(NSView* view);
 
-  // Send a key press to the first responder.
-  void SimulateKeyPress(unichar c);
+  // Send a key action using handleCommandBySelector.
+  void SimulateKeyAction(SEL c);
 
   void SimulateMouseEnterItemAt(size_t index);
   void SimulateMouseExitItemAt(size_t index);
@@ -55,10 +58,10 @@ class AppsGridControllerTestHelper : public ui::CocoaTest {
   NSCollectionView* GetPageAt(size_t index);
   NSView* GetSelectedView();
 
-  AppListTestViewDelegate* delegate();
   AppListTestModel* model();
 
-  scoped_ptr<AppListTestViewDelegate> delegate_;
+  virtual void ResetModel(scoped_ptr<AppListModel> model);
+
   AppsGridController* apps_grid_controller_;
 
  private:

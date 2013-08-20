@@ -5,8 +5,8 @@
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -36,7 +36,7 @@ OmniboxHandler::~OmniboxHandler() {
 
 bool OmniboxHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<OmniboxInfo> info(new OmniboxInfo);
-  const DictionaryValue* dict = NULL;
+  const base::DictionaryValue* dict = NULL;
   if (!extension->manifest()->GetDictionary(extension_manifest_keys::kOmnibox,
                                             &dict) ||
       !dict->GetString(kKeyword, &info->keyword) ||

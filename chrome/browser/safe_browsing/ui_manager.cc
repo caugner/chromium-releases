@@ -9,7 +9,7 @@
 #include "base/callback.h"
 #include "base/debug/leak_tracker.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
@@ -219,7 +219,7 @@ void SafeBrowsingUIManager::ReportSafeBrowsingHitOnIOThread(
 
   // The service may delete the ping manager (i.e. when user disabling service,
   // etc). This happens on the IO thread.
-  if (sb_service_ == NULL || sb_service_->ping_manager() == NULL)
+  if (sb_service_.get() == NULL || sb_service_->ping_manager() == NULL)
     return;
 
   DVLOG(1) << "ReportSafeBrowsingHit: " << malicious_url << " " << page_url
@@ -239,7 +239,7 @@ void SafeBrowsingUIManager::SendSerializedMalwareDetails(
 
   // The service may delete the ping manager (i.e. when user disabling service,
   // etc). This happens on the IO thread.
-  if (sb_service_ == NULL || sb_service_->ping_manager() == NULL)
+  if (sb_service_.get() == NULL || sb_service_->ping_manager() == NULL)
     return;
 
   if (!serialized.empty()) {
@@ -254,8 +254,9 @@ void SafeBrowsingUIManager::UpdateWhitelist(const UnsafeResource& resource) {
   WhiteListedEntry entry;
   entry.render_process_host_id = resource.render_process_host_id;
   entry.render_view_id = resource.render_view_id;
-  entry.domain = net::RegistryControlledDomainService::GetDomainAndRegistry(
-      resource.url);
+  entry.domain = net::registry_controlled_domains::GetDomainAndRegistry(
+      resource.url,
+      net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
   entry.threat_type = resource.threat_type;
   white_listed_entries_.push_back(entry);
 }
@@ -276,11 +277,11 @@ bool SafeBrowsingUIManager::IsWhitelisted(const UnsafeResource& resource) {
          (entry.threat_type == SB_THREAT_TYPE_URL_PHISHING &&
           resource.threat_type == SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL) ||
          (entry.threat_type == SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL &&
-          resource.threat_type == SB_THREAT_TYPE_URL_PHISHING))  &&
-        entry.domain ==
-        net::RegistryControlledDomainService::GetDomainAndRegistry(
-            resource.url)) {
-      return true;
+          resource.threat_type == SB_THREAT_TYPE_URL_PHISHING))) {
+      return entry.domain ==
+          net::registry_controlled_domains::GetDomainAndRegistry(
+              resource.url,
+              net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
     }
   }
   return false;

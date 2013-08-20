@@ -41,6 +41,7 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/scoped_ptr.h"
@@ -48,8 +49,8 @@
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/test/test_file_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
@@ -69,6 +70,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "components/breakpad/common/breakpad_paths.h"
 #include "net/base/net_util.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "v8/include/v8-testing.h"
@@ -633,12 +635,12 @@ class PageLoadTest : public UITest {
       crash_dumps_dir_path_ = base::FilePath::FromUTF8Unsafe(
           alternate_minidump_location);
     } else {
-      PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dumps_dir_path_);
+      PathService::Get(breakpad::DIR_CRASH_DUMPS, &crash_dumps_dir_path_);
     }
 
-    file_util::FileEnumerator enumerator(crash_dumps_dir_path_,
-                                         false,  // not recursive
-                                         file_util::FileEnumerator::FILES);
+    base::FileEnumerator enumerator(crash_dumps_dir_path_,
+                                    false,  // not recursive
+                                    base::FileEnumerator::FILES);
     for (base::FilePath path = enumerator.Next(); !path.value().empty();
          path = enumerator.Next()) {
       if (path.MatchesExtension(FILE_PATH_LITERAL(".dmp")))
@@ -687,9 +689,9 @@ class PageLoadTest : public UITest {
   }
 
   bool HasNewCrashDumps() {
-    file_util::FileEnumerator enumerator(crash_dumps_dir_path_,
-                                         false,  // not recursive
-                                         file_util::FileEnumerator::FILES);
+    base::FileEnumerator enumerator(crash_dumps_dir_path_,
+                                    false,  // not recursive
+                                    base::FileEnumerator::FILES);
     for (base::FilePath path = enumerator.Next(); !path.value().empty();
          path = enumerator.Next()) {
       if (path.MatchesExtension(FILE_PATH_LITERAL(".dmp")) &&
@@ -707,9 +709,9 @@ class PageLoadTest : public UITest {
                             NavigationMetrics* metrics,
                             bool delete_dumps) {
     int num_dumps = 0;
-    file_util::FileEnumerator enumerator(crash_dumps_dir_path_,
-                                         false,  // not recursive
-                                         file_util::FileEnumerator::FILES);
+    base::FileEnumerator enumerator(crash_dumps_dir_path_,
+                                    false,  // not recursive
+                                    base::FileEnumerator::FILES);
     for (base::FilePath path = enumerator.Next(); !path.value().empty();
          path = enumerator.Next()) {
       if (path.MatchesExtension(FILE_PATH_LITERAL(".dmp")) &&
@@ -733,8 +735,8 @@ class PageLoadTest : public UITest {
   PrefService* GetLocalState(PrefRegistry* registry) {
     base::FilePath path = user_data_dir().Append(chrome::kLocalStateFilename);
     PrefServiceMockBuilder builder;
-    builder.WithUserFilePrefs(path,
-                              MessageLoop::current()->message_loop_proxy());
+    builder.WithUserFilePrefs(
+        path, base::MessageLoop::current()->message_loop_proxy().get());
     return builder.Create(registry);
   }
 
@@ -748,7 +750,7 @@ class PageLoadTest : public UITest {
     registry->RegisterIntegerPref(prefs::kStabilityCrashCount, 0);
     registry->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
 
-    scoped_ptr<PrefService> local_state(GetLocalState(registry));
+    scoped_ptr<PrefService> local_state(GetLocalState(registry.get()));
     if (!local_state.get())
       return;
 

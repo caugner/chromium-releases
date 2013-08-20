@@ -126,10 +126,6 @@ DirectoryTreeUtil.searchAndSelectPath = function(items, path) {
  * @return {Array.<DirectoryEntries>} Modified entries.
  */
 DirectoryTreeUtil.addAndRemoveDriveSpecialDirs = function(entries) {
-  if (!util.platform.newUI()) {
-    console.error('This function should be used only in new ui.');
-    return [];
-  }
   var modifiedEntries = [];
   for (var i in entries) {
     // Removes '/drive/other'.
@@ -185,7 +181,7 @@ DirectoryTreeUtil.updateSubDirectories = function(
           DirectoryTreeUtil.updateSubDirectories(
               item, dm, successCallback, opt_errorCallback);
         },
-        opt_errorCallback);
+        opt_errorCallback || function() {});
     return;
   }
 
@@ -302,12 +298,7 @@ DirectoryItem.prototype.decorate = function(
     dirEntry, parentDirItem, directoryModel) {
   var path = dirEntry.fullPath;
   var label;
-  if (!util.platform.newUI()) {
-    label = PathUtil.isRootPath(path) ?
-            PathUtil.getRootLabel(path) : dirEntry.name;
-  } else {
-    label = dirEntry.label ? dirEntry.label : dirEntry.name;
-  }
+  label = dirEntry.label ? dirEntry.label : dirEntry.name;
 
   this.className = 'tree-item';
   this.innerHTML =
@@ -327,31 +318,19 @@ DirectoryItem.prototype.decorate = function(
   this.dirEntry_ = dirEntry;
   this.fileFilter_ = this.directoryModel_.getFileFilter();
 
-  // Sets hasChildren=true tentatively. This will be overridden after
+  // Sets hasChildren=false tentatively. This will be overridden after
   // scanning sub-directories in DirectoryTreeUtil.updateSubElementsFromList.
-  // Special search does not have children.
-  this.hasChildren = !PathUtil.isSpecialSearchRoot(path);
+  this.hasChildren = false;
 
   this.addEventListener('expand', this.onExpand_.bind(this), false);
   var volumeManager = VolumeManager.getInstance();
   var icon = this.querySelector('.icon');
-  if (!util.platform.newUI()) {
-    if (PathUtil.isRootPath(path)) {
-      icon.classList.add('volume-icon');
-      var iconType = PathUtil.getRootType(path);
-      icon.setAttribute('volume-type-icon', iconType);
-
-      if (iconType == RootType.REMOVABLE)
-        icon.setAttribute('volume-subtype', volumeManager.getDeviceType(path));
-    }
-  } else {
-      icon.classList.add('volume-icon');
-      var iconType = PathUtil.getRootType(path);
-      if (iconType && PathUtil.isRootPath(path))
-        icon.setAttribute('volume-type-icon', iconType);
-      else
-        icon.setAttribute('file-type-icon', 'folder');
-  }
+  icon.classList.add('volume-icon');
+  var iconType = PathUtil.getRootType(path);
+  if (iconType && PathUtil.isRootPath(path))
+    icon.setAttribute('volume-type-icon', iconType);
+  else
+    icon.setAttribute('file-type-icon', 'folder');
 
   var eject = this.querySelector('.root-eject');
   eject.hidden = !PathUtil.isUnmountableByUser(path);
@@ -373,8 +352,23 @@ DirectoryItem.prototype.decorate = function(
  * a complex layout. This call is not necessary, so we are ignoring it.
  *
  * @param {boolean} unused Unused.
+ * @override
  */
 DirectoryItem.prototype.scrollIntoViewIfNeeded = function(unused) {
+};
+
+/**
+ * Removes the child node, but without selecting the parent item, to avoid
+ * unintended changing of directories. Removing is done externally, and other
+ * code will navigate to another directory.
+ *
+ * @param {!cr.ui.TreeItem} child The tree item child to remove.
+ * @override
+ */
+DirectoryItem.prototype.remove = function(child) {
+  this.lastElementChild.removeChild(child);
+  if (this.items.length == 0)
+    this.hasChildren = false;
 };
 
 /**
@@ -522,13 +516,6 @@ DirectoryTree.prototype.decorate = function(directoryModel) {
    */
   this.fullPath = '/';
   this.dirEntry_ = null;
-  if (!util.platform.newUI()) {
-    this.rootsList_ = this.directoryModel_.getRootsList();
-    this.rootsList_.addEventListener('change',
-                                     this.onRootsListChanged_.bind(this));
-    this.rootsList_.addEventListener('permuted',
-                                     this.onRootsListChanged_.bind(this));
-  }
 
   /**
    * The path of the current directory.
@@ -542,7 +529,7 @@ DirectoryTree.prototype.decorate = function(directoryModel) {
   // Add a handler for directory change.
   this.addEventListener('change', function() {
     if (this.selectedItem && this.currentPath_ != this.selectedItem.fullPath) {
-      this.currentPath_ = this.selectedItem;
+      this.currentPath_ = this.selectedItem.fullPath;
       this.selectedItem.doAction();
       return;
     }
@@ -553,33 +540,8 @@ DirectoryTree.prototype.decorate = function(directoryModel) {
   chrome.fileBrowserPrivate.onDirectoryChanged.addListener(
       this.privateOnDirectoryChangedBound_);
 
-  if (util.platform.newUI())
-    ScrollBar.createVertical(this.parentNode, this);
-
-  if (!util.platform.newUI())
-    this.onRootsListChanged_();
-};
-
-/**
- * Sets a context menu. Context menu is enabled only on archive and removable
- * volumes as of now.
- *
- * @param {cr.ui.Menu} menu Context menu.
- */
-DirectoryTree.prototype.setContextMenu = function(menu) {
-  if (util.platform.newUI())
-    return;
-
-  this.contextMenu_ = menu;
-  for (var i = 0; i < this.rootsList_.length; i++) {
-    var item = this.rootsList_.item(i);
-    var type = PathUtil.getRootType(item.fullPath);
-    // Context menu is set only to archive and removable volumes.
-    if (type == RootType.ARCHIVE || type == RootType.REMOVABLE) {
-      cr.ui.contextMenuHandler.setContextMenu(this.items[i].rowElement,
-                                              this.contextMenu_);
-    }
-  }
+  this.scrollBar_ = MainPanelScrollBar();
+  this.scrollBar_.initialize(this.parentNode, this);
 };
 
 /**
@@ -673,38 +635,16 @@ DirectoryTree.prototype.updateSubDirectories = function(
 };
 
 /**
- * Invoked when the root list is changed. Redraws the list and synchronizes
- * the selection.
- * @private
- */
-DirectoryTree.prototype.onRootsListChanged_ = function() {
-  if (!util.platform.newUI()) {
-    this.redraw(false /* recursive */);
-    cr.dispatchSimpleEvent(this, 'content-updated');
-  }
-};
-
-/**
  * Redraw the list.
  * @param {boolean} recursive True if the update is recursively. False if the
  *     only root items are updated.
  */
 DirectoryTree.prototype.redraw = function(recursive) {
-  if (!util.platform.newUI()) {
-    var rootsList = this.rootsList_;
-    DirectoryTreeUtil.updateSubElementsFromList(
-        this,
-        rootsList.item.bind(rootsList),
-        this.directoryModel_,
-        recursive);
-  } else {
-    DirectoryTreeUtil.updateSubElementsFromList(
-        this,
-        function(i) { return this.entries_[i]; }.bind(this),
-        this.directoryModel_,
-        recursive);
-    this.setContextMenu(this.contextMenu_);
-  }
+  DirectoryTreeUtil.updateSubElementsFromList(
+      this,
+      function(i) { return this.entries_[i]; }.bind(this),
+      this.directoryModel_,
+      recursive);
 };
 
 /**
@@ -712,6 +652,10 @@ DirectoryTree.prototype.redraw = function(recursive) {
  * @private
  */
 DirectoryTree.prototype.onFilterChanged_ = function() {
+  // Returns immediately, if the tree is hidden.
+  if (!this.currentPath_ || DirectoryTreeUtil.shouldHideTree(this.currentPath_))
+    return;
+
   this.redraw(true /* recursive */);
   cr.dispatchSimpleEvent(this, 'content-updated');
 };
@@ -722,6 +666,10 @@ DirectoryTree.prototype.onFilterChanged_ = function() {
  * @private
  */
 DirectoryTree.prototype.onDirectoryContentChanged_ = function(event) {
+  // Returns immediately, if the tree is hidden.
+  if (!this.currentPath_ || DirectoryTreeUtil.shouldHideTree(this.currentPath_))
+    return;
+
   if (event.eventType == 'changed') {
     var path = util.extractFilePath(event.directoryUrl);
     DirectoryTreeUtil.updateChangedDirectoryItem(path, this);
@@ -760,6 +708,15 @@ DirectoryTree.prototype.clearTree_ = function(redraw) {
     this.redraw(false);
     cr.dispatchSimpleEvent(this, 'content-updated');
   }
+};
+
+/**
+ * Sets the margin height for the transparent preview panel at the bottom.
+ * @param {number} margin Margin to be set in px.
+ */
+DirectoryTree.prototype.setBottomMarginForPanel = function(margin) {
+  this.style.paddingBottom = margin + 'px';
+  this.scrollBar_.setBottomMarginForPanel(margin);
 };
 
 /**

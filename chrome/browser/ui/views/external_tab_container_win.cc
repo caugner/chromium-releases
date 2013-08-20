@@ -7,6 +7,7 @@
 #include <atlbase.h>
 #include <atlapp.h>
 #include <atlconv.h>
+#include <atlcrack.h>
 #include <atlmisc.h>
 #include <string>
 
@@ -16,9 +17,9 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/win_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_tab_contents.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
@@ -64,10 +66,10 @@
 #include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/public/platform/WebCString.h"
+#include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "ui/base/events/event_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
@@ -80,6 +82,7 @@
 #if defined(USE_AURA)
 #include "ui/aura/root_window.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+#include "ui/views/widget/desktop_aura/desktop_root_window_host_win.h"
 #endif
 
 using content::BrowserThread;
@@ -157,6 +160,110 @@ ContextMenuModel* ConvertMenuModel(const ui::MenuModel* ui_model) {
 
 }  // namespace
 
+#if defined(USE_AURA)
+typedef ATL::CWinTraits<WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                        WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW>
+    ContainerWindowHWNDTraits;
+
+// A window placed in the parent/child hierarchy between the host (e.g., a
+// ChromeFrameAutomationClient window) and the Aura DesktopRootWindowHostWin.
+// This non-activatable window is necessary to prevent focus from warping from
+// the DRWHW up to the CFAC window during reparenting. This is not needed in the
+// non-Aura case because the ExternalTabContainer's primary widget takes this
+// role (the RenderWidgetHostViewWin's HWND is a grandchild of it).
+class ContainerWindow : public ATL::CWindowImpl<ContainerWindow,
+                                                ATL::CWindow,
+                                                ContainerWindowHWNDTraits>,
+                        public base::SupportsWeakPtr<ContainerWindow> {
+ public:
+  DECLARE_WND_CLASS_EX(NULL, CS_DBLCLKS, 0);
+
+  BEGIN_MSG_MAP_EX(ContainerWindow)
+    MSG_WM_MOVE(OnMove)
+    MSG_WM_SHOWWINDOW(OnShowWindow)
+    MSG_WM_SIZE(OnSize)
+  END_MSG_MAP()
+
+  ContainerWindow(HWND parent, const gfx::Rect& bounds) : child_(NULL) {
+    RECT rect = bounds.ToRECT();
+    Create(parent, rect);
+  }
+
+  HWND hwnd() {
+    DCHECK(::IsWindow(m_hWnd));
+    return m_hWnd;
+  }
+
+  // Sets the child window (the DRWHW). The child is made activateable as part
+  // of the operation.
+  void SetChild(HWND window) {
+    child_ = window;
+
+    ::SetWindowLong(
+        window, GWL_STYLE,
+        (::GetWindowLong(window, GWL_STYLE) & ~WS_POPUP) | WS_CHILD);
+    ::SetWindowLong(window, GWL_EXSTYLE,
+                    (::GetWindowLong(window, GWL_EXSTYLE) & ~WS_EX_NOACTIVATE));
+
+    ::SetParent(window, hwnd());
+  }
+
+ protected:
+  virtual void OnFinalMessage(HWND hwnd) OVERRIDE {
+    delete this;
+  }
+
+ private:
+  void OnMove(const CPoint& position) {
+    ::SetWindowPos(child_, NULL, position.x, position.y, 0, 0,
+                   SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
+  }
+
+  void OnShowWindow(BOOL show, UINT status) {
+    ::ShowWindow(child_, SW_SHOWNA);
+  }
+
+  void OnSize(UINT type, const CSize& size) {
+    ::SetWindowPos(child_, NULL, 0, 0, size.cx, size.cy,
+                   SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER);
+  }
+
+  HWND child_;
+
+  DISALLOW_COPY_AND_ASSIGN(ContainerWindow);
+};
+
+// A specialization of DesktopRootWindowHost for an external tab container that
+// saves and restores focus as the ETC is blurred and focused. DRWHW ordinarily
+// does this during window activation and deactivation. Since the ETC is a child
+// window, it does not receive activation messages.
+class ExternalTabRootWindowHost : public views::DesktopRootWindowHostWin {
+ public:
+  ExternalTabRootWindowHost(
+      views::internal::NativeWidgetDelegate* native_widget_delegate,
+      views::DesktopNativeWidgetAura* desktop_native_widget_aura,
+      const gfx::Rect& initial_bounds)
+      : views::DesktopRootWindowHostWin(native_widget_delegate,
+                                        desktop_native_widget_aura,
+                                        initial_bounds) {}
+
+ protected:
+  // HWNDMessageHandlerDelegate methods:
+  virtual void HandleNativeFocus(HWND last_focused_window) OVERRIDE {
+    views::DesktopRootWindowHostWin::HandleNativeFocus(last_focused_window);
+    RestoreFocusOnActivate();
+  }
+
+  virtual void HandleNativeBlur(HWND focused_window) OVERRIDE {
+    SaveFocusOnDeactivate();
+    views::DesktopRootWindowHostWin::HandleNativeBlur(focused_window);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ExternalTabRootWindowHost);
+};
+#endif
+
 base::LazyInstance<ExternalTabContainerWin::PendingTabs>
     ExternalTabContainerWin::pending_tabs_ = LAZY_INSTANCE_INITIALIZER;
 
@@ -224,15 +331,28 @@ bool ExternalTabContainerWin::Init(Profile* profile,
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.bounds = bounds;
 #if defined(USE_AURA)
-  params.native_widget = new views::DesktopNativeWidgetAura(widget_);
+  // Create the window that sits between the parent (most likely a
+  // ChromeFrameAutomationClient) and the DesktopRootWindowHostWin.
+  tab_container_window_ =
+      (new ContainerWindow(HWND_DESKTOP, params.bounds))->AsWeakPtr();
+
+  views::DesktopNativeWidgetAura* native_widget =
+      new views::DesktopNativeWidgetAura(widget_);
+  params.native_widget = native_widget;
+  params.desktop_root_window_host =
+      new ExternalTabRootWindowHost(widget_, native_widget, params.bounds);
   params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
 #endif
   widget_->Init(params);
-  HWND window = views::HWNDForWidget(widget_);
+
+#if defined(USE_AURA)
+  tab_container_window_->SetChild(views::HWNDForWidget(widget_));
+#endif
 
   // TODO(jcampan): limit focus traversal to contents.
 
-  prop_.reset(new ui::ViewProp(window, kWindowObjectKey, this));
+  prop_.reset(new ui::ViewProp(views::HWNDForWidget(widget_), kWindowObjectKey,
+                               this));
 
   if (existing_contents) {
     existing_contents->GetController().SetBrowserContext(profile);
@@ -270,11 +390,12 @@ bool ExternalTabContainerWin::Init(Profile* profile,
   // Start loading initial URL
   if (!initial_url.is_empty()) {
     // Navigate out of context since we don't have a 'tab_handle_' yet.
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&ExternalTabContainerWin::Navigate,
                    weak_factory_.GetWeakPtr(),
-                   initial_url, referrer));
+                   initial_url,
+                   referrer));
   }
 
   // We need WS_POPUP to be on the window during initialization, but
@@ -283,6 +404,7 @@ bool ExternalTabContainerWin::Init(Profile* profile,
   // Note that it's important to do this before we call SetParent since
   // during the SetParent call we will otherwise get a WA_ACTIVATE call
   // that causes us to steal the current focus.
+  HWND window = GetExternalTabHWND();
   SetWindowLong(window, GWL_STYLE,
                 (GetWindowLong(window, GWL_STYLE) & ~WS_POPUP) | style);
 
@@ -360,12 +482,13 @@ bool ExternalTabContainerWin::Reinitialize(
   automation_resource_message_filter_ = filter;
   // Wait for the automation channel to be initialized before resuming pending
   // render views and sending in the navigation state.
-  MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&ExternalTabContainerWin::OnReinitialize,
-                            weak_factory_.GetWeakPtr()));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&ExternalTabContainerWin::OnReinitialize,
+                 weak_factory_.GetWeakPtr()));
 
   if (parent_window)
-    SetParent(views::HWNDForWidget(widget_), parent_window);
+    SetParent(GetExternalTabHWND(), parent_window);
   return true;
 }
 
@@ -374,7 +497,11 @@ WebContents* ExternalTabContainerWin::GetWebContents() const {
 }
 
 HWND ExternalTabContainerWin::GetExternalTabHWND() const {
+#if defined(USE_AURA)
+  return tab_container_window_.get() ? tab_container_window_->hwnd() : NULL;
+#else
   return views::HWNDForWidget(widget_);
+#endif
 }
 
 HWND ExternalTabContainerWin::GetContentHWND() const {
@@ -649,7 +776,7 @@ void ExternalTabContainerWin::UpdateTargetURL(WebContents* source,
                                               int32 page_id,
                                               const GURL& url) {
   if (automation_) {
-    string16 url_string = CA2W(url.spec().c_str());
+    string16 url_string = base::UTF8ToUTF16(url.spec());
     automation_->Send(
         new AutomationMsg_UpdateTargetUrl(tab_handle_, url_string));
   }
@@ -666,6 +793,12 @@ bool ExternalTabContainerWin::TakeFocus(content::WebContents* source,
   }
 
   return true;
+}
+
+void ExternalTabContainerWin::WebContentsFocused(
+    content::WebContents* contents) {
+  DCHECK_EQ(tab_contents_container_->GetWebContents(), contents);
+  tab_contents_container_->OnWebContentsFocused(contents);
 }
 
 void ExternalTabContainerWin::CanDownload(
@@ -698,7 +831,12 @@ void ExternalTabContainerWin::CanDownload(
 void ExternalTabContainerWin::RegisterRenderViewHostForAutomation(
     bool pending_view,
     RenderViewHost* render_view_host) {
-  if (render_view_host) {
+  if (!GetTabHandle()) {
+    // This method is being called when it shouldn't be on the win_rel trybot;
+    // see http://crbug.com/250965. Don't crash release builds in that case
+    // until the root cause can be diagnosed and fixed. TODO(grt): fix this.
+    DLOG(FATAL) << "tab_handle_ unset";
+  } else if (render_view_host) {
     AutomationResourceMessageFilter::RegisterRenderView(
         render_view_host->GetProcess()->GetID(),
         render_view_host->GetRoutingID(),
@@ -828,6 +966,11 @@ void ExternalTabContainerWin::BeforeUnloadFired(WebContents* tab,
 void ExternalTabContainerWin::ShowRepostFormWarningDialog(WebContents* source) {
   TabModalConfirmDialog::Create(new RepostFormWarningController(source),
                                 source);
+}
+
+content::ColorChooser* ExternalTabContainerWin::OpenColorChooser(
+    WebContents* web_contents, SkColor initial_color) {
+  return chrome::ShowColorChooser(web_contents, initial_color);
 }
 
 void ExternalTabContainerWin::RunFileChooser(
@@ -1268,8 +1411,9 @@ ExternalTabContainer* ExternalTabContainer::Create(
 // static
 ExternalTabContainer* ExternalTabContainer::GetContainerForTab(
     content::WebContents* web_contents) {
-  HWND parent_window = views::HWNDForNativeWindow(
-      web_contents->GetView()->GetTopLevelNativeWindow());
+  HWND webcontents_view_window = views::HWNDForNativeWindow(
+      web_contents->GetView()->GetNativeView());
+  HWND parent_window = ::GetParent(webcontents_view_window);
   if (!::IsWindow(parent_window))
     return NULL;
   return reinterpret_cast<ExternalTabContainerWin*>(

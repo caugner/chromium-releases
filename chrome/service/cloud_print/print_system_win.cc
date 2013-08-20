@@ -12,7 +12,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_com_initializer.h"
@@ -182,8 +182,7 @@ class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
       printer_name_to_use = const_cast<LPTSTR>(printer_name_wide.c_str());
     }
     bool ret = false;
-    OpenPrinter(printer_name_to_use, printer_.Receive(), NULL);
-    if (printer_.IsValid()) {
+    if (printer_.OpenPrinter(printer_name_to_use)) {
       printer_change_.Set(FindFirstPrinterChangeNotification(
           printer_, PRINTER_CHANGE_PRINTER|PRINTER_CHANGE_JOB, 0, NULL));
       if (printer_change_.IsValid()) {
@@ -839,8 +838,7 @@ bool PrintSystemWin::GetJobDetails(const std::string& printer_name,
   DCHECK(job_details);
   printing::ScopedPrinterHandle printer_handle;
   std::wstring printer_name_wide = UTF8ToWide(printer_name);
-  OpenPrinter(const_cast<LPTSTR>(printer_name_wide.c_str()),
-              printer_handle.Receive(), NULL);
+  printer_handle.OpenPrinter(printer_name_wide.c_str());
   DCHECK(printer_handle.IsValid());
   bool ret = false;
   if (printer_handle.IsValid()) {

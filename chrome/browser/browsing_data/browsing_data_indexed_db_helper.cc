@@ -9,16 +9,14 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/indexed_db_context.h"
-#include "webkit/database/database_util.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/browser/database/database_util.h"
 
 using content::BrowserThread;
 using content::IndexedDBContext;

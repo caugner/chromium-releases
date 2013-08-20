@@ -39,9 +39,7 @@ class RenderTextMac : public RenderText {
   virtual SelectionModel AdjacentWordSelectionModel(
       const SelectionModel& selection,
       VisualCursorDirection direction) OVERRIDE;
-  virtual void GetGlyphBounds(size_t index,
-                              ui::Range* xspan,
-                              int* height) OVERRIDE;
+  virtual ui::Range GetGlyphBounds(size_t index) OVERRIDE;
   virtual std::vector<Rect> GetSubstringBounds(const ui::Range& range) OVERRIDE;
   virtual size_t TextIndexToLayoutIndex(size_t index) const OVERRIDE;
   virtual size_t LayoutIndexToTextIndex(size_t index) const OVERRIDE;
@@ -76,11 +74,11 @@ class RenderTextMac : public RenderText {
   void ComputeRuns();
 
   // The Core Text line of text. Created by |EnsureLayout()|.
-  base::mac::ScopedCFTypeRef<CTLineRef> line_;
+  base::ScopedCFTypeRef<CTLineRef> line_;
 
   // Array to hold CFAttributedString attributes that allows Core Text to hold
   // weak references to them without leaking.
-  base::mac::ScopedCFTypeRef<CFMutableArrayRef> attributes_;
+  base::ScopedCFTypeRef<CFMutableArrayRef> attributes_;
 
   // Visual dimensions of the text. Computed by |EnsureLayout()|.
   Size string_size_;

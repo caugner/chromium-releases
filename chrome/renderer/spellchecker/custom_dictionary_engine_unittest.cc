@@ -8,9 +8,16 @@
 
 TEST(CustomDictionaryTest, HandlesEmptyWordWithInvalidSubstring) {
   CustomDictionaryEngine engine;
-  std::vector<std::string> custom_words;
-
+  std::set<std::string> custom_words;
   engine.Init(custom_words);
   EXPECT_FALSE(engine.SpellCheckWord(string16().c_str(), 15, 23));
 }
 
+TEST(CustomDictionaryTest, Basic) {
+  CustomDictionaryEngine engine;
+  EXPECT_FALSE(engine.SpellCheckWord(ASCIIToUTF16("helllo").c_str(), 0, 6));
+  std::set<std::string> custom_words;
+  custom_words.insert("helllo");
+  engine.Init(custom_words);
+  EXPECT_TRUE(engine.SpellCheckWord(ASCIIToUTF16("helllo").c_str(), 0, 6));
+}

@@ -6,9 +6,8 @@
 
 #import <ImageCaptureCore/ImageCaptureCore.h>
 
-#include "base/file_util.h"
 #import "chrome/browser/storage_monitor/image_capture_device.h"
-#include "chrome/browser/storage_monitor/media_storage_util.h"
+#include "chrome/browser/storage_monitor/storage_info.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace {
@@ -26,8 +25,8 @@ chrome::ImageCaptureDeviceManager* g_image_capture_device_manager = NULL;
 @interface ImageCaptureDeviceManagerImpl
     : NSObject<ICDeviceBrowserDelegate> {
  @private
-  scoped_nsobject<ICDeviceBrowser> deviceBrowser_;
-  scoped_nsobject<NSMutableArray> cameras_;
+  base::scoped_nsobject<ICDeviceBrowser> deviceBrowser_;
+  base::scoped_nsobject<NSMutableArray> cameras_;
 
   // Guaranteed to outlive this class.
   // TODO(gbillock): Update when ownership chains go up through
@@ -101,8 +100,8 @@ chrome::ImageCaptureDeviceManager* g_image_capture_device_manager = NULL;
 
   // TODO(gbillock): use [cameraDevice mountPoint] here when possible.
   chrome::StorageInfo info(
-      chrome::MediaStorageUtil::MakeDeviceId(
-          chrome::MediaStorageUtil::MAC_IMAGE_CAPTURE,
+      chrome::StorageInfo::MakeDeviceId(
+          chrome::StorageInfo::MAC_IMAGE_CAPTURE,
           base::SysNSStringToUTF8([cameraDevice UUIDString])),
       base::SysNSStringToUTF16([cameraDevice name]),
       "",
@@ -125,8 +124,8 @@ chrome::ImageCaptureDeviceManager* g_image_capture_device_manager = NULL;
   [cameras_ removeObject:device];
 
   notifications_->ProcessDetach(
-      chrome::MediaStorageUtil::MakeDeviceId(
-          chrome::MediaStorageUtil::MAC_IMAGE_CAPTURE, uuid));
+      chrome::StorageInfo::MakeDeviceId(
+          chrome::StorageInfo::MAC_IMAGE_CAPTURE, uuid));
 }
 
 @end  // ImageCaptureDeviceManagerImpl

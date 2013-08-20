@@ -20,13 +20,12 @@ class Size;
 // SelectedKeywordView displays the tab-to-search UI in the location bar view.
 class SelectedKeywordView : public IconLabelBubbleView {
  public:
-  SelectedKeywordView(const int background_images[],
-                      int contained_image,
-                      SkColor color,
+  SelectedKeywordView(const gfx::Font& font,
+                      int font_y_offset,
+                      SkColor text_color,
+                      SkColor parent_background_color,
                       Profile* profile);
   virtual ~SelectedKeywordView();
-
-  void SetFont(const gfx::Font& font);
 
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
@@ -34,7 +33,7 @@ class SelectedKeywordView : public IconLabelBubbleView {
 
   // The current keyword, or an empty string if no keyword is displayed.
   void SetKeyword(const string16& keyword);
-  string16 keyword() const { return keyword_; }
+  const string16& keyword() const { return keyword_; }
 
  private:
   // The keyword we're showing. If empty, no keyword is selected.
@@ -51,7 +50,7 @@ class SelectedKeywordView : public IconLabelBubbleView {
 
   Profile* profile_;
 
-  DISALLOW_IMPLICIT_CONSTRUCTORS(SelectedKeywordView);
+  DISALLOW_COPY_AND_ASSIGN(SelectedKeywordView);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_SELECTED_KEYWORD_VIEW_H_

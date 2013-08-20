@@ -17,9 +17,6 @@
           <span i18n-content="useSharedProxies"></span>
         </label>
       </div>
-      <div id="network-locked-message" hidden>
-        <span i18n-content="accessLockedMsg"></span>
-      </div>
       <div id="network-menus"></div>
     </div>
   </section>
@@ -30,18 +27,18 @@
   <section>
     <h3 i18n-content="sectionTitleAppearance"></h3>
     <div class="settings-row">
-      <if expr="pp_ifdef('chromeos')">
+<if expr="pp_ifdef('chromeos')">
       <button id="set-wallpaper" i18n-content="setWallpaper"
           guest-visibility="disabled"></button>
 </if>
-<if expr="not pp_ifdef('toolkit_views') and is_posix and not is_macosx">
+<if expr="not pp_ifdef('chromeos') and is_posix and not is_macosx">
       <button id="themes-gallery" i18n-content="themesGallery"></button>
-      <button id="themes-GTK-button"
-          i18n-content="themesGTKButton"></button>
+      <button id="themes-native-button"
+          i18n-content="themesNativeButton"></button>
       <button id="themes-reset"
           i18n-content="themesSetClassic"></button>
 </if>
-<if expr="pp_ifdef('toolkit_views') or is_win or is_macosx">
+<if expr="pp_ifdef('chromeos') or is_win or is_macosx">
       <button id="themes-gallery" i18n-content="themesGallery"></button>
       <button id="themes-reset" i18n-content="themesReset"></button>
 </if>
@@ -117,9 +114,7 @@
         <button id="keyboard-settings-button"
             i18n-content="keyboardSettingsButtonTitle">
         </button>
-        <!-- By default, the display settings are hidden.  They are only visible
-             if more than one display is found. -->
-        <span id="display-options-section" hidden>
+        <span id="display-options-section">
           <button id="display-options" i18n-content="displayOptions">
           </button>
         </span>
@@ -142,20 +137,18 @@
               i18n-content="defaultSearchManageEngines">
           </button>
         </div>
-        <div class="checkbox" guest-visibility="disabled">
+        <div id="instant-enabled-setting" class="checkbox"
+            guest-visibility="disabled">
           <span class="controlled-setting-with-label">
             <input id="instant-enabled-control" type="checkbox"
-                metric="Options_InstantEnabled"
-                i18n-values="pref:instant_enabled">
+                pref="instant_extended.instant_enabled"
+                metric="Options_InstantExtendedEnabled">
             <span>
-              <!-- TODO(estade) There's a link in here which should not be
-                   inside a <label>. -->
-              <label id="instant-enabled-label" for="instant-enabled-control"
-                  i18n-values=".innerHTML:instantPrefAndWarning">
+              <!-- The content of the label is inserted by JS -->
+              <label id="instant-enabled-label" for="instant-enabled-control">
               </label>
-              <span id="instant-enabled-indicator"
-                  class="controlled-setting-indicator"
-                  i18n-values="pref:instant_enabled">
+              <span class="controlled-setting-indicator"
+                  pref="instant_extended.instant_enabled">
               </span>
             </span>
           </span>
@@ -443,6 +436,8 @@
             </option>
           </select>
         </label>
+        <span id="font-size-indicator"
+            class="controlled-setting-indicator"></span>
         <button id="fontSettingsCustomizeFontsButton"
             i18n-content="fontSettingsCustomizeFontsButton"></button>
       </div>
@@ -492,6 +487,8 @@
           </label>
           <span class="controlled-setting-indicator" pref="translate.enabled">
           </span>
+          <button id="manage-languages" class="link-button"
+              i18n-content="manageLanguages"></button>
         </span>
       </span>
     </div>
@@ -631,27 +628,66 @@
       </div>
       <div class="option-name">
         <div class="checkbox">
-          <label>
-            <input id="accessibility-spoken-feedback-check" type="checkbox">
-            <span i18n-content="accessibilitySpokenFeedback"></span>
-          </label>
+          <span class="controlled-setting-with-label">
+            <input id="accessibility-large-cursor-check"
+                pref="settings.a11y.large_cursor_enabled" type="checkbox">
+            <span>
+              <label for="accessibility-large-cursor-check"
+                  i18n-content="accessibilityLargeCursor">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="settings.a11y.large_cursor_enabled">
+              </span>
+            </span>
+          </span>
         </div>
       </div>
       <div class="option-name">
         <div class="checkbox">
-          <label>
-            <input id="accessibility-high-contrast-check" type="checkbox">
-            <span i18n-content="accessibilityHighContrast"></span>
-          </label>
+          <span class="controlled-setting-with-label">
+            <input id="accessibility-high-contrast-check"
+                pref="settings.a11y.high_contrast_enabled" type="checkbox">
+            <span>
+              <label for="accessibility-high-contrast-check"
+                  i18n-content="accessibilityHighContrast">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="settings.a11y.high_contrast_enabled">
+              </span>
+            </span>
+          </span>
         </div>
       </div>
       <div class="option-name">
         <div class="checkbox">
-          <label>
+          <span class="controlled-setting-with-label">
+            <input id="accessibility-spoken-feedback-check"
+                pref="settings.accessibility" type="checkbox">
+            <span>
+              <label for="accessibility-spoken-feedback-check"
+                  i18n-content="accessibilitySpokenFeedback">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="settings.accessibility">
+              </span>
+            </span>
+          </span>
+        </div>
+      </div>
+      <div class="option-name">
+        <div class="checkbox">
+          <span class="controlled-setting-with-label">
             <input id="accessibility-screen-magnifier-check"
                 pref="settings.a11y.screen_magnifier" type="checkbox">
-            <span i18n-content="accessibilityScreenMagnifier"></span>
-          </label>
+            <span>
+              <label for="accessibility-screen-magnifier-check"
+                  i18n-content="accessibilityScreenMagnifier">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="settings.a11y.screen_magnifier">
+              </span>
+            </span>
+          </span>
         </div>
       </div>
       <div class="option-name" id="accessibility-tap-dragging">
@@ -672,14 +708,6 @@
       </span>
       <button id="factory-reset-restart"
           i18n-content="factoryResetRestart">
-      </button>
-    </div>
-  </section>
-  <section id="kiosk-section" hidden>
-    <h3 i18n-content="advancedSectionTitleKiosk"></h3>
-    <div>
-      <button id="manage-kiosk-apps-button"
-          i18n-content="manageKioskAppsButton">
       </button>
     </div>
   </section>
@@ -720,11 +748,14 @@
     </div>
   </section>
 </if>
-  <section id="managed-user-settings-section" hidden>
-    <h3 i18n-content="managedUsersSectionTitle"></h3>
-    <button id="open-managed-user-settings-button"
-        i18n-content="manageProfilesManagedUserSettings">
-    </button>
+  <section id="reset-profile-settings-section" hidden>
+    <h3 i18n-content="resetProfileSettingsSectionTitle"></h3>
+    <div>
+      <span class="settings-row" i18n-content="resetProfileSettingsDescription">
+      </span>
+      <button id="reset-profile-settings" i18n-content="resetProfileSettings">
+      </button>
+    </div>
   </section>
   </div>  <!-- advanced-settings-container -->
   </div>  <!-- advanced-settings -->

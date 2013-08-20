@@ -5,16 +5,16 @@
 #include "ui/message_center/views/notification_view.h"
 
 #include "base/command_line.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ui_resources.h"
-#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/size.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_constants.h"
+#include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_switches.h"
 #include "ui/message_center/message_center_util.h"
 #include "ui/message_center/notification.h"
@@ -39,34 +39,23 @@ const int kTextLeftPadding = kIconSize + message_center::kIconToTextPadding;
 const int kTextBottomPadding = 12;
 const int kTextRightPadding = 23;
 const int kItemTitleToMessagePadding = 3;
-const int kButtonHeight = 38;
-const int kButtonHorizontalPadding = 16;
 const int kButtonVecticalPadding = 0;
-const int kButtonIconTopPadding = 11;
-const int kButtonIconToTitlePadding = 16;
 const int kButtonTitleTopPadding = 0;
-
-// Line limits.
-const int kTitleLineLimit = 3;
-const int kMessageCollapsedLineLimit = 3;
-const int kMessageExpandedLineLimit = 7;
 
 // Character limits: Displayed text will be subject to the line limits above,
 // but we also remove trailing characters from text to reduce processing cost.
 // Character limit = pixels per line * line limit / min. pixels per character.
 const size_t kTitleCharacterLimit =
-    message_center::kNotificationWidth * kTitleLineLimit / 4;
+    message_center::kNotificationWidth * message_center::kTitleLineLimit / 4;
 const size_t kMessageCharacterLimit =
-    message_center::kNotificationWidth * kMessageExpandedLineLimit / 3;
+    message_center::kNotificationWidth *
+        message_center::kMessageExpandedLineLimit / 3;
 
 // Notification colors. The text background colors below are used only to keep
 // view::Label from modifying the text color and will not actually be drawn.
 // See view::Label's RecalculateColors() for details.
 const SkColor kRegularTextBackgroundColor = SK_ColorWHITE;
-const SkColor kDimTextColor = SkColorSetRGB(102, 102, 102);
 const SkColor kDimTextBackgroundColor = SK_ColorWHITE;
-const SkColor kButtonSeparatorColor = SkColorSetRGB(234, 234, 234);
-const SkColor kHoveredButtonBackgroundColor = SkColorSetRGB(243, 243, 243);
 
 // static
 views::Background* MakeBackground(
@@ -130,6 +119,7 @@ class ItemView : public views::View {
   ItemView(const message_center::NotificationItem& item);
   virtual ~ItemView();
 
+  // Overridden from views::View:
   virtual void SetVisible(bool visible) OVERRIDE;
 
  private:
@@ -143,7 +133,6 @@ ItemView::ItemView(const message_center::NotificationItem& item) {
   views::Label* title = new views::Label(item.title);
   title->set_collapse_when_hidden(true);
   title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  title->SetElideBehavior(views::Label::ELIDE_AT_END);
   title->SetEnabledColor(message_center::kRegularTextColor);
   title->SetBackgroundColor(kRegularTextBackgroundColor);
   AddChildView(title);
@@ -151,8 +140,7 @@ ItemView::ItemView(const message_center::NotificationItem& item) {
   views::Label* message = new views::Label(item.message);
   message->set_collapse_when_hidden(true);
   message->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  message->SetElideBehavior(views::Label::ELIDE_AT_END);
-  message->SetEnabledColor(kDimTextColor);
+  message->SetEnabledColor(message_center::kDimTextColor);
   message->SetBackgroundColor(kDimTextBackgroundColor);
   AddChildView(message);
 
@@ -233,15 +221,7 @@ void ProportionalImageView::OnPaint(gfx::Canvas* canvas) {
 
 gfx::Size ProportionalImageView::GetImageSizeForWidth(int width) {
   gfx::Size size = visible() ? image_.size() : gfx::Size();
-  if (width > 0 && !size.IsEmpty()) {
-    double proportion = size.height() / (double) size.width();
-    size.SetSize(width, std::max(0.5 + width * proportion, 1.0));
-    if (size.height() > message_center::kNotificationMaximumImageHeight) {
-      int height = message_center::kNotificationMaximumImageHeight;
-      size.SetSize(std::max(0.5 + height / proportion, 1.0), height);
-    }
-  }
-  return size;
+  return message_center::GetImageSizeForWidth(width, size);
 }
 
 // NotificationButton //////////////////////////////////////////////////////////
@@ -275,10 +255,11 @@ NotificationButton::NotificationButton(views::ButtonListener* listener)
       title_(NULL) {
   set_focusable(true);
   set_request_focus_on_press(false);
-  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal,
-                                        kButtonHorizontalPadding,
-                                        kButtonVecticalPadding,
-                                        kButtonIconToTitlePadding));
+  SetLayoutManager(
+      new views::BoxLayout(views::BoxLayout::kHorizontal,
+                           message_center::kButtonHorizontalPadding,
+                           kButtonVecticalPadding,
+                           message_center::kButtonIconToTitlePadding));
 }
 
 NotificationButton::~NotificationButton() {
@@ -296,7 +277,8 @@ void NotificationButton::SetIcon(const gfx::ImageSkia& image) {
     icon_->SetImage(image);
     icon_->SetHorizontalAlignment(views::ImageView::LEADING);
     icon_->SetVerticalAlignment(views::ImageView::LEADING);
-    icon_->set_border(MakeEmptyBorder(kButtonIconTopPadding, 0, 0, 0));
+    icon_->set_border(
+        MakeEmptyBorder(message_center::kButtonIconTopPadding, 0, 0, 0));
     AddChildViewAt(icon_, 0);
   }
 }
@@ -309,23 +291,25 @@ void NotificationButton::SetTitle(const string16& title) {
   } else {
     title_ = new views::Label(title);
     title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    title_->SetElideBehavior(views::Label::ELIDE_AT_END);
     title_->SetEnabledColor(message_center::kRegularTextColor);
     title_->SetBackgroundColor(kRegularTextBackgroundColor);
     title_->set_border(MakeEmptyBorder(kButtonTitleTopPadding, 0, 0, 0));
     AddChildView(title_);
   }
+  SetAccessibleName(title);
 }
 
 gfx::Size NotificationButton::GetPreferredSize() {
-  return gfx::Size(message_center::kNotificationWidth, kButtonHeight);
+  return gfx::Size(message_center::kNotificationWidth,
+                   message_center::kButtonHeight);
 }
 
 int NotificationButton::GetHeightForWidth(int width) {
-  return kButtonHeight;
+  return message_center::kButtonHeight;
 }
 
 void NotificationButton::OnFocus() {
+  views::CustomButton::OnFocus();
   ScrollRectToVisible(GetLocalBounds());
 }
 
@@ -337,10 +321,12 @@ void NotificationButton::OnPaintFocusBorder(gfx::Canvas* canvas) {
 }
 
 void NotificationButton::StateChanged() {
-  if (state() == STATE_HOVERED || state() == STATE_PRESSED)
-    set_background(MakeBackground(kHoveredButtonBackgroundColor));
-  else
+  if (state() == STATE_HOVERED || state() == STATE_PRESSED) {
+    set_background(
+        MakeBackground(message_center::kHoveredButtonBackgroundColor));
+  } else {
     set_background(NULL);
+  }
 }
 
 }  // namespace
@@ -352,7 +338,9 @@ namespace message_center {
 // static
 MessageView* NotificationView::Create(const Notification& notification,
                                       MessageCenter* message_center,
-                                      bool expanded) {
+                                      MessageCenterTray* tray,
+                                      bool expanded,
+                                      bool top_level) {
   // Use MessageSimpleView for simple notifications unless rich style
   // notifications are enabled. This preserves the appearance of notifications
   // created by existing code that uses webkitNotifications.
@@ -378,13 +366,28 @@ MessageView* NotificationView::Create(const Notification& notification,
   }
 
   // Currently all roads lead to the generic NotificationView.
-  return new NotificationView(notification, message_center, expanded);
+  MessageView* notification_view =
+      new NotificationView(notification, message_center, tray, expanded);
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  // Don't create shadows for notification toasts on linux wih aura.
+  if (top_level)
+    return notification_view;
+#endif
+
+  if (IsRichNotificationEnabled())
+    notification_view->CreateShadowBorder();
+
+  return notification_view;
 }
 
 NotificationView::NotificationView(const Notification& notification,
                                    MessageCenter* message_center,
+                                   MessageCenterTray* tray,
                                    bool expanded)
-    : MessageView(notification, message_center, expanded) {
+    : MessageView(notification, message_center, tray, expanded) {
+  std::vector<string16> accessible_lines;
+
   // Create the opaque background that's above the view's shadow.
   background_view_ = new views::View();
   background_view_->set_background(MakeBackground());
@@ -406,11 +409,12 @@ NotificationView::NotificationView(const Notification& notification,
     title_view_ = new BoundedLabel(
         ui::TruncateString(notification.title(), kTitleCharacterLimit), font);
     title_view_->SetLineHeight(kTitleLineHeight);
-    title_view_->SetLineLimit(kTitleLineLimit);
+    title_view_->SetLineLimit(message_center::kTitleLineLimit);
     title_view_->SetColors(message_center::kRegularTextColor,
                            kRegularTextBackgroundColor);
     title_view_->set_border(MakeTextBorder(padding, 3, 0));
     top_view_->AddChildView(title_view_);
+    accessible_lines.push_back(notification.title());
   }
 
   // Create the message view if appropriate.
@@ -421,9 +425,11 @@ NotificationView::NotificationView(const Notification& notification,
         ui::TruncateString(notification.message(), kMessageCharacterLimit));
     message_view_->SetLineHeight(kMessageLineHeight);
     message_view_->SetVisible(!is_expanded() || !notification.items().size());
-    message_view_->SetColors(kDimTextColor, kDimTextBackgroundColor);
+    message_view_->SetColors(message_center::kDimTextColor,
+                             kDimTextBackgroundColor);
     message_view_->set_border(MakeTextBorder(padding, 4, 0));
     top_view_->AddChildView(message_view_);
+    accessible_lines.push_back(notification.message());
   }
 
   // Create the list item views (up to a maximum).
@@ -435,6 +441,8 @@ NotificationView::NotificationView(const Notification& notification,
     item_view->set_border(MakeTextBorder(padding, i ? 0 : 4, 0));
     item_views_.push_back(item_view);
     top_view_->AddChildView(item_view);
+    accessible_lines.push_back(
+        items[i].title + base::ASCIIToUTF16(" ") + items[i].message);
   }
 
   // Create the notification icon view.
@@ -492,6 +500,7 @@ NotificationView::NotificationView(const Notification& notification,
   AddChildView(bottom_view_);
   AddChildView(close_button());
   AddChildView(expand_button());
+  set_accessible_name(JoinString(accessible_lines, '\n'));
 }
 
 NotificationView::~NotificationView() {
@@ -570,10 +579,45 @@ void NotificationView::Layout() {
                              expand_size.width(), expand_size.height());
 }
 
+void NotificationView::OnFocus() {
+  MessageView::OnFocus();
+  ScrollRectToVisible(GetLocalBounds());
+}
+
 void NotificationView::ScrollRectToVisible(const gfx::Rect& rect) {
   // Notification want to show the whole notification when a part of it (like
   // a button) gets focused.
   views::View::ScrollRectToVisible(GetLocalBounds());
+}
+
+views::View* NotificationView::GetEventHandlerForPoint(
+    const gfx::Point& point) {
+  // Want to return this for underlying views, otherwise GetCursor is not
+  // called. But buttons are exceptions, they'll have their own event handlings.
+  std::vector<views::View*> buttons(action_buttons_);
+  buttons.push_back(close_button());
+  buttons.push_back(expand_button());
+
+  for (size_t i = 0; i < buttons.size(); ++i) {
+    gfx::Point point_in_child = point;
+    ConvertPointToTarget(this, buttons[i], &point_in_child);
+    if (buttons[i]->HitTestPoint(point_in_child))
+      return buttons[i]->GetEventHandlerForPoint(point_in_child);
+  }
+
+  return this;
+}
+
+gfx::NativeCursor NotificationView::GetCursor(const ui::MouseEvent& event) {
+  if (!message_center()->HasClickedListener(notification_id()))
+    return views::View::GetCursor(event);
+
+#if defined(USE_AURA)
+  return ui::kCursorHand;
+#elif defined(OS_WIN)
+  static HCURSOR g_hand_cursor = LoadCursor(NULL, IDC_HAND);
+  return g_hand_cursor;
+#endif
 }
 
 void NotificationView::ButtonPressed(views::Button* sender,
@@ -616,7 +660,8 @@ bool NotificationView::IsExpansionNeeded(int width) {
 
 bool NotificationView::IsMessageExpansionNeeded(int width) {
   int current = GetMessageLines(width, GetMessageLineLimit(width));
-  int expanded = GetMessageLines(width, kMessageExpandedLineLimit);
+  int expanded = GetMessageLines(width,
+                                 message_center::kMessageExpandedLineLimit);
   return current < expanded;
 }
 
@@ -624,15 +669,16 @@ int NotificationView::GetMessageLineLimit(int width) {
   // Expanded notifications get a larger limit, except for image notifications,
   // whose images must be kept flush against their icons.
   if (is_expanded() && !image_view_)
-    return kMessageExpandedLineLimit;
+    return message_center::kMessageExpandedLineLimit;
 
   // If there's a title ensure title + message lines <= collapsed line limit.
   if (title_view_) {
     int title_lines = title_view_->GetLinesForWidthAndLimit(width, -1);
-    return std::max(kMessageCollapsedLineLimit - title_lines, 0);
+    return std::max(message_center::kMessageCollapsedLineLimit - title_lines,
+                    0);
   }
 
-  return kMessageCollapsedLineLimit;
+  return message_center::kMessageCollapsedLineLimit;
 }
 
 int NotificationView::GetMessageLines(int width, int limit) {

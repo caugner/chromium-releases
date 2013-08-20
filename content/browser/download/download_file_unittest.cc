@@ -4,7 +4,7 @@
 
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/byte_stream.h"
@@ -131,16 +131,15 @@ class DownloadFileTest : public testing::Test {
 
     scoped_ptr<DownloadSaveInfo> save_info(new DownloadSaveInfo());
     download_file_.reset(
-        new DownloadFileImpl(
-            save_info.Pass(),
-            base::FilePath(),
-            GURL(),                     // Source
-            GURL(),                     // Referrer
-            calculate_hash,
-            scoped_ptr<ByteStreamReader>(input_stream_),
-            net::BoundNetLog(),
-            scoped_ptr<PowerSaveBlocker>(NULL).Pass(),
-            observer_factory_.GetWeakPtr()));
+        new DownloadFileImpl(save_info.Pass(),
+                             base::FilePath(),
+                             GURL(),  // Source
+                             GURL(),  // Referrer
+                             calculate_hash,
+                             scoped_ptr<ByteStreamReader>(input_stream_),
+                             net::BoundNetLog(),
+                             scoped_ptr<PowerSaveBlocker>().Pass(),
+                             observer_factory_.GetWeakPtr()));
 
     EXPECT_CALL(*input_stream_, Read(_, _))
         .WillOnce(Return(ByteStreamReader::STREAM_EMPTY))
@@ -161,8 +160,6 @@ class DownloadFileTest : public testing::Test {
 
   virtual void DestroyDownloadFile(int offset) {
     EXPECT_FALSE(download_file_->InProgress());
-    EXPECT_EQ(static_cast<int64>(expected_data_.size()),
-              download_file_->BytesSoFar());
 
     // Make sure the data has been properly written to disk.
     std::string disk_data;

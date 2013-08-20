@@ -6,7 +6,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "testing/platform_test.h"
 #include "ui/base/text/text_elider.h"
 
@@ -87,7 +87,8 @@ class OmniboxPopupViewMacTest : public PlatformTest {
   // needs.  Fake one for us to use.
   static AutocompleteMatch MakeMatch(const string16 &contents,
                                      const string16 &description) {
-    AutocompleteMatch m(NULL, 1, true, AutocompleteMatch::URL_WHAT_YOU_TYPED);
+    AutocompleteMatch m(NULL, 1, true,
+                        AutocompleteMatchType::URL_WHAT_YOU_TYPED);
     m.contents = contents;
     m.description = description;
     return m;
@@ -448,7 +449,7 @@ TEST_F(OmniboxPopupViewMacTest, ElideString) {
   NSDictionary* attributes =
       [NSDictionary dictionaryWithObject:font_.GetNativeFont()
                                   forKey:NSFontAttributeName];
-  scoped_nsobject<NSMutableAttributedString> as(
+  base::scoped_nsobject<NSMutableAttributedString> as(
       [[NSMutableAttributedString alloc] initWithString:contents
                                              attributes:attributes]);
 

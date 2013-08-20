@@ -18,12 +18,12 @@
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest.h"
-#include "chrome/common/web_apps.h"
 #include "sync/api/string_ordinal.h"
 
 class ExtensionService;
 class ExtensionServiceTest;
 class SkBitmap;
+struct WebApplicationInfo;
 
 namespace base {
 class SequencedTaskRunner;
@@ -194,7 +194,7 @@ class CrxInstaller
 
   Profile* profile() { return installer_.profile(); }
 
-  const Extension* extension() { return installer_.extension(); }
+  const Extension* extension() { return installer_.extension().get(); }
 
  private:
   friend class ::ExtensionServiceTest;

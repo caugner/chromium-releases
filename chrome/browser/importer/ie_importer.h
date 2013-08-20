@@ -11,10 +11,11 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/string16.h"
-#include "chrome/browser/importer/ie_importer_test_registry_overrider_win.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/importer/importer.h"
-#include "chrome/browser/importer/profile_writer.h"
+
+struct ImportedBookmarkEntry;
+struct ImportedFaviconUsage;
 
 class IEImporter : public Importer {
  public:
@@ -26,7 +27,7 @@ class IEImporter : public Importer {
                            ImporterBridge* bridge) OVERRIDE;
 
  private:
-  typedef std::vector<ProfileWriter::BookmarkEntry> BookmarkVector;
+  typedef std::vector<ImportedBookmarkEntry> BookmarkVector;
 
   // A struct that hosts the information of IE Favorite folder.
   struct FavoritesInfo {
@@ -71,7 +72,7 @@ class IEImporter : public Importer {
   void ParseFavoritesFolder(
       const FavoritesInfo& info,
       BookmarkVector* bookmarks,
-      std::vector<history::ImportedFaviconUsage>* favicons);
+      std::vector<ImportedFaviconUsage>* favicons);
 
   // Determines which version of IE is in use.
   int CurrentIEVersion() const;
@@ -79,9 +80,6 @@ class IEImporter : public Importer {
   // IE does not have source path. It's used in unit tests only for providing a
   // fake source.
   base::FilePath source_path_;
-
-  // Used to override the registry for IEImporterTests if needed.
-  IEImporterTestRegistryOverrider test_registry_overrider_;
 
   DISALLOW_COPY_AND_ASSIGN(IEImporter);
 };

@@ -15,8 +15,8 @@
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "content/shell/common/shell_switches.h"
 #include "content/shell/shell_download_manager_delegate.h"
-#include "content/shell/shell_switches.h"
 #include "content/shell/shell_url_request_context_getter.h"
 
 #if defined(OS_WIN)
@@ -113,7 +113,7 @@ bool ShellBrowserContext::IsOffTheRecord() const {
 DownloadManagerDelegate* ShellBrowserContext::GetDownloadManagerDelegate()  {
   DownloadManager* manager = BrowserContext::GetDownloadManager(this);
 
-  if (!download_manager_delegate_) {
+  if (!download_manager_delegate_.get()) {
     download_manager_delegate_ = new ShellDownloadManagerDelegate();
     download_manager_delegate_->SetDownloadManager(manager);
     CommandLine* cmd_line = CommandLine::ForCurrentProcess();
@@ -132,7 +132,7 @@ net::URLRequestContextGetter* ShellBrowserContext::GetRequestContext()  {
 
 net::URLRequestContextGetter* ShellBrowserContext::CreateRequestContext(
     ProtocolHandlerMap* protocol_handlers) {
-  DCHECK(!url_request_getter_);
+  DCHECK(!url_request_getter_.get());
   url_request_getter_ = new ShellURLRequestContextGetter(
       ignore_certificate_errors_,
       GetPath(),

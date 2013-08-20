@@ -18,26 +18,33 @@ OmniboxViewViews* GetOmniboxViewViews(OmniboxView* view) {
       static_cast<OmniboxViewViews*>(view) : NULL;
 }
 
-#if defined(OS_WIN) && !defined(USE_AURA)
 OmniboxViewWin* GetOmniboxViewWin(OmniboxView* view) {
+#if defined(OS_WIN) && !defined(USE_AURA)
   return views::Textfield::IsViewsTextfieldEnabled() ?
       NULL : static_cast<OmniboxViewWin*>(view);
-}
+#else
+  return NULL;
 #endif
+}
 
 OmniboxView* CreateOmniboxView(OmniboxEditController* controller,
                                ToolbarModel* toolbar_model,
                                Profile* profile,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
-                               LocationBarView* location_bar) {
+                               LocationBarView* location_bar,
+                               const gfx::Font& font,
+                               int font_y_offset) {
 #if defined(OS_WIN) && !defined(USE_AURA)
-  if (!views::Textfield::IsViewsTextfieldEnabled())
-    return new OmniboxViewWin(controller, toolbar_model, location_bar,
-        command_updater, popup_window_mode, location_bar);
+  if (!views::Textfield::IsViewsTextfieldEnabled()) {
+    return new OmniboxViewWin(
+        controller, toolbar_model, location_bar, command_updater,
+        popup_window_mode, font, font_y_offset);
+  }
 #endif
-  OmniboxViewViews* omnibox = new OmniboxViewViews(controller, toolbar_model,
-      profile, command_updater, popup_window_mode, location_bar);
+  OmniboxViewViews* omnibox = new OmniboxViewViews(
+      controller, toolbar_model, profile, command_updater, popup_window_mode,
+      location_bar, font, font_y_offset);
   omnibox->Init();
   return omnibox;
 }

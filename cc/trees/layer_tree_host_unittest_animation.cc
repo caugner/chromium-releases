@@ -75,9 +75,9 @@ MULTI_THREAD_TEST_F(
     LayerTreeHostAnimationTestSetNeedsAnimateShouldNotSetCommitRequested);
 
 // Trigger a frame with SetNeedsCommit. Then, inside the resulting animate
-// callback, requet another frame using SetNeedsAnimate. End the test when
+// callback, request another frame using SetNeedsAnimate. End the test when
 // animate gets called yet-again, indicating that the proxy is correctly
-// handling the case where SetNeedsAnimate() is called inside the begin frame
+// handling the case where SetNeedsAnimate() is called inside the BeginFrame
 // flow.
 class LayerTreeHostAnimationTestSetNeedsAnimateInsideAnimationCallback
     : public LayerTreeHostAnimationTest {
@@ -193,7 +193,7 @@ class LayerTreeHostAnimationTestCheckerboardDoesNotStarveDraws
     started_animating_ = true;
   }
 
-  virtual void DrawLayersOnThread(LayerTreeHostImpl* tree_impl) OVERRIDE {
+  virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (started_animating_)
       EndTest();
   }
@@ -205,7 +205,7 @@ class LayerTreeHostAnimationTestCheckerboardDoesNotStarveDraws
     return false;
   }
 
-  virtual void AfterTest() OVERRIDE {}
+  virtual void AfterTest() OVERRIDE { }
 
  private:
   bool started_animating_;
@@ -213,6 +213,45 @@ class LayerTreeHostAnimationTestCheckerboardDoesNotStarveDraws
 
 // Starvation can only be an issue with the MT compositor.
 MULTI_THREAD_TEST_F(LayerTreeHostAnimationTestCheckerboardDoesNotStarveDraws);
+
+// Ensures that animations eventually get deleted.
+class LayerTreeHostAnimationTestAnimationsGetDeleted
+    : public LayerTreeHostAnimationTest {
+ public:
+  LayerTreeHostAnimationTestAnimationsGetDeleted()
+      : started_animating_(false) {}
+
+  virtual void BeginTest() OVERRIDE {
+    PostAddAnimationToMainThread(layer_tree_host()->root_layer());
+  }
+
+  virtual void AnimateLayers(
+      LayerTreeHostImpl* host_impl,
+      base::TimeTicks monotonic_time) OVERRIDE {
+    bool have_animations = !host_impl->animation_registrar()->
+        active_animation_controllers().empty();
+    if (!started_animating_ && have_animations) {
+      started_animating_ = true;
+      return;
+    }
+
+    if (started_animating_ && !have_animations)
+      EndTest();
+  }
+
+  virtual void notifyAnimationFinished(double time) OVERRIDE {
+    // Animations on the impl-side controller only get deleted during a commit,
+    // so we need to schedule a commit.
+    layer_tree_host()->SetNeedsCommit();
+  }
+
+  virtual void AfterTest() OVERRIDE {}
+
+ private:
+  bool started_animating_;
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostAnimationTestAnimationsGetDeleted);
 
 // Ensures that animations continue to be ticked when we are backgrounded.
 class LayerTreeHostAnimationTestTickAnimationWhileBackgrounded
@@ -266,7 +305,7 @@ class LayerTreeHostAnimationTestAddAnimationWithTimingFunction
   }
 
   virtual void BeginTest() OVERRIDE {
-    PostAddAnimationToMainThread(content_);
+    PostAddAnimationToMainThread(content_.get());
   }
 
   virtual void AnimateLayers(
@@ -330,7 +369,7 @@ class LayerTreeHostAnimationTestSynchronizeAnimationStartTimes
   }
 
   virtual void BeginTest() OVERRIDE {
-    PostAddAnimationToMainThread(content_);
+    PostAddAnimationToMainThread(content_.get());
   }
 
   virtual void notifyAnimationStarted(double time) OVERRIDE {
@@ -423,7 +462,7 @@ class LayerTreeHostAnimationTestDoNotSkipLayersWithAnimatedOpacity
     PostAddAnimationToMainThread(update_check_layer_.get());
   }
 
-  virtual void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     LayerAnimationController* controller_impl =
         host_impl->active_tree()->root_layer()->layer_animation_controller();
     Animation* animation_impl =
@@ -601,7 +640,7 @@ class LayerTreeHostAnimationTestRunAnimationWhenNotCanDraw
 
   virtual void BeginTest() OVERRIDE {
     layer_tree_host()->SetViewportSize(gfx::Size());
-    PostAddAnimationToMainThread(content_);
+    PostAddAnimationToMainThread(content_.get());
   }
 
   virtual void notifyAnimationStarted(double wall_clock_time) OVERRIDE {
@@ -642,7 +681,7 @@ class LayerTreeHostAnimationTestRunAnimationWhenNotVisible
 
   virtual void BeginTest() OVERRIDE {
     visible_ = true;
-    PostAddAnimationToMainThread(content_);
+    PostAddAnimationToMainThread(content_.get());
   }
 
   virtual void DidCommit() OVERRIDE {
@@ -692,6 +731,7 @@ class LayerTreeHostAnimationTestCheckerboardDoesntStartAnimations
   }
 
   virtual void BeginTest() OVERRIDE {
+    prevented_draw_ = 0;
     added_animations_ = 0;
     started_times_ = 0;
     finished_times_ = 0;
@@ -711,28 +751,31 @@ class LayerTreeHostAnimationTestCheckerboardDoesntStartAnimations
                                      bool result) OVERRIDE {
     if (added_animations_ < 2)
       return result;
+    if (TestEnded())
+      return result;
     // Act like there is checkerboard when the second animation wants to draw.
+    ++prevented_draw_;
     return false;
   }
 
   virtual void DidCommitAndDrawFrame() OVERRIDE {
     switch (layer_tree_host()->commit_number()) {
       case 1:
-        // The animation is longer than 1 vsync.
-        AddOpacityTransitionToLayer(content_, 0.1, 0.2f, 0.8f, false);
+        // The animation is longer than 1 BeginFrame interval.
+        AddOpacityTransitionToLayer(content_.get(), 0.1, 0.2f, 0.8f, false);
         added_animations_++;
         break;
       case 2:
         // This second animation will not be drawn so it should not start.
-        AddAnimatedTransformToLayer(content_, 0.1, 5, 5);
+        AddAnimatedTransformToLayer(content_.get(), 0.1, 5, 5);
         added_animations_++;
-        break;
-      case 3:
         break;
     }
   }
 
   virtual void notifyAnimationStarted(double wall_clock_time) OVERRIDE {
+    if (TestEnded())
+      return;
     started_times_++;
   }
 
@@ -745,6 +788,8 @@ class LayerTreeHostAnimationTestCheckerboardDoesntStartAnimations
   }
 
   virtual void AfterTest() OVERRIDE {
+    // Make sure we tried to draw the second animation but failed.
+    EXPECT_LT(0, prevented_draw_);
     // The first animation should be started, but the second should not because
     // of checkerboard.
     EXPECT_EQ(1, started_times_);
@@ -752,6 +797,7 @@ class LayerTreeHostAnimationTestCheckerboardDoesntStartAnimations
     EXPECT_EQ(1, finished_times_);
   }
 
+  int prevented_draw_;
   int added_animations_;
   int started_times_;
   int finished_times_;
@@ -761,70 +807,6 @@ class LayerTreeHostAnimationTestCheckerboardDoesntStartAnimations
 
 MULTI_THREAD_TEST_F(
     LayerTreeHostAnimationTestCheckerboardDoesntStartAnimations);
-
-// Test that creating a pinch-zoom scrollbar animation leads to AnimateLayers
-// being called.
-class LayerTreeHostAnimationTestPinchZoomScrollbars
-    : public LayerTreeHostAnimationTest {
- public:
-  LayerTreeHostAnimationTestPinchZoomScrollbars()
-      : root_layer_(FakeContentLayer::Create(&client_)),
-        started_times_(0),
-        num_commit_complete_(0) {}
-
-  virtual void InitializeSettings(LayerTreeSettings* settings) OVERRIDE {
-    settings->use_pinch_zoom_scrollbars = true;
-  }
-
-  virtual void SetupTree() OVERRIDE {
-    root_layer_->SetBounds(gfx::Size(100, 100));
-    root_layer_->SetScrollable(true);
-    layer_tree_host()->SetRootLayer(root_layer_);
-    LayerTreeHostAnimationTest::SetupTree();
-  }
-
-  virtual void BeginTest() OVERRIDE {
-    layer_tree_host()->SetPageScaleFactorAndLimits(1.55f, 1.f, 4.f);
-    PostSetNeedsCommitToMainThread();
-  }
-
-  virtual void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    num_commit_complete_++;
-  }
-
-  virtual void AnimateLayers(LayerTreeHostImpl* host_impl,
-                             base::TimeTicks monotonic_time) OVERRIDE {
-    // Two commits are required for the creation of pinch-zoom scrollbars.
-    // Wait for these to finish.
-    if (num_commit_complete_ < 2)
-      return;
-
-    EXPECT_NE(host_impl->active_tree()->page_scale_factor(), 1.f);
-
-    switch (started_times_) {
-      case 0:
-        host_impl->active_tree()->DidBeginScroll();
-        started_times_++;
-        break;
-      case 1:
-        host_impl->active_tree()->DidEndScroll();
-        started_times_++;
-        break;
-      case 2:
-        EndTest();
-    }
-  }
-
-  virtual void AfterTest() OVERRIDE {}
-
- private:
-  FakeContentLayerClient client_;
-  scoped_refptr<FakeContentLayer> root_layer_;
-  int started_times_;
-  int num_commit_complete_;
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostAnimationTestPinchZoomScrollbars);
 
 }  // namespace
 }  // namespace cc

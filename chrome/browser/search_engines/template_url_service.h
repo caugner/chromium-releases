@@ -15,9 +15,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "sync/api/sync_change.h"
@@ -61,7 +61,7 @@ struct URLVisitedDetails;
 // TemplateURLService handles deletion.
 
 class TemplateURLService : public WebDataServiceConsumer,
-                           public ProfileKeyedService,
+                           public BrowserContextKeyedService,
                            public content::NotificationObserver,
                            public syncer::SyncableService {
  public:
@@ -225,6 +225,11 @@ class TemplateURLService : public WebDataServiceConsumer,
   // destroyed at any time so should be used right after the call.
   TemplateURL* FindNewDefaultSearchProvider();
 
+  // Resets the search providers to the prepopulated engines plus any
+  // extension-supplied engines.  Also resets the default search engine unless
+  // it's managed.
+  void ResetNonExtensionURLs();
+
   // Observers used to listen for changes to the model.
   // TemplateURLService does NOT delete the observers when deleted.
   void AddObserver(TemplateURLServiceObserver* observer);
@@ -261,7 +266,7 @@ class TemplateURLService : public WebDataServiceConsumer,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // ProfileKeyedService implementation.
+  // BrowserContextKeyedService implementation.
   virtual void Shutdown() OVERRIDE;
 
   // syncer::SyncableService implementation.
@@ -420,6 +425,9 @@ class TemplateURLService : public WebDataServiceConsumer,
   bool LoadDefaultSearchProviderFromPrefs(
       scoped_ptr<TemplateURL>* default_provider,
       bool* is_managed);
+
+  // Clears user preferences describing the default search engine.
+  void ClearDefaultProviderFromPrefs();
 
   // Returns true if there is no TemplateURL that has a search url with the
   // specified host, or the only TemplateURLs matching the specified host can
@@ -581,6 +589,17 @@ class TemplateURLService : public WebDataServiceConsumer,
   void PatchMissingSyncGUIDs(TemplateURLVector* template_urls);
 
   void OnSyncedDefaultSearchProviderGUIDChanged();
+
+  // Adds |template_urls| to |template_urls_| and sets up the default search
+  // provider.  If |default_search_provider| is non-NULL, it must refer to one
+  // of the |template_urls|, and will be used as the new default.
+  void AddTemplateURLsAndSetupDefaultEngine(
+      TemplateURLVector* template_urls,
+      TemplateURL* default_search_provider);
+
+  // If there is no current default search provider, sets the default to the
+  // result of calling FindNewDefaultSearchProvider().
+  void EnsureDefaultSearchProviderExists();
 
   content::NotificationRegistrar notification_registrar_;
   PrefChangeRegistrar pref_change_registrar_;

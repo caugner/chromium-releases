@@ -9,10 +9,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_data_delegate.h"
+#include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "content/public/browser/notification_observer.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -31,37 +33,42 @@ class KioskAppManagerObserver;
 class KioskAppManager : public content::NotificationObserver,
                         public KioskAppDataDelegate {
  public:
+  enum ConsumerKioskModeStatus {
+    // Consumer kiosk mode can be enabled on this machine.
+    CONSUMER_KIOSK_MODE_CONFIGURABLE,
+    // Consumer kiosk is enabled on this machine.
+    CONSUMER_KIOSK_MODE_ENABLED,
+    // Consumer kiosk mode is disabled ans cannot any longer be enabled on
+    // this machine.
+    CONSUMER_KIOSK_MODE_DISABLED,
+  };
+
+  typedef base::Callback<void(bool success)> EnableKioskModeCallback;
+  typedef base::Callback<void(ConsumerKioskModeStatus status)>
+      GetConsumerKioskModeStatusCallback;
+
   // Struct to hold app info returned from GetApps() call.
   struct App {
     explicit App(const KioskAppData& data);
     App();
     ~App();
 
-    std::string id;
+    std::string app_id;
+    std::string user_id;
     std::string name;
     gfx::ImageSkia icon;
     bool is_loading;
   };
   typedef std::vector<App> Apps;
 
-  // Name of a dictionary that holds kiosk app info.
+  // Name of a dictionary that holds kiosk app info in Local State.
   // Sample layout:
   //   "kiosk": {
-  //     "auto_launch": "app_id1",  // Exists if using local state pref
-  //     "apps": {
-  //       "app_id1" : {
-  //         "name": "name of app1",
-  //         "icon": "path to locally saved icon file"
-  //       },
-  //       "app_id2": {
-  //         "name": "name of app2",
-  //         "icon": "path to locally saved icon file"
-  //       },
-  //       ...
-  //     }
+  //     "auto_login_enabled": true  //
   //   }
   static const char kKioskDictionaryName[];
   static const char kKeyApps[];
+  static const char kKeyAutoLoginState[];
 
   // Sub directory under DIR_USER_DATA to store cached icon files.
   static const char kIconCacheDir[];
@@ -75,11 +82,28 @@ class KioskAppManager : public content::NotificationObserver,
   // Registers kiosk app entries in local state.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
+  // Initiates reading of consumer kiosk mode status.
+  void GetConsumerKioskModeStatus(
+      const GetConsumerKioskModeStatusCallback& callback);
+
+  // Enables consumer kiosk mode feature. Upon completion, |callback| will be
+  // invoked with outcome of this operation.
+  void EnableConsumerModeKiosk(const EnableKioskModeCallback& callback);
+
   // Returns auto launcher app id or an empty string if there is none.
   std::string GetAutoLaunchApp() const;
 
   // Sets |app_id| as the app to auto launch at start up.
   void SetAutoLaunchApp(const std::string& app_id);
+
+  // Returns true if there is a pending auto-launch request.
+  bool IsAutoLaunchRequested() const;
+
+  // Returns true if owner/policy enabled auto launch.
+  bool IsAutoLaunchEnabled() const;
+
+  // Enable auto launch setter.
+  void SetEnableAutoLaunch(bool value);
 
   // Adds/removes a kiosk app by id. When removed, all locally cached data
   // will be removed as well.
@@ -109,6 +133,13 @@ class KioskAppManager : public content::NotificationObserver,
   friend class KioskAppManagerTest;
   friend class KioskTest;
 
+  enum AutoLoginState {
+    AUTOLOGIN_NONE      = 0,
+    AUTOLOGIN_REQUESTED = 1,
+    AUTOLOGIN_APPROVED  = 2,
+    AUTOLOGIN_REJECTED  = 3,
+  };
+
   KioskAppManager();
   virtual ~KioskAppManager();
 
@@ -118,7 +149,7 @@ class KioskAppManager : public content::NotificationObserver,
   // Gets KioskAppData for the given app id.
   const KioskAppData* GetAppData(const std::string& app_id) const;
 
-  // Update app data |apps_| based on |prefs_|.
+  // Update app data |apps_| based on CrosSettings.
   void UpdateAppData();
 
   // content::NotificationObserver overrides:
@@ -131,6 +162,28 @@ class KioskAppManager : public content::NotificationObserver,
   virtual void OnKioskAppDataChanged(const std::string& app_id) OVERRIDE;
   virtual void OnKioskAppDataLoadFailure(const std::string& app_id) OVERRIDE;
 
+  // Callback for EnterpriseInstallAttributes::LockDevice() during
+  // EnableConsumerModeKiosk() call.
+  void OnLockDevice(
+      const EnableKioskModeCallback& callback,
+      policy::EnterpriseInstallAttributes::LockResult result);
+
+  // Callback for EnterpriseInstallAttributes::ReadImmutableAttributes() during
+  // GetConsumerKioskModeStatus() call.
+  void OnReadImmutableAttributes(
+      const GetConsumerKioskModeStatusCallback& callback);
+
+  // Callback for reading handling checks of the owner public.
+  void OnOwnerFileChecked(
+      const GetConsumerKioskModeStatusCallback& callback,
+      bool *owner_present);
+
+  // Reads/writes auto login state from/to local state.
+  AutoLoginState GetAutoLoginState() const;
+  void SetAutoLoginState(AutoLoginState state);
+
+  // True if machine ownership is already established.
+  bool ownership_established_;
   ScopedVector<KioskAppData> apps_;
   std::string auto_launch_app_id_;
   ObserverList<KioskAppManagerObserver, true> observers_;

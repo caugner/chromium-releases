@@ -22,7 +22,7 @@ class QuotaPermissionContext;
 }
 
 namespace extensions {
-class Extension;
+class BrowserPermissionsPolicyDelegate;
 }
 
 namespace user_prefs {
@@ -59,9 +59,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool* in_memory) OVERRIDE;
   virtual content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) OVERRIDE;
-  virtual void GuestWebContentsCreated(
+  virtual void GuestWebContentsAttached(
       content::WebContents* guest_web_contents,
-      content::WebContents* embedder_web_contents) OVERRIDE;
+      content::WebContents* embedder_web_contents,
+      int browser_plugin_instance_id,
+      const base::DictionaryValue& extra_params) OVERRIDE;
   virtual void RenderProcessHostCreated(
       content::RenderProcessHost* host) OVERRIDE;
   virtual bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
@@ -84,8 +86,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool in_memory,
       content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
   virtual bool IsHandledURL(const GURL& url) OVERRIDE;
+  virtual bool CanCommitURL(content::RenderProcessHost* process_host,
+                            const GURL& url) OVERRIDE;
   virtual bool IsSuitableHost(content::RenderProcessHost* process_host,
-                              const GURL& url) OVERRIDE;
+                              const GURL& site_url) OVERRIDE;
   virtual bool ShouldTryToUseExistingProcessHost(
       content::BrowserContext* browser_context, const GURL& url) OVERRIDE;
   virtual void SiteInstanceGotProcess(
@@ -155,7 +159,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool overridable,
       bool strict_enforcement,
       const base::Callback<void(bool)>& callback,
-      bool* cancel_request) OVERRIDE;
+      content::CertificateRequestResultType* request) OVERRIDE;
   virtual void SelectClientCertificate(
       int render_process_id,
       int render_view_id,
@@ -225,6 +229,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual bool AllowPepperSocketAPI(
       content::BrowserContext* browser_context,
       const GURL& url,
+      bool private_api,
       const content::SocketPermissionRequest& params) OVERRIDE;
   virtual base::FilePath GetHyphenDictionaryDirectory() OVERRIDE;
   virtual ui::SelectFilePolicy* CreateSelectFilePolicy(
@@ -254,8 +259,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 #endif
 
  private:
+#if defined(ENABLE_PLUGINS)
   // Set of origins that can use TCP/UDP private APIs from NaCl.
   std::set<std::string> allowed_socket_origins_;
+#endif
+  scoped_ptr<extensions::BrowserPermissionsPolicyDelegate>
+      permissions_policy_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentBrowserClient);
 };

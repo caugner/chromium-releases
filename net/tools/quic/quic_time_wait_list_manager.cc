@@ -6,7 +6,7 @@
 
 #include <errno.h>
 
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "net/base/ip_endpoint.h"
@@ -154,7 +154,7 @@ void QuicTimeWaitListManager::OnError(QuicFramer* framer) {
 }
 
 bool QuicTimeWaitListManager::OnProtocolVersionMismatch(
-    QuicVersionTag received_version) {
+    QuicTag received_version) {
   // Drop such packets whose version don't match.
   return false;
 }

@@ -8,11 +8,13 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/simple_thread.h"
 #include "ipc/ipc_test_sink.h"
 #include "native_client/src/trusted/desc/nacl_desc_custom.h"
+#include "native_client/src/trusted/service_runtime/include/sys/fcntl.h"
+#include "ppapi/c/ppb_file_io.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -29,7 +31,7 @@ class NaClIPCAdapterTest : public testing::Test {
     // loop instead of using a real IO thread. This should work OK since we do
     // not need real IPC for the tests.
     adapter_ = new NaClIPCAdapter(scoped_ptr<IPC::Channel>(sink_),
-                                  base::MessageLoopProxy::current());
+                                  base::MessageLoopProxy::current().get());
   }
   virtual void TearDown() OVERRIDE {
     sink_ = NULL;  // This pointer is actually owned by the IPCAdapter.
@@ -53,7 +55,7 @@ class NaClIPCAdapterTest : public testing::Test {
     return adapter_->Send(&msg);
   }
 
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
 
   scoped_refptr<NaClIPCAdapter> adapter_;
 
@@ -284,7 +286,7 @@ TEST_F(NaClIPCAdapterTest, ReadWithChannelError) {
    private:
     scoped_refptr<NaClIPCAdapter> adapter_;
   };
-  MyThread thread(adapter_);
+  MyThread thread(adapter_.get());
 
   // IMPORTANT: do not return early from here down (including ASSERT_*) because
   // the thread needs to joined or it will assert.
@@ -306,3 +308,37 @@ TEST_F(NaClIPCAdapterTest, ReadWithChannelError) {
   thread.Join();
 }
 
+// Tests that TranslatePepperFileOpenFlags translates pepper read/write open
+// flags into NaCl open flags correctly.
+TEST_F(NaClIPCAdapterTest, TranslatePepperFileReadWriteOpenFlags) {
+  EXPECT_EQ(NACL_ABI_O_RDONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(PP_FILEOPENFLAG_READ));
+  EXPECT_EQ(NACL_ABI_O_WRONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(PP_FILEOPENFLAG_WRITE));
+  EXPECT_EQ(NACL_ABI_O_RDWR,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(
+          PP_FILEOPENFLAG_READ | PP_FILEOPENFLAG_WRITE));
+
+  // The flags other than PP_FILEOPENFLAG_READ and PP_FILEOPENFLAG_WRITE are
+  // discared.
+  EXPECT_EQ(NACL_ABI_O_WRONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(
+          PP_FILEOPENFLAG_WRITE | PP_FILEOPENFLAG_CREATE));
+  EXPECT_EQ(NACL_ABI_O_WRONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(
+          PP_FILEOPENFLAG_WRITE | PP_FILEOPENFLAG_TRUNCATE));
+  EXPECT_EQ(NACL_ABI_O_WRONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(
+          PP_FILEOPENFLAG_WRITE | PP_FILEOPENFLAG_EXCLUSIVE));
+
+  // If neither of PP_FILEOPENFLAG_READ and PP_FILEOPENFLAG_WRITE is set, falls
+  // back NACL_ABI_O_READONLY
+  EXPECT_EQ(NACL_ABI_O_RDONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(PP_FILEOPENFLAG_CREATE));
+  EXPECT_EQ(NACL_ABI_O_RDONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(
+          PP_FILEOPENFLAG_TRUNCATE));
+  EXPECT_EQ(NACL_ABI_O_RDONLY,
+      TranslatePepperFileReadWriteOpenFlagsForTesting(
+          PP_FILEOPENFLAG_EXCLUSIVE));
+}

@@ -10,6 +10,7 @@ from telemetry.core import util
 from telemetry.core import exceptions
 from telemetry.core.chrome import inspector_console
 from telemetry.core.chrome import inspector_memory
+from telemetry.core.chrome import inspector_network
 from telemetry.core.chrome import inspector_page
 from telemetry.core.chrome import inspector_runtime
 from telemetry.core.chrome import inspector_timeline
@@ -35,6 +36,7 @@ class InspectorBackend(object):
     self._page = inspector_page.InspectorPage(self)
     self._runtime = inspector_runtime.InspectorRuntime(self)
     self._timeline = inspector_timeline.InspectorTimeline(self)
+    self._network = inspector_network.InspectorNetwork(self)
 
   def __del__(self):
     self.Disconnect()
@@ -199,6 +201,11 @@ class InspectorBackend(object):
   def StopTimelineRecording(self):
     self._timeline.Stop()
 
+  # Network public methods.
+
+  def ClearCache(self):
+    self._network.ClearCache()
+
   # Methods used internally by other backends.
 
   def DispatchNotifications(self, timeout=10):
@@ -223,6 +230,8 @@ class InspectorBackend(object):
         res.get('params', {}).get('reason','') == 'replaced_with_devtools'):
       self._WaitForInspectorToGoAwayAndReconnect()
       return
+    if res['method'] == 'Inspector.targetCrashed':
+      raise exceptions.TabCrashException()
 
     mname = res['method']
     dot_pos = mname.find('.')

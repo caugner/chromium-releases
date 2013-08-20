@@ -15,7 +15,7 @@ class TokenService;
 
 namespace content {
 class NavigationController;
-}  // namespace content
+}
 
 // This is the actual infobar displayed to prompt the user to auto-login.
 class AutoLoginInfoBarDelegate : public ConfirmInfoBarDelegate,
@@ -26,7 +26,7 @@ class AutoLoginInfoBarDelegate : public ConfirmInfoBarDelegate,
     ~Params();
 
     // Information from a parsed header.
-    components::auto_login::HeaderData header;
+    auto_login_parser::HeaderData header;
 
     // Username to display in the infobar indicating user to be logged in as.
     // This is initially fetched from sign-in on non-Android platforms. Note
@@ -37,13 +37,12 @@ class AutoLoginInfoBarDelegate : public ConfirmInfoBarDelegate,
   // Creates an autologin delegate and adds it to |infobar_service|.
   static void Create(InfoBarService* infobar_service, const Params& params);
 
-  // All the methods below are used by the Android implementation of the
-  // AutoLogin bar on the app side.
-  string16 GetMessageText(const std::string& username) const;
+ protected:
+  AutoLoginInfoBarDelegate(InfoBarService* owner, const Params& params);
+  virtual ~AutoLoginInfoBarDelegate();
 
-  const std::string& realm() const { return params_.header.realm; }
-  const std::string& account() const { return params_.header.account; }
-  const std::string& args() const { return params_.header.args; }
+  // ConfirmInfoBarDelegate:
+  virtual string16 GetMessageText() const OVERRIDE;
 
  private:
   // Enum values used for UMA histograms.
@@ -57,15 +56,11 @@ class AutoLoginInfoBarDelegate : public ConfirmInfoBarDelegate,
     HISTOGRAM_MAX
   };
 
-  AutoLoginInfoBarDelegate(InfoBarService* owner, const Params& params);
-  virtual ~AutoLoginInfoBarDelegate();
-
   // ConfirmInfoBarDelegate:
   virtual void InfoBarDismissed() OVERRIDE;
-  virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual int GetIconID() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
   virtual AutoLoginInfoBarDelegate* AsAutoLoginInfoBarDelegate() OVERRIDE;
-  virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;

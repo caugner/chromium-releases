@@ -21,25 +21,24 @@ class MockAutofillDialogController : public AutofillDialogController {
   virtual string16 EditSuggestionText() const OVERRIDE;
   virtual string16 CancelButtonText() const OVERRIDE;
   virtual string16 ConfirmButtonText() const OVERRIDE;
-  virtual string16 CancelSignInText() const OVERRIDE;
   virtual string16 SaveLocallyText() const OVERRIDE;
-  virtual string16 ProgressBarText() const OVERRIDE;
   virtual string16 LegalDocumentsText() OVERRIDE;
   virtual DialogSignedInState SignedInState() const OVERRIDE;
   virtual bool ShouldShowSpinner() const OVERRIDE;
   virtual bool ShouldOfferToSaveInChrome() const OVERRIDE;
   MOCK_METHOD0(MenuModelForAccountChooser, ui::MenuModel*());
   virtual gfx::Image AccountChooserImage() OVERRIDE;
-  virtual bool AutocheckoutIsRunning() const OVERRIDE;
-  virtual bool HadAutocheckoutError() const OVERRIDE;
+  virtual bool ShouldShowProgressBar() const OVERRIDE;
+  virtual int GetDialogButtons() const OVERRIDE;
+  virtual bool ShouldShowDetailArea() const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual const std::vector<ui::Range>& LegalDocumentLinks() OVERRIDE;
   virtual bool SectionIsActive(DialogSection section) const OVERRIDE;
-  virtual const DetailInputs& RequestedFieldsForSection(
-      DialogSection section) const OVERRIDE;
-  virtual ui::ComboboxModel* ComboboxModelForAutofillType(
-      AutofillFieldType type) OVERRIDE;
-  virtual ui::MenuModel* MenuModelForSection(DialogSection section) OVERRIDE;
+  MOCK_CONST_METHOD1(RequestedFieldsForSection,
+                     const DetailInputs&(DialogSection));
+  MOCK_METHOD1(ComboboxModelForAutofillType,
+               ui::ComboboxModel*(AutofillFieldType));
+  MOCK_METHOD1(MenuModelForSection, ui::MenuModel*(DialogSection));
   virtual string16 LabelForSection(DialogSection section) const OVERRIDE;
   virtual SuggestionState SuggestionStateForSection(
       DialogSection section) OVERRIDE;
@@ -47,12 +46,16 @@ class MockAutofillDialogController : public AutofillDialogController {
   virtual void EditCancelledForSection(DialogSection section) OVERRIDE;
   virtual gfx::Image IconForField(AutofillFieldType type,
                                   const string16& user_input) const OVERRIDE;
-  virtual bool InputIsValid(AutofillFieldType type,
-                            const string16& value) const OVERRIDE;
+  virtual string16 InputValidityMessage(
+      DialogSection section,
+      AutofillFieldType type,
+      const string16& value) OVERRIDE;
   virtual ValidityData InputsAreValid(
+      DialogSection section,
       const DetailOutputMap& inputs,
-      ValidationType validation_type) const OVERRIDE;
-  virtual void UserEditedOrActivatedInput(const DetailInput* input,
+      ValidationType validation_type) OVERRIDE;
+  virtual void UserEditedOrActivatedInput(DialogSection section,
+                                          const DetailInput* input,
                                           gfx::NativeView parent_view,
                                           const gfx::Rect& content_bounds,
                                           const string16& field_contents,
@@ -62,13 +65,16 @@ class MockAutofillDialogController : public AutofillDialogController {
 
   virtual void FocusMoved() OVERRIDE;
 
+  virtual gfx::Image SplashPageImage() const OVERRIDE;
+
   virtual void ViewClosed() OVERRIDE;
 
-  virtual std::vector<DialogNotification>
-      CurrentNotifications() const OVERRIDE;
+  virtual std::vector<DialogNotification> CurrentNotifications() OVERRIDE;
 
-  virtual void StartSignInFlow() OVERRIDE;
-  virtual void EndSignInFlow() OVERRIDE;
+  virtual std::vector<DialogAutocheckoutStep> CurrentAutocheckoutSteps()
+      const OVERRIDE;
+
+  virtual void SignInLinkClicked() OVERRIDE;
   virtual void NotificationCheckboxStateChanged(DialogNotification::Type type,
                                                 bool checked) OVERRIDE;
 
@@ -79,8 +85,8 @@ class MockAutofillDialogController : public AutofillDialogController {
   MOCK_METHOD0(profile, Profile*());
   virtual content::WebContents* web_contents() OVERRIDE;
  private:
+  DetailInputs default_inputs_;
   std::vector<ui::Range> range_;
-  DetailInputs inputs_;
 };
 
 }  // namespace autofill

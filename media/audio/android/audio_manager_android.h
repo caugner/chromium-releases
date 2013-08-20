@@ -24,7 +24,8 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
       const std::string& device_id) OVERRIDE;
 
   virtual AudioOutputStream* MakeAudioOutputStream(
-      const AudioParameters& params) OVERRIDE;
+      const AudioParameters& params,
+      const std::string& input_device_id) OVERRIDE;
   virtual AudioInputStream* MakeAudioInputStream(
       const AudioParameters& params, const std::string& device_id) OVERRIDE;
   virtual void ReleaseOutputStream(AudioOutputStream* stream) OVERRIDE;
@@ -34,7 +35,8 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
   virtual AudioOutputStream* MakeLinearOutputStream(
       const AudioParameters& params) OVERRIDE;
   virtual AudioOutputStream* MakeLowLatencyOutputStream(
-      const AudioParameters& params) OVERRIDE;
+      const AudioParameters& params,
+      const std::string& input_device_id) OVERRIDE;
   virtual AudioInputStream* MakeLinearInputStream(
       const AudioParameters& params, const std::string& device_id) OVERRIDE;
   virtual AudioInputStream* MakeLowLatencyInputStream(
@@ -52,6 +54,10 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
   void SetAudioMode(int mode);
   void RegisterHeadsetReceiver();
   void UnregisterHeadsetReceiver();
+  int GetNativeOutputSampleRate();
+  bool IsAudioLowLatencySupported();
+  int GetAudioLowLatencyOutputFrameSize();
+  int GetOptimalOutputFrameSize(int sample_rate, int channels);
 
   // Java AudioManager instance.
   base::android::ScopedJavaGlobalRef<jobject> j_audio_manager_;

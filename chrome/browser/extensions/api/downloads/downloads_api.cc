@@ -21,10 +21,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_danger_prompt.h"
@@ -47,6 +47,7 @@
 #include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/downloads.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_save_info.h"
@@ -59,6 +60,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_util.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -214,7 +216,7 @@ scoped_ptr<base::DictionaryValue> DownloadItemToJSON(
   const GURL& url = download_item->GetOriginalUrl();
   json->SetString(kUrlKey, (url.is_valid() ? url.spec() : std::string()));
   json->SetString(kFilenameKey,
-                  download_item->GetFullPath().LossyDisplayName());
+                  download_item->GetTargetFilePath().LossyDisplayName());
   json->SetString(kDangerKey, DangerString(download_item->GetDangerType()));
   if (download_item->GetDangerType() !=
       content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS)
@@ -374,7 +376,9 @@ DownloadItem* GetDownloadIfInProgress(
     bool include_incognito,
     int id) {
   DownloadItem* download_item = GetDownload(profile, include_incognito, id);
-  return download_item && download_item->IsInProgress() ? download_item : NULL;
+  if (download_item && (download_item->GetState() == DownloadItem::IN_PROGRESS))
+    return download_item;
+  return NULL;
 }
 
 enum DownloadsFunctionName {
@@ -678,7 +682,7 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
     // determiners_ doesn't keep hogging memory.
     weak_ptr_factory_.reset(
         new base::WeakPtrFactory<ExtensionDownloadsEventRouterData>(this));
-    MessageLoopForUI::current()->PostDelayedTask(
+    base::MessageLoopForUI::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ExtensionDownloadsEventRouterData::ClearPendingDeterminers,
                    weak_ptr_factory_->GetWeakPtr()),
@@ -783,7 +787,7 @@ void OnDeterminingFilenameWillDispatchCallback(
     ExtensionDownloadsEventRouterData* data,
     Profile* profile,
     const extensions::Extension* extension,
-    ListValue* event_args) {
+    base::ListValue* event_args) {
   *any_determiners = true;
   base::Time installed = extensions::ExtensionSystem::Get(
       profile)->extension_service()->extension_prefs()->
@@ -806,7 +810,8 @@ bool DownloadsDownloadFunction::RunImpl() {
   if (!download_url.is_valid() ||
       (!download_url.SchemeIs("data") &&
        download_url.GetOrigin() != GetExtension()->url().GetOrigin() &&
-       !GetExtension()->HasHostPermission(download_url))) {
+       !extensions::PermissionsData::HasHostPermission(GetExtension(),
+                                                       download_url))) {
     error_ = download_extension_errors::kInvalidURLError;
     return false;
   }
@@ -1069,7 +1074,7 @@ void DownloadsAcceptDangerFunction::DangerPromptCallback(
     DownloadItem* download_item = GetDownloadIfInProgress(
         profile(), include_incognito(), download_id);
     if (download_item)
-      download_item->DangerousDownloadValidated();
+      download_item->ValidateDangerousDownload();
   }
   SendResponse(error_.empty());
 }
@@ -1103,7 +1108,7 @@ bool DownloadsOpenFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
   DownloadItem* download_item = GetDownload(
       profile(), include_incognito(), params->download_id);
-  if (!download_item || !download_item->IsComplete()) {
+  if (!download_item || download_item->GetState() != DownloadItem::COMPLETE) {
     error_ = download_extension_errors::kInvalidOperationError;
     return false;
   }
@@ -1130,11 +1135,12 @@ bool DownloadsDragFunction::RunImpl() {
   }
   RecordApiFunctions(DOWNLOADS_FUNCTION_DRAG);
   gfx::Image* icon = g_browser_process->icon_manager()->LookupIconFromFilepath(
-      download_item->GetUserVerifiedFilePath(), IconLoader::NORMAL);
+      download_item->GetTargetFilePath(), IconLoader::NORMAL);
   gfx::NativeView view = web_contents->GetView()->GetNativeView();
   {
     // Enable nested tasks during DnD, while |DragDownload()| blocks.
-    MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
+    base::MessageLoop::ScopedNestableTaskAllower allow(
+        base::MessageLoop::current());
     download_util::DragDownload(download_item, icon, view);
   }
   return true;
@@ -1294,7 +1300,7 @@ bool ExtensionDownloadsEventRouter::DetermineFilename(
     *error = download_extension_errors::kTooManyListenersError;
     return false;
   }
-  if (!item->IsInProgress()) {
+  if (item->GetState() != DownloadItem::IN_PROGRESS) {
     *error = download_extension_errors::kInvalidOperationError;
     return false;
   }

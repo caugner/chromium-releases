@@ -20,11 +20,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
@@ -74,7 +74,7 @@
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
+#include "third_party/WebKit/public/web/WebFindOptions.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
@@ -210,8 +210,8 @@ bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
       effective_channel_id,
       GetChannelMode(use_named_interface),
       this,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
-  channel_->AddFilter(automation_resource_message_filter_);
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get()));
+  channel_->AddFilter(automation_resource_message_filter_.get());
 
 #if defined(OS_CHROMEOS)
   if (use_initial_load_observers_) {

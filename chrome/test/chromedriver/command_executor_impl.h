@@ -25,12 +25,15 @@ class DictionaryValue;
 class Value;
 }
 
+class Adb;
 class ChromeLauncherImpl;
+class DeviceManager;
+class Log;
 class URLRequestContextGetter;
 
 class CommandExecutorImpl : public CommandExecutor {
  public:
-  CommandExecutorImpl();
+  explicit CommandExecutorImpl(Log* log);
   virtual ~CommandExecutorImpl();
 
   // Overridden from CommandExecutor:
@@ -48,11 +51,14 @@ class CommandExecutorImpl : public CommandExecutor {
       CommandExecutorImplTest, CommandThatDoesntSetValueOrSessionId);
   FRIEND_TEST_ALL_PREFIXES(CommandExecutorImplTest, CommandThatReturnsError);
 
+  Log* log_;
   base::Thread io_thread_;
   scoped_refptr<URLRequestContextGetter> context_getter_;
   SyncWebSocketFactory socket_factory_;
   SessionMap session_map_;
   SynchronizedMap<std::string, Command> command_map_;
+  scoped_ptr<Adb> adb_;
+  scoped_ptr<DeviceManager> device_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(CommandExecutorImpl);
 };

@@ -12,12 +12,12 @@
 #include "base/bind_helpers.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/crash_upload_list.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
@@ -33,7 +33,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "content/public/common/gpu_info.h"
+#include "gpu/config/gpu_info.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -90,7 +90,7 @@ class FlashDOMHandler : public WebUIMessageHandler,
   virtual void RegisterMessages() OVERRIDE;
 
   // CrashUploadList::Delegate implementation.
-  virtual void OnCrashListAvailable() OVERRIDE;
+  virtual void OnUploadListAvailable() OVERRIDE;
 
   // GpuDataManager::Observer implementation.
   virtual void OnGpuInfoUpdate() OVERRIDE;
@@ -142,7 +142,7 @@ FlashDOMHandler::FlashDOMHandler()
       has_plugin_info_(false) {
   // Request Crash data asynchronously.
   upload_list_ = CrashUploadList::Create(this);
-  upload_list_->LoadCrashListAsynchronously();
+  upload_list_->LoadUploadListAsynchronously();
 
   // Watch for changes in GPUInfo.
   GpuDataManager::GetInstance()->AddObserver(this);
@@ -167,6 +167,7 @@ FlashDOMHandler::FlashDOMHandler()
 
 FlashDOMHandler::~FlashDOMHandler() {
   GpuDataManager::GetInstance()->RemoveObserver(this);
+  upload_list_->ClearDelegate();
 }
 
 void FlashDOMHandler::RegisterMessages() {
@@ -175,7 +176,7 @@ void FlashDOMHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void FlashDOMHandler::OnCrashListAvailable() {
+void FlashDOMHandler::OnUploadListAvailable() {
   crash_list_available_ = true;
   MaybeRespondToPage();
 }
@@ -272,7 +273,7 @@ void FlashDOMHandler::MaybeRespondToPage() {
     AddPair(list, ASCIIToUTF16(kFlashPlugin), "Not installed");
   } else {
     PluginPrefs* plugin_prefs =
-        PluginPrefs::GetForProfile(Profile::FromWebUI(web_ui()));
+        PluginPrefs::GetForProfile(Profile::FromWebUI(web_ui())).get();
     bool found_enabled = false;
     for (size_t i = 0; i < info_array.size(); ++i) {
       string16 flash_version = info_array[i].version + ASCIIToUTF16(" ") +
@@ -295,14 +296,14 @@ void FlashDOMHandler::MaybeRespondToPage() {
   AddPair(list, string16(), "--- Crash data ---");
   bool crash_reporting_enabled = CrashesUI::CrashReportingUIEnabled();
   if (crash_reporting_enabled) {
-    std::vector<CrashUploadList::CrashInfo> crashes;
-    upload_list_->GetUploadedCrashes(10, &crashes);
+    std::vector<CrashUploadList::UploadInfo> crashes;
+    upload_list_->GetUploads(10, &crashes);
 
-    for (std::vector<CrashUploadList::CrashInfo>::iterator i = crashes.begin();
+    for (std::vector<CrashUploadList::UploadInfo>::iterator i = crashes.begin();
          i != crashes.end(); ++i) {
-      string16 crash_string(ASCIIToUTF16(i->crash_id));
+      string16 crash_string(ASCIIToUTF16(i->id));
       crash_string += ASCIIToUTF16(" ");
-      crash_string += base::TimeFormatFriendlyDateAndTime(i->crash_time);
+      crash_string += base::TimeFormatFriendlyDateAndTime(i->time);
       AddPair(list, ASCIIToUTF16("crash id"), crash_string);
     }
   } else {
@@ -314,7 +315,7 @@ void FlashDOMHandler::MaybeRespondToPage() {
 
   // GPU information.
   AddPair(list, string16(), "--- GPU information ---");
-  content::GPUInfo gpu_info = GpuDataManager::GetInstance()->GetGPUInfo();
+  gpu::GPUInfo gpu_info = GpuDataManager::GetInstance()->GetGPUInfo();
 
   std::string reason;
   if (!GpuDataManager::GetInstance()->GpuAccessAllowed(&reason)) {
@@ -322,8 +323,8 @@ void FlashDOMHandler::MaybeRespondToPage() {
             "GPU access is not allowed: " + reason);
   }
 #if defined(OS_WIN)
-  const content::DxDiagNode& node = gpu_info.dx_diagnostics;
-  for (std::map<std::string, content::DxDiagNode>::const_iterator it =
+  const gpu::DxDiagNode& node = gpu_info.dx_diagnostics;
+  for (std::map<std::string, gpu::DxDiagNode>::const_iterator it =
            node.children.begin();
        it != node.children.end();
        ++it) {

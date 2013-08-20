@@ -7,7 +7,7 @@
 #include <map>
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/panels/panel.h"
@@ -138,7 +138,7 @@ void NativePanelTestingWin::FinishDragTitlebar() {
 }
 
 bool NativePanelTestingWin::VerifyDrawingAttention() const {
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   return panel_view_->GetFrameView()->GetPaintState() ==
          PanelFrameView::PAINT_FOR_ATTENTION;
 }
@@ -225,24 +225,23 @@ panel::CornerStyle NativePanelTestingWin::GetWindowCornerStyle() const {
 }  // namespace
 
 // static
-NativePanel* Panel::CreateNativePanel(Panel* panel, const gfx::Rect& bounds) {
-  return new PanelView(panel, bounds);
+NativePanel* Panel::CreateNativePanel(Panel* panel,
+                                      const gfx::Rect& bounds,
+                                      bool always_on_top) {
+  return new PanelView(panel, bounds, always_on_top);
 }
 
 // The panel window has to be created as always-on-top. We cannot create it
 // as non-always-on-top and then change it to always-on-top because Windows
 // system might deny making a window always-on-top if the application is not
-// a foreground application. In addition, we do not know if the panel should
-// be created as always-on-top at its creation time. To solve this issue,
-// always_on_top_ is default to true because we can always change from
-// always-on-top to not always-on-top but not the other way around.
-PanelView::PanelView(Panel* panel, const gfx::Rect& bounds)
+// a foreground application.
+PanelView::PanelView(Panel* panel, const gfx::Rect& bounds, bool always_on_top)
     : panel_(panel),
       bounds_(bounds),
       window_(NULL),
       window_closed_(false),
       web_view_(NULL),
-      always_on_top_(true),
+      always_on_top_(always_on_top),
       focused_(false),
       user_resizing_(false),
 #if defined(OS_WIN)
@@ -257,7 +256,7 @@ PanelView::PanelView(Panel* panel, const gfx::Rect& bounds)
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
   params.delegate = this;
   params.remove_standard_frame = true;
-  params.keep_on_top = true;
+  params.keep_on_top = always_on_top;
   params.bounds = bounds;
   window_->Init(params);
   window_->set_frame_type(views::Widget::FRAME_TYPE_FORCE_CUSTOM);
@@ -569,6 +568,16 @@ void PanelView::FullScreenModeChanged(bool is_full_screen) {
       window_->Hide();
   } else {
     ShowPanelInactive();
+
+#if defined(OS_WIN)
+    // When hiding and showing again a top-most window that belongs to a
+    // background application (i.e. the application is not a foreground one),
+    // the window may loose top-most placement even though its WS_EX_TOPMOST
+    // bit is still set. Re-issuing SetWindowsPos() returns the window to its
+    // top-most placement.
+    if (always_on_top_)
+      window_->SetAlwaysOnTop(true);
+#endif
   }
 }
 
@@ -605,6 +614,9 @@ void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
   if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
 
+  if (panel_->collection()->type() != PanelCollection::DOCKED)
+    return;
+
   bool is_minimized = old_state != Panel::EXPANDED;
   bool will_be_minimized = new_state != Panel::EXPANDED;
   if (is_minimized == will_be_minimized)
@@ -614,8 +626,7 @@ void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
 
   if (!thumbnailer_.get()) {
     DCHECK(native_window);
-    thumbnailer_.reset(new TaskbarWindowThumbnailerWin(native_window));
-    ui::HWNDSubclass::AddFilterToTarget(native_window, thumbnailer_.get());
+    thumbnailer_.reset(new TaskbarWindowThumbnailerWin(native_window, NULL));
   }
 
   // Cache the image at this point.
@@ -629,8 +640,9 @@ void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
                      RDW_NOCHILDREN | RDW_INVALIDATE | RDW_UPDATENOW);
     }
 
-    std::vector<HWND> snapshot_hwnds;
-    thumbnailer_->Start(snapshot_hwnds);
+    // Start the thumbnailer and capture the snapshot now.
+    thumbnailer_->Start();
+    thumbnailer_->CaptureSnapshot();
   } else {
     force_to_paint_as_inactive_ = false;
     thumbnailer_->Stop();
@@ -914,6 +926,11 @@ void PanelView::OnWidgetDestroying(views::Widget* widget) {
 
 void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
 #if defined(OS_WIN)
+  // WM_NCACTIVATED could be sent when an active window is being destroyed on
+  // Windows. We need to guard against this.
+  if (window_closed_)
+    return;
+
   // The panel window is in focus (actually accepting keystrokes) if it is
   // active and belongs to a foreground application.
   bool focused = active &&

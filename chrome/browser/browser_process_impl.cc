@@ -6,14 +6,12 @@
 
 #include <algorithm>
 #include <map>
-#include <set>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/alias.h"
-#include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -89,6 +87,7 @@
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/message_center/message_center.h"
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -96,16 +95,9 @@
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
-#if defined(ENABLE_MESSAGE_CENTER)
-#include "ui/message_center/message_center.h"
-#endif
-
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "ui/views/focus/view_storage.h"
-#if defined(USE_AURA)
-#include "chrome/browser/metro_viewer/metro_viewer_process_host_win.h"
-#endif
 #elif defined(OS_MACOSX)
 #include "chrome/browser/chrome_browser_main_mac.h"
 #endif
@@ -113,12 +105,6 @@
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
 #endif
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/browser_process_platform_part_chromeos.h"
-#else
-#include "chrome/browser/browser_process_platform_part.h"
-#endif  // defined(OS_CHROMEOS)
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
@@ -130,6 +116,11 @@
 
 #if defined(OS_MACOSX)
 #include "apps/app_shim/app_shim_host_manager_mac.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
+#endif
+
+#if defined(ENABLE_WEBRTC)
+#include "chrome/browser/media/webrtc_log_uploader.h"
 #endif
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -203,9 +194,7 @@ BrowserProcessImpl::BrowserProcessImpl(
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
   ExtensionRendererState::GetInstance()->Init();
 
-#if defined(ENABLE_MESSAGE_CENTER)
   message_center::MessageCenter::Initialize();
-#endif
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
@@ -262,9 +251,7 @@ void BrowserProcessImpl::StartTearDown() {
 
   ExtensionRendererState::GetInstance()->Shutdown();
 
-#if defined(ENABLE_MESSAGE_CENTER)
   message_center::MessageCenter::Shutdown();
-#endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // The policy providers managed by |browser_policy_connector_| need to shut
@@ -308,9 +295,9 @@ void BrowserProcessImpl::PostDestroyThreads() {
 // our (other) recent requests (to save preferences).
 // Change the boolean so that the receiving thread will know that we did indeed
 // send the QuitTask that terminated the message loop.
-static void PostQuit(MessageLoop* message_loop) {
+static void PostQuit(base::MessageLoop* message_loop) {
   g_end_session_file_thread_has_completed = true;
-  message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  message_loop->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
 }
 #elif defined(USE_X11)
 static void Signal(base::WaitableEvent* event) {
@@ -350,14 +337,14 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
     print_job_manager_.reset();
 #endif
 
-    CHECK(MessageLoop::current()->is_running());
+    CHECK(base::MessageLoop::current()->is_running());
 
 #if defined(OS_MACOSX)
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(ChromeBrowserMainPartsMac::DidEndMainMessageLoop));
 #endif
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
   return module_ref_count_;
 }
@@ -399,15 +386,17 @@ void BrowserProcessImpl::EndSession() {
 
 #elif defined(OS_WIN)
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      base::Bind(PostQuit, MessageLoop::current()));
+      base::Bind(PostQuit, base::MessageLoop::current()));
   int quits_received = 0;
   do {
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
     ++quits_received;
   } while (!g_end_session_file_thread_has_completed);
   // If we did get extra quits, then we should re-post them to the message loop.
-  while (--quits_received > 0)
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  while (--quits_received > 0) {
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
+  }
 #else
   NOTIMPLEMENTED();
 #endif
@@ -478,12 +467,10 @@ NotificationUIManager* BrowserProcessImpl::notification_ui_manager() {
   return notification_ui_manager_.get();
 }
 
-#if defined(ENABLE_MESSAGE_CENTER)
 message_center::MessageCenter* BrowserProcessImpl::message_center() {
   DCHECK(CalledOnValidThread());
   return message_center::MessageCenter::Get();
 }
-#endif
 
 policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
   DCHECK(CalledOnValidThread());
@@ -546,7 +533,6 @@ AutomationProviderList* BrowserProcessImpl::GetAutomationProviderList() {
 }
 
 void BrowserProcessImpl::CreateDevToolsHttpProtocolHandler(
-    Profile* profile,
     chrome::HostDesktopType host_desktop_type,
     const std::string& ip,
     int port,
@@ -557,7 +543,7 @@ void BrowserProcessImpl::CreateDevToolsHttpProtocolHandler(
   // is started with several profiles or existing browser process is reused.
   if (!remote_debugging_server_.get()) {
     remote_debugging_server_.reset(
-        new RemoteDebuggingServer(profile, host_desktop_type, ip, port,
+        new RemoteDebuggingServer(host_desktop_type, ip, port,
                                   frontend_url));
   }
 #endif
@@ -644,15 +630,17 @@ BrowserProcessImpl::media_file_system_registry() {
 #endif
 }
 
-#if !defined(OS_WIN)
-void BrowserProcessImpl::PlatformSpecificCommandLineProcessing(
-    const CommandLine& command_line) {
-}
-#endif
-
 bool BrowserProcessImpl::created_local_state() const {
     return created_local_state_;
 }
+
+#if defined(ENABLE_WEBRTC)
+WebRtcLogUploader* BrowserProcessImpl::webrtc_log_uploader() {
+  if (!webrtc_log_uploader_.get())
+    webrtc_log_uploader_.reset(new WebRtcLogUploader());
+  return webrtc_log_uploader_.get();
+}
+#endif
 
 // static
 void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
@@ -662,10 +650,6 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   // so we do it here.
   registry->RegisterIntegerPref(prefs::kMaxConnectionsPerProxy,
                                 net::kDefaultMaxSocketsPerProxyServer);
-
-  // This is observed by ChildProcessSecurityPolicy, which lives in content/
-  // though, so it can't register itself.
-  registry->RegisterListPref(prefs::kDisabledSchemes);
 
   registry->RegisterBooleanPref(prefs::kAllowCrossOriginAuthPrompt, false);
 
@@ -694,13 +678,18 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
       prefs::kMetricsReportingEnabled,
       GoogleUpdateSettings::GetCollectStatsConsent());
 #endif  // !defined(OS_CHROMEOS)
+
+#if defined(OS_ANDROID)
+  registry->RegisterBooleanPref(
+      prefs::kCrashReportingEnabled, false);
+#endif  // defined(OS_ANDROID)
 }
 
 DownloadRequestLimiter* BrowserProcessImpl::download_request_limiter() {
   DCHECK(CalledOnValidThread());
-  if (!download_request_limiter_)
+  if (!download_request_limiter_.get())
     download_request_limiter_ = new DownloadRequestLimiter();
-  return download_request_limiter_;
+  return download_request_limiter_.get();
 }
 
 BackgroundModeManager* BrowserProcessImpl::background_mode_manager() {
@@ -831,11 +820,11 @@ void BrowserProcessImpl::CreateLocalState() {
   scoped_refptr<PrefRegistrySimple> pref_registry = new PrefRegistrySimple;
 
   // Register local state preferences.
-  chrome::RegisterLocalState(pref_registry);
+  chrome::RegisterLocalState(pref_registry.get());
 
   local_state_.reset(
       chrome_prefs::CreateLocalState(local_state_path,
-                                     local_state_task_runner_,
+                                     local_state_task_runner_.get(),
                                      policy_service(),
                                      NULL,
                                      pref_registry,
@@ -855,12 +844,6 @@ void BrowserProcessImpl::CreateLocalState() {
       std::max(std::min(max_per_proxy, 99),
                net::ClientSocketPoolManager::max_sockets_per_group(
                    net::HttpNetworkSession::NORMAL_SOCKET_POOL)));
-
-  pref_change_registrar_.Add(
-      prefs::kDisabledSchemes,
-      base::Bind(&BrowserProcessImpl::ApplyDisabledSchemesPolicy,
-                 base::Unretained(this)));
-  ApplyDisabledSchemesPolicy();
 }
 
 void BrowserProcessImpl::PreCreateThreads() {
@@ -890,9 +873,12 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 #if defined(OS_POSIX)
   // Also find plugins in a user-specific plugins dir,
   // e.g. ~/.config/chromium/Plugins.
-  base::FilePath user_data_dir;
-  if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
-    plugin_service->AddExtraPluginDir(user_data_dir.Append("Plugins"));
+  const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
+  if (!cmd_line.HasSwitch(switches::kDisablePluginsDiscovery)) {
+    base::FilePath user_data_dir;
+    if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
+      plugin_service->AddExtraPluginDir(user_data_dir.Append("Plugins"));
+  }
 #endif
 
   // Triggers initialization of the singleton instance on UI thread.
@@ -921,6 +907,7 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 
 #if defined(OS_MACOSX)
   app_shim_host_manager_.reset(new AppShimHostManager);
+  AppListService::InitAll(NULL);
 #endif
 }
 
@@ -985,19 +972,6 @@ void BrowserProcessImpl::CreateSafeBrowsingService() {
   safe_browsing_service_ = SafeBrowsingService::CreateSafeBrowsingService();
   safe_browsing_service_->Initialize();
 #endif
-}
-
-void BrowserProcessImpl::ApplyDisabledSchemesPolicy() {
-  std::set<std::string> schemes;
-  const ListValue* scheme_list =
-      local_state()->GetList(prefs::kDisabledSchemes);
-  for (ListValue::const_iterator iter = scheme_list->begin();
-       iter != scheme_list->end(); ++iter) {
-    std::string scheme;
-    if ((*iter)->GetAsString(&scheme))
-      schemes.insert(scheme);
-  }
-  ChildProcessSecurityPolicy::GetInstance()->RegisterDisabledSchemes(schemes);
 }
 
 void BrowserProcessImpl::ApplyDefaultBrowserPolicy() {

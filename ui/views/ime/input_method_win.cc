@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/base/events/event_utils.h"
@@ -27,6 +27,7 @@ InputMethodWin::InputMethodWin(internal::InputMethodDelegate* delegate,
                                ui::InputMethod* host)
     : hwnd_(hwnd),
       active_(false),
+      is_candidate_popup_open_(false),
       direction_(base::i18n::UNKNOWN_DIRECTION),
       pending_requested_direction_(base::i18n::UNKNOWN_DIRECTION),
       host_(host) {
@@ -42,7 +43,7 @@ void InputMethodWin::Init(Widget* widget) {
   InputMethodBase::Init(widget);
 
   // Gets the initial input locale and text direction information.
-  OnInputLangChange(0, 0);
+  OnInputLocaleChanged();
 }
 
 void InputMethodWin::OnFocus() {
@@ -51,6 +52,54 @@ void InputMethodWin::OnFocus() {
 
 void InputMethodWin::OnBlur() {
   ConfirmCompositionText();
+}
+
+bool InputMethodWin::OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                              NativeEventResult* result) {
+  LRESULT original_result = 0;
+  BOOL handled = FALSE;
+  switch (event.message) {
+    case WM_IME_SETCONTEXT:
+      original_result = OnImeSetContext(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    case WM_IME_STARTCOMPOSITION:
+      original_result = OnImeStartComposition(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    case WM_IME_COMPOSITION:
+      original_result = OnImeComposition(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    case WM_IME_ENDCOMPOSITION:
+      original_result = OnImeEndComposition(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    case WM_IME_REQUEST:
+      original_result = OnImeRequest(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    case WM_IME_NOTIFY:
+      original_result = OnImeNotify(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    case WM_CHAR:
+    case WM_SYSCHAR:
+      original_result = OnChar(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    case WM_DEADCHAR:
+    case WM_SYSDEADCHAR:
+      original_result = OnDeadChar(
+          event.message, event.wParam, event.lParam, &handled);
+      break;
+    default:
+      NOTREACHED() << "Unknown IME message:" << event.message;
+      break;
+  }
+  if (result)
+    *result = original_result;
+  return !!handled;
 }
 
 void InputMethodWin::DispatchKeyEvent(const ui::KeyEvent& key) {
@@ -97,6 +146,13 @@ void InputMethodWin::CancelComposition(View* view) {
     ime_input_.CancelIME(hwnd_);
 }
 
+void InputMethodWin::OnInputLocaleChanged() {
+  active_ = ime_input_.SetInputLanguage();
+  locale_ = ime_input_.GetInputLanguageName();
+  direction_ = ime_input_.GetTextDirection();
+  OnInputMethodChanged();
+}
+
 std::string InputMethodWin::GetInputLocale() {
   return locale_;
 }
@@ -116,39 +172,8 @@ ui::TextInputClient* InputMethodWin::GetTextInputClient() const {
   return host_ ? host_->GetTextInputClient() : NULL;
 }
 
-
-LRESULT InputMethodWin::OnImeMessages(
-    UINT message, WPARAM w_param, LPARAM l_param, BOOL* handled) {
-  LRESULT result = 0;
-  switch (message) {
-    case WM_IME_SETCONTEXT:
-      result = OnImeSetContext(message, w_param, l_param, handled);
-      break;
-    case WM_IME_STARTCOMPOSITION:
-      result = OnImeStartComposition(message, w_param, l_param, handled);
-      break;
-    case WM_IME_COMPOSITION:
-      result = OnImeComposition(message, w_param, l_param, handled);
-      break;
-    case WM_IME_ENDCOMPOSITION:
-      result = OnImeEndComposition(message, w_param, l_param, handled);
-      break;
-    case WM_IME_REQUEST:
-      result = OnImeRequest(message, w_param, l_param, handled);
-      break;
-    case WM_CHAR:
-    case WM_SYSCHAR:
-      result = OnChar(message, w_param, l_param, handled);
-      break;
-    case WM_DEADCHAR:
-    case WM_SYSDEADCHAR:
-      result = OnDeadChar(message, w_param, l_param, handled);
-      break;
-    default:
-      NOTREACHED() << "Unknown IME message:" << message;
-      break;
-  }
-  return result;
+bool InputMethodWin::IsCandidatePopupOpen() const {
+  return is_candidate_popup_open_;
 }
 
 void InputMethodWin::OnWillChangeFocus(View* focused_before, View* focused) {
@@ -157,14 +182,6 @@ void InputMethodWin::OnWillChangeFocus(View* focused_before, View* focused) {
 
 void InputMethodWin::OnDidChangeFocus(View* focused_before, View* focused) {
   UpdateIMEState();
-}
-
-void InputMethodWin::OnInputLangChange(DWORD character_set,
-                                       HKL input_language_id) {
-  active_ = ime_input_.SetInputLanguage();
-  locale_ = ime_input_.GetInputLanguageName();
-  direction_ = ime_input_.GetTextDirection();
-  OnInputMethodChanged();
 }
 
 LRESULT InputMethodWin::OnImeSetContext(
@@ -264,6 +281,23 @@ LRESULT InputMethodWin::OnImeRequest(
     default:
       return 0;
   }
+}
+
+LRESULT InputMethodWin::OnImeNotify(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL* handled) {
+  *handled = FALSE;
+
+  // Update |is_candidate_popup_open_|, whether a candidate window is open.
+  switch (wparam) {
+  case IMN_OPENCANDIDATE:
+    is_candidate_popup_open_ = true;
+    break;
+  case IMN_CLOSECANDIDATE:
+    is_candidate_popup_open_ = false;
+    break;
+  }
+
+  return 0;
 }
 
 LRESULT InputMethodWin::OnChar(

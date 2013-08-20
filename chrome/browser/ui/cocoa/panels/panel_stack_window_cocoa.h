@@ -11,7 +11,7 @@
 #include <map>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/panels/native_panel_stack_window.h"
 #include "ui/gfx/rect.h"
@@ -48,6 +48,7 @@ class PanelStackWindowCocoa : public NativePanelStackWindow {
   virtual void Minimize() OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
   virtual void DrawSystemAttention(bool draw_attention) OVERRIDE;
+  virtual void OnPanelActivated(Panel* panel) OVERRIDE;
 
  private:
   typedef std::list<Panel*> Panels;
@@ -69,7 +70,7 @@ class PanelStackWindowCocoa : public NativePanelStackWindow {
   NativePanelStackWindowDelegate* delegate_;
 
   // The underlying window.
-  scoped_nsobject<NSWindow> window_;
+  base::scoped_nsobject<NSWindow> window_;
 
   Panels panels_;
 
@@ -84,7 +85,8 @@ class PanelStackWindowCocoa : public NativePanelStackWindow {
   // Used to animate the bounds changes at a synchronized pace.
   // Lifetime controlled manually, needs more than just |release| to terminate.
   NSViewAnimation* bounds_animation_;
-  scoped_nsobject<BatchBoundsAnimationDelegate> bounds_animation_delegate_;
+  base::scoped_nsobject<BatchBoundsAnimationDelegate>
+      bounds_animation_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelStackWindowCocoa);
 };

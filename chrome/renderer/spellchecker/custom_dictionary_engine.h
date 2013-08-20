@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 // Custom spellcheck dictionary. Words in this dictionary are always correctly
 // spelled. Words that are not in this dictionary may or may not be correctly
@@ -20,7 +20,7 @@ class CustomDictionaryEngine {
   ~CustomDictionaryEngine();
 
   // Initialize the custom dictionary engine.
-  void Init(const std::vector<std::string>& words);
+  void Init(const std::set<std::string>& words);
 
   // Spellcheck |text|. Assumes that another spelling engine has set
   // |misspelling_start| and |misspelling_len| to indicate a misspelling.

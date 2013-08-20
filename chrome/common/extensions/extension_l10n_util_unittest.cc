@@ -219,45 +219,37 @@ TEST(ExtensionL10nUtil, LoadMessageCatalogsDuplicateKeys) {
 
 // Caller owns the returned object.
 MessageBundle* CreateManifestBundle() {
-  linked_ptr<DictionaryValue> catalog(new DictionaryValue);
+  linked_ptr<base::DictionaryValue> catalog(new base::DictionaryValue);
 
-  DictionaryValue* name_tree = new DictionaryValue();
+  base::DictionaryValue* name_tree = new base::DictionaryValue();
   name_tree->SetString("message", "name");
   catalog->Set("name", name_tree);
 
-  DictionaryValue* description_tree = new DictionaryValue();
+  base::DictionaryValue* description_tree = new base::DictionaryValue();
   description_tree->SetString("message", "description");
   catalog->Set("description", description_tree);
 
-  DictionaryValue* action_title_tree = new DictionaryValue();
+  base::DictionaryValue* action_title_tree = new base::DictionaryValue();
   action_title_tree->SetString("message", "action title");
   catalog->Set("title", action_title_tree);
 
-  DictionaryValue* omnibox_keyword_tree = new DictionaryValue();
+  base::DictionaryValue* omnibox_keyword_tree = new base::DictionaryValue();
   omnibox_keyword_tree->SetString("message", "omnibox keyword");
   catalog->Set("omnibox_keyword", omnibox_keyword_tree);
 
-  DictionaryValue* file_handler_title_tree = new DictionaryValue();
+  base::DictionaryValue* file_handler_title_tree = new base::DictionaryValue();
   file_handler_title_tree->SetString("message", "file handler title");
   catalog->Set("file_handler_title", file_handler_title_tree);
 
-  DictionaryValue* launch_local_path_tree = new DictionaryValue();
+  base::DictionaryValue* launch_local_path_tree = new base::DictionaryValue();
   launch_local_path_tree->SetString("message", "main.html");
   catalog->Set("launch_local_path", launch_local_path_tree);
 
-  DictionaryValue* launch_web_url_tree = new DictionaryValue();
+  base::DictionaryValue* launch_web_url_tree = new base::DictionaryValue();
   launch_web_url_tree->SetString("message", "http://www.google.com/");
   catalog->Set("launch_web_url", launch_web_url_tree);
 
-  DictionaryValue* intent_title_tree = new DictionaryValue();
-  intent_title_tree->SetString("message", "intent title");
-  catalog->Set("intent_title", intent_title_tree);
-
-  DictionaryValue* intent_title_tree_2 = new DictionaryValue();
-  intent_title_tree_2->SetString("message", "intent title 2");
-  catalog->Set("intent_title2", intent_title_tree_2);
-
-  std::vector<linked_ptr<DictionaryValue> > catalogs;
+  std::vector<linked_ptr<base::DictionaryValue> > catalogs;
   catalogs.push_back(catalog);
 
   std::string error;
@@ -269,7 +261,7 @@ MessageBundle* CreateManifestBundle() {
 }
 
 TEST(ExtensionL10nUtil, LocalizeEmptyManifest) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   std::string error;
   scoped_ptr<MessageBundle> messages(CreateManifestBundle());
 
@@ -279,7 +271,7 @@ TEST(ExtensionL10nUtil, LocalizeEmptyManifest) {
 }
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithoutNameMsgAndEmptyDescription) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "no __MSG");
   std::string error;
   scoped_ptr<MessageBundle> messages(CreateManifestBundle());
@@ -297,7 +289,7 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithoutNameMsgAndEmptyDescription) {
 }
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithNameMsgAndEmptyDescription) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "__MSG_name__");
   std::string error;
   scoped_ptr<MessageBundle> messages(CreateManifestBundle());
@@ -315,7 +307,7 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithNameMsgAndEmptyDescription) {
 }
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithLocalLaunchURL) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "name");
   manifest.SetString(keys::kLaunchLocalPath, "__MSG_launch_local_path__");
   std::string error;
@@ -332,7 +324,7 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithLocalLaunchURL) {
 }
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithHostedLaunchURL) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "name");
   manifest.SetString(keys::kLaunchWebURL, "__MSG_launch_web_url__");
   std::string error;
@@ -348,72 +340,8 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithHostedLaunchURL) {
   EXPECT_TRUE(error.empty());
 }
 
-TEST(ExtensionL10nUtil, LocalizeManifestWithIntents) {
-  DictionaryValue manifest;
-  DictionaryValue* intents = new DictionaryValue;
-  DictionaryValue* action = new DictionaryValue;
-
-  action->SetString(keys::kIntentTitle, "__MSG_intent_title__");
-  intents->Set("share", action);
-  manifest.SetString(keys::kName, "name");
-  manifest.Set(keys::kIntents, intents);
-
-  std::string error;
-  scoped_ptr<MessageBundle> messages(CreateManifestBundle());
-
-  EXPECT_TRUE(
-      extension_l10n_util::LocalizeManifest(*messages, &manifest, &error));
-
-  std::string result;
-  ASSERT_TRUE(manifest.GetString("intents.share.title", &result));
-  EXPECT_EQ("intent title", result);
-
-  EXPECT_TRUE(error.empty());
-}
-
-TEST(ExtensionL10nUtil, LocalizeManifestWithIntentsList) {
-  DictionaryValue manifest;
-  DictionaryValue* intents = new DictionaryValue;
-  ListValue* actions = new ListValue;
-  DictionaryValue* action1 = new DictionaryValue;
-  DictionaryValue* action2 = new DictionaryValue;
-
-  action1->SetString(keys::kIntentTitle, "__MSG_intent_title__");
-  action2->SetString(keys::kIntentTitle, "__MSG_intent_title2__");
-  actions->Append(action1);
-  actions->Append(action2);
-  intents->Set("share", actions);
-  manifest.SetString(keys::kName, "name");
-  manifest.Set(keys::kIntents, intents);
-
-  std::string error;
-  scoped_ptr<MessageBundle> messages(CreateManifestBundle());
-
-  EXPECT_TRUE(
-      extension_l10n_util::LocalizeManifest(*messages, &manifest, &error));
-
-  std::string result;
-  ListValue* l10n_actions = NULL;
-  ASSERT_TRUE(manifest.GetList("intents.share", &l10n_actions));
-
-  DictionaryValue* l10n_action = NULL;
-  ASSERT_TRUE(l10n_actions->GetDictionary(0, &l10n_action));
-
-  ASSERT_TRUE(l10n_action->GetString(keys::kIntentTitle, &result));
-  EXPECT_EQ("intent title", result);
-
-  l10n_action = NULL;
-  ASSERT_TRUE(l10n_actions->GetDictionary(1, &l10n_action));
-
-  ASSERT_TRUE(l10n_action->GetString(keys::kIntentTitle, &result));
-  EXPECT_EQ("intent title 2", result);
-
-  EXPECT_TRUE(error.empty());
-}
-
-
 TEST(ExtensionL10nUtil, LocalizeManifestWithBadNameMsg) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "__MSG_name_is_bad__");
   manifest.SetString(keys::kDescription, "__MSG_description__");
   std::string error;
@@ -433,7 +361,7 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithBadNameMsg) {
 }
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithNameDescriptionDefaultTitleMsgs) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "__MSG_name__");
   manifest.SetString(keys::kDescription, "__MSG_description__");
   std::string action_title(keys::kBrowserAction);
@@ -461,7 +389,7 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithNameDescriptionDefaultTitleMsgs) {
 }
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithNameDescriptionOmniboxMsgs) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "__MSG_name__");
   manifest.SetString(keys::kDescription, "__MSG_description__");
   manifest.SetString(keys::kOmniboxKeyword, "__MSG_omnibox_keyword__");
@@ -486,12 +414,12 @@ TEST(ExtensionL10nUtil, LocalizeManifestWithNameDescriptionOmniboxMsgs) {
 }
 
 TEST(ExtensionL10nUtil, LocalizeManifestWithNameDescriptionFileHandlerTitle) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kName, "__MSG_name__");
   manifest.SetString(keys::kDescription, "__MSG_description__");
-  ListValue* handlers = new ListValue();
+  base::ListValue* handlers = new base::ListValue();
   manifest.Set(keys::kFileBrowserHandlers, handlers);
-  DictionaryValue* handler = new DictionaryValue();
+  base::DictionaryValue* handler = new base::DictionaryValue();
   handlers->Append(handler);
   handler->SetString(keys::kPageActionDefaultTitle,
                      "__MSG_file_handler_title__");
@@ -522,20 +450,20 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithNullManifest) {
 
 // Try with default and current locales missing.
 TEST(ExtensionL10nUtil, ShouldRelocalizeManifestEmptyManifest) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   EXPECT_FALSE(extension_l10n_util::ShouldRelocalizeManifest(&manifest));
 }
 
 // Try with missing current_locale.
 TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithDefaultLocale) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kDefaultLocale, "en_US");
   EXPECT_TRUE(extension_l10n_util::ShouldRelocalizeManifest(&manifest));
 }
 
 // Try with missing default_locale.
 TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithCurrentLocale) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kCurrentLocale,
                      extension_l10n_util::CurrentLocaleOrDefault());
   EXPECT_FALSE(extension_l10n_util::ShouldRelocalizeManifest(&manifest));
@@ -543,7 +471,7 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestWithCurrentLocale) {
 
 // Try with all data present, but with same current_locale as system locale.
 TEST(ExtensionL10nUtil, ShouldRelocalizeManifestSameCurrentLocale) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kDefaultLocale, "en_US");
   manifest.SetString(keys::kCurrentLocale,
                      extension_l10n_util::CurrentLocaleOrDefault());
@@ -552,7 +480,7 @@ TEST(ExtensionL10nUtil, ShouldRelocalizeManifestSameCurrentLocale) {
 
 // Try with all data present, but with different current_locale.
 TEST(ExtensionL10nUtil, ShouldRelocalizeManifestDifferentCurrentLocale) {
-  DictionaryValue manifest;
+  base::DictionaryValue manifest;
   manifest.SetString(keys::kDefaultLocale, "en_US");
   manifest.SetString(keys::kCurrentLocale, "sr");
   EXPECT_TRUE(extension_l10n_util::ShouldRelocalizeManifest(&manifest));

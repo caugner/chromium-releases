@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/autofill/account_chooser_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/autofill/browser/autofill_metrics.h"
+#include "components/autofill/core/browser/autofill_metrics.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -100,7 +100,7 @@ TEST_F(AccountChooserModelTest, HandlesError) {
   ASSERT_TRUE(model()->IsCommandIdEnabled(
       TestAccountChooserModel::kActiveWalletItemId));
 
-  model()->SetHadWalletError();
+  model()->SetHadWalletError(ASCIIToUTF16("Error"));
   EXPECT_FALSE(model()->WalletIsSelected());
   EXPECT_FALSE(model()->IsCommandIdEnabled(
       TestAccountChooserModel::kActiveWalletItemId));

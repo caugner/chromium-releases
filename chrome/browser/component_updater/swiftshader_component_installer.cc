@@ -9,17 +9,18 @@
 #include "base/compiler_specific.h"
 #include "base/cpu.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
-#include "content/public/common/gpu_feature_type.h"
+#include "gpu/config/gpu_feature_type.h"
 
 using content::BrowserThread;
 using content::GpuDataManager;
@@ -63,8 +64,8 @@ bool GetLatestSwiftShaderDirectory(base::FilePath* result,
                                    std::vector<base::FilePath>* older_dirs) {
   base::FilePath base_dir = GetSwiftShaderBaseDirectory();
   bool found = false;
-  file_util::FileEnumerator
-      file_enumerator(base_dir, false, file_util::FileEnumerator::DIRECTORIES);
+  base::FileEnumerator
+      file_enumerator(base_dir, false, base::FileEnumerator::DIRECTORIES);
   for (base::FilePath path = file_enumerator.Next(); !path.value().empty();
        path = file_enumerator.Next()) {
     Version version(path.BaseName().MaybeAsASCII());
@@ -103,6 +104,9 @@ class SwiftShaderComponentInstaller : public ComponentInstaller {
 
   virtual bool Install(const base::DictionaryValue& manifest,
                        const base::FilePath& unpack_path) OVERRIDE;
+
+  virtual bool GetInstalledFile(const std::string& file,
+                                base::FilePath* installed_file) OVERRIDE;
 
  private:
   Version current_version_;
@@ -148,6 +152,11 @@ bool SwiftShaderComponentInstaller::Install(
   return true;
 }
 
+bool SwiftShaderComponentInstaller::GetInstalledFile(
+    const std::string& file, base::FilePath* installed_file) {
+  return false;
+}
+
 void FinishSwiftShaderUpdateRegistration(ComponentUpdateService* cus,
                                          const Version& version) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -180,7 +189,7 @@ void UpdateChecker::OnGpuInfoUpdate() {
   GpuDataManager *gpu_data_manager = GpuDataManager::GetInstance();
 
   if (!gpu_data_manager->GpuAccessAllowed(NULL) ||
-      gpu_data_manager->IsFeatureBlacklisted(content::GPU_FEATURE_TYPE_WEBGL) ||
+      gpu_data_manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL) ||
       gpu_data_manager->ShouldUseSwiftShader()) {
     gpu_data_manager->RemoveObserver(this);
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));

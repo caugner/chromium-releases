@@ -45,15 +45,18 @@ class InputEventRecorder {
     records_.clear();
   }
 
-  void HandleInputEvent(int routing_id, const WebInputEvent* event) {
+  InputEventAckState HandleInputEvent(int routing_id,
+                                      const WebInputEvent* event,
+                                      const ui::LatencyInfo& latency_info) {
     DCHECK_EQ(kTestRoutingID, routing_id);
 
     records_.push_back(Record(event));
 
     if (handle_events_) {
-      filter_->DidHandleInputEvent();
+      return INPUT_EVENT_ACK_STATE_CONSUMED;
     } else {
-      filter_->DidNotHandleInputEvent(send_to_widget_);
+      return send_to_widget_ ? INPUT_EVENT_ACK_STATE_NOT_CONSUMED
+                             : INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS;
     }
   }
 
@@ -119,7 +122,8 @@ void AddEventsToFilter(IPC::ChannelProxy::MessageFilter* message_filter,
   std::vector<IPC::Message> messages;
   for (size_t i = 0; i < count; ++i) {
     messages.push_back(
-        InputMsg_HandleInputEvent(kTestRoutingID, &events[i], false));
+        InputMsg_HandleInputEvent(
+            kTestRoutingID, &events[i], ui::LatencyInfo(), false));
   }
 
   AddMessagesToFilter(message_filter, messages);
@@ -132,10 +136,12 @@ class InputEventFilterTest : public testing::Test {
   virtual void SetUp() OVERRIDE {
     filter_ = new InputEventFilter(
         &message_recorder_,
-        message_loop_.message_loop_proxy(),
+        message_loop_.message_loop_proxy());
+    filter_->SetBoundHandler(
         base::Bind(&InputEventRecorder::HandleInputEvent,
             base::Unretained(&event_recorder_)));
-    event_recorder_.set_filter(filter_);
+
+    event_recorder_.set_filter(filter_.get());
 
     filter_->OnFilterAdded(&ipc_sink_);
   }
@@ -162,14 +168,14 @@ TEST_F(InputEventFilterTest, Basic) {
   InitMouseEvent(&kEvents[1], WebInputEvent::MouseMove, 20, 20);
   InitMouseEvent(&kEvents[2], WebInputEvent::MouseUp, 30, 30);
 
-  AddEventsToFilter(filter_, kEvents, arraysize(kEvents));
+  AddEventsToFilter(filter_.get(), kEvents, arraysize(kEvents));
   EXPECT_EQ(0U, ipc_sink_.message_count());
   EXPECT_EQ(0U, event_recorder_.record_count());
   EXPECT_EQ(0U, message_recorder_.message_count());
 
-  filter_->AddRoute(kTestRoutingID);
+  filter_->DidAddInputHandler(kTestRoutingID, NULL);
 
-  AddEventsToFilter(filter_, kEvents, arraysize(kEvents));
+  AddEventsToFilter(filter_.get(), kEvents, arraysize(kEvents));
   ASSERT_EQ(arraysize(kEvents), ipc_sink_.message_count());
   ASSERT_EQ(arraysize(kEvents), event_recorder_.record_count());
   EXPECT_EQ(0U, message_recorder_.message_count());
@@ -196,7 +202,7 @@ TEST_F(InputEventFilterTest, Basic) {
 
   event_recorder_.set_send_to_widget(true);
 
-  AddEventsToFilter(filter_, kEvents, arraysize(kEvents));
+  AddEventsToFilter(filter_.get(), kEvents, arraysize(kEvents));
   EXPECT_EQ(arraysize(kEvents), ipc_sink_.message_count());
   EXPECT_EQ(2 * arraysize(kEvents), event_recorder_.record_count());
   EXPECT_EQ(arraysize(kEvents), message_recorder_.message_count());
@@ -205,7 +211,7 @@ TEST_F(InputEventFilterTest, Basic) {
     const IPC::Message& message = message_recorder_.message_at(i);
 
     ASSERT_EQ(InputMsg_HandleInputEvent::ID, message.type());
-    const WebInputEvent* event = InputEventFilter::CrackMessage(message);
+    const WebInputEvent* event = InputEventFilter::CrackMessage(message, NULL);
 
     EXPECT_EQ(kEvents[i].size, event->size);
     EXPECT_TRUE(memcmp(&kEvents[i], event, event->size) == 0);
@@ -219,7 +225,7 @@ TEST_F(InputEventFilterTest, Basic) {
 
   event_recorder_.set_handle_events(true);
 
-  AddEventsToFilter(filter_, kEvents, arraysize(kEvents));
+  AddEventsToFilter(filter_.get(), kEvents, arraysize(kEvents));
   EXPECT_EQ(arraysize(kEvents), ipc_sink_.message_count());
   EXPECT_EQ(arraysize(kEvents), event_recorder_.record_count());
   EXPECT_EQ(0U, message_recorder_.message_count());
@@ -242,7 +248,7 @@ TEST_F(InputEventFilterTest, Basic) {
 }
 
 TEST_F(InputEventFilterTest, PreserveRelativeOrder) {
-  filter_->AddRoute(kTestRoutingID);
+  filter_->DidAddInputHandler(kTestRoutingID, NULL);
   event_recorder_.set_send_to_widget(true);
 
 
@@ -254,6 +260,7 @@ TEST_F(InputEventFilterTest, PreserveRelativeOrder) {
   std::vector<IPC::Message> messages;
   messages.push_back(InputMsg_HandleInputEvent(kTestRoutingID,
                                               &mouse_down,
+                                              ui::LatencyInfo(),
                                               false));
   // Control where input events are delivered.
   messages.push_back(InputMsg_MouseCaptureLost(kTestRoutingID));
@@ -282,8 +289,9 @@ TEST_F(InputEventFilterTest, PreserveRelativeOrder) {
 
   messages.push_back(InputMsg_HandleInputEvent(kTestRoutingID,
                                               &mouse_up,
+                                              ui::LatencyInfo(),
                                               false));
-  AddMessagesToFilter(filter_, messages);
+  AddMessagesToFilter(filter_.get(), messages);
 
   // We should have sent all messages back to the main thread and preserved
   // their relative order.

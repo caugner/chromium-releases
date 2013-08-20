@@ -12,7 +12,7 @@
  * {
  *   filesystem: size, modificationTime
  *   internal: presence
- *   drive: pinned, present, hosted, editUrl, contentUrl, availableOffline
+ *   drive: pinned, present, hosted, availableOffline
  *   streaming: (no property)
  *
  *   Following are not fetched for non-present drive files.
@@ -594,18 +594,6 @@ MetadataCache.prototype.refreshDirectory = function(url) {
 };
 
 /**
- * Ask the Drive service to re-fetch the metadata.
- * @param {string} fileURL File URL.
- */
-MetadataCache.prototype.refreshFileMetadata = function(fileURL) {
-  if (!FileType.isOnDrive(fileURL))
-    return;
-  // TODO(kaznacheev) This does not really work with Drive search.
-  var url = fileURL.substr(0, fileURL.lastIndexOf('/'));
-  this.refreshDirectory(url);
-};
-
-/**
  * Resumes refreshes by resreshDirectory.
  * @param {string} url Directory URL.
  */
@@ -855,8 +843,6 @@ DriveProvider.prototype.convert_ = function(data, url) {
     dirty: data.isDirty,
     availableOffline: DriveProvider.isAvailableOffline(data, url),
     availableWhenMetered: DriveProvider.isAvailableWhenMetered(data),
-    contentUrl: (data.contentUrl || '').replace(/\?.*$/gi, ''),
-    editUrl: data.editUrl || '',
     driveApps: data.driveApps || [],
     contentMimeType: data.contentMimeType || '',
     sharedWithMe: data.sharedWithMe

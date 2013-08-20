@@ -14,14 +14,15 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
@@ -491,7 +492,6 @@ bool CheckAppHostPreconditions(const InstallationState& original_state,
                                InstallerState* installer_state,
                                installer::InstallStatus* status) {
   if (installer_state->FindProduct(BrowserDistribution::CHROME_APP_HOST)) {
-
     if (!installer_state->is_multi_install()) {
       LOG(DFATAL) << "App Launcher requires multi install";
       *status = installer::APP_HOST_REQUIRES_MULTI_INSTALL;
@@ -507,7 +507,6 @@ bool CheckAppHostPreconditions(const InstallationState& original_state,
       installer_state->WriteInstallerResult(*status, 0, NULL);
       return false;
     }
-
   }
 
   return true;
@@ -638,6 +637,11 @@ installer::InstallStatus InstallProductsHelper(
   DCHECK(archive_type);
   const bool system_install = installer_state.system_install();
   installer::InstallStatus install_status = installer::UNKNOWN_STATUS;
+
+  // Drop to background processing mode if the process was started below the
+  // normal process priority class.
+  bool entered_background_mode = installer::AdjustProcessPriority();
+  VLOG_IF(1, entered_background_mode) << "Entered background processing mode.";
 
   // For install the default location for chrome.packed.7z is in current
   // folder, so get that value first.
@@ -1472,6 +1476,27 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
   } else if (cmd_line.HasSwitch(installer::switches::kChromeFrameQuickEnable)) {
     *exit_code = installer::ChromeFrameQuickEnable(original_state,
                                                    installer_state);
+  } else if (cmd_line.HasSwitch(installer::switches::kPatch)) {
+    const std::string patch_type_str(
+        cmd_line.GetSwitchValueASCII(installer::switches::kPatch));
+    const base::FilePath input_file(
+        cmd_line.GetSwitchValuePath(installer::switches::kInputFile));
+    const base::FilePath patch_file(
+        cmd_line.GetSwitchValuePath(installer::switches::kPatchFile));
+    const base::FilePath output_file(
+        cmd_line.GetSwitchValuePath(installer::switches::kOutputFile));
+
+    if (patch_type_str == installer::kCourgette) {
+      *exit_code = installer::CourgettePatchFiles(input_file,
+                                                  patch_file,
+                                                  output_file);
+    } else if (patch_type_str == installer::kBsdiff) {
+      *exit_code = installer::BsdiffPatchFiles(input_file,
+                                               patch_file,
+                                               output_file);
+    } else {
+      *exit_code = installer::PATCH_INVALID_ARGUMENTS;
+    }
   } else {
     handled = false;
   }

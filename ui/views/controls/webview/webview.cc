@@ -26,8 +26,7 @@
 namespace views {
 
 // static
-const char WebView::kViewClassName[] =
-    "ui/views/WebView";
+const char WebView::kViewClassName[] = "WebView";
 
 ////////////////////////////////////////////////////////////////////////////////
 // WebView, public:
@@ -93,7 +92,7 @@ void WebView::SetPreferredSize(const gfx::Size& preferred_size) {
 ////////////////////////////////////////////////////////////////////////////////
 // WebView, View overrides:
 
-std::string WebView::GetClassName() const {
+const char* WebView::GetClassName() const {
   return kViewClassName;
 }
 
@@ -101,8 +100,9 @@ void WebView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   wcv_holder_->SetSize(bounds().size());
 }
 
-void WebView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
-  if (is_add)
+void WebView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add)
     AttachWebContents();
 }
 

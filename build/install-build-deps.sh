@@ -21,6 +21,12 @@ usage() {
   exit 1
 }
 
+# Checks whether a particular package is available in the repos.
+# USAGE: $ package_exists <package name>
+package_exists() {
+  apt-cache pkgnames | grep -x "$1" > /dev/null 2>&1
+}
+
 while test "$1" != ""
 do
   case "$1" in
@@ -41,8 +47,8 @@ do
   shift
 done
 
-ubuntu_versions="10\.04|10\.10|11\.04|11\.10|12\.04|12\.10"
-ubuntu_codenames="lucid|maverick|natty|oneiric|precise|quantal"
+ubuntu_versions="10\.04|10\.10|11\.04|11\.10|12\.04|12\.10|13\.04"
+ubuntu_codenames="lucid|maverick|natty|oneiric|precise|quantal|raring"
 ubuntu_issue="Ubuntu ($ubuntu_versions|$ubuntu_codenames)"
 # GCEL is an Ubuntu-derived VM image used on Google Compute Engine; /etc/issue
 # doesn't contain a version number so just trust that the user knows what
@@ -51,7 +57,7 @@ gcel_issue="^GCEL"
 
 if [ 0 -eq "${do_unsupported-0}" ] ; then
   if ! egrep -q "($ubuntu_issue|$gcel_issue)" /etc/issue; then
-    echo "ERROR: Only Ubuntu 10.04 (lucid) through 12.10 (quantal) are"\
+    echo "ERROR: Only Ubuntu 10.04 (lucid) through 13.04 (raring) are"\
         "currently supported" >&2
     exit 1
   fi
@@ -100,7 +106,7 @@ chromeos_lib_list="libpulse0 libbz2-1.0 libcurl4-gnutls-dev"
 lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libcups2 libexpat1
           libfontconfig1 libfreetype6 libglib2.0-0 libgnome-keyring0
           libgtk2.0-0 libpam0g libpango1.0-0 libpci3 libpcre3 libpixman-1-0
-          libpng12-0 libspeechd2 libstdc++6 libsqlite3-0 libudev0 libx11-6
+          libpng12-0 libspeechd2 libstdc++6 libsqlite3-0 libx11-6
           libxau6 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxdmcp6
           libxext6 libxfixes3 libxi6 libxinerama1 libxrandr2 libxrender1
           libxtst6 zlib1g $chromeos_lib_list"
@@ -123,27 +129,33 @@ arm_list="libc6-armel-cross libc6-dev-armel-cross libgcc1-armel-cross
 
 
 # Some package names have changed over time
-if apt-cache show ttf-mscorefonts-installer >/dev/null 2>&1; then
+if package_exists ttf-mscorefonts-installer; then
   dev_list="${dev_list} ttf-mscorefonts-installer"
 else
   dev_list="${dev_list} msttcorefonts"
 fi
-if apt-cache show libnspr4-dbg >/dev/null 2>&1; then
+if package_exists libnspr4-dbg; then
   dbg_list="${dbg_list} libnspr4-dbg libnss3-dbg"
   lib_list="${lib_list} libnspr4 libnss3"
 else
   dbg_list="${dbg_list} libnspr4-0d-dbg libnss3-1d-dbg"
   lib_list="${lib_list} libnspr4-0d libnss3-1d"
 fi
-if apt-cache show libjpeg-dev >/dev/null 2>&1; then
- dev_list="${dev_list} libjpeg-dev"
+if package_exists libjpeg-dev; then
+  dev_list="${dev_list} libjpeg-dev"
 else
- dev_list="${dev_list} libjpeg62-dev"
+  dev_list="${dev_list} libjpeg62-dev"
 fi
+if package_exists libudev1; then
+  dev_list="${dev_list} libudev1"
+else
+  dev_list="${dev_list} libudev0"
+fi
+
 
 # Some packages are only needed, if the distribution actually supports
 # installing them.
-if apt-cache show appmenu-gtk >/dev/null 2>&1; then
+if package_exists appmenu-gtk; then
   lib_list="$lib_list appmenu-gtk"
 fi
 
@@ -257,7 +269,7 @@ packages="${dev_list} ${lib_list} ${dbg_list} ${arm_list}"
 echo "Packages required: " $packages
 echo
 new_list_cmd="sudo apt-get install --reinstall $(echo $packages)"
-if new_list="$(yes n | LANG=C $new_list_cmd)"; then
+if new_list="$(yes n | LANGUAGE=en LANG=C $new_list_cmd)"; then
   # We probably never hit this following line.
   echo "No missing packages, and the packages are up-to-date."
 elif [ $? -eq 1 ]; then

@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
+#include "chrome/browser/policy/policy_domain_descriptor.h"
 #include "chrome/browser/policy/policy_map.h"
 
 namespace policy {
@@ -75,15 +76,20 @@ void PolicyServiceImpl::RemoveObserver(PolicyDomain domain,
 }
 
 void PolicyServiceImpl::RegisterPolicyDomain(
-    PolicyDomain domain,
-    const std::set<std::string>& components) {
+    scoped_refptr<const PolicyDomainDescriptor> descriptor) {
+  domain_descriptors_[descriptor->domain()] = descriptor;
   for (Iterator it = providers_.begin(); it != providers_.end(); ++it)
-    (*it)->RegisterPolicyDomain(domain, components);
+    (*it)->RegisterPolicyDomain(descriptor);
 }
 
 const PolicyMap& PolicyServiceImpl::GetPolicies(
     const PolicyNamespace& ns) const {
   return policy_bundle_.Get(ns);
+}
+
+scoped_refptr<const PolicyDomainDescriptor>
+PolicyServiceImpl::GetPolicyDomainDescriptor(PolicyDomain domain) const {
+  return domain_descriptors_[domain];
 }
 
 bool PolicyServiceImpl::IsInitializationComplete(PolicyDomain domain) const {
@@ -120,7 +126,7 @@ void PolicyServiceImpl::NotifyNamespaceUpdated(
     const PolicyMap& current) {
   // If running a unit test that hasn't setup a MessageLoop, don't send any
   // notifications.
-  if (!MessageLoop::current())
+  if (!base::MessageLoop::current())
     return;
 
   // Don't queue up a task if we have no observers - that way Observers added
@@ -132,7 +138,7 @@ void PolicyServiceImpl::NotifyNamespaceUpdated(
   // call to MergeAndTriggerUpdates() by modifying policy.
   scoped_ptr<PolicyChangeInfo> changes(
       new PolicyChangeInfo(ns, previous, current));
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&PolicyServiceImpl::NotifyNamespaceUpdatedTask,
                  weak_ptr_factory_.GetWeakPtr(),

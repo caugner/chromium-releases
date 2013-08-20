@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,50 +7,41 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
-#include "base/values.h"
+#include "base/metrics/histogram.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
-#include "chromeos/dbus/bluetooth_manager_client.h"
-#include "chromeos/dbus/bluetooth_out_of_band_client.h"
+#include "chromeos/dbus/bluetooth_input_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "dbus/object_path.h"
+#include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_device_chromeos.h"
-#include "device/bluetooth/bluetooth_out_of_band_pairing_data.h"
 
 using device::BluetoothAdapter;
 using device::BluetoothDevice;
-using device::BluetoothOutOfBandPairingData;
 
 namespace chromeos {
 
-BluetoothAdapterChromeOS::BluetoothAdapterChromeOS() : BluetoothAdapter(),
-                                                       powered_(false),
-                                                       discovering_(false),
-                                                       discovering_count_(0),
-                                                       weak_ptr_factory_(this) {
-  DBusThreadManager::Get()->GetBluetoothManagerClient()->
-      AddObserver(this);
-  DBusThreadManager::Get()->GetBluetoothAdapterClient()->
-      AddObserver(this);
-  DBusThreadManager::Get()->GetBluetoothDeviceClient()->
-      AddObserver(this);
+BluetoothAdapterChromeOS::BluetoothAdapterChromeOS()
+    : weak_ptr_factory_(this) {
+  DBusThreadManager::Get()->GetBluetoothAdapterClient()->AddObserver(this);
+  DBusThreadManager::Get()->GetBluetoothDeviceClient()->AddObserver(this);
+  DBusThreadManager::Get()->GetBluetoothInputClient()->AddObserver(this);
 
-  DBusThreadManager::Get()->GetBluetoothManagerClient()->
-      DefaultAdapter(base::Bind(&BluetoothAdapterChromeOS::AdapterCallback,
-                                weak_ptr_factory_.GetWeakPtr()));
+  std::vector<dbus::ObjectPath> object_paths =
+      DBusThreadManager::Get()->GetBluetoothAdapterClient()->GetAdapters();
+
+  if (!object_paths.empty()) {
+    VLOG(1) << object_paths.size() << " Bluetooth adapter(s) available.";
+    SetAdapter(object_paths[0]);
+  }
 }
 
 BluetoothAdapterChromeOS::~BluetoothAdapterChromeOS() {
-  DBusThreadManager::Get()->GetBluetoothDeviceClient()->
-      RemoveObserver(this);
-  DBusThreadManager::Get()->GetBluetoothAdapterClient()->
-      RemoveObserver(this);
-  DBusThreadManager::Get()->GetBluetoothManagerClient()->
-      RemoveObserver(this);
-
-  STLDeleteValues(&devices_);
+  DBusThreadManager::Get()->GetBluetoothAdapterClient()->RemoveObserver(this);
+  DBusThreadManager::Get()->GetBluetoothDeviceClient()->RemoveObserver(this);
+  DBusThreadManager::Get()->GetBluetoothInputClient()->RemoveObserver(this);
 }
 
 void BluetoothAdapterChromeOS::AddObserver(
@@ -66,30 +57,52 @@ void BluetoothAdapterChromeOS::RemoveObserver(
 }
 
 std::string BluetoothAdapterChromeOS::GetAddress() const {
-  return address_;
+  if (!IsPresent())
+    return std::string();
+
+  BluetoothAdapterClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothAdapterClient()->
+          GetProperties(object_path_);
+  DCHECK(properties);
+
+  return properties->address.value();
 }
 
 std::string BluetoothAdapterChromeOS::GetName() const {
-  return name_;
+  if (!IsPresent())
+    return std::string();
+
+  BluetoothAdapterClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothAdapterClient()->
+          GetProperties(object_path_);
+  DCHECK(properties);
+
+  return properties->alias.value();
 }
 
-// TODO(youngki) Return true when object path and properties of the adapter are
-// initialized.
 bool BluetoothAdapterChromeOS::IsInitialized() const {
   return true;
 }
 
 bool BluetoothAdapterChromeOS::IsPresent() const {
-  return !object_path_.value().empty() && !address_.empty();
+  return !object_path_.value().empty();
 }
 
 bool BluetoothAdapterChromeOS::IsPowered() const {
-  return powered_;
+  if (!IsPresent())
+    return false;
+
+  BluetoothAdapterClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothAdapterClient()->
+          GetProperties(object_path_);
+
+  return properties->powered.value();
 }
 
-void BluetoothAdapterChromeOS::SetPowered(bool powered,
-                                          const base::Closure& callback,
-                                          const ErrorCallback& error_callback) {
+void BluetoothAdapterChromeOS::SetPowered(
+    bool powered,
+    const base::Closure& callback,
+    const ErrorCallback& error_callback) {
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
       GetProperties(object_path_)->powered.Set(
           powered,
@@ -100,7 +113,14 @@ void BluetoothAdapterChromeOS::SetPowered(bool powered,
 }
 
 bool BluetoothAdapterChromeOS::IsDiscovering() const {
-  return discovering_;
+  if (!IsPresent())
+    return false;
+
+  BluetoothAdapterClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothAdapterClient()->
+          GetProperties(object_path_);
+
+  return properties->discovering.value();
 }
 
 void BluetoothAdapterChromeOS::StartDiscovering(
@@ -110,11 +130,14 @@ void BluetoothAdapterChromeOS::StartDiscovering(
   // single connection, so issue a StartDiscovery() call for every use
   // within Chromium for the right behavior.
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
-      StartDiscovery(object_path_,
-                     base::Bind(
-                         &BluetoothAdapterChromeOS::OnStartDiscovery,
-                         weak_ptr_factory_.GetWeakPtr(),
-                         callback, error_callback));
+      StartDiscovery(
+          object_path_,
+          base::Bind(&BluetoothAdapterChromeOS::OnStartDiscovery,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     callback),
+          base::Bind(&BluetoothAdapterChromeOS::OnStartDiscoveryError,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     error_callback));
 }
 
 void BluetoothAdapterChromeOS::StopDiscovering(
@@ -122,97 +145,272 @@ void BluetoothAdapterChromeOS::StopDiscovering(
     const ErrorCallback& error_callback) {
   // Inform BlueZ to stop one of our open discovery sessions.
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
-      StopDiscovery(object_path_,
-                    base::Bind(
-                        &BluetoothAdapterChromeOS::OnStopDiscovery,
-                        weak_ptr_factory_.GetWeakPtr(),
-                        callback, error_callback));
+      StopDiscovery(
+          object_path_,
+          base::Bind(&BluetoothAdapterChromeOS::OnStopDiscovery,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     callback),
+          base::Bind(&BluetoothAdapterChromeOS::OnStopDiscoveryError,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     error_callback));
 }
 
 void BluetoothAdapterChromeOS::ReadLocalOutOfBandPairingData(
     const BluetoothAdapter::BluetoothOutOfBandPairingDataCallback& callback,
     const ErrorCallback& error_callback) {
-  DBusThreadManager::Get()->GetBluetoothOutOfBandClient()->
-      ReadLocalData(object_path_,
-          base::Bind(&BluetoothAdapterChromeOS::OnReadLocalData,
-              weak_ptr_factory_.GetWeakPtr(),
-              callback,
-              error_callback));
+  error_callback.Run();
 }
 
-void BluetoothAdapterChromeOS::AdapterCallback(
-    const dbus::ObjectPath& adapter_path,
-    bool success) {
-  if (success) {
-    ChangeAdapter(adapter_path);
-  } else if (!object_path_.value().empty()) {
-    RemoveAdapter();
-  }
-}
-
-void BluetoothAdapterChromeOS::DefaultAdapterChanged(
-    const dbus::ObjectPath& adapter_path) {
-  ChangeAdapter(adapter_path);
+void BluetoothAdapterChromeOS::AdapterAdded(
+    const dbus::ObjectPath& object_path) {
+  // Set the adapter to the newly added adapter only if no adapter is present.
+  if (!IsPresent())
+    SetAdapter(object_path);
 }
 
 void BluetoothAdapterChromeOS::AdapterRemoved(
-    const dbus::ObjectPath& adapter_path) {
-  if (adapter_path == object_path_)
+    const dbus::ObjectPath& object_path) {
+  if (object_path == object_path_)
     RemoveAdapter();
 }
 
-void BluetoothAdapterChromeOS::ChangeAdapter(
-    const dbus::ObjectPath& adapter_path) {
-  if (object_path_.value().empty()) {
-    VLOG(1) << "Adapter path initialized to " << adapter_path.value();
-  } else if (object_path_.value() != adapter_path.value()) {
-    VLOG(1) << "Adapter path changed from " << object_path_.value()
-            << " to " << adapter_path.value();
+void BluetoothAdapterChromeOS::AdapterPropertyChanged(
+    const dbus::ObjectPath& object_path,
+    const std::string& property_name) {
+  if (object_path != object_path_)
+    return;
 
-    RemoveAdapter();
-  } else {
-    VLOG(1) << "Adapter address updated";
-  }
-
-  object_path_ = adapter_path;
-
-  // Update properties to their new values.
   BluetoothAdapterClient::Properties* properties =
       DBusThreadManager::Get()->GetBluetoothAdapterClient()->
-      GetProperties(object_path_);
+          GetProperties(object_path_);
 
-  address_ = properties->address.value();
-  name_ = properties->name.value();
+  if (property_name == properties->powered.name())
+    PoweredChanged(properties->powered.value());
+  else if (property_name == properties->discovering.name())
+    DiscoveringChanged(properties->discovering.value());
+}
 
-  // Delay announcing a new adapter until we have an address.
-  if (address_.empty()) {
-    VLOG(1) << "Adapter address not yet known";
+void BluetoothAdapterChromeOS::DeviceAdded(
+  const dbus::ObjectPath& object_path) {
+  BluetoothDeviceClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothDeviceClient()->
+          GetProperties(object_path);
+  if (properties->adapter.value() != object_path_)
     return;
-  }
 
-  PoweredChanged(properties->powered.value());
-  DiscoveringChanged(properties->discovering.value());
-  DevicesChanged(properties->devices.value());
+  BluetoothDeviceChromeOS* device_chromeos =
+      new BluetoothDeviceChromeOS(this, object_path);
+  DCHECK(devices_.find(device_chromeos->GetAddress()) == devices_.end());
+
+  devices_[device_chromeos->GetAddress()] = device_chromeos;
 
   FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterPresentChanged(this, true));
+                    DeviceAdded(this, device_chromeos));
+}
+
+void BluetoothAdapterChromeOS::DeviceRemoved(
+    const dbus::ObjectPath& object_path) {
+  for (DevicesMap::iterator iter = devices_.begin();
+       iter != devices_.end(); ++iter) {
+    BluetoothDeviceChromeOS* device_chromeos =
+        static_cast<BluetoothDeviceChromeOS*>(iter->second);
+    if (device_chromeos->object_path() == object_path) {
+      devices_.erase(iter);
+
+      FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                        DeviceRemoved(this, device_chromeos));
+      delete device_chromeos;
+      return;
+    }
+  }
+}
+
+void BluetoothAdapterChromeOS::DevicePropertyChanged(
+    const dbus::ObjectPath& object_path,
+    const std::string& property_name) {
+  BluetoothDeviceChromeOS* device_chromeos = GetDeviceWithPath(object_path);
+  if (!device_chromeos)
+    return;
+
+  BluetoothDeviceClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothDeviceClient()->
+          GetProperties(object_path);
+
+  if (property_name == properties->bluetooth_class.name() ||
+      property_name == properties->address.name() ||
+      property_name == properties->alias.name() ||
+      property_name == properties->paired.name() ||
+      property_name == properties->trusted.name() ||
+      property_name == properties->connected.name() ||
+      property_name == properties->uuids.name())
+    NotifyDeviceChanged(device_chromeos);
+
+  // UMA connection counting
+  if (property_name == properties->connected.name()) {
+    int count = 0;
+
+    for (DevicesMap::iterator iter = devices_.begin();
+         iter != devices_.end(); ++iter) {
+      if (iter->second->IsPaired() && iter->second->IsConnected())
+        ++count;
+    }
+
+    UMA_HISTOGRAM_COUNTS_100("Bluetooth.ConnectedDeviceCount", count);
+  }
+}
+
+void BluetoothAdapterChromeOS::InputPropertyChanged(
+    const dbus::ObjectPath& object_path,
+    const std::string& property_name) {
+  BluetoothDeviceChromeOS* device_chromeos = GetDeviceWithPath(object_path);
+  if (!device_chromeos)
+    return;
+
+  BluetoothInputClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothInputClient()->
+          GetProperties(object_path);
+
+  // Properties structure can be removed, which triggers a change in the
+  // BluetoothDevice::IsConnectable() property, as does a change in the
+  // actual reconnect_mode property.
+  if (!properties ||
+      property_name == properties->reconnect_mode.name())
+    NotifyDeviceChanged(device_chromeos);
+}
+
+BluetoothDeviceChromeOS*
+BluetoothAdapterChromeOS::GetDeviceWithPath(
+    const dbus::ObjectPath& object_path) {
+  for (DevicesMap::iterator iter = devices_.begin();
+       iter != devices_.end(); ++iter) {
+    BluetoothDeviceChromeOS* device_chromeos =
+        static_cast<BluetoothDeviceChromeOS*>(iter->second);
+    if (device_chromeos->object_path() == object_path)
+      return device_chromeos;
+  }
+
+  return NULL;
+}
+
+void BluetoothAdapterChromeOS::SetAdapter(const dbus::ObjectPath& object_path) {
+  DCHECK(!IsPresent());
+  object_path_ = object_path;
+
+  VLOG(1) << object_path_.value() << ": using adapter.";
+
+  SetAdapterName();
+
+  BluetoothAdapterClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothAdapterClient()->
+          GetProperties(object_path_);
+
+  PresentChanged(true);
+
+  if (properties->powered.value())
+    PoweredChanged(true);
+  if (properties->discovering.value())
+    DiscoveringChanged(true);
+
+  std::vector<dbus::ObjectPath> device_paths =
+      DBusThreadManager::Get()->GetBluetoothDeviceClient()->
+          GetDevicesForAdapter(object_path_);
+
+  for (std::vector<dbus::ObjectPath>::iterator iter = device_paths.begin();
+       iter != device_paths.end(); ++iter) {
+    BluetoothDeviceChromeOS* device_chromeos =
+        new BluetoothDeviceChromeOS(this, *iter);
+
+    devices_[device_chromeos->GetAddress()] = device_chromeos;
+
+    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                      DeviceAdded(this, device_chromeos));
+  }
+}
+
+void BluetoothAdapterChromeOS::SetAdapterName() {
+  // Set a better name for the adapter than "BlueZ 5.x"; this isn't an ideal
+  // way to do this but it'll do for now. See http://crbug.com/126732 and
+  // http://crbug.com/126802.
+  std::string board;
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(chromeos::switches::kChromeOSReleaseBoard)) {
+    board = command_line->
+        GetSwitchValueASCII(chromeos::switches::kChromeOSReleaseBoard);
+  }
+
+  std::string alias;
+  if (board.substr(0, 6) == "stumpy") {
+    alias = "Chromebox";
+  } else if (board.substr(0, 4) == "link") {
+    alias = "Chromebook Pixel";
+  } else {
+    alias = "Chromebook";
+  }
+
+  DBusThreadManager::Get()->GetBluetoothAdapterClient()->
+      GetProperties(object_path_)->alias.Set(
+          alias,
+          base::Bind(&BluetoothAdapterChromeOS::OnSetAlias,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void BluetoothAdapterChromeOS::OnSetAlias(bool success) {
+  LOG_IF(WARNING, !success) << object_path_.value()
+                            << ": Failed to set adapter alias";
 }
 
 void BluetoothAdapterChromeOS::RemoveAdapter() {
-  const bool adapter_was_present = IsPresent();
+  DCHECK(IsPresent());
+  VLOG(1) << object_path_.value() << ": adapter removed.";
 
-  VLOG(1) << "Adapter lost.";
-  PoweredChanged(false);
-  DiscoveringChanged(false);
-  ClearDevices();
+  BluetoothAdapterClient::Properties* properties =
+      DBusThreadManager::Get()->GetBluetoothAdapterClient()->
+          GetProperties(object_path_);
 
   object_path_ = dbus::ObjectPath("");
-  address_.clear();
-  name_.clear();
 
-  if (adapter_was_present)
+  if (properties->powered.value())
+    PoweredChanged(false);
+  if (properties->discovering.value())
+    DiscoveringChanged(false);
+
+  // Copy the devices list here and clear the original so that when we
+  // send DeviceRemoved(), GetDevices() returns no devices.
+  DevicesMap devices = devices_;
+  devices_.clear();
+
+  for (DevicesMap::iterator iter = devices.begin();
+       iter != devices.end(); ++iter) {
     FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      AdapterPresentChanged(this, false));
+                      DeviceRemoved(this, iter->second));
+    delete iter->second;
+  }
+
+  PresentChanged(false);
+}
+
+void BluetoothAdapterChromeOS::PoweredChanged(bool powered) {
+  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                    AdapterPoweredChanged(this, powered));
+}
+
+void BluetoothAdapterChromeOS::DiscoveringChanged(
+    bool discovering) {
+  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                    AdapterDiscoveringChanged(this, discovering));
+}
+
+void BluetoothAdapterChromeOS::PresentChanged(bool present) {
+  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                    AdapterPresentChanged(this, present));
+}
+
+void BluetoothAdapterChromeOS::NotifyDeviceChanged(
+    BluetoothDeviceChromeOS* device) {
+  DCHECK(device->adapter_ == this);
+
+  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                    DeviceChanged(this, device));
 }
 
 void BluetoothAdapterChromeOS::OnSetPowered(const base::Closure& callback,
@@ -224,313 +422,30 @@ void BluetoothAdapterChromeOS::OnSetPowered(const base::Closure& callback,
     error_callback.Run();
 }
 
-void BluetoothAdapterChromeOS::PoweredChanged(bool powered) {
-  if (powered == powered_)
-    return;
-
-  powered_ = powered;
-
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterPoweredChanged(this, powered_));
+void BluetoothAdapterChromeOS::OnStartDiscovery(const base::Closure& callback) {
+  callback.Run();
 }
 
-void BluetoothAdapterChromeOS::NotifyDeviceChanged(
-    BluetoothDeviceChromeOS* device) {
-  DCHECK(device->adapter_ == this);
-
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    DeviceChanged(this, device));
-}
-
-void BluetoothAdapterChromeOS::OnStartDiscovery(
-    const base::Closure& callback,
+void BluetoothAdapterChromeOS::OnStartDiscoveryError(
     const ErrorCallback& error_callback,
-    const dbus::ObjectPath& adapter_path,
-    bool success) {
-  if (success) {
-    if (discovering_count_++ == 0) {
-      VLOG(1) << object_path_.value() << ": started discovery.";
-
-      // Clear devices found in previous discovery attempts
-      ClearDiscoveredDevices();
-    }
-
-    callback.Run();
-  } else {
-    error_callback.Run();
-  }
+    const std::string& error_name,
+    const std::string& error_message) {
+  LOG(WARNING) << object_path_.value() << ": Failed to start discovery: "
+               << error_name << ": " << error_message;
+  error_callback.Run();
 }
 
-void BluetoothAdapterChromeOS::OnStopDiscovery(
-    const base::Closure& callback,
+void BluetoothAdapterChromeOS::OnStopDiscovery(const base::Closure& callback) {
+  callback.Run();
+}
+
+void BluetoothAdapterChromeOS::OnStopDiscoveryError(
     const ErrorCallback& error_callback,
-    const dbus::ObjectPath& adapter_path,
-    bool success) {
-  if (success) {
-    if (--discovering_count_ == 0) {
-      VLOG(1) << object_path_.value() << ": stopped discovery.";
-    } else if (discovering_count_ < 0) {
-      LOG(WARNING) << adapter_path.value() << ": call to StopDiscovering "
-                   << "without matching StartDiscovering.";
-      error_callback.Run();
-      return;
-    }
-
-    callback.Run();
-
-    // Leave found devices available for perusing.
-  } else {
-    error_callback.Run();
-  }
-}
-
-void BluetoothAdapterChromeOS::DiscoveringChanged(bool discovering) {
-  if (discovering == discovering_)
-    return;
-
-  discovering_ = discovering;
-
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterDiscoveringChanged(this, discovering_));
-}
-
-void BluetoothAdapterChromeOS::OnReadLocalData(
-    const BluetoothAdapter::BluetoothOutOfBandPairingDataCallback& callback,
-    const ErrorCallback& error_callback,
-    const BluetoothOutOfBandPairingData& data,
-    bool success) {
-  if (success)
-    callback.Run(data);
-  else
-    error_callback.Run();
-}
-
-void BluetoothAdapterChromeOS::AdapterPropertyChanged(
-    const dbus::ObjectPath& adapter_path,
-    const std::string& property_name) {
-  if (adapter_path != object_path_)
-    return;
-
-  BluetoothAdapterClient::Properties* properties =
-      DBusThreadManager::Get()->GetBluetoothAdapterClient()->
-      GetProperties(object_path_);
-
-  if (property_name == properties->address.name()) {
-    ChangeAdapter(object_path_);
-
-  } else if (!address_.empty()) {
-    if (property_name == properties->powered.name()) {
-      PoweredChanged(properties->powered.value());
-
-    } else if (property_name == properties->discovering.name()) {
-      DiscoveringChanged(properties->discovering.value());
-
-    } else if (property_name == properties->devices.name()) {
-      DevicesChanged(properties->devices.value());
-
-    } else if (property_name == properties->name.name()) {
-      name_ = properties->name.value();
-
-    }
-  }
-}
-
-void BluetoothAdapterChromeOS::DevicePropertyChanged(
-    const dbus::ObjectPath& device_path,
-    const std::string& property_name) {
-  UpdateDevice(device_path);
-}
-
-void BluetoothAdapterChromeOS::UpdateDevice(
-    const dbus::ObjectPath& device_path) {
-  BluetoothDeviceClient::Properties* properties =
-      DBusThreadManager::Get()->GetBluetoothDeviceClient()->
-      GetProperties(device_path);
-
-  // When we first see a device, we may not know the address yet and need to
-  // wait for the DevicePropertyChanged signal before adding the device.
-  const std::string address = properties->address.value();
-  if (address.empty())
-    return;
-
-  // The device may be already known to us, either because this is an update
-  // to properties, or the device going from discovered to connected and
-  // pairing gaining an object path in the process. In any case, we want
-  // to update the existing object, not create a new one.
-  DevicesMap::iterator iter = devices_.find(address);
-  BluetoothDeviceChromeOS* device;
-  const bool update_device = (iter != devices_.end());
-  if (update_device) {
-    device = static_cast<BluetoothDeviceChromeOS*>(iter->second);
-  } else {
-    device = BluetoothDeviceChromeOS::Create(this);
-    devices_[address] = device;
-  }
-
-  if (!device->HasObjectPath()) {
-    VLOG(1) << "Assigned object path " << device_path.value() << " to device "
-            << address;
-    device->SetObjectPath(device_path);
-  }
-  device->Update(properties, true);
-
-  if (update_device)
-    NotifyDeviceChanged(device);
-  else {
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceAdded(this, device));
-  }
-}
-
-void BluetoothAdapterChromeOS::ClearDevices() {
-  DevicesMap replace;
-  devices_.swap(replace);
-  for (DevicesMap::iterator iter = replace.begin();
-       iter != replace.end(); ++iter) {
-    BluetoothDevice* device = iter->second;
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceRemoved(this, device));
-
-    delete device;
-  }
-}
-
-void BluetoothAdapterChromeOS::DeviceCreated(
-    const dbus::ObjectPath& adapter_path,
-    const dbus::ObjectPath& device_path) {
-  if (adapter_path != object_path_)
-    return;
-
-  UpdateDevice(device_path);
-}
-
-void BluetoothAdapterChromeOS::DeviceRemoved(
-    const dbus::ObjectPath& adapter_path,
-    const dbus::ObjectPath& device_path) {
-  if (adapter_path != object_path_)
-    return;
-
-  DevicesMap::iterator iter = devices_.begin();
-  while (iter != devices_.end()) {
-    BluetoothDeviceChromeOS* device =
-        static_cast<BluetoothDeviceChromeOS*>(iter->second);
-    DevicesMap::iterator temp = iter;
-    ++iter;
-
-    if (device->object_path_ != device_path)
-      continue;
-
-    // DeviceRemoved can also be called to indicate a device that is visible
-    // during discovery has disconnected, but it is still visible to the
-    // adapter, so don't remove in that case and only clear the object path.
-    if (!device->WasDiscovered()) {
-      FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                        DeviceRemoved(this, device));
-
-      VLOG(1) << "Removed device " << device->GetAddress();
-
-      delete device;
-      devices_.erase(temp);
-    } else {
-      VLOG(1) << "Removed object path from device " << device->GetAddress();
-      device->RemoveObjectPath();
-
-      NotifyDeviceChanged(device);
-    }
-  }
-}
-
-void BluetoothAdapterChromeOS::DevicesChanged(
-    const std::vector<dbus::ObjectPath>& devices) {
-  for (std::vector<dbus::ObjectPath>::const_iterator iter =
-           devices.begin(); iter != devices.end(); ++iter)
-    UpdateDevice(*iter);
-}
-
-void BluetoothAdapterChromeOS::ClearDiscoveredDevices() {
-  DevicesMap::iterator iter = devices_.begin();
-  while (iter != devices_.end()) {
-    BluetoothDeviceChromeOS* device =
-        static_cast<BluetoothDeviceChromeOS*>(iter->second);
-    DevicesMap::iterator temp = iter;
-    ++iter;
-
-    if (!device->HasObjectPath()) {
-      FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                        DeviceRemoved(this, device));
-
-      delete device;
-      devices_.erase(temp);
-
-    } else
-      device->SetDiscovered(false);
-  }
-}
-
-void BluetoothAdapterChromeOS::DeviceFound(
-    const dbus::ObjectPath& adapter_path,
-    const std::string& address,
-    const BluetoothDeviceClient::Properties& properties) {
-  if (adapter_path != object_path_)
-    return;
-
-  // DeviceFound can also be called to indicate that a device we've
-  // paired with is now visible to the adapter during discovery, in which
-  // case we want to update the existing object, not create a new one.
-  BluetoothDeviceChromeOS* device;
-  DevicesMap::iterator iter = devices_.find(address);
-  const bool update_device = (iter != devices_.end());
-  if (update_device) {
-    device = static_cast<BluetoothDeviceChromeOS*>(iter->second);
-  } else {
-    device = BluetoothDeviceChromeOS::Create(this);
-    devices_[address] = device;
-  }
-
-  VLOG(1) << "Device " << address << " is visible to the adapter";
-  device->SetDiscovered(true);
-  device->Update(&properties, false);
-
-  if (update_device)
-    NotifyDeviceChanged(device);
-  else {
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceAdded(this, device));
-  }
-}
-
-void BluetoothAdapterChromeOS::DeviceDisappeared(
-    const dbus::ObjectPath& adapter_path,
-    const std::string& address) {
-  if (adapter_path != object_path_)
-    return;
-
-  DevicesMap::iterator iter = devices_.find(address);
-  if (iter == devices_.end())
-    return;
-
-  BluetoothDeviceChromeOS* device =
-      static_cast<BluetoothDeviceChromeOS*>(iter->second);
-
-  // DeviceDisappeared can also be called to indicate that a device we've
-  // paired with is no longer visible to the adapter, so don't remove
-  // in that case and only clear the visible flag.
-  if (!device->HasObjectPath()) {
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceRemoved(this, device));
-
-    VLOG(1) << "Discovered device " << device->GetAddress()
-             << " is no longer visible to the adapter";
-
-    delete device;
-    devices_.erase(iter);
-  } else {
-    VLOG(1) << "Paired device " << device->GetAddress()
-            << " is no longer visible to the adapter";
-    device->SetDiscovered(false);
-
-    NotifyDeviceChanged(device);
-  }
+    const std::string& error_name,
+    const std::string& error_message) {
+  LOG(WARNING) << object_path_.value() << ": Failed to stop discovery: "
+               << error_name << ": " << error_message;
+  error_callback.Run();
 }
 
 }  // namespace chromeos

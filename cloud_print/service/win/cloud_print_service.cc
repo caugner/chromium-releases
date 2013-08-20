@@ -15,8 +15,8 @@
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -401,11 +401,9 @@ int main(int argc, char** argv) {
   CommandLine::Init(argc, argv);
   base::AtExitManager at_exit;
 
-  logging::InitLogging(NULL,
-                       logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-                       logging::LOCK_LOG_FILE,
-                       logging::APPEND_TO_OLD_LOG_FILE,
-                       logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  logging::InitLogging(settings);
 
   logging::SetMinLogLevel(
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableLogging) ?

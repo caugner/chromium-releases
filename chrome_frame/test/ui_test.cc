@@ -6,8 +6,8 @@
 #include <string>
 
 #include "base/file_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_file_util.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_variant.h"
 #include "base/win/windows_version.h"
@@ -77,9 +77,9 @@ TEST_P(FullTabUITest, KeyboardInput) {
   }
   std::wstring key_event_url = GetTestUrl(L"keyevent.html");
 
-  const char* input = "Chrome";
+  static const char input[] = "chrome";
   EXPECT_CALL(ie_mock_, OnLoad(GetParam().invokes_cf(), StrEq(key_event_url)))
-      .WillOnce(PostCharMessagesToRenderer(&ie_mock_, input));
+      .WillOnce(PostKeyMessagesToRenderer(&ie_mock_, input));
 
   EXPECT_CALL(ie_mock_, OnMessage(StrCaseEq(UTF8ToWide(input)), _, _))
       .WillOnce(CloseBrowserMock(&ie_mock_));
@@ -322,7 +322,7 @@ TEST_P(FullTabUITest, ViewSource) {
   // Expect notification for view-source window, handle new window event
   // and attach a new ie_mock_ to the received web browser
   std::wstring view_source_url;
-  view_source_url += UTF8ToWide(chrome::kViewSourceScheme);
+  view_source_url += UTF8ToWide(content::kViewSourceScheme);
   view_source_url += L":";
   view_source_url += GetSimplePageUrl();
   std::wstring url_in_new_window = kChromeProtocolPrefix;
@@ -360,12 +360,7 @@ void NavigateToCurrentUrl(MockIEEventSink* mock) {
 
 // Tests that Chrome gets re-instantiated after crash if we reload via
 // the address bar or via a new navigation.
-#if defined(USE_AURA)
-// Renderer doesn't have focus; see http://crbug.com/235411.
-TEST_P(FullTabUITest, DISABLED_TabCrashReload) {
-#else
 TEST_P(FullTabUITest, TabCrashReload) {
-#endif
   using testing::DoAll;
 
   if (!GetParam().invokes_cf()) {
@@ -433,12 +428,7 @@ TEST_P(FullTabUITest, DISABLED_TabCrashRefresh) {
 
 // Test that window.print() on a page results in the native Windows print dialog
 // appearing rather than Chrome's in-page print preview.
-#if defined(USE_AURA)
-// Native printing is broken with use_aura=1; see http://crbug.com/180997.
-TEST_P(FullTabUITest, DISABLED_WindowPrintOpensNativePrintDialog) {
-#else
 TEST_P(FullTabUITest, WindowPrintOpensNativePrintDialog) {
-#endif
   std::wstring window_print_url(GetTestUrl(L"window_print.html"));
   std::wstring window_print_title(L"window.print");
 
@@ -570,7 +560,7 @@ TEST_F(ContextMenuTest, CFViewSource) {
   // Expect notification for view-source window, handle new window event
   // and attach a new ie_mock_ to the received web browser
   std::wstring view_source_url;
-  view_source_url += UTF8ToWide(chrome::kViewSourceScheme);
+  view_source_url += UTF8ToWide(content::kViewSourceScheme);
   view_source_url += L":";
   view_source_url += GetSimplePageUrl();
   std::wstring url_in_new_window = kChromeProtocolPrefix;

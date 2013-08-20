@@ -9,15 +9,15 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/dom_operation_notification_details.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -506,6 +506,7 @@ bool DOMMessageQueue::WaitForMessage(std::string* message) {
     return false;
   if (message)
     *message = message_queue_.front();
+  message_queue_.pop();
   return true;
 }
 

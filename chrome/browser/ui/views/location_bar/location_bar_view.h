@@ -38,7 +38,6 @@ class ExtensionAction;
 class GURL;
 class InstantController;
 class KeywordHintView;
-class LocationBarSeparatorView;
 class LocationIconView;
 class OpenPDFInReaderView;
 class PageActionWithBadgeView;
@@ -76,7 +75,7 @@ class LocationBarView : public LocationBar,
   // The location bar view's class name.
   static const char kViewClassName[];
 
-  // DropdownBarHostDelegate
+  // DropdownBarHostDelegate:
   virtual void SetFocusAndSelection(bool select_all) OVERRIDE;
   virtual void SetAnimationOffset(int offset) OVERRIDE;
 
@@ -127,24 +126,12 @@ class LocationBarView : public LocationBar,
     SECURITY_TEXT,
   };
 
-  // The modes reflect the different scenarios where a location bar can be used.
-  // The normal mode is the mode used in a regular browser window.
-  // In popup mode, the location bar view is read only and has a slightly
-  // different presentation (font size / color).
-  // In app launcher mode, the location bar is empty and no security states or
-  // page/browser actions are displayed.
-  enum Mode {
-    NORMAL = 0,
-    POPUP,
-    APP_LAUNCHER
-  };
-
   LocationBarView(Browser* browser,
                   Profile* profile,
                   CommandUpdater* command_updater,
                   ToolbarModel* model,
                   Delegate* delegate,
-                  Mode mode);
+                  bool is_popup_mode);
 
   virtual ~LocationBarView();
 
@@ -204,6 +191,11 @@ class LocationBarView : public LocationBar,
   // appears, not where the icons are shown).
   gfx::Point GetLocationEntryOrigin() const;
 
+  // Shows |text| as an inline autocompletion.  This is useful for IMEs, where
+  // we can't show the autocompletion inside the actual OmniboxView.  See
+  // comments on |ime_inline_autocomplete_view_|.
+  void SetImeInlineAutocompletion(const string16& text);
+
   // Invoked from OmniboxViewWin to show the instant suggestion.
   void SetInstantSuggestion(const string16& text);
 
@@ -236,8 +228,6 @@ class LocationBarView : public LocationBar,
   // in the toolbar in full keyboard accessibility mode.
   virtual void SelectAll();
 
-  const gfx::Font& font() const { return font_; }
-
 #if defined(OS_WIN) && !defined(USE_AURA)
   // Event Handlers
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
@@ -253,7 +243,7 @@ class LocationBarView : public LocationBar,
 
   views::View* location_entry_view() const { return location_entry_view_; }
 
-  // Overridden from OmniboxEditController:
+  // OmniboxEditController:
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
                                     content::PageTransition transition,
@@ -267,16 +257,17 @@ class LocationBarView : public LocationBar,
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual content::WebContents* GetWebContents() const OVERRIDE;
+  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE;
 
-  // Overridden from views::View:
-  virtual std::string GetClassName() const OVERRIDE;
+  // views::View:
+  virtual const char* GetClassName() const OVERRIDE;
   virtual bool SkipDefaultKeyEventProcessing(
       const ui::KeyEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual bool HasFocus() const OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
-  // Overridden from views::DragController:
+  // views::DragController:
   virtual void WriteDragDataForView(View* sender,
                                     const gfx::Point& press_pt,
                                     OSExchangeData* data) OVERRIDE;
@@ -286,7 +277,7 @@ class LocationBarView : public LocationBar,
                                    const gfx::Point& press_pt,
                                    const gfx::Point& p) OVERRIDE;
 
-  // Overridden from LocationBar:
+  // LocationBar:
   virtual void ShowFirstRunBubble() OVERRIDE;
   virtual void SetInstantSuggestion(
       const InstantSuggestion& suggestion) OVERRIDE;
@@ -306,7 +297,7 @@ class LocationBarView : public LocationBar,
   virtual OmniboxView* GetLocationEntry() OVERRIDE;
   virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
 
-  // Overridden from LocationBarTesting:
+  // LocationBarTesting:
   virtual int PageActionCount() OVERRIDE;
   virtual int PageActionVisibleCount() OVERRIDE;
   virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
@@ -315,10 +306,10 @@ class LocationBarView : public LocationBar,
   virtual void TestActionBoxMenuItemSelected(int command_id) OVERRIDE;
   virtual bool GetBookmarkStarVisibility() OVERRIDE;
 
-  // Overridden from TemplateURLServiceObserver
+  // TemplateURLServiceObserver:
   virtual void OnTemplateURLServiceChanged() OVERRIDE;
 
-  // Overridden from content::NotificationObserver
+  // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
@@ -329,20 +320,27 @@ class LocationBarView : public LocationBar,
   // otherwise it will be the current height.
   int GetInternalHeight(bool use_preferred_size);
 
-  // Space between items in the location bar.
+  // Returns the position and width that the popup should be, and also the left
+  // edge that the results should align themselves to (which will leave some
+  // border on the left of the popup).
+  void GetOmniboxPopupPositioningInfo(
+      gfx::Point* top_left_screen_coord,
+      int* popup_width,
+      int* left_margin,
+      int* right_margin);
+
+  // Space between items in the location bar, as well as between items and the
+  // edges.
   static int GetItemPadding();
 
-  // Space between the edges and the items next to them.
-  static int GetEdgeItemPadding();
-
-  // Thickness of the left and right edges of the omnibox, in normal mode.
-  static const int kNormalHorizontalEdgeThickness;
-  // Thickness of the top and bottom edges of the omnibox.
-  static const int kVerticalEdgeThickness;
+  // Thickness of the edges of the omnibox background images, in normal mode.
+  static const int kNormalEdgeThickness;
+  // The same, but for popup mode.
+  static const int kPopupEdgeThickness;
   // Amount of padding built into the standard omnibox icons.
   static const int kIconInternalPadding;
   // Space between the edge and a bubble.
-  static const int kBubbleHorizontalPadding;
+  static const int kBubblePadding;
 
  protected:
   virtual void OnFocus() OVERRIDE;
@@ -353,6 +351,14 @@ class LocationBarView : public LocationBar,
   friend class PageActionImageView;
   friend class PageActionWithBadgeView;
   typedef std::vector<PageActionWithBadgeView*> PageActionViews;
+
+  // Returns the thickness of any visible left and right edge, in pixels.
+  int GetHorizontalEdgeThickness() const;
+
+  // The same, but for the top and bottom edges.
+  int vertical_edge_thickness() const {
+    return is_popup_mode_ ? kPopupEdgeThickness : kNormalEdgeThickness;
+  }
 
   // Update the visibility state of the Content Blocked icons to reflect what is
   // actually blocked on the current page.
@@ -423,11 +429,9 @@ class LocationBarView : public LocationBar,
   // The transition type to use for the navigation
   content::PageTransition transition_;
 
-  // Font used by edit and some of the hints.
-  gfx::Font font_;
-
   // An object used to paint the normal-mode background.
-  scoped_ptr<views::Painter> background_painter_;
+  scoped_ptr<views::Painter> background_border_painter_;
+  scoped_ptr<views::Painter> background_filling_painter_;
 
   // An icon to the left of the edit field.
   LocationIconView* location_icon_view_;
@@ -437,6 +441,12 @@ class LocationBarView : public LocationBar,
 
   // Location_entry view
   views::View* location_entry_view_;
+
+  // A view to show inline autocompletion when an IME is active.  In this case,
+  // we shouldn't change the text or selection inside the OmniboxView itself,
+  // since this will conflict with the IME's control over the text.  So instead
+  // we show any autocompletion in a separate field after the OmniboxView.
+  views::Label* ime_inline_autocomplete_view_;
 
   // The following views are used to provide hints and remind the user as to
   // what is going in the edit. They are all added a children of the
@@ -453,12 +463,6 @@ class LocationBarView : public LocationBar,
 
   // Shown if the selected url has a corresponding keyword.
   KeywordHintView* keyword_hint_view_;
-
-  // View responsible for showing text "<Search provider> Search", which appears
-  // when omnibox replaces the URL with its query terms and there's enough space
-  // in omnibox.
-  views::Label* search_token_view_;
-  LocationBarSeparatorView* search_token_separator_view_;
 
   // The content setting views.
   ContentSettingViews content_setting_views_;
@@ -484,8 +488,8 @@ class LocationBarView : public LocationBar,
   // The action box button (plus).
   ActionBoxButtonView* action_box_button_view_;
 
-  // The mode that dictates how the bar shows.
-  Mode mode_;
+  // Whether we're in popup mode.
+  const bool is_popup_mode_;
 
   // True if we should show a focus rect while the location entry field is
   // focused. Used when the toolbar is in full keyboard accessibility mode.
@@ -507,7 +511,7 @@ class LocationBarView : public LocationBar,
   // Used to register for notifications received by NotificationObserver.
   content::NotificationRegistrar registrar_;
 
-  DISALLOW_IMPLICIT_CONSTRUCTORS(LocationBarView);
+  DISALLOW_COPY_AND_ASSIGN(LocationBarView);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_LOCATION_BAR_VIEW_H_

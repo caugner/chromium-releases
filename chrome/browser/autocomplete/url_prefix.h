@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 struct URLPrefix;
 typedef std::vector<URLPrefix> URLPrefixes;
@@ -23,7 +23,7 @@ struct URLPrefix {
   // Returns if the argument is a valid URL prefix.
   static bool IsURLPrefix(const string16& prefix);
 
-  // Returns the prefix with the most components that begins |text|, or NULL.
+  // Returns the URL prefix of |text| with the most components, or NULL.
   // |prefix_suffix| (which may be empty) is appended to every attempted prefix,
   // which is useful for finding the innermost match of user input in a URL.
   // Performs case insensitive string comparison.

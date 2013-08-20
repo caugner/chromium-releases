@@ -9,7 +9,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -26,14 +26,7 @@
 using content::WebContents;
 using content::WebUIMessageHandler;
 using ui::WebDialogObserver;
-
-namespace {
-
-// Default width/height of the dialog.
-const int kDefaultWidth = 580;
-const int kDefaultHeight = 600;
-
-}  // namespace
+using web_modal::NativeWebContentsModalDialog;
 
 // Shows a certificate using the WebUI certificate viewer.
 void ShowCertificateViewer(WebContents* web_contents,
@@ -93,10 +86,12 @@ GURL CertificateViewerDialog::GetDialogContentURL() const {
 
 void CertificateViewerDialog::GetWebUIMessageHandlers(
     std::vector<WebUIMessageHandler*>* handlers) const {
-  handlers->push_back(new CertificateViewerDialogHandler(window_, cert_));
+  handlers->push_back(new CertificateViewerDialogHandler(window_, cert_.get()));
 }
 
 void CertificateViewerDialog::GetDialogSize(gfx::Size* size) const {
+  const int kDefaultWidth = 544;
+  const int kDefaultHeight = 628;
   size->SetSize(kDefaultWidth, kDefaultHeight);
 }
 

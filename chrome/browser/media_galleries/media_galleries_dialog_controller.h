@@ -10,7 +10,7 @@
 
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
 #include "chrome/browser/storage_monitor/removable_storage_observer.h"
 #include "ui/gfx/native_widget_types.h"
@@ -72,17 +72,6 @@ class MediaGalleriesDialogController
                                  const extensions::Extension& extension,
                                  const base::Closure& on_finish);
 
-  // Called by the view to provide details for a particular gallery
-  // permission entry.
-  static string16 GetGalleryDisplayName(
-      const MediaGalleryPrefInfo& gallery);
-  static string16 GetGalleryDisplayNameNoAttachment(
-      const MediaGalleryPrefInfo& gallery);
-  static string16 GetGalleryTooltip(const MediaGalleryPrefInfo& gallery);
-  static bool GetGalleryAttached(const MediaGalleryPrefInfo& gallery);
-  static string16 GetGalleryAdditionalDetails(
-      const MediaGalleryPrefInfo& gallery);
-
   // The title of the dialog view.
   string16 GetHeader() const;
 
@@ -125,6 +114,10 @@ class MediaGalleriesDialogController
   typedef std::map<MediaGalleryPrefId, GalleryPermission>
       KnownGalleryPermissions;
 
+  // Bottom half of constructor -- called when the storage monitor
+  // is initialized.
+  void OnStorageMonitorInitialized();
+
   // SelectFileDialog::Listener implementation:
   virtual void FileSelected(const base::FilePath& path,
                             int index,
@@ -138,7 +131,9 @@ class MediaGalleriesDialogController
   // MediaGalleriesPreferences::GalleryChangeObserver implementation.
   // Used to keep the dialog in sync when the preferences change.
   virtual void OnGalleryChanged(MediaGalleriesPreferences* pref,
-                                const std::string& extension_id) OVERRIDE;
+                                const std::string& extension_id,
+                                MediaGalleryPrefId pref_id,
+                                bool has_permission) OVERRIDE;
 
   // Populates |known_galleries_| from |preferences_|. Subsequent calls merge
   // into |known_galleries_| and do not change permissions for user toggled

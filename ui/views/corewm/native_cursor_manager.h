@@ -5,7 +5,7 @@
 #ifndef UI_VIEWS_COREWM_NATIVE_CURSOR_MANAGER_H_
 #define UI_VIEWS_COREWM_NATIVE_CURSOR_MANAGER_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/views/corewm/native_cursor_manager_delegate.h"
 #include "ui/views/views_export.h"
 
@@ -42,6 +42,11 @@ class VIEWS_EXPORT NativeCursorManager {
   virtual void SetVisibility(
     bool visible,
     views::corewm::NativeCursorManagerDelegate* delegate) = 0;
+
+  // A request to set the scale of the cursor icon.
+  virtual void SetScale(
+      float scale,
+      views::corewm::NativeCursorManagerDelegate* delegate) = 0;
 
   // A request to set whether mouse events are disabled. At minimum,
   // implementer should call NativeCursorManagerDelegate::

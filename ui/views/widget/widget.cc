@@ -7,7 +7,8 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
+#include "ui/base/default_theme_provider.h"
 #include "ui/base/events/event.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_font_util.h"
@@ -21,7 +22,6 @@
 #include "ui/views/focus/widget_focus_manager.h"
 #include "ui/views/ime/input_method.h"
 #include "ui/views/views_delegate.h"
-#include "ui/views/widget/default_theme_provider.h"
 #include "ui/views/widget/native_widget_private.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/tooltip_manager.h"
@@ -366,7 +366,7 @@ void Widget::Init(const InitParams& in_params) {
   native_widget_ = CreateNativeWidget(params.native_widget, this)->
                    AsNativeWidgetPrivate();
   root_view_.reset(CreateRootView());
-  default_theme_provider_.reset(new DefaultThemeProvider);
+  default_theme_provider_.reset(new ui::DefaultThemeProvider);
   if (params.type == InitParams::TYPE_MENU) {
     is_mouse_button_pressed_ =
         internal::NativeWidgetPrivate::IsMouseButtonDown();
@@ -378,6 +378,7 @@ void Widget::Init(const InitParams& in_params) {
     // Create the ClientView, add it to the NonClientView and add the
     // NonClientView to the RootView. This will cause everything to be parented.
     non_client_view_->set_client_view(widget_delegate_->CreateClientView(this));
+    non_client_view_->SetOverlayView(widget_delegate_->CreateOverlayView());
     SetContentsView(non_client_view_);
     SetInitialBounds(params.bounds);
     if (params.show_state == ui::SHOW_STATE_MAXIMIZED)
@@ -418,15 +419,16 @@ bool Widget::GetAccelerator(int cmd_id, ui::Accelerator* accelerator) {
   return false;
 }
 
-void Widget::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
-  if (!is_add) {
-    if (child == dragged_view_)
+void Widget::ViewHierarchyChanged(
+    const View::ViewHierarchyChangedDetails& details) {
+  if (!details.is_add) {
+    if (details.child == dragged_view_)
       dragged_view_ = NULL;
     FocusManager* focus_manager = GetFocusManager();
     if (focus_manager)
-      focus_manager->ViewRemoved(child);
-    ViewStorage::GetInstance()->ViewRemoved(child);
-    native_widget_->ViewRemoved(child);
+      focus_manager->ViewRemoved(details.child);
+    ViewStorage::GetInstance()->ViewRemoved(details.child);
+    native_widget_->ViewRemoved(details.child);
   }
 }
 
@@ -778,6 +780,10 @@ void Widget::SetCursor(gfx::NativeCursor cursor) {
   native_widget_->SetCursor(cursor);
 }
 
+bool Widget::IsMouseEventsEnabled() const {
+  return native_widget_->IsMouseEventsEnabled();
+}
+
 void Widget::SetNativeWindowProperty(const char* name, void* value) {
   native_widget_->SetNativeWindowProperty(name, value);
 }
@@ -879,16 +885,12 @@ ui::Compositor* Widget::GetCompositor() {
   return native_widget_->GetCompositor();
 }
 
-gfx::Vector2d Widget::CalculateOffsetToAncestorWithLayer(
-    ui::Layer** layer_parent) {
-  return native_widget_->CalculateOffsetToAncestorWithLayer(layer_parent);
+ui::Layer* Widget::GetLayer() {
+  return native_widget_->GetLayer();
 }
 
-void Widget::ReorderLayers() {
-  ui::Layer* layer = NULL;
-  CalculateOffsetToAncestorWithLayer(&layer);
-  if (layer)
-    root_view_->ReorderChildLayers(layer);
+void Widget::ReorderNativeViews() {
+  native_widget_->ReorderNativeViews();
 }
 
 void Widget::UpdateRootLayers() {
@@ -1020,9 +1022,9 @@ void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
     root->layer()->SetVisible(visible);
 }
 
-void Widget::OnNativeWidgetCreated() {
+void Widget::OnNativeWidgetCreated(bool desktop_widget) {
   if (is_top_level())
-    focus_manager_.reset(FocusManagerFactory::Create(this));
+    focus_manager_.reset(FocusManagerFactory::Create(this, desktop_widget));
 
   native_widget_->InitModalType(widget_delegate_->GetModalType());
 
@@ -1122,6 +1124,9 @@ void Widget::OnKeyEvent(ui::KeyEvent* event) {
 }
 
 void Widget::OnMouseEvent(ui::MouseEvent* event) {
+  if (!IsMouseEventsEnabled())
+    return;
+
   ScopedEvent scoped(this, *event);
   View* root_view = GetRootView();
   switch (event->type()) {

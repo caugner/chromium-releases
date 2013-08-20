@@ -9,10 +9,14 @@
 
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 class Browser;
 class GlobalErrorBubbleViewBase;
+
+namespace gfx {
+class Image;
+}
 
 // This object describes a single global error.
 class GlobalError : public base::SupportsWeakPtr<GlobalError> {
@@ -50,8 +54,8 @@ class GlobalError : public base::SupportsWeakPtr<GlobalError> {
   void ShowBubbleView(Browser* browser);
   // Returns the bubble view.
   virtual GlobalErrorBubbleViewBase* GetBubbleView();
-  // Returns the resource ID for bubble view icon.
-  int GetBubbleViewIconResourceID();
+  // Returns an icon to use for the bubble view.
+  virtual gfx::Image GetBubbleViewIcon();
   // Returns the title for the bubble view.
   virtual string16 GetBubbleViewTitle() = 0;
   // Returns the messages for the bubble view, one per line. Multiple messages

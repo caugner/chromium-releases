@@ -38,7 +38,6 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_name_folder_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -57,6 +56,7 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
+#import "ui/base/cocoa/cocoa_event_utils.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -664,7 +664,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* node = [sender bookmarkNode];
   DCHECK(node);
   WindowOpenDisposition disposition =
-      event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+      ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   RecordAppLaunch(browser_->profile(), node->url());
   [self openURL:node->url() disposition:disposition];
 
@@ -1027,7 +1027,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   int64 tag = [self nodeIdFromMenuTag:[sender tag]];
   const BookmarkNode* node = bookmarkModel_->GetNodeByID(tag);
   WindowOpenDisposition disposition =
-      event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+      ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   [self openURL:node->url() disposition:disposition];
 }
 
@@ -1073,8 +1073,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   BookmarkButtonCell* cell = [self cellForBookmarkNode:node];
   NSRect frame = [self frameForBookmarkButtonFromCell:cell xOffset:xOffset];
 
-  scoped_nsobject<BookmarkButton>
-      button([[BookmarkButton alloc] initWithFrame:frame]);
+  base::scoped_nsobject<BookmarkButton> button(
+      [[BookmarkButton alloc] initWithFrame:frame]);
   DCHECK(button.get());
 
   // [NSButton setCell:] warns to NOT use setCell: other than in the
@@ -1158,7 +1158,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (!appsPageShortcutButton_.get())
     return NO;
 
-  BOOL visible = bookmarkModel_->IsLoaded() &&
+  BOOL visible = bookmarkModel_->loaded() &&
       chrome::ShouldShowAppsShortcutInBookmarkBar(browser_->profile());
   [appsPageShortcutButton_ setHidden:!visible];
   return visible;
@@ -1227,7 +1227,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 - (void)openAppsPage:(id)sender {
   WindowOpenDisposition disposition =
-      event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+      ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   [self openURL:GURL(chrome::kChromeUIAppsURL) disposition:disposition];
   bookmark_utils::RecordAppsPageOpen([self bookmarkLaunchLocation]);
 }
@@ -1678,7 +1678,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 // Called when our controlled frame has changed size.
 - (void)frameDidChange {
-  if (!bookmarkModel_->IsLoaded())
+  if (!bookmarkModel_->loaded())
     return;
   [self updateTheme:[[[self view] window] themeProvider]];
   [self reconfigureBookmarkBar];
@@ -2013,7 +2013,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 // TODO(jrg): for now this is brute force.
 - (void)loaded:(BookmarkModel*)model {
   DCHECK(model == bookmarkModel_);
-  if (!model->IsLoaded())
+  if (!model->loaded())
     return;
 
   // If this is a rebuild request while we have a folder open, close it.
@@ -2201,7 +2201,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   return NSHeight([[browserController tabContentArea] frame]);
 }
 
-- (ui::ThemeProvider*)themeProvider {
+- (ThemeService*)themeService {
   return ThemeServiceFactory::GetForProfile(browser_->profile());
 }
 

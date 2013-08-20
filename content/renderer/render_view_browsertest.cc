@@ -5,34 +5,33 @@
 #include "base/basictypes.h"
 
 #include "base/shared_memory.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/bindings_policy.h"
-#include "content/public/common/url_constants.h"
+#include "content/public/common/url_utils.h"
 #include "content/public/renderer/document_state.h"
+#include "content/public/renderer/history_item_serialization.h"
 #include "content/public/renderer/navigation_state.h"
 #include "content/public/test/render_view_test.h"
 #include "content/renderer/render_view_impl.h"
+#include "content/shell/common/shell_content_client.h"
 #include "content/shell/shell_content_browser_client.h"
-#include "content/shell/shell_content_client.h"
 #include "content/test/mock_keyboard.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebHTTPBody.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
+#include "third_party/WebKit/public/web/WebHistoryItem.h"
+#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/WebKit/public/web/WebWindowFeatures.h"
+#include "third_party/WebKit/public/platform/WebData.h"
+#include "third_party/WebKit/public/platform/WebHTTPBody.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebURLError.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/codec/jpeg_codec.h"
-#include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/web_io_operators.h"
 
 #if defined(OS_LINUX) && !defined(USE_AURA)
 #include "ui/base/gtk/event_synthesis_gtk.h"
@@ -301,9 +300,9 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
   EXPECT_TRUE(host_nav_params.a.is_post);
 
   // Check post data sent to browser matches
-  EXPECT_FALSE(host_nav_params.a.content_state.empty());
-  const WebKit::WebHistoryItem item = webkit_glue::HistoryItemFromString(
-      host_nav_params.a.content_state);
+  EXPECT_TRUE(host_nav_params.a.page_state.IsValid());
+  const WebKit::WebHistoryItem item = PageStateToHistoryItem(
+      host_nav_params.a.page_state);
   WebKit::WebHTTPBody body = item.httpBody();
   WebKit::WebHTTPBody::Element element;
   bool successful = body.elementAt(0, element);
@@ -418,6 +417,30 @@ TEST_F(RenderViewImplTest, DecideNavigationPolicyForWebUI) {
   new_view->Release();
 }
 
+TEST_F(RenderViewImplTest, ChromeNativeSchemeCommitsSynchronously) {
+  LoadHTML("<div>Page A</div>");
+  int initial_page_id = view()->GetPageId();
+
+  // Issue a navigation to a chrome-native page.
+  ViewMsg_Navigate_Params nav_params;
+  nav_params.url = GURL("chrome-native://testpage");
+  nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+  nav_params.transition = PAGE_TRANSITION_TYPED;
+  nav_params.current_history_list_length = 1;
+  nav_params.current_history_list_offset = 0;
+  nav_params.pending_history_list_offset = 1;
+  nav_params.page_id = -1;
+  view()->OnNavigate(nav_params);
+
+  // Ensure the chrome-native:// navigate commits synchronously.
+  EXPECT_NE(initial_page_id, view()->GetPageId());
+
+  ProcessPendingMessages();
+  const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
+      ViewHostMsg_UpdateState::ID);
+  EXPECT_TRUE(msg);
+}
+
 // Ensure the RenderViewImpl sends an ACK to a SwapOut request, even if it is
 // already swapped out.  http://crbug.com/93427.
 TEST_F(RenderViewImplTest, SendSwapOutACK) {
@@ -425,32 +448,20 @@ TEST_F(RenderViewImplTest, SendSwapOutACK) {
   int initial_page_id = view()->GetPageId();
 
   // Respond to a swap out request.
-  ViewMsg_SwapOut_Params params;
-  params.closing_process_id = 10;
-  params.closing_route_id = 11;
-  params.new_render_process_host_id = 12;
-  params.new_request_id = 13;
-  view()->OnSwapOut(params);
+  view()->OnSwapOut();
 
   // Ensure the swap out commits synchronously.
   EXPECT_NE(initial_page_id, view()->GetPageId());
 
-  // Check for a valid OnSwapOutACK with echoed params.
+  // Check for a valid OnSwapOutACK.
   const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_SwapOut_ACK::ID);
   ASSERT_TRUE(msg);
-  ViewHostMsg_SwapOut_ACK::Param reply_params;
-  ViewHostMsg_SwapOut_ACK::Read(msg, &reply_params);
-  EXPECT_EQ(params.closing_process_id, reply_params.a.closing_process_id);
-  EXPECT_EQ(params.closing_route_id, reply_params.a.closing_route_id);
-  EXPECT_EQ(params.new_render_process_host_id,
-            reply_params.a.new_render_process_host_id);
-  EXPECT_EQ(params.new_request_id, reply_params.a.new_request_id);
 
   // It is possible to get another swap out request.  Ensure that we send
   // an ACK, even if we don't have to do anything else.
   render_thread_->sink().ClearMessages();
-  view()->OnSwapOut(params);
+  view()->OnSwapOut();
   const IPC::Message* msg2 = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_SwapOut_ACK::ID);
   ASSERT_TRUE(msg2);
@@ -487,7 +498,7 @@ TEST_F(RenderViewImplTest, ReloadWhileSwappedOut) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_A);
   int page_id_A;
-  std::string state_A;
+  PageState state_A;
   ViewHostMsg_UpdateState::Read(msg_A, &page_id_A, &state_A);
   EXPECT_EQ(1, page_id_A);
   render_thread_->sink().ClearMessages();
@@ -500,17 +511,12 @@ TEST_F(RenderViewImplTest, ReloadWhileSwappedOut) {
   params_A.current_history_list_offset = 1;
   params_A.pending_history_list_offset = 0;
   params_A.page_id = 1;
-  params_A.state = state_A;
+  params_A.page_state = state_A;
   view()->OnNavigate(params_A);
   ProcessPendingMessages();
 
   // Respond to a swap out request.
-  ViewMsg_SwapOut_Params params;
-  params.closing_process_id = 10;
-  params.closing_route_id = 11;
-  params.new_render_process_host_id = 12;
-  params.new_request_id = 13;
-  view()->OnSwapOut(params);
+  view()->OnSwapOut();
 
   // Check for a OnSwapOutACK.
   const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
@@ -519,7 +525,7 @@ TEST_F(RenderViewImplTest, ReloadWhileSwappedOut) {
   render_thread_->sink().ClearMessages();
 
   // It is possible to get a reload request at this point, containing the
-  // params.state of the initial page (e.g., if the new page fails the
+  // params.page_state of the initial page (e.g., if the new page fails the
   // provisional load in the renderer process, after we unload the old page).
   // Ensure the old page gets reloaded, not swappedout://.
   ViewMsg_Navigate_Params nav_params;
@@ -530,7 +536,7 @@ TEST_F(RenderViewImplTest, ReloadWhileSwappedOut) {
   nav_params.current_history_list_offset = 0;
   nav_params.pending_history_list_offset = 0;
   nav_params.page_id = 1;
-  nav_params.state = state_A;
+  nav_params.page_state = state_A;
   view()->OnNavigate(nav_params);
   ProcessPendingMessages();
 
@@ -563,7 +569,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_A);
   int page_id_A;
-  std::string state_A;
+  PageState state_A;
   ViewHostMsg_UpdateState::Read(msg_A, &page_id_A, &state_A);
   EXPECT_EQ(1, page_id_A);
   render_thread_->sink().ClearMessages();
@@ -577,7 +583,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_B);
   int page_id_B;
-  std::string state_B;
+  PageState state_B;
   ViewHostMsg_UpdateState::Read(msg_B, &page_id_B, &state_B);
   EXPECT_EQ(2, page_id_B);
   EXPECT_NE(state_A, state_B);
@@ -592,7 +598,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_C);
   int page_id_C;
-  std::string state_C;
+  PageState state_C;
   ViewHostMsg_UpdateState::Read(msg_C, &page_id_C, &state_C);
   EXPECT_EQ(3, page_id_C);
   EXPECT_NE(state_B, state_C);
@@ -606,7 +612,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   params_C.current_history_list_offset = 3;
   params_C.pending_history_list_offset = 2;
   params_C.page_id = 3;
-  params_C.state = state_C;
+  params_C.page_state = state_C;
   view()->OnNavigate(params_C);
   ProcessPendingMessages();
   render_thread_->sink().ClearMessages();
@@ -623,7 +629,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   params_B.current_history_list_offset = 2;
   params_B.pending_history_list_offset = 1;
   params_B.page_id = 2;
-  params_B.state = state_B;
+  params_B.page_state = state_B;
   view()->OnNavigate(params_B);
 
   // Back to page A (page_id 1) and commit.
@@ -634,7 +640,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   params_B.current_history_list_offset = 2;
   params_B.pending_history_list_offset = 0;
   params.page_id = 1;
-  params.state = state_A;
+  params.page_state = state_A;
   view()->OnNavigate(params);
   ProcessPendingMessages();
 
@@ -644,7 +650,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg);
   int page_id;
-  std::string state;
+  PageState state;
   ViewHostMsg_UpdateState::Read(msg, &page_id, &state);
   EXPECT_EQ(page_id_C, page_id);
   EXPECT_NE(state_A, state);
@@ -674,7 +680,7 @@ TEST_F(RenderViewImplTest, StaleNavigationsIgnored) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_A);
   int page_id_A;
-  std::string state_A;
+  PageState state_A;
   ViewHostMsg_UpdateState::Read(msg_A, &page_id_A, &state_A);
   EXPECT_EQ(1, page_id_A);
   render_thread_->sink().ClearMessages();
@@ -687,7 +693,7 @@ TEST_F(RenderViewImplTest, StaleNavigationsIgnored) {
   params_A.current_history_list_offset = 1;
   params_A.pending_history_list_offset = 0;
   params_A.page_id = 1;
-  params_A.state = state_A;
+  params_A.page_state = state_A;
   view()->OnNavigate(params_A);
   ProcessPendingMessages();
 
@@ -705,7 +711,7 @@ TEST_F(RenderViewImplTest, StaleNavigationsIgnored) {
   params_B.current_history_list_offset = 0;
   params_B.pending_history_list_offset = 1;
   params_B.page_id = 2;
-  params_B.state = state_A;  // Doesn't matter, just has to be present.
+  params_B.page_state = state_A;  // Doesn't matter, just has to be present.
   view()->OnNavigate(params_B);
 
   // State should be unchanged.
@@ -739,7 +745,7 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_A);
   int page_id_A;
-  std::string state_A;
+  PageState state_A;
   ViewHostMsg_UpdateState::Read(msg_A, &page_id_A, &state_A);
   EXPECT_EQ(1, page_id_A);
   render_thread_->sink().ClearMessages();
@@ -756,7 +762,7 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_B);
   int page_id_B;
-  std::string state_B;
+  PageState state_B;
   ViewHostMsg_UpdateState::Read(msg_B, &page_id_B, &state_B);
   EXPECT_EQ(2, page_id_B);
   render_thread_->sink().ClearMessages();
@@ -771,7 +777,7 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
   params_B.current_history_list_offset = 1;
   params_B.pending_history_list_offset = 0;
   params_B.page_id = 2;
-  params_B.state = state_B;
+  params_B.page_state = state_B;
   view()->OnNavigate(params_B);
   ProcessPendingMessages();
 
@@ -782,7 +788,7 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
 
 // Test that our IME backend sends a notification message when the input focus
 // changes.
-TEST_F(RenderViewImplTest, OnImeStateChanged) {
+TEST_F(RenderViewImplTest, OnImeTypeChanged) {
   // Enable our IME backend code.
   view()->OnSetInputMethodActive(true);
 
@@ -808,19 +814,15 @@ TEST_F(RenderViewImplTest, OnImeStateChanged) {
 
     // Update the IME status and verify if our IME backend sends an IPC message
     // to activate IMEs.
-    view()->UpdateTextInputState(RenderWidget::DO_NOT_SHOW_IME);
+    view()->UpdateTextInputType();
     const IPC::Message* msg = render_thread_->sink().GetMessageAt(0);
     EXPECT_TRUE(msg != NULL);
-    EXPECT_EQ(ViewHostMsg_TextInputStateChanged::ID, msg->type());
-    ViewHostMsg_TextInputStateChanged::Param params;
-    ViewHostMsg_TextInputStateChanged::Read(msg, &params);
-    EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, params.a.type);
-    EXPECT_EQ(true, params.a.can_compose_inline);
-    EXPECT_EQ("some text", params.a.value);
-    EXPECT_EQ(0, params.a.selection_start);
-    EXPECT_EQ(9, params.a.selection_end);
-    EXPECT_EQ(-1, params.a.composition_start);
-    EXPECT_EQ(-1, params.a.composition_end);
+    EXPECT_EQ(ViewHostMsg_TextInputTypeChanged::ID, msg->type());
+    ui::TextInputType type;
+    bool can_compose_inline = false;
+    ViewHostMsg_TextInputTypeChanged::Read(msg, &type, &can_compose_inline);
+    EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, type);
+    EXPECT_EQ(true, can_compose_inline);
 
     // Move the input focus to the second <input> element, where we should
     // de-activate IMEs.
@@ -830,12 +832,12 @@ TEST_F(RenderViewImplTest, OnImeStateChanged) {
 
     // Update the IME status and verify if our IME backend sends an IPC message
     // to de-activate IMEs.
-    view()->UpdateTextInputState(RenderWidget::DO_NOT_SHOW_IME);
+    view()->UpdateTextInputType();
     msg = render_thread_->sink().GetMessageAt(0);
     EXPECT_TRUE(msg != NULL);
-    EXPECT_EQ(ViewHostMsg_TextInputStateChanged::ID, msg->type());
-    ViewHostMsg_TextInputStateChanged::Read(msg, &params);
-    EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, params.a.type);
+    EXPECT_EQ(ViewHostMsg_TextInputTypeChanged::ID, msg->type());
+    ViewHostMsg_TextInputTypeChanged::Read(msg, &type, &can_compose_inline);
+    EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, type);
   }
 }
 
@@ -962,7 +964,7 @@ TEST_F(RenderViewImplTest, ImeComposition) {
 
     // Update the status of our IME back-end.
     // TODO(hbono): we should verify messages to be sent from the back-end.
-    view()->UpdateTextInputState(RenderWidget::DO_NOT_SHOW_IME);
+    view()->UpdateTextInputType();
     ProcessPendingMessages();
     render_thread_->sink().ClearMessages();
 
@@ -1025,9 +1027,16 @@ TEST_F(RenderViewImplTest, OnSetTextDirection) {
   }
 }
 
+// see http://crbug.com/238750
+#if defined(OS_WIN)
+#define MAYBE_OnHandleKeyboardEvent DISABLED_OnHandleKeyboardEvent
+#else
+#define MAYBE_OnHandleKeyboardEvent OnHandleKeyboardEvent
+#endif
+
 // Test that we can receive correct DOM events when we send input events
 // through the RenderWidget::OnHandleInputEvent() function.
-TEST_F(RenderViewImplTest, OnHandleKeyboardEvent) {
+TEST_F(RenderViewImplTest, MAYBE_OnHandleKeyboardEvent) {
 #if !defined(OS_MACOSX)
   // Load an HTML page consisting of one <input> element and three
   // contentediable <div> elements.
@@ -1175,7 +1184,13 @@ TEST_F(RenderViewImplTest, OnHandleKeyboardEvent) {
 // keyboard events through the RenderWidget::OnHandleInputEvent() function.
 // This test is for preventing regressions caused only when we use non-US
 // keyboards, such as Issue 10846.
-TEST_F(RenderViewImplTest, InsertCharacters) {
+// see http://crbug.com/244562
+#if defined(OS_WIN)
+#define MAYBE_InsertCharacters DISABLED_InsertCharacters
+#else
+#define MAYBE_InsertCharacters InsertCharacters
+#endif
+TEST_F(RenderViewImplTest, MAYBE_InsertCharacters) {
 #if !defined(OS_MACOSX)
   static const struct {
     MockKeyboard::Layout layout;
@@ -1846,6 +1861,12 @@ TEST_F(RenderViewImplTest, NavigateFrame) {
   std::wstring output = UTF16ToWideHack(
       GetMainFrame()->contentAsText(kMaxOutputCharacters));
   EXPECT_EQ(output, L"hello \n\nworld");
+}
+
+// This test ensures that a RenderFrame object is created for the top level
+// frame in the RenderView.
+TEST_F(RenderViewImplTest, BasicRenderFrame) {
+  EXPECT_TRUE(view()->main_render_frame_.get());
 }
 
 }  // namespace content

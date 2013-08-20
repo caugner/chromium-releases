@@ -6,7 +6,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/base_bubble_controller.h"
 #include "content/public/common/media_stream_request.h"
@@ -48,9 +48,6 @@ typedef std::map<NSPopUpButton*, MediaMenuParts*> MediaMenuPartsMap;
 
   // The container for the bubble contents of the geolocation bubble.
   IBOutlet NSView* contentsContainer_;
-
-  // The container for the bubble contents of the media menus.
-  IBOutlet NSView* mediaMenusContainer_;
 
   IBOutlet NSTextField* blockedResourcesField_;
 

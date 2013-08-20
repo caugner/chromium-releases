@@ -13,13 +13,13 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/page_state.h"
 #include "content/public/common/password_form.h"
 #include "content/test/test_web_contents.h"
 #include "media/base/video_frame.h"
 #include "ui/gfx/rect.h"
-#include "webkit/dom_storage/dom_storage_types.h"
-#include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/webpreferences.h"
+#include "webkit/common/dom_storage/dom_storage_types.h"
+#include "webkit/common/webpreferences.h"
 
 namespace content {
 
@@ -35,6 +35,9 @@ SessionStorageNamespaceImpl* CreateSessionStorageNamespace(
   return new SessionStorageNamespaceImpl(
       static_cast<DOMStorageContextImpl*>(dom_storage_context));
 }
+
+const int64 kFrameId = 13UL;
+
 }  // namespace
 
 
@@ -55,12 +58,14 @@ void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
   params->gesture = NavigationGestureUser;
   params->was_within_same_page = false;
   params->is_post = false;
-  params->content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
+  params->page_state = PageState::CreateFromURL(url);
 }
 
 TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
     : rwh_(RenderWidgetHostImpl::From(rwh)),
-      is_showing_(false) {
+      is_showing_(false),
+      did_swap_compositor_frame_(false) {
+  rwh_->SetView(this);
 }
 
 TestRenderWidgetHostView::~TestRenderWidgetHostView() {
@@ -106,6 +111,8 @@ void TestRenderWidgetHostView::RenderViewGone(base::TerminationStatus status,
                                               int error_code) {
   delete this;
 }
+
+void TestRenderWidgetHostView::Destroy() { delete this; }
 
 gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
   return gfx::Rect();
@@ -202,6 +209,12 @@ gfx::NativeView TestRenderWidgetHostView::BuildInputMethodsGtkMenu() {
 }
 #endif  // defined(TOOLKIT_GTK)
 
+void TestRenderWidgetHostView::OnSwapCompositorFrame(
+    scoped_ptr<cc::CompositorFrame> frame) {
+  did_swap_compositor_frame_ = true;
+}
+
+
 gfx::GLSurfaceHandle TestRenderWidgetHostView::GetCompositingSurface() {
   return gfx::GLSurfaceHandle();
 }
@@ -226,16 +239,24 @@ bool TestRenderWidgetHostView::LockMouse() {
 void TestRenderWidgetHostView::UnlockMouse() {
 }
 
+#if defined(OS_WIN) && defined(USE_AURA)
+void TestRenderWidgetHostView::SetParentNativeViewAccessible(
+    gfx::NativeViewAccessible accessible_parent) {
+}
+#endif
+
 TestRenderViewHost::TestRenderViewHost(
     SiteInstance* instance,
     RenderViewHostDelegate* delegate,
     RenderWidgetHostDelegate* widget_delegate,
     int routing_id,
+    int main_frame_routing_id,
     bool swapped_out)
     : RenderViewHostImpl(instance,
                          delegate,
                          widget_delegate,
                          routing_id,
+                         main_frame_routing_id,
                          swapped_out,
                          CreateSessionStorageNamespace(instance)),
       render_view_created_(false),
@@ -243,19 +264,17 @@ TestRenderViewHost::TestRenderViewHost(
       simulate_fetch_via_proxy_(false),
       simulate_history_list_was_cleared_(false),
       contents_mime_type_("text/html") {
-  // For normal RenderViewHosts, this is freed when |Shutdown()| is
-  // called.  For TestRenderViewHost, the view is explicitly
-  // deleted in the destructor below, because
-  // TestRenderWidgetHostView::Destroy() doesn't |delete this|.
-  SetView(new TestRenderWidgetHostView(this));
+  // TestRenderWidgetHostView installs itself into this->view_ in its
+  // constructor, and deletes itself when TestRenderWidgetHostView::Destroy() is
+  // called.
+  new TestRenderWidgetHostView(this);
+
+  main_frame_id_ = kFrameId;
 }
 
 TestRenderViewHost::~TestRenderViewHost() {
   if (delete_counter_)
     ++*delete_counter_;
-
-  // Since this isn't a traditional view, we have to delete it.
-  delete GetView();
 }
 
 bool TestRenderViewHost::CreateRenderView(
@@ -287,7 +306,7 @@ void TestRenderViewHost::SendNavigateWithTransition(
 
 void TestRenderViewHost::SendNavigateWithOriginalRequestURL(
     int page_id, const GURL& url, const GURL& original_request_url) {
-  OnDidStartProvisionalLoadForFrame(0, -1, true, url);
+  OnDidStartProvisionalLoadForFrame(kFrameId, -1, true, url);
   SendNavigateWithParameters(page_id, url, PAGE_TRANSITION_LINK,
                              original_request_url, 200, 0);
 }
@@ -301,7 +320,7 @@ void TestRenderViewHost::SendNavigateWithFile(
 void TestRenderViewHost::SendNavigateWithTransitionAndResponseCode(
     int page_id, const GURL& url, PageTransition transition,
     int response_code) {
-  OnDidStartProvisionalLoadForFrame(0, -1, true, url);
+  OnDidStartProvisionalLoadForFrame(kFrameId, -1, true, url);
   SendNavigateWithParameters(page_id, url, transition, url, response_code, 0);
 }
 
@@ -311,7 +330,7 @@ void TestRenderViewHost::SendNavigateWithParameters(
     const base::FilePath* file_path_for_history_item) {
   ViewHostMsg_FrameNavigate_Params params;
   params.page_id = page_id;
-  params.frame_id = 0;
+  params.frame_id = kFrameId;
   params.url = url;
   params.referrer = Referrer();
   params.transition = transition;
@@ -332,20 +351,11 @@ void TestRenderViewHost::SendNavigateWithParameters(
   params.history_list_was_cleared = simulate_history_list_was_cleared_;
   params.original_request_url = original_request_url;
 
-  WebKit::WebHTTPBody http_body;
-  http_body.initialize();
-
-  WebKit::WebHistoryItem history_item;
-  history_item.initialize();
-  history_item.setURLString(WebKit::WebString::fromUTF8(url.spec()));
-  if (file_path_for_history_item) {
-    const char char_data[] = "data";
-    http_body.appendData(WebKit::WebData(char_data, arraysize(char_data)-1));
-    http_body.appendFile(WebKit::WebString::fromUTF8(
-        file_path_for_history_item->MaybeAsASCII()));
-    history_item.setHTTPBody(http_body);
-  }
-  params.content_state = webkit_glue::HistoryItemToString(history_item);
+  params.page_state = PageState::CreateForTesting(
+      url,
+      false,
+      file_path_for_history_item ? "data" : NULL,
+      file_path_for_history_item);
 
   ViewHostMsg_FrameNavigate msg(1, params);
   OnNavigate(msg);
@@ -361,7 +371,7 @@ void TestRenderViewHost::SetContentsMimeType(const std::string& mime_type) {
 }
 
 void TestRenderViewHost::SimulateSwapOutACK() {
-  OnSwapOutACK(false);
+  OnSwappedOut(false);
 }
 
 void TestRenderViewHost::SimulateWasHidden() {
@@ -383,17 +393,11 @@ void TestRenderViewHost::TestOnStartDragging(
 void TestRenderViewHost::TestOnUpdateStateWithFile(
     int process_id,
     const base::FilePath& file_path) {
-  WebKit::WebHTTPBody http_body;
-  http_body.initialize();
-  const char char_data[] = "data";
-  http_body.appendData(WebKit::WebData(char_data, arraysize(char_data)-1));
-  http_body.appendFile(WebKit::WebString::fromUTF8(file_path.MaybeAsASCII()));
-
-  WebKit::WebHistoryItem history_item;
-  history_item.initialize();
-  history_item.setURLString("http://www.google.com");
-  history_item.setHTTPBody(http_body);
-  OnUpdateState(process_id, webkit_glue::HistoryItemToString(history_item));
+  OnUpdateState(process_id,
+                PageState::CreateForTesting(GURL("http://www.google.com"),
+                                            false,
+                                            "data",
+                                            &file_path));
 }
 
 void TestRenderViewHost::set_simulate_fetch_via_proxy(bool proxy) {

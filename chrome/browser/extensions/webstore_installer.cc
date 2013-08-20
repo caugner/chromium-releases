@@ -9,10 +9,10 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/rand_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -66,7 +66,7 @@ const char kInstallCanceledError[] = "Install canceled";
 const char kDownloadInterruptedError[] = "Download interrupted";
 const char kInvalidDownloadError[] = "Download was not a CRX";
 const char kInlineInstallSource[] = "inline";
-const char kDefaultInstallSource[] = "";
+const char kDefaultInstallSource[] = "ondemand";
 
 base::FilePath* g_download_directory_for_tests = NULL;
 

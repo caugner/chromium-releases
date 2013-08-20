@@ -10,9 +10,9 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_downloader_delegate.h"
@@ -141,7 +141,7 @@ bool ProfileDownloader::GetProfileNameAndImageURL(const std::string& data,
   std::string error_message;
   scoped_ptr<base::Value> root_value(base::JSONReader::ReadAndReturnError(
       data, base::JSON_PARSE_RFC, &error_code, &error_message));
-  if (!root_value.get()) {
+  if (!root_value) {
     LOG(ERROR) << "Error while parsing user entry response: "
                << error_message;
     return false;

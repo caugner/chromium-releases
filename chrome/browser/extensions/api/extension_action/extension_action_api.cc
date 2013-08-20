@@ -8,8 +8,8 @@
 
 #include "base/base64.h"
 #include "base/lazy_instance.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/extension_action/extension_page_actions_api_constants.h"
 #include "chrome/browser/extensions/extension_action.h"
@@ -43,6 +43,9 @@ const char kBadgeTextStorageKey[] = "badge_text";
 const char kBadgeBackgroundColorStorageKey[] = "badge_background_color";
 const char kBadgeTextColorStorageKey[] = "badge_text_color";
 const char kAppearanceStorageKey[] = "appearance";
+
+// Whether the browser action is visible in the toolbar.
+const char kBrowserActionVisible[] = "browser_action_visible";
 
 // Errors.
 const char kNoExtensionActionError[] =
@@ -147,7 +150,7 @@ void SetDefaultsFromValue(const base::DictionaryValue* dict,
 // disk.
 scoped_ptr<base::DictionaryValue> DefaultsToValue(ExtensionAction* action) {
   const int kTabId = ExtensionAction::kDefaultTabId;
-  scoped_ptr<base::DictionaryValue> dict(new DictionaryValue());
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
   dict->SetString(kPopupUrlStorageKey, action->GetPopupUrl(kTabId).spec());
   dict->SetString(kTitleStorageKey, action->GetTitle(kTabId));
@@ -225,6 +228,36 @@ ExtensionActionAPI::~ExtensionActionAPI() {
 ProfileKeyedAPIFactory<ExtensionActionAPI>*
 ExtensionActionAPI::GetFactoryInstance() {
   return &g_factory.Get();
+}
+
+// static
+bool ExtensionActionAPI::GetBrowserActionVisibility(
+    const ExtensionPrefs* prefs,
+    const std::string& extension_id) {
+  bool visible = false;
+  if (!prefs || !prefs->ReadPrefAsBoolean(extension_id,
+                                          kBrowserActionVisible,
+                                          &visible)) {
+    return true;
+  }
+  return visible;
+}
+
+// static
+void ExtensionActionAPI::SetBrowserActionVisibility(
+    ExtensionPrefs* prefs,
+    const std::string& extension_id,
+    bool visible) {
+  if (GetBrowserActionVisibility(prefs, extension_id) == visible)
+    return;
+
+  prefs->UpdateExtensionPref(extension_id,
+                             kBrowserActionVisible,
+                             Value::CreateBooleanValue(visible));
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
+      content::Source<ExtensionPrefs>(prefs),
+      content::Details<const std::string>(&extension_id));
 }
 
 //
@@ -431,11 +464,11 @@ void ExtensionActionFunction::NotifyChange() {
   switch (extension_action_->action_type()) {
     case ActionInfo::TYPE_BROWSER:
     case ActionInfo::TYPE_PAGE:
-      if (ExtensionActionManager::Get(profile_)->
-          GetBrowserAction(*extension_)) {
+      if (ExtensionActionManager::Get(profile_)
+              ->GetBrowserAction(*extension_.get())) {
         NotifyBrowserActionChange();
-      } else if (ExtensionActionManager::Get(profile_)->
-                     GetPageAction(*extension_)) {
+      } else if (ExtensionActionManager::Get(profile_)
+                     ->GetPageAction(*extension_.get())) {
         NotifyLocationBarChange();
       }
       return;
@@ -598,7 +631,7 @@ bool ExtensionActionSetBadgeBackgroundColorFunction::RunExtensionAction() {
   EXTENSION_FUNCTION_VALIDATE(details_->Get("color", &color_value));
   SkColor color = 0;
   if (color_value->IsType(Value::TYPE_LIST)) {
-    ListValue* list = NULL;
+    base::ListValue* list = NULL;
     EXTENSION_FUNCTION_VALIDATE(details_->GetList("color", &list));
     EXTENSION_FUNCTION_VALIDATE(list->GetSize() == 4);
 
@@ -638,7 +671,7 @@ bool ExtensionActionGetBadgeTextFunction::RunExtensionAction() {
 }
 
 bool ExtensionActionGetBadgeBackgroundColorFunction::RunExtensionAction() {
-  ListValue* list = new ListValue();
+  base::ListValue* list = new base::ListValue();
   SkColor color = extension_action_->GetBadgeBackgroundColor(tab_id_);
   list->Append(Value::CreateIntegerValue(SkColorGetR(color)));
   list->Append(Value::CreateIntegerValue(SkColorGetG(color)));

@@ -6,6 +6,7 @@
 
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
+#include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_bindings.h"
@@ -13,7 +14,7 @@
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_cgl.h"
 #include "ui/gl/gl_surface_osmesa.h"
-#include "ui/surface/io_surface_support_mac.h"
+#include "ui/gl/io_surface_support_mac.h"
 
 namespace content {
 namespace {
@@ -33,8 +34,10 @@ int RoundUpSurfaceDimension(int number) {
 
 // We are backed by an offscreen surface for the purposes of creating
 // a context, but use FBOs to render to texture backed IOSurface
-class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
-                                       public ImageTransportSurface {
+class IOSurfaceImageTransportSurface
+    : public gfx::NoOpGLSurfaceCGL,
+      public ImageTransportSurface,
+      public GpuCommandBufferStub::DestructionObserver {
  public:
   IOSurfaceImageTransportSurface(GpuChannelManager* manager,
                                  GpuCommandBufferStub* stub,
@@ -59,8 +62,11 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
   virtual void OnBufferPresented(
       const AcceleratedSurfaceMsg_BufferPresented_Params& params) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
-  virtual void OnResize(gfx::Size size) OVERRIDE;
-  virtual void SetLatencyInfo(const cc::LatencyInfo&) OVERRIDE;
+  virtual void OnResize(gfx::Size size, float scale_factor) OVERRIDE;
+  virtual void SetLatencyInfo(const ui::LatencyInfo&) OVERRIDE;
+
+  // GpuCommandBufferStub::DestructionObserver implementation.
+  virtual void OnWillDestroyStub() OVERRIDE;
 
  private:
   virtual ~IOSurfaceImageTransportSurface() OVERRIDE;
@@ -76,7 +82,7 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
   uint32 fbo_id_;
   GLuint texture_id_;
 
-  base::mac::ScopedCFTypeRef<CFTypeRef> io_surface_;
+  base::ScopedCFTypeRef<CFTypeRef> io_surface_;
 
   // The id of |io_surface_| or 0 if that's NULL.
   uint64 io_surface_handle_;
@@ -86,6 +92,7 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
 
   gfx::Size size_;
   gfx::Size rounded_size_;
+  float scale_factor_;
 
   // Whether or not we've successfully made the surface current once.
   bool made_current_;
@@ -96,7 +103,7 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
   // Whether we unscheduled command buffer because of pending SwapBuffers.
   bool did_unschedule_;
 
-  cc::LatencyInfo latency_info_;
+  ui::LatencyInfo latency_info_;
 
   scoped_ptr<ImageTransportHelper> helper_;
 
@@ -113,7 +120,7 @@ void AddBooleanValue(CFMutableDictionaryRef dictionary,
 void AddIntegerValue(CFMutableDictionaryRef dictionary,
                      const CFStringRef key,
                      int32 value) {
-  base::mac::ScopedCFTypeRef<CFNumberRef> number(
+  base::ScopedCFTypeRef<CFNumberRef> number(
       CFNumberCreate(NULL, kCFNumberSInt32Type, &value));
   CFDictionaryAddValue(dictionary, key, number.get());
 }
@@ -129,6 +136,7 @@ IOSurfaceImageTransportSurface::IOSurfaceImageTransportSurface(
       texture_id_(0),
       io_surface_handle_(0),
       context_(NULL),
+      scale_factor_(1.f),
       made_current_(false),
       is_swap_buffers_pending_(false),
       did_unschedule_(false) {
@@ -136,7 +144,6 @@ IOSurfaceImageTransportSurface::IOSurfaceImageTransportSurface(
 }
 
 IOSurfaceImageTransportSurface::~IOSurfaceImageTransportSurface() {
-  Destroy();
 }
 
 bool IOSurfaceImageTransportSurface::Initialize() {
@@ -149,7 +156,14 @@ bool IOSurfaceImageTransportSurface::Initialize() {
 
   if (!helper_->Initialize())
     return false;
-  return NoOpGLSurfaceCGL::Initialize();
+
+  if (!NoOpGLSurfaceCGL::Initialize()) {
+    helper_->Destroy();
+    return false;
+  }
+
+  helper_->stub()->AddDestructionObserver(this);
+  return true;
 }
 
 void IOSurfaceImageTransportSurface::Destroy() {
@@ -184,7 +198,7 @@ bool IOSurfaceImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
   if (made_current_)
     return true;
 
-  OnResize(gfx::Size(1, 1));
+  OnResize(gfx::Size(1, 1), 1.f);
 
   made_current_ = true;
   return true;
@@ -231,6 +245,7 @@ bool IOSurfaceImageTransportSurface::SwapBuffers() {
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
   params.surface_handle = io_surface_handle_;
   params.size = GetSize();
+  params.scale_factor = scale_factor_;
   params.latency_info = latency_info_;
   helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
@@ -253,6 +268,7 @@ bool IOSurfaceImageTransportSurface::PostSubBuffer(
   params.width = width;
   params.height = height;
   params.surface_size = GetSize();
+  params.surface_scale_factor = scale_factor_;
   params.latency_info = latency_info_;
   helper_->SendAcceleratedSurfacePostSubBuffer(params);
 
@@ -289,7 +305,8 @@ void IOSurfaceImageTransportSurface::OnResizeViewACK() {
   NOTREACHED();
 }
 
-void IOSurfaceImageTransportSurface::OnResize(gfx::Size size) {
+void IOSurfaceImageTransportSurface::OnResize(gfx::Size size,
+                                              float scale_factor) {
   // This trace event is used in gpu_feature_browsertest.cc - the test will need
   // to be updated if this event is changed or moved.
   TRACE_EVENT2("gpu", "IOSurfaceImageTransportSurface::OnResize",
@@ -298,13 +315,19 @@ void IOSurfaceImageTransportSurface::OnResize(gfx::Size size) {
   DCHECK(context_->IsCurrent(this));
 
   size_ = size;
+  scale_factor_ = scale_factor;
 
   CreateIOSurface();
 }
 
 void IOSurfaceImageTransportSurface::SetLatencyInfo(
-    const cc::LatencyInfo& latency_info) {
+    const ui::LatencyInfo& latency_info) {
   latency_info_ = latency_info;
+}
+
+void IOSurfaceImageTransportSurface::OnWillDestroyStub() {
+  helper_->stub()->RemoveDestructionObserver(this);
+  Destroy();
 }
 
 void IOSurfaceImageTransportSurface::UnrefIOSurface() {
@@ -376,7 +399,7 @@ void IOSurfaceImageTransportSurface::CreateIOSurface() {
 
   // Allocate a new IOSurface, which is the GPU resource that can be
   // shared across processes.
-  base::mac::ScopedCFTypeRef<CFMutableDictionaryRef> properties;
+  base::ScopedCFTypeRef<CFMutableDictionaryRef> properties;
   properties.reset(CFDictionaryCreateMutable(kCFAllocatorDefault,
                                              0,
                                              &kCFTypeDictionaryKeyCallBacks,
@@ -472,7 +495,7 @@ scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateNativeSurface(
         return scoped_refptr<gfx::GLSurface>();
       }
       scoped_refptr<gfx::GLSurface> surface(new DRTSurfaceOSMesa());
-      if (!surface || !surface->Initialize())
+      if (!surface.get() || !surface->Initialize())
         return surface;
       return scoped_refptr<gfx::GLSurface>(new PassThroughImageTransportSurface(
           manager, stub, surface.get(), false));

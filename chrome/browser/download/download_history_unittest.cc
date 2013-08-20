@@ -198,14 +198,12 @@ class FakeHistoryAdapter : public DownloadHistory::HistoryAdapter {
 class DownloadHistoryTest : public testing::Test {
  public:
   DownloadHistoryTest()
-    : ui_thread_(content::BrowserThread::UI, &loop_),
-      manager_(new content::MockDownloadManager()),
-      history_(NULL),
-      download_history_(NULL),
-      manager_observer_(NULL),
-      item_observer_(NULL),
-      download_created_index_(0) {
-  }
+      : ui_thread_(content::BrowserThread::UI, &loop_),
+        manager_(new content::MockDownloadManager()),
+        history_(NULL),
+        manager_observer_(NULL),
+        item_observer_(NULL),
+        download_created_index_(0) {}
   virtual ~DownloadHistoryTest() {
     STLDeleteElements(&items_);
   }
@@ -410,10 +408,10 @@ class DownloadHistoryTest : public testing::Test {
   }
 
  private:
-  MessageLoopForUI loop_;
+  base::MessageLoopForUI loop_;
   content::TestBrowserThread ui_thread_;
   std::vector<NiceMockDownloadItem*> items_;
-  scoped_refptr<content::MockDownloadManager> manager_;
+  scoped_ptr<content::MockDownloadManager> manager_;
   FakeHistoryAdapter* history_;
   scoped_ptr<DownloadHistory> download_history_;
   content::DownloadManager::Observer* manager_observer_;

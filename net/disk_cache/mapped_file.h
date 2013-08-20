@@ -8,7 +8,6 @@
 #define NET_DISK_CACHE_MAPPED_FILE_H_
 
 #include "net/base/net_export.h"
-#include "net/disk_cache/disk_format.h"
 #include "net/disk_cache/file.h"
 #include "net/disk_cache/file_block.h"
 
@@ -51,9 +50,6 @@ class NET_EXPORT_PRIVATE MappedFile : public File {
 #endif
   void* buffer_;  // Address of the memory mapped buffer.
   size_t view_size_;  // Size of the memory pointed by buffer_.
-#if defined(POSIX_AVOID_MMAP)
-  void* snapshot_;  // Copy of the buffer taken when it was last flushed.
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(MappedFile);
 };

@@ -9,8 +9,25 @@ var test = test || {};
 
 /**
  * Namespace for test utility functions.
+ *
+ * Public functions in the test.util.sync and the test.util.async namespaces are
+ * published to test cases and can be called by using callRemoteTestUtil. The
+ * arguments are serialized as JSON internally. If application ID is passed to
+ * callRemoteTestUtil, the content window of the application is added as the
+ * first argument. The functions in the test.util.async namespace are passed the
+ * callback function as the last argument.
  */
 test.util = {};
+
+/**
+ * Namespace for synchronous utility functions.
+ */
+test.util.sync = {};
+
+/**
+ * Namespace for asynchronous utility functions.
+ */
+test.util.async = {};
 
 /**
  * Extension ID of the testing extension.
@@ -20,33 +37,101 @@ test.util = {};
 test.util.TESTING_EXTENSION_ID = 'oobinhbdbiehknkpbpejbbpdbkdjmoco';
 
 /**
+ * Interval of checking a condition in milliseconds.
+ * @type {number}
+ * @const
+ * @private
+ */
+test.util.WAITTING_INTERVAL_ = 50;
+
+/**
+ * Repeats the function until it returns true.
+ * @param {function()} closure Function expected to return true.
+ * @private
+ */
+test.util.repeatUntilTrue_ = function(closure) {
+  var step = function() {
+    if (closure())
+      return;
+    setTimeout(step, test.util.WAITTING_INTERVAL_);
+  };
+  step();
+};
+
+/**
  * Opens the main Files.app's window and waits until it is ready.
  *
  * @param {string} path Path of the directory to be opened.
  * @param {function(string)} callback Completion callback with the new window's
  *     App ID.
  */
-test.util.openMainWindow = function(path, callback) {
-  var appId = launchFileManager({defaultPath: path});
-  function helper() {
-    if (appWindows[appId]) {
-      var contentWindow = appWindows[appId].contentWindow;
-      var table = contentWindow.document.querySelector('#detail-table');
-      if (table) {
+test.util.async.openMainWindow = function(path, callback) {
+  var steps = [
+    function() {
+      launchFileManager({defaultPath: path},
+                        undefined,  // opt_type
+                        undefined,  // opt_id
+                        steps.shift());
+    },
+    function(appId) {
+      test.util.repeatUntilTrue_(function() {
+        if (!appWindows[appId])
+          return false;
+        var contentWindow = appWindows[appId].contentWindow;
+        var table = contentWindow.document.querySelector('#detail-table');
+        if (!table)
+          return false;
         callback(appId);
-        return;
+        return true;
+      });
+    }
+  ];
+  steps.shift()();
+};
+
+/**
+ * Waits for a window with the specified App ID prefix. Eg. `files` will match
+ * windows such as files#0, files#1, etc.
+ *
+ * @param {string} appIdPrefix ID prefix of the requested window.
+ * @param {function(string)} callback Completion callback with the new window's
+ *     App ID.
+ */
+test.util.async.waitForWindow = function(appIdPrefix, callback) {
+  test.util.repeatUntilTrue_(function() {
+    for (var appId in appWindows) {
+      if (appId.indexOf(appIdPrefix) == 0 &&
+          appWindows[appId].contentWindow) {
+        callback(appId);
+        return true;
       }
     }
-    window.setTimeout(helper, 50);
+    return false;
+  });
+};
+
+/**
+ * Gets a document in the Files.app's window, including iframes.
+ *
+ * @param {Window} contentWindow Window to be used.
+ * @param {string=} opt_iframeQuery Query for the iframe.
+ * @return {Document=} Returns the found document or undefined if not found.
+ * @private
+ */
+test.util.sync.getDocument_ = function(contentWindow, opt_iframeQuery) {
+  if (opt_iframeQuery) {
+    var iframe = contentWindow.document.querySelector(opt_iframeQuery);
+    return iframe && iframe.contentWindow && iframe.contentWindow.document;
   }
-  helper();
+
+  return contentWindow.document;
 };
 
 /**
  * Gets total Javascript error count from each app window.
  * @return {number} Error count.
  */
-test.util.getErrorCount = function() {
+test.util.sync.getErrorCount = function() {
   var totalCount = 0;
   for (var appId in appWindows) {
     var contentWindow = appWindows[appId].contentWindow;
@@ -57,12 +142,25 @@ test.util.getErrorCount = function() {
 };
 
 /**
+ * Resizes the window to the specified dimensions.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {number} width Window width.
+ * @param {number} height Window height.
+ * @return {boolean} True for success.
+ */
+test.util.sync.resizeWindow = function(contentWindow, width, height) {
+  appWindows[contentWindow.appID].resizeTo(width, height);
+  return true;
+};
+
+/**
  * Returns an array with the files currently selected in the file manager.
  *
  * @param {Window} contentWindow Window to be tested.
  * @return {Array.<string>} Array of selected files.
  */
-test.util.getSelectedFiles = function(contentWindow) {
+test.util.sync.getSelectedFiles = function(contentWindow) {
   var table = contentWindow.document.querySelector('#detail-table');
   var rows = table.querySelectorAll('li');
   var selected = [];
@@ -81,7 +179,7 @@ test.util.getSelectedFiles = function(contentWindow) {
  * @param {Window} contentWindow Window to be tested.
  * @return {Array.<Array.<string>>} Array of rows.
  */
-test.util.getFileList = function(contentWindow) {
+test.util.sync.getFileList = function(contentWindow) {
   var table = contentWindow.document.querySelector('#detail-table');
   var rows = table.querySelectorAll('li');
   var fileList = [];
@@ -94,8 +192,56 @@ test.util.getFileList = function(contentWindow) {
       row.querySelector('.date').textContent
     ]);
   }
-  fileList.sort();
   return fileList;
+};
+
+/**
+ * Waits until the window is set to the specified dimensions.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {number} width Requested width.
+ * @param {number} height Requested height.
+ * @param {function(Object)} callback Success callback with the dimensions.
+ */
+test.util.async.waitForWindowGeometry = function(
+    contentWindow, width, height, callback) {
+  test.util.repeatUntilTrue_(function() {
+    if (contentWindow.innerWidth == width &&
+        contentWindow.innerHeight == height) {
+      callback({width: width, height: height});
+      return true;
+    }
+    return false;
+  });
+};
+
+/**
+ * Waits for an element and returns it as an array of it's attributes.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} targetQuery Query to specify the element.
+ * @param {?string} iframeQuery Iframe selector or null if no iframe.
+ * @param {function(Object)} callback Callback with a hash array of attributes
+ *     and contents as text.
+ */
+test.util.async.waitForElement = function(
+    contentWindow, targetQuery, iframeQuery, callback) {
+  test.util.repeatUntilTrue_(function() {
+    var doc = test.util.sync.getDocument_(contentWindow, iframeQuery);
+    if (!doc)
+      return false;
+    var element = doc.querySelector(targetQuery);
+    if (!element)
+      return false;
+    var attributes = {};
+    for (var i = 0; i < element.attributes.length; i++) {
+      attributes[element.attributes[i].nodeName] =
+          element.attributes[i].nodeValue;
+    }
+    var text = element.textContent;
+    callback({attributes: attributes, text: text});
+    return true;
+  });
 };
 
 /**
@@ -106,21 +252,23 @@ test.util.getFileList = function(contentWindow) {
  * @param {number} lengthBefore Number of items visible before.
  * @param {function(Array.<Array.<string>>)} callback Change callback.
  */
-test.util.waitForFileListChange = function(
+test.util.async.waitForFileListChange = function(
     contentWindow, lengthBefore, callback) {
-  function helper() {
-    var files = test.util.getFileList(contentWindow);
+  test.util.repeatUntilTrue_(function() {
+    var files = test.util.sync.getFileList(contentWindow);
+    files.sort();
     var notReadyRows = files.filter(function(row) {
       return row.filter(function(cell) { return cell == '...'; }).length;
     });
     if (notReadyRows.length === 0 &&
         files.length !== lengthBefore &&
-        files.length !== 0)
+        files.length !== 0) {
       callback(files);
-    else
-      window.setTimeout(helper, 50);
-  }
-  helper();
+      return true;
+    } else {
+      return false;
+    }
+  });
 };
 
 /**
@@ -129,7 +277,7 @@ test.util.waitForFileListChange = function(
  * @param {Window} contentWindow Window to be tested.
  * @return {Array.<string>} Array of items.
  */
-test.util.getAutocompleteList = function(contentWindow) {
+test.util.sync.getAutocompleteList = function(contentWindow) {
   var list = contentWindow.document.querySelector('#autocomplete-list');
   var lines = list.querySelectorAll('li');
   var items = [];
@@ -150,7 +298,7 @@ test.util.getAutocompleteList = function(contentWindow) {
  * @param {number} numExpectedItems number of items to be shown.
  * @param {function(Array.<string>)} callback Change callback.
  */
-test.util.performAutocompleteAndWait = function(
+test.util.async.performAutocompleteAndWait = function(
     contentWindow, query, numExpectedItems, callback) {
   // Dispatch a 'focus' event to the search box so that the autocomplete list
   // is attached to the search box. Note that calling searchBox.focus() won't
@@ -167,14 +315,15 @@ test.util.performAutocompleteAndWait = function(
   inputEvent.initEvent('input', true /* bubbles */, true /* cancelable */);
   searchBox.dispatchEvent(inputEvent);
 
-  function helper() {
-    var items = test.util.getAutocompleteList(contentWindow);
-    if (items.length >= numExpectedItems)
+  test.util.repeatUntilTrue_(function() {
+    var items = test.util.sync.getAutocompleteList(contentWindow);
+    if (items.length >= numExpectedItems) {
       callback(items);
-    else
-      window.setTimeout(helper, 50);
-  }
-  helper();
+      return true;
+    } else {
+      return false;
+    }
+  });
 };
 
 /**
@@ -183,17 +332,15 @@ test.util.performAutocompleteAndWait = function(
  * @param {Window} contentWindow Window to be tested.
  * @param {function()} callback Success callback.
  */
-test.util.waitAndAcceptDialog = function(contentWindow, callback) {
-  var tryAccept = function() {
+test.util.async.waitAndAcceptDialog = function(contentWindow, callback) {
+  test.util.repeatUntilTrue_(function() {
     var button = contentWindow.document.querySelector('.cr-dialog-ok');
-    if (button) {
-      button.click();
-      callback();
-      return;
-    }
-    window.setTimeout(tryAccept, 50);
-  };
-  tryAccept();
+    if (!button)
+      return false;
+    button.click();
+    callback();
+    return true;
+  });
 };
 
 /**
@@ -203,12 +350,12 @@ test.util.waitAndAcceptDialog = function(contentWindow, callback) {
  * @param {string} filename Name of the file to be selected.
  * @return {boolean} True if file got selected, false otherwise.
  */
-test.util.selectFile = function(contentWindow, filename) {
+test.util.sync.selectFile = function(contentWindow, filename) {
   var table = contentWindow.document.querySelector('#detail-table');
   var rows = table.querySelectorAll('li');
   for (var index = 0; index < rows.length; ++index) {
-    test.util.fakeKeyDown(contentWindow, '#file-list', 'Down', false);
-    var selection = test.util.getSelectedFiles(contentWindow);
+    test.util.sync.fakeKeyDown(contentWindow, '#file-list', 'Down', false);
+    var selection = test.util.sync.getSelectedFiles(contentWindow);
     if (selection.length === 1 && selection[0] === filename)
       return true;
   }
@@ -221,15 +368,70 @@ test.util.selectFile = function(contentWindow, filename) {
  *
  * @param {Window} contentWindow Window to be tested.
  * @param {string} iconName Name of the volume icon.
- * @return {boolean} True if the target is found and mousedown and click events
- *     are sent.
+ * @param {function(boolean)} callback Callback function to notify the caller
+ *     whether the target is found and mousedown and click events are sent.
  */
-test.util.selectVolume = function(contentWindow, iconName) {
+test.util.async.selectVolume = function(contentWindow, iconName, callback) {
   var query = '[volume-type-icon=' + iconName + ']';
-  // To change the selected volume, we have to send both events 'mousedown' and
-  // 'click' to the volume list.
-  return test.util.fakeMouseDown(contentWindow, query) &&
-      test.util.fakeMouseClick(contentWindow, query);
+  var driveQuery = '[volume-type-icon=drive]';
+  var isDriveSubVolume = iconName == 'drive_recent' ||
+                         iconName == 'drive_shared_with_me' ||
+                         iconName == 'drive_offline';
+  var preSelection = false;
+  var steps = {
+    checkQuery: function() {
+      if (contentWindow.document.querySelector(query)) {
+        steps.sendEvents();
+        return;
+      }
+      // If the target volume is sub-volume of drive, we must click 'drive'
+      // before clicking the sub-item.
+      if (!preSelection) {
+        if (!isDriveSubVolume) {
+          callback(false);
+          return;
+        }
+        if (!(test.util.sync.fakeMouseDown(contentWindow, driveQuery) &&
+              test.util.sync.fakeMouseClick(contentWindow, driveQuery))) {
+          callback(false);
+          return;
+        }
+        preSelection = true;
+      }
+      setTimeout(steps.checkQuery, 50);
+    },
+    sendEvents: function() {
+      // To change the selected volume, we have to send both events 'mousedown'
+      // and 'click' to the volume list.
+      callback(test.util.sync.fakeMouseDown(contentWindow, query) &&
+               test.util.sync.fakeMouseClick(contentWindow, query));
+    }
+  };
+  steps.checkQuery();
+};
+
+/**
+ * Waits the contents of file list becomes to equal to expected contents.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {Array.<Array.<string>>} expected Expected contents of file list.
+ * @param {boolean=} opt_orderCheck If it is true, this function also compares
+ *     the order of files.
+ * @param {function()} callback Callback function to notify the caller that
+ *     expected files turned up.
+ */
+test.util.async.waitForFiles = function(
+    contentWindow, expected, opt_orderCheck, callback) {
+  test.util.repeatUntilTrue_(function() {
+    var files = test.util.sync.getFileList(contentWindow);
+    if (!opt_orderCheck)
+      files.sort();
+    if (chrome.test.checkDeepEq(expected, files)) {
+      callback(true);
+      return true;
+    }
+    return false;
+  });
 };
 
 /**
@@ -238,17 +440,34 @@ test.util.selectVolume = function(contentWindow, iconName) {
  * @param {Window} contentWindow Window to be tested.
  * @param {string} targetQuery Query to specify the element.
  * @param {Event} event Event to be sent.
+ * @param {string=} opt_iframeQuery Optional iframe selector.
  * @return {boolean} True if the event is sent to the target, false otherwise.
  */
-test.util.sendEvent = function(contentWindow, targetQuery, event) {
-  var target = contentWindow.document.querySelector(targetQuery);
-  if (target) {
-    target.dispatchEvent(event);
-    return true;
-  } else {
-    console.error('Target element for ' + targetQuery + ' not found.');
-    return false;
+test.util.sync.sendEvent = function(
+    contentWindow, targetQuery, event, opt_iframeQuery) {
+  var doc = test.util.sync.getDocument_(contentWindow, opt_iframeQuery);
+  if (doc) {
+    var target = doc.querySelector(targetQuery);
+    if (target) {
+      target.dispatchEvent(event);
+      return true;
+    }
   }
+  console.error('Target element for ' + targetQuery + ' not found.');
+  return false;
+};
+
+/**
+ * Sends an fake event having the specified type to the target query.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} targetQuery Query to specify the element.
+ * @param {string} event Type of event.
+ * @return {boolean} True if the event is sent to the target, false otherwise.
+ */
+test.util.sync.fakeEvent = function(contentWindow, targetQuery, event) {
+  return test.util.sync.sendEvent(
+      contentWindow, targetQuery, new Event(event));
 };
 
 /**
@@ -259,26 +478,67 @@ test.util.sendEvent = function(contentWindow, targetQuery, event) {
  * @param {string} targetQuery Query to specify the element.
  * @param {string} keyIdentifier Identifier of the emulated key.
  * @param {boolean} ctrl Whether CTRL should be pressed, or not.
+ * @param {string=} opt_iframeQuery Optional iframe selector.
  * @return {boolean} True if the event is sent to the target, false otherwise.
  */
-test.util.fakeKeyDown = function(
-    contentWindow, targetQuery, keyIdentifier, ctrl) {
+test.util.sync.fakeKeyDown = function(
+    contentWindow, targetQuery, keyIdentifier, ctrl, opt_iframeQuery) {
   var event = new KeyboardEvent(
       'keydown',
       { bubbles: true, keyIdentifier: keyIdentifier, ctrlKey: ctrl });
-  return test.util.sendEvent(contentWindow, targetQuery, event);
+  return test.util.sync.sendEvent(
+      contentWindow, targetQuery, event, opt_iframeQuery);
 };
 
 /**
- * Sends a fake mouse click event to the element specified by |targetQuery|.
+ * Sends a fake mouse click event (left button, single click) to the element
+ * specified by |targetQuery|.
  *
  * @param {Window} contentWindow Window to be tested.
  * @param {string} targetQuery Query to specify the element.
+ * @param {string=} opt_iframeQuery Optional iframe selector.
  * @return {boolean} True if the event is sent to the target, false otherwise.
  */
-test.util.fakeMouseClick = function(contentWindow, targetQuery) {
-  var event = new MouseEvent('click', { bubbles: true });
-  return test.util.sendEvent(contentWindow, targetQuery, event);
+test.util.sync.fakeMouseClick = function(
+    contentWindow, targetQuery, opt_iframeQuery) {
+  var event = new MouseEvent('click', { bubbles: true, detail: 1 });
+  return test.util.sync.sendEvent(
+      contentWindow, targetQuery, event, opt_iframeQuery);
+};
+
+/**
+ * Simulates a fake double click event (left button) to the element specified by
+ * |targetQuery|.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} targetQuery Query to specify the element.
+ * @param {string=} opt_iframeQuery Optional iframe selector.
+ * @return {boolean} True if the event is sent to the target, false otherwise.
+ */
+test.util.sync.fakeMouseDoubleClick = function(
+    contentWindow, targetQuery, opt_iframeQuery) {
+  // Double click is always preceeded with a single click.
+  if (!test.util.sync.fakeMouseClick(
+      contentWindow, targetQuery, opt_iframeQuery)) {
+    return false;
+  }
+
+  // Send the second click event, but with detail equal to 2 (number of clicks)
+  // in a row.
+  var event = new MouseEvent('click', { bubbles: true, detail: 2 });
+  if (!test.util.sync.sendEvent(
+      contentWindow, targetQuery, event, opt_iframeQuery)) {
+    return false;
+  }
+
+  // Send the double click event.
+  var event = new MouseEvent('dblclick', { bubbles: true });
+  if (!test.util.sync.sendEvent(
+      contentWindow, targetQuery, event, opt_iframeQuery)) {
+    return false;
+  }
+
+  return true;
 };
 
 /**
@@ -286,11 +546,29 @@ test.util.fakeMouseClick = function(contentWindow, targetQuery) {
  *
  * @param {Window} contentWindow Window to be tested.
  * @param {string} targetQuery Query to specify the element.
+ * @param {string=} opt_iframeQuery Optional iframe selector.
  * @return {boolean} True if the event is sent to the target, false otherwise.
  */
-test.util.fakeMouseDown = function(contentWindow, targetQuery) {
+test.util.sync.fakeMouseDown = function(
+    contentWindow, targetQuery, opt_iframeQuery) {
   var event = new MouseEvent('mousedown', { bubbles: true });
-  return test.util.sendEvent(contentWindow, targetQuery, event);
+  return test.util.sync.sendEvent(
+      contentWindow, targetQuery, event, opt_iframeQuery);
+};
+
+/**
+ * Sends a fake mouse up event to the element specified by |targetQuery|.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} targetQuery Query to specify the element.
+ * @param {string=} opt_iframeQuery Optional iframe selector.
+ * @return {boolean} True if the event is sent to the target, false otherwise.
+ */
+test.util.sync.fakeMouseUp = function(
+    contentWindow, targetQuery, opt_iframeQuery) {
+  var event = new MouseEvent('mouseup', { bubbles: true });
+  return test.util.sync.sendEvent(
+      contentWindow, targetQuery, event, opt_iframeQuery);
 };
 
 /**
@@ -301,12 +579,12 @@ test.util.fakeMouseDown = function(contentWindow, targetQuery) {
  * @return {boolean} True if copying got simulated successfully. It does not
  *     say if the file got copied, or not.
  */
-test.util.copyFile = function(contentWindow, filename) {
-  if (!test.util.selectFile(contentWindow, filename))
+test.util.sync.copyFile = function(contentWindow, filename) {
+  if (!test.util.sync.selectFile(contentWindow, filename))
     return false;
   // Ctrl+C and Ctrl+V
-  test.util.fakeKeyDown(contentWindow, '#file-list', 'U+0043', true);
-  test.util.fakeKeyDown(contentWindow, '#file-list', 'U+0056', true);
+  test.util.sync.fakeKeyDown(contentWindow, '#file-list', 'U+0043', true);
+  test.util.sync.fakeKeyDown(contentWindow, '#file-list', 'U+0056', true);
   return true;
 };
 
@@ -318,96 +596,96 @@ test.util.copyFile = function(contentWindow, filename) {
  * @return {boolean} True if deleting got simulated successfully. It does not
  *     say if the file got deleted, or not.
  */
-test.util.deleteFile = function(contentWindow, filename) {
-  if (!test.util.selectFile(contentWindow, filename))
+test.util.sync.deleteFile = function(contentWindow, filename) {
+  if (!test.util.sync.selectFile(contentWindow, filename))
     return false;
   // Delete
-  test.util.fakeKeyDown(contentWindow, '#file-list', 'U+007F', false);
+  test.util.sync.fakeKeyDown(contentWindow, '#file-list', 'U+007F', false);
   return true;
+};
+
+/**
+ * Wait for the elements' style to be changed as the expected values.  The
+ * queries argument is a list of object that have the query property and the
+ * styles property. The query property is a string query to specify the
+ * element. The styles property is a string map of the style name and its
+ * expected value.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {Array.<object>} queries Queries that specifies the elements and
+ *   expected styles.
+ * @param {function()} callback Callback function to be notified the change of
+ *     the styles.
+ */
+test.util.async.waitForStyles = function(contentWindow, queries, callback) {
+  test.util.repeatUntilTrue_(function() {
+    for (var i = 0; i < queries.length; i++) {
+      var element = contentWindow.document.querySelector(queries[i].query);
+      var styles = queries[i].styles;
+      for (var name in styles) {
+        if (contentWindow.getComputedStyle(element)[name] != styles[name])
+          return false;
+      }
+    }
+    callback();
+    return true;
+  });
+};
+
+/**
+ * Execute a command on the document in the specified window.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} command Command name.
+ * @return {boolean} True if the command is executed successfully.
+ */
+test.util.sync.execCommand = function(contentWindow, command) {
+  return contentWindow.document.execCommand(command);
 };
 
 /**
  * Registers message listener, which runs test utility functions.
  */
 test.util.registerRemoteTestUtils = function() {
+  // Register the message listenr.
   var onMessage = chrome.runtime ? chrome.runtime.onMessageExternal :
       chrome.extension.onMessageExternal;
+  // Return true for asynchronous functions and false for synchronous.
   onMessage.addListener(function(request, sender, sendResponse) {
+    // Check the sender.
     if (sender.id != test.util.TESTING_EXTENSION_ID) {
       console.error('The testing extension must be white-listed.');
       return false;
     }
-    var contentWindow;
+    // Check the function name.
+    if (!request.func || request.func[request.func.length - 1] == '_') {
+      request.func = '';
+    }
+    // Prepare arguments.
+    var args = request.args.slice();  // shallow copy
     if (request.appId) {
       if (!appWindows[request.appId]) {
         console.error('Specified window not found.');
         return false;
       }
-      contentWindow = appWindows[request.appId].contentWindow;
+      args.unshift(appWindows[request.appId].contentWindow);
     }
-    if (!contentWindow) {
-      // Global functions, not requiring a window.
-      switch (request.func) {
-        case 'openMainWindow':
-          test.util.openMainWindow(request.args[0], sendResponse);
-          return true;
-        case 'getErrorCount':
-          sendResponse(test.util.getErrorCount());
-          return true;
-        default:
-          console.error('Global function ' + request.func + ' not found.');
-      }
+    // Call the test utility function and respond the result.
+    if (test.util.async[request.func]) {
+      args[test.util.async[request.func].length - 1] = function() {
+        console.debug('Received the result of ' + request.func);
+        sendResponse.apply(null, arguments);
+      };
+      console.debug('Waiting for the result of ' + request.func);
+      test.util.async[request.func].apply(null, args);
+      return true;
+    } else if (test.util.sync[request.func]) {
+      sendResponse(test.util.sync[request.func].apply(null, args));
+      return false;
     } else {
-      // Functions working on a window.
-      switch (request.func) {
-        case 'getSelectedFiles':
-          sendResponse(test.util.getSelectedFiles(contentWindow));
-          return false;
-        case 'getFileList':
-          sendResponse(test.util.getFileList(contentWindow));
-          return false;
-        case 'performAutocompleteAndWait':
-          test.util.performAutocompleteAndWait(
-              contentWindow, request.args[0], request.args[1], sendResponse);
-          return true;
-        case 'waitForFileListChange':
-          test.util.waitForFileListChange(
-              contentWindow, request.args[0], sendResponse);
-          return true;
-        case 'waitAndAcceptDialog':
-          test.util.waitAndAcceptDialog(contentWindow, sendResponse);
-          return true;
-        case 'selectFile':
-          sendResponse(test.util.selectFile(contentWindow, request.args[0]));
-          return false;
-        case 'selectVolume':
-          sendResponse(test.util.selectVolume(contentWindow, request.args[0]));
-          return false;
-        case 'fakeKeyDown':
-          sendResponse(test.util.fakeKeyDown(contentWindow,
-                                             request.args[0],
-                                             request.args[1],
-                                             request.args[2]));
-          return false;
-        case 'fakeMouseClick':
-          sendResponse(test.util.fakeMouseClick(
-              contentWindow, request.args[0]));
-          return false;
-        case 'fakeMouseDown':
-          sendResponse(test.util.fakeMouseDown(
-              contentWindow, request.args[0]));
-          return false;
-        case 'copyFile':
-          sendResponse(test.util.copyFile(contentWindow, request.args[0]));
-          return false;
-        case 'deleteFile':
-          sendResponse(test.util.deleteFile(contentWindow, request.args[0]));
-          return false;
-        default:
-          console.error('Window function ' + request.func + ' not found.');
-      }
+      console.error('Invalid function name.');
+      return false;
     }
-    return false;
   });
 };
 

@@ -20,8 +20,7 @@ class PrefService;
 
 class ExtensionSorting {
  public:
-  ExtensionSorting(ExtensionScopedPrefs* extension_scoped_prefs,
-                   PrefService* pref_service);
+  explicit ExtensionSorting(ExtensionScopedPrefs* extension_scoped_prefs);
   ~ExtensionSorting();
 
   // Set up the ExtensionService to inform of changes that require syncing.
@@ -185,7 +184,7 @@ class ExtensionSorting {
   // ordinals is updated with corresponding ordinals.
   bool GetDefaultOrdinals(const std::string& extension_id,
                           syncer::StringOrdinal* page_ordinal,
-                          syncer::StringOrdinal* app_launch_ordinal) const;
+                          syncer::StringOrdinal* app_launch_ordinal);
 
   // Returns |app_launch_ordinal| if it has no collision in the page specified
   // by |page_ordinal|. Otherwise, returns an ordinal after |app_launch_ordinal|
@@ -198,7 +197,6 @@ class ExtensionSorting {
   size_t CountItemsVisibleOnNtp(const AppLaunchOrdinalMap& m) const;
 
   ExtensionScopedPrefs* extension_scoped_prefs_;  // Weak, owns this instance.
-  PrefService* pref_service_;  // Weak.
   ExtensionServiceInterface* extension_service_;  // Weak.
 
   // A map of all the StringOrdinal page ordinals mapping to the collections of
@@ -212,6 +210,10 @@ class ExtensionSorting {
 
   // Defines the default ordinals.
   AppOrdinalsMap default_ordinals_;
+
+  // Used to construct the default ordinals once when needed instead of on
+  // construction when the app order may not have been determined.
+  bool default_ordinals_created_;
 
   // The set of extensions that don't appear in the new tab page.
   std::set<std::string> ntp_hidden_extensions_;

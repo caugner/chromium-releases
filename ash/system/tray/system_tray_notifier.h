@@ -19,7 +19,6 @@
 #include "ash/system/ime/ime_observer.h"
 #include "ash/system/locale/locale_observer.h"
 #include "ash/system/logout_button/logout_button_observer.h"
-#include "ash/system/power/power_status_observer.h"
 #include "ash/system/session_length_limit/session_length_limit_observer.h"
 #include "ash/system/tray_accessibility.h"
 #include "ash/system/tray_caps_lock.h"
@@ -31,10 +30,15 @@
 #include "ash/system/chromeos/audio/audio_observer.h"
 #include "ash/system/chromeos/network/network_observer.h"
 #include "ash/system/chromeos/network/sms_observer.h"
-#include "ash/system/chromeos/screen_capture/screen_capture_observer.h"
+#include "ash/system/chromeos/screen_security/screen_capture_observer.h"
+#include "ash/system/chromeos/screen_security/screen_share_observer.h"
 #endif
 
 namespace ash {
+
+#if defined(OS_CHROMEOS)
+class NetworkStateNotifier;
+#endif
 
 class ASH_EXPORT SystemTrayNotifier {
 public:
@@ -68,9 +72,6 @@ public:
   void AddLogoutButtonObserver(LogoutButtonObserver* observer);
   void RemoveLogoutButtonObserver(LogoutButtonObserver* observer);
 
-  void AddPowerStatusObserver(PowerStatusObserver* observer);
-  void RemovePowerStatusObserver(PowerStatusObserver* observer);
-
   void AddSessionLengthLimitObserver(SessionLengthLimitObserver* observer);
   void RemoveSessionLengthLimitObserver(SessionLengthLimitObserver* observer);
 
@@ -87,9 +88,6 @@ public:
   void AddNetworkObserver(NetworkObserver* observer);
   void RemoveNetworkObserver(NetworkObserver* observer);
 
-  void AddVpnObserver(NetworkObserver* observer);
-  void RemoveVpnObserver(NetworkObserver* observer);
-
   void AddSmsObserver(SmsObserver* observer);
   void RemoveSmsObserver(SmsObserver* observer);
 
@@ -98,6 +96,9 @@ public:
 
   void AddScreenCaptureObserver(ScreenCaptureObserver* observer);
   void RemoveScreenCaptureObserver(ScreenCaptureObserver* observer);
+
+  void AddScreenShareObserver(ScreenShareObserver* observer);
+  void RemoveScreenShareObserver(ScreenShareObserver* observer);
 #endif
 
   void NotifyAccessibilityModeChanged(
@@ -116,7 +117,6 @@ public:
                            const std::string& cur_locale,
                            const std::string& from_locale,
                            const std::string& to_locale);
-  void NotifyPowerStatusChanged(const PowerSupplyStatus& power_status);
   void NotifySessionStartTimeChanged();
   void NotifySessionLengthLimitChanged();
   void NotifyUpdateRecommended(UpdateObserver::UpdateSeverity severity);
@@ -124,7 +124,6 @@ public:
 #if defined(OS_CHROMEOS)
   void NotifyVolumeChanged(float level);
   void NotifyMuteToggled();
-  void NotifyRefreshNetwork(const NetworkIconInfo &info);
   void NotifySetNetworkMessage(NetworkTrayDelegate* delegate,
                                NetworkObserver::MessageType message_type,
                                NetworkObserver::NetworkType network_type,
@@ -132,13 +131,19 @@ public:
                                const base::string16& message,
                                const std::vector<base::string16>& links);
   void NotifyClearNetworkMessage(NetworkObserver::MessageType message_type);
-  void NotifyVpnRefreshNetwork(const NetworkIconInfo &info);
-  void NotifyWillToggleWifi();
+  void NotifyRequestToggleWifi();
   void NotifyAddSmsMessage(const base::DictionaryValue& message);
   void NotifyEnterpriseDomainChanged();
   void NotifyScreenCaptureStart(const base::Closure& stop_callback,
                                 const base::string16& sharing_app_name);
   void NotifyScreenCaptureStop();
+  void NotifyScreenShareStart(const base::Closure& stop_callback,
+                              const base::string16& helper_name);
+  void NotifyScreenShareStop();
+
+  NetworkStateNotifier* network_state_notifier() {
+    return network_state_notifier_.get();
+  }
 #endif
 
  private:
@@ -151,17 +156,17 @@ public:
   ObserverList<IMEObserver> ime_observers_;
   ObserverList<LocaleObserver> locale_observers_;
   ObserverList<LogoutButtonObserver> logout_button_observers_;
-  ObserverList<PowerStatusObserver> power_status_observers_;
   ObserverList<SessionLengthLimitObserver> session_length_limit_observers_;
   ObserverList<UpdateObserver> update_observers_;
   ObserverList<UserObserver> user_observers_;
 #if defined(OS_CHROMEOS)
   ObserverList<AudioObserver> audio_observers_;
   ObserverList<NetworkObserver> network_observers_;
-  ObserverList<NetworkObserver> vpn_observers_;
   ObserverList<SmsObserver> sms_observers_;
   ObserverList<EnterpriseDomainObserver> enterprise_domain_observers_;
   ObserverList<ScreenCaptureObserver> screen_capture_observers_;
+  ObserverList<ScreenShareObserver> screen_share_observers_;
+  scoped_ptr<NetworkStateNotifier> network_state_notifier_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(SystemTrayNotifier);

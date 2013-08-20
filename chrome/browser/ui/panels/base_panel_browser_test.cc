@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -366,7 +367,7 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
   }
 
   if (params.wait_for_fully_created) {
-    MessageLoopForUI::current()->RunUntilIdle();
+    base::MessageLoopForUI::current()->RunUntilIdle();
 
 #if defined(OS_LINUX)
     // On bots, we might have a simple window manager which always activates new
@@ -435,9 +436,12 @@ Panel* BasePanelBrowserTest::CreateStackedPanel(const std::string& name,
                                                 const gfx::Rect& bounds,
                                                 StackedPanelCollection* stack) {
   Panel* panel = CreateDetachedPanel(name, bounds);
-  panel->manager()->MovePanelToCollection(panel,
-                                          stack,
-                                          PanelCollection::DEFAULT_POSITION);
+  panel->manager()->MovePanelToCollection(
+      panel,
+      stack,
+      static_cast<PanelCollection::PositioningMask>(
+          PanelCollection::DEFAULT_POSITION |
+          PanelCollection::COLLAPSE_TO_FIT));
   EXPECT_EQ(PanelCollection::STACKED, panel->collection()->type());
   WaitForBoundsAnimationFinished(panel);
   return panel;
@@ -453,12 +457,9 @@ scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
     const base::FilePath::StringType& path,
     extensions::Manifest::Location location,
     const DictionaryValue& extra_value) {
-#if defined(OS_WIN)
-  base::FilePath full_path(FILE_PATH_LITERAL("c:\\"));
-#else
-  base::FilePath full_path(FILE_PATH_LITERAL("/"));
-#endif
-  full_path = full_path.Append(path);
+  extensions::ExtensionPrefs* extension_prefs =
+      extensions::ExtensionPrefs::Get(browser()->profile());
+  base::FilePath full_path = extension_prefs->install_directory().Append(path);
 
   scoped_ptr<DictionaryValue> input_value(extra_value.DeepCopy());
   input_value->SetString(extension_manifest_keys::kVersion, "1.0.0.0");

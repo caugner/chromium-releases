@@ -7,7 +7,7 @@
 #include "build/build_config.h"
 
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -21,7 +21,7 @@
 
 namespace views {
 
-const char Link::kViewClassName[] = "views/Link";
+const char Link::kViewClassName[] = "Link";
 
 Link::Link() : Label(string16()) {
   Init();
@@ -39,7 +39,7 @@ void Link::OnEnabledChanged() {
   View::OnEnabledChanged();
 }
 
-std::string Link::GetClassName() const {
+const char* Link::GetClassName() const {
   return kViewClassName;
 }
 

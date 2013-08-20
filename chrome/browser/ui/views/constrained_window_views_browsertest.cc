@@ -10,13 +10,14 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -33,6 +34,8 @@
 #include <X11/Xlib.h>
 #include "ui/base/x/x11_util.h"
 #endif
+
+using web_modal::WebContentsModalDialogManager;
 
 namespace {
 
@@ -329,16 +332,25 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest,
       NULL,
       web_contents);
 
+  content::WindowedNotificationObserver back_observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::Source<content::NavigationController>(
+          &web_contents->GetController()));
   content::RenderViewHost* render_view_host =
       cwdd->GetWebContents()->GetRenderViewHost();
   ForwardKeyEvent(render_view_host, ui::VKEY_BACK);
 
   // Backspace is not processed as accelerator before it's sent to web contents.
+  EXPECT_FALSE(web_contents->GetController().GetPendingEntry());
   EXPECT_EQ(about_url.spec(), web_contents->GetURL().spec());
 
-  content::RunAllPendingInMessageLoop();
-
   // Backspace is processed as accelerator after it's sent to web contents.
+  content::RunAllPendingInMessageLoop();
+  EXPECT_TRUE(web_contents->GetController().GetPendingEntry());
+
+  // Wait for the navigation to commit, since the URL will not be visible
+  // until then.
+  back_observer.Wait();
   EXPECT_EQ(new_tab_url.spec(), web_contents->GetURL().spec());
 }
 

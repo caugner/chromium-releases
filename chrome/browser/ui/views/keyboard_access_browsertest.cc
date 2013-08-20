@@ -8,7 +8,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -16,12 +16,12 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_controls.h"
+#include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/test/ui_controls.h"
 #include "ui/views/controls/menu/menu_listener.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/view.h"
@@ -68,7 +68,8 @@ class ViewFocusChangeWaiter : public views::FocusChangeListener {
   virtual void OnDidChangeFocus(views::View* focused_before,
                                 views::View* focused_now) OVERRIDE {
     if (focused_now && focused_now->id() != previous_view_id_) {
-      MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+      base::MessageLoop::current()->PostTask(FROM_HERE,
+                                             base::MessageLoop::QuitClosure());
     }
   }
 
@@ -109,8 +110,9 @@ class SendKeysMenuListener : public views::MenuListener {
       SendKeyPress(browser_, ui::VKEY_RETURN);
     } else {
       SendKeyPress(browser_, ui::VKEY_ESCAPE);
-      MessageLoop::current()->PostDelayedTask(
-          FROM_HERE, MessageLoop::QuitClosure(),
+      base::MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          base::MessageLoop::QuitClosure(),
           base::TimeDelta::FromMilliseconds(200));
     }
   }

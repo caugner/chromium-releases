@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/process_util.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -20,7 +20,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/focus/focus_manager.h"

@@ -37,8 +37,7 @@ class SyncSharedChangeProcessorTest : public testing::Test {
  public:
   SyncSharedChangeProcessorTest()
       : ui_thread_(BrowserThread::UI, &ui_loop_),
-        db_thread_(BrowserThread::DB),
-        db_syncable_service_(NULL) {}
+        db_thread_(BrowserThread::DB) {}
 
   virtual ~SyncSharedChangeProcessorTest() {
     EXPECT_FALSE(db_syncable_service_.get());
@@ -112,7 +111,7 @@ class SyncSharedChangeProcessorTest : public testing::Test {
         base::WeakPtr<syncer::SyncMergeResult>()));
   }
 
-  MessageLoopForUI ui_loop_;
+  base::MessageLoopForUI ui_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
 

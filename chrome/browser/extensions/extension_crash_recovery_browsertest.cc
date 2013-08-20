@@ -25,13 +25,10 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
-
-#if defined(ENABLE_MESSAGE_CENTER)
-#include "base/command_line.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_switches.h"
+#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/notification_list.h"
-#endif
 
 using content::NavigationController;
 using content::WebContents;
@@ -39,11 +36,11 @@ using extensions::Extension;
 
 // Tests are timing out waiting for extension to crash.
 // http://crbug.com/174705
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_LINUX)
 #define MAYBE_ExtensionCrashRecoveryTest DISABLED_ExtensionCrashRecoveryTest
 #else
 #define MAYBE_ExtensionCrashRecoveryTest ExtensionCrashRecoveryTest
-#endif  // defined(OS_MACOSX) || defined(USE_AURA)
+#endif  // defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_LINUX)
 
 class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
  protected:
@@ -73,6 +70,9 @@ class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
     ASSERT_TRUE(WaitForExtensionCrash(extension_id));
     ASSERT_FALSE(GetExtensionProcessManager()->
                  GetBackgroundHostForExtension(extension_id));
+
+    // Wait for extension crash balloon to appear.
+    base::MessageLoop::current()->RunUntilIdle();
   }
 
   void CheckExtensionConsistency(std::string extension_id) {
@@ -114,95 +114,68 @@ class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
 
   std::string first_extension_id_;
   std::string second_extension_id_;
-
 };
 
-// TODO(rsesek): Implement and enable these tests. http://crbug.com/179904
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(OS_MACOSX)
-
-class MessageCenterExtensionCrashRecoveryTest
+class MAYBE_ExtensionCrashRecoveryTest
     : public ExtensionCrashRecoveryTestBase {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    ExtensionCrashRecoveryTestBase::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(
-        message_center::switches::kEnableRichNotifications);
-  }
-
   virtual void AcceptNotification(size_t index) OVERRIDE {
-    message_center::MessageCenter* message_center =
-        message_center::MessageCenter::Get();
-    ASSERT_GT(message_center->NotificationCount(), index);
-    message_center::NotificationList::Notifications::reverse_iterator it =
-        message_center->GetNotifications().rbegin();
-    for (size_t i=0; i < index; ++i)
-      it++;
-    std::string id = (*it)->id();
-    message_center->ClickOnNotification(id);
+    if (message_center::IsRichNotificationEnabled()) {
+      message_center::MessageCenter* message_center =
+          message_center::MessageCenter::Get();
+      ASSERT_GT(message_center->NotificationCount(), index);
+      message_center::NotificationList::Notifications::reverse_iterator it =
+          message_center->GetNotifications().rbegin();
+      for (size_t i=0; i < index; ++i)
+        it++;
+      std::string id = (*it)->id();
+      message_center->ClickOnNotification(id);
+    } else {
+      Balloon* balloon = GetNotificationDelegate(index);
+      ASSERT_TRUE(balloon);
+      balloon->OnClick();
+    }
     WaitForExtensionLoad();
   }
 
   virtual void CancelNotification(size_t index) OVERRIDE {
-    message_center::MessageCenter* message_center =
-        message_center::MessageCenter::Get();
-    ASSERT_GT(message_center->NotificationCount(), index);
-    message_center::NotificationList::Notifications::reverse_iterator it =
-        message_center->GetNotifications().rbegin();
-    for (size_t i=0; i < index; i++) { it++; }
-    ASSERT_TRUE(
-        g_browser_process->notification_ui_manager()->CancelById((*it)->id()));
+    if (message_center::IsRichNotificationEnabled()) {
+      message_center::MessageCenter* message_center =
+          message_center::MessageCenter::Get();
+      ASSERT_GT(message_center->NotificationCount(), index);
+      message_center::NotificationList::Notifications::reverse_iterator it =
+          message_center->GetNotifications().rbegin();
+      for (size_t i=0; i < index; i++) { it++; }
+      ASSERT_TRUE(g_browser_process->notification_ui_manager()->
+          CancelById((*it)->id()));
+    } else {
+      Balloon* balloon = GetNotificationDelegate(index);
+      ASSERT_TRUE(balloon);
+      std::string id = balloon->notification().notification_id();
+      ASSERT_TRUE(g_browser_process->notification_ui_manager()->CancelById(id));
+    }
   }
 
   virtual size_t CountBalloons() OVERRIDE {
-    message_center::MessageCenter* message_center =
-        message_center::MessageCenter::Get();
-    return message_center->NotificationCount();
+    if (message_center::IsRichNotificationEnabled())
+      return message_center::MessageCenter::Get()->NotificationCount();
+
+    return BalloonNotificationUIManager::GetInstanceForTesting()->
+        balloon_collection()->GetActiveBalloons().size();
   }
+
+private:
+     Balloon* GetNotificationDelegate(size_t index) {
+       BalloonNotificationUIManager* manager =
+           BalloonNotificationUIManager::GetInstanceForTesting();
+       BalloonCollection::Balloons balloons =
+           manager->balloon_collection()->GetActiveBalloons();
+       return index < balloons.size() ? balloons.at(index) : NULL;
+     }
 };
 
-typedef MessageCenterExtensionCrashRecoveryTest
-    MAYBE_ExtensionCrashRecoveryTest;
-
-#else  // defined(ENABLED_MESSAGE_CENTER)
-
-class BalloonExtensionCrashRecoveryTest
-    : public ExtensionCrashRecoveryTestBase {
- protected:
-  virtual void AcceptNotification(size_t index) OVERRIDE {
-    Balloon* balloon = GetNotificationDelegate(index);
-    ASSERT_TRUE(balloon);
-    balloon->OnClick();
-    WaitForExtensionLoad();
-  }
-
-  virtual void CancelNotification(size_t index) OVERRIDE {
-    Balloon* balloon = GetNotificationDelegate(index);
-    ASSERT_TRUE(balloon);
-    std::string id = balloon->notification().notification_id();
-    ASSERT_TRUE(g_browser_process->notification_ui_manager()->CancelById(id));
-  }
-
-  virtual size_t CountBalloons() OVERRIDE {
-    BalloonNotificationUIManager* manager =
-        BalloonNotificationUIManager::GetInstanceForTesting();
-    BalloonCollection::Balloons balloons =
-        manager->balloon_collection()->GetActiveBalloons();
-    return balloons.size();
-  }
- private:
-  Balloon* GetNotificationDelegate(size_t index) {
-    BalloonNotificationUIManager* manager =
-        BalloonNotificationUIManager::GetInstanceForTesting();
-    BalloonCollection::Balloons balloons =
-        manager->balloon_collection()->GetActiveBalloons();
-    return index < balloons.size() ? balloons.at(index) : NULL;
-  }
-};
-
-typedef BalloonExtensionCrashRecoveryTest MAYBE_ExtensionCrashRecoveryTest;
-#endif  // defined(ENABLE_MESSAGE_CENTER)
-
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, Basic) {
+// Flaky: http://crbug.com/242167.
+IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, DISABLED_Basic) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
@@ -219,7 +192,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, Basic) {
             GetExtensionService()->terminated_extensions()->size());
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, CloseAndReload) {
+// Flaky, http://crbug.com/241191.
+IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
+                       DISABLED_CloseAndReload) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
@@ -239,7 +214,14 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, CloseAndReload) {
             GetExtensionService()->terminated_extensions()->size());
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, ReloadIndependently) {
+// Test is timing out on Windows http://crbug.com/174705.
+#if defined(OS_WIN)
+#define MAYBE_ReloadIndependently DISABLED_ReloadIndependently
+#else
+#define MAYBE_ReloadIndependently ReloadIndependently
+#endif  // defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
+                       MAYBE_ReloadIndependently) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
@@ -259,8 +241,15 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, ReloadIndependently) {
   ASSERT_EQ(0U, CountBalloons());
 }
 
+// Test is timing out on Windows http://crbug.com/174705.
+#if defined(OS_WIN)
+#define MAYBE_ReloadIndependentlyChangeTabs DISABLED_ReloadIndependentlyChangeTabs
+#else
+#define MAYBE_ReloadIndependentlyChangeTabs ReloadIndependentlyChangeTabs
+#endif  // defined(OS_WIN)
+
 IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       ReloadIndependentlyChangeTabs) {
+                       MAYBE_ReloadIndependentlyChangeTabs) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
@@ -337,8 +326,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 }
 
+// Flaky, http://crbug.com/241245.
 IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       TwoExtensionsCrashFirst) {
+                       DISABLED_TwoExtensionsCrashFirst) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -351,8 +341,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   CheckExtensionConsistency(second_extension_id_);
 }
 
+// Flaky: http://crbug.com/242196
 IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       TwoExtensionsCrashSecond) {
+                       DISABLED_TwoExtensionsCrashSecond) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -442,8 +433,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 }
 
+// Flaky, http://crbug.com/241573.
 IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       TwoExtensionsIgnoreFirst) {
+                       DISABLED_TwoExtensionsIgnoreFirst) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -463,8 +455,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   CheckExtensionConsistency(second_extension_id_);
 }
 
+// Flaky, http://crbug.com/241164.
 IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       TwoExtensionsReloadIndependently) {
+                       DISABLED_TwoExtensionsReloadIndependently) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -494,7 +487,14 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   }
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, CrashAndUninstall) {
+// http://crbug.com/243648
+#if defined(OS_WIN)
+#define MAYBE_CrashAndUninstall DISABLED_CrashAndUninstall
+#else
+#define MAYBE_CrashAndUninstall CrashAndUninstall
+#endif
+IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
+                       MAYBE_CrashAndUninstall) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
@@ -507,7 +507,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, CrashAndUninstall) {
 
   ASSERT_EQ(1U, CountBalloons());
   UninstallExtension(first_extension_id_);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   SCOPED_TRACE("after uninstalling");
   ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
@@ -540,9 +540,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
             GetExtensionService()->terminated_extensions()->size());
 }
 
-// Disabled on aura as flakey: http://crbug.com/169622
-// Failing on Windows after Blink roll: http://crbug.com/232340
-#if defined(USE_AURA) || defined(OS_WIN)
+// Fails a DCHECK on Aura and Linux: http://crbug.com/169622
+// Failing on Windows: http://crbug.com/232340
+#if defined(USE_AURA) || defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_ReloadTabsWithBackgroundPage DISABLED_ReloadTabsWithBackgroundPage
 #else
 #define MAYBE_ReloadTabsWithBackgroundPage ReloadTabsWithBackgroundPage

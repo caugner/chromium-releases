@@ -3,12 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/view_event_test_base.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/base/test/ui_controls.h"
 #include "ui/views/controls/button/button_dropdown.h"
 
 class ButtonDropDownDragTest : public ViewEventTestBase,
@@ -113,9 +113,8 @@ class ButtonDropDownDragTest : public ViewEventTestBase,
     // One more hop is required because ui::SimpleMenuModel calls
     // ui::SimpleMenuModel::Delegate::MenuClosed() via a posted
     // task.
-    MessageLoopForUI::current()->PostTask(
-        FROM_HERE,
-        CreateEventTask(this, &ButtonDropDownDragTest::Step5));
+    base::MessageLoopForUI::current()->PostTask(
+        FROM_HERE, CreateEventTask(this, &ButtonDropDownDragTest::Step5));
   }
 
   void Step5() {

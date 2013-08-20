@@ -22,7 +22,7 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "components/visitedlink/browser/visitedlink_event_listener.h"
@@ -30,12 +30,12 @@
 #include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
-namespace components {
-
 using content::BrowserThread;
 using file_util::ScopedFILE;
 using file_util::OpenFile;
 using file_util::TruncateFile;
+
+namespace visitedlink {
 
 const int32 VisitedLinkMaster::kFileHeaderSignatureOffset = 0;
 const int32 VisitedLinkMaster::kFileHeaderVersionOffset = 4;
@@ -262,7 +262,7 @@ VisitedLinkMaster::Hash VisitedLinkMaster::TryToAddURL(const GURL& url) {
   Fingerprint fingerprint = ComputeURLFingerprint(url.spec().data(),
                                                   url.spec().size(),
                                                   salt_);
-  if (table_builder_) {
+  if (table_builder_.get()) {
     // If we have a pending delete for this fingerprint, cancel it.
     std::set<Fingerprint>::iterator found =
         deleted_since_rebuild_.find(fingerprint);
@@ -293,7 +293,7 @@ void VisitedLinkMaster::PostIOTask(const tracked_objects::Location& from_here,
 
 void VisitedLinkMaster::AddURL(const GURL& url) {
   Hash index = TryToAddURL(url);
-  if (!table_builder_ && index != null_hash_) {
+  if (!table_builder_.get() && index != null_hash_) {
     // Not rebuilding, so we want to keep the file on disk up-to-date.
     if (persist_to_disk_) {
       WriteUsedItemCountToFile();
@@ -307,12 +307,12 @@ void VisitedLinkMaster::AddURLs(const std::vector<GURL>& url) {
   for (std::vector<GURL>::const_iterator i = url.begin();
        i != url.end(); ++i) {
     Hash index = TryToAddURL(*i);
-    if (!table_builder_ && index != null_hash_)
+    if (!table_builder_.get() && index != null_hash_)
       ResizeTableIfNecessary();
   }
 
   // Keeps the file on disk up-to-date.
-  if (!table_builder_ && persist_to_disk_)
+  if (!table_builder_.get() && persist_to_disk_)
     WriteFullTable();
 }
 
@@ -343,7 +343,7 @@ void VisitedLinkMaster::DeleteURLs(URLIterator* urls) {
 
   listener_->Reset();
 
-  if (table_builder_) {
+  if (table_builder_.get()) {
     // A rebuild is in progress, save this deletion in the temporary list so
     // it can be added once rebuild is complete.
     while (urls->HasNextURL()) {
@@ -830,7 +830,7 @@ uint32 VisitedLinkMaster::NewTableSizeForCount(int32 item_count) const {
 
 // See the TableBuilder definition in the header file for how this works.
 bool VisitedLinkMaster::RebuildTableFromDelegate() {
-  DCHECK(!table_builder_);
+  DCHECK(!table_builder_.get());
 
   // TODO(brettw) make sure we have reasonable salt!
   table_builder_ = new TableBuilder(this, salt_);
@@ -987,4 +987,4 @@ void VisitedLinkMaster::TableBuilder::OnCompleteMainThread() {
     master_->OnTableRebuildComplete(success_, fingerprints_);
 }
 
-}  // namespace components
+}  // namespace visitedlink

@@ -4,42 +4,26 @@
 
 #include "chrome/browser/ui/views/tab_modal_confirm_dialog_views.h"
 
-#include "base/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/views/controls/message_box_view.h"
+#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
 
-namespace {
-
-views::MessageBoxView::InitParams GetInitParams(
-    const string16& message,
-    content::WebContents* web_contents) {
-  views::MessageBoxView::InitParams params(message);
-  if (web_contents) {
-    if (Browser* browser = chrome::FindBrowserWithWebContents(web_contents)) {
-      params.clipboard_source_tag =
-        content::BrowserContext::GetMarkerForOffTheRecordContext(
-            browser->profile());
-    }
-  }
-  return params;
-}
-
-} // namespace
+using web_modal::WebContentsModalDialogManager;
 
 // static
 TabModalConfirmDialog* TabModalConfirmDialog::Create(
@@ -56,10 +40,17 @@ TabModalConfirmDialogViews::TabModalConfirmDialogViews(
     TabModalConfirmDialogDelegate* delegate,
     content::WebContents* web_contents)
     : delegate_(delegate),
-      message_box_view_(new views::MessageBoxView(
-          GetInitParams(delegate->GetMessage(), web_contents))),
       dialog_(NULL),
       browser_context_(web_contents->GetBrowserContext()) {
+  views::MessageBoxView::InitParams init_params(delegate->GetMessage());
+  init_params.inter_row_vertical_spacing =
+      views::kUnrelatedControlVerticalSpacing;
+  message_box_view_ = new views::MessageBoxView(init_params);
+
+  string16 link_text(delegate->GetLinkText());
+  if (!link_text.empty())
+    message_box_view_->SetLink(link_text, this);
+
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(web_contents);
   dialog_ = CreateWebContentsModalDialogViews(
@@ -84,6 +75,14 @@ void TabModalConfirmDialogViews::CancelTabModalDialog() {
 
 void TabModalConfirmDialogViews::CloseDialog() {
   dialog_->Close();
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// TabModalConfirmDialogViews, views::LinkListener implementation:
+
+void TabModalConfirmDialogViews::LinkClicked(views::Link* source,
+                                             int event_flags) {
+  delegate_->LinkClicked(ui::DispositionFromEventFlags(event_flags));
 }
 
 //////////////////////////////////////////////////////////////////////////////

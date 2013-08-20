@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 
 class MockConfirmInfoBarDelegate : public ConfirmInfoBarDelegate {
@@ -36,7 +36,7 @@ class MockConfirmInfoBarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   // ConfirmInfoBarDelegate:
-  virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual int GetIconID() const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;

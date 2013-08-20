@@ -12,6 +12,7 @@
 #include "ash/launcher/launcher_model_observer.h"
 #include "ash/wm/gestures/shelf_gesture_handler.h"
 #include "base/observer_list.h"
+#include "ui/app_list/views/app_list_drag_and_drop_host.h"
 #include "ui/views/animation/bounds_animator_observer.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
@@ -38,6 +39,7 @@ class LauncherModel;
 
 namespace internal {
 
+class DragImageView;
 class LauncherButton;
 class LauncherTooltipManager;
 class ShelfLayoutManager;
@@ -50,7 +52,8 @@ class ASH_EXPORT LauncherView : public views::View,
                                 public LauncherButtonHost,
                                 public views::ContextMenuController,
                                 public views::FocusTraversable,
-                                public views::BoundsAnimatorObserver {
+                                public views::BoundsAnimatorObserver,
+                                public app_list::ApplicationDragAndDropHost {
  public:
   LauncherView(LauncherModel* model,
                LauncherDelegate* delegate,
@@ -96,6 +99,27 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual views::FocusSearch* GetFocusSearch() OVERRIDE;
   virtual FocusTraversable* GetFocusTraversableParent() OVERRIDE;
   virtual View* GetFocusTraversableParentView() OVERRIDE;
+
+  // Overridden from app_list::ApplicationDragAndDropHost:
+  virtual void CreateDragIconProxy(
+      const gfx::Point& location_in_screen_coordinates,
+      const gfx::ImageSkia& icon,
+      views::View* replaced_view,
+      const gfx::Vector2d& cursor_offset_from_center,
+      float scale_factor) OVERRIDE;
+  virtual void UpdateDragIconProxy(
+      const gfx::Point& location_in_screen_coordinates) OVERRIDE;
+  virtual void DestroyDragIconProxy() OVERRIDE;
+  virtual bool StartDrag(
+      const std::string& app_id,
+      const gfx::Point& location_in_screen_coordinates) OVERRIDE;
+  virtual bool Drag(const gfx::Point& location_in_screen_coordinates) OVERRIDE;
+  virtual void EndDrag(bool cancel) OVERRIDE;
+
+  // Return the view model for test purposes.
+  const views::ViewModel* const view_model_for_test() const {
+    return view_model_.get();
+  }
 
  private:
   friend class ash::test::LauncherViewTestAPI;
@@ -178,6 +202,7 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   // Overridden from ui::EventHandler:
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
@@ -218,11 +243,12 @@ class ASH_EXPORT LauncherView : public views::View,
   // The |event_flags| are the flags of the event which triggered this menu.
   bool ShowListMenuForView(const LauncherItem& item,
                            views::View* source,
-                           int event_flags);
+                           const ui::Event& event);
 
   // Overridden from views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& point) OVERRIDE;
+                                      const gfx::Point& point,
+                                      ui::MenuSourceType source_type) OVERRIDE;
 
   // Show either a context or normal click menu of given |menu_model_adapter|.
   // If |context_menu| is set, the displayed menu is a context menu and not
@@ -231,7 +257,8 @@ class ASH_EXPORT LauncherView : public views::View,
   void ShowMenu(scoped_ptr<views::MenuModelAdapter> menu_model_adapter,
                 views::View* source,
                 const gfx::Point& click_point,
-                bool context_menu);
+                bool context_menu,
+                ui::MenuSourceType source_type);
 
   // Overridden from views::BoundsAnimatorObserver:
   virtual void OnBoundsAnimatorProgressed(
@@ -319,6 +346,30 @@ class ASH_EXPORT LauncherView : public views::View,
   // When this object gets deleted while a menu is shown, this pointed
   // element will be set to false.
   bool* got_deleted_;
+
+  // True if a drag and drop operation created/pinned the item in the launcher
+  // and it needs to be deleted/unpinned again if the operation gets cancelled.
+  bool drag_and_drop_item_pinned_;
+
+  // The launcher item which is currently used for a drag and a drop operation
+  // or 0 otherwise.
+  LauncherID drag_and_drop_launcher_id_;
+
+  // The application ID of the application which we drag and drop.
+  std::string drag_and_drop_app_id_;
+
+  // The original launcher item's size before the dragging operation.
+  gfx::Size pre_drag_and_drop_size_;
+
+  // The image proxy for drag operations when a drag and drop host exists and
+  // the item can be dragged outside the app grid.
+  scoped_ptr<ash::internal::DragImageView> drag_image_;
+
+  // The cursor offset to the middle of the dragged item.
+  gfx::Vector2d drag_image_offset_;
+
+  // The view which gets replaced by our drag icon proxy.
+  views::View* drag_replaced_view_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

@@ -17,7 +17,7 @@ namespace views {
 static const int kHoverFadeDurationMs = 150;
 
 // static
-const char CustomButton::kViewClassName[] = "views/CustomButton";
+const char CustomButton::kViewClassName[] = "CustomButton";
 
 ////////////////////////////////////////////////////////////////////////////////
 // CustomButton, public:
@@ -68,18 +68,6 @@ void CustomButton::SetAnimationDuration(int duration) {
   hover_animation_->SetSlideDuration(duration);
 }
 
-bool CustomButton::IsMouseHovered() const {
-  // If we haven't yet been placed in an onscreen view hierarchy, we can't be
-  // hovered.
-  if (!GetWidget())
-    return false;
-
-  gfx::Point cursor_pos(gfx::Screen::GetScreenFor(
-      GetWidget()->GetNativeView())->GetCursorScreenPoint());
-  ConvertPointToTarget(NULL, this, &cursor_pos);
-  return HitTestPoint(cursor_pos);
-}
-
 void CustomButton::SetHotTracked(bool is_hot_tracked) {
   if (state_ != STATE_DISABLED)
     SetState(is_hot_tracked ? STATE_HOVERED : STATE_NORMAL);
@@ -105,7 +93,7 @@ void CustomButton::OnEnabledChanged() {
     SetState(STATE_DISABLED);
 }
 
-std::string CustomButton::GetClassName() const {
+const char* CustomButton::GetClassName() const {
   return kViewClassName;
 }
 
@@ -247,7 +235,8 @@ bool CustomButton::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return true;
 }
 
-void CustomButton::ShowContextMenu(const gfx::Point& p, bool is_mouse_gesture) {
+void CustomButton::ShowContextMenu(const gfx::Point& p,
+                                   ui::MenuSourceType source_type) {
   if (!context_menu_controller())
     return;
 
@@ -255,7 +244,7 @@ void CustomButton::ShowContextMenu(const gfx::Point& p, bool is_mouse_gesture) {
   // we won't get a mouse exited and reset state. Reset it now to be sure.
   if (state_ != STATE_DISABLED)
     SetState(STATE_NORMAL);
-  View::ShowContextMenu(p, is_mouse_gesture);
+  View::ShowContextMenu(p, source_type);
 }
 
 void CustomButton::OnDragDone() {
@@ -325,10 +314,9 @@ bool CustomButton::ShouldEnterPushedState(const ui::Event& event) {
 ////////////////////////////////////////////////////////////////////////////////
 // CustomButton, View overrides (protected):
 
-void CustomButton::ViewHierarchyChanged(bool is_add,
-                                        View* parent,
-                                        View* child) {
-  if (!is_add && state_ != STATE_DISABLED)
+void CustomButton::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (!details.is_add && state_ != STATE_DISABLED)
     SetState(STATE_NORMAL);
 }
 

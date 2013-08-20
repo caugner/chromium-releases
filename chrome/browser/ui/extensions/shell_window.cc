@@ -4,32 +4,34 @@
 
 #include "chrome/browser/ui/extensions/shell_window.h"
 
-#include "base/utf_string_conversions.h"
+#include "apps/shell_window_geometry_cache.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/app_window_contents.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/image_loader.h"
-#include "chrome/browser/extensions/shell_window_geometry_cache.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/suggest_permission_util.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
@@ -44,6 +46,7 @@
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/screen.h"
 
 #if defined(USE_ASH)
 #include "ash/launcher/launcher_types.h"
@@ -52,6 +55,8 @@
 using content::ConsoleMessageLevel;
 using content::WebContents;
 using extensions::APIPermission;
+using web_modal::WebContentsModalDialogHost;
+using web_modal::WebContentsModalDialogManager;
 
 namespace {
 const int kDefaultWidth = 512;
@@ -64,6 +69,23 @@ const int kPreferredIconSize = ash::kLauncherPreferredSize;
 const int kPreferredIconSize = extension_misc::EXTENSION_ICON_SMALL;
 #endif
 
+static bool disable_external_open_for_testing_ = false;
+
+class ShellWindowLinkDelegate : public content::WebContentsDelegate {
+ private:
+  virtual content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params) OVERRIDE;
+};
+
+content::WebContents* ShellWindowLinkDelegate::OpenURLFromTab(
+    content::WebContents* source,
+    const content::OpenURLParams& params) {
+  platform_util::OpenExternal(params.url);
+  delete source;
+  return NULL;
+}
+
 }  // namespace
 
 ShellWindow::CreateParams::CreateParams()
@@ -72,7 +94,7 @@ ShellWindow::CreateParams::CreateParams()
     transparent_background(false),
     bounds(INT_MIN, INT_MIN, 0, 0),
     creator_process_id(0),
-    state(STATE_NORMAL),
+    state(ui::SHOW_STATE_DEFAULT),
     hidden(false),
     resizable(true),
     focused(true) {
@@ -96,6 +118,7 @@ ShellWindow::ShellWindow(Profile* profile,
                          const extensions::Extension* extension)
     : profile_(profile),
       extension_(extension),
+      extension_id_(extension->id()),
       window_type_(WINDOW_TYPE_DEFAULT),
       image_loader_ptr_factory_(this),
       fullscreen_for_window_api_(false),
@@ -104,7 +127,7 @@ ShellWindow::ShellWindow(Profile* profile,
 
 void ShellWindow::Init(const GURL& url,
                        ShellWindowContents* shell_window_contents,
-                       const ShellWindow::CreateParams& params) {
+                       const CreateParams& params) {
   // Initialize the render interface and web contents
   shell_window_contents_.reset(shell_window_contents);
   shell_window_contents_->Initialize(profile(), url);
@@ -130,19 +153,34 @@ void ShellWindow::Init(const GURL& url,
   // If left and top are left undefined, the native shell window will center
   // the window on the main screen in a platform-defined manner.
 
+  ui::WindowShowState cached_state = ui::SHOW_STATE_DEFAULT;
   if (!params.window_key.empty()) {
     window_key_ = params.window_key;
 
-    extensions::ShellWindowGeometryCache* cache =
-        extensions::ExtensionSystem::Get(profile())->
-          shell_window_geometry_cache();
+    apps::ShellWindowGeometryCache* cache =
+        apps::ShellWindowGeometryCache::Get(profile());
+
     gfx::Rect cached_bounds;
-    if (cache->GetGeometry(extension()->id(), params.window_key,
-                           &cached_bounds))
+    gfx::Rect cached_screen_bounds;
+    if (cache->GetGeometry(extension()->id(), params.window_key, &cached_bounds,
+                           &cached_screen_bounds, &cached_state)) {
       bounds = cached_bounds;
+      // App window has cached screen bounds, make sure it fits on screen in
+      // case the screen resolution changed.
+      if (!cached_screen_bounds.IsEmpty()) {
+        gfx::Screen* screen = gfx::Screen::GetNativeScreen();
+        gfx::Display display = screen->GetDisplayMatching(cached_bounds);
+        gfx::Rect current_screen_bounds = display.work_area();
+        AdjustBoundsToBeVisibleOnScreen(cached_bounds,
+                                        cached_screen_bounds,
+                                        current_screen_bounds,
+                                        params.minimum_size,
+                                        &bounds);
+      }
+    }
   }
 
-  ShellWindow::CreateParams new_params = params;
+  CreateParams new_params = params;
 
   gfx::Size& minimum_size = new_params.minimum_size;
   gfx::Size& maximum_size = new_params.maximum_size;
@@ -166,29 +204,26 @@ void ShellWindow::Init(const GURL& url,
 
   new_params.bounds = bounds;
 
+  if (cached_state != ui::SHOW_STATE_DEFAULT)
+    new_params.state = cached_state;
+
   native_app_window_.reset(NativeAppWindow::Create(this, new_params));
-  OnNativeWindowChanged();
 
-  switch (params.state) {
-    case CreateParams::STATE_NORMAL:
-      break;
-    case CreateParams::STATE_FULLSCREEN:
-      Fullscreen();
-      break;
-    case CreateParams::STATE_MAXIMIZED:
-      Maximize();
-      break;
-    case CreateParams::STATE_MINIMIZED:
-      Minimize();
-      break;
-  }
-
-  if (!params.hidden) {
+  if (!new_params.hidden) {
     if (window_type_is_panel())
       GetBaseWindow()->ShowInactive();  // Panels are not activated by default.
     else
       GetBaseWindow()->Show();
   }
+
+  if (new_params.state == ui::SHOW_STATE_FULLSCREEN)
+    Fullscreen();
+  else if (new_params.state == ui::SHOW_STATE_MAXIMIZED)
+    Maximize();
+  else if (new_params.state == ui::SHOW_STATE_MINIMIZED)
+    Minimize();
+
+  OnNativeWindowChanged();
 
   // When the render view host is changed, the native window needs to know
   // about it in case it has any setup to do to make the renderer appear
@@ -281,6 +316,21 @@ void ShellWindow::AddNewContents(WebContents* source,
                                  bool* was_blocked) {
   DCHECK(Profile::FromBrowserContext(new_contents->GetBrowserContext()) ==
       profile_);
+#if defined(OS_MACOSX) || defined(OS_WIN) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+  if (disable_external_open_for_testing_) {
+    Browser* browser =
+        chrome::FindOrCreateTabbedBrowser(profile_, chrome::GetActiveDesktop());
+    // Force all links to open in a new tab, even if they were trying to open a
+    // new window.
+    disposition =
+        disposition == NEW_BACKGROUND_TAB ? disposition : NEW_FOREGROUND_TAB;
+    chrome::AddWebContents(browser, NULL, new_contents, disposition,
+                           initial_pos, user_gesture, was_blocked);
+  } else {
+    new_contents->SetDelegate(new ShellWindowLinkDelegate());
+  }
+#else
   Browser* browser =
       chrome::FindOrCreateTabbedBrowser(profile_, chrome::GetActiveDesktop());
   // Force all links to open in a new tab, even if they were trying to open a
@@ -289,6 +339,7 @@ void ShellWindow::AddNewContents(WebContents* source,
       disposition == NEW_BACKGROUND_TAB ? disposition : NEW_FOREGROUND_TAB;
   chrome::AddWebContents(browser, NULL, new_contents, disposition, initial_pos,
                          user_gesture, was_blocked);
+#endif
 }
 
 void ShellWindow::HandleKeyboardEvent(
@@ -319,6 +370,10 @@ void ShellWindow::OnNativeWindowChanged() {
   SaveWindowPosition();
   if (shell_window_contents_ && native_app_window_)
     shell_window_contents_->NativeWindowChanged(native_app_window_.get());
+}
+
+void ShellWindow::OnNativeWindowActivated() {
+  extensions::ShellWindowRegistry::Get(profile_)->ShellWindowActivated(this);
 }
 
 scoped_ptr<gfx::Image> ShellWindow::GetAppListIcon() {
@@ -374,7 +429,10 @@ void ShellWindow::SetAppIconUrl(const GURL& url) {
 
   app_icon_url_ = url;
   web_contents()->DownloadImage(
-      url, true, kPreferredIconSize,
+      url,
+      true,  // is a favicon
+      kPreferredIconSize,
+      0,  // no maximum size
       base::Bind(&ShellWindow::DidDownloadFavicon,
                  image_loader_ptr_factory_.GetWeakPtr()));
 }
@@ -423,6 +481,7 @@ void ShellWindow::OnImageLoaded(const gfx::Image& image) {
 }
 
 void ShellWindow::DidDownloadFavicon(int id,
+                                     int http_status_code,
                                      const GURL& image_url,
                                      int requested_size,
                                      const std::vector<SkBitmap>& bitmaps) {
@@ -463,6 +522,11 @@ void ShellWindow::CloseContents(WebContents* contents) {
 
 bool ShellWindow::ShouldSuppressDialogs() {
   return true;
+}
+
+content::ColorChooser* ShellWindow::OpenColorChooser(WebContents* web_contents,
+                                                     SkColor initial_color) {
+  return chrome::ShowColorChooser(web_contents, initial_color);
 }
 
 void ShellWindow::RunFileChooser(WebContents* tab,
@@ -549,10 +613,6 @@ extensions::ActiveTabPermissionGranter*
   return NULL;
 }
 
-void ShellWindow::SetWebContentsBlocked(content::WebContents* web_contents,
-                                        bool blocked) {
-}
-
 WebContentsModalDialogHost* ShellWindow::GetWebContentsModalDialogHost() {
   return native_app_window_.get();
 }
@@ -570,13 +630,53 @@ void ShellWindow::SaveWindowPosition() {
   if (!native_app_window_)
     return;
 
-  extensions::ShellWindowGeometryCache* cache =
-      extensions::ExtensionSystem::Get(profile())->
-          shell_window_geometry_cache();
+  apps::ShellWindowGeometryCache* cache =
+      apps::ShellWindowGeometryCache::Get(profile());
 
   gfx::Rect bounds = native_app_window_->GetRestoredBounds();
   bounds.Inset(native_app_window_->GetFrameInsets());
-  cache->SaveGeometry(extension()->id(), window_key_, bounds);
+  gfx::Rect screen_bounds =
+      gfx::Screen::GetNativeScreen()->GetDisplayMatching(bounds).work_area();
+  ui::WindowShowState window_state = native_app_window_->GetRestoredState();
+  cache->SaveGeometry(extension()->id(),
+                      window_key_,
+                      bounds,
+                      screen_bounds,
+                      window_state);
+}
+
+void ShellWindow::AdjustBoundsToBeVisibleOnScreen(
+    const gfx::Rect& cached_bounds,
+    const gfx::Rect& cached_screen_bounds,
+    const gfx::Rect& current_screen_bounds,
+    const gfx::Size& minimum_size,
+    gfx::Rect* bounds) const {
+  if (!bounds)
+    return;
+
+  *bounds = cached_bounds;
+
+  // Reposition and resize the bounds if the cached_screen_bounds is different
+  // from the current screen bounds and the current screen bounds doesn't
+  // completely contain the bounds.
+  if (!cached_screen_bounds.IsEmpty() &&
+      cached_screen_bounds != current_screen_bounds &&
+      !current_screen_bounds.Contains(cached_bounds)) {
+    bounds->set_width(
+        std::max(minimum_size.width(),
+                 std::min(bounds->width(), current_screen_bounds.width())));
+    bounds->set_height(
+        std::max(minimum_size.height(),
+                 std::min(bounds->height(), current_screen_bounds.height())));
+    bounds->set_x(
+        std::max(current_screen_bounds.x(),
+                 std::min(bounds->x(),
+                          current_screen_bounds.right() - bounds->width())));
+    bounds->set_y(
+        std::max(current_screen_bounds.y(),
+                 std::min(bounds->y(),
+                          current_screen_bounds.bottom() - bounds->height())));
+  }
 }
 
 // static
@@ -596,3 +696,8 @@ SkRegion* ShellWindow::RawDraggableRegionsToSkRegion(
   }
   return sk_region;
 }
+
+void ShellWindow::DisableExternalOpenForTesting() {
+  disable_external_open_for_testing_ = true;
+}
+

@@ -29,6 +29,14 @@
       ],
     }, # target_name: All
     {
+      'target_name': 'all_webkit',
+      'type': 'none',
+      'dependencies': [
+        '../third_party/WebKit/public/all.gyp:all_blink',
+        '../content/content.gyp:content_shell_apk',
+      ],
+    }, # target_name: all_webkit
+    {
       # The current list of tests for android.  This is temporary
       # until the full set supported.  If adding a new test here,
       # please also add it to build/android/run_tests.py, else the
@@ -59,7 +67,7 @@
         '../sandbox/sandbox.gyp:sandbox_linux_unittests',
         '../sql/sql.gyp:sql_unittests',
         '../sync/sync.gyp:sync_unit_tests',
-        '../third_party/WebKit/Source/WebKit/chromium/All.gyp:*',
+        '../third_party/WebKit/public/all.gyp:*',
         '../tools/android/android_tools.gyp:android_tools',
         '../tools/android/device_stats_monitor/device_stats_monitor.gyp:device_stats_monitor',
         '../tools/android/findbugs_plugin/findbugs_plugin.gyp:findbugs_plugin_test',
@@ -92,6 +100,7 @@
             '../components/components.gyp:components_unittests_apk',
             '../content/content.gyp:content_browsertests_apk',
             '../content/content.gyp:content_unittests_apk',
+            '../content/content.gyp:video_decode_accelerator_unittest_apk',
             '../gpu/gpu.gyp:gl_tests_apk',
             '../gpu/gpu.gyp:gpu_unittests_apk',
             '../ipc/ipc.gyp:ipc_tests_apk',
@@ -104,7 +113,7 @@
             '../android_webview/android_webview.gyp:android_webview_test_apk',
             '../chrome/chrome.gyp:chromium_testshell_test_apk',
             '../chrome/chrome.gyp:chromium_testshell_uiautomator_tests',
-            '../webkit/compositor_bindings/compositor_bindings_tests.gyp:webkit_compositor_bindings_unittests_apk'
+            '../webkit/renderer/compositor_bindings/compositor_bindings_tests.gyp:webkit_compositor_bindings_unittests_apk'
           ],
         }],
       ],

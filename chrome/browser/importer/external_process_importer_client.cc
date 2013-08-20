@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/bookmarks/imported_bookmark_entry.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
@@ -63,6 +64,7 @@ void ExternalProcessImporterClient::Cancel() {
 }
 
 void ExternalProcessImporterClient::OnProcessCrashed(int exit_code) {
+  DLOG(ERROR) << __FUNCTION__;
   if (cancelled_)
     return;
 
@@ -186,7 +188,7 @@ void ExternalProcessImporterClient::OnBookmarksImportStart(
 }
 
 void ExternalProcessImporterClient::OnBookmarksImportGroup(
-    const std::vector<ProfileWriter::BookmarkEntry>& bookmarks_group) {
+    const std::vector<ImportedBookmarkEntry>& bookmarks_group) {
   if (cancelled_)
     return;
 
@@ -208,7 +210,7 @@ void ExternalProcessImporterClient::OnFaviconsImportStart(
 }
 
 void ExternalProcessImporterClient::OnFaviconsImportGroup(
-    const std::vector<history::ImportedFaviconUsage>& favicons_group) {
+    const std::vector<ImportedFaviconUsage>& favicons_group) {
   if (cancelled_)
     return;
 
@@ -248,7 +250,7 @@ void ExternalProcessImporterClient::Cleanup() {
 }
 
 void ExternalProcessImporterClient::CancelImportProcessOnIOThread() {
-  if (utility_process_host_)
+  if (utility_process_host_.get())
     utility_process_host_->Send(new ProfileImportProcessMsg_CancelImport());
 }
 
@@ -260,10 +262,9 @@ void ExternalProcessImporterClient::NotifyItemFinishedOnIOThread(
 
 void ExternalProcessImporterClient::StartProcessOnIOThread(
     BrowserThread::ID thread_id) {
-  utility_process_host_ =
-      UtilityProcessHost::Create(
-          this,
-          BrowserThread::GetMessageLoopProxyForThread(thread_id))->AsWeakPtr();
+  utility_process_host_ = UtilityProcessHost::Create(
+      this, BrowserThread::GetMessageLoopProxyForThread(thread_id).get())
+      ->AsWeakPtr();
   utility_process_host_->DisableSandbox();
 
 #if defined(OS_MACOSX)

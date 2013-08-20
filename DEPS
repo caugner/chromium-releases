@@ -2,7 +2,7 @@
 #  To use this DEPS file to re-create a Chromium release you
 #  need the tools from http://dev.chromium.org installed.
 #  
-#  This DEPS file corresponds to Chromium 28.0.1500.95
+#  This DEPS file corresponds to Chromium 29.0.1547.9
 #  
 #  
 #  
@@ -86,7 +86,7 @@ vars = {
   'sctp-refimpl':
     'https://sctp-refimpl.googlecode.com/svn',
   'jsoncpp':
-    'http://svn.code.sf.net/p/jsoncpp/code',
+    'http://jsoncpp.svn.sourceforge.net/svnroot/jsoncpp',
   'webrtc':
     'http://webrtc.googlecode.com/svn',
   'web-page-replay':
@@ -128,11 +128,11 @@ deps_os = {
       'src/third_party/xulrunner-sdk':
       '/trunk/deps/third_party/xulrunner-sdk@119756',
       'src/third_party/gnu_binutils':
-      Var("native_client") + '/trunk/deps/third_party/gnu_binutils@11040',
+      Var("native_client") + '/trunk/deps/third_party/gnu_binutils@11437',
       'src/third_party/psyco_win32':
       '/trunk/deps/third_party/psyco_win32@79861',
       'src/third_party/mingw-w64/mingw/bin':
-      Var("native_client") + '/trunk/deps/third_party/mingw-w64/mingw/bin@11040',
+      Var("native_client") + '/trunk/deps/third_party/mingw-w64/mingw/bin@11437',
       'src/third_party/perl':
       '/trunk/deps/third_party/perl@147900',
       'src/chrome_frame/tools/test/reference_build/chrome_win':
@@ -142,9 +142,9 @@ deps_os = {
       'src/third_party/python_26':
       '/trunk/tools/third_party/python_26@89111',
       'src/third_party/syzygy/binaries':
-      Var("sawbuck") + '/trunk/syzygy/binaries@1462',
+      Var("sawbuck") + '/trunk/syzygy/binaries@1584',
       'src/third_party/nss':
-      '/trunk/deps/third_party/nss@197511',
+      '/trunk/deps/third_party/nss@206843',
    },
    'mac': {
       'src/third_party/GTM':
@@ -160,7 +160,7 @@ deps_os = {
       'src/chrome/tools/test/reference_build/chrome_mac':
       '/trunk/deps/reference_builds/chrome_mac@197743',
       'src/third_party/nss':
-      '/trunk/deps/third_party/nss@197511',
+      '/trunk/deps/third_party/nss@206843',
    },
    'ios': {
       'src/third_party/sfntly/cpp/src':
@@ -179,19 +179,11 @@ deps_os = {
       None,
       'src/third_party/hunspell_dictionaries':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/storage/indexeddb':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/media':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/http/tests/appcache':
-      None,
       'src/third_party/scons-2.0.1':
       None,
       'src/third_party/webdriver/pylib':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/fast/filesystem_temp':
-      None,
-      'src/third_party/libsrtp':
+      'src/chrome/test/data/perf/canvas_bench':
       None,
       'src/third_party/libexif/sources':
       None,
@@ -203,55 +195,39 @@ deps_os = {
       None,
       'src/third_party/libyuv':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/http/tests/workers':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/fast/workers':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/storage/domstorage':
-      None,
       'src/third_party/snappy/src':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/editing/pasteboard/resources':
+      'src/third_party/webrtc':
       None,
       'src/third_party/libjpeg_turbo':
       None,
       'src/third_party/nss':
-      '/trunk/deps/third_party/nss@197511',
+      '/trunk/deps/third_party/nss@206843',
       'src/third_party/bidichecker':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/http/tests/workers':
+      'src/third_party/usrsctp/usrsctplib':
       None,
       'src/third_party/pylib':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/http/tests/resources':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/workers':
       None,
       'src/chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin':
       None,
       'src/third_party/smhasher/src':
       None,
-      'src/third_party/webrtc':
+      'src/third_party/hunspell':
       None,
       'src/native_client':
       None,
       'src/testing/iossim/third_party/class-dump':
-      '/trunk/deps/third_party/class-dump@147231',
+      '/trunk/deps/third_party/class-dump@199203',
       'src/third_party/leveldatabase/src':
       None,
-      'src/chrome/test/data/perf/canvas_bench':
+      'src/third_party/libsrtp':
       None,
       'src/third_party/ffmpeg':
       None,
-      'src/third_party/WebKit/Source/Platform/chromium/public':
-      'http://svn.webkit.org/repository/webkit/trunk/Source/Platform/chromium/public@147503',
       'src/native_client/src/third_party/ppapi':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/storage/domstorage':
-      None,
       'src/tools/page_cycler/acid3':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/http/tests/xmlhttprequest':
       None,
       'src/build/util/support':
       None,
@@ -259,21 +235,11 @@ deps_os = {
       None,
       'src/third_party/pymox/src':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/events':
-      None,
-      'src/third_party/yasm/source/patched-yasm':
-      None,
-      'src/third_party/WebKit/Source/WebKit/chromium/public':
-      'http://svn.webkit.org/repository/webkit/trunk/Source/WebKit/chromium/public@147503',
-      'src/content/test/data/layout_tests/LayoutTests/fast/events':
-      None,
-      'src/third_party/WebKit':
+      'src/third_party/angle_dx11':
       None,
       'src/third_party/webpagereplay':
       None,
-      'src/third_party/hunspell':
-      None,
-      'src/third_party/swig/Lib':
+      'src/third_party/yasm/source/patched-yasm':
       None,
       'src/third_party/angle':
       None,
@@ -281,42 +247,42 @@ deps_os = {
       None,
       'src/third_party/libvpx':
       None,
-      'src/content/test/data/layout_tests/LayoutTests/http/tests/websocket/tests':
-      None,
-      'src/content/test/data/layout_tests/LayoutTests/fast/js/resources':
+      'src/third_party/swig/Lib':
       None,
    },
    'unix': {
       'src/third_party/chromite':
-      Var("git.chromium.org") + '/chromiumos/chromite.git@dfd2710856705831dd4e8cd6267899fd4721e11a',
+      Var("git.chromium.org") + '/chromiumos/chromite.git@785fedc51fc430445d8f397440012ea3b489bac9',
       'build/third_party/xvfb':
       '/trunk/tools/third_party/xvfb@125214',
       'src/third_party/mtpd/source':
       Var("git.chromium.org") + '/chromiumos/platform/mtpd.git@132604f107368f617a3073ba2d515b78641ceeed',
       'src/third_party/xdg-utils':
-      '/trunk/deps/third_party/xdg-utils@149334',
+      '/trunk/deps/third_party/xdg-utils@203785',
+      'src/third_party/undoview':
+      '/trunk/deps/third_party/undoview@119694',
       'src/third_party/gold':
-      '/trunk/deps/third_party/gold@168091',
+      '/trunk/deps/third_party/gold@203758',
       'src/third_party/libmtp':
-      '/trunk/deps/third_party/libmtp@178673',
+      '/trunk/deps/third_party/libmtp@206535',
       'src/third_party/freetype2/src':
       Var("git.chromium.org") + '/chromium/src/third_party/freetype2.git@d699c2994ecc178c4ed05ac2086061b2034c2178',
-      'src/chrome/tools/test/reference_build/chrome_linux':
-      '/trunk/deps/reference_builds/chrome_linux@197743',
       'src/third_party/cros_system_api':
-      Var("git.chromium.org") + '/chromiumos/platform/system_api.git@d28fa3e2665f58687841c4febe0a0ba2b7e2d9cc',
+      Var("git.chromium.org") + '/chromiumos/platform/system_api.git@211c50e14bc96a7b3e040d6287fc66ef80bee44d',
       'src/third_party/pyelftools':
       Var("git.chromium.org") + '/chromiumos/third_party/pyelftools.git@bdc1d380acd88d4bfaf47265008091483b0d614e',
       'src/third_party/openssl':
-      '/trunk/deps/third_party/openssl@194187',
+      '/trunk/deps/third_party/openssl@207965',
       'build/xvfb':
       '/trunk/tools/xvfb@121100',
       'src/third_party/cros_dbus_cplusplus/source':
       Var("git.chromium.org") + '/chromiumos/third_party/dbus-cplusplus.git@5e8f6d9db5c2abfb91d91f751184f25bb5cd0900',
+      'src/chrome/tools/test/reference_build/chrome_linux':
+      '/trunk/deps/reference_builds/chrome_linux@197743',
       'src/third_party/swig/linux':
       '/trunk/deps/third_party/swig/linux@69281',
       'build/third_party/cbuildbot_chromite':
-      'https://git.chromium.org/chromiumos/chromite.git@90b67db0c591f01b021d2b0c8a277fde52763558',
+      'https://git.chromium.org/chromiumos/chromite.git@5dc9a9dace7cbbf7eba0d4314bbb764d064d88ae',
       'src/third_party/lss':
       Var("linux-syscall-support") + '/trunk/lss@20',
    },
@@ -330,13 +296,13 @@ deps_os = {
       'src/third_party/apache-mime4j':
       '/trunk/deps/third_party/apache-mime4j@170888',
       'src/third_party/openssl':
-      '/trunk/deps/third_party/openssl@194187',
+      '/trunk/deps/third_party/openssl@207965',
       'src/third_party/jarjar':
       '/trunk/deps/third_party/jarjar@170888',
       'src/third_party/aosp':
       '/trunk/deps/third_party/aosp@148330',
       'src/third_party/android_tools':
-      Var("git.chromium.org") + '/android_tools.git@6c57b3397787c23888f9ded9f6a0c0c3f3fdc3a5',
+      Var("git.chromium.org") + '/android_tools.git@e9da75d5e88d3e122ac60ee1d642cdcc1acb2bd8',
       'src/third_party/httpcomponents-client':
       '/trunk/deps/third_party/httpcomponents-client@170888',
       'src/third_party/findbugs':
@@ -352,191 +318,155 @@ deps_os = {
 
 deps = {
    'src/third_party/skia/include':
-      Var("skia") + '/branches/chrome/m28_1500/include@9070',
+      Var("skia") + '/trunk/include@9712',
    'build/scripts/private/data/reliability':
       '/trunk/src/chrome/test/data/reliability@159828',
    'src/third_party/flac':
       '/trunk/deps/third_party/flac@198139',
-   'src/third_party/v8-i18n':
-      Var("v8-i18n") + '/trunk@174',
-   'src/chrome/test/data/perf/frame_rate/content':
-      '/trunk/deps/frame_rate/content@93671',
    'src/third_party/ots':
-      Var("ots") + '/trunk@97',
+      Var("ots") + '/trunk@102',
+   'src/third_party/mesa/src':
+      '/trunk/deps/third_party/mesa@204346',
+   'src/third_party/cacheinvalidation/src':
+      Var("google-cache-invalidation-api") + '/trunk/src@309',
+   'src/webkit/renderer/media/crypto/ppapi/cdm':
+      '/trunk/deps/cdm@181763',
+   'src/chrome/test/data/perf/third_party/octane':
+      Var("octane-benchmark") + '/trunk@19',
+   'src/third_party/skia/gyp':
+      Var("skia") + '/trunk/gyp@9712',
+   'src/third_party/webdriver/pylib':
+      Var("selenium") + '/trunk/py@18337',
+   'src/third_party/libyuv':
+      Var("libyuv") + '/trunk@723',
+   'src/third_party/libphonenumber/src/phonenumbers':
+      Var("libphonenumber") + '/trunk/cpp/src/phonenumbers@456',
+   'src/third_party/safe_browsing/testing':
+      Var("google-safe-browsing") + '/trunk/testing@112',
+   'src/third_party/pyftpdlib/src':
+      Var("pyftpdlib") + '/trunk@977',
+   'src/third_party/usrsctp/usrsctplib':
+      Var("sctp-refimpl") + '/trunk/KERN/usrsctp/usrsctplib@8463',
+   'src/tools/deps2git':
+      '/trunk/tools/deps2git@202885',
+   'depot_tools':
+      '/trunk/tools/depot_tools@207404',
+   'src/third_party/bidichecker':
+      Var("bidichecker") + '/trunk/lib@4',
+   'src/third_party/WebKit':
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1547@153258',
+   'src/third_party/jsoncpp/source/src/lib_json':
+      Var("jsoncpp") + '/trunk/jsoncpp/src/lib_json@248',
+   'src/testing/gmock':
+      Var("googlemock") + '/trunk@410',
+   'src/chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin':
+      Var("native_client") + '/trunk/src/native_client/tests/prebuilt@11601',
+   'src/third_party/smhasher/src':
+      Var("smhasher") + '/trunk@149',
+   'src/third_party/leveldatabase/src':
+      Var("leveldb") + '/trunk@75',
+   'src/tools/gyp':
+      Var("gyp") + '/trunk@1652',
+   'src/sdch/open-vcdiff':
+      Var("open-vcdiff") + '/trunk@42',
+   'src/tools/page_cycler/acid3':
+      '/trunk/deps/page_cycler/acid3@171600',
+   'src/third_party/jsoncpp/source/include':
+      Var("jsoncpp") + '/trunk/jsoncpp/include@248',
+   'src':
+      '/branches/1547/src@209236',
+   'src/third_party/hunspell':
+      '/trunk/deps/third_party/hunspell@206172',
+   'src/testing/gtest':
+      Var("googletest") + '/trunk@629',
+   'src/v8':
+      Var("v8") + '/branches/3.19@15324',
+   'src/third_party/libvpx':
+      '/trunk/deps/third_party/libvpx@208227',
    'src/third_party/sfntly/cpp/src':
       Var("sfntly") + '/trunk/cpp/src@134',
-   'src/third_party/undoview':
-      '/trunk/deps/third_party/undoview@119694',
+   'src/breakpad/src':
+      Var("google-breakpad") + '/trunk/src@1182',
+   'src/third_party/v8-i18n':
+      Var("v8-i18n") + '/trunk@191',
+   'src/chrome/test/data/perf/frame_rate/content':
+      '/trunk/deps/frame_rate/content@93671',
+   'src/third_party/openmax_dl':
+      Var("webrtc") + '/deps/third_party/openmax@4148',
    'src/googleurl':
-      Var("google-url") + '/trunk@183',
-   'src/third_party/cacheinvalidation/src':
-      Var("google-cache-invalidation-api") + '/trunk/src@298',
+      Var("google-url") + '/trunk@185',
+   'build/third_party/lighttpd':
+      '/trunk/deps/third_party/lighttpd@58968',
    'src/tools/swarm_client':
-      '/trunk/tools/swarm_client@197757',
+      '/trunk/tools/swarm_client@207216',
    'src/third_party/opus/src':
       '/trunk/deps/third_party/opus@185324',
    'src/third_party/webgl_conformance':
-      '/trunk/deps/third_party/webgl/sdk/tests@170088',
+      '/trunk/deps/third_party/webgl/sdk/tests@202601',
    'src/third_party/hunspell_dictionaries':
       '/trunk/deps/third_party/hunspell_dictionaries@193701',
-   'src/content/test/data/layout_tests/LayoutTests/storage/indexeddb':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/storage/indexeddb@154530',
-   'src/content/test/data/layout_tests/LayoutTests/http/tests/appcache':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/http/tests/appcache@154530',
    'src/third_party/libjingle/source':
-      Var("libjingle") + '/trunk@313',
-   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/http/tests/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/platform/chromium-win/http/tests/workers@154530',
-   'src/chrome/test/data/perf/third_party/octane':
-      Var("octane-benchmark") + '/trunk@19',
+      Var("libjingle") + '/trunk@347',
    'src/third_party/accessibility-developer-tools':
       Var("git.chromium.org") + '/external/accessibility-developer-tools.git@ad5df9a5341d38778658c90e4aa241c4ebe4e8aa',
-   'src/third_party/skia/gyp':
-      Var("skia") + '/branches/chrome/m28_1500/gyp@9070',
    'src/third_party/scons-2.0.1':
-      Var("native_client") + '/trunk/src/third_party/scons-2.0.1@11040',
-   'src/third_party/webdriver/pylib':
-      Var("selenium") + '/trunk/py@16922',
-   'build/third_party/swarm_client':
-      '/trunk/tools/swarm_client@197915',
-   'src':
-      '/branches/1500/src@213514',
-   'src/third_party/libyuv':
-      Var("libyuv") + '/trunk@682',
-   'src/third_party/hunspell':
-      '/trunk/deps/third_party/hunspell@197309',
-   'src/third_party/libphonenumber/src/phonenumbers':
-      Var("libphonenumber") + '/trunk/cpp/src/phonenumbers@456',
+      Var("native_client") + '/trunk/src/third_party/scons-2.0.1@11437',
+   'build/scripts/gsd_generate_index':
+      '/trunk/tools/gsd_generate_index@164784',
+   'src/chrome/test/data/perf/canvas_bench':
+      '/trunk/deps/canvas_bench@122605',
+   'src/third_party/libexif/sources':
+      '/trunk/deps/third_party/libexif/sources@146817',
    'src/third_party/libphonenumber/src/resources':
       Var("libphonenumber") + '/trunk/resources@456',
-   'src/third_party/safe_browsing/testing':
-      Var("google-safe-browsing") + '/trunk/testing@112',
-   'src/content/test/data/layout_tests/LayoutTests/http/tests/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/http/tests/workers@154530',
-   'src/content/test/data/layout_tests/LayoutTests/fast/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/fast/workers@154530',
+   'src/third_party/speex':
+      '/trunk/deps/third_party/speex@198168',
    'build/third_party/gsutil':
       Var("gsutil") + '/trunk/src@263',
-   'src/content/test/data/layout_tests/LayoutTests/media':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/media@154530',
-   'src/third_party/pyftpdlib/src':
-      Var("pyftpdlib") + '/trunk@977',
-   'src/webkit/media/crypto/ppapi/cdm':
-      '/trunk/deps/cdm@181763',
-   'src/content/test/data/layout_tests/LayoutTests/storage/domstorage':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/storage/domstorage@154530',
    'src/third_party/snappy/src':
       Var("snappy") + '/trunk@74',
    'src/third_party/webrtc':
-      Var("webrtc") + '/branches/3.30/webrtc@4032',
-   'src/tools/deps2git':
-      '/trunk/tools/deps2git@194189',
+      Var("webrtc") + '/branches/3.34/webrtc@4269',
    'src/third_party/libjpeg_turbo':
       '/trunk/deps/third_party/libjpeg_turbo@177737',
    'src/third_party/pywebsocket/src':
       Var("pywebsocket") + '/trunk/src@662',
-   'depot_tools':
-      '/trunk/tools/depot_tools@198572',
-   'src/third_party/bidichecker':
-      Var("bidichecker") + '/trunk/lib@4',
    'commit-queue':
-      '/trunk/tools/commit-queue@197910',
-   'src/breakpad/src':
-      Var("google-breakpad") + '/trunk/src@1174',
-   'src/third_party/openmax_dl':
-      Var("webrtc") + '/deps/third_party/openmax@3720',
-   'src/content/test/data/layout_tests/LayoutTests/http/tests/resources':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/http/tests/resources@154530',
-   'src/third_party/jsoncpp/source/src/lib_json':
-      Var("jsoncpp") + '/trunk/jsoncpp/src/lib_json@248',
-   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/platform/chromium-win/fast/workers@154530',
-   'build/scripts/command_wrapper/bin':
-      '/trunk/tools/command_wrapper/bin@135178',
-   'src/testing/gtest':
-      Var("googletest") + '/trunk@629',
-   'build/scripts/gsd_generate_index':
-      '/trunk/tools/gsd_generate_index@164784',
-   'src/testing/gmock':
-      Var("googlemock") + '/trunk@410',
+      '/trunk/tools/commit-queue@207699',
    'src/third_party/skia/src':
-      Var("skia") + '/branches/chrome/m28_1500/src@9721',
-   'src/chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin':
-      Var("native_client") + '/trunk/src/native_client/tests/prebuilt@11298',
-   'src/third_party/smhasher/src':
-      Var("smhasher") + '/trunk@148',
-   'src/content/test/data/layout_tests/LayoutTests/editing/pasteboard/resources':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/editing/pasteboard/resources@154530',
-   'src/content/test/data/layout_tests/LayoutTests/fast/filesystem':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/fast/filesystem@154530',
-   'src/native_client':
-      Var("native_client") + '/trunk/src/native_client@11298',
-   'src/tools/page_cycler/acid3':
-      '/trunk/deps/page_cycler/acid3@171600',
-   'src/third_party/leveldatabase/src':
-      Var("leveldb") + '/trunk@72',
+      Var("skia") + '/trunk/src@9712',
+   'src/third_party/webpagereplay':
+      Var("web-page-replay") + '/trunk@515',
    'build':
-      '/trunk/tools/build@198609',
-   'src/tools/gyp':
-      Var("gyp") + '/trunk@1611',
-   'src/chrome/test/data/perf/canvas_bench':
-      '/trunk/deps/canvas_bench@122605',
-   'src/third_party/ffmpeg':
-      '/branches/ffmpeg/1500@202719',
-   'src/third_party/libexif/sources':
-      '/trunk/deps/third_party/libexif/sources@146817',
-   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/storage/domstorage':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/platform/chromium-win/storage/domstorage@154530',
-   'build/third_party/lighttpd':
-      '/trunk/deps/third_party/lighttpd@58968',
-   'src/content/test/data/layout_tests/LayoutTests/http/tests/xmlhttprequest':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/http/tests/xmlhttprequest@154530',
-   'src/third_party/jsoncpp/source/include':
-      Var("jsoncpp") + '/trunk/jsoncpp/include@248',
+      '/trunk/tools/build@208324',
+   'build/third_party/swarm_client':
+      '/trunk/tools/swarm_client@207274',
    'src/third_party/libsrtp':
       '/trunk/deps/third_party/libsrtp@189528',
+   'src/third_party/ffmpeg':
+      '/trunk/deps/third_party/ffmpeg@203786',
+   'src/native_client':
+      Var("native_client") + '/trunk/src/native_client@11601',
    'src/third_party/libphonenumber/src/test':
       Var("libphonenumber") + '/trunk/cpp/test@456',
-   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/events':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/platform/chromium-win/fast/events@154530',
+   'src/third_party/trace-viewer':
+      Var("trace-viewer") + '/trunk@623',
+   'build/scripts/command_wrapper/bin':
+      '/trunk/tools/command_wrapper/bin@135178',
+   'src/third_party/icu':
+      '/trunk/deps/third_party/icu46@205936',
+   'src/third_party/angle_dx11':
+      Var("git.chromium.org") + '/external/angle.git@f576cb24c8fc02d3f2fb90faebdcf333fb27892f',
+   'src/tools/grit':
+      Var("grit-i18n") + '/trunk@127',
    'src/third_party/yasm/source/patched-yasm':
       '/trunk/deps/third_party/yasm/patched-yasm@167605',
-   'src/content/test/data/layout_tests/LayoutTests/fast/files':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/fast/files@154530',
-   'src/sdch/open-vcdiff':
-      Var("open-vcdiff") + '/trunk@42',
-   'src/third_party/pymox/src':
-      Var("pymox") + '/trunk@70',
-   'src/content/test/data/layout_tests/LayoutTests/fast/events':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/fast/events@154530',
-   'src/third_party/WebKit':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500@154530',
-   'src/third_party/icu':
-      '/trunk/deps/third_party/icu46@192960',
-   'src/third_party/speex':
-      '/trunk/deps/third_party/speex@198168',
-   'src/tools/grit':
-      Var("grit-i18n") + '/trunk@119',
-   'src/third_party/webpagereplay':
-      Var("web-page-replay") + '/trunk@511',
-   'src/third_party/trace-viewer':
-      Var("trace-viewer") + '/trunk@299',
    'src/third_party/swig/Lib':
       '/trunk/deps/third_party/swig/Lib@69281',
-   'src/third_party/angle':
-      Var("angleproject") + '/trunk@2212',
-   'src/v8':
-      Var("v8") + '/branches/3.18@15836',
-   'src/third_party/libvpx':
-      '/trunk/deps/third_party/libvpx@197977',
-   'src/content/test/data/layout_tests/LayoutTests/http/tests/websocket/tests':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/http/tests/websocket/tests@154530',
-   'src/content/test/data/layout_tests/LayoutTests/fast/js/resources':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1500/LayoutTests/fast/js/resources@154530',
 }
 
 skip_child_includes =  ['breakpad', 'chrome_frame', 'delegate_execute', 'googleurl', 'metro_driver', 'native_client_sdk', 'o3d', 'pdf', 'sdch', 'skia', 'testing', 'third_party', 'v8', 'win8'] 
 
-hooks =  [{'action': ['python', 'src/build/download_nacl_toolchains.py', '--no-arm-trusted', '--keep'], 'pattern': '.'}, {'action': ['python', 'src/build/linux/install-arm-sysroot.py', '--linux-only'], 'pattern': '.'}, {'action': ['python', 'src/build/linux/install-debian.wheezy.sysroot.wrapper.py', '--linux-only'], 'pattern': '.'}, {'action': ['python', 'src/tools/clang/scripts/update.py', '--mac-only'], 'pattern': '.'}, {'action': ['python', 'src/build/win/setup_cygwin_mount.py', '--win-only'], 'pattern': '.'}, {'action': ['python', 'src/build/util/lastchange.py', '-o', 'src/build/util/LASTCHANGE'], 'pattern': '.'}, {'action': ['python', 'src/build/gyp_chromium'], 'pattern': '.'}, {'action': ['python', 'src/build/landmines.py'], 'pattern': '.'}] 
+hooks =  [{'action': ['python', 'src/build/download_nacl_toolchains.py', '--no-arm-trusted', '--keep'], 'pattern': '.'}, {'action': ['python', 'src/build/linux/install-arm-sysroot.py', '--linux-only'], 'pattern': '.'}, {'action': ['python', 'src/chrome/installer/linux/sysroot_scripts/install-debian.wheezy.sysroot.py', '--linux-only', '--arch=amd64'], 'pattern': '.'}, {'action': ['python', 'src/chrome/installer/linux/sysroot_scripts/install-debian.wheezy.sysroot.py', '--linux-only', '--arch=i386'], 'pattern': '.'}, {'action': ['python', 'src/tools/clang/scripts/update.py', '--mac-only'], 'pattern': '.'}, {'action': ['python', 'src/build/win/setup_cygwin_mount.py', '--win-only'], 'pattern': '.'}, {'action': ['python', 'src/build/util/lastchange.py', '-o', 'src/build/util/LASTCHANGE'], 'pattern': '.'}, {'action': ['python', 'src/build/util/lastchange.py', '-s', 'src/third_party/WebKit', '-o', 'src/build/util/LASTCHANGE.blink'], 'pattern': '.'}, {'action': ['python', 'src/build/gyp_chromium'], 'pattern': '.'}, {'action': ['python', 'src/build/landmines.py'], 'pattern': '.'}] 
 
 include_rules =  ['+base', '+build', '+googleurl', '+ipc', '+library_loaders', '+testing', '+third_party/icu/public']

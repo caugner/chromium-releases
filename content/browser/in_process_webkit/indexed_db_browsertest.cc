@@ -9,8 +9,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/thread_test_helper.h"
-#include "base/utf_string_conversions.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_context.h"
@@ -24,8 +24,8 @@
 #include "content/shell/shell.h"
 #include "content/test/content_browser_test.h"
 #include "content/test/content_browser_test_utils.h"
-#include "webkit/database/database_util.h"
-#include "webkit/quota/quota_manager.h"
+#include "webkit/browser/database/database_util.h"
+#include "webkit/browser/quota/quota_manager.h"
 
 using quota::QuotaManager;
 using webkit_database::DatabaseUtil;
@@ -96,9 +96,8 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     qm->SetTemporaryGlobalOverrideQuota(bytes, quota::QuotaCallback());
     // Don't return until the quota has been set.
-    scoped_refptr<base::ThreadTestHelper> helper(
-        new base::ThreadTestHelper(
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB)));
+    scoped_refptr<base::ThreadTestHelper> helper(new base::ThreadTestHelper(
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get()));
     ASSERT_TRUE(helper->Run());
   }
 
@@ -110,7 +109,7 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
                 &IndexedDBBrowserTest::DidGetDiskUsage, this));
     scoped_refptr<base::ThreadTestHelper> helper(
         new base::ThreadTestHelper(BrowserThread::GetMessageLoopProxyForThread(
-            BrowserThread::WEBKIT_DEPRECATED)));
+            BrowserThread::WEBKIT_DEPRECATED).get()));
     EXPECT_TRUE(helper->Run());
     // Wait for DidGetDiskUsage to be called.
     base::MessageLoop::current()->RunUntilIdle();
@@ -166,7 +165,8 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, TransactionTest) {
   SimpleTest(GetTestUrl("indexeddb", "transaction_test.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ValueSizeTest) {
+// http://crbug.com/239366
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, FLAKY_ValueSizeTest) {
   SimpleTest(GetTestUrl("indexeddb", "value_size_test.html"));
 }
 
@@ -255,7 +255,7 @@ class IndexedDBBrowserTestWithPreexistingLevelDB : public IndexedDBBrowserTest {
                    EnclosingLevelDBDir()));
     scoped_refptr<base::ThreadTestHelper> helper(
         new base::ThreadTestHelper(BrowserThread::GetMessageLoopProxyForThread(
-            BrowserThread::WEBKIT_DEPRECATED)));
+            BrowserThread::WEBKIT_DEPRECATED).get()));
     ASSERT_TRUE(helper->Run());
   }
 
@@ -405,7 +405,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ConnectionsClosedOnTabClose) {
 
   // Start on a different URL to force a new renderer process.
   Shell* new_shell = CreateBrowser();
-  NavigateToURL(new_shell, GURL(chrome::kAboutBlankURL));
+  NavigateToURL(new_shell, GURL(kAboutBlankURL));
   NavigateAndWaitForTitle(new_shell, "version_change_blocked.html", "#tab2",
                           "setVersion(3) blocked");
 

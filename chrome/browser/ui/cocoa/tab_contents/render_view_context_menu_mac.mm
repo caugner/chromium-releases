@@ -5,16 +5,16 @@
 #include "chrome/browser/ui/cocoa/tab_contents/render_view_context_menu_mac.h"
 
 #include "base/compiler_specific.h"
+#include "base/mac/scoped_nsobject.h"
 #import "base/mac/scoped_sending_event.h"
-#include "base/memory/scoped_nsobject.h"
 #include "base/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/menu_controller.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "grit/generated_resources.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::WebContents;
@@ -88,7 +88,8 @@ void RenderViewContextMenuMac::PlatformInit() {
 
   {
     // Make sure events can be pumped while the menu is up.
-    MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
+    base::MessageLoop::ScopedNestableTaskAllower allow(
+        base::MessageLoop::current());
 
     // One of the events that could be pumped is |window.close()|.
     // User-initiated event-tracking loops protect against this by

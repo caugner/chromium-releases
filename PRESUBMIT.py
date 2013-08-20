@@ -160,6 +160,43 @@ _BANNED_CPP_FUNCTIONS = (
         r"^net[\\\/]disk_cache[\\\/]cache_util\.cc$",
       ),
     ),
+    (
+      'SkRefPtr',
+      (
+        'The use of SkRefPtr is prohibited. ',
+        'Please use skia::RefPtr instead.'
+      ),
+      True,
+      (),
+    ),
+    (
+      'SkAutoRef',
+      (
+        'The indirect use of SkRefPtr via SkAutoRef is prohibited. ',
+        'Please use skia::RefPtr instead.'
+      ),
+      True,
+      (),
+    ),
+    (
+      'SkAutoTUnref',
+      (
+        'The use of SkAutoTUnref is dangerous because it implicitly ',
+        'converts to a raw pointer. Please use skia::RefPtr instead.'
+      ),
+      True,
+      (),
+    ),
+    (
+      'SkAutoUnref',
+      (
+        'The indirect use of SkAutoTUnref through SkAutoUnref is dangerous ',
+        'because it implicitly converts to a raw pointer. ',
+        'Please use skia::RefPtr instead.'
+      ),
+      True,
+      (),
+    ),
 )
 
 
@@ -194,6 +231,7 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
 
   base_function_pattern = r'ForTest(ing)?|for_test(ing)?'
   inclusion_pattern = input_api.re.compile(r'(%s)\s*\(' % base_function_pattern)
+  comment_pattern = input_api.re.compile(r'//.*%s' % base_function_pattern)
   exclusion_pattern = input_api.re.compile(
     r'::[A-Za-z0-9_]+(%s)|(%s)[^;]+\{' % (
       base_function_pattern, base_function_pattern))
@@ -214,6 +252,7 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
     line_number = 0
     for line in lines:
       if (inclusion_pattern.search(line) and
+          not comment_pattern.search(line) and
           not exclusion_pattern.search(line)):
         problems.append(
           '%s:%d\n    %s' % (local_path, line_number, line.strip()))
@@ -415,7 +454,7 @@ def _CheckUnwantedDependencies(input_api, output_api):
     changed_lines = [line for line_num, line in f.ChangedContents()]
     added_includes.append([f.LocalPath(), changed_lines])
 
-  deps_checker = checkdeps.DepsChecker()
+  deps_checker = checkdeps.DepsChecker(input_api.PresubmitLocalPath())
 
   error_descriptions = []
   warning_descriptions = []
@@ -651,11 +690,13 @@ def _CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api):
                   _TEST_CODE_EXCLUDED_PATHS +
                   input_api.DEFAULT_BLACK_LIST))
 
-  pattern = input_api.re.compile('"[^"]*google\.com[^"]*"')
+  base_pattern = '"[^"]*google\.com[^"]*"'
+  comment_pattern = input_api.re.compile('//.*%s' % base_pattern)
+  pattern = input_api.re.compile(base_pattern)
   problems = []  # items are (filename, line_number, line)
   for f in input_api.AffectedSourceFiles(FilterFile):
     for line_num, line in f.ChangedContents():
-      if pattern.search(line):
+      if not comment_pattern.search(line) and pattern.search(line):
         problems.append((f.LocalPath(), line_num, line))
 
   if problems:
@@ -686,6 +727,79 @@ def _CheckNoAbbreviationInPngFileName(input_api, output_api):
   return results
 
 
+def _CheckAddedDepsHaveTargetApprovals(input_api, output_api):
+  """When a dependency prefixed with + is added to a DEPS file, we
+  want to make sure that the change is reviewed by an OWNER of the
+  target file or directory, to avoid layering violations from being
+  introduced. This check verifies that this happens.
+  """
+  changed_lines = set()
+  for f in input_api.AffectedFiles():
+    filename = input_api.os_path.basename(f.LocalPath())
+    if filename == 'DEPS':
+      changed_lines |= set(line.strip()
+                           for line_num, line
+                           in f.ChangedContents())
+  if not changed_lines:
+    return []
+
+  virtual_depended_on_files = set()
+  # This pattern grabs the path without basename in the first
+  # parentheses, and the basename (if present) in the second. It
+  # relies on the simple heuristic that if there is a basename it will
+  # be a header file ending in ".h".
+  pattern = input_api.re.compile(
+      r"""['"]\+([^'"]+?)(/[a-zA-Z0-9_]+\.h)?['"].*""")
+  for changed_line in changed_lines:
+    m = pattern.match(changed_line)
+    if m:
+      virtual_depended_on_files.add('%s/DEPS' % m.group(1))
+
+  if not virtual_depended_on_files:
+    return []
+
+  if input_api.is_committing:
+    if input_api.tbr:
+      return [output_api.PresubmitNotifyResult(
+          '--tbr was specified, skipping OWNERS check for DEPS additions')]
+    if not input_api.change.issue:
+      return [output_api.PresubmitError(
+          "DEPS approval by OWNERS check failed: this change has "
+          "no Rietveld issue number, so we can't check it for approvals.")]
+    output = output_api.PresubmitError
+  else:
+    output = output_api.PresubmitNotifyResult
+
+  owners_db = input_api.owners_db
+  owner_email, reviewers = input_api.canned_checks._RietveldOwnerAndReviewers(
+      input_api,
+      owners_db.email_regexp,
+      approval_needed=input_api.is_committing)
+
+  owner_email = owner_email or input_api.change.author_email
+
+  reviewers_plus_owner = set(reviewers)
+  if owner_email:
+    reviewers_plus_owner.add(owner_email)
+  missing_files = owners_db.files_not_covered_by(virtual_depended_on_files,
+                                                 reviewers_plus_owner)
+  unapproved_dependencies = ["'+%s'," % path[:-len('/DEPS')]
+                             for path in missing_files]
+
+  if unapproved_dependencies:
+    output_list = [
+      output('Missing LGTM from OWNERS of directories added to DEPS:\n    %s' %
+             '\n    '.join(sorted(unapproved_dependencies)))]
+    if not input_api.is_committing:
+      suggested_owners = owners_db.reviewers_for(missing_files, owner_email)
+      output_list.append(output(
+          'Suggested missing target path OWNERS:\n    %s' %
+          '\n    '.join(suggested_owners or [])))
+    return output_list
+
+  return []
+
+
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
   results = []
@@ -710,6 +824,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api))
   results.extend(_CheckNoAbbreviationInPngFileName(input_api, output_api))
   results.extend(_CheckForInvalidOSMacros(input_api, output_api))
+  results.extend(_CheckAddedDepsHaveTargetApprovals(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(

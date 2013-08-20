@@ -5,6 +5,7 @@
 #ifndef CC_TEST_FAKE_LAYER_TREE_HOST_IMPL_CLIENT_H_
 #define CC_TEST_FAKE_LAYER_TREE_HOST_IMPL_CLIENT_H_
 
+#include "cc/output/begin_frame_args.h"
 #include "cc/trees/layer_tree_host_impl.h"
 
 namespace cc {
@@ -12,19 +13,19 @@ namespace cc {
 class FakeLayerTreeHostImplClient : public LayerTreeHostImplClient {
  public:
   // LayerTreeHostImplClient implementation.
+  virtual void DidTryInitializeRendererOnImplThread(
+      bool success,
+      scoped_refptr<ContextProvider> offscreen_context_provider) OVERRIDE {}
   virtual void DidLoseOutputSurfaceOnImplThread() OVERRIDE {}
   virtual void OnSwapBuffersCompleteOnImplThread() OVERRIDE {}
-  virtual void OnVSyncParametersChanged(
-      base::TimeTicks,
-      base::TimeDelta) OVERRIDE {}
-  virtual void DidVSync(base::TimeTicks frame_time) OVERRIDE {}
+  virtual void BeginFrameOnImplThread(const BeginFrameArgs& args)
+      OVERRIDE {}
   virtual void OnCanDrawStateChanged(bool can_draw) OVERRIDE {}
   virtual void OnHasPendingTreeStateChanged(bool has_pending_tree) OVERRIDE {}
   virtual void SetNeedsRedrawOnImplThread() OVERRIDE {}
   virtual void SetNeedsRedrawRectOnImplThread(gfx::Rect damage_rect) OVERRIDE {}
   virtual void DidInitializeVisibleTileOnImplThread() OVERRIDE {}
   virtual void SetNeedsCommitOnImplThread() OVERRIDE {}
-  virtual void SetNeedsManageTilesOnImplThread() OVERRIDE {}
   virtual void PostAnimationEventsToMainThreadOnImplThread(
       scoped_ptr<AnimationEventsVector> events,
       base::Time wall_clock_time) OVERRIDE {}
@@ -37,8 +38,7 @@ class FakeLayerTreeHostImplClient : public LayerTreeHostImplClient {
   virtual void RenewTreePriority() OVERRIDE {}
   virtual void RequestScrollbarAnimationOnImplThread(base::TimeDelta)
       OVERRIDE {}
-  virtual void DidReceiveLastInputEventForVSync(base::TimeTicks frame_time)
-      OVERRIDE {}
+  virtual void DidActivatePendingTree() OVERRIDE {}
 };
 
 }  // namespace cc

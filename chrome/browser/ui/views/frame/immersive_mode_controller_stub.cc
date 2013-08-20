@@ -12,7 +12,10 @@ ImmersiveModeControllerStub::ImmersiveModeControllerStub() {
 ImmersiveModeControllerStub::~ImmersiveModeControllerStub() {
 }
 
-void ImmersiveModeControllerStub::Init(BrowserView* browser_view) {
+void ImmersiveModeControllerStub::Init(
+    Delegate* delegate,
+    views::Widget* widget,
+    views::View* top_container) {
 }
 
 void ImmersiveModeControllerStub::SetEnabled(bool enabled) {
@@ -35,7 +38,9 @@ bool ImmersiveModeControllerStub::IsRevealed() const {
   return false;
 }
 
-void ImmersiveModeControllerStub::MaybeStackViewAtTop() {
+int ImmersiveModeControllerStub::GetTopContainerVerticalOffset(
+    const gfx::Size& top_container_size) const {
+  return 0;
 }
 
 ImmersiveRevealedLock* ImmersiveModeControllerStub::GetRevealedLock(
@@ -53,4 +58,8 @@ void ImmersiveModeControllerStub::UnanchorWidgetFromTopContainer(
 }
 
 void ImmersiveModeControllerStub::OnTopContainerBoundsChanged() {
+}
+
+void ImmersiveModeControllerStub::OnFindBarVisibleBoundsChanged(
+    const gfx::Rect& new_visible_bounds_in_screen) {
 }

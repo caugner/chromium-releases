@@ -4,14 +4,15 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_file_util.h"
 #include "base/threading/simple_thread.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,7 +26,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "printing/image.h"
 #include "printing/printing_test.h"
 
@@ -78,14 +79,16 @@ class PrintingLayoutTest : public PrintingTest<InProcessBrowserTest>,
     switch (content::Details<printing::JobEventDetails>(details)->type()) {
       case printing::JobEventDetails::JOB_DONE: {
         // Succeeded.
-        MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+        base::MessageLoop::current()->PostTask(
+            FROM_HERE, base::MessageLoop::QuitClosure());
         break;
       }
       case printing::JobEventDetails::USER_INIT_CANCELED:
       case printing::JobEventDetails::FAILED: {
         // Failed.
         ASSERT_TRUE(false);
-        MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+        base::MessageLoop::current()->PostTask(
+            FROM_HERE, base::MessageLoop::QuitClosure());
         break;
       }
       case printing::JobEventDetails::NEW_DOC:
@@ -195,8 +198,8 @@ class PrintingLayoutTest : public PrintingTest<InProcessBrowserTest>,
     bool found_emf = false;
     bool found_prn = false;
     for (int i = 0; i < 100; ++i) {
-      file_util::FileEnumerator enumerator(emf_path_, false,
-          file_util::FileEnumerator::FILES);
+      base::FileEnumerator enumerator(emf_path_, false,
+                                      base::FileEnumerator::FILES);
       emf_file.clear();
       prn_file.clear();
       found_emf = false;

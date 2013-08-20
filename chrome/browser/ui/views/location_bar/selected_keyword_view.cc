@@ -5,44 +5,49 @@
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
 
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
 #include "chrome/browser/ui/views/location_bar/keyword_hint_view.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/views/painter.h"
 
-SelectedKeywordView::SelectedKeywordView(const int background_images[],
-                                         int contained_image,
-                                         SkColor color,
+
+namespace {
+const int kBackgroundImages[] = IMAGE_GRID(IDR_OMNIBOX_SELECTED_KEYWORD_BUBBLE);
+}
+
+
+SelectedKeywordView::SelectedKeywordView(const gfx::Font& font,
+                                         int font_y_offset,
+                                         SkColor text_color,
+                                         SkColor parent_background_color,
                                          Profile* profile)
-    : IconLabelBubbleView(background_images, contained_image, color),
+    : IconLabelBubbleView(kBackgroundImages, IDR_KEYWORD_SEARCH_MAGNIFIER, font,
+                          font_y_offset, text_color, parent_background_color,
+                          false),
       profile_(profile) {
+  full_label_.SetFont(font);
   full_label_.SetVisible(false);
+  partial_label_.SetFont(font);
   partial_label_.SetVisible(false);
 }
 
 SelectedKeywordView::~SelectedKeywordView() {
 }
 
-void SelectedKeywordView::SetFont(const gfx::Font& font) {
-  IconLabelBubbleView::SetFont(font);
-  full_label_.SetFont(font);
-  partial_label_.SetFont(font);
-}
-
 gfx::Size SelectedKeywordView::GetPreferredSize() {
-  gfx::Size size(GetNonLabelSize());
-  size.Enlarge(full_label_.GetPreferredSize().width(), 0);
-  return size;
+  // Height will be ignored by the LocationBarView.
+  return GetSizeForLabelWidth(full_label_.GetPreferredSize().width());
 }
 
 gfx::Size SelectedKeywordView::GetMinimumSize() {
-  gfx::Size size(GetNonLabelSize());
-  size.Enlarge(partial_label_.GetMinimumSize().width(), 0);
-  return size;
+  // Height will be ignored by the LocationBarView.
+  return GetSizeForLabelWidth(partial_label_.GetMinimumSize().width());
 }
 
 void SelectedKeywordView::Layout() {

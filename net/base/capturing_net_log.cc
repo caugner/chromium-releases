@@ -15,7 +15,7 @@ CapturingNetLog::CapturedEntry::CapturedEntry(
     const base::TimeTicks& time,
     Source source,
     EventPhase phase,
-    scoped_ptr<DictionaryValue> params)
+    scoped_ptr<base::DictionaryValue> params)
     : type(type),
       time(time),
       source(source),
@@ -67,20 +67,19 @@ std::string CapturingNetLog::CapturedEntry::GetParamsJson() const {
   return json;
 }
 
-CapturingNetLog::CapturingNetLog()
-    : last_id_(0),
-      log_level_(LOG_ALL_BUT_BYTES) {
-}
+CapturingNetLog::Observer::Observer() {}
 
-CapturingNetLog::~CapturingNetLog() {}
+CapturingNetLog::Observer::~Observer() {}
 
-void CapturingNetLog::GetEntries(CapturedEntryList* entry_list) const {
+void CapturingNetLog::Observer::GetEntries(
+    CapturedEntryList* entry_list) const {
   base::AutoLock lock(lock_);
   *entry_list = captured_entries_;
 }
 
-void CapturingNetLog::GetEntriesForSource(NetLog::Source source,
-                                          CapturedEntryList* entry_list) const {
+void CapturingNetLog::Observer::GetEntriesForSource(
+    NetLog::Source source,
+    CapturedEntryList* entry_list) const {
   base::AutoLock lock(lock_);
   entry_list->clear();
   for (CapturedEntryList::const_iterator entry = captured_entries_.begin();
@@ -90,28 +89,23 @@ void CapturingNetLog::GetEntriesForSource(NetLog::Source source,
   }
 }
 
-size_t CapturingNetLog::GetSize() const {
+size_t CapturingNetLog::Observer::GetSize() const {
   base::AutoLock lock(lock_);
   return captured_entries_.size();
 }
 
-void CapturingNetLog::Clear() {
+void CapturingNetLog::Observer::Clear() {
   base::AutoLock lock(lock_);
   captured_entries_.clear();
 }
 
-void CapturingNetLog::SetLogLevel(NetLog::LogLevel log_level) {
-  base::AutoLock lock(lock_);
-  log_level_ = log_level;
-}
-
-void CapturingNetLog::OnAddEntry(const net::NetLog::Entry& entry) {
+void CapturingNetLog::Observer::OnAddEntry(const net::NetLog::Entry& entry) {
   // Only BoundNetLogs without a NetLog should have an invalid source.
   CHECK(entry.source().IsValid());
 
   // Using Dictionaries instead of Values makes checking values a little
   // simpler.
-  DictionaryValue* param_dict = NULL;
+  base::DictionaryValue* param_dict = NULL;
   Value* param_value = entry.ParametersToValue();
   if (param_value && !param_value->GetAsDictionary(&param_dict))
     delete param_value;
@@ -123,32 +117,38 @@ void CapturingNetLog::OnAddEntry(const net::NetLog::Entry& entry) {
                     base::TimeTicks::Now(),
                     entry.source(),
                     entry.phase(),
-                    scoped_ptr<DictionaryValue>(param_dict)));
+                    scoped_ptr<base::DictionaryValue>(param_dict)));
 }
 
-uint32 CapturingNetLog::NextID() {
-  return base::subtle::NoBarrier_AtomicIncrement(&last_id_, 1);
+CapturingNetLog::CapturingNetLog() {
+  AddThreadSafeObserver(&capturing_net_log_observer_, LOG_ALL_BUT_BYTES);
 }
 
-NetLog::LogLevel CapturingNetLog::GetLogLevel() const {
-  base::AutoLock lock(lock_);
-  return log_level_;
+CapturingNetLog::~CapturingNetLog() {
+  RemoveThreadSafeObserver(&capturing_net_log_observer_);
 }
 
-void CapturingNetLog::AddThreadSafeObserver(
-    NetLog::ThreadSafeObserver* observer,
-    NetLog::LogLevel log_level) {
-  NOTIMPLEMENTED() << "Not currently used by net unit tests.";
+void CapturingNetLog::SetLogLevel(NetLog::LogLevel log_level) {
+  SetObserverLogLevel(&capturing_net_log_observer_, log_level);
 }
 
-void CapturingNetLog::SetObserverLogLevel(ThreadSafeObserver* observer,
-                                          LogLevel log_level) {
-  NOTIMPLEMENTED() << "Not currently used by net unit tests.";
+void CapturingNetLog::GetEntries(
+    CapturingNetLog::CapturedEntryList* entry_list) const {
+  capturing_net_log_observer_.GetEntries(entry_list);
 }
 
-void CapturingNetLog::RemoveThreadSafeObserver(
-    NetLog::ThreadSafeObserver* observer) {
-  NOTIMPLEMENTED() << "Not currently used by net unit tests.";
+void CapturingNetLog::GetEntriesForSource(
+    NetLog::Source source,
+    CapturedEntryList* entry_list) const {
+  capturing_net_log_observer_.GetEntriesForSource(source, entry_list);
+}
+
+size_t CapturingNetLog::GetSize() const {
+  return capturing_net_log_observer_.GetSize();
+}
+
+void CapturingNetLog::Clear() {
+  capturing_net_log_observer_.Clear();
 }
 
 CapturingBoundNetLog::CapturingBoundNetLog()

@@ -28,7 +28,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
@@ -398,13 +398,9 @@ typedef scoped_ptr_malloc<DIR, ScopedDIRClose> ScopedDIR;
   static const char kFDDir[] = "/proc/self/fd";
 #endif
 
-void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
-  // DANGER: no calls to malloc are allowed from now on:
-  // http://crbug.com/36678
-
-  // Get the maximum number of FDs possible.
-  struct rlimit nofile;
+size_t GetMaxFds() {
   rlim_t max_fds;
+  struct rlimit nofile;
   if (getrlimit(RLIMIT_NOFILE, &nofile)) {
     // getrlimit failed. Take a best guess.
     max_fds = kSystemDefaultMaxFds;
@@ -416,11 +412,20 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
   if (max_fds > INT_MAX)
     max_fds = INT_MAX;
 
-  DirReaderPosix fd_dir(kFDDir);
+  return static_cast<size_t>(max_fds);
+}
 
+void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
+  // DANGER: no calls to malloc are allowed from now on:
+  // http://crbug.com/36678
+
+  // Get the maximum number of FDs possible.
+  size_t max_fds = GetMaxFds();
+
+  DirReaderPosix fd_dir(kFDDir);
   if (!fd_dir.IsValid()) {
     // Fallback case: Try every possible fd.
-    for (rlim_t i = 0; i < max_fds; ++i) {
+    for (size_t i = 0; i < max_fds; ++i) {
       const int fd = static_cast<int>(i);
       if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
         continue;
@@ -636,10 +641,6 @@ bool LaunchProcess(const std::vector<std::string>& argv,
     // might do things like block waiting for threads that don't even exist
     // in the child.
 
-    if (options.debug) {
-      RAW_LOG(INFO, "Right after fork");
-    }
-
     // If a child process uses the readline library, the process block forever.
     // In BSD like OSes including OS X it is safe to assign /dev/null as stdin.
     // See http://crbug.com/56596.
@@ -665,18 +666,10 @@ bool LaunchProcess(const std::vector<std::string>& argv,
       }
     }
 
-    if (options.debug) {
-      RAW_LOG(INFO, "Right before base::type_profiler::Controller::Stop()");
-    }
-
     // Stop type-profiler.
     // The profiler should be stopped between fork and exec since it inserts
     // locks at new/delete expressions.  See http://crbug.com/36678.
     base::type_profiler::Controller::Stop();
-
-    if (options.debug) {
-      RAW_LOG(INFO, "Right after base::type_profiler::Controller::Stop()");
-    }
 
     if (options.maximize_rlimits) {
       // Some resource limits need to be maximal in this child.
@@ -701,10 +694,6 @@ bool LaunchProcess(const std::vector<std::string>& argv,
 #endif  // defined(OS_MACOSX)
 
     ResetChildSignalHandlersToDefaults();
-
-    if (options.debug) {
-      RAW_LOG(INFO, "Right after signal/exception handler restoration.");
-    }
 
 #if 0
     // When debugging it can be helpful to check that we really aren't making
@@ -741,10 +730,6 @@ bool LaunchProcess(const std::vector<std::string>& argv,
       }
     }
 
-    if (options.debug) {
-      RAW_LOG(INFO, "Right after fd_shuffle push_backs.");
-    }
-
     if (options.environ)
       SetEnvironment(new_environ.get());
 
@@ -752,19 +737,7 @@ bool LaunchProcess(const std::vector<std::string>& argv,
     if (!ShuffleFileDescriptors(&fd_shuffle1))
       _exit(127);
 
-    if (options.debug) {
-      RAW_LOG(INFO, "Right after ShuffleFileDescriptors");
-    }
-
     CloseSuperfluousFds(fd_shuffle2);
-
-    if (options.debug) {
-      RAW_LOG(INFO, "Right after CloseSuperfluousFds");
-    }
-
-    if (options.debug) {
-      RAW_LOG(INFO, "Right before execvp");
-    }
 
     for (size_t i = 0; i < argv.size(); i++)
       argv_cstr[i] = const_cast<char*>(argv[i].c_str());
@@ -797,8 +770,6 @@ bool LaunchProcess(const CommandLine& cmdline,
                    ProcessHandle* process_handle) {
   return LaunchProcess(cmdline.argv(), options, process_handle);
 }
-
-ProcessMetrics::~ProcessMetrics() { }
 
 void RaiseProcessToHighPriority() {
   // On POSIX, we don't actually do anything here.  We could try to nice() or
@@ -971,14 +942,6 @@ bool WaitForSingleProcess(ProcessHandle handle, base::TimeDelta wait) {
   } else {
     return false;
   }
-}
-
-int64 TimeValToMicroseconds(const struct timeval& tv) {
-  static const int kMicrosecondsPerSecond = 1000000;
-  int64 ret = tv.tv_sec;  // Avoid (int * int) integer overflow.
-  ret *= kMicrosecondsPerSecond;
-  ret += tv.tv_usec;
-  return ret;
 }
 
 // Return value used by GetAppOutputInternal to encapsulate the various exit

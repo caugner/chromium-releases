@@ -206,7 +206,7 @@ void DownloadShelfGtk::DoClose(CloseReason reason) {
   browser_->UpdateDownloadShelfVisibility(false);
   int num_in_progress = 0;
   for (size_t i = 0; i < download_items_.size(); ++i) {
-    if (download_items_[i]->download()->IsInProgress())
+    if (download_items_[i]->download()->GetState() == DownloadItem::IN_PROGRESS)
       ++num_in_progress;
   }
   download_util::RecordShelfClose(
@@ -227,9 +227,10 @@ void DownloadShelfGtk::Closed() {
   size_t i = 0;
   while (i < download_items_.size()) {
     DownloadItem* download = download_items_[i]->download();
-    bool is_transfer_done = download->IsComplete() ||
-                            download->IsCancelled() ||
-                            download->IsInterrupted();
+    DownloadItem::DownloadState state = download->GetState();
+    bool is_transfer_done = state == DownloadItem::COMPLETE ||
+                            state == DownloadItem::CANCELLED ||
+                            state == DownloadItem::INTERRUPTED;
     if (is_transfer_done && !download->IsDangerous()) {
       RemoveDownloadItem(download_items_[i]);
     } else {
@@ -339,9 +340,9 @@ void DownloadShelfGtk::SetCloseOnMouseOut(bool close) {
   close_on_mouse_out_ = close;
   mouse_in_shelf_ = close;
   if (close)
-    MessageLoopForUI::current()->AddObserver(this);
+    base::MessageLoopForUI::current()->AddObserver(this);
   else
-    MessageLoopForUI::current()->RemoveObserver(this);
+    base::MessageLoopForUI::current()->RemoveObserver(this);
 }
 
 void DownloadShelfGtk::WillProcessEvent(GdkEvent* event) {
@@ -394,10 +395,10 @@ bool DownloadShelfGtk::IsCursorInShelfZone(
 void DownloadShelfGtk::MouseLeftShelf() {
   DCHECK(close_on_mouse_out_);
 
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&DownloadShelfGtk::Close, weak_factory_.GetWeakPtr(),
-                 AUTOMATIC),
+      base::Bind(
+          &DownloadShelfGtk::Close, weak_factory_.GetWeakPtr(), AUTOMATIC),
       base::TimeDelta::FromMilliseconds(kAutoCloseDelayMs));
 }
 

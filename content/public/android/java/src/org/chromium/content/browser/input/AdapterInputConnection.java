@@ -51,7 +51,8 @@ public class AdapterInputConnection extends BaseInputConnection {
         mImeAdapter = imeAdapter;
         mImeAdapter.setInputConnection(this);
         mSingleLine = true;
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
+                | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
         outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT
                 | EditorInfo.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT;
 

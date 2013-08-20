@@ -8,7 +8,7 @@
 #include <set>
 
 #include "base/stl_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
@@ -90,7 +90,7 @@ void GetServiceApplications(ExtensionService* service,
   for (ExtensionSet::const_iterator cursor = extensions->begin();
        cursor != extensions->end();
        ++cursor) {
-    const Extension* extension = *cursor;
+    const Extension* extension = cursor->get();
     if (BackgroundApplicationListModel::IsBackgroundApp(*extension,
                                                         service->profile())) {
       applications_result->push_back(extension);
@@ -103,7 +103,7 @@ void GetServiceApplications(ExtensionService* service,
   for (ExtensionSet::const_iterator cursor = extensions->begin();
        cursor != extensions->end();
        ++cursor) {
-    const Extension* extension = *cursor;
+    const Extension* extension = cursor->get();
     if (BackgroundApplicationListModel::IsBackgroundApp(*extension,
                                                         service->profile())) {
       applications_result->push_back(extension);
@@ -139,10 +139,7 @@ BackgroundApplicationListModel::Application::~Application() {
 BackgroundApplicationListModel::Application::Application(
     BackgroundApplicationListModel* model,
     const Extension* extension)
-    : extension_(extension),
-      icon_(NULL),
-      model_(model) {
-}
+    : extension_(extension), model_(model) {}
 
 void BackgroundApplicationListModel::Application::OnImageLoaded(
     const gfx::Image& image) {
@@ -226,7 +223,7 @@ void BackgroundApplicationListModel::DissociateApplicationData(
 const Extension* BackgroundApplicationListModel::GetExtension(
     int position) const {
   DCHECK(position >= 0 && static_cast<size_t>(position) < extensions_.size());
-  return extensions_[position];
+  return extensions_[position].get();
 }
 
 const BackgroundApplicationListModel::Application*

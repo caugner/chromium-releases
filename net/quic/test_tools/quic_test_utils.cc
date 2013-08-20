@@ -13,7 +13,9 @@
 #include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/quic_framer.h"
 #include "net/quic/quic_packet_creator.h"
+#include "net/spdy/spdy_frame_builder.h"
 
+using base::StringPiece;
 using std::max;
 using std::min;
 using std::string;
@@ -53,7 +55,7 @@ MockFramerVisitor::MockFramerVisitor() {
 MockFramerVisitor::~MockFramerVisitor() {
 }
 
-bool NoOpFramerVisitor::OnProtocolVersionMismatch(QuicVersionTag version) {
+bool NoOpFramerVisitor::OnProtocolVersionMismatch(QuicTag version) {
   return false;
 }
 
@@ -186,7 +188,8 @@ void MockHelper::AdvanceTime(QuicTime::Delta delta) {
 MockConnection::MockConnection(QuicGuid guid,
                                IPEndPoint address,
                                bool is_server)
-    : QuicConnection(guid, address, new MockHelper(), is_server),
+    : QuicConnection(guid, address, new testing::NiceMock<MockHelper>(),
+                     is_server),
       has_mock_helper_(true) {
 }
 
@@ -215,6 +218,7 @@ PacketSavingConnection::PacketSavingConnection(QuicGuid guid,
 
 PacketSavingConnection::~PacketSavingConnection() {
   STLDeleteElements(&packets_);
+  STLDeleteElements(&encrypted_packets_);
 }
 
 bool PacketSavingConnection::SendOrQueuePacket(
@@ -224,16 +228,36 @@ bool PacketSavingConnection::SendOrQueuePacket(
     QuicPacketEntropyHash entropy_hash,
     HasRetransmittableData retransmittable) {
   packets_.push_back(packet);
+  QuicEncryptedPacket* encrypted =
+      framer_.EncryptPacket(level, sequence_number, *packet);
+  encrypted_packets_.push_back(encrypted);
   return true;
 }
 
 MockSession::MockSession(QuicConnection* connection, bool is_server)
-    : QuicSession(connection, is_server) {
+    : QuicSession(connection, DefaultQuicConfig(), is_server) {
   ON_CALL(*this, WriteData(_, _, _, _))
       .WillByDefault(testing::Return(QuicConsumedData(0, false)));
 }
 
 MockSession::~MockSession() {
+}
+
+TestSession::TestSession(QuicConnection* connection,
+                         const QuicConfig& config,
+                         bool is_server)
+    : QuicSession(connection, config, is_server),
+      crypto_stream_(NULL) {
+}
+
+TestSession::~TestSession() {}
+
+void TestSession::SetCryptoStream(QuicCryptoStream* stream) {
+  crypto_stream_ = stream;
+}
+
+QuicCryptoStream* TestSession::GetCryptoStream() {
+  return crypto_stream_;
 }
 
 MockSendAlgorithm::MockSendAlgorithm() {
@@ -340,7 +364,6 @@ static QuicPacket* ConstructPacketFromHandshakeMessage(
   header.entropy_flag = false;
   header.entropy_hash = 0;
   header.fec_flag = false;
-  header.fec_entropy_flag = false;
   header.fec_group = 0;
 
   QuicStreamFrame stream_frame(kCryptoStreamId, false, 0,
@@ -352,19 +375,24 @@ static QuicPacket* ConstructPacketFromHandshakeMessage(
   return quic_framer.ConstructFrameDataPacket(header, frames).packet;
 }
 
-QuicPacket* ConstructHandshakePacket(QuicGuid guid, CryptoTag tag) {
+QuicPacket* ConstructHandshakePacket(QuicGuid guid, QuicTag tag) {
   CryptoHandshakeMessage message;
   message.set_tag(tag);
   return ConstructPacketFromHandshakeMessage(guid, message, false);
 }
 
-size_t GetPacketLengthForOneStream(bool include_version, size_t payload) {
+size_t GetPacketLengthForOneStream(
+    bool include_version, InFecGroup is_in_fec_group, size_t payload) {
   // TODO(wtc): the hardcoded use of NullEncrypter here seems wrong.
   size_t packet_length = NullEncrypter().GetCiphertextSize(payload) +
-      QuicPacketCreator::StreamFramePacketOverhead(1, include_version);
+      QuicPacketCreator::StreamFramePacketOverhead(
+          1, PACKET_8BYTE_GUID, include_version,
+          PACKET_6BYTE_SEQUENCE_NUMBER, is_in_fec_group);
 
   size_t ack_length = NullEncrypter().GetCiphertextSize(
-      QuicFramer::GetMinAckFrameSize()) + GetPacketHeaderSize(include_version);
+      QuicFramer::GetMinAckFrameSize()) +
+      GetPacketHeaderSize(PACKET_8BYTE_GUID, include_version,
+                          PACKET_6BYTE_SEQUENCE_NUMBER, is_in_fec_group);
   // Make sure that if we change the size of the packet length for one stream
   // or the ack frame; that all our test are configured correctly.
   DCHECK_GE(packet_length, ack_length);
@@ -374,6 +402,21 @@ size_t GetPacketLengthForOneStream(bool include_version, size_t payload) {
 QuicPacketEntropyHash TestEntropyCalculator::ReceivedEntropyHash(
     QuicPacketSequenceNumber sequence_number) const {
   return 1u;
+}
+
+QuicConfig DefaultQuicConfig() {
+  QuicConfig config;
+  config.SetDefaults();
+  return config;
+}
+
+bool TestDecompressorVisitor::OnDecompressedData(StringPiece data) {
+  data.AppendToString(&data_);
+  return true;
+}
+
+void TestDecompressorVisitor::OnDecompressionError() {
+  error_ = true;
 }
 
 }  // namespace test

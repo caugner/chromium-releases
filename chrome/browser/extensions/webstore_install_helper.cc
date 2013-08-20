@@ -73,9 +73,8 @@ void WebstoreInstallHelper::Start() {
 
 void WebstoreInstallHelper::StartWorkOnIOThread() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  utility_host_ =
-      UtilityProcessHost::Create(
-          this, base::MessageLoopProxy::current())->AsWeakPtr();
+  utility_host_ = UtilityProcessHost::Create(
+      this, base::MessageLoopProxy::current().get())->AsWeakPtr();
   utility_host_->EnableZygote();
   utility_host_->StartBatchMode();
 
@@ -112,7 +111,7 @@ void WebstoreInstallHelper::OnURLFetchComplete(
 
 void WebstoreInstallHelper::StartFetchedImageDecode() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  CHECK(utility_host_);
+  CHECK(utility_host_.get());
   utility_host_->Send(new ChromeUtilityMsg_DecodeImage(fetched_icon_data_));
 }
 
@@ -150,7 +149,8 @@ void WebstoreInstallHelper::OnDecodeImageFailed() {
   ReportResultsIfComplete();
 }
 
-void WebstoreInstallHelper::OnJSONParseSucceeded(const ListValue& wrapper) {
+void WebstoreInstallHelper::OnJSONParseSucceeded(
+    const base::ListValue& wrapper) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   manifest_parse_complete_ = true;
   const Value* value = NULL;
@@ -180,7 +180,7 @@ void WebstoreInstallHelper::ReportResultsIfComplete() {
     return;
 
   // The utility_host_ will take care of deleting itself after this call.
-  if (utility_host_) {
+  if (utility_host_.get()) {
     utility_host_->EndBatchMode();
     utility_host_.reset();
   }

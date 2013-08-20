@@ -54,7 +54,7 @@ GeneralConfig.prototype = {
       var units = row.querySelector('.row-units');
 
       label.setAttribute('for', field.key);
-      label.textContent = field.label;
+      label.innerHTML = field.label;
       input.id = field.key;
       input.min = field.min || 0;
 
@@ -227,6 +227,14 @@ function GestureConfig() {
       units: ''
     },
     {
+      key: 'scroll_prediction_seconds',
+      label: 'Scroll prediction interval<br>' +
+          '(Enable scroll prediction in ' +
+              '<a href="chrome://flags">chrome://flags</a>)',
+      units: 'seconds',
+      step: 0.01
+    },
+    {
       key: 'min_swipe_speed',
       label: 'Minimum Swipe Speed',
       units: 'pixels/sec.'
@@ -332,6 +340,34 @@ function OverscrollConfig() {
   return new GeneralConfig(OVERSCROLL_TITLE,
                            OVERSCROLL_PREFIX,
                            OVERSCROLL_FIELDS);
+}
+
+/**
+ * Returns a GeneralConfig for configuring immersive.* preferences for
+ * immersive fullscreen in Ash.
+ * @return {object} A GeneralConfig object.
+ */
+function ImmersiveConfig() {
+  /** @const */ var IMMERSIVE_TITLE = 'Immersive Fullscreen Configuration';
+
+  /** @const */ var IMMERSIVE_PREFIX = 'immersive_mode.';
+
+  var IMMERSIVE_FIELDS = [
+    {
+      key: 'reveal_delay_ms',
+      label: 'Top-of-screen reveal delay',
+      units: 'milliseconds'
+    },
+    {
+      key: 'reveal_x_threshold_pixels',
+      label: 'Top-of-screen mouse x threshold',
+      units: 'pixels'
+    },
+  ];
+
+  return new GeneralConfig(IMMERSIVE_TITLE,
+                           IMMERSIVE_PREFIX,
+                           IMMERSIVE_FIELDS);
 }
 
 /**
@@ -457,8 +493,7 @@ function FlingConfig() {
 }
 
 /**
- * WebUI instance for configuring gesture.* and overscroll.* preference values
- * used by Chrome's gesture recognition system.
+ * WebUI instance for configuring preference values related to gesture input.
  */
 window.gesture_config = {
   /**
@@ -474,6 +509,9 @@ window.gesture_config = {
     var f = FlingConfig();
     f.buildAll();
 
+    var i = ImmersiveConfig();
+    i.buildAll();
+
     var c = WorkspaceCyclerConfig();
     c.buildAll();
 
@@ -481,6 +519,7 @@ window.gesture_config = {
       g.onReset();
       o.onReset();
       f.onReset();
+      i.onReset();
       c.onReset();
     };
   },

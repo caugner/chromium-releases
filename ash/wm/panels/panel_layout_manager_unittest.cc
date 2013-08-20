@@ -24,12 +24,14 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/i18n/rtl.h"
 #include "base/run_loop.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/views/corewm/corewm_switches.h"
 #include "ui/views/widget/widget.h"
 
@@ -52,8 +54,8 @@ class PanelLayoutManagerTest : public test::AshTestBase {
     launcher_view_test_->SetAnimationDuration(1);
   }
 
-  aura::Window* CreateNormalWindow() {
-    return CreateTestWindowInShellWithBounds(gfx::Rect());
+  aura::Window* CreateNormalWindow(const gfx::Rect& bounds) {
+    return CreateTestWindowInShellWithBounds(bounds);
   }
 
   aura::Window* CreatePanelWindow(const gfx::Rect& bounds) {
@@ -69,6 +71,7 @@ class PanelLayoutManagerTest : public test::AshTestBase {
         static_cast<PanelLayoutManager*>(GetPanelContainer(window)->
                                          layout_manager());
     manager->Relayout();
+    launcher_view_test()->RunMessageLoopUntilAnimationsDone();
     return window;
   }
 
@@ -246,7 +249,10 @@ class PanelLayoutManagerTest : public test::AshTestBase {
         RootWindowController::ForWindow(window)->shelf()->
         shelf_layout_manager();
     shelf->SetAutoHideBehavior(behavior);
-    shelf->UpdateAutoHideState();
+    LauncherView* launcher_view =
+        Launcher::ForWindow(window)->GetLauncherViewForTest();
+    test::LauncherViewTestAPI test_api(launcher_view);
+    test_api.RunMessageLoopUntilAnimationsDone();
   }
 
   void SetShelfVisibilityState(aura::Window* window,
@@ -268,13 +274,41 @@ class PanelLayoutManagerTest : public test::AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(PanelLayoutManagerTest);
 };
 
-// Tests that a created panel window is successfully added to the panel
-// layout manager.
-TEST_F(PanelLayoutManagerTest, AddOnePanel) {
+class PanelLayoutManagerTextDirectionTest
+    : public PanelLayoutManagerTest,
+      public testing::WithParamInterface<bool> {
+ public:
+  PanelLayoutManagerTextDirectionTest() : is_rtl_(GetParam()) {}
+  virtual ~PanelLayoutManagerTextDirectionTest() {}
+
+  virtual void SetUp() OVERRIDE {
+    original_locale = l10n_util::GetApplicationLocale(std::string());
+    if (is_rtl_)
+      base::i18n::SetICUDefaultLocale("he");
+    PanelLayoutManagerTest::SetUp();
+    ASSERT_EQ(is_rtl_, base::i18n::IsRTL());
+  }
+
+  virtual void TearDown() OVERRIDE {
+    if (is_rtl_)
+      base::i18n::SetICUDefaultLocale(original_locale);
+    PanelLayoutManagerTest::TearDown();
+  }
+
+ private:
+  bool is_rtl_;
+  std::string original_locale;
+
+  DISALLOW_COPY_AND_ASSIGN(PanelLayoutManagerTextDirectionTest);
+};
+
+// Tests that a created panel window is above the launcher icon in LTR and RTL.
+TEST_P(PanelLayoutManagerTextDirectionTest, AddOnePanel) {
   gfx::Rect bounds(0, 0, 201, 201);
   scoped_ptr<aura::Window> window(CreatePanelWindow(bounds));
   EXPECT_EQ(GetPanelContainer(window.get()), window->parent());
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(window.get()));
+  EXPECT_NO_FATAL_FAILURE(IsCalloutAboveLauncherIcon(window.get()));
 }
 
 // Tests that a created panel window is successfully aligned over a hidden
@@ -283,10 +317,35 @@ TEST_F(PanelLayoutManagerTest, PanelAlignsToHiddenLauncherIcon) {
   gfx::Rect bounds(0, 0, 201, 201);
   SetShelfAutoHideBehavior(Shell::GetPrimaryRootWindow(),
                            SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
-  RunAllPendingInMessageLoop();
+  scoped_ptr<aura::Window> normal_window(CreateNormalWindow(bounds));
   scoped_ptr<aura::Window> window(CreatePanelWindow(bounds));
   EXPECT_EQ(GetPanelContainer(window.get()), window->parent());
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(window.get()));
+}
+
+TEST_F(PanelLayoutManagerTest, PanelAlignsToHiddenLauncherIconSecondDisplay) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  // Keep the displays wide so that launchers have enough
+  // space for launcher buttons.
+  UpdateDisplay("400x400,600x400");
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  scoped_ptr<aura::Window> normal_window(
+      CreateNormalWindow(gfx::Rect(450, 0, 100, 100)));
+  scoped_ptr<aura::Window> panel(CreatePanelWindow(gfx::Rect(400, 0, 50, 50)));
+  EXPECT_EQ(root_windows[1], panel->GetRootWindow());
+  EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(panel.get()));
+  gfx::Rect shelf_visible_position = panel->GetBoundsInScreen();
+
+  SetShelfAutoHideBehavior(root_windows[1],
+                           SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  // Expect the panel X position to remain the same after the shelf is hidden
+  // but the Y to move down.
+  EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(panel.get()));
+  EXPECT_EQ(shelf_visible_position.x(), panel->GetBoundsInScreen().x());
+  EXPECT_GT(panel->GetBoundsInScreen().y(), shelf_visible_position.y());
 }
 
 // Tests interactions between multiple panels
@@ -339,7 +398,7 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelCallout) {
   scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
   scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
   scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w4(CreateNormalWindow());
+  scoped_ptr<aura::Window> w4(CreateNormalWindow(gfx::Rect()));
   launcher_view_test()->RunMessageLoopUntilAnimationsDone();
   EXPECT_TRUE(IsPanelCalloutVisible(w1.get()));
   EXPECT_TRUE(IsPanelCalloutVisible(w2.get()));
@@ -501,22 +560,10 @@ TEST_F(PanelLayoutManagerTest, MinimizeRestorePanel) {
   EXPECT_TRUE(IsPanelCalloutVisible(window.get()));
 }
 
-#if defined(OS_WIN)
-// Multiple displays aren't supported on Windows Metro/Ash.
-// http://crbug.com/165962
-#define MAYBE_PanelMoveBetweenMultipleDisplays \
-        DISABLED_PanelMoveBetweenMultipleDisplays
-#define MAYBE_PanelAttachPositionMultipleDisplays \
-        DISABLED_PanelAttachPositionMultipleDisplays
-#define MAYBE_PanelAlignmentSecondDisplay DISABLED_PanelAlignmentSecondDisplay
-#else
-#define MAYBE_PanelMoveBetweenMultipleDisplays PanelMoveBetweenMultipleDisplays
-#define MAYBE_PanelAttachPositionMultipleDisplays \
-        PanelAttachPositionMultipleDisplays
-#define MAYBE_PanelAlignmentSecondDisplay PanelAlignmentSecondDisplay
-#endif
+TEST_F(PanelLayoutManagerTest, PanelMoveBetweenMultipleDisplays) {
+  if (!SupportsMultipleDisplays())
+    return;
 
-TEST_F(PanelLayoutManagerTest, MAYBE_PanelMoveBetweenMultipleDisplays) {
   // Keep the displays wide so that launchers have enough
   // space for launcher buttons.
   UpdateDisplay("600x400,600x400");
@@ -583,7 +630,10 @@ TEST_F(PanelLayoutManagerTest, MAYBE_PanelMoveBetweenMultipleDisplays) {
       p1_d2->GetBoundsInScreen()));
 }
 
-TEST_F(PanelLayoutManagerTest, MAYBE_PanelAttachPositionMultipleDisplays) {
+TEST_F(PanelLayoutManagerTest, PanelAttachPositionMultipleDisplays) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   // Keep the displays wide so that launchers have enough space for launcher
   // buttons. Use differently sized displays so the launcher is in a different
   // position on second display.
@@ -602,7 +652,10 @@ TEST_F(PanelLayoutManagerTest, MAYBE_PanelAttachPositionMultipleDisplays) {
   IsCalloutAboveLauncherIcon(p1_d2.get());
 }
 
-TEST_F(PanelLayoutManagerTest, MAYBE_PanelAlignmentSecondDisplay) {
+TEST_F(PanelLayoutManagerTest, PanelAlignmentSecondDisplay) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   UpdateDisplay("600x400,600x400");
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
 
@@ -681,6 +734,9 @@ TEST_F(PanelLayoutManagerTest, PanelsHideAndRestoreWithShelf) {
   EXPECT_FALSE(w2->IsVisible());
   EXPECT_TRUE(w3->IsVisible());
 }
+
+INSTANTIATE_TEST_CASE_P(LtrRtl, PanelLayoutManagerTextDirectionTest,
+                        testing::Bool());
 
 }  // namespace internal
 }  // namespace ash

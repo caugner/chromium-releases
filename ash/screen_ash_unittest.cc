@@ -23,6 +23,9 @@ namespace test {
 typedef test::AshTestBase ScreenAshTest;
 
 TEST_F(ScreenAshTest, Bounds) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   UpdateDisplay("600x600,500x500");
   Shell::GetPrimaryRootWindowController()->GetShelfLayoutManager()->
       SetAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
@@ -38,15 +41,9 @@ TEST_F(ScreenAshTest, Bounds) {
   EXPECT_EQ("0,0 600x597",
             ScreenAsh::GetMaximizedWindowBoundsInParent(
                 primary->GetNativeView()).ToString());
-  if (Shell::IsLauncherPerDisplayEnabled()) {
-    EXPECT_EQ("0,0 500x452",
-              ScreenAsh::GetMaximizedWindowBoundsInParent(
-                  secondary->GetNativeView()).ToString());
-  } else {
-    EXPECT_EQ("0,0 500x500",
-              ScreenAsh::GetMaximizedWindowBoundsInParent(
-                  secondary->GetNativeView()).ToString());
-  }
+  EXPECT_EQ("0,0 500x452",
+            ScreenAsh::GetMaximizedWindowBoundsInParent(
+                secondary->GetNativeView()).ToString());
 
   // Display bounds
   EXPECT_EQ("0,0 600x600",
@@ -60,20 +57,17 @@ TEST_F(ScreenAshTest, Bounds) {
   EXPECT_EQ("0,0 600x597",
             ScreenAsh::GetDisplayWorkAreaBoundsInParent(
                 primary->GetNativeView()).ToString());
-  if (Shell::IsLauncherPerDisplayEnabled()) {
-    EXPECT_EQ("0,0 500x452",
-              ScreenAsh::GetDisplayWorkAreaBoundsInParent(
-                  secondary->GetNativeView()).ToString());
-  } else {
-    EXPECT_EQ("0,0 500x500",
-              ScreenAsh::GetDisplayWorkAreaBoundsInParent(
-                  secondary->GetNativeView()).ToString());
-  }
+  EXPECT_EQ("0,0 500x452",
+            ScreenAsh::GetDisplayWorkAreaBoundsInParent(
+                secondary->GetNativeView()).ToString());
 }
 
 // Test verifies a stable handling of secondary screen widget changes
 // (crbug.com/226132).
 TEST_F(ScreenAshTest, StabilityTest) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   UpdateDisplay("600x600,500x500");
   views::Widget* secondary = views::Widget::CreateWindowWithContextAndBounds(
       NULL, CurrentContext(), gfx::Rect(610, 10, 100, 100));
@@ -88,6 +82,9 @@ TEST_F(ScreenAshTest, StabilityTest) {
 }
 
 TEST_F(ScreenAshTest, ConvertRect) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   UpdateDisplay("600x600,500x500");
 
   views::Widget* primary = views::Widget::CreateWindowWithContextAndBounds(

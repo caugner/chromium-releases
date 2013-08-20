@@ -41,6 +41,8 @@ class AndroidPlatformBackend(platform_backend.PlatformBackend):
 
   def StartRawDisplayFrameRateMeasurement(self):
     assert not self._surface_stats_collector
+    # Clear any leftover data from previous timed out tests
+    self._raw_display_frame_rate_measurements = []
     self._surface_stats_collector = \
         surface_stats_collector.SurfaceStatsCollector(self._adb)
     self._surface_stats_collector.Start()
@@ -107,3 +109,16 @@ class AndroidPlatformBackend(platform_backend.PlatformBackend):
             child_pids.append(int(curr_pid))
         break
     return child_pids
+
+  def GetCommandLine(self, pid):
+    ps = self._adb.RunShellCommand('ps', log_result=False)[1:]
+    for line in ps:
+      data = line.split()
+      curr_pid = data[1]
+      curr_name = data[-1]
+      if int(curr_pid) == pid:
+        return curr_name
+    raise Exception("Could not get command line for %d" % pid)
+
+  def GetOSName(self):
+    return 'android'

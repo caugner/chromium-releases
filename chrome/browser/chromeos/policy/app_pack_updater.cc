@@ -7,9 +7,10 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/location.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
@@ -29,7 +30,6 @@
 #include "content/public/browser/notification_source.h"
 
 using content::BrowserThread;
-using file_util::FileEnumerator;
 
 namespace policy {
 
@@ -85,14 +85,14 @@ AppPackUpdater::AppPackUpdater(net::URLRequestContextGetter* request_context,
       install_attributes_(install_attributes) {
   chromeos::CrosSettings::Get()->AddSettingsObserver(chromeos::kAppPack, this);
 
-  if (install_attributes_->GetMode() == DEVICE_MODE_KIOSK) {
+  if (install_attributes_->GetMode() == DEVICE_MODE_RETAIL_KIOSK) {
     // Already in Kiosk mode, start loading.
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                             base::Bind(&AppPackUpdater::Init,
                                        weak_ptr_factory_.GetWeakPtr()));
   } else {
-    // Linger until the device switches to DEVICE_MODE_KIOSK and the app pack
-    // device setting appears.
+    // Linger until the device switches to DEVICE_MODE_RETAIL_KIOSK and the
+    // app pack device setting appears.
   }
 }
 
@@ -147,7 +147,7 @@ void AppPackUpdater::Observe(int type,
     case chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED:
       DCHECK_EQ(chromeos::kAppPack,
                 *content::Details<const std::string>(details).ptr());
-      if (install_attributes_->GetMode() == DEVICE_MODE_KIOSK) {
+      if (install_attributes_->GetMode() == DEVICE_MODE_RETAIL_KIOSK) {
         if (!initialized_)
           Init();
         else
@@ -250,18 +250,16 @@ void AppPackUpdater::BlockingCheckCacheInternal(
 
   // Enumerate all the files in the cache |dir|, including directories
   // and symlinks. Each unrecognized file will be erased.
-  int types = FileEnumerator::FILES | FileEnumerator::DIRECTORIES |
-      FileEnumerator::SHOW_SYM_LINKS;
-  FileEnumerator enumerator(dir, false /* recursive */, types);
+  int types = base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES |
+      base::FileEnumerator::SHOW_SYM_LINKS;
+  base::FileEnumerator enumerator(dir, false /* recursive */, types);
 
   for (base::FilePath path = enumerator.Next();
        !path.empty(); path = enumerator.Next()) {
-    FileEnumerator::FindInfo info;
-    enumerator.GetFindInfo(&info);
+    base::FileEnumerator::FileInfo info = enumerator.GetInfo();
     std::string basename = path.BaseName().value();
 
-    if (FileEnumerator::IsDirectory(info) ||
-        file_util::IsLink(FileEnumerator::GetFilename(info))) {
+    if (info.IsDirectory() || file_util::IsLink(info.GetName())) {
       LOG(ERROR) << "Erasing bad file in AppPack directory: " << basename;
       file_util::Delete(path, true /* recursive */);
       continue;

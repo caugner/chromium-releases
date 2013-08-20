@@ -12,11 +12,12 @@
 #include "base/perftimer.h"
 #include "base/pickle.h"
 #include "base/shared_memory.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/common/extensions/csp_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/extensions/dom_activity_logger.h"
@@ -26,14 +27,14 @@
 #include "content/public/renderer/render_view.h"
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/web/WebDataSource.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebSecurityOrigin.h"
+#include "third_party/WebKit/public/web/WebSecurityPolicy.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using WebKit::WebFrame;
@@ -99,7 +100,7 @@ std::string UserScriptSlave::GetExtensionIdForIsolatedWorld(
 void UserScriptSlave::InitializeIsolatedWorld(int isolated_world_id,
                                               const Extension* extension) {
   const URLPatternSet& permissions =
-      extension->GetEffectiveHostPermissions();
+      PermissionsData::GetEffectiveHostPermissions(extension);
   for (URLPatternSet::const_iterator i = permissions.begin();
        i != permissions.end(); ++i) {
     const char* schemes[] = {
@@ -125,9 +126,7 @@ void UserScriptSlave::RemoveIsolatedWorld(const std::string& extension_id) {
 }
 
 UserScriptSlave::UserScriptSlave(const ExtensionSet* extensions)
-    : shared_memory_(NULL),
-      script_deleter_(&scripts_),
-      extensions_(extensions) {
+    : script_deleter_(&scripts_), extensions_(extensions) {
   api_js_ = ResourceBundle::GetSharedInstance().GetRawDataResource(
       IDR_GREASEMONKEY_API_JS);
 }
@@ -263,7 +262,7 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
     return;
 
   if (frame->isViewSourceModeEnabled())
-    data_source_url = GURL(chrome::kViewSourceScheme + std::string(":") +
+    data_source_url = GURL(content::kViewSourceScheme + std::string(":") +
                            data_source_url.spec());
 
   PerfTimer timer;
@@ -287,12 +286,16 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
       continue;
 
     // Content scripts are not tab-specific.
-    int kNoTabId = -1;
-    if (!extension->CanExecuteScriptOnPage(data_source_url,
-                                           frame->top()->document().url(),
-                                           kNoTabId,
-                                           script,
-                                           NULL)) {
+    const int kNoTabId = -1;
+    // We don't have a process id in this context.
+    const int kNoProcessId = -1;
+    if (!PermissionsData::CanExecuteScriptOnPage(extension,
+                                                 data_source_url,
+                                                 frame->top()->document().url(),
+                                                 kNoTabId,
+                                                 script,
+                                                 kNoProcessId,
+                                                 NULL)) {
       continue;
     }
 

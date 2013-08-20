@@ -7,17 +7,31 @@
 
 #include "chrome/browser/media_galleries/fileapi/itunes_finder.h"
 
+namespace base {
+class FilePath;
+}
+
 namespace itunes {
 
+// This Windows-specific ITunesFinder uses a utility process to parse the
+// iTunes preferences XML file if it exists. If not or if the parsing fails,
+// ITunesFinderWin will try a default location as well.
 class ITunesFinderWin : public ITunesFinder {
  public:
-  explicit ITunesFinderWin(ITunesFinderCallback callback);
+  explicit ITunesFinderWin(const ITunesFinderCallback& callback);
   virtual ~ITunesFinderWin();
 
- protected:
+ private:
   virtual void FindITunesLibraryOnFileThread() OVERRIDE;
 
- private:
+  // Check the default location for the iTunes library XML file.
+  // Runs on the FILE thread.
+  void TryDefaultLocation();
+
+  // Called by SafeITunesPrefParser when it finishes parsing the preferences
+  // XML file. Runs on the FILE thread.
+  void FinishedParsingPrefXML(const base::FilePath& library_file);
+
   DISALLOW_COPY_AND_ASSIGN(ITunesFinderWin);
 };
 

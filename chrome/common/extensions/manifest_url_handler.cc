@@ -7,9 +7,9 @@
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
@@ -17,6 +17,7 @@
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/url_constants.h"
 #include "extensions/common/error_utils.h"
 #include "grit/generated_resources.h"
@@ -54,7 +55,7 @@ const GURL ManifestURL::GetHomepageURL(const Extension* extension) {
   const GURL& homepage_url = GetManifestURL(extension, keys::kHomepageURL);
   if (homepage_url.is_valid())
     return homepage_url;
-  return extension->UpdatesFromGallery() ?
+  return UpdatesFromGallery(extension) ?
       GURL(extension_urls::GetWebstoreItemDetailURLPrefix() + extension->id()) :
       GURL::EmptyGURL();
 }
@@ -62,6 +63,11 @@ const GURL ManifestURL::GetHomepageURL(const Extension* extension) {
 // static
 const GURL& ManifestURL::GetUpdateURL(const Extension* extension) {
   return GetManifestURL(extension, keys::kUpdateURL);
+}
+
+// static
+bool ManifestURL::UpdatesFromGallery(const Extension* extension) {
+  return extension_urls::IsWebstoreUpdateUrl(GetUpdateURL(extension));
 }
 
 // static
@@ -110,7 +116,8 @@ bool DevToolsPageHandler::Parse(Extension* extension, string16* error) {
   }
   manifest_url->url_ = extension->GetResourceURL(devtools_str);
   extension->SetManifestData(keys::kDevToolsPage, manifest_url.release());
-  extension->initial_api_permissions()->insert(APIPermission::kDevtools);
+  PermissionsData::GetInitialAPIPermissions(extension)->insert(
+      APIPermission::kDevtools);
   return true;
 }
 
@@ -255,7 +262,7 @@ URLOverridesHandler::~URLOverridesHandler() {
 }
 
 bool URLOverridesHandler::Parse(Extension* extension, string16* error) {
-  const DictionaryValue* overrides = NULL;
+  const base::DictionaryValue* overrides = NULL;
   if (!extension->manifest()->GetDictionary(keys::kChromeURLOverrides,
                                             &overrides)) {
     *error = ASCIIToUTF16(errors::kInvalidChromeURLOverrides);
@@ -263,7 +270,7 @@ bool URLOverridesHandler::Parse(Extension* extension, string16* error) {
   }
   scoped_ptr<URLOverrides> url_overrides(new URLOverrides);
   // Validate that the overrides are all strings
-  for (DictionaryValue::Iterator iter(*overrides); !iter.IsAtEnd();
+  for (base::DictionaryValue::Iterator iter(*overrides); !iter.IsAtEnd();
          iter.Advance()) {
     std::string page = iter.key();
     std::string val;

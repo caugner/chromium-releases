@@ -16,14 +16,14 @@
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/syncable/canned_syncable_file_system.h"
-#include "webkit/fileapi/syncable/local_file_sync_context.h"
-#include "webkit/fileapi/syncable/mock_sync_status_observer.h"
-#include "webkit/fileapi/syncable/sync_callbacks.h"
-#include "webkit/fileapi/syncable/sync_file_metadata.h"
-#include "webkit/fileapi/syncable/sync_status_code.h"
-#include "webkit/fileapi/syncable/syncable_file_system_util.h"
+#include "webkit/browser/fileapi/file_system_context.h"
+#include "webkit/browser/fileapi/syncable/canned_syncable_file_system.h"
+#include "webkit/browser/fileapi/syncable/local_file_sync_context.h"
+#include "webkit/browser/fileapi/syncable/mock_sync_status_observer.h"
+#include "webkit/browser/fileapi/syncable/sync_callbacks.h"
+#include "webkit/browser/fileapi/syncable/sync_file_metadata.h"
+#include "webkit/browser/fileapi/syncable/sync_status_code.h"
+#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
 
 using fileapi::FileSystemURL;
 using fileapi::FileSystemURLSet;
@@ -40,7 +40,6 @@ namespace sync_file_system {
 namespace {
 
 const char kOrigin[] = "http://example.com";
-const char kServiceName[] = "test";
 
 template <typename R> struct AssignTrait {
   typedef const R& ArgumentType;
@@ -120,7 +119,7 @@ class SyncFileSystemServiceTest : public testing::Test {
     thread_helper_.SetUp();
 
     file_system_.reset(new CannedSyncableFileSystem(
-        GURL(kOrigin), kServiceName,
+        GURL(kOrigin),
         thread_helper_.io_task_runner(),
         thread_helper_.file_task_runner()));
 
@@ -153,7 +152,7 @@ class SyncFileSystemServiceTest : public testing::Test {
     sync_service_->Shutdown();
 
     file_system_->TearDown();
-    RevokeSyncableFileSystem(kServiceName);
+    RevokeSyncableFileSystem();
     thread_helper_.TearDown();
   }
 
@@ -166,7 +165,7 @@ class SyncFileSystemServiceTest : public testing::Test {
 
     sync_service_->InitializeForApp(
         file_system_->file_system_context(),
-        kServiceName, GURL(kOrigin),
+        GURL(kOrigin),
         AssignAndQuitCallback(&run_loop, &status));
     run_loop.Run();
 
@@ -209,7 +208,7 @@ class SyncFileSystemServiceTest : public testing::Test {
     base::RunLoop run_loop;
     sync_service_->InitializeForApp(
         file_system_->file_system_context(),
-        kServiceName, GURL(kOrigin),
+        GURL(kOrigin),
         AssignAndQuitCallback(&run_loop, &actual_status));
     run_loop.Run();
 
@@ -235,6 +234,8 @@ class SyncFileSystemServiceTest : public testing::Test {
     EXPECT_CALL(*mock_remote_service(), SetSyncEnabled(true)).Times(1);
     sync_service_->SetSyncEnabledForTesting(true);
   }
+
+  ScopedEnableSyncFSDirectoryOperation enable_directory_operation_;
 
   MultiThreadTestHelper thread_helper_;
   TestingProfile profile_;

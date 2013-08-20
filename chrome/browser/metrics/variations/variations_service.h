@@ -14,8 +14,8 @@
 #include "base/time.h"
 #include "chrome/browser/metrics/proto/study.pb.h"
 #include "chrome/browser/metrics/proto/trials_seed.pb.h"
-#include "chrome/browser/metrics/variations/resource_request_allowed_notifier.h"
 #include "chrome/browser/metrics/variations/variations_request_scheduler.h"
+#include "chrome/browser/web_resource/resource_request_allowed_notifier.h"
 #include "chrome/common/chrome_version_info.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -95,6 +95,10 @@ class VariationsService
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, ValidateStudy);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedStoredWhenOKStatus);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedNotStoredWhenNonOKStatus);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, ForceGroupWithFlag1);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, ForceGroupWithFlag2);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, ForceFirstGroupWithFlag);
+  FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, DontChooseGroupWithFlag);
 
   // Creates the VariationsService with the given |local_state| prefs service.
   // Use the |Create| factory method to create a VariationsService.

@@ -9,7 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_util.h"
 #include "net/base/test_completion_callback.h"
@@ -19,8 +19,10 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/http/transport_security_state.h"
 #include "net/ssl/ssl_config_service_defaults.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/url_request/file_protocol_handler.h"
 #include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_job_factory_impl.h"
@@ -51,6 +53,7 @@ class RequestContext : public URLRequestContext {
     ProxyConfig no_proxy;
     storage_.set_host_resolver(scoped_ptr<HostResolver>(new MockHostResolver));
     storage_.set_cert_verifier(new MockCertVerifier);
+    storage_.set_transport_security_state(new TransportSecurityState);
     storage_.set_proxy_service(ProxyService::CreateFixed(no_proxy));
     storage_.set_ssl_config_service(new SSLConfigServiceDefaults);
     storage_.set_http_server_properties(new HttpServerPropertiesImpl);
@@ -58,15 +61,17 @@ class RequestContext : public URLRequestContext {
     HttpNetworkSession::Params params;
     params.host_resolver = host_resolver();
     params.cert_verifier = cert_verifier();
+    params.transport_security_state = transport_security_state();
     params.proxy_service = proxy_service();
     params.ssl_config_service = ssl_config_service();
     params.http_server_properties = http_server_properties();
     scoped_refptr<HttpNetworkSession> network_session(
         new HttpNetworkSession(params));
     storage_.set_http_transaction_factory(new HttpCache(
-        network_session,
-        HttpCache::DefaultBackend::InMemory(0)));
-    storage_.set_job_factory(new URLRequestJobFactoryImpl());
+        network_session.get(), HttpCache::DefaultBackend::InMemory(0)));
+    URLRequestJobFactoryImpl* job_factory = new URLRequestJobFactoryImpl();
+    job_factory->SetProtocolHandler("file", new FileProtocolHandler());
+    storage_.set_job_factory(job_factory);
   }
 
   virtual ~RequestContext() {

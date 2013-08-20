@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/importer/importer_lock_dialog.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
@@ -36,7 +36,8 @@ void ShowImportLockDialog(gfx::NativeWindow parent,
 // static
 void ImportLockDialogView::Show(gfx::NativeWindow parent,
                                 const base::Callback<void(bool)>& callback) {
-  views::Widget::CreateWindow(new ImportLockDialogView(callback))->Show();
+  views::DialogDelegate::CreateDialogWidget(
+      new ImportLockDialogView(callback), NULL, NULL)->Show();
 }
 
 ImportLockDialogView::ImportLockDialogView(
@@ -86,13 +87,13 @@ string16 ImportLockDialogView::GetWindowTitle() const {
 }
 
 bool ImportLockDialogView::Accept() {
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   base::Bind(callback_, true));
+  base::MessageLoop::current()->PostTask(FROM_HERE,
+                                         base::Bind(callback_, true));
   return true;
 }
 
 bool ImportLockDialogView::Cancel() {
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   base::Bind(callback_, false));
+  base::MessageLoop::current()->PostTask(FROM_HERE,
+                                         base::Bind(callback_, false));
   return true;
 }

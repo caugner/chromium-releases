@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
@@ -24,6 +24,7 @@
 
 #if defined(USE_AURA)
 #include "ui/base/events/event.h"
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/native_widget_aura.h"
 #endif
 
@@ -85,10 +86,9 @@ bool WebDialogView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return true;
 }
 
-void WebDialogView::ViewHierarchyChanged(bool is_add,
-                                         views::View* parent,
-                                         views::View* child) {
-  if (is_add && GetWidget())
+void WebDialogView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && GetWidget())
     InitDialog();
 }
 
@@ -274,14 +274,18 @@ void WebDialogView::HandleKeyboardEvent(content::WebContents* source,
   if (!event.os_event)
     return;
   ui::KeyEvent aura_event(event.os_event->native_event(), false);
-  views::NativeWidgetAura* aura_widget =
-      static_cast<views::NativeWidgetAura*>(GetWidget()->native_widget());
-  aura_widget->OnKeyEvent(&aura_event);
+  ui::EventHandler* event_handler =
+      GetWidget()->native_widget()->GetEventHandler();
+
+  DCHECK(event_handler);
+  if (event_handler)
+    event_handler->OnKeyEvent(&aura_event);
+
 #elif defined(OS_WIN)
   // Any unhandled keyboard/character messages should be defproced.
   // This allows stuff like F10, etc to work correctly.
   DefWindowProc(event.os_event.hwnd, event.os_event.message,
-                  event.os_event.wParam, event.os_event.lParam);
+                event.os_event.wParam, event.os_event.lParam);
 #endif
 }
 

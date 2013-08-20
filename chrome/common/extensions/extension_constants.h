@@ -25,14 +25,21 @@ namespace extension_urls {
   // to get the item detail URL.
   std::string GetWebstoreItemDetailURLPrefix();
 
-  // Returns the URL leading to a search page for Web Intents. The search is
-  // specific to intents with the given |action| and |type|.
-  GURL GetWebstoreIntentQueryURL(const std::string& action,
-                                 const std::string& type);
-
   // Returns the URL used to get webstore data (ratings, manifest, icon URL,
   // etc.) about an extension from the webstore as JSON.
   GURL GetWebstoreItemJsonDataURL(const std::string& extension_id);
+
+  // Returns the URL used to get webstore search results in JSON format. The URL
+  // returns a JSON dictionary that has the search results (under "results").
+  // Each entry in the array is a dictionary as the data returned for
+  // GetWebstoreItemJsonDataURL above. |query| is the user typed query string.
+  // |hl| is the host language code, e.g. en_US. Both arguments will be escaped
+  // and added as a query parameter to the returned web store json search URL.
+  GURL GetWebstoreJsonSearchUrl(const std::string& query,
+                                const std::string& hl);
+
+  // Returns the URL of the web store search results page for |query|.
+  GURL GetWebstoreSearchPageUrl(const std::string& query);
 
   // Return the update URL used by gallery/webstore extensions/apps.
   GURL GetWebstoreUpdateUrl();
@@ -67,21 +74,6 @@ namespace extension_filenames {
 
   // Path to imported modules.
   extern const char kModulesDir[];
-}
-
-// Keys in the dictionary returned by Extension::GetBasicInfo().
-namespace extension_info_keys {
-  extern const char kDescriptionKey[];
-  extern const char kEnabledKey[];
-  extern const char kHomepageUrlKey[];
-  extern const char kIdKey[];
-  extern const char kNameKey[];
-  extern const char kKioskEnabledKey[];
-  extern const char kOfflineEnabledKey[];
-  extern const char kOptionsUrlKey[];
-  extern const char kDetailsUrlKey[];
-  extern const char kVersionKey[];
-  extern const char kPackagedAppKey[];
 }
 
 namespace extension_misc {
@@ -159,6 +151,12 @@ namespace extension_misc {
 
   // The extension id of the Youtube application.
   extern const char kYoutubeAppId[];
+
+  // The extension id of the Identity API UI application.
+  extern const char kIdentityApiUiAppId[];
+
+  // The extension id of the in-app payments support application.
+  extern const char kInAppPaymentsSupportAppId[];
 
   // Note: this structure is an ASN.1 which encodes the algorithm used
   // with its parameters. This is defined in PKCS #1 v2.1 (RFC 3447).
@@ -254,6 +252,18 @@ namespace extension_misc {
 
     // User clicked app launcher search result.
     APP_LAUNCH_APP_LIST_SEARCH,
+
+    // User clicked the chrome app icon from the app launcher's main view.
+    APP_LAUNCH_APP_LIST_MAIN_CHROME,
+
+    // User clicked the webstore icon from the app launcher's main view.
+    APP_LAUNCH_APP_LIST_MAIN_WEBSTORE,
+
+    // User clicked the chrome app icon from the app launcher's search view.
+    APP_LAUNCH_APP_LIST_SEARCH_CHROME,
+
+    // User clicked the webstore icon from the app launcher's search view.
+    APP_LAUNCH_APP_LIST_SEARCH_WEBSTORE,
 
     APP_LAUNCH_BUCKET_BOUNDARY,
     APP_LAUNCH_BUCKET_INVALID

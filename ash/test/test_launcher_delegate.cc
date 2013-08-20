@@ -7,7 +7,7 @@
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_util.h"
 #include "ash/wm/window_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ash_resources.h"
 #include "ui/aura/window.h"
 
@@ -63,9 +63,6 @@ void TestLauncherDelegate::OnWillRemoveWindow(aura::Window* window) {
   }
 }
 
-void TestLauncherDelegate::OnBrowserShortcutClicked(int event_flags) {
-}
-
 void TestLauncherDelegate::ItemSelected(const ash::LauncherItem& item,
                                        const ui::Event& event) {
   aura::Window* window = GetWindowByID(item.id);
@@ -73,10 +70,6 @@ void TestLauncherDelegate::ItemSelected(const ash::LauncherItem& item,
     ash::wm::MoveWindowToEventRoot(window, event);
   window->Show();
   ash::wm::ActivateWindow(window);
-}
-
-int TestLauncherDelegate::GetBrowserShortcutResourceId() {
-  return IDR_AURA_LAUNCHER_BROWSER_SHORTCUT;
 }
 
 base::string16 TestLauncherDelegate::GetTitle(const ash::LauncherItem& item) {
@@ -129,6 +122,21 @@ void TestLauncherDelegate::OnLauncherDestroyed(Launcher* launcher) {
 
 bool TestLauncherDelegate::IsPerAppLauncher() {
   return true;
+}
+
+LauncherID TestLauncherDelegate::GetLauncherIDForAppID(
+    const std::string& app_id) {
+  return 0;
+}
+
+void TestLauncherDelegate::PinAppWithID(const std::string& app_id) {
+}
+
+bool TestLauncherDelegate::IsAppPinned(const std::string& app_id) {
+  return false;
+}
+
+void TestLauncherDelegate::UnpinAppsWithID(const std::string& app_id) {
 }
 
 }  // namespace test

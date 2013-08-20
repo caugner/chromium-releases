@@ -13,9 +13,9 @@
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "crypto/nss_util.h"
 #include "crypto/nss_util_internal.h"
 #include "crypto/scoped_nss_types.h"
@@ -59,7 +59,7 @@ class CertDatabaseNSSTest : public testing::Test {
     // Run the message loop to process any observer callbacks (e.g. for the
     // ClientSocketFactory singleton) so that the scoped ref ptrs created in
     // NSSCertDatabase::NotifyObservers* get released.
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
 
     EXPECT_EQ(0U, ListCertsInSlot(slot_->os_module_handle()).size());
   }
@@ -116,7 +116,7 @@ class CertDatabaseNSSTest : public testing::Test {
       if (srv != SECSuccess)
         ok = false;
 
-      if (!cert_db_->DeleteCertAndKey(certs[i]))
+      if (!cert_db_->DeleteCertAndKey(certs[i].get()))
         ok = false;
     }
     return ok;
@@ -139,7 +139,7 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12WrongPassword) {
   std::string pkcs12_data = ReadTestFile("client.p12");
 
   EXPECT_EQ(ERR_PKCS12_IMPORT_BAD_PASSWORD,
-            cert_db_->ImportFromPKCS12(slot_,
+            cert_db_->ImportFromPKCS12(slot_.get(),
                                        pkcs12_data,
                                        base::string16(),
                                        true,  // is_extractable
@@ -152,11 +152,12 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12WrongPassword) {
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsExtractableAndExportAgain) {
   std::string pkcs12_data = ReadTestFile("client.p12");
 
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(slot_,
-                                           pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           NULL));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(slot_.get(),
+                                       pkcs12_data,
+                                       ASCIIToUTF16("12345"),
+                                       true,  // is_extractable
+                                       NULL));
 
   CertificateList cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
@@ -176,31 +177,34 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsExtractableAndExportAgain) {
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12Twice) {
   std::string pkcs12_data = ReadTestFile("client.p12");
 
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(slot_,
-                                           pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           NULL));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(slot_.get(),
+                                       pkcs12_data,
+                                       ASCIIToUTF16("12345"),
+                                       true,  // is_extractable
+                                       NULL));
   EXPECT_EQ(1U, ListCertsInSlot(slot_->os_module_handle()).size());
 
   // NSS has a SEC_ERROR_PKCS12_DUPLICATE_DATA error, but it doesn't look like
   // it's ever used.  This test verifies that.
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(slot_,
-                                           pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           NULL));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(slot_.get(),
+                                       pkcs12_data,
+                                       ASCIIToUTF16("12345"),
+                                       true,  // is_extractable
+                                       NULL));
   EXPECT_EQ(1U, ListCertsInSlot(slot_->os_module_handle()).size());
 }
 
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsUnextractableAndExportAgain) {
   std::string pkcs12_data = ReadTestFile("client.p12");
 
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(slot_,
-                                           pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           false,  // is_extractable
-                                           NULL));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(slot_.get(),
+                                       pkcs12_data,
+                                       ASCIIToUTF16("12345"),
+                                       false,  // is_extractable
+                                       NULL));
 
   CertificateList cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
@@ -218,22 +222,24 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsUnextractableAndExportAgain) {
 // private key should not mark an existing private key as unextractable.
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12OnlyMarkIncludedKey) {
   std::string pkcs12_data = ReadTestFile("client.p12");
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(slot_,
-                                           pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           NULL));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(slot_.get(),
+                                       pkcs12_data,
+                                       ASCIIToUTF16("12345"),
+                                       true,  // is_extractable
+                                       NULL));
 
   CertificateList cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
 
   // Now import a PKCS#12 file with just a certificate but no private key.
   pkcs12_data = ReadTestFile("client-nokey.p12");
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(slot_,
-                                           pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           false,  // is_extractable
-                                           NULL));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(slot_.get(),
+                                       pkcs12_data,
+                                       ASCIIToUTF16("12345"),
+                                       false,  // is_extractable
+                                       NULL));
 
   cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
@@ -249,7 +255,7 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12InvalidFile) {
   std::string pkcs12_data = "Foobarbaz";
 
   EXPECT_EQ(ERR_PKCS12_IMPORT_INVALID_FILE,
-            cert_db_->ImportFromPKCS12(slot_,
+            cert_db_->ImportFromPKCS12(slot_.get(),
                                        pkcs12_data,
                                        base::string16(),
                                        true,  // is_extractable
@@ -261,7 +267,7 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12InvalidFile) {
 
 TEST_F(CertDatabaseNSSTest, ImportCACert_SSLTrust) {
   CertificateList certs = CreateCertificateListFromFile(
-      GetTestCertsDirectory(), "root_ca_cert.crt",
+      GetTestCertsDirectory(), "root_ca_cert.pem",
       X509Certificate::FORMAT_AUTO);
   ASSERT_EQ(1U, certs.size());
   EXPECT_FALSE(certs[0]->os_cert_handle()->isperm);
@@ -276,7 +282,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACert_SSLTrust) {
   CertificateList cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
   scoped_refptr<X509Certificate> cert(cert_list[0]);
-  EXPECT_EQ("Test CA", cert->subject().common_name);
+  EXPECT_EQ("Test Root CA", cert->subject().common_name);
 
   EXPECT_EQ(NSSCertDatabase::TRUSTED_SSL,
             cert_db_->GetCertTrust(cert.get(), CA_CERT));
@@ -292,7 +298,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACert_SSLTrust) {
 
 TEST_F(CertDatabaseNSSTest, ImportCACert_EmailTrust) {
   CertificateList certs = CreateCertificateListFromFile(
-      GetTestCertsDirectory(), "root_ca_cert.crt",
+      GetTestCertsDirectory(), "root_ca_cert.pem",
       X509Certificate::FORMAT_AUTO);
   ASSERT_EQ(1U, certs.size());
   EXPECT_FALSE(certs[0]->os_cert_handle()->isperm);
@@ -307,7 +313,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACert_EmailTrust) {
   CertificateList cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
   scoped_refptr<X509Certificate> cert(cert_list[0]);
-  EXPECT_EQ("Test CA", cert->subject().common_name);
+  EXPECT_EQ("Test Root CA", cert->subject().common_name);
 
   EXPECT_EQ(NSSCertDatabase::TRUSTED_EMAIL,
             cert_db_->GetCertTrust(cert.get(), CA_CERT));
@@ -323,7 +329,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACert_EmailTrust) {
 
 TEST_F(CertDatabaseNSSTest, ImportCACert_ObjSignTrust) {
   CertificateList certs = CreateCertificateListFromFile(
-      GetTestCertsDirectory(), "root_ca_cert.crt",
+      GetTestCertsDirectory(), "root_ca_cert.pem",
       X509Certificate::FORMAT_AUTO);
   ASSERT_EQ(1U, certs.size());
   EXPECT_FALSE(certs[0]->os_cert_handle()->isperm);
@@ -338,7 +344,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACert_ObjSignTrust) {
   CertificateList cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
   scoped_refptr<X509Certificate> cert(cert_list[0]);
-  EXPECT_EQ("Test CA", cert->subject().common_name);
+  EXPECT_EQ("Test Root CA", cert->subject().common_name);
 
   EXPECT_EQ(NSSCertDatabase::TRUSTED_OBJ_SIGN,
             cert_db_->GetCertTrust(cert.get(), CA_CERT));
@@ -484,7 +490,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACertHierarchyTree) {
 
 TEST_F(CertDatabaseNSSTest, ImportCACertNotHierarchy) {
   CertificateList certs = CreateCertificateListFromFile(
-      GetTestCertsDirectory(), "root_ca_cert.crt",
+      GetTestCertsDirectory(), "root_ca_cert.pem",
       X509Certificate::FORMAT_AUTO);
   ASSERT_EQ(1U, certs.size());
   ASSERT_TRUE(ReadCertIntoList("dod_ca_13_cert.der", &certs));
@@ -506,7 +512,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACertNotHierarchy) {
 
   CertificateList cert_list = ListCertsInSlot(slot_->os_module_handle());
   ASSERT_EQ(1U, cert_list.size());
-  EXPECT_EQ("Test CA", cert_list[0]->subject().common_name);
+  EXPECT_EQ("Test Root CA", cert_list[0]->subject().common_name);
 }
 
 // http://crbug.com/108009 - Disabled, as google.chain.pem is an expired
@@ -541,8 +547,12 @@ TEST_F(CertDatabaseNSSTest, DISABLED_ImportServerCert) {
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(goog_cert, "www.google.com", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(goog_cert.get(),
+                                  "www.google.com",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 }
@@ -568,8 +578,12 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned) {
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(puny_cert, "xn--wgv71a119e.com", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(puny_cert.get(),
+                                  "xn--wgv71a119e.com",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(ERR_CERT_AUTHORITY_INVALID, error);
   EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result.cert_status);
 }
@@ -603,15 +617,19 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned_Trusted) {
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(puny_cert, "xn--wgv71a119e.com", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(puny_cert.get(),
+                                  "xn--wgv71a119e.com",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 }
 
 TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert) {
   CertificateList ca_certs = CreateCertificateListFromFile(
-      GetTestCertsDirectory(), "root_ca_cert.crt",
+      GetTestCertsDirectory(), "root_ca_cert.pem",
       X509Certificate::FORMAT_AUTO);
   ASSERT_EQ(1U, ca_certs.size());
 
@@ -635,8 +653,12 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert) {
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(certs[0].get(),
+                                  "127.0.0.1",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 }
@@ -649,7 +671,7 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert_DistrustServer) {
   }
 
   CertificateList ca_certs = CreateCertificateListFromFile(
-      GetTestCertsDirectory(), "root_ca_cert.crt",
+      GetTestCertsDirectory(), "root_ca_cert.pem",
       X509Certificate::FORMAT_AUTO);
   ASSERT_EQ(1U, ca_certs.size());
 
@@ -670,7 +692,7 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert_DistrustServer) {
       certs, NSSCertDatabase::DISTRUSTED_SSL, &failed));
   EXPECT_EQ(0U, failed.size());
   EXPECT_EQ(NSSCertDatabase::DISTRUSTED_SSL,
-            cert_db_->GetCertTrust(certs[0], SERVER_CERT));
+            cert_db_->GetCertTrust(certs[0].get(), SERVER_CERT));
 
   EXPECT_EQ(unsigned(CERTDB_TERMINAL_RECORD),
             certs[0]->os_cert_handle()->trust->sslFlags);
@@ -679,8 +701,12 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert_DistrustServer) {
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(certs[0].get(),
+                                  "127.0.0.1",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(ERR_CERT_REVOKED, error);
   EXPECT_EQ(CERT_STATUS_REVOKED, verify_result.cert_status);
 }
@@ -717,14 +743,18 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa) {
       certs, NSSCertDatabase::TRUST_DEFAULT, &failed));
   EXPECT_EQ(0U, failed.size());
   EXPECT_EQ(NSSCertDatabase::TRUST_DEFAULT,
-            cert_db_->GetCertTrust(certs[0], SERVER_CERT));
+            cert_db_->GetCertTrust(certs[0].get(), SERVER_CERT));
 
   // Server cert should verify.
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(certs[0].get(),
+                                  "127.0.0.1",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -736,9 +766,9 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa) {
 
   // Trust the root cert and distrust the intermediate.
   EXPECT_TRUE(cert_db_->SetCertTrust(
-      ca_certs[0], CA_CERT, NSSCertDatabase::TRUSTED_SSL));
+      ca_certs[0].get(), CA_CERT, NSSCertDatabase::TRUSTED_SSL));
   EXPECT_TRUE(cert_db_->SetCertTrust(
-      intermediate_certs[0], CA_CERT, NSSCertDatabase::DISTRUSTED_SSL));
+      intermediate_certs[0].get(), CA_CERT, NSSCertDatabase::DISTRUSTED_SSL));
   EXPECT_EQ(
       unsigned(CERTDB_VALID_CA | CERTDB_TRUSTED_CA | CERTDB_TRUSTED_CLIENT_CA),
       ca_certs[0]->os_cert_handle()->trust->sslFlags);
@@ -756,20 +786,23 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa) {
 
   // Server cert should fail to verify.
   CertVerifyResult verify_result2;
-  error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                              NULL, empty_cert_list_, &verify_result2);
+  error = verify_proc->Verify(certs[0].get(),
+                              "127.0.0.1",
+                              flags,
+                              NULL,
+                              empty_cert_list_,
+                              &verify_result2);
   EXPECT_EQ(ERR_CERT_REVOKED, error);
   EXPECT_EQ(CERT_STATUS_REVOKED, verify_result2.cert_status);
 }
 
-// Fails on Linux. crbug.com/224612
-#if defined(OS_LINUX)
-#define MAYBE_TrustIntermediateCa2 DISABLED_TrustIntermediateCa2
-#else
-#define MAYBE_TrustIntermediateCa2 TrustIntermediateCa2
-#endif
+TEST_F(CertDatabaseNSSTest, TrustIntermediateCa2) {
+  if (NSS_VersionCheck("3.14.2") && !NSS_VersionCheck("3.15")) {
+    // See http://bugzil.la/863947 for details.
+    LOG(INFO) << "Skipping test for NSS 3.14.2 - NSS 3.15";
+    return;
+  }
 
-TEST_F(CertDatabaseNSSTest, MAYBE_TrustIntermediateCa2) {
   NSSCertDatabase::ImportCertFailureList failed;
 
   CertificateList intermediate_certs = CreateCertificateListFromFile(
@@ -792,37 +825,44 @@ TEST_F(CertDatabaseNSSTest, MAYBE_TrustIntermediateCa2) {
       certs, NSSCertDatabase::TRUST_DEFAULT, &failed));
   EXPECT_EQ(0U, failed.size());
   EXPECT_EQ(NSSCertDatabase::TRUST_DEFAULT,
-            cert_db_->GetCertTrust(certs[0], SERVER_CERT));
+            cert_db_->GetCertTrust(certs[0].get(), SERVER_CERT));
 
   // Server cert should verify.
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(certs[0].get(),
+                                  "127.0.0.1",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
   // Without explicit trust of the intermediate, verification should fail.
   EXPECT_TRUE(cert_db_->SetCertTrust(
-      intermediate_certs[0], CA_CERT, NSSCertDatabase::TRUST_DEFAULT));
+      intermediate_certs[0].get(), CA_CERT, NSSCertDatabase::TRUST_DEFAULT));
 
   // Server cert should fail to verify.
   CertVerifyResult verify_result2;
-  error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                              NULL, empty_cert_list_, &verify_result2);
+  error = verify_proc->Verify(certs[0].get(),
+                              "127.0.0.1",
+                              flags,
+                              NULL,
+                              empty_cert_list_,
+                              &verify_result2);
   EXPECT_EQ(ERR_CERT_AUTHORITY_INVALID, error);
   EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result2.cert_status);
 }
 
-// Fails on Linux. crbug.com/224612
-#if defined(OS_LINUX)
-#define MAYBE_TrustIntermediateCa3 DISABLED_TrustIntermediateCa3
-#else
-#define MAYBE_TrustIntermediateCa3 TrustIntermediateCa3
-#endif
+TEST_F(CertDatabaseNSSTest, TrustIntermediateCa3) {
+  if (NSS_VersionCheck("3.14.2") && !NSS_VersionCheck("3.15")) {
+    // See http://bugzil.la/863947 for details.
+    LOG(INFO) << "Skipping test for NSS 3.14.2 - NSS 3.15";
+    return;
+  }
 
-TEST_F(CertDatabaseNSSTest, MAYBE_TrustIntermediateCa3) {
   NSSCertDatabase::ImportCertFailureList failed;
 
   CertificateList ca_certs = CreateCertificateListFromFile(
@@ -855,25 +895,33 @@ TEST_F(CertDatabaseNSSTest, MAYBE_TrustIntermediateCa3) {
       certs, NSSCertDatabase::TRUST_DEFAULT, &failed));
   EXPECT_EQ(0U, failed.size());
   EXPECT_EQ(NSSCertDatabase::TRUST_DEFAULT,
-            cert_db_->GetCertTrust(certs[0], SERVER_CERT));
+            cert_db_->GetCertTrust(certs[0].get(), SERVER_CERT));
 
   // Server cert should verify.
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(certs[0].get(),
+                                  "127.0.0.1",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
   // Without explicit trust of the intermediate, verification should fail.
   EXPECT_TRUE(cert_db_->SetCertTrust(
-      intermediate_certs[0], CA_CERT, NSSCertDatabase::TRUST_DEFAULT));
+      intermediate_certs[0].get(), CA_CERT, NSSCertDatabase::TRUST_DEFAULT));
 
   // Server cert should fail to verify.
   CertVerifyResult verify_result2;
-  error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                              NULL, empty_cert_list_, &verify_result2);
+  error = verify_proc->Verify(certs[0].get(),
+                              "127.0.0.1",
+                              flags,
+                              NULL,
+                              empty_cert_list_,
+                              &verify_result2);
   EXPECT_EQ(ERR_CERT_AUTHORITY_INVALID, error);
   EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result2.cert_status);
 }
@@ -917,27 +965,78 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa4) {
       certs, NSSCertDatabase::TRUST_DEFAULT, &failed));
   EXPECT_EQ(0U, failed.size());
   EXPECT_EQ(NSSCertDatabase::TRUST_DEFAULT,
-            cert_db_->GetCertTrust(certs[0], SERVER_CERT));
+            cert_db_->GetCertTrust(certs[0].get(), SERVER_CERT));
 
   // Server cert should not verify.
   scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                                  NULL, empty_cert_list_, &verify_result);
+  int error = verify_proc->Verify(certs[0].get(),
+                                  "127.0.0.1",
+                                  flags,
+                                  NULL,
+                                  empty_cert_list_,
+                                  &verify_result);
   EXPECT_EQ(ERR_CERT_REVOKED, error);
   EXPECT_EQ(CERT_STATUS_REVOKED, verify_result.cert_status);
 
   // Without explicit distrust of the intermediate, verification should succeed.
   EXPECT_TRUE(cert_db_->SetCertTrust(
-      intermediate_certs[0], CA_CERT, NSSCertDatabase::TRUST_DEFAULT));
+      intermediate_certs[0].get(), CA_CERT, NSSCertDatabase::TRUST_DEFAULT));
 
   // Server cert should verify.
   CertVerifyResult verify_result2;
-  error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
-                              NULL, empty_cert_list_, &verify_result2);
+  error = verify_proc->Verify(certs[0].get(),
+                              "127.0.0.1",
+                              flags,
+                              NULL,
+                              empty_cert_list_,
+                              &verify_result2);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result2.cert_status);
+}
+
+// Importing two certificates with the same issuer and subject common name,
+// but overall distinct subject names, should succeed and generate a unique
+// nickname for the second certificate.
+TEST_F(CertDatabaseNSSTest, ImportDuplicateCommonName) {
+  CertificateList certs =
+      CreateCertificateListFromFile(GetTestCertsDirectory(),
+                                    "duplicate_cn_1.pem",
+                                    X509Certificate::FORMAT_AUTO);
+  ASSERT_EQ(1U, certs.size());
+
+  EXPECT_EQ(0U, ListCertsInSlot(slot_->os_module_handle()).size());
+
+  // Import server cert with default trust.
+  NSSCertDatabase::ImportCertFailureList failed;
+  EXPECT_TRUE(cert_db_->ImportServerCert(
+      certs, NSSCertDatabase::TRUST_DEFAULT, &failed));
+  EXPECT_EQ(0U, failed.size());
+  EXPECT_EQ(NSSCertDatabase::TRUST_DEFAULT,
+            cert_db_->GetCertTrust(certs[0].get(), SERVER_CERT));
+
+  CertificateList new_certs = ListCertsInSlot(slot_->os_module_handle());
+  ASSERT_EQ(1U, new_certs.size());
+
+  // Now attempt to import a different certificate with the same common name.
+  CertificateList certs2 =
+      CreateCertificateListFromFile(GetTestCertsDirectory(),
+                                    "duplicate_cn_2.pem",
+                                    X509Certificate::FORMAT_AUTO);
+  ASSERT_EQ(1U, certs2.size());
+
+  // Import server cert with default trust.
+  EXPECT_TRUE(cert_db_->ImportServerCert(
+      certs2, NSSCertDatabase::TRUST_DEFAULT, &failed));
+  EXPECT_EQ(0U, failed.size());
+  EXPECT_EQ(NSSCertDatabase::TRUST_DEFAULT,
+            cert_db_->GetCertTrust(certs2[0].get(), SERVER_CERT));
+
+  new_certs = ListCertsInSlot(slot_->os_module_handle());
+  ASSERT_EQ(2U, new_certs.size());
+  EXPECT_STRNE(new_certs[0]->os_cert_handle()->nickname,
+               new_certs[1]->os_cert_handle()->nickname);
 }
 
 }  // namespace net

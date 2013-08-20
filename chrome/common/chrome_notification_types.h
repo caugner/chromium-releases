@@ -309,8 +309,8 @@ enum NotificationType {
   NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
 
   // Sent by history when the favicon of a URL changes.  The source is the
-  // profile, and the details is history::FaviconChangeDetails (see
-  // history_notifications.h).
+  // profile, and the details is FaviconChangedDetails (see
+  // chrome/browser/favicon/favicon_changed_details.h).
   NOTIFICATION_FAVICON_CHANGED,
 
   // Sent by FaviconTabHelper when a tab's favicon has been successfully
@@ -573,7 +573,8 @@ enum NotificationType {
   NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
 
   // Sent when a browser action's visibility has changed. The source is the
-  // ExtensionPrefs* that changed. The details are a Extension*.
+  // ExtensionPrefs* that changed, and the details are a std::string with the
+  // extension's ID.
   NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
 
   // Sent when a page action's visibility has changed. The source is the
@@ -596,18 +597,21 @@ enum NotificationType {
   NOTIFICATION_EXTENSION_COMMAND_ADDED,
 
   // Sent when an extension command shortcut for a browser action is activated
-  // on Mac. The source is the profile and the details is a std::string
-  // containing an extension ID.
+  // on Mac. The source is the profile and the details is a std::pair of a
+  // std::string containing an extension ID and a gfx::NativeWindow for the
+  // associated window.
   NOTIFICATION_EXTENSION_COMMAND_BROWSER_ACTION_MAC,
 
   // Sent when an extension command shortcut for a page action is activated
-  // on Mac. The source is the profile and the details is a std::string
-  // containing an extension ID.
+  // on Mac. The source is the profile and the details is a std::pair of a
+  // std::string containing an extension ID and a gfx::NativeWindow for the
+  // associated window.
   NOTIFICATION_EXTENSION_COMMAND_PAGE_ACTION_MAC,
 
   // Sent when an extension command shortcut for a script badge is activated
-  // on Mac. The source is the profile and the details is a std::string
-  // containing an extension ID.
+  // on Mac. The source is the profile and the details is a std::pair of a
+  // std::string containing an extension ID and a gfx::NativeWindow for the
+  // associated window.
   NOTIFICATION_EXTENSION_COMMAND_SCRIPT_BADGE_MAC,
 
   // A new extension RenderViewHost has been registered. The details are
@@ -886,12 +890,6 @@ enum NotificationType {
   // The details are a chromeos::User object.
   NOTIFICATION_LOGIN_USER_CHANGED,
 
-  // Sent when a chromium os active user has changed.
-  // The details are a chromeos::User object.
-  // This notification is _not_ sent when user logs in to a new or existing
-  // session because NOTIFICATION_LOGIN_USER_CHANGED is sent instead.
-  NOTIFICATION_ACTIVE_USER_CHANGED,
-
   // Sent immediately after the logged-in user's profile is ready.
   // The details are a Profile object.
   NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
@@ -959,10 +957,6 @@ enum NotificationType {
   // First paint event after this fires NOTIFICATION_LOGIN_WEBUI_VISIBLE.
   NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
 
-  // Sent when the EULA has been accepted in the first-run wizard. This is never
-  // sent if the EULA was already accepted at startup.
-  NOTIFICATION_WIZARD_EULA_ACCEPTED,
-
   // Sent when the specific part of login WebUI is considered to be visible.
   // That moment is tracked as the first paint event after one of the:
   // 1. NOTIFICATION_LOGIN_USER_IMAGES_LOADED
@@ -993,6 +987,21 @@ enum NotificationType {
 
   // Sent when proxy dialog is closed.
   NOTIFICATION_LOGIN_PROXY_CHANGED,
+
+  // Send when kiosk auto-launch warning screen is visible.
+  NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_VISIBLE,
+
+  // Send when kiosk auto-launch warning screen had completed.
+  NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_COMPLETED,
+
+  // Send when enable consumer kiosk warning screen is visible.
+  NOTIFICATION_KIOSK_ENABLE_WARNING_VISIBLE,
+
+  // Send when consumer kiosk has been enabled.
+  NOTIFICATION_KIOSK_ENABLED,
+
+  // Send when enable consumer kiosk warning screen had completed.
+  NOTIFICATION_KIOSK_ENABLE_WARNING_COMPLETED,
 
   // Sent when kiosk app list is loaded in UI.
   NOTIFICATION_KIOSK_APPS_LOADED,
@@ -1038,6 +1047,9 @@ enum NotificationType {
   // EnterPuk dialog, either because the user cancelled, or entered a
   // PIN or PUK.
   NOTIFICATION_ENTER_PIN_ENDED,
+
+  // Sent when large cursor is toggled.
+  NOTIFICATION_CROS_ACCESSIBILITY_TOGGLE_LARGE_CURSOR,
 
   // Sent when high contrast mode is toggled.
   NOTIFICATION_CROS_ACCESSIBILITY_TOGGLE_HIGH_CONTRAST_MODE,
@@ -1130,6 +1142,14 @@ enum NotificationType {
 #if defined(USE_ASH)
   // Sent when wallpaper show animation has finished.
   NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
+
+  // Sent when the Ash session has started. In its current incantation this is
+  // generated when the metro app has connected to the browser IPC channel.
+  // Used only on Windows.
+  NOTIFICATION_ASH_SESSION_STARTED,
+  // Sent when the Ash session ended. Currently this means the metro app exited.
+  // Used only on Windows.
+  NOTIFICATION_ASH_SESSION_ENDED,
 #endif
 
 #if defined(OS_CHROMEOS)

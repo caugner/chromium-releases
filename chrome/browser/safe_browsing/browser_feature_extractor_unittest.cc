@@ -10,7 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/time.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_service.h"
@@ -32,10 +32,9 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using ::testing::Return;
-using ::testing::StrictMock;
-using content::BrowserThread;
 using content::WebContentsTester;
+using testing::Return;
+using testing::StrictMock;
 
 namespace safe_browsing {
 namespace {
@@ -50,10 +49,6 @@ class MockClientSideDetectionService : public ClientSideDetectionService {
 
 class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
  protected:
-  BrowserFeatureExtractorTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_) {
-  }
-
   virtual void SetUp() {
     ChromeRenderViewHostTestHarness::SetUp();
     profile()->CreateHistoryService(true /* delete_file */, false /* no_db */);
@@ -116,7 +111,7 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
 
   bool ExtractFeatures(ClientPhishingRequest* request) {
     StartExtractFeatures(request);
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
     EXPECT_EQ(1U, success_.count(request));
     return success_.count(request) ? success_[request] : false;
   }
@@ -161,7 +156,6 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     }
   }
 
-  content::TestBrowserThread ui_thread_;
   int num_pending_;
   scoped_ptr<BrowserFeatureExtractor> extractor_;
   std::map<ClientPhishingRequest*, bool> success_;
@@ -173,7 +167,7 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     ASSERT_EQ(0U, success_.count(request));
     success_[request] = success;
     if (--num_pending_ == 0) {
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
     }
   }
 };
@@ -279,7 +273,7 @@ TEST_F(BrowserFeatureExtractorTest, MultipleRequestsAtOnce) {
   request2.set_client_score(1.0);
   StartExtractFeatures(&request2);
 
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   EXPECT_TRUE(success_[&request]);
   // Success is false because the second URL is not in the history and we are
   // not able to distinguish between a missing URL in the history and an error.

@@ -19,10 +19,10 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_offset_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "content/browser/accessibility/browser_accessibility_gtk.h"
 #include "content/browser/accessibility/browser_accessibility_manager_gtk.h"
 #include "content/browser/renderer_host/backing_store_gtk.h"
@@ -34,14 +34,12 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
-#include "content/public/browser/browser_context.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/content_switches.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebScreenInfo.h"
+#include "third_party/WebKit/public/web/gtk/WebInputEventFactory.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/text/text_elider.h"
@@ -49,7 +47,7 @@
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/gtk_native_view_id_manager.h"
 #include "ui/gfx/gtk_preserve_window.h"
-#include "webkit/glue/webcursor_gtk_data.h"
+#include "webkit/common/cursors/webcursor_gtk_data.h"
 #include "webkit/plugins/npapi/webplugin.h"
 
 using WebKit::WebInputEventFactory;
@@ -837,9 +835,9 @@ void RenderWidgetHostViewGtk::SetIsLoading(bool is_loading) {
     ShowCurrentCursor();
 }
 
-void RenderWidgetHostViewGtk::TextInputStateChanged(
-    const ViewHostMsg_TextInputState_Params& params) {
-  im_context_->UpdateInputMethodState(params.type, params.can_compose_inline);
+void RenderWidgetHostViewGtk::TextInputTypeChanged(ui::TextInputType type,
+                                                   bool can_compose_inline) {
+  im_context_->UpdateInputMethodState(type, can_compose_inline);
 }
 
 void RenderWidgetHostViewGtk::ImeCancelComposition() {
@@ -854,8 +852,10 @@ void RenderWidgetHostViewGtk::ImeCompositionRangeChanged(
 void RenderWidgetHostViewGtk::DidUpdateBackingStore(
     const gfx::Rect& scroll_rect,
     const gfx::Vector2d& scroll_delta,
-    const std::vector<gfx::Rect>& copy_rects) {
+    const std::vector<gfx::Rect>& copy_rects,
+    const ui::LatencyInfo& latency_info) {
   TRACE_EVENT0("ui::gtk", "RenderWidgetHostViewGtk::DidUpdateBackingStore");
+  software_latency_info_.MergeWith(latency_info);
 
   if (is_hidden_)
     return;
@@ -965,12 +965,10 @@ void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
     return;
   }
 
-  BrowserContext* browser_context = host_->GetProcess()->GetBrowserContext();
   // Set the BUFFER_SELECTION to the ui::Clipboard.
   ui::ScopedClipboardWriter clipboard_writer(
       ui::Clipboard::GetForCurrentThread(),
-      ui::Clipboard::BUFFER_SELECTION,
-      BrowserContext::GetMarkerForOffTheRecordContext(browser_context));
+      ui::Clipboard::BUFFER_SELECTION);
   clipboard_writer.WriteText(text.substr(pos, n));
 }
 
@@ -1070,19 +1068,21 @@ bool RenderWidgetHostViewGtk::CanCopyToVideoFrame() const {
 void RenderWidgetHostViewGtk::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
-   AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
-   ack_params.sync_point = 0;
-   RenderWidgetHostImpl::AcknowledgeBufferPresent(
+  AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
+  ack_params.sync_point = 0;
+  RenderWidgetHostImpl::AcknowledgeBufferPresent(
       params.route_id, gpu_host_id, ack_params);
+  host_->FrameSwapped(params.latency_info);
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
     int gpu_host_id) {
-   AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
-   ack_params.sync_point = 0;
-   RenderWidgetHostImpl::AcknowledgeBufferPresent(
+  AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
+  ack_params.sync_point = 0;
+  RenderWidgetHostImpl::AcknowledgeBufferPresent(
       params.route_id, gpu_host_id, ack_params);
+  host_->FrameSwapped(params.latency_info);
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfaceSuspend() {
@@ -1212,6 +1212,9 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
       // recorded.
       web_contents_switch_paint_time_ = base::TimeTicks();
     }
+    software_latency_info_.swap_timestamp = base::TimeTicks::HighResNow();
+    render_widget_host->FrameSwapped(software_latency_info_);
+    software_latency_info_.Clear();
   } else {
     if (window)
       gdk_window_clear(window);

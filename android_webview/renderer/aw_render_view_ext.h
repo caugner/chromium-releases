@@ -8,7 +8,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "content/public/renderer/render_view_observer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
+#include "third_party/WebKit/public/web/WebPermissionClient.h"
 
 namespace WebKit {
 
@@ -51,9 +51,16 @@ class AwRenderViewExt : public content::RenderViewObserver,
   void UpdatePageScaleFactor();
 
   // WebKit::WebPermissionClient implementation.
-  virtual bool allowImage(WebKit::WebFrame* frame,
-                          bool enabledPerSettings,
-                          const WebKit::WebURL& imageURL) OVERRIDE;
+  virtual bool allowDisplayingInsecureContent(
+      WebKit::WebFrame* frame,
+      bool enabled_per_settings,
+      const WebKit::WebSecurityOrigin& origin,
+      const WebKit::WebURL& url) OVERRIDE;
+  virtual bool allowRunningInsecureContent(
+      WebKit::WebFrame* frame,
+      bool enabled_per_settings,
+      const WebKit::WebSecurityOrigin& origin,
+      const WebKit::WebURL& url) OVERRIDE;
 
   bool capture_picture_enabled_;
 

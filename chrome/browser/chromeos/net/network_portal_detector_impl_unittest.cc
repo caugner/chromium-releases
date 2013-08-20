@@ -9,14 +9,34 @@
 #include "chrome/browser/captive_portal/captive_portal_detector.h"
 #include "chrome/browser/captive_portal/testing_utils.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros/network_library_impl_base.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_impl.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/shill_device_client.h"
+#include "chromeos/dbus/shill_service_client.h"
+#include "chromeos/network/network_state.h"
+#include "chromeos/network/network_state_handler.h"
+#include "dbus/object_path.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
+
+namespace {
+
+void ErrorCallbackFunction(const std::string& error_name,
+                           const std::string& error_message) {
+  LOG(ERROR) << "Shill Error: " << error_name << " : " << error_message;
+}
+
+}  // namespace
+
+// Service paths for stub network devices.
+const char* kStubEthernet = "stub_ethernet";
+const char* kStubWireless1 = "stub_wifi1";
+const char* kStubWireless2 = "stub_wifi2";
+const char* kStubCellular = "stub_cellular";
 
 class NetworkPortalDetectorImplTest
     : public testing::Test,
@@ -26,21 +46,8 @@ class NetworkPortalDetectorImplTest
   virtual ~NetworkPortalDetectorImplTest() {}
 
   virtual void SetUp() {
-    CrosLibrary::Initialize(true);
-    network_library_ = CrosLibrary::Get()->GetNetworkLibrary();
-    DCHECK(network_library_);
-
-    ethernet_network_ = network_library_->FindNetworkByPath("eth1");
-    DCHECK(ethernet_network_);
-
-    wifi1_network_ = network_library_->FindNetworkByPath("wifi1");
-    DCHECK(wifi1_network_);
-
-    wifi2_network_ = network_library_->FindNetworkByPath("wifi2");
-    DCHECK(wifi2_network_);
-
-    cellular1_network_ = network_library_->FindNetworkByPath("cellular1");
-    DCHECK(cellular1_network_);
+    DBusThreadManager::InitializeWithStub();
+    SetupNetworkHandler();
 
     profile_.reset(new TestingProfile());
     network_portal_detector_.reset(
@@ -56,12 +63,17 @@ class NetworkPortalDetectorImplTest
 
   virtual void TearDown() {
     network_portal_detector_->Shutdown();
-    CrosLibrary::Shutdown();
+    profile_.reset();
+    NetworkHandler::Shutdown();
+    DBusThreadManager::Shutdown();
   }
 
   void CheckPortalState(NetworkPortalDetector::CaptivePortalStatus status,
                         int response_code,
-                        const Network* network) {
+                        const std::string& network_service_path) {
+    const NetworkState* network =
+        NetworkHandler::Get()->network_state_handler()->GetNetworkState(
+            network_service_path);
     NetworkPortalDetector::CaptivePortalState state =
         network_portal_detector()->GetCaptivePortalState(network);
     ASSERT_EQ(status, state.status);
@@ -79,12 +91,6 @@ class NetworkPortalDetectorImplTest
     CompleteURLFetch(net_error, status_code, NULL);
   }
 
-  NetworkLibrary* network_library() { return network_library_; }
-  Network* ethernet_network() { return ethernet_network_; }
-  Network* wifi1_network() { return wifi1_network_; }
-  Network* wifi2_network() { return wifi2_network_; }
-  Network* cellular1_network() { return cellular1_network_; }
-
   Profile* profile() { return profile_.get(); }
 
   NetworkPortalDetectorImpl* network_portal_detector() {
@@ -93,6 +99,10 @@ class NetworkPortalDetectorImplTest
 
   NetworkPortalDetectorImpl::State state() {
     return network_portal_detector()->state();
+  }
+
+  bool start_detection_if_idle() {
+    return network_portal_detector()->StartDetectionIfIdle();
   }
 
   void enable_lazy_detection() {
@@ -152,44 +162,59 @@ class NetworkPortalDetectorImplTest
     network_portal_detector()->set_time_ticks_for_testing(time_ticks);
   }
 
-  void SetBehindPortal(Network* network) {
-    Network::TestApi test_api(network);
-        test_api.SetBehindPortal();
-    static_cast<NetworkLibraryImplBase*>(
-        network_library())->CallConnectToNetwork(network);
-    MessageLoop::current()->RunUntilIdle();
+  void SetBehindPortal(const std::string& service_path) {
+    DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
+        dbus::ObjectPath(service_path),
+        flimflam::kStateProperty, base::StringValue(flimflam::kStatePortal),
+        base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
+    base::MessageLoop::current()->RunUntilIdle();
   }
 
-  void EnableNetworkDeviceType(ConnectionType device, bool enable) {
-    static_cast<NetworkLibraryImplBase*>(
-        network_library())->CallEnableNetworkDeviceType(device, enable);
+  void SetNetworkDeviceEnabled(const std::string& type, bool enabled) {
+    NetworkHandler::Get()->network_state_handler()->SetTechnologyEnabled(
+        type, enabled, network_handler::ErrorCallback());
+    base::MessageLoop::current()->RunUntilIdle();
   }
 
-  void SetConnected(Network* network) {
-    Network::TestApi test_api(network);
-    test_api.SetConnected();
-    static_cast<NetworkLibraryImplBase*>(
-        network_library())->CallConnectToNetwork(network);
-    MessageLoop::current()->RunUntilIdle();
+  void SetConnected(const std::string& service_path) {
+    DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
+        dbus::ObjectPath(service_path),
+        flimflam::kStateProperty, base::StringValue(flimflam::kStateOnline),
+        base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
+    base::MessageLoop::current()->RunUntilIdle();
   }
 
  private:
-  NetworkLibrary* network_library_;
+  void SetupDefaultShillState() {
+    base::MessageLoop::current()->RunUntilIdle();
+    ShillServiceClient::TestInterface* service_test =
+        DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
+    service_test->ClearServices();
+    const bool add_to_watchlist = true;
+    service_test->AddService(kStubEthernet,
+                             kStubEthernet,
+                             flimflam::kTypeEthernet, flimflam::kStateIdle,
+                             add_to_watchlist);
+    service_test->AddService(kStubWireless1,
+                             kStubWireless1,
+                             flimflam::kTypeWifi, flimflam::kStateIdle,
+                             add_to_watchlist);
+    service_test->AddService(kStubWireless2,
+                             kStubWireless2,
+                             flimflam::kTypeWifi, flimflam::kStateIdle,
+                             add_to_watchlist);
+    service_test->AddService(kStubCellular,
+                             kStubCellular,
+                             flimflam::kTypeCellular, flimflam::kStateIdle,
+                             add_to_watchlist);
+  }
 
-  // Pointer to a fake ethernet network.
-  Network* ethernet_network_;
+  void SetupNetworkHandler() {
+    SetupDefaultShillState();
+    NetworkHandler::Initialize();
+  }
 
-  // Pointer to a fake wifi1 network.
-  Network* wifi1_network_;
-
-  // Pointer to a fake wifi2 network.
-  Network* wifi2_network_;
-
-  // Pointer to a fake cellular1 network.
-  Network* cellular1_network_;
-
-  MessageLoop message_loop_;
-
+  base::MessageLoop message_loop_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<NetworkPortalDetectorImpl> network_portal_detector_;
 };
@@ -197,86 +222,86 @@ class NetworkPortalDetectorImplTest
 TEST_F(NetworkPortalDetectorImplTest, NoPortal) {
   ASSERT_TRUE(is_state_idle());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
 
   ASSERT_TRUE(is_state_checking_for_portal());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
 
   CompleteURLFetch(net::OK, 204, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, Portal) {
   ASSERT_TRUE(is_state_idle());
 
   // Check HTTP 200 response code.
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::OK, 200, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 200,
-                   wifi1_network());
+                   kStubWireless1);
 
   // Check HTTP 301 response code.
-  SetConnected(wifi2_network());
+  SetConnected(kStubWireless2);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::OK, 301, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 301,
-                   wifi2_network());
+                   kStubWireless2);
 
   // Check HTTP 302 response code.
-  SetConnected(ethernet_network());
+  SetConnected(kStubEthernet);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::OK, 302, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 302,
-                   ethernet_network());
+                   kStubEthernet);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, TwoNetworks) {
   ASSERT_TRUE(is_state_idle());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   // wifi is in portal state.
   CompleteURLFetch(net::OK, 200, NULL);
   ASSERT_TRUE(is_state_idle());
 
-  SetConnected(ethernet_network());
+  SetConnected(kStubEthernet);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   // ethernet is in online state.
   CompleteURLFetch(net::OK, 204, NULL);
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-                   ethernet_network());
+                   kStubEthernet);
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 200,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, NetworkChanged) {
   ASSERT_TRUE(is_state_idle());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
 
   // WiFi is in portal state.
   fetcher()->set_response_code(200);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   // Active network is changed during portal detection for wifi.
-  SetConnected(ethernet_network());
+  SetConnected(kStubEthernet);
 
   // Portal detection for wifi is cancelled, portal detection for
   // ethernet is initiated.
@@ -286,27 +311,27 @@ TEST_F(NetworkPortalDetectorImplTest, NetworkChanged) {
   CompleteURLFetch(net::OK, 204, NULL);
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-                   ethernet_network());
+                   kStubEthernet);
 
   // As active network was changed during portal detection for wifi
   // network, it's state must be unknown.
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, NetworkStateNotChanged) {
   ASSERT_TRUE(is_state_idle());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::OK, 204, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-                   wifi1_network());
+                   kStubWireless1);
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   ASSERT_TRUE(is_state_idle());
 }
 
@@ -314,32 +339,32 @@ TEST_F(NetworkPortalDetectorImplTest, NetworkStateChanged) {
   // Test for Portal -> Online -> Portal network state transitions.
   ASSERT_TRUE(is_state_idle());
 
-  SetBehindPortal(wifi1_network());
+  SetBehindPortal(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::OK, 200, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 200,
-                   wifi1_network());
+                   kStubWireless1);
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::OK, 204, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-                   wifi1_network());
+                   kStubWireless1);
 
-  SetBehindPortal(wifi1_network());
+  SetBehindPortal(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::OK, 200, NULL);
 
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 200,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, PortalDetectionTimeout) {
@@ -351,8 +376,8 @@ TEST_F(NetworkPortalDetectorImplTest, PortalDetectionTimeout) {
   ASSERT_TRUE(is_state_idle());
   ASSERT_EQ(0, attempt_count());
 
-  SetConnected(wifi1_network());
-  MessageLoop::current()->RunUntilIdle();
+  SetConnected(kStubWireless1);
+  base::MessageLoop::current()->RunUntilIdle();
 
   // First portal detection timeouts, next portal detection is
   // scheduled.
@@ -369,7 +394,7 @@ TEST_F(NetworkPortalDetectorImplTest, PortalDetectionRetryAfter) {
   ASSERT_TRUE(is_state_idle());
   ASSERT_EQ(0, attempt_count());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   CompleteURLFetch(net::OK, 503, retry_after);
 
   // First portal detection completed, next portal detection is
@@ -387,7 +412,7 @@ TEST_F(NetworkPortalDetectorImplTest, PortalDetectorRetryAfterIsSmall) {
   ASSERT_TRUE(is_state_idle());
   ASSERT_EQ(0, attempt_count());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   CompleteURLFetch(net::OK, 503, retry_after);
 
   // First portal detection completed, next portal detection is
@@ -407,7 +432,7 @@ TEST_F(NetworkPortalDetectorImplTest, FirstAttemptFailed) {
   ASSERT_TRUE(is_state_idle());
   ASSERT_EQ(0, attempt_count());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
 
   CompleteURLFetch(net::OK, 503, retry_after);
   ASSERT_TRUE(is_state_portal_detection_pending());
@@ -415,13 +440,13 @@ TEST_F(NetworkPortalDetectorImplTest, FirstAttemptFailed) {
   ASSERT_EQ(base::TimeDelta::FromSeconds(0), next_attempt_delay());
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::OK, 204, NULL);
   ASSERT_TRUE(is_state_idle());
   ASSERT_EQ(2, attempt_count());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, AllAttemptsFailed) {
@@ -433,7 +458,7 @@ TEST_F(NetworkPortalDetectorImplTest, AllAttemptsFailed) {
   ASSERT_TRUE(is_state_idle());
   ASSERT_EQ(0, attempt_count());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
 
   CompleteURLFetch(net::OK, 503, retry_after);
   ASSERT_TRUE(is_state_portal_detection_pending());
@@ -441,7 +466,7 @@ TEST_F(NetworkPortalDetectorImplTest, AllAttemptsFailed) {
   ASSERT_EQ(base::TimeDelta::FromSeconds(0), next_attempt_delay());
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::OK, 503, retry_after);
   ASSERT_TRUE(is_state_portal_detection_pending());
@@ -449,51 +474,51 @@ TEST_F(NetworkPortalDetectorImplTest, AllAttemptsFailed) {
   ASSERT_EQ(base::TimeDelta::FromSeconds(0), next_attempt_delay());
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::OK, 503, retry_after);
   ASSERT_TRUE(is_state_idle());
   ASSERT_EQ(3, attempt_count());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_OFFLINE, 503,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, ProxyAuthRequired) {
   ASSERT_TRUE(is_state_idle());
   set_min_time_between_attempts(base::TimeDelta());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   CompleteURLFetch(net::OK, 407, NULL);
   ASSERT_EQ(1, attempt_count());
   ASSERT_TRUE(is_state_portal_detection_pending());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::OK, 407, NULL);
   ASSERT_EQ(2, attempt_count());
   ASSERT_TRUE(is_state_portal_detection_pending());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::OK, 407, NULL);
   ASSERT_EQ(3, attempt_count());
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(
       NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED, 407,
-      wifi1_network());
+      kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, NoResponseButBehindPortal) {
   ASSERT_TRUE(is_state_idle());
   set_min_time_between_attempts(base::TimeDelta());
 
-  SetBehindPortal(wifi1_network());
+  SetBehindPortal(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
 
   CompleteURLFetch(net::ERR_CONNECTION_CLOSED,
@@ -503,7 +528,7 @@ TEST_F(NetworkPortalDetectorImplTest, NoResponseButBehindPortal) {
   ASSERT_TRUE(is_state_portal_detection_pending());
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::ERR_CONNECTION_CLOSED,
                    net::URLFetcher::RESPONSE_CODE_INVALID,
@@ -512,7 +537,7 @@ TEST_F(NetworkPortalDetectorImplTest, NoResponseButBehindPortal) {
   ASSERT_TRUE(is_state_portal_detection_pending());
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::ERR_CONNECTION_CLOSED,
                    net::URLFetcher::RESPONSE_CODE_INVALID,
@@ -522,7 +547,7 @@ TEST_F(NetworkPortalDetectorImplTest, NoResponseButBehindPortal) {
 
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL,
                    net::URLFetcher::RESPONSE_CODE_INVALID,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForOnlineNetwork) {
@@ -530,7 +555,7 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForOnlineNetwork) {
   set_min_time_between_attempts(base::TimeDelta());
   set_lazy_check_interval(base::TimeDelta());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   enable_lazy_detection();
   CompleteURLFetch(net::OK, 204, NULL);
 
@@ -538,10 +563,10 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForOnlineNetwork) {
   ASSERT_TRUE(is_state_portal_detection_pending());
   CheckPortalState(
       NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-      wifi1_network());
+      kStubWireless1);
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::OK, 204, NULL);
 
@@ -549,10 +574,10 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForOnlineNetwork) {
   ASSERT_TRUE(is_state_portal_detection_pending());
   CheckPortalState(
       NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-      wifi1_network());
+      kStubWireless1);
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   disable_lazy_detection();
 
@@ -563,7 +588,7 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForOnlineNetwork) {
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(
       NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
-      wifi1_network());
+      kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForPortalNetwork) {
@@ -571,7 +596,7 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForPortalNetwork) {
   set_min_time_between_attempts(base::TimeDelta());
   set_lazy_check_interval(base::TimeDelta());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   enable_lazy_detection();
 
   CompleteURLFetch(net::ERR_CONNECTION_CLOSED,
@@ -580,10 +605,10 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForPortalNetwork) {
   ASSERT_EQ(1, attempt_count());
   ASSERT_TRUE(is_state_portal_detection_pending());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::ERR_CONNECTION_CLOSED,
                    net::URLFetcher::RESPONSE_CODE_INVALID,
@@ -591,19 +616,19 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForPortalNetwork) {
   ASSERT_EQ(2, attempt_count());
   ASSERT_TRUE(is_state_portal_detection_pending());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   CompleteURLFetch(net::OK, 200, NULL);
   ASSERT_EQ(3, attempt_count());
   ASSERT_TRUE(is_state_portal_detection_pending());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 200,
-                   wifi1_network());
+                   kStubWireless1);
 
   // To run CaptivePortalDetector::DetectCaptivePortal().
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   disable_lazy_detection();
 
@@ -613,24 +638,53 @@ TEST_F(NetworkPortalDetectorImplTest, LazyDetectionForPortalNetwork) {
   ASSERT_EQ(3, attempt_count());
   ASSERT_TRUE(is_state_idle());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 200,
-                   wifi1_network());
+                   kStubWireless1);
 }
 
 TEST_F(NetworkPortalDetectorImplTest, DetectionTimeoutIsCancelled) {
   ASSERT_TRUE(is_state_idle());
   set_min_time_between_attempts(base::TimeDelta());
 
-  SetConnected(wifi1_network());
+  SetConnected(kStubWireless1);
   ASSERT_TRUE(is_state_checking_for_portal());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
 
   cancel_portal_detection();
 
   ASSERT_TRUE(is_state_idle());
   ASSERT_TRUE(detection_timeout_is_cancelled());
   CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN, -1,
-                   wifi1_network());
+                   kStubWireless1);
+}
+
+TEST_F(NetworkPortalDetectorImplTest, TestDetectionRestart) {
+  ASSERT_TRUE(is_state_idle());
+  set_min_time_between_attempts(base::TimeDelta());
+
+  // First portal detection attempts determines ONLINE state.
+  SetConnected(kStubWireless1);
+  ASSERT_TRUE(is_state_checking_for_portal());
+  ASSERT_FALSE(start_detection_if_idle());
+
+  CompleteURLFetch(net::OK, 204, NULL);
+
+  CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204,
+                   kStubWireless1);
+  ASSERT_TRUE(is_state_idle());
+
+  // First portal detection attempts determines PORTAL state.
+  ASSERT_TRUE(start_detection_if_idle());
+  ASSERT_TRUE(is_state_portal_detection_pending());
+  ASSERT_FALSE(start_detection_if_idle());
+
+  base::MessageLoop::current()->RunUntilIdle();
+  ASSERT_TRUE(is_state_checking_for_portal());
+  CompleteURLFetch(net::OK, 200, NULL);
+
+  CheckPortalState(NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL, 200,
+                   kStubWireless1);
+  ASSERT_TRUE(is_state_idle());
 }
 
 TEST_F(NetworkPortalDetectorImplTest, RequestTimeouts) {
@@ -638,8 +692,8 @@ TEST_F(NetworkPortalDetectorImplTest, RequestTimeouts) {
   set_min_time_between_attempts(base::TimeDelta());
   set_lazy_check_interval(base::TimeDelta());
 
-  EnableNetworkDeviceType(TYPE_WIFI, false);
-  SetConnected(cellular1_network());
+  SetNetworkDeviceEnabled(flimflam::kTypeWifi, false);
+  SetConnected(kStubCellular);
 
   // First portal detection attempt for cellular1 uses 5sec timeout.
   CheckRequestTimeoutAndCompleteAttempt(1, 5, net::ERR_CONNECTION_CLOSED,
@@ -647,29 +701,29 @@ TEST_F(NetworkPortalDetectorImplTest, RequestTimeouts) {
 
   // Second portal detection attempt for cellular1 uses 10sec timeout.
   ASSERT_TRUE(is_state_portal_detection_pending());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   CheckRequestTimeoutAndCompleteAttempt(2, 10, net::ERR_CONNECTION_CLOSED,
                                         net::URLFetcher::RESPONSE_CODE_INVALID);
 
   // Third portal detection attempt for cellular1 uses 15sec timeout.
   ASSERT_TRUE(is_state_portal_detection_pending());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   CheckRequestTimeoutAndCompleteAttempt(3, 15, net::ERR_CONNECTION_CLOSED,
                                         net::URLFetcher::RESPONSE_CODE_INVALID);
 
   ASSERT_TRUE(is_state_idle());
 
-  // Check that in lazy detection for cellualr1 15sec timeout is used.
+  // Check that in lazy detection for cellular1 15sec timeout is used.
   enable_lazy_detection();
   ASSERT_TRUE(is_state_portal_detection_pending());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   disable_lazy_detection();
   CheckRequestTimeoutAndCompleteAttempt(3, 15, net::ERR_CONNECTION_CLOSED,
                                         net::URLFetcher::RESPONSE_CODE_INVALID);
   ASSERT_TRUE(is_state_idle());
 
-  EnableNetworkDeviceType(TYPE_WIFI, true);
-  SetConnected(wifi1_network());
+  SetNetworkDeviceEnabled(flimflam::kTypeWifi, true);
+  SetConnected(kStubWireless1);
 
   // First portal detection attempt for wifi1 uses 5sec timeout.
   CheckRequestTimeoutAndCompleteAttempt(1, 5, net::ERR_CONNECTION_CLOSED,
@@ -677,16 +731,47 @@ TEST_F(NetworkPortalDetectorImplTest, RequestTimeouts) {
 
   // Second portal detection attempt for wifi1 also uses 5sec timeout.
   ASSERT_TRUE(is_state_portal_detection_pending());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   CheckRequestTimeoutAndCompleteAttempt(2, 10, net::OK, 204);
   ASSERT_TRUE(is_state_idle());
 
   // Check that in lazy detection for wifi1 5sec timeout is used.
   enable_lazy_detection();
   ASSERT_TRUE(is_state_portal_detection_pending());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   disable_lazy_detection();
   CheckRequestTimeoutAndCompleteAttempt(3, 15, net::OK, 204);
+  ASSERT_TRUE(is_state_idle());
+}
+
+TEST_F(NetworkPortalDetectorImplTest, StartDetectionIfIdle) {
+  ASSERT_TRUE(is_state_idle());
+  set_min_time_between_attempts(base::TimeDelta());
+  SetConnected(kStubWireless1);
+
+  // First portal detection attempt for wifi1 uses 5sec timeout.
+  CheckRequestTimeoutAndCompleteAttempt(1, 5, net::ERR_CONNECTION_CLOSED,
+                                        net::URLFetcher::RESPONSE_CODE_INVALID);
+  ASSERT_TRUE(is_state_portal_detection_pending());
+  base::MessageLoop::current()->RunUntilIdle();
+
+  // Second portal detection attempt for wifi1 uses 10sec timeout.
+  CheckRequestTimeoutAndCompleteAttempt(2, 10, net::ERR_CONNECTION_CLOSED,
+                                        net::URLFetcher::RESPONSE_CODE_INVALID);
+  ASSERT_TRUE(is_state_portal_detection_pending());
+  base::MessageLoop::current()->RunUntilIdle();
+
+  // Second portal detection attempt for wifi1 uses 15sec timeout.
+  CheckRequestTimeoutAndCompleteAttempt(3, 15, net::ERR_CONNECTION_CLOSED,
+                                        net::URLFetcher::RESPONSE_CODE_INVALID);
+  ASSERT_TRUE(is_state_idle());
+  start_detection_if_idle();
+
+  ASSERT_TRUE(is_state_portal_detection_pending());
+
+  // First portal detection attempt for wifi1 uses 5sec timeout.
+  base::MessageLoop::current()->RunUntilIdle();
+  CheckRequestTimeoutAndCompleteAttempt(1, 5, net::OK, 204);
   ASSERT_TRUE(is_state_idle());
 }
 

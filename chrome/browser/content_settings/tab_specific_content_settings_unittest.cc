@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
@@ -11,8 +11,8 @@
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/parsed_cookie.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
 
@@ -38,18 +38,10 @@ class MockSiteDataObserver
 
 class TabSpecificContentSettingsTest : public ChromeRenderViewHostTestHarness {
  public:
-  TabSpecificContentSettingsTest()
-      : browser_thread_(BrowserThread::UI, &message_loop_) {}
-
   virtual void SetUp() OVERRIDE {
     ChromeRenderViewHostTestHarness::SetUp();
     TabSpecificContentSettings::CreateForWebContents(web_contents());
   }
-
- private:
-  content::TestBrowserThread browser_thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabSpecificContentSettingsTest);
 };
 
 TEST_F(TabSpecificContentSettingsTest, BlockedContent) {
@@ -68,8 +60,10 @@ TEST_F(TabSpecificContentSettingsTest, BlockedContent) {
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_FALSE(
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
-  EXPECT_FALSE(
-      content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+  EXPECT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  EXPECT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
 
   // Set a cookie, block access to images, block mediastream access and block a
   // popup.
@@ -81,7 +75,9 @@ TEST_F(TabSpecificContentSettingsTest, BlockedContent) {
   content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_IMAGES,
                                      std::string());
   content_settings->SetPopupsBlocked(true);
-  content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM,
+  content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+                                     std::string());
+  content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
                                      std::string());
 
   // Check that only the respective content types are affected.
@@ -93,8 +89,10 @@ TEST_F(TabSpecificContentSettingsTest, BlockedContent) {
   EXPECT_FALSE(
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_TRUE(content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
-  EXPECT_TRUE(
-      content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+  EXPECT_TRUE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  EXPECT_TRUE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
   content_settings->OnCookieChanged(GURL("http://google.com"),
                                     GURL("http://google.com"),
                                     "A=B",
@@ -122,8 +120,10 @@ TEST_F(TabSpecificContentSettingsTest, BlockedContent) {
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_FALSE(
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
-  EXPECT_FALSE(
-      content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+  EXPECT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  EXPECT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
 
   content_settings->ClearCookieSpecificContentSettings();
   EXPECT_FALSE(
@@ -136,8 +136,10 @@ TEST_F(TabSpecificContentSettingsTest, BlockedContent) {
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_FALSE(
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
-  EXPECT_FALSE(
-      content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+  EXPECT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  EXPECT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
 }
 
 TEST_F(TabSpecificContentSettingsTest, BlockedFileSystems) {
@@ -167,8 +169,10 @@ TEST_F(TabSpecificContentSettingsTest, AllowedContent) {
       content_settings->IsContentAllowed(CONTENT_SETTINGS_TYPE_COOKIES));
   ASSERT_FALSE(
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
-  ASSERT_FALSE(
-      content_settings->IsContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+  ASSERT_FALSE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  ASSERT_FALSE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
 
   // Record a cookie.
   content_settings->OnCookieChanged(GURL("http://google.com"),
@@ -192,20 +196,56 @@ TEST_F(TabSpecificContentSettingsTest, AllowedContent) {
   ASSERT_TRUE(
       content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
 
-  // Allow mediastream access.
-  content_settings->OnMediaStreamAllowed();
-  ASSERT_TRUE(
-      content_settings->IsContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
-  ASSERT_FALSE(
-      content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
 
-  // Record a blocked mediastream access request.
-  content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM,
-                                     std::string());
-  ASSERT_FALSE(
-      content_settings->IsContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
-  ASSERT_TRUE(
-      content_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM));
+  ASSERT_EQ(TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED,
+            content_settings->GetMicrophoneCameraState());
+
+  // Access microphone.
+  content_settings->OnMicrophoneAccessed();
+  ASSERT_TRUE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  ASSERT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  ASSERT_EQ(TabSpecificContentSettings::MICROPHONE_ACCESSED,
+            content_settings->GetMicrophoneCameraState());
+
+  // Allow mediastream access.
+  content_settings->OnCameraAccessed();
+  ASSERT_TRUE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
+  ASSERT_FALSE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
+  ASSERT_EQ(TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED,
+            content_settings->GetMicrophoneCameraState());
+
+  // Allow mediastream microphone access.
+  content_settings->OnMicrophoneAccessBlocked();
+  ASSERT_FALSE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  ASSERT_TRUE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+
+  // Allow mediastream camera access.
+  content_settings->OnCameraAccessBlocked();
+  ASSERT_FALSE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
+  ASSERT_TRUE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
+
+
+  // Record a blocked mediastream microphone access request.
+  content_settings->OnMicrophoneAccessBlocked();
+  ASSERT_FALSE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+  ASSERT_TRUE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+
+  // Record a blocked mediastream microphone access request.
+  content_settings->OnCameraAccessBlocked();
+  ASSERT_FALSE(content_settings->IsContentAllowed(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
+  ASSERT_TRUE(content_settings->IsContentBlocked(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
 }
 
 TEST_F(TabSpecificContentSettingsTest, EmptyCookieList) {
@@ -266,23 +306,46 @@ TEST_F(TabSpecificContentSettingsTest, SiteDataObserver) {
 TEST_F(TabSpecificContentSettingsTest, BlockThenAllowMediaAccess) {
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents());
-  ContentSettingsType type = CONTENT_SETTINGS_TYPE_MEDIASTREAM;
-  content_settings->OnContentBlocked(type, std::string());
-  EXPECT_TRUE(content_settings->IsContentBlocked(type));
-  EXPECT_FALSE(content_settings->IsContentAllowed(type));
-  content_settings->OnContentAllowed(type);
-  EXPECT_TRUE(content_settings->IsContentAllowed(type));
-  EXPECT_FALSE(content_settings->IsContentBlocked(type));
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED);
+
+  content_settings->OnMicrophoneAccessBlocked();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_BLOCKED);
+  content_settings->OnCameraAccessBlocked();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED);
+
+  // If microphone and camera have opposite settings, like one is allowed,
+  // while the other is denied, we show the allow access in our UI.
+  content_settings->OnMicrophoneAccessed();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_ACCESSED);
+  content_settings->OnCameraAccessed();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED);
 }
 
 TEST_F(TabSpecificContentSettingsTest, AllowThenBlockMediaAccess) {
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents());
-  ContentSettingsType type = CONTENT_SETTINGS_TYPE_MEDIASTREAM;
-  content_settings->OnContentAllowed(type);
-  EXPECT_TRUE(content_settings->IsContentAllowed(type));
-  EXPECT_FALSE(content_settings->IsContentBlocked(type));
-  content_settings->OnContentBlocked(type, std::string());
-  EXPECT_TRUE(content_settings->IsContentBlocked(type));
-  EXPECT_FALSE(content_settings->IsContentAllowed(type));
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED);
+
+  content_settings->OnMicrophoneAccessed();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_ACCESSED);
+  content_settings->OnCameraAccessed();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED);
+
+  // If microphone and camera have opposite settings, like one is allowed,
+  // while the other is denied, we show the allow access in our UI.
+  // TODO(xians): Fix the UI to show one allowed icon and one blocked icon.
+  content_settings->OnMicrophoneAccessBlocked();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::CAMERA_ACCESSED);
+  content_settings->OnCameraAccessBlocked();
+  EXPECT_EQ(content_settings->GetMicrophoneCameraState(),
+            TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED);
 }

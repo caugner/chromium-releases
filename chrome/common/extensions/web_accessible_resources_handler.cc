@@ -6,7 +6,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
@@ -64,7 +64,7 @@ WebAccessibleResourcesHandler::~WebAccessibleResourcesHandler() {
 bool WebAccessibleResourcesHandler::Parse(Extension* extension,
                                           string16* error) {
   scoped_ptr<WebAccessibleResourcesInfo> info(new WebAccessibleResourcesInfo);
-  const ListValue* list_value = NULL;
+  const base::ListValue* list_value = NULL;
   if (!extension->manifest()->GetList(keys::kWebAccessibleResources,
                                       &list_value)) {
     *error = ASCIIToUTF16(errors::kInvalidWebAccessibleResourcesList);

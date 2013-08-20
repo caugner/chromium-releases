@@ -14,8 +14,8 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop_proxy.h"
-#include "base/string_util.h"
+#include "base/message_loop/message_loop_proxy.h"
+#include "base/strings/string_util.h"
 #include "base/task_runner.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/feedback/feedback_util.h"
@@ -330,9 +330,11 @@ void SyslogsProviderImpl::ReadSyslogs(
       dbus::statistics::FORMAT_ALL);
 
   // Include recent network log events
-  (*logs)["network_event_log"] = chromeos::network_event_log::GetAsString(
-      chromeos::network_event_log::OLDEST_FIRST,
-      chromeos::system::kFeedbackMaxLineCount);
+  (*logs)["network_event_log"] = network_event_log::GetAsString(
+      network_event_log::OLDEST_FIRST,
+      "time,file,desc",
+      network_event_log::kDefaultLogLevel,
+      system::kFeedbackMaxLineCount);
 
   // SyslogsMemoryHandler will clean itself up.
   // SyslogsMemoryHandler::OnDetailsAvailable() will modify |logs| and call

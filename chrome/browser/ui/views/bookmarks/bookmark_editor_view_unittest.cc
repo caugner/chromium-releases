@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/message_loop.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -107,7 +107,7 @@ class BookmarkEditorViewTest : public testing::Test {
 
   views::TreeView* tree_view() { return editor_->tree_view_; }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 

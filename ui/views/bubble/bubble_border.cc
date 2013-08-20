@@ -112,6 +112,7 @@ BorderImages* GetBorderImages(BubbleBorder::Shadow shadow) {
       set = new BorderImages(kShadowImages, kShadowArrows, 0, 0, 3);
       break;
     case BubbleBorder::NO_SHADOW:
+    case BubbleBorder::NO_SHADOW_OPAQUE_BORDER:
       set = new BorderImages(kNoShadowImages, kNoShadowArrows, 6, 7, 4);
       break;
     case BubbleBorder::BIG_SHADOW:
@@ -157,11 +158,11 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& anchor_rect,
       std::max(images_->arrow_thickness + images_->border_interior_thickness,
                images_->border_thickness);
   if (is_arrow_on_horizontal(arrow_))
-    size.ClampToMin(gfx::Size(min_with_arrow_width, min_with_arrow_thickness));
+    size.SetToMax(gfx::Size(min_with_arrow_width, min_with_arrow_thickness));
   else if (has_arrow(arrow_))
-    size.ClampToMin(gfx::Size(min_with_arrow_thickness, min_with_arrow_width));
+    size.SetToMax(gfx::Size(min_with_arrow_thickness, min_with_arrow_width));
   else
-    size.ClampToMin(gfx::Size(min, min));
+    size.SetToMax(gfx::Size(min, min));
 
   int x = anchor_rect.x();
   int y = anchor_rect.y();
@@ -332,6 +333,9 @@ void BubbleBorder::DrawArrow(gfx::Canvas* canvas,
 }
 
 void BubbleBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
+  if (border_->shadow() == BubbleBorder::NO_SHADOW_OPAQUE_BORDER)
+    canvas->DrawColor(border_->background_color());
+
   // Clip out the client bounds to prevent overlapping transparent widgets.
   if (!border_->client_bounds().IsEmpty()) {
     SkRect client_rect(gfx::RectToSkRect(border_->client_bounds()));

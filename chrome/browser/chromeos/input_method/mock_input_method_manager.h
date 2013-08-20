@@ -48,12 +48,13 @@ class MockInputMethodManager : public InputMethodManager {
       const std::string& id,
       const std::string& name,
       const std::vector<std::string>& layouts,
-      const std::string& language,
+      const std::vector<std::string>& languages,
+      const GURL& options_url,
       InputMethodEngine* instance) OVERRIDE;
   virtual void RemoveInputMethodExtension(const std::string& id) OVERRIDE;
   virtual void GetInputMethodExtensions(
       InputMethodDescriptors* result) OVERRIDE;
-  virtual void SetFilteredExtensionImes(std::vector<std::string>* ids) OVERRIDE;
+  virtual void SetEnabledExtensionImes(std::vector<std::string>* ids) OVERRIDE;
   virtual bool SwitchToNextInputMethod() OVERRIDE;
   virtual bool SwitchToPreviousInputMethod() OVERRIDE;
   virtual bool SwitchInputMethod(const ui::Accelerator& accelerator) OVERRIDE;

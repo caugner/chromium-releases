@@ -5,15 +5,17 @@
 #import "ui/app_list/cocoa/apps_grid_view_item.h"
 
 #include "base/mac/foundation_util.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/app_list_item_model_observer.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image_skia_util_mac.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 namespace {
 
@@ -30,6 +32,7 @@ class ItemModelObserverBridge : public app_list::AppListItemModelObserver {
   virtual ~ItemModelObserverBridge();
 
   AppListItemModel* model() { return model_; }
+  NSMenu* GetContextMenu();
 
   virtual void ItemIconChanged() OVERRIDE;
   virtual void ItemTitleChanged() OVERRIDE;
@@ -40,6 +43,7 @@ class ItemModelObserverBridge : public app_list::AppListItemModelObserver {
  private:
   AppsGridViewItem* parent_;  // Weak. Owns us.
   AppListItemModel* model_;  // Weak. Owned by AppListModel::Apps.
+  base::scoped_nsobject<MenuController> context_menu_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ItemModelObserverBridge);
 };
@@ -55,12 +59,21 @@ ItemModelObserverBridge::~ItemModelObserverBridge() {
   model_->RemoveObserver(this);
 }
 
+NSMenu* ItemModelObserverBridge::GetContextMenu() {
+  if (!context_menu_controller_) {
+    context_menu_controller_.reset(
+        [[MenuController alloc] initWithModel:model_->GetContextMenuModel()
+                       useWithPopUpButtonCell:NO]);
+  }
+  return [context_menu_controller_ menu];
+}
+
 void ItemModelObserverBridge::ItemIconChanged() {
   [[parent_ button] setImage:gfx::NSImageFromImageSkia(model_->icon())];
 }
 
 void ItemModelObserverBridge::ItemTitleChanged() {
-  [[parent_ button] setTitle:base::SysUTF8ToNSString(model_->title())];
+  [parent_ setButtonTitle:base::SysUTF8ToNSString(model_->title())];
 }
 
 void ItemModelObserverBridge::ItemHighlightedChanged() {
@@ -90,6 +103,18 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
 
 @end
 
+@interface AppsGridItemButtonCell : NSButtonCell {
+ @private
+  BOOL hasShadow_;
+}
+
+@property(assign, nonatomic) BOOL hasShadow;
+
+@end
+
+@interface AppsGridItemButton : NSButton;
+@end
+
 @implementation AppsGridItemBackgroundView
 
 - (NSButton*)button {
@@ -97,9 +122,7 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
 }
 
 - (void)setSelected:(BOOL)flag {
-  if (selected_ == flag)
-    return;
-
+  DCHECK(selected_ != flag);
   selected_ = flag;
   [self setNeedsDisplay:YES];
 }
@@ -113,7 +136,7 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
   if (!selected_)
     return;
 
-  [gfx::SkColorToCalibratedNSColor(app_list::kHoverAndPushedColor) set];
+  [gfx::SkColorToCalibratedNSColor(app_list::kSelectedColor) set];
   NSRectFillUsingOperation(dirtyRect, NSCompositeSourceOver);
 }
 
@@ -149,8 +172,8 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
 
 - (id)initWithSize:(NSSize)tileSize {
   if ((self = [super init])) {
-    scoped_nsobject<NSButton> prototypeButton(
-        [[NSButton alloc] initWithFrame:NSMakeRect(
+    base::scoped_nsobject<AppsGridItemButton> prototypeButton(
+        [[AppsGridItemButton alloc] initWithFrame:NSMakeRect(
             0, 0, tileSize.width, tileSize.height - kTileTopPadding)]);
 
     // This NSButton style always positions the icon at the very top of the
@@ -160,17 +183,36 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
     [prototypeButton setButtonType:NSMomentaryChangeButton];
     [prototypeButton setBordered:NO];
 
-    [[prototypeButton cell]
-        setFont:ui::ResourceBundle::GetSharedInstance().GetFont(
-            app_list::kItemTextFontStyle).GetNativeFont()];
-
-    scoped_nsobject<AppsGridItemBackgroundView> prototypeButtonBackground(
-        [[AppsGridItemBackgroundView alloc] initWithFrame:NSMakeRect(
-            0, 0, tileSize.width, tileSize.height)]);
+    base::scoped_nsobject<AppsGridItemBackgroundView> prototypeButtonBackground(
+        [[AppsGridItemBackgroundView alloc]
+            initWithFrame:NSMakeRect(0, 0, tileSize.width, tileSize.height)]);
     [prototypeButtonBackground addSubview:prototypeButton];
     [self setView:prototypeButtonBackground];
   }
   return self;
+}
+
+- (NSString*)buttonTitle {
+  return [[[self button] attributedTitle] string];
+}
+
+- (void)setButtonTitle:(NSString*)newTitle {
+  base::scoped_nsobject<NSMutableParagraphStyle> paragraphStyle(
+      [[NSMutableParagraphStyle alloc] init]);
+  [paragraphStyle setLineBreakMode:NSLineBreakByTruncatingTail];
+  [paragraphStyle setAlignment:NSCenterTextAlignment];
+  NSDictionary* titleAttributes = @{
+    NSParagraphStyleAttributeName : paragraphStyle,
+    NSFontAttributeName : ui::ResourceBundle::GetSharedInstance().GetFont(
+        app_list::kItemTextFontStyle).GetNativeFont(),
+    NSForegroundColorAttributeName : [self isSelected] ?
+        gfx::SkColorToCalibratedNSColor(app_list::kGridTitleHoverColor) :
+        gfx::SkColorToCalibratedNSColor(app_list::kGridTitleColor)
+  };
+  base::scoped_nsobject<NSAttributedString> attributedTitle(
+      [[NSAttributedString alloc] initWithString:newTitle
+                                      attributes:titleAttributes]);
+  [[self button] setAttributedTitle:attributedTitle];
 }
 
 - (void)setModel:(app_list::AppListItemModel*)itemModel {
@@ -180,8 +222,9 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
   }
 
   NSButton* button = [self button];
-  [button setTitle:base::SysUTF8ToNSString(itemModel->title())];
+  [self setButtonTitle:base::SysUTF8ToNSString(itemModel->title())];
   [button setImage:gfx::NSImageFromImageSkia(itemModel->icon())];
+  [[button cell] setHasShadow:itemModel->has_shadow()];
   observerBridge_.reset(new app_list::ItemModelObserverBridge(self, itemModel));
 
   if (trackingArea_.get())
@@ -207,6 +250,11 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
       [[[self view] subviews] objectAtIndex:0]);
 }
 
+- (NSMenu*)contextMenu {
+  [self setSelected:YES];
+  return observerBridge_->GetContextMenu();
+}
+
 - (AppsGridItemBackgroundView*)itemBackgroundView {
   return base::mac::ObjCCastStrict<AppsGridItemBackgroundView>([self view]);
 }
@@ -220,8 +268,49 @@ void ItemModelObserverBridge::ItemPercentDownloadedChanged() {
 }
 
 - (void)setSelected:(BOOL)flag {
+  if ([self isSelected] == flag)
+    return;
+
   [[self itemBackgroundView] setSelected:flag];
   [super setSelected:flag];
+  [self setButtonTitle:[self buttonTitle]];
+}
+
+@end
+
+@implementation AppsGridItemButton
+
++ (Class)cellClass {
+  return [AppsGridItemButtonCell class];
+}
+
+@end
+
+@implementation AppsGridItemButtonCell
+
+@synthesize hasShadow = hasShadow_;
+
+- (void)drawImage:(NSImage*)image
+        withFrame:(NSRect)frame
+           inView:(NSView*)controlView {
+  if (!hasShadow_) {
+    [super drawImage:image
+           withFrame:frame
+              inView:controlView];
+    return;
+  }
+
+  base::scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
+  gfx::ScopedNSGraphicsContextSaveGState context;
+  [shadow setShadowOffset:NSMakeSize(0, -2)];
+  [shadow setShadowBlurRadius:2.0];
+  [shadow setShadowColor:[NSColor colorWithCalibratedWhite:0
+                                                     alpha:0.14]];
+  [shadow set];
+
+  [super drawImage:image
+         withFrame:frame
+            inView:controlView];
 }
 
 @end

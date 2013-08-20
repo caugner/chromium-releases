@@ -15,7 +15,7 @@ var CommandUtil = {};
  * @return {DirectoryEntry} Found root.
  */
 CommandUtil.getCommandRoot = function(event, list) {
-  if (util.platform.newUI() && list instanceof VolumeList) {
+  if (list instanceof VolumeList) {
     var result = list.dataModel.item(
                      list.getIndexOfListItem(event.target)) ||
                  list.selectedItem;
@@ -68,6 +68,14 @@ CommandUtil.canExecuteVisibleOnDriveWithCtrlKeyOnly =
     function(event, fileManager) {
   event.canExecute = fileManager.isOnDrive() && fileManager.isCtrlKeyPressed();
   event.command.setHidden(!event.canExecute);
+};
+
+/**
+ * Sets as the command as always enabled.
+ * @param {Event} event Command event to mark.
+ */
+CommandUtil.canExecuteAlways = function(event) {
+  event.canExecute = true;
 };
 
 /**
@@ -218,12 +226,7 @@ Commands.importCommand = {
     if (!root)
       return;
 
-    chrome.windows.getCurrent(undefined, function(window) {
-      chrome.windows.create(
-          { url: chrome.extension.getURL('photo_import.html') +
-                 '?' + window.id + '#' + PathUtil.getRootPath(root.fullPath),
-            type: 'popup' });
-    }.bind(this));
+    // TODO(mtomasz): Implement launching Photo Importer.
   },
   /**
    * @param {Event} event Command event.
@@ -244,8 +247,9 @@ Commands.newFolderCommand = {
   },
   canExecute: function(event, fileManager, directoryModel) {
     event.canExecute = !fileManager.isOnReadonlyDirectory() &&
+                       !fileManager.isRenamingInProgress() &&
                        !directoryModel.isSearching() &&
-                       !fileManager.isRenamingInProgress();
+                       !directoryModel.isScanning();
   }
 };
 
@@ -268,9 +272,7 @@ Commands.changeDefaultAppCommand = {
   execute: function(event, fileManager) {
     fileManager.showChangeDefaultAppPicker();
   },
-  canExecute: function(event, fileManager) {
-    event.canExecute = true;
-  }
+  canExecute: CommandUtil.canExecuteAlways
 };
 
 /**
@@ -322,13 +324,11 @@ Commands.renameFileCommand = {
 Commands.volumeHelpCommand = {
   execute: function() {
     if (fileManager.isOnDrive())
-      window.open(FileManager.GOOGLE_DRIVE_HELP, 'help');
+      chrome.windows.create({url: FileManager.GOOGLE_DRIVE_HELP});
     else
-      window.open(FileManager.FILES_APP_HELP, 'help');
+      chrome.windows.create({url: FileManager.FILES_APP_HELP});
   },
-  canExecute: function(event, fileManager) {
-    event.canExecute = true;
-  }
+  canExecute: CommandUtil.canExecuteAlways
 };
 
 /**
@@ -336,7 +336,7 @@ Commands.volumeHelpCommand = {
  */
 Commands.driveBuySpaceCommand = {
   execute: function() {
-    window.open(FileManager.GOOGLE_DRIVE_BUY_STORAGE, 'buy-more-space');
+    chrome.windows.create({url: FileManager.GOOGLE_DRIVE_BUY_STORAGE});
   },
   canExecute: CommandUtil.canExecuteVisibleOnDriveOnly
 };
@@ -366,7 +366,7 @@ Commands.driveReloadCommand = {
  */
 Commands.driveGoToDriveCommand = {
   execute: function() {
-    window.open(FileManager.GOOGLE_DRIVE_ROOT, 'drive-root');
+    chrome.windows.create({url: FileManager.GOOGLE_DRIVE_ROOT});
   },
   canExecute: CommandUtil.canExecuteVisibleOnDriveOnly
 };
@@ -396,11 +396,24 @@ Commands.openWithCommand = {
  * Focuses search input box.
  */
 Commands.searchCommand = {
-  execute: function(event, fileManager, elmnt) {
-    elmnt.focus();
+  execute: function(event, fileManager, element) {
+    element.focus();
+    element.select();
   },
   canExecute: function(event, fileManager) {
     event.canExecute = !fileManager.isRenamingInProgress();
+  }
+};
+
+/**
+ * Activates the n-th volume.
+ */
+Commands.volumeSwitchCommand = {
+  execute: function(event, volumeList, index) {
+    volumeList.selectByIndex(index - 1);
+  },
+  canExecute: function(event, volumeList, index) {
+    event.canExecute = index > 0 && index <= volumeList.dataModel.length;
   }
 };
 
@@ -465,4 +478,50 @@ Commands.zipSelectionCommand = {
         !fileManager.isOnDrive() &&
         selection && selection.totalCount > 0;
   }
+};
+
+/**
+ * Shows the share dialog for the current selection (single only).
+ */
+Commands.shareCommand = {
+  execute: function(event, fileManager) {
+    fileManager.shareSelection();
+  },
+  canExecute: function(event, fileManager) {
+    var selection = fileManager.getSelection();
+    event.canExecute = fileManager.isOnDrive() &&
+        !fileManager.isDriveOffline() &&
+        selection && selection.totalCount == 1;
+    event.command.setHidden(!fileManager.isOnDrive());
+  }
+};
+
+/**
+ * Zoom in to the Files.app.
+ */
+Commands.zoomInCommand = {
+  execute: function(event) {
+    chrome.fileBrowserPrivate.zoom('in');
+  },
+  canExecute: CommandUtil.canExecuteAlways
+};
+
+/**
+ * Zoom out from the Files.app.
+ */
+Commands.zoomOutCommand = {
+  execute: function(event) {
+    chrome.fileBrowserPrivate.zoom('out');
+  },
+  canExecute: CommandUtil.canExecuteAlways
+};
+
+/**
+ * Reset the zoom factor.
+ */
+Commands.zoomResetCommand = {
+  execute: function(event) {
+    chrome.fileBrowserPrivate.zoom('reset');
+  },
+  canExecute: CommandUtil.canExecuteAlways
 };

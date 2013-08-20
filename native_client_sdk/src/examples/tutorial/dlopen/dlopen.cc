@@ -2,19 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/// @file
-/// This example demonstrates building a dynamic library which is loaded by the
-/// NaCl module.  To load the NaCl module, the browser first looks for the
-/// CreateModule() factory method (at the end of this file).  It calls
-/// CreateModule() once to load the module code from your .nexe.  After the
-/// .nexe code is loaded, CreateModule() is not called again.
-///
-/// Once the .nexe code is loaded, the browser then calls the CreateInstance()
-/// method on the object returned by CreateModule().  If the CreateInstance
-/// returns successfully, then Init function is called, which will load the
-/// shared object on a worker thread.  We use a worker because dlopen is
-/// a blocking call, which is not allowed on the main thread.
-
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -36,13 +23,19 @@
 #define CONFIG_NAME "Release"
 #endif
 
-#define XSTRINGIFY(x) STRINGIFY(x)
-#define STRINGIFY(x) #x
-#define NACL_ARCH_STRING XSTRINGIFY(NACL_ARCH)
+#if defined __arm__
+#define NACL_ARCH "arm"
+#elif defined __i686__
+#define NACL_ARCH "x86_32"
+#elif defined __x86_64__
+#define NACL_ARCH "x86_64"
+#else
+#error "Unknown arch"
+#endif
 
-class DlopenInstance : public pp::Instance {
+class DlOpenInstance : public pp::Instance {
  public:
-  explicit DlopenInstance(PP_Instance instance)
+  explicit DlOpenInstance(PP_Instance instance)
       : pp::Instance(instance),
         eightball_so_(NULL),
         reverse_so_(NULL),
@@ -50,8 +43,7 @@ class DlopenInstance : public pp::Instance {
         reverse_(NULL),
         tid_(NULL) {}
 
-  virtual ~DlopenInstance() {}
-  ;
+  virtual ~DlOpenInstance() {}
 
   // Helper function to post a message back to the JS and stdout functions.
   void logmsg(const char* pStr) {
@@ -80,7 +72,7 @@ class DlopenInstance : public pp::Instance {
   // dlclose, which would close the shared object and unload it from memory.
   void LoadLibrary() {
     const char reverse_so_path[] =
-        "/http/glibc/" CONFIG_NAME "/libreverse_" NACL_ARCH_STRING ".so";
+        "/http/glibc/" CONFIG_NAME "/libreverse_" NACL_ARCH ".so";
     const int32_t IMMEDIATELY = 0;
     eightball_so_ = dlopen("libeightball.so", RTLD_LAZY);
     reverse_so_ = dlopen(reverse_so_path, RTLD_LAZY);
@@ -167,13 +159,13 @@ class DlopenInstance : public pp::Instance {
   }
 
   static void* LoadLibrariesOnWorker(void* pInst) {
-    DlopenInstance* inst = static_cast<DlopenInstance*>(pInst);
+    DlOpenInstance* inst = static_cast<DlOpenInstance*>(pInst);
     inst->LoadLibrary();
     return NULL;
   }
 
   static void LoadDoneCB(void* pInst, int32_t result) {
-    DlopenInstance* inst = static_cast<DlopenInstance*>(pInst);
+    DlOpenInstance* inst = static_cast<DlOpenInstance*>(pInst);
     inst->UseLibrary();
   }
 
@@ -185,25 +177,17 @@ class DlopenInstance : public pp::Instance {
   pthread_t tid_;
 };
 
-// The Module class.  The browser calls the CreateInstance() method to create
-// an instance of your NaCl module on the web page.  The browser creates a new
-// instance for each <embed> tag with type="application/x-nacl".
-class dlOpenModule : public pp::Module {
+class DlOpenModule : public pp::Module {
  public:
-  dlOpenModule() : pp::Module() {}
-  virtual ~dlOpenModule() {}
+  DlOpenModule() : pp::Module() {}
+  virtual ~DlOpenModule() {}
 
-  // Create and return a DlopenInstance object.
+  // Create and return a DlOpenInstance object.
   virtual pp::Instance* CreateInstance(PP_Instance instance) {
-    return new DlopenInstance(instance);
+    return new DlOpenInstance(instance);
   }
 };
 
-// Factory function called by the browser when the module is first loaded.
-// The browser keeps a singleton of this module.  It calls the
-// CreateInstance() method on the object you return to make instances.  There
-// is one instance per <embed> tag on the page.  This is the main binding
-// point for your NaCl module with the browser.
 namespace pp {
-Module* CreateModule() { return new dlOpenModule(); }
+Module* CreateModule() { return new DlOpenModule(); }
 }  // namespace pp

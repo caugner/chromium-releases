@@ -4,15 +4,21 @@
 
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
 
+#include "apps/app_load_service.h"
+#include "apps/app_restore_service.h"
+#include "apps/saved_files_service.h"
 #include "base/base64.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api_factory.h"
 #include "chrome/browser/extensions/api/developer_private/entry_picker.h"
+#include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -27,14 +33,18 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/developer_private.h"
 #include "chrome/common/extensions/background_info.h"
-#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/incognito_handler.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/manifest_handlers/offline_enabled_info.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/storage_partition.h"
@@ -46,11 +56,12 @@
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "webkit/blob/shareable_file_reference.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_operation.h"
-#include "webkit/fileapi/local_file_system_operation.h"
-#include "webkit/fileapi/syncable/syncable_file_system_util.h"
+#include "ui/webui/web_ui_util.h"
+#include "webkit/browser/fileapi/file_system_context.h"
+#include "webkit/browser/fileapi/file_system_operation_runner.h"
+#include "webkit/browser/fileapi/local_file_system_operation.h"
+#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
+#include "webkit/common/blob/shareable_file_reference.h"
 
 using content::RenderViewHost;
 
@@ -65,23 +76,9 @@ ExtensionUpdater* GetExtensionUpdater(Profile* profile) {
     return profile->GetExtensionService()->updater();
 }
 
-GURL ToDataURL(const base::FilePath& path) {
-  std::string contents;
-  if (!file_util::ReadFileToString(path, &contents))
-    return GURL();
-
-  std::string contents_base64;
-  if (!base::Base64Encode(contents, &contents_base64))
-    return GURL();
-
-  const char kDataURLPrefix[] = "data:image;base64,";
-  return GURL(kDataURLPrefix + contents_base64);
-}
-
 std::vector<base::FilePath> ListFolder(const base::FilePath path) {
-  file_util::FileEnumerator files(path, false,
-      file_util::FileEnumerator::DIRECTORIES
-      | file_util::FileEnumerator::FILES);
+  base::FileEnumerator files(path, false,
+      base::FileEnumerator::DIRECTORIES | base::FileEnumerator::FILES);
   std::vector<base::FilePath> paths;
 
   for (base::FilePath current_path = files.Next(); !current_path.empty();
@@ -95,6 +92,17 @@ bool ValidateFolderName(const base::FilePath::StringType& name) {
   base::FilePath::StringType name_sanitized(name);
   file_util::ReplaceIllegalCharactersInPath(&name_sanitized, '_');
   return name == name_sanitized;
+}
+
+const Extension* GetExtensionByPath(const ExtensionSet* extensions,
+                                    const base::FilePath& path) {
+  base::FilePath extension_path = base::MakeAbsoluteFilePath(path);
+  for (ExtensionSet::const_iterator iter = extensions->begin();
+       iter != extensions->end(); ++iter) {
+    if ((*iter)->path() == extension_path)
+      return iter->get();
+  }
+  return NULL;
 }
 
 }  // namespace
@@ -174,6 +182,14 @@ scoped_ptr<developer::ItemInfo>
   info->version = item.VersionString();
   info->description = item.description();
 
+  GURL url =
+      ExtensionIconSource::GetIconURL(&item,
+                                      extension_misc::EXTENSION_ICON_MEDIUM,
+                                      ExtensionIconSet::MATCH_BIGGER,
+                                      false,
+                                      NULL);
+  info->icon_url = url.spec();
+
   if (item.is_app()) {
     if (item.is_legacy_packaged_app())
       info->type = developer::ITEM_TYPE_LEGACY_PACKAGED_APP;
@@ -218,7 +234,7 @@ scoped_ptr<developer::ItemInfo>
 
   if (item.is_app()) {
     info->app_launch_url.reset(new std::string(
-        item.GetFullLaunchURL().spec()));
+        extensions::AppLaunchInfo::GetFullLaunchURL(&item).spec()));
   }
 
   info->may_disable = system->management_policy()->
@@ -227,26 +243,6 @@ scoped_ptr<developer::ItemInfo>
   info->views = GetInspectablePagesForExtension(&item, item_is_enabled);
 
   return info.Pass();
-}
-
-void DeveloperPrivateGetItemsInfoFunction::GetIconsOnFileThread(
-    ItemInfoList item_list,
-    const std::map<std::string, ExtensionResource> idToIcon) {
-  for (ItemInfoList::iterator iter = item_list.begin();
-       iter != item_list.end(); ++iter) {
-    developer_private::ItemInfo* info = iter->get();
-    std::map<std::string, ExtensionResource>::const_iterator resource_ptr
-        = idToIcon.find(info->id);
-    if (resource_ptr != idToIcon.end()) {
-      info->icon = ToDataURL(resource_ptr->second.GetFilePath()).spec();
-    }
-  }
-
-  results_ = developer::GetItemsInfo::Results::Create(item_list);
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&DeveloperPrivateGetItemsInfoFunction::SendResponse,
-                 this,
-                 true));
 }
 
 void DeveloperPrivateGetItemsInfoFunction::
@@ -279,7 +275,7 @@ void DeveloperPrivateGetItemsInfoFunction::
   ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
   if (!registry) return;
 
-  const ShellWindowRegistry::ShellWindowSet windows =
+  const ShellWindowRegistry::ShellWindowList windows =
       registry->GetShellWindowsForApp(extension->id());
 
   for (ShellWindowRegistry::const_iterator it = windows.begin();
@@ -385,30 +381,35 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
     items.InsertAll(*service->terminated_extensions());
   }
 
-  std::map<std::string, ExtensionResource> id_to_icon;
   ItemInfoList item_list;
 
   for (ExtensionSet::const_iterator iter = items.begin();
        iter != items.end(); ++iter) {
-    const Extension& item = **iter;
+    const Extension& item = *iter->get();
 
-    ExtensionResource item_resource =
-        IconsInfo::GetIconResource(&item,
-                                   48,
-                                   ExtensionIconSet::MATCH_BIGGER);
-    id_to_icon[item.id()] = item_resource;
+    // Don't show component extensions because they are only extensions as an
+    // implementation detail of Chrome.
+    if (item.location() == Manifest::COMPONENT &&
+        !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kShowComponentExtensionOptions)) {
+      continue;
+    }
 
-    if (item.location() == Manifest::COMPONENT)
-      continue;  // Skip built-in extensions / apps;
+    // Don't show apps that aren't visible in either launcher or ntp.
+    if (item.is_app() && !item.ShouldDisplayInAppLauncher() &&
+        !item.ShouldDisplayInNewTabPage() &&
+        !Manifest::IsUnpackedLocation(item.location())) {
+      continue;
+    }
+
     item_list.push_back(make_linked_ptr<developer::ItemInfo>(
-        CreateItemInfo(item, false).release()));
+        CreateItemInfo(
+            item, service->IsExtensionEnabled(item.id())).release()));
   }
 
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&DeveloperPrivateGetItemsInfoFunction::GetIconsOnFileThread,
-                 this,
-                 item_list,
-                 id_to_icon));
+  results_ = developer::GetItemsInfo::Results::Create(item_list);
+  SendResponse(true);
+
   return true;
 }
 
@@ -477,31 +478,44 @@ bool DeveloperPrivateReloadFunction::RunImpl() {
 }
 
 bool DeveloperPrivateShowPermissionsDialogFunction::RunImpl() {
-  std::string extension_id;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id_));
   ExtensionService* service = profile()->GetExtensionService();
-  CHECK(!extension_id.empty());
+  CHECK(!extension_id_.empty());
   ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
   DCHECK(registry);
   ShellWindow* shell_window = registry->GetShellWindowForRenderViewHost(
       render_view_host());
   prompt_.reset(new ExtensionInstallPrompt(shell_window->web_contents()));
-  const Extension* extension = service->GetInstalledExtension(extension_id);
+  const Extension* extension = service->GetInstalledExtension(extension_id_);
 
   if (!extension)
     return false;
 
-  // Released by InstallUIAbort.
+  // Released by InstallUIAbort or InstallUIProceed.
   AddRef();
-  prompt_->ReviewPermissions(this, extension);
+  std::vector<base::FilePath> retained_file_paths;
+  if (extension->HasAPIPermission(extensions::APIPermission::kFileSystem)) {
+    std::vector<apps::SavedFileEntry> retained_file_entries =
+        apps::SavedFilesService::Get(profile())->GetAllFileEntries(
+            extension_id_);
+    for (size_t i = 0; i < retained_file_entries.size(); i++) {
+      retained_file_paths.push_back(retained_file_entries[i].path);
+    }
+  }
+  prompt_->ReviewPermissions(this, extension, retained_file_paths);
   return true;
 }
 
 DeveloperPrivateReloadFunction::~DeveloperPrivateReloadFunction() {}
 
+// This is called when the user clicks "Revoke File Access."
 void DeveloperPrivateShowPermissionsDialogFunction::InstallUIProceed() {
-  // The permissions dialog only contains a close button.
-  NOTREACHED();
+  apps::SavedFilesService::Get(profile())->ClearQueue(
+      profile()->GetExtensionService()->GetExtensionById(extension_id_, true));
+  if (apps::AppRestoreService::Get(profile())->IsAppRestorable(extension_id_))
+    apps::AppLoadService::Get(profile())->RestartApplication(extension_id_);
+  SendResponse(true);
+  Release();
 }
 
 void DeveloperPrivateShowPermissionsDialogFunction::InstallUIAbort(
@@ -520,9 +534,9 @@ bool DeveloperPrivateRestartFunction::RunImpl() {
   scoped_ptr<Restart::Params> params(Restart::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  ExtensionService* service = profile()->GetExtensionService();
+  apps::AppLoadService* service = apps::AppLoadService::Get(profile());
   EXTENSION_FUNCTION_VALIDATE(!params->item_id.empty());
-  service->RestartExtension(params->item_id);
+  service->RestartApplication(params->item_id);
   return true;
 }
 
@@ -579,7 +593,8 @@ bool DeveloperPrivateEnableFunction::RunImpl() {
       service->EnableExtension(extension_id);
 
       // Make sure any browser action contained within it is not hidden.
-      prefs->SetBrowserActionVisibility(extension, true);
+      ExtensionActionAPI::SetBrowserActionVisibility(
+          prefs, extension->id(), true);
     }
   } else {
     service->DisableExtension(extension_id, Extension::DISABLE_USER_ACTION);
@@ -833,18 +848,11 @@ void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
       Extension::GetBaseURLFromExtensionId(extension_id()).spec());
   fileapi::FileSystemURL url(sync_file_system::CreateSyncableFileSystemURL(
       GURL(origin_url),
-      sync_file_system::DriveFileSyncService::kServiceName,
-      base::FilePath()));
+      project_path.BaseName()));
 
-  base::PlatformFileError error_code;
-  fileapi::FileSystemOperation* op =
-      context_->CreateFileSystemOperation(url, &error_code);
-
-  DCHECK(op);
-
-  op->ReadDirectory(url, base::Bind(
-      &DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
-          ReadSyncFileSystemDirectoryCb, this, project_path));
+  context_->operation_runner()->ReadDirectory(
+      url, base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
+                      ReadSyncFileSystemDirectoryCb, this, project_path));
 }
 
 void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
@@ -876,22 +884,11 @@ void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
         Extension::GetBaseURLFromExtensionId(extension_id()).spec());
     fileapi::FileSystemURL url(sync_file_system::CreateSyncableFileSystemURL(
         GURL(origin_url),
-        sync_file_system::DriveFileSyncService::kServiceName,
-        base::FilePath(file_list[i].name)));
+        project_path.BaseName().Append(file_list[i].name)));
     base::FilePath target_path = project_path;
     target_path = target_path.Append(file_list[i].name);
 
-    base::PlatformFileError error_code;
-    fileapi::FileSystemOperation* op =
-        context_->CreateFileSystemOperation(url, &error_code);
-    DCHECK(op);
-
-    if (error_code != base::PLATFORM_FILE_OK) {
-      DLOG(ERROR) << "Error in copying files from sync filesystem.";
-      return;
-    }
-
-    op->CreateSnapshotFile(
+    context_->operation_runner()->CreateSnapshotFile(
         url,
         base::Bind(
             &DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
@@ -962,133 +959,6 @@ DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
 DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
     ~DeveloperPrivateExportSyncfsFolderToLocalfsFunction() {}
 
-bool DeveloperPrivateLoadProjectToSyncfsFunction::RunImpl() {
-  // TODO(grv) : add unittests.
-  base::FilePath::StringType project_name;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &project_name));
-  if (!ValidateFolderName(project_name)) {
-    DLOG(INFO) << "Invalid project_name : [" << project_name << "]";
-    return false;
-  }
-
-  context_ = content::BrowserContext::GetStoragePartition(profile(),
-      render_view_host()->GetSiteInstance())->GetFileSystemContext();
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&DeveloperPrivateLoadProjectToSyncfsFunction::
-                 CopyFolder,
-                 this, project_name));
-  return true;
-}
-
-void DeveloperPrivateLoadProjectToSyncfsFunction::CopyFolder(
-    const base::FilePath::StringType& project_name) {
-  base::FilePath path(profile()->GetPath());
-  path = path.Append(kUnpackedAppsFolder);
-  path = path.Append(project_name);
-
-  std::vector<base::FilePath> paths = ListFolder(path);
-  content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&DeveloperPrivateLoadProjectToSyncfsFunction::
-                 CopyFiles,
-                 this, paths));
-}
-
-void DeveloperPrivateLoadProjectToSyncfsFunction::CopyFiles(
-    const std::vector<base::FilePath>& paths) {
-  std::string origin_url(
-      Extension::GetBaseURLFromExtensionId(extension_id()).spec());
-  fileapi::FileSystemURL url(sync_file_system::CreateSyncableFileSystemURL(
-      GURL(origin_url),
-      sync_file_system::DriveFileSyncService::kServiceName,
-      base::FilePath()));
-
-  pendingCallbacksCount_ = paths.size();
-
-  for (size_t i = 0; i < paths.size(); ++i) {
-    base::PlatformFileError error_code;
-    fileapi::FileSystemOperation* op
-        = context_->CreateFileSystemOperation(url, &error_code);
-    DCHECK(op);
-
-    std::string origin_url(
-        Extension::GetBaseURLFromExtensionId(extension_id()).spec());
-    fileapi::FileSystemURL
-        dest_url(sync_file_system::CreateSyncableFileSystemURL(
-            GURL(origin_url),
-            sync_file_system::DriveFileSyncService::kServiceName,
-            base::FilePath(paths[i].BaseName())));
-
-    op->AsLocalFileSystemOperation()->CopyInForeignFile(paths[i], dest_url,
-        base::Bind(&DeveloperPrivateLoadProjectToSyncfsFunction::
-                   CopyFilesCallback,
-                   this));
-  }
-}
-
-void DeveloperPrivateLoadProjectToSyncfsFunction::CopyFilesCallback(
-    const base::PlatformFileError result) {
-
-  CHECK(pendingCallbacksCount_);
-  pendingCallbacksCount_--;
-
-  if (success_ && result != base::PLATFORM_FILE_OK) {
-    SetError("Error in copying files to sync filesystem.");
-    success_ = false;
-  }
-
-  if (!pendingCallbacksCount_) {
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&DeveloperPrivateLoadProjectToSyncfsFunction::SendResponse,
-                   this,
-                   success_));
-  }
-}
-
-DeveloperPrivateLoadProjectToSyncfsFunction::
-    DeveloperPrivateLoadProjectToSyncfsFunction()
-    : pendingCallbacksCount_(0), success_(true) {}
-
-DeveloperPrivateLoadProjectToSyncfsFunction::
-    ~DeveloperPrivateLoadProjectToSyncfsFunction() {}
-
-bool DeveloperPrivateGetProjectsInfoFunction::RunImpl() {
-  // TODO(grv) : add unittests.
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&DeveloperPrivateGetProjectsInfoFunction::ReadFolder,
-                 this));
-
-  // Released by ReadFolder
-  AddRef();
-  return true;
-}
-
-void DeveloperPrivateGetProjectsInfoFunction::ReadFolder() {
-  base::FilePath path(profile()->GetPath());
-  path = path.Append(kUnpackedAppsFolder);
-
-  std::vector<base::FilePath> paths = ListFolder(path);
-  ProjectInfoList info_list;
-  for (size_t i = 0; i <  paths.size(); ++i) {
-    scoped_ptr<developer::ProjectInfo> info(new developer::ProjectInfo());
-    info->name = paths[i].BaseName().MaybeAsASCII();
-    info_list.push_back(
-        make_linked_ptr<developer::ProjectInfo>(info.release()));
-  }
-
-  results_ = developer::GetProjectsInfo::Results::Create(info_list);
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&DeveloperPrivateGetProjectsInfoFunction::SendResponse,
-                 this,
-                 true));
-  Release();
-}
-
-DeveloperPrivateGetProjectsInfoFunction::
-    DeveloperPrivateGetProjectsInfoFunction() {}
-
-DeveloperPrivateGetProjectsInfoFunction::
-    ~DeveloperPrivateGetProjectsInfoFunction() {}
-
 bool DeveloperPrivateLoadProjectFunction::RunImpl() {
   // TODO(grv) : add unit tests.
   base::FilePath::StringType project_name;
@@ -1104,8 +974,32 @@ bool DeveloperPrivateLoadProjectFunction::RunImpl() {
   path = path.Append(project_name);
   ExtensionService* service = profile()->GetExtensionService();
   UnpackedInstaller::Create(service)->Load(path);
-  SendResponse(true);
+
+  const ExtensionSet* extensions = service->extensions();
+  // Released by GetUnpackedExtension.
+  AddRef();
+  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(&DeveloperPrivateLoadProjectFunction::GetUnpackedExtension,
+                 this, path, extensions));
   return true;
+}
+
+void DeveloperPrivateLoadProjectFunction::GetUnpackedExtension(
+    const base::FilePath& path,
+    const ExtensionSet* extensions) {
+  const Extension* extension = GetExtensionByPath(extensions, path);
+  bool success = true;
+  if (extension) {
+    SetResult(base::Value::CreateStringValue(extension->id()));
+  } else {
+    SetError("unable to load the project");
+    success = false;
+  }
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&DeveloperPrivateLoadProjectFunction::SendResponse,
+                 this,
+                 success));
+  Release();
 }
 
 DeveloperPrivateLoadProjectFunction::DeveloperPrivateLoadProjectFunction() {}
@@ -1169,8 +1063,10 @@ void DeveloperPrivateChoosePathFunction::FileSelectionCanceled() {
 DeveloperPrivateChoosePathFunction::~DeveloperPrivateChoosePathFunction() {}
 
 bool DeveloperPrivateGetStringsFunction::RunImpl() {
-  DictionaryValue* dict = new DictionaryValue();
+  base::DictionaryValue* dict = new base::DictionaryValue();
   SetResult(dict);
+
+  webui::SetFontAndTextDirection(dict);
 
   #define   SET_STRING(id, idr) \
     dict->SetString(id, l10n_util::GetStringUTF16(idr))
@@ -1180,8 +1076,9 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("appsDevtoolNoApps", IDS_APPS_DEVTOOL_NO_APPS_INSTALLED);
   SET_STRING("appsDevtoolApps", IDS_APPS_DEVTOOL_APPS_INSTALLED);
   SET_STRING("appsDevtoolExtensions", IDS_APPS_DEVTOOL_EXTENSIONS_INSTALLED);
-  SET_STRING("appsDevtoolNoExtensions",
-             IDS_EXTENSIONS_NONE_INSTALLED);
+  SET_STRING("appsDevtoolNoExtensions", IDS_EXTENSIONS_NONE_INSTALLED);
+  SET_STRING("appsDevtoolUnpacked", IDS_APPS_DEVTOOL_UNPACKED_INSTALLED);
+  SET_STRING("appsDevtoolNoUnpacked", IDS_APPS_DEVTOOL_NO_UNPACKED_INSTALLED);
   SET_STRING("appsDevtoolTitle", IDS_APPS_DEVTOOL_TITLE);
   SET_STRING("extensionSettingsGetMoreExtensions", IDS_GET_MORE_EXTENSIONS);
   SET_STRING("extensionSettingsExtensionId", IDS_EXTENSIONS_ID);
@@ -1204,14 +1101,13 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("extensionSettingsLaunch", IDS_EXTENSIONS_LAUNCH);
   SET_STRING("extensionSettingsRestart", IDS_EXTENSIONS_RESTART);
   SET_STRING("extensionSettingsOptions", IDS_EXTENSIONS_OPTIONS_LINK);
-  SET_STRING("extensionSettingsActivity", IDS_EXTENSIONS_ACTIVITY_LINK);
   SET_STRING("extensionSettingsPermissions", IDS_EXTENSIONS_PERMISSIONS_LINK);
   SET_STRING("extensionSettingsVisitWebsite", IDS_EXTENSIONS_VISIT_WEBSITE);
   SET_STRING("extensionSettingsVisitWebStore", IDS_EXTENSIONS_VISIT_WEBSTORE);
   SET_STRING("extensionSettingsPolicyControlled",
              IDS_EXTENSIONS_POLICY_CONTROLLED);
   SET_STRING("extensionSettingsManagedMode",
-             IDS_EXTENSIONS_LOCKED_MANAGED_MODE);
+             IDS_EXTENSIONS_LOCKED_MANAGED_USER);
   SET_STRING("extensionSettingsShowButton", IDS_EXTENSIONS_SHOW_BUTTON);
   SET_STRING("appsDevtoolLoadUnpackedButton",
              IDS_APPS_DEVTOOL_LOAD_UNPACKED_BUTTON);
@@ -1226,10 +1122,16 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("extensionsPermissionsHeading",
              IDS_EXTENSIONS_PERMISSIONS_HEADING);
   SET_STRING("extensionsPermissionsClose", IDS_EXTENSIONS_PERMISSIONS_CLOSE);
+  SET_STRING("extensionDisabled", IDS_EXTENSIONS_DISABLED);
+  SET_STRING("extensionSettingsShowLogsButton", IDS_EXTENSIONS_SHOW_LOGS);
+  SET_STRING("extensionSettingsMoreDetailsButton", IDS_EXTENSIONS_MORE_DETAILS);
+  SET_STRING("extensionSettingsVersion", IDS_EXTENSIONS_VERSION);
+  SET_STRING("extensionSettingsDelete", IDS_EXTENSIONS_DELETE);
+  SET_STRING("extensionSettingsPack", IDS_EXTENSIONS_PACK);
 
 // Pack Extension strings
   SET_STRING("packExtensionOverlay", IDS_EXTENSION_PACK_DIALOG_TITLE);
-  SET_STRING("packExtensionHeading", IDS_EXTENSION_PACK_DIALOG_HEADING);
+  SET_STRING("packExtensionHeading", IDS_EXTENSION_ADT_PACK_DIALOG_HEADING);
   SET_STRING("packExtensionCommit", IDS_EXTENSION_PACK_BUTTON);
   SET_STRING("ok",IDS_OK);
   SET_STRING("cancel",IDS_CANCEL);

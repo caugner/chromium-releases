@@ -41,7 +41,6 @@ class MockPluginDelegate : public PluginDelegate {
   virtual PlatformGraphics2D* GetGraphics2D(PluginInstance* instance,
                                             PP_Resource graphics_2d);
   virtual PlatformContext3D* CreateContext3D();
-  virtual void ReparentContext(PlatformContext3D*);
   virtual PlatformVideoDecoder* CreateVideoDecoder(
       media::VideoDecodeAccelerator::Client* client,
       int32 command_buffer_route_id);
@@ -79,35 +78,33 @@ class MockPluginDelegate : public PluginDelegate {
                                               PP_Resource resource) const;
   virtual GURL GetFileSystemRootUrl(PP_Instance instance,
                                     PP_Resource resource) const;
-  virtual bool OpenFileSystem(
-      const GURL& origin_url,
-      fileapi::FileSystemType type,
-      long long size,
-      fileapi::FileSystemCallbackDispatcher* dispatcher);
   virtual bool MakeDirectory(
       const GURL& path,
       bool recursive,
-      fileapi::FileSystemCallbackDispatcher* dispatcher);
+      const StatusCallback& callback);
   virtual bool Query(const GURL& path,
-                     fileapi::FileSystemCallbackDispatcher* dispatcher);
+                     const MetadataCallback& success_callback,
+                     const StatusCallback& error_callback);
   virtual bool ReadDirectoryEntries(
       const GURL& path,
-      fileapi::FileSystemCallbackDispatcher* dispatcher);
+      const ReadDirectoryCallback& success_callback,
+      const StatusCallback& error_callback);
   virtual bool Touch(const GURL& path,
                      const base::Time& last_access_time,
                      const base::Time& last_modified_time,
-                     fileapi::FileSystemCallbackDispatcher* dispatcher);
+                     const StatusCallback& callback);
   virtual bool SetLength(const GURL& path,
                          int64_t length,
-                         fileapi::FileSystemCallbackDispatcher* dispatcher);
+                         const StatusCallback& callback);
   virtual bool Delete(const GURL& path,
-                      fileapi::FileSystemCallbackDispatcher* dispatcher);
+                      const StatusCallback& callback);
   virtual bool Rename(const GURL& file_path,
                       const GURL& new_file_path,
-                      fileapi::FileSystemCallbackDispatcher* dispatcher);
+                      const StatusCallback& callback);
   virtual bool ReadDirectory(
       const GURL& directory_path,
-      fileapi::FileSystemCallbackDispatcher* dispatcher);
+      const ReadDirectoryCallback& success_callback,
+      const StatusCallback& error_callback);
   virtual void QueryAvailableSpace(const GURL& origin,
                                    quota::StorageType type,
                                    const AvailableSpaceCallback& callback);
@@ -135,9 +132,9 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void TCPSocketRead(uint32 socket_id, int32_t bytes_to_read);
   virtual void TCPSocketWrite(uint32 socket_id, const std::string& buffer);
   virtual void TCPSocketDisconnect(uint32 socket_id);
-  virtual void TCPSocketSetBoolOption(uint32 socket_id,
-                                      PP_TCPSocketOption_Private name,
-                                      bool value);
+  virtual void TCPSocketSetOption(uint32 socket_id,
+                                  PP_TCPSocket_Option name,
+                                  const ::ppapi::SocketOptionData& value);
   virtual void RegisterTCPSocket(PPB_TCPSocket_Private_Impl* socket,
                                  uint32 socket_id);
   virtual void TCPServerSocketListen(PP_Resource socket_resource,
@@ -183,6 +180,8 @@ class MockPluginDelegate : public PluginDelegate {
       base::ProcessId target_process_id,
       bool should_close_source) const;
   virtual bool IsRunningInProcess(PP_Instance instance) const;
+  virtual void HandleDocumentLoad(PluginInstance* instance,
+                                  const WebKit::WebURLResponse& response);
 };
 
 }  // namespace ppapi

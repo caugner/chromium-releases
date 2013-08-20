@@ -12,8 +12,11 @@
 #include "android_webview/browser/net/aw_network_delegate.h"
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
 #include "android_webview/browser/net/init_native_callback.h"
+#include "android_webview/common/aw_switches.h"
+#include "base/command_line.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/cookie_store_factory.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/cache_type.h"
@@ -54,26 +57,42 @@ void AwURLRequestContextGetter::Init() {
   net::URLRequestContextBuilder builder;
   builder.set_user_agent(content::GetUserAgent(GURL()));
   builder.set_network_delegate(new AwNetworkDelegate());
+#if !defined(DISABLE_FTP_SUPPORT)
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
+#endif
   builder.set_proxy_config_service(proxy_config_service_.release());
   builder.set_accept_language(net::HttpUtil::GenerateAcceptLanguageHeader(
       AwContentBrowserClient::GetAcceptLangsImpl()));
 
   url_request_context_.reset(builder.Build());
-
   // TODO(mnaganov): Fix URLRequestContextBuilder to use proper threads.
   net::HttpNetworkSession::Params network_session_params;
+
+  net::BackendType cache_type = net::CACHE_BACKEND_SIMPLE;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableSimpleCache)) {
+    cache_type = net::CACHE_BACKEND_BLOCKFILE;
+  }
   PopulateNetworkSessionParams(&network_session_params);
   net::HttpCache* main_cache = new net::HttpCache(
       network_session_params,
       new net::HttpCache::DefaultBackend(
           net::DISK_CACHE,
-          net::CACHE_BACKEND_DEFAULT,
+          cache_type,
           browser_context_->GetPath().Append(FILE_PATH_LITERAL("Cache")),
           10 * 1024 * 1024,  // 10M
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
   main_http_factory_.reset(main_cache);
   url_request_context_->set_http_transaction_factory(main_cache);
+
+  scoped_refptr<net::CookieStore> cookie_store =
+      content::CreatePersistentCookieStore(
+          browser_context_->GetPath().Append(FILE_PATH_LITERAL("Cookies")),
+          false,
+          NULL,
+          NULL);
+  cookie_store->GetCookieMonster()->SetPersistSessionCookies(true);
+  url_request_context_->set_cookie_store(cookie_store.get());
 
   // The CookieMonster must be passed here so it happens synchronously to
   // the main thread initialization (to avoid race condition in another

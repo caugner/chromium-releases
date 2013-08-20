@@ -5,7 +5,7 @@
 #include "ui/gfx/render_text.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/break_list.h"
 
@@ -41,7 +41,11 @@ bool IndexInRange(const ui::Range& range, size_t index) {
   return index >= range.start() && index < range.end();
 }
 
-#if !defined(OS_MACOSX)
+base::string16 GetSelectedText(RenderText* render_text) {
+  return render_text->text().substr(render_text->selection().GetMin(),
+                                    render_text->selection().length());
+}
+
 // A test utility function to set the application default text direction.
 void SetRTL(bool rtl) {
   // Override the current locale/direction.
@@ -52,7 +56,6 @@ void SetRTL(bool rtl) {
 #endif
   EXPECT_EQ(rtl, base::i18n::IsRTL());
 }
-#endif
 
 }  // namespace
 
@@ -190,7 +193,7 @@ TEST_F(RenderTextTest, PangoAttributes) {
     PangoFontDescription* font = pango_font_description_new();
     pango_attr_iterator_get_font(iter, font, NULL, NULL);
     char* description_string = pango_font_description_to_string(font);
-    const string16 desc = ASCIIToUTF16(description_string);
+    const base::string16 desc = ASCIIToUTF16(description_string);
     const bool bold = desc.find(ASCIIToUTF16("Bold")) != std::string::npos;
     EXPECT_EQ(cases[i].bold, bold);
     const bool italic = desc.find(ASCIIToUTF16("Italic")) != std::string::npos;
@@ -208,7 +211,7 @@ TEST_F(RenderTextTest, PangoAttributes) {
 //                  does not implement this yet. http://crbug.com/131618
 #if !defined(OS_MACOSX)
 void TestVisualCursorMotionInObscuredField(RenderText* render_text,
-                                           const string16& text,
+                                           const base::string16& text,
                                            bool select) {
   ASSERT_TRUE(render_text->obscured());
   render_text->SetText(text);
@@ -236,8 +239,8 @@ void TestVisualCursorMotionInObscuredField(RenderText* render_text,
 }
 
 TEST_F(RenderTextTest, ObscuredText) {
-  const string16 seuss = ASCIIToUTF16("hop on pop");
-  const string16 no_seuss = ASCIIToUTF16("**********");
+  const base::string16 seuss = ASCIIToUTF16("hop on pop");
+  const base::string16 no_seuss = ASCIIToUTF16("**********");
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
 
   // GetLayoutText() returns asterisks when the obscured bit is set.
@@ -282,11 +285,8 @@ TEST_F(RenderTextTest, ObscuredText) {
   }
 
   // GetGlyphBounds() should yield the entire string bounds for text index 0.
-  int height = 0;
-  ui::Range bounds;
-  render_text->GetGlyphBounds(0U, &bounds, &height);
   EXPECT_EQ(render_text->GetStringSize().width(),
-            static_cast<int>(bounds.length()));
+            static_cast<int>(render_text->GetGlyphBounds(0U).length()));
 
   // Cursoring is independent of underlying characters when text is obscured.
   const wchar_t* const texts[] = {
@@ -295,10 +295,82 @@ TEST_F(RenderTextTest, ObscuredText) {
     L"\x05d0\x05d1 \x05d0\x05d2 \x05d1\x05d2",  // Check RTL word boundaries.
   };
   for (size_t i = 0; i < arraysize(texts); ++i) {
-    string16 text = WideToUTF16(texts[i]);
+    base::string16 text = WideToUTF16(texts[i]);
     TestVisualCursorMotionInObscuredField(render_text.get(), text, false);
     TestVisualCursorMotionInObscuredField(render_text.get(), text, true);
   }
+}
+
+TEST_F(RenderTextTest, RevealObscuredText) {
+  const base::string16 seuss = ASCIIToUTF16("hop on pop");
+  const base::string16 no_seuss = ASCIIToUTF16("**********");
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+
+  render_text->SetText(seuss);
+  render_text->SetObscured(true);
+  EXPECT_EQ(seuss, render_text->text());
+  EXPECT_EQ(no_seuss, render_text->GetLayoutText());
+
+  // Valid reveal index and new revealed index clears previous one.
+  render_text->RenderText::SetObscuredRevealIndex(0);
+  EXPECT_EQ(ASCIIToUTF16("h*********"), render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(1);
+  EXPECT_EQ(ASCIIToUTF16("*o********"), render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(2);
+  EXPECT_EQ(ASCIIToUTF16("**p*******"), render_text->GetLayoutText());
+
+  // Invalid reveal index.
+  render_text->RenderText::SetObscuredRevealIndex(-1);
+  EXPECT_EQ(no_seuss, render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(seuss.length() + 1);
+  EXPECT_EQ(no_seuss, render_text->GetLayoutText());
+
+  // SetObscured clears the revealed index.
+  render_text->RenderText::SetObscuredRevealIndex(0);
+  EXPECT_EQ(ASCIIToUTF16("h*********"), render_text->GetLayoutText());
+  render_text->SetObscured(false);
+  EXPECT_EQ(seuss, render_text->GetLayoutText());
+  render_text->SetObscured(true);
+  EXPECT_EQ(no_seuss, render_text->GetLayoutText());
+
+  // SetText clears the revealed index.
+  render_text->SetText(ASCIIToUTF16("new"));
+  EXPECT_EQ(ASCIIToUTF16("***"), render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(2);
+  EXPECT_EQ(ASCIIToUTF16("**w"), render_text->GetLayoutText());
+  render_text->SetText(ASCIIToUTF16("new longer"));
+  EXPECT_EQ(ASCIIToUTF16("**********"), render_text->GetLayoutText());
+
+  // Text with invalid surrogates.
+  const char16 invalid_surrogates[] = {0xDC00, 0xD800, 'h', 'o', 'p', 0};
+  render_text->SetText(invalid_surrogates);
+  EXPECT_EQ(ASCIIToUTF16("*****"), render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(0);
+  const char16 invalid_expect_0[] = {0xDC00, '*', '*', '*', '*', 0};
+  EXPECT_EQ(invalid_expect_0, render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(1);
+  const char16 invalid_expect_1[] = {'*', 0xD800, '*', '*', '*', 0};
+  EXPECT_EQ(invalid_expect_1, render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(2);
+  EXPECT_EQ(ASCIIToUTF16("**h**"), render_text->GetLayoutText());
+
+  // Text with valid surrogates before and after the reveal index.
+  const char16 valid_surrogates[] =
+      {0xD800, 0xDC00, 'h', 'o', 'p', 0xD800, 0xDC00, 0};
+  render_text->SetText(valid_surrogates);
+  EXPECT_EQ(ASCIIToUTF16("*****"), render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(0);
+  const char16 valid_expect_0_and_1[] = {0xD800, 0xDC00, '*', '*', '*', '*', 0};
+  EXPECT_EQ(valid_expect_0_and_1, render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(1);
+  EXPECT_EQ(valid_expect_0_and_1, render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(2);
+  EXPECT_EQ(ASCIIToUTF16("*h***"), render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(5);
+  const char16 valid_expect_5_and_6[] = {'*', '*', '*', '*', 0xD800, 0xDC00, 0};
+  EXPECT_EQ(valid_expect_5_and_6, render_text->GetLayoutText());
+  render_text->RenderText::SetObscuredRevealIndex(6);
+  EXPECT_EQ(valid_expect_5_and_6, render_text->GetLayoutText());
 }
 
 TEST_F(RenderTextTest, GetTextDirection) {
@@ -542,29 +614,44 @@ TEST_F(RenderTextTest, MoveCursorLeftRight_ComplexScript) {
 }
 #endif
 
+TEST_F(RenderTextTest, MoveCursorLeftRight_MeiryoUILigatures) {
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  // Meiryo UI uses single-glyph ligatures for 'ff' and 'ffi', but each letter
+  // (code point) has unique bounds, so mid-glyph cursoring should be possible.
+  render_text->SetFont(Font("Meiryo UI", 12));
+  render_text->SetText(WideToUTF16(L"ff ffi"));
+  EXPECT_EQ(0U, render_text->cursor_position());
+  for (size_t i = 0; i < render_text->text().length(); ++i) {
+    render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, false);
+    EXPECT_EQ(i + 1, render_text->cursor_position());
+  }
+  EXPECT_EQ(6U, render_text->cursor_position());
+}
+
 TEST_F(RenderTextTest, GraphemePositions) {
   // LTR 2-character grapheme, LTR abc, LTR 2-character grapheme.
-  const string16 kText1 = WideToUTF16(L"\x0915\x093f"L"abc"L"\x0915\x093f");
+  const base::string16 kText1 =
+      WideToUTF16(L"\x0915\x093f"L"abc"L"\x0915\x093f");
 
   // LTR ab, LTR 2-character grapheme, LTR cd.
-  const string16 kText2 = WideToUTF16(L"ab"L"\x0915\x093f"L"cd");
+  const base::string16 kText2 = WideToUTF16(L"ab"L"\x0915\x093f"L"cd");
 
   // The below is 'MUSICAL SYMBOL G CLEF', which is represented in UTF-16 as
   // two characters forming the surrogate pair 0x0001D11E.
   const std::string kSurrogate = "\xF0\x9D\x84\x9E";
 
   // LTR ab, UTF16 surrogate pair, LTR cd.
-  const string16 kText3 = UTF8ToUTF16("ab" + kSurrogate + "cd");
+  const base::string16 kText3 = UTF8ToUTF16("ab" + kSurrogate + "cd");
 
   struct {
-    string16 text;
+    base::string16 text;
     size_t index;
     size_t expected_previous;
     size_t expected_next;
   } cases[] = {
-    { string16(), 0, 0, 0 },
-    { string16(), 1, 0, 0 },
-    { string16(), 50, 0, 0 },
+    { base::string16(), 0, 0, 0 },
+    { base::string16(), 1, 0, 0 },
+    { base::string16(), 50, 0, 0 },
     { kText1, 0, 0, 2 },
     { kText1, 1, 0, 2 },
     { kText1, 2, 0, 3 },
@@ -620,21 +707,23 @@ TEST_F(RenderTextTest, GraphemePositions) {
 
 TEST_F(RenderTextTest, EdgeSelectionModels) {
   // Simple Latin text.
-  const string16 kLatin = WideToUTF16(L"abc");
+  const base::string16 kLatin = WideToUTF16(L"abc");
   // LTR 2-character grapheme.
-  const string16 kLTRGrapheme = WideToUTF16(L"\x0915\x093f");
+  const base::string16 kLTRGrapheme = WideToUTF16(L"\x0915\x093f");
   // LTR 2-character grapheme, LTR a, LTR 2-character grapheme.
-  const string16 kHindiLatin = WideToUTF16(L"\x0915\x093f"L"a"L"\x0915\x093f");
+  const base::string16 kHindiLatin =
+      WideToUTF16(L"\x0915\x093f"L"a"L"\x0915\x093f");
   // RTL 2-character grapheme.
-  const string16 kRTLGrapheme = WideToUTF16(L"\x05e0\x05b8");
+  const base::string16 kRTLGrapheme = WideToUTF16(L"\x05e0\x05b8");
   // RTL 2-character grapheme, LTR a, RTL 2-character grapheme.
-  const string16 kHebrewLatin = WideToUTF16(L"\x05e0\x05b8"L"a"L"\x05e0\x05b8");
+  const base::string16 kHebrewLatin =
+      WideToUTF16(L"\x05e0\x05b8"L"a"L"\x05e0\x05b8");
 
   struct {
-    string16 text;
+    base::string16 text;
     base::i18n::TextDirection expected_text_direction;
   } cases[] = {
-    { string16(),   base::i18n::LEFT_TO_RIGHT },
+    { base::string16(), base::i18n::LEFT_TO_RIGHT },
     { kLatin,       base::i18n::LEFT_TO_RIGHT },
     { kLTRGrapheme, base::i18n::LEFT_TO_RIGHT },
     { kHindiLatin,  base::i18n::LEFT_TO_RIGHT },
@@ -678,7 +767,7 @@ TEST_F(RenderTextTest, SelectAll) {
   for (size_t i = 0; i < 2; ++i) {
     SetRTL(!base::i18n::IsRTL());
     // Test that an empty string produces an empty selection model.
-    render_text->SetText(string16());
+    render_text->SetText(base::string16());
     EXPECT_EQ(render_text->selection_model(), SelectionModel());
 
     // Test the weak, LTR, RTL, and Bidi string cases.
@@ -913,7 +1002,7 @@ TEST_F(RenderTextTest, StringSizeEmptyString) {
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   render_text->SetFont(font);
 
-  render_text->SetText(string16());
+  render_text->SetText(base::string16());
   EXPECT_EQ(font.GetHeight(), render_text->GetStringSize().height());
   EXPECT_EQ(0, render_text->GetStringSize().width());
 
@@ -937,19 +1026,19 @@ TEST_F(RenderTextTest, StringSizeBoldWidth) {
   EXPECT_GT(plain_width, 0);
 
   // Apply a bold style and check that the new width is greater.
-  render_text->SetStyle(gfx::BOLD, true);
+  render_text->SetStyle(BOLD, true);
   const int bold_width = render_text->GetStringSize().width();
   EXPECT_GT(bold_width, plain_width);
 
   // Now, apply a plain style over the first word only.
-  render_text->ApplyStyle(gfx::BOLD, false, ui::Range(0, 5));
+  render_text->ApplyStyle(BOLD, false, ui::Range(0, 5));
   const int plain_bold_width = render_text->GetStringSize().width();
   EXPECT_GT(plain_bold_width, plain_width);
   EXPECT_LT(plain_bold_width, bold_width);
 }
 
 TEST_F(RenderTextTest, StringSizeHeight) {
-  string16 cases[] = {
+  base::string16 cases[] = {
     WideToUTF16(L"Hello World!"),  // English
     WideToUTF16(L"\x6328\x62f6"),  // Japanese
     WideToUTF16(L"\x0915\x093f"),  // Hindi
@@ -995,34 +1084,76 @@ TEST_F(RenderTextTest, CursorBoundsInReplacementMode) {
   EXPECT_EQ(cursor_around_b.right(), cursor_before_c.x());
 }
 
-// http://crbug.com/161902
-#if defined(OS_LINUX)
-#define MAYBE_OriginForDrawing DISABLED_OriginForDrawing
-#else
-#define MAYBE_OriginForDrawing OriginForDrawing
-#endif
-TEST_F(RenderTextTest, MAYBE_OriginForDrawing) {
+TEST_F(RenderTextTest, GetTextOffset) {
+  // The default horizontal text offset differs for LTR and RTL, and is only set
+  // when the RenderText object is created.  This test will check the default in
+  // LTR mode, and the next test will check the RTL default.
+  const bool was_rtl = base::i18n::IsRTL();
+  SetRTL(false);
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   render_text->SetText(ASCIIToUTF16("abcdefg"));
   render_text->SetFontList(FontList("Arial, 13px"));
 
-  // Set display area's height equals to font height.
-  const int font_height = render_text->GetStringSize().height();
-  Rect display_rect(0, 0, 100, font_height);
+  // Set display area's size equal to the font size.
+  const Size font_size(render_text->GetContentWidth(),
+                       render_text->GetStringSize().height());
+  Rect display_rect(font_size);
   render_text->SetDisplayRect(display_rect);
 
-  Vector2d offset = render_text->GetOffsetForDrawing();
+  Vector2d offset = render_text->GetTextOffset();
   EXPECT_TRUE(offset.IsZero());
 
-  // Set display area's height greater than font height.
+  // Set display area's size greater than font size.
   const int kEnlargement = 2;
-  display_rect = Rect(0, 0, 100, font_height + kEnlargement);
+  display_rect.Inset(0, 0, -kEnlargement, -kEnlargement);
   render_text->SetDisplayRect(display_rect);
 
-  // Text should be vertically centered.
-  offset = render_text->GetOffsetForDrawing();
-  EXPECT_EQ(offset.x(), 0);
-  EXPECT_EQ(offset.y(), kEnlargement / 2);
+  // Check the default horizontal and vertical alignment.
+  offset = render_text->GetTextOffset();
+  EXPECT_EQ(kEnlargement / 2, offset.y());
+  EXPECT_EQ(0, offset.x());
+
+  // Check explicitly setting the horizontal alignment.
+  render_text->SetHorizontalAlignment(ALIGN_LEFT);
+  offset = render_text->GetTextOffset();
+  EXPECT_EQ(0, offset.x());
+  render_text->SetHorizontalAlignment(ALIGN_CENTER);
+  offset = render_text->GetTextOffset();
+  EXPECT_EQ(kEnlargement / 2, offset.x());
+  render_text->SetHorizontalAlignment(ALIGN_RIGHT);
+  offset = render_text->GetTextOffset();
+  EXPECT_EQ(kEnlargement, offset.x());
+
+  // Check explicitly setting the vertical alignment.
+  render_text->SetVerticalAlignment(ALIGN_TOP);
+  offset = render_text->GetTextOffset();
+  EXPECT_EQ(0, offset.y());
+  render_text->SetVerticalAlignment(ALIGN_VCENTER);
+  offset = render_text->GetTextOffset();
+  EXPECT_EQ(kEnlargement / 2, offset.y());
+  render_text->SetVerticalAlignment(ALIGN_BOTTOM);
+  offset = render_text->GetTextOffset();
+  EXPECT_EQ(kEnlargement, offset.y());
+
+  SetRTL(was_rtl);
+}
+
+TEST_F(RenderTextTest, GetTextOffsetHorizontalDefaultInRTL) {
+  // This only checks the default horizontal alignment in RTL mode; all other
+  // GetTextOffset() attributes are checked by the test above.
+  const bool was_rtl = base::i18n::IsRTL();
+  SetRTL(true);
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  render_text->SetText(ASCIIToUTF16("abcdefg"));
+  render_text->SetFontList(FontList("Arial, 13px"));
+  const int kEnlargement = 2;
+  const Size font_size(render_text->GetContentWidth() + kEnlargement,
+                       render_text->GetStringSize().height());
+  Rect display_rect(font_size);
+  render_text->SetDisplayRect(display_rect);
+  Vector2d offset = render_text->GetTextOffset();
+  EXPECT_EQ(kEnlargement, offset.x());
+  SetRTL(was_rtl);
 }
 
 TEST_F(RenderTextTest, SameFontForParentheses) {
@@ -1035,7 +1166,7 @@ TEST_F(RenderTextTest, SameFontForParentheses) {
     { '<', '>' },
   };
   struct {
-    string16 text;
+    base::string16 text;
   } cases[] = {
     // English(English)
     { WideToUTF16(L"Hello World(a)") },
@@ -1066,11 +1197,11 @@ TEST_F(RenderTextTest, SameFontForParentheses) {
 
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
-    string16 text = cases[i].text;
+    base::string16 text = cases[i].text;
     const size_t start_paren_char_index = text.find('(');
-    ASSERT_NE(string16::npos, start_paren_char_index);
+    ASSERT_NE(base::string16::npos, start_paren_char_index);
     const size_t end_paren_char_index = text.find(')');
-    ASSERT_NE(string16::npos, end_paren_char_index);
+    ASSERT_NE(base::string16::npos, end_paren_char_index);
 
     for (size_t j = 0; j < ARRAYSIZE_UNSAFE(punctuation_pairs); ++j) {
       text[start_paren_char_index] = punctuation_pairs[j].left_char;
@@ -1118,14 +1249,34 @@ TEST_F(RenderTextTest, LastWordSelected) {
   render_text->SetText(ASCIIToUTF16(kTestURL1));
   render_text->SetCursorPosition(kTestURL1.length());
   render_text->SelectWord();
-  EXPECT_EQ(ui::Range(kTestURL1.length() - 3, kTestURL1.length()),
-            render_text->selection());
+  EXPECT_EQ(ASCIIToUTF16("com"), GetSelectedText(render_text.get()));
+  EXPECT_FALSE(render_text->selection().is_reversed());
 
   render_text->SetText(ASCIIToUTF16(kTestURL2));
   render_text->SetCursorPosition(kTestURL2.length());
   render_text->SelectWord();
-  EXPECT_EQ(ui::Range(kTestURL2.length() - 1, kTestURL2.length()),
-            render_text->selection());
+  EXPECT_EQ(ASCIIToUTF16("/"), GetSelectedText(render_text.get()));
+  EXPECT_FALSE(render_text->selection().is_reversed());
+}
+
+// When given a non-empty selection, SelectWord should expand the selection to
+// nearest word boundaries.
+TEST_F(RenderTextTest, SelectMultipleWords) {
+  const std::string kTestURL = "http://www.google.com";
+
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+
+  render_text->SetText(ASCIIToUTF16(kTestURL));
+  render_text->SelectRange(ui::Range(16, 20));
+  render_text->SelectWord();
+  EXPECT_EQ(ASCIIToUTF16("google.com"), GetSelectedText(render_text.get()));
+  EXPECT_FALSE(render_text->selection().is_reversed());
+
+  // SelectWord should preserve the selection direction.
+  render_text->SelectRange(ui::Range(20, 16));
+  render_text->SelectWord();
+  EXPECT_EQ(ASCIIToUTF16("google.com"), GetSelectedText(render_text.get()));
+  EXPECT_TRUE(render_text->selection().is_reversed());
 }
 
 // TODO(asvitkine): Cursor movements tests disabled on Mac because RenderTextMac

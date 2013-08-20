@@ -10,7 +10,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_switches.h"
@@ -30,6 +30,7 @@ const char* const kPaths[] = {
   chrome::kChromeUIHistoryHost,
   chrome::kChromeUIIPCHost,
   chrome::kChromeUIMemoryHost,
+  chrome::kChromeUIMemoryInternalsHost,
 #if defined(OS_ANDROID) || defined(OS_IOS)
   chrome::kChromeUINetExportHost,
 #endif
@@ -111,7 +112,7 @@ bool WillHandleBrowserAboutURL(GURL* url,
   *url = URLFixerUpper::FixupURL(url->possibly_invalid_spec(), std::string());
 
   // Check that about: URLs are fixed up to chrome: by URLFixerUpper::FixupURL.
-  DCHECK((*url == GURL(chrome::kAboutBlankURL)) ||
+  DCHECK((*url == GURL(content::kAboutBlankURL)) ||
          !url->SchemeIs(chrome::kAboutScheme));
 
   // Only handle chrome://foo/, URLFixerUpper::FixupURL translates about:foo.
@@ -133,8 +134,7 @@ bool WillHandleBrowserAboutURL(GURL* url,
   } else if (host == chrome::kChromeUIExtensionsHost) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUIExtensionsHost + url->path();
-  // Redirect chrome://settings/extensions.
-  // TODO(csilv): Remove this URL after M22 (legacy URL).
+  // Redirect chrome://settings/extensions (legacy URL).
   } else if (host == chrome::kChromeUISettingsHost &&
       url->path() == std::string("/") + chrome::kExtensionsSubPage) {
     host = chrome::kChromeUIUberHost;

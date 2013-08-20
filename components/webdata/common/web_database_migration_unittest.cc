@@ -9,10 +9,10 @@
 #include "base/guid.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/webdata/keyword_table.h"
 #include "chrome/browser/webdata/logins_table.h"
@@ -20,13 +20,13 @@
 #include "chrome/browser/webdata/web_apps_table.h"
 #include "chrome/browser/webdata/web_intents_table.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/autofill/browser/autofill_country.h"
-#include "components/autofill/browser/autofill_profile.h"
-#include "components/autofill/browser/autofill_type.h"
-#include "components/autofill/browser/credit_card.h"
-#include "components/autofill/browser/webdata/autofill_change.h"
-#include "components/autofill/browser/webdata/autofill_entry.h"
-#include "components/autofill/browser/webdata/autofill_table.h"
+#include "components/autofill/core/browser/autofill_country.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/webdata/autofill_change.h"
+#include "components/autofill/core/browser/webdata/autofill_entry.h"
+#include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/webdata/common/web_database.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -240,7 +240,7 @@ class WebDatabaseMigrationTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(WebDatabaseMigrationTest);
 };
 
-const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 50;
+const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 51;
 
 void WebDatabaseMigrationTest::LoadDatabase(
     const base::FilePath::StringType& file) {

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/admin_policy.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest.h"
 #include "grit/generated_resources.h"
@@ -59,6 +59,12 @@ bool UserMayLoad(const base::ListValue* blacklist,
   // Component extensions are always allowed.
   if (extension->location() == Manifest::COMPONENT)
     return true;
+
+  // Forced installed extensions cannot be overwritten manually.
+  if (extension->location() != Manifest::EXTERNAL_POLICY_DOWNLOAD &&
+      forcelist && forcelist->HasKey(extension->id())) {
+    return ReturnLoadError(extension, error);
+  }
 
   // Early exit for the common case of no policy restrictions.
   if ((!blacklist || blacklist->empty()) && (!allowed_types))

@@ -53,9 +53,9 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -66,6 +66,7 @@
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #import "ui/base/animation/animation_container.h"
+#include "ui/base/cocoa/animation_utils.h"
 #import "ui/base/cocoa/tracking_area.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/list_selection_model.h"
@@ -161,7 +162,7 @@ private:
 // 10.6 and 10.7.
 NSImage* CreateImageWithSize(NSSize size,
                              void (^drawingHandler)(NSSize)) {
-  scoped_nsobject<NSImage> result([[NSImage alloc] initWithSize:size]);
+  base::scoped_nsobject<NSImage> result([[NSImage alloc] initWithSize:size]);
   [NSGraphicsContext saveGraphicsState];
   for (ui::ScaleFactor scale_factor : ui::GetSupportedScaleFactors()) {
     float scale = GetScaleFactorScale(scale_factor);
@@ -656,6 +657,10 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   DCHECK(modelIndex >= 0 && modelIndex < tabStripModel_->count());
   NSInteger index = [self indexFromModelIndex:modelIndex];
   TabContentsController* controller = [tabContentsArray_ objectAtIndex:index];
+
+  // Make sure that any layers that move are not animated to their new
+  // positions.
+  ScopedCAActionDisabler disabler;
 
   // Resize the new view to fit the window. Calling |view| may lazily
   // instantiate the TabContentsController from the nib. Until we call
@@ -1291,7 +1296,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   // Make a new tab. Load the contents of this tab from the nib and associate
   // the new controller with |contents| so it can be looked up later.
-  scoped_nsobject<TabContentsController> contentsController(
+  base::scoped_nsobject<TabContentsController> contentsController(
       [[TabContentsController alloc] initWithContents:contents]);
   [tabContentsArray_ insertObject:contentsController atIndex:index];
 
@@ -1405,7 +1410,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   // Simply create a new TabContentsController for |newContents| and place it
   // into the array, replacing |oldContents|.  An ActiveTabChanged notification
   // will follow, at which point we will install the new view.
-  scoped_nsobject<TabContentsController> newController(
+  base::scoped_nsobject<TabContentsController> newController(
       [[TabContentsController alloc] initWithContents:newContents]);
 
   // Bye bye, |oldController|.
@@ -1486,9 +1491,9 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   NSView* tabView = [closingTab view];
   CAAnimation* animation = [[tabView animationForKey:@"frameOrigin"] copy];
   [animation autorelease];
-  scoped_nsobject<TabCloseAnimationDelegate> delegate(
-    [[TabCloseAnimationDelegate alloc] initWithTabStrip:self
-                                          tabController:closingTab]);
+  base::scoped_nsobject<TabCloseAnimationDelegate> delegate(
+      [[TabCloseAnimationDelegate alloc] initWithTabStrip:self
+                                            tabController:closingTab]);
   [animation setDelegate:delegate.get()];  // Retains delegate.
   NSMutableDictionary* animationDictionary =
       [NSMutableDictionary dictionaryWithDictionary:[tabView animations]];
@@ -1741,12 +1746,12 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   // Cancel any pending tab transition.
   hoverTabSelector_->CancelTabTransition();
 
-  scoped_nsobject<TabContentsController> movedTabContentsController(
+  base::scoped_nsobject<TabContentsController> movedTabContentsController(
       [[tabContentsArray_ objectAtIndex:from] retain]);
   [tabContentsArray_ removeObjectAtIndex:from];
   [tabContentsArray_ insertObject:movedTabContentsController.get()
                           atIndex:to];
-  scoped_nsobject<TabController> movedTabController(
+  base::scoped_nsobject<TabController> movedTabController(
       [[tabArray_ objectAtIndex:from] retain]);
   DCHECK([movedTabController isKindOfClass:[TabController class]]);
   [tabArray_ removeObjectAtIndex:from];

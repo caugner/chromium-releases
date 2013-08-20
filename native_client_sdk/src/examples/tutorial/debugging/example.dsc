@@ -10,7 +10,7 @@
       'NAME' : 'debugging',
       'TYPE' : 'main',
       'SOURCES' : [
-        'hello_world.c',
+        'debugging.c',
       ],
       'CCFLAGS': ['-fno-omit-frame-pointer'],
       'DEPS' : ['error_handling'],
@@ -19,11 +19,11 @@
   ],
 
   'POST': """
+
 #
 # Specify the MAP files to be created.
 #
-$(eval $(call MAP_RULE,$(TARGET),$(TARGET)))
-""",
+$(eval $(call MAP_RULE,$(TARGET),$(TARGET)))""",
   'DATA': [
     'example.js',
   ],

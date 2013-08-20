@@ -19,14 +19,14 @@ import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.test.util.CallbackHelper;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
@@ -112,12 +112,20 @@ public class AwContentsTest extends AwTestBase {
         createAwTestContainerView(mContentsClient).getAwContents().destroy();
     }
 
-    /*
-     * @LargeTest
-     * @Feature({"AndroidWebView"})
-     * Disabled until we switch to final rendering pipeline.
-     */
-    @DisabledTest
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testCreateLoadPageDestroy() throws Throwable {
+        AwTestContainerView awTestContainerView =
+                createAwTestContainerViewOnMainSync(mContentsClient);
+        loadUrlSync(awTestContainerView.getAwContents(),
+                mContentsClient.getOnPageFinishedHelper(), CommonResources.ABOUT_HTML);
+        destroyAwContentsOnMainSync(awTestContainerView.getAwContents());
+        // It should be safe to call destroy multiple times.
+        destroyAwContentsOnMainSync(awTestContainerView.getAwContents());
+    }
+
+    @LargeTest
+    @Feature({"AndroidWebView"})
     public void testCreateLoadDestroyManyTimes() throws Throwable {
         final int CREATE_AND_DESTROY_REPEAT_COUNT = 10;
         for (int i = 0; i < CREATE_AND_DESTROY_REPEAT_COUNT; ++i) {
@@ -129,12 +137,8 @@ public class AwContentsTest extends AwTestBase {
         }
     }
 
-    /*
-     * @LargeTest
-     * @Feature({"AndroidWebView"})
-     * Disabled until we switch to final rendering pipeline.
-     */
-    @DisabledTest
+    @LargeTest
+    @Feature({"AndroidWebView"})
     public void testCreateLoadDestroyManyAtOnce() throws Throwable {
         final int CREATE_AND_DESTROY_REPEAT_COUNT = 10;
         AwTestContainerView views[] = new AwTestContainerView[CREATE_AND_DESTROY_REPEAT_COUNT];
@@ -149,6 +153,46 @@ public class AwContentsTest extends AwTestBase {
             destroyAwContentsOnMainSync(views[i].getAwContents());
             views[i] = null;
         }
+    }
+
+    public void testCreateAndGcManyTimes() throws Throwable {
+        final int CONCURRENT_INSTANCES = 4;
+        final int REPETITIONS = 16;
+        // The system retains a strong ref to the last focused view (in InputMethodManager)
+        // so allow for 1 'leaked' instance.
+        final int MAX_IDLE_INSTANCES = 1;
+
+        System.gc();
+
+        assertTrue(pollOnUiThread(new Callable<Boolean>() {
+            @Override
+            public Boolean call() {
+                return AwContents.getNativeInstanceCount() <= MAX_IDLE_INSTANCES;
+            }
+        }));
+        for (int i = 0; i < REPETITIONS; ++i) {
+            for (int j = 0; j < CONCURRENT_INSTANCES; ++j) {
+                AwTestContainerView view = createAwTestContainerViewOnMainSync(mContentsClient);
+                loadUrlAsync(view.getAwContents(), "about:blank");
+            }
+            assertTrue(AwContents.getNativeInstanceCount() >= CONCURRENT_INSTANCES);
+            assertTrue(AwContents.getNativeInstanceCount() <= (i + 1) * CONCURRENT_INSTANCES);
+            runTestOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    getActivity().removeAllViews();
+                }
+            });
+        }
+
+        System.gc();
+
+        assertTrue(pollOnUiThread(new Callable<Boolean>() {
+            @Override
+            public Boolean call() {
+                return AwContents.getNativeInstanceCount() <= MAX_IDLE_INSTANCES;
+            }
+        }));
     }
 
     private int callDocumentHasImagesSync(final AwContents awContents)
@@ -294,13 +338,13 @@ public class AwContentsTest extends AwTestBase {
             getAwSettingsOnUiThread(awContents).setImagesEnabled(true);
             loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
 
-            assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+            assertTrue(pollOnUiThread(new Callable<Boolean>() {
                 @Override
-                public boolean isSatisfied() {
+                public Boolean call() {
                     return awContents.getFavicon() != null &&
                         !awContents.getFavicon().sameAs(defaultFavicon);
                 }
-            }, TEST_TIMEOUT, CHECK_INTERVAL));
+            }));
 
             final Object originalFaviconSource = (new URL(faviconUrl)).getContent();
             final Bitmap originalFavicon =

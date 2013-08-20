@@ -11,8 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/hash_tables.h"
 #include "base/gtest_prod_util.h"
-#include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
@@ -24,7 +24,7 @@
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_origin.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -78,7 +78,7 @@ class PrerenderTracker;
 class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                          public base::NonThreadSafe,
                          public content::NotificationObserver,
-                         public ProfileKeyedService {
+                         public BrowserContextKeyedService {
  public:
   // NOTE: New values need to be appended, since they are used in histograms.
   enum PrerenderManagerMode {
@@ -111,7 +111,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   virtual ~PrerenderManager();
 
-  // From ProfileKeyedService:
+  // From BrowserContextKeyedService:
   virtual void Shutdown() OVERRIDE;
 
   // Entry points for adding prerenders.
@@ -136,6 +136,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // tab at the time the prerender is generated from the omnibox. Returns a
   // caller-owned PrerenderHandle*, or NULL.
   PrerenderHandle* AddPrerenderFromOmnibox(
+      const GURL& url,
+      content::SessionStorageNamespace* session_storage_namespace,
+      const gfx::Size& size);
+
+  PrerenderHandle* AddPrerenderFromLocalPredictor(
       const GURL& url,
       content::SessionStorageNamespace* session_storage_namespace,
       const gfx::Size& size);
@@ -200,13 +205,13 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // is prerendering a page. The optional parameter |origin| is an output
   // parameter which, if a prerender is found, is set to the Origin of the
   // prerender |web_contents|.
-  bool IsWebContentsPrerendering(content::WebContents* web_contents,
+  bool IsWebContentsPrerendering(const content::WebContents* web_contents,
                                  Origin* origin) const;
 
   // Returns the PrerenderContents object for the given web_contents if it's
   // used for an active prerender page, otherwise returns NULL.
   PrerenderContents* GetPrerenderContents(
-      content::WebContents* web_contents) const;
+      const content::WebContents* web_contents) const;
 
   // Returns a list of all WebContents being prerendered.
   const std::vector<content::WebContents*> GetAllPrerenderingContents() const;
@@ -299,6 +304,15 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // mock advancing/retarding time.
   virtual base::Time GetCurrentTime() const;
   virtual base::TimeTicks GetCurrentTimeTicks() const;
+
+  scoped_refptr<predictors::LoggedInPredictorTable>
+  logged_in_predictor_table() {
+    return logged_in_predictor_table_;
+  }
+
+  PrerenderLocalPredictor* local_predictor() {
+    return local_predictor_.get();
+  }
 
  protected:
   class PrerenderData : public base::SupportsWeakPtr<PrerenderData> {
@@ -452,7 +466,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // automatically be cancelled.
   void PostCleanupTask();
 
-  base::TimeTicks GetExpiryTimeForNewPrerender() const;
+  base::TimeTicks GetExpiryTimeForNewPrerender(Origin origin) const;
   base::TimeTicks GetExpiryTimeForNavigatedAwayPrerender() const;
 
   void DeleteOldEntries();

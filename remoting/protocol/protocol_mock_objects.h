@@ -16,6 +16,7 @@
 #include "remoting/protocol/connection_to_client.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_stub.h"
+#include "remoting/protocol/pairing_registry.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_manager.h"
 #include "remoting/protocol/transport.h"
@@ -107,6 +108,8 @@ class MockHostStub : public HostStub {
   MOCK_METHOD1(ControlVideo, void(const VideoControl& video_control));
   MOCK_METHOD1(ControlAudio, void(const AudioControl& audio_control));
   MOCK_METHOD1(SetCapabilities, void(const Capabilities& capabilities));
+  MOCK_METHOD1(RequestPairing,
+               void(const PairingRequest& pairing_request));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockHostStub);
@@ -119,6 +122,8 @@ class MockClientStub : public ClientStub {
 
   // ClientStub mock implementation.
   MOCK_METHOD1(SetCapabilities, void(const Capabilities& capabilities));
+  MOCK_METHOD1(SetPairingResponse,
+               void(const PairingResponse& pairing_response));
 
   // ClipboardStub mock implementation.
   MOCK_METHOD1(InjectClipboardEvent, void(const ClipboardEvent& event));
@@ -182,21 +187,46 @@ class MockSessionManager : public SessionManager {
       Authenticator* authenticator,
       CandidateSessionConfig* config));
   MOCK_METHOD0(Close, void());
-  MOCK_METHOD1(set_authenticator_factory_ptr, void(AuthenticatorFactory*));
+  MOCK_METHOD1(set_authenticator_factory_ptr,
+               void(AuthenticatorFactory* factory));
   virtual scoped_ptr<Session> Connect(
       const std::string& host_jid,
       scoped_ptr<Authenticator> authenticator,
       scoped_ptr<CandidateSessionConfig> config) {
     return scoped_ptr<Session>(ConnectPtr(
         host_jid, authenticator.get(), config.get()));
-  };
+  }
   virtual void set_authenticator_factory(
       scoped_ptr<AuthenticatorFactory> authenticator_factory) {
     set_authenticator_factory_ptr(authenticator_factory.release());
-  };
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSessionManager);
+};
+
+// Simple delegate that caches information on paired clients in memory.
+class MockPairingRegistryDelegate : public PairingRegistry::Delegate {
+ public:
+  MockPairingRegistryDelegate();
+  virtual ~MockPairingRegistryDelegate();
+
+  const std::string& pairings_json() const {
+    return pairings_json_;
+  }
+
+  // PairingRegistry::Delegate implementation.
+  virtual void Save(
+      const std::string& pairings_json,
+      const PairingRegistry::SaveCallback& callback) OVERRIDE;
+  virtual void Load(
+      const PairingRegistry::LoadCallback& callback) OVERRIDE;
+
+  void RunCallback();
+
+ private:
+  base::Closure load_callback_;
+  std::string pairings_json_;
 };
 
 }  // namespace protocol

@@ -7,15 +7,13 @@
 #include <Carbon/Carbon.h>  // kVK_Return
 
 #include "base/mac/foundation_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/ui/cocoa/event_utils.h"
 #include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_popup_view_mac.h"
@@ -28,6 +26,7 @@
 #include "grit/theme_resources.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "ui/base/clipboard/clipboard.h"
+#import "ui/base/cocoa/cocoa_event_utils.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/rect.h"
 
@@ -143,19 +142,16 @@ OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
       popup_view_(OmniboxPopupViewMac::Create(this, model(), field)),
       field_(field),
       delete_was_pressed_(false),
-      delete_at_end_pressed_(false),
-      line_height_(0) {
+      delete_at_end_pressed_(false) {
   [field_ setObserver:this];
 
   // Needed so that editing doesn't lose the styling.
   [field_ setAllowsEditingTextAttributes:YES];
 
   // Get the appropriate line height for the font that we use.
-  scoped_nsobject<NSLayoutManager>
-      layoutManager([[NSLayoutManager alloc] init]);
+  base::scoped_nsobject<NSLayoutManager> layoutManager(
+      [[NSLayoutManager alloc] init]);
   [layoutManager setUsesScreenFonts:YES];
-  line_height_ = [layoutManager defaultLineHeightForFont:GetFieldFont()];
-  DCHECK_GT(line_height_, 0);
 }
 
 OmniboxViewMac::~OmniboxViewMac() {
@@ -439,10 +435,11 @@ void OmniboxViewMac::ApplyTextAttributes(const string16& display_text,
 
   // Make a paragraph style locking in the standard line height as the maximum,
   // otherwise the baseline may shift "downwards".
-  scoped_nsobject<NSMutableParagraphStyle>
-      paragraph_style([[NSMutableParagraphStyle alloc] init]);
-  [paragraph_style setMaximumLineHeight:line_height_];
-  [paragraph_style setMinimumLineHeight:line_height_];
+  base::scoped_nsobject<NSMutableParagraphStyle> paragraph_style(
+      [[NSMutableParagraphStyle alloc] init]);
+  CGFloat line_height = [[field_ cell] lineHeight];
+  [paragraph_style setMaximumLineHeight:line_height];
+  [paragraph_style setMinimumLineHeight:line_height];
   [as addAttribute:NSParagraphStyleAttributeName value:paragraph_style
              range:as_entire_string];
 
@@ -695,7 +692,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
     // Only commit suggested text if the cursor is all the way to the right and
     // there is no selection.
     if (suggest_text_.length() > 0 && IsCaretAtEnd()) {
-      model()->CommitSuggestedText(true);
+      model()->CommitSuggestedText();
       return true;
     }
   }
@@ -728,7 +725,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
       ([event type] == NSKeyDown || [event type] == NSKeyUp) &&
       [event keyCode] == kVK_Return)) {
     WindowOpenDisposition disposition =
-        event_utils::WindowOpenDispositionFromNSEvent(event);
+        ui::WindowOpenDispositionFromNSEvent(event);
     model()->AcceptInput(disposition, false);
     // Opening a URL in a background tab should also revert the omnibox contents
     // to their original state.  We cannot do a blanket revert in OpenURL()
@@ -751,7 +748,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
   if (cmd == @selector(insertLineBreak:)) {
     OnControlKeyChanged(true);
     WindowOpenDisposition disposition =
-        event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+        ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
     model()->AcceptInput(disposition, false);
     return true;
   }
@@ -824,10 +821,6 @@ void OmniboxViewMac::CopyToPasteboard(NSPasteboard* pb) {
     [pb declareURLPasteboardWithAdditionalTypes:[NSArray array] owner:nil];
     [pb setDataForURL:base::SysUTF8ToNSString(url.spec()) title:nstext];
   }
-  ui::Clipboard::WriteSourceTag(pb,
-                                content::BrowserContext::
-                                    GetMarkerForOffTheRecordContext(
-                                        model()->profile()));
 }
 
 void OmniboxViewMac::CopyURLToPasteboard(NSPasteboard* pb) {
@@ -843,10 +836,6 @@ void OmniboxViewMac::CopyURLToPasteboard(NSPasteboard* pb) {
 
   [pb declareURLPasteboardWithAdditionalTypes:[NSArray array] owner:nil];
   [pb setDataForURL:base::SysUTF8ToNSString(url.spec()) title:nstext];
-  ui::Clipboard::WriteSourceTag(pb,
-                                content::BrowserContext::
-                                    GetMarkerForOffTheRecordContext(
-                                        model()->profile()));
 }
 
 void OmniboxViewMac::OnPaste() {
@@ -887,7 +876,7 @@ void OmniboxViewMac::OnPaste() {
 // this method could call the OmniboxView version.
 bool OmniboxViewMac::ShouldEnableCopyURL() {
   return !model()->user_input_in_progress() &&
-      toolbar_model()->GetSearchTermsType() != ToolbarModel::NO_SEARCH_TERMS;
+      toolbar_model()->WouldReplaceSearchURLWithSearchTerms();
 }
 
 bool OmniboxViewMac::CanPasteAndGo() {
@@ -964,11 +953,8 @@ void OmniboxViewMac::FocusLocation(bool select_all) {
 // static
 NSFont* OmniboxViewMac::GetFieldFont() {
   // This value should be kept in sync with InstantPage::InitializeFonts.
-  if (chrome::IsInstantExtendedAPIEnabled())
-    return [NSFont fontWithName:@"Helvetica Neue" size:16];
-
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetFont(ResourceBundle::BaseFont).GetNativeFont();
+  return rb.GetFont(ResourceBundle::BaseFont).DeriveFont(1).GetNativeFont();
 }
 
 int OmniboxViewMac::GetOmniboxTextLength() const {

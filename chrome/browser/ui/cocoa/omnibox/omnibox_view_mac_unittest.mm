@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "testing/platform_test.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/rect.h"
 
 namespace {
 
@@ -97,6 +98,7 @@ class TestingOmniboxEditController : public OmniboxEditController {
   virtual content::WebContents* GetWebContents() const OVERRIDE {
     return NULL;
   }
+  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE { return gfx::Rect(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestingOmniboxEditController);
@@ -144,7 +146,7 @@ TEST_F(OmniboxViewMacTest, TabToAutocomplete) {
 
 TEST_F(OmniboxViewMacTest, SetInstantSuggestion) {
   const NSRect frame = NSMakeRect(0, 0, 50, 30);
-  scoped_nsobject<AutocompleteTextField> field(
+  base::scoped_nsobject<AutocompleteTextField> field(
       [[AutocompleteTextField alloc] initWithFrame:frame]);
 
   TestingToolbarModelDelegate delegate;

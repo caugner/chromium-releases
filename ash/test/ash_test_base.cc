@@ -25,9 +25,14 @@
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/ime/input_method_initializer.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/screen.h"
+
+#if defined(OS_CHROMEOS)
+#include "ash/system/chromeos/tray_display.h"
+#endif
 
 #if defined(OS_WIN)
 #include "ash/test/test_metro_viewer_process_host.h"
@@ -36,7 +41,6 @@
 #include "base/win/windows_version.h"
 #include "ui/aura/remote_root_window_host_win.h"
 #include "ui/aura/root_window_host_win.h"
-#include "ui/base/ime/win/tsf_bridge.h"
 #include "win8/test/test_registrar_constants.h"
 #endif
 
@@ -102,9 +106,8 @@ void AshTestBase::SetUp() {
       switches::kAshHostWindowBounds, "1+1-800x600");
 #if defined(OS_WIN)
   aura::test::SetUsePopupAsRootWindowForTest(true);
-  if (base::win::IsTSFAwareRequired())
-    ui::TSFBridge::Initialize();
 #endif
+  ui::InitializeInputMethodForTesting();
 
   ash_test_helper_->SetUp();
 
@@ -119,7 +122,13 @@ void AshTestBase::SetUp() {
   if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
           ash::switches::kForceAshToDesktop)) {
-    metro_viewer_host_.reset(new TestMetroViewerProcessHost("viewer"));
+    ipc_thread_.reset(new base::Thread("test_metro_viewer_ipc_thread"));
+    base::Thread::Options options;
+    options.message_loop_type = base::MessageLoop::TYPE_IO;
+    ipc_thread_->StartWithOptions(options);
+
+    metro_viewer_host_.reset(
+        new TestMetroViewerProcessHost(ipc_thread_->message_loop_proxy()));
     CHECK(metro_viewer_host_->LaunchViewerAndWaitForConnection(
         win8::test::kDefaultTestAppUserModelId));
     aura::RemoteRootWindowHostWin* root_window_host =
@@ -145,6 +154,7 @@ void AshTestBase::TearDown() {
 
   ash_test_helper_->TearDown();
 
+  ui::ShutdownInputMethodForTesting();
 #if defined(OS_WIN)
   aura::test::SetUsePopupAsRootWindowForTest(false);
   // Kill the viewer process if we spun one up.
@@ -171,6 +181,15 @@ aura::test::EventGenerator& AshTestBase::GetEventGenerator() {
         new aura::test::EventGenerator(new AshEventGeneratorDelegate()));
   }
   return *event_generator_.get();
+}
+
+// static
+bool AshTestBase::SupportsMultipleDisplays() {
+#if defined(OS_WIN)
+  return base::win::GetVersion() < base::win::VERSION_WIN8;
+#else
+  return true;
+#endif
 }
 
 void AshTestBase::UpdateDisplay(const std::string& display_specs) {

@@ -4,7 +4,7 @@
 
 #include "chrome/renderer/pepper/pepper_pdf_host.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/printing/print_web_view_helper.h"
 #include "content/public/renderer/render_thread.h"
@@ -20,11 +20,11 @@
 #include "ppapi/proxy/ppb_image_data_proxy.h"
 #include "ppapi/shared_impl/scoped_pp_resource.h"
 #include "ppapi/thunk/enter.h"
-#include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebPluginContainer.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -204,7 +204,7 @@ int32_t PepperPDFHost::OnHostMsgUserMetricsRecordAction(
     ppapi::host::HostMessageContext* context,
     const std::string& action) {
   bool valid = false;
-  for (size_t i = 0; i < arraysize(kResourceImageMap); ++i) {
+  for (size_t i = 0; i < arraysize(kValidUserMetricsActions); ++i) {
     if (action == kValidUserMetricsActions[i]) {
       valid = true;
       break;
@@ -299,8 +299,8 @@ int32_t PepperPDFHost::OnHostMsgGetResourceImage(
   pp_size.height = image_skia_rep.pixel_height();
 
   ppapi::HostResource host_resource;
-  std::string image_data_desc;
-  ppapi::proxy::ImageHandle image_handle;
+  PP_ImageDataDesc image_data_desc;
+  IPC::PlatformFileForTransit image_handle;
   uint32_t byte_count = 0;
   bool success = CreateImageData(
       pp_instance(),
@@ -318,44 +318,12 @@ int32_t PepperPDFHost::OnHostMsgGetResourceImage(
 
   ppapi::host::ReplyMessageContext reply_context =
       context->MakeReplyMessageContext();
-  // This mess of #defines is needed to translate between ImageHandles and
-  // SerializedHandles. This is something that should be addressed with a
-  // refactoring of PPB_ImageData.
-#if defined(OS_WIN)
   ppapi::proxy::SerializedHandle serialized_handle;
-  PpapiPluginMsg_PDF_GetResourceImageReply reply_msg(host_resource,
-                                                     image_data_desc,
-                                                     0);
-  ppapi::proxy::HostDispatcher* dispatcher =
-      ppapi::proxy::HostDispatcher::GetForInstance(pp_instance());
-  if (!dispatcher)
-    return PP_ERROR_FAILED;
-  serialized_handle.set_shmem(
-      dispatcher->ShareHandleWithRemote(image_handle, false), byte_count);
-  reply_context.params.AppendHandle(serialized_handle);
-#elif defined(OS_MACOSX)
-  ppapi::proxy::SerializedHandle serialized_handle;
-  PpapiPluginMsg_PDF_GetResourceImageReply reply_msg(host_resource,
-                                                     image_data_desc,
-                                                     0);
   serialized_handle.set_shmem(image_handle, byte_count);
   reply_context.params.AppendHandle(serialized_handle);
-#elif defined(OS_LINUX)
-  // For linux, we pass the SysV shared memory key in the message.
-  PpapiPluginMsg_PDF_GetResourceImageReply reply_msg(host_resource,
-                                                     image_data_desc,
-                                                     image_handle);
-#else
-  // Not supported on the other platforms.
-  // This is a stub reply_msg not to break the build.
-  PpapiPluginMsg_PDF_GetResourceImageReply reply_msg(host_resource,
-                                                     image_data_desc,
-                                                     0);
-  NOTIMPLEMENTED();
-  return PP_ERROR_NOTSUPPORTED;
-#endif
-
-  SendReply(reply_context, reply_msg);
+  SendReply(reply_context,
+            PpapiPluginMsg_PDF_GetResourceImageReply(host_resource,
+                                                     image_data_desc));
 
   // Keep a reference to the resource only if the function succeeds.
   image_data_resource.Release();
@@ -365,7 +333,7 @@ int32_t PepperPDFHost::OnHostMsgGetResourceImage(
 
 // TODO(raymes): This function is mainly copied from ppb_image_data_proxy.cc.
 // It's a mess and needs to be fixed in several ways but this is better done
-// when we refactor PPB_ImageData. On success, the serialized handle will be
+// when we refactor PPB_ImageData. On success, the image handle will be
 // non-null.
 bool PepperPDFHost::CreateImageData(
     PP_Instance instance,
@@ -373,18 +341,18 @@ bool PepperPDFHost::CreateImageData(
     const PP_Size& size,
     const SkBitmap& pixels_to_write,
     ppapi::HostResource* result,
-    std::string* out_image_data_desc,
-    ppapi::proxy::ImageHandle* out_image_handle,
+    PP_ImageDataDesc* out_image_data_desc,
+    IPC::PlatformFileForTransit* out_image_handle,
     uint32_t* out_byte_count) {
-  // Create the resource.
-  ppapi::thunk::EnterResourceCreation enter(instance);
-  if (enter.failed())
-    return false;
-
-  PP_Resource resource = enter.functions()->CreateImageData(instance, format,
-                                                            &size, PP_FALSE);
+  PP_Resource resource = ppapi::proxy::PPB_ImageData_Proxy::CreateImageData(
+      instance,
+      ppapi::PPB_ImageData_Shared::SIMPLE,
+      format, size,
+      false /* init_to_zero */,
+      out_image_data_desc, out_image_handle, out_byte_count);
   if (!resource)
     return false;
+
   result->SetHostResource(instance, resource);
 
   // Write the image to the resource shared memory.
@@ -399,28 +367,11 @@ bool PepperPDFHost::CreateImageData(
   if (!mapper.is_valid())
     return false;
 
-  skia::PlatformCanvas* canvas = image_data->GetPlatformCanvas();
-  // Note: Do not skBitmap::copyTo the canvas bitmap directly because it will
-  // ignore the allocated pixels in shared memory and re-allocate a new buffer.
-  canvas->writePixels(pixels_to_write, 0, 0);
+  const SkBitmap* bitmap = image_data->GetMappedBitmap();
+  pixels_to_write.copyPixelsTo(bitmap->getPixels(),
+                               bitmap->getSize(),
+                               bitmap->rowBytes());
 
-  // Get the image description, it's just serialized as a string.
-  PP_ImageDataDesc desc;
-  if (enter_resource.object()->Describe(&desc) == PP_TRUE) {
-    out_image_data_desc->resize(sizeof(PP_ImageDataDesc));
-    memcpy(&(*out_image_data_desc)[0], &desc, sizeof(PP_ImageDataDesc));
-  } else {
-    return false;
-  }
-
-  // Get the shared memory handle.
-  int32_t handle = 0;
-  if (enter_resource.object()->GetSharedMemory(
-      &handle, out_byte_count) != PP_OK) {
-    return false;
-  }
-
-  *out_image_handle = ppapi::proxy::ImageData::HandleFromInt(handle);
   return true;
 }
 

@@ -4,9 +4,9 @@
 
 #include "chrome/browser/extensions/api/system_info_storage/storage_info_provider.h"
 
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
 #include <windows.h>
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 
 namespace extensions {
 
@@ -63,7 +63,7 @@ bool StorageInfoProviderWin::QueryUnitInfo(const std::string& id,
   DWORD ret = GetDriveType(drive.c_str());
   switch (ret) {
     case DRIVE_FIXED:
-      type = systeminfo::kStorageTypeHardDisk;
+      type = systeminfo::kStorageTypeFixed;
       break;
     case DRIVE_REMOVABLE:
       type = systeminfo::kStorageTypeRemovable;

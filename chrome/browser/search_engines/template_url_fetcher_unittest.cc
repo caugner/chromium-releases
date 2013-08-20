@@ -6,7 +6,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_fetcher_callbacks.h"
@@ -16,7 +16,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
 #include "googleurl/src/gurl.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class TemplateURLFetcherTest;
@@ -120,7 +120,7 @@ void TemplateURLFetcherTest::DestroyedCallback(
     TemplateURLFetcherTestCallbacks* callbacks) {
   callbacks_destroyed_++;
   if (waiting_for_download_)
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
 }
 
 void TemplateURLFetcherTest::ConfirmAddSearchProvider(
@@ -156,7 +156,7 @@ void TemplateURLFetcherTest::StartDownload(
 void TemplateURLFetcherTest::WaitForDownloadToFinish() {
   ASSERT_FALSE(waiting_for_download_);
   waiting_for_download_ = true;
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   waiting_for_download_ = false;
 }
 

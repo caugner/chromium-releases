@@ -8,9 +8,9 @@
 
 #include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -130,10 +130,9 @@ void CookieInfoView::EnableCookieDisplay(bool enabled) {
 ///////////////////////////////////////////////////////////////////////////////
 // CookieInfoView, views::View overrides.
 
-void CookieInfoView::ViewHierarchyChanged(bool is_add,
-                                          views::View* parent,
-                                          views::View* child) {
-  if (is_add && child == this)
+void CookieInfoView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.child == this)
     Init();
 }
 

@@ -6,17 +6,23 @@
 
 #include "content/browser/renderer_host/popup_menu_helper_mac.h"
 
+#include "base/mac/scoped_nsobject.h"
 #import "base/mac/scoped_sending_event.h"
-#include "base/memory/scoped_nsobject.h"
 #include "base/message_loop.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
+#include "content/browser/renderer_host/webmenurunner_mac.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #import "ui/base/cocoa/base_view.h"
-#include "webkit/glue/webmenurunner_mac.h"
 
 namespace content {
+
+namespace {
+
+bool g_allow_showing_popup_menus = true;
+
+}  // namespace
 
 PopupMenuHelper::PopupMenuHelper(RenderViewHost* render_view_host)
     : render_view_host_(static_cast<RenderViewHostImpl*>(render_view_host)) {
@@ -36,20 +42,23 @@ void PopupMenuHelper::ShowPopupMenu(
   // Only single selection list boxes show a popup on Mac.
   DCHECK(!allow_multiple_selection);
 
+  if (!g_allow_showing_popup_menus)
+    return;
+
   // Retain the Cocoa view for the duration of the pop-up so that it can't be
   // dealloced if my Destroy() method is called while the pop-up's up (which
   // would in turn delete me, causing a crash once the -runMenuInView
   // call returns. That's what was happening in <http://crbug.com/33250>).
- RenderWidgetHostViewMac* rwhvm =
-     static_cast<RenderWidgetHostViewMac*>(GetRenderWidgetHostView());
-  scoped_nsobject<RenderWidgetHostViewCocoa> cocoa_view
-      ([rwhvm->cocoa_view() retain]);
+  RenderWidgetHostViewMac* rwhvm =
+      static_cast<RenderWidgetHostViewMac*>(GetRenderWidgetHostView());
+  base::scoped_nsobject<RenderWidgetHostViewCocoa> cocoa_view(
+      [rwhvm->cocoa_view() retain]);
 
   // Display the menu.
-  scoped_nsobject<WebMenuRunner> menu_runner;
-  menu_runner.reset([[WebMenuRunner alloc] initWithItems:items
-                                                fontSize:item_font_size
-                                            rightAligned:right_aligned]);
+  base::scoped_nsobject<WebMenuRunner> menu_runner;
+   menu_runner.reset([[WebMenuRunner alloc] initWithItems:items
+                                                 fontSize:item_font_size
+                                             rightAligned:right_aligned]);
 
   {
     // Make sure events can be pumped while the menu is up.
@@ -81,6 +90,11 @@ void PopupMenuHelper::ShowPopupMenu(
   } else {
     render_view_host_->DidCancelPopupMenu();
   }
+}
+
+// static
+void PopupMenuHelper::DontShowPopupMenuForTesting() {
+  g_allow_showing_popup_menus = false;
 }
 
 RenderWidgetHostViewMac* PopupMenuHelper::GetRenderWidgetHostView() const {

@@ -5,19 +5,19 @@
 #include "chrome/browser/chromeos/preferences.h"
 
 #include "ash/magnifier/magnifier_constants.h"
+#include "ash/shell_delegate.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_registry_simple.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -46,11 +46,12 @@ static const char kFallbackInputMethodLocale[] = "en-US";
 
 Preferences::Preferences()
     : prefs_(NULL),
-      input_method_manager_(input_method::GetInputMethodManager()) {
+      input_method_manager_(input_method::InputMethodManager::Get()) {
 }
 
 Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
-    : input_method_manager_(input_method_manager) {
+    : prefs_(NULL),
+      input_method_manager_(input_method_manager) {
 }
 
 Preferences::~Preferences() {
@@ -59,10 +60,8 @@ Preferences::~Preferences() {
 
 // static
 void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(prefs::kHighContrastEnabled, false);
   registry->RegisterBooleanPref(prefs::kOwnerPrimaryMouseButtonRight, false);
   registry->RegisterBooleanPref(prefs::kOwnerTapToClickEnabled, true);
-  registry->RegisterBooleanPref(prefs::kSpokenFeedbackEnabled, false);
   registry->RegisterBooleanPref(prefs::kVirtualKeyboardEnabled, false);
 }
 
@@ -73,7 +72,7 @@ void Preferences::RegisterUserPrefs(
   // TODO(yusukes): Remove the runtime hack.
   if (base::chromeos::IsRunningOnChromeOS()) {
     input_method::InputMethodManager* manager =
-        input_method::GetInputMethodManager();
+        input_method::InputMethodManager::Get();
     if (manager) {
       hardware_keyboard_id =
           manager->GetInputMethodUtil()->GetHardwareInputMethodId();
@@ -101,7 +100,7 @@ void Preferences::RegisterUserPrefs(
   registry->RegisterBooleanPref(
       prefs::kNaturalScroll,
       CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kNaturalScrollDefault),
+          switches::kNaturalScrollDefault),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kPrimaryMouseButtonRight,
@@ -115,6 +114,22 @@ void Preferences::RegisterUserPrefs(
       prefs::kLabsAdvancedFilesystemEnabled,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kStickyKeysEnabled,
+      false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kLargeCursorEnabled,
+      false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kSpokenFeedbackEnabled,
+      false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kHighContrastEnabled,
+      false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kScreenMagnifierEnabled,
       false,
@@ -130,7 +145,7 @@ void Preferences::RegisterUserPrefs(
   registry->RegisterBooleanPref(
       prefs::kShouldAlwaysShowAccessibilityMenu,
       false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kMouseSensitivity,
       3,
@@ -177,7 +192,7 @@ void Preferences::RegisterUserPrefs(
       hardware_keyboard_id,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterStringPref(
-      prefs::kLanguageFilteredExtensionImes,
+      prefs::kLanguageEnabledExtensionImes,
       "",
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
@@ -259,10 +274,13 @@ void Preferences::RegisterUserPrefs(
       prefs::kLanguageRemapAltKeyTo,
       input_method::kAltKey,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  // We don't sync the CapsLock remapping pref, since the UI hides this pref
+  // on certain devices, so syncing a non-default value to a device that
+  // doesn't allow changing the pref would be odd. http://crbug.com/167237
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapCapsLockKeyTo,
       input_method::kCapsLockKey,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapDiamondKeyTo,
       input_method::kControlKey,
@@ -372,14 +390,12 @@ void Preferences::RegisterUserPrefs(
       true,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDoublePref(
-      prefs::kPowerPresentationIdleDelayFactor,
+      prefs::kPowerPresentationScreenDimDelayFactor,
       2.0,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  // TODO(derat): Change the default to 2.0 once a policy is added such
-  // that this can be set to 1.0 for public accounts.
   registry->RegisterDoublePref(
       prefs::kPowerUserActivityScreenDimDelayFactor,
-      1.0,
+      2.0,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   registry->RegisterStringPref(
@@ -401,10 +417,16 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
   three_finger_swipe_enabled_.Init(prefs::kEnableTouchpadThreeFingerSwipe,
       prefs, callback);
   natural_scroll_.Init(prefs::kNaturalScroll, prefs, callback);
-  screen_magnifier_enabled_.Init(prefs::kScreenMagnifierEnabled,
-                                 prefs, callback);
-  screen_magnifier_type_.Init(prefs::kScreenMagnifierType, prefs, callback);
-  screen_magnifier_scale_.Init(prefs::kScreenMagnifierScale, prefs, callback);
+  a11y_spoken_feedback_enabled_.Init(prefs::kSpokenFeedbackEnabled,
+                                     prefs, callback);
+  a11y_high_contrast_enabled_.Init(prefs::kHighContrastEnabled,
+                                   prefs, callback);
+  a11y_screen_magnifier_enabled_.Init(prefs::kScreenMagnifierEnabled,
+                                      prefs, callback);
+  a11y_screen_magnifier_type_.Init(prefs::kScreenMagnifierType,
+                                   prefs, callback);
+  a11y_screen_magnifier_scale_.Init(prefs::kScreenMagnifierScale,
+                                    prefs, callback);
   mouse_sensitivity_.Init(prefs::kMouseSensitivity, prefs, callback);
   touchpad_sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, callback);
   use_24hour_clock_.Init(prefs::kUse24HourClock, prefs, callback);
@@ -424,8 +446,8 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
   preferred_languages_.Init(prefs::kLanguagePreferredLanguages,
                             prefs, callback);
   preload_engines_.Init(prefs::kLanguagePreloadEngines, prefs, callback);
-  filtered_extension_imes_.Init(prefs::kLanguageFilteredExtensionImes,
-                                prefs, callback);
+  enabled_extension_imes_.Init(prefs::kLanguageEnabledExtensionImes,
+                               prefs, callback);
   current_input_method_.Init(prefs::kLanguageCurrentInputMethod,
                              prefs, callback);
   previous_input_method_.Init(prefs::kLanguagePreviousInputMethod,
@@ -507,8 +529,8 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
       prefs::kPowerUseVideoActivity, prefs, callback);
   power_allow_screen_wake_locks_.Init(
       prefs::kPowerAllowScreenWakeLocks, prefs, callback);
-  power_presentation_idle_delay_factor_.Init(
-      prefs::kPowerPresentationIdleDelayFactor, prefs, callback);
+  power_presentation_screen_dim_delay_factor_.Init(
+      prefs::kPowerPresentationScreenDimDelayFactor, prefs, callback);
   power_user_activity_screen_dim_delay_factor_.Init(
       prefs::kPowerUserActivityScreenDimDelayFactor, prefs, callback);
 }
@@ -694,14 +716,14 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
                                      preload_engines_.GetValue());
   }
 
-  if (!pref_name || *pref_name == prefs::kLanguageFilteredExtensionImes) {
-    std::string value(filtered_extension_imes_.GetValue());
+  if (!pref_name || *pref_name == prefs::kLanguageEnabledExtensionImes) {
+    std::string value(enabled_extension_imes_.GetValue());
 
     std::vector<std::string> split_values;
     if (!value.empty())
       base::SplitString(value, ',', &split_values);
 
-    input_method_manager_->SetFilteredExtensionImes(&split_values);
+    input_method_manager_->SetEnabledExtensionImes(&split_values);
   }
 
   // Do not check |*pref_name| of the prefs for remembering current/previous
@@ -834,7 +856,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       *pref_name == prefs::kPowerUseAudioActivity ||
       *pref_name == prefs::kPowerUseVideoActivity ||
       *pref_name == prefs::kPowerAllowScreenWakeLocks ||
-      *pref_name == prefs::kPowerPresentationIdleDelayFactor ||
+      *pref_name == prefs::kPowerPresentationScreenDimDelayFactor ||
       *pref_name == prefs::kPowerUserActivityScreenDimDelayFactor ||
       *pref_name == prefs::kEnableScreenLock) {
     PowerPolicyController::PrefValues values;
@@ -861,8 +883,8 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     values.use_video_activity = power_use_video_activity_.GetValue();
     values.allow_screen_wake_locks = power_allow_screen_wake_locks_.GetValue();
     values.enable_screen_lock = enable_screen_lock_.GetValue();
-    values.presentation_idle_delay_factor =
-        power_presentation_idle_delay_factor_.GetValue();
+    values.presentation_screen_dim_delay_factor =
+        power_presentation_screen_dim_delay_factor_.GetValue();
     values.user_activity_screen_dim_delay_factor =
         power_user_activity_screen_dim_delay_factor_.GetValue();
 
@@ -878,7 +900,7 @@ void Preferences::OnIsSyncingChanged() {
 void Preferences::ForceNaturalScrollDefault() {
   DVLOG(1) << "ForceNaturalScrollDefault";
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kNaturalScrollDefault) &&
+          switches::kNaturalScrollDefault) &&
       prefs_->IsSyncing() &&
       !prefs_->GetUserPrefValue(prefs::kNaturalScroll)) {
     DVLOG(1) << "Natural scroll forced to true";

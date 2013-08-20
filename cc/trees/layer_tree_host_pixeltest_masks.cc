@@ -55,11 +55,11 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskOfLayer) {
   mask->SetBounds(gfx::Size(100, 100));
   mask->SetIsDrawable(true);
   mask->SetIsMask(true);
-  green->SetMaskLayer(mask);
+  green->SetMaskLayer(mask.get());
 
-  RunPixelTest(background,
-               base::FilePath(FILE_PATH_LITERAL(
-                   "mask_of_layer.png")));
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
+               base::FilePath(FILE_PATH_LITERAL("mask_of_layer.png")));
 }
 
 TEST_F(LayerTreeHostMasksPixelTest, ImageMaskOfLayer) {
@@ -84,12 +84,12 @@ TEST_F(LayerTreeHostMasksPixelTest, ImageMaskOfLayer) {
 
   scoped_refptr<SolidColorLayer> green = CreateSolidColorLayerWithBorder(
       gfx::Rect(50, 50, 100, 100), kCSSGreen, 1, SK_ColorBLACK);
-  green->SetMaskLayer(mask);
+  green->SetMaskLayer(mask.get());
   background->AddChild(green);
 
-  RunPixelTest(background,
-               base::FilePath(FILE_PATH_LITERAL(
-                   "image_mask_of_layer.png")));
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
+               base::FilePath(FILE_PATH_LITERAL("image_mask_of_layer.png")));
 }
 
 TEST_F(LayerTreeHostMasksPixelTest, MaskOfClippedLayer) {
@@ -113,11 +113,11 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskOfClippedLayer) {
   mask->SetBounds(gfx::Size(100, 100));
   mask->SetIsDrawable(true);
   mask->SetIsMask(true);
-  green->SetMaskLayer(mask);
+  green->SetMaskLayer(mask.get());
 
-  RunPixelTest(background,
-               base::FilePath(FILE_PATH_LITERAL(
-                   "mask_of_clipped_layer.png")));
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
+               base::FilePath(FILE_PATH_LITERAL("mask_of_clipped_layer.png")));
 }
 
 TEST_F(LayerTreeHostMasksPixelTest, MaskWithReplica) {
@@ -133,7 +133,7 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskWithReplica) {
   scoped_refptr<SolidColorLayer> green = CreateSolidColorLayerWithBorder(
       gfx::Rect(0, 0, 100, 100), kCSSGreen, 1, SK_ColorBLACK);
   background->AddChild(green);
-  green->SetMaskLayer(mask);
+  green->SetMaskLayer(mask.get());
 
   gfx::Transform replica_transform;
   replica_transform.Rotate(-90.0);
@@ -142,11 +142,11 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskWithReplica) {
   replica->SetAnchorPoint(gfx::PointF(0.5f, 0.5f));
   replica->SetPosition(gfx::Point(100, 100));
   replica->SetTransform(replica_transform);
-  green->SetReplicaLayer(replica);
+  green->SetReplicaLayer(replica.get());
 
-  RunPixelTest(background,
-               base::FilePath(FILE_PATH_LITERAL(
-                   "mask_with_replica.png")));
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
+               base::FilePath(FILE_PATH_LITERAL("mask_with_replica.png")));
 }
 
 TEST_F(LayerTreeHostMasksPixelTest, MaskWithReplicaOfClippedLayer) {
@@ -171,7 +171,7 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskWithReplicaOfClippedLayer) {
   scoped_refptr<SolidColorLayer> green = CreateSolidColorLayerWithBorder(
       gfx::Rect(0, -50, 100, 100), kCSSGreen, 1, SK_ColorBLACK);
   clip->AddChild(green);
-  green->SetMaskLayer(mask);
+  green->SetMaskLayer(mask.get());
 
   gfx::Transform replica_transform;
   replica_transform.Rotate(-90.0);
@@ -180,9 +180,10 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskWithReplicaOfClippedLayer) {
   replica->SetAnchorPoint(gfx::PointF(0.5f, 0.5f));
   replica->SetPosition(gfx::Point(100, 100));
   replica->SetTransform(replica_transform);
-  green->SetReplicaLayer(replica);
+  green->SetReplicaLayer(replica.get());
 
-  RunPixelTest(background,
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
                base::FilePath(FILE_PATH_LITERAL(
                    "mask_with_replica_of_clipped_layer.png")));
 }
@@ -213,12 +214,12 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskOfReplica) {
   replica->SetAnchorPoint(gfx::PointF(1.f, 1.f));
   replica->SetPosition(gfx::Point());
   replica->SetTransform(replica_transform);
-  replica->SetMaskLayer(mask);
-  green->SetReplicaLayer(replica);
+  replica->SetMaskLayer(mask.get());
+  green->SetReplicaLayer(replica.get());
 
-  RunPixelTest(background,
-               base::FilePath(FILE_PATH_LITERAL(
-                   "mask_of_replica.png")));
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
+               base::FilePath(FILE_PATH_LITERAL("mask_of_replica.png")));
 }
 
 TEST_F(LayerTreeHostMasksPixelTest, MaskOfReplicaOfClippedLayer) {
@@ -255,10 +256,11 @@ TEST_F(LayerTreeHostMasksPixelTest, MaskOfReplicaOfClippedLayer) {
   replica->SetAnchorPoint(gfx::PointF(1.f, 1.f));
   replica->SetPosition(gfx::Point());
   replica->SetTransform(replica_transform);
-  replica->SetMaskLayer(mask);
-  green->SetReplicaLayer(replica);
+  replica->SetMaskLayer(mask.get());
+  green->SetReplicaLayer(replica.get());
 
-  RunPixelTest(background,
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
                base::FilePath(FILE_PATH_LITERAL(
                    "mask_of_replica_of_clipped_layer.png")));
 }

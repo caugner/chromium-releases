@@ -29,6 +29,7 @@ namespace views {
 class DropHelper;
 class NativeWidgetAuraWindowObserver;
 class TooltipManagerAura;
+class WindowReorderer;
 
 class VIEWS_EXPORT NativeWidgetAura
     : public internal::NativeWidgetPrivate,
@@ -57,8 +58,8 @@ class VIEWS_EXPORT NativeWidgetAura
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual gfx::Vector2d CalculateOffsetToAncestorWithLayer(
-      ui::Layer** layer_parent) OVERRIDE;
+  virtual ui::Layer* GetLayer() OVERRIDE;
+  virtual void ReorderNativeViews() OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
@@ -114,6 +115,7 @@ class VIEWS_EXPORT NativeWidgetAura
                             ui::DragDropTypes::DragEventSource source) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
+  virtual bool IsMouseEventsEnabled() const OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
   virtual void SetInactiveRenderingDisabled(bool value) OVERRIDE;
@@ -172,6 +174,9 @@ class VIEWS_EXPORT NativeWidgetAura
   virtual void OnDragExited() OVERRIDE;
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
 
+  // Overridden from NativeWidget:
+  virtual ui::EventHandler* GetEventHandler() OVERRIDE;
+
  protected:
   virtual ~NativeWidgetAura();
 
@@ -205,6 +210,10 @@ class VIEWS_EXPORT NativeWidgetAura
   ui::WindowShowState saved_window_state_;
 
   scoped_ptr<TooltipManagerAura> tooltip_manager_;
+
+  // Reorders child windows of |window_| associated with a view based on the
+  // order of the associated views in the widget's view hierarchy.
+  scoped_ptr<WindowReorderer> window_reorderer_;
 
   scoped_ptr<NativeWidgetAuraWindowObserver> active_window_observer_;
 

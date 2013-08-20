@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/cros/network_property_ui_data.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
@@ -67,6 +67,7 @@ class WifiConfigView : public ChildNetworkConfigView,
   virtual void OnCertificatesLoaded(bool initial_load) OVERRIDE;
 
   // ChildNetworkConfigView:
+  virtual string16 GetTitle() const OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
   virtual bool CanLogin() OVERRIDE;
   virtual bool Login() OVERRIDE;

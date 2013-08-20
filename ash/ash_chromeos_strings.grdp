@@ -3,6 +3,14 @@
      Everything in this file is wrapped in <if expr="pp_ifdef('chromeos')">. -->
 <grit-part>
 
+  <!-- Status tray charging strings. -->
+  <message name="IDS_ASH_STATUS_TRAY_LOW_POWER_CHARGER_TITLE" desc="The title of a notification indicating that a low-current USB charger has been connected.">
+    Low-power charger connected
+  </message>
+  <message name="IDS_ASH_STATUS_TRAY_LOW_POWER_CHARGER_MESSAGE" desc="The message body of a notification indicating that a low-current USB charger has been connected.">
+    Your Chromebook may not charge while it is turned on. Consider using the official charger.
+  </message>
+  
   <!-- Status Tray Network strings -->
   <message name="IDS_ASH_STATUS_TRAY_NETWORK" desc="The label used in the network dialog header.">
     Network
@@ -117,6 +125,10 @@
   <message name="IDS_NETWORK_CONNECTION_ERROR_MESSAGE_WITH_DETAILS" desc="Message for network connection error notification with details">
     Failed to connect to network '<ph name="name">$1<ex>GoogleGuest</ex></ph>': <ph name="details">$2<ex>Unrecognized error</ex></ph>
   </message>
+  <message name="IDS_NETWORK_CONNECTION_ERROR_MESSAGE_WITH_SERVER_MESSAGE" desc="Message for network connection error notification with details and a server message">
+Failed to connect to '<ph name="name">$1<ex>GoogleGuest</ex></ph>': <ph name="details">$2<ex>Unrecognized error</ex></ph>
+Server message: <ph name="server_msg">$3<ex>Incorrect password</ex></ph>
+  </message>
   <message name="IDS_NETWORK_OUT_OF_CREDITS_TITLE" desc="Title for network out of data error notification">
     Network Connection Error
   </message>
@@ -172,67 +184,84 @@
   </message>
 
   <!-- Network error strings -->
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN" desc="Network error in about:network: UNKNOWN">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN" desc="Network error details in notifications: UNKNOWN">
     Unknown network error
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_OUT_OF_RANGE" desc="Network error in about:network: OUT_OF_RANGE">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_OUT_OF_RANGE" desc="Network error details in notifications: OUT_OF_RANGE">
     Out of range
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_PIN_MISSING" desc="Network error in about:network: PIN_MISSING">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_PIN_MISSING" desc="Network error details in notifications: PIN_MISSING">
     PIN missing
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED" desc="Network error in about:network: DHCP_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED" desc="Network error details in notifications: DHCP_FAILED">
     DHCP lookup failed
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED" desc="Network error in about:network: CONNECT_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED" desc="Network error details in notifications: CONNECT_FAILED">
     Connect failed
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE" desc="Network error in about:network: BAD_PASSPHRASE">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE" desc="Network error details in notifications: BAD_PASSPHRASE">
     Bad passphrase
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY" desc="Network error in about:network: BAD_WEPKEY">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY" desc="Network error details in notifications: BAD_WEPKEY">
     Bad WEP key
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_ACTIVATION_FAILED" desc="Network error in about:network: ACTIVATION_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_ACTIVATION_FAILED" desc="Network error details in notifications: ACTIVATION_FAILED">
     Activation failed
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_EVDO" desc="Network error in about:network: NEED_EVDO">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_EVDO" desc="Network error details in notifications: NEED_EVDO">
     Need EVDO
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_HOME_NETWORK" desc="Network error in about:network: NEED_HOME_NETWORK">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_HOME_NETWORK" desc="Network error details in notifications: NEED_HOME_NETWORK">
     Need home network
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_OTASP_FAILED" desc="Network error in about:network: OTASP_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_OTASP_FAILED" desc="Network error details in notifications: OTASP_FAILED">
     OTASP failed
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_AAA_FAILED" desc="Network error in about:network: AAA_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_AAA_FAILED" desc="Network error details in notifications: AAA_FAILED">
     AAA check failed
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_INTERNAL" desc="Network error in about:network: INTERNAL">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_INTERNAL" desc="Network error details in notifications: INTERNAL">
     Internal error
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_DNS_LOOKUP_FAILED" desc="Network error in about:network: DNS_LOOKUP_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_DNS_LOOKUP_FAILED" desc="Network error details in notifications: DNS_LOOKUP_FAILED">
     DNS lookup failed
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_HTTP_GET_FAILED" desc="Network error in about:network: HTTP_GET_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_HTTP_GET_FAILED" desc="Network error details in notifications: HTTP_GET_FAILED">
     HTTP get failed
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_IPSEC_PSK_AUTH_FAILED" desc="Network error in about:network: IPSEC_PSK_AUTH_FAILED">
-    Failed to authenticate with provided pre-shared key
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_IPSEC_PSK_AUTH_FAILED" desc="Network error details in notifications: IPSEC_PSK_AUTH_FAILED">
+    Incorrect password
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_IPSEC_CERT_AUTH_FAILED" desc="Network error in about:network: IPSEC_CERT_AUTH_FAILED">
-    Failed to authenticate with provided certificate
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_CERT_AUTH_FAILED" desc="Network error details in notifications: IPSEC_CERT_AUTH_FAILED">
+    Authentication certificate rejected by network
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_PPP_AUTH_FAILED" desc="Network error in about:network: PPP_AUTH_FAILED">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_EAP_LOCAL_TLS_FAILED" desc="Network error details in notifications: EAP_LOCAL_TLS_FAILED">
+    Authentication certificate rejected locally
+  </message>
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_EAP_REMOTE_TLS_FAILED" desc="Network error details in notifications: EAP_REMOTE_TLS_FAILED">
+    Authentication certificate rejected remotely
+  </message>
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_PPP_AUTH_FAILED" desc="Network error details in notifications: PPP_AUTH_FAILED">
     Failed to authenticate with provided username or password
   </message>
-  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNRECOGNIZED" desc="Network error in about:network: Unrecognized">
+  <message name="IDS_CHROMEOS_NETWORK_ERROR_UNRECOGNIZED" desc="Network error details in notifications: Unrecognized">
     Unrecognized error
   </message>
 
-  <!-- Status Tray ScreenCapture strings -->
-  <message name="IDS_CHROMEOS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_STOP" desc="label used for screen sharing stop button">
+  <!-- Status tray screen capture strings. -->
+  <message name="IDS_ASH_STATUS_TRAY_SCREEN_CAPTURE_STOP" desc="label used for screen capture stop button">
     Stop
+  </message>
+
+  <!-- Status tray screen share strings. -->
+  <message name="IDS_ASH_STATUS_TRAY_SCREEN_SHARE_STOP" desc="label used for screen sharing stop button">
+    Stop
+  </message>
+  <message name="IDS_ASH_STATUS_TRAY_SCREEN_SHARE_BEING_HELPED" desc="label for screen sharing notification">
+    Sharing control of your screen via Hangouts.
+  </message>
+  <message name="IDS_ASH_STATUS_TRAY_SCREEN_SHARE_BEING_HELPED_NAME" desc="label for screen sharing notification with name">
+    Sharing control of your screen with <ph name="HELPER_NAME">$1<ex>Walder Frey</ex></ph> via Hangouts.
   </message>
 
 </grit-part>

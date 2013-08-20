@@ -1,25 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/windows_version.h"
-#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/browser/media/media_browsertest.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/shell/shell.h"
-#include "content/test/content_browser_test.h"
-#include "content/test/content_browser_test_utils.h"
-#include "googleurl/src/gurl.h"
-#include "media/base/media_switches.h"
-#include "webkit/media/crypto/key_systems.h"
+#include "webkit/renderer/media/crypto/key_systems.h"
 
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
@@ -27,17 +18,17 @@
 #include <gnu/libc-version.h>
 #endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(OS_LINUX)
 
+#if defined(ENABLE_PEPPER_CDMS)
 // Platform-specific filename relative to the chrome executable.
-#if defined(OS_WIN)
-static const char kClearKeyLibraryName[] = "clearkeycdmadapter.dll";
-static const char kWidevineLibraryName[] = "widevinecdmadapter.dll";
-#elif defined(OS_MACOSX)
-static const char kClearKeyLibraryName[] = "clearkeycdmadapter.plugin";
-static const char kWidevineLibraryName[] = "widevinecdmadapter.plugin";
+static const char kClearKeyCdmAdapterFileName[] =
+#if defined(OS_MACOSX)
+    "clearkeycdmadapter.plugin";
+#elif defined(OS_WIN)
+    "clearkeycdmadapter.dll";
 #elif defined(OS_POSIX)
-static const char kClearKeyLibraryName[] = "libclearkeycdmadapter.so";
-static const char kWidevineLibraryName[] = "libwidevinecdmadapter.so";
+    "libclearkeycdmadapter.so";
 #endif
+#endif  // defined(ENABLE_PEPPER_CDMS)
 
 // Available key systems.
 static const char kClearKeyKeySystem[] = "webkit-org.w3.clearkey";
@@ -52,87 +43,61 @@ static const char kMP4AudioOnly[] = "audio/mp4; codecs=\"mp4a.40.2\"";
 static const char kMP4VideoOnly[] = "video/mp4; codecs=\"avc1.4D4041\"";
 
 // Common test expectations.
-const string16 kExpectedEnded = ASCIIToUTF16("ENDED");
-const string16 kExpectedWebKitError = ASCIIToUTF16("WEBKITKEYERROR");
+static const char kKeyError[] = "KEYERROR";
 
 namespace content {
 
 class EncryptedMediaTest : public testing::WithParamInterface<const char*>,
-                           public ContentBrowserTest {
+                           public content::MediaBrowserTest {
  public:
   void TestSimplePlayback(const char* encrypted_media, const char* media_type,
-                          const char* key_system, const string16 expectation) {
-    ASSERT_NO_FATAL_FAILURE(
-        PlayEncryptedMedia("encrypted_media_player.html", encrypted_media,
-                           media_type, key_system, expectation));
+                          const char* key_system, const char* expectation) {
+    RunEncryptedMediaTest("encrypted_media_player.html", encrypted_media,
+                          media_type, key_system, expectation);
   }
 
-  void TestFrameSizeChange(const char* key_system, const string16 expectation) {
-    ASSERT_NO_FATAL_FAILURE(
-        PlayEncryptedMedia("encrypted_frame_size_change.html",
-                           "frame_size_change-av-enc-v.webm", kWebMAudioVideo,
-                           key_system, expectation));
+  void TestFrameSizeChange(const char* key_system, const char* expectation) {
+    RunEncryptedMediaTest("encrypted_frame_size_change.html",
+                          "frame_size_change-av-enc-v.webm", kWebMAudioVideo,
+                          key_system, expectation);
   }
 
-  void PlayEncryptedMedia(const char* html_page, const char* media_file,
-                          const char* media_type, const char* key_system,
-                          const string16 expectation) {
-    // TODO(shadi): Add non-HTTP tests once src is supported for EME.
-    ASSERT_TRUE(test_server()->Start());
-
-    const string16 kError = ASCIIToUTF16("ERROR");
-    const string16 kFailed = ASCIIToUTF16("FAILED");
-    GURL player_gurl = test_server()->GetURL(base::StringPrintf(
-        "files/media/%s?keysystem=%s&mediafile=%s&mediatype=%s", html_page,
-        key_system, media_file, media_type));
-    TitleWatcher title_watcher(shell()->web_contents(), expectation);
-    title_watcher.AlsoWaitForTitle(kError);
-    title_watcher.AlsoWaitForTitle(kFailed);
-
-    NavigateToURL(shell(), player_gurl);
-
-    string16 final_title = title_watcher.WaitAndGetTitle();
-    EXPECT_EQ(expectation, final_title);
-
-    if (final_title == kFailed) {
-      std::string fail_message;
-      EXPECT_TRUE(ExecuteScriptAndExtractString(
-          shell()->web_contents(),
-          "window.domAutomationController.send(failMessage);",
-          &fail_message));
-      LOG(INFO) << "Test failed: " << fail_message;
-    }
+  void RunEncryptedMediaTest(const char* html_page, const char* media_file,
+                             const char* media_type, const char* key_system,
+                             const char* expectation) {
+    std::vector<StringPair> query_params;
+    query_params.push_back(std::make_pair("mediafile", media_file));
+    query_params.push_back(std::make_pair("mediatype", media_type));
+    query_params.push_back(std::make_pair("keysystem", key_system));
+    RunMediaTestPage(html_page, &query_params, expectation, true);
   }
 
  protected:
-  // Registers any CDM plugins not registered by default.
+#if defined(ENABLE_PEPPER_CDMS)
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    RegisterPepperPlugin(command_line, kClearKeyLibraryName,
-                         kExternalClearKeyKeySystem);
+    RegisterPepperCdm(command_line, kClearKeyCdmAdapterFileName,
+                      kExternalClearKeyKeySystem);
   }
 
-  virtual void RegisterPepperPlugin(CommandLine* command_line,
-                                    const std::string& library_name,
-                                    const std::string& key_system) {
+  virtual void RegisterPepperCdm(CommandLine* command_line,
+                                 const std::string& adapter_name,
+                                 const std::string& key_system) {
     // Append the switch to register the Clear Key CDM Adapter.
     base::FilePath plugin_dir;
     EXPECT_TRUE(PathService::Get(base::DIR_MODULE, &plugin_dir));
-#if defined(OS_WIN)
-    base::FilePath plugin_lib = plugin_dir.Append(ASCIIToWide(library_name));
-#else
-    base::FilePath plugin_lib = plugin_dir.Append(library_name);
-#endif
+    base::FilePath plugin_lib = plugin_dir.AppendASCII(adapter_name);
     EXPECT_TRUE(file_util::PathExists(plugin_lib));
     base::FilePath::StringType pepper_plugin = plugin_lib.value();
     pepper_plugin.append(FILE_PATH_LITERAL("#CDM#0.1.0.0;"));
 #if defined(OS_WIN)
-    pepper_plugin.append(ASCIIToWide(webkit_media::GetPluginType(key_system)));
+    pepper_plugin.append(ASCIIToWide(webkit_media::GetPepperType(key_system)));
 #else
-    pepper_plugin.append(webkit_media::GetPluginType(key_system));
+    pepper_plugin.append(webkit_media::GetPepperType(key_system));
 #endif
     command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
                                      pepper_plugin);
   }
+#endif  // defined(ENABLE_PEPPER_CDMS)
 };
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
@@ -155,7 +120,7 @@ class WVEncryptedMediaTest : public EncryptedMediaTest {
     }
 #endif  // defined(OS_LINUX)
     EncryptedMediaTest::TestSimplePlayback(encrypted_media, media_type,
-                                           key_system, kExpectedWebKitError);
+                                           key_system, kKeyError);
     bool receivedKeyMessage = false;
     EXPECT_TRUE(ExecuteScriptAndExtractBool(
         shell()->web_contents(),
@@ -165,51 +130,51 @@ class WVEncryptedMediaTest : public EncryptedMediaTest {
   }
 
  protected:
-  // Registers any CDM plugins not registered by default.
+#if defined(ENABLE_PEPPER_CDMS)
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
-    RegisterPepperPlugin(command_line, kWidevineLibraryName,
-                         kWidevineKeySystem);
+    RegisterPepperCdm(command_line, kWidevineCdmAdapterFileName,
+                      kWidevineKeySystem);
   }
+#endif  // defined(ENABLE_PEPPER_CDMS)
 };
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
 
 INSTANTIATE_TEST_CASE_P(ClearKey, EncryptedMediaTest,
                         ::testing::Values(kClearKeyKeySystem));
 
+// External Clear Key is currently only used on platforms that use Pepper CDMs.
+#if defined(ENABLE_PEPPER_CDMS)
 INSTANTIATE_TEST_CASE_P(ExternalClearKey, EncryptedMediaTest,
                         ::testing::Values(kExternalClearKeyKeySystem));
+#endif
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaTest, InvalidKeySystem) {
-  const string16 kExpected = ASCIIToUTF16(
-      StringToUpperASCII(std::string("GenerateKeyRequestException")));
   TestSimplePlayback("bear-320x240-av-enc_av.webm", kWebMAudioVideo,
-                     "com.example.invalid", kExpected);
+                     "com.example.invalid", "GENERATE_KEY_REQUEST_EXCEPTION");
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_WebM) {
-  TestSimplePlayback("bear-a-enc_a.webm", kWebMAudioOnly, GetParam(),
-                     kExpectedEnded);
+  TestSimplePlayback("bear-a-enc_a.webm", kWebMAudioOnly, GetParam(), kEnded);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioClearVideo_WebM) {
   TestSimplePlayback("bear-320x240-av-enc_a.webm", kWebMAudioVideo, GetParam(),
-                     kExpectedEnded);
+                     kEnded);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoAudio_WebM) {
   TestSimplePlayback("bear-320x240-av-enc_av.webm", kWebMAudioVideo, GetParam(),
-                     kExpectedEnded);
+                     kEnded);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM) {
   TestSimplePlayback("bear-320x240-v-enc_v.webm", kWebMVideoOnly, GetParam(),
-                     kExpectedEnded);
+                     kEnded);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoClearAudio_WebM) {
   TestSimplePlayback("bear-320x240-av-enc_v.webm", kWebMAudioVideo,GetParam(),
-                     kExpectedEnded);
+                     kEnded);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameChangeVideo) {
@@ -218,18 +183,18 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameChangeVideo) {
   if (base::win::GetVersion() < base::win::VERSION_VISTA)
     return;
 #endif
-  TestFrameSizeChange(GetParam(), kExpectedEnded);
+  TestFrameSizeChange(GetParam(), kEnded);
 }
 
 #if defined(GOOGLE_CHROME_BUILD) || defined(USE_PROPRIETARY_CODECS)
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4) {
   TestSimplePlayback("bear-640x360-v_frag-cenc.mp4", kMP4VideoOnly, GetParam(),
-                     kExpectedEnded);
+                     kEnded);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_MP4) {
   TestSimplePlayback("bear-640x360-a_frag-cenc.mp4", kMP4AudioOnly, GetParam(),
-                     kExpectedEnded);
+                     kEnded);
 }
 #endif
 

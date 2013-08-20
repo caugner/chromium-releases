@@ -22,6 +22,10 @@
       'difference_estimator.h',
       'disassembler.cc',
       'disassembler.h',
+      'disassembler_elf_32.cc',
+      'disassembler_elf_32.h',
+      'disassembler_elf_32_arm.cc',
+      'disassembler_elf_32_arm.h',
       'disassembler_elf_32_x86.cc',
       'disassembler_elf_32_x86.h',
       'disassembler_win32_x86.cc',
@@ -111,6 +115,15 @@
         '../testing/gtest.gyp:gtest',
       ],
       'conditions': [
+        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        }],
         [ 'toolkit_uses_gtk == 1', {
           'dependencies': [
             # Workaround for gyp bug 69.

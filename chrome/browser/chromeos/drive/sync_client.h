@@ -9,34 +9,39 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/chromeos/drive/file_cache_observer.h"
-#include "chrome/browser/chromeos/drive/file_system_interface.h"
-#include "chrome/browser/chromeos/drive/file_system_observer.h"
+#include "chrome/browser/chromeos/drive/file_errors.h"
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace drive {
 
-class FileCache;
 class FileCacheEntry;
-class FileSystemInterface;
+class JobScheduler;
 class ResourceEntry;
 
+namespace file_system {
+class DownloadOperation;
+class OperationObserver;
+class UpdateOperation;
+}
+
+namespace internal {
+
+class FileCache;
+class ResourceMetadata;
+
 // The SyncClient is used to synchronize pinned files on Drive and the
-// cache on the local drive. The sync client works as follows.
-//
-// When the user pins files on Drive, this client is notified about the files
-// that get pinned, and queues tasks and starts fetching these files in the
-// background.
-//
-// When the user unpins files on Drive, this client is notified about the
-// files that get unpinned, cancels tasks if these are still in the queue.
+// cache on the local drive.
 //
 // If the user logs out before fetching of the pinned files is complete, this
 // client resumes fetching operations next time the user logs in, based on
 // the states left in the cache.
-class SyncClient : public FileSystemObserver,
-                   public FileCacheObserver {
+class SyncClient {
  public:
   // Types of sync tasks.
   enum SyncType {
@@ -44,19 +49,22 @@ class SyncClient : public FileSystemObserver,
     UPLOAD,  // Upload a file to the Drive server.
   };
 
-  SyncClient(FileSystemInterface* file_system, FileCache* cache);
+  SyncClient(base::SequencedTaskRunner* blocking_task_runner,
+             file_system::OperationObserver* observer,
+             JobScheduler* scheduler,
+             ResourceMetadata* metadata,
+             FileCache* cache,
+             const base::FilePath& temporary_file_directory);
   virtual ~SyncClient();
 
-  // FileSystemInterface::Observer overrides.
-  virtual void OnInitialLoadFinished() OVERRIDE;
-  virtual void OnFeedFromServerLoaded() OVERRIDE;
+  // Adds a fetch task to the queue.
+  void AddFetchTask(const std::string& resource_id);
 
-  // FileCache::Observer overrides.
-  virtual void OnCachePinned(const std::string& resource_id,
-                             const std::string& md5) OVERRIDE;
-  virtual void OnCacheUnpinned(const std::string& resource_id,
-                               const std::string& md5) OVERRIDE;
-  virtual void OnCacheCommitted(const std::string& resource_id) OVERRIDE;
+  // Removes a fetch task from the queue.
+  void RemoveFetchTask(const std::string& resource_id);
+
+  // Adds an upload task to the queue.
+  void AddUploadTask(const std::string& resource_id);
 
   // Starts processing the backlog (i.e. pinned-but-not-filed files and
   // dirty-but-not-uploaded files). Kicks off retrieval of the resource
@@ -68,16 +76,6 @@ class SyncClient : public FileSystemObserver,
   // are added to the queue and the sync loop is started.
   void StartCheckingExistingPinnedFiles();
 
-  // Returns the resource IDs in |queue_| for the given sync type. Used only
-  // for testing.
-  std::vector<std::string> GetResourceIdsForTesting(SyncType sync_type) const;
-
-  // Adds the resource ID to the queue. Used only for testing.
-  void AddResourceIdForTesting(SyncType sync_type,
-                               const std::string& resource_id) {
-    AddTaskToQueue(sync_type, resource_id);
-  }
-
   // Sets a delay for testing.
   void set_delay_for_testing(const base::TimeDelta& delay) {
     delay_ = delay;
@@ -87,8 +85,6 @@ class SyncClient : public FileSystemObserver,
   void StartSyncLoop();
 
  private:
-  friend class SyncClientTest;
-
   // Adds the given task to the queue. If the same task is queued, remove the
   // existing one, and adds a new one to the end of the queue.
   void AddTaskToQueue(SyncType type, const std::string& resource_id);
@@ -105,11 +101,10 @@ class SyncClient : public FileSystemObserver,
                                            const FileCacheEntry& cache_entry);
 
   // Called when a file entry is obtained.
-  void OnGetEntryInfoByResourceId(const std::string& resource_id,
-                                  const FileCacheEntry& cache_entry,
-                                  FileError error,
-                                  const base::FilePath& file_path,
-                                  scoped_ptr<ResourceEntry> entry);
+  void OnGetResourceEntryById(const std::string& resource_id,
+                              const FileCacheEntry& cache_entry,
+                              FileError error,
+                              scoped_ptr<ResourceEntry> entry);
 
   // Called when a cache entry is obtained.
   void OnGetCacheEntry(const std::string& resource_id,
@@ -128,16 +123,21 @@ class SyncClient : public FileSystemObserver,
   void OnFetchFileComplete(const std::string& resource_id,
                            FileError error,
                            const base::FilePath& local_path,
-                           const std::string& ununsed_mime_type,
-                           DriveFileType file_type);
+                           scoped_ptr<ResourceEntry> entry);
 
   // Called when the file for |resource_id| is uploaded.
   // Calls DoSyncLoop() to go back to the sync loop.
   void OnUploadFileComplete(const std::string& resource_id,
                             FileError error);
 
-  FileSystemInterface* file_system_;  // Owned by DriveSystemService.
-  FileCache* cache_;  // Owned by DriveSystemService.
+  ResourceMetadata* metadata_;
+  FileCache* cache_;
+
+  // Used to fetch pinned files.
+  scoped_ptr<file_system::DownloadOperation> download_operation_;
+
+  // Used to upload committed files.
+  scoped_ptr<file_system::UpdateOperation> update_operation_;
 
   // List of the resource ids of resources which have a fetch task created.
   std::set<std::string> fetch_list_;
@@ -159,6 +159,7 @@ class SyncClient : public FileSystemObserver,
   DISALLOW_COPY_AND_ASSIGN(SyncClient);
 };
 
+}  // namespace internal
 }  // namespace drive
 
 #endif  // CHROME_BROWSER_CHROMEOS_DRIVE_SYNC_CLIENT_H_

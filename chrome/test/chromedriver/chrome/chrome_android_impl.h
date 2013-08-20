@@ -5,13 +5,13 @@
 #ifndef CHROME_TEST_CHROMEDRIVER_CHROME_CHROME_ANDROID_IMPL_H_
 #define CHROME_TEST_CHROMEDRIVER_CHROME_CHROME_ANDROID_IMPL_H_
 
-#include <list>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/test/chromedriver/chrome/chrome_impl.h"
 
+class Device;
 class DevToolsHttpClient;
 
 class ChromeAndroidImpl : public ChromeImpl {
@@ -20,12 +20,17 @@ class ChromeAndroidImpl : public ChromeImpl {
       scoped_ptr<DevToolsHttpClient> client,
       const std::string& version,
       int build_no,
-      const std::list<DevToolsEventLogger*>& devtools_event_loggers);
+      ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+      scoped_ptr<Device> device,
+      Log* log);
   virtual ~ChromeAndroidImpl();
 
   // Overridden from Chrome:
   virtual std::string GetOperatingSystemName() OVERRIDE;
   virtual Status Quit() OVERRIDE;
+
+ private:
+  scoped_ptr<Device> device_;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_CHROME_ANDROID_IMPL_H_

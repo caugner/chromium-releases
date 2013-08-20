@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/public/common/ssl_status.h"
@@ -142,10 +142,10 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   EXPECT_EQ(ASCIIToUTF16("title2"), entry2_->GetTitle());
 
   // State
-  EXPECT_EQ(std::string(), entry1_->GetContentState());
-  EXPECT_EQ(std::string(), entry2_->GetContentState());
-  entry2_->SetContentState("state");
-  EXPECT_EQ("state", entry2_->GetContentState());
+  EXPECT_FALSE(entry1_->GetPageState().IsValid());
+  EXPECT_FALSE(entry2_->GetPageState().IsValid());
+  entry2_->SetPageState(PageState::CreateFromEncodedData("state"));
+  EXPECT_EQ("state", entry2_->GetPageState().ToEncodedData());
 
   // Page ID
   EXPECT_EQ(-1, entry1_->GetPageID());

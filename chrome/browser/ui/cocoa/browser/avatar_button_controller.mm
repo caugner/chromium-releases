@@ -8,26 +8,34 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/managed_mode/managed_mode.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/menu_controller.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
+
+namespace {
+
+// Space between the avatar icon and the managed user avatar label.
+const CGFloat kAvatarSpacing = 4;
+
+}  // namespace
 
 @interface AvatarButtonController (Private)
 - (void)setButtonEnabled:(BOOL)flag;
@@ -90,26 +98,30 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
   if ((self = [super init])) {
     browser_ = browser;
 
-    scoped_nsobject<NSButton> button(
-        [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 20, 20)]);
-    [button setButtonType:NSMomentaryLightButton];
+    base::scoped_nsobject<NSView> container(
+        [[NSView alloc] initWithFrame:NSMakeRect(
+            0, 0, profiles::kAvatarIconWidth, profiles::kAvatarIconHeight)]);
+    [self setView:container];
+    button_.reset([[NSButton alloc] initWithFrame:NSMakeRect(
+        0, 0, profiles::kAvatarIconWidth, profiles::kAvatarIconHeight)]);
+    NSButtonCell* cell = [button_ cell];
+    [button_ setButtonType:NSMomentaryLightButton];
 
-    [button setImagePosition:NSImageOnly];
-    [[button cell] setImageScaling:NSImageScaleProportionallyDown];
-    [[button cell] setImagePosition:NSImageBelow];
+    [button_ setImagePosition:NSImageOnly];
+    [cell setImageScaling:NSImageScaleProportionallyDown];
+    [cell setImagePosition:NSImageBelow];
 
     // AppKit sets a title for some reason when using |-setImagePosition:|.
-    [button setTitle:nil];
+    [button_ setTitle:nil];
 
-    [[button cell] setImageDimsWhenDisabled:NO];
-    [[button cell] setHighlightsBy:NSContentsCellMask];
-    [[button cell] setShowsStateBy:NSContentsCellMask];
+    [cell setImageDimsWhenDisabled:NO];
+    [cell setHighlightsBy:NSContentsCellMask];
+    [cell setShowsStateBy:NSContentsCellMask];
 
-    [button setBordered:NO];
-    [button setTarget:self];
-    [button setAction:@selector(buttonClicked:)];
+    [button_ setBordered:NO];
+    [button_ setTarget:self];
+    [button_ setAction:@selector(buttonClicked:)];
 
-    NSButtonCell* cell = [button cell];
     [cell accessibilitySetOverrideValue:NSAccessibilityButtonRole
                            forAttribute:NSAccessibilityRoleAttribute];
     [cell accessibilitySetOverrideValue:
@@ -125,9 +137,10 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
         l10n_util::GetNSString(IDS_PROFILES_BUBBLE_ACCESSIBLE_DESCRIPTION)
                            forAttribute:NSAccessibilityDescriptionAttribute];
 
-    [self setView:button];
+    [[self view] addSubview:button_];
 
-    if (browser_->profile()->IsOffTheRecord()) {
+    Profile* profile = browser_->profile();
+    if (profile->IsOffTheRecord()) {
       ResourceBundle& bundle = ResourceBundle::GetSharedInstance();
       NSImage* otrIcon = bundle.GetNativeImageNamed(IDR_OTR_ICON).ToNSImage();
       [self setImage:[self compositeImageWithShadow:otrIcon]];
@@ -136,6 +149,35 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
       [self setButtonEnabled:YES];
       observer_.reset(new AvatarButtonControllerInternal::Observer(self));
       [self updateAvatar];
+
+      // Managed users cannot enter incognito mode, so we only need to check
+      // it in this code path.
+      if (ManagedUserService::ProfileIsManaged(profile)) {
+        labelButton_.reset([[NSButton alloc] initWithFrame:NSZeroRect]);
+        [labelButton_ setButtonType:NSMomentaryLightButton];
+        [labelButton_ setBezelStyle:NSRecessedBezelStyle];
+        [labelButton_ setTitle:
+            l10n_util::GetNSString(IDS_MANAGED_USER_AVATAR_LABEL)];
+        [labelButton_ setShowsBorderOnlyWhileMouseInside:YES];
+
+        [labelButton_ setTarget:self];
+        [labelButton_ setAction:@selector(buttonClicked:)];
+
+        [labelButton_ sizeToFit];
+        [labelButton_ setFrameOrigin:
+            NSMakePoint(kAvatarSpacing,
+                        (profiles::kAvatarIconHeight -
+                             NSHeight([labelButton_ frame])) / 2)];
+        [[self view] addSubview:labelButton_];
+
+        // Reposition the avatar button and resize the container.
+        CGFloat avatarButtonXOffset =
+            NSWidth([labelButton_ frame]) + 2 * kAvatarSpacing;
+        [container setFrameSize:
+            NSMakeSize(avatarButtonXOffset + NSWidth([button_ frame]),
+                       profiles::kAvatarIconHeight)];
+        [button_ setFrameOrigin:NSMakePoint(avatarButtonXOffset, 0)];
+      }
     }
   }
   return self;
@@ -150,14 +192,18 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
 }
 
 - (NSButton*)buttonView {
-  return static_cast<NSButton*>(self.view);
+  return button_.get();
+}
+
+- (NSButton*)labelButtonView {
+  return labelButton_.get();
 }
 
 - (void)setImage:(NSImage*)image {
-  [self.buttonView setImage:image];
+  [button_ setImage:image];
 }
 
-- (void)showAvatarBubble {
+- (void)showAvatarBubble:(NSView*)anchor {
   if (menuController_)
     return;
 
@@ -170,11 +216,10 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
         lockBarVisibilityForOwner:self withAnimation:NO delay:NO];
   }
 
-  NSView* view = self.view;
-  NSPoint point = NSMakePoint(NSMidX([view bounds]),
-                              NSMaxY([view bounds]) - kMenuYOffsetAdjust);
-  point = [view convertPoint:point toView:nil];
-  point = [[view window] convertBaseToScreen:point];
+  NSPoint point = NSMakePoint(NSMidX([anchor bounds]),
+                              NSMaxY([anchor bounds]) - kMenuYOffsetAdjust);
+  point = [anchor convertPoint:point toView:nil];
+  point = [[anchor window] convertBaseToScreen:point];
 
   // |menu| will automatically release itself on close.
   menuController_ = [[AvatarMenuBubbleController alloc] initWithBrowser:browser_
@@ -192,16 +237,12 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
 // Private /////////////////////////////////////////////////////////////////////
 
 - (void)setButtonEnabled:(BOOL)flag {
-  [self.buttonView setEnabled:flag];
+  [button_ setEnabled:flag];
 }
 
 - (IBAction)buttonClicked:(id)sender {
-  DCHECK_EQ(self.buttonView, sender);
-  if (ManagedMode::IsInManagedMode()) {
-    ManagedMode::LeaveManagedMode();
-  } else {
-    [self showAvatarBubble];
-  }
+  DCHECK(sender == button_.get() || sender == labelButton_.get());
+  [self showAvatarBubble:sender];
 }
 
 - (void)bubbleWillClose:(NSNotification*)notif {
@@ -218,7 +259,7 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
 - (NSImage*)compositeImageWithShadow:(NSImage*)image {
   gfx::ScopedNSGraphicsContextSaveGState scopedGState;
 
-  scoped_nsobject<NSImage> destination(
+  base::scoped_nsobject<NSImage> destination(
       [[NSImage alloc] initWithSize:[image size]]);
 
   NSRect destRect = NSZeroRect;
@@ -226,7 +267,7 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
 
   [destination lockFocus];
 
-  scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
+  base::scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
   [shadow.get() setShadowColor:[NSColor colorWithCalibratedWhite:0.0
                                                            alpha:0.75]];
   [shadow.get() setShadowOffset:NSMakeSize(0, 0)];
@@ -247,13 +288,6 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
 
 // Updates the avatar information from the profile cache.
 - (void)updateAvatar {
-  if (ManagedMode::IsInManagedMode()) {
-    gfx::Image icon =
-        ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-            IDR_MANAGED_MODE_AVATAR);
-    [self setImage:icon.ToNSImage()];
-    return;
-  }
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   size_t index =
@@ -270,8 +304,8 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
 
   const string16& name = cache.GetNameOfProfileAtIndex(index);
   NSString* nsName = base::SysUTF16ToNSString(name);
-  [self.view setToolTip:nsName];
-  [[self.buttonView cell]
+  [button_ setToolTip:nsName];
+  [[button_ cell]
       accessibilitySetOverrideValue:nsName
                        forAttribute:NSAccessibilityValueAttribute];
 }

@@ -136,3 +136,24 @@ IPC_MESSAGE_CONTROL1(MetroViewerHostMsg_DisplaySelectFolder,
 // activation etc.
 IPC_MESSAGE_CONTROL1(MetroViewerHostMsg_WindowActivated,
                      bool) /* active */
+
+// Sent to the viewer process to set the cursor position.
+IPC_MESSAGE_CONTROL2(MetroViewerHostMsg_SetCursorPos,
+                     int,  /* x */
+                     int)  /* y */
+
+// Ack sent by the viewer process indicating that the SetCursorPos operation
+// was completed.
+IPC_MESSAGE_CONTROL0(MetroViewerHostMsg_SetCursorPosAck)
+
+IPC_MESSAGE_CONTROL1(MetroViewerHostMsg_OpenURL,
+                     string16)  /* url */
+
+IPC_MESSAGE_CONTROL1(MetroViewerHostMsg_SearchRequest,
+                     string16)  /* search_string */
+
+// Sent from the metro viewer process to the browser process to indicate that
+// the viewer window size has changed.
+IPC_MESSAGE_CONTROL2(MetroViewerHostMsg_WindowSizeChanged,
+                     uint32,   /* width */
+                     uint32)   /* height */

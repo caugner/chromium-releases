@@ -28,6 +28,7 @@
 #include "chromeos/cryptohome/mock_cryptohome_library.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
+#include "google_apis/gaia/gaia_oauth_client.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "policy/policy_constants.h"
@@ -77,7 +78,7 @@ class DeviceCloudPolicyManagerChromeOSTest
     request_context_getter_ = new net::TestURLRequestContextGetter(
         loop_.message_loop_proxy());
     TestingBrowserProcess::GetGlobal()->SetSystemRequestContext(
-        request_context_getter_);
+        request_context_getter_.get());
     TestingBrowserProcess::GetGlobal()->SetLocalState(&local_state_);
     chromeos::DeviceOAuth2TokenServiceFactory::Initialize();
     chromeos::CryptohomeLibrary::SetForTest(cryptohome_library_.get());
@@ -121,8 +122,9 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, FreshDevice) {
   FlushDeviceSettings();
   EXPECT_TRUE(manager_.IsInitializationComplete(POLICY_DOMAIN_CHROME));
 
-  manager_.Connect(&local_state_, &device_management_service_,
-                   scoped_ptr<CloudPolicyClient::StatusProvider>(NULL));
+  manager_.Connect(&local_state_,
+                   &device_management_service_,
+                   scoped_ptr<CloudPolicyClient::StatusProvider>());
 
   PolicyBundle bundle;
   EXPECT_TRUE(manager_.policies().Equals(bundle));
@@ -150,12 +152,16 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, EnrolledDevice) {
            Value::CreateBooleanValue(false));
   EXPECT_TRUE(manager_.policies().Equals(bundle));
 
-  manager_.Connect(&local_state_, &device_management_service_,
-                   scoped_ptr<CloudPolicyClient::StatusProvider>(NULL));
+  manager_.Connect(&local_state_,
+                   &device_management_service_,
+                   scoped_ptr<CloudPolicyClient::StatusProvider>());
   EXPECT_TRUE(manager_.policies().Equals(bundle));
 
   manager_.Shutdown();
   EXPECT_TRUE(manager_.policies().Equals(bundle));
+
+  EXPECT_EQ(manager_.GetRobotAccountId(),
+            PolicyBuilder::kFakeServiceAccountIdentity);
 }
 
 TEST_F(DeviceCloudPolicyManagerChromeOSTest, ConsumerDevice) {
@@ -166,8 +172,9 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, ConsumerDevice) {
   PolicyBundle bundle;
   EXPECT_TRUE(manager_.policies().Equals(bundle));
 
-  manager_.Connect(&local_state_, &device_management_service_,
-                   scoped_ptr<CloudPolicyClient::StatusProvider>(NULL));
+  manager_.Connect(&local_state_,
+                   &device_management_service_,
+                   scoped_ptr<CloudPolicyClient::StatusProvider>());
   EXPECT_TRUE(manager_.policies().Equals(bundle));
 
   manager_.Shutdown();
@@ -219,8 +226,9 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
     PolicyBundle bundle;
     EXPECT_TRUE(manager_.policies().Equals(bundle));
 
-    manager_.Connect(&local_state_, &device_management_service_,
-                     scoped_ptr<CloudPolicyClient::StatusProvider>(NULL));
+    manager_.Connect(&local_state_,
+                     &device_management_service_,
+                     scoped_ptr<CloudPolicyClient::StatusProvider>());
   }
 
   void ExpectFailedEnrollment(EnrollmentStatus::Status status) {
@@ -322,12 +330,10 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
     // We return a successful OAuth response via a TestURLFetcher to trigger the
     // happy path for these classes so that enrollment can continue.
     if (robot_auth_fetch_status_ == DM_STATUS_SUCCESS) {
-      net::TestURLFetcher* url_fetcher = url_fetcher_factory_.GetFetcherByID(0);
+      net::TestURLFetcher* url_fetcher = url_fetcher_factory_.GetFetcherByID(
+          gaia::GaiaOAuthClient::kUrlFetcherId);
       ASSERT_TRUE(url_fetcher);
-      // The logic in GaiaOAuthClient seems broken, it always retries 1x on
-      // non-200 response codes, even if the retries are set to 0.  Seems like
-      // its num_retries_ > source->GetMaxRetriesOn5xx() should have a >=?
-      url_fetcher->SetMaxRetriesOn5xx(-2);
+      url_fetcher->SetMaxRetriesOn5xx(0);
       url_fetcher->set_status(net::URLRequestStatus());
       url_fetcher->set_response_code(url_fetcher_response_code_);
       url_fetcher->SetResponseString(url_fetcher_response_string_);
@@ -483,5 +489,5 @@ TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest, LoadError) {
             status_.store_status());
 }
 
-}  // namespace test
+}  // namespace
 }  // namespace policy

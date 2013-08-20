@@ -36,6 +36,7 @@ class APIPermission {
 
     // Real permissions.
     kActiveTab,
+    kActivityLogPrivate,
     kAdView,
     kAlarms,
     kAppCurrentWindowInternal,
@@ -58,6 +59,7 @@ class APIPermission {
     kContentSettings,
     kContextMenus,
     kCookie,
+    kDiagnostics,
     kDial,
     kDebugger,
     kDeclarative,
@@ -70,16 +72,19 @@ class APIPermission {
     kEchoPrivate,
     kEnterprisePlatformKeysPrivate,
     kExperimental,
+    kFeedbackPrivate,
     kFileBrowserHandler,
     kFileBrowserHandlerInternal,
     kFileBrowserPrivate,
     kFileSystem,
+    kFileSystemRetainFiles,
     kFileSystemWrite,
     kFontSettings,
     kFullscreen,
     kGeolocation,
     kHistory,
     kIdentity,
+    kIdentityPrivate,
     kIdle,
     kInput,
     kInputMethodPrivate,
@@ -90,6 +95,7 @@ class APIPermission {
     kMediaGalleriesPrivate,
     kMediaPlayerPrivate,
     kMetricsPrivate,
+    kMusicManagerPrivate,
     kNativeMessaging,
     kNetworkingPrivate,
     kNotification,
@@ -97,6 +103,7 @@ class APIPermission {
     kPointerLock,
     kPlugin,
     kPower,
+    kPreferencesPrivate,
     kPrivacy,
     kProxy,
     kPushMessaging,
@@ -122,6 +129,7 @@ class APIPermission {
     kUsbDevice,
     kVideoCapture,
     kWallpaperPrivate,
+    kWebConnectable,  // for externally_connectable manifest key
     kWebNavigation,
     kWebRequest,
     kWebRequestBlocking,
@@ -129,6 +137,8 @@ class APIPermission {
     kWebSocketProxyPrivate,
     kWebstorePrivate,
     kWebView,
+    kSystemInfoCpu,
+    kSystemInfoMemory,
     kEnumBoundary
   };
 
@@ -221,10 +231,7 @@ class APIPermissionInfo {
     kFlagImpliesFullURLAccess = 1 << 1,
 
     // Indicates that extensions cannot specify the permission as optional.
-    kFlagCannotBeOptional = 1 << 3,
-
-    // Indicates that extensions must specify the permission as optional.
-    kFlagMustBeOptional = 1 << 4
+    kFlagCannotBeOptional = 1 << 3
   };
 
   typedef APIPermission* (*APIPermissionConstructor)(const APIPermissionInfo*);
@@ -262,12 +269,6 @@ class APIPermissionInfo {
   // optional permissions extension API.
   bool supports_optional() const {
     return (flags_ & kFlagCannotBeOptional) == 0;
-  }
-
-  // Returns true if this permission must be added and removed via the
-  // optional permissions extension API.
-  bool must_be_optional() const {
-    return (flags_ & kFlagMustBeOptional) != 0;
   }
 
  private:

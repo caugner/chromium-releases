@@ -10,14 +10,15 @@
 #include "components/webdata/common/web_database.h"
 #include "components/webdata/common/web_database_table.h"
 
-
 using base::Bind;
 using base::FilePath;
-using content::BrowserThread;
 
 WebDataServiceBackend::WebDataServiceBackend(
-    const FilePath& path, Delegate* delegate)
-    : db_path_(path),
+    const FilePath& path,
+    Delegate* delegate,
+    const scoped_refptr<base::MessageLoopProxy>& db_thread)
+    : base::RefCountedDeleteOnMessageLoop<WebDataServiceBackend>(db_thread),
+      db_path_(path),
       request_manager_(new WebDataRequestManager()),
       init_status_(sql::INIT_FAILURE),
       init_complete_(false),
@@ -73,23 +74,40 @@ void WebDataServiceBackend::ShutdownDatabase(bool should_reinit) {
 void WebDataServiceBackend::DBWriteTaskWrapper(
     const WebDatabaseService::WriteTask& task,
     scoped_ptr<WebDataRequest> request) {
+  if (request->IsCancelled())
+    return;
+
+  ExecuteWriteTask(task);
+  request_manager_->RequestCompleted(request.Pass());
+}
+
+void WebDataServiceBackend::ExecuteWriteTask(
+    const WebDatabaseService::WriteTask& task) {
   LoadDatabaseIfNecessary();
-  if (db_ && init_status_ == sql::INIT_OK && !request->IsCancelled()) {
+  if (db_ && init_status_ == sql::INIT_OK) {
     WebDatabase::State state = task.Run(db_.get());
     if (state == WebDatabase::COMMIT_NEEDED)
       Commit();
   }
-  request_manager_->RequestCompleted(request.Pass());
 }
 
 void WebDataServiceBackend::DBReadTaskWrapper(
     const WebDatabaseService::ReadTask& task,
     scoped_ptr<WebDataRequest> request) {
-  LoadDatabaseIfNecessary();
-  if (db_ && init_status_ == sql::INIT_OK && !request->IsCancelled()) {
-    request->SetResult(task.Run(db_.get()).Pass());
-  }
+  if (request->IsCancelled())
+    return;
+
+  request->SetResult(ExecuteReadTask(task).Pass());
   request_manager_->RequestCompleted(request.Pass());
+}
+
+scoped_ptr<WDTypedResult> WebDataServiceBackend::ExecuteReadTask(
+    const WebDatabaseService::ReadTask& task) {
+  LoadDatabaseIfNecessary();
+  if (db_ && init_status_ == sql::INIT_OK) {
+    return task.Run(db_.get());
+  }
+  return scoped_ptr<WDTypedResult>();
 }
 
 WebDataServiceBackend::~WebDataServiceBackend() {

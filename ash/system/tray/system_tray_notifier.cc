@@ -4,9 +4,16 @@
 
 #include "ash/system/tray/system_tray_notifier.h"
 
+#if defined(OS_CHROMEOS)
+#include "ash/system/chromeos/network/network_state_notifier.h"
+#endif
+
 namespace ash {
 
 SystemTrayNotifier::SystemTrayNotifier() {
+#if defined(OS_CHROMEOS)
+  network_state_notifier_.reset(new NetworkStateNotifier());
+#endif
 }
 
 SystemTrayNotifier::~SystemTrayNotifier() {
@@ -89,16 +96,6 @@ void SystemTrayNotifier::RemoveLogoutButtonObserver(
   logout_button_observers_.RemoveObserver(observer);
 }
 
-void SystemTrayNotifier::AddPowerStatusObserver(
-    PowerStatusObserver* observer) {
-  power_status_observers_.AddObserver(observer);
-}
-
-void SystemTrayNotifier::RemovePowerStatusObserver(
-    PowerStatusObserver* observer) {
-  power_status_observers_.RemoveObserver(observer);
-}
-
 void SystemTrayNotifier::AddSessionLengthLimitObserver(
     SessionLengthLimitObserver* observer) {
   session_length_limit_observers_.AddObserver(observer);
@@ -143,14 +140,6 @@ void SystemTrayNotifier::RemoveNetworkObserver(NetworkObserver* observer) {
   network_observers_.RemoveObserver(observer);
 }
 
-void SystemTrayNotifier::AddVpnObserver(NetworkObserver* observer) {
-  vpn_observers_.AddObserver(observer);
-}
-
-void SystemTrayNotifier::RemoveVpnObserver(NetworkObserver* observer) {
-  vpn_observers_.RemoveObserver(observer);
-}
-
 void SystemTrayNotifier::AddSmsObserver(SmsObserver* observer) {
   sms_observers_.AddObserver(observer);
 }
@@ -179,6 +168,15 @@ void SystemTrayNotifier::RemoveScreenCaptureObserver(
   screen_capture_observers_.RemoveObserver(observer);
 }
 
+void SystemTrayNotifier::AddScreenShareObserver(
+    ScreenShareObserver* observer) {
+  screen_share_observers_.AddObserver(observer);
+}
+
+void SystemTrayNotifier::RemoveScreenShareObserver(
+    ScreenShareObserver* observer) {
+  screen_share_observers_.RemoveObserver(observer);
+}
 #endif
 
 void SystemTrayNotifier::NotifyAccessibilityModeChanged(
@@ -263,13 +261,6 @@ void SystemTrayNotifier::NotifyLocaleChanged(
       OnLocaleChanged(delegate, cur_locale, from_locale, to_locale));
 }
 
-void SystemTrayNotifier::NotifyPowerStatusChanged(
-    const PowerSupplyStatus& power_status) {
-  FOR_EACH_OBSERVER(PowerStatusObserver,
-                    power_status_observers_,
-                    OnPowerStatusChanged(power_status));
-}
-
 void SystemTrayNotifier::NotifySessionStartTimeChanged() {
   FOR_EACH_OBSERVER(SessionLengthLimitObserver,
                     session_length_limit_observers_,
@@ -309,12 +300,6 @@ void SystemTrayNotifier::NotifyMuteToggled() {
                     OnMuteToggled());
 }
 
-void SystemTrayNotifier::NotifyRefreshNetwork(const NetworkIconInfo &info) {
-  FOR_EACH_OBSERVER(NetworkObserver,
-                    network_observers_,
-                    OnNetworkRefresh(info));
-}
-
 void SystemTrayNotifier::NotifySetNetworkMessage(
     NetworkTrayDelegate* delegate,
     NetworkObserver::MessageType message_type,
@@ -340,16 +325,10 @@ void SystemTrayNotifier::NotifyClearNetworkMessage(
                     ClearNetworkMessage(message_type));
 }
 
-void SystemTrayNotifier::NotifyVpnRefreshNetwork(const NetworkIconInfo &info) {
-  FOR_EACH_OBSERVER(NetworkObserver,
-                    vpn_observers_,
-                    OnNetworkRefresh(info));
-}
-
-void SystemTrayNotifier::NotifyWillToggleWifi() {
+void SystemTrayNotifier::NotifyRequestToggleWifi() {
   FOR_EACH_OBSERVER(NetworkObserver,
                     network_observers_,
-                    OnWillToggleWifi());
+                    RequestToggleWifi());
 }
 
 void SystemTrayNotifier::NotifyAddSmsMessage(
@@ -372,6 +351,18 @@ void SystemTrayNotifier::NotifyScreenCaptureStart(
 void SystemTrayNotifier::NotifyScreenCaptureStop() {
   FOR_EACH_OBSERVER(ScreenCaptureObserver, screen_capture_observers_,
                     OnScreenCaptureStop());
+}
+
+void SystemTrayNotifier::NotifyScreenShareStart(
+    const base::Closure& stop_callback,
+    const base::string16& helper_name) {
+  FOR_EACH_OBSERVER(ScreenShareObserver, screen_share_observers_,
+                    OnScreenShareStart(stop_callback, helper_name));
+}
+
+void SystemTrayNotifier::NotifyScreenShareStop() {
+  FOR_EACH_OBSERVER(ScreenShareObserver, screen_share_observers_,
+                    OnScreenShareStop());
 }
 
 #endif  // OS_CHROMEOS

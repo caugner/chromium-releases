@@ -12,17 +12,18 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/gtk_window_util.h"
-#include "chrome/browser/ui/gtk/panels/panel_titlebar_gtk.h"
 #include "chrome/browser/ui/gtk/panels/panel_drag_gtk.h"
+#include "chrome/browser/ui/gtk/panels/panel_titlebar_gtk.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_constants.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -194,24 +195,27 @@ void SetFrameSize(const gfx::Size& new_size) {
   frame_size.SetSize(new_size.width(), new_size.height());
 }
 
-}
+}  // namespace
 
 // static
-NativePanel* Panel::CreateNativePanel(Panel* panel, const gfx::Rect& bounds) {
-  PanelGtk* panel_gtk = new PanelGtk(panel, bounds);
+NativePanel* Panel::CreateNativePanel(Panel* panel,
+                                      const gfx::Rect& bounds,
+                                      bool always_on_top) {
+  PanelGtk* panel_gtk = new PanelGtk(panel, bounds, always_on_top);
   panel_gtk->Init();
   return panel_gtk;
 }
 
-PanelGtk::PanelGtk(Panel* panel, const gfx::Rect& bounds)
+PanelGtk::PanelGtk(Panel* panel, const gfx::Rect& bounds, bool always_on_top)
     : panel_(panel),
       bounds_(bounds),
-      always_on_top_(false),
+      always_on_top_(always_on_top),
       is_shown_(false),
       paint_state_(PAINT_AS_INACTIVE),
       is_drawing_attention_(false),
       frame_cursor_(NULL),
       is_active_(!ui::ActiveWindowWatcherX::WMSupportsActivation()),
+      is_minimized_(false),
       window_(NULL),
       window_container_(NULL),
       window_vbox_(NULL),
@@ -256,6 +260,8 @@ void PanelGtk::Init() {
                    G_CALLBACK(OnMainWindowDestroyThunk), this);
   g_signal_connect(window_, "configure-event",
                    G_CALLBACK(OnConfigureThunk), this);
+  g_signal_connect(window_, "window-state-event",
+                   G_CALLBACK(OnWindowStateThunk), this);
   g_signal_connect(window_, "key-press-event",
                    G_CALLBACK(OnKeyPressThunk), this);
   g_signal_connect(window_, "motion-notify-event",
@@ -310,6 +316,7 @@ void PanelGtk::Init() {
   gtk_widget_show(window_container_);
 
   ConnectAccelerators();
+  SetPanelAlwaysOnTop(always_on_top_);
 }
 
 void PanelGtk::SetWindowCornerStyle(panel::CornerStyle corner_style) {
@@ -318,16 +325,15 @@ void PanelGtk::SetWindowCornerStyle(panel::CornerStyle corner_style) {
 }
 
 void PanelGtk::MinimizePanelBySystem() {
-  NOTIMPLEMENTED();
+  gtk_window_iconify(window_);
 }
 
 bool PanelGtk::IsPanelMinimizedBySystem() const {
-  NOTIMPLEMENTED();
-  return false;
+  return is_minimized_;
 }
 
 void PanelGtk::ShowShadow(bool show) {
-  NOTIMPLEMENTED();
+  // Shadow is not supported for GTK panel.
 }
 
 void PanelGtk::UpdateWindowShape() {
@@ -391,6 +397,12 @@ gboolean PanelGtk::OnConfigure(GtkWidget* widget,
       content::Source<Panel>(panel_.get()),
       content::NotificationService::NoDetails());
 
+  return FALSE;
+}
+
+gboolean PanelGtk::OnWindowState(GtkWidget* widget,
+                                 GdkEventWindowState* event) {
+  is_minimized_ = event->new_window_state & GDK_WINDOW_STATE_ICONIFIED;
   return FALSE;
 }
 
@@ -596,7 +608,30 @@ gboolean PanelGtk::OnTitlebarButtonPressEvent(
   if (event->type != GDK_BUTTON_PRESS)
     return TRUE;
 
-  gdk_window_raise(gtk_widget_get_window(GTK_WIDGET(window_)));
+  // If the panel is in a stack, bring all other panels in the stack to the
+  // top.
+  StackedPanelCollection* stack = panel_->stack();
+  if (stack) {
+    for (StackedPanelCollection::Panels::const_iterator iter =
+             stack->panels().begin();
+         iter != stack->panels().end(); ++iter) {
+      Panel* panel = *iter;
+      GtkWindow* gtk_window = panel->GetNativeWindow();
+      // If a panel is collapsed, we make it not to take focus. For such window,
+      // it cannot be brought to the top by calling gdk_window_raise. To work
+      // around this issue, we make it always-on-top first and then put it back
+      // to normal. Note that this trick has been done for all panels in the
+      // stack, regardless of whether it is collapsed or not.
+      // There is one side-effect to this approach: if the panel being pressed
+      // on is collapsed, clicking on the client area of the last active
+      // window will not raise it above these panels.
+      gtk_window_set_keep_above(gtk_window, true);
+      gtk_window_set_keep_above(gtk_window, false);
+    }
+  } else {
+    gdk_window_raise(gtk_widget_get_window(GTK_WIDGET(window_)));
+  }
+
   EnsureDragHelperCreated();
   drag_helper_->InitialTitlebarMousePress(event, titlebar_->widget());
   return TRUE;
@@ -717,7 +752,7 @@ void PanelGtk::OnMainWindowDestroy(GtkWidget* widget) {
   //
   // We don't want to use DeleteSoon() here since it won't work on a nested pump
   // (like in UI tests).
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&base::DeletePointer<PanelGtk>, this));
 }
 
@@ -814,7 +849,28 @@ void PanelGtk::ActivatePanel() {
 }
 
 void PanelGtk::DeactivatePanel() {
-  gdk_window_lower(gtk_widget_get_window(GTK_WIDGET(window_)));
+  // When a panel is deactivated, it should not be lowered to the bottom of the
+  // z-order. We could put it behind other panel window.
+  Panel* other_panel = NULL;
+  // First, try to pick the sibling panel in the same stack.
+  StackedPanelCollection* stack = panel_->stack();
+  if (stack && stack->num_panels()) {
+    other_panel = panel_ != stack->top_panel() ? stack->top_panel()
+                                               : stack->bottom_panel();
+  }
+  // Then, try to pick other detached or stacked panel.
+  if (!other_panel) {
+    std::vector<Panel*> panels =
+        panel_->manager()->GetDetachedAndStackedPanels();
+    if (!panels.empty())
+      other_panel = panel_ != panels.front() ? panels.front() : panels.back();
+  }
+
+  gdk_window_restack(
+      gtk_widget_get_window(GTK_WIDGET(window_)),
+      other_panel ? gtk_widget_get_window(
+          GTK_WIDGET(other_panel->GetNativeWindow())) : NULL,
+      false);
 
   // Per ICCCM: http://tronche.com/gui/x/icccm/sec-4.html#s-4.1.7
   // A convention is also required for clients that want to give up the
@@ -974,8 +1030,6 @@ bool PanelGtk::IsPanelAlwaysOnTop() const {
 }
 
 void PanelGtk::SetPanelAlwaysOnTop(bool on_top) {
-  if (always_on_top_ == on_top)
-    return;
   always_on_top_ = on_top;
 
   gtk_window_set_keep_above(window_, on_top);
@@ -1061,7 +1115,7 @@ void GtkNativePanelTesting::PressLeftMouseButtonTitlebar(
   panel_gtk_->OnTitlebarButtonPressEvent(
       NULL, reinterpret_cast<GdkEventButton*>(event));
   gdk_event_free(event);
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::ReleaseMouseButtonTitlebar(
@@ -1078,7 +1132,7 @@ void GtkNativePanelTesting::ReleaseMouseButtonTitlebar(
         NULL, reinterpret_cast<GdkEventButton*>(event));
   }
   gdk_event_free(event);
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::DragTitlebar(const gfx::Point& mouse_location) {
@@ -1090,14 +1144,14 @@ void GtkNativePanelTesting::DragTitlebar(const gfx::Point& mouse_location) {
   panel_gtk_->drag_helper_->OnMouseMoveEvent(
       NULL, reinterpret_cast<GdkEventMotion*>(event));
   gdk_event_free(event);
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::CancelDragTitlebar() {
   if (!panel_gtk_->drag_helper_.get())
     return;
   panel_gtk_->drag_helper_->OnGrabBrokenEvent(NULL, NULL);
-  MessageLoopForUI::current()->RunUntilIdle();
+  base::MessageLoopForUI::current()->RunUntilIdle();
 }
 
 void GtkNativePanelTesting::FinishDragTitlebar() {

@@ -10,18 +10,19 @@
 
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
@@ -260,7 +261,8 @@ void BundleInstaller::ShowPrompt() {
   scoped_refptr<PermissionSet> permissions;
   for (size_t i = 0; i < dummy_extensions_.size(); ++i) {
     permissions = PermissionSet::CreateUnion(
-          permissions, dummy_extensions_[i]->required_permission_set());
+        permissions.get(),
+        PermissionsData::GetRequiredPermissions(dummy_extensions_[i].get()));
   }
 
   if (g_auto_approve_for_test == PROCEED) {
@@ -278,7 +280,7 @@ void BundleInstaller::ShowPrompt() {
     if (browser)
       web_contents = browser->tab_strip_model()->GetActiveWebContents();
     install_ui_.reset(new ExtensionInstallPrompt(web_contents));
-    install_ui_->ConfirmBundleInstall(this, permissions);
+    install_ui_->ConfirmBundleInstall(this, permissions.get());
   }
 }
 

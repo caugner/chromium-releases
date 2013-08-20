@@ -4,7 +4,7 @@
 
 #include "ui/views/controls/button/menu_button.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ui_resources.h"
 #include "grit/ui_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -37,7 +37,7 @@ static const int kDefaultMenuOffsetY = -4;
 // static
 const int MenuButton::kMenuMarkerPaddingLeft = 3;
 const int MenuButton::kMenuMarkerPaddingRight = -1;
-const char MenuButton::kViewClassName[] = "views/MenuButton";
+const char MenuButton::kViewClassName[] = "MenuButton";
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -172,7 +172,7 @@ gfx::Size MenuButton::GetPreferredSize() {
   return prefsize;
 }
 
-std::string MenuButton::GetClassName() const {
+const char* MenuButton::GetClassName() const {
   return kViewClassName;
 }
 

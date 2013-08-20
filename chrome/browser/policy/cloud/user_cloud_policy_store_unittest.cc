@@ -7,12 +7,14 @@
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/policy/cloud/mock_cloud_policy_store.h"
 #include "chrome/browser/policy/cloud/policy_builder.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "policy/policy_constants.h"
@@ -35,7 +37,7 @@ void RunUntilIdle() {
 class UserCloudPolicyStoreTest : public testing::Test {
  public:
   UserCloudPolicyStoreTest()
-      : loop_(MessageLoop::TYPE_UI),
+      : loop_(base::MessageLoop::TYPE_UI),
         ui_thread_(content::BrowserThread::UI, &loop_),
         file_thread_(content::BrowserThread::FILE, &loop_),
         profile_(new TestingProfile()) {}
@@ -45,12 +47,16 @@ class UserCloudPolicyStoreTest : public testing::Test {
     SigninManager* signin = static_cast<SigninManager*>(
       SigninManagerFactory::GetInstance()->SetTestingFactoryAndUse(
           profile_.get(), FakeSigninManager::Build));
-    signin->SetAuthenticatedUsername(PolicyBuilder::kFakeUsername);
+    profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
+                                    PolicyBuilder::kFakeUsername);
+    signin->Initialize(profile_.get(), NULL);
     store_.reset(new UserCloudPolicyStore(profile_.get(), policy_file()));
     store_->AddObserver(&observer_);
 
-    policy_.payload().mutable_showhomebutton()->set_value(true);
-    policy_.payload().mutable_syncdisabled()->set_value(true);
+    policy_.payload().mutable_passwordmanagerenabled()->set_value(true);
+    policy_.payload().mutable_urlblacklist()->mutable_value()->add_entries(
+        "chromium.org");
+
     policy_.Build();
   }
 
@@ -68,10 +74,10 @@ class UserCloudPolicyStoreTest : public testing::Test {
   void VerifyPolicyMap(CloudPolicyStore* store) {
     EXPECT_EQ(2U, store->policy_map().size());
     const PolicyMap::Entry* entry =
-        store->policy_map().Get(key::kShowHomeButton);
+        store->policy_map().Get(key::kPasswordManagerEnabled);
     ASSERT_TRUE(entry);
     EXPECT_TRUE(base::FundamentalValue(true).Equals(entry->value));
-    ASSERT_TRUE(store->policy_map().Get(key::kSyncDisabled));
+    ASSERT_TRUE(store->policy_map().Get(key::kURLBlacklist));
   }
 
   // Install an expectation on |observer_| for an error code.
@@ -89,7 +95,7 @@ class UserCloudPolicyStoreTest : public testing::Test {
   // CloudPolicyValidator() requires a FILE thread so declare one here. Both
   // |ui_thread_| and |file_thread_| share the same MessageLoop |loop_| so
   // callers can use RunLoop to manage both virtual threads.
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 
@@ -218,7 +224,7 @@ TEST_F(UserCloudPolicyStoreTest, StoreTwoTimes) {
   EXPECT_CALL(observer_, OnStoreLoaded(store_.get())).Times(2);
 
   UserPolicyBuilder first_policy;
-  first_policy.payload().mutable_showhomebutton()->set_value(false);
+  first_policy.payload().mutable_passwordmanagerenabled()->set_value(false);
   first_policy.Build();
   store_->Store(first_policy.policy());
   RunUntilIdle();

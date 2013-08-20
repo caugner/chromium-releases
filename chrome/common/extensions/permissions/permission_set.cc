@@ -120,8 +120,8 @@ PermissionSet* PermissionSet::CreateDifference(
     const PermissionSet* set1,
     const PermissionSet* set2) {
   scoped_refptr<PermissionSet> empty = new PermissionSet();
-  const PermissionSet* set1_safe = (set1 == NULL) ? empty : set1;
-  const PermissionSet* set2_safe = (set2 == NULL) ? empty : set2;
+  const PermissionSet* set1_safe = (set1 == NULL) ? empty.get() : set1;
+  const PermissionSet* set2_safe = (set2 == NULL) ? empty.get() : set2;
 
   APIPermissionSet apis;
   APIPermissionSet::Difference(set1_safe->apis(), set2_safe->apis(), &apis);
@@ -144,8 +144,8 @@ PermissionSet* PermissionSet::CreateIntersection(
     const PermissionSet* set1,
     const PermissionSet* set2) {
   scoped_refptr<PermissionSet> empty = new PermissionSet();
-  const PermissionSet* set1_safe = (set1 == NULL) ? empty : set1;
-  const PermissionSet* set2_safe = (set2 == NULL) ? empty : set2;
+  const PermissionSet* set1_safe = (set1 == NULL) ? empty.get() : set1;
+  const PermissionSet* set2_safe = (set2 == NULL) ? empty.get() : set2;
 
   APIPermissionSet apis;
   APIPermissionSet::Intersection(set1_safe->apis(), set2_safe->apis(), &apis);
@@ -168,8 +168,8 @@ PermissionSet* PermissionSet::CreateUnion(
     const PermissionSet* set1,
     const PermissionSet* set2) {
   scoped_refptr<PermissionSet> empty = new PermissionSet();
-  const PermissionSet* set1_safe = (set1 == NULL) ? empty : set1;
-  const PermissionSet* set2_safe = (set2 == NULL) ? empty : set2;
+  const PermissionSet* set1_safe = (set1 == NULL) ? empty.get() : set1;
+  const PermissionSet* set2_safe = (set2 == NULL) ? empty.get() : set2;
 
   APIPermissionSet apis;
   APIPermissionSet::Union(set1_safe->apis(), set2_safe->apis(), &apis);
@@ -487,8 +487,10 @@ std::set<std::string> PermissionSet::GetDistinctHosts(
 
     // If the host has an RCD, split it off so we can detect duplicates.
     std::string rcd;
-    size_t reg_len = net::RegistryControlledDomainService::GetRegistryLength(
-        host, false);
+    size_t reg_len = net::registry_controlled_domains::GetRegistryLength(
+        host,
+        net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+        net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
     if (reg_len && reg_len != std::string::npos) {
       if (include_rcd)  // else leave rcd empty
         rcd = host.substr(host.size() - reg_len);
@@ -522,6 +524,11 @@ void PermissionSet::InitImplicitPermissions() {
   // The downloads permission implies the internal version as well.
   if (apis_.find(APIPermission::kDownloads) != apis_.end())
     apis_.insert(APIPermission::kDownloadsInternal);
+
+  // TODO(fsamuel): Is there a better way to request access to the WebRequest
+  // API without exposing it to the Chrome App?
+  if (apis_.find(APIPermission::kWebView) != apis_.end())
+    apis_.insert(APIPermission::kWebRequestInternal);
 
   // The webRequest permission implies the internal version as well.
   if (apis_.find(APIPermission::kWebRequest) != apis_.end())

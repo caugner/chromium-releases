@@ -7,12 +7,13 @@
 #include <cmath>
 
 #include "base/command_line.h"
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_util.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window_state.h"
@@ -155,8 +156,15 @@ willPositionSheet:(NSWindow*)sheet
     }
     case BookmarkBar::HIDDEN:
     case BookmarkBar::DETACHED: {
-      NSRect toolbarFrame = [[toolbarController_ view] frame];
-      defaultSheetRect.origin.y = toolbarFrame.origin.y;
+      if ([self hasToolbar]) {
+        NSRect toolbarFrame = [[toolbarController_ view] frame];
+        defaultSheetRect.origin.y = toolbarFrame.origin.y;
+      } else {
+        // The toolbar is not shown in application mode. The sheet should be
+        // located at the top of the window, under the title of the window.
+        defaultSheetRect.origin.y = NSHeight([[window contentView] frame]) -
+                                    defaultSheetRect.size.height;
+      }
       break;
     }
   }
@@ -214,6 +222,7 @@ willPositionSheet:(NSWindow*)sheet
   BOOL placeBookmarkBarBelowInfoBar = [self placeBookmarkBarBelowInfoBar];
   if (!placeBookmarkBarBelowInfoBar)
     maxY = [self layoutBookmarkBarAtMinX:minX maxY:maxY width:width];
+  CGFloat toolbarBottomY = maxY;
 
   // The floating bar backing view doesn't actually add any height.
   NSRect floatingBarBackingRect =
@@ -221,11 +230,8 @@ willPositionSheet:(NSWindow*)sheet
   [self layoutFloatingBarBackingView:floatingBarBackingRect
                     presentationMode:inPresentationMode];
 
-  // Place the find bar immediately below the toolbar/attached bookmark bar. In
-  // presentation mode, it hangs off the top of the screen when the bar is
-  // hidden.  The find bar is unaffected by the side tab positioning.
-  [findBarCocoaController_ positionFindBarViewAtMaxY:maxY maxWidth:width];
-  [fullscreenExitBubbleController_ positionInWindowAtTop:maxY width:width];
+  [fullscreenExitBubbleController_ positionInWindowAtTop:toolbarBottomY
+                                                   width:width];
 
   // If in presentation mode, reset |maxY| to top of screen, so that the
   // floating bar slides over the things which appear to be in the content area.
@@ -261,8 +267,8 @@ willPositionSheet:(NSWindow*)sheet
     // The tabContentArea view starts below the omnibox.
     CGFloat minToolbarHeight = 0;
     if ([self hasToolbar]) {
-      minToolbarHeight = [toolbarController_
-          desiredHeightForCompression:bookmarks::kBookmarkBarOverlap];
+      // 1 to account for the toolbar separator.
+      minToolbarHeight = [toolbarController_ desiredHeightForCompression:1];
     }
     contentAreaTop = toolbarTopY - minToolbarHeight;
     // This is the space between the bottom of the omnibox and the bottom of the
@@ -271,6 +277,18 @@ willPositionSheet:(NSWindow*)sheet
     toolbarToWebContentsOffset_ = contentAreaTop - maxY;
   }
   [self updateContentOffsets];
+
+  // Place the find bar immediately below the toolbar/attached bookmark bar. In
+  // presentation mode, it hangs off the top of the screen when the bar is
+  // hidden.
+  if ([self currentInstantUIState] ==
+      browser_window_controller::kInstantUIFullPageResults) {
+    [findBarCocoaController_ positionFindBarViewAtMaxY:contentAreaTop - 1
+                                              maxWidth:width];
+  } else {
+    [findBarCocoaController_ positionFindBarViewAtMaxY:toolbarBottomY
+                                              maxWidth:width];
+  }
 
   NSRect contentAreaRect = NSMakeRect(minX, minY, width, contentAreaTop - minY);
   [self layoutTabContentArea:contentAreaRect];
@@ -324,7 +342,7 @@ willPositionSheet:(NSWindow*)sheet
     NSView* avatarButton = [avatarButtonController_ view];
     CGFloat buttonHeight = std::min(
         static_cast<CGFloat>(profiles::kAvatarIconHeight), tabStripHeight);
-    [avatarButton setFrameSize:NSMakeSize(profiles::kAvatarIconWidth,
+    [avatarButton setFrameSize:NSMakeSize(NSWidth([avatarButton frame]),
                                           buttonHeight)];
 
     // Actually place the badge *above* |maxY|, by +2 to miss the divider.
@@ -349,6 +367,9 @@ willPositionSheet:(NSWindow*)sheet
     rightIndent += -[window fullScreenButtonOriginAdjustment].x;
   } else if ([self shouldShowAvatar]) {
     rightIndent += kAvatarTabStripShrink;
+    NSButton* labelButton = [avatarButtonController_ labelButtonView];
+    if (labelButton)
+      rightIndent += NSWidth([labelButton frame]) + kAvatarRightOffset;
   }
   [tabStripController_ setRightIndentForControls:rightIndent];
 
@@ -531,21 +552,22 @@ willPositionSheet:(NSWindow*)sheet
   [bookmarkBubbleController_ ok:self];
 
   // Save the current first responder so we can restore after views are moved.
-  scoped_nsobject<FocusTracker> focusTracker(
+  base::scoped_nsobject<FocusTracker> focusTracker(
       [[FocusTracker alloc] initWithWindow:sourceWindow]);
 
   // While we move views (and focus) around, disable any bar visibility changes.
   [self disableBarVisibilityUpdates];
 
   // Retain the tab strip view while we remove it from its superview.
-  scoped_nsobject<NSView> tabStripView;
+  base::scoped_nsobject<NSView> tabStripView;
   if ([self hasTabStrip]) {
     tabStripView.reset([[self tabStripView] retain]);
     [tabStripView removeFromSuperview];
   }
 
   // Ditto for the content view.
-  scoped_nsobject<NSView> contentView([[sourceWindow contentView] retain]);
+  base::scoped_nsobject<NSView> contentView(
+      [[sourceWindow contentView] retain]);
   // Disable autoresizing of subviews while we move views around. This prevents
   // spurious renderer resizes.
   [contentView setAutoresizesSubviews:NO];
@@ -721,6 +743,7 @@ willPositionSheet:(NSWindow*)sheet
   // Force the bookmark bar z-order to update.
   [[bookmarkBarController_ view] removeFromSuperview];
   [self updateSubviewZOrder:fullscreen];
+  [self updateAllowOverlappingViews:fullscreen];
 }
 
 - (void)showFullscreenExitBubbleIfNecessary {
@@ -970,8 +993,8 @@ willPositionSheet:(NSWindow*)sheet
     NSView* relativeView = nil;
     if (inPresentationMode) {
       relativeView = toolbarView;
-    } else if ([self currentInstantUIState] !=
-               browser_window_controller::kInstantUINone) {
+    } else if ([self currentInstantUIState] ==
+               browser_window_controller::kInstantUIOverlay) {
       relativeView = [infoBarContainerController_ view];
     } else {
       relativeView = [self tabContentArea];
@@ -994,6 +1017,47 @@ willPositionSheet:(NSWindow*)sheet
                          relativeTo:[bookmarkBarController_ view]];
     }
   }
+}
+
+- (BOOL)shouldAllowOverlappingViews:(BOOL)inPresentationMode {
+  if (inPresentationMode)
+    return YES;
+
+  if (findBarCocoaController_ &&
+      ![[findBarCocoaController_ findBarView] isHidden]) {
+    return YES;
+  }
+
+  if (historyOverlayCount_)
+    return YES;
+
+  return NO;
+}
+
+- (void)updateAllowOverlappingViews:(BOOL)inPresentationMode {
+  WebContents* contents = browser_->tab_strip_model()->GetActiveWebContents();
+  if (!contents)
+    return;
+
+  BOOL allowOverlappingViews =
+      [self shouldAllowOverlappingViews:inPresentationMode];
+  contents->GetView()->SetAllowOverlappingViews(allowOverlappingViews);
+
+  DevToolsWindow* devToolsWindow =
+      DevToolsWindow::GetDockedInstanceForInspectedTab(contents);
+  if (devToolsWindow) {
+    devToolsWindow->web_contents()->GetView()->
+        SetAllowOverlappingViews(allowOverlappingViews);
+  }
+}
+
+- (void)updateInfoBarTipVisibility {
+  // If the overlay is open or if there's no toolbar then hide the infobar tip.
+  BOOL suppressInfoBarTip =
+      [self currentInstantUIState] !=
+      browser_window_controller::kInstantUINone || ![self hasToolbar];
+  [infoBarContainerController_
+      setShouldSuppressTopInfoBarTip:suppressInfoBarTip];
 }
 
 @end  // @implementation BrowserWindowController(Private)

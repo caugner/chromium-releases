@@ -7,8 +7,8 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -25,7 +25,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/controls/textfield/textfield.h"
 
@@ -122,7 +122,7 @@ class TestFinishObserver : public content::NotificationObserver {
     if (dom_op_details->json == "\"FINISHED\"") {
       finished_ = true;
       if (waiting_)
-        MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->Quit();
     }
   }
 
@@ -532,17 +532,9 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
 }
 #endif
 
-#if defined(OS_MACOSX)
-// http://crbug.com/81451 for mac
-#define MAYBE_AccessKeys DISABLED_AccessKeys
-#elif defined(OS_LINUX)
-// http://crbug.com/129235
-#define MAYBE_AccessKeys DISABLED_AccessKeys
-#else
-#define MAYBE_AccessKeys AccessKeys
-#endif
-
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
+// Flaky: http://crbug.com/81451 , http://crbug.com/129235 ,
+// also fails on Windows.
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
 #if defined(OS_MACOSX)
   // On Mac, access keys use ctrl+alt modifiers.
   static const KeyEventTestData kTestAccessA = {

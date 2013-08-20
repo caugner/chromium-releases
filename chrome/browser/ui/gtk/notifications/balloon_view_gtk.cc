@@ -12,7 +12,7 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/notifications/balloon.h"
@@ -104,11 +104,8 @@ BalloonViewImpl::BalloonViewImpl(BalloonCollection* collection)
       hbox_(NULL),
       html_container_(NULL),
       weak_factory_(this),
-      close_button_(NULL),
-      animation_(NULL),
       menu_showing_(false),
-      pending_close_(false) {
-}
+      pending_close_(false) {}
 
 BalloonViewImpl::~BalloonViewImpl() {
   if (frame_container_) {
@@ -123,7 +120,7 @@ void BalloonViewImpl::Close(bool by_user) {
   if (!by_user && menu_showing_) {
     pending_close_ = true;
   } else {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&BalloonViewImpl::DelayedClose,
                    weak_factory_.GetWeakPtr(),
@@ -467,11 +464,10 @@ void BalloonViewImpl::OnOptionsMenuButton(GtkWidget* widget,
 void BalloonViewImpl::StoppedShowing() {
   menu_showing_ = false;
   if (pending_close_) {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(&BalloonViewImpl::DelayedClose,
-                   weak_factory_.GetWeakPtr(),
-                   false));
+        base::Bind(
+            &BalloonViewImpl::DelayedClose, weak_factory_.GetWeakPtr(), false));
   }
 }
 

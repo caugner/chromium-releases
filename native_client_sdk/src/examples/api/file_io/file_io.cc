@@ -11,6 +11,7 @@
 
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/ppb_file_io.h"
+#include "ppapi/cpp/directory_entry.h"
 #include "ppapi/cpp/file_io.h"
 #include "ppapi/cpp/file_ref.h"
 #include "ppapi/cpp/file_system.h"
@@ -39,6 +40,8 @@ namespace {
 const char* const kLoadPrefix = "ld";
 const char* const kSavePrefix = "sv";
 const char* const kDeletePrefix = "de";
+const char* const kListPrefix = "ls";
+const char* const kMakeDirPrefix = "md";
 }
 
 /// The Instance class.  One of these exists for each instance of your NaCl
@@ -113,34 +116,35 @@ class FileIoInstance : public pp::Instance {
     }
 
     // Dispatch the instruction
-    if (instruction.compare(kLoadPrefix) == 0) {
+    if (instruction == kLoadPrefix) {
       file_thread_.message_loop().PostWork(
           callback_factory_.NewCallback(&FileIoInstance::Load, file_name));
-      return;
-    }
-
-    if (instruction.compare(kSavePrefix) == 0) {
+    } else if (instruction == kSavePrefix) {
       // Read the rest of the message as the file text
       reader.ignore(1);  // Eat the delimiter
       std::string file_text = message.substr(reader.tellg());
       file_thread_.message_loop().PostWork(callback_factory_.NewCallback(
           &FileIoInstance::Save, file_name, file_text));
-      return;
-    }
-
-    if (instruction.compare(kDeletePrefix) == 0) {
+    } else if (instruction == kDeletePrefix) {
       file_thread_.message_loop().PostWork(
           callback_factory_.NewCallback(&FileIoInstance::Delete, file_name));
-      return;
+    } else if (instruction == kListPrefix) {
+      const std::string& dir_name = file_name;
+      file_thread_.message_loop().PostWork(
+          callback_factory_.NewCallback(&FileIoInstance::List, dir_name));
+    } else if (instruction == kMakeDirPrefix) {
+      const std::string& dir_name = file_name;
+      file_thread_.message_loop().PostWork(
+          callback_factory_.NewCallback(&FileIoInstance::MakeDir, dir_name));
     }
   }
 
   void OpenFileSystem(int32_t /* result */) {
-    int32_t rv = file_system_.Open(1024 * 1024, pp::CompletionCallback());
+    int32_t rv = file_system_.Open(1024 * 1024, pp::BlockUntilComplete());
     if (rv == PP_OK) {
       file_system_ready_ = true;
       // Notify the user interface that we're ready
-      PostMessage(pp::Var("READY|"));
+      PostMessage("READY|");
     } else {
       ShowErrorMessage("Failed to open file system", rv);
     }
@@ -160,7 +164,7 @@ class FileIoInstance : public pp::Instance {
         file.Open(ref,
                   PP_FILEOPENFLAG_WRITE | PP_FILEOPENFLAG_CREATE |
                       PP_FILEOPENFLAG_TRUNCATE,
-                  pp::CompletionCallback());
+                  pp::BlockUntilComplete());
     if (open_result != PP_OK) {
       ShowErrorMessage("File open for write failed", open_result);
       return;
@@ -179,7 +183,7 @@ class FileIoInstance : public pp::Instance {
         bytes_written = file.Write(offset,
                                    file_contents.data() + offset,
                                    file_contents.length(),
-                                   pp::CompletionCallback());
+                                   pp::BlockUntilComplete());
         if (bytes_written > 0) {
           offset += bytes_written;
         } else {
@@ -189,7 +193,7 @@ class FileIoInstance : public pp::Instance {
       } while (bytes_written < static_cast<int64_t>(file_contents.length()));
     }
     // All bytes have been written, flush the write buffer to complete
-    int32_t flush_result = file.Flush(pp::CompletionCallback());
+    int32_t flush_result = file.Flush(pp::BlockUntilComplete());
     if (flush_result != PP_OK) {
       ShowErrorMessage("File fail to flush", flush_result);
       return;
@@ -206,7 +210,7 @@ class FileIoInstance : public pp::Instance {
     pp::FileIO file(this);
 
     int32_t open_result =
-        file.Open(ref, PP_FILEOPENFLAG_READ, pp::CompletionCallback());
+        file.Open(ref, PP_FILEOPENFLAG_READ, pp::BlockUntilComplete());
     if (open_result == PP_ERROR_FILENOTFOUND) {
       ShowStatusMessage("File not found");
       return;
@@ -215,7 +219,7 @@ class FileIoInstance : public pp::Instance {
       return;
     }
     PP_FileInfo info;
-    int32_t query_result = file.Query(&info, pp::CompletionCallback());
+    int32_t query_result = file.Query(&info, pp::BlockUntilComplete());
     if (query_result != PP_OK) {
       ShowErrorMessage("File query failed", query_result);
       return;
@@ -233,7 +237,7 @@ class FileIoInstance : public pp::Instance {
       bytes_read = file.Read(offset,
                              &data[offset],
                              data.size() - offset,
-                             pp::CompletionCallback());
+                             pp::BlockUntilComplete());
       if (bytes_read > 0)
         offset += bytes_read;
     } while (bytes_read > 0);
@@ -245,7 +249,7 @@ class FileIoInstance : public pp::Instance {
     PP_DCHECK(bytes_read == 0);
     // Done reading, send content to the user interface
     std::string string_data(data.begin(), data.end());
-    PostMessage(pp::Var("DISP|" + string_data));
+    PostMessage("DISP|" + string_data);
     ShowStatusMessage("Load complete");
   }
 
@@ -256,29 +260,76 @@ class FileIoInstance : public pp::Instance {
     }
     pp::FileRef ref(file_system_, file_name.c_str());
 
-    int32_t result = ref.Delete(pp::CompletionCallback());
+    int32_t result = ref.Delete(pp::BlockUntilComplete());
     if (result == PP_ERROR_FILENOTFOUND) {
-      ShowStatusMessage("File not found");
+      ShowStatusMessage("File/Directory not found");
       return;
     } else if (result != PP_OK) {
       ShowErrorMessage("Deletion failed", result);
       return;
     }
-    ShowStatusMessage("File deleted");
+    ShowStatusMessage("File/Directory deleted");
+  }
+
+  void List(int32_t /* result */, const std::string& dir_name) {
+    if (!file_system_ready_) {
+      ShowErrorMessage("File system is not open", PP_ERROR_FAILED);
+      return;
+    }
+
+    pp::FileRef ref(file_system_, dir_name.c_str());
+
+    // Pass ref along to keep it alive.
+    ref.ReadDirectoryEntries(callback_factory_.NewCallbackWithOutput(
+        &FileIoInstance::ListCallback, ref));
+  }
+
+  void ListCallback(int32_t result,
+                    const std::vector<pp::DirectoryEntry>& entries,
+                    pp::FileRef /* unused_ref */) {
+    if (result != PP_OK) {
+      ShowErrorMessage("List failed", result);
+      return;
+    }
+
+    std::stringstream ss;
+    ss << "LIST";
+    for (size_t i = 0; i < entries.size(); ++i) {
+      pp::Var name = entries[i].file_ref().GetName();
+      if (name.is_string()) {
+        ss << "|" << name.AsString();
+      }
+    }
+    PostMessage(ss.str());
+  }
+
+  void MakeDir(int32_t /* result */, const std::string& dir_name) {
+    if (!file_system_ready_) {
+      ShowErrorMessage("File system is not open", PP_ERROR_FAILED);
+      return;
+    }
+    pp::FileRef ref(file_system_, dir_name.c_str());
+
+    int32_t result = ref.MakeDirectory(pp::BlockUntilComplete());
+    if (result != PP_OK) {
+      ShowErrorMessage("Make directory failed", result);
+      return;
+    }
+    ShowStatusMessage("Made directory");
   }
 
   /// Encapsulates our simple javascript communication protocol
   void ShowErrorMessage(const std::string& message, int32_t result) {
     std::stringstream ss;
     ss << "ERR|" << message << " -- Error #: " << result;
-    PostMessage(pp::Var(ss.str()));
+    PostMessage(ss.str());
   }
 
   /// Encapsulates our simple javascript communication protocol
   void ShowStatusMessage(const std::string& message) {
     std::stringstream ss;
     ss << "STAT|" << message;
-    PostMessage(pp::Var(ss.str()));
+    PostMessage(ss.str());
   }
 };
 

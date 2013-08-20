@@ -97,6 +97,7 @@
 #define HEAP_PROFILE_MMAP "heapprof.mmap"
 #define HEAP_PROFILE_ONLY_MMAP "heapprof.only_mmap"
 #define DEEP_HEAP_PROFILE "heapprof.deep_heap_profile"
+#define DEEP_HEAP_PROFILE_PAGEFRAME "heapprof.deep.pageframe"
 #define HEAP_PROFILE_TYPE_STATISTICS "heapprof.type_statistics"
 #else  // defined(__ANDROID__) || defined(ANDROID)
 #define HEAPPROFILE "HEAPPROFILE"
@@ -108,6 +109,7 @@
 #define HEAP_PROFILE_MMAP "HEAP_PROFILE_MMAP"
 #define HEAP_PROFILE_ONLY_MMAP "HEAP_PROFILE_ONLY_MMAP"
 #define DEEP_HEAP_PROFILE "DEEP_HEAP_PROFILE"
+#define DEEP_HEAP_PROFILE_PAGEFRAME "DEEP_HEAP_PROFILE_PAGEFRAME"
 #define HEAP_PROFILE_TYPE_STATISTICS "HEAP_PROFILE_TYPE_STATISTICS"
 #endif  // defined(__ANDROID__) || defined(ANDROID)
 
@@ -154,7 +156,11 @@ DEFINE_bool(only_mmap_profile,
             "do not profile malloc/new/etc");
 DEFINE_bool(deep_heap_profile,
             EnvToBool(DEEP_HEAP_PROFILE, false),
-            "If heap-profiling is on, profile deeper (only on Linux)");
+            "If heap-profiling is on, profile deeper (Linux and Android)");
+DEFINE_int32(deep_heap_profile_pageframe,
+             EnvToInt(DEEP_HEAP_PROFILE_PAGEFRAME, 0),
+             "Needs deeper profile. If 1, dump page frame numbers (PFNs). "
+             "If 2, dump page counts (/proc/kpagecount) with PFNs.");
 #if defined(TYPE_PROFILING)
 DEFINE_bool(heap_profile_type_statistics,
             EnvToBool(HEAP_PROFILE_TYPE_STATISTICS, false),
@@ -178,7 +184,7 @@ static SpinLock heap_lock(SpinLock::LINKER_INITIALIZED);
 // Simple allocator for heap profiler's internal memory
 //----------------------------------------------------------------------
 
-static LowLevelAlloc::Arena* heap_profiler_memory;
+static LowLevelAlloc::Arena *heap_profiler_memory;
 
 static void* ProfilerMalloc(size_t bytes) {
   return LowLevelAlloc::AllocWithArena(bytes, heap_profiler_memory);
@@ -188,11 +194,7 @@ static void ProfilerFree(void* p) {
 }
 
 // We use buffers of this size in DoGetHeapProfile.
-// The size is 1 << 20 in the original google-perftools.  Changed it to
-// 5 << 20 since a larger buffer is requried for deeper profiling in Chromium.
-// The buffer is allocated only when the environment variable HEAPPROFILE is
-// specified to dump heap information.
-static const int kProfileBufferSize = 5 << 20;
+static const int kProfileBufferSize = 1 << 20;
 
 // This is a last-ditch buffer we use in DumpProfileLocked in case we
 // can't allocate more memory from ProfilerMalloc.  We expect this
@@ -236,11 +238,7 @@ static char* DoGetHeapProfileLocked(char* buf, int buflen) {
   if (is_on) {
     HeapProfileTable::Stats const stats = heap_profile->total();
     (void)stats;   // avoid an unused-variable warning in non-debug mode.
-    if (deep_profile) {
-      bytes_written = deep_profile->FillOrderedProfile(buf, buflen - 1);
-    } else {
-      bytes_written = heap_profile->FillOrderedProfile(buf, buflen - 1);
-    }
+    bytes_written = heap_profile->FillOrderedProfile(buf, buflen - 1);
     // FillOrderedProfile should not reduce the set of active mmap-ed regions,
     // hence MemoryRegionMap will let us remove everything we've added above:
     RAW_DCHECK(stats.Equivalent(heap_profile->total()), "");
@@ -265,9 +263,7 @@ static void NewHook(const void* ptr, size_t size);
 static void DeleteHook(const void* ptr);
 
 // Helper for HeapProfilerDump.
-static void DumpProfileLocked(const char* reason,
-                              char* filename_buffer,
-                              size_t filename_buffer_length) {
+static void DumpProfileLocked(const char* reason) {
   RAW_DCHECK(heap_lock.IsHeld(), "");
   RAW_DCHECK(is_on, "");
   RAW_DCHECK(!dumping, "");
@@ -277,17 +273,18 @@ static void DumpProfileLocked(const char* reason,
   dumping = true;
 
   // Make file name
+  char file_name[1000];
   dump_count++;
-  snprintf(filename_buffer, filename_buffer_length, "%s.%05d.%04d%s",
+  snprintf(file_name, sizeof(file_name), "%s.%05d.%04d%s",
            filename_prefix, getpid(), dump_count, HeapProfileTable::kFileExt);
 
   // Dump the profile
-  RAW_VLOG(0, "Dumping heap profile to %s (%s)", filename_buffer, reason);
+  RAW_VLOG(0, "Dumping heap profile to %s (%s)", file_name, reason);
   // We must use file routines that don't access memory, since we hold
   // a memory lock now.
-  RawFD fd = RawOpenForWriting(filename_buffer);
+  RawFD fd = RawOpenForWriting(file_name);
   if (fd == kIllegalRawFD) {
-    RAW_LOG(ERROR, "Failed dumping heap profile to %s", filename_buffer);
+    RAW_LOG(ERROR, "Failed dumping heap profile to %s", file_name);
     dumping = false;
     return;
   }
@@ -299,17 +296,22 @@ static void DumpProfileLocked(const char* reason,
         reinterpret_cast<char*>(ProfilerMalloc(kProfileBufferSize));
   }
 
-  char* profile = DoGetHeapProfileLocked(global_profiler_buffer,
-                                         kProfileBufferSize);
-  RawWrite(fd, profile, strlen(profile));
+  if (deep_profile) {
+    deep_profile->DumpOrderedProfile(reason, global_profiler_buffer,
+                                     kProfileBufferSize, fd);
+  } else {
+    char* profile = DoGetHeapProfileLocked(global_profiler_buffer,
+                                           kProfileBufferSize);
+    RawWrite(fd, profile, strlen(profile));
+  }
   RawClose(fd);
 
 #if defined(TYPE_PROFILING)
   if (FLAGS_heap_profile_type_statistics) {
-    snprintf(filename_buffer, filename_buffer_length, "%s.%05d.%04d.type",
+    snprintf(file_name, sizeof(file_name), "%s.%05d.%04d.type",
              filename_prefix, getpid(), dump_count);
-    RAW_VLOG(0, "Dumping type statistics to %s", filename_buffer);
-    heap_profile->DumpTypeStatistics(filename_buffer);
+    RAW_VLOG(0, "Dumping type statistics to %s", file_name);
+    heap_profile->DumpTypeStatistics(file_name);
   }
 #endif  // defined(TYPE_PROFILING)
 
@@ -358,8 +360,7 @@ static void MaybeDumpProfileLocked() {
       last_dump_time = current_time;
     }
     if (need_to_dump) {
-      char filename_buffer[1000];
-      DumpProfileLocked(buf, filename_buffer, sizeof(filename_buffer));
+      DumpProfileLocked(buf);
 
       last_dump_alloc = total.alloc_size;
       last_dump_free = total.free_size;
@@ -527,7 +528,8 @@ extern "C" void HeapProfilerStart(const char* prefix) {
     // Initialize deep memory profiler
     RAW_VLOG(0, "[%d] Starting a deep memory profiler", getpid());
     deep_profile = new(ProfilerMalloc(sizeof(DeepHeapProfile)))
-        DeepHeapProfile(heap_profile, prefix);
+        DeepHeapProfile(heap_profile, prefix, DeepHeapProfile::PageFrameType(
+            FLAGS_deep_heap_profile_pageframe));
   }
 
   // We do not reset dump_count so if the user does a sequence of
@@ -612,17 +614,7 @@ extern "C" void HeapProfilerStop() {
 extern "C" void HeapProfilerDump(const char* reason) {
   SpinLockHolder l(&heap_lock);
   if (is_on && !dumping) {
-    char filename_buffer[1000];
-    DumpProfileLocked(reason, filename_buffer, sizeof(filename_buffer));
-  }
-}
-
-extern "C" void HeapProfilerDumpWithFileName(const char* reason,
-                                             char* dumped_filename_buffer,
-                                             int filename_buffer_length) {
-  SpinLockHolder l(&heap_lock);
-  if (is_on && !dumping) {
-    DumpProfileLocked(reason, dumped_filename_buffer, filename_buffer_length);
+    DumpProfileLocked(reason);
   }
 }
 

@@ -13,21 +13,22 @@
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
+#include "content/shell/common/shell_messages.h"
+#include "content/shell/common/shell_switches.h"
+#include "content/shell/common/webkit_test_helpers.h"
 #include "content/shell/geolocation/shell_access_token_store.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
 #include "content/shell/shell_browser_main_parts.h"
 #include "content/shell/shell_devtools_delegate.h"
 #include "content/shell/shell_message_filter.h"
-#include "content/shell/shell_messages.h"
 #include "content/shell/shell_quota_permission_context.h"
 #include "content/shell/shell_resource_dispatcher_host_delegate.h"
-#include "content/shell/shell_switches.h"
 #include "content/shell/shell_web_contents_view_delegate_creator.h"
 #include "content/shell/webkit_test_controller.h"
-#include "content/shell/webkit_test_helpers.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/webpreferences.h"
+#include "webkit/common/webpreferences.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/path_utils.h"
@@ -90,6 +91,9 @@ void ShellContentBrowserClient::RenderProcessHostCreated(
   registrar_.Add(this,
                  NOTIFICATION_RENDERER_PROCESS_CREATED,
                  Source<RenderProcessHost>(host));
+  registrar_.Add(this,
+                 NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                 Source<RenderProcessHost>(host));
 }
 
 net::URLRequestContextGetter* ShellContentBrowserClient::CreateRequestContext(
@@ -110,6 +114,27 @@ ShellContentBrowserClient::CreateRequestContextForStoragePartition(
       ShellBrowserContextForBrowserContext(content_browser_context);
   return shell_browser_context->CreateRequestContextForStoragePartition(
       partition_path, in_memory, protocol_handlers);
+}
+
+bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
+  if (!url.is_valid())
+    return false;
+  DCHECK_EQ(url.scheme(), StringToLowerASCII(url.scheme()));
+  // Keep in sync with ProtocolHandlers added by
+  // ShellURLRequestContextGetter::GetURLRequestContext().
+  static const char* const kProtocolList[] = {
+      chrome::kBlobScheme,
+      chrome::kFileSystemScheme,
+      chrome::kChromeUIScheme,
+      chrome::kChromeDevToolsScheme,
+      chrome::kDataScheme,
+      chrome::kFileScheme,
+  };
+  for (size_t i = 0; i < arraysize(kProtocolList); ++i) {
+    if (url.scheme() == kProtocolList[i])
+      return true;
+  }
+  return false;
 }
 
 void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -190,12 +215,25 @@ void ShellContentBrowserClient::Observe(int type,
       registrar_.Remove(this,
                         NOTIFICATION_RENDERER_PROCESS_CREATED,
                         source);
+      registrar_.Remove(this,
+                        NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                        source);
       if (hyphen_dictionary_file_ != base::kInvalidPlatformFileValue) {
         RenderProcessHost* host = Source<RenderProcessHost>(source).ptr();
         IPC::PlatformFileForTransit file = IPC::GetFileHandleForProcess(
             hyphen_dictionary_file_, host->GetHandle(), false);
         host->Send(new ShellViewMsg_LoadHyphenDictionary(file));
       }
+      break;
+    }
+
+    case NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
+      registrar_.Remove(this,
+                        NOTIFICATION_RENDERER_PROCESS_CREATED,
+                        source);
+      registrar_.Remove(this,
+                        NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                        source);
       break;
     }
 

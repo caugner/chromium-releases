@@ -11,9 +11,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/hash_tables.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -47,12 +47,21 @@ class ProfileManager : public base::NonThreadSafe,
   // Physically remove deleted profile directories from disk.
   static void NukeDeletedProfilesFromDisk();
 
+  // The following DEPRECATED functions should be removed: crbug.com/83792.
+
   // DEPRECATED: DO NOT USE unless in ChromeOS.
   // Returns the default profile.  This adds the profile to the
   // ProfileManager if it doesn't already exist.  This method returns NULL if
   // the profile doesn't exist and we can't create it.
   // The profile used can be overridden by using --login-profile on cros.
   Profile* GetDefaultProfile(const base::FilePath& user_data_dir);
+
+  // DEPRECATED: Temporary measure to ensure that GetDefaultProfile() is not
+  // called before CreateProfile() is called in chrome_browser_main.cc.
+  // If GetDefaultProfile() or GetDefaultProfileOrOffTheRecord() is called
+  // before this, a CHECK will be triggered.
+  static void AllowGetDefaultProfile();
+  static bool IsGetDefaultProfileAllowed();
 
   // DEPRECATED: DO NOT USE unless in ChromeOS.
   // Same as instance method but provides the default user_data_dir as well.
@@ -101,7 +110,14 @@ class ProfileManager : public base::NonThreadSafe,
   Profile* GetLastUsedProfile(const base::FilePath& user_data_dir);
 
   // Same as instance method but provides the default user_data_dir as well.
+  // If the Profile is going to be used to open a new window then consider using
+  // GetLastUsedProfileAllowedByPolicy() instead.
   static Profile* GetLastUsedProfile();
+
+  // Same as GetLastUsedProfile() but returns the incognito Profile if
+  // incognito mode is forced. This should be used if the last used Profile
+  // will be used to open new browser windows.
+  static Profile* GetLastUsedProfileAllowedByPolicy();
 
   // Get the path of the last used profile, or if that's undefined, the default
   // profile.
@@ -126,10 +142,6 @@ class ProfileManager : public base::NonThreadSafe,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // Returns true if the given command line indicates that this is a short-lived
-  // profile import process.
-  static bool IsImportProcess(const CommandLine& command_line);
 
   // Indicate that an import process will run for the next created Profile.
   void SetWillImport();
@@ -182,12 +194,12 @@ class ProfileManager : public base::NonThreadSafe,
   // that at some point the list of numbered profiles is not continuous.)
   // |callback| may be invoked multiple times (for CREATE_STATUS_INITIALIZED
   // and CREATE_STATUS_CREATED) so binding parameters with bind::Passed() is
-  // prohibited.
-  static void CreateMultiProfileAsync(
+  // prohibited. Returns the file path to the profile that will be created
+  // asynchronously.
+  static base::FilePath CreateMultiProfileAsync(
       const string16& name,
       const string16& icon_url,
       const CreateCallback& callback,
-      chrome::HostDesktopType desktop_type,
       bool is_managed);
 
   // Register multi-profile related preferences in Local State.
@@ -201,9 +213,11 @@ class ProfileManager : public base::NonThreadSafe,
   // profile specfic desktop shortcuts.
   ProfileShortcutManager* profile_shortcut_manager();
 
-  // Schedules the profile at the given path to be deleted on shutdown.
+  // Schedules the profile at the given path to be deleted on shutdown. If we're
+  // deleting the last profile, a new one will be created in its place, and in
+  // that case the callback will be called when profile creation is complete.
   void ScheduleProfileForDeletion(const base::FilePath& profile_dir,
-                                  chrome::HostDesktopType desktop_type);
+                                  const CreateCallback& callback);
 
   // Checks if multiple profiles is enabled.
   static bool IsMultipleProfilesEnabled();

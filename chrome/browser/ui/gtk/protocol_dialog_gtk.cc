@@ -10,7 +10,7 @@
 
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/ui/external_protocol_dialog_delegate.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -42,7 +42,7 @@ ProtocolDialogGtk::ProtocolDialogGtk(
     scoped_ptr<const ProtocolDialogDelegate> delegate)
     : delegate_(delegate.Pass()),
       creation_time_(base::TimeTicks::Now()) {
-  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+  DCHECK_EQ(base::MessageLoop::TYPE_UI, base::MessageLoop::current()->type());
 
   dialog_ = gtk_dialog_new_with_buttons(
       UTF16ToUTF8(delegate_->GetTitleText()).c_str(),

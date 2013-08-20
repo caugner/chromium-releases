@@ -10,9 +10,9 @@ import threading
 
 
 from telemetry.core import util
-from telemetry.core.chrome import trace_event_importer
 from telemetry.core.chrome import trace_result
 from telemetry.core.chrome import websocket
+from telemetry.core.timeline import model
 
 
 class TracingUnsupportedException(Exception):
@@ -43,8 +43,7 @@ class TraceResultImpl(object):
   def AsTimelineModel(self):
     f = cStringIO.StringIO()
     self.Serialize(f)
-    return trace_event_importer.Import(
-      f.getvalue())
+    return model.TimelineModel(event_data=f.getvalue())
 
 class TracingBackend(object):
   def __init__(self, devtools_port):
@@ -55,9 +54,11 @@ class TracingBackend(object):
     self._thread = None
     self._tracing_data = []
 
-  def BeginTracing(self):
+  def BeginTracing(self, custom_categories=None):
     self._CheckNotificationSupported()
     req = {'method': 'Tracing.start'}
+    if custom_categories:
+      req['params'] = {'categories': custom_categories}
     self._SyncRequest(req)
     # Tracing.start will send asynchronous notifications containing trace
     # data, until Tracing.end is called.

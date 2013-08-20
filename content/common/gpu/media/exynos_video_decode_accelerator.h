@@ -86,17 +86,13 @@ class CONTENT_EXPORT ExynosVideoDecodeAccelerator :
   // These are rather subjectively tuned.
   enum {
     kMfcInputBufferCount = 8,
-    kMfcInputBufferMaxSize = 512 * 1024,
+    // TODO(posciak): determine MFC input buffer size based on level limits.
+    // See http://crbug.com/255116.
+    kMfcInputBufferMaxSize = 1024 * 1024,
     kGscInputBufferCount = 4,
     // Number of output buffers to use for each VDA stage above what's required
     // by the decoder (e.g. DPB size, in H264).
     kDpbOutputBufferExtraCount = 3,
-    // We're continuing to have issues with synchronization between Mali 3D and
-    // Exynos video decode, so we buffer this many extra GSC output buffers in
-    // the GSC free output buffers queue, to add a safety margin.
-    // Must be lesser than or equal to kDpbOutputBufferExtraCount.
-    // TODO(sheu): remove this hack (http://crbug.com/225563).
-    kGscOutputBufferExtraForSyncCount = 2,
   };
 
   // Internal state of the decoder.

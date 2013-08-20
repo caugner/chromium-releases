@@ -20,12 +20,12 @@
 #include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_about_handler.h"
@@ -157,7 +157,8 @@ class ChromeOSOnlineTermsHandler : public net::URLFetcherDelegate {
       : fetch_callback_(callback) {
     std::string eula_URL = base::StringPrintf(chrome::kOnlineEulaURLPath,
                                               locale.c_str());
-    eula_fetcher_.reset(net::URLFetcher::Create(GURL(eula_URL),
+    eula_fetcher_.reset(net::URLFetcher::Create(0 /* ID used for testing */,
+                                                GURL(eula_URL),
                                                 net::URLFetcher::GET,
                                                 this));
     eula_fetcher_->SetRequestContext(

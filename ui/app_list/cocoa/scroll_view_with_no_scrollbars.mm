@@ -5,7 +5,7 @@
 #include "ui/app_list/cocoa/scroll_view_with_no_scrollbars.h"
 
 #include "base/mac/mac_util.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 
 #if !defined(MAC_OS_X_VERSION_10_7) || \
     MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
@@ -49,10 +49,10 @@ typedef NSUInteger NSEventPhase;
 
 - (id)initWithFrame:(NSRect)frame {
   if ((self = [super initWithFrame:frame])) {
-    [self setHasHorizontalScroller:YES];
+    [self setHasHorizontalScroller:base::mac::IsOSLionOrLater()];
     NSRect horizontalScrollerRect = [self bounds];
     horizontalScrollerRect.size.height = 0;
-    scoped_nsobject<InvisibleScroller> horizontalScroller(
+    base::scoped_nsobject<InvisibleScroller> horizontalScroller(
         [[InvisibleScroller alloc] initWithFrame:horizontalScrollerRect]);
     [self setHorizontalScroller:horizontalScroller];
   }

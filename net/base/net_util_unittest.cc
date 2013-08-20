@@ -10,14 +10,14 @@
 
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/test/test_file_util.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -3169,6 +3169,14 @@ TEST(NetUtilTest, GetHostOrSpecFromURL) {
             GetHostOrSpecFromURL(GURL("http://example.com./test")));
   EXPECT_EQ("file:///tmp/test.html",
             GetHostOrSpecFromURL(GURL("file:///tmp/test.html")));
+}
+
+TEST(NetUtilTest, GetAddressFamily) {
+  IPAddressNumber number;
+  EXPECT_TRUE(ParseIPLiteralToNumber("192.168.0.1", &number));
+  EXPECT_EQ(ADDRESS_FAMILY_IPV4, GetAddressFamily(number));
+  EXPECT_TRUE(ParseIPLiteralToNumber("1:abcd::3:4:ff", &number));
+  EXPECT_EQ(ADDRESS_FAMILY_IPV6, GetAddressFamily(number));
 }
 
 // Test that invalid IP literals fail to parse.

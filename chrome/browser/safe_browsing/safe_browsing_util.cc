@@ -5,8 +5,8 @@
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 
 #include "base/logging.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/google/google_util.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
@@ -164,6 +164,7 @@ const char kBinHashList[] = "goog-badbin-digestvar-disabled";
 const char kCsdWhiteList[] = "goog-csdwhite-sha256";
 const char kDownloadWhiteList[] = "goog-downloadwhite-digest256";
 const char kExtensionBlacklist[] = "goog-badcrxids-digestvar";
+const char kSideEffectFreeWhitelist[] = "goog-sideeffectfree-shavar";
 
 ListType GetListId(const std::string& name) {
   ListType id;
@@ -181,6 +182,8 @@ ListType GetListId(const std::string& name) {
     id = DOWNLOADWHITELIST;
   } else if (name == safe_browsing_util::kExtensionBlacklist) {
     id = EXTENSIONBLACKLIST;
+  } else if (name == safe_browsing_util::kSideEffectFreeWhitelist) {
+    id = SIDEEFFECTFREEWHITELIST;
   } else {
     id = INVALID;
   }
@@ -209,6 +212,9 @@ bool GetListName(ListType list_id, std::string* list) {
       break;
     case EXTENSIONBLACKLIST:
       *list = safe_browsing_util::kExtensionBlacklist;
+      break;
+    case SIDEEFFECTFREEWHITELIST:
+      *list = safe_browsing_util::kSideEffectFreeWhitelist;
       break;
     default:
       return false;

@@ -19,7 +19,7 @@ namespace {
 
 // Used to render into an already current context+surface,
 // that we do not have ownership of (draw callback).
-class GLNonOwnedContext : public GLContext {
+class GLNonOwnedContext : public GLContextReal {
  public:
   GLNonOwnedContext(GLShareGroup* share_group);
 
@@ -44,10 +44,10 @@ class GLNonOwnedContext : public GLContext {
 };
 
 GLNonOwnedContext::GLNonOwnedContext(GLShareGroup* share_group)
-  : GLContext(share_group) {}
+  : GLContextReal(share_group) {}
 
 bool GLNonOwnedContext::MakeCurrent(GLSurface* surface) {
-  SetCurrent(this, surface);
+  SetCurrent(surface);
   SetRealGLApi();
   return true;
 }
@@ -89,23 +89,27 @@ bool GLContextEGL::GetTotalGpuMemory(size_t* bytes) {
   // end devices, 1/2 of the heap size can be too high, but this
   // correlates well with having a small heap-growth-limit. So for
   // devices with less ram, we factor in the growth limit.
+  // For devices with very limited memory, (e.g. Nexus S) we use
+  // 1/8 of the heap_size.
   //
   // This is the result of the calculation below:
   // Droid DNA 1080P  128MB
-  // Nexus S           56MB
+  // Nexus S           16MB
   // Galaxy Nexus     112MB
   // Nexus 4/10       256MB
   // Xoom              88MB
-  size_t dalvik_limit = 0;
+  static size_t dalvik_limit = 0;
   if (!dalvik_limit) {
     size_t heap_size   = static_cast<size_t>(base::SysInfo::DalvikHeapSizeMB());
     size_t heap_growth = static_cast<size_t>(
                              base::SysInfo::DalvikHeapGrowthLimitMB());
     size_t limit = 0;
     if (heap_size >= 350)
-        limit = heap_size / 2;
+      limit = heap_size / 2;
+    else if (heap_size <= 128)
+      limit = heap_size / 8;
     else
-        limit = (heap_size + (heap_growth * 2)) / 4;
+      limit = (heap_size + (heap_growth * 2)) / 4;
     dalvik_limit = limit * 1024 * 1024;
   }
   *bytes = dalvik_limit;

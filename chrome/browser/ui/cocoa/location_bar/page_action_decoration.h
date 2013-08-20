@@ -55,7 +55,7 @@ class PageActionDecoration : public ImageDecoration,
   NSPoint GetBubblePointInFrame(NSRect frame);
 
   // Overridden from |LocationBarDecoration|
-  virtual CGFloat GetWidthForSpace(CGFloat width, CGFloat text_width) OVERRIDE;
+  virtual CGFloat GetWidthForSpace(CGFloat width) OVERRIDE;
   virtual void DrawWithBackgroundInFrame(NSRect background_frame,
                                          NSRect frame,
                                          NSView* control_view) OVERRIDE;
@@ -104,10 +104,10 @@ class PageActionDecoration : public ImageDecoration,
   GURL current_url_;
 
   // The string to show for a tooltip.
-  scoped_nsobject<NSString> tooltip_;
+  base::scoped_nsobject<NSString> tooltip_;
 
   // The context menu for the Page Action.
-  scoped_nsobject<ExtensionActionContextMenu> menu_;
+  base::scoped_nsobject<ExtensionActionContextMenu> menu_;
 
   // This is used for post-install visual feedback. The page_action
   // icon is briefly shown even if it hasn't been enabled by its

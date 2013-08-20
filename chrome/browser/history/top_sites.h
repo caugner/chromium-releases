@@ -28,7 +28,6 @@ class RefCountedMemory;
 namespace history {
 
 class TopSitesCache;
-class TopSitesTest;
 
 // Interface for TopSites, which stores the data for the top "most visited"
 // sites. This includes a cache of the most visited data from history, as well
@@ -45,6 +44,9 @@ class TopSites
   // Initializes TopSites.
   static TopSites* Create(Profile* profile, const base::FilePath& db_name);
 
+  // Helper method to shuffle MostVisited tiles for A/B testing purposes.
+  static void MaybeShuffle(MostVisitedURLList* data);
+
   // Sets the given thumbnail for the given URL. Returns true if the thumbnail
   // was updated. False means either the URL wasn't known to us, or we felt
   // that our current thumbnail was superior to the given one. Should be called
@@ -52,6 +54,13 @@ class TopSites
   virtual bool SetPageThumbnail(const GURL& url,
                                 const gfx::Image& thumbnail,
                                 const ThumbnailScore& score) = 0;
+
+  // While testing the history system, we want to set the thumbnail to a piece
+  // of static memory.
+  virtual bool SetPageThumbnailToJPEGBytes(
+      const GURL& url,
+      const base::RefCountedMemory* memory,
+      const ThumbnailScore& score) = 0;
 
   typedef base::Callback<void(const MostVisitedURLList&)>
       GetMostVisitedURLsCallback;
@@ -130,6 +139,11 @@ class TopSites
   // Returns true if the given URL is known to the top sites service.
   // This function also returns false if TopSites isn't loaded yet.
   virtual bool IsKnownURL(const GURL& url) = 0;
+
+  // Follows the cached redirect chain to convert any URL to its
+  // canonical version. If no redirect chain is known for the URL,
+  // return it without modification.
+  virtual const std::string& GetCanonicalURLString(const GURL& url) const = 0;
 
   // Returns true if the top sites list is full (i.e. we already have the
   // maximum number of top sites).  This function also returns false if

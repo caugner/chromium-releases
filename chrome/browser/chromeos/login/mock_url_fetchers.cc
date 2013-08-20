@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "googleurl/src/gurl.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
@@ -32,7 +32,7 @@ ExpectCanceledFetcher::~ExpectCanceledFetcher() {
 }
 
 void ExpectCanceledFetcher::Start() {
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ExpectCanceledFetcher::CompleteFetch,
                  weak_factory_.GetWeakPtr()),
@@ -41,7 +41,7 @@ void ExpectCanceledFetcher::Start() {
 
 void ExpectCanceledFetcher::CompleteFetch() {
   ADD_FAILURE() << "Fetch completed in ExpectCanceledFetcher!";
-  MessageLoop::current()->Quit();  // Allow exiting even if we mess up.
+  base::MessageLoop::current()->Quit();  // Allow exiting even if we mess up.
 }
 
 GotCanceledFetcher::GotCanceledFetcher(

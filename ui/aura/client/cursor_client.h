@@ -5,7 +5,7 @@
 #ifndef UI_AURA_CLIENT_CURSOR_CLIENT_H_
 #define UI_AURA_CLIENT_CURSOR_CLIENT_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/aura/aura_export.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -30,6 +30,9 @@ class AURA_EXPORT CursorClient {
   // Hides the cursor. Mouse events keep being sent even when the cursor is
   // invisible.
   virtual void HideCursor() = 0;
+
+  // Sets the scale of the mouse cursor icon.
+  virtual void SetScale(float scale) = 0;
 
   // Gets whether the cursor is visible.
   virtual bool IsCursorVisible() const = 0;
@@ -59,7 +62,7 @@ class AURA_EXPORT CursorClient {
 
   // Used to pass the cursor resource module name to the cursor loader. This is
   // typically used to load non system cursors.
-  virtual void SetCursorResourceModule(const string16& module_name) = 0;
+  virtual void SetCursorResourceModule(const base::string16& module_name) = 0;
 
   // Used to add or remove a CursorClientObserver.
   virtual void AddObserver(CursorClientObserver* observer) = 0;

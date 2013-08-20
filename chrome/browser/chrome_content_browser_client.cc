@@ -13,10 +13,9 @@
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/sha1.h"
-#include "base/string_number_conversions.h"
-#include "base/strings/string_tokenizer.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/app/breakpad_mac.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_about_handler.h"
@@ -32,8 +31,9 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/extensions/activity_log.h"
+#include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
+#include "chrome/browser/extensions/browser_permissions_policy_delegate.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
@@ -46,6 +46,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.h"
+#include "chrome/browser/nacl_host/nacl_host_message_filter.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
@@ -58,6 +59,7 @@
 #include "chrome/browser/prerender/prerender_message_filter.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/printing/printing_message_filter.h"
+#include "chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -76,12 +78,13 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/toolkit_extra_parts.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/browser/user_style_sheet_watcher_factory.h"
 #include "chrome/browser/validation_message_message_filter.h"
+#include "chrome/browser/webview/webview_guest.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -93,15 +96,19 @@
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/manifest_handlers/app_isolation_info.h"
 #include "chrome/common/extensions/manifest_handlers/shared_module_info.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/pepper_permission_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/chromeos_constants.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_ppapi_host.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browser_url_handler.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -126,7 +133,8 @@
 #include "ppapi/host/ppapi_host.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/glue/webpreferences.h"
+#include "ui/message_center/message_center_util.h"
+#include "webkit/common/webpreferences.h"
 #include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
@@ -137,7 +145,9 @@
 #include "chrome/browser/spellchecker/spellcheck_message_filter_mac.h"
 #elif defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
+#include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chromeos/chromeos_switches.h"
 #elif defined(OS_LINUX)
 #include "chrome/browser/chrome_browser_main_linux.h"
@@ -158,10 +168,6 @@
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
 #endif
 
-#if defined(ENABLE_MESSAGE_CENTER)
-#include "ui/message_center/message_center_util.h"
-#endif
-
 #if defined(OS_ANDROID)
 #include "ui/base/ui_base_paths.h"
 #endif
@@ -177,6 +183,14 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/media_galleries/fileapi/media_file_system_mount_point_provider.h"
+#endif
+
+#if defined(ENABLE_WEBRTC)
+#include "chrome/browser/media/webrtc_logging_handler_host.h"
+#endif
+
+#if defined(FILE_MANAGER_EXTENSION)
+#include "chrome/browser/chromeos/extensions/file_manager/file_manager_util.h"
 #endif
 
 using base::FileDescriptor;
@@ -200,6 +214,7 @@ namespace {
 // thread.
 base::LazyInstance<std::string> g_io_thread_application_locale;
 
+#if defined(ENABLE_PLUGINS)
 const char* kPredefinedAllowedSocketOrigins[] = {
   "okddffdblfhhnmhodogpojmfkjmhinfp",  // Test SSH Client
   "pnhechapfaindjhompbnflcldabbghjo",  // HTerm App (SSH Client)
@@ -217,11 +232,13 @@ const char* kPredefinedAllowedSocketOrigins[] = {
   "ghbfeebgmiidnnmeobbbaiamklmpbpii",  // see crbug.com/134099
   "jdfhpkjeckflbbleddjlpimecpbjdeep",  // see crbug.com/142514
   "iabmpiboiopbgfabjmgeedhcmjenhbla",  // see crbug.com/165080
+  "B7CF8A292249681AF81771650BA4CEEAF19A4560", // see crbug.com/165080
   "6EAED1924DB611B6EEF2A664BD077BE7EAD33B8F", // see crbug.com/234789
   "7525AF4F66763A70A883C4700529F647B470E4D2", // see crbug.com/238084
   "0B549507088E1564D672F7942EB87CA4DAD73972", // see crbug.com/238084
   "864288364E239573E777D3E0E36864E590E95C74"  // see crbug.com/238084
 };
+#endif
 
 // Returns a copy of the given url with its host set to given host and path set
 // to given path. Other parts of the url will be the same.
@@ -266,7 +283,14 @@ bool RemoveUberHost(GURL* url) {
     new_path = old_path.substr(separator);
   }
 
+  // Do not allow URLs with paths empty before the first slash since we can't
+  // have an empty host. (e.g "foo://chrome//")
+  if (new_host.empty())
+    return false;
+
   *url = ReplaceURLHostAndPath(*url, new_host, new_path);
+
+  DCHECK(url->is_valid());
 
   return true;
 }
@@ -461,23 +485,18 @@ void SetApplicationLocaleOnIOThread(const std::string& locale) {
   g_io_thread_application_locale.Get() = locale;
 }
 
-std::string HashHost(const std::string& host) {
-  const std::string id_hash = base::SHA1HashString(host);
-  DCHECK(id_hash.length() == base::kSHA1Length);
-  return base::HexEncode(id_hash.c_str(), id_hash.length());
-}
-
-bool HostIsInSet(const std::string& host, const std::set<std::string>& set) {
-  return set.count(host) > 0 || set.count(HashHost(host)) > 0;
-}
-
 }  // namespace
 
 namespace chrome {
 
 ChromeContentBrowserClient::ChromeContentBrowserClient() {
+#if defined(ENABLE_PLUGINS)
   for (size_t i = 0; i < arraysize(kPredefinedAllowedSocketOrigins); ++i)
     allowed_socket_origins_.insert(kPredefinedAllowedSocketOrigins[i]);
+#endif
+
+  permissions_policy_delegate_.reset(
+      new extensions::BrowserPermissionsPolicyDelegate());
 }
 
 ChromeContentBrowserClient::~ChromeContentBrowserClient() {
@@ -539,6 +558,8 @@ content::BrowserMainParts* ChromeContentBrowserClient::CreateBrowserMainParts(
   NOTREACHED();
   main_parts = new ChromeBrowserMainParts(parameters);
 #endif
+
+  chrome::AddProfilesExtraParts(main_parts);
 
   // Construct additional browser parts. Stages are called in the order in
   // which they are added.
@@ -668,13 +689,16 @@ content::WebContentsViewDelegate*
 
 // Check if the extension activity log is enabled for the profile.
 static bool IsExtensionActivityLogEnabledForProfile(Profile* profile) {
-  extensions::ActivityLog* activity_log =
-      extensions::ActivityLog::GetInstance(profile);
-  return activity_log->IsLogEnabled();
+  // crbug.com/247908 - This should be IsLogEnabled except for an issue
+  // in chrome_frame_net_tests
+  return extensions::ActivityLog::IsLogEnabledOnAnyProfile();
 }
 
-void ChromeContentBrowserClient::GuestWebContentsCreated(
-    WebContents* guest_web_contents, WebContents* embedder_web_contents) {
+void ChromeContentBrowserClient::GuestWebContentsAttached(
+    WebContents* guest_web_contents,
+    WebContents* embedder_web_contents,
+    int browser_plugin_instance_id,
+    const base::DictionaryValue& extra_params) {
   Profile* profile = Profile::FromBrowserContext(
       embedder_web_contents->GetBrowserContext());
   ExtensionService* service =
@@ -689,6 +713,11 @@ void ChromeContentBrowserClient::GuestWebContentsCreated(
   std::vector<ExtensionMsg_Loaded_Params> extensions;
   extensions.push_back(ExtensionMsg_Loaded_Params(extension));
   guest_web_contents->Send(new ExtensionMsg_Loaded(extensions));
+  new WebViewGuest(guest_web_contents,
+                   embedder_web_contents,
+                   extension->id(),
+                   browser_plugin_instance_id,
+                   extra_params);
 }
 
 void ChromeContentBrowserClient::RenderProcessHostCreated(
@@ -717,8 +746,13 @@ void ChromeContentBrowserClient::RenderProcessHostCreated(
   host->GetChannel()->AddFilter(
       new prerender::PrerenderMessageFilter(id, profile));
   host->GetChannel()->AddFilter(new ValidationMessageMessageFilter(id));
-#if !defined(OS_ANDROID)
   host->GetChannel()->AddFilter(new TtsMessageFilter(id, profile));
+#if defined(ENABLE_WEBRTC)
+  host->GetChannel()->AddFilter(new WebRtcLoggingHandlerHost());
+#endif
+#if !defined(DISABLE_NACL)
+  host->GetChannel()->AddFilter(new NaClHostMessageFilter(id, profile,
+    context));
 #endif
 
   host->Send(new ChromeViewMsg_SetIsIncognitoProcess(
@@ -880,6 +914,33 @@ bool ChromeContentBrowserClient::IsHandledURL(const GURL& url) {
   return ProfileIOData::IsHandledURL(url);
 }
 
+bool ChromeContentBrowserClient::CanCommitURL(
+    content::RenderProcessHost* process_host,
+    const GURL& url) {
+  // We need to let most extension URLs commit in any process, since this can
+  // be allowed due to web_accessible_resources.  Most hosted app URLs may also
+  // load in any process (e.g., in an iframe).  However, the Chrome Web Store
+  // cannot be loaded in iframes and should never be requested outside its
+  // process.
+  Profile* profile =
+      Profile::FromBrowserContext(process_host->GetBrowserContext());
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  if (!service)
+    return true;
+  const Extension* new_extension =
+      service->extensions()->GetExtensionOrAppByURL(ExtensionURLInfo(url));
+  if (new_extension &&
+      new_extension->is_hosted_app() &&
+      new_extension->id() == extension_misc::kWebStoreAppId &&
+      !service->process_map()->Contains(new_extension->id(),
+                                        process_host->GetID())) {
+    return false;
+  }
+
+  return true;
+}
+
 bool ChromeContentBrowserClient::IsSuitableHost(
     content::RenderProcessHost* process_host,
     const GURL& site_url) {
@@ -1014,6 +1075,11 @@ void ChromeContentBrowserClient::SiteInstanceGotProcess(
         SigninManagerFactory::GetForProfile(profile);
     if (signin_manager)
       signin_manager->SetSigninProcess(site_instance->GetProcess()->GetID());
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&ExtensionInfoMap::SetSigninProcess,
+                   extensions::ExtensionSystem::Get(profile)->info_map(),
+                   site_instance->GetProcess()->GetID()));
   }
 #endif
 
@@ -1221,16 +1287,19 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
     if (content::IsThreadedCompositingEnabled())
       command_line->AppendSwitch(switches::kEnableThreadedCompositing);
 
-#if defined(ENABLE_MESSAGE_CENTER)
     if (message_center::IsRichNotificationEnabled())
       command_line->AppendSwitch(switches::kDisableHTMLNotifications);
-#endif
 
     // Please keep this in alphabetical order.
     static const char* const kSwitchNames[] = {
+      autofill::switches::kDisableInteractiveAutocomplete,
       autofill::switches::kEnableExperimentalFormFilling,
+      autofill::switches::kEnableInteractiveAutocomplete,
       switches::kAllowHTTPBackgroundPage,
       switches::kAllowLegacyExtensionManifests,
+      // TODO(victorhsieh): remove the following flag once we move PPAPI FileIO
+      // to browser.
+      switches::kAllowNaClFileHandleAPI,
       switches::kAllowScriptingGallery,
       switches::kAppsCheckoutURL,
       switches::kAppsGalleryURL,
@@ -1244,7 +1313,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kEnableBenchmarking,
       switches::kEnableExperimentalExtensionApis,
       switches::kEnableIPCFuzzing,
-      switches::kEnableInteractiveAutocomplete,
       switches::kEnableNaCl,
       switches::kEnableNetBenchmarking,
       switches::kEnablePasswordGeneration,
@@ -1495,13 +1563,13 @@ void ChromeContentBrowserClient::AllowCertificateError(
     bool overridable,
     bool strict_enforcement,
     const base::Callback<void(bool)>& callback,
-    bool* cancel_request) {
+    content::CertificateRequestResultType* result) {
   if (resource_type != ResourceType::MAIN_FRAME) {
     // A sub-resource has a certificate error.  The user doesn't really
     // have a context for making the right decision, so block the
     // request hard, without an info bar to allow showing the insecure
     // content.
-    *cancel_request = true;
+    *result = content::CERTIFICATE_REQUEST_RESULT_TYPE_DENY;
     return;
   }
 
@@ -1520,7 +1588,7 @@ void ChromeContentBrowserClient::AllowCertificateError(
     if (prerender_manager->prerender_tracker()->TryCancel(
             render_process_id, render_view_id,
             prerender::FINAL_STATUS_SSL_ERROR)) {
-      *cancel_request = true;
+      *result = content::CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL;
       return;
     }
   }
@@ -1571,9 +1639,9 @@ void ChromeContentBrowserClient::SelectClientCertificate(
       const std::vector<scoped_refptr<net::X509Certificate> >&
           all_client_certs = cert_request_info->client_certs;
       for (size_t i = 0; i < all_client_certs.size(); ++i) {
-        if (CertMatchesFilter(*all_client_certs[i], *filter_dict)) {
+        if (CertMatchesFilter(*all_client_certs[i].get(), *filter_dict)) {
           // Use the first certificate that is matched by the filter.
-          callback.Run(all_client_certs[i]);
+          callback.Run(all_client_certs[i].get());
           return;
         }
       }
@@ -1640,7 +1708,7 @@ void ChromeContentBrowserClient::RequestDesktopNotificationPermission(
     for (ExtensionSet::const_iterator iter = extensions.begin();
          iter != extensions.end(); ++iter) {
       if (notification_service->IsExtensionEnabled((*iter)->id())) {
-        extension = *iter;
+        extension = iter->get();
         break;
       }
     }
@@ -1805,9 +1873,11 @@ void ChromeContentBrowserClient::ResourceDispatcherHostCreated() {
 // TODO(tommi): Rename from Get to Create.
 content::SpeechRecognitionManagerDelegate*
     ChromeContentBrowserClient::GetSpeechRecognitionManagerDelegate() {
-#if defined(ENABLE_INPUT_SPEECH)
+#if !defined(OS_ANDROID)
   return new speech::ChromeSpeechRecognitionManagerDelegate();
 #else
+  // TODO(janx): Implement speech::AndroidSpeechRecognitionManagerDelegate
+  // (see crbug.com/222352).
   return NULL;
 #endif
 }
@@ -1905,14 +1975,33 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
   web_prefs->user_gesture_required_for_media_playback = false;
 #endif
 #endif
+
+#if defined(OS_ANDROID)
+  web_prefs->password_echo_enabled =
+      prefs->GetBoolean(prefs::kWebKitPasswordEchoEnabled);
+#else
   web_prefs->password_echo_enabled = browser_defaults::kPasswordEchoEnabled;
+#endif
+
+#if defined(OS_CHROMEOS)
+  // Enable password echo during OOBE when keyboard driven flag is set.
+  if (chromeos::UserManager::IsInitialized() &&
+      !chromeos::UserManager::Get()->IsUserLoggedIn() &&
+      !chromeos::StartupUtils::IsOobeCompleted()) {
+    bool keyboard_driven_oobe = false;
+    chromeos::system::StatisticsProvider::GetInstance()->GetMachineFlag(
+        chromeos::system::kOemKeyboardDrivenOobeKey, &keyboard_driven_oobe);
+    if (keyboard_driven_oobe)
+       web_prefs->password_echo_enabled = true;
+  }
+#endif
 
 #if defined(OS_ANDROID)
   web_prefs->user_style_sheet_enabled = false;
 #else
   // The user stylesheet watcher may not exist in a testing profile.
   UserStyleSheetWatcher* user_style_sheet_watcher =
-      UserStyleSheetWatcherFactory::GetForProfile(profile);
+      UserStyleSheetWatcherFactory::GetForProfile(profile).get();
   if (user_style_sheet_watcher) {
     web_prefs->user_style_sheet_enabled = true;
     web_prefs->user_style_sheet_location =
@@ -1975,7 +2064,8 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
   // Override the default of suppressing HW compositing for WebUI pages for the
   // file manager, which is implemented using WebUI but wants HW acceleration
   // for video decode & render.
-  if (url.spec() == chrome::kChromeUIFileManagerURL) {
+  if (url.SchemeIs(extensions::kExtensionScheme) &&
+      url.host() == kFileBrowserDomain) {
     web_prefs->accelerated_compositing_enabled = true;
     web_prefs->accelerated_2d_canvas_enabled = true;
   }
@@ -2088,61 +2178,44 @@ bool ChromeContentBrowserClient::SupportsBrowserPlugin(
 bool ChromeContentBrowserClient::AllowPepperSocketAPI(
     content::BrowserContext* browser_context,
     const GURL& url,
+    bool private_api,
     const content::SocketPermissionRequest& params) {
-  if (!url.is_valid())
-    return false;
-
-  std::string host = url.host();
-  if (url.SchemeIs(extensions::kExtensionScheme) &&
-      HostIsInSet(host, allowed_socket_origins_)) {
-    return true;
-  }
-
+#if defined(ENABLE_PLUGINS)
   Profile* profile = Profile::FromBrowserContext(browser_context);
-  const Extension* extension = NULL;
-  ExtensionService* extension_service = !profile ? NULL :
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  if (extension_service) {
-    extension = extension_service->extensions()->
-        GetExtensionOrAppByURL(ExtensionURLInfo(url));
+  const ExtensionSet* extension_set = NULL;
+  if (profile) {
+    extension_set = extensions::ExtensionSystem::Get(profile)->
+        extension_service()->extensions();
   }
 
-  // Check the modules that are imported by this extension to see if any of them
-  // is whitelisted.
-  if (extension) {
-    const std::vector<extensions::SharedModuleInfo::ImportInfo>& imports =
-        extensions::SharedModuleInfo::GetImports(extension);
-    std::vector<extensions::SharedModuleInfo::ImportInfo>::const_iterator it;
-    for (it = imports.begin(); it != imports.end(); ++it) {
-      const Extension* imported_extension = extension_service->
-          GetExtensionById(it->extension_id, false);
-      if (imported_extension &&
-          extensions::SharedModuleInfo::IsSharedModule(imported_extension) &&
-          HostIsInSet(it->extension_id, allowed_socket_origins_)) {
-        return true;
+  if (private_api) {
+    // Access to private socket APIs is controlled by the whitelist.
+    if (IsExtensionOrSharedModuleWhitelisted(url, extension_set,
+                                             allowed_socket_origins_)) {
+      return true;
+    }
+  } else {
+    // Access to public socket APIs is controlled by extension permissions.
+    if (url.is_valid() && url.SchemeIs(extensions::kExtensionScheme) &&
+        extension_set) {
+      const Extension* extension = extension_set->GetByID(url.host());
+      if (extension) {
+        extensions::SocketPermission::CheckParam check_params(
+            params.type, params.host, params.port);
+        if (extensions::PermissionsData::CheckAPIPermissionWithParam(
+                extension, extensions::APIPermission::kSocket, &check_params)) {
+          return true;
+        }
       }
     }
   }
 
-  // Need to check this now and not on construction because otherwise it won't
-  // work with browser_tests.
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  std::string allowed_list =
-      command_line.GetSwitchValueASCII(switches::kAllowNaClSocketAPI);
-  if (allowed_list == "*") {
-    // The wildcard allows socket API only for packaged and platform apps.
-    return extension &&
-        (extension->GetType() == Manifest::TYPE_LEGACY_PACKAGED_APP ||
-         extension->GetType() == Manifest::TYPE_PLATFORM_APP);
-  } else if (!allowed_list.empty()) {
-    base::StringTokenizer t(allowed_list, ",");
-    while (t.GetNext()) {
-      if (t.token() == host)
-        return true;
-    }
-  }
-
+  // Allow both public and private APIs if the command line says so.
+  return IsHostAllowedByCommandLine(url, extension_set,
+                                    switches::kAllowNaClSocketAPI);
+#else
   return false;
+#endif
 }
 
 base::FilePath ChromeContentBrowserClient::GetHyphenDictionaryDirectory() {
@@ -2168,8 +2241,11 @@ void ChromeContentBrowserClient::GetAdditionalFileSystemMountPointProviders(
     const base::FilePath& storage_partition_path,
     ScopedVector<fileapi::FileSystemMountPointProvider>* additional_providers) {
 #if !defined(OS_ANDROID)
+  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
   additional_providers->push_back(new MediaFileSystemMountPointProvider(
-      storage_partition_path));
+      storage_partition_path,
+      pool->GetSequencedTaskRunner(pool->GetNamedSequenceToken(
+          MediaFileSystemMountPointProvider::kMediaTaskRunnerName)).get()));
 #endif
 }
 

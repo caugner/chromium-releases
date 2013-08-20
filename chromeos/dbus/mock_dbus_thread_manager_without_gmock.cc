@@ -12,18 +12,20 @@
 #include "chromeos/dbus/fake_bluetooth_profile_manager_client.h"
 #include "chromeos/dbus/fake_cros_disks_client.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
+#include "chromeos/dbus/fake_gsm_sms_client.h"
 #include "chromeos/dbus/fake_image_burner_client.h"
-#include "chromeos/dbus/fake_old_bluetooth_adapter_client.h"
-#include "chromeos/dbus/fake_old_bluetooth_device_client.h"
-#include "chromeos/dbus/fake_old_bluetooth_manager_client.h"
+#include "chromeos/dbus/fake_power_manager_client.h"
+#include "chromeos/dbus/fake_session_manager_client.h"
 #include "chromeos/dbus/fake_shill_manager_client.h"
 #include "chromeos/dbus/fake_system_clock_client.h"
+#include "chromeos/dbus/fake_update_engine_client.h"
 #include "chromeos/dbus/ibus/mock_ibus_client.h"
 #include "chromeos/dbus/ibus/mock_ibus_config_client.h"
 #include "chromeos/dbus/ibus/mock_ibus_engine_factory_service.h"
 #include "chromeos/dbus/ibus/mock_ibus_engine_service.h"
 #include "chromeos/dbus/ibus/mock_ibus_input_context_client.h"
 #include "chromeos/dbus/ibus/mock_ibus_panel_service.h"
+#include "chromeos/dbus/power_policy_controller.h"
 
 namespace chromeos {
 
@@ -36,19 +38,16 @@ MockDBusThreadManagerWithoutGMock::MockDBusThreadManagerWithoutGMock()
         new FakeBluetoothProfileManagerClient()),
     fake_cros_disks_client_(new FakeCrosDisksClient),
     fake_cryptohome_client_(new FakeCryptohomeClient),
+    fake_gsm_sms_client_(new FakeGsmSMSClient),
     fake_image_burner_client_(new FakeImageBurnerClient),
+    fake_session_manager_client_(new FakeSessionManagerClient),
     fake_shill_manager_client_(new FakeShillManagerClient),
     fake_system_clock_client_(new FakeSystemClockClient),
-    fake_old_bluetooth_manager_client_(new FakeOldBluetoothManagerClient),
-    fake_old_bluetooth_adapter_client_(new FakeOldBluetoothAdapterClient),
-    fake_old_bluetooth_device_client_(new FakeOldBluetoothDeviceClient),
-    mock_ibus_client_(new MockIBusClient),
-    mock_ibus_config_client_(new MockIBusConfigClient),
-    mock_ibus_input_context_client_(new MockIBusInputContextClient),
-    mock_ibus_engine_service_(new MockIBusEngineService),
-    mock_ibus_engine_factory_service_(new MockIBusEngineFactoryService),
-    mock_ibus_panel_service_(new MockIBusPanelService),
+    fake_power_manager_client_(new FakePowerManagerClient),
+    fake_update_engine_client_(new FakeUpdateEngineClient),
     ibus_bus_(NULL) {
+  power_policy_controller_.reset(
+      new PowerPolicyController(this, fake_power_manager_client_.get()));
 }
 
 MockDBusThreadManagerWithoutGMock::~MockDBusThreadManagerWithoutGMock() {
@@ -73,6 +72,12 @@ void MockDBusThreadManagerWithoutGMock::InitIBusBus(
     const base::Closure& closure) {
   // Non-null bus address is used to ensure the connection to ibus-daemon.
   ibus_bus_ = reinterpret_cast<dbus::Bus*>(0xdeadbeef);
+  mock_ibus_client_.reset(new MockIBusClient);
+  mock_ibus_config_client_.reset(new MockIBusConfigClient);
+  mock_ibus_input_context_client_.reset(new MockIBusInputContextClient);
+  mock_ibus_engine_service_.reset(new MockIBusEngineService);
+  mock_ibus_engine_factory_service_.reset(new MockIBusEngineFactoryService);
+  mock_ibus_panel_service_.reset(new MockIBusPanelService);
 }
 
 dbus::Bus* MockDBusThreadManagerWithoutGMock::GetSystemBus() {
@@ -85,33 +90,30 @@ dbus::Bus* MockDBusThreadManagerWithoutGMock::GetIBusBus() {
 
 BluetoothAdapterClient*
     MockDBusThreadManagerWithoutGMock::GetBluetoothAdapterClient() {
-  return fake_old_bluetooth_adapter_client_.get();
+  return fake_bluetooth_adapter_client_.get();
+}
+
+BluetoothAgentManagerClient*
+    MockDBusThreadManagerWithoutGMock::GetBluetoothAgentManagerClient() {
+  return fake_bluetooth_agent_manager_client_.get();
 }
 
 BluetoothDeviceClient*
     MockDBusThreadManagerWithoutGMock::GetBluetoothDeviceClient() {
-  return fake_old_bluetooth_device_client_.get();
+  return fake_bluetooth_device_client_.get();
 }
 
 BluetoothInputClient*
     MockDBusThreadManagerWithoutGMock::GetBluetoothInputClient() {
-  NOTIMPLEMENTED();
-  return NULL;
+  return fake_bluetooth_input_client_.get();
 }
 
-BluetoothManagerClient*
-    MockDBusThreadManagerWithoutGMock::GetBluetoothManagerClient() {
-  return fake_old_bluetooth_manager_client_.get();
-}
-
-BluetoothNodeClient*
-    MockDBusThreadManagerWithoutGMock::GetBluetoothNodeClient() {
-  NOTIMPLEMENTED();
-  return NULL;
+BluetoothProfileManagerClient*
+    MockDBusThreadManagerWithoutGMock::GetBluetoothProfileManagerClient() {
+  return fake_bluetooth_profile_manager_client_.get();
 }
 
 CrasAudioClient* MockDBusThreadManagerWithoutGMock::GetCrasAudioClient() {
-  NOTIMPLEMENTED();
   return NULL;
 }
 
@@ -128,33 +130,6 @@ DebugDaemonClient* MockDBusThreadManagerWithoutGMock::GetDebugDaemonClient() {
   return NULL;
 }
 
-ExperimentalBluetoothAdapterClient*
-    MockDBusThreadManagerWithoutGMock::GetExperimentalBluetoothAdapterClient() {
-  return fake_bluetooth_adapter_client_.get();
-}
-
-ExperimentalBluetoothAgentManagerClient*
-    MockDBusThreadManagerWithoutGMock::
-        GetExperimentalBluetoothAgentManagerClient() {
-  return fake_bluetooth_agent_manager_client_.get();
-}
-
-ExperimentalBluetoothDeviceClient*
-    MockDBusThreadManagerWithoutGMock::GetExperimentalBluetoothDeviceClient() {
-  return fake_bluetooth_device_client_.get();
-}
-
-ExperimentalBluetoothInputClient*
-    MockDBusThreadManagerWithoutGMock::GetExperimentalBluetoothInputClient() {
-  return fake_bluetooth_input_client_.get();
-}
-
-ExperimentalBluetoothProfileManagerClient*
-    MockDBusThreadManagerWithoutGMock::
-        GetExperimentalBluetoothProfileManagerClient() {
-  return fake_bluetooth_profile_manager_client_.get();
-}
-
 ShillDeviceClient*
     MockDBusThreadManagerWithoutGMock::GetShillDeviceClient() {
   NOTIMPLEMENTED();
@@ -169,7 +144,7 @@ ShillIPConfigClient*
 
 ShillManagerClient*
     MockDBusThreadManagerWithoutGMock::GetShillManagerClient() {
-  return fake_shill_manager_client_.get();;
+  return fake_shill_manager_client_.get();
 }
 
 ShillProfileClient*
@@ -185,8 +160,7 @@ ShillServiceClient*
 }
 
 GsmSMSClient* MockDBusThreadManagerWithoutGMock::GetGsmSMSClient() {
-  NOTIMPLEMENTED();
-  return NULL;
+  return fake_gsm_sms_client_.get();
 }
 
 ImageBurnerClient* MockDBusThreadManagerWithoutGMock::GetImageBurnerClient() {
@@ -212,20 +186,17 @@ PermissionBrokerClient*
 }
 
 PowerManagerClient* MockDBusThreadManagerWithoutGMock::GetPowerManagerClient() {
-  NOTIMPLEMENTED();
-  return NULL;
+  return fake_power_manager_client_.get();
 }
 
 PowerPolicyController*
 MockDBusThreadManagerWithoutGMock::GetPowerPolicyController() {
-  NOTIMPLEMENTED();
-  return NULL;
+  return power_policy_controller_.get();
 }
 
 SessionManagerClient*
     MockDBusThreadManagerWithoutGMock::GetSessionManagerClient() {
-  NOTIMPLEMENTED();
-  return NULL;
+  return fake_session_manager_client_.get();
 }
 
 SMSClient* MockDBusThreadManagerWithoutGMock::GetSMSClient() {
@@ -238,14 +209,7 @@ SystemClockClient* MockDBusThreadManagerWithoutGMock::GetSystemClockClient() {
 }
 
 UpdateEngineClient* MockDBusThreadManagerWithoutGMock::GetUpdateEngineClient() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
-BluetoothOutOfBandClient*
-    MockDBusThreadManagerWithoutGMock::GetBluetoothOutOfBandClient() {
-  NOTIMPLEMENTED();
-  return NULL;
+  return fake_update_engine_client_.get();
 }
 
 IBusClient* MockDBusThreadManagerWithoutGMock::GetIBusClient() {

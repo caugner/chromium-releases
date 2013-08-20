@@ -48,8 +48,10 @@ void ServiceProcessControl::ConnectInternal() {
   // TODO(hclam): Handle error connecting to channel.
   const IPC::ChannelHandle channel_id = GetServiceProcessChannel();
   SetChannel(new IPC::ChannelProxy(
-      channel_id, IPC::Channel::MODE_NAMED_CLIENT, this,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
+      channel_id,
+      IPC::Channel::MODE_NAMED_CLIENT,
+      this,
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get()));
 }
 
 void ServiceProcessControl::SetChannel(IPC::ChannelProxy* channel) {
@@ -100,7 +102,7 @@ void ServiceProcessControl::Launch(const base::Closure& success_task,
     connect_failure_tasks_.push_back(failure);
 
   // If we already in the process of launching, then we are done.
-  if (launcher_)
+  if (launcher_.get())
     return;
 
   // If the service process is already running then connects to it.
@@ -133,7 +135,7 @@ void ServiceProcessControl::Launch(const base::Closure& success_task,
     switches::kIgnoreUrlFetcherCertRequests,
     switches::kLang,
     switches::kLoggingLevel,
-    switches::kLsoHost,
+    switches::kLsoUrl,
     switches::kNoServiceAutorun,
     switches::kUserDataDir,
     switches::kV,
@@ -290,7 +292,7 @@ void ServiceProcessControl::Launcher::DoDetectLaunched() {
 
   // If the service process is not launched yet then check again in 2 seconds.
   const base::TimeDelta kDetectLaunchRetry = base::TimeDelta::FromSeconds(2);
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE, base::Bind(&Launcher::DoDetectLaunched, this),
       kDetectLaunchRetry);
 }

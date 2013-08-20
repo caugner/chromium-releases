@@ -12,7 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/policy/user_policy_disk_cache.h"
 #include "chrome/browser/chromeos/policy/user_policy_token_loader.h"
 #include "chrome/browser/policy/proto/cloud/device_management_local.pb.h"
@@ -197,7 +197,8 @@ void UserCloudPolicyStoreChromeOS::Store(
 void UserCloudPolicyStoreChromeOS::Load() {
   // Cancel all pending requests.
   weak_factory_.InvalidateWeakPtrs();
-  session_manager_client_->RetrieveUserPolicy(
+  session_manager_client_->RetrievePolicyForUser(
+      username_,
       base::Bind(&UserCloudPolicyStoreChromeOS::OnPolicyRetrieved,
                  weak_factory_.GetWeakPtr()));
 }
@@ -244,8 +245,10 @@ void UserCloudPolicyStoreChromeOS::OnPolicyToStoreValidated(
     return;
   }
 
-  session_manager_client_->StoreUserPolicy(
+  session_manager_client_->StorePolicyForUser(
+      username_,
       policy_blob,
+      validator->policy()->new_public_key(),
       base::Bind(&UserCloudPolicyStoreChromeOS::OnPolicyStored,
                  weak_factory_.GetWeakPtr()));
 }

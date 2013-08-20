@@ -12,10 +12,10 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -74,6 +74,7 @@ class ScreenshotTakerNotificationDelegate : public NotificationDelegate {
     // TODO(sschmitz): perhaps add similar action for Windows.
 #endif
   }
+  virtual bool HasClickedListener() OVERRIDE { return success_; }
   virtual std::string id() const OVERRIDE {
     return std::string(kNotificationId);
   }

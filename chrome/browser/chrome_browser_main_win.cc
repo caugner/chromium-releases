@@ -17,9 +17,8 @@
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/metro.h"
-#include "base/win/text_services_message_filter.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/browser_util_win.h"
@@ -200,31 +199,10 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
   }
 }
 
-void ChromeBrowserMainPartsWin::PostMainMessageLoopStart() {
-  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
-
-  if (base::win::IsTSFAwareRequired()) {
-    // Create a TSF message filter for the message loop. MessageLoop takes
-    // ownership of the filter.
-    scoped_ptr<base::win::TextServicesMessageFilter> tsf_message_filter(
-      new base::win::TextServicesMessageFilter);
-    if (tsf_message_filter->Init()) {
-      MessageLoopForUI::current()->SetMessageFilter(
-        tsf_message_filter.PassAs<MessageLoopForUI::MessageFilter>());
-    }
-  }
-}
-
 void ChromeBrowserMainPartsWin::PreProfileInit() {
   storage_monitor_.reset(chrome::StorageMonitorWin::Create());
 
   ChromeBrowserMainParts::PreProfileInit();
-}
-
-void ChromeBrowserMainPartsWin::PostProfileInit() {
-  storage_monitor_->Init();
-
-  ChromeBrowserMainParts::PostProfileInit();
 }
 
 void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
@@ -274,7 +252,7 @@ void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
   base::ScopedNativeLibrary library(base::FilePath(L"kernel32.dll"));
   // Get the function pointer for RegisterApplicationRestart.
   RegisterApplicationRestartProc register_application_restart =
-      static_cast<RegisterApplicationRestartProc>(
+      reinterpret_cast<RegisterApplicationRestartProc>(
           library.GetFunctionPointer("RegisterApplicationRestart"));
   if (!register_application_restart) {
     LOG(WARNING) << "Cannot find RegisterApplicationRestart in kernel32.dll";

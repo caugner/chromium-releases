@@ -13,10 +13,10 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/history/history_types.h"
+#include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/search/instant_commit_type.h"
 #include "chrome/browser/ui/search/instant_overlay_model.h"
@@ -24,8 +24,6 @@
 #include "chrome/common/instant_types.h"
 #include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/search_types.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/window_open_disposition.h"
@@ -33,10 +31,14 @@
 #include "ui/gfx/rect.h"
 
 struct AutocompleteMatch;
+struct InstantAutocompleteResult;
+
 class AutocompleteProvider;
+class AutocompleteResult;
 class BrowserInstantController;
 class InstantNTP;
 class InstantOverlay;
+class InstantService;
 class InstantTab;
 class TemplateURL;
 
@@ -67,8 +69,20 @@ class WebContents;
 //
 // InstantController is owned by Browser via BrowserInstantController.
 class InstantController : public InstantPage::Delegate,
-                          public content::NotificationObserver {
+                          public InstantServiceObserver {
  public:
+  // For reporting fallbacks to local overlay.
+  enum InstantFallbackReason {
+    INSTANT_FALLBACK_NONE = 0,
+    INSTANT_FALLBACK_UNKNOWN = 1,
+    INSTANT_FALLBACK_INSTANT_URL_EMPTY = 2,
+    INSTANT_FALLBACK_ORIGIN_PATH_MISMATCH = 3,
+    INSTANT_FALLBACK_INSTANT_NOT_SUPPORTED = 4,
+    INSTANT_FALLBACK_NO_OVERLAY = 5,
+    INSTANT_FALLBACK_JAVASCRIPT_DISABLED = 6,
+    INSTANT_FALLBACK_MAX = 7,
+  };
+
   InstantController(BrowserInstantController* browser,
                     bool extended_enabled);
   virtual ~InstantController();
@@ -112,7 +126,8 @@ class InstantController : public InstantPage::Delegate,
 
   // Send autocomplete results from |providers| to the overlay page.
   void HandleAutocompleteResults(
-      const std::vector<AutocompleteProvider*>& providers);
+      const std::vector<AutocompleteProvider*>& providers,
+      const AutocompleteResult& result);
 
   // Called when the default search provider changes. Resets InstantNTP and
   // InstantOverlay.
@@ -135,12 +150,23 @@ class InstantController : public InstantPage::Delegate,
   // an onsubmit notification to the instant page.
   void OmniboxNavigateToURL();
 
+  // Notifies |instant_Tab_| to toggle voice search.
+  void ToggleVoiceSearch();
+
   // The overlay WebContents. May be NULL. InstantController retains ownership.
   content::WebContents* GetOverlayContents() const;
+
+  // The ntp WebContents. May be NULL. InstantController retains ownership.
+  content::WebContents* GetNTPContents() const;
 
   // Returns true if Instant is showing a search results overlay. Returns false
   // if the overlay is not showing, or if it's showing only suggestions.
   bool IsOverlayingSearchResults() const;
+
+  // Called if the browser is navigating to a search URL for |search_terms| with
+  // search-term-replacement enabled. If |instant_tab_| can be used to process
+  // the search, this does so and returns true. Else, returns false.
+  bool SubmitQuery(const string16& search_terms);
 
   // If the overlay is showing search results, commits the overlay, calling
   // CommitInstant() on the browser, and returns true. Else, returns false.
@@ -171,9 +197,6 @@ class InstantController : public InstantPage::Delegate,
   // applicable if |extended_enabled_| is true.
   void SetInstantEnabled(bool instant_enabled, bool use_local_page_only);
 
-  // The theme has changed. Pass the message to the overlay page.
-  void ThemeChanged(const ThemeBackgroundInfo& theme_info);
-
   // Called when someone else swapped in a different contents in the |overlay_|.
   void SwappedOverlayContents();
 
@@ -195,6 +218,18 @@ class InstantController : public InstantPage::Delegate,
   // Resets list of debug events.
   void ClearDebugEvents();
 
+  // Gets the Most Visited items info from InstantService and forwards them to
+  // the Instant page renderer via the appropriate InstantPage subclass.
+  void UpdateMostVisitedItems();
+
+  // Returns the correct Instant URL to use from the following possibilities:
+  //   o The default search engine's Instant URL
+  //   o The --instant-url command line switch
+  //   o The local page (see GetLocalInstantURL())
+  // Returns empty string if no valid Instant URL is available (this is only
+  // possible in non-extended mode where we don't have a local page fall-back).
+  virtual std::string GetInstantURL() const;
+
   // See comments for |debug_events_| below.
   const std::list<std::pair<int64, std::string> >& debug_events() {
     return debug_events_;
@@ -209,30 +244,44 @@ class InstantController : public InstantPage::Delegate,
   // happen through the InstantController interface.
   InstantOverlayModel* model() { return &model_; }
 
+  // Used by BrowserInstantController to notify InstantController about the
+  // instant support change event for the active web contents.
+  void InstantSupportChanged(InstantSupportState instant_support);
+
+ protected:
+  // Accessors are made protected for testing purposes.
+  virtual bool extended_enabled() const;
+
+  virtual InstantOverlay* overlay() const;
+  virtual InstantTab* instant_tab() const;
+  virtual InstantNTP* ntp() const;
+
+  virtual Profile* profile() const;
+
+  // Returns true if Javascript is enabled and false otherwise.
+  virtual bool IsJavascriptEnabled() const;
+
+  // Returns true if the browser is in startup.
+  virtual bool InStartup() const;
+
  private:
+  friend class InstantExtendedManualTest;
   friend class InstantTestBase;
-  FRIEND_TEST_ALL_PREFIXES(InstantTest, OmniboxFocusLoadsInstant);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, UsesOverlayIfTabNotReady);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
-                           SearchQueryNotDisplayedForNavsuggest);
-  FRIEND_TEST_ALL_PREFIXES(InstantTest, SetWithTemplateURL);
-  FRIEND_TEST_ALL_PREFIXES(InstantTest, NonInstantSearchProvider);
-  FRIEND_TEST_ALL_PREFIXES(InstantTest, InstantOverlayRefresh);
-  FRIEND_TEST_ALL_PREFIXES(InstantTest, InstantOverlayRefreshDifferentOrder);
-  FRIEND_TEST_ALL_PREFIXES(InstantTest, InstantRenderViewGone);
+#define UNIT_F(test) FRIEND_TEST_ALL_PREFIXES(InstantControllerTest, test)
+  UNIT_F(DoesNotSwitchToLocalNTPIfOnCurrentNTP);
+  UNIT_F(DoesNotSwitchToLocalNTPIfOnLocalNTP);
+  UNIT_F(IsJavascriptEnabled);
+  UNIT_F(IsJavascriptEnabledChecksContentSettings);
+  UNIT_F(IsJavascriptEnabledChecksPrefs);
+  UNIT_F(PrefersRemoteNTPOnStartup);
+  UNIT_F(ShouldSwitchToLocalOverlay);
+  UNIT_F(SwitchesToLocalNTPIfJSDisabled);
+  UNIT_F(SwitchesToLocalNTPIfNoInstantSupport);
+  UNIT_F(SwitchesToLocalNTPIfNoNTPReady);
+  UNIT_F(SwitchesToLocalNTPIfPathBad);
+#undef UNIT_F
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ExtendedModeIsOn);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, MostVisited);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, RestrictedItemReadback);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, OmniboxFocusLoadsInstant);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
-                           OmniboxTextUponFocusedCommittedSERP);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
-                           NavigationSuggestionIsDiscardedUponSearchSuggestion);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
-                           NavigateToURLSuggestionHitEnterAndLookForSubmit);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
-                           MiddleClickOnSuggestionOpensInNewTab);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, SearchProviderRunsForFallback);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, NTPIsPreloaded);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, PreloadedNTPIsUsedInNewTab);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, PreloadedNTPIsUsedInSameTab);
@@ -242,35 +291,25 @@ class InstantController : public InstantPage::Delegate,
                            PreloadedNTPDoesntSupportInstant);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ProcessIsolation);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, UnrelatedSiteInstance);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ValidatesSuggestions);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
-                           OmniboxCommitsWhenShownFullHeight);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, LocalNTPIsNotPreloaded);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, OverlayRenderViewGone);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, OverlayDoesntSupportInstant);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedManualTest,
-                           MANUAL_OmniboxFocusLoadsInstant);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedManualTest,
-                           MANUAL_BackspaceFromQueryToSelectedUrlAndNavigate);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, LocalOnlyNTPIsPreloaded);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, LocalOnlyNTPIsNotPreloaded);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, OnDefaultSearchProviderChanged);
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, SearchProviderForLocalNTP);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
                            AcceptingURLSearchDoesNotNavigate);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, AcceptingJSSearchDoesNotRunJS);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
                            ReloadSearchAfterBackReloadsCorrectQuery);
-  FRIEND_TEST_ALL_PREFIXES(
-      InstantExtendedFirstTabTest, RedirectToLocalOnLoadFailure);
-
-  Profile* profile() const;
-  InstantOverlay* overlay() const;
-  InstantTab* instant_tab() const;
-  InstantNTP* ntp() const;
-
-  // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedFirstTabTest,
+                           RedirectToLocalOnLoadFailure);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, KeyboardTogglesVoiceSearch);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, HomeButtonAffectsMargin);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, SearchReusesInstantTab);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
+                           SearchDoesntReuseInstantTabWithoutSupport);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
+                           TypedSearchURLDoesntReuseInstantTab);
+  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest,
+                           DispatchMVChangeEventWhileNavigatingBackToNTP);
 
   // Overridden from InstantPage::Delegate:
   // TODO(shishir): We assume that the WebContent's current RenderViewHost is
@@ -292,24 +331,27 @@ class InstantController : public InstantPage::Delegate,
       const content::WebContents* contents,
       int height,
       InstantSizeUnits units) OVERRIDE;
+  virtual void LogDropdownShown() OVERRIDE;
   virtual void FocusOmnibox(const content::WebContents* contents,
                             OmniboxFocusState state) OVERRIDE;
   virtual void NavigateToURL(
       const content::WebContents* contents,
       const GURL& url,
       content::PageTransition transition,
-      WindowOpenDisposition disposition) OVERRIDE;
+      WindowOpenDisposition disposition,
+      bool is_search_type) OVERRIDE;
   virtual void InstantPageLoadFailed(content::WebContents* contents) OVERRIDE;
+
+  // Overridden from InstantServiceObserver:
+  virtual void ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) OVERRIDE;
 
   // Invoked by the InstantLoader when the Instant page wants to delete a
   // Most Visited item.
-  virtual void DeleteMostVisitedItem(InstantRestrictedID most_visited_item_id)
-      OVERRIDE;
+  virtual void DeleteMostVisitedItem(const GURL& url) OVERRIDE;
 
   // Invoked by the InstantLoader when the Instant page wants to undo a
   // Most Visited deletion.
-  virtual void UndoMostVisitedDeletion(InstantRestrictedID most_visited_item_id)
-      OVERRIDE;
+  virtual void UndoMostVisitedDeletion(const GURL& url) OVERRIDE;
 
   // Invoked by the InstantLoader when the Instant page wants to undo all
   // Most Visited deletions.
@@ -324,15 +366,7 @@ class InstantController : public InstantPage::Delegate,
 
   // Returns the local Instant URL. (Just a convenience wrapper around
   // chrome::GetLocalInstantURL.)
-  std::string GetLocalInstantURL() const;
-
-  // Returns the correct Instant URL to use from the following possibilities:
-  //   o The default search engine's Instant URL
-  //   o The --instant-url command line switch
-  //   o The local page (see GetLocalInstantURL())
-  // Returns empty string if no valid Instant URL is available (this is only
-  // possible in non-extended mode where we don't have a local page fall-back).
-  std::string GetInstantURL() const;
+  virtual std::string GetLocalInstantURL() const;
 
   // Returns true if |page| has an up-to-date Instant URL and supports Instant.
   // Note that local URLs will not pass this check.
@@ -351,8 +385,8 @@ class InstantController : public InstantPage::Delegate,
   // |instant_url| is empty or if there is no active tab.
   void ResetOverlay(const std::string& instant_url);
 
-  // Returns true if we should switch to using the local overlay.
-  bool ShouldSwitchToLocalOverlay() const;
+  // Returns an enum value indicating the reason to fallback.
+  InstantFallbackReason ShouldSwitchToLocalOverlay() const;
 
   // If the active tab is an Instant search results page, sets |instant_tab_| to
   // point to it. Else, deletes any existing |instant_tab_|.
@@ -360,6 +394,10 @@ class InstantController : public InstantPage::Delegate,
 
   // Sends theme info, omnibox bounds, font info, etc. down to the Instant tab.
   void UpdateInfoForInstantTab();
+
+  // Returns whether input is in progress, i.e. if the omnibox has focus and the
+  // active tab is in mode SEARCH_SUGGESTIONS.
+  bool IsInputInProgress() const;
 
   // Hide the overlay. Also sends an onchange event (with blank query) to the
   // overlay, telling it to clear out results for any old queries.
@@ -376,23 +414,6 @@ class InstantController : public InstantPage::Delegate,
   // Send the omnibox popup bounds to the page.
   void SendPopupBoundsToPage();
 
-  // Begin listening to change notifications from TopSites and fire off an
-  // initial request for most visited items.
-  void StartListeningToMostVisitedChanges();
-
-  // Fire off an async request for most visited items to the TopNav code.
-  void RequestMostVisitedItems();
-
-  // Called when we get new most visited items from the TopNav code,
-  // registered as an async callback.  Parses them and sends them to the
-  // renderer via SendMostVisitedItems.
-  void OnMostVisitedItemsReceived(const history::MostVisitedURLList& data);
-
-  // Sends a collection of MostVisitedItems to the renderer process via
-  // the appropriate InstantPage subclass.
-  void SendMostVisitedItems(
-      const std::vector<InstantMostVisitedItemIDPair>& items);
-
   // If possible, tries to mutate |suggestion| to a valid suggestion. Returns
   // true if successful. (Note that |suggestion| may be modified even if this
   // returns false.)
@@ -405,6 +426,18 @@ class InstantController : public InstantPage::Delegate,
   // exists.
   bool UseTabForSuggestions() const;
 
+  // Populates InstantAutocompleteResult with AutocompleteMatch details.
+  // |autocomplete_match_index| specifies the index of |match| in the
+  // AutocompleteResult. If the |match| is obtained from auto complete
+  // providers, then the |autocomplete_match_index| is set to kNoMatchIndex.
+  void PopulateInstantAutocompleteResultFromMatch(
+      const AutocompleteMatch& match,
+      size_t autocomplete_match_index,
+      InstantAutocompleteResult* result);
+
+  // Returns the InstantService for the browser profile.
+  InstantService* GetInstantService() const;
+
   BrowserInstantController* const browser_;
 
   // Whether the extended API and regular API are enabled. If both are false,
@@ -414,6 +447,9 @@ class InstantController : public InstantPage::Delegate,
 
   // If true, the Instant URL is set to kChromeSearchLocalNtpUrl.
   bool use_local_page_only_;
+
+  // If true, preload an NTP into |ntp_|.
+  bool preload_ntp_;
 
   // The state of the overlay page, i.e., the page owned by |overlay_|. Ignored
   // if |instant_tab_| is in use.
@@ -465,6 +501,9 @@ class InstantController : public InstantPage::Delegate,
   // Omnibox focus state.
   OmniboxFocusState omnibox_focus_state_;
 
+  // The reason for the most recent omnibox focus change.
+  OmniboxFocusChangeReason omnibox_focus_change_reason_;
+
   // The search model mode for the active tab.
   SearchMode search_mode_;
 
@@ -492,6 +531,9 @@ class InstantController : public InstantPage::Delegate,
   // overlay is showed and cleared when the overlay is hidden.
   base::Time first_interaction_time_;
 
+  // Indicates that the first interaction time has already been logged.
+  bool first_interaction_time_recorded_;
+
   // Whether to allow the overlay to show search suggestions. In general, the
   // overlay is allowed to show search suggestions whenever |search_mode_| is
   // MODE_SEARCH_SUGGESTIONS, except in those cases where this is false.
@@ -499,12 +541,6 @@ class InstantController : public InstantPage::Delegate,
 
   // List of events and their timestamps, useful in debugging Instant behaviour.
   mutable std::list<std::pair<int64, std::string> > debug_events_;
-
-  // Used for Top Sites async retrieval.
-  base::WeakPtrFactory<InstantController> weak_ptr_factory_;
-
-  // Used to get notifications about Most Visted changes.
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantController);
 };

@@ -38,6 +38,10 @@ gfx::Rect TestBrowserWindow::GetRestoredBounds() const {
   return gfx::Rect();
 }
 
+ui::WindowShowState TestBrowserWindow::GetRestoredState() const {
+  return ui::SHOW_STATE_DEFAULT;
+}
+
 gfx::Rect TestBrowserWindow::GetBounds() const {
   return gfx::Rect();
 }
@@ -133,7 +137,7 @@ FindBar* TestBrowserWindow::CreateFindBar() {
   return NULL;
 }
 
-WebContentsModalDialogHost*
+web_modal::WebContentsModalDialogHost*
     TestBrowserWindow::GetWebContentsModalDialogHost() {
   return NULL;
 }

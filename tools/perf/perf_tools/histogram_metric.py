@@ -36,7 +36,5 @@ class HistogramMetric(object):
     return 'getHistogram'
 
   def _GetHistogramFromDomAutomation(self, tab):
-    js = ('window.domAutomationController.%s ? '
-          'window.domAutomationController.%s("%s") : ""' %
-          (self.histogram_function, self.histogram_function, self.name))
-    return tab.EvaluateJavaScript(js)
+    return histogram_module.GetHistogramFromDomAutomation(
+        self.histogram_function, self.name, tab)

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,7 +21,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PreferenceApi) {
   pref_service->SetBoolean(prefs::kEnableHyperlinkAuditing, false);
   pref_service->SetBoolean(prefs::kEnableReferrers, false);
   pref_service->SetBoolean(prefs::kEnableTranslate, false);
-  pref_service->SetBoolean(prefs::kInstantEnabled, false);
   pref_service->SetBoolean(prefs::kNetworkPredictionEnabled, false);
   pref_service->SetBoolean(prefs::kSafeBrowsingEnabled, false);
   pref_service->SetBoolean(prefs::kSearchSuggestEnabled, false);
@@ -38,7 +37,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PreferenceApi) {
   EXPECT_TRUE(pref_service->GetBoolean(prefs::kEnableHyperlinkAuditing));
   EXPECT_TRUE(pref_service->GetBoolean(prefs::kEnableReferrers));
   EXPECT_TRUE(pref_service->GetBoolean(prefs::kEnableTranslate));
-  EXPECT_TRUE(pref_service->GetBoolean(prefs::kInstantEnabled));
   EXPECT_TRUE(pref_service->GetBoolean(prefs::kNetworkPredictionEnabled));
   EXPECT_TRUE(pref_service->GetBoolean(prefs::kSafeBrowsingEnabled));
   EXPECT_TRUE(pref_service->GetBoolean(prefs::kSearchSuggestEnabled));

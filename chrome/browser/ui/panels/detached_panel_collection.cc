@@ -174,7 +174,8 @@ void DetachedPanelCollection::OnRestoreButtonClicked(
 bool DetachedPanelCollection::CanShowMinimizeButton(const Panel* panel) const {
   // We also show minimize button for detached panel when stacking mode is
   // enabled.
-  return PanelManager::IsPanelStackingEnabled();
+  return PanelManager::IsPanelStackingEnabled() &&
+         PanelManager::CanUseSystemMinimize();
 }
 
 bool DetachedPanelCollection::CanShowRestoreButton(const Panel* panel) const {
@@ -186,6 +187,10 @@ bool DetachedPanelCollection::CanShowRestoreButton(const Panel* panel) const {
 bool DetachedPanelCollection::IsPanelMinimized(const Panel* panel) const {
   DCHECK_EQ(this, panel->collection());
   // Detached panels do not minimize.
+  return false;
+}
+
+bool DetachedPanelCollection::UsesAlwaysOnTopPanels() const {
   return false;
 }
 
@@ -233,7 +238,6 @@ void DetachedPanelCollection::UpdatePanelOnCollectionChange(Panel* panel) {
   panel->set_attention_mode(
       static_cast<Panel::AttentionMode>(Panel::USE_PANEL_ATTENTION |
                                         Panel::USE_SYSTEM_ATTENTION));
-  panel->SetAlwaysOnTop(false);
   panel->ShowShadow(true);
   panel->EnableResizeByMouse(true);
   panel->UpdateMinimizeRestoreButtonVisibility();

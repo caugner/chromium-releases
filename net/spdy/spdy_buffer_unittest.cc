@@ -5,7 +5,6 @@
 #include "net/spdy/spdy_buffer.h"
 
 #include <cstddef>
-#include <cstring>
 #include <string>
 
 #include "base/basictypes.h"
@@ -117,19 +116,6 @@ TEST_F(SpdyBufferTest, GetIOBufferForRemainingData) {
 
   buffer.Consume(kDataSize - 5);
   EXPECT_EQ(expectedData, std::string(io_buffer->data(), io_buffer_size));
-}
-
-// Make sure the IOBuffer returned by GetIOBufferForRemainingData()
-// outlives the buffer itself.
-TEST_F(SpdyBufferTest, IOBufferForRemainingDataOutlivesBuffer) {
-  scoped_ptr<SpdyBuffer> buffer(new SpdyBuffer(kData, kDataSize));
-
-  scoped_refptr<IOBuffer> io_buffer = buffer->GetIOBufferForRemainingData();
-  buffer.reset();
-
-  // This will cause a use-after-free error if |io_buffer| doesn't
-  // outlive |buffer|.
-  std::memcpy(io_buffer->data(), kData, kDataSize);
 }
 
 }  // namespace

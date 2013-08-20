@@ -12,21 +12,13 @@
 #include "ipc/ipc_platform_file.h"
 #include "printing/pdf_render_settings.h"
 
-class Importer;
-
 namespace base {
-class DictionaryValue;
 class FilePath;
-class Thread;
 struct FileDescriptor;
 }
 
 namespace gfx {
 class Rect;
-}
-
-namespace importer {
-struct SourceProfile;
 }
 
 namespace printing {
@@ -46,8 +38,6 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
-  virtual bool Send(IPC::Message* message);
-
   // IPC message handlers.
   void OnUnpackExtension(const base::FilePath& extension_path,
                          const std::string& extension_id,
@@ -90,7 +80,13 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   void OnAnalyzeZipFileForDownloadProtection(
       IPC::PlatformFileForTransit zip_file);
 
+#if defined(OS_WIN)
+  void OnParseITunesPrefXml(const std::string& itunes_xml_data);
+#endif  // defined(OS_WIN)
+
   scoped_ptr<ProfileImportHandler> import_handler_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromeContentUtilityClient);
 };
 
 }  // namespace chrome

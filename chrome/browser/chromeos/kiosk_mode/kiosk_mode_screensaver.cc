@@ -24,6 +24,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chromeos/login/login_state.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -99,7 +100,7 @@ void ScreensaverUnpackerClient::LoadScreensaverExtension(
                                          extensions::Manifest::COMPONENT,
                                          Extension::NO_FLAGS,
                                          &error);
-  if (!screensaver_extension) {
+  if (!screensaver_extension.get()) {
     LOG(ERROR) << "Could not load screensaver extension from: "
                << screensaver_extension_path.value() << " due to: " << error;
     NotifyAppPackOfDamagedFile();
@@ -220,9 +221,10 @@ void KioskModeScreensaver::SetupScreensaver(
   Profile* default_profile = ProfileManager::GetDefaultProfile();
   // Add the extension to the extension service and display the screensaver.
   if (default_profile) {
-    extensions::ExtensionSystem::Get(default_profile)->extension_service()->
-        AddExtension(extension);
-    ash::ShowScreensaver(extension->GetFullLaunchURL());
+    extensions::ExtensionSystem::Get(default_profile)->extension_service()
+        ->AddExtension(extension.get());
+    ash::ShowScreensaver(
+        extensions::AppLaunchInfo::GetFullLaunchURL(extension.get()));
   } else {
     LOG(ERROR) << "Couldn't get default profile. Unable to load screensaver!";
     ShutdownKioskModeScreensaver();

@@ -53,10 +53,11 @@ class BrowserNonClientFrameViewAsh
   // views::View overrides:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
+  virtual void OnThemeChanged() OVERRIDE;
 
   // views::ButtonListener overrides:
   virtual void ButtonPressed(views::Button* sender,
@@ -89,10 +90,14 @@ class BrowserNonClientFrameViewAsh
   // above the content area.
   void PaintContentEdge(gfx::Canvas* canvas);
 
-  // Returns the correct image id for the frame header based on activation
-  // state and incognito mode.
+  // Returns the id of the header frame image based on the browser type,
+  // activation state and incognito mode.
   int GetThemeFrameImageId() const;
-  const gfx::ImageSkia* GetThemeFrameOverlayImage() const;
+
+  // Returns the id of the header frame overlay image based on the activation
+  // state and incognito mode.
+  // Returns 0 if no overlay image should be used.
+  int GetThemeFrameOverlayImageId() const;
 
   // Window controls. The |size_button_| either toggles maximized or toggles
   // minimized. The exact behavior is determined by |size_button_minimizes_|.

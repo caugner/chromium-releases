@@ -6,14 +6,13 @@
 
 #include <algorithm>
 
-#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/i18n/string_compare.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"  // g_browser_process
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/x509_certificate_model.h"
@@ -111,11 +110,11 @@ bool CertLibrary::IsInitialized() {
 }
 
 CertLibrary::CertLibrary() {
-  CertLoader::Get()->AddObserver(this);
+  NetworkHandler::Get()->cert_loader()->AddObserver(this);
 }
 
 CertLibrary::~CertLibrary() {
-  CertLoader::Get()->RemoveObserver(this);
+  NetworkHandler::Get()->cert_loader()->RemoveObserver(this);
 }
 
 void CertLibrary::AddObserver(CertLibrary::Observer* observer) {
@@ -127,15 +126,15 @@ void CertLibrary::RemoveObserver(CertLibrary::Observer* observer) {
 }
 
 bool CertLibrary::CertificatesLoading() const {
-  return CertLoader::Get()->CertificatesLoading();
+  return NetworkHandler::Get()->cert_loader()->CertificatesLoading();
 }
 
 bool CertLibrary::CertificatesLoaded() const {
-  return CertLoader::Get()->certificates_loaded();
+  return NetworkHandler::Get()->cert_loader()->certificates_loaded();
 }
 
 bool CertLibrary::IsHardwareBacked() const {
-  return CertLoader::Get()->IsHardwareBacked();
+  return NetworkHandler::Get()->cert_loader()->IsHardwareBacked();
 }
 
 int CertLibrary::NumCertificates(CertType type) const {
@@ -160,12 +159,13 @@ std::string CertLibrary::GetCertPkcs11IdAt(CertType type, int index) const {
 }
 
 bool CertLibrary::IsCertHardwareBackedAt(CertType type, int index) const {
-  if (!CertLoader::Get()->IsHardwareBacked())
+  if (!NetworkHandler::Get()->cert_loader()->IsHardwareBacked())
     return false;
   net::X509Certificate* cert = GetCertificateAt(type, index);
   std::string cert_token_name =
       x509_certificate_model::GetTokenName(cert->os_cert_handle());
-  return cert_token_name == CertLoader::Get()->tpm_token_name();
+  return cert_token_name ==
+      NetworkHandler::Get()->cert_loader()->tpm_token_name();
 }
 
 int CertLibrary::GetCertIndexByNickname(CertType type,

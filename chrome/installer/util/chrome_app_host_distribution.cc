@@ -9,7 +9,7 @@
 
 #include "chrome/installer/util/chrome_app_host_distribution.h"
 
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/common/net/test_server_locations.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/google_update_constants.h"
@@ -94,10 +94,6 @@ string16 ChromeAppHostDistribution::GetStateMediumKey() {
   key.append(L"\\");
   key.append(kChromeAppHostGuid);
   return key;
-}
-
-string16 ChromeAppHostDistribution::GetStatsServerURL() {
-  return L"https://clients4.google.com/firefox/metrics/collect";
 }
 
 std::string ChromeAppHostDistribution::GetNetworkStatsServer() const {

@@ -21,12 +21,10 @@ namespace policy {
 
 NetworkConfigurationUpdaterImpl::NetworkConfigurationUpdaterImpl(
     PolicyService* policy_service,
-    chromeos::ManagedNetworkConfigurationHandler* network_config_handler,
     scoped_ptr<chromeos::CertificateHandler> certificate_handler)
     : policy_change_registrar_(
           policy_service, PolicyNamespace(POLICY_DOMAIN_CHROME, std::string())),
       policy_service_(policy_service),
-      network_config_handler_(network_config_handler),
       certificate_handler_(certificate_handler.Pass()) {
   policy_change_registrar_.Observe(
       key::kDeviceOpenNetworkConfiguration,
@@ -46,13 +44,19 @@ NetworkConfigurationUpdaterImpl::NetworkConfigurationUpdaterImpl(
 NetworkConfigurationUpdaterImpl::~NetworkConfigurationUpdaterImpl() {
 }
 
-void NetworkConfigurationUpdaterImpl::OnUserPolicyInitialized(
+void NetworkConfigurationUpdaterImpl::SetUserPolicyService(
     bool allow_trusted_certs_from_policy,
-    const std::string& hashed_username) {
+    const std::string& hashed_username,
+    PolicyService* user_policy_service) {
+  // TODO(pneubeck): observe user_policy_service for the actual initialization.
   VLOG(1) << "User policy initialized.";
+  hashed_username_ = hashed_username;
   if (allow_trusted_certs_from_policy)
     SetAllowTrustedCertsFromPolicy();
   ApplyNetworkConfiguration(chromeos::onc::ONC_SOURCE_USER_POLICY);
+}
+
+void NetworkConfigurationUpdaterImpl::UnsetUserPolicyService() {
 }
 
 void NetworkConfigurationUpdaterImpl::OnPolicyChanged(
@@ -93,7 +97,10 @@ void NetworkConfigurationUpdaterImpl::ApplyNetworkConfiguration(
   ParseAndValidateOncForImport(
       onc_blob, onc_source, "", &network_configs, &certificates);
 
-  network_config_handler_->SetPolicy(onc_source, network_configs);
+  std::string userhash = onc_source == chromeos::onc::ONC_SOURCE_USER_POLICY ?
+      hashed_username_ : std::string();
+  chromeos::NetworkHandler::Get()->managed_network_configuration_handler()->
+      SetPolicy(onc_source, userhash, network_configs);
 
   scoped_ptr<net::CertificateList> web_trust_certs(new net::CertificateList);
   certificate_handler_->ImportCertificates(

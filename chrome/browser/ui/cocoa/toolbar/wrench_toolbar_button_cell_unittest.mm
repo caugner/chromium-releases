@@ -21,15 +21,15 @@
 class WrenchToolbarButtonCellTest : public CocoaTest {
  protected:
   WrenchToolbarButtonCellTest() {
-    scoped_nsobject<NSButton> button([[TestWrenchToolbarButton alloc]
+    base::scoped_nsobject<NSButton> button([[TestWrenchToolbarButton alloc]
         initWithFrame:NSMakeRect(0, 0, 29, 29)]);
     button_ = button;
     [[test_window() contentView] addSubview:button_];
   }
 
   NSButton* button_;
-  scoped_nsobject<WrenchToolbarButtonCell> cell_;
-  MessageLoopForUI message_loop_;  // Needed for ui::Animation.
+  base::scoped_nsobject<WrenchToolbarButtonCell> cell_;
+  base::MessageLoopForUI message_loop_;  // Needed for ui::Animation.
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WrenchToolbarButtonCellTest);

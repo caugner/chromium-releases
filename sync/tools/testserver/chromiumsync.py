@@ -32,6 +32,7 @@ import favicon_image_specifics_pb2
 import favicon_tracking_specifics_pb2
 import history_delete_directive_specifics_pb2
 import managed_user_setting_specifics_pb2
+import managed_user_specifics_pb2
 import nigori_specifics_pb2
 import password_specifics_pb2
 import preference_specifics_pb2
@@ -62,6 +63,7 @@ ALL_TYPES = (
     EXTENSIONS,
     HISTORY_DELETE_DIRECTIVE,
     MANAGED_USER_SETTING,
+    MANAGED_USER,
     NIGORI,
     PASSWORD,
     PREFERENCE,
@@ -73,7 +75,7 @@ ALL_TYPES = (
     TYPED_URL,
     EXTENSION_SETTINGS,
     FAVICON_IMAGES,
-    FAVICON_TRACKING) = range(25)
+    FAVICON_TRACKING) = range(26)
 
 # An enumeration on the frequency at which the server should send errors
 # to the client. This would be specified by the url that triggers the error.
@@ -105,6 +107,7 @@ SYNC_TYPE_TO_DESCRIPTOR = {
     FAVICON_TRACKING: SYNC_TYPE_FIELDS['favicon_tracking'],
     HISTORY_DELETE_DIRECTIVE: SYNC_TYPE_FIELDS['history_delete_directive'],
     MANAGED_USER_SETTING: SYNC_TYPE_FIELDS['managed_user_setting'],
+    MANAGED_USER: SYNC_TYPE_FIELDS['managed_user'],
     NIGORI: SYNC_TYPE_FIELDS['nigori'],
     PASSWORD: SYNC_TYPE_FIELDS['password'],
     PREFERENCE: SYNC_TYPE_FIELDS['preference'],
@@ -497,6 +500,9 @@ class SyncDataModel(object):
       PermanentItem('google_chrome_managed_user_settings',
                     name='Managed User Settings',
                     parent_tag=ROOT_ID, sync_type=MANAGED_USER_SETTING),
+      PermanentItem('google_chrome_managed_users',
+                    name='Managed Users',
+                    parent_tag=ROOT_ID, sync_type=MANAGED_USER),
       PermanentItem('google_chrome_nigori', name='Nigori',
                     parent_tag=ROOT_ID, sync_type=NIGORI),
       PermanentItem('google_chrome_passwords', name='Passwords',
@@ -531,13 +537,11 @@ class SyncDataModel(object):
     self._entries = {}
 
     self.ResetStoreBirthday()
-
     self.migration_history = MigrationHistory()
-
     self.induced_error = sync_pb2.ClientToServerResponse.Error()
     self.induced_error_frequency = 0
     self.sync_count_before_errors = 0
-
+    self.acknowledge_managed_users = False
     self._keys = [MakeNewKeystoreKey()]
 
   def _SaveEntry(self, entry):
@@ -725,6 +729,8 @@ class SyncDataModel(object):
     if (sieve.GetCreateMobileBookmarks() and
         first_time_types.count(BOOKMARK) > 0):
       self.TriggerCreateSyncedBookmarks()
+
+    self.TriggerAcknowledgeManagedUsers()
 
     change_log = sorted(self._entries.values(),
                         key=operator.attrgetter('version'))
@@ -1080,6 +1086,21 @@ class SyncDataModel(object):
     nigori_tag = "google_chrome_nigori"
     self._SaveEntry(self._entries.get(self._ServerTagToId(nigori_tag)))
 
+  def TriggerAcknowledgeManagedUsers(self):
+    """Set the "acknowledged" flag for any managed user entities that don't have
+       it set already.
+    """
+
+    if not self.acknowledge_managed_users:
+      return
+
+    managed_users = [copy.deepcopy(entry) for entry in self._entries.values()
+                     if entry.specifics.HasField('managed_user')
+                     and not entry.specifics.managed_user.acknowledged]
+    for user in managed_users:
+      user.specifics.managed_user.acknowledged = True
+      self._SaveEntry(user)
+
   def SetInducedError(self, error, error_frequency,
                       sync_count_before_errors):
     self.induced_error = error
@@ -1251,6 +1272,14 @@ class TestServer(object):
         200,
         '<html><title>Rotate Keystore Keys</title>'
             '<H1>Rotate Keystore Keys</H1></html>')
+
+  def HandleEnableManagedUserAcknowledgement(self):
+    """Enable acknowledging newly created managed users."""
+    self.account.acknowledge_managed_users = True
+    return (
+        200,
+        '<html><title>Enable Managed User Acknowledgement</title>'
+            '<h1>Enable Managed User Acknowledgement</h1></html>')
 
   def HandleCommand(self, query, raw_request):
     """Decode and handle a sync command from a raw input of bytes.

@@ -14,15 +14,20 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/android/tab_model/tab_model.h"
+#include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/android/devtools_auth.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/devtools_http_handler_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
 #include "grit/devtools_discovery_page_resources.h"
 #include "jni/DevToolsServer_jni.h"
 #include "net/socket/unix_domain_socket_posix.h"
@@ -34,7 +39,7 @@ namespace {
 const char kFrontEndURL[] =
     "http://chrome-devtools-frontend.appspot.com/static/%s/devtools.html";
 const char kDefaultSocketName[] = "chrome_devtools_remote";
-const char kTetheringSocketName[] = "chrome_devtools_tethering_%d";
+const char kTetheringSocketName[] = "chrome_devtools_tethering_%d_%d";
 
 // Delegate implementation for the devtools http handler on android. A new
 // instance of this gets created each time devtools is enabled.
@@ -78,7 +83,16 @@ class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
   }
 
   virtual content::RenderViewHost* CreateNewTarget() OVERRIDE {
-    return NULL;
+    Profile* profile =
+        g_browser_process->profile_manager()->GetDefaultProfile();
+    TabModel* tab_model = TabModelList::GetTabModelWithProfile(profile);
+    if (!tab_model)
+      return NULL;
+    content::WebContents* web_contents =
+        tab_model->CreateTabForTesting(GURL(content::kAboutBlankURL));
+    if (!web_contents)
+      return NULL;
+    return web_contents->GetRenderViewHost();
   }
 
   virtual TargetType GetTargetType(content::RenderViewHost*) OVERRIDE {
@@ -92,9 +106,11 @@ class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
   virtual scoped_refptr<net::StreamListenSocket> CreateSocketForTethering(
       net::StreamListenSocket::Delegate* delegate,
       std::string* name) OVERRIDE {
-    *name = base::StringPrintf(kTetheringSocketName, ++last_tethering_socket_);
+    *name = base::StringPrintf(
+        kTetheringSocketName, getpid(), ++last_tethering_socket_);
     return net::UnixDomainSocket::CreateAndListenWithAbstractNamespace(
         *name,
+        "",
         delegate,
         base::Bind(&content::CanUserConnectToDevTools));
   }
@@ -148,6 +164,7 @@ void DevToolsServer::Start() {
   protocol_handler_ = content::DevToolsHttpHandler::Start(
       new net::UnixDomainSocketWithAbstractNamespaceFactory(
           socket_name_,
+          base::StringPrintf("%s_%d", socket_name_.c_str(), getpid()),
           base::Bind(&content::CanUserConnectToDevTools)),
       use_bundled_frontend_resources_ ?
           "" :

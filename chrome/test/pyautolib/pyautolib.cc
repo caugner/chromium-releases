@@ -7,10 +7,10 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_switches.h"
@@ -48,20 +48,20 @@ PyUITestBase::PyUITestBase(bool clear_profile, std::wstring homepage)
   // We add this so that pyauto can execute javascript in the renderer and
   // read values back.
   dom_automation_enabled_ = true;
-  message_loop_ = GetSharedMessageLoop(MessageLoop::TYPE_DEFAULT);
+  message_loop_ = GetSharedMessageLoop(base::MessageLoop::TYPE_DEFAULT);
 }
 
 PyUITestBase::~PyUITestBase() {
 }
 
 // static, refer .h for why it needs to be static
-MessageLoop* PyUITestBase::message_loop_ = NULL;
+base::MessageLoop* PyUITestBase::message_loop_ = NULL;
 
 // static
-MessageLoop* PyUITestBase::GetSharedMessageLoop(
-  MessageLoop::Type msg_loop_type) {
-  if (!message_loop_)   // Create a shared instance of MessageLoop
-    message_loop_ = new MessageLoop(msg_loop_type);
+base::MessageLoop* PyUITestBase::GetSharedMessageLoop(
+    base::MessageLoop::Type msg_loop_type) {
+  if (!message_loop_)  // Create a shared instance of MessageLoop
+    message_loop_ = new base::MessageLoop(msg_loop_type);
   return message_loop_;
 }
 

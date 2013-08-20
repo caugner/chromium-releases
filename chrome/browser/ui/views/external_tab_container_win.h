@@ -45,6 +45,10 @@ class WebView;
 class Widget;
 }
 
+#if defined(USE_AURA)
+class ContainerWindow;
+#endif
+
 // This class serves as the container window for an external tab.
 // An external tab is a Chrome tab that is meant to displayed in an
 // external process. This class provides the FocusManger needed by the
@@ -127,6 +131,7 @@ class ExternalTabContainerWin : public ExternalTabContainer,
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual bool TakeFocus(content::WebContents* source, bool reverse) OVERRIDE;
+  virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void CanDownload(content::RenderViewHost* render_view_host,
                            int request_id,
                            const std::string& request_method,
@@ -141,6 +146,8 @@ class ExternalTabContainerWin : public ExternalTabContainer,
       GetJavaScriptDialogManager() OVERRIDE;
   virtual void ShowRepostFormWarningDialog(
       content::WebContents* source) OVERRIDE;
+  virtual content::ColorChooser* OpenColorChooser(
+      content::WebContents* web_contents, SkColor color) OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* tab,
       const content::FileChooserParams& params) OVERRIDE;
@@ -327,6 +334,10 @@ class ExternalTabContainerWin : public ExternalTabContainer,
 
   // if this tab is a popup
   bool is_popup_window_;
+
+#if defined(USE_AURA)
+  base::WeakPtr<ContainerWindow> tab_container_window_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ExternalTabContainerWin);
 };

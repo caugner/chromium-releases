@@ -16,10 +16,7 @@
 #include "chrome/browser/importer/importer.h"
 
 class GURL;
-
-namespace history {
 struct ImportedFaviconUsage;
-}
 
 namespace sql {
 class Connection;
@@ -76,14 +73,13 @@ class Firefox3Importer : public Importer {
   // and converts it into FaviconUsage structures.
   void LoadFavicons(sql::Connection* db,
                     const FaviconMap& favicon_map,
-                    std::vector<history::ImportedFaviconUsage>* favicons);
+                    std::vector<ImportedFaviconUsage>* favicons);
 
   base::FilePath source_path_;
   base::FilePath app_path_;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Stored because we can only access it from the UI thread. Not usable
-  // in Mac because no access from out-of-process import.
+#if defined(OS_POSIX)
+  // Stored because we can only access it from the UI thread.
   std::string locale_;
 #endif
 

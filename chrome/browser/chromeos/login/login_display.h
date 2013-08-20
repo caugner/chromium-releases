@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/remove_user_delegate.h"
 #include "chrome/browser/chromeos/login/user.h"
@@ -73,8 +73,14 @@ class LoginDisplay : public RemoveUserDelegate {
     // Called when the user requests enterprise enrollment.
     virtual void OnStartEnterpriseEnrollment() = 0;
 
+    // Called when the user requests kiosk enable screen.
+    virtual void OnStartKioskEnableScreen() = 0;
+
     // Called when the user requests device reset.
     virtual void OnStartDeviceReset() = 0;
+
+    // Called when the owner permission for kiosk app auto launch is requested.
+    virtual void OnStartKioskAutolaunchScreen() = 0;
 
     // Shows wrong HWID screen.
     virtual void ShowWrongHWIDScreen() = 0;
@@ -101,6 +107,9 @@ class LoginDisplay : public RemoveUserDelegate {
   // |background_bounds| determines the bounds of login UI background.
   LoginDisplay(Delegate* delegate, const gfx::Rect& background_bounds);
   virtual ~LoginDisplay();
+
+  // Clears and enables fields on user pod or GAIA frame.
+  virtual void ClearAndEnablePassword() = 0;
 
   // Initializes login UI with the user pods based on list of known users and
   // guest, new user pods if those are enabled.

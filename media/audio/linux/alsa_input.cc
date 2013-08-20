@@ -102,6 +102,7 @@ bool AlsaPcmInputStream::Open() {
 void AlsaPcmInputStream::Start(AudioInputCallback* callback) {
   DCHECK(!callback_ && callback);
   callback_ = callback;
+  StartAgc();
   int error = wrapper_->PcmPrepare(device_handle_);
   if (error < 0) {
     HandleError("PcmPrepare", error);
@@ -118,13 +119,11 @@ void AlsaPcmInputStream::Start(AudioInputCallback* callback) {
     // buffer might have got filled, to accommodate some delays in the audio
     // driver. This could also give us a smooth read sequence going forward.
     base::TimeDelta delay = buffer_duration_ + buffer_duration_ / 2;
-    next_read_time_ = base::Time::Now() + delay;
+    next_read_time_ = base::TimeTicks::Now() + delay;
     base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&AlsaPcmInputStream::ReadAudio, weak_factory_.GetWeakPtr()),
         delay);
-
-    audio_manager_->IncreaseActiveInputStreamCount();
   }
 }
 
@@ -183,7 +182,7 @@ void AlsaPcmInputStream::ReadAudio() {
     // Even Though read callback was behind schedule, there is no data, so
     // reset the next_read_time_.
     if (read_callback_behind_schedule_) {
-      next_read_time_ = base::Time::Now();
+      next_read_time_ = base::TimeTicks::Now();
       read_callback_behind_schedule_ = false;
     }
 
@@ -203,7 +202,7 @@ void AlsaPcmInputStream::ReadAudio() {
   // Update the AGC volume level once every second. Note that, |volume| is
   // also updated each time SetVolume() is called through IPC by the
   // render-side AGC.
-  QueryAgcVolume(&normalized_volume);
+  GetAgcVolume(&normalized_volume);
 
   while (num_buffers--) {
     int frames_read = wrapper_->PcmReadi(device_handle_, audio_buffer_.get(),
@@ -219,7 +218,7 @@ void AlsaPcmInputStream::ReadAudio() {
   }
 
   next_read_time_ += buffer_duration_;
-  base::TimeDelta delay = next_read_time_ - base::Time::Now();
+  base::TimeDelta delay = next_read_time_ - base::TimeTicks::Now();
   if (delay < base::TimeDelta()) {
     DVLOG(1) << "Audio read callback behind schedule by "
              << (buffer_duration_ - delay).InMicroseconds()
@@ -240,9 +239,7 @@ void AlsaPcmInputStream::Stop() {
   if (!device_handle_ || !callback_)
     return;
 
-  // Stop is always called before Close. In case of error, this will be
-  // also called when closing the input controller.
-  audio_manager_->DecreaseActiveInputStreamCount();
+  StopAgc();
 
   weak_factory_.InvalidateWeakPtrs();  // Cancel the next scheduled read.
   int error = wrapper_->PcmDrop(device_handle_);

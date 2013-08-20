@@ -4,8 +4,12 @@
 
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
 
+#include "base/logging.h"
+#include "base/time/default_tick_clock.h"
+#include "base/time/tick_clock.h"
 #include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/system/automatic_reboot_manager.h"
 
 BrowserProcessPlatformPart::BrowserProcessPlatformPart()
     : created_profile_helper_(false) {
@@ -14,8 +18,15 @@ BrowserProcessPlatformPart::BrowserProcessPlatformPart()
 BrowserProcessPlatformPart::~BrowserProcessPlatformPart() {
 }
 
-void BrowserProcessPlatformPart::StartTearDown() {
-  profile_helper_.reset();
+void BrowserProcessPlatformPart::InitializeAutomaticRebootManager() {
+  DCHECK(!automatic_reboot_manager_);
+
+  automatic_reboot_manager_.reset(new chromeos::system::AutomaticRebootManager(
+      scoped_ptr<base::TickClock>(new base::DefaultTickClock)));
+}
+
+void BrowserProcessPlatformPart::ShutdownAutomaticRebootManager() {
+  automatic_reboot_manager_.reset();
 }
 
 chromeos::OomPriorityManager*
@@ -37,4 +48,8 @@ void BrowserProcessPlatformPart::CreateProfileHelper() {
   DCHECK(!created_profile_helper_ && profile_helper_.get() == NULL);
   created_profile_helper_ = true;
   profile_helper_.reset(new chromeos::ProfileHelper());
+}
+
+void BrowserProcessPlatformPart::StartTearDown() {
+  profile_helper_.reset();
 }

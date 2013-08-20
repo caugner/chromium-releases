@@ -4,11 +4,9 @@
 
 #include "base/command_line.h"
 #include "base/path_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
 #include "chrome/browser/chromeos/login/enrollment/mock_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
@@ -30,6 +28,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/chromeos_test_utils.h"
+#include "chromeos/network/network_state_handler.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -121,7 +121,7 @@ class WizardControllerFlowTest : public WizardControllerTest {
     WizardController::default_controller()->is_official_build_ = true;
 
     // Clear portal list (as it is by default in OOBE).
-    CrosLibrary::Get()->GetNetworkLibrary()->SetCheckPortalList("");
+    NetworkHandler::Get()->network_state_handler()->SetCheckPortalList("");
 
     // Set up the mocks for all screens.
     MOCK(mock_network_screen_, network_screen_,
@@ -178,8 +178,9 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowMain) {
   OnExit(ScreenObserver::UPDATE_INSTALLED);
 
   EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
-  EXPECT_EQ("ethernet,wifi,cellular",
-            CrosLibrary::Get()->GetNetworkLibrary()->GetCheckPortalList());
+  EXPECT_EQ(
+      "ethernet,wifi,cellular",
+      NetworkHandler::Get()->network_state_handler()->check_portal_list());
 }
 
 IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowErrorUpdate) {
@@ -234,12 +235,14 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowSkipUpdateEnroll) {
   EXPECT_CALL(*mock_enrollment_screen_, Show()).Times(1);
   EXPECT_CALL(*mock_enrollment_screen_, Hide()).Times(0);
   OnExit(ScreenObserver::EULA_ACCEPTED);
+  content::RunAllPendingInMessageLoop();
 
   EXPECT_EQ(WizardController::default_controller()->GetEnrollmentScreen(),
             WizardController::default_controller()->current_screen());
   EXPECT_TRUE(ExistingUserController::current_controller() == NULL);
-  EXPECT_EQ("ethernet,wifi,cellular",
-            CrosLibrary::Get()->GetNetworkLibrary()->GetCheckPortalList());
+  EXPECT_EQ(
+      "ethernet,wifi,cellular",
+      NetworkHandler::Get()->network_state_handler()->check_portal_list());
 }
 
 IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowEulaDeclined) {
@@ -306,7 +309,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
   ExistingUserController::current_controller()->CompleteLogin(
       UserContext(kUsername, kPassword, ""));
   // Run the tasks posted to complete the login:
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   EnrollmentScreen* screen =
       WizardController::default_controller()->GetEnrollmentScreen();
@@ -317,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
   // Prevent browser launch when the profile is prepared:
   browser_shutdown::SetTryingToQuit(true);
   // Run the tasks posted to complete the login:
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowResetScreen) {
@@ -364,11 +367,11 @@ class WizardControllerKioskFlowTest : public WizardControllerFlowTest {
   // Overridden from InProcessBrowserTest:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     base::FilePath test_data_dir;
-    PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+    ASSERT_TRUE(chromeos::test_utils::GetTestDataPath(
+                    "app_mode", "kiosk_manifest", &test_data_dir));
     command_line->AppendSwitchPath(
         switches::kAppOemManifestFile,
-         test_data_dir.Append(FILE_PATH_LITERAL(
-             "chromeos/app_mode/kiosk_manifest/kiosk_manifest.json")));
+        test_data_dir.AppendASCII("kiosk_manifest.json"));
   }
 
  private:
@@ -421,7 +424,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerKioskFlowTest,
 
 // TODO(nkostylev): Add test for WebUI accelerators http://crosbug.com/22571
 
-COMPILE_ASSERT(ScreenObserver::EXIT_CODES_COUNT == 15,
+COMPILE_ASSERT(ScreenObserver::EXIT_CODES_COUNT == 18,
                add_tests_for_new_control_flow_you_just_introduced);
 
 }  // namespace chromeos

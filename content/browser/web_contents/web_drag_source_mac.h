@@ -6,7 +6,7 @@
 
 #include "base/files/file_path.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "googleurl/src/gurl.h"
@@ -31,13 +31,13 @@ CONTENT_EXPORT
   scoped_ptr<WebDropData> dropData_;
 
   // The image to show as drag image. Can be nil.
-  scoped_nsobject<NSImage> dragImage_;
+  base::scoped_nsobject<NSImage> dragImage_;
 
   // The offset to draw |dragImage_| at.
   NSPoint imageOffset_;
 
   // Our pasteboard.
-  scoped_nsobject<NSPasteboard> pasteboard_;
+  base::scoped_nsobject<NSPasteboard> pasteboard_;
 
   // A mask of the allowed drag operations.
   NSDragOperation dragOperationMask_;
@@ -49,7 +49,7 @@ CONTENT_EXPORT
   GURL downloadURL_;
 
   // The file UTI associated with the file drag, if any.
-  base::mac::ScopedCFTypeRef<CFStringRef> fileUTI_;
+  base::ScopedCFTypeRef<CFStringRef> fileUTI_;
 }
 
 // Initialize a WebDragSource object for a drag (originating on the given
@@ -85,11 +85,5 @@ CONTENT_EXPORT
 
 // Drag moved; hook up to -draggedImage:movedTo:.
 - (void)moveDragTo:(NSPoint)screenPoint;
-
-// Call to drag a promised file to the given path (should be called before
-// -endDragAt:...); hook up to -namesOfPromisedFilesDroppedAtDestination:.
-// Returns the file name (not including path) of the file deposited (or which
-// will be deposited).
-- (NSString*)dragPromisedFileTo:(NSString*)path;
 
 @end

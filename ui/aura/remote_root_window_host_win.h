@@ -9,7 +9,7 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/aura/root_window_host.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/gfx/native_widget_types.h"
@@ -43,34 +43,32 @@ typedef base::Callback<void(const base::FilePath&, int, void*)>
 
 // Handles the open file operation for Metro Chrome Ash. The callback passed in
 // is invoked when we receive the opened file name from the metro viewer.
-AURA_EXPORT void HandleOpenFile(
-    const string16& title,
-    const base::FilePath& default_path,
-    const string16& filter,
-    const OpenFileCompletion& callback);
+AURA_EXPORT void HandleOpenFile(const base::string16& title,
+                                const base::FilePath& default_path,
+                                const base::string16& filter,
+                                const OpenFileCompletion& callback);
 
 // Handles the open multiple file operation for Metro Chrome Ash. The callback
 // passed in is invoked when we receive the opened file names from the metro
 // viewer.
 AURA_EXPORT void HandleOpenMultipleFiles(
-    const string16& title,
+    const base::string16& title,
     const base::FilePath& default_path,
-    const string16& filter,
+    const base::string16& filter,
     const OpenMultipleFilesCompletion& callback);
 
 // Handles the save file operation for Metro Chrome Ash. The callback passed in
 // is invoked when we receive the saved file name from the metro viewer.
-AURA_EXPORT void HandleSaveFile(
-    const string16& title,
-    const base::FilePath& default_path,
-    const string16& filter,
-    int filter_index,
-    const string16& default_extension,
-    const SaveFileCompletion& callback);
+AURA_EXPORT void HandleSaveFile(const base::string16& title,
+                                const base::FilePath& default_path,
+                                const base::string16& filter,
+                                int filter_index,
+                                const base::string16& default_extension,
+                                const SaveFileCompletion& callback);
 
 // Handles the select folder for Metro Chrome Ash. The callback passed in
 // is invoked when we receive the folder name from the metro viewer.
-AURA_EXPORT void HandleSelectFolder(const string16& title,
+AURA_EXPORT void HandleSelectFolder(const base::string16& title,
                                     const SelectFolderCompletion& callback);
 
 // RootWindowHost implementaton that receives events from a different
@@ -90,27 +88,24 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
   // Called when we have a message from the remote process.
   bool OnMessageReceived(const IPC::Message& message);
 
-  void HandleOpenFile(
-      const string16& title,
-      const base::FilePath& default_path,
-      const string16& filter,
-      const OpenFileCompletion& callback);
+  void HandleOpenFile(const base::string16& title,
+                      const base::FilePath& default_path,
+                      const base::string16& filter,
+                      const OpenFileCompletion& callback);
 
-  void HandleOpenMultipleFiles(
-      const string16& title,
-      const base::FilePath& default_path,
-      const string16& filter,
-      const OpenMultipleFilesCompletion& callback);
+  void HandleOpenMultipleFiles(const base::string16& title,
+                               const base::FilePath& default_path,
+                               const base::string16& filter,
+                               const OpenMultipleFilesCompletion& callback);
 
-  void HandleSaveFile(
-      const string16& title,
-      const base::FilePath& default_path,
-      const string16& filter,
-      int filter_index,
-      const string16& default_extension,
-      const SaveFileCompletion& callback);
+  void HandleSaveFile(const base::string16& title,
+                      const base::FilePath& default_path,
+                      const base::string16& filter,
+                      int filter_index,
+                      const base::string16& default_extension,
+                      const SaveFileCompletion& callback);
 
-  void HandleSelectFolder(const string16& title,
+  void HandleSelectFolder(const base::string16& title,
                           const SelectFolderCompletion& callback);
 
  private:
@@ -148,6 +143,9 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
                            const std::vector<base::FilePath>& files);
   void OnSelectFolderDone(bool success, const base::FilePath& folder);
   void OnWindowActivated(bool active);
+  void OnSetCursorPosAck();
+  void OnWindowSizeChanged(uint32 width, uint32 height);
+
   // RootWindowHost overrides:
   virtual void SetDelegate(RootWindowHostDelegate* delegate) OVERRIDE;
   virtual RootWindow* GetRootWindow() OVERRIDE;
@@ -198,6 +196,10 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
   OpenMultipleFilesCompletion multi_file_open_completion_callback_;
   SaveFileCompletion file_saveas_completion_callback_;
   SelectFolderCompletion select_folder_completion_callback_;
+
+  // Set to true if we need to ignore mouse messages until the SetCursorPos
+  // operation is acked by the viewer.
+  bool ignore_mouse_moves_until_set_cursor_ack_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoteRootWindowHostWin);
 };

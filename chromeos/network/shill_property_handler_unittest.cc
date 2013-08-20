@@ -67,8 +67,12 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
     AddPropertyUpdate(flimflam::kDevicesProperty, device_path);
   }
 
-  virtual void ManagerPropertyChanged() OVERRIDE {
+  virtual void NotifyManagerPropertyChanged() OVERRIDE {
     ++manager_updates_;
+  }
+
+  virtual void CheckPortalListChanged(
+      const std::string& check_portal_list) OVERRIDE {
   }
 
   virtual void ManagedStateListChanged(
@@ -236,7 +240,7 @@ class ShillPropertyHandlerTest : public testing::Test {
                flimflam::kStateIdle, add_to_watchlist);
   }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   scoped_ptr<TestListener> listener_;
   scoped_ptr<internal::ShillPropertyHandler> shill_property_handler_;
   ShillManagerClient::TestInterface* manager_test_;
@@ -324,10 +328,13 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
              flimflam::kStateIdle, false);
   message_loop_.RunUntilIdle();
   EXPECT_EQ(1, listener_->manager_updates());  // No new manager updates.
-  // Only watched services trigger a service list update.
-  EXPECT_EQ(1, listener_->list_updates(flimflam::kServicesProperty));
+  // Watched and unwatched services trigger a service list update.
+  EXPECT_EQ(2, listener_->list_updates(flimflam::kServicesProperty));
   EXPECT_EQ(kNumShillManagerClientStubImplServices + 1,
             listener_->entries(flimflam::kServicesProperty).size());
+  // Service receives an initial property update.
+  EXPECT_EQ(1, listener_->
+            property_updates(flimflam::kServicesProperty)[kTestServicePath]);
   // Change a property.
   base::FundamentalValue scan_interval(3);
   DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
@@ -336,8 +343,8 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
       scan_interval,
       base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
   message_loop_.RunUntilIdle();
-  // Property change should NOT trigger an update.
-  EXPECT_EQ(0, listener_->
+  // Property change triggers an update.
+  EXPECT_EQ(2, listener_->
             property_updates(flimflam::kServicesProperty)[kTestServicePath]);
 
   // Add the existing service to the watch list.
@@ -349,9 +356,6 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
   // Number of services shouldn't change.
   EXPECT_EQ(kNumShillManagerClientStubImplServices + 1,
             listener_->entries(flimflam::kServicesProperty).size());
-  // Property update should be received when watched service is added.
-  EXPECT_EQ(1, listener_->
-            property_updates(flimflam::kServicesProperty)[kTestServicePath]);
 
   // Change a property.
   DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
@@ -361,7 +365,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
       base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
   message_loop_.RunUntilIdle();
   // Property change should trigger another update.
-  EXPECT_EQ(2, listener_->
+  EXPECT_EQ(3, listener_->
             property_updates(flimflam::kServicesProperty)[kTestServicePath]);
 
   // Remove a service

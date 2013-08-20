@@ -29,16 +29,21 @@ namespace {
 const char kApplicationName[] = "chromoting";
 
 std::ostream& operator<<(std::ostream& os, const ScreenResolution& resolution) {
-  return os << resolution.dimensions_.width() << "x"
-            << resolution.dimensions_.height() << " at "
-            << resolution.dpi_.x() << "x" << resolution.dpi_.y() << " DPI";
+  return os << resolution.dimensions().width() << "x"
+            << resolution.dimensions().height() << " at "
+            << resolution.dpi().x() << "x" << resolution.dpi().y() << " DPI";
 }
 
 }  // namespace
 
 DaemonProcess::~DaemonProcess() {
-  DCHECK(!config_watcher_.get());
-  DCHECK(desktop_sessions_.empty());
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+
+  host_event_logger_.reset();
+  weak_factory_.InvalidateWeakPtrs();
+
+  config_watcher_.reset();
+  DeleteAllDesktopSessions();
 }
 
 void DaemonProcess::OnConfigUpdated(const std::string& serialized_config) {
@@ -121,7 +126,7 @@ bool DaemonProcess::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void DaemonProcess::OnPermanentError() {
+void DaemonProcess::OnPermanentError(int exit_code) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
   Stop();
 }
@@ -163,10 +168,10 @@ DaemonProcess::DaemonProcess(
     scoped_refptr<AutoThreadTaskRunner> caller_task_runner,
     scoped_refptr<AutoThreadTaskRunner> io_task_runner,
     const base::Closure& stopped_callback)
-    : Stoppable(caller_task_runner, stopped_callback),
-      caller_task_runner_(caller_task_runner),
+    : caller_task_runner_(caller_task_runner),
       io_task_runner_(io_task_runner),
       next_terminal_id_(0),
+      stopped_callback_(stopped_callback),
       weak_factory_(this) {
   DCHECK(caller_task_runner->BelongsToCurrentThread());
 }
@@ -187,13 +192,6 @@ void DaemonProcess::CreateDesktopSession(int terminal_id,
 
   // Terminal IDs cannot be reused. Update the expected next terminal ID.
   next_terminal_id_ = std::max(next_terminal_id_, terminal_id + 1);
-
-  // Validate |resolution| and restart the sender if it is not valid.
-  if (!resolution.IsValid()) {
-    LOG(ERROR) << "Invalid resolution specified: " << resolution;
-    CrashNetworkProcess(FROM_HERE);
-    return;
-  }
 
   // Create the desktop session.
   scoped_ptr<DesktopSession> session = DoCreateDesktopSession(
@@ -223,7 +221,7 @@ void DaemonProcess::SetScreenResolution(int terminal_id,
   }
 
   // Validate |resolution| and restart the sender if it is not valid.
-  if (!resolution.IsValid()) {
+  if (resolution.IsEmpty()) {
     LOG(ERROR) << "Invalid resolution specified: " << resolution;
     CrashNetworkProcess(FROM_HERE);
     return;
@@ -275,6 +273,16 @@ void DaemonProcess::Initialize() {
 
   // Launch the process.
   LaunchNetworkProcess();
+}
+
+void DaemonProcess::Stop() {
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+
+  if (!stopped_callback_.is_null()) {
+    base::Closure stopped_callback = stopped_callback_;
+    stopped_callback_.Reset();
+    stopped_callback.Run();
+  }
 }
 
 bool DaemonProcess::WasTerminalIdAllocated(int terminal_id) {
@@ -357,18 +365,6 @@ void DaemonProcess::OnHostShutdown() {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
   FOR_EACH_OBSERVER(HostStatusObserver, status_observers_, OnShutdown());
-}
-
-void DaemonProcess::DoStop() {
-  DCHECK(caller_task_runner()->BelongsToCurrentThread());
-
-  host_event_logger_.reset();
-  weak_factory_.InvalidateWeakPtrs();
-
-  config_watcher_.reset();
-  DeleteAllDesktopSessions();
-
-  CompleteStopping();
 }
 
 void DaemonProcess::DeleteAllDesktopSessions() {

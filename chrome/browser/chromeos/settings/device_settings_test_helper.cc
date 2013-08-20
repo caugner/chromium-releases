@@ -23,10 +23,10 @@ void DeviceSettingsTestHelper::FlushLoops() {
   // between the message loop and the blocking pool. 2 iterations are currently
   // sufficient (key loading, signing).
   for (int i = 0; i < 2; ++i) {
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     content::BrowserThread::GetBlockingPool()->FlushForTesting();
   }
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 void DeviceSettingsTestHelper::FlushStore() {
@@ -125,12 +125,16 @@ void DeviceSettingsTestHelper::RequestUnlockScreen() {}
 
 void DeviceSettingsTestHelper::NotifyLockScreenDismissed() {}
 
+void DeviceSettingsTestHelper::RetrieveActiveSessions(
+      const ActiveSessionsCallback& callback) {}
+
 void DeviceSettingsTestHelper::RetrieveDevicePolicy(
     const RetrievePolicyCallback& callback) {
   device_policy_.retrieve_callbacks_.push_back(callback);
 }
 
-void DeviceSettingsTestHelper::RetrieveUserPolicy(
+void DeviceSettingsTestHelper::RetrievePolicyForUser(
+    const std::string& username,
     const RetrievePolicyCallback& callback) {
 }
 
@@ -148,8 +152,10 @@ void DeviceSettingsTestHelper::StoreDevicePolicy(
   device_policy_.store_callbacks_.push_back(callback);
 }
 
-void DeviceSettingsTestHelper::StoreUserPolicy(
+void DeviceSettingsTestHelper::StorePolicyForUser(
+    const std::string& username,
     const std::string& policy_blob,
+    const std::string& policy_key,
     const StorePolicyCallback& callback) {
 }
 
@@ -160,6 +166,10 @@ void DeviceSettingsTestHelper::StoreDeviceLocalAccountPolicy(
   device_local_account_policy_[account_id].policy_blob_ = policy_blob;
   device_local_account_policy_[account_id].store_callbacks_.push_back(callback);
 }
+
+void DeviceSettingsTestHelper::SetFlagsForUser(
+    const std::string& account_id,
+    const std::vector<std::string>& flags) {}
 
 DeviceSettingsTestHelper::PolicyState::PolicyState()
     : store_result_(true) {}
@@ -180,7 +190,7 @@ ScopedDeviceSettingsTestHelper::~ScopedDeviceSettingsTestHelper() {
 }
 
 DeviceSettingsTestBase::DeviceSettingsTestBase()
-    : loop_(MessageLoop::TYPE_UI),
+    : loop_(base::MessageLoop::TYPE_UI),
       ui_thread_(content::BrowserThread::UI, &loop_),
       file_thread_(content::BrowserThread::FILE, &loop_),
       owner_key_util_(new MockOwnerKeyUtil()) {}

@@ -15,10 +15,10 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/common/page_state.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/password_form.h"
 #include "content/public/test/mock_render_process_host.h"
-#include "webkit/glue/glue_serialize.h"
 
 namespace content {
 
@@ -83,7 +83,7 @@ void TestWebContents::TestDidNavigateWithReferrer(
   params.gesture = NavigationGestureUser;
   params.was_within_same_page = false;
   params.is_post = false;
-  params.content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
+  params.page_state = PageState::CreateFromURL(url);
 
   DidNavigate(render_view_host, params);
 }
@@ -149,7 +149,7 @@ void TestWebContents::CommitPendingNavigation() {
   // Simulate the SwapOut_ACK that fires if you commit a cross-site navigation
   // without making any network requests.
   if (old_rvh != rvh)
-    static_cast<RenderViewHostImpl*>(old_rvh)->OnSwapOutACK(false);
+    static_cast<RenderViewHostImpl*>(old_rvh)->OnSwappedOut(false);
 }
 
 void TestWebContents::ProceedWithCrossSiteNavigation() {
@@ -170,15 +170,13 @@ void TestWebContents::SetOpener(TestWebContents* opener) {
   // This is normally only set in the WebContents constructor, which also
   // registers an observer for when the opener gets closed.
   opener_ = opener;
-  registrar_.Add(this, NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                 Source<WebContents>(opener_));
+  AddDestructionObserver(opener_);
 }
 
 void TestWebContents::AddPendingContents(TestWebContents* contents) {
   // This is normally only done in WebContentsImpl::CreateNewWindow.
   pending_contents_[contents->GetRenderViewHost()->GetRoutingID()] = contents;
-  registrar_.Add(this, NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                 Source<WebContents>(contents));
+  AddDestructionObserver(contents);
 }
 
 void TestWebContents::ExpectSetHistoryLengthAndPrune(
@@ -223,6 +221,7 @@ void TestWebContents::TestDidFailLoadWithError(
 
 void TestWebContents::CreateNewWindow(
     int route_id,
+    int main_frame_route_id,
     const ViewHostMsg_CreateWindow_Params& params,
     SessionStorageNamespace* session_storage_namespace) {
 }

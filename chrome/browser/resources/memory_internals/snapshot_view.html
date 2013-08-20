@@ -1,19 +1,17 @@
 <!-- Copyright 2013 The Chromium Authors. All rights reserved.
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file. -->
-<div id="buttons">
-  <button id="button-update">Update</button>
-</div>
-
 <h2>Processes</h2>
-<div id="snapshot_view">
-  <table>
-    <tr>
-      <th>PID
-      <th>Name
-      <th>Private Memory [KB]
-  </table>
-</div>
+<div id="os-view">OS: <span id="os-value">unknown</span></div>
+<div id="uptime-view">Uptime: <span id="uptime-value">unknown</span></div>
 
-<h3>JSON</h3>
-<textarea id="json" readonly></textarea>
+<table id="snapshot-view">
+  <tr class="header">
+    <th class="process-id">PID
+    <th class="process-info">Name
+    <th class="process-memory">Private Memory [KB]
+  <tr id="process-template">
+    <td class="process-id">
+    <td class="process-info">
+    <td class="process-memory">
+</table>

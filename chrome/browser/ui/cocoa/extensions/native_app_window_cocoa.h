@@ -8,7 +8,7 @@
 #import <Cocoa/Cocoa.h>
 #include <vector>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #include "chrome/browser/ui/extensions/native_app_window.h"
@@ -46,13 +46,14 @@ class NativeAppWindowCocoa : public NativeAppWindow {
   NativeAppWindowCocoa(ShellWindow* shell_window,
                        const ShellWindow::CreateParams& params);
 
-  // BaseWindow implementation.
+  // ui::BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
+  virtual ui::WindowShowState GetRestoredState() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
@@ -88,6 +89,9 @@ class NativeAppWindowCocoa : public NativeAppWindow {
   // Called when the window is un-minimized.
   void WindowDidDeminiaturize();
 
+  // Called when the window is zoomed (maximized or de-maximized).
+  void WindowWillZoom();
+
   // Called to handle a key event.
   bool HandledByExtensionCommand(NSEvent* event);
 
@@ -104,6 +108,7 @@ class NativeAppWindowCocoa : public NativeAppWindow {
   // NativeAppWindow implementation.
   virtual void SetFullscreen(bool fullscreen) OVERRIDE;
   virtual bool IsFullscreenOrPending() const OVERRIDE;
+  virtual bool IsDetached() const OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
   virtual void UpdateWindowTitle() OVERRIDE;
   virtual void UpdateDraggableRegions(
@@ -114,11 +119,12 @@ class NativeAppWindowCocoa : public NativeAppWindow {
   virtual gfx::Insets GetFrameInsets() const OVERRIDE;
 
   // WebContentsModalDialogHost implementation.
+  virtual gfx::NativeView GetHostView() const OVERRIDE;
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
   virtual void AddObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
 
  private:
   virtual ~NativeAppWindowCocoa();
@@ -145,6 +151,7 @@ class NativeAppWindowCocoa : public NativeAppWindow {
 
   bool has_frame_;
 
+  bool is_maximized_;
   bool is_fullscreen_;
   NSRect restored_bounds_;
 
@@ -152,7 +159,7 @@ class NativeAppWindowCocoa : public NativeAppWindow {
   gfx::Size max_size_;
   bool resizable_;
 
-  scoped_nsobject<NativeAppWindowController> window_controller_;
+  base::scoped_nsobject<NativeAppWindowController> window_controller_;
   NSInteger attention_request_id_;  // identifier from requestUserAttention
 
   // Indicates whether system drag or custom drag should be used, depending on

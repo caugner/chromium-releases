@@ -43,6 +43,7 @@ class Rect;
 namespace ui {
 class Accelerator;
 class Compositor;
+class DefaultThemeProvider;
 class Layer;
 class NativeTheme;
 class OSExchangeData;
@@ -51,7 +52,6 @@ class ThemeProvider;
 
 namespace views {
 
-class DefaultThemeProvider;
 class DesktopRootWindowHost;
 class InputMethod;
 class NativeWidget;
@@ -312,7 +312,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator);
 
   // Forwarded from the RootView so that the widget can do any cleanup.
-  void ViewHierarchyChanged(bool is_add, View* parent, View* child);
+  void ViewHierarchyChanged(const View::ViewHierarchyChangedDetails& details);
 
   // Performs any necessary cleanup and forwards to RootView.
   void NotifyNativeViewHierarchyChanged(bool attached,
@@ -496,11 +496,14 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Adds the specified |rect| in client area coordinates to the rectangle to be
   // redrawn.
-  void SchedulePaintInRect(const gfx::Rect& rect);
+  virtual void SchedulePaintInRect(const gfx::Rect& rect);
 
   // Sets the currently visible cursor. If |cursor| is NULL, the cursor used
   // before the current is restored.
   void SetCursor(gfx::NativeCursor cursor);
+
+  // Returns true if and only if mouse events are enabled.
+  bool IsMouseEventsEnabled() const;
 
   // Sets/Gets a native window property on the underlying native window object.
   // Returns NULL if the property does not exist. Setting the property value to
@@ -570,12 +573,17 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   const ui::Compositor* GetCompositor() const;
   ui::Compositor* GetCompositor();
 
-  // Invokes method of same name on the NativeWidget.
-  gfx::Vector2d CalculateOffsetToAncestorWithLayer(
-      ui::Layer** layer_parent);
+  // Returns the widget's layer, if any.
+  ui::Layer* GetLayer();
 
-  // Invokes method of same name on the NativeWidget.
-  void ReorderLayers();
+  // Reorders the widget's child NativeViews which are associated to the view
+  // tree (eg via a NativeViewHost) to match the z-order of the views in the
+  // view tree. The z-order of views with layers relative to views with
+  // associated NativeViews is used to reorder the NativeView layers. This
+  // method assumes that the widget's child layers which are owned by a view are
+  // already in the correct z-order relative to each other and does no
+  // reordering if there are no views with an associated NativeView.
+  void ReorderNativeViews();
 
   // Schedules an update to the root layers. The actual processing occurs when
   // GetRootLayers() is invoked.
@@ -658,7 +666,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual void OnNativeFocus(gfx::NativeView old_focused_view) OVERRIDE;
   virtual void OnNativeBlur(gfx::NativeView new_focused_view) OVERRIDE;
   virtual void OnNativeWidgetVisibilityChanged(bool visible) OVERRIDE;
-  virtual void OnNativeWidgetCreated() OVERRIDE;
+  virtual void OnNativeWidgetCreated(bool desktop_widget) OVERRIDE;
   virtual void OnNativeWidgetDestroying() OVERRIDE;
   virtual void OnNativeWidgetDestroyed() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
@@ -760,7 +768,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   scoped_ptr<FocusManager> focus_manager_;
 
   // A theme provider to use when no other theme provider is specified.
-  scoped_ptr<DefaultThemeProvider> default_theme_provider_;
+  scoped_ptr<ui::DefaultThemeProvider> default_theme_provider_;
 
   // Valid for the lifetime of RunShellDrag(), indicates the view the drag
   // started from.

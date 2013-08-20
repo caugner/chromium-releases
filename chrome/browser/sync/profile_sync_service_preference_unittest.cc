@@ -33,6 +33,7 @@
 #include "sync/api/sync_data.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/data_type_debug_info_listener.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
 #include "sync/internal_api/public/write_node.h"
@@ -67,7 +68,8 @@ ACTION_P(ReturnNewDataTypeManagerWithDebugListener, debug_listener) {
       arg1,
       arg2,
       arg3,
-      arg4);
+      arg4,
+      arg5);
 }
 
 // TODO(zea): Refactor to remove the ProfileSyncService usage.
@@ -100,9 +102,9 @@ class ProfileSyncServicePreferenceTest
   }
 
   // DataTypeDebugInfoListener implementation.
-  virtual void OnDataTypeAssociationComplete(
-      const syncer::DataTypeAssociationStats& association_stats) OVERRIDE {
-    association_stats_ = association_stats;
+  virtual void OnSingleDataTypeConfigureComplete(
+      const syncer::DataTypeConfigurationStats& configuration_stats) OVERRIDE {
+    association_stats_ = configuration_stats.association_stats;
   }
   virtual void OnConfigureComplete() OVERRIDE {
     // Do nothing.
@@ -152,6 +154,8 @@ class ProfileSyncServicePreferenceTest
     SigninManagerBase* signin =
          SigninManagerFactory::GetForProfile(profile_.get());
     signin->SetAuthenticatedUsername("test");
+    ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
+        profile_.get(), FakeOAuth2TokenService::BuildTokenService);
     sync_service_ = static_cast<TestProfileSyncService*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_.get(), &TestProfileSyncService::BuildAutoStartAsyncInit));
@@ -165,7 +169,7 @@ class ProfileSyncServicePreferenceTest
     EXPECT_CALL(*components, GetSyncableServiceForType(syncer::PREFERENCES)).
         WillOnce(Return(pref_sync_service_->AsWeakPtr()));
 
-    EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _, _)).
+    EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _, _, _)).
         WillOnce(ReturnNewDataTypeManagerWithDebugListener(
                      syncer::MakeWeakHandle(debug_ptr_factory_.GetWeakPtr())));
     dtc_ = new UIDataTypeController(syncer::PREFERENCES,
@@ -179,10 +183,12 @@ class ProfileSyncServicePreferenceTest
                      &change_processor_));
     sync_service_->RegisterDataTypeController(dtc_);
     TokenServiceFactory::GetForProfile(profile_.get())->IssueAuthTokenForTest(
+        GaiaConstants::kGaiaOAuth2LoginRefreshToken, "oauth2_login_token");
+    TokenServiceFactory::GetForProfile(profile_.get())->IssueAuthTokenForTest(
         GaiaConstants::kSyncService, "token");
 
     sync_service_->Initialize();
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
 
     // It's possible this test triggered an unrecoverable error, in which case
     // we can't get the preference count.

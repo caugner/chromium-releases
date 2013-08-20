@@ -40,7 +40,10 @@ class DummyKeyboardControllerProxy : public keyboard::KeyboardControllerProxy {
     return Shell::GetInstance()->input_method_filter()->input_method();
   }
 
-  virtual void OnKeyboardBoundsChanged(const gfx::Rect& new_bounds) OVERRIDE {
+  virtual void RequestAudioInput(content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE {
+    return;
   }
 
   DISALLOW_COPY_AND_ASSIGN(DummyKeyboardControllerProxy);
@@ -56,7 +59,8 @@ ShellDelegateImpl::ShellDelegateImpl()
       spoken_feedback_enabled_(false),
       high_contrast_enabled_(false),
       screen_magnifier_enabled_(false),
-      screen_magnifier_type_(kDefaultMagnifierType) {
+      screen_magnifier_type_(kDefaultMagnifierType),
+      large_cursor_enabled_(false) {
 }
 
 ShellDelegateImpl::~ShellDelegateImpl() {
@@ -116,9 +120,6 @@ void ShellDelegateImpl::OpenFileManager(bool as_dialog) {
 void ShellDelegateImpl::OpenCrosh() {
 }
 
-void ShellDelegateImpl::OpenMobileSetup(const std::string& service_path) {
-}
-
 void ShellDelegateImpl::RestoreTab() {
 }
 
@@ -168,6 +169,14 @@ bool ShellDelegateImpl::IsMagnifierEnabled() const {
 
 MagnifierType ShellDelegateImpl::GetMagnifierType() const {
   return screen_magnifier_type_;
+}
+
+void ShellDelegateImpl::SetLargeCursorEnabled(bool enabled) {
+  large_cursor_enabled_ = enabled;
+}
+
+bool ShellDelegateImpl::IsLargeCursorEnabled() const {
+  return large_cursor_enabled_;
 }
 
 bool ShellDelegateImpl::ShouldAlwaysShowAccessibilityMenu() const {

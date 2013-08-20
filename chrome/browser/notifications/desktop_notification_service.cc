@@ -5,8 +5,8 @@
 #include "chrome/browser/notifications/desktop_notification_service.h"
 
 #include "base/metrics/histogram.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
@@ -40,9 +40,10 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/notifier_settings.h"
 #include "ui/webui/web_ui_util.h"
 
@@ -56,15 +57,6 @@ using WebKit::WebSecurityOrigin;
 const ContentSetting kDefaultSetting = CONTENT_SETTING_ASK;
 
 namespace {
-
-bool UsesTextNotifications() {
-#if defined(USE_ASH)
-  return true;
-#else
-  return
-      g_browser_process->notification_ui_manager()->DelegatesToMessageCenter();
-#endif
-}
 
 void ToggleListPrefItem(PrefService* prefs, const char* key,
                         const std::string& item, bool flag) {
@@ -126,7 +118,7 @@ class NotificationPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual ~NotificationPermissionInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
-  virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual int GetIconID() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
@@ -198,9 +190,8 @@ NotificationPermissionInfoBarDelegate::
     host->DesktopNotificationPermissionRequestDone(callback_context_);
 }
 
-gfx::Image* NotificationPermissionInfoBarDelegate::GetIcon() const {
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INFOBAR_DESKTOP_NOTIFICATIONS);
+int NotificationPermissionInfoBarDelegate::GetIconID() const {
+  return IDR_INFOBAR_DESKTOP_NOTIFICATIONS;
 }
 
 InfoBarDelegate::Type
@@ -239,12 +230,10 @@ bool NotificationPermissionInfoBarDelegate::Cancel() {
 // static
 void DesktopNotificationService::RegisterUserPrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-#if defined(OS_CHROMEOS) || defined(ENABLE_MESSAGE_CENTER)
   registry->RegisterListPref(prefs::kMessageCenterDisabledExtensionIds,
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterListPref(prefs::kMessageCenterDisabledSystemComponentIds,
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-#endif
 }
 
 // static
@@ -307,7 +296,7 @@ std::string DesktopNotificationService::AddNotification(
     const string16& replace_id,
     NotificationDelegate* delegate,
     Profile* profile) {
-  if (UsesTextNotifications()) {
+  if (message_center::IsRichNotificationEnabled()) {
     // For message center create a non-HTML notification with |icon_url|.
     Notification notification(origin_url, icon_url, title, message,
                               WebKit::WebTextDirectionDefault,
@@ -335,7 +324,7 @@ std::string DesktopNotificationService::AddIconNotification(
     NotificationDelegate* delegate,
     Profile* profile) {
 
-  if (UsesTextNotifications()) {
+  if (message_center::IsRichNotificationEnabled()) {
     // For message center create a non-HTML notification with |icon|.
     Notification notification(origin_url, icon, title, message,
                               WebKit::WebTextDirectionDefault,
@@ -362,7 +351,6 @@ DesktopNotificationService::DesktopNotificationService(
     NotificationUIManager* ui_manager)
     : profile_(profile),
       ui_manager_(ui_manager) {
-#if defined(ENABLE_MESSAGE_CENTER)
   OnDisabledExtensionIdsChanged();
   OnDisabledSystemComponentIdsChanged();
   disabled_extension_id_pref_.Init(
@@ -377,13 +365,11 @@ DesktopNotificationService::DesktopNotificationService(
       base::Bind(
           &DesktopNotificationService::OnDisabledSystemComponentIdsChanged,
           base::Unretained(this)));
-#endif
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
+                 content::Source<Profile>(profile_));
 }
 
 DesktopNotificationService::~DesktopNotificationService() {
-#if defined(ENABLE_MESSAGE_CENTER)
-  disabled_extension_id_pref_.Destroy();
-#endif
 }
 
 void DesktopNotificationService::GrantPermission(const GURL& origin) {
@@ -526,7 +512,7 @@ bool DesktopNotificationService::ShowDesktopNotification(
         params.body, params.direction, display_source, params.replace_id,
         proxy);
     // The webkit notification doesn't timeout.
-    notification.DisableTimeout();
+    notification.set_never_timeout(true);
     ShowNotification(notification);
   }
   return true;
@@ -592,7 +578,6 @@ void DesktopNotificationService::OnDisabledExtensionIdsChanged() {
                           &disabled_extension_ids_);
 }
 
-#if defined(ENABLE_MESSAGE_CENTER)
 bool DesktopNotificationService::IsSystemComponentEnabled(
     message_center::Notifier::SystemComponentNotifierType type) {
   return disabled_system_component_ids_.find(message_center::ToString(type)) ==
@@ -616,7 +601,6 @@ void DesktopNotificationService::OnDisabledSystemComponentIdsChanged() {
                           prefs::kMessageCenterDisabledSystemComponentIds,
                           &disabled_system_component_ids_);
 }
-#endif
 
 WebKit::WebNotificationPresenter::Permission
     DesktopNotificationService::HasPermission(const GURL& origin) {
@@ -637,4 +621,18 @@ WebKit::WebNotificationPresenter::Permission
     return WebKit::WebNotificationPresenter::PermissionNotAllowed;
   NOTREACHED() << "Invalid notifications settings value: " << setting;
   return WebKit::WebNotificationPresenter::PermissionNotAllowed;
+}
+
+void DesktopNotificationService::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK_EQ(chrome::NOTIFICATION_EXTENSION_UNINSTALLED, type);
+
+  extensions::Extension* extension =
+      content::Details<extensions::Extension>(details).ptr();
+  if (IsExtensionEnabled(extension->id()))
+    return;
+
+  SetExtensionEnabled(extension->id(), true);
 }

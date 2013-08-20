@@ -13,6 +13,7 @@
 #include "base/test/scoped_path_override.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 #include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
@@ -267,7 +268,8 @@ TEST_F(DeviceSettingsProviderTest, LegacyDeviceLocalAccounts) {
   EXPECT_CALL(*this, SettingChanged(_)).Times(AnyNumber());
   em::DeviceLocalAccountInfoProto* account =
       device_policy_.payload().mutable_device_local_accounts()->add_account();
-  account->set_id(policy::PolicyBuilder::kFakeUsername);
+  account->set_deprecated_public_session_id(
+      policy::PolicyBuilder::kFakeUsername);
   device_policy_.Build();
   device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
   ReloadDeviceSettings();
@@ -279,7 +281,7 @@ TEST_F(DeviceSettingsProviderTest, LegacyDeviceLocalAccounts) {
   entry_dict->SetString(kAccountsPrefDeviceLocalAccountsKeyId,
                         policy::PolicyBuilder::kFakeUsername);
   entry_dict->SetInteger(kAccountsPrefDeviceLocalAccountsKeyType,
-                         DEVICE_LOCAL_ACCOUNT_TYPE_PUBLIC_SESSION);
+                         policy::DeviceLocalAccount::TYPE_PUBLIC_SESSION);
   expected_accounts.Append(entry_dict.release());
   const base::Value* actual_accounts =
       provider_->Get(kAccountsPrefDeviceLocalAccounts);

@@ -11,7 +11,7 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_vector.h"
 #include "base/process_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -191,10 +191,11 @@ static const int kCentralColumnPadding =
 // HungRendererDialogView, public:
 
 // static
-HungRendererDialogView* HungRendererDialogView::Create() {
+HungRendererDialogView* HungRendererDialogView::Create(
+    gfx::NativeView context) {
   if (!g_instance_) {
     g_instance_ = new HungRendererDialogView;
-    views::Widget::CreateWindow(g_instance_);
+    views::DialogDelegate::CreateDialogWidget(g_instance_, context, NULL);
   }
   return g_instance_;
 }
@@ -350,10 +351,9 @@ void HungRendererDialogView::TabDestroyed() {
 ///////////////////////////////////////////////////////////////////////////////
 // HungRendererDialogView, views::View overrides:
 
-void HungRendererDialogView::ViewHierarchyChanged(bool is_add,
-                                                  views::View* parent,
-                                                  views::View* child) {
-  if (!initialized_ && is_add && child == this && GetWidget())
+void HungRendererDialogView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (!initialized_ && details.is_add && details.child == this && GetWidget())
     Init();
 }
 
@@ -443,7 +443,8 @@ namespace chrome {
 void ShowHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed() &&
       !PlatformShowCustomHungRendererDialog(contents)) {
-    HungRendererDialogView* view = HungRendererDialogView::Create();
+    HungRendererDialogView* view = HungRendererDialogView::Create(
+        platform_util::GetTopLevel(contents->GetView()->GetNativeView()));
     view->ShowForWebContents(contents);
   }
 }

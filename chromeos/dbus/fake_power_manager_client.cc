@@ -7,7 +7,8 @@
 
 namespace chromeos {
 
-FakePowerManagerClient::FakePowerManagerClient() {
+FakePowerManagerClient::FakePowerManagerClient()
+  : request_restart_call_count_(0) {
 }
 
 FakePowerManagerClient::~FakePowerManagerClient() {
@@ -16,8 +17,7 @@ FakePowerManagerClient::~FakePowerManagerClient() {
 void FakePowerManagerClient::AddObserver(Observer* observer) {
 }
 
-void FakePowerManagerClient::RequestStatusUpdate(
-    UpdateRequestType update_type) {
+void FakePowerManagerClient::RequestStatusUpdate() {
 }
 
 void FakePowerManagerClient::SetPolicy(
@@ -51,6 +51,7 @@ bool FakePowerManagerClient::HasObserver(Observer* observer) {
 }
 
 void FakePowerManagerClient::RequestRestart() {
+  ++request_restart_call_count_;
 }
 
 void FakePowerManagerClient::IncreaseKeyboardBrightness() {

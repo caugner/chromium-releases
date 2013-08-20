@@ -9,18 +9,14 @@
 #include "base/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/base/ime/text_input_test_support.h"
-#include "ui/compositor/test/compositor_test_support.h"
+#include "ui/base/ime/input_method_initializer.h"
+#include "ui/base/test/ui_controls.h"
+#include "ui/message_center/message_center.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/widget.h"
-
-#if defined(ENABLE_MESSAGE_CENTER)
-#include "ui/message_center/message_center.h"
-#endif
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
@@ -34,13 +30,9 @@
 #include "ui/aura/test/aura_test_helper.h"
 #endif
 
-#if defined(OS_WIN)
-#include "base/win/metro.h"
-#include "ui/base/ime/win/tsf_bridge.h"
-#endif
-
 #if defined(OS_CHROMEOS)
 #include "chromeos/audio/cras_audio_handler.h"
+#include "chromeos/power/power_manager_handler.h"
 #endif
 
 namespace {
@@ -84,7 +76,7 @@ ViewEventTestBase::ViewEventTestBase()
 }
 
 void ViewEventTestBase::Done() {
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 
 #if defined(OS_WIN) && !defined(USE_AURA)
   // We need to post a message to tickle the Dispatcher getting called and
@@ -97,12 +89,12 @@ void ViewEventTestBase::Done() {
   // need to quit twice. The second quit does that for us. Finish all
   // pending UI events before posting closure because events it may be
   // executed before UI events are executed.
-  ui_controls::RunClosureAfterAllPendingUIEvents(MessageLoop::QuitClosure());
+  ui_controls::RunClosureAfterAllPendingUIEvents(
+      base::MessageLoop::QuitClosure());
 }
 
 void ViewEventTestBase::SetUp() {
-  ui::TextInputTestSupport::Initialize();
-  ui::CompositorTestSupport::Initialize();
+  ui::InitializeInputMethodForTesting();
   gfx::NativeView context = NULL;
 #if defined(USE_ASH)
 #if defined(OS_WIN)
@@ -111,13 +103,12 @@ void ViewEventTestBase::SetUp() {
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
 #else
-#if defined(ENABLE_MESSAGE_CENTER)
   // Ash Shell can't just live on its own without a browser process, we need to
   // also create the message center.
   message_center::MessageCenter::Initialize();
-#endif
 #if defined(OS_CHROMEOS)
   chromeos::CrasAudioHandler::InitializeForTesting();
+  chromeos::PowerManagerHandler::Initialize();
 #endif
   ash::Shell::CreateInstance(new ash::test::TestShellDelegate());
   context = ash::Shell::GetPrimaryRootWindow();
@@ -128,10 +119,6 @@ void ViewEventTestBase::SetUp() {
   aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
   aura_test_helper_->SetUp();
   context = aura_test_helper_->root_window();
-#endif
-#if defined(OS_WIN)
-  if (base::win::IsTSFAwareRequired())
-    ui::TSFBridge::Initialize();
 #endif
   window_ = views::Widget::CreateWindowWithContext(this, context);
 }
@@ -151,20 +138,18 @@ void ViewEventTestBase::TearDown() {
 #else
   ash::Shell::DeleteInstance();
 #if defined(OS_CHROMEOS)
+  chromeos::PowerManagerHandler::Shutdown();
   chromeos::CrasAudioHandler::Shutdown();
 #endif
-#if defined(ENABLE_MESSAGE_CENTER)
   // Ash Shell can't just live on its own without a browser process, we need to
   // also shut down the message center.
   message_center::MessageCenter::Shutdown();
-#endif
   aura::Env::DeleteInstance();
 #endif
 #elif defined(USE_AURA)
   aura_test_helper_->TearDown();
 #endif
-  ui::CompositorTestSupport::Terminate();
-  ui::TextInputTestSupport::Shutdown();
+  ui::ShutdownInputMethodForTesting();
 }
 
 bool ViewEventTestBase::CanResize() const {
@@ -203,9 +188,8 @@ void ViewEventTestBase::StartMessageLoopAndRunTest() {
 
   // Schedule a task that starts the test. Need to do this as we're going to
   // run the message loop.
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&ViewEventTestBase::DoTestOnMessageLoop, this));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&ViewEventTestBase::DoTestOnMessageLoop, this));
 
   content::RunMessageLoop();
 }

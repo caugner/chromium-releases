@@ -7,11 +7,17 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/command_line.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part_chromeos.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/networking_private.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
+#include "chromeos/network/network_connection_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_constants.h"
@@ -22,6 +28,7 @@ namespace api = extensions::api::networking_private;
 namespace onc = chromeos::onc;
 using chromeos::DBusThreadManager;
 using chromeos::ManagedNetworkConfigurationHandler;
+using chromeos::NetworkHandler;
 using chromeos::NetworkState;
 using chromeos::NetworkStateHandler;
 using chromeos::ShillManagerClient;
@@ -62,7 +69,7 @@ bool NetworkingPrivateGetPropertiesFunction::RunImpl() {
       api::GetProperties::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  ManagedNetworkConfigurationHandler::Get()->GetProperties(
+  NetworkHandler::Get()->managed_network_configuration_handler()->GetProperties(
       params->network_guid,  // service path
       base::Bind(&NetworkingPrivateGetPropertiesFunction::GetPropertiesSuccess,
                  this),
@@ -100,12 +107,24 @@ bool NetworkingPrivateGetManagedPropertiesFunction::RunImpl() {
       api::GetManagedProperties::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  ManagedNetworkConfigurationHandler::Get()->GetManagedProperties(
-      params->network_guid,  // service path
-      base::Bind(&NetworkingPrivateGetManagedPropertiesFunction::Success,
-                 this),
-      base::Bind(&NetworkingPrivateGetManagedPropertiesFunction::Failure,
-                 this));
+  // User ID hash presence is only enforced when multi-profiles are turned on.
+  std::string user_id_hash;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles)) {
+    user_id_hash = g_browser_process->platform_part()->
+        profile_helper()->GetUserIdHashFromProfile(profile());
+  } else {
+    user_id_hash = g_browser_process->platform_part()->
+        profile_helper()->active_user_id_hash();
+  }
+
+  NetworkHandler::Get()->managed_network_configuration_handler()->
+      GetManagedProperties(
+          user_id_hash,
+          params->network_guid,  // service path
+          base::Bind(&NetworkingPrivateGetManagedPropertiesFunction::Success,
+                     this),
+          base::Bind(&NetworkingPrivateGetManagedPropertiesFunction::Failure,
+                     this));
   return true;
 }
 
@@ -140,8 +159,8 @@ bool NetworkingPrivateGetStateFunction::RunImpl() {
   // The |network_guid| parameter is storing the service path.
   std::string service_path = params->network_guid;
 
-  const NetworkState* state =
-      NetworkStateHandler::Get()->GetNetworkState(service_path);
+  const NetworkState* state = NetworkHandler::Get()->network_state_handler()->
+      GetNetworkState(service_path);
   if (!state) {
     error_ = "Error.InvalidParameter";
     SendResponse(false);
@@ -173,7 +192,7 @@ bool NetworkingPrivateSetPropertiesFunction::RunImpl() {
   scoped_ptr<base::DictionaryValue> properties_dict(
       params->properties.ToValue());
 
-  ManagedNetworkConfigurationHandler::Get()->SetProperties(
+  NetworkHandler::Get()->managed_network_configuration_handler()->SetProperties(
       params->network_guid,  // service path
       *properties_dict,
       base::Bind(&NetworkingPrivateSetPropertiesFunction::ResultCallback,
@@ -209,7 +228,8 @@ bool NetworkingPrivateGetVisibleNetworksFunction::RunImpl() {
       api::GetVisibleNetworks::Params::ToString(params->type);
 
   NetworkStateHandler::NetworkStateList network_states;
-  NetworkStateHandler::Get()->GetNetworkList(&network_states);
+  NetworkHandler::Get()->network_state_handler()->GetNetworkList(
+      &network_states);
 
   base::ListValue* network_properties_list = new base::ListValue;
   for (NetworkStateHandler::NetworkStateList::iterator it =
@@ -247,7 +267,7 @@ NetworkingPrivateRequestNetworkScanFunction::
 }
 
 bool NetworkingPrivateRequestNetworkScanFunction::RunImpl() {
-  NetworkStateHandler::Get()->RequestScan();
+  NetworkHandler::Get()->network_state_handler()->RequestScan();
   return true;
 }
 
@@ -274,14 +294,16 @@ bool NetworkingPrivateStartConnectFunction::RunImpl() {
       api::StartConnect::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  ManagedNetworkConfigurationHandler::Get()->Connect(
+  const bool ignore_error_state = true;
+  NetworkHandler::Get()->network_connection_handler()->ConnectToNetwork(
       params->network_guid,  // service path
       base::Bind(
           &NetworkingPrivateStartConnectFunction::ConnectionStartSuccess,
           this),
       base::Bind(
           &NetworkingPrivateStartConnectFunction::ConnectionStartFailed,
-          this));
+          this),
+      ignore_error_state);
   return true;
 }
 
@@ -308,7 +330,7 @@ bool NetworkingPrivateStartDisconnectFunction::RunImpl() {
       api::StartDisconnect::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  ManagedNetworkConfigurationHandler::Get()->Disconnect(
+  NetworkHandler::Get()->network_connection_handler()->DisconnectNetwork(
       params->network_guid,  // service path
       base::Bind(
           &NetworkingPrivateStartDisconnectFunction::DisconnectionStartSuccess,

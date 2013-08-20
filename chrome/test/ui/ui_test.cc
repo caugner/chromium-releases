@@ -17,6 +17,7 @@
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
@@ -26,11 +27,11 @@
 #include "base/process_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_file_util.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile_impl.h"
@@ -50,6 +51,7 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/breakpad/common/breakpad_paths.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "ui/gl/gl_implementation.h"
@@ -82,29 +84,29 @@ UITestBase::UITestBase()
     : launch_arguments_(CommandLine::NO_PROGRAM),
       expected_errors_(0),
       expected_crashes_(0),
-      homepage_(chrome::kAboutBlankURL),
+      homepage_(content::kAboutBlankURL),
       wait_for_initial_loads_(true),
       dom_automation_enabled_(false),
+      stats_collection_controller_enabled_(false),
       show_window_(false),
       clear_profile_(true),
       include_testing_id_(true),
-      enable_file_cookies_(true),
-      profile_type_(UITestBase::DEFAULT_THEME) {
+      enable_file_cookies_(true) {
   PathService::Get(chrome::DIR_APP, &browser_directory_);
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_);
 }
 
-UITestBase::UITestBase(MessageLoop::Type msg_loop_type)
+UITestBase::UITestBase(base::MessageLoop::Type msg_loop_type)
     : launch_arguments_(CommandLine::NO_PROGRAM),
       expected_errors_(0),
       expected_crashes_(0),
       wait_for_initial_loads_(true),
       dom_automation_enabled_(false),
+      stats_collection_controller_enabled_(false),
       show_window_(false),
       clear_profile_(true),
       include_testing_id_(true),
-      enable_file_cookies_(true),
-      profile_type_(UITestBase::DEFAULT_THEME) {
+      enable_file_cookies_(true) {
   PathService::Get(chrome::DIR_APP, &browser_directory_);
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_);
 }
@@ -189,6 +191,8 @@ void UITestBase::SetLaunchSwitches() {
     launch_arguments_.AppendSwitch(switches::kEnableFileCookies);
   if (dom_automation_enabled_)
     launch_arguments_.AppendSwitch(switches::kDomAutomationController);
+  if (stats_collection_controller_enabled_)
+    launch_arguments_.AppendSwitch(switches::kStatsCollectionController);
   // Allow off-store extension installs.
   launch_arguments_.AppendSwitchASCII(
       switches::kEasyOffStoreExtensionInstall, "1");
@@ -419,39 +423,14 @@ bool UITestBase::CloseBrowser(BrowserProxy* browser,
   return result;
 }
 
-// static
-base::FilePath UITestBase::ComputeTypicalUserDataSource(
-    UITestBase::ProfileType profile_type) {
-  base::FilePath source_history_file;
-  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA,
-                               &source_history_file));
-  source_history_file = source_history_file.AppendASCII("profiles");
-  switch (profile_type) {
-    case UITestBase::DEFAULT_THEME:
-      source_history_file = source_history_file.AppendASCII(
-          "profile_with_default_theme");
-      break;
-    case UITestBase::COMPLEX_THEME:
-      source_history_file = source_history_file.AppendASCII(
-          "profile_with_complex_theme");
-      break;
-    default:
-      NOTREACHED();
-  }
-
-  return source_history_file;
-}
-
 int UITestBase::GetCrashCount() const {
   base::FilePath crash_dump_path;
-  PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_path);
+  PathService::Get(breakpad::DIR_CRASH_DUMPS, &crash_dump_path);
 
   int files_found = 0;
-  file_util::FileEnumerator en(crash_dump_path, false,
-                               file_util::FileEnumerator::FILES);
+  base::FileEnumerator en(crash_dump_path, false, base::FileEnumerator::FILES);
   while (!en.Next().empty()) {
-    file_util::FileEnumerator::FindInfo info;
-    if (file_util::FileEnumerator::GetLastModifiedTime(info) > test_start_time_)
+    if (en.GetInfo().GetLastModifiedTime() > test_start_time_)
       files_found++;
   }
 
@@ -460,7 +439,7 @@ int UITestBase::GetCrashCount() const {
   return files_found / 2;
 #else
   return files_found;
- #endif
+#endif
 }
 
 std::string UITestBase::CheckErrorsAndCrashes() const {

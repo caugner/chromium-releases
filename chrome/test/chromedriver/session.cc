@@ -8,10 +8,10 @@
 
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/chrome.h"
-#include "chrome/test/chromedriver/chrome/devtools_event_logger.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/version.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
+#include "chrome/test/chromedriver/logging.h"
 
 FrameInfo::FrameInfo(const std::string& parent_frame_id,
                      const std::string& frame_id,
@@ -20,24 +20,28 @@ FrameInfo::FrameInfo(const std::string& parent_frame_id,
       frame_id(frame_id),
       chromedriver_frame_id(chromedriver_frame_id) {}
 
+const int Session::kDefaultPageLoadTimeoutMs = 5 * 60 * 1000;
+
 Session::Session(const std::string& id)
     : id(id),
       thread(("SessionThread_" + id).c_str()),
+      detach(false),
       sticky_modifiers(0),
       mouse_position(0, 0),
       implicit_wait(0),
-      page_load_timeout(0),
+      page_load_timeout(kDefaultPageLoadTimeoutMs),
       script_timeout(0) {
 }
 
 Session::Session(const std::string& id, scoped_ptr<Chrome> chrome)
     : id(id),
       thread(("SessionThread_" + id).c_str()),
+      detach(false),
       chrome(chrome.Pass()),
       sticky_modifiers(0),
       mouse_position(0, 0),
       implicit_wait(0),
-      page_load_timeout(0),
+      page_load_timeout(kDefaultPageLoadTimeoutMs),
       script_timeout(0),
       capabilities(CreateCapabilities()) {
 }

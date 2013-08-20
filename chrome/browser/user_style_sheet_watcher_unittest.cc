@@ -9,7 +9,7 @@
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "content/public/test/test_browser_thread.h"
@@ -28,9 +28,9 @@ TEST(UserStyleSheetWatcherTest, StyleLoad) {
   ASSERT_TRUE(file_util::WriteFile(style_sheet_file,
               css_file_contents.data(), css_file_contents.length()));
 
-  MessageLoop loop(MessageLoop::TYPE_UI);
+  base::MessageLoop loop(base::MessageLoop::TYPE_UI);
   base::Thread io_thread("UserStyleSheetWatcherTestIOThread");
-  base::Thread::Options options(MessageLoop::TYPE_IO, 0);
+  base::Thread::Options options(base::MessageLoop::TYPE_IO, 0);
   ASSERT_TRUE(io_thread.StartWithOptions(options));
   content::TestBrowserThread browser_ui_thread(BrowserThread::UI, &loop);
   content::TestBrowserThread browser_file_thread(BrowserThread::FILE,

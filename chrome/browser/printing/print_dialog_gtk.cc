@@ -16,8 +16,8 @@
 #include "base/file_util.h"
 #include "base/files/file_util_proxy.h"
 #include "base/logging.h"
-#include "base/message_loop_proxy.h"
-#include "base/utf_string_conversions.h"
+#include "base/message_loop/message_loop_proxy.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "printing/metafile.h"
 #include "printing/print_job_constants.h"
@@ -407,8 +407,10 @@ void PrintDialogGtk::OnJobCompleted(GtkPrintJob* print_job, GError* error) {
   if (print_job)
     g_object_unref(print_job);
   base::FileUtilProxy::Delete(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-      path_to_pdf_, false, base::FileUtilProxy::StatusCallback());
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE).get(),
+      path_to_pdf_,
+      false,
+      base::FileUtilProxy::StatusCallback());
   // Printing finished. Matches AddRef() in PrintDocument();
   Release();
 }

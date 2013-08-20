@@ -17,10 +17,7 @@
 #include "ash/system/locale/tray_locale.h"
 #include "ash/system/logout_button/tray_logout_button.h"
 #include "ash/system/monitor/tray_monitor.h"
-#include "ash/system/power/power_supply_status.h"
-#include "ash/system/power/tray_power.h"
 #include "ash/system/session_length_limit/tray_session_length_limit.h"
-#include "ash/system/settings/tray_settings.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
@@ -33,8 +30,8 @@
 #include "ash/system/user/tray_user.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/timer.h"
-#include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/events/event_constants.h"
@@ -56,8 +53,12 @@
 #include "ash/system/chromeos/network/tray_network.h"
 #include "ash/system/chromeos/network/tray_sms.h"
 #include "ash/system/chromeos/network/tray_vpn.h"
-#include "ash/system/chromeos/screen_capture/tray_screen_capture.h"
+#include "ash/system/chromeos/power/tray_power.h"
+#include "ash/system/chromeos/screen_security/screen_capture_tray_item.h"
+#include "ash/system/chromeos/screen_security/screen_share_tray_item.h"
+#include "ash/system/chromeos/settings/tray_settings.h"
 #include "ash/system/chromeos/tray_display.h"
+#include "ui/message_center/message_center.h"
 #endif
 
 using views::TrayBubbleView;
@@ -89,6 +90,11 @@ class SystemBubbleWrapper {
     bubble_->InitView(anchor, login_status, init_params);
     bubble_wrapper_.reset(
         new internal::TrayBubbleWrapper(tray, bubble_->bubble_view()));
+    if (ash::switches::UseAlternateShelfLayout()) {
+      // The system bubble should not have an arrow.
+      bubble_->bubble_view()->SetArrowPaintType(
+          views::BubbleBorder::PAINT_NONE);
+    }
   }
 
   // Convenience accessors:
@@ -115,7 +121,8 @@ SystemTray::SystemTray(internal::StatusAreaWidget* status_area_widget)
     : internal::TrayBackgroundView(status_area_widget),
       items_(),
       default_bubble_height_(0),
-      hide_notifications_(false) {
+      hide_notifications_(false),
+      tray_accessibility_(NULL) {
   SetContentsBackground();
 }
 
@@ -139,7 +146,17 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
 #if !defined(OS_WIN)
   AddTrayItem(new internal::TraySessionLengthLimit(this));
   AddTrayItem(new internal::TrayLogoutButton(this));
-  AddTrayItem(new internal::TrayUser(this));
+  // In multi-profile user mode we can have multiple user tiles.
+  ash::Shell* shell = ash::Shell::GetInstance();
+  int maximum_user_profiles =
+      shell->delegate()->IsMultiProfilesEnabled() ?
+          shell->session_state_delegate()->GetMaximumNumberOfLoggedInUsers() :
+          0;
+  // Note: We purposely use one more item then logged in users to account for
+  // the additional separator.
+  for (int i = 0; i <= maximum_user_profiles; i++)
+    AddTrayItem(new internal::TrayUser(this, i));
+
 #endif
 #if defined(OS_CHROMEOS)
   AddTrayItem(new internal::TrayEnterprise(this));
@@ -148,8 +165,9 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   AddTrayItem(new internal::TrayIME(this));
   tray_accessibility_ = new internal::TrayAccessibility(this);
   AddTrayItem(tray_accessibility_);
-#if !defined(OS_WIN)
-  AddTrayItem(new internal::TrayPower(this));
+#if defined(OS_CHROMEOS)
+  AddTrayItem(
+      new internal::TrayPower(this, message_center::MessageCenter::Get()));
 #endif
 #if defined(OS_CHROMEOS)
   AddTrayItem(new internal::TrayNetwork(this));
@@ -163,14 +181,17 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   AddTrayItem(new internal::TrayLocale(this));
 #if defined(OS_CHROMEOS)
   AddTrayItem(new internal::TrayDisplay(this));
-  AddTrayItem(new internal::TrayScreenCapture(this));
+  AddTrayItem(new internal::ScreenCaptureTrayItem(this));
+  AddTrayItem(new internal::ScreenShareTrayItem(this));
   AddTrayItem(new internal::TrayAudio(this));
 #endif
 #if !defined(OS_WIN)
   AddTrayItem(new internal::TrayBrightness(this));
   AddTrayItem(new internal::TrayCapsLock(this));
 #endif
+#if defined(OS_CHROMEOS)
   AddTrayItem(new internal::TraySettings(this));
+#endif
   AddTrayItem(new internal::TrayUpdate(this));
   AddTrayItem(new internal::TrayDate(this));
 
@@ -201,6 +222,10 @@ void SystemTray::AddTrayItem(SystemTrayItem* item) {
 
 void SystemTray::RemoveTrayItem(SystemTrayItem* item) {
   NOTIMPLEMENTED();
+}
+
+const std::vector<SystemTrayItem*>& SystemTray::GetTrayItems() const {
+  return items_.get();
 }
 
 void SystemTray::ShowDefaultView(BubbleCreationType creation_type) {
@@ -310,7 +335,7 @@ bool SystemTray::IsMouseInNotificationBubble() const {
       Shell::GetScreen()->GetCursorScreenPoint());
 }
 
-bool SystemTray::CloseSystemBubbleForTest() const {
+bool SystemTray::CloseSystemBubble() const {
   if (!system_bubble_)
     return false;
   system_bubble_->bubble()->Close();
@@ -440,7 +465,13 @@ void SystemTray::UpdateNotificationBubble() {
       this, notification_items_, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
   views::View* anchor;
   TrayBubbleView::AnchorType anchor_type;
-  if (system_bubble_.get() && system_bubble_->bubble_view()) {
+  // Tray items might want to show notifications while we are creating and
+  // initializing the |system_bubble_| - but it might not be fully initialized
+  // when coming here - this would produce a crashed like crbug.com/247416.
+  // As such we check the existence of the widget here.
+  if (system_bubble_.get() &&
+      system_bubble_->bubble_view() &&
+      system_bubble_->bubble_view()->GetWidget()) {
     anchor = system_bubble_->bubble_view();
     anchor_type = TrayBubbleView::ANCHOR_TYPE_BUBBLE;
   } else {
@@ -491,7 +522,8 @@ void SystemTray::AnchorUpdated() {
   }
   if (system_bubble_) {
     system_bubble_->bubble_view()->UpdateBubble();
-    UpdateBubbleViewArrow(system_bubble_->bubble_view());
+    if (!ash::switches::UseAlternateShelfLayout())
+      UpdateBubbleViewArrow(system_bubble_->bubble_view());
   }
 }
 

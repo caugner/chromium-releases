@@ -18,7 +18,6 @@ class Value;
 
 struct Session;
 class Status;
-class WebView;
 
 typedef base::Callback<Status(
     Session* session,
@@ -37,13 +36,6 @@ Status ExecuteSessionCommand(
 
 // Gets the capabilities of a particular session.
 Status ExecuteGetSessionCapabilities(
-    SessionMap* session_map,
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value);
-
-// Quits a particular session.
-Status ExecuteQuit(
     SessionMap* session_map,
     Session* session,
     const base::DictionaryValue& params,
@@ -90,36 +82,6 @@ Status ExecuteSetScriptTimeout(
 
 // Set the amount of time the driver should wait when searching for elements.
 Status ExecuteImplicitlyWait(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value);
-
-// Returns whether an alert is open.
-Status ExecuteGetAlert(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value);
-
-// Returns the text of the open alert.
-Status ExecuteGetAlertText(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value);
-
-// Sets the value of the alert prompt.
-Status ExecuteSetAlertValue(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value);
-
-// Accepts the open alert.
-Status ExecuteAcceptAlert(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value);
-
-// Dismisses the open alert.
-Status ExecuteDismissAlert(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);

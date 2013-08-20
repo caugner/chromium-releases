@@ -22,7 +22,7 @@
 #include "content/public/browser/web_ui.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/webui/web_ui_util.h"
-#include "webkit/glue/webpreferences.h"
+#include "webkit/common/webpreferences.h"
 
 namespace {
 
@@ -264,10 +264,8 @@ base::DictionaryValue* TaskManagerHandler::CreateTaskGroupValue(
   int index = model_->GetResourceIndexForGroup(group_index, 0);
   int length = model_->GetGroupRangeForResource(index).second;
 
-  // Forces to set following 3 columns regardless of |enable_columns|.
+  // Forces to set following column regardless of |enable_columns|.
   val->SetInteger("index", index);
-  val->SetBoolean("isBackgroundResource",
-                  model_->IsBackgroundResource(index));
   CreateGroupColumnList("processId", index, 1, val);
   CreateGroupColumnList("type", index, length, val);
   CreateGroupColumnList("uniqueId", index, length, val);

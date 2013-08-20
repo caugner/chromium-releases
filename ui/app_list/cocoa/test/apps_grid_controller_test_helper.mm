@@ -5,7 +5,7 @@
 #import "ui/app_list/cocoa/test/apps_grid_controller_test_helper.h"
 
 #include "base/mac/foundation_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "ui/app_list/app_list_item_model.h"
 #import "ui/app_list/cocoa/apps_grid_controller.h"
 #import "ui/app_list/cocoa/apps_grid_view_item.h"
@@ -20,7 +20,7 @@ const size_t AppsGridControllerTestHelper::kItemsPerPage = 16;
 
 AppsGridControllerTestHelper::AppsGridControllerTestHelper() {
   Init();
-  delegate_.reset(new AppListTestViewDelegate);
+  [AppsGridController setScrollAnimationDuration:0.0];
 }
 
 AppsGridControllerTestHelper::~AppsGridControllerTestHelper() {}
@@ -29,8 +29,7 @@ void AppsGridControllerTestHelper::SetUpWithGridController(
     AppsGridController* grid_controller) {
   ui::CocoaTest::SetUp();
   apps_grid_controller_ = grid_controller;
-  scoped_ptr<AppListModel> model(new AppListTestModel);
-  [apps_grid_controller_ setModel:model.Pass()];
+  ReplaceTestModel(0);
 }
 
 void AppsGridControllerTestHelper::SimulateClick(NSView* view) {
@@ -40,8 +39,8 @@ void AppsGridControllerTestHelper::SimulateClick(NSView* view) {
   [NSApp postEvent:events.second atStart:NO];
 }
 
-void AppsGridControllerTestHelper::SimulateKeyPress(unichar c) {
-  [test_window() keyDown:cocoa_test_event_utils::KeyEventWithCharacter(c)];
+void AppsGridControllerTestHelper::SimulateKeyAction(SEL c) {
+  [apps_grid_controller_ handleCommandBySelector:c];
 }
 
 void AppsGridControllerTestHelper::SimulateMouseEnterItemAt(size_t index) {
@@ -57,7 +56,12 @@ void AppsGridControllerTestHelper::SimulateMouseExitItemAt(size_t index) {
 void AppsGridControllerTestHelper::ReplaceTestModel(int item_count) {
   scoped_ptr<AppListTestModel> new_model(new AppListTestModel);
   new_model->PopulateApps(item_count);
-  [apps_grid_controller_ setModel:new_model.PassAs<AppListModel>()];
+  ResetModel(new_model.PassAs<AppListModel>());
+}
+
+void AppsGridControllerTestHelper::ResetModel(
+    scoped_ptr<AppListModel> new_model) {
+  [apps_grid_controller_ setModel:new_model.Pass()];
 }
 
 std::string AppsGridControllerTestHelper::GetViewContent() const {
@@ -111,6 +115,9 @@ void AppsGridControllerTestHelper::SinkEvents() {
 }
 
 NSButton* AppsGridControllerTestHelper::GetItemViewAt(size_t index) {
+  if (index == NSNotFound)
+    return nil;
+
   return [[apps_grid_controller_ itemAtIndex:index] button];
 }
 
@@ -119,20 +126,7 @@ NSCollectionView* AppsGridControllerTestHelper::GetPageAt(size_t index) {
 }
 
 NSView* AppsGridControllerTestHelper::GetSelectedView() {
-  // TODO(tapted): Update this to work for selections on other than the first
-  // page.
-  NSIndexSet* selection = [GetPageAt(0) selectionIndexes];
-  if ([selection count]) {
-    AppsGridViewItem* item = base::mac::ObjCCastStrict<AppsGridViewItem>(
-        [GetPageAt(0) itemAtIndex:[selection firstIndex]]);
-    return [item button];
-  }
-
-  return nil;
-}
-
-AppListTestViewDelegate* AppsGridControllerTestHelper::delegate() {
-  return static_cast<AppListTestViewDelegate*>(delegate_.get());
+  return GetItemViewAt([apps_grid_controller_ selectedItemIndex]);
 }
 
 AppListTestModel* AppsGridControllerTestHelper::model() {

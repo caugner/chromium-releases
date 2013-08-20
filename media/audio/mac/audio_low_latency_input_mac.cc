@@ -43,6 +43,7 @@ AUAudioInputStream::AUAudioInputStream(
       input_device_id_(audio_device_id),
       started_(false),
       hardware_latency_frames_(0),
+      fifo_delay_bytes_(0),
       number_of_channels_in_frame_(0) {
   DCHECK(manager_);
 
@@ -64,7 +65,7 @@ AUAudioInputStream::AUAudioInputStream(
   // Set number of sample frames per callback used by the internal audio layer.
   // An internal FIFO is then utilized to adapt the internal size to the size
   // requested by the client.
-  // Note that we  use the same native buffer size as for the output side here
+  // Note that we use the same native buffer size as for the output side here
   // since the AUHAL implementation requires that both capture and render side
   // use the same buffer size. See http://crbug.com/154352 for more details.
   // TODO(xians): Get the audio parameters from the right device.
@@ -99,12 +100,15 @@ AUAudioInputStream::AUAudioInputStream(
   DVLOG(1) << "Requested buffer size in bytes : " << requested_size_bytes_;
   DLOG_IF(INFO, requested_size_frames > number_of_frames_) << "FIFO is used";
 
+  const int number_of_bytes = number_of_frames_ * format_.mBytesPerFrame;
+  fifo_delay_bytes_ = requested_size_bytes_ - number_of_bytes;
+
   // Allocate some extra memory to avoid memory reallocations.
   // Ensure that the size is an even multiple of |number_of_frames_ and
   // larger than |requested_size_frames|.
   // Example: number_of_frames_=128, requested_size_frames=480 =>
   // allocated space equals 4*128=512 audio frames
-  const int max_forward_capacity = format_.mBytesPerFrame * number_of_frames_ *
+  const int max_forward_capacity = number_of_bytes *
       ((requested_size_frames / number_of_frames_) + 1);
   fifo_.reset(new media::SeekableBuffer(0, max_forward_capacity));
 
@@ -268,6 +272,7 @@ void AUAudioInputStream::Start(AudioInputCallback* callback) {
   if (started_ || !audio_unit_)
     return;
   sink_ = callback;
+  StartAgc();
   OSStatus result = AudioOutputUnitStart(audio_unit_);
   if (result == noErr) {
     started_ = true;
@@ -279,6 +284,7 @@ void AUAudioInputStream::Start(AudioInputCallback* callback) {
 void AUAudioInputStream::Stop() {
   if (!started_)
     return;
+  StopAgc();
   OSStatus result = AudioOutputUnitStop(audio_unit_);
   if (result == noErr) {
     started_ = false;
@@ -483,16 +489,18 @@ OSStatus AUAudioInputStream::Provide(UInt32 number_of_frames,
   // Update the capture latency.
   double capture_latency_frames = GetCaptureLatency(time_stamp);
 
-  // Update the AGC volume level once every second. Note that, |volume| is
-  // also updated each time SetVolume() is called through IPC by the
-  // render-side AGC.
+  // The AGC volume level is updated once every second on a separate thread.
+  // Note that, |volume| is also updated each time SetVolume() is called
+  // through IPC by the render-side AGC.
   double normalized_volume = 0.0;
-  QueryAgcVolume(&normalized_volume);
+  GetAgcVolume(&normalized_volume);
 
   AudioBuffer& buffer = io_data->mBuffers[0];
   uint8* audio_data = reinterpret_cast<uint8*>(buffer.mData);
   uint32 capture_delay_bytes = static_cast<uint32>
       ((capture_latency_frames + 0.5) * format_.mBytesPerFrame);
+  // Account for the extra delay added by the FIFO.
+  capture_delay_bytes += fifo_delay_bytes_;
   DCHECK(audio_data);
   if (!audio_data)
     return kAudioUnitErr_InvalidElement;
@@ -503,7 +511,7 @@ OSStatus AUAudioInputStream::Provide(UInt32 number_of_frames,
 
   // Deliver recorded data to the client as soon as the FIFO contains a
   // sufficient amount.
-  while (fifo_->forward_bytes() >= requested_size_bytes_) {
+  if (fifo_->forward_bytes() >= requested_size_bytes_) {
     // Read from FIFO into temporary data buffer.
     fifo_->Read(data_->GetWritableData(), requested_size_bytes_);
 

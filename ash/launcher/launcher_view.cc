@@ -8,6 +8,7 @@
 
 #include "ash/ash_constants.h"
 #include "ash/ash_switches.h"
+#include "ash/drag_drop/drag_image_view.h"
 #include "ash/launcher/app_list_button.h"
 #include "ash/launcher/launcher_button.h"
 #include "ash/launcher/launcher_delegate.h"
@@ -22,10 +23,14 @@
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell_delegate.h"
 #include "base/auto_reset.h"
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
+#include "ui/aura/client/screen_position_client.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -33,6 +38,7 @@
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/point.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
@@ -302,6 +308,17 @@ void ReflectItemStatus(const ash::LauncherItem& item,
   }
 }
 
+// Get the event location in screen coordinates.
+gfx::Point GetPositionInScreen(const gfx::Point& root_location,
+                               views::View* view) {
+  gfx::Point root_location_in_screen = root_location;
+  aura::RootWindow* root_window =
+      view->GetWidget()->GetNativeWindow()->GetRootWindow();
+  aura::client::GetScreenPositionClient(root_window->GetRootWindow())->
+        ConvertPointToScreen(root_window, &root_location_in_screen);
+  return root_location_in_screen;
+}
+
 }  // namespace
 
 // AnimationDelegate used when deleting an item. This steadily decreased the
@@ -377,7 +394,9 @@ LauncherView::LauncherView(LauncherModel* model,
       cancelling_drag_model_changed_(false),
       last_hidden_index_(0),
       closing_event_time_(base::TimeDelta()),
-      got_deleted_(NULL) {
+      got_deleted_(NULL),
+      drag_and_drop_item_pinned_(false),
+      drag_and_drop_launcher_id_(0) {
   DCHECK(model_);
   bounds_animator_.reset(new views::BoundsAnimator(this));
   bounds_animator_->AddObserver(this);
@@ -454,7 +473,8 @@ gfx::Rect LauncherView::GetIdealBoundsOfItemIcon(LauncherID id) {
   LauncherButton* button =
       static_cast<LauncherButton*>(view_model_->view_at(index));
   gfx::Rect icon_bounds = button->GetIconBounds();
-  return gfx::Rect(ideal_bounds.x() + icon_bounds.x(),
+  return gfx::Rect(GetMirroredXWithWidthInView(
+                       ideal_bounds.x() + icon_bounds.x(), icon_bounds.width()),
                    ideal_bounds.y() + icon_bounds.y(),
                    icon_bounds.width(),
                    icon_bounds.height());
@@ -467,19 +487,21 @@ void LauncherView::UpdatePanelIconPosition(LauncherID id,
   if (current_index < first_panel_index)
     return;
 
+  gfx::Point midpoint_in_view(GetMirroredXInView(midpoint.x()),
+                              midpoint.y());
   ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
   int target_index = current_index;
   while (target_index > first_panel_index &&
          shelf->PrimaryAxisValue(view_model_->ideal_bounds(target_index).x(),
                                  view_model_->ideal_bounds(target_index).y()) >
-         shelf->PrimaryAxisValue(midpoint.x(), midpoint.y())) {
+         shelf->PrimaryAxisValue(midpoint_in_view.x(), midpoint_in_view.y())) {
     --target_index;
   }
   while (target_index < view_model_->view_size() - 1 &&
          shelf->PrimaryAxisValue(
              view_model_->ideal_bounds(target_index).right(),
              view_model_->ideal_bounds(target_index).bottom()) <
-         shelf->PrimaryAxisValue(midpoint.x(), midpoint.y())) {
+         shelf->PrimaryAxisValue(midpoint_in_view.x(), midpoint_in_view.y())) {
     ++target_index;
   }
   if (current_index != target_index)
@@ -521,6 +543,123 @@ views::FocusTraversable* LauncherView::GetFocusTraversableParent() {
 
 View* LauncherView::GetFocusTraversableParentView() {
   return this;
+}
+
+void LauncherView::CreateDragIconProxy(
+    const gfx::Point& location_in_screen_coordinates,
+    const gfx::ImageSkia& icon,
+    views::View* replaced_view,
+    const gfx::Vector2d& cursor_offset_from_center,
+    float scale_factor) {
+  drag_replaced_view_ = replaced_view;
+  drag_image_.reset(new ash::internal::DragImageView(
+      drag_replaced_view_->GetWidget()->GetNativeWindow()->GetRootWindow()));
+  drag_image_->SetImage(icon);
+  gfx::Size size = drag_image_->GetPreferredSize();
+  size.set_width(size.width() * scale_factor);
+  size.set_height(size.height() * scale_factor);
+  drag_image_offset_ = gfx::Vector2d(size.width() / 2, size.height() / 2) +
+                       cursor_offset_from_center;
+  gfx::Rect drag_image_bounds(
+      GetPositionInScreen(location_in_screen_coordinates,
+                          drag_replaced_view_) - drag_image_offset_, size);
+  drag_image_->SetBoundsInScreen(drag_image_bounds);
+  drag_image_->SetWidgetVisible(true);
+}
+
+void LauncherView::UpdateDragIconProxy(
+    const gfx::Point& location_in_screen_coordinates) {
+  drag_image_->SetScreenPosition(
+      GetPositionInScreen(location_in_screen_coordinates,
+                          drag_replaced_view_) - drag_image_offset_);
+}
+
+void LauncherView::DestroyDragIconProxy() {
+  drag_image_.reset();
+  drag_image_offset_ = gfx::Vector2d(0, 0);
+}
+
+bool LauncherView::StartDrag(const std::string& app_id,
+                             const gfx::Point& location_in_screen_coordinates) {
+  // Bail if an operation is already going on - or the cursor is not inside.
+  // This could happen if mouse / touch operations overlap.
+  if (drag_and_drop_launcher_id_ ||
+      !GetBoundsInScreen().Contains(location_in_screen_coordinates))
+    return false;
+
+  // If the AppsGridView (which was dispatching this event) was opened by our
+  // button, LauncherView dragging operations are locked and we have to unlock.
+  CancelDrag(-1);
+  drag_and_drop_item_pinned_ = false;
+  drag_and_drop_app_id_ = app_id;
+  drag_and_drop_launcher_id_ =
+      delegate_->GetLauncherIDForAppID(drag_and_drop_app_id_);
+  // Check if the application is known and pinned - if not, we have to pin it so
+  // that we can re-arrange the launcher order accordingly. Note that items have
+  // to be pinned to give them the same (order) possibilities as a shortcut.
+  if (!drag_and_drop_launcher_id_ || !delegate_->IsAppPinned(app_id)) {
+    delegate_->PinAppWithID(app_id);
+    drag_and_drop_launcher_id_ =
+        delegate_->GetLauncherIDForAppID(drag_and_drop_app_id_);
+    if (!drag_and_drop_launcher_id_)
+      return false;
+    drag_and_drop_item_pinned_ = true;
+  }
+  views::View* drag_and_drop_view = view_model_->view_at(
+      model_->ItemIndexByID(drag_and_drop_launcher_id_));
+  DCHECK(drag_and_drop_view);
+
+  // Since there is already an icon presented by the caller, we hide this item
+  // for now. That has to be done by reducing the size since the visibility will
+  // change once a regrouping animation is performed.
+  pre_drag_and_drop_size_ = drag_and_drop_view->size();
+  drag_and_drop_view->SetSize(gfx::Size());
+
+  // First we have to center the mouse cursor over the item.
+  gfx::Point pt = drag_and_drop_view->GetBoundsInScreen().CenterPoint();
+  views::View::ConvertPointFromScreen(drag_and_drop_view, &pt);
+  ui::MouseEvent event(ui::ET_MOUSE_PRESSED,
+                       pt, location_in_screen_coordinates, 0);
+  PointerPressedOnButton(
+      drag_and_drop_view, LauncherButtonHost::DRAG_AND_DROP, event);
+
+  // Drag the item where it really belongs.
+  Drag(location_in_screen_coordinates);
+  return true;
+}
+
+bool LauncherView::Drag(const gfx::Point& location_in_screen_coordinates) {
+  if (!drag_and_drop_launcher_id_ ||
+      !GetBoundsInScreen().Contains(location_in_screen_coordinates))
+    return false;
+
+  gfx::Point pt = location_in_screen_coordinates;
+  views::View* drag_and_drop_view = view_model_->view_at(
+      model_->ItemIndexByID(drag_and_drop_launcher_id_));
+  views::View::ConvertPointFromScreen(drag_and_drop_view, &pt);
+
+  ui::MouseEvent event(ui::ET_MOUSE_DRAGGED, pt, gfx::Point(), 0);
+  PointerDraggedOnButton(
+      drag_and_drop_view, LauncherButtonHost::DRAG_AND_DROP, event);
+  return true;
+}
+
+void LauncherView::EndDrag(bool cancel) {
+  if (!drag_and_drop_launcher_id_)
+    return;
+
+  views::View* drag_and_drop_view = view_model_->view_at(
+      model_->ItemIndexByID(drag_and_drop_launcher_id_));
+  PointerReleasedOnButton(
+      drag_and_drop_view, LauncherButtonHost::DRAG_AND_DROP, cancel);
+
+  // Either destroy the temporarily created item - or - make the item visible.
+  if (drag_and_drop_item_pinned_ && cancel)
+    delegate_->UnpinAppsWithID(drag_and_drop_app_id_);
+  else if (drag_and_drop_view)
+    drag_and_drop_view->SetSize(pre_drag_and_drop_size_);
+
+  drag_and_drop_launcher_id_ = 0;
 }
 
 void LauncherView::LayoutToIdealBounds() {
@@ -748,6 +887,7 @@ views::View* LauncherView::CreateViewForItem(const LauncherItem& item) {
       break;
     }
 
+    case TYPE_BROWSER_SHORTCUT:
     case TYPE_APP_SHORTCUT:
     case TYPE_WINDOWED_APP:
     case TYPE_PLATFORM_APP:
@@ -775,18 +915,6 @@ views::View* LauncherView::CreateViewForItem(const LauncherItem& item) {
               views::ImageButton::ALIGN_MIDDLE,
               views::ImageButton::ALIGN_MIDDLE,
               views::ImageButton::ALIGN_BOTTOM));
-      view = button;
-      break;
-    }
-
-    case TYPE_BROWSER_SHORTCUT: {
-      ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-      LauncherButton* button = LauncherButton::Create(
-          this, this, tooltip_->shelf_layout_manager());
-      int image_id = delegate_ ?
-          delegate_->GetBrowserShortcutResourceId() :
-          IDR_AURA_LAUNCHER_BROWSER_SHORTCUT;
-      button->SetImage(*rb.GetImageNamed(image_id).ToImageSkia());
       view = button;
       break;
     }
@@ -900,10 +1028,11 @@ bool LauncherView::SameDragType(LauncherItemType typea,
     case TYPE_PLATFORM_APP:
       return (typeb == TYPE_TABBED || typeb == TYPE_PLATFORM_APP);
     case TYPE_APP_SHORTCUT:
+    case TYPE_BROWSER_SHORTCUT:
+      return (typeb == TYPE_APP_SHORTCUT || typeb == TYPE_BROWSER_SHORTCUT);
     case TYPE_WINDOWED_APP:
     case TYPE_APP_LIST:
     case TYPE_APP_PANEL:
-    case TYPE_BROWSER_SHORTCUT:
       return typeb == typea;
   }
   NOTREACHED();
@@ -1071,6 +1200,11 @@ views::FocusTraversable* LauncherView::GetPaneFocusTraversable() {
   return this;
 }
 
+void LauncherView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_TOOLBAR;
+  state->name = l10n_util::GetStringUTF16(IDS_ASH_LAUNCHER_ACCESSIBLE_NAME);
+}
+
 void LauncherView::OnGestureEvent(ui::GestureEvent* event) {
   if (gesture_handler_.ProcessGestureEvent(*event))
     event->StopPropagation();
@@ -1173,8 +1307,6 @@ void LauncherView::LauncherItemChanged(int model_index,
       break;
     }
     case TYPE_BROWSER_SHORTCUT:
-      if (!Shell::IsLauncherPerDisplayEnabled())
-        break;
       // Fallthrough for the new Launcher since it needs to show the activation
       // change as well.
     case TYPE_APP_SHORTCUT:
@@ -1296,15 +1428,13 @@ base::string16 LauncherView::GetAccessibleName(const views::View* view) {
     case TYPE_APP_SHORTCUT:
     case TYPE_WINDOWED_APP:
     case TYPE_PLATFORM_APP:
+    case TYPE_BROWSER_SHORTCUT:
       return delegate_->GetTitle(model_->items()[view_index]);
 
     case TYPE_APP_LIST:
       return model_->status() == LauncherModel::STATUS_LOADING ?
           l10n_util::GetStringUTF16(IDS_AURA_APP_LIST_SYNCING_TITLE) :
           l10n_util::GetStringUTF16(IDS_AURA_APP_LIST_TITLE);
-
-    case TYPE_BROWSER_SHORTCUT:
-      return Shell::GetInstance()->delegate()->GetProductName();
   }
   return base::string16();
 }
@@ -1340,43 +1470,42 @@ void LauncherView::ButtonPressed(views::Button* sender,
             ui::ScopedAnimationDurationScaleMode::SLOW_DURATION));
     }
 
-  // Collect usage statistics before we decide what to do with the click.
-  switch (model_->items()[view_index].type) {
-    case TYPE_APP_SHORTCUT:
-    case TYPE_WINDOWED_APP:
-    case TYPE_PLATFORM_APP:
-      Shell::GetInstance()->delegate()->RecordUserMetricsAction(
-          UMA_LAUNCHER_CLICK_ON_APP);
-      // Fallthrough
-    case TYPE_TABBED:
-    case TYPE_APP_PANEL:
-      delegate_->ItemSelected(model_->items()[view_index], event);
-      break;
+    // Collect usage statistics before we decide what to do with the click.
+    switch (model_->items()[view_index].type) {
+      case TYPE_APP_SHORTCUT:
+      case TYPE_WINDOWED_APP:
+      case TYPE_PLATFORM_APP:
+      case TYPE_BROWSER_SHORTCUT:
+        Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+            UMA_LAUNCHER_CLICK_ON_APP);
+        // Fallthrough
+      case TYPE_TABBED:
+      case TYPE_APP_PANEL:
+        delegate_->ItemSelected(model_->items()[view_index], event);
+        break;
 
-    case TYPE_APP_LIST:
-      Shell::GetInstance()->delegate()->RecordUserMetricsAction(
-          UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON);
-      Shell::GetInstance()->ToggleAppList(GetWidget()->GetNativeView());
-      break;
-
-    case TYPE_BROWSER_SHORTCUT:
-      // Click on browser icon is counted in app clicks.
-      Shell::GetInstance()->delegate()->RecordUserMetricsAction(
-          UMA_LAUNCHER_CLICK_ON_APP);
-      delegate_->OnBrowserShortcutClicked(event.flags());
-      break;
+      case TYPE_APP_LIST:
+        Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+            UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON);
+        Shell::GetInstance()->ToggleAppList(GetWidget()->GetNativeView());
+        // By setting us as DnD recipient, the app list knows that we can
+        // handle items.
+        if (!CommandLine::ForCurrentProcess()->HasSwitch(
+                 ash::switches::kAshDisableDragAndDropAppListToLauncher))
+          Shell::GetInstance()->SetDragAndDropHostOfCurrentAppList(this);
+        break;
     }
   }
 
   if (model_->items()[view_index].type != TYPE_APP_LIST)
-    ShowListMenuForView(model_->items()[view_index], sender, event.flags());
+    ShowListMenuForView(model_->items()[view_index], sender, event);
 }
 
 bool LauncherView::ShowListMenuForView(const LauncherItem& item,
                                        views::View* source,
-                                       int event_flags) {
+                                       const ui::Event& event) {
   scoped_ptr<ash::LauncherMenuModel> menu_model;
-  menu_model.reset(delegate_->CreateApplicationMenu(item, event_flags));
+  menu_model.reset(delegate_->CreateApplicationMenu(item, event.flags()));
 
   // Make sure we have a menu and it has at least two items in addition to the
   // application title and the 3 spacing separators.
@@ -1387,20 +1516,24 @@ bool LauncherView::ShowListMenuForView(const LauncherItem& item,
                new LauncherMenuModelAdapter(menu_model.get())),
            source,
            gfx::Point(),
-           false);
+           false,
+           ui::GetMenuSourceTypeForEvent(event));
   return true;
 }
 
 void LauncherView::ShowContextMenuForView(views::View* source,
-                                          const gfx::Point& point) {
+                                          const gfx::Point& point,
+                                          ui:: MenuSourceType source_type) {
   int view_index = view_model_->GetIndexOfView(source);
   if (view_index != -1 &&
       model_->items()[view_index].type == TYPE_APP_LIST) {
     view_index = -1;
   }
 
+  tooltip_->Close();
+
   if (view_index == -1) {
-    Shell::GetInstance()->ShowContextMenu(point);
+    Shell::GetInstance()->ShowContextMenu(point, source_type);
     return;
   }
   scoped_ptr<ui::MenuModel> menu_model(delegate_->CreateContextMenu(
@@ -1416,14 +1549,16 @@ void LauncherView::ShowContextMenuForView(views::View* source,
                new views::MenuModelAdapter(menu_model.get())),
            source,
            point,
-           true);
+           true,
+           source_type);
 }
 
 void LauncherView::ShowMenu(
     scoped_ptr<views::MenuModelAdapter> menu_model_adapter,
     views::View* source,
     const gfx::Point& click_point,
-    bool context_menu) {
+    bool context_menu,
+    ui::MenuSourceType source_type) {
   closing_event_time_ = base::TimeDelta();
   launcher_menu_runner_.reset(
       new views::MenuRunner(menu_model_adapter->CreateMenu()));
@@ -1439,6 +1574,14 @@ void LauncherView::ShowMenu(
     // Application lists use a bubble.
     ash::ShelfAlignment align = shelf->GetAlignment();
     anchor_point = source->GetBoundsInScreen();
+
+    // It is possible to invoke the menu while it is sliding into view. To cover
+    // that case, the screen coordinates are offsetted by the animation delta.
+    gfx::Vector2d offset =
+        source->GetWidget()->GetNativeWindow()->bounds().origin() -
+        source->GetWidget()->GetNativeWindow()->GetTargetBounds().origin();
+    anchor_point.set_x(anchor_point.x() - offset.x());
+    anchor_point.set_y(anchor_point.y() - offset.y());
 
     // Launcher items can have an asymmetrical border for spacing reasons.
     // Adjust anchor location for this.
@@ -1473,7 +1616,9 @@ void LauncherView::ShowMenu(
           NULL,
           anchor_point,
           menu_alignment,
-          views::MenuRunner::CONTEXT_MENU) == views::MenuRunner::MENU_DELETED) {
+          source_type,
+          context_menu ? views::MenuRunner::CONTEXT_MENU : 0) ==
+      views::MenuRunner::MENU_DELETED) {
     if (!got_deleted) {
       got_deleted_ = NULL;
       shelf->ForceUndimming(false);

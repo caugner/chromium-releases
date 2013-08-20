@@ -9,18 +9,20 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "content/public/browser/color_chooser.h"
-#include "content/public/browser/web_contents_observer.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ScopedJavaLocalRef;
 
-namespace components {
+namespace content {
+class WebContents;
+}
+
+namespace web_contents_delegate_android {
 
 // Glues the Java (ColorPickerChooser.java) picker with the native part.
-class ColorChooserAndroid : public content::ColorChooser,
-                            public content::WebContentsObserver {
+class ColorChooserAndroid : public content::ColorChooser {
  public:
-  ColorChooserAndroid(int identifier, content::WebContents* tab,
+  ColorChooserAndroid(content::WebContents* tab,
                       SkColor initial_color);
   virtual ~ColorChooserAndroid();
 
@@ -33,12 +35,16 @@ class ColorChooserAndroid : public content::ColorChooser,
  private:
   base::android::ScopedJavaGlobalRef<jobject> j_color_chooser_;
 
+  // The web contents invoking the color chooser.  No ownership. because it will
+  // outlive this class.
+  content::WebContents* web_contents_;
+
   DISALLOW_COPY_AND_ASSIGN(ColorChooserAndroid);
 };
 
 // Native JNI methods
 bool RegisterColorChooserAndroid(JNIEnv* env);
 
-}  // namespace components
+}  // namespace web_contents_delegate_android
 
 #endif  // COMPONENTS_WEB_CONTENTS_DELEGATE_ANDROID_COLOR_CHOOSER_ANDROID_H_

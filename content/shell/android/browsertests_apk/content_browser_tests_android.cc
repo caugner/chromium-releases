@@ -6,33 +6,32 @@
 // inside an android application.
 
 #include <android/log.h>
+#include <unistd.h>
 
 #include "base/android/base_jni_registrar.h"
+#include "base/android/fifo_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_tokenizer.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "content/public/app/android_library_loader_hooks.h"
 #include "content/public/app/content_main.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/nested_message_pump_android.h"
 #include "content/public/test/test_launcher.h"
 #include "content/shell/android/shell_jni_registrar.h"
-#include "content/shell/shell_main_delegate.h"
-#include "content/test/browser_test_message_pump_android.h"
+#include "content/shell/app/shell_main_delegate.h"
 #include "jni/ContentBrowserTestsActivity_jni.h"
 #include "testing/android/native_test_util.h"
 
 using testing::native_test_util::ArgsToArgv;
-using testing::native_test_util::CreateFIFO;
 using testing::native_test_util::ParseArgsFromCommandLineFile;
-using testing::native_test_util::RedirectStream;
 using testing::native_test_util::ScopedMainEntryLogger;
 
 // The main function of the program to be wrapped as an apk.
@@ -49,11 +48,12 @@ static const char kCommandLineFilePath[] =
 
 namespace content {
 
+// TODO(nileshagrawal): Refactor and deduplicate with
+// testing/android/native_test_launcher.cc
 static void RunTests(JNIEnv* env,
                      jobject obj,
                      jstring jfiles_dir,
                      jobject app_context) {
-
   // Command line basic initialization, will be fully initialized later.
   static const char* const kInitialArgv[] = { "ContentBrowserTestsActivity" };
   CommandLine::Init(arraysize(kInitialArgv), kInitialArgv);
@@ -77,6 +77,7 @@ static void RunTests(JNIEnv* env,
   // Append required switches.
   command_line->AppendSwitch(content::kSingleProcessTestsFlag);
   command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
+  command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
   // Specify a socket name to not conflict with the default one used
   // in content_shell.
   command_line->AppendSwitchASCII(switches::kRemoteDebuggingSocketName,
@@ -86,8 +87,8 @@ static void RunTests(JNIEnv* env,
   base::FilePath files_dir(
       base::android::ConvertJavaStringToUTF8(env, jfiles_dir));
   base::FilePath fifo_path(files_dir.Append(base::FilePath("test.fifo")));
-  CreateFIFO(fifo_path.value().c_str());
-  RedirectStream(stdout, fifo_path.value().c_str(), "w");
+  base::android::CreateFIFO(fifo_path, 0666);
+  base::android::RedirectStream(stdout, fifo_path, "w");
   dup2(STDOUT_FILENO, STDERR_FILENO);
 
   ScopedMainEntryLogger scoped_main_entry_logger;
@@ -106,7 +107,7 @@ JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
   if (!content::android::RegisterShellJni(env))
     return -1;
 
-  if (!content::BrowserTestMessagePumpAndroid::RegisterJni(env))
+  if (!content::NestedMessagePumpAndroid::RegisterJni(env))
     return -1;
 
   if (!content::RegisterNativesImpl(env))

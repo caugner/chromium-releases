@@ -18,10 +18,6 @@
 
 namespace sandbox {
 
-// With SELinux we can carve out a precise sandbox, so we don't have to play
-// with intercepting libc calls.
-#if !defined(CHROMIUM_SELINUX)
-
 static bool g_override_urandom = false;
 
 void InitLibcUrandomOverrides() {
@@ -63,6 +59,7 @@ static void InitLibcFileIOFunctions() {
     g_libc_fopen64 = g_libc_fopen;
   }
 
+#if defined(LIBC_GLIBC)
   // TODO(sergeyu): This works only on systems with glibc. Fix it to
   // work properly on other systems if necessary.
   g_libc_xstat = reinterpret_cast<XstatFunction>(
@@ -159,9 +156,8 @@ int xstat64_override(int version, const char *path, struct stat64 *buf) {
     return g_libc_xstat64(version, path, buf);
   }
 }
+#endif  // defined(LIBC_GLIBC)
 
-#endif  // !ADDRESS_SANITIZER
-
-#endif  // !CHROMIUM_SELINUX
+#endif  // !defined(ADDRESS_SANITIZER)
 
 }  // namespace content

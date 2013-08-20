@@ -9,18 +9,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/user_image.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace chromeos {
-
-// The guest user has a magic, empty e-mail address.
-extern const char kGuestUserEMail[];
-
-// The retail mode user has a magic, domainless e-mail address.
-extern const char kRetailModeUserEMail[];
 
 extern const int kDefaultImagesCount;
 

@@ -7,7 +7,7 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/safe_numerics.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
@@ -25,10 +25,10 @@
 #include "ppapi/shared_impl/var.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/icu/public/i18n/unicode/usearch.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
@@ -203,7 +203,7 @@ PP_Resource GetFontFileWithFallback(
 
   scoped_refptr<ppapi::StringVar> face_name(ppapi::StringVar::FromPPVar(
       description->face));
-  if (!face_name)
+  if (!face_name.get())
     return 0;
 
   int fd = content::MatchFontWithFallback(
@@ -322,7 +322,7 @@ void HistogramPDFPageCount(PP_Instance /*instance*/, int count) {
 void UserMetricsRecordAction(PP_Instance /*instance*/, PP_Var action) {
   scoped_refptr<ppapi::StringVar> action_str(
       ppapi::StringVar::FromPPVar(action));
-  if (action_str)
+  if (action_str.get())
     RenderThread::Get()->RecordUserMetrics(action_str->value());
 }
 
@@ -403,7 +403,7 @@ PP_Resource GetResourceImageForScale(PP_Instance instance_id,
     return 0;
   }
 
-  webkit::ppapi::ImageDataAutoMapper mapper(image_data);
+  webkit::ppapi::ImageDataAutoMapper mapper(image_data.get());
   if (!mapper.is_valid())
     return 0;
 

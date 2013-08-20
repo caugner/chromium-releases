@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/sync_file_system/extension_sync_event_observer.h"
 #include "chrome/browser/extensions/api/sync_file_system/extension_sync_event_observer_factory.h"
 #include "chrome/browser/extensions/api/sync_file_system/sync_file_system_api_helpers.h"
@@ -22,12 +22,12 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_client.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_types.h"
-#include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/syncable/sync_file_status.h"
-#include "webkit/quota/quota_manager.h"
+#include "webkit/browser/fileapi/file_system_context.h"
+#include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/browser/fileapi/syncable/sync_file_status.h"
+#include "webkit/browser/quota/quota_manager.h"
+#include "webkit/common/fileapi/file_system_types.h"
+#include "webkit/common/fileapi/file_system_util.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -39,10 +39,6 @@ using sync_file_system::SyncStatusCode;
 namespace extensions {
 
 namespace {
-
-// This is the only supported cloud backend service for now.
-const char* const kDriveCloudService =
-    sync_file_system::DriveFileSyncService::kServiceName;
 
 // Error messages.
 const char kFileError[] = "File error %d.";
@@ -58,7 +54,7 @@ sync_file_system::SyncFileSystemService* GetSyncFileSystemService(
   ExtensionSyncEventObserver* observer =
       ExtensionSyncEventObserverFactory::GetForProfile(profile);
   DCHECK(observer);
-  observer->InitializeForService(service, kDriveCloudService);
+  observer->InitializeForService(service);
   return service;
 }
 
@@ -113,21 +109,13 @@ void SyncFileSystemDeleteFileSystemFunction::DidDeleteFileSystem(
 }
 
 bool SyncFileSystemRequestFileSystemFunction::RunImpl() {
-  // Please note that Google Drive is the only supported cloud backend at this
-  // time. However other functions which have already been written to
-  // accommodate different service names are being left as is to allow easier
-  // future support for other backend services. (http://crbug.com/172562).
-  const std::string service_name = sync_file_system::DriveFileSyncService::
-      kServiceName;
   // Initializes sync context for this extension and continue to open
   // a new file system.
   GetSyncFileSystemService(profile())->
       InitializeForApp(
           GetFileSystemContext(),
-          service_name,
           source_url().GetOrigin(),
-          base::Bind(&self::DidInitializeFileSystemContext, this,
-                     service_name));
+          base::Bind(&self::DidInitializeFileSystemContext, this));
   return true;
 }
 
@@ -140,7 +128,6 @@ SyncFileSystemRequestFileSystemFunction::GetFileSystemContext() {
 }
 
 void SyncFileSystemRequestFileSystemFunction::DidInitializeFileSystemContext(
-    const std::string& service_name,
     SyncStatusCode status) {
   if (status != sync_file_system::SYNC_STATUS_OK) {
     error_ = sync_file_system::SyncStatusCodeToString(status);
@@ -157,10 +144,9 @@ void SyncFileSystemRequestFileSystemFunction::DidInitializeFileSystemContext(
       BrowserThread::IO, FROM_HERE,
       Bind(&fileapi::FileSystemContext::OpenSyncableFileSystem,
            GetFileSystemContext(),
-           service_name,
            source_url().GetOrigin(),
            fileapi::kFileSystemTypeSyncable,
-           true, /* create */
+           fileapi::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
            base::Bind(&self::DidOpenFileSystem, this)));
 }
 
@@ -185,7 +171,7 @@ void SyncFileSystemRequestFileSystemFunction::DidOpenFileSystem(
     return;
   }
 
-  DictionaryValue* dict = new DictionaryValue();
+  base::DictionaryValue* dict = new base::DictionaryValue();
   SetResult(dict);
   dict->SetString("name", file_system_name);
   dict->SetString("root", root_url.spec());
@@ -234,7 +220,7 @@ SyncFileSystemGetFileStatusesFunction::~SyncFileSystemGetFileStatusesFunction(
 
 bool SyncFileSystemGetFileStatusesFunction::RunImpl() {
   // All FileEntries converted into array of URL Strings in JS custom bindings.
-  ListValue* file_entry_urls = NULL;
+  base::ListValue* file_entry_urls = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetList(0, &file_entry_urls));
 
   scoped_refptr<fileapi::FileSystemContext> file_system_context =
@@ -288,7 +274,7 @@ void SyncFileSystemGetFileStatusesFunction::DidGetFileStatus(
   base::ListValue* status_array = new base::ListValue();
   for (URLToStatusMap::iterator it = file_sync_statuses_.begin();
        it != file_sync_statuses_.end(); ++it) {
-    DictionaryValue* dict = new DictionaryValue();
+    base::DictionaryValue* dict = new base::DictionaryValue();
     status_array->Append(dict);
 
     fileapi::FileSystemURL url = it->first;

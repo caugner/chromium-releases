@@ -24,26 +24,21 @@ static const char kLoopback[] = "127.0.0.1";
 static const int kDefaultTimeoutMs = 5000;
 
 TCPListenSocketTester::TCPListenSocketTester()
-    : thread_(NULL),
-      loop_(NULL),
-      server_(NULL),
-      connection_(NULL),
-      cv_(&lock_) {
-}
+    : loop_(NULL), server_(NULL), connection_(NULL), cv_(&lock_) {}
 
 void TCPListenSocketTester::SetUp() {
   base::Thread::Options options;
-  options.message_loop_type = MessageLoop::TYPE_IO;
+  options.message_loop_type = base::MessageLoop::TYPE_IO;
   thread_.reset(new base::Thread("socketio_test"));
   thread_->StartWithOptions(options);
-  loop_ = reinterpret_cast<MessageLoopForIO*>(thread_->message_loop());
+  loop_ = reinterpret_cast<base::MessageLoopForIO*>(thread_->message_loop());
 
   loop_->PostTask(FROM_HERE, base::Bind(
       &TCPListenSocketTester::Listen, this));
 
   // verify Listen succeeded
   NextAction();
-  ASSERT_FALSE(server_ == NULL);
+  ASSERT_FALSE(server_.get() == NULL);
   ASSERT_EQ(ACTION_LISTEN, last_action_.type());
 
   // verify the connect/accept and setup test_socket_
@@ -127,7 +122,7 @@ void TCPListenSocketTester::Shutdown() {
 
 void TCPListenSocketTester::Listen() {
   server_ = DoListen();
-  ASSERT_TRUE(server_);
+  ASSERT_TRUE(server_.get());
   server_->AddRef();
   ReportAction(TCPListenSocketTestAction(ACTION_LISTEN));
 }

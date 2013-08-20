@@ -7,7 +7,7 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "third_party/mesa/MesaLib/include/GL/osmesa.h"
+#include "third_party/mesa/src/include/GL/osmesa.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_cgl.h"
@@ -36,13 +36,9 @@ bool GLSurface::InitializeOneOffInternal() {
 }
 
 scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
-    bool software,
     gfx::AcceleratedWidget window) {
   TRACE_EVENT0("gpu", "GLSurface::CreateViewGLSurface");
 #if defined(USE_AURA)
-  if (software)
-    return NULL;
-
   switch (GetGLImplementation()) {
     case kGLImplementationDesktopGL:
     case kGLImplementationAppleGL: {
@@ -59,17 +55,13 @@ scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
       return NULL;
   }
 #else
-  return CreateOffscreenGLSurface(software, gfx::Size(1,1));
+  return CreateOffscreenGLSurface(gfx::Size(1, 1));
 #endif
 }
 
 scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(
-    bool software,
     const gfx::Size& size) {
   TRACE_EVENT0("gpu", "GLSurface::CreateOffscreenGLSurface");
-  if (software)
-    return NULL;
-
   switch (GetGLImplementation()) {
     case kGLImplementationOSMesaGL: {
       scoped_refptr<GLSurface> surface(new GLSurfaceOSMesa(OSMESA_RGBA,

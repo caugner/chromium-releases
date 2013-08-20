@@ -47,6 +47,7 @@ class FaviconBitmapHandler : public content::WebContentsObserver {
  private:
   void DidDownloadFavicon(
       int id,
+      int http_status_code,
       const GURL& image_url,
       int requested_size,
       const std::vector<SkBitmap>& bitmaps);
@@ -109,7 +110,11 @@ void FaviconBitmapHandler::DidUpdateFaviconURL(
     if (pending_requests_.find(*iter) != pending_requests_.end())
       continue;  // Skip already pending downloads.
     pending_requests_.insert(*iter);
-    web_contents_->DownloadImage(*iter, true, 0,
+    web_contents_->DownloadImage(
+        *iter,
+        true,  // is a favicon
+        0,     // no preferred size
+        0,     // no maximum size
         base::Bind(&FaviconBitmapHandler::DidDownloadFavicon,
                    weak_ptr_factory_.GetWeakPtr()));
   }
@@ -121,6 +126,7 @@ bool FaviconBitmapHandler::HasPendingDownloads() const {
 
 void FaviconBitmapHandler::DidDownloadFavicon(
     int id,
+    int http_status_code,
     const GURL& image_url,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {

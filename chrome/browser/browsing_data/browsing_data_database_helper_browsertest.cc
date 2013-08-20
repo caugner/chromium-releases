@@ -5,7 +5,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/browsing_data_database_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_helper_browsertest.h"
 #include "chrome/browser/profiles/profile.h"
@@ -36,19 +36,18 @@ class BrowsingDataDatabaseHelperTest : public InProcessBrowserTest {
     string16 db_name = ASCIIToUTF16("db");
     string16 description = ASCIIToUTF16("db_description");
     int64 size;
-    string16 identifier1(UTF8ToUTF16(kTestIdentifier1));
-    db_tracker->DatabaseOpened(identifier1, db_name, description, 1, &size);
-    db_tracker->DatabaseClosed(identifier1, db_name);
+    db_tracker->DatabaseOpened(kTestIdentifier1, db_name, description,
+                               1, &size);
+    db_tracker->DatabaseClosed(kTestIdentifier1, db_name);
     base::FilePath db_path1 =
-        db_tracker->GetFullDBFilePath(identifier1, db_name);
+        db_tracker->GetFullDBFilePath(kTestIdentifier1, db_name);
     file_util::CreateDirectory(db_path1.DirName());
     ASSERT_EQ(0, file_util::WriteFile(db_path1, NULL, 0));
-    string16 identifierExtension(UTF8ToUTF16(kTestIdentifierExtension));
-    db_tracker->DatabaseOpened(identifierExtension, db_name, description, 1,
-                               &size);
-    db_tracker->DatabaseClosed(identifierExtension, db_name);
+    db_tracker->DatabaseOpened(kTestIdentifierExtension, db_name, description,
+                               1, &size);
+    db_tracker->DatabaseClosed(kTestIdentifierExtension, db_name);
     base::FilePath db_path2 =
-        db_tracker->GetFullDBFilePath(identifierExtension, db_name);
+        db_tracker->GetFullDBFilePath(kTestIdentifierExtension, db_name);
     file_util::CreateDirectory(db_path2.DirName());
     ASSERT_EQ(0, file_util::WriteFile(db_path2, NULL, 0));
     std::vector<webkit_database::OriginInfo> origins;
@@ -72,8 +71,8 @@ class StopTestOnCallback {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     ASSERT_EQ(1UL, database_info_list.size());
     EXPECT_EQ(std::string(kTestIdentifier1),
-              database_info_list.begin()->origin_identifier);
-    MessageLoop::current()->Quit();
+              database_info_list.begin()->identifier.ToString());
+    base::MessageLoop::current()->Quit();
   }
 
  private:
@@ -85,10 +84,9 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataDatabaseHelperTest, DISABLED_FetchData) {
   CreateDatabases();
   scoped_refptr<BrowsingDataDatabaseHelper> database_helper(
       new BrowsingDataDatabaseHelper(browser()->profile()));
-  StopTestOnCallback stop_test_on_callback(database_helper);
-  database_helper->StartFetching(
-      base::Bind(&StopTestOnCallback::Callback,
-                 base::Unretained(&stop_test_on_callback)));
+  StopTestOnCallback stop_test_on_callback(database_helper.get());
+  database_helper->StartFetching(base::Bind(
+      &StopTestOnCallback::Callback, base::Unretained(&stop_test_on_callback)));
   // Blocks until StopTestOnCallback::Callback is notified.
   content::RunMessageLoop();
 }
@@ -119,13 +117,13 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataDatabaseHelperTest, CannedAddDatabase) {
   ASSERT_EQ(3u, result.size());
   std::list<BrowsingDataDatabaseHelper::DatabaseInfo>::iterator info =
       result.begin();
-  EXPECT_STREQ(origin_str1, info->origin_identifier.c_str());
+  EXPECT_EQ(origin_str1, info->identifier.ToString());
   EXPECT_STREQ(db1, info->database_name.c_str());
   info++;
-  EXPECT_STREQ(origin_str1, info->origin_identifier.c_str());
+  EXPECT_EQ(origin_str1, info->identifier.ToString());
   EXPECT_STREQ(db2, info->database_name.c_str());
   info++;
-  EXPECT_STREQ(origin_str2, info->origin_identifier.c_str());
+  EXPECT_EQ(origin_str2, info->identifier.ToString());
   EXPECT_STREQ(db3, info->database_name.c_str());
 }
 
@@ -148,7 +146,7 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataDatabaseHelperTest, CannedUnique) {
       callback.result();
 
   ASSERT_EQ(1u, result.size());
-  EXPECT_STREQ(origin_str, result.begin()->origin_identifier.c_str());
+  EXPECT_EQ(origin_str, result.begin()->identifier.ToString());
   EXPECT_STREQ(db, result.begin()->database_name.c_str());
 }
 }  // namespace

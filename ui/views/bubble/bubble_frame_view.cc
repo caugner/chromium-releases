@@ -9,17 +9,20 @@
 #include "grit/ui_resources.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/path.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 #include "ui/views/window/client_view.h"
 
 namespace {
 
-// Insets, in pixels, for the title view, when it exists.
-const int kTitleTopInset = 19;
-const int kTitleLeftInset = 10;
+// Padding, in pixels, for the title view, when it exists.
+const int kTitleTopInset = 12;
+const int kTitleLeftInset = 19;
+const int kTitleBottomInset = 12;
 
 // Get the |vertical| or horizontal screen overflow of the |window_bounds|.
 int GetOffScreenLength(const gfx::Rect& monitor_bounds,
@@ -52,8 +55,7 @@ BubbleFrameView::BubbleFrameView(const gfx::Insets& content_margins)
       content_margins_(content_margins),
       title_(NULL),
       close_(NULL),
-      titlebar_extra_view_(NULL),
-      can_drag_(false) {
+      titlebar_extra_view_(NULL) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   title_ = new Label(string16(), rb.GetFont(ui::ResourceBundle::MediumFont));
   title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -88,15 +90,41 @@ gfx::Rect BubbleFrameView::GetWindowBoundsForClientBounds(
 }
 
 int BubbleFrameView::NonClientHitTest(const gfx::Point& point) {
+  if (!bounds().Contains(point))
+    return HTNOWHERE;
   if (close_->visible() && close_->GetMirroredBounds().Contains(point))
     return HTCLOSE;
-  if (can_drag_ && point.y() < GetInsets().top())
-    return HTCAPTION;
+
+  // Allow dialogs to show the system menu and be dragged.
+  if (GetWidget()->widget_delegate()->AsDialogDelegate()) {
+    gfx::Rect sys_rect(0, 0, title_->x(), title_->y());
+    sys_rect.set_origin(gfx::Point(GetMirroredXForRect(sys_rect), 0));
+    if (sys_rect.Contains(point))
+      return HTSYSMENU;
+    if (point.y() < title_->bounds().bottom())
+      return HTCAPTION;
+  }
+
   return GetWidget()->client_view()->NonClientHitTest(point);
 }
 
 void BubbleFrameView::GetWindowMask(const gfx::Size& size,
-                                    gfx::Path* window_mask) {}
+                                    gfx::Path* window_mask) {
+  if (bubble_border_->shadow() != BubbleBorder::NO_SHADOW_OPAQUE_BORDER)
+    return;
+
+  // Use a window mask roughly matching the border in the image assets.
+  static const int kBorderStrokeSize = 1;
+  static const SkScalar kCornerRadius = SkIntToScalar(6);
+  gfx::Insets border_insets = bubble_border_->GetInsets();
+  const SkRect rect = { SkIntToScalar(border_insets.left() - kBorderStrokeSize),
+                        SkIntToScalar(border_insets.top() - kBorderStrokeSize),
+                        SkIntToScalar(size.width() - border_insets.right() +
+                                      kBorderStrokeSize),
+                        SkIntToScalar(size.height() - border_insets.bottom() +
+                                      kBorderStrokeSize) };
+  window_mask->addRoundRect(rect, kCornerRadius, kCornerRadius);
+}
 
 void BubbleFrameView::ResetWindowControls() {}
 
@@ -106,33 +134,47 @@ void BubbleFrameView::UpdateWindowTitle() {}
 
 gfx::Insets BubbleFrameView::GetInsets() const {
   gfx::Insets insets = content_margins_;
-  insets += gfx::Insets(
-      std::max(title_->text().empty() ? 0 : title_->height() + kTitleTopInset,
-               close_->visible() ? close_->height() : 0),
-      0, 0, 0);
+  const int title_height = title_->text().empty() ? 0 :
+      title_->GetPreferredSize().height() + kTitleTopInset + kTitleBottomInset;
+  const int close_height = close_->visible() ? close_->height() : 0;
+  insets += gfx::Insets(std::max(title_height, close_height), 0, 0, 0);
   return insets;
 }
 
 gfx::Size BubbleFrameView::GetPreferredSize() {
-  gfx::Size client_size(GetWidget()->client_view()->GetPreferredSize());
-  return GetUpdatedWindowBounds(gfx::Rect(), client_size, false).size();
+  const gfx::Size client(GetWidget()->client_view()->GetPreferredSize());
+  gfx::Size size(GetUpdatedWindowBounds(gfx::Rect(), client, false).size());
+  // Accommodate the width of the title bar elements.
+  int title_bar_width = GetInsets().width() + border()->GetInsets().width();
+  if (!title_->text().empty())
+    title_bar_width += kTitleLeftInset + title_->GetPreferredSize().width();
+  if (close_->visible())
+    title_bar_width += close_->width() + 1;
+  if (titlebar_extra_view_ != NULL)
+    title_bar_width += titlebar_extra_view_->GetPreferredSize().width();
+  size.SetToMax(gfx::Size(title_bar_width, 0));
+  return size;
 }
 
 void BubbleFrameView::Layout() {
-  gfx::Rect bounds = GetLocalBounds();
+  gfx::Rect bounds(GetLocalBounds());
   bounds.Inset(border()->GetInsets());
   // Small additional insets yield the desired 10px visual close button insets.
-  bounds.Inset(0, 2, close_->width() + 1, 0);
-  close_->SetPosition(gfx::Point(bounds.right(), bounds.y()));
+  bounds.Inset(0, 0, close_->width() + 1, 0);
+  close_->SetPosition(gfx::Point(bounds.right(), bounds.y() + 2));
 
-  gfx::Rect title_bounds = bounds;
-  title_bounds.Inset(kTitleTopInset, kTitleLeftInset, 0, 0);
-
-  title_bounds.set_size(title_->GetPreferredSize());
+  gfx::Rect title_bounds(bounds);
+  title_bounds.Inset(kTitleLeftInset, kTitleTopInset, 0, 0);
+  gfx::Size title_size(title_->GetPreferredSize());
+  const int title_width = std::max(0, close_->bounds().x() - title_bounds.x());
+  title_size.SetToMin(gfx::Size(title_width, title_size.height()));
+  title_bounds.set_size(title_size);
   title_->SetBoundsRect(title_bounds);
 
   if (titlebar_extra_view_) {
-    const gfx::Size size = titlebar_extra_view_->GetPreferredSize();
+    const int extra_width = close_->bounds().x() - title_->bounds().right();
+    gfx::Size size = titlebar_extra_view_->GetPreferredSize();
+    size.SetToMin(gfx::Size(std::max(0, extra_width), size.height()));
     gfx::Rect titlebar_extra_view_bounds(
         bounds.right() - size.width(),
         title_bounds.y(),
@@ -143,8 +185,8 @@ void BubbleFrameView::Layout() {
   }
 }
 
-std::string BubbleFrameView::GetClassName() const {
-  return "ui/views/bubble/BubbleFrameView";
+const char* BubbleFrameView::GetClassName() const {
+  return "BubbleFrameView";
 }
 
 void BubbleFrameView::ChildPreferredSizeChanged(View* child) {

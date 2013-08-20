@@ -9,9 +9,9 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/string16.h"
-#include "components/autofill/browser/autofill_metrics.h"
-#include "components/autofill/browser/field_types.h"
+#include "base/strings/string16.h"
+#include "components/autofill/core/browser/autofill_metrics.h"
+#include "components/autofill/core/browser/field_types.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
@@ -19,6 +19,15 @@
 namespace autofill {
 
 class AutofillField;
+
+// The time (in milliseconds) to show the splash page when the dialog is first
+// started.
+extern int const kSplashDisplayDurationMs;
+// The time (in milliseconds) spend fading out the splash image.
+extern int const kSplashFadeOutDurationMs;
+// The time (in milliseconds) spend fading in the dialog (after the splash image
+// has been faded out).
+extern int const kSplashFadeInDialogDurationMs;
 
 // This struct describes a single input control for the imperative autocomplete
 // dialog.
@@ -30,14 +39,15 @@ struct DetailInput {
   AutofillFieldType type;
   // Placeholder text resource ID.
   int placeholder_text_rid;
-  // The section suffix that the field must have to match up to this input.
-  const char* section_suffix;
   // A number between 0 and 1.0 that describes how much of the horizontal space
   // in the row should be allotted to this input. 0 is equivalent to 1.
   float expand_weight;
   // When non-empty, indicates the starting value for this input. This will be
   // used when the user is editing existing data.
   string16 initial_value;
+  // Whether the input is able to be edited (e.g. text changed in textfields,
+  // index changed in comboboxes).
+  bool editable;
 };
 
 // Determines whether |input| and |field| match.
@@ -71,12 +81,13 @@ class DialogNotification {
   enum Type {
     NONE,
     AUTOCHECKOUT_ERROR,
+    AUTOCHECKOUT_SUCCESS,
+    DEVELOPER_WARNING,
     EXPLANATORY_MESSAGE,
     REQUIRED_ACTION,
     SECURITY_WARNING,
     VALIDATION_ERROR,
     WALLET_ERROR,
-    WALLET_SIGNIN_PROMO,
     WALLET_USAGE_CONFIRMATION,
   };
 
@@ -117,6 +128,37 @@ class DialogNotification {
   bool interactive_;
 };
 
+// A notification to show in the autofill dialog. Ranges from information to
+// seriously scary security messages, and will give you the color it should be
+// displayed (if you ask it).
+class DialogAutocheckoutStep {
+ public:
+  DialogAutocheckoutStep(AutocheckoutStepType type,
+                         AutocheckoutStepStatus status);
+
+  // Returns the appropriate color for the display text based on |status_|.
+  SkColor GetTextColor() const;
+
+  // Returns the appropriate font for the display text based on |status_|.
+  gfx::Font GetTextFont() const;
+
+  // Returns whether the icon for the view should be visable based on |status_|.
+  bool IsIconVisible() const;
+
+  // Returns the display text based on |type_| and |status_|.
+  string16 GetDisplayText() const;
+
+  AutocheckoutStepStatus status() { return status_; }
+
+  AutocheckoutStepType type() { return type_; }
+
+ private:
+  AutocheckoutStepType type_;
+  AutocheckoutStepStatus status_;
+};
+
+extern SkColor const kWarningColor;
+
 enum DialogSignedInState {
   REQUIRES_RESPONSE,
   REQUIRES_SIGN_IN,
@@ -125,20 +167,31 @@ enum DialogSignedInState {
   SIGN_IN_DISABLED,
 };
 
+// Overall state of the Autocheckout flow.
+enum AutocheckoutState {
+  AUTOCHECKOUT_ERROR,        // There was an error in the flow.
+  AUTOCHECKOUT_IN_PROGRESS,  // The flow is currently in.
+  AUTOCHECKOUT_NOT_STARTED,  // The flow has not been initiated by the user yet.
+  AUTOCHECKOUT_SUCCESS,      // The flow completed successsfully.
+};
+
 struct SuggestionState {
   SuggestionState(const string16& text,
                   gfx::Font::FontStyle text_style,
                   const gfx::Image& icon,
                   const string16& extra_text,
-                  const gfx::Image& extra_icon,
-                  bool editable);
+                  const gfx::Image& extra_icon);
   ~SuggestionState();
   string16 text;
   gfx::Font::FontStyle text_style;
   gfx::Image icon;
   string16 extra_text;
   gfx::Image extra_icon;
-  bool editable;
+};
+
+enum ValidationType {
+  VALIDATE_EDIT,   // Validate user edits. Allow for empty fields.
+  VALIDATE_FINAL,  // Full form validation. Required fields can't be empty.
 };
 
 typedef std::vector<DetailInput> DetailInputs;

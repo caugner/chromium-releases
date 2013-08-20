@@ -28,6 +28,7 @@ LIB_DICT = {
   'mac': [],
   'win': ['x86_32']
 }
+VALID_TOOLCHAINS = ['newlib', 'glibc', 'pnacl', 'win', 'linux', 'mac']
 
 
 def CopyFilesFromTo(filelist, srcdir, dstdir):
@@ -68,6 +69,13 @@ def UpdateHelpers(pepperdir, platform, clobber=False):
                                os.path.join(pepperdir, 'tools', 'make.exe'))
 
 
+def ValidateToolchains(toolchains):
+  invalid_toolchains = set(toolchains) - set(VALID_TOOLCHAINS)
+  if invalid_toolchains:
+    buildbot_common.ErrorExit('Invalid toolchain(s): %s' % (
+        ', '.join(invalid_toolchains)))
+
+
 def UpdateProjects(pepperdir, platform, project_tree, toolchains,
                    clobber=False, configs=None, first_toolchain=False):
   if configs is None:
@@ -77,6 +85,7 @@ def UpdateProjects(pepperdir, platform, project_tree, toolchains,
   if not os.path.exists(os.path.join(pepperdir, 'toolchain')):
     buildbot_common.ErrorExit('Examples depend on missing toolchains.')
 
+  ValidateToolchains(toolchains)
 
   # Create the library output directories
   libdir = os.path.join(pepperdir, 'lib')
@@ -132,8 +141,7 @@ def UpdateProjects(pepperdir, platform, project_tree, toolchains,
                                        targets)
 
 
-def BuildProjectsBranch(pepperdir, platform, branch, deps=True, clean=False,
-                        config='Debug'):
+def BuildProjectsBranch(pepperdir, platform, branch, deps, clean, config):
   make_dir = os.path.join(pepperdir, branch)
   print "\n\nMake: " + make_dir
   if platform == 'win':
@@ -147,7 +155,7 @@ def BuildProjectsBranch(pepperdir, platform, branch, deps=True, clean=False,
     extra_args += ['IGNORE_DEPS=1']
 
   try:
-    buildbot_common.Run([make, '-j8', 'all_versions'] + extra_args,
+    buildbot_common.Run([make, '-j8', 'TOOLCHAIN=all'] + extra_args,
                         cwd=make_dir)
   except:
     print 'Failed to build ' + branch
@@ -155,7 +163,7 @@ def BuildProjectsBranch(pepperdir, platform, branch, deps=True, clean=False,
 
   if clean:
     # Clean to remove temporary files but keep the built
-    buildbot_common.Run([make, '-j8', 'clean'] + extra_args,
+    buildbot_common.Run([make, '-j8', 'clean', 'TOOLCHAIN=all'] + extra_args,
                         cwd=make_dir)
 
 
@@ -175,11 +183,14 @@ def BuildProjects(pepperdir, platform, project_tree, deps=True,
 
 def main(args):
   parser = optparse.OptionParser()
-  parser.add_option('--clobber',
+  parser.add_option('-c', '--clobber',
       help='Clobber project directories before copying new files',
       action='store_true', default=False)
   parser.add_option('-b', '--build',
       help='Build the projects.', action='store_true')
+  parser.add_option('--config',
+      help='Choose configuration to build (Debug or Release).  Builds both '
+           'by default')
   parser.add_option('-x', '--experimental',
       help='Build experimental projects', action='store_true')
   parser.add_option('-t', '--toolchain',
@@ -193,10 +204,14 @@ def main(args):
       action='append')
   parser.add_option('-v', '--verbose', action='store_true')
 
-  options, files = parser.parse_args(args[1:])
-  if len(files):
-    parser.error('Not expecting files.')
-    return 1
+  options, args = parser.parse_args(args[1:])
+  if args:
+    parser.error('Not expecting any arguments.')
+
+  if 'NACL_SDK_ROOT' in os.environ:
+    # We don't want the currently configured NACL_SDK_ROOT to have any effect
+    # on the build.
+    del os.environ['NACL_SDK_ROOT']
 
   pepper_ver = str(int(build_version.ChromeMajorVersion()))
   pepperdir = os.path.join(OUT_DIR, 'pepper_' + pepper_ver)
@@ -206,8 +221,11 @@ def main(args):
     options.toolchain = ['newlib', 'glibc', 'pnacl', 'host']
 
   if 'host' in options.toolchain:
+    options.toolchain.remove('host')
     options.toolchain.append(platform)
     print 'Adding platform: ' + platform
+
+  ValidateToolchains(options.toolchain)
 
   filters = {}
   if options.toolchain:
@@ -222,17 +240,26 @@ def main(args):
     filters['NAME'] = options.project
     print 'Filter by name: ' + str(options.project)
 
-  project_tree = parse_dsc.LoadProjectTree(SDK_SRC_DIR, verbose=options.verbose,
-                                           filters=filters)
+  project_tree = parse_dsc.LoadProjectTree(SDK_SRC_DIR, filters=filters)
   parse_dsc.PrintProjectTree(project_tree)
 
   UpdateHelpers(pepperdir, platform, clobber=options.clobber)
   UpdateProjects(pepperdir, platform, project_tree, options.toolchain,
                  clobber=options.clobber)
+
   if options.build:
-    BuildProjects(pepperdir, platform, project_tree)
+    if options.config:
+      configs = [options.config]
+    else:
+      configs = ['Debug', 'Release']
+    for config in configs:
+      BuildProjects(pepperdir, platform, project_tree, config=config)
+
   return 0
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  try:
+    sys.exit(main(sys.argv))
+  except KeyboardInterrupt:
+    buildbot_common.ErrorExit('%s: interrupted' % os.path.basename(sys.argv[0]))

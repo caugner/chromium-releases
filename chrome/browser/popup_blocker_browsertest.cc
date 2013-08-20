@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -114,7 +113,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
   BasicTest(CreateIncognitoBrowser(), GetTestURL());
 }
 
-IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, 
+IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        PopupBlockedFakeClickOnAnchor) {
   GURL url(ui_test_utils::GetTestUrl(
       base::FilePath(kTestDir),
@@ -152,7 +151,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, PopupsLaunchWhenTabIsClosed) {
       base::FilePath(FILE_PATH_LITERAL("popup-on-unload.html")));
   ui_test_utils::NavigateToURL(browser(), url);
 
-  NavigateAndCheckPopupShown(browser(), GURL(chrome::kAboutBlankURL));
+  NavigateAndCheckPopupShown(browser(), GURL(content::kAboutBlankURL));
 }
 
 // Verify that when you unblock popup, the popup shows in history and omnibox.
@@ -179,8 +178,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
   LocationBar* location_bar = browser()->window()->GetLocationBar();
   ui_test_utils::SendToOmniboxAndSubmit(location_bar, search_string);
   OmniboxEditModel* model = location_bar->GetLocationEntry()->model();
-  EXPECT_EQ(GURL(search_string), model->CurrentMatch().destination_url);
-  EXPECT_EQ(ASCIIToUTF16(search_string), model->CurrentMatch().contents);
+  EXPECT_EQ(GURL(search_string), model->CurrentMatch(NULL).destination_url);
+  EXPECT_EQ(ASCIIToUTF16(search_string), model->CurrentMatch(NULL).contents);
 }
 
 }  // namespace

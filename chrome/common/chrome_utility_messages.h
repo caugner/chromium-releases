@@ -8,21 +8,18 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/platform_file.h"
+#include "base/strings/string16.h"
 #include "base/values.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
-#include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "printing/backend/print_backend.h"
 #include "printing/page_range.h"
 #include "printing/pdf_render_settings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/gfx/rect.h"
 
 #define IPC_MESSAGE_START ChromeUtilityMsgStart
 
@@ -60,6 +57,7 @@ IPC_STRUCT_TRAITS_END()
 //------------------------------------------------------------------------------
 // Utility process messages:
 // These are messages from the browser to the utility process.
+
 // Tell the utility process to unpack the given extension file in its
 // directory and verify that it is valid.
 IPC_MESSAGE_CONTROL4(ChromeUtilityMsg_UnpackExtension,
@@ -127,26 +125,34 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityMsg_StartupPing)
 IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
                      IPC::PlatformFileForTransit /* zip_file */)
 
+#if defined(OS_WIN)
+// Tell the utility process to parse the iTunes preference XML file contents
+// and return the path to the iTunes directory.
+IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_ParseITunesPrefXml,
+                     std::string /* XML to parse */)
+#endif  // defined(OS_WIN)
+
 //------------------------------------------------------------------------------
 // Utility process host messages:
 // These are messages from the utility process to the browser.
+
 // Reply when the utility process is done unpacking an extension.  |manifest|
 // is the parsed manifest.json file.
 // The unpacker should also have written out files containing the decoded
 // images and message catalogs from the extension. See extensions::Unpacker for
 // details.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_UnpackExtension_Succeeded,
-                     DictionaryValue /* manifest */)
+                     base::DictionaryValue /* manifest */)
 
 // Reply when the utility process has failed while unpacking an extension.
 // |error_message| is a user-displayable explanation of what went wrong.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_UnpackExtension_Failed,
-                     string16 /* error_message, if any */)
+                     base::string16 /* error_message, if any */)
 
 // Reply when the utility process is done unpacking and parsing JSON data
 // from a web resource.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_UnpackWebResource_Succeeded,
-                     DictionaryValue /* json data */)
+                     base::DictionaryValue /* json data */)
 
 // Reply when the utility process has failed while unpacking and parsing a
 // web resource.  |error_message| is a user-readable explanation of what
@@ -186,7 +192,7 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_RenderPDFPagesToMetafile_Failed)
 // so we put the result Value into a ListValue. Handlers should examine the
 // first (and only) element of the ListValue for the actual result.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Succeeded,
-                     ListValue)
+                     base::ListValue)
 
 // Reply when the utility process failed in parsing a JSON string.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Failed,
@@ -220,3 +226,10 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_ProcessStarted)
 IPC_MESSAGE_CONTROL1(
     ChromeUtilityHostMsg_AnalyzeZipFileForDownloadProtection_Finished,
     safe_browsing::zip_analyzer::Results)
+
+#if defined(OS_WIN)
+// Reply after parsing the iTunes preferences XML file contents with either the
+// path to the iTunes directory or an empty FilePath.
+IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_GotITunesDirectory,
+                     base::FilePath /* Path to iTunes library */)
+#endif  // defined(OS_WIN)

@@ -11,8 +11,8 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -360,9 +360,8 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   GtkWidget* table;
   if (details_.GetNodeType() != BookmarkNode::FOLDER) {
     url_entry_ = gtk_entry_new();
-    PrefService* prefs = profile_ ?
-        components::UserPrefs::Get(profile_) :
-        NULL;
+    PrefService* prefs =
+      profile_ ? user_prefs::UserPrefs::Get(profile_) :  NULL;
     gtk_entry_set_text(
         GTK_ENTRY(url_entry_),
         UTF16ToUTF8(chrome::FormatBookmarkURLForDisplay(url, prefs)).c_str());
@@ -524,7 +523,7 @@ string16 BookmarkEditorGtk::GetInputTitle() const {
 }
 
 void BookmarkEditorGtk::ApplyEdits() {
-  DCHECK(bb_model_->IsLoaded());
+  DCHECK(bb_model_->loaded());
 
   GtkTreeIter currently_selected_iter;
   if (show_tree_) {
@@ -619,7 +618,7 @@ gboolean BookmarkEditorGtk::OnWindowDeleteEvent(GtkWidget* widget,
 }
 
 void BookmarkEditorGtk::OnWindowDestroy(GtkWidget* widget) {
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void BookmarkEditorGtk::OnEntryChanged(GtkWidget* entry) {

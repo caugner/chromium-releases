@@ -9,7 +9,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/ui/cocoa/location_bar/bubble_decoration.h"
 
 class SelectedKeywordDecoration : public BubbleDecoration {
@@ -24,7 +24,7 @@ class SelectedKeywordDecoration : public BubbleDecoration {
   // Determines what combination of labels and image will best fit
   // within |width|, makes those current for |BubbleDecoration|, and
   // return the resulting width.
-  virtual CGFloat GetWidthForSpace(CGFloat width, CGFloat text_width) OVERRIDE;
+  virtual CGFloat GetWidthForSpace(CGFloat width) OVERRIDE;
 
   void SetImage(NSImage* image);
 
@@ -33,9 +33,9 @@ class SelectedKeywordDecoration : public BubbleDecoration {
   FRIEND_TEST_ALL_PREFIXES(SelectedKeywordDecorationTest,
                            UsesPartialKeywordIfNarrow);
 
-  scoped_nsobject<NSImage> search_image_;
-  scoped_nsobject<NSString> full_string_;
-  scoped_nsobject<NSString> partial_string_;
+  base::scoped_nsobject<NSImage> search_image_;
+  base::scoped_nsobject<NSString> full_string_;
+  base::scoped_nsobject<NSString> partial_string_;
 
   DISALLOW_COPY_AND_ASSIGN(SelectedKeywordDecoration);
 };

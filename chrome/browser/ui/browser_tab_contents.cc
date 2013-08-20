@@ -13,10 +13,8 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
 #include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
-#include "chrome/browser/omnibox_search_hint.h"
 #include "chrome/browser/password_manager/password_generation_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
@@ -42,25 +40,21 @@
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/autofill/browser/autofill_external_delegate.h"
-#include "components/autofill/browser/autofill_manager.h"
+#include "components/autofill/content/browser/autofill_driver_impl.h"
+#include "components/autofill/core/browser/autofill_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
-
-#if defined(ENABLE_AUTOMATION)
-#include "chrome/browser/automation/automation_tab_helper.h"
-#endif
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
 #endif
 
 #if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
 #include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #endif
 
 #if defined(ENABLE_PRINTING)
@@ -76,10 +70,11 @@
 #include "chrome/browser/ui/metro_pin_tab_helper_win.h"
 #endif
 
-using autofill::AutofillExternalDelegate;
+using autofill::AutofillDriverImpl;
 using autofill::AutofillManager;
 using autofill::TabAutofillManagerDelegate;
 using content::WebContents;
+using web_modal::WebContentsModalDialogManager;
 
 namespace {
 
@@ -114,17 +109,11 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
 
   AlternateErrorPageTabObserver::CreateForWebContents(web_contents);
   TabAutofillManagerDelegate::CreateForWebContents(web_contents);
-  AutofillManager::CreateForWebContentsAndDelegate(
+  AutofillDriverImpl::CreateForWebContentsAndDelegate(
       web_contents,
       TabAutofillManagerDelegate::FromWebContents(web_contents),
-      g_browser_process->GetApplicationLocale());
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableNativeAutofillUi)) {
-    AutofillExternalDelegate::CreateForWebContentsAndManager(
-        web_contents, AutofillManager::FromWebContents(web_contents));
-    AutofillManager::FromWebContents(web_contents)->SetExternalDelegate(
-        AutofillExternalDelegate::FromWebContents(web_contents));
-  }
+      g_browser_process->GetApplicationLocale(),
+      AutofillManager::ENABLE_AUTOFILL_DOWNLOAD_MANAGER);
   BlockedContentTabHelper::CreateForWebContents(web_contents);
   BookmarkTabHelper::CreateForWebContents(web_contents);
   chrome_browser_net::LoadTimeStatsTabHelper::CreateForWebContents(
@@ -141,8 +130,6 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   HungPluginTabHelper::CreateForWebContents(web_contents);
   InfoBarService::CreateForWebContents(web_contents);
   NavigationMetricsRecorder::CreateForWebContents(web_contents);
-  if (OmniboxSearchHint::IsEnabled(profile))
-    OmniboxSearchHint::CreateForWebContents(web_contents);
   PasswordGenerationManager::CreateForWebContents(web_contents);
   PasswordManagerDelegateImpl::CreateForWebContents(web_contents);
   PasswordManager::CreateForWebContentsAndDelegate(
@@ -162,18 +149,12 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   TranslateTabHelper::CreateForWebContents(web_contents);
   ZoomController::CreateForWebContents(web_contents);
 
-#if defined(ENABLE_AUTOMATION)
-  AutomationTabHelper::CreateForWebContents(web_contents);
-#endif
-
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
   captive_portal::CaptivePortalTabHelper::CreateForWebContents(web_contents);
 #endif
 
 #if defined(ENABLE_MANAGED_USERS)
-  ManagedUserService* service =
-      ManagedUserServiceFactory::GetForProfile(profile);
-  if (service->ProfileIsManaged())
+  if (ManagedUserService::ProfileIsManaged(profile))
     ManagedModeNavigationObserver::CreateForWebContents(web_contents);
 #endif
 

@@ -4,8 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/infobars/confirm_infobar_controller.h"
 
-#include "base/memory/scoped_nsobject.h"
-#include "base/string_util.h"
+#include "base/mac/scoped_nsobject.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -110,8 +110,8 @@ class ConfirmInfoBarControllerTest : public CocoaProfileTest,
   bool delegate_closed() const { return delegate_ == NULL; }
 
   MockConfirmInfoBarDelegate* delegate_;  // Owns itself.
-  scoped_nsobject<id> container_;
-  scoped_nsobject<ConfirmInfoBarController> controller_;
+  base::scoped_nsobject<id> container_;
+  base::scoped_nsobject<ConfirmInfoBarController> controller_;
   bool closed_delegate_ok_clicked_;
   bool closed_delegate_cancel_clicked_;
   bool closed_delegate_link_clicked_;

@@ -12,7 +12,7 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/test/ash_test_base.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
@@ -26,6 +26,8 @@ namespace ash {
 namespace test {
 
 namespace {
+
+const int kStatusTrayOffsetFromScreenEdgeForTest = 4;
 
 SystemTray* GetSystemTray() {
   return Shell::GetPrimaryRootWindowController()->shelf()->
@@ -140,9 +142,9 @@ TEST_F(SystemTrayTest, SystemTrayDefaultView) {
   tray->ShowDefaultView(BUBBLE_CREATE_NEW);
 
   // Ensure that closing the bubble destroys it.
-  ASSERT_TRUE(tray->CloseSystemBubbleForTest());
+  ASSERT_TRUE(tray->CloseSystemBubble());
   RunAllPendingInMessageLoop();
-  ASSERT_FALSE(tray->CloseSystemBubbleForTest());
+  ASSERT_FALSE(tray->CloseSystemBubble());
 }
 
 TEST_F(SystemTrayTest, SystemTrayTestItems) {
@@ -153,6 +155,13 @@ TEST_F(SystemTrayTest, SystemTrayTestItems) {
   TestItem* detailed_item = new TestItem;
   tray->AddTrayItem(test_item);
   tray->AddTrayItem(detailed_item);
+
+  // Check items have been added
+  const std::vector<SystemTrayItem*>& items = tray->GetTrayItems();
+  ASSERT_TRUE(
+      std::find(items.begin(), items.end(), test_item) != items.end());
+  ASSERT_TRUE(
+      std::find(items.begin(), items.end(), detailed_item) != items.end());
 
   // Ensure the tray views are created.
   ASSERT_TRUE(test_item->tray_view() != NULL);
@@ -245,8 +254,8 @@ TEST_F(SystemTrayTest, SystemTrayNotifications) {
   ASSERT_TRUE(detailed_item->detailed_view() != NULL);
   ASSERT_TRUE(test_item->notification_view() != NULL);
 
-  // Hide the detailed view, ensure the notificaiton view still exists.
-  ASSERT_TRUE(tray->CloseSystemBubbleForTest());
+  // Hide the detailed view, ensure the notification view still exists.
+  ASSERT_TRUE(tray->CloseSystemBubble());
   RunAllPendingInMessageLoop();
   ASSERT_TRUE(detailed_item->detailed_view() == NULL);
   ASSERT_TRUE(test_item->notification_view() != NULL);
@@ -298,14 +307,16 @@ TEST_F(SystemTrayTest, TrayBoundsInWidget) {
   widget->SetShelfAlignment(SHELF_ALIGNMENT_BOTTOM);
   gfx::Rect window_bounds = widget->GetWindowBoundsInScreen();
   gfx::Rect tray_bounds = tray->GetBoundsInScreen();
-  EXPECT_EQ(window_bounds.bottom(), tray_bounds.bottom());
+  EXPECT_EQ(window_bounds.bottom(),
+            tray_bounds.bottom() + kStatusTrayOffsetFromScreenEdgeForTest);
   EXPECT_EQ(window_bounds.right(), tray_bounds.right());
 
   // Test in the top alignment. Top and right edges should match.
   widget->SetShelfAlignment(SHELF_ALIGNMENT_TOP);
   window_bounds = widget->GetWindowBoundsInScreen();
   tray_bounds = tray->GetBoundsInScreen();
-  EXPECT_EQ(window_bounds.y(), tray_bounds.y());
+  EXPECT_EQ(window_bounds.y(),
+            tray_bounds.y() - kStatusTrayOffsetFromScreenEdgeForTest);
   EXPECT_EQ(window_bounds.right(), tray_bounds.right());
 
   // Test in the left alignment. Left and bottom edges should match.
@@ -313,7 +324,8 @@ TEST_F(SystemTrayTest, TrayBoundsInWidget) {
   window_bounds = widget->GetWindowBoundsInScreen();
   tray_bounds = tray->GetBoundsInScreen();
   EXPECT_EQ(window_bounds.bottom(), tray_bounds.bottom());
-  EXPECT_EQ(window_bounds.x(), tray_bounds.x());
+  EXPECT_EQ(window_bounds.x(),
+            tray_bounds.x() - kStatusTrayOffsetFromScreenEdgeForTest);
 
   // Test in the right alignment. Right and bottom edges should match.
   widget->SetShelfAlignment(SHELF_ALIGNMENT_LEFT);

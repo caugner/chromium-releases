@@ -6,7 +6,7 @@
 
 #include "base/location.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_error.h"
@@ -81,7 +81,7 @@ void GenericChangeProcessor::CommitChangesFromSyncModel() {
   DCHECK(CalledOnValidThread());
   if (syncer_changes_.empty())
     return;
-  if (!local_service_) {
+  if (!local_service_.get()) {
     syncer::ModelType type = syncer_changes_[0].sync_data().GetDataType();
     syncer::SyncError error(FROM_HERE, "Local service destroyed.", type);
     error_handler()->OnSingleDatatypeUnrecoverableError(error.location(),
@@ -116,10 +116,13 @@ syncer::SyncError GenericChangeProcessor::GetSyncDataForType(
   // TODO(akalin): We'll have to do a tree traversal for bookmarks.
   DCHECK_NE(type, syncer::BOOKMARKS);
 
-  int64 sync_child_id = root.GetFirstChildId();
-  while (sync_child_id != syncer::kInvalidId) {
+  std::vector<int64> child_ids;
+  root.GetChildIds(&child_ids);
+
+  for (std::vector<int64>::iterator it = child_ids.begin();
+       it != child_ids.end(); ++it) {
     syncer::ReadNode sync_child_node(&trans);
-    if (sync_child_node.InitByIdLookup(sync_child_id) !=
+    if (sync_child_node.InitByIdLookup(*it) !=
             syncer::BaseNode::INIT_OK) {
       syncer::SyncError error(FROM_HERE,
                       "Failed to fetch child node for type " + type_name + ".",
@@ -128,7 +131,6 @@ syncer::SyncError GenericChangeProcessor::GetSyncDataForType(
     }
     current_sync_data->push_back(syncer::SyncData::CreateRemoteData(
         sync_child_node.GetId(), sync_child_node.GetEntitySpecifics()));
-    sync_child_id = sync_child_node.GetSuccessorId();
   }
   return syncer::SyncError();
 }
@@ -283,7 +285,7 @@ syncer::SyncError GenericChangeProcessor::ProcessSyncChanges(
         NOTREACHED();
         return error;
       }
-      if (merge_result_) {
+      if (merge_result_.get()) {
         merge_result_->set_num_items_deleted(
             merge_result_->num_items_deleted() + 1);
       }
@@ -357,9 +359,9 @@ syncer::SyncError GenericChangeProcessor::ProcessSyncChanges(
       }
       sync_node.SetTitle(UTF8ToWide(change.sync_data().GetTitle()));
       sync_node.SetEntitySpecifics(change.sync_data().GetSpecifics());
-      if (merge_result_) {
-        merge_result_->set_num_items_added(
-            merge_result_->num_items_added() + 1);
+      if (merge_result_.get()) {
+        merge_result_->set_num_items_added(merge_result_->num_items_added() +
+                                           1);
       }
     } else if (change.change_type() == syncer::SyncChange::ACTION_UPDATE) {
       // TODO(zea): consider having this logic for all possible changes?
@@ -450,7 +452,7 @@ syncer::SyncError GenericChangeProcessor::ProcessSyncChanges(
 
       sync_node.SetTitle(UTF8ToWide(change.sync_data().GetTitle()));
       sync_node.SetEntitySpecifics(change.sync_data().GetSpecifics());
-      if (merge_result_) {
+      if (merge_result_.get()) {
         merge_result_->set_num_items_modified(
             merge_result_->num_items_modified() + 1);
       }

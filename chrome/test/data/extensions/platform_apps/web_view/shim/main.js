@@ -212,6 +212,22 @@ chrome.test.getConfig(function(config) {
       }, 0);
     },
 
+    function webViewExecuteScriptFail() {
+      var webview = document.createElement('webview');
+      document.body.appendChild(webview);
+      setTimeout(function() {
+        try {
+        webview.executeScript(
+          {code:'document.body.style.backgroundColor = "red";'},
+          function(results) {
+            chrome.test.fail();
+          });
+        } catch (e) {
+          chrome.test.succeed();
+        }
+      }, 0);
+    },
+
     function webViewExecuteScript() {
       var webview = document.createElement('webview');
       webview.setAttribute('partition', arguments.callee.name);
@@ -398,5 +414,31 @@ chrome.test.getConfig(function(config) {
       document.body.appendChild(webview);
     },
 
+    // This test verifies that the load event fires when the a new page is
+    // loaded.
+    // TODO(fsamuel): Add a test to verify that subframe loads within a guest
+    // do not fire the 'contentload' event.
+    function webViewContentLoadEvent() {
+      var webview = document.createElement('webview');
+      webview.addEventListener('contentload', function(e) {
+        chrome.test.succeed();
+      });
+      webview.setAttribute('src', 'data:text/html,trigger navigation');
+      document.body.appendChild(webview);
+    },
+
+    function webViewWebRequestAPI() {
+      var webview = document.createElement('webview');
+      webview.setAttribute('src', 'data:text/html,trigger navigation');
+      var firstLoad = function() {
+        webview.removeEventListener('loadstop', firstLoad);
+        webview.onBeforeRequest.addListener(function(e) {
+          chrome.test.succeed();
+        }, { urls: ['<all_urls>']}, ['blocking']) ;
+        webview.src = windowOpenGuestURL;
+      };
+      webview.addEventListener('loadstop', firstLoad);
+      document.body.appendChild(webview);
+    }
   ]);
 });

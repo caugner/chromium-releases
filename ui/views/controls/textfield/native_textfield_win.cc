@@ -8,8 +8,8 @@
 
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/rtl.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/metro.h"
 #include "base/win/windows_version.h"
 #include "grit/ui_strings.h"
@@ -196,7 +196,7 @@ void NativeTextfieldWin::AppendText(const string16& text) {
                 reinterpret_cast<LPARAM>(text.c_str()));
 }
 
-void NativeTextfieldWin::ReplaceSelection(const string16& text) {
+void NativeTextfieldWin::InsertOrReplaceText(const string16& text) {
   // Currently not needed.
   NOTIMPLEMENTED();
 }
@@ -230,10 +230,6 @@ void NativeTextfieldWin::UpdateBorder() {
   SetWindowPos(NULL, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_FRAMECHANGED | SWP_NOACTIVATE |
                SWP_NOOWNERZORDER | SWP_NOSIZE);
-}
-
-void NativeTextfieldWin::UpdateBorderColor() {
-  // TODO(estade): implement.
 }
 
 void NativeTextfieldWin::UpdateTextColor() {
@@ -303,6 +299,12 @@ void NativeTextfieldWin::UpdateVerticalMargins() {
   }
   // Non-zero margins case.
   NOTIMPLEMENTED();
+}
+
+void NativeTextfieldWin::UpdateVerticalAlignment() {
+  // Default alignment is vertically centered.
+  if (textfield_->vertical_alignment() != gfx::ALIGN_VCENTER)
+    NOTIMPLEMENTED();
 }
 
 bool NativeTextfieldWin::SetFocus() {
@@ -556,7 +558,7 @@ void NativeTextfieldWin::InitializeAccessibilityInfo() {
     // We expect it to be a Label preceeding this view (if it exists).
     string16 name;
     View* label_view = parent->child_at(label_index);
-    if (label_view->GetClassName() == Label::kViewClassName) {
+    if (!strcmp(label_view->GetClassName(), Label::kViewClassName)) {
       ui::AccessibleViewState state;
       label_view->GetAccessibleState(&state);
       hr = pAccPropServices->SetHwndPropStr(m_hWnd, OBJID_CLIENT,
@@ -607,7 +609,9 @@ void NativeTextfieldWin::OnChar(TCHAR ch, UINT repeat_count, UINT flags) {
 
 void NativeTextfieldWin::OnContextMenu(HWND window, const POINT& point) {
   POINT p(point);
+  ui::MenuSourceType source_type = ui::MENU_SOURCE_MOUSE;
   if (point.x == -1 || point.y == -1) {
+    source_type = ui::MENU_SOURCE_KEYBOARD;
     GetCaretPos(&p);
     MapWindowPoints(HWND_DESKTOP, &p, 1);
   }
@@ -618,7 +622,7 @@ void NativeTextfieldWin::OnContextMenu(HWND window, const POINT& point) {
 
   ignore_result(context_menu_runner_->RunMenuAt(textfield_->GetWidget(), NULL,
       gfx::Rect(gfx::Point(p), gfx::Size()), MenuItemView::TOPLEFT,
-      MenuRunner::HAS_MNEMONICS));
+      source_type, MenuRunner::HAS_MNEMONICS));
 }
 
 void NativeTextfieldWin::OnCopy() {
@@ -627,8 +631,9 @@ void NativeTextfieldWin::OnCopy() {
 
   const string16 text(GetSelectedText());
   if (!text.empty()) {
-    ui::ScopedClipboardWriter(ui::Clipboard::GetForCurrentThread(),
-                              ui::Clipboard::BUFFER_STANDARD).WriteText(text);
+    ui::ScopedClipboardWriter(
+        ui::Clipboard::GetForCurrentThread(),
+        ui::Clipboard::BUFFER_STANDARD).WriteText(text);
     if (TextfieldController* controller = textfield_->GetController())
       controller->OnAfterCutOrCopy();
   }
@@ -1056,6 +1061,8 @@ void NativeTextfieldWin::OnPaste() {
     textfield_->SyncText();
     text_before_change_.clear();
     ReplaceSel(collapsed.c_str(), true);
+    if (TextfieldController* controller = textfield_->GetController())
+      controller->OnAfterPaste();
   }
 }
 

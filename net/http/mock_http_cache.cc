@@ -281,8 +281,9 @@ void MockDiskEntry::CallbackLater(const net::CompletionCallback& callback,
                                   int result) {
   if (ignore_callbacks_)
     return StoreAndDeliverCallbacks(true, this, callback, result);
-  MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-      &MockDiskEntry::RunCallback, this, callback, result));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&MockDiskEntry::RunCallback, this, callback, result));
 }
 
 void MockDiskEntry::RunCallback(
@@ -472,7 +473,7 @@ void MockDiskCache::ReleaseAll() {
 
 void MockDiskCache::CallbackLater(const net::CompletionCallback& callback,
                                   int result) {
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&CallbackForwader, callback, result));
 }
 
@@ -510,7 +511,7 @@ bool MockHttpCache::ReadResponseInfo(disk_cache::Entry* disk_entry,
 
   net::TestCompletionCallback cb;
   scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(size));
-  int rv = disk_entry->ReadData(0, 0, buffer, size, cb.callback());
+  int rv = disk_entry->ReadData(0, 0, buffer.get(), size, cb.callback());
   rv = cb.GetResult(rv);
   EXPECT_EQ(size, rv);
 
@@ -531,7 +532,7 @@ bool MockHttpCache::WriteResponseInfo(
       reinterpret_cast<const char*>(pickle.data())));
   int len = static_cast<int>(pickle.size());
 
-  int rv =  disk_entry->WriteData(0, 0, data, len, cb.callback(), true);
+  int rv = disk_entry->WriteData(0, 0, data.get(), len, cb.callback(), true);
   rv = cb.GetResult(rv);
   return (rv == len);
 }

@@ -10,7 +10,7 @@
 
 #include "base/files/file_path.h"
 #include "base/pickle.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "content/public/common/password_form.h"
 #include "sql/connection.h"
 #include "sql/meta_table.h"
@@ -114,6 +114,9 @@ class LoginDatabase {
   base::FilePath db_path_;
   mutable sql::Connection db_;
   sql::MetaTable meta_table_;
+
+  // Set to true if the public suffix based domain matching is enabled.
+  bool public_suffix_domain_matching_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginDatabase);
 };

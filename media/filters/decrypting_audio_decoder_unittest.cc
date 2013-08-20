@@ -50,7 +50,7 @@ static scoped_refptr<DecoderBuffer> CreateFakeEncryptedBuffer() {
 namespace {
 
 ACTION_P(ReturnBuffer, buffer) {
-  arg0.Run(buffer ? DemuxerStream::kOk : DemuxerStream::kAborted, buffer);
+  arg0.Run(buffer.get() ? DemuxerStream::kOk : DemuxerStream::kAborted, buffer);
 }
 
 ACTION_P(RunCallbackIfNotNull, param) {
@@ -264,6 +264,15 @@ TEST_F(DecryptingAudioDecoderTest, Initialize_UnsupportedAudioConfig) {
       .WillOnce(RunCallback<1>(false));
   EXPECT_CALL(*this, RequestDecryptorNotification(_))
       .WillOnce(RunCallbackIfNotNull(decryptor_.get()));
+
+  AudioDecoderConfig config(kCodecVorbis, kSampleFormatPlanarF32,
+                            CHANNEL_LAYOUT_STEREO, 44100, NULL, 0, true);
+  InitializeAndExpectStatus(config, DECODER_ERROR_NOT_SUPPORTED);
+}
+
+TEST_F(DecryptingAudioDecoderTest, Initialize_NullDecryptor) {
+  EXPECT_CALL(*this, RequestDecryptorNotification(_))
+      .WillRepeatedly(RunCallbackIfNotNull(static_cast<Decryptor*>(NULL)));
 
   AudioDecoderConfig config(kCodecVorbis, kSampleFormatPlanarF32,
                             CHANNEL_LAYOUT_STEREO, 44100, NULL, 0, true);

@@ -10,7 +10,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/tuple.h"
@@ -21,6 +21,7 @@
 #include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/test_completion_callback.h"
+#include "net/dns/single_request_host_resolver.h"
 #include "net/proxy/proxy_service.h"
 #include "net/udp/udp_client_socket.h"
 #include "net/udp/udp_server_socket.h"
@@ -136,14 +137,18 @@ bool NetworkStats::Start(net::HostResolver* host_resolver,
              packets_to_send,
              finished_callback);
 
+  scoped_ptr<net::SingleRequestHostResolver> resolver(
+      new net::SingleRequestHostResolver(host_resolver));
   net::HostResolver::RequestInfo request(server_host_port_pair);
-  int rv = host_resolver->Resolve(
+  int rv = resolver->Resolve(
       request, &addresses_,
       base::Bind(&NetworkStats::OnResolveComplete,
                  base::Unretained(this)),
-      NULL, net::BoundNetLog());
-  if (rv == net::ERR_IO_PENDING)
+      net::BoundNetLog());
+  if (rv == net::ERR_IO_PENDING) {
+    resolver_.swap(resolver);
     return true;
+  }
   return DoConnect(rv);
 }
 
@@ -210,11 +215,6 @@ bool NetworkStats::DoConnect(int result) {
   }
   set_socket(udp_socket);
 
-  if (addresses().empty()) {
-    Finish(RESOLVE_FAILED, net::ERR_INVALID_ARGUMENT);
-    return false;
-  }
-
   const net::IPEndPoint& endpoint = addresses().front();
   int rv = udp_socket->Connect(endpoint);
   if (rv < 0) {
@@ -270,14 +270,14 @@ void NetworkStats::SendPacket() {
 
 void NetworkStats::SendNextPacketAfterDelay() {
   if (current_test_ == PACED_PACKET_TEST) {
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&NetworkStats::SendPacket, weak_factory_.GetWeakPtr()),
         average_time_);
     return;
   }
 
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&NetworkStats::SendPacket, weak_factory_.GetWeakPtr()));
 }
@@ -329,7 +329,7 @@ void NetworkStats::OnReadComplete(int result) {
     // of 1ms so that the time-out will fire before we have time to really hog
     // the CPU too extensively (waiting for the time-out) in case of an infinite
     // loop.
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&NetworkStats::ReadData, weak_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(1));
@@ -356,7 +356,7 @@ void NetworkStats::OnWriteComplete(int result) {
     DCHECK_EQ(bytes_to_send_, 0u);
   }
 
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&NetworkStats::SendPacket, weak_factory_.GetWeakPtr()));
 }
@@ -372,9 +372,10 @@ void NetworkStats::ReadData() {
     // We release the read_buffer_ in the destructor if there is an error.
     read_buffer_ = new net::IOBuffer(kMaxMessage);
 
-    rv = socket_->Read(read_buffer_, kMaxMessage,
-                       base::Bind(&NetworkStats::OnReadComplete,
-                                  base::Unretained(this)));
+    rv = socket_->Read(
+        read_buffer_.get(),
+        kMaxMessage,
+        base::Bind(&NetworkStats::OnReadComplete, base::Unretained(this)));
     if (rv == net::ERR_IO_PENDING)
       break;
 
@@ -391,8 +392,8 @@ int NetworkStats::SendData() {
       // Send a new packet.
       scoped_refptr<net::IOBufferWithSize> buffer(
           new net::IOBufferWithSize(bytes_to_send_));
-      GetEchoRequest(buffer);
-      write_buffer_ = new net::DrainableIOBuffer(buffer, bytes_to_send_);
+      GetEchoRequest(buffer.get());
+      write_buffer_ = new net::DrainableIOBuffer(buffer.get(), bytes_to_send_);
 
       // As soon as we write, a read could happen. Thus update all the book
       // keeping data.
@@ -409,10 +410,10 @@ int NetworkStats::SendData() {
 
     if (!socket_.get())
       return net::ERR_UNEXPECTED;
-    int rv = socket_->Write(write_buffer_,
-                            write_buffer_->BytesRemaining(),
-                            base::Bind(&NetworkStats::OnWriteComplete,
-                                       base::Unretained(this)));
+    int rv = socket_->Write(
+        write_buffer_.get(),
+        write_buffer_->BytesRemaining(),
+        base::Bind(&NetworkStats::OnWriteComplete, base::Unretained(this)));
     if (rv < 0)
       return rv;
     DidSendData(rv);
@@ -437,7 +438,7 @@ void NetworkStats::DidSendData(int bytes_sent) {
 }
 
 void NetworkStats::StartReadDataTimer(int milliseconds) {
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&NetworkStats::OnReadDataTimeout,
                  weak_factory_.GetWeakPtr(),
@@ -654,7 +655,7 @@ void NetworkStats::Finish(Status status, int result) {
 
   if (next_test() == NON_PACED_PACKET_TEST ||
       next_test() == PACED_PACKET_TEST) {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&NetworkStats::RestartPacketTest,
                    weak_factory_.GetWeakPtr()));
@@ -810,6 +811,9 @@ void NetworkStats::RecordRTTHistograms(const ProtocolValue& protocol,
                                        uint32 index) {
   DCHECK_GE(index, 0u);
   DCHECK_LT(index, packet_status_.size());
+
+  if (packet_status_[index].end_time_ ==  base::TimeTicks())
+    return;  // Echo response packet never arrived.
 
   const char* test_name = TestName();
   std::string rtt_histogram_name = base::StringPrintf(

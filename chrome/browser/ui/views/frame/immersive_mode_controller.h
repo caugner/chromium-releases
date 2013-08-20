@@ -6,10 +6,18 @@
 #define CHROME_BROWSER_UI_VIEWS_FRAME_IMMERSIVE_MODE_CONTROLLER_H_
 
 #include "base/compiler_specific.h"
+#include "base/observer_list.h"
 
-class BrowserView;
+class BookmarkBarView;
+class FullscreenController;
+
+namespace gfx {
+class Rect;
+class Size;
+}
 
 namespace views {
+class View;
 class Widget;
 }
 
@@ -33,10 +41,43 @@ class ImmersiveModeController {
     ANIMATE_REVEAL_NO
   };
 
-  virtual ~ImmersiveModeController() {}
+  class Observer {
+   public:
+    // Called when a reveal of the top-of-window views has been initiated.
+    virtual void OnImmersiveRevealStarted() {}
+
+    // Called when the immersive mode controller has been destroyed.
+    virtual void OnImmersiveModeControllerDestroyed() {}
+
+   protected:
+    virtual ~Observer() {}
+  };
+
+  class Delegate {
+   public:
+    // Returns the bookmark bar, or NULL if the window does not support one.
+    virtual BookmarkBarView* GetBookmarkBar() = 0;
+
+    // Returns the browser's FullscreenController.
+    virtual FullscreenController* GetFullscreenController() = 0;
+
+    // Notifies the delegate that fullscreen has been entered or exited.
+    virtual void FullscreenStateChanged() = 0;
+
+    // Requests that the tab strip be painted in a short, "light bar" style.
+    virtual void SetImmersiveStyle(bool immersive) = 0;
+
+   protected:
+    virtual ~Delegate() {}
+  };
+
+  ImmersiveModeController();
+  virtual ~ImmersiveModeController();
 
   // Must initialize after browser view has a Widget and native window.
-  virtual void Init(BrowserView* browser_view) = 0;
+  virtual void Init(Delegate* delegate,
+                    views::Widget* widget,
+                    views::View* top_container) = 0;
 
   // Enables or disables immersive mode.
   virtual void SetEnabled(bool enabled) = 0;
@@ -52,9 +93,14 @@ class ImmersiveModeController {
   // True when the top views are fully or partially visible.
   virtual bool IsRevealed() const = 0;
 
-  // If the controller is temporarily revealing the top views ensures that
-  // the reveal view's layer is on top and hence visible over web contents.
-  virtual void MaybeStackViewAtTop() = 0;
+  // Returns the top container's vertical offset relative to its parent. When
+  // revealing or closing the top-of-window views, part of the top container is
+  // offscreen.
+  // This method takes in the top container's size because it is called as part
+  // of computing the new bounds for the top container in
+  // BrowserViewLayout::UpdateTopContainerBounds().
+  virtual int GetTopContainerVerticalOffset(
+      const gfx::Size& top_container_size) const = 0;
 
   // Returns a lock which will keep the top-of-window views revealed for its
   // lifetime. Several locks can be obtained. When all of the locks are
@@ -89,17 +135,24 @@ class ImmersiveModeController {
 
   // Called by the TopContainerView to indicate that its bounds have changed.
   virtual void OnTopContainerBoundsChanged() = 0;
+
+  // Called by the find bar to indicate that its visible bounds have changed.
+  // |new_visible_bounds_in_screen| should be empty if the find bar is not
+  // visible.
+  virtual void OnFindBarVisibleBoundsChanged(
+      const gfx::Rect& new_visible_bounds_in_screen) = 0;
+
+  virtual void AddObserver(Observer* observer);
+  virtual void RemoveObserver(Observer* observer);
+
+ protected:
+  ObserverList<Observer> observers_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ImmersiveModeController);
 };
 
 namespace chrome {
-
-// Returns true if immersive mode should be used for fullscreen based on
-// command line flags.
-// Implemented in immersive_mode_controller_factory.cc.
-bool UseImmersiveFullscreen();
-
-// Implemented in immersive_mode_controller_factory.cc.
-void EnableImmersiveFullscreenForTest();
 
 // Implemented in immersive_mode_controller_factory.cc.
 ImmersiveModeController* CreateImmersiveModeController();

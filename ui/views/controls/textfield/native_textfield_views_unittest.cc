@@ -13,8 +13,8 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "grit/ui_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -923,7 +923,7 @@ TEST_F(NativeTextfieldViewsTest, DragAndDrop_AcceptDrop) {
   ui::OSExchangeData bad_data;
   bad_data.SetFilename(base::FilePath(FILE_PATH_LITERAL("x")));
 #if defined(OS_WIN)
-  ui::OSExchangeData::CustomFormat fmt = CF_BITMAP;
+  ui::OSExchangeData::CustomFormat fmt = ui::Clipboard::GetBitmapFormatType();
   bad_data.SetPickledData(fmt, Pickle());
   bad_data.SetFileContents(base::FilePath(L"x"), "x");
   bad_data.SetHtml(string16(ASCIIToUTF16("x")), GURL("x.org"));
@@ -934,14 +934,7 @@ TEST_F(NativeTextfieldViewsTest, DragAndDrop_AcceptDrop) {
 }
 #endif
 
-// TODO(erg): Disabled while the other half of drag and drop is being written.
-// http://crbug.com/130806
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_DragAndDrop_InitiateDrag DISABLED_DragAndDrop_InitiateDrag
-#else
-#define MAYBE_DragAndDrop_InitiateDrag DragAndDrop_InitiateDrag
-#endif
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_InitiateDrag) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_InitiateDrag) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello string world"));
 
@@ -987,14 +980,7 @@ TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_InitiateDrag) {
       textfield_view_->GetDragOperationsForView(textfield_view_, kStringPoint));
 }
 
-// TODO(erg): Disabled while the other half of drag and drop is being written.
-// http://crbug.com/130806
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_DragAndDrop_ToTheRight DISABLED_DragAndDrop_ToTheRight
-#else
-#define MAYBE_DragAndDrop_ToTheRight DragAndDrop_ToTheRight
-#endif
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheRight) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_ToTheRight) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
 
@@ -1049,14 +1035,7 @@ TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheRight) {
   EXPECT_STR_EQ("h welloorld", textfield_->text());
 }
 
-// TODO(erg): Disabled while the other half of drag and drop is being written.
-// http://crbug.com/130806
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_DragAndDrop_ToTheLeft DISABLED_DragAndDrop_ToTheLeft
-#else
-#define MAYBE_DragAndDrop_ToTheLeft DragAndDrop_ToTheLeft
-#endif
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheLeft) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_ToTheLeft) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
 
@@ -1111,14 +1090,7 @@ TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_ToTheLeft) {
   EXPECT_STR_EQ("h worlellod", textfield_->text());
 }
 
-// TODO(erg): Disabled while the other half of drag and drop is being written.
-// http://crbug.com/130806
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_DragAndDrop_Canceled DISABLED_DragAndDrop_Canceled
-#else
-#define MAYBE_DragAndDrop_Canceled DragAndDrop_Canceled
-#endif
-TEST_F(NativeTextfieldViewsTest, MAYBE_DragAndDrop_Canceled) {
+TEST_F(NativeTextfieldViewsTest, DragAndDrop_Canceled) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
 
@@ -1290,6 +1262,12 @@ TEST_F(NativeTextfieldViewsTest, TextInputClientTest) {
   EXPECT_EQ(8U, textfield_->GetCursorPosition());
   EXPECT_EQ(1, on_before_user_action_);
   EXPECT_EQ(1, on_after_user_action_);
+
+  textfield_->clear();
+  textfield_->SetText(ASCIIToUTF16("0123456789"));
+  EXPECT_TRUE(client->SetSelectionRange(ui::Range(5, 5)));
+  client->ExtendSelectionAndDelete(4, 2);
+  EXPECT_STR_EQ("0789", textfield_->text());
 
   // On{Before,After}UserAction should be called by whatever user action
   // triggers clearing or setting a selection if appropriate.
@@ -1842,6 +1820,34 @@ TEST_F(NativeTextfieldViewsTest, GetCompositionCharacterBoundsTest) {
   EXPECT_FALSE(client->GetCompositionCharacterBounds(char_count + 100, &rect));
 }
 
+// The word we select by double clicking should remain selected regardless of
+// where we drag the mouse afterwards without releasing the left button.
+TEST_F(NativeTextfieldViewsTest, KeepInitiallySelectedWord) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+
+  textfield_->SetText(ASCIIToUTF16("abc def ghi"));
+
+  textfield_->SelectRange(ui::Range(5, 5));
+  const gfx::Rect middle_cursor = GetCursorBounds();
+  textfield_->SelectRange(ui::Range(0, 0));
+  const gfx::Point beginning = GetCursorBounds().origin();
+
+  // Double click, but do not release the left button.
+  MouseClick(middle_cursor, 0);
+  const gfx::Point middle(middle_cursor.x(),
+                          middle_cursor.y() + middle_cursor.height() / 2);
+  ui::MouseEvent press_event(ui::ET_MOUSE_PRESSED, middle, middle,
+                             ui::EF_LEFT_MOUSE_BUTTON);
+  textfield_view_->OnMousePressed(press_event);
+  EXPECT_EQ(ui::Range(4, 7), textfield_->GetSelectedRange());
+
+  // Drag the mouse to the beginning of the textfield.
+  ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, beginning, beginning,
+                            ui::EF_LEFT_MOUSE_BUTTON);
+  textfield_view_->OnMouseDragged(drag_event);
+  EXPECT_EQ(ui::Range(7, 0), textfield_->GetSelectedRange());
+}
+
 // Touch selection and draggin currently only works for chromeos.
 #if defined(OS_CHROMEOS)
 TEST_F(NativeTextfieldViewsTest, TouchSelectionAndDraggingTest) {
@@ -1885,6 +1891,7 @@ TEST_F(NativeTextfieldViewsTest, TouchSelectionAndDraggingTest) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableTouchDragDrop);
   textfield_view_->OnGestureEvent(&tap_down);
+
   // Create a new long press event since the previous one is not marked handled.
   GestureEventForTest long_press2(ui::ET_GESTURE_LONG_PRESS, eventX, eventY, 0);
   textfield_view_->OnGestureEvent(&long_press2);
@@ -1893,4 +1900,24 @@ TEST_F(NativeTextfieldViewsTest, TouchSelectionAndDraggingTest) {
 }
 #endif
 
+// Long_Press gesture in NativeTextfieldViews can initiate a drag and drop now.
+TEST_F(NativeTextfieldViewsTest, TestLongPressInitiatesDragDrop) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+  textfield_->SetText(ASCIIToUTF16("Hello string world"));
+
+  // Ensure the textfield will provide selected text for drag data.
+  textfield_->SelectRange(ui::Range(6, 12));
+  const gfx::Point kStringPoint(GetCursorPositionX(9), 0);
+
+  // Enable touch-drag-drop to make long press effective.
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableTouchDragDrop);
+
+  // Create a long press event in the selected region should start a drag.
+  GestureEventForTest long_press(ui::ET_GESTURE_LONG_PRESS,
+      kStringPoint.x(), kStringPoint.y(), 0);
+  textfield_view_->OnGestureEvent(&long_press);
+  EXPECT_TRUE(textfield_view_->CanStartDragForView(NULL,
+      kStringPoint, kStringPoint));
+}
 }  // namespace views

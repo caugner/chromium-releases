@@ -19,6 +19,7 @@ class GURL;
 class Profile;
 
 namespace content {
+class PageState;
 class WebContents;
 struct SSLStatus;
 }
@@ -131,7 +132,7 @@ void FocusNextPane(Browser* browser);
 void FocusPreviousPane(Browser* browser);
 void ToggleDevToolsWindow(Browser* browser, DevToolsToggleAction action);
 bool CanOpenTaskManager();
-void OpenTaskManager(Browser* browser, bool highlight_background_resources);
+void OpenTaskManager(Browser* browser);
 void OpenFeedbackDialog(Browser* browser);
 void ToggleBookmarkBar(Browser* browser);
 void ShowAppMenu(Browser* browser);
@@ -152,7 +153,7 @@ void ViewSource(Browser* browser, content::WebContents* tab);
 void ViewSource(Browser* browser,
                 content::WebContents* tab,
                 const GURL& url,
-                const std::string& content_state);
+                const content::PageState& page_state);
 
 void ViewSelectedSource(Browser* browser);
 bool CanViewSource(const Browser* browser);

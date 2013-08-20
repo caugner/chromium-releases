@@ -10,23 +10,22 @@ import tempfile
 
 from telemetry.core import util
 from telemetry.core.chrome import browser_backend
-from telemetry.core.chrome import cros_util
 
 class DesktopBrowserBackend(browser_backend.BrowserBackend):
   """The backend for controlling a locally-executed browser instance, on Linux,
   Mac or Windows.
   """
-  def __init__(self, options, executable, is_content_shell, use_login):
+  def __init__(self, options, executable, is_content_shell,
+               delete_profile_dir_after_run=True):
     super(DesktopBrowserBackend, self).__init__(
         is_content_shell=is_content_shell,
-        supports_extensions=not is_content_shell, options=options)
+        supports_extensions=not is_content_shell,
+        options=options)
 
     # Initialize fields so that an explosion during init doesn't break in Close.
     self._proc = None
     self._tmpdir = None
     self._tmp_output_file = None
-
-    self._use_login = use_login
 
     self._executable = executable
     if not self._executable:
@@ -37,7 +36,9 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
           'Content shell does not support extensions.')
 
     self._port = util.GetAvailableLocalPort()
+    self._profile_dir = None
     self._supports_net_benchmarking = True
+    self._delete_profile_dir_after_run = delete_profile_dir_after_run
     self._LaunchBrowser(options)
 
     # For old chrome versions, might have to relaunch to have the
@@ -46,9 +47,6 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
       self.Close()
       self._supports_net_benchmarking = False
       self._LaunchBrowser(options)
-
-    if self._use_login:
-      cros_util.NavigateLogin(self)
 
   def _LaunchBrowser(self, options):
     args = [self._executable]
@@ -78,25 +76,36 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
         args.append('--enable-benchmarking')
       if not self.options.dont_override_profile:
         self._tmpdir = tempfile.mkdtemp()
-        if self.options.profile_dir:
+        profile_dir = self._profile_dir or self.options.profile_dir
+        if profile_dir:
           if self.is_content_shell:
             logging.critical('Profiles cannot be used with content shell')
             sys.exit(1)
           shutil.rmtree(self._tmpdir)
-          shutil.copytree(self.options.profile_dir, self._tmpdir)
+          shutil.copytree(profile_dir, self._tmpdir)
         args.append('--user-data-dir=%s' % self._tmpdir)
-      if self._use_login:
-        ext_path = os.path.join(os.path.dirname(__file__), 'chromeos_login_ext')
-        args.extend(['--login-manager', '--login-profile=user',
-                     '--stub-cros', '--login-screen=login',
-                     '--auth-ext-path=%s' % ext_path])
     return args
+
+  def SetProfileDirectory(self, profile_dir):
+    # Make sure _profile_dir hasn't already been set.
+    assert self._profile_dir is None
+
+    if self.is_content_shell:
+      logging.critical('Profile creation cannot be used with content shell')
+      sys.exit(1)
+
+    self._profile_dir = profile_dir
 
   @property
   def pid(self):
     if self._proc:
       return self._proc.pid
     return None
+
+
+  @property
+  def profile_directory(self):
+    return self._tmpdir
 
   def IsBrowserRunning(self):
     return self._proc.poll() == None
@@ -141,7 +150,8 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
           self._proc = None
           raise Exception('Could not shutdown the browser.')
 
-    if self._tmpdir and os.path.exists(self._tmpdir):
+    if self._delete_profile_dir_after_run and \
+        self._tmpdir and os.path.exists(self._tmpdir):
       shutil.rmtree(self._tmpdir, ignore_errors=True)
       self._tmpdir = None
 

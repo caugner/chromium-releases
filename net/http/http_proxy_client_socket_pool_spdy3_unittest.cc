@@ -6,8 +6,8 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_network_session.h"
@@ -88,16 +88,14 @@ class HttpProxyClientSocketPoolSpdy3Test : public TestWithHttpParam {
                          BoundNetLog().net_log()),
         session_(CreateNetworkSession()),
         http_proxy_histograms_("HttpProxyUnitTest"),
-        ssl_data_(NULL),
-        data_(NULL),
+        spdy_util_(kProtoSPDY3),
         pool_(kMaxSockets,
               kMaxSocketsPerGroup,
               &http_proxy_histograms_,
               NULL,
               &transport_socket_pool_,
               &ssl_socket_pool_,
-              NULL) {
-  }
+              NULL) {}
 
   virtual ~HttpProxyClientSocketPoolSpdy3Test() {
   }
@@ -205,6 +203,7 @@ class HttpProxyClientSocketPoolSpdy3Test : public TestWithHttpParam {
   ClientSocketPoolHistograms http_proxy_histograms_;
 
  protected:
+  SpdyTestUtil spdy_util_;
   scoped_ptr<SSLSocketDataProvider> ssl_data_;
   scoped_ptr<DeterministicSocketData> data_;
   HttpProxyClientSocketPool pool_;
@@ -245,8 +244,10 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, NeedAuth) {
     MockRead(ASYNC, 3, "Content-Length: 10\r\n\r\n"),
     MockRead(ASYNC, 4, "0123456789"),
   };
-  scoped_ptr<SpdyFrame> req(ConstructSpdyConnect(NULL, 0, 1));
-  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
+  scoped_ptr<SpdyFrame> req(
+      spdy_util_.ConstructSpdyConnect(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> rst(
+      spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC),
     CreateMockWrite(*rst, 2, ASYNC),
@@ -257,16 +258,16 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, NeedAuth) {
     "proxy-authenticate", "Basic realm=\"MyRealm1\"",
   };
   scoped_ptr<SpdyFrame> resp(
-
-      ConstructSpdyControlFrame(NULL,
-                                0,
-                                false,
-                                1,
-                                LOWEST,
-                                SYN_REPLY,
-                                CONTROL_FLAG_NONE,
-                                kAuthChallenge,
-                                arraysize(kAuthChallenge)));
+      spdy_util_.ConstructSpdyControlFrame(NULL,
+                                           0,
+                                           false,
+                                           1,
+                                           LOWEST,
+                                           SYN_REPLY,
+                                           CONTROL_FLAG_NONE,
+                                           kAuthChallenge,
+                                           arraysize(kAuthChallenge),
+                                           0));
   MockRead spdy_reads[] = {
     CreateMockRead(*resp, 1, ASYNC),
     MockRead(ASYNC, 0, 3)
@@ -342,8 +343,8 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, AsyncHaveAuth) {
     MockRead(ASYNC, 1, "HTTP/1.1 200 Connection Established\r\n\r\n"),
   };
 
-  scoped_ptr<SpdyFrame> req(ConstructSpdyConnect(kAuthHeaders,
-                                                       kAuthHeadersSize, 1));
+  scoped_ptr<SpdyFrame> req(
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1));
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC)
   };
@@ -454,8 +455,8 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, TunnelUnexpectedClose) {
     MockRead(ASYNC, 1, "HTTP/1.1 200 Conn"),
     MockRead(ASYNC, ERR_CONNECTION_CLOSED, 2),
   };
-  scoped_ptr<SpdyFrame> req(ConstructSpdyConnect(kAuthHeaders,
-                                                       kAuthHeadersSize, 1));
+  scoped_ptr<SpdyFrame> req(
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1));
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC)
   };
@@ -480,7 +481,7 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, TunnelUnexpectedClose) {
     // returns ERR_CONNECTION_CLOSED in this case.
     EXPECT_EQ(ERR_CONNECTION_CLOSED, callback_.WaitForResult());
   } else {
-    EXPECT_EQ(ERR_HEADERS_TRUNCATED, callback_.WaitForResult());
+    EXPECT_EQ(ERR_RESPONSE_HEADERS_TRUNCATED, callback_.WaitForResult());
   }
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -497,9 +498,10 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, TunnelSetupError) {
   MockRead reads[] = {
     MockRead(ASYNC, 1, "HTTP/1.1 304 Not Modified\r\n\r\n"),
   };
-  scoped_ptr<SpdyFrame> req(ConstructSpdyConnect(kAuthHeaders,
-                                                       kAuthHeadersSize, 1));
-  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
+  scoped_ptr<SpdyFrame> req(
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1));
+  scoped_ptr<SpdyFrame> rst(
+      spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC),
     CreateMockWrite(*rst, 2, ASYNC),
@@ -548,11 +550,13 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, TunnelSetupRedirect) {
     MockRead(ASYNC, 1, responseText.c_str()),
   };
   scoped_ptr<SpdyFrame> req(
-      ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1));
-  scoped_ptr<SpdyFrame> rst(ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1));
+  scoped_ptr<SpdyFrame> rst(
+      spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
 
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC),
+    CreateMockWrite(*rst, 3, ASYNC),
   };
 
   const char* const responseHeaders[] = {
@@ -598,7 +602,7 @@ TEST_P(HttpProxyClientSocketPoolSpdy3Test, TunnelSetupRedirect) {
     const ProxyClientSocket* tunnel_socket =
         static_cast<ProxyClientSocket*>(handle_.socket());
     const HttpResponseInfo* response = tunnel_socket->GetConnectResponseInfo();
-    const HttpResponseHeaders* headers = response->headers;
+    const HttpResponseHeaders* headers = response->headers.get();
 
     // Make sure Set-Cookie header was stripped.
     EXPECT_FALSE(headers->HasHeader("set-cookie"));

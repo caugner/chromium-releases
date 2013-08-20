@@ -10,7 +10,6 @@
 #include "base/json/json_writer.h"  // for debug output only.
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversion_utils.h"
-#include "chrome/browser/chromeos/cros/certificate_pattern_matcher.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
@@ -18,6 +17,7 @@
 #include "chrome/browser/chromeos/cros/network_library_impl_stub.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "chromeos/network/certificate_pattern.h"
+#include "chromeos/network/certificate_pattern_matcher.h"
 #include "chromeos/network/cros_network_functions.h"
 #include "chromeos/network/network_state_handler.h"
 #include "content/public/browser/browser_thread.h"
@@ -236,8 +236,6 @@ Network::~Network() {
   }
 }
 
-Network::ProxyOncConfig::ProxyOncConfig() : type(PROXY_ONC_DIRECT) {}
-
 void Network::SetNetworkParser(NetworkParser* parser) {
   network_parser_.reset(parser);
 }
@@ -376,6 +374,11 @@ void Network::SetValueProperty(const char* prop, const base::Value& value) {
   if (!EnsureCrosLoaded())
     return;
   CrosSetNetworkServiceProperty(service_path_, prop, value);
+  // Ensure NetworkStateHandler properties are up-to-date.
+  if (NetworkHandler::IsInitialized()) {
+    NetworkHandler::Get()->network_state_handler()->RequestUpdateForNetwork(
+        service_path());
+  }
 }
 
 void Network::ClearProperty(const char* prop) {
@@ -383,6 +386,11 @@ void Network::ClearProperty(const char* prop) {
   if (!EnsureCrosLoaded())
     return;
   CrosClearNetworkServiceProperty(service_path_, prop);
+  // Ensure NetworkStateHandler properties are up-to-date.
+  if (NetworkHandler::IsInitialized()) {
+    NetworkHandler::Get()->network_state_handler()->RequestUpdateForNetwork(
+        service_path());
+  }
 }
 
 void Network::SetStringProperty(
@@ -450,8 +458,10 @@ void Network::AttemptConnection(const base::Closure& closure) {
 void Network::set_connecting() {
   state_ = STATE_CONNECT_REQUESTED;
   // Set the connecting network in NetworkStateHandler for the status area UI.
-  if (NetworkStateHandler::IsInitialized())
-    NetworkStateHandler::Get()->SetConnectingNetwork(service_path());
+  if (NetworkHandler::IsInitialized()) {
+    NetworkHandler::Get()->network_state_handler()->
+        SetConnectingNetwork(service_path());
+  }
 }
 
 void Network::SetProfilePath(const std::string& profile_path) {
@@ -508,7 +518,7 @@ std::string Network::GetErrorString() const {
           IDS_CHROMEOS_NETWORK_ERROR_IPSEC_PSK_AUTH_FAILED);
     case ERROR_IPSEC_CERT_AUTH_FAILED:
       return l10n_util::GetStringUTF8(
-          IDS_CHROMEOS_NETWORK_ERROR_IPSEC_CERT_AUTH_FAILED);
+          IDS_CHROMEOS_NETWORK_ERROR_CERT_AUTH_FAILED);
     case ERROR_PPP_AUTH_FAILED:
     case ERROR_EAP_AUTHENTICATION_FAILED:
     case ERROR_EAP_LOCAL_TLS_FAILED:
@@ -519,11 +529,6 @@ std::string Network::GetErrorString() const {
       return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN);
   }
   return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED);
-}
-
-void Network::SetProxyConfig(const std::string& proxy_config) {
-  SetOrClearStringProperty(
-      flimflam::kProxyConfigProperty, proxy_config, &proxy_config_);
 }
 
 void Network::InitIPAddress() {
@@ -627,28 +632,47 @@ void VirtualNetwork::CopyCredentialsFromRemembered(Network* remembered) {
 }
 
 bool VirtualNetwork::NeedMoreInfoToConnect() const {
-  if (server_hostname_.empty() || username_.empty() ||
-      IsUserPassphraseRequired())
+  if (server_hostname_.empty()) {
+    VLOG(1) << "server_hostname_.empty()";
     return true;
-  if (error() != ERROR_NO_ERROR)
+  }
+  if (username_.empty()) {
+    VLOG(1) << "username_.empty()";
     return true;
+  }
+  if (IsUserPassphraseRequired()) {
+    VLOG(1) << "User Passphrase Required";
+    return true;
+  }
+  if (error() != ERROR_NO_ERROR) {
+    VLOG(1) << "Error: " << error();
+    return true;
+  }
   switch (provider_type_) {
     case PROVIDER_TYPE_L2TP_IPSEC_PSK:
-      if (IsPSKPassphraseRequired())
+      if (IsPSKPassphraseRequired()) {
+        VLOG(1) << "PSK Passphrase Required";
         return true;
+      }
       break;
     case PROVIDER_TYPE_L2TP_IPSEC_USER_CERT:
       if (client_cert_id_.empty() &&
-          client_cert_type() != CLIENT_CERT_TYPE_PATTERN)
+          client_cert_type() != CLIENT_CERT_TYPE_PATTERN) {
+        VLOG(1) << "Certificate Required";
         return true;
+      }
       break;
     case PROVIDER_TYPE_OPEN_VPN:
-      if (client_cert_id_.empty())
+      if (client_cert_id_.empty()) {
+        VLOG(1) << "client_cert_id_.empty()";
         return true;
+      }
       // For now we always need additional info for OpenVPN.
       // TODO(stevenjb): Check connectable() once shill sets that state
       // properly, or define another mechanism to determine when additional
       // credentials are required.
+      VLOG(1) << "OpenVPN requires credentials, connectable: "
+              << connectable();
       return true;
       break;
     case PROVIDER_TYPE_MAX:
@@ -779,7 +803,7 @@ void VirtualNetwork::MatchCertificatePattern(bool allow_enroll,
   }
 
   scoped_refptr<net::X509Certificate> matching_cert =
-      GetCertificateMatch(client_cert_pattern());
+      certificate_pattern::GetCertificateMatch(client_cert_pattern());
   if (matching_cert.get()) {
     std::string client_cert_id =
         x509_certificate_model::GetPkcs11Id(matching_cert->os_cert_handle());
@@ -1301,7 +1325,7 @@ void WifiNetwork::MatchCertificatePattern(bool allow_enroll,
   }
 
   scoped_refptr<net::X509Certificate> matching_cert =
-      GetCertificateMatch(client_cert_pattern());
+      certificate_pattern::GetCertificateMatch(client_cert_pattern());
   if (matching_cert.get()) {
     SetEAPClientCertPkcs11Id(
         x509_certificate_model::GetPkcs11Id(matching_cert->os_cert_handle()));

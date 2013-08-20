@@ -8,7 +8,7 @@
 
 #include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
@@ -228,19 +228,19 @@ CGFloat ContentSettingDecoration::MeasureTextWidth() {
   return [animated_text_ size].width;
 }
 
-scoped_nsobject<NSAttributedString>
+base::scoped_nsobject<NSAttributedString>
 ContentSettingDecoration::CreateAnimatedText() {
   NSString* text =
       l10n_util::GetNSString(
           content_setting_image_model_->explanatory_string_id());
-  scoped_nsobject<NSMutableParagraphStyle> style(
+  base::scoped_nsobject<NSMutableParagraphStyle> style(
       [[NSMutableParagraphStyle alloc] init]);
   // Set line break mode to clip the text, otherwise drawInRect: won't draw a
   // word if it doesn't fit in the bounding box.
   [style setLineBreakMode:NSLineBreakByClipping];
   NSDictionary* attributes = @{ NSFontAttributeName : GetFont(),
                                 NSParagraphStyleAttributeName : style };
-  return scoped_nsobject<NSAttributedString>(
+  return base::scoped_nsobject<NSAttributedString>(
       [[NSAttributedString alloc] initWithString:text attributes:attributes]);
 }
 
@@ -300,10 +300,8 @@ void ContentSettingDecoration::SetToolTip(NSString* tooltip) {
 
 // Override to handle the case where there is text to display during the
 // animation. The width is based on the animator's progress.
-CGFloat ContentSettingDecoration::GetWidthForSpace(CGFloat width,
-                                                   CGFloat text_width) {
-  CGFloat preferred_width =
-      ImageDecoration::GetWidthForSpace(width, text_width);
+CGFloat ContentSettingDecoration::GetWidthForSpace(CGFloat width) {
+  CGFloat preferred_width = ImageDecoration::GetWidthForSpace(width);
   if (animation_.get()) {
     AnimationState state = [animation_ animationState];
     if (state != kNoAnimation) {

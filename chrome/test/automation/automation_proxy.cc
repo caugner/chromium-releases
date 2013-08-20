@@ -144,7 +144,7 @@ void AutomationProxy::InitializeThread() {
   scoped_ptr<base::Thread> thread(
       new base::Thread("AutomationProxy_BackgroundThread"));
   base::Thread::Options options;
-  options.message_loop_type = MessageLoop::TYPE_IO;
+  options.message_loop_type = base::MessageLoop::TYPE_IO;
   bool thread_result = thread->StartWithOptions(options);
   DCHECK(thread_result);
   thread_.swap(thread);
@@ -158,10 +158,9 @@ void AutomationProxy::InitializeChannel(const std::string& channel_id,
   // The shutdown event could be global on the same lines as the automation
   // provider, where we use the shutdown event provided by the chrome browser
   // process.
-  channel_.reset(new IPC::SyncChannel(
-      this,  // we are the listener
-      thread_->message_loop_proxy(),
-      shutdown_event_.get()));
+  channel_.reset(new IPC::SyncChannel(this,  // we are the listener
+                                      thread_->message_loop_proxy().get(),
+                                      shutdown_event_.get()));
   channel_->AddFilter(new AutomationMessageFilter(this));
 
   // Create the pipe synchronously so that Chrome doesn't try to connect to an

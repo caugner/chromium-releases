@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -63,11 +63,8 @@ void PolicyOAuth2TokenFetcher::Start() {
 }
 
 void PolicyOAuth2TokenFetcher::StartFetchingRefreshToken() {
-  DCHECK(!refresh_token_fetcher_.get());
-  refresh_token_fetcher_.reset(
-      new GaiaAuthFetcher(this,
-                          GaiaConstants::kChromeSource,
-                          auth_context_getter_));
+  refresh_token_fetcher_.reset(new GaiaAuthFetcher(
+      this, GaiaConstants::kChromeSource, auth_context_getter_.get()));
   refresh_token_fetcher_->StartCookieForOAuthLoginTokenExchange(EmptyString());
 }
 
@@ -75,7 +72,7 @@ void PolicyOAuth2TokenFetcher::StartFetchingAccessToken() {
   std::vector<std::string> scopes;
   scopes.push_back(GaiaConstants::kDeviceManagementServiceOAuth);
   access_token_fetcher_.reset(
-      new OAuth2AccessTokenFetcher(this, system_context_getter_));
+      new OAuth2AccessTokenFetcher(this, system_context_getter_.get()));
   access_token_fetcher_->Start(
       GaiaUrls::GetInstance()->oauth2_chrome_client_id(),
       GaiaUrls::GetInstance()->oauth2_chrome_client_secret(),

@@ -15,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/debugger/debugger_api_constants.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -44,7 +44,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/worker_service.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/url_constants.h"
+#include "content/public/common/url_utils.h"
 #include "extensions/common/error_utils.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -277,7 +277,7 @@ base::Value* SerializePageInfo(RenderViewHost* rvh) {
   if (!web_contents)
     return NULL;
 
-  DevToolsAgentHost* agent_host = DevToolsAgentHost::GetOrCreateFor(rvh);
+  DevToolsAgentHost* agent_host = DevToolsAgentHost::GetOrCreateFor(rvh).get();
 
   base::DictionaryValue* dictionary = new base::DictionaryValue();
 
@@ -407,8 +407,8 @@ ExtensionDevToolsClientHost::ExtensionDevToolsClientHost(
                  content::NotificationService::AllSources());
 
   // Attach to debugger and tell it we are ready.
-  DevToolsManager::GetInstance()->
-      RegisterDevToolsClientHostFor(agent_host_, this);
+  DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(
+      agent_host_.get(), this);
 
   if (infobar_delegate_) {
     infobar_delegate_->AttachClientHost(this);
@@ -454,7 +454,7 @@ void ExtensionDevToolsClientHost::SendMessageToBackend(
     DebuggerSendCommandFunction* function,
     const std::string& method,
     SendCommand::Params::CommandParams* command_params) {
-  DictionaryValue protocol_request;
+  base::DictionaryValue protocol_request;
   int request_id = ++last_request_id_;
   pending_requests_[request_id] = function;
   protocol_request.SetInteger("id", request_id);
@@ -517,7 +517,8 @@ void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
   scoped_ptr<Value> result(base::JSONReader::Read(message));
   if (!result->IsType(Value::TYPE_DICTIONARY))
     return;
-  DictionaryValue* dictionary = static_cast<DictionaryValue*>(result.get());
+  base::DictionaryValue* dictionary =
+      static_cast<base::DictionaryValue*>(result.get());
 
   int id;
   if (!dictionary->GetInteger("id", &id)) {
@@ -526,7 +527,7 @@ void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
       return;
 
     OnEvent::Params params;
-    DictionaryValue* params_value;
+    base::DictionaryValue* params_value;
     if (dictionary->GetDictionary("params", &params_value))
       params.additional_properties.Swap(params_value);
 
@@ -537,7 +538,7 @@ void ExtensionDevToolsClientHost::DispatchOnInspectorFrontend(
     extensions::ExtensionSystem::Get(profile_)->event_router()->
         DispatchEventToExtension(extension_id_, event.Pass());
   } else {
-    DebuggerSendCommandFunction* function = pending_requests_[id];
+    DebuggerSendCommandFunction* function = pending_requests_[id].get();
     if (!function)
       return;
 
@@ -599,7 +600,7 @@ bool DebuggerFunction::InitAgentHost() {
     return false;
   }
 
-  if (!agent_host_) {
+  if (!agent_host_.get()) {
     FormatErrorMessage(keys::kNoTargetError);
     return false;
   }
@@ -610,8 +611,8 @@ bool DebuggerFunction::InitClientHost() {
   if (!InitAgentHost())
     return false;
 
-  client_host_ = AttachedClientHosts::GetInstance()->
-      Lookup(agent_host_, GetExtension()->id());
+  client_host_ = AttachedClientHosts::GetInstance()->Lookup(
+      agent_host_.get(), GetExtension()->id());
 
   if (!client_host_) {
     FormatErrorMessage(keys::kNotAttachedError);
@@ -665,7 +666,7 @@ bool DebuggerAttachFunction::RunImpl() {
   }
 
   new ExtensionDevToolsClientHost(profile(),
-                                  agent_host_,
+                                  agent_host_.get(),
                                   GetExtension()->id(),
                                   GetExtension()->name(),
                                   debuggee_,
@@ -715,7 +716,7 @@ bool DebuggerSendCommandFunction::RunImpl() {
 }
 
 void DebuggerSendCommandFunction::SendResponseBody(
-    DictionaryValue* response) {
+    base::DictionaryValue* response) {
   Value* error_body;
   if (response->Get("error", &error_body)) {
     base::JSONWriter::Write(error_body, &error_);
@@ -723,7 +724,7 @@ void DebuggerSendCommandFunction::SendResponseBody(
     return;
   }
 
-  DictionaryValue* result_body;
+  base::DictionaryValue* result_body;
   SendCommand::Results::Result result;
   if (response->GetDictionary("result", &result_body))
     result.additional_properties.Swap(result_body);
@@ -751,8 +752,8 @@ bool DebuggerGetTargetsFunction::RunImpl() {
       results_list->Append(value);
   }
 
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::IO,
+  content::BrowserThread::PostTaskAndReply(
+      content::BrowserThread::IO,
       FROM_HERE,
       base::Bind(&DebuggerGetTargetsFunction::CollectWorkerInfo,
                  this,

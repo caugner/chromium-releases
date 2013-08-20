@@ -5,8 +5,7 @@
 #include "chrome/browser/ui/webui/version_ui.h"
 
 #include "base/command_line.h"
-#include "base/file_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/version_handler.h"
 #include "chrome/common/chrome_version_info.h"
@@ -20,7 +19,7 @@
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
 #include "v8/include/v8.h"
-#include "webkit/user_agent/user_agent_util.h"
+#include "webkit/common/user_agent/user_agent_util.h"
 
 #if defined(ENABLE_THEMES)
 #include "chrome/browser/ui/webui/theme_source.h"
